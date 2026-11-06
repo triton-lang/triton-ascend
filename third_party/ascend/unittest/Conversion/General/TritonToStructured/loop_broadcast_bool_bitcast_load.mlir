@@ -44,3 +44,41 @@ module {
 // CHECK: %[[VALUE:.*]] = tt.broadcast %[[LOAD]] : tensor<1x16xi8> -> tensor<16x16xi8>
 // CHECK: tt.addptr %[[PTR]], %[[STEP]] : tensor<16x16x!tt.ptr<i1>>, tensor<16x16xi32>
 // CHECK: scf.yield {{.*}}, %[[VALUE]] : tensor<16x16x!tt.ptr<i1>>, tensor<16x16xi8>
+
+// -----
+
+// Pointer analysis can rebuild the bool broadcast offset inside the loop as
+// addptr(splat(base), broadcast(offset) + splat(loop_offset)). The bitcast must
+// still expose the broadcast source shape so the load does not lower with a
+// zero stride on the broadcast axis.
+module {
+  tt.func public @broadcast_bool_bitcast_addptr_load_small_mask(%input: !tt.ptr<i1>, %output: !tt.ptr<i1>, %limit: i32) {
+    %rows = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %row_offsets = tt.expand_dims %rows {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+    %broadcast_offsets = tt.broadcast %row_offsets : tensor<1x16xi32> -> tensor<16x16xi32>
+    %loop_offset = tt.splat %limit : i32 -> tensor<16x16xi32>
+    %offsets = arith.addi %broadcast_offsets, %loop_offset : tensor<16x16xi32>
+    %input_splat = tt.splat %input : !tt.ptr<i1> -> tensor<16x16x!tt.ptr<i1>>
+    %input_ptrs = tt.addptr %input_splat, %offsets {PointerDescriptorRebuild, PointerDescriptorStructuredAxes = array<i32: 1, 1>} : tensor<16x16x!tt.ptr<i1>>, tensor<16x16xi32>
+    %limit_vec = tt.splat %limit : i32 -> tensor<16xi32>
+    %mask_small = arith.cmpi slt, %rows, %limit_vec : tensor<16xi32>
+    %mask_row = tt.expand_dims %mask_small {axis = 0 : i32} : tensor<16xi1> -> tensor<1x16xi1>
+    %mask = tt.broadcast %mask_row : tensor<1x16xi1> -> tensor<16x16xi1>
+    %zero = arith.constant dense<0> : tensor<16x16xi8>
+    %as_i8 = tt.bitcast %input_ptrs : tensor<16x16x!tt.ptr<i1>> -> tensor<16x16x!tt.ptr<i8>>
+    %value = tt.load %as_i8, %mask, %zero {was_bool_to_int8 = true} : tensor<16x16x!tt.ptr<i8>>
+    %as_bool = arith.trunci %value : tensor<16x16xi8> to tensor<16x16xi1>
+    %output_splat = tt.splat %output : !tt.ptr<i1> -> tensor<16x16x!tt.ptr<i1>>
+    %output_offsets = tt.broadcast %row_offsets : tensor<1x16xi32> -> tensor<16x16xi32>
+    %output_ptrs = tt.addptr %output_splat, %output_offsets : tensor<16x16x!tt.ptr<i1>>, tensor<16x16xi32>
+    tt.store %output_ptrs, %as_bool : tensor<16x16x!tt.ptr<i1>>
+    tt.return
+  }
+}
+
+// CHECK-LABEL: tt.func public @broadcast_bool_bitcast_addptr_load_small_mask
+// CHECK: %[[PTRS:.*]] = tt.addptr {{.*}} {PointerDescriptorRebuild, PointerDescriptorStructuredAxes = array<i32: 1, 1>}
+// CHECK: %[[SMALL_PTR:.*]] = tensor.extract_slice %[[PTRS]][0, 0] [1, 16] [1, 1] : tensor<16x16x!tt.ptr<i1>> to tensor<1x16x!tt.ptr<i1>>
+// CHECK: %[[SMALL_I8:.*]] = tt.bitcast %[[SMALL_PTR]] : tensor<1x16x!tt.ptr<i1>> -> tensor<1x16x!tt.ptr<i8>>
+// CHECK: %[[LOAD:.*]] = tt.load %[[SMALL_I8]], {{.*}} {was_bool_to_int8 = true} : tensor<1x16x!tt.ptr<i8>>
+// CHECK: %[[VALUE:.*]] = tt.broadcast %[[LOAD]] : tensor<1x16xi8> -> tensor<16x16xi8>

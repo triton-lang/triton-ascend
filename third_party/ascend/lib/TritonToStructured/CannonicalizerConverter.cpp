@@ -289,55 +289,96 @@ LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
         !dstPtrType.getPointeeType().isInteger(8))
       return failure();
 
-    // The bool lowering bitcast hides a loop-carried broadcast pointer. Slice
-    // the pointer to the broadcast source shape so the load sees unit strides.
-    auto iterArg = dyn_cast<BlockArgument>(ptrBitcast.getSrc());
-    if (!iterArg)
-      return failure();
-    auto forOp = dyn_cast<scf::ForOp>(iterArg.getOwner()->getParentOp());
-    if (!forOp)
-      return failure();
-    auto iterArgs = forOp.getRegionIterArgs();
-    auto iter = llvm::find(iterArgs, iterArg);
-    if (iter == iterArgs.end())
-      return failure();
-    unsigned iterIndex = std::distance(iterArgs.begin(), iter);
-    auto yieldedAdd =
-        forOp.getYieldedValues()[iterIndex].getDefiningOp<triton::AddPtrOp>();
-    if (!yieldedAdd || yieldedAdd.getPtr() != iterArg)
-      return failure();
-    Value increment = yieldedAdd.getOffset();
-    if (!increment.getDefiningOp<triton::SplatOp>()) {
-      auto constant = increment.getDefiningOp<arith::ConstantOp>();
-      auto dense =
-          constant ? dyn_cast<DenseElementsAttr>(constant.getValue()) : nullptr;
-      if (!dense || !dense.isSplat())
+    // The bool lowering bitcast hides a broadcast pointer. Slice the pointer to
+    // the broadcast source shape so the load sees unit strides.
+    Value fullPtr = ptrBitcast.getSrc();
+    RankedTensorType smallPtrType;
+    if (auto iterArg = dyn_cast<BlockArgument>(fullPtr)) {
+      auto forOp = dyn_cast<scf::ForOp>(iterArg.getOwner()->getParentOp());
+      if (!forOp)
         return failure();
+      auto iterArgs = forOp.getRegionIterArgs();
+      auto iter = llvm::find(iterArgs, iterArg);
+      if (iter == iterArgs.end())
+        return failure();
+      unsigned iterIndex = std::distance(iterArgs.begin(), iter);
+      auto yieldedAdd =
+          forOp.getYieldedValues()[iterIndex].getDefiningOp<triton::AddPtrOp>();
+      if (!yieldedAdd || yieldedAdd.getPtr() != iterArg)
+        return failure();
+      Value increment = yieldedAdd.getOffset();
+      if (!increment.getDefiningOp<triton::SplatOp>()) {
+        auto constant = increment.getDefiningOp<arith::ConstantOp>();
+        auto dense = constant ? dyn_cast<DenseElementsAttr>(constant.getValue())
+                              : nullptr;
+        if (!dense || !dense.isSplat())
+          return failure();
+      }
+
+      auto initBroadcast =
+          forOp.getInitArgs()[iterIndex].getDefiningOp<triton::BroadcastOp>();
+      smallPtrType =
+          initBroadcast
+              ? dyn_cast<RankedTensorType>(initBroadcast.getSrc().getType())
+              : nullptr;
+    } else if (auto addPtr = fullPtr.getDefiningOp<triton::AddPtrOp>()) {
+      // Pointer analysis can rebuild the broadcast offset as
+      // addptr(splat(base), broadcast(offset) + splat(loop_offset)).
+      if (!addPtr.getPtr().getDefiningOp<triton::SplatOp>())
+        return failure();
+      auto offsetAdd = addPtr.getOffset().getDefiningOp<arith::AddIOp>();
+      if (!offsetAdd)
+        return failure();
+
+      auto isUniformSplat = [](Value value) {
+        if (value.getDefiningOp<triton::SplatOp>())
+          return true;
+        Attribute attr;
+        if (!matchPattern(value, m_Constant(&attr)))
+          return false;
+        auto dense = dyn_cast<DenseElementsAttr>(attr);
+        return dense && dense.isSplat();
+      };
+
+      triton::BroadcastOp offsetBroadcast;
+      for (Value operand : {offsetAdd.getLhs(), offsetAdd.getRhs()}) {
+        if (auto broadcast = operand.getDefiningOp<triton::BroadcastOp>()) {
+          if (offsetBroadcast)
+            return failure();
+          offsetBroadcast = broadcast;
+        } else if (!isUniformSplat(operand)) {
+          return failure();
+        }
+      }
+      if (!offsetBroadcast)
+        return failure();
+      smallPtrType =
+          dyn_cast<RankedTensorType>(offsetBroadcast.getSrc().getType());
+    } else {
+      return failure();
     }
 
-    auto initBroadcast =
-        forOp.getInitArgs()[iterIndex].getDefiningOp<triton::BroadcastOp>();
-    auto smallPtrType =
-        initBroadcast
-            ? dyn_cast<RankedTensorType>(initBroadcast.getSrc().getType())
-            : nullptr;
     if (!smallPtrType || !smallPtrType.hasStaticShape() ||
         srcType.getRank() != smallPtrType.getRank())
       return failure();
 
     SmallVector<OpFoldResult> offsets, sizes, strides;
+    bool hasBroadcastDim = false;
     for (auto [smallDim, fullDim] :
          llvm::zip(smallPtrType.getShape(), srcType.getShape())) {
       if (smallDim != 1 && smallDim != fullDim)
         return failure();
+      hasBroadcastDim |= smallDim != fullDim;
       offsets.push_back(rewriter.getIndexAttr(0));
       sizes.push_back(rewriter.getIndexAttr(smallDim));
       strides.push_back(rewriter.getIndexAttr(1));
     }
+    if (!hasBroadcastDim)
+      return failure();
 
     Location loc = loadOp.getLoc();
     Value smallPtr = rewriter.create<tensor::ExtractSliceOp>(
-        loc, iterArg, offsets, sizes, strides);
+        loc, fullPtr, offsets, sizes, strides);
     Value smallPtrI8 = rewriter.create<triton::BitcastOp>(
         loc, smallPtrType.clone(dstType.getElementType()), smallPtr);
     ptr = rewriter.create<triton::BroadcastOp>(loc, dstType, smallPtrI8);

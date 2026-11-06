@@ -310,8 +310,7 @@ LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
     if (!increment.getDefiningOp<triton::SplatOp>()) {
       auto constant = increment.getDefiningOp<arith::ConstantOp>();
       auto dense =
-          constant ? dyn_cast<DenseElementsAttr>(constant.getValue())
-                   : nullptr;
+          constant ? dyn_cast<DenseElementsAttr>(constant.getValue()) : nullptr;
       if (!dense || !dense.isSplat())
         return failure();
     }
@@ -337,9 +336,8 @@ LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
     }
 
     Location loc = loadOp.getLoc();
-    Value smallPtr =
-        rewriter.create<tensor::ExtractSliceOp>(loc, iterArg, offsets, sizes,
-                                                strides);
+    Value smallPtr = rewriter.create<tensor::ExtractSliceOp>(
+        loc, iterArg, offsets, sizes, strides);
     Value smallPtrI8 = rewriter.create<triton::BitcastOp>(
         loc, smallPtrType.clone(dstType.getElementType()), smallPtr);
     ptr = rewriter.create<triton::BroadcastOp>(loc, dstType, smallPtrI8);
@@ -413,8 +411,7 @@ LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
     auto newLoad = rewriter.create<triton::LoadOp>(
         loc, smallPtr, maskSrc, newOther, cache, evict, isVolatile);
     if (loadOp->hasAttr("was_bool_to_int8"))
-      newLoad->setAttr("was_bool_to_int8",
-                       loadOp->getAttr("was_bool_to_int8"));
+      newLoad->setAttr("was_bool_to_int8", loadOp->getAttr("was_bool_to_int8"));
     auto broadcasted = rewriter.create<triton::BroadcastOp>(
         loc, resultType, newLoad.getResult());
     rewriter.replaceOp(loadOp, broadcasted.getResult());
@@ -425,8 +422,7 @@ LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
       loc, smallPtr, /*mask=*/nullptr, /*other=*/nullptr, cache, evict,
       isVolatile);
   if (loadOp->hasAttr("was_bool_to_int8"))
-    newLoad->setAttr("was_bool_to_int8",
-                     loadOp->getAttr("was_bool_to_int8"));
+    newLoad->setAttr("was_bool_to_int8", loadOp->getAttr("was_bool_to_int8"));
   auto broadcasted = rewriter.create<triton::BroadcastOp>(loc, resultType,
                                                           newLoad.getResult());
   Value result = broadcasted.getResult();

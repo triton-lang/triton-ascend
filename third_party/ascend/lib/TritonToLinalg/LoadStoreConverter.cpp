@@ -553,12 +553,18 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
 
   Value allocOp;
   Value allocOpTmp;
-  auto parentLoop = dyn_cast<scf::ForOp>(op->getParentOp());
+  Operation *parentAccess = op->getParentOp();
+  bool guardedByIf = false;
+  while (auto parentIf = dyn_cast<scf::IfOp>(parentAccess)) {
+    guardedByIf = true;
+    parentAccess = parentIf->getParentOp();
+  }
+  auto parentLoop = dyn_cast<scf::ForOp>(parentAccess);
   bool hasValidDiscreteLoop = op->hasAttr(ConverterUtils::discreteAttrName) &&
                               parentLoop &&
                               parentLoop->hasAttr("ExtractedLoadOrStore");
   if (hasValidDiscreteLoop) {
-    Operation *loop = op->getParentOp();
+    Operation *loop = parentAccess;
     int extractedLoopCount = 1;
     for (auto parentOp = loop->getParentOp();
          parentOp->hasAttr("ExtractedLoadOrStore");
@@ -571,12 +577,21 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     auto fullMemRefShape =
         cast<RankedTensorType>(loopOp.getInitArgs()[0].getType()).getShape();
     auto fullMemRefType = MemRefType::get(fullMemRefShape, memRefElementType);
-    bool isIndexSelectScenario =
-        (extractedLoopCount == 1) && (fullMemRefShape.size() > 1u);
+    bool isIndexSelectScenario = (extractedLoopCount == 1) &&
+                                 (fullMemRefShape.size() > 1u) && !guardedByIf;
     if (isIndexSelectScenario)
       loopOp->setAttr("hivm.parallel_loop", rewriter.getUnitAttr());
     allocOp = rewriter.create<memref::AllocOp>(loc, fullMemRefType);
     allocOpTmp = allocOp;
+    if (guardedByIf) {
+      Value zeroFill = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getZeroAttr(memRefElementType));
+      rewriter.create<linalg::FillOp>(loc, ValueRange{zeroFill},
+                                      ValueRange{allocOp});
+      rewriter.create<hivm::PipeBarrierOp>(
+          loc,
+          hivm::PipeAttr::get(rewriter.getContext(), hivm::PIPE::PIPE_ALL));
+    }
     rewriter.setInsertionPointAfter(loop);
     auto toTensorOp = rewriter.create<bufferization::ToTensorOp>(
         loc, RankedTensorType::get(fullMemRefShape, memRefElementType), allocOp,
@@ -588,6 +603,18 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
         insertSliceOp = targetOp;
         break;
       }
+      Operation *cursor = user;
+      if (auto yieldOp = dyn_cast<scf::YieldOp>(cursor))
+        if (auto parentIf = dyn_cast<scf::IfOp>(yieldOp->getParentOp()))
+          cursor = parentIf;
+      for (auto result : cursor->getResults())
+        for (auto *resUser : result.getUsers())
+          if (auto targetOp = dyn_cast<tensor::InsertSliceOp>(resUser)) {
+            insertSliceOp = targetOp;
+            break;
+          }
+      if (insertSliceOp)
+        break;
     }
     auto offsets = insertSliceOp.getMixedOffsets();
     auto sizes = insertSliceOp.getMixedSizes();

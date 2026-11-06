@@ -38,6 +38,7 @@
 #include "mlir/Transforms/Passes.h"
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 #include <optional>
 
@@ -567,6 +568,59 @@ static Value getResidualLoadMask(Value mask, ArrayRef<bool> boundedLoopAxes,
   if (!cmp || cmp.getPredicate() != arith::CmpIPredicate::slt)
     return mask;
   return {};
+}
+
+static bool valueDependsOnRuntimeLoad(Value value,
+                                      llvm::SmallPtrSetImpl<Value> &visited) {
+  if (!value)
+    return false;
+  SmallVector<Value, 16> worklist{value};
+  while (!worklist.empty()) {
+    Value v = worklist.pop_back_val();
+    if (!visited.insert(v).second)
+      continue;
+    if (v.getDefiningOp<triton::LoadOp>())
+      return true;
+    Operation *def = v.getDefiningOp();
+    if (!def)
+      continue;
+    for (Value operand : def->getOperands())
+      worklist.push_back(operand);
+  }
+  return false;
+}
+
+static void collectDataDependentMaskLeaves(Value mask,
+                                           SmallVectorImpl<Value> &discLeaves) {
+  if (auto andOp = mask.getDefiningOp<arith::AndIOp>()) {
+    collectDataDependentMaskLeaves(andOp.getLhs(), discLeaves);
+    collectDataDependentMaskLeaves(andOp.getRhs(), discLeaves);
+    return;
+  }
+  llvm::SmallPtrSet<Value, 32> visited;
+  if (valueDependsOnRuntimeLoad(mask, visited))
+    discLeaves.push_back(mask);
+}
+
+static Value buildGuardFromMaskRow(Value maskRow, Location loc,
+                                   PatternRewriter &rewriter) {
+  auto maskType = cast<RankedTensorType>(maskRow.getType());
+  auto initType = RankedTensorType::get({}, rewriter.getI1Type());
+  Value init = rewriter.create<arith::ConstantOp>(
+      loc, DenseElementsAttr::get(initType, rewriter.getBoolAttr(false)));
+  SmallVector<int64_t> reduceDims(maskType.getRank());
+  for (int64_t axis = 0; axis < static_cast<int64_t>(maskType.getRank());
+       axis++)
+    reduceDims[axis] = axis; // Reduce over all axes (axis 0 has length 1).
+  auto reduceOp = rewriter.create<linalg::ReduceOp>(
+      loc, ValueRange{maskRow}, ValueRange{init}, reduceDims,
+      [&](OpBuilder &b, Location bLoc, ValueRange args) {
+        Value orRes = b.create<arith::OrIOp>(bLoc, args[0], args[1]);
+        b.create<linalg::YieldOp>(bLoc, orRes);
+      });
+  Value guardCond =
+      rewriter.create<tensor::ExtractOp>(loc, reduceOp.getResult(0));
+  return guardCond;
 }
 
 template <typename MemAccOpTy>
@@ -1175,17 +1229,66 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     accessedOp =
         createMemAccOp(op, ptrToAccess, loc, rewriter, offsets, sizes, strides);
   }
+
+  Value guardedAccessResult;
+
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
     // Preserve the mask on retained dimensions, just as stores and atomics do.
     // BubbleUpOperation exposes the sliced mask for structured lowering.
-    if (mstate && !fullyUnstructured) {
+
+    Value discMaskForGuard;
+    if (!fullyUnstructured && op.getMask()) {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPoint(accessedOp);
       Value residualMask =
           getResidualLoadMask(op.getMask(), boundedLoopAxes, rewriter);
-      if (residualMask)
-        accessedOp.getMaskMutable().assign(createExtractOp(
-            loc, residualMask, rewriter, offsets, sizes, strides));
+      if (residualMask) {
+        SmallVector<Value, 4> discLeaves;
+        collectDataDependentMaskLeaves(residualMask, discLeaves);
+        auto combineLeaves = [&](SmallVectorImpl<Value> &leaves) -> Value {
+          Value acc = leaves[0];
+          for (size_t k = 1; k < leaves.size(); k++)
+            acc = rewriter.create<arith::AndIOp>(loc, acc, leaves[k]);
+          return acc;
+        };
+        if (discLeaves.empty()) {
+          if (mstate)
+            accessedOp.getMaskMutable().assign(createExtractOp(
+                loc, residualMask, rewriter, offsets, sizes, strides));
+        } else
+          discMaskForGuard = combineLeaves(discLeaves);
+      }
+    }
+
+    if (discMaskForGuard) {
+      Value discRow = createExtractOp(loc, discMaskForGuard, rewriter, offsets,
+                                      sizes, strides);
+      Value guardCond = buildGuardFromMaskRow(discRow, loc, rewriter);
+      Value elseValue;
+      if (op.getOther()) {
+        elseValue = createExtractOp(loc, op.getOther(), rewriter, offsets,
+                                    sizes, strides);
+      } else {
+        Value zero = rewriter.create<arith::ConstantOp>(
+            loc, rewriter.getZeroAttr(resultElementType));
+        elseValue = rewriter.create<triton::SplatOp>(loc, extractedType, zero);
+      }
+      auto ifOp = rewriter.create<scf::IfOp>(
+          loc, TypeRange{extractedType}, guardCond, /*withElseRegion=*/true);
+      {
+        OpBuilder::InsertionGuard guard(rewriter);
+        Block &thenBlock = ifOp.getThenRegion().front();
+        rewriter.setInsertionPointToStart(&thenBlock);
+        rewriter.moveOpBefore(accessedOp.getOperation(), &thenBlock,
+                              thenBlock.begin());
+        rewriter.setInsertionPointAfter(accessedOp.getOperation());
+        rewriter.create<scf::YieldOp>(loc, accessedOp->getResult(0));
+
+        rewriter.setInsertionPointToStart(&ifOp.getElseRegion().front());
+        rewriter.create<scf::YieldOp>(loc, elseValue);
+      }
+      rewriter.setInsertionPointAfter(ifOp);
+      guardedAccessResult = ifOp.getResult(0);
     }
   }
 
@@ -1195,7 +1298,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   if (isLoadLike) {
     assert(iterArg && "Load case must have iterArg in for loop");
 
-    Value value = accessedOp->getResult(0);
+    Value value =
+        guardedAccessResult ? guardedAccessResult : accessedOp->getResult(0);
     Value result;
     if (!isa<RankedTensorType>(value.getType()) &&
         (std::is_same_v<MemAccOpTy, triton::AtomicRMWOp> ||

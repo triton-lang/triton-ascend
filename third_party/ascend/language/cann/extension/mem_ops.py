@@ -398,12 +398,10 @@ def index_select_simd(src, dim, index, src_shape, src_offset, read_shape, _seman
         output_ty = tl.block_type(element_ty, return_shape)
         out = _builder.create_index_select_simd(src.handle, index.handle, dim, newsrc_shape, newsrc_offset, read_shape,
                                                 return_shape)
-        if is_bool:
-            out.set_attr("was_bool_to_int8", _builder.get_bool_attr(True))
 
         ret = tl.tensor(out, output_ty)
         if is_bool:
-            ret.was_bool_to_int8 = True
+            ret = _semantic.cast(ret, tl.int1)
         return ret
 
     dim = _unwrap_if_constexpr(dim)

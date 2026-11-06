@@ -1941,6 +1941,18 @@ CONSTRAINTS = {
         ],
         "example": "triton.language.extra.cann.extension.sort",
     },
+    "triton.language.extra.cann.extension.conv1d": {
+        "constraints": [
+            "``padding=None`` is treated as ``padding=0`` and does not pad the input.",
+            "An integer ``padding=p`` pads both sides with ``p`` zeros; a two-element sequence ``(pad_left, pad_right)`` specifies asymmetric padding.",
+            "``padding='valid'`` is equivalent to ``padding=0``.",
+            "``padding='same'`` requires ``stride=1`` and preserves the input length. If the total padding is odd, the extra zero is added on the right; for example, with ``dilation=1``, kernel sizes 3 and 4 use ``(1, 1)`` and ``(1, 2)`` respectively.",
+            "The former ``padding_size`` keyword has been renamed to ``padding``. Using ``padding_size=`` raises ``TypeError`` with a prompt to use ``padding=``.",
+            "Enabling 1:2 (Cube:Vector) mode is currently not supported.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.conv1d",
+    },
     "triton.language.extra.cann.extension.dot": {
         "constraints": [
             "DataType: Ascend supports f16, bf16, f32, int8. A and B must have the same dtype.",

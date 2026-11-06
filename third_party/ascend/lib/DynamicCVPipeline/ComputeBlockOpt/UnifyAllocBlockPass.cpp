@@ -303,6 +303,10 @@ tryUnifyForAlloc(memref::AllocOp allocOp,
 
   // Step6: Cycle detection and block_id assignment
   if (CVPipeline::willCreateCycle(coreOps, memGraph, targetBlockId, bm)) {
+    LOG_DEBUG("Failed, targetBlockId = " << targetBlockId << "\n");
+    for (auto op : coreOps) {
+      LOG_DEBUG("op: " << *op);
+    }
     LOG_DEBUG("[error] Find cycle, have unsupport IR! Should Check!!");
     return failure();
   }

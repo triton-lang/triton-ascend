@@ -143,12 +143,11 @@ public:
 private:
   // Information about a pointer iteration argument to be promoted
   struct PointerArgInfo {
-    unsigned oldIndex;   // 迭代参数的原始索引
-    Value basePointer;   // 作为初始值传入的基础指针
-    Value pointerSource; // 去除循环外层广播后的基础指针
-    Value offsetValue;   // addptr 操作使用的偏移
-    Value newIterArg;    // 新的整数迭代参数
-    Value addPtrValue;   // 更新指针的 addptr 操作结果
+    unsigned oldIndex; // Original index in the iteration arguments
+    Value basePointer; // Base pointer value passed as init arg
+    Value offsetValue; // Offset value used in addptr operation
+    Value newIterArg;  // New integer iteration argument
+    Value addPtrValue; // The addptr operation result that updates the pointer
     // Offset value used in advancePtr operation (with explicit inlined
     // capacity)
     SmallVector<Value> offsetValues;

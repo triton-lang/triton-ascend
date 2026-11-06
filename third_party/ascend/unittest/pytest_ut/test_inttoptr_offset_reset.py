@@ -320,8 +320,7 @@ def test_where_int32_pointer_tensors(dtype):
 
     z_tri = torch.empty(SIZE, dtype=dtype).npu()
     grid = (triton.cdiv(SIZE, BLOCK), )
-    _where_int32_kernel[grid](cond, x, y, z_tri, SIZE, BLOCK_SIZE=BLOCK,
-                              TEST_POINTERS=True, TEST_SCALAR_POINTERS=False)
+    _where_int32_kernel[grid](cond, x, y, z_tri, SIZE, BLOCK_SIZE=BLOCK, TEST_POINTERS=True, TEST_SCALAR_POINTERS=False)
     assert (z.cpu().numpy() == z_tri.cpu().numpy()).all()
 
 
@@ -335,8 +334,7 @@ def test_where_int32_scalar_pointer(dtype):
 
     z_tri = torch.empty(SIZE, dtype=dtype).npu()
     grid = (triton.cdiv(SIZE, BLOCK), )
-    _where_int32_kernel[grid](cond, x, y, z_tri, SIZE, BLOCK_SIZE=BLOCK,
-                              TEST_POINTERS=True, TEST_SCALAR_POINTERS=True)
+    _where_int32_kernel[grid](cond, x, y, z_tri, SIZE, BLOCK_SIZE=BLOCK, TEST_POINTERS=True, TEST_SCALAR_POINTERS=True)
     assert (z.cpu().numpy() == z_tri.cpu().numpy()).all()
 
 
@@ -360,4 +358,3 @@ def test_int_to_ptr_addptr_roundtrip():
 
     expected = base + np.arange(BLOCK, dtype=np.int64) * 4 + 4
     assert (out.cpu().numpy() == expected).all()
-

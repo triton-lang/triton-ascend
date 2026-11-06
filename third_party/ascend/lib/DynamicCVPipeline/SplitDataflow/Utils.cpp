@@ -85,6 +85,8 @@ bool triton::is1DTensorDependency(mlir::Value depValue) {
 bool triton::isOutlineReuseBlacklistKernel(ModuleOp module) {
   std::vector<std::string> blacklist{
       "kernel_da_fwd_u",
+      "chunk_kda_bwd_kernel_intra",
+      "flex_attention_kernel",
   };
 
   bool isBlacklistKernel = false;

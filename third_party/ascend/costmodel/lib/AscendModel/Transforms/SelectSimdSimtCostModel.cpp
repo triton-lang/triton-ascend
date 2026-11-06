@@ -286,9 +286,9 @@ static bool fuseFloatAtomicMinMaxPairs(ModuleOp module) {
     Value signBit = signBitOf(op.getMask(), op.getVal());
     if (!signBit)
       continue;
-    const triton::RMWOp wanted =
-        op.getAtomicRmwOp() == triton::RMWOp::MAX ? triton::RMWOp::UMIN
-                                                  : triton::RMWOp::UMAX;
+    const triton::RMWOp wanted = op.getAtomicRmwOp() == triton::RMWOp::MAX
+                                     ? triton::RMWOp::UMIN
+                                     : triton::RMWOp::UMAX;
     triton::AtomicRMWOp partner;
     for (Operation &other : op->getBlock()->getOperations()) {
       auto candidate = dyn_cast<triton::AtomicRMWOp>(&other);
@@ -308,8 +308,8 @@ static bool fuseFloatAtomicMinMaxPairs(ModuleOp module) {
       continue;
 
     rewriter.setInsertionPoint(op);
-    Value fusedMask =
-        rewriter.create<arith::OrIOp>(op.getLoc(), op.getMask(), partner.getMask());
+    Value fusedMask = rewriter.create<arith::OrIOp>(op.getLoc(), op.getMask(),
+                                                    partner.getMask());
     Type fusedType = valBitcast.getSrc().getType();
     auto fused = rewriter.create<triton::AtomicRMWOp>(
         op.getLoc(), fusedType, op.getAtomicRmwOp(), ptrBitcast.getSrc(),

@@ -127,8 +127,7 @@ def scatter_xchg(out_ptr, idx_ptr, val_ptr, BLOCK: tl.constexpr, LINE: tl.conste
 
 
 @triton.jit
-def scatter_cas(out_ptr, idx_ptr, cmp_ptr, val_ptr, BLOCK: tl.constexpr,
-                LINE: tl.constexpr):
+def scatter_cas(out_ptr, idx_ptr, cmp_ptr, val_ptr, BLOCK: tl.constexpr, LINE: tl.constexpr):
     pid = tl.program_id(0)
     base = pid * (BLOCK * LINE)
     offs = tl.arange(0, BLOCK)
@@ -168,7 +167,7 @@ def _vector_core_count():
     for key in ("num_vectorcore", "num_vector_core", "vector_core_num"):
         if key in props:
             return int(props[key])
-    raise RuntimeError("cannot read the vector core count: %r" % (props,))
+    raise RuntimeError("cannot read the vector core count: %r" % (props, ))
 
 
 def _aicore_count():
@@ -214,8 +213,7 @@ def _kernel_duration_us(launch, profile_root, iters=20):
     if not samples:
         raise RuntimeError("the profiler produced no kernel duration")
     print("  [prof %s] n=%d us_min=%.3f us_med=%.3f us_max=%.3f" %
-          (profile_root.name, len(samples), min(samples),
-           statistics.median(samples), max(samples)))
+          (profile_root.name, len(samples), min(samples), statistics.median(samples), max(samples)))
     return statistics.median(samples)
 
 
@@ -288,8 +286,7 @@ def test_indirect_atomic_cost_model_matches_measurement(op, dtype_name, tmp_path
         args = (out, idx, compare, value) if op == "cas" else (out, idx, value)
 
         def launch(args=args, options=options, block=block):
-            return KERNELS[op][(logical_programs, )](*args, BLOCK=block,
-                                                    LINE=line, **options)
+            return KERNELS[op][(logical_programs, )](*args, BLOCK=block, LINE=line, **options)
 
         binary = launch()
         torch.npu.synchronize()
@@ -298,15 +295,12 @@ def test_indirect_atomic_cost_model_matches_measurement(op, dtype_name, tmp_path
         # once.  Only the touched addresses carry the updated value; the rest
         # of the destination still holds the seed, so the whole buffer cannot
         # be checked with a sum (a min or a max seed is not zero).
-        touched = (torch.arange(logical_programs, dtype=torch.int64,
-                                device=idx.device)[:, None] * (block * line) +
-                   torch.arange(block, dtype=torch.int64,
-                                device=idx.device)[None, :] * line)
+        touched = (torch.arange(logical_programs, dtype=torch.int64, device=idx.device)[:, None] * (block * line) +
+                   torch.arange(block, dtype=torch.int64, device=idx.device)[None, :] * line)
         written = out.index_select(0, touched.reshape(-1))
-        assert bool((written == 1).all().item()), (
-            "the atomic did not update every touched address exactly once, "
-            "%d of %d addresses hold the updated value" %
-            (int((written == 1).sum().item()), written.numel()))
+        assert bool((written == 1).all().item()), ("the atomic did not update every touched address exactly once, "
+                                                   "%d of %d addresses hold the updated value" % (int(
+                                                       (written == 1).sum().item()), written.numel()))
 
         duration_us = _kernel_duration_us(launch, tmp_path / ("prof_%d" % block))
         rows.append({
@@ -322,8 +316,7 @@ def test_indirect_atomic_cost_model_matches_measurement(op, dtype_name, tmp_path
     # The fitted slope is the per element cost of the compiled operation.  It
     # is the number a profile slot has to carry, so it is printed in the unit
     # the profile uses.
-    human_points = [(r["elements"], r["measured_us"])
-                    for r in rows]
+    human_points = [(r["elements"], r["measured_us"]) for r in rows]
     slope_us, intercept_us = _fit_slope(human_points)
 
     frequency_mhz = None
@@ -341,10 +334,8 @@ def test_indirect_atomic_cost_model_matches_measurement(op, dtype_name, tmp_path
     print("  fitted per element cost : %.6f us" % slope_us)
     if frequency_mhz:
         cycles = slope_us * frequency_mhz
-        print("  fitted per element cost : %.4f cycles (at %.1f MHz)" %
-              (cycles, frequency_mhz))
-        print("  implied slot rate       : %.6f elements/cycle" %
-              (1.0 / cycles if cycles else 0.0))
+        print("  fitted per element cost : %.4f cycles (at %.1f MHz)" % (cycles, frequency_mhz))
+        print("  implied slot rate       : %.6f elements/cycle" % (1.0 / cycles if cycles else 0.0))
     print("  fitted fixed cost       : %.3f us" % intercept_us)
 
     if any(row["report"] is None for row in rows):
@@ -364,22 +355,17 @@ def test_indirect_atomic_cost_model_matches_measurement(op, dtype_name, tmp_path
         absolute = abs(predicted_us - row["measured_us"])
         relative = absolute / row["measured_us"]
         worst_relative = max(worst_relative, relative)
-        accepted = (relative <= RELATIVE_TOLERANCE
-                    or absolute <= ABSOLUTE_TOLERANCE_US)
+        accepted = (relative <= RELATIVE_TOLERANCE or absolute <= ABSOLUTE_TOLERANCE_US)
         if not accepted:
             rejected.append((row["block"], relative, absolute))
         print("  %-6d %12.3f %14.3f %9.3f %9.3f   %s%s" %
-              (row["block"], row["measured_us"], predicted_us, relative,
-               absolute, row["report"].get("decision_kind"),
+              (row["block"], row["measured_us"], predicted_us, relative, absolute, row["report"].get("decision_kind"),
                "" if accepted else "  REJECTED"))
     print("  worst relative error    : %.3f" % worst_relative)
-    print("  tolerance               : rel %.2f or abs %.1f us" %
-          (RELATIVE_TOLERANCE, ABSOLUTE_TOLERANCE_US))
+    print("  tolerance               : rel %.2f or abs %.1f us" % (RELATIVE_TOLERANCE, ABSOLUTE_TOLERANCE_US))
     print("  formula                 : %s" % prediction.get("formula"))
 
-    assert not rejected, (
-        "the route model exceeds both tolerances at %s; the worst of them is "
-        "%.3f relative and %.3f us absolute" %
-        (", ".join("block %d" % block for block, _, _ in rejected),
-         max(relative for _, relative, _ in rejected),
-         max(absolute for _, _, absolute in rejected)))
+    assert not rejected, ("the route model exceeds both tolerances at %s; the worst of them is "
+                          "%.3f relative and %.3f us absolute" %
+                          (", ".join("block %d" % block for block, _, _ in rejected),
+                           max(relative for _, relative, _ in rejected), max(absolute for _, _, absolute in rejected)))

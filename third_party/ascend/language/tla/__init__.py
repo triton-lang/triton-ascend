@@ -94,6 +94,7 @@ from .dma import (
     load_gm_to_ub,
     store_ub_to_gm,
     load_gm_to_l1,
+    load_gm_to_l1_mx_scale,
     copy_ub_to_l1,
     copy_l1_to_ub,
     copy_l1_to_bt,
@@ -119,8 +120,9 @@ from . import simd
 # Scalar / SIMD-register selection (eager, unlike TileLang T.if_then_else).
 from .selection import where
 
-# Cube-core ops (``mmad``/``tla.copy`` L1/L0C routes).
+# Cube-core ops (``mmad``/``mmad_mx``/``tla.copy`` L1/L0C routes).
 from . import cube
+from .cube import MxFormat
 
 # Explicit pipeline / global synchronization.
 from . import sync
@@ -174,6 +176,7 @@ __all__ = [
     "load_gm_to_ub",
     "store_ub_to_gm",
     "load_gm_to_l1",
+    "load_gm_to_l1_mx_scale",
     "copy_ub_to_l1",
     "copy_l1_to_ub",
     "copy_l1_to_bt",
@@ -219,6 +222,7 @@ __all__ = [
 
     # cube ops
     "cube",
+    "MxFormat",
 
     # explicit synchronization
     "sync",

@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <string>
@@ -41,6 +42,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Location.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/ValueRange.h"
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
@@ -912,6 +914,20 @@ int UpdateConditionInfoPass::buildOutputGroups(
 // Block level cross-core conditions
 // ---------------------------------------------------------------------------
 
+// Whether the preload condition is generated for `block`.
+//
+// The condition compares the counters of the block and of the block two
+// positions earlier in its chain, both of them have to own a counter for the
+// comparison to be possible.
+bool UpdateConditionInfoPass::hasPreloadCondition(scf::IfOp block) {
+  auto targetIt = info->preloadIfOpPairs.find(block);
+  if (targetIt == info->preloadIfOpPairs.end()) {
+    return false;
+  }
+  return info->blockCounterSlots.count(block) &&
+         info->blockCounterSlots.count(targetIt->second.reference);
+}
+
 // Memrefs holding the counter of `targetBlock` as seen by the reading core.
 //   cube reader  : vector target -> {core0 copy, core1 copy};
 //                  cube target   -> {the single copy}.
@@ -1118,6 +1134,10 @@ Value UpdateConditionInfoPass::addCrossCoreBlockConditions(
       Value diff =
           builder.create<arith::SubIOp>(loc, producerValue, consumerValue);
       if (currentIsProducer) {
+        // The producer may not run more than bufferNum - 1 rounds ahead of its
+        // consumer: with two inter-core buffers the physical buffer index is
+        // round % 2, so a producer that leads by two rounds overwrites the
+        // buffer the consumer is still reading.
         Value bufferNum = builder.create<arith::ConstantIntOp>(
             loc, edge.bufferNum, CONST_INT_TYPE);
         combineCondition(builder.create<arith::CmpIOp>(
@@ -1196,7 +1216,7 @@ void UpdateConditionInfoPass::updateBlockCounterVars(
 // Set the crossCore condition of `ifOp` and bump its own counter.
 int UpdateConditionInfoPass::setCrossCoreCondition(
     scf::IfOp ifOp, SmallVector<SmallVector<Value>> ssbufferPtrs,
-    Value &crossCoreCond) {
+    DenseMap<Value, Value> &loadedCounters, Value &crossCoreCond) {
   OpBuilder builder(ifOp);
   Location loc = ifOp.getLoc();
   crossCoreCond = nullptr;
@@ -1256,7 +1276,6 @@ int UpdateConditionInfoPass::setCrossCoreCondition(
   // ========== Part 2: Add cross-core conditions ==========
   // The counters that are read by the conditions are kept, the update of the
   // counter of this block reuses the value that was loaded here.
-  DenseMap<Value, Value> loadedCounters;
   crossCoreCond = addCrossCoreBlockConditions(builder, loc, ifOp, isAIC,
                                               zeroConst, vectorSSBufferMemrefs,
                                               ssbufferPtrs, loadedCounters);
@@ -1541,20 +1560,23 @@ int UpdateConditionInfoPass::setIntraCoreCondition(
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
-// Set the FlowOpt extra condition for the third if block in the DAG
+// Set the flowOpt condition of a flowOpt target of the block dependency DAG.
+//
+// The condition lets the target block start before the chain it belongs to has
+// produced all its data, it is the counterpart of the preload condition which
+// delays a block until the chain has built up a backlog.
 int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
-                                                 Operation *loopOp,
-                                                 Value &flowOptCond) {
+                                                  Operation *loopOp,
+                                                  Value &flowOptCond) {
+  flowOptCond = nullptr;
   auto forOp = dyn_cast<scf::ForOp>(loopOp);
   if (!forOp) {
-    flowOptCond = nullptr;
     return UPDATE_CONDITION_INFO_SUCCESS;
   }
 
   // Check if current ifOp is a target node (third node) in flowOptIfOpPairs
   if (!info->flowOptIfOpPairs.count(currentIfOp)) {
     LDBG("Current ifOp is not a flowOpt target node, skip.");
-    flowOptCond = nullptr;
     return UPDATE_CONDITION_INFO_SUCCESS;
   }
 
@@ -1563,7 +1585,6 @@ int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
   // - Intra-core buffer count > INTRA_CORE_BUFFER_COUNT_THRESHOLD
   if (info->crossCoreBufferCount <= CROSS_CORE_BUFFER_COUNT_THRESHOLD ||
       info->intraCoreBufferCount <= INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
-    flowOptCond = nullptr;
     return UPDATE_CONDITION_INFO_SUCCESS;
   }
 
@@ -1615,6 +1636,157 @@ int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
+// Set the preload condition of a preload target of the block dependency DAG.
+//
+// The target block waits until the block two positions earlier in the chain
+// has produced interCoreBufferCount + 1 more rounds than the target has
+// consumed:
+//
+//     c_reference - c_target >= interCoreBufferCount + 1
+//
+// The backlog of the whole chain is used instead of the backlog of the direct
+// producer: the target only starts once the head of the chain is far enough
+// ahead, so that it never has to wait for its own input.
+//
+// Near the end of the main loop the backlog can no longer grow, the condition
+// falls back to "the loop is about to end":
+//
+//     upperBound - c_target <= interCoreBufferCount
+//
+// The counter of the block is used on both sides of the comparison, so the
+// upper bound has to be counted in rounds as well: the main loop runs
+// (upperBound - lowerBound) / step rounds.
+int UpdateConditionInfoPass::setPreloadCondition(
+    scf::IfOp currentIfOp, Operation *loopOp,
+    SmallVector<SmallVector<Value>> ssbufferPtrs,
+    DenseMap<Value, Value> &loadedCounters, Value &preloadCond) {
+  preloadCond = nullptr;
+
+  auto forOp = dyn_cast<scf::ForOp>(loopOp);
+  if (!forOp) {
+    // scf.while has no upper bound to compare the induction variable with.
+    LDBG("Main loop is not an scf.for, skip the preload condition.");
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+
+  if (!hasPreloadCondition(currentIfOp)) {
+    LDBG("Current ifOp is not a preload target, skip.");
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+  scf::IfOp reference = info->preloadIfOpPairs[currentIfOp].reference;
+
+  OpBuilder builder(currentIfOp);
+  Location loc = currentIfOp.getLoc();
+
+  // The core running the code decides which copies of the counters it reads.
+  scope::ScopeOp scopeOp = findOwningScope(currentIfOp);
+  bool isAIC = false;
+  bool isAIV = false;
+  if (!getScopeCoreType(scopeOp, isAIC, isAIV)) {
+    LDBG("ifblock not in a correct scope block" << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
+  // The vector side addresses the counters of the vector blocks through the
+  // dynamic address of its own core.
+  DenseMap<int, Value> vectorSSBufferMemrefs;
+  if (!isAIC) {
+    SmallVector<int> neededSlots;
+    for (scf::IfOp block : {reference, currentIfOp}) {
+      if (info->blockCounterSlots[block].isVector) {
+        neededSlots.push_back(info->blockCounterSlots[block].slot);
+      }
+    }
+    auto result = computeVectorSSBufferMemrefs(
+        builder, loc, scopeOp.getOperation(), neededSlots);
+    if (!result) {
+      LDBG("computeVectorSSBufferMemrefs failed!");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+    vectorSSBufferMemrefs = std::move(*result);
+  }
+
+  // The computation of the dynamic addresses moved the insertion point.
+  builder.setInsertionPoint(currentIfOp);
+
+  // The counters are read once, the loaded value is shared by all conditions.
+  auto loadCounter = [&](Value memref) -> Value {
+    auto it = loadedCounters.find(memref);
+    if (it != loadedCounters.end()) {
+      return it->second;
+    }
+    auto loadOp = builder.create<memref::LoadOp>(loc, memref, ValueRange{});
+    auto markOp = builder.create<annotation::MarkOp>(loc, loadOp);
+    markOp->setAttr(kMemrefExtVolatile, builder.getUnitAttr());
+    loadedCounters[memref] = loadOp.getResult();
+    return loadOp.getResult();
+  };
+
+  SmallVector<Value> referenceMemrefs = getBlockCounterMemrefs(
+      isAIC, reference, vectorSSBufferMemrefs, ssbufferPtrs);
+  SmallVector<Value> ownMemrefs = getBlockCounterMemrefs(
+      isAIC, currentIfOp, vectorSSBufferMemrefs, ssbufferPtrs);
+  if (referenceMemrefs.empty() || ownMemrefs.empty()) {
+    LDBG("Missing counter address for the preload condition of " << currentIfOp
+                                                                 << "\n");
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+
+  // The counter of the block itself, it is owned by the block and therefore
+  // read through a single address.
+  Value ownValue = loadCounter(ownMemrefs[0]);
+
+  // Term 1: the reference block is interCoreBufferCount + 1 rounds ahead. A
+  // cube block reading a vector reference block reads both copies, the
+  // backlog of the two vector cores has to reach the depth on both of them.
+  Value leadRounds = builder.create<arith::ConstantIntOp>(
+      loc, info->interCoreBufferCount + 1, CONST_INT_TYPE);
+  Value backlogCond = nullptr;
+  for (Value referenceMemref : referenceMemrefs) {
+    Value referenceValue = loadCounter(referenceMemref);
+    Value diff =
+        builder.create<arith::SubIOp>(loc, referenceValue, ownValue);
+    Value cmp = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sge,
+                                              diff, leadRounds);
+    if (backlogCond) {
+      backlogCond = builder.create<arith::AndIOp>(loc, backlogCond, cmp);
+    } else {
+      backlogCond = cmp;
+    }
+  }
+
+  // Term 2: the main loop is within interCoreBufferCount rounds of its end.
+  //
+  // The block counter counts the rounds the block itself has run, the number
+  // of rounds of the main loop is (upperBound - lowerBound) / step. The
+  // condition upperBound - counter <= interCoreBufferCount tells that the
+  // loop is about to end, so the backlog of the chain can no longer grow and
+  // the block has to run anyway.
+  Value lowerBound = forOp.getLowerBound();
+  Value upperBound = forOp.getUpperBound();
+  Value step = forOp.getStep();
+  auto stepIntType = dyn_cast<IntegerType>(step.getType());
+  if (!stepIntType) {
+    LDBG("[Error] forOp step is expected to be an integer type, got "
+         << step.getType() << ", forOp=" << forOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+  Value roundCount = builder.create<arith::SubIOp>(loc, upperBound, lowerBound);
+  Value totalRounds = roundCount;
+  if (!matchPattern(step, m_One())) {
+    totalRounds = builder.create<arith::DivSIOp>(loc, roundCount, step);
+  }
+  Value bufferCount = builder.create<arith::ConstantIntOp>(
+      loc, info->interCoreBufferCount, stepIntType.getWidth());
+  Value endLimit = builder.create<arith::SubIOp>(loc, totalRounds, bufferCount);
+  Value endCond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sge,
+                                               ownValue, endLimit);
+
+  preloadCond = builder.create<arith::OrIOp>(loc, backlogCond, endCond);
+
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
 // Update DAG nodes after ifOp replacement
 void UpdateConditionInfoPass::updateDAGAfterIfOpReplacement(scf::IfOp oldIfOp,
                                                             scf::IfOp newIfOp) {
@@ -1635,9 +1807,9 @@ void UpdateConditionInfoPass::updateDAGAfterIfOpReplacement(scf::IfOp oldIfOp,
 
   // 2. Update flowOptIfOpPairs
   if (info->flowOptIfOpPairs.count(oldIfOp)) {
-    auto source = info->flowOptIfOpPairs[oldIfOp];
+    auto startNode = info->flowOptIfOpPairs[oldIfOp];
     info->flowOptIfOpPairs.erase(oldIfOp);
-    info->flowOptIfOpPairs[newIfOp] = source;
+    info->flowOptIfOpPairs[newIfOp] = startNode;
   }
 
   for (auto &entry : info->flowOptIfOpPairs) {
@@ -1646,7 +1818,20 @@ void UpdateConditionInfoPass::updateDAGAfterIfOpReplacement(scf::IfOp oldIfOp,
     }
   }
 
-  // 3. Update the block level cross-core edges
+  // 3. Update preloadIfOpPairs
+  if (info->preloadIfOpPairs.count(oldIfOp)) {
+    auto target = info->preloadIfOpPairs[oldIfOp];
+    info->preloadIfOpPairs.erase(oldIfOp);
+    info->preloadIfOpPairs[newIfOp] = target;
+  }
+
+  for (auto &entry : info->preloadIfOpPairs) {
+    if (entry.second.reference == oldIfOp) {
+      entry.second.reference = newIfOp;
+    }
+  }
+
+  // 4. Update the block level cross-core edges
   if (info->crossCoreBlockEdges.count(oldIfOp)) {
     auto edges = info->crossCoreBlockEdges[oldIfOp];
     info->crossCoreBlockEdges.erase(oldIfOp);
@@ -1664,14 +1849,14 @@ void UpdateConditionInfoPass::updateDAGAfterIfOpReplacement(scf::IfOp oldIfOp,
     }
   }
 
-  // 4. Update the block counter slots
+  // 5. Update the block counter slots
   if (info->blockCounterSlots.count(oldIfOp)) {
     auto slot = info->blockCounterSlots[oldIfOp];
     info->blockCounterSlots.erase(oldIfOp);
     info->blockCounterSlots[newIfOp] = slot;
   }
 
-  // 5. Update the counter slot owners
+  // 6. Update the counter slot owners
   for (auto &owner : blockCounterOwners) {
     if (owner == oldIfOp) {
       owner = newIfOp;
@@ -2090,11 +2275,11 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
   return newIfOp;
 }
 
-// Combine the conditions: crossCore condition + intraCore condition + counter
-// condition + flowOpt condition
+// Combine the conditions: crossCore condition + intraCore condition + flowOpt
+// condition + preload condition + counter condition
 int UpdateConditionInfoPass::combineConditions(
     ModuleOp module, Value crossCoreCond, Value intraCoreCond,
-    Value flowOptCond, scf::IfOp ifOp, Operation *loopOp,
+    Value flowOptCond, Value preloadCond, scf::IfOp ifOp, Operation *loopOp,
     size_t &usedCounterNum, DenseMap<Value, VarUpdateType> &varUpdateTypes) {
   Location loc = ifOp.getLoc();
   SmallVector<Value> validConditions;
@@ -2110,6 +2295,9 @@ int UpdateConditionInfoPass::combineConditions(
   }
   if (flowOptCond) {
     validConditions.push_back(flowOptCond);
+  }
+  if (preloadCond) {
+    validConditions.push_back(preloadCond);
   }
 
   auto forOp = dyn_cast<scf::ForOp>(loopOp);
@@ -2312,8 +2500,14 @@ int UpdateConditionInfoPass::updateIfConds(
       }
 
       // Step3:Set the crossCore condition
+      // The counters read by the conditions of this block are cached, the
+      // preload condition of the same block reuses them.
+      // The preload condition needs the upper bound of the main loop, only an
+      // scf.for has one.
+      DenseMap<Value, Value> loadedCounters;
       Value crossCoreCond;
-      if (setCrossCoreCondition(ifOp, ssbufferPtrs, crossCoreCond) != 0) {
+      if (setCrossCoreCondition(ifOp, ssbufferPtrs, loadedCounters,
+                                crossCoreCond) != 0) {
         LDBG("setCrossCoreCondition failed! ifOp=" << ifOp << ", loopOp="
                                                    << *loopOp << "\n");
         return UPDATE_CONDITION_INFO_FAILED;
@@ -2327,16 +2521,22 @@ int UpdateConditionInfoPass::updateIfConds(
           UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }
-      // Step5:Set the flowOpt condition (for only; needs lb/ub/step)
+      // Step5:Set the flowOpt condition
       Value flowOptCond;
       if (setFlowOptCondition(ifOp, loopOp, flowOptCond) ==
           UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }
-      // Step6:Combine the conditions: crossCore + intraCore + counter +
-      // flowOpt
+      // Step6:Set the preload condition (for only; needs ub/step)
+      Value preloadCond;
+      if (setPreloadCondition(ifOp, loopOp, ssbufferPtrs, loadedCounters,
+                              preloadCond) == UPDATE_CONDITION_INFO_FAILED) {
+        return UPDATE_CONDITION_INFO_FAILED;
+      }
+      // Step7:Combine the conditions: crossCore + intraCore + flowOpt +
+      // preload + counter
       if (combineConditions(module, crossCoreCond, intraCoreCond, flowOptCond,
-                            ifOp, loopOp, usedCounterNum,
+                            preloadCond, ifOp, loopOp, usedCounterNum,
                             varUpdateTypes) == UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }

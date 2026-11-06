@@ -183,18 +183,32 @@ private:
 
   // loopOp is scf.for or scf.while main_loop.
   int combineConditions(ModuleOp module, Value crossCoreCond,
-                        Value intraCoreCond, Value flowOptCond, scf::IfOp ifOp,
-                        Operation *loopOp, size_t &usedCounterNum,
+                        Value intraCoreCond, Value flowOptCond,
+                        Value preloadCond, scf::IfOp ifOp, Operation *loopOp,
+                        size_t &usedCounterNum,
                         DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
   int setCrossCoreCondition(scf::IfOp ifOp,
                             SmallVector<SmallVector<Value>> ssbufferPtrs,
+                            DenseMap<Value, Value> &loadedCounters,
                             Value &crossCoreCond);
 
-  // Set the FlowOpt extra condition for the third if block in the DAG.
-  // Needs lb/ub/step from scf.for; scf.while leaves flowOptCond null.
+  // Set the flowOpt condition of a flowOpt target of the block dependency DAG.
+  // The block is allowed to start before the chain it belongs to has produced
+  // all its data. Needs lb/ub/step from scf.for; scf.while leaves flowOptCond
+  // null.
   int setFlowOptCondition(scf::IfOp currentIfOp, Operation *loopOp,
                           Value &flowOptCond);
+
+  // Set the preload condition of a preload target of the block dependency DAG.
+  // The block waits until the block two positions earlier in the chain has
+  // produced interCoreBufferCount + 1 more rounds, or until the main loop is
+  // about to end. Needs lb/ub/step from scf.for; scf.while leaves preloadCond
+  // null.
+  int setPreloadCondition(scf::IfOp currentIfOp, Operation *loopOp,
+                          SmallVector<SmallVector<Value>> ssbufferPtrs,
+                          DenseMap<Value, Value> &loadedCounters,
+                          Value &preloadCond);
 
   // Update DAG nodes after ifOp replacement
   void updateDAGAfterIfOpReplacement(scf::IfOp oldIfOp, scf::IfOp newIfOp);
@@ -228,6 +242,11 @@ private:
   getBlockCounterMemrefs(bool isAIC, scf::IfOp targetBlock,
                          DenseMap<int, Value> &vectorSSBufferMemrefs,
                          ArrayRef<SmallVector<Value>> ssbufferPtrs);
+
+  // Whether the preload condition is generated for `block`: it needs the
+  // counters of the block itself and of the block two positions earlier in
+  // its chain.
+  bool hasPreloadCondition(scf::IfOp block);
 
   // Cross-core conditions of `ifOp`: consumer difference, producer difference
   // and the cube side alignment condition.

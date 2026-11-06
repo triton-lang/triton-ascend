@@ -35,6 +35,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       %[[C2:.+]] = memref.load
         // CHECK:       %[[D1:.+]] = arith.subi %[[C2]], %[[V5]]
         // CHECK:       arith.cmpi sgt, %[[D1]]
+        // The producer may not run more than buffer_num - 1 rounds ahead of
+        // its consumer, the throttle is not relaxed for the preload targets.
         // CHECK:       %[[C1:.+]] = memref.load
         // CHECK:       %[[D2:.+]] = arith.subi %[[V5]], %[[C1]]
         // CHECK:       arith.constant 2 : i32
@@ -60,6 +62,17 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       %[[V6:.+]] = memref.load
         // CHECK:       %[[DV:.+]] = arith.subi %[[C1V]], %[[V6]]
         // CHECK:       arith.cmpi sgt, %[[DV]]
+        // The vector block 6 is at depth 4, its reference is the vector block
+        // 5, two positions earlier in the chain.
+        // CHECK:       %[[V5REF:.+]] = memref.load
+        // CHECK:       %[[PDV:.+]] = arith.subi %[[V5REF]], %[[V6]]
+        // CHECK:       arith.cmpi sge, %[[PDV]], %c3_i32{{.*}} : i32
+        // The main loop is within buffer_num rounds of its end.
+        // CHECK:       arith.subi %{{[^,]+}}, %{{[^,]+}} : i32
+        // CHECK:       arith.divsi
+        // CHECK:       arith.subi %{{[^,]+}}, %c2_i32{{.*}} : i32
+        // CHECK:       arith.cmpi sge, %[[V6]], %{{[^,]+}} : i32
+        // CHECK:       arith.ori
         // CHECK:       scf.if
         hivm.hir.sync_block_set {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 4
         %memspacecast_16 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossCoreDeps = [1, 0]} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
@@ -90,6 +103,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // Cube block 0 produces the group consumed by vector block 5. The
         // producer side condition is (c_cube0 - c_v5) < buffer_number, one
         // condition per vector core of the consumer block.
+        // CHECK:       scf.while (%{{[^ ]+}} = %{{[^ ,]+}}, %{{[^ ]+}} = %{{[^ ,]+}}, %{{[^ ]+}} = %{{[^ ,]+}}, %{{[^ ]+}} = %{{[^ ,]+}}, %[[C2CNT:[^ ,]+]] = %{{[^ ,]+}}, %{{[^ ]+}} = %{{[^ ,]+}}) : (i32, i32, i32, i32, i32, i32) ->
         // CHECK:       %[[CB0:.+]] = memref.load
         // CHECK:       %[[V5C0:.+]] = memref.load
         // CHECK:       %[[P0:.+]] = arith.subi %[[CB0]], %[[V5C0]]
@@ -144,8 +158,23 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // The two vector cores of the producer block must be aligned.
         // CHECK:       arith.cmpi eq, %[[V5E0]], %[[V5E1]]
         // CHECK:       arith.andi
-        // CHECK:       arith.cmpi sge
-        // CHECK:       arith.cmpi sge
+        // The flowOpt condition of the cube block 1 is kept, the preload
+        // condition is added on top of it: the conditions only grow.
+        // CHECK:       arith.cmpi sge, %[[C2CNT]], %{{[^,]+}} : i32
+        // CHECK:       arith.muli %{{[^,]+}}, %c2_i32{{.*}} : i32
+        // CHECK:       arith.addi %{{[^,]+}}, %{{[^,]+}} : i32
+        // CHECK:       arith.cmpi sge, %[[C2CNT]], %{{[^,]+}} : i32
+        // CHECK:       arith.ori
+        // The cube block 1 is at depth 3, its reference is the cube block 2,
+        // two positions earlier in the chain.
+        // CHECK:       %[[C2REF:.+]] = memref.load
+        // CHECK:       %[[PDC:.+]] = arith.subi %[[C2REF]], %[[CB1]]
+        // CHECK:       arith.cmpi sge, %[[PDC]], %c3_i32{{.*}} : i32
+        // The main loop is within buffer_num rounds of its end.
+        // CHECK:       arith.subi %{{[^,]+}}, %{{[^,]+}} : i32
+        // CHECK:       arith.divsi
+        // CHECK:       arith.subi %{{[^,]+}}, %c2_i32{{.*}} : i32
+        // CHECK:       arith.cmpi sge, %[[CB1]], %{{[^,]+}} : i32
         // CHECK:       arith.ori
         // CHECK:       scf.if
         hivm.hir.sync_block_wait {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2

@@ -11,6 +11,11 @@
 
 // CHECK-LABEL: func.func @while_update_condition_crosscore
 
+// The main loop is an scf.while, it has no upper bound to compare the
+// induction variable with. The preload condition is therefore not generated
+// and the throttle of the producers is not relaxed either.
+// CHECK-NOT: arith.cmpi sge
+
 // SSBuffer slots initialized to 0 via pointer_cast + memref.store.
 // CHECK: hivm.hir.pointer_cast(%{{.*}}) : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: memref.store %{{.*}}, %{{.*}}[] : memref<i32, #hivm.address_space<ssbuf>>
@@ -29,7 +34,7 @@
 // CHECK: %[[LD_C5B:.*]] = memref.load %{{.*}}[] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: annotation.mark %[[LD_C5B]] {memref_ext.volatile}
 // CHECK: %[[DIFF_OUT5:.*]] = arith.subi %[[LD_V5]], %[[LD_C5B]] : i32
-// CHECK: %[[SLT5:.*]] = arith.cmpi slt, %[[DIFF_OUT5]], %{{.*}} : i32
+// CHECK: %[[SLT5:.*]] = arith.cmpi slt, %[[DIFF_OUT5]], %c1_i32{{.*}} : i32
 // CHECK: %[[CROSS5:.*]] = arith.andi %[[SGT5]], %[[SLT5]]
 // CHECK: %[[AND5:.*]] = arith.andi %[[CROSS5]], %{{.*}}
 // CHECK: scf.if %[[AND5]]
@@ -60,7 +65,7 @@
 // CHECK: %[[LD_V0:.*]] = memref.load %{{.*}}[] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: annotation.mark %[[LD_V0]] {memref_ext.volatile}
 // CHECK: %[[DIFF0:.*]] = arith.subi %[[LD_OWN0]], %[[LD_V0]] : i32
-// CHECK: %[[SLT0:.*]] = arith.cmpi slt, %[[DIFF0]], %{{.*}} : i32
+// CHECK: %[[SLT0:.*]] = arith.cmpi slt, %[[DIFF0]], %c1_i32{{.*}} : i32
 // CHECK: %[[LD_V1:.*]] = memref.load %{{.*}}[] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: annotation.mark %[[LD_V1]] {memref_ext.volatile}
 // CHECK: %[[DIFF1:.*]] = arith.subi %[[LD_OWN0]], %[[LD_V1]] : i32

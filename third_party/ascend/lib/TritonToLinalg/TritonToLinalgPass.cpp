@@ -2170,6 +2170,7 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
   });
 
   rewriteDevicePrintOffsets(moduleOp);
+  normalizeDevicePrintTensorRanks(moduleOp);
 
   // Clean up dead code and simplify IR.
   PassManager pm(&getContext(), moduleOp.getOperationName());

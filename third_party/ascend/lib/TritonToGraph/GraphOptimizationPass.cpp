@@ -62,13 +62,6 @@ namespace {
 constexpr std::array<GraphOptimizationRulePhase, 12> kRulePhases = {
     GraphOptimizationRulePhase::DiagonalMaskRemoval,
     GraphOptimizationRulePhase::ConvertModuloToMask,
-    // Rule A (selected-block scan) phase: it rewrites the sparse loop before
-    // the memory-access rules below.  Rule B (query row batching) sits in
-    // the ProgramMapping phase per RFC #2686, alongside IAT, and is
-    // scheduled with that phase's loop.
-    // Rule A's phase: it rewrites the sparse loop before the memory-access
-    // rules below look at it.  Rule B (query row batching) runs in the
-    // ProgramMapping phase, alongside IAT, as specified by RFC #2686.
     GraphOptimizationRulePhase::SelectedBlockScan,
     GraphOptimizationRulePhase::ProgramMapping,
     GraphOptimizationRulePhase::PersistentTaskMapping,
@@ -109,14 +102,6 @@ bool isRuleEnabled(GraphOptimizationRuleMask ruleMask,
 }
 
 constexpr bool requiresPostRewriteCleanup(GraphOptimizationRuleId ruleId) {
-  // Rule A/B build 64-wide values on demand while lifting rows, but the
-  // rewrite can leave unused full-width broadcasts behind (the
-  // 8x16x128xf32 alpha broadcast, for example).  If they are left alone,
-  // downstream materialisation turns them into whole UB buffers and hits
-  // the capacity limit, so both rules rerun the structural cleanup after
-  // apply.
-  // Rules A/B leave unused full-width broadcasts (e.g. 8x16x128xf32 alpha)
-  // behind; without cleanup they are materialized into UB and blow the budget.
   return ruleId == GraphOptimizationRuleId::IndependentAxisTensorize ||
          ruleId == GraphOptimizationRuleId::PersistentTaskStripMining ||
          ruleId == GraphOptimizationRuleId::SelectedBlockScan ||
@@ -618,20 +603,13 @@ void populateBuiltinGraphOptimizationRules(
     rules.push_back(createContiguousBlockAccessFormationRule(
         options.contiguousBlockAccessFormation));
   }
-  // SelectedBlockScanRule is registered when rule bit 65536 is set; that bit
-  // is fixed default-off and must be requested explicitly.  There is no
-  // extra gate to wire up between the two rules: it always goes through
-  // the materialize entry in QueryRowBatching.h and lets the row lift
-  // decide, while 131072 only decides whether QueryRowBatchingRule joins
-  // the scheduler as a standalone rule.
-  // SelectedBlockScanRule is registered when bit 65536 is set (the bit is fixed
-  // default-off, so the caller has to request it).  Nothing has to be stitched
-  // together here: it always goes through the QueryRowBatching.h materialize
-  // entry and the row lift decides; bit 131072 only controls whether
-  // QueryRowBatchingRule is scheduled as a standalone rule.
   if (isRuleEnabled(options.enabledRuleMask,
                     GraphOptimizationRuleId::SelectedBlockScan)) {
     rules.push_back(createSelectedBlockScanRule());
+  }
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::QueryRowBatching)) {
+    rules.push_back(createQueryRowBatchingRule());
   }
   const auto compileMode =
       triton::ascend::parseCompileMode(options.compileMode);

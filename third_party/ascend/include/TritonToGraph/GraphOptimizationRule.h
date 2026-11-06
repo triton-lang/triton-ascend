@@ -120,6 +120,7 @@ std::unique_ptr<GraphOptimizationRule> createStoreCoveragePlanningRule(
     const StoreCoveragePlanningRuleOptions &options);
 std::unique_ptr<GraphOptimizationRule> createContiguousBlockAccessFormationRule(
     const ContiguousBlockAccessFormationRuleOptions &options);
+std::unique_ptr<GraphOptimizationRule> createQueryRowBatchingRule();
 
 } // namespace cfg
 } // namespace triton

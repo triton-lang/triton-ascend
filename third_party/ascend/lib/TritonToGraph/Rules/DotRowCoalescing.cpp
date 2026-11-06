@@ -35,7 +35,6 @@
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
-#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -142,6 +141,8 @@ static std::optional<RowAddressRange> analyzeRowAddress(Value v, Value pid) {
   return std::nullopt;
 }
 
+// The row-coalescing engine is shared; this rule only owns the matcher and
+// plan.
 using RowCandidate = RowLiftCandidate;
 
 static int64_t tensorStorageBytes(RankedTensorType tensor) {
@@ -273,10 +274,6 @@ static std::optional<RowCandidate> matchDotRows(triton::FuncOp fn,
             triton::AddPtrOp, triton::TransOp, triton::ReshapeOp>(op))
       return;
     StringRef ns = op->getName().getDialectNamespace();
-    // A partial group evaluates arithmetic for inactive rows as well.
-    if (!grid && dependent && (ns == "arith" || ns == "math") &&
-        !isSpeculatable(op))
-      safe = false;
     if ((ns != "arith" && ns != "math") || op->getNumRegions())
       safe = false;
   });
@@ -311,9 +308,9 @@ static std::optional<RowCandidate> matchDotRows(triton::FuncOp fn,
   policy.l0ABudgetBytes = l0aBudgetBytes;
   policy.l0CBudgetBytes = l0cBudgetBytes;
   policy.coreNum = coreNum;
-  int64_t rows = selectRowsPerProgram(grid ? grid.getInt() : 0, maxDotRows,
-                                      maxTensorBytes, /*peakLiveBytes=*/0,
-                                      policy);
+  int64_t rows =
+      selectRowsPerProgram(grid ? grid.getInt() : 0, maxDotRows, maxTensorBytes,
+                           /*peakLiveBytes=*/0, policy);
   if (rows <= 1)
     return std::nullopt;
 
@@ -351,24 +348,23 @@ public:
   unsigned getBenefit() const override { return 1; }
 
   Operation *getAnchor() const override { return candidate.function; }
+
   unsigned getCreationEpoch() const override { return epoch; }
 
   LogicalResult revalidate(GraphOptimizationContext &context) const override {
     if (context.getFunction() != candidate.function)
       return failure();
 
-    auto current =
-        matchDotRows(candidate.function, l0aBudgetBytes, l0cBudgetBytes, coreNum);
+    auto current = matchDotRows(candidate.function, l0aBudgetBytes,
+                                l0cBudgetBytes, coreNum);
     return success(current && current->anchor == candidate.anchor &&
                    current->rowsPerProgram == candidate.rowsPerProgram &&
                    current->runtimeGrid == candidate.runtimeGrid);
   }
 
-  static std::unique_ptr<DotRowPlan> create(RowCandidate candidate,
-                                            unsigned epoch,
-                                            uint64_t l0aBudgetBytes,
-                                            uint64_t l0cBudgetBytes,
-                                            uint64_t coreNum) {
+  static std::unique_ptr<DotRowPlan>
+  create(RowCandidate candidate, unsigned epoch, uint64_t l0aBudgetBytes,
+         uint64_t l0cBudgetBytes, uint64_t coreNum) {
     // Prepare and verify privately before offering a plan to the scheduler.
     // An unsupported rewrite must leave the input and its diagnostics
     // untouched.
@@ -453,10 +449,11 @@ cfg::createDotRowCoalescingPlan(triton::FuncOp function, unsigned epoch,
     l0cBudgetBytes = resources.getSafeL0CBudget().value_or(0);
   }
 
-  auto candidate = matchDotRows(function, l0aBudgetBytes, l0cBudgetBytes, 0);
+  auto candidate =
+      matchDotRows(function, l0aBudgetBytes, l0cBudgetBytes, resources.coreNum);
   if (!candidate)
     return nullptr;
 
   return DotRowPlan::create(*candidate, epoch, l0aBudgetBytes, l0cBudgetBytes,
-                            0);
+                            resources.coreNum);
 }

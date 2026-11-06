@@ -308,16 +308,14 @@ def test_graph_optimize_pass_accepts_zero_rule_mask(tmp_path):
     assert_reparseable(module, tmp_path, "zero-rule-mask")
 
 
-def test_default_graph_mask_keeps_iat_ptsm_and_leaves_nsa_rules_opt_in():
-    expected_mask = (511 | INDEPENDENT_AXIS_TENSORIZE_RULE_BIT
-                     | PERSISTENT_TASK_STRIP_MINING_RULE_BIT)
+def test_default_graph_mask_enables_iat_ptsm_and_keeps_nsa_rule_pair_off():
+    expected_mask = (511 | INDEPENDENT_AXIS_TENSORIZE_RULE_BIT | PERSISTENT_TASK_STRIP_MINING_RULE_BIT)
 
-    # 3071, without SelectedBlockScanRule (1 << 16) / QueryRowBatchingRule (1 << 17)
     assert expected_mask == 3071
     assert DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK == expected_mask
     assert NPUOptions(arch="Ascend910_95").rule_mask == expected_mask
-    assert (DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & SELECTED_BLOCK_SCAN_RULE_BIT) == 0
-    assert (DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & QUERY_ROW_BATCHING_RULE_BIT) == 0
+    assert not DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & SELECTED_BLOCK_SCAN_RULE_BIT
+    assert not DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & QUERY_ROW_BATCHING_RULE_BIT
 
 
 def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(tmp_path, ):
@@ -937,16 +935,23 @@ def test_graph_optimize_options_contribute_to_npu_hash():
 #   * the Python one, GRAPH_OPTIMIZATION_KNOWN_RULE_MASK in
 #     third_party/ascend/backend/program_grid.py (0x3FBFF: bits 0-9 and 11-17),
 #     enforced by NPUOptions and normalize_graph_optimization_rule_mask.
-# Widening only one layer fails differently: C++-only keeps NPUOptions raising
-# at option construction; Python-only lets the option through and the pybind
-# add_graph_optimize rejects it instead.  Both layers also carry the default
-# mask (3071: bits 0-9 and 11, i.e. without the #2686 bits), so the cases below
-# pin the "fixed default-off" contract, the "unknown bits stay rejected"
-# contract, and that SelectedBlockScanRule's bit alone already produces the same
-# IR as bit 16|17 (it has no separate enable flag; it always calls the row
-# lift's materialize entry).
+# Both layers also carry the default mask (3071), which keeps bits 16 and 17
+# out so the pair stays opt-in; the cases below pin that default-off contract,
+# the "unknown bits stay rejected" contract, and that Rule A's bit alone
+# already produces the same IR as bit 16|17 (Rule A has no separate Rule B
+# enable flag; it always calls Rule B's materialize entry).
 
-RULE_A_TTIR_FIXTURES = (Path(__file__).resolve().parent.parent / "Conversion" / "General" / "TritonToGraph" / "Inputs")
+RULE_A_CASES_DIR = Path(__file__).resolve().parent.parent / "Conversion" / "General" / "TritonToGraph"
+RULE_A_CASES = RULE_A_CASES_DIR / "nsa_selected_block_scan.mlir"
+
+
+def _rule_a_positive_module(tmp_path):
+    """The lit file holds the positive module first, then `// -----` and a
+    negative one; only the positive module is parsed here."""
+    source = RULE_A_CASES.read_text().split("\n// -----")[0]
+    path = tmp_path / "rule-a-positive.mlir"
+    path.write_text(source)
+    return path, source
 
 
 def _render_graph_optimize(fixture, mask):
@@ -976,13 +981,10 @@ def test_rule_mask_still_rejects_unknown_bits():
 
 
 def test_default_graph_mask_excludes_nsa_rule_pair():
-    # fixed default-off: bits 16/17 are known but not in the default bundle
     assert DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK == 3071
     assert NPUOptions(arch="Ascend910_95").rule_mask == 3071
-    assert (DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & SELECTED_BLOCK_SCAN_RULE_BIT) == 0
-    assert (DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & QUERY_ROW_BATCHING_RULE_BIT) == 0
-    assert (GRAPH_OPTIMIZATION_KNOWN_RULE_MASK & SELECTED_BLOCK_SCAN_RULE_BIT) != 0
-    assert (GRAPH_OPTIMIZATION_KNOWN_RULE_MASK & QUERY_ROW_BATCHING_RULE_BIT) != 0
+    assert not DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & SELECTED_BLOCK_SCAN_RULE_BIT
+    assert not DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & QUERY_ROW_BATCHING_RULE_BIT
 
 
 def test_add_graph_optimize_accepts_selected_block_scan(tmp_path):
@@ -995,7 +997,7 @@ def test_add_graph_optimize_accepts_selected_block_scan(tmp_path):
     assert_reparseable(module, tmp_path, "selected-block-scan-mask")
 
 
-def test_rule_a_bit_alone_matches_a_plus_b():
+def test_rule_a_bit_alone_matches_a_plus_b(tmp_path):
     """Rule A has no separate Rule B gate.
 
     Rule A always runs Rule B's real implementation (the QueryRowBatching.h
@@ -1006,13 +1008,11 @@ def test_rule_a_bit_alone_matches_a_plus_b():
     'rule-mask=65536'` vs `'rule-mask=196608'` equality pinned by
     `unittest/Conversion/General/TritonToGraph/nsa_selected_block_scan.mlir`.
 
-    Shared fixture: that lit file feeds the same
-    `Inputs/nsa_fwd_const_ns.mlir`, so moving or renaming the fixture has to
-    update both places -- the pytest reads it directly instead of duplicating
-    it.
+    Shared input: that lit file embeds the same kernel as its positive module,
+    so moving or renaming the kernel has to update both places -- the pytest
+    reads it directly instead of duplicating it.
     """
-    fixture = RULE_A_TTIR_FIXTURES / "nsa_fwd_const_ns.mlir"
-    source = fixture.read_text()
+    fixture, source = _rule_a_positive_module(tmp_path)
     # The pattern Rule A matches: an i64 gather-table load inside the scan loop.
     assert "!tt.ptr<i64>" in source
     assert "scf.for" in source
@@ -1022,22 +1022,3 @@ def test_rule_a_bit_alone_matches_a_plus_b():
     a_only = baseline | SELECTED_BLOCK_SCAN_RULE_BIT
     assert _render_graph_optimize(fixture, a_only) == _render_graph_optimize(fixture,
                                                                              a_only | QUERY_ROW_BATCHING_RULE_BIT)
-
-
-def test_default_graph_mask_leaves_real_nsa_kernel_untouched():
-    """Fixed default-off contract: the default bundle does not rewrite the kernel.
-
-    Bits 16/17 are not part of the default mask, so a caller that passes no
-    `rule_mask=` keeps the sparse gather loop; enabling bit 16 does rewrite it
-    (the lit `JOINTREW` case pins that shape).
-    """
-    fixture = RULE_A_TTIR_FIXTURES / "nsa_fwd_const_ns.mlir"
-    baseline = DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK
-    assert baseline == 3071
-    baseline_ir = _render_graph_optimize(fixture, baseline)
-    default_ir = _render_graph_optimize(fixture, DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK)
-    assert baseline_ir == default_ir
-    assert "scf.if" in default_ir
-    enabled_ir = _render_graph_optimize(fixture, baseline | SELECTED_BLOCK_SCAN_RULE_BIT)
-    assert enabled_ir != default_ir
-    assert "scf.if" not in enabled_ir

@@ -36,28 +36,15 @@ namespace cfg {
 
 struct ResourceSnapshot;
 
-// The single scan → row-lift entry point.  SelectedBlockScanRule calls this on
-// its own sandboxed copy right after turning the sparse loop into a sequential
-// scan, so the row lift runs immediately instead of being queried and later
-// scheduled on its own.  The scan rewrite therefore obtains the row lift's real
-// result: success means the sandbox can commit both rewrites and the launch
-// contract together, failure means the row lift cannot run on this shape and
-// the scan rewrite must not commit. The rewrite is in place: the caller owns
-// the sandbox, the module may be partially modified on failure and must not be
-// the live IR.  Static grids publish the coalesce attributes on the module;
-// runtime grids add the hidden extent argument and publish
-// hacc.program_grid_transforms.  The L0A/L0C budgets in the resource snapshot
-// bound the lifting factor; an unknown capacity (zero) leaves the factor
-// unconstrained.
+// Rule A calls this after turning the loop into a sequential scan in its
+// private sandbox, so Rule B lifts the rows in place; success means the
+// sandbox can commit both rewrites together.
 LogicalResult
 materializeQueryRowBatchingCandidate(ModuleOp module, triton::FuncOp function,
                                      const ResourceSnapshot &resources);
 
-// Return a privately rewritten and verified plan for query-row batching.  Used
-// only by the graph-optimize scheduler; SelectedBlockScanRule uses the
-// materialize entry above.  Both entries share one rewrite implementation, so
-// the scheduled path and the materialize path cannot diverge.  Unsupported
-// inputs return nullptr without touching the original IR.
+// Return a privately rewritten and verified plan for the Rule B scheduling
+// path; nullptr when the shape is unsupported.
 std::unique_ptr<RewritePlan>
 createQueryRowBatchingPlan(triton::FuncOp function, unsigned epoch,
                            const ResourceSnapshot &resources);

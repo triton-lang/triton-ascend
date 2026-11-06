@@ -33,6 +33,7 @@ add_triton_library(TritonToGraph
   Rules/LoadStoreTransposeRule.cpp
   Rules/RowCoalescingRule.cpp
   Rules/DotRowCoalescing.cpp
+  Rules/QueryRowBatchingRule.cpp
   Rules/SelectedBlockScanBuild.cpp
   Rules/SelectedBlockScanMatch.cpp
   Rules/SelectedBlockScanRule.cpp

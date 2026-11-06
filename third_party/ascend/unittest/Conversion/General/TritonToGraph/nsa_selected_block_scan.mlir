@@ -1,288 +1,290 @@
-// === #2686 SelectedBlockScanRule (bit 65536) — POSITIVE case ===
+// === #2686 SelectedBlockScanRule (bit 65536) — merged case ===
 //
-// The scan rewrite never commits alone: the plan factory always hands its
-// private sandbox to the row lift's real materialize entry (QueryRowBatching.h)
-// and lets the row lift decide, so the form that lands in production is always
-// the JOINT scan + row lift one.
-// The A-only IR that the former test-only escape hatch (removed 2026-11-05)
-// used to pin is no longer reachable through the pass, so the positive
-// assertions in this file are the joint ones.
+// Two modules in one file:
+//   1. POSITIVE: the sparse gather kernel. The rule never commits alone: its
+//      plan hands a private sandbox to the row lift's real materialize entry
+//      (QueryRowBatching.h), so the joint scan + row lift form is what lands.
+//      Bit 131072 only decides whether the row lift is ALSO scheduled alone, so
+//      65536 and 196608 must agree, and both must differ from the rule-off run.
+//   2. NEGATIVE: the same kernel with a third tensor load inside the loop. The
+//      rewrite rebuilds the body and can only reproduce the loads it knows, so
+//      the matcher must decline and leave the module byte-identical.
 //
-//  A. The DESIGN-TARGET assertions (FileCheck on Inputs/nsa_fwd_ruleA_design_target.mlir):
-//     that fixture is the compiled gold standard (the Rule-A-only reference
-//     implementation run through the early TTIR pipeline), re-printed once by
-//     `triton-opt <file> -o <new>` without --mlir-print-debuginfo.  It is
-//     therefore the SAME IR WITH THE LOCATIONS DROPPED -- not a byte-for-byte
-//     copy of the reference artifact: every #loc alias is gone, and with it the
-//     SSA value names the name locs used to supply (%q, %k_5, ... are now
-//     %arg0, %6, ...).  The op stream, the types and the module attribute are
-//     unchanged.  Keeping an implementation-independent artifact in the tree is
-//     what makes these CHECK lines verifiable against something other than the
-//     rule itself; otherwise every assertion about the rewritten form is
-//     circular.
-//
-//  B. The JOINT assertions (`-graph-optimize='rule-mask=196608'` vs
-//     `'rule-mask=65536'`): bit 131072 only decides whether the row lift is ALSO
-//     scheduled standalone, so the two masks must produce identical IR (C below).
-//
-// What the fixture is: the REAL NSA forward kernel IR (nsa_fwd.py) after the early
-// TTIR pipeline, i.e. exactly what graph-optimize sees in production
-// (third_party/ascend/backend/compiler.py:309-327).  Shapes G=16, K=V=128, S=16,
-// BS=64, bf16; constant trip count (NS = S = 16); online-softmax (Form 1:
-// iter_args o/m/l).  See Inputs/nsa_fwd_const_ns.mlir for provenance.
-//
-// Why rule-mask=65536 and nothing else: attribution isolation, the same contract
-// that convert_modulo_to_mask.mlir:8-9 states in prose.
-// nsa_selected_block_scan_attribution.mlir proves that today's 3071 rules do not
-// touch this fixture.
-//
-// Coverage note (2026-11-05, escape hatch removed): the A-only fingerprints
-// (REWRITTEN/R2REW/DYNREW/BWDREW/VARLENREW/S17REW/VARLENBCREW) are gone with it,
-// because that IR can no longer be produced by the pass.  The fixtures those
-// groups covered are still exercised end to end by the joint smoke block at the
-// end of this file (verify + idempotency); their exact joint fingerprints should
-// be re-derived from a `triton-opt` dump before the MR.
-
-// --- A. design target: the CHECK lines below, checked without the rule -----
-// RUN: triton-opt %S/Inputs/nsa_fwd_ruleA_design_target.mlir -o %t.design
-// RUN: FileCheck %s --check-prefix=REWRITTEN --implicit-check-not='scf.if' < %t.design
-// RUN: FileCheck %s --check-prefix=NOSCALAR < %t.design
-
-// --- control run: the fixture with the rule off -----------------------------
-// RUN: triton-opt %S/Inputs/nsa_fwd_const_ns.mlir -graph-optimize='rule-mask=0' -canonicalize -cse -o %t.control
-
-// --- The scan rewrite has no separate row-lift gate ------------------------------------
-// It always runs the row lift's real implementation (the QueryRowBatching.h
-// materialize entry) inside its own sandbox and lets the row lift decide, so bit
-// 65536 alone must produce exactly the same IR as 65536|131072: the 131072 bit
-// only decides whether the row lift is ALSO scheduled as a standalone rule, where
-// it finds nothing left to lift.  (Bits 16/17 are fixed default-off, so the default
-// mask stays 3071 and every run here enables them explicitly; see
-// nsa_selected_block_scan_attribution.mlir for the baseline-vs-enabled split.)
-// RUN: triton-opt %S/Inputs/nsa_fwd_const_ns.mlir -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.joint
-// RUN: triton-opt %S/Inputs/nsa_fwd_const_ns.mlir -graph-optimize='rule-mask=65536' -canonicalize -cse -o %t.gated
-// RUN: diff %t.joint %t.gated
-// ... and the joint rewrite must still differ from the rule-off run, so that
-// equality cannot pass vacuously:
-// RUN: not diff %t.control %t.gated
-
-// ---------------------------------------------------------------------------
-// REWRITTEN — the shape the rewrite must produce.  The design target
-// (Inputs/nsa_fwd_ruleA_design_target.mlir) is the compiled gold standard with
-// the locations dropped, so group A checks this fingerprint WITHOUT running the
-// rule at all.  The assertions anchor semantic fingerprints only (vector table
-// read / scan upper bound / one loop with 3 iter_args / weight reduce / safe_m /
-// both dots keeping M = 16), never implementation detail.
-// ---------------------------------------------------------------------------
-// REWRITTEN-LABEL: tt.func public @parallel_nsa_fwd_kernel
-// NEGATIVE 1: no branch may remain in the loop; NEGATIVE 2: no per-iteration
-// scalar index read; NEGATIVE 3: the block-level i32 predicate must be gone
-// (a token-level tensor<64xi32> sle is allowed)
-// REWRITTEN-NOT: scf.if
-// REWRITTEN-NOT: tt.load %{{.*}} : !tt.ptr<i64>
-// REWRITTEN-NOT: arith.cmpi sle, %{{.*}}, %{{.*}} : i32
-// POSITIVE 1: the whole index table is read once as a vector
-// REWRITTEN: tt.load %{{.*}} : tensor<16x!tt.ptr<i64>>
-// POSITIVE 2: the scan upper bound comes from cdiv(i_t + 1, BN)
-// REWRITTEN: arith.divsi %{{.*}}, %{{.*}} : i32
-// POSITIVE 3: still one scf.for, still three iter_args (o, m, l)
-// REWRITTEN: %{{.*}}:3 = scf.for {{.*}} iter_args(
-// POSITIVE 4: the weight reduce (along the S = 16 axis)
-// REWRITTEN: "tt.reduce"(%{{.*}}) <{axis = 1 : i32}>
-// POSITIVE 5: the first dot still has M = 16 (not widened by row merging)
-// REWRITTEN: tt.dot %{{.*}} : tensor<16x128xbf16> * tensor<128x64xbf16> -> tensor<16x64xf32>
-// POSITIVE 6: the safe_m guard is in place
-// REWRITTEN: arith.cmpf oeq, %{{.*}}, %{{.*}} : tensor<16xf32>
-// POSITIVE 7: the second dot still has M = 16
-// REWRITTEN: tt.dot %{{.*}} : tensor<16x64xbf16> * tensor<64x128xbf16> -> tensor<16x128xf32>
-
-// ---------------------------------------------------------------------------
-// NOSCALAR — the three properties the row lift's matcher needs, expressed as "nothing
-// forbidden from the loop onwards".  The NOT region starts at the `scf.for` match
-// and runs to end of file (the loop is the last construct: in the after-IR and in
-// any sane rewrite the only thing after it is the epilogue + tt.return).
-// This also holds for the dynamic-NS fixtures: a surviving block_counts load
-// sits BEFORE the first scf.for, outside the forbidden region.
-// ---------------------------------------------------------------------------
-// NOSCALAR-NOT: hacc.program_grid_transforms
-// NOSCALAR-NOT: hacc.coalesce_factor
-// NOSCALAR-LABEL: tt.func public @parallel_nsa_fwd_kernel(
-// NOSCALAR: scf.for
-// NOSCALAR-NOT: : !tt.ptr<i64>
-// NOSCALAR-NOT: scf.if
-// NOSCALAR-NOT: scf.for
-
-// ---------- joint golden standard: scan + row lift (JOINTREW) ---------------
-// (2026-11-03) The joint flavour is the launch-contract one: the rewrite commits
-// hacc.program_grid_transforms (the launcher divides the grid by the row factor)
-// and the kernel keeps "program id == query row". The in-kernel flavour (flat
-// program id + `if active`) that the hand-written reference `nsa_fwd_new.py`
-// uses is a *different* plumbing; SelectedBlockScanRule must never emit both
-// (see the mutual-exclusion check in the rule and 15-v3-realignment.md 0.1).
-//
-// RUN: triton-opt %S/Inputs/nsa_fwd_const_ns.mlir -graph-optimize='rule-mask=196608' -o %t.joint
-// RUN: FileCheck %s --check-prefix=JOINTREW < %t.joint
-
-// JOINTREW: hacc.program_grid_transforms = {extent_source = "runtime_original_grid"
-// the joint function grows the hidden original-grid arguments the row lift appends
-// JOINTREW: tt.func public @parallel_nsa_fwd_kernel(
-// no per-block branch survives: the scan loop is the only loop
-// JOINTREW-NOT: scf.if
-// JOINTREW: scf.for
-// the per-token weight reduce is present (axis 2, the lifted row axis), so A ran
-// JOINTREW: "tt.reduce"(%{{.*}}) <{axis = 2 : i32}>
-// and the rewritten body still ends with the masked stores
-// JOINTREW: tt.store
-// JOINTREW: tt.return
-
-// ---------- bwd dq dyn NS: folded index address (BWDYNJOINT) ---------------
-// (2026-11-03) The dyn-NS spelling of the bwd dq kernel folds the row advance
-// into the in-loop index address:
-//     tt.addptr %root, arith.addi(%rowOffset, %iv)
-// The dense kernels keep it as a separate SSA value instead:
-//     tt.addptr %rowBase, %iv      (%rowBase = tt.addptr %root, %rowOffset)
-// The address is the same, but parseIndexTable used to insist that the offset be
-// exactly the induction variable, so this spelling was rejected -- which left the
-// block_counts production path of the bwd dq kernel silently unmatchable.
-// Inputs/nsa_bwd_dq_dyn_ns.mlir is exactly that IR.  The rewrite re-creates the
-// row base the vectorised read needs (tt.addptr %root, %rowOffset) in the
-// prologue, so both spellings land on the same scan form.
-
-// the joint gate accepts the same shape and publishes the runtime grid contract
-// RUN: triton-opt %S/Inputs/nsa_bwd_dq_dyn_ns.mlir -graph-optimize='rule-mask=196608' -o %t.bwdyndyn.joint
-// RUN: FileCheck %s --check-prefix=BWDYNJOINT < %t.bwdyndyn.joint
-
-// BWDYNJOINT: hacc.program_grid_transforms = {extent_source = "runtime_original_grid"
-// BWDYNJOINT: tt.func public @parallel_nsa_bwd_kernel_dq(
-// BWDYNJOINT-NOT: scf.if
-// BWDYNJOINT: scf.for
-// BWDYNJOINT: "tt.reduce"(%{{.*}}) <{axis = 2 : i32}>
-// BWDYNJOINT: tt.store
-// BWDYNJOINT: tt.return
-
-// ---------- varlen + block_counts: 7 loop-invariant scalar loads ------------
-// (2026-11-03) The production varlen dispatch also passes block_counts, so the
-// loop-invariant scalar loads before the loop are 2 token_indices_q + 2
-// cu_seqlens_q + 2 cu_seqlens_k + 1 block_counts = 7, not the 6 of the pure
-// varlen prefix.  The skeleton budget used to be six and rejected the whole
-// dispatch before parseIndexTable ran.  Inputs/nsa_fwd_varlen_bc.mlir is that IR.
-// RUN: triton-opt %S/Inputs/nsa_fwd_varlen_bc.mlir -graph-optimize='rule-mask=0' -canonicalize -cse -o %t.varlenbc.ctl
-
-// (meta) the joint gate must still refuse it: the row lift does not lift varlen, so
-// offering only bit 65536 must leave the IR untouched.
-// RUN: triton-opt %S/Inputs/nsa_fwd_varlen_bc.mlir -graph-optimize='rule-mask=65536' -canonicalize -cse -o %t.varlenbc.gated
-// RUN: diff %t.varlenbc.ctl %t.varlenbc.gated
-
-// ---------- H == 1 + dyn NS: table length from the row stride (H1DYNREW) -----
-// (2026-11-03) With H == 1 the head split folds away, so the row base loses its
-// i_h*S addend and the row stride of block_indices is H*S == S.  The table
-// length used to be recoverable only from a CONSTANT trip count, so the dyn-NS
-// (block_counts) H == 1 decode shape never matched.  The matcher now reads S off
-// the constant multiplier of the pid-carrying row offset, but only when the
-// function carries no `i_bh % H` remainder -- H > 1 always leaves one, and with
-// H > 1 that same constant would be H*S, i.e. a vector read spilling into the
-// next head's row.
-// Inputs/nsa_fwd_h1_dyn_ns.mlir is that IR (H=1 HQ=16 G=16 K=V=64 S=16 BS=32).
-// The runtime decode offset uses a last-valid-row bound under the no-wrap input contract. The bounded variant also exercises the static-grid contract.
-// RUN: triton-opt %S/Inputs/nsa_fwd_h1_dyn_ns.mlir -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.h1dyn.joint
-// RUN: FileCheck %s --check-prefix=H1GROUP < %t.h1dyn.joint
-// RUN: sed 's/%7 = arith.subi %arg9, %arg8 : i32/%7 = arith.constant 64 : i32/; s/module attributes {/module attributes {hacc.grid_num_tiles = 512 : i32,/' %S/Inputs/nsa_fwd_h1_dyn_ns.mlir > %t.h1bounded.mlir
-// RUN: triton-opt %t.h1bounded.mlir -graph-optimize='rule-mask=196608' -o %t.h1bounded
-// RUN: FileCheck %s --check-prefix=H1DYNREW < %t.h1bounded
-// H1DYNREW: hacc.coalesce_factor = 32 : i32
-// H1DYNREW: tt.func public @parallel_nsa_fwd_kernel(
-// H1DYNREW-NOT: scf.if
-// H1DYNREW: tensor<32x16x!tt.ptr<i64>>
-// H1DYNREW: scf.for
-// H1DYNREW: "tt.reduce"(%{{.*}}) <{axis = 2 : i32}>
-// H1DYNREW: tt.store
-// H1DYNREW: tt.return
-
-// ---------- joint fingerprints (dumps taken from the bf34ac235 triton-opt) ---
-// These stand in for the scan-only fingerprints that went away with the escape
-// hatch: every line below is measured on the form production actually commits,
-// i.e. the scan rewrite plus the row lift, with the row factor the row-count
-// policy picks for this shape (R = 16 unless noted).
-
-// --- dyn NS: the block_counts trip count survives outside the lifted rows ----
-// RUN: triton-opt %S/Inputs/nsa_fwd_dyn_ns.mlir -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.dynj
-// RUN: FileCheck %s --check-prefix=DYNJOINT < %t.dynj
-// DYNJOINT: hacc.program_grid_transforms = {extent_source = "runtime_original_grid"
-// DYNJOINT: tt.func public @parallel_nsa_fwd_kernel(
-// DYNJOINT-NOT: scf.if
-// DYNJOINT: tt.load %{{.*}}, %{{.*}}, %{{.*}} : tensor<16x16x!tt.ptr<i64>>
-// DYNJOINT: %{{.*}}:4 = scf.for {{.*}} iter_args({{.*}}) -> (tensor<256x64xf32>, tensor<256x64xf32>, tensor<256xf32>, tensor<256xf32>)
-// DYNJOINT: "tt.reduce"(%{{.*}}) <{axis = 2 : i32}>
-// DYNJOINT: tt.dot %{{.*}} : tensor<256x128xbf16> * tensor<128x64xbf16> -> tensor<256x64xf32>
-// DYNJOINT-COUNT-2: tt.dot %{{.*}} : tensor<256x64xbf16> * tensor<64x64xbf16> -> tensor<256x64xf32>
-// DYNJOINT: tt.store %{{.*}}, %{{.*}}, %{{.*}} : tensor<16x16x64x!tt.ptr<bf16>>
-// DYNJOINT: tt.return
-
-// --- BS = 32 (R = BN/BS = 2 inside the scan rewrite): the R axis survives the lifting --
-// RUN: triton-opt %S/Inputs/nsa_fwd_const_ns_bs32.mlir -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.bs32j
-// RUN: FileCheck %s --check-prefix=BS32JOINT < %t.bs32j
-// BS32JOINT: hacc.program_grid_transforms = {extent_source = "runtime_original_grid"
-// BS32JOINT: tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
-// BS32JOINT: tt.broadcast %{{.*}} : tensor<16x1x16xi32> -> tensor<16x2x16xi32>
-// BS32JOINT-NOT: scf.if
-// BS32JOINT: %{{.*}}:4 = scf.for {{.*}} iter_args({{.*}}) -> (tensor<256x64xf32>, tensor<256x64xf32>, tensor<256xf32>, tensor<256xf32>)
-// BS32JOINT: "tt.reduce"(%{{.*}}) <{axis = 2 : i32}>
-// BS32JOINT: tt.dot %{{.*}} : tensor<256x128xbf16> * tensor<128x64xbf16> -> tensor<256x64xf32>
-// BS32JOINT: tt.return
-
-// --- S = 17: the slot axis is padded to next_pow2(S) = 32 ------------------
-// RUN: triton-opt %S/Inputs/nsa_fwd_s17.mlir -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.s17j
-// RUN: FileCheck %s --check-prefix=S17JOINT < %t.s17j
-// S17JOINT: hacc.program_grid_transforms = {extent_source = "runtime_original_grid"
-// S17JOINT: tt.load %{{.*}}, %{{.*}}, %{{.*}} : tensor<16x32x!tt.ptr<i64>>
-// S17JOINT-NOT: scf.if
-// S17JOINT: %{{.*}}:3 = scf.for {{.*}} iter_args({{.*}}) -> (tensor<256x64xf32>, tensor<256xf32>, tensor<256xf32>)
-// S17JOINT: "tt.reduce"(%{{.*}}) <{axis = 2 : i32}>
-// S17JOINT: tt.dot %{{.*}} : tensor<256x128xbf16> * tensor<128x64xbf16> -> tensor<256x64xf32>
-// S17JOINT: tt.store %{{.*}}, %{{.*}}, %{{.*}} : tensor<16x16x64x!tt.ptr<bf16>>
-// S17JOINT: tt.return
-
-// --- bwd dq additive form: R = 2, one carried accumulator, three dots ------
-// RUN: triton-opt %S/Inputs/nsa_bwd_dq_const_ns.mlir -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.bwdj
-// RUN: FileCheck %s --check-prefix=BWDJOINT < %t.bwdj
-// BWDJOINT: hacc.program_grid_transforms = {extent_source = "runtime_original_grid"
-// BWDJOINT: factor = 2 : i64
-// BWDJOINT: tt.func public @parallel_nsa_bwd_kernel_dq(
-// BWDJOINT-NOT: scf.if
-// BWDJOINT: tt.load %{{.*}}, %{{.*}}, %{{.*}} : tensor<2x16x!tt.ptr<i64>>
-// BWDJOINT: %{{.*}} = scf.for {{.*}} iter_args(%{{.*}} = %{{.*}}) -> (tensor<32x128xf32>)
-// BWDJOINT: "tt.reduce"(%{{.*}}) <{axis = 2 : i32}>
-// BWDJOINT-COUNT-2: tt.dot %{{.*}}, %{{.*}}, %{{.*}} : tensor<32x128xbf16> * tensor<128x64xbf16> -> tensor<32x64xf32>
-// BWDJOINT: tt.dot %{{.*}}, %{{.*}}, %arg13 : tensor<32x64xbf16> * tensor<64x128xbf16> -> tensor<32x128xf32>
-// BWDJOINT: tt.store %{{.*}}, %{{.*}}, %{{.*}} : tensor<2x16x128x!tt.ptr<bf16>>
-// BWDJOINT: tt.return
-
-// --- non-950 target: the joint rule leaves the module alone ----------------
-// The target gate lives in the row lift's scheduler entry (isAscend950), so with the
-// joint mask the whole rule declines on a 910_95 module, prints nothing, and
-// the IR stays byte-identical to the rule-off run.
-// RUN: sed 's/Ascend950PR_9579/Ascend910_95/' %S/Inputs/nsa_fwd_const_ns.mlir > %t.a595.mlir
-// RUN: triton-opt %t.a595.mlir -graph-optimize='rule-mask=0' -canonicalize -cse -o %t.a595.ctl
-// RUN: triton-opt %t.a595.mlir -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.a595.out 2> %t.a595.err
-// RUN: diff %t.a595.ctl %t.a595.out
+// Bits 16/17 are known but fixed default-off (default mask 3071), so they are
+// requested explicitly. The non-950 run checks the target gate declines too.
 // RUN: echo -n > %t.empty
+// RUN: triton-opt %s --split-input-file -graph-optimize='rule-mask=0' -canonicalize -cse -o %t.ctl
+// RUN: triton-opt %s --split-input-file -graph-optimize='rule-mask=65536' -canonicalize -cse -o %t.a
+// RUN: triton-opt %s --split-input-file -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.ab
+// RUN: diff %t.a %t.ab
+// RUN: not diff %t.ctl %t.a
+// RUN: triton-opt %s --split-input-file -graph-optimize='rule-mask=65536' -canonicalize -cse -o /dev/null 2> %t.err
+// RUN: diff %t.empty %t.err
+// RUN: sed 's/Ascend950PR_9579/Ascend910_95/' %s > %t.a595.mlir
+// RUN: triton-opt %t.a595.mlir --split-input-file -graph-optimize='rule-mask=0' -canonicalize -cse -o %t.a595.ctl
+// RUN: triton-opt %t.a595.mlir --split-input-file -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.a595.out 2> %t.a595.err
+// RUN: diff %t.a595.ctl %t.a595.out
 // RUN: diff %t.empty %t.a595.err
 
-// ---------- joint smoke: verify + idempotency for the remaining fixtures ---
-// i64_iv reuses the dense fwd joint form (same shapes, only the induction
-// variable width differs) and the two varlen fixtures decline, so they get the
-// structural assertion instead of a fingerprint: the pipeline verifies, a
-// second application is a no-op, and the pass never fails.
-// RUN: for f in nsa_fwd_const_ns_i64_iv nsa_fwd_varlen nsa_fwd_varlen_bc; do \
-// RUN:   triton-opt %S/Inputs/$f.mlir -graph-optimize='rule-mask=196608' --verify-each -canonicalize -cse -o %t.$f.once && \
-// RUN:   triton-opt %t.$f.once -graph-optimize='rule-mask=196608' --verify-each -canonicalize -cse -o %t.$f.twice && \
-// RUN:   diff %t.$f.once %t.$f.twice || exit 1; done
+// ~~~ POSITIVE: the whole index table is read once, the scan is one loop
+// REWRITTEN: module attributes {hacc.program_grid_transforms
+// REWRITTEN-LABEL: tt.func public @parallel_nsa_fwd_kernel(
+// no per-block branch survives
+// REWRITTEN-NOT: scf.if
+// REWRITTEN-NOT: tt.load %{{.*}} : !tt.ptr<i64>
+// REWRITTEN: tt.load %{{.*}} : tensor<16x16x!tt.ptr<i64>>
+// the scan upper bound is cdiv(row, BN) with BN = 64
+// REWRITTEN: arith.divsi %{{.*}}, %c64_i32 : i32
+// one fused scan loop with (o, m, l) carried state
+// REWRITTEN: %{{.*}}:4 = scf.for
+// the per-token weight reduce runs on the lifted row axis
+// REWRITTEN: "tt.reduce"(%{{.*}}) <{axis = 2 : i32}>
+// both dots keep the lifted M = 16 * 16 rows
+// REWRITTEN: tt.dot %{{.*}} : tensor<256x128xbf16> * tensor<128x64xbf16> -> tensor<256x64xf32>
+// REWRITTEN: tt.dot %{{.*}} : tensor<256x64xbf16> * tensor<64x64xbf16> -> tensor<256x64xf32>
+// REWRITTEN: tt.store
+// REWRITTEN: tt.return
 
-// The H=1 dynamic-offset form uses a last-valid-row bound. The scan rewrite still
-// commits only when its joint row-batching query succeeds.
-// H1GROUP: hacc.program_grid_transforms
-// H1GROUP-LABEL: tt.func public @parallel_nsa_fwd_kernel(
-// H1GROUP: arith.minsi
-// H1GROUP-NOT: arith.maxsi {{.*}} : i32
-// H1GROUP: scf.for
-// H1GROUP: tt.dot
+// ~~~ NEGATIVE: an extra in-loop load must leave the module untouched
+// EXTRA-LABEL: tt.func public @parallel_nsa_extra_load_kernel(
+// the pre-rewrite shape is really there
+// EXTRA: scf.for
+// EXTRA: tt.load %{{.*}} : !tt.ptr<i64>
+// EXTRA: scf.if
+// and no trace of either rule was added
+// EXTRA-NOT: hacc.coalesce_factor
+// EXTRA-NOT: hacc.program_grid_transforms
+// EXTRA-NOT: arith.divsi %{{.*}}, %c64_i32 : i32
+
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @parallel_nsa_fwd_kernel(%arg0: !tt.ptr<bf16>, %arg1: !tt.ptr<bf16>, %arg2: !tt.ptr<bf16>, %arg3: !tt.ptr<bf16>, %arg4: !tt.ptr<f32>, %arg5: f32, %arg6: !tt.ptr<i64>, %arg7: !tt.ptr<i64>, %arg8: i32) attributes {noinline = false} {
+    %cst = arith.constant dense<0.000000e+00> : tensor<16xf32>
+    %c1_i32 = arith.constant 1 : i32
+    %c8192_i32 = arith.constant 8192 : i32
+    %cst_0 = arith.constant dense<0.000000e+00> : tensor<16x128xf32>
+    %cst_1 = arith.constant dense<0xFF800000> : tensor<16x64xf32>
+    %cst_2 = arith.constant dense<0.000000e+00> : tensor<16x64xf32>
+    %c512_i64 = arith.constant 512 : i64
+    %cst_3 = arith.constant dense<0xFF800000> : tensor<16xf32>
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i64 = arith.constant 1 : i64
+    %c128_i64 = arith.constant 128 : i64
+    %c64_i64 = arith.constant 64 : i64
+    %c64_i32 = arith.constant 64 : i32
+    %c16_i32 = arith.constant 16 : i32
+    %c128_i32 = arith.constant 128 : i32
+    %c4_i32 = arith.constant 4 : i32
+    %0 = tt.get_program_id x : i32
+    %1 = tt.get_program_id y : i32
+    %2 = tt.get_program_id z : i32
+    %3 = arith.divsi %2, %c4_i32 : i32
+    %4 = arith.remsi %2, %c4_i32 : i32
+    %5 = arith.muli %3, %arg8 : i32
+    %6 = arith.muli %5, %c4_i32 : i32
+    %7 = arith.addi %6, %4 : i32
+    %8 = arith.muli %7, %c128_i32 : i32
+    %9 = tt.addptr %arg1, %8 : !tt.ptr<bf16>, i32
+    %10 = tt.addptr %arg2, %8 : !tt.ptr<bf16>, i32
+    %11 = arith.addi %5, %0 : i32
+    %12 = arith.muli %11, %c64_i32 : i32
+    %13 = arith.muli %4, %c16_i32 : i32
+    %14 = arith.addi %12, %13 : i32
+    %15 = tt.addptr %arg6, %14 : !tt.ptr<i64>, i32
+    %16 = arith.muli %11, %c8192_i32 : i32
+    %17 = tt.addptr %arg0, %16 : !tt.ptr<bf16>, i32
+    %18 = tt.make_tensor_ptr %17, [%c64_i64, %c128_i64], [%c128_i64, %c1_i64], [%13, %c0_i32] {order = array<i32: 1, 0>} : <tensor<16x128xbf16>>
+    %19 = tt.load %18 {boundaryCheck = array<i32: 0, 1>, padding = 1 : i32} : !tt.ptr<tensor<16x128xbf16>>
+    %20 = arith.extf %19 : tensor<16x128xbf16> to tensor<16x128xf32>
+    %21 = tt.splat %arg5 : f32 -> tensor<16x128xf32>
+    %22 = arith.mulf %20, %21 : tensor<16x128xf32>
+    %23 = arith.truncf %22 : tensor<16x128xf32> to tensor<16x128xbf16>
+    %24 = tt.addptr %arg3, %16 : !tt.ptr<bf16>, i32
+    %25 = arith.muli %1, %c128_i32 : i32
+    %26 = tt.make_tensor_ptr %24, [%c64_i64, %c128_i64], [%c128_i64, %c1_i64], [%13, %25] {order = array<i32: 1, 0>} : <tensor<16x128xbf16>>
+    %27 = tt.addptr %arg4, %12 : !tt.ptr<f32>, i32
+    %28 = tt.addptr %27, %13 : !tt.ptr<f32>, i32
+    %29 = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %30 = tt.splat %28 : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+    %31 = tt.addptr %30, %29 : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+    %32:3 = scf.for %arg9 = %c0_i32 to %c16_i32 step %c1_i32 iter_args(%arg10 = %cst_0, %arg11 = %cst_3, %arg12 = %cst) -> (tensor<16x128xf32>, tensor<16xf32>, tensor<16xf32>)  : i32 {
+      %39 = tt.addptr %15, %arg9 : !tt.ptr<i64>, i32
+      %40 = tt.load %39 : !tt.ptr<i64>
+      %41 = arith.trunci %40 : i64 to i32
+      %42 = arith.muli %41, %c64_i32 : i32
+      %43 = arith.cmpi sle, %42, %0 : i32
+      %44 = arith.cmpi sge, %42, %c0_i32 : i32
+      %45 = arith.andi %43, %44 : i1
+      %46:3 = scf.if %45 -> (tensor<16x128xf32>, tensor<16xf32>, tensor<16xf32>) {
+        %47 = arith.extsi %arg8 : i32 to i64
+        %48 = tt.make_tensor_ptr %9, [%c128_i64, %47], [%c1_i64, %c512_i64], [%c0_i32, %42] {order = array<i32: 0, 1>} : <tensor<128x64xbf16>>
+        %49 = tt.make_tensor_ptr %10, [%47, %c128_i64], [%c512_i64, %c1_i64], [%42, %25] {order = array<i32: 1, 0>} : <tensor<64x128xbf16>>
+        %50 = tt.load %48 {boundaryCheck = array<i32: 0, 1>, padding = 1 : i32} : !tt.ptr<tensor<128x64xbf16>>
+        %51 = tt.load %49 {boundaryCheck = array<i32: 0, 1>, padding = 1 : i32} : !tt.ptr<tensor<64x128xbf16>>
+        %52 = tt.dot %23, %50, %cst_2 : tensor<16x128xbf16> * tensor<128x64xbf16> -> tensor<16x64xf32>
+        %53 = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32>
+        %54 = tt.splat %42 : i32 -> tensor<64xi32>
+        %55 = arith.addi %54, %53 : tensor<64xi32>
+        %56 = tt.splat %0 : i32 -> tensor<64xi32>
+        %57 = arith.cmpi sge, %56, %55 : tensor<64xi32>
+        %58 = tt.expand_dims %57 {axis = 0 : i32} : tensor<64xi1> -> tensor<1x64xi1>
+        %59 = tt.broadcast %58 : tensor<1x64xi1> -> tensor<16x64xi1>
+        %60 = arith.select %59, %52, %cst_1 : tensor<16x64xi1>, tensor<16x64xf32>
+        %61 = "tt.reduce"(%60) <{axis = 1 : i32}> ({
+        ^bb0(%arg13: f32, %arg14: f32):
+          %77 = arith.maxnumf %arg13, %arg14 : f32
+          tt.reduce.return %77 : f32
+        }) : (tensor<16x64xf32>) -> tensor<16xf32>
+        %62 = arith.maxnumf %arg11, %61 : tensor<16xf32>
+        %63 = arith.subf %arg11, %62 : tensor<16xf32>
+        %64 = math.exp %63 : tensor<16xf32>
+        %65 = tt.expand_dims %62 {axis = 1 : i32} : tensor<16xf32> -> tensor<16x1xf32>
+        %66 = tt.broadcast %65 : tensor<16x1xf32> -> tensor<16x64xf32>
+        %67 = arith.subf %60, %66 : tensor<16x64xf32>
+        %68 = math.exp %67 : tensor<16x64xf32>
+        %69 = arith.mulf %arg12, %64 : tensor<16xf32>
+        %70 = "tt.reduce"(%68) <{axis = 1 : i32}> ({
+        ^bb0(%arg13: f32, %arg14: f32):
+          %77 = arith.addf %arg13, %arg14 : f32
+          tt.reduce.return %77 : f32
+        }) : (tensor<16x64xf32>) -> tensor<16xf32>
+        %71 = arith.addf %69, %70 : tensor<16xf32>
+        %72 = tt.expand_dims %64 {axis = 1 : i32} : tensor<16xf32> -> tensor<16x1xf32>
+        %73 = tt.broadcast %72 : tensor<16x1xf32> -> tensor<16x128xf32>
+        %74 = arith.mulf %arg10, %73 : tensor<16x128xf32>
+        %75 = arith.truncf %68 : tensor<16x64xf32> to tensor<16x64xbf16>
+        %76 = tt.dot %75, %51, %74 : tensor<16x64xbf16> * tensor<64x128xbf16> -> tensor<16x128xf32>
+        scf.yield %76, %62, %71 : tensor<16x128xf32>, tensor<16xf32>, tensor<16xf32>
+      } else {
+        scf.yield %arg10, %arg11, %arg12 : tensor<16x128xf32>, tensor<16xf32>, tensor<16xf32>
+      }
+      scf.yield %46#0, %46#1, %46#2 : tensor<16x128xf32>, tensor<16xf32>, tensor<16xf32>
+    }
+    %33 = tt.expand_dims %32#2 {axis = 1 : i32} : tensor<16xf32> -> tensor<16x1xf32>
+    %34 = tt.broadcast %33 : tensor<16x1xf32> -> tensor<16x128xf32>
+    %35 = arith.divf %32#0, %34 : tensor<16x128xf32>
+    %36 = math.log %32#2 : tensor<16xf32>
+    %37 = arith.addf %32#1, %36 : tensor<16xf32>
+    %38 = arith.truncf %35 : tensor<16x128xf32> to tensor<16x128xbf16>
+    tt.store %26, %38 {boundaryCheck = array<i32: 0, 1>} : !tt.ptr<tensor<16x128xbf16>>
+    tt.store %31, %37 : tensor<16x!tt.ptr<f32>>
+    tt.return
+  }
+}
+
+// -----
+
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @parallel_nsa_extra_load_kernel(%arg0: !tt.ptr<bf16>, %arg1: !tt.ptr<bf16>, %arg2: !tt.ptr<bf16>, %arg3: !tt.ptr<bf16>, %arg4: !tt.ptr<f32>, %arg5: f32, %arg6: !tt.ptr<i64>, %arg7: !tt.ptr<i64>, %arg8: i32) attributes {noinline = false} {
+    %cst = arith.constant dense<0.000000e+00> : tensor<16xf32>
+    %c1_i32 = arith.constant 1 : i32
+    %c8192_i32 = arith.constant 8192 : i32
+    %cst_0 = arith.constant dense<0.000000e+00> : tensor<16x128xf32>
+    %cst_1 = arith.constant dense<0xFF800000> : tensor<16x64xf32>
+    %cst_2 = arith.constant dense<0.000000e+00> : tensor<16x64xf32>
+    %c512_i64 = arith.constant 512 : i64
+    %cst_3 = arith.constant dense<0xFF800000> : tensor<16xf32>
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i64 = arith.constant 1 : i64
+    %c128_i64 = arith.constant 128 : i64
+    %c64_i64 = arith.constant 64 : i64
+    %c64_i32 = arith.constant 64 : i32
+    %c16_i32 = arith.constant 16 : i32
+    %c128_i32 = arith.constant 128 : i32
+    %c4_i32 = arith.constant 4 : i32
+    %0 = tt.get_program_id x : i32
+    %1 = tt.get_program_id y : i32
+    %2 = tt.get_program_id z : i32
+    %3 = arith.divsi %2, %c4_i32 : i32
+    %4 = arith.remsi %2, %c4_i32 : i32
+    %5 = arith.muli %3, %arg8 : i32
+    %6 = arith.muli %5, %c4_i32 : i32
+    %7 = arith.addi %6, %4 : i32
+    %8 = arith.muli %7, %c128_i32 : i32
+    %9 = tt.addptr %arg1, %8 : !tt.ptr<bf16>, i32
+    %10 = tt.addptr %arg2, %8 : !tt.ptr<bf16>, i32
+    %11 = arith.addi %5, %0 : i32
+    %12 = arith.muli %11, %c64_i32 : i32
+    %13 = arith.muli %4, %c16_i32 : i32
+    %14 = arith.addi %12, %13 : i32
+    %15 = tt.addptr %arg6, %14 : !tt.ptr<i64>, i32
+    %16 = arith.muli %11, %c8192_i32 : i32
+    %17 = tt.addptr %arg0, %16 : !tt.ptr<bf16>, i32
+    %18 = tt.make_tensor_ptr %17, [%c64_i64, %c128_i64], [%c128_i64, %c1_i64], [%13, %c0_i32] {order = array<i32: 1, 0>} : <tensor<16x128xbf16>>
+    %19 = tt.load %18 {boundaryCheck = array<i32: 0, 1>, padding = 1 : i32} : !tt.ptr<tensor<16x128xbf16>>
+    %20 = arith.extf %19 : tensor<16x128xbf16> to tensor<16x128xf32>
+    %21 = tt.splat %arg5 : f32 -> tensor<16x128xf32>
+    %22 = arith.mulf %20, %21 : tensor<16x128xf32>
+    %23 = arith.truncf %22 : tensor<16x128xf32> to tensor<16x128xbf16>
+    %24 = tt.addptr %arg3, %16 : !tt.ptr<bf16>, i32
+    %25 = arith.muli %1, %c128_i32 : i32
+    %26 = tt.make_tensor_ptr %24, [%c64_i64, %c128_i64], [%c128_i64, %c1_i64], [%13, %25] {order = array<i32: 1, 0>} : <tensor<16x128xbf16>>
+    %27 = tt.addptr %arg4, %12 : !tt.ptr<f32>, i32
+    %28 = tt.addptr %27, %13 : !tt.ptr<f32>, i32
+    %29 = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %30 = tt.splat %28 : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+    %31 = tt.addptr %30, %29 : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+    %32:3 = scf.for %arg9 = %c0_i32 to %c16_i32 step %c1_i32 iter_args(%arg10 = %cst_0, %arg11 = %cst_3, %arg12 = %cst) -> (tensor<16x128xf32>, tensor<16xf32>, tensor<16xf32>)  : i32 {
+      %39 = tt.addptr %15, %arg9 : !tt.ptr<i64>, i32
+      %40 = tt.load %39 : !tt.ptr<i64>
+      %41 = arith.trunci %40 : i64 to i32
+      %42 = arith.muli %41, %c64_i32 : i32
+      %43 = arith.cmpi sle, %42, %0 : i32
+      %44 = arith.cmpi sge, %42, %c0_i32 : i32
+      %45 = arith.andi %43, %44 : i1
+      %46:3 = scf.if %45 -> (tensor<16x128xf32>, tensor<16xf32>, tensor<16xf32>) {
+        %47 = arith.extsi %arg8 : i32 to i64
+        %48 = tt.make_tensor_ptr %9, [%c128_i64, %47], [%c1_i64, %c512_i64], [%c0_i32, %42] {order = array<i32: 0, 1>} : <tensor<128x64xbf16>>
+        %49 = tt.make_tensor_ptr %10, [%47, %c128_i64], [%c512_i64, %c1_i64], [%42, %25] {order = array<i32: 1, 0>} : <tensor<64x128xbf16>>
+        %50 = tt.load %48 {boundaryCheck = array<i32: 0, 1>, padding = 1 : i32} : !tt.ptr<tensor<128x64xbf16>>
+        %51 = tt.load %49 {boundaryCheck = array<i32: 0, 1>, padding = 1 : i32} : !tt.ptr<tensor<64x128xbf16>>
+        %extra = tt.load %48 {boundaryCheck = array<i32: 0, 1>, padding = 1 : i32} : !tt.ptr<tensor<128x64xbf16>>
+        %52 = tt.dot %23, %50, %cst_2 : tensor<16x128xbf16> * tensor<128x64xbf16> -> tensor<16x64xf32>
+        %53 = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32>
+        %54 = tt.splat %42 : i32 -> tensor<64xi32>
+        %55 = arith.addi %54, %53 : tensor<64xi32>
+        %56 = tt.splat %0 : i32 -> tensor<64xi32>
+        %57 = arith.cmpi sge, %56, %55 : tensor<64xi32>
+        %58 = tt.expand_dims %57 {axis = 0 : i32} : tensor<64xi1> -> tensor<1x64xi1>
+        %59 = tt.broadcast %58 : tensor<1x64xi1> -> tensor<16x64xi1>
+        %60 = arith.select %59, %52, %cst_1 : tensor<16x64xi1>, tensor<16x64xf32>
+        %61 = "tt.reduce"(%60) <{axis = 1 : i32}> ({
+        ^bb0(%arg13: f32, %arg14: f32):
+          %77 = arith.maxnumf %arg13, %arg14 : f32
+          tt.reduce.return %77 : f32
+        }) : (tensor<16x64xf32>) -> tensor<16xf32>
+        %62 = arith.maxnumf %arg11, %61 : tensor<16xf32>
+        %63 = arith.subf %arg11, %62 : tensor<16xf32>
+        %64 = math.exp %63 : tensor<16xf32>
+        %65 = tt.expand_dims %62 {axis = 1 : i32} : tensor<16xf32> -> tensor<16x1xf32>
+        %66 = tt.broadcast %65 : tensor<16x1xf32> -> tensor<16x64xf32>
+        %67 = arith.subf %60, %66 : tensor<16x64xf32>
+        %68 = math.exp %67 : tensor<16x64xf32>
+        %69 = arith.mulf %arg12, %64 : tensor<16xf32>
+        %70 = "tt.reduce"(%68) <{axis = 1 : i32}> ({
+        ^bb0(%arg13: f32, %arg14: f32):
+          %77 = arith.addf %arg13, %arg14 : f32
+          tt.reduce.return %77 : f32
+        }) : (tensor<16x64xf32>) -> tensor<16xf32>
+        %71 = arith.addf %69, %70 : tensor<16xf32>
+        %72 = tt.expand_dims %64 {axis = 1 : i32} : tensor<16xf32> -> tensor<16x1xf32>
+        %73 = tt.broadcast %72 : tensor<16x1xf32> -> tensor<16x128xf32>
+        %74 = arith.mulf %arg10, %73 : tensor<16x128xf32>
+        %75 = arith.truncf %68 : tensor<16x64xf32> to tensor<16x64xbf16>
+        %76 = tt.dot %75, %51, %74 : tensor<16x64xbf16> * tensor<64x128xbf16> -> tensor<16x128xf32>
+        scf.yield %76, %62, %71 : tensor<16x128xf32>, tensor<16xf32>, tensor<16xf32>
+      } else {
+        scf.yield %arg10, %arg11, %arg12 : tensor<16x128xf32>, tensor<16xf32>, tensor<16xf32>
+      }
+      scf.yield %46#0, %46#1, %46#2 : tensor<16x128xf32>, tensor<16xf32>, tensor<16xf32>
+    }
+    %33 = tt.expand_dims %32#2 {axis = 1 : i32} : tensor<16xf32> -> tensor<16x1xf32>
+    %34 = tt.broadcast %33 : tensor<16x1xf32> -> tensor<16x128xf32>
+    %35 = arith.divf %32#0, %34 : tensor<16x128xf32>
+    %36 = math.log %32#2 : tensor<16xf32>
+    %37 = arith.addf %32#1, %36 : tensor<16xf32>
+    %38 = arith.truncf %35 : tensor<16x128xf32> to tensor<16x128xbf16>
+    tt.store %26, %38 {boundaryCheck = array<i32: 0, 1>} : !tt.ptr<tensor<16x128xbf16>>
+    tt.store %31, %37 : tensor<16x!tt.ptr<f32>>
+    tt.return
+  }
+}

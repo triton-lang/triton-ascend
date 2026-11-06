@@ -722,6 +722,7 @@ def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_modu
         "mapping_l0b_capacity_bytes": 64 * 1024,
         "mapping_l0c_capacity_bytes": 128 * 1024,
         "l0_safety_percent": 80,
+        "core_num": 0,
     }]
     assert events[-1] == "run_row"
 

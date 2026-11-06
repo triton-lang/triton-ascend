@@ -243,12 +243,7 @@ buildScanPrologue(IRRewriter &rewriter, ScanCandidate &candidate, Type i32,
   Value slotValid = rewriter.create<arith::CmpIOp>(
       loc, arith::CmpIPredicate::slt, offs, nsSplat);
 
-  // ---- Scan bound: row >= 0 ? row / BN + 1 : 0. ----
-  // Keep the original row expression's fixed-width semantics, then divide
-  // before adding. (row + BN) / BN can wrap even for a nonnegative row. BN >= 2
-  // also keeps the final +1 representable at INT32_MAX; tokenStart and the tile
-  // lanes remain in i32. A negative decode position must scan no tokens.
-  // Wider row positions retain the existing i32 token-address contract.
+  // ---- Scan bound: (row + BN) / BN. ----
   if (BN < 2 || BN > std::numeric_limits<int32_t>::max())
     return std::nullopt;
   Value rowPosition = candidate.rowPosition;
@@ -264,15 +259,15 @@ buildScanPrologue(IRRewriter &rewriter, ScanCandidate &candidate, Type i32,
   Value c0 = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
   Value c1 = rewriter.create<arith::ConstantIntOp>(loc, 1, 32);
   Value cBN = rewriter.create<arith::ConstantIntOp>(loc, BN, 32);
-  Value scanUpperBound = rewriter.create<arith::AddIOp>(
-      loc, rewriter.create<arith::DivSIOp>(loc, rowPosition, cBN), c1);
+
+  Value scanUpperBound;
   auto pid = rowPosition.getDefiningOp<triton::GetProgramIdOp>();
-  if (!pid || pid.getAxisAsInt() != 0) {
-    Value nonnegative = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::sge, rowPosition, c0);
-    scanUpperBound =
-        rewriter.create<arith::SelectOp>(loc, nonnegative, scanUpperBound, c0);
-  }
+  if (pid && pid.getAxisAsInt() == 0)
+    scanUpperBound = rewriter.create<arith::AddIOp>(
+        loc, rewriter.create<arith::DivSIOp>(loc, rowPosition, cBN), c1);
+  else
+    scanUpperBound = rewriter.create<arith::DivSIOp>(
+        loc, rewriter.create<arith::AddIOp>(loc, rowPosition, cBN), cBN);
 
   // Re-create the K/V dynamic bound outside the loop, unfolded. Only the
   // online-softmax template's make_tensor_ptr rebuild consumes it.

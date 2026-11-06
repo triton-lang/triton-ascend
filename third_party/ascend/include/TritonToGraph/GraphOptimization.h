@@ -82,8 +82,6 @@ enum class GraphOptimizationRuleId : GraphOptimizationRuleMask {
 enum class GraphOptimizationRulePhase : uint8_t {
   DiagonalMaskRemoval,
   ConvertModuloToMask,
-  // SelectedBlockScanRule runs right after address linearization so the
-  // budgeted memory-access rules below already see the sequential-scan form.
   SelectedBlockScan,
   ProgramMapping,
   PersistentTaskMapping,
@@ -169,12 +167,8 @@ getGraphOptimizationRulePhase(GraphOptimizationRuleId rule) {
     return GraphOptimizationRulePhase::StoreCoalescing;
   case GraphOptimizationRuleId::ContiguousBlockAccessFormation:
     return GraphOptimizationRulePhase::ContiguousBlockAccessFormation;
-  // The scan rewrite must finish before the row lift inspects the loop, which
-  // is why this phase sits before every budgeted memory-access phase.
   case GraphOptimizationRuleId::SelectedBlockScan:
     return GraphOptimizationRulePhase::SelectedBlockScan;
-  // QueryRowBatchingRule runs in the ProgramMapping phase, alongside IAT, as
-  // specified by RFC #2686.
   case GraphOptimizationRuleId::QueryRowBatching:
     return GraphOptimizationRulePhase::ProgramMapping;
   case GraphOptimizationRuleId::RowCoalescing:

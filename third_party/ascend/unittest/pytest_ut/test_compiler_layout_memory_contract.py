@@ -848,7 +848,7 @@ def test_finalize_program_launch_policy_uses_linalg_ptsm_gate(
     }
     monkeypatch.setattr(compiler_module, "_is_auto_map_parallel_blocks_enabled", lambda: auto_map_enabled)
 
-    compiler_module._finalize_program_launch_policy(metadata, SimpleNamespace(is_pure_simt=False))
+    compiler_module._finalize_program_launch_policy(metadata, SimpleNamespace(is_pure_simt=False, enable_tla_mode=False))
 
     assert metadata["auto_blockify_enabled"] is expected_auto
     assert metadata["ptsm_cap_authorized"] is expected_ptsm
@@ -882,7 +882,7 @@ def test_finalize_program_launch_policy_pure_simt_ignores_blacklist(
     }
     monkeypatch.setattr(compiler_module, "_is_auto_map_parallel_blocks_enabled", lambda: auto_map_enabled)
 
-    compiler_module._finalize_program_launch_policy(metadata, SimpleNamespace(is_pure_simt=True))
+    compiler_module._finalize_program_launch_policy(metadata, SimpleNamespace(is_pure_simt=True, enable_tla_mode=False))
 
     assert metadata["auto_blockify_enabled"] is expected_auto
     assert metadata["ptsm_cap_authorized"] is False
@@ -911,6 +911,21 @@ def test_non_pure_simt_linalg_compilers_keep_blacklist_auto_blockify_gate(
 
     assert ("--enable-auto-blockify-loop" in command) is not has_blacklist_op
     assert "--pure-simt" not in command
+
+
+def test_tla_launch_policy_keeps_full_grid(compiler_module, monkeypatch):
+    metadata = {
+        "program_grid_transforms": None,
+        "program_grid_mapping_applied": False,
+        "row_coalescing_applied": False,
+        "has_auto_blockify_blacklist_op": False,
+        "mix_mode": "aiv",
+    }
+    monkeypatch.setattr(compiler_module, "_is_auto_map_parallel_blocks_enabled", lambda: True)
+    # simt_only and TLA are independent switches; TLA must keep the full grid
+    # even when the SIMT branch would otherwise enable AutoBlockify.
+    compiler_module._finalize_program_launch_policy(metadata, SimpleNamespace(is_pure_simt=True, enable_tla_mode=True))
+    assert metadata["auto_blockify_enabled"] is False
 
 
 def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compiler_module):

@@ -145,6 +145,15 @@ jobs:
       pull-requests: read
 
     steps:
+      - name: Checkout base branch
+        # This job runs under pull_request_target with OBS secrets in scope.
+        # The default checkout is the BASE branch, i.e. trusted workflow and
+        # action code only (needed for ./.github/actions/setup-obsutil).
+        # Never checkout the PR head here.
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Resolve pipeline context
         id: ctx
         shell: bash
@@ -195,25 +204,20 @@ jobs:
           name: cibw-wheels-manylinux_2_28_x86_64-wheels-upload
           path: wheelhouse
 
-      - name: Setup obsutil and upload to OBS
+      - name: Setup obsutil
+        id: obs
+        uses: ./.github/actions/setup-obsutil
+        with:
+          ak: ${{ secrets.OBS_AK }}
+          sk: ${{ secrets.OBS_SK }}
+
+      - name: Upload wheels to OBS
         shell: bash
         env:
-          AK: ${{ secrets.OBS_AK }}
-          SK: ${{ secrets.OBS_SK }}
           PR_NUM: ${{ steps.ctx.outputs.pr_id }}
         run: |
           set -eu
-          if [ -z "${AK}" ] || [ -z "${SK}" ]; then
-            echo "OBS credentials are empty."
-            exit 1
-          fi
-          curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_arm64.tar.gz" -o obsutil.tar.gz
-          gzip -t obsutil.tar.gz || { echo "obsutil.tar.gz is not a valid gzip"; exit 1; }
-          tar xzf obsutil.tar.gz
-          rm -f obsutil.tar.gz
-          mv obsutil_linux_* obsutil
-          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-southwest-2.myhuaweicloud.com
-          obsutil/obsutil cp -u wheelhouse/*.whl "obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/"
+          "${{ steps.obs.outputs.obsutil-path }}" cp -u wheelhouse/*.whl "obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/"
 
       - name: Trigger BY pipeline
         id: run
@@ -355,13 +359,20 @@ jobs:
           echo "terminal status: ${ST} - ${MSG}"
           [ "$ST" = "SUCCESS" ] || exit 1
 
-      - name: Remove wheels from OBS
+      - name: Setup obsutil (cleanup)
         if: always() && steps.ctx.outputs.pr_id != ''
+        id: obs-cleanup
+        continue-on-error: true
+        uses: ./.github/actions/setup-obsutil
+        with:
+          ak: ${{ secrets.OBS_AK }}
+          sk: ${{ secrets.OBS_SK }}
+
+      - name: Remove wheels from OBS
+        if: always() && steps.ctx.outputs.pr_id != '' && steps.obs-cleanup.outputs.obsutil-path != ''
         continue-on-error: true
         shell: bash
         env:
-          AK: ${{ secrets.OBS_AK }}
-          SK: ${{ secrets.OBS_SK }}
           PR_NUM: ${{ steps.ctx.outputs.pr_id }}
         run: |
           # Guard against a missing/malformed PR_NUM: an empty value would
@@ -373,10 +384,4 @@ jobs:
             exit 1
           fi
 
-          curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_arm64.tar.gz" -o obsutil.tar.gz
-          gzip -t obsutil.tar.gz || { echo "obsutil.tar.gz is not a valid gzip"; exit 1; }
-          tar xzf obsutil.tar.gz
-          rm -f obsutil.tar.gz
-          mv obsutil_linux_* obsutil
-          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-southwest-2.myhuaweicloud.com
-          obsutil/obsutil rm -r -f "obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/" || true
+          "${{ steps.obs-cleanup.outputs.obsutil-path }}" rm -r -f "obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/" || true

@@ -113,7 +113,14 @@ def _get_ascend_llvm_package_info(base_dir):
     patch_hash = _get_llvm_patch_hash()
     name = f"llvm-{rev}-{patch_hash}-{system_suffix}"
     sym_name = f"llvm-{system_suffix}"
-    url = f"https://triton-ascend-artifacts.obs.myhuaweicloud.com/llvm-builds/{name}.tar.gz"
+    # Canonical location of merged (push-built) LLVM packages. When a PR
+    # changes the LLVM hash/patches, its build is relayed to a PR-scoped
+    # prefix by llvm-build-upload.yml; integration tests then export
+    # TRITON_ASCEND_LLVM_URL_PREFIX to redirect the download there (see
+    # .github/workflows/scripts/wait_for_llvm_package.py).
+    prefix = os.environ.get("TRITON_ASCEND_LLVM_URL_PREFIX") or \
+        "https://triton-ascend-artifacts.obs.myhuaweicloud.com/llvm-builds/"
+    url = f"{prefix.rstrip('/')}/{name}.tar.gz"
     return {"name": name, "sym_name": sym_name, "url": url}
 
 

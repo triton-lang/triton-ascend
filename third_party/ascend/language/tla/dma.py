@@ -503,6 +503,38 @@ def load_gm_to_l1(src, dst, params=None, _semantic=None):
 
 
 @builtin
+def load_gm_to_l1_mx_scale(src, dst, params=None, _semantic=None):
+    """Loads an MX E8M0 scale tensor into L1 using ``hivm.hir.load_scale``.
+
+    The native MX scale DMA converts the GM row-major scale layout into the
+    zZ (A) / nN (B) fractal layout consumed by :func:`tla.cube.mmad_mx`.
+    Unlike :func:`load_gm_to_l1`, this route does not emit an ND-to-NZ
+    conversion, which cannot express the scale fractal.
+
+    :param src: GM scale source with ``space="gm"`` and logical shape
+        ``(rows, K // 32)``, typically created with ``tla.view``.
+    :type src: tla.buffer
+    :param dst: L1 destination with ``space="l1"`` and element type
+        ``int8``/``uint8``. Its 4-D fractal shape is
+        ``(rows // 16, (K // 32 + 1) // 2, 16, 2)``.
+    :type dst: tla.buffer
+    :param params: Reserved configuration object; must be ``None``.
+    :type params: None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+
+    .. note::
+        Emit this Cube transfer in ``tla.scope.cube()``. The scale tile must
+        be contiguous along the ``K // 32`` axis. The backend checks the
+        dtype, rank and alignment of both operands.
+    """
+    _route(src, dst, (("gm", "l1"), ))
+    if _unwrap_if_constexpr(params) is not None:
+        raise TypeError("tla.load_gm_to_l1_mx_scale takes no configuration")
+    _semantic.builder.create_hivm_load_mx_scale(src.handle, dst.handle, is_transposed=False)
+
+
+@builtin
 def copy_ub_to_l1(src, dst, params=None, _semantic=None):
     """Copies UB data into L1 using ``hivm.hir.copy``.
 

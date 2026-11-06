@@ -29,6 +29,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL
@@ -39,6 +40,8 @@
 #include <limits>
 #include <tuple>
 #include <utility>
+
+#define DEBUG_TYPE "resource-cost"
 
 using namespace mlir;
 using namespace triton;
@@ -80,8 +83,12 @@ bool isUBResidentTensor(Value value) {
   if (!value)
     return false;
   auto tensor = dyn_cast<RankedTensorType>(value.getType());
-  return tensor && tensor.hasStaticShape() &&
-         isa<FloatType>(tensor.getElementType());
+  if (!tensor || !tensor.hasStaticShape())
+    return false;
+  Type elementType = tensor.getElementType();
+  if (isa<triton::PointerType>(elementType))
+    return false;
+  return isa<FloatType, IntegerType>(elementType);
 }
 
 bool isStorageViewOperation(Operation *operation) {
@@ -365,6 +372,9 @@ std::optional<uint64_t> cfg::getStaticTensorBytes(Type type) {
   if (!elementBits || *elementBits == 0)
     return std::nullopt;
 
+  const uint64_t elementBytes =
+      std::max<uint64_t>(1, (static_cast<uint64_t>(*elementBits) + 7) / 8);
+
   uint64_t elements = 1;
   for (int64_t dimension : tensor.getShape()) {
     if (dimension < 0)
@@ -373,12 +383,10 @@ std::optional<uint64_t> cfg::getStaticTensorBytes(Type type) {
       return std::nullopt;
   }
 
-  uint64_t totalBits = 0;
-  if (!checkedMul(elements, *elementBits, totalBits))
+  uint64_t totalBytes = 0;
+  if (!checkedMul(elements, elementBytes, totalBytes))
     return std::nullopt;
-  if (totalBits > std::numeric_limits<uint64_t>::max() - 7)
-    return std::nullopt;
-  return (totalBits + 7) / 8;
+  return totalBytes;
 }
 
 LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
@@ -524,6 +532,7 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
   llvm::sort(positions);
   positions.erase(std::unique(positions.begin(), positions.end()),
                   positions.end());
+  uint64_t bestPosition = 0;
   for (uint64_t position : positions) {
     llvm::SmallVector<const IntervalState *, 16> live;
     for (const auto &entry : intervals) {
@@ -556,6 +565,8 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
       selected.push_back(state);
     }
     estimate.peakLiveBytes = std::max(estimate.peakLiveBytes, liveBytes);
+    if (liveBytes >= estimate.peakLiveBytes)
+      bestPosition = position;
   }
 
   estimate.known = true;

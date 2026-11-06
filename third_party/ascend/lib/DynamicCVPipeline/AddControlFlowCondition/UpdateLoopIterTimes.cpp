@@ -32,6 +32,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/Debug.h"
+#include <algorithm>
 
 static constexpr const char *DEBUG_TYPE = "UpdateLoopIterTimes";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -1127,6 +1128,17 @@ int UpdateLoopIterTimesPass::ComputeMainLoopTimes(
       }
       iterInfo.requiredBuffers = requiredBuffers;
       iterInfo.x = x;
+
+      // If flowOpt optimization is enabled, reserve extra iterations to host
+      // the flowOpt condition's third if block.
+      if (isFlowOptEnabled(info)) {
+        int optNum = std::min(info->intraCoreBufferCount - 1,
+                              info->crossCoreBufferCount);
+        iterInfo.ifCount += (optNum - 1);
+        LDBG("flowOpt enabled, optNum=" << optNum
+                                        << ", ifCount=" << iterInfo.ifCount);
+      }
+
       infoMap[loopOp] = iterInfo;
     }
   }

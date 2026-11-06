@@ -27,6 +27,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import sysconfig
 import tempfile
 from types import MappingProxyType
@@ -319,8 +320,26 @@ def _shared_key(fingerprint, sources):
     return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
 
+def _python_link_flags():
+    """Link libpython into the launcher artifacts.
+
+    The exported C ABI is consumed from plain C processes (AOT), where the
+    artifacts are dlopened without a Python interpreter on the stack. Python
+    data symbols (e.g. PyExc_RuntimeError) must resolve eagerly at dlopen
+    time, so the artifacts link libpython themselves instead of relying on
+    the host process to provide it.
+    """
+    flags = []
+    libdir = sysconfig.get_config_var("LIBDIR")
+    if libdir:
+        flags += [f"-L{libdir}", f"-Wl,-rpath,{libdir}"]
+    flags += [f"-lpython{sys.version_info.major}.{sys.version_info.minor}"]
+    return tuple(flags)
+
+
 def _build_shared(name, sources, debug=False, bin_dir=None):
-    fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=_LAUNCHER_CFLAGS)
+    ldflags = _python_link_flags()
+    fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=_LAUNCHER_CFLAGS, extra_ldflags=ldflags)
     key = _shared_key(json.dumps(fingerprint, sort_keys=True), tuple(sorted(sources.items())))
     # bin_dir roots this shared artifact under a fixed installation directory
     # instead of TRITON_CACHE_DIR (which PyTorch Inductor repoints per test
@@ -341,7 +360,7 @@ def _build_shared(name, sources, debug=False, bin_dir=None):
                 Path(temp, source_name).write_text(content)
             source_path = Path(temp,
                                "launcher_runtime.cpp" if name == "__triton_launcher_runtime" else "launcher_export.cpp")
-            built = utils._build_npu_ext(name, str(source_path), extra_cflags=_LAUNCHER_CFLAGS)
+            built = utils._build_npu_ext(name, str(source_path), extra_cflags=_LAUNCHER_CFLAGS, extra_ldflags=ldflags)
             return Path(built).read_bytes()
 
     return utils._get_or_build_npu_artifact(cache, filename, build)

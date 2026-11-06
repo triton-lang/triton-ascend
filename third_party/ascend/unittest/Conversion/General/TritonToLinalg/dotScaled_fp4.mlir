@@ -55,6 +55,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 
 
 // CHECK-LABEL: func.func @_dot_scaled_test_fp4
-// CHECK: hfusion.matmul_mx
+// CHECK-NOT: hfusion.matmul_mx
+// CHECK: linalg.matmul {{.*}}input_precision = "ieee"
 // CHECK: outs([[OUT:.*]] : tensor<16x16xf32>) -> tensor<16x16xf32>
 // CHECK: bufferization.materialize_in_destination

@@ -28,7 +28,7 @@ jobs:
       image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Full history is required for PR runs: the checker diffs <base>...HEAD
           # to find the changed docs. (Harmless for full scans.)
@@ -151,7 +151,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: "true"
 

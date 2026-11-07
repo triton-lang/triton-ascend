@@ -51,6 +51,8 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_tla_sync_all',
         'create_tla_block_set_flag',
         'create_tla_block_wait_flag',
+        'create_tla_mutex_lock',
+        'create_tla_mutex_unlock',
         'create_tla_buffer_type',
         'create_tla_vector_type',
         'create_tla_alloc',

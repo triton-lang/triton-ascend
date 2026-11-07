@@ -293,6 +293,8 @@ struct StageAtomicRate {
 };
 
 struct StageModeProfile {
+  /// Warps per logical SIMT scan, excluding other SuperBlock programs.
+  int64_t prefixScanWarpCount = 0;
   /// Resolved by the evaluator; not an independently editable profile knob.
   int64_t activeWarpCount = 0;
   double setupCycles = 0.0;

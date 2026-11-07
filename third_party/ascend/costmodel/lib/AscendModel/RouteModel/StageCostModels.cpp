@@ -82,6 +82,8 @@ resolveModeProfile(const HardwareProfile &hardware,
       implementation.mode == StageMode::SIMD ? hardware.simd : hardware.simt;
   if (implementation.mode == StageMode::SIMD)
     return resolved;
+  resolved.prefixScanWarpCount =
+      std::max<int64_t>(1, hardware.baseSimtWarpCount);
 
   const int64_t activeWarps =
       std::max<int64_t>(1, hardware.baseSimtWarpCount) *

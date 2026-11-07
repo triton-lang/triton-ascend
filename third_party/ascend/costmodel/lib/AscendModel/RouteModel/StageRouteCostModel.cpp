@@ -280,6 +280,7 @@ setDiagnostics(StageRoutePlan &plan,
 }
 
 struct MinmaxScanFacts {
+  size_t stageIndex = 0;
   bool exact = true;
   int64_t count = 0;
   int64_t sequences = 0;
@@ -313,6 +314,7 @@ static MinmaxScanFacts minmaxScanFacts(const StageCostTable &table) {
       continue;
     }
     ++facts.count;
+    facts.stageIndex = static_cast<size_t>(&stage - table.stages.data());
     facts.sequences = sequences;
     facts.extent = extent;
   }
@@ -331,6 +333,17 @@ findImplementationCost(const LogicalStageCost &stage,
         cost.implementation.aivSubblocks == implementation.aivSubblocks)
       return &cost;
   return nullptr;
+}
+
+static bool fittedScanOwnsCompletion(const MinmaxScanFacts &facts,
+                                     const StageCostTable &table,
+                                     const StageRoutePlan &plan) {
+  if (!facts.exact || facts.stageIndex >= plan.implementations.size())
+    return false;
+  const auto *selected = findImplementationCost(
+      table.stages[facts.stageIndex], plan.implementations[facts.stageIndex]);
+  // A fitted scan already owns its full completion cost.
+  return selected && selected->resources.scanCompletionCycles > 0.0;
 }
 
 /// AutoBlockify V1 is a route-conditional execution schedule.
@@ -3622,7 +3635,8 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       costTable.routeCompletions.largeSequenceMinmaxScan.enabled) {
     const auto facts = minmaxScanFacts(costTable);
     const auto &fit = costTable.routeCompletions.largeSequenceMinmaxScan;
-    if (facts.exact && facts.sequences >= fit.minimumIndependentSequences &&
+    if (facts.exact && !fittedScanOwnsCompletion(facts, costTable, plan) &&
+        facts.sequences >= fit.minimumIndependentSequences &&
         facts.sequences <= fit.maximumIndependentSequences &&
         facts.extent >= fit.minimumExtent &&
         facts.extent <= fit.maximumExtent) {
@@ -3657,7 +3671,8 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
         facts.sequences <= fit.largeMaximumIndependentSequences &&
         facts.extent >= fit.largeMinimumExtent &&
         facts.extent <= fit.largeMaximumExtent;
-    if (facts.exact && (baseDomain || largeDomain)) {
+    if (facts.exact && !fittedScanOwnsCompletion(facts, costTable, plan) &&
+        (baseDomain || largeDomain)) {
       const double reduction =
           largeDomain
               ? std::min(

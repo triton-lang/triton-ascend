@@ -1,5 +1,6 @@
 #include "AscendModel/RouteModel/PrefixScan/PrefixScanFormulaModel.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include <algorithm>
 #include <cmath>
@@ -46,15 +47,20 @@ const std::set<std::string> featureNames = {"one",
                                             "pressure2_8",
                                             "pressure2_16",
                                             "pressure2_24",
+                                            "pressure2_48",
                                             "pressure2_64",
                                             "pressure2_96",
                                             "partial_pressure8",
-                                            "partial_pressure16"};
+                                            "partial_pressure16",
+                                            "direct_group_work",
+                                            "direct_narrow_group_work",
+                                            "direct_half_row_groups"};
 const std::set<std::string> branches = {"short",
                                         "long",
                                         "tree",
                                         "chain",
                                         "direct",
+                                        "direct_full_groups",
                                         "transpose",
                                         "product_multi",
                                         "scalar_or_generic",
@@ -267,6 +273,15 @@ std::optional<PrefixScanEstimate> mlir::ascend::estimatePrefixScanFormula(
     f["vecwork"] = (E - 1) * ceilDiv(C, 64);
     f["payload"] = 4 * N;
     f["tileR"] = ceilDiv(pre, 4) * ceilDiv(post, 64) * (E - 1);
+    const double groups = std::floor(pre / 4);
+    f["direct_group_work"] = groups * ceilDiv(post, 64) * (E - 1);
+    // Quarter-register rows in a retained outer group loop require additional
+    // vector-store ordering in the calibrated lowering. Wider rows do not
+    // share this cost, even when their element count is larger.
+    f["direct_narrow_group_work"] =
+        groups > 1 && post < 32 ? f["direct_group_work"] : 0;
+    f["direct_half_row_groups"] =
+        groups > 1 && post >= 32 && post < 64 ? groups : 0;
     f["paddedwork"] = (E - 1) * ceilDiv(8 * ceilDiv(C, 8), 64);
     f["doubling"] = 0;
     f["treework"] = 0;
@@ -380,6 +395,21 @@ std::optional<PrefixScanEstimate> mlir::ascend::estimatePrefixScanFormula(
                                     : "multi_element";
   } else
     branch = "multi";
+  // A qualified asset may refine the direct path with complete groups of
+  // four rows. Preserve older assets and remainder-row
+  // paths; the refined domain takes explicit priority, never JSON order.
+  if (simd && branch == "direct" && pre >= 4 && std::fmod(pre, 4) == 0) {
+    const bool hasFullGroups = llvm::any_of(formulas, [&](const auto &formula) {
+      return llvm::any_of(formula.domains, [&](const auto &d) {
+        return d.operation == operation && d.dataType == type &&
+               d.rank == int64_t(shape.size()) && d.axis == axis &&
+               d.branch == "direct_full_groups" &&
+               (d.warps == 0 || d.warps == warps);
+      });
+    });
+    if (hasFullGroups)
+      branch = "direct_full_groups";
+  }
   auto matchesFeatures = [&](const PrefixScanFormulaDomain &d) {
     return d.operation == operation && d.dataType == type &&
            (d.branch == branch || (!simd && (d.branch == layoutBranch ||
@@ -510,8 +540,11 @@ mlir::ascend::estimateFittedScan(const StageWorkload::PrefixScanKey &shape,
   const auto &combine = std::get<11>(shape);
   if (combine != "arith.addf" && combine != "arith.addi") {
     if (allowTableFormulas)
-      return estimatePrefixScanFormula(shape, profile.activeWarpCount, simd,
-                                       profile.calibratedPrefixScan.formulas);
+      return estimatePrefixScanFormula(
+          shape,
+          profile.prefixScanWarpCount > 0 ? profile.prefixScanWarpCount
+                                          : profile.activeWarpCount,
+          simd, profile.calibratedPrefixScan.formulas);
     return std::nullopt;
   }
   const auto &calibration = profile.calibratedPrefixScan;

@@ -1674,9 +1674,22 @@ static void readStageResources(ProfileJSONReader &reader,
       else {
         if (context == "simd") {
           static const llvm::StringSet<> simdFeatures = {
-              "one",        "E",        "C",       "logE",    "f16",
-              "B",          "chain",    "vecwork", "payload", "tileR",
-              "paddedwork", "doubling", "treework"};
+              "one",
+              "E",
+              "C",
+              "logE",
+              "f16",
+              "B",
+              "chain",
+              "vecwork",
+              "payload",
+              "tileR",
+              "paddedwork",
+              "doubling",
+              "treework",
+              "direct_group_work",
+              "direct_narrow_group_work",
+              "direct_half_row_groups"};
           for (const auto &formula : *parsed) {
             if (formula.projection != "legacy")
               reader.setError(

@@ -73,8 +73,11 @@ def test_Host_stride_values_and_formula_complexity():
         predict(MODELS["SIMT"], c, **CONTRACT)
     assert predict(MODELS["SIMT"], c, [8, 1], **CONTRACT)["eligible"]
     for model in MODELS.values():
-        for formula in [*model["models"].values(), model["fallback"]]:
-            assert 1 <= len(formula["features"]) == len(formula["coefficients"]) <= 8
+        assert model["strategy"] == "physical_short8_program_v1"
+        for node in model["nodes"]:
+            if node["kind"] in ("linear", "exp"):
+                assert 1 <= len(node["terms"]) <= 8
+        assert predict(model, c, [8, 1], **CONTRACT)["terms"] <= 8
 
 
 @pytest.mark.parametrize("dtype", ["int1", "float8e4nv", "float8e5"])

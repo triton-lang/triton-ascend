@@ -120,6 +120,10 @@ OrdinaryLoadMainResult targetCost(triton::LoadOp load,
   m.payloadTypeVerified = true;
   m.payloadIsInt1 = logicalPayload.isInteger(1);
   m.payloadIsFloat8 = logicalFP8;
+  m.logical.verified = true;
+  m.logical.integer = isa<IntegerType>(logicalPayload);
+  m.logical.floating = isa<FloatType>(logicalPayload);
+  m.logical.bfloat16 = isa<BFloat16Type>(logicalPayload);
   auto staticAxes = axes(load.getPtr());
   const bool known =
       staticAxes.size() == m.shape.size() &&

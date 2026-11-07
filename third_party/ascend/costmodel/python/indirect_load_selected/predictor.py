@@ -32,6 +32,20 @@ def predict(model, case, runtime_coefficients=None, *, enabled=True, stage_owner
     features = visible_features(case, runtime_coefficients, operation="load")
     if "semantic_zero" in features:
         return dict(eligible=True, ticks=0., leaf="", accepted=False)
+    if model["strategy"] == "physical_short8_program_v1":
+        from .features import visible_features as program_features
+        from .physical_program import evaluate
+        logical_case = dict(case)
+        logical_case.setdefault("dtype", dtype)
+        x = program_features(logical_case, runtime_coefficients)
+        x.update(width=case["bytes"], mask=int(case["mask"] != "none"), rank=len(case["shape"]),
+                 warp_band=0 if w <= 4 else 1 if w <= 16 else 2,
+                 K_band=0 if x["K"] <= 16 else 1 if x["K"] <= 128 else 2,
+                 leading_band=0 if x["leading"] <= 1 else 1 if x["leading"] <= 8 else 2)
+        value, terms = evaluate(model, x)
+        if not math.isfinite(value) or not 1 <= terms <= 8:
+            raise ValueError("Invalid physical Load formula")
+        return dict(eligible=True, ticks=value, leaf="physical_short8", terms=terms, accepted=False)
     strategy = model["strategy"]
     if strategy == "width_mask_prefix":
         branch = any(hi - lo != n for lo, hi, n in zip(case["lo"][:-1], case["hi"][:-1], case["shape"][:-1]))

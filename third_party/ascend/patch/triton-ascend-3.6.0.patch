@@ -1450,3 +1450,132 @@ index 0f506818f..9961a4eb2 100644
              # launch kernel
              launch_metadata = kernel.launch_metadata(grid, stream, *bound_args.values())
              kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+diff --git a/python/triton/tools/compile.py b/python/triton/tools/compile.py
+index 73085d3d3160..ee5eb6410dcd 100644
+--- a/python/triton/tools/compile.py
++++ b/python/triton/tools/compile.py
+@@ -194,6 +194,46 @@ def compile_kernel(args: CompileArgs):
+         "_placeholder": "",
+         "warp_size": target.warp_size,
+     }
++    if target.backend == "npu":
++        # NPU AOT: export the fixed C launcher next to the C stubs and adapt
++        # template parameters to the launcher ABI (no scratch pointer args).
++        import dataclasses
++        import shutil
++
++        from triton.backends.ascend import launcher
++        from triton.backends.ascend.driver import NPUUtils
++
++        npu_utils = NPUUtils()
++        spec = launcher.make_launch_spec(ccinfo.metadata, npu_utils)
++        # A plain C process has no torch task queue: strip the framework-only
++        # flag so the launcher runs the kernel directly instead of submitting
++        # through npu_utils' OpCommand path.
++        spec = dataclasses.replace(spec, flags=spec.flags & ~launcher.TASKQUEUE)
++        index = lambda name: kernel.arg_names.index(name)
++        types = launcher.argument_types({index(name): ty for name, ty in signature.items()},
++                                        {index(name) for name in constants})
++        _, runtime_path = launcher.get_runtime(npu_utils.get_so_path())
++        shutil.copy(launcher.export_launcher(spec, types, runtime_path),
++                    out_path.parent / "launcher_export.so")
++        params["register_kernel_name"] = ccinfo.metadata.kernel_name
++        params["packed_kernel_name"] = ccinfo.packed_metadata["kernel_name"]
++        # CANN >= 9.1 launches kernels through aclrtLaunchKernelWithHostArgs;
++        # the stub must register the embedded binary with the matching ACL
++        # binary-load API: an rt-style function stub is not a valid
++        # aclrtFuncHandle and would crash the launch.
++        if launcher.utils.is_cann_version_at_least(9, 1, 0):
++            params["use_acl_load"] = "1"
++            params["acl_magic"] = ("ACL_RT_BINARY_MAGIC_ELF_VECTOR_CORE"
++                                   if ccinfo.metadata.mix_mode == "aiv"
++                                   else "ACL_RT_BINARY_MAGIC_ELF_AICORE")
++        else:
++            params["use_acl_load"] = "0"
++            params["acl_magic"] = "ACL_RT_BINARY_MAGIC_ELF_AICORE"
++        params["magic"] = ("RT_DEV_BINARY_MAGIC_ELF_AIVEC"
++                           if ccinfo.metadata.mix_mode == "aiv" else "RT_DEV_BINARY_MAGIC_ELF")
++        params["arg_pointers"] = ", ".join([f"&{arg}" for arg in arg_names_not_1])
++        params["arg_sizes"] = ", ".join([f"sizeof({arg})" for arg in arg_names_not_1])
++        params["num_args"] = len(arg_names_not_1)
+     output_files = []
+     backend_name = target.backend
+     template_dir = Path(__file__).parent / "extra" / backend_name
+diff --git a/python/triton/tools/link.py b/python/triton/tools/link.py
+index 75a1157a52f9..a86605bfaf6a 100644
+--- a/python/triton/tools/link.py
++++ b/python/triton/tools/link.py
+@@ -36,7 +36,7 @@ class HeaderParser:
+         # [name, hash, suffix]
+         self.kernel_name = re.compile("^([\\w]+)_([\\w]+)_([\\w]+)$")
+         # [(type, name)]
+-        self.c_sig = re.compile("[\\s]*(\\w+)\\s(\\w+)[,]?")
++        self.c_sig = re.compile("[\\s]*(\\w+\\*?)\\s+(\\w+)[,]?")
+         # [d|c]
+         self.arg_suffix = re.compile("[c,d]")
+ 
+@@ -174,8 +174,13 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
+             if hint == 1  #
+             else None)
+         conds = " && ".join([  #
+-            cond_fn(val, hint)  #
+-            for val, hint in zip(meta.arg_names, meta.sizes)  #
++            # Pointer arguments (e.g. the NPU "void*" spelling) cannot take
++            # integer arithmetic directly; cast their address through
++            # uintptr_t for the divisibility/equality dispatch checks.
++            (f"((uintptr_t){val} % {hint} == 0)" if ty == "void*" and hint == 16 else
++             f"((uintptr_t){val} == {hint})" if ty == "void*" else
++             cond_fn(val, hint))  #
++            for val, hint, ty in zip(meta.arg_names, meta.sizes, meta.arg_ctypes)  #
+             if hint is not None
+         ])
+         src += (f"  if ({conds})\n" if any(meta.sizes) else "if (1)\n"
+@@ -264,8 +269,14 @@ if __name__ == "__main__":
+     parser.add_argument("--out", "-o", type=Path, help="Out filename")
+     parser.add_argument(
+         "--prefix",
+         type=str,
+         default="",
+         help="String to prefix kernel dispatcher names",
+     )
++    parser.add_argument(
++        "--backend",
++        type=str,
++        default="cuda",
++        help="Backend of the headers being linked (cuda|hip|npu); selects how the generated code obtains CUresult/CUstream",
++    )
+     args = parser.parse_args()
+@@ -286,5 +297,24 @@ if __name__ == "__main__":
+     get_num_algos_decl = make_get_num_algos_decl(meta)
+     global_decl = make_global_decl(meta)
++    # The generated sources borrow CUresult/CUstream for their C API surface.
++    # CUDA/HIP provide them through <cuda.h>; the NPU toolchain ships no CUDA
++    # headers, so emit self-contained stand-ins (guarded so the per-kernel
++    # headers generated by compile.py can be included alongside this one).
++    if args.backend == "npu":
++        c_types_include = "\n".join([
++            "#include <stdint.h>",
++            "",
++            "#ifndef TT_AOT_KERNEL_TYPES",
++            "#define TT_AOT_KERNEL_TYPES",
++            "typedef int CUresult;",
++            "typedef void *CUstream;",
++            "#define CUDA_SUCCESS 0",
++            "#define CUDA_ERROR_UNKNOWN 1",
++            "#define CUDA_ERROR_INVALID_VALUE 2",
++            "#endif",
++        ])
++    else:
++        c_types_include = "#include <cuda.h>"
+     with args.out.with_suffix(".h").open("w") as fp:
+-        out = "#include <cuda.h>\n"
++        out = c_types_include + "\n"
+         out += "\n".join(algo_decls)
+@@ -305,6 +335,6 @@ if __name__ == "__main__":
+     with args.out.with_suffix(".c").open("w") as fp:
+         out = ""
+-        out += "#include <cuda.h>\n"
++        out += c_types_include + "\n"
+         out += "#include <stdint.h>\n"
+         out += "#include <assert.h>\n"
+         out += "\n"

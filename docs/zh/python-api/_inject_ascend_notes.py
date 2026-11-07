@@ -1,8 +1,8 @@
 """
 Sphinx extension to inject Ascend platform notes into API docs.
 
-Loads constraints from _ascend_constraints.py and appends RST sections
-via the autodoc-process-docstring event.
+Loads constraints from ``_ascend_constraints.py`` and appends RST sections
+via the ``autodoc-process-docstring`` event.
 """
 import functools as _functools
 import importlib.util as _importlib_util
@@ -12,7 +12,8 @@ from sphinx.util import logging as _sphinx_logging
 
 _logger = _sphinx_logging.getLogger(__name__)
 
-_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "_ascend_constraints.py")
+_HERE = _os.path.dirname(_os.path.abspath(__file__))
+_path = _os.path.join(_HERE, "_ascend_constraints.py")
 _spec = _importlib_util.spec_from_file_location("_ascend_constraints", _path)
 if _spec is None or _spec.loader is None:
     raise ImportError(f"cannot load _ascend_constraints from {_path!r}")
@@ -20,17 +21,23 @@ _mod = _importlib_util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 ASCEND_CONSTRAINTS = _mod.CONSTRAINTS
 
-_EXAMPLES_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "_examples")
+# Keep the existing per-API snippets under python-api/_examples and allow
+# module-level examples under docs/zh/examples/tla.
+_EXAMPLES_DIRS = (
+    _os.path.join(_HERE, "_examples"),
+    _os.path.abspath(_os.path.join(_HERE, "..", "examples", "tla")),
+)
 
 
 @_functools.lru_cache(maxsize=None)
 def _read_example(name):
-    """Read usage example code from a .py file."""
-    path = _os.path.join(_EXAMPLES_DIR, f"{name}.py")
-    if _os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
-    _logger.warning("ascend constraints: example file missing for %r (%s)", name, path)
+    """Read usage example code from the first matching .py file."""
+    for examples_dir in _EXAMPLES_DIRS:
+        path = _os.path.join(examples_dir, f"{name}.py")
+        if _os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+    _logger.warning("ascend constraints: example file missing for %r in %s", name, _EXAMPLES_DIRS)
     return ""
 
 

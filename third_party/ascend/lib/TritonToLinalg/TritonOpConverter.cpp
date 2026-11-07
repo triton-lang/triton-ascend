@@ -618,72 +618,63 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
     return success();
   }
 
-  // Tail/Middle masks may have a dynamic start outside the tensor. Keep the
-  // same bounds check for both target-specific slice implementations.
-  Value dynamicOffset;
-  int dynamicDim = -1;
+  // For Tail or Middle positions, we need to compute inverted dimensions
+  // to handle the masking logic
+  SmallVector<OpFoldResult> invertOffsets;
+  SmallVector<OpFoldResult> invertFalseDims;
+  SmallVector<OpFoldResult> invertTrueDims;
+  OpFoldResult falseDimOp;
+  OpFoldResult trueDimOp;
+  int valDim = -1;
   for (int i = 0; i < mstate.getRank(); ++i) {
-    if (!getConstantIntValue(mstate.offsets[i]).has_value()) {
-      assert(dynamicDim == -1 &&
-             "The offset in only one dimension can be dynamic.");
-      dynamicDim = i;
-      dynamicOffset = cast<Value>(mstate.offsets[i]);
-    }
-  }
-
-  Value sliceSource = trueTensor;
-  SmallVector<OpFoldResult> sliceOffsets(mstate.offsets);
-  SmallVector<OpFoldResult> sliceDims(mstate.dims);
-  SmallVector<Operation *> sliceOps;
-  if (!useDirectSelectSlices) {
-    // A2/A3 require the prefix reconstruction to keep all slice starts at zero.
-    // Direct dynamic starts can trigger NPU IR alignment padding and UB
-    // overflow. 950 supports unaligned UB copies and can use the original mask
-    // offsets.
-    SmallVector<OpFoldResult> invertOffsets;
-    SmallVector<OpFoldResult> invertFalseDims;
-    SmallVector<OpFoldResult> invertTrueDims;
-    for (int i = 0; i < mstate.getRank(); ++i) {
-      const auto &offset = mstate.offsets[i];
-      const auto &dim = mstate.dims[i];
-      invertOffsets.push_back(rewriter.getIndexAttr(0));
-      if (isConstantIntValue(offset, 0)) {
-        invertFalseDims.push_back(dim);
-        invertTrueDims.push_back(dim);
-      } else {
-        invertFalseDims.push_back(offset);
-        invertTrueDims.push_back(addOpFoldResult(offset, dim, loc, rewriter,
-                                                 rewriter.getIndexType()));
+    const auto &offVal = mstate.offsets[i];
+    const auto &dimVal = mstate.dims[i];
+    auto constOffVal = getConstantIntValue(offVal);
+    invertOffsets.push_back(rewriter.getIndexAttr(0));
+    if (constOffVal.has_value() && constOffVal.value() == 0) {
+      invertFalseDims.push_back(dimVal);
+      invertTrueDims.push_back(dimVal);
+    } else {
+      assert(valDim == -1 &&
+             "The offset in only one dimension can be not zero.");
+      if (!constOffVal.has_value()) {
+        valDim = i;
+        falseDimOp = offVal;
       }
-    }
 
-    auto falseExtractSliceOp = mstate.getExtractSlice(
-        falseTensor, loc, rewriter, invertOffsets, invertFalseDims);
-    auto trueInsertSliceOp =
-        mstate.getInsertSlice(falseExtractSliceOp, trueTensor, loc, rewriter,
-                              invertOffsets, invertFalseDims);
-    sliceOps.push_back(falseExtractSliceOp.getOperation());
-    sliceOps.push_back(trueInsertSliceOp.getOperation());
-    sliceSource = trueInsertSliceOp;
-    sliceOffsets = std::move(invertOffsets);
-    sliceDims = std::move(invertTrueDims);
+      invertFalseDims.push_back(offVal);
+      trueDimOp = addOpFoldResult(offVal, dimVal, loc, rewriter,
+                                  rewriter.getIndexType());
+      invertTrueDims.push_back(trueDimOp);
+    }
   }
 
-  auto extractSliceOp = mstate.getExtractSlice(sliceSource, loc, rewriter,
-                                               sliceOffsets, sliceDims);
-  auto insertSliceOp = mstate.getInsertSlice(extractSliceOp, falseTensor, loc,
-                                             rewriter, sliceOffsets, sliceDims);
-  sliceOps.push_back(extractSliceOp.getOperation());
-  sliceOps.push_back(insertSliceOp.getOperation());
-  if (dynamicDim != -1) {
-    rewriter.setInsertionPointAfter(insertSliceOp);
+  // Slice out the invert first masked part of false tensor
+  auto falseExtractSliceOp = mstate.getExtractSlice(
+      falseTensor, loc, rewriter, invertOffsets, invertFalseDims);
+  // Insert out the sliced false tensor into true tensor
+  auto trueInsertSliceOp =
+      mstate.getInsertSlice(falseExtractSliceOp, trueTensor, loc, rewriter,
+                            invertOffsets, invertFalseDims);
+  // Slice out the invert first masked and masked part of inserted true tensor
+  auto extractSliceOp = mstate.getExtractSlice(trueInsertSliceOp, loc, rewriter,
+                                               invertOffsets, invertTrueDims);
+  // Insert out the sliced true tensor into false tensor
+  auto insertSliceOp =
+      mstate.getInsertSlice(extractSliceOp, falseTensor, loc, rewriter,
+                            invertOffsets, invertTrueDims);
+  if (valDim != -1) {
+    rewriter.setInsertionPointAfter(trueInsertSliceOp);
+    assert(isa<Value>(falseDimOp) &&
+           "Expected to be a runtime Value for dynamic dimension check.");
     Value zeroIndex = rewriter.create<arith::ConstantIndexOp>(loc, 0);
     Value isNegative = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::slt, dynamicOffset, zeroIndex);
+        loc, arith::CmpIPredicate::slt, cast<Value>(falseDimOp), zeroIndex);
+
     Value sizeIndex =
-        rewriter.create<arith::ConstantIndexOp>(loc, tensorShape[dynamicDim]);
+        rewriter.create<arith::ConstantIndexOp>(loc, tensorShape[valDim]);
     Value isOutOfRange = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::sge, dynamicOffset, sizeIndex);
+        loc, arith::CmpIPredicate::sge, cast<Value>(falseDimOp), sizeIndex);
     auto orOp = rewriter.create<arith::OrIOp>(loc, isNegative, isOutOfRange);
     auto ifOp = rewriter.create<scf::IfOp>(loc, TypeRange{type},
                                            orOp.getResult(), true, true);
@@ -693,20 +684,27 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
     rewriter.create<scf::YieldOp>(loc, ValueRange{falseTensor});
 
     Block *elseBlock = &ifOp.getElseRegion().front();
-    for (Operation *sliceOp : sliceOps)
-      sliceOp->moveBefore(elseBlock, elseBlock->end());
+    rewriter.setInsertionPointToStart(elseBlock);
+    falseExtractSliceOp->moveBefore(elseBlock, elseBlock->begin());
+    trueInsertSliceOp->moveAfter(falseExtractSliceOp);
+    extractSliceOp->moveAfter(trueInsertSliceOp);
+    insertSliceOp->moveAfter(extractSliceOp);
+
     rewriter.setInsertionPointAfter(insertSliceOp);
     rewriter.create<scf::YieldOp>(loc, ValueRange{insertSliceOp.getResult()});
     rewriter.replaceOp(op, ifOp);
-  } else {
+  } else { // static offsets
     rewriter.replaceOp(op, insertSliceOp);
   }
   LLVM_DEBUG({
-    llvm::dbgs() << "  -> Created "
-                 << (useDirectSelectSlices ? "direct" : "prefix")
-                 << " select slices:\n";
-    for (Operation *sliceOp : sliceOps)
-      llvm::dbgs() << "     " << *sliceOp << "\n";
+    llvm::dbgs() << "  -> [invert] Created false tensor extractSlice: "
+                 << *falseExtractSliceOp.getOperation() << "\n"
+                 << "  -> [invert] Created true tensor insertSlice: "
+                 << *trueInsertSliceOp.getOperation() << "\n"
+                 << "  -> [invert] Created ExtractSlice: "
+                 << *extractSliceOp.getOperation() << "\n"
+                 << "  -> [invert] Created InsertSlice: "
+                 << *insertSliceOp.getOperation() << "\n";
   });
   return success();
 }
@@ -1254,8 +1252,54 @@ ReshapeConverter::matchAndRewrite(triton::ReshapeOp op, OpAdaptor adaptor,
                                   ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
   insertDebugNop(loc, rewriter);
-  auto src = op.getSrc();
+  Value src = op.getSrc();
   auto dst = op.getResult();
+
+  if (op.getAllowReorder()) {
+    auto srcShape = cast<ShapedType>(src.getType()).getShape();
+    auto dstShape = cast<ShapedType>(dst.getType()).getShape();
+
+    SmallVector<std::pair<int64_t, size_t>> srcCore;
+    SmallVector<int64_t> dstCore;
+    for (auto [i, extent] : llvm::enumerate(srcShape))
+      if (extent != 1)
+        srcCore.emplace_back(extent, i);
+    for (int64_t extent : dstShape)
+      if (extent != 1)
+        dstCore.push_back(extent);
+
+    if (srcCore.size() == dstCore.size() &&
+        !std::equal(srcCore.begin(), srcCore.end(), dstCore.begin(),
+                    [](const auto &core, int64_t extent) {
+                      return core.first == extent;
+                    })) {
+
+      SmallVector<bool> used(srcCore.size(), false);
+      SmallVector<bool> placed(srcShape.size(), false);
+      SmallVector<int> order;
+      for (int64_t extent : dstCore) {
+        size_t match = srcCore.size();
+        for (size_t j = 0; j < srcCore.size() && match == srcCore.size(); ++j)
+          if (!used[j] && srcCore[j].first == extent)
+            match = j;
+        if (match == srcCore.size()) {
+          return rewriter.notifyMatchFailure(
+              loc,
+              "allow_reorder reshape: destination non-singleton extent has no "
+              "matching source non-singleton extent");
+        }
+        used[match] = true;
+        order.push_back(static_cast<int>(srcCore[match].second));
+        placed[srcCore[match].second] = true;
+      }
+
+      for (size_t i = 0; i < srcShape.size(); ++i)
+        if (!placed[i])
+          order.push_back(static_cast<int>(i));
+      src = ConverterUtils::getTransposedValue(src, loc, rewriter, order);
+    }
+  }
+
   Value shape = rewriter.create<arith::ConstantOp>(
       loc,
       rewriter.getI64TensorAttr(cast<ShapedType>(dst.getType()).getShape()));
@@ -3091,6 +3135,20 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                      rhsElemType == triton::ScaleDotElemType::E5M2);
   bool isFP4Input = (lhsElemType == triton::ScaleDotElemType::E2M1) &&
                     (rhsElemType == triton::ScaleDotElemType::E2M1);
+  // MatMulMx consumes K-packed bytes and E8M0 scales. Its small-K
+  // decomposition requires at least 64 packed bytes (128 FP4 elements).
+  constexpr int64_t minimumNativeFp4StorageK = 64;
+  auto hasE8M0Scale = [](Value scale) {
+    return !scale || cast<RankedTensorType>(scale.getType())
+                         .getElementType()
+                         .isInteger(8);
+  };
+  bool useNativeMx =
+      (isFP8Input || isFP4Input) && dstType.getRank() == 2 &&
+      dstType.getElementType().isF32() && op.getLhsKPack() &&
+      op.getRhsKPack() && hasE8M0Scale(lhsScale) && hasE8M0Scale(rhsScale) &&
+      (!isFP4Input || cast<RankedTensorType>(lhs.getType()).getShape().back() >=
+                          minimumNativeFp4StorageK);
   if (!lhsScale) {
     auto lhsTy = cast<RankedTensorType>(lhs.getType());
     int64_t k = lhsTy.getShape().back();
@@ -3110,7 +3168,7 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                                            ValueRange{defaultScaleEmpty})
                    .getResult(0);
   }
-  if (isFP8Input || isFP4Input) {
+  if (useNativeMx) {
     if (!rhsScale) {
       auto rhsTy = cast<RankedTensorType>(rhs.getType());
       int64_t k = rhsTy.getDimSize(rhsTy.getRank() - 2);
@@ -3167,6 +3225,102 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     rewriter.replaceOp(op, finalResult);
     return success();
   }
+
+  // Follow DecomposeScaledBlocked::getComputeType and Fp4ToFpOp: decode
+  // directly to FP16 when either operand is FP16, and to BF16 otherwise.
+  FloatType fp4ComputeType =
+      lhsElemType == triton::ScaleDotElemType::FP16 ||
+              rhsElemType == triton::ScaleDotElemType::FP16
+          ? rewriter.getF16Type()
+          : rewriter.getBF16Type();
+  // E2M1 layout: [sign:1][exponent:2][fraction:1], exponent bias = 1.
+  constexpr unsigned fp4ExponentBits = 2;
+  constexpr unsigned fp4FractionBits = 1;
+  constexpr unsigned fp4SignBit = fp4ExponentBits + fp4FractionBits;
+  constexpr unsigned fp4StorageBits = fp4SignBit + 1;
+  constexpr unsigned fp4ValuesPerByte = 8 / fp4StorageBits;
+  constexpr uint16_t fp4SignMask = 1u << fp4SignBit;
+  constexpr uint16_t fp4MagnitudeMask = fp4SignMask - 1;
+  constexpr uint16_t fp4NibbleMask = (1u << fp4StorageBits) - 1;
+  constexpr uint16_t fp4FirstNormal = 1u << fp4FractionBits;
+  auto unpackFp4 = [&](Value packed, FloatType computeType,
+                       unsigned axis) -> Value {
+    // All E2M1 values are exact in both FP16 and BF16. Derive the target
+    // fields from the type rather than hard-coding either representation.
+    unsigned targetFractionBits = computeType.getFPMantissaWidth() - 1;
+    unsigned targetSignBit = computeType.getWidth() - 1;
+    uint16_t halfBits = rewriter.getFloatAttr(computeType, 0.5)
+                            .getValue()
+                            .bitcastToAPInt()
+                            .getZExtValue();
+    auto type = cast<RankedTensorType>(packed.getType());
+    auto shape = type.getShape();
+    auto i16Ty = type.clone(rewriter.getI16Type());
+    auto constant = [&](uint16_t value) -> Value {
+      return rewriter.create<arith::ConstantOp>(
+          loc, i16Ty, DenseElementsAttr::get(i16Ty, APInt(16, value)));
+    };
+    Value bits = rewriter.create<arith::ExtUIOp>(loc, i16Ty, packed);
+    auto decodeNibble = [&](Value nibble) -> Value {
+      Value magnitude = rewriter.create<arith::AndIOp>(
+          loc, nibble, constant(fp4MagnitudeMask));
+      Value sign =
+          rewriter.create<arith::AndIOp>(loc, nibble, constant(fp4SignMask));
+      sign = rewriter.create<arith::ShLIOp>(
+          loc, sign, constant(targetSignBit - fp4SignBit));
+      Value normal = rewriter.create<arith::ShLIOp>(
+          loc, magnitude, constant(targetFractionBits - fp4FractionBits));
+      normal = rewriter.create<arith::AddIOp>(loc, normal, constant(halfBits));
+      Value subnormal = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::ult, magnitude, constant(fp4FirstNormal));
+      Value zero = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
+                                                  magnitude, constant(0));
+      Value subnormalBits = rewriter.create<arith::SelectOp>(
+          loc, zero, constant(0), constant(halfBits));
+      Value fpBits = rewriter.create<arith::SelectOp>(loc, subnormal,
+                                                      subnormalBits, normal);
+      fpBits = rewriter.create<arith::OrIOp>(loc, fpBits, sign);
+      return rewriter.create<arith::BitcastOp>(loc, type.clone(computeType),
+                                               fpBits);
+    };
+    Value low = decodeNibble(
+        rewriter.create<arith::AndIOp>(loc, bits, constant(fp4NibbleMask)));
+    Value high = decodeNibble(
+        rewriter.create<arith::ShRUIOp>(loc, bits, constant(fp4StorageBits)));
+    SmallVector<int64_t> joinedShape(shape);
+    joinedShape.push_back(fp4ValuesPerByte);
+    Value joined = rewriter.create<triton::JoinOp>(
+        loc, RankedTensorType::get(joinedShape, computeType), low, high);
+    unsigned rank = type.getRank();
+    SmallVector<int32_t> order;
+    SmallVector<int64_t> interleavedShape;
+    SmallVector<ReassociationIndices> reassociation;
+    unsigned expandedAxis = 0;
+    for (unsigned i = 0; i < rank; ++i) {
+      order.push_back(i);
+      interleavedShape.push_back(shape[i]);
+      ReassociationIndices group{expandedAxis++};
+      if (i == axis) {
+        order.push_back(rank);
+        interleavedShape.push_back(fp4ValuesPerByte);
+        group.push_back(expandedAxis++);
+      }
+      reassociation.push_back(group);
+    }
+    if (axis != rank - 1)
+      joined = rewriter.create<triton::TransOp>(
+          loc, RankedTensorType::get(interleavedShape, computeType), joined,
+          rewriter.getDenseI32ArrayAttr(order));
+    SmallVector<int64_t> unpackedShape(shape);
+    unpackedShape[axis] *= fp4ValuesPerByte;
+    return rewriter.create<tensor::CollapseShapeOp>(
+        loc, RankedTensorType::get(unpackedShape, computeType), joined,
+        reassociation);
+  };
+  if (lhsElemType == triton::ScaleDotElemType::E2M1)
+    lhs = unpackFp4(lhs, fp4ComputeType, op.getLhsKPack() ? 1 : 0);
+  if (rhsElemType == triton::ScaleDotElemType::E2M1)
+    rhs = unpackFp4(rhs, fp4ComputeType, op.getRhsKPack() ? 0 : 1);
 
   if (!lhsScale) {
     return op.emitError("lhsScale is required for non-FP8 input");

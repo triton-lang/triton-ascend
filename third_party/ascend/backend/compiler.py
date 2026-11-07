@@ -288,6 +288,21 @@ def _with_debug_line(npubin_stage, options):
     return stage
 
 
+def _graph_optimize_core_num(opt):
+    # Physical AI-core blocks the launcher will schedule, so the row-count policy
+    # can keep at least one full wave after R-way coalescing.  The launcher picks
+    # AIV for pure-SIMT kernels (final mix_mode "aiv") and AIC otherwise, so the
+    # compile-time proxy is opt.is_pure_simt.  A device-less/compile-only host
+    # returns 0, which disables the gridX/R >= coreNum check.
+    try:
+        npu_utils = NPUUtils()
+        if getattr(opt, "is_pure_simt", False):
+            return npu_utils.get_aivector_core_num()
+        return npu_utils.get_aicore_num()
+    except Exception:
+        return 0
+
+
 def _graph_optimize_kwargs(opt):
     l0a_kb, l0b_kb, l0c_kb = l0_size_in_kbytes_for_arch(opt.target_arch)
     kwargs = {
@@ -298,6 +313,7 @@ def _graph_optimize_kwargs(opt):
         "mapping_l0b_capacity_bytes": l0b_kb * 1024,
         "mapping_l0c_capacity_bytes": l0c_kb * 1024,
         "l0_safety_percent": 80,
+        "core_num": _graph_optimize_core_num(opt),
     }
     rule_mask = getattr(opt, "rule_mask", DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK)
     if rule_mask != DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK:
@@ -346,6 +362,8 @@ def make_ttir(mod, metadata, opt):
     passes.ttir.add_loop_unroll(pm)
     if opt.enable_graph_optimize:
         ascend.passes.ttir.add_graph_optimize(pm, **_graph_optimize_kwargs(opt))
+    if AscendBackend.instrumentation:
+        AscendBackend.instrumentation.patch("ttir", pm, mod.context)
     pm.run(mod, 'make_ttir')
     if opt.debug:
         dump_manager = get_dump_manager(metadata["hash"])
@@ -440,6 +458,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             ascend.passes.ttir.set_enable_buffer_insert_optimization(mod)
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
+        if AscendBackend.instrumentation:
+            AscendBackend.instrumentation.patch("ttir_to_linalg", pm, mod.context)
+
         if _enable_msdebug():
             ascend.passes.ttir.add_normalize_debug_line_locations(pm)
 
@@ -476,6 +497,12 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         _export_program_grid_metadata(mod, metadata)
 
         linalg_text = _serialize_module(mod, opt)
+        if AscendBackend.instrumentation:
+            for key in ("profile_scratch_size", "profile_scratch_align", "profile_num_units",
+                        "profile_sections_per_block", "profile_sample_every_n"):
+                match = re.search(rf"\b{key}\s*=\s*(\d+)", linalg_text)
+                if match:
+                    metadata[key] = int(match.group(1))
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
             dump_manager.put(linalg_text, "kernel.ttadapter.mlir", binary=False)
@@ -1246,8 +1273,11 @@ class NPUOptions:
     launch_cooperative_grid: bool = False
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
+    # Proton profile scratch bytes per block; 0 (default) keeps the
+    # driver-side profile scratch path inert.
+    profile_scratch_size: int = 0
     enable_graph_optimize: bool = True
-    supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4nv")
+    supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
     deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()
     vf_merge_level: int = 1
@@ -1568,6 +1598,8 @@ def get_simt_stack_limit():
 
 
 class AscendBackend(BaseBackend):
+    # Set by proton's InstrumentationHook; mirrors CUDABackend.instrumentation.
+    instrumentation = None
 
     @staticmethod
     def get_jit_reuse_handler():
@@ -1661,6 +1693,8 @@ class AscendBackend(BaseBackend):
             "hash": metadata.hash,
             "debug": metadata.debug,
             "tensor_kinds": metadata.tensor_kinds,
+            "profile_scratch_size": getattr(metadata, "profile_scratch_size", 0),
+            "num_warps": getattr(metadata, "num_warps", 0),
         }
 
     def get_codegen_implementation(self, options):
@@ -1677,6 +1711,8 @@ class AscendBackend(BaseBackend):
         buffer_ir.load_dialects(ctx)
         ascend_ir.load_dialects(ctx)
         ascend.load_dialects(ctx)
+        if AscendBackend.instrumentation:
+            AscendBackend.instrumentation.load_dialects(ctx)
 
     def add_stages(self, stages, options, language):
         if self.target.backend == "npu":

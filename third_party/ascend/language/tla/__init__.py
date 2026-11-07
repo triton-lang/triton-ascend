@@ -66,7 +66,7 @@ from triton.language.core import (
     uint64,
 )
 
-from .core import buffer, buffer_type, vector, vector_type
+from .core import AddressSpace, buffer, buffer_type, vector, vector_type
 from .scope import scope
 from .alloc import alloc_buffer, alloc
 from .copy import copy
@@ -94,6 +94,7 @@ from .dma import (
     load_gm_to_ub,
     store_ub_to_gm,
     load_gm_to_l1,
+    load_gm_to_l1_mx_scale,
     copy_ub_to_l1,
     copy_l1_to_ub,
     copy_l1_to_bt,
@@ -109,7 +110,7 @@ from .view import view, subview, reshape
 from .aux_ops import annotate_buffer_versions, assume
 
 from . import math
-from .math import compensated_rstd, truncmod
+from .math import compensated_rstd, truncmod, sqrt
 from .debug import device_assert, device_print
 
 # SIMD vector-register ops.  ``simd`` is exported as a module so its ``cast``
@@ -119,8 +120,9 @@ from . import simd
 # Scalar / SIMD-register selection (eager, unlike TileLang T.if_then_else).
 from .selection import where
 
-# Cube-core ops (``mmad``/``tla.copy`` L1/L0C routes).
+# Cube-core ops (``mmad``/``mmad_mx``/``tla.copy`` L1/L0C routes).
 from . import cube
+from .cube import MxFormat
 
 # Explicit pipeline / global synchronization.
 from . import sync
@@ -151,6 +153,7 @@ __all__ = [
     "uint16",
     "uint32",
     "uint64",
+    "AddressSpace",
     "PadMode",
     "EvictionPolicy",
     "AtomicKind",
@@ -174,6 +177,7 @@ __all__ = [
     "load_gm_to_ub",
     "store_ub_to_gm",
     "load_gm_to_l1",
+    "load_gm_to_l1_mx_scale",
     "copy_ub_to_l1",
     "copy_l1_to_ub",
     "copy_l1_to_bt",
@@ -203,6 +207,7 @@ __all__ = [
     "math",
     "compensated_rstd",
     "truncmod",
+    "sqrt",
     "device_assert",
     "device_print",
 
@@ -218,6 +223,7 @@ __all__ = [
 
     # cube ops
     "cube",
+    "MxFormat",
 
     # explicit synchronization
     "sync",

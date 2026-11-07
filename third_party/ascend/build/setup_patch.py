@@ -117,13 +117,31 @@ def _get_ascend_llvm_package_info(base_dir):
     return {"name": name, "sym_name": sym_name, "url": url}
 
 
-def _apply_patch(patch_path):
+def _apply_patch(patch_path, reverse=False):
     try:
-        subprocess.run(["git", "apply", patch_path], check=True, stdout=subprocess.DEVNULL, cwd=str(_REPO_ROOT))
+        command = ["git", "apply"] + (["--reverse"] if reverse else []) + [str(patch_path)]
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, cwd=str(_REPO_ROOT))
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"patch({patch_path}) failed,cmd={e.cmd}, retcode={e.returncode}") from e
     except FileNotFoundError:
         raise RuntimeError(f"patch({patch_path}) not found.")
+
+
+def _apply_proton_patch(enabled):
+    """Toggle the Proton patch without resetting local source changes."""
+    patch_path = _REPO_ROOT / "third_party" / "ascend" / "patch" / "proton_patch.patch"
+    command = ["git", "apply", "--check"]
+    # Check the opposite direction to detect the desired state already exists.
+    already_applied = ["--reverse"] if enabled else []
+    result = subprocess.run(command + already_applied + [str(patch_path)], cwd=_REPO_ROOT, capture_output=True)
+    if result.returncode == 0:
+        return
+    direction = [] if enabled else ["--reverse"]
+    result = subprocess.run(command + direction + [str(patch_path)], cwd=_REPO_ROOT, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError("Proton patch conflicts with local changes or is incomplete; "
+                           "no files were changed. Resolve the conflict before rebuilding.\n" + result.stderr)
+    _apply_patch(patch_path, reverse=not enabled)
 
 
 def checkout_file(files):
@@ -334,7 +352,7 @@ def _ensure_distributed_submodule():
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
     distributed_dir = _REPO_ROOT / "third_party" / "ascend" / "Triton-distributed-ascend"
-    commit_id = "82b8c919bc4f82e733e15ded7ea259aa089c9e6a"
+    commit_id = "64e4e09ebf7899514aa7d4e8968db4198c7f0608"
     if not distributed_dir.is_dir():
         try:
             _git_check_call_with_retry([
@@ -445,6 +463,32 @@ def _get_ascend_cmake_args():
     return cmake_args
 
 
+def _get_ascend_proton_cmake_args():
+    """Return CANN and MSPTI paths for both Ascend Proton backends."""
+    cann_home = os.getenv("ASCEND_TOOLKIT_HOME", "") or os.getenv("ASCEND_HOME_PATH", "")
+    cann_include_dir = os.getenv("CANN_INCLUDE_DIR", "") or os.getenv("ASCEND_INCLUDE_DIR", "")
+    if not cann_include_dir and cann_home:
+        for candidate in (os.path.join(cann_home, "include"), os.path.join(cann_home, "runtime", "include")):
+            if os.path.exists(os.path.join(candidate, "acl", "acl.h")):
+                cann_include_dir = candidate
+                break
+    cmake_args = [
+        "-DPROTON_BUILD_CUDA=OFF",
+        "-DPROTON_BUILD_HIP=OFF",
+        "-DPROTON_BUILD_CANN=ON",
+        "-DPROTON_BUILD_MSPTI=ON",
+    ]
+    if cann_include_dir:
+        cmake_args.append(f"-DCANN_INCLUDE_DIR={cann_include_dir}")
+    for variable, suffix in (("MSPTI_INCLUDE_DIR", "include"), ("MSPTI_LIB_DIR", "lib64")):
+        path = os.getenv(variable, "")
+        if not path and cann_home:
+            path = os.path.join(cann_home, "tools", "mspti", suffix)
+        if path:
+            cmake_args.append(f"-D{variable}={path}")
+    return cmake_args
+
+
 def _get_install_requirements():
     install_requires = [
         "attrs",
@@ -460,6 +504,8 @@ def _get_install_requirements():
     argv = " ".join(sys.argv).lower()
     if "editable_wheel" not in argv and "dist_info" not in argv:
         install_requires.append("triton==3.6.0")
+    if os.getenv("TRITON_BUILD_PROTON", "OFF").lower() not in ("0", "false", "off", "no"):
+        install_requires.append("llnl-hatchet")
     return [*install_requires]
 
 
@@ -499,7 +545,14 @@ def patch_module(mod):
 
     class CMakeBuild(_OrigCMakeBuild):
 
+        def get_proton_cmake_args(self):
+            cmake_args = mod.get_thirdparty_packages([mod.get_json_package_info()])
+            cmake_args += self.get_pybind11_cmake_args()
+            cmake_args += _get_ascend_proton_cmake_args()
+            return cmake_args
+
         def run(self):
+            _apply_proton_patch(mod.check_env_flag("TRITON_BUILD_PROTON", "OFF"))
             _apply_triton_ascend_patch()
 
             enable_hitest = os.getenv("TRITON_ENABLE_COVERAGE_HITEST", "0").lower() \

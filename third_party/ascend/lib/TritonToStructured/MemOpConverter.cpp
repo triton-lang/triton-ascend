@@ -721,9 +721,10 @@ Value MemOpTransformer::createNewAdvancePtr(Value oldPtr, const Location loc,
 }
 
 // Move broadcast axes without reordering the underlying mask data. In sparse
-// attention this changes broadcast(valid[None, :]) to broadcast(valid[:, None]).
+// attention this changes broadcast(valid[None, :]) to broadcast(valid[:,
+// None]).
 static Value remapBroadcastMask(Value mask, const PtrState &state, Location loc,
-                               PatternRewriter &rewriter) {
+                                PatternRewriter &rewriter) {
   auto broadcast = mask.getDefiningOp<triton::BroadcastOp>();
   if (!broadcast || !state.isPermuted || state.dynamicOffsets.empty() ||
       state.isBlockPtr())
@@ -767,7 +768,7 @@ static Value remapBroadcastMask(Value mask, const PtrState &state, Location loc,
     unexpanded = expand.getSrc();
   auto unexpandedType = cast<RankedTensorType>(unexpanded.getType());
   if (llvm::none_of(unexpandedType.getShape(),
-                   [](int64_t extent) { return extent == 1; })) {
+                    [](int64_t extent) { return extent == 1; })) {
     source = unexpanded;
     for (auto [i, extent] : llvm::enumerate(shape))
       if (extent == 1)
@@ -775,9 +776,10 @@ static Value remapBroadcastMask(Value mask, const PtrState &state, Location loc,
   } else if (sourceType.getShape() != ArrayRef<int64_t>(shape)) {
     // Only singleton axes move; allow_reorder=false preserves element order.
     source = rewriter.create<triton::ReshapeOp>(loc, shape, source,
-                                              /*allowReorder=*/false);
+                                                /*allowReorder=*/false);
   }
-  auto targetType = RankedTensorType::get(targetShape, maskType.getElementType());
+  auto targetType =
+      RankedTensorType::get(targetShape, maskType.getElementType());
   return rewriter.create<triton::BroadcastOp>(loc, targetType, source);
 }
 

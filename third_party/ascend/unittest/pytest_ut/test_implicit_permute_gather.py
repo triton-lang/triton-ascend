@@ -60,15 +60,13 @@ def test_implicit_permute_gather(variant, N, M):
     output = torch.empty((N, M), dtype=torch.float32, device="npu")
     kernel = implicit_permute_gather_kernel if implicit_permute_gather else row_gather_load_kernel
     grid = (triton.cdiv(N, block_n), )
-    kernel[grid](indices.npu(), data.npu(), output, N, M, BLOCK_N=block_n, BLOCK_M=block_m,
-                 compile_mode="simd")
+    kernel[grid](indices.npu(), data.npu(), output, N, M, BLOCK_N=block_n, BLOCK_M=block_m, compile_mode="simd")
     test_common.validate_cmp("float32", output, expected)
 
 
 @triton.jit
-def data_mask_gather_kernel(indices, data, output, D: tl.constexpr, N: tl.constexpr,
-                            BLOCK_D: tl.constexpr, BLOCK_N: tl.constexpr,
-                            BROADCAST_MASK: tl.constexpr):
+def data_mask_gather_kernel(indices, data, output, D: tl.constexpr, N: tl.constexpr, BLOCK_D: tl.constexpr,
+                            BLOCK_N: tl.constexpr, BROADCAST_MASK: tl.constexpr):
     """Discrete broadcast mask, with a non-broadcast fallback variant."""
     d = tl.arange(0, BLOCK_D)
     n = tl.arange(0, BLOCK_N)
@@ -79,8 +77,7 @@ def data_mask_gather_kernel(indices, data, output, D: tl.constexpr, N: tl.conste
         # back to the original load until mask analysis supports it.
         mask = mask & (d < D)[:, None]
     value = tl.load(data + token[None, :] * D + d[:, None], mask=mask, other=0.0)
-    tl.store(output + d[:, None] * N + n[None, :], value,
-             mask=(d < D)[:, None] & (n < N)[None, :])
+    tl.store(output + d[:, None] * N + n[None, :], value, mask=(d < D)[:, None] & (n < N)[None, :])
 
 
 @pytest.mark.parametrize("D,N,broadcast_mask", [(64, 64, True), (128, 64, True), (100, 50, False)])
@@ -95,15 +92,14 @@ def test_implicit_permute_data_mask(D, N, broadcast_mask):
     gathered = data[indices.clamp(min=0).long()].t()
     expected = torch.where((indices >= 0)[None, :], gathered, 0.0)
     output = torch.empty((D, N), dtype=torch.float32, device="npu")
-    data_mask_gather_kernel[(1,)](indices.npu(), data.npu(), output, D, N,
-                                  BLOCK_D=triton.next_power_of_2(D), BLOCK_N=block_n,
-                                  BROADCAST_MASK=broadcast_mask, compile_mode="simd")
+    data_mask_gather_kernel[(1, )](indices.npu(), data.npu(), output, D, N, BLOCK_D=triton.next_power_of_2(D),
+                                   BLOCK_N=block_n, BROADCAST_MASK=broadcast_mask, compile_mode="simd")
     torch.testing.assert_close(output.cpu(), expected, atol=0, rtol=0)
 
 
 @triton.jit
-def tensor_other_gather_kernel(indices, data, output, D: tl.constexpr, N: tl.constexpr,
-                              VALID_N: tl.constexpr, BLOCK_D: tl.constexpr, BLOCK_N: tl.constexpr):
+def tensor_other_gather_kernel(indices, data, output, D: tl.constexpr, N: tl.constexpr, VALID_N: tl.constexpr,
+                               BLOCK_D: tl.constexpr, BLOCK_N: tl.constexpr):
     """Non-uniform tensor other with an analyzable mask must retain its lanes."""
     d = tl.arange(0, BLOCK_D)
     n = tl.arange(0, BLOCK_N)
@@ -111,8 +107,7 @@ def tensor_other_gather_kernel(indices, data, output, D: tl.constexpr, N: tl.con
     mask = (d < D)[:, None] & (n < VALID_N)[None, :]
     other = (d[:, None] * BLOCK_N + n[None, :] + 1).to(tl.float32)
     value = tl.load(data + token[None, :] * D + d[:, None], mask=mask, other=other)
-    tl.store(output + d[:, None] * N + n[None, :], value,
-             mask=(d < D)[:, None] & (n < N)[None, :])
+    tl.store(output + d[:, None] * N + n[None, :], value, mask=(d < D)[:, None] & (n < N)[None, :])
 
 
 @pytest.mark.parametrize("D,N", [(64, 64), (128, 64), (100, 50)])
@@ -128,7 +123,6 @@ def test_implicit_permute_tensor_other(D, N):
     other = (torch.arange(D)[:, None] * block_n + torch.arange(N)[None, :] + 1).float()
     expected = torch.where((torch.arange(N) < valid_n)[None, :], gathered, other)
     output = torch.empty((D, N), dtype=torch.float32, device="npu")
-    tensor_other_gather_kernel[(1,)](indices.npu(), data.npu(), output, D, N,
-                                    VALID_N=valid_n, BLOCK_D=triton.next_power_of_2(D),
-                                    BLOCK_N=block_n, compile_mode="simd")
+    tensor_other_gather_kernel[(1, )](indices.npu(), data.npu(), output, D, N, VALID_N=valid_n,
+                                      BLOCK_D=triton.next_power_of_2(D), BLOCK_N=block_n, compile_mode="simd")
     torch.testing.assert_close(output.cpu(), expected, atol=0, rtol=0)

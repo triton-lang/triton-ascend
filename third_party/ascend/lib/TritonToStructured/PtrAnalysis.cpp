@@ -609,8 +609,9 @@ LogicalResult PtrState::addState(PtrState &lhsState, PtrState &rhsState,
     bool rhsIsDataStride =
         rhsStrideValue && isa<RankedTensorType>(rhsStrideValue.getType());
     // FIXME: Preserve the affine contribution on a data-dependent axis before
-    // accepting mixed strides, e.g. 16 * idx[j] + 2 * j. Keeping only the tensor
-    // marker drops 2 * j when createAddPtrOp skips this axis's affine range.
+    // accepting mixed strides, e.g. 16 * idx[j] + 2 * j. Keeping only the
+    // tensor marker drops 2 * j when createAddPtrOp skips this axis's affine
+    // range.
     if ((lhsIsDataStride && !rhsIsDataStride && !isZero(rIt->stride)) ||
         (rhsIsDataStride && !lhsIsDataStride && !isZero(lIt->stride))) {
       LLVM_DEBUG({
@@ -708,9 +709,9 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
 
   auto emitDynamicSizeError = [&]() -> triton::AddPtrOp {
     LLVM_DEBUG({
-      InFlightDiagnostic diag =
-          emitError(loc) << "PtrAnalysis: dynamic block size is not "
-                            "supported when rebuilding the addptr";
+      InFlightDiagnostic diag = emitError(loc)
+                                << "PtrAnalysis: dynamic block size is not "
+                                   "supported when rebuilding the addptr";
     });
     return nullptr;
   };
@@ -721,7 +722,7 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
       continue;
     tensorStrides.emplace_back(info.stride);
     tensorSizes.emplace_back(getIntAttr(info.shape).value());
-    }
+  }
 
   // load a scalar pointer
   if (tensorSizes.empty()) {
@@ -824,8 +825,8 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
         if (dataType.getElementType().isIndex()) {
           dataTile =
               builder.create<arith::IndexCastOp>(loc, i32DataType, dataTile);
-        } else if (auto intTy = dyn_cast<IntegerType>(
-                       dataType.getElementType())) {
+        } else if (auto intTy =
+                       dyn_cast<IntegerType>(dataType.getElementType())) {
           if (intTy.getWidth() < 32) {
             dataTile =
                 builder.create<arith::ExtSIOp>(loc, i32DataType, dataTile);
@@ -852,8 +853,8 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
         dataTile = builder.create<triton::ReshapeOp>(
             loc, permutedSizes, dataTile, /*allowReorder=*/!identityPermute);
       }
-      dataTile = builder.create<triton::BroadcastOp>(loc, broadCastType,
-                                                     dataTile);
+      dataTile =
+          builder.create<triton::BroadcastOp>(loc, broadCastType, dataTile);
       rangeAfterCombine =
           builder.create<arith::AddIOp>(loc, rangeAfterCombine, dataTile);
     }
@@ -864,8 +865,8 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
   if (offset) {
     Value addValue = materializeValue(builder, loc, offset);
     if (addValue.getType().isIndex()) {
-      addValue =
-          builder.create<arith::IndexCastOp>(loc, builder.getI32Type(), addValue);
+      addValue = builder.create<arith::IndexCastOp>(loc, builder.getI32Type(),
+                                                    addValue);
     }
     Value splatOffset =
         builder.create<triton::SplatOp>(loc, broadCastType, addValue);
@@ -1075,7 +1076,8 @@ PtrAnalysis::visitOperandBroadcast(triton::BroadcastOp broadcastOp,
   return success();
 }
 
-LogicalResult PtrAnalysis::visitOperandDataTensor(Value operand, PtrState &state,
+LogicalResult PtrAnalysis::visitOperandDataTensor(Value operand,
+                                                  PtrState &state,
                                                   const Location loc,
                                                   OpBuilder &builder) {
   if (!state.isEmpty()) {
@@ -1702,8 +1704,8 @@ void PtrState::analyzePermute() {
     return true;
   };
 
-  // Broadcast-only axes have no place in the affine stride ordering: 
-  // Treat them as the largest stride so they sort to the outermost 
+  // Broadcast-only axes have no place in the affine stride ordering:
+  // Treat them as the largest stride so they sort to the outermost
   // position instead.
   std::stable_sort(permuteIds.begin(), permuteIds.end(),
                    [&](size_t a, size_t b) {

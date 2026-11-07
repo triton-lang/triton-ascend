@@ -40,7 +40,7 @@ using MemOpTransformer = MemOpConverter::MemOpTransformer;
 // Only remap other when pointer rebuilding is a pure permutation:
 // split or removed axes still need the existing mask analysis.
 static bool canPermuteLoadOperands(const TritonToStructured::PtrState &state,
-                                  Value oldPtr, Value newPtr) {
+                                   Value oldPtr, Value newPtr) {
   auto oldType = dyn_cast<RankedTensorType>(oldPtr.getType());
   auto newType = dyn_cast<RankedTensorType>(newPtr.getType());
   if (state.dynamicOffsets.empty() || state.isBlockPtr() || !oldType ||
@@ -59,7 +59,7 @@ static bool canPermuteLoadOperands(const TritonToStructured::PtrState &state,
 }
 
 static Value remapSplatOther(Value other, RankedTensorType targetType,
-                            Location loc, PatternRewriter &rewriter) {
+                             Location loc, PatternRewriter &rewriter) {
   if (!other)
     return nullptr;
   if (auto splat = other.getDefiningOp<triton::SplatOp>())

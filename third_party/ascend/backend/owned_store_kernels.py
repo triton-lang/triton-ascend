@@ -8,10 +8,8 @@ import hashlib
 import inspect
 
 
-def _known(X, Index, Values, S: tl.constexpr, D: tl.constexpr,
-           PS: tl.constexpr, PD: tl.constexpr, LO0: tl.constexpr,
-           HI0: tl.constexpr, LO1: tl.constexpr, HI1: tl.constexpr,
-           MASK: tl.constexpr):
+def _known(X, Index, Values, S: tl.constexpr, D: tl.constexpr, PS: tl.constexpr, PD: tl.constexpr, LO0: tl.constexpr,
+           HI0: tl.constexpr, LO1: tl.constexpr, HI1: tl.constexpr, MASK: tl.constexpr):
     s = tl.arange(0, S)[:, None]
     d = tl.arange(0, D)[None, :]
     index = tl.load(Index + tl.arange(0, D))[None, :]
@@ -23,9 +21,8 @@ def _known(X, Index, Values, S: tl.constexpr, D: tl.constexpr,
         tl.store(pointer, value)
 
 
-def _host(X, Index, Values, PS, PD, S: tl.constexpr, D: tl.constexpr,
-          LO0: tl.constexpr, HI0: tl.constexpr, LO1: tl.constexpr,
-          HI1: tl.constexpr, MASK: tl.constexpr):
+def _host(X, Index, Values, PS, PD, S: tl.constexpr, D: tl.constexpr, LO0: tl.constexpr, HI0: tl.constexpr,
+          LO1: tl.constexpr, HI1: tl.constexpr, MASK: tl.constexpr):
     s = tl.arange(0, S)[:, None]
     d = tl.arange(0, D)[None, :]
     index = tl.load(Index + tl.arange(0, D))[None, :]
@@ -37,9 +34,8 @@ def _host(X, Index, Values, PS, PD, S: tl.constexpr, D: tl.constexpr,
         tl.store(pointer, value)
 
 
-def _device(X, Index, Values, Coefficients, S: tl.constexpr, D: tl.constexpr,
-            LO0: tl.constexpr, HI0: tl.constexpr, LO1: tl.constexpr,
-            HI1: tl.constexpr, MASK: tl.constexpr):
+def _device(X, Index, Values, Coefficients, S: tl.constexpr, D: tl.constexpr, LO0: tl.constexpr, HI0: tl.constexpr,
+            LO1: tl.constexpr, HI1: tl.constexpr, MASK: tl.constexpr):
     ps = tl.load(Coefficients)
     pd = tl.load(Coefficients + 1)
     s = tl.arange(0, S)[:, None]

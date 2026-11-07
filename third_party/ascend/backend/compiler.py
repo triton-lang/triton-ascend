@@ -2743,9 +2743,11 @@ class NPUOptions:
         object.__setattr__(self, "auto_simt_model_assets_hash", asset_hash)
 
         from triton.backends.ascend.owned_store_runtime import normalize_compile_request
-        object.__setattr__(self, "ordinary_store_owned_recipe_json",
-                           normalize_compile_request(self.ordinary_store_owned_recipe_json)
-                           if self.ordinary_store_owned_recipe_json else "")
+        object.__setattr__(
+            self, "ordinary_store_owned_recipe_json",
+            normalize_compile_request(self.ordinary_store_owned_recipe_json)
+            if self.ordinary_store_owned_recipe_json else "")
+
     def hash(self):
         key = "_".join([f"{name}-{val}" for name, val in self.__dict__.items()])
         key = "_".join([key, get_cann_version_file_hash()])

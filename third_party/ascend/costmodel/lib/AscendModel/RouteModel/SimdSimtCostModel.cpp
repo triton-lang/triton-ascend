@@ -3273,7 +3273,8 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
         true);
   }
   profile.hardware.ordinaryStoreActiveProfileSha256 = profile.contentSha256;
-  profile.hardware.ordinaryStoreUnitSourceSha256 = profile.microbenchmarkContentSha256;
+  profile.hardware.ordinaryStoreUnitSourceSha256 =
+      profile.microbenchmarkContentSha256;
   return profile;
 }
 

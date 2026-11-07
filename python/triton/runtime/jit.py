@@ -2,7 +2,6 @@ from __future__ import annotations, division
 import ast
 import sys
 
-OWNED_SD_JIT_ABI = "owned-sd-main-pre-cache-v1"
 import copy
 import hashlib
 import inspect
@@ -23,6 +22,8 @@ from . import _async_compile
 from .._utils import find_paths_if, get_iterable_path, type_canonicalisation_dict, is_namedtuple
 from .cache import get_cache_key
 from triton._C.libtriton import get_cache_invalidating_env_vars, native_specialize_impl
+
+OWNED_SD_JIT_ABI = "owned-sd-main-pre-cache-v1"
 
 TRITON_MODULE = "triton.language"
 GLUON_MODULE = "triton.experimental.gluon.language"
@@ -717,8 +718,8 @@ class JITFunction(JITCallable, KernelInterface[T]):
 
         # Resolve real scalar values BEFORE key selection. Raw caller JSON
         # outside the private offline context is stripped by the backend.
-        if _owned is not None and (options.get("ordinary_store_owned_recipe_json") or
-                                   _owned.offline_recipe() is not None):
+        if _owned is not None and (options.get("ordinary_store_owned_recipe_json")
+                                   or _owned.offline_recipe() is not None):
             updates = backend.get_runtime_compile_options(bound_args, specialization, options)
             options.update(updates)
             kwargs.update(updates)  # _pack_args reparses kwargs on a miss.

@@ -1,7 +1,6 @@
 from __future__ import annotations
 import hashlib
 
-OWNED_SD_COMPILED_ABI = "owned-sd-main-compiled-run-v1"
 import json
 from .._C.libtriton import get_cache_invalidating_env_vars, ir
 from ..backends import backends
@@ -18,6 +17,8 @@ import functools
 import os
 import time
 import copy
+
+OWNED_SD_COMPILED_ABI = "owned-sd-main-compiled-run-v1"
 
 # - ^\s*tt\.func\s+ : match the start of the string, any leading whitespace, the keyword func,
 #    and any following whitespace

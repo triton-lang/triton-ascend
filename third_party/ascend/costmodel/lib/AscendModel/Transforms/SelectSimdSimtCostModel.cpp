@@ -5,8 +5,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
-#include "AscendModel/RouteModel/SimdSimtCostModel.h"
 #include "AscendModel/RouteModel/OrdinaryStoreOwnedCompiler.h"
+#include "AscendModel/RouteModel/SimdSimtCostModel.h"
 #include "AscendModel/Transforms/Passes.h"
 #include "AscendModel/Transforms/SimtSelection.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
@@ -200,8 +200,10 @@ struct SelectSimdSimtCostModelPass
     }
 
     // Never reuse a prior native-analysis carrier from the source IR.
-    analysisModule->removeAttr("ascend.costmodel.ordinary_store.main_route_capability_json");
-    analysisModule->removeAttr("ascend.costmodel.ordinary_load.route_capability_json");
+    analysisModule->removeAttr(
+        "ascend.costmodel.ordinary_store.main_route_capability_json");
+    analysisModule->removeAttr(
+        "ascend.costmodel.ordinary_load.route_capability_json");
     SimdSimtCostModelOptions options;
     options.loopWorkloadModule = module;
     options.profilePath = profilePath.getValue();
@@ -244,9 +246,12 @@ struct SelectSimdSimtCostModelPass
         if (!autoMode)
           analysisModule->setAttr(
               "ascend.costmodel.ordinary_store.main_route_capability_json",
-              StringAttr::get(analysisModule.getContext(), routeTransformCapabilityJSON.getValue()));
-        analysisModule->setAttr("ascend.costmodel.ordinary_load.route_capability_json",
-            StringAttr::get(analysisModule.getContext(), routeTransformCapabilityJSON.getValue()));
+              StringAttr::get(analysisModule.getContext(),
+                              routeTransformCapabilityJSON.getValue()));
+        analysisModule->setAttr(
+            "ascend.costmodel.ordinary_load.route_capability_json",
+            StringAttr::get(analysisModule.getContext(),
+                            routeTransformCapabilityJSON.getValue()));
         if (failed(attachRuntimeScalarValues(analysisModule, *object))) {
           module.emitError("invalid runtime scalar values in route capability");
           signalPassFailure();
@@ -319,13 +324,15 @@ struct SelectSimdSimtCostModelPass
     // already support the requested route. The final conditional analysis
     // below uses the original forced route and all its real legality checks.
     auto bootstrapOptions = options;
-    if (auto capability = llvm::json::parse(routeTransformCapabilityJSON.getValue())) {
-      if (auto *object = capability->getAsObject(); autoMode && object &&
+    if (auto capability =
+            llvm::json::parse(routeTransformCapabilityJSON.getValue())) {
+      if (auto *object = capability->getAsObject();
+          autoMode && object &&
           object->getObject("ordinary_store_owned_recipe"))
         bootstrapOptions.backendForcedDecision.reset();
     }
-    auto reportOr =
-        analyzeSimdSimtCandidates(analysisModule, analysisAnchorPlan, bootstrapOptions);
+    auto reportOr = analyzeSimdSimtCandidates(
+        analysisModule, analysisAnchorPlan, bootstrapOptions);
     if (!reportOr) {
       module.emitError("C++ SIMD/SIMT cost model failed: ")
           << llvm::toString(reportOr.takeError());
@@ -341,48 +348,70 @@ struct SelectSimdSimtCostModelPass
     // mixed routing, F>1 and multiple programs stay on their original route.
     std::string ownedCertificateJSON;
     std::string ownedCertificateReason = "owned_recipe_missing";
-    if (auto capability = llvm::json::parse(routeTransformCapabilityJSON.getValue())) {
-      if (auto *object = capability->getAsObject(); object && object->getObject("ordinary_store_owned_recipe")) {
-        const auto *ownedRecipe = object->getObject("ordinary_store_owned_recipe");
-        const auto desired = ordinary_store_owned::str(*ownedRecipe, "fixed_route");
-        if (!autoMode || analysisModule != module || options.logicalProgramCountHint != 1 ||
-            options.sourceLogicalProgramCountHint != 1 || report.features.autoBlockifyV1Applied ||
+    if (auto capability =
+            llvm::json::parse(routeTransformCapabilityJSON.getValue())) {
+      if (auto *object = capability->getAsObject();
+          object && object->getObject("ordinary_store_owned_recipe")) {
+        const auto *ownedRecipe =
+            object->getObject("ordinary_store_owned_recipe");
+        const auto desired =
+            ordinary_store_owned::str(*ownedRecipe, "fixed_route");
+        if (!autoMode || analysisModule != module ||
+            options.logicalProgramCountHint != 1 ||
+            options.sourceLogicalProgramCountHint != 1 ||
+            report.features.autoBlockifyV1Applied ||
             ownedRecipe->getInteger("num_warps") != int64_t(options.numWarps) ||
-            containsExplicitVectorScope(module) || report.profileTarget != "Ascend950PR/dav-c310") {
-          ownedCertificateReason = "owned_requires_actual_single_program_fixed_F1_auto_compilation";
+            containsExplicitVectorScope(module) ||
+            report.profileTarget != "Ascend950PR/dav-c310") {
+          ownedCertificateReason =
+              "owned_requires_actual_single_program_fixed_F1_auto_compilation";
         } else {
-          auto proof = ordinary_store_owned::prove(analysisModule, *object,
-              report.profileContentSha256, report.microbenchmarkProfileContentSha256);
+          auto proof = ordinary_store_owned::prove(
+              analysisModule, *object, report.profileContentSha256,
+              report.microbenchmarkProfileContentSha256);
           ownedCertificateReason = proof.reason;
           if (proof.eligible) {
-            ownedCertificateJSON = ordinary_store_owned::canonical(llvm::json::Value(
-                ordinary_store_owned::cloneObject(proof.certificate)));
-            (*object)[ordinary_store_owned::certificateKey] = std::move(proof.certificate);
-            analysisModule->setAttr(ordinary_store_owned::carrierName,
-                StringAttr::get(module.getContext(), ordinary_store_owned::canonical(*capability)));
-            auto conditional = analyzeSimdSimtCandidates(analysisModule, analysisAnchorPlan, options);
+            ownedCertificateJSON =
+                ordinary_store_owned::canonical(llvm::json::Value(
+                    ordinary_store_owned::cloneObject(proof.certificate)));
+            (*object)[ordinary_store_owned::certificateKey] =
+                std::move(proof.certificate);
+            analysisModule->setAttr(
+                ordinary_store_owned::carrierName,
+                StringAttr::get(module.getContext(),
+                                ordinary_store_owned::canonical(*capability)));
+            auto conditional = analyzeSimdSimtCandidates(
+                analysisModule, analysisAnchorPlan, options);
             bool used = false;
             std::string conditionalError;
             if (conditional) {
               const bool simd = desired == "all_simd";
-              const auto &whole = simd ? conditional->stageModel.allSimd : conditional->stageModel.allSimt;
+              const auto &whole = simd ? conditional->stageModel.allSimd
+                                       : conditional->stageModel.allSimt;
               unsigned increments = 0;
               for (const auto &stage : conditional->stageModel.stages)
                 for (const auto &implementation : stage.implementations)
                   if (implementation.ordinaryStoreRound4CandidateUsed &&
                       implementation.implementation.superblockFactor == 1 &&
                       !implementation.implementation.localScope &&
-                      (implementation.implementation.mode == StageMode::SIMD) == simd)
+                      (implementation.implementation.mode == StageMode::SIMD) ==
+                          simd)
                     ++increments;
-              used = stringifySimdSimtCandidate(conditional->decision) == desired &&
+              used = stringifySimdSimtCandidate(conditional->decision) ==
+                         desired &&
                      whole.routeSuperblockFactor == 1 && increments == 1;
-              if (used) report = std::move(*conditional);
-            } else conditionalError = llvm::toString(conditional.takeError());
+              if (used)
+                report = std::move(*conditional);
+            } else
+              conditionalError = llvm::toString(conditional.takeError());
             if (!used) {
               ownedCertificateJSON.clear();
-              ownedCertificateReason = conditionalError.empty() ?
-                  "owned_conditional_target_not_used_once_on_fixed_F1_route" :
-                  "owned_conditional_analysis_rejected: " + conditionalError;
+              ownedCertificateReason =
+                  conditionalError.empty()
+                      ? "owned_conditional_target_not_used_once_on_fixed_F1_"
+                        "route"
+                      : "owned_conditional_analysis_rejected: " +
+                            conditionalError;
               analysisModule->removeAttr(ordinary_store_owned::carrierName);
             }
           }
@@ -495,15 +524,18 @@ struct SelectSimdSimtCostModelPass
     // Only an actually consumed candidate on the applied fixed whole-kernel
     // route gets a positive artifact certificate. Runtime must additionally
     // prove owned inputs/fresh output and retain them until async completion.
-    bool ownedGuardRequired = !ownedCertificateJSON.empty() && actionSupported &&
-                              effective == recommended && selectedSuperblockFactor == 1;
+    bool ownedGuardRequired = !ownedCertificateJSON.empty() &&
+                              actionSupported && effective == recommended &&
+                              selectedSuperblockFactor == 1;
     reportJSON["ordinary_store_owned_guard_required"] = ownedGuardRequired;
-    reportJSON["ordinary_store_owned_certificate_reason"] = ownedCertificateReason;
+    reportJSON["ordinary_store_owned_certificate_reason"] =
+        ownedCertificateReason;
     if (ownedGuardRequired) {
       auto certificate = llvm::json::parse(ownedCertificateJSON);
       if (!certificate) {
         llvm::consumeError(certificate.takeError());
-        module.emitError("internally generated owned certificate JSON is invalid");
+        module.emitError(
+            "internally generated owned certificate JSON is invalid");
         signalPassFailure();
         return;
       }

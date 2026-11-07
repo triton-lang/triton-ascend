@@ -44,7 +44,6 @@ from triton.backends.ascend.program_grid import (
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
 
-
 OWNED_SD_PRECOMPILED_DRIVER_ABI = "owned-sd-precompiled-driver-v1"
 
 

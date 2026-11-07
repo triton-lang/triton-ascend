@@ -50,17 +50,24 @@ uses an explicit Host producer contract for a causal valid prefix. Its result
 does not permit a generic Load estimator to inspect hidden runtime K; the
 generic static-mask integration falls back on that runtime-mask case.
 
-The generic final matrix contains 886 Load configurations, but no matching
-measurement files were present in the inspected existing measurement sessions.
-It must not be represented as an evaluated final set. All 1772 A/B binaries now
-have verified hashes and complete ELF resource descriptors, including 30
-existing FP8 byte-transport alternatives to old native build failures. Their
-semantic case fields match the matrix. This verifies static preparation only.
-The present generic
-formula domain covers 26 mixed layouts ending in D, F=1, rank 2--5. The original
-52-layout plan, all factors, page/pointer-table structures and distribution
-pressure panels remain a broader acceptance task. Existing structured and
-indirect fallback models are retained outside this domain.
+The newly evaluated generic final matrix contains 886 Load configurations,
+7088 input identities and two sessions. This check **did not pass**. There are
+164 nonpositive two-session median labels; the remaining 6924 positive-label
+inputs have MAPE 70.2104%. This positive subset is not a valid full-set MAPE.
+The original repeat-quality criteria fail for 386 configurations. The SIMD
+subset has positive labels throughout and MAPE 30.6038%. No observations were
+removed or replaced to declare acceptance. All retained quartet/window/label
+reductions were independently reproduced, and 352368 original-feature
+comparisons matched exactly. Existing-formula reuse therefore remains a
+candidate; these results do not establish final Load accuracy. Follow-up
+fitting uses TRAIN data, not the final measurement labels.
+
+All 1772 existing A/B binaries had verified hashes and complete ELF resource
+descriptors, including 30 existing FP8 byte-transport alternatives. The current
+generic formula domain is 26 mixed layouts ending in D, F=1, rank 2--5.
+Regular-fragment and dedicated-pattern models are separate work, outside this
+PR's responsibility. Existing structured and indirect fallback models remain
+available outside the generic domain.
 
 Direction and group metrics are reports under the revised overall-MAPE policy.
 No Load coefficients were fitted during this verification or export.

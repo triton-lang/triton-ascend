@@ -7,18 +7,19 @@ import pytest
 ROOT = Path(__file__).resolve().parents[4]
 COST = ROOT / "third_party/ascend/costmodel"
 sys.path.insert(0, str(COST / "python"))
-from indirect_load_selected import predict
+from indirect_load_selected import predict  # noqa: E402
 
-MODELS = {m: json.loads((COST / f"profiles/indirect_load_selected/{m}_load.json").read_text())["model"]
-          for m in ("SIMD", "SIMT")}
+MODELS = {
+    m: json.loads((COST / f"profiles/indirect_load_selected/{m}_load.json").read_text())["model"]
+    for m in ("SIMD", "SIMT")
+}
 CONTRACT = dict(stage_ownership=True, matched_increment=True)
 
 
 def case(mode="SIMD", mask="none"):
-    return dict(op="load", mode=mode, F=1, W=1 if mode == "SIMD" else 4,
-                shape=[4, 8], random=[False, True], lo=[0, 0], hi=[4, 8],
-                E=32, K=32, bytes=4, payload_dtype="float32", visibility="known",
-                coefficients=[8, 1], mask=mask)
+    return dict(op="load", mode=mode, F=1, W=1 if mode == "SIMD" else 4, shape=[4, 8], random=[False, True], lo=[0, 0],
+                hi=[4, 8], E=32, K=32, bytes=4, payload_dtype="float32", visibility="known", coefficients=[8, 1],
+                mask=mask)
 
 
 @pytest.mark.parametrize("mode", ["SIMD", "SIMT"])
@@ -51,11 +52,15 @@ def test_explicit_disable_ownership_and_factor():
 
 
 def test_Device_hidden_strides_not_inspected():
+
     class Hidden:
+
         def __len__(self):
             raise AssertionError("hidden coefficient read")
+
         def __getitem__(self, item):
             raise AssertionError("hidden coefficient read")
+
     c = case("SIMT")
     c.update(visibility="device", coefficients=Hidden())
     assert predict(MODELS["SIMT"], c, Hidden(), **CONTRACT)["eligible"]

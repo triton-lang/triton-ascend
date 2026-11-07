@@ -2,20 +2,18 @@
 import math
 from indirect_store_selected.visible_features import visible_features
 
-STATIC_MASKS = frozenset(("none", "box", "eighth", "quarter", "half", "full",
-                          "interior_box", "row_half", "three_quarters",
-                          "full_minus_one", "one", "zero"))
+STATIC_MASKS = frozenset(("none", "box", "eighth", "quarter", "half", "full", "interior_box", "row_half",
+                          "three_quarters", "full_minus_one", "one", "zero"))
 
 
-def predict(model, case, runtime_coefficients=None, *, enabled=True,
-            stage_ownership=False, matched_increment=False):
+def predict(model, case, runtime_coefficients=None, *, enabled=True, stage_ownership=False, matched_increment=False):
     if not enabled or not (stage_ownership and matched_increment):
         return dict(eligible=False, reason="Load_target_contract_missing_or_disabled")
     if case.get("op") != "load":
         raise ValueError("Load estimator requires an ordinary Load")
     dtype = case.get("payload_dtype")
-    if not isinstance(dtype, str) or not dtype or (
-            (dtype == "int1" or dtype.startswith("float8")) and case["bytes"] != 1):
+    if not isinstance(dtype, str) or not dtype or ((dtype == "int1" or dtype.startswith("float8"))
+                                                   and case["bytes"] != 1):
         raise ValueError("Explicit Load payload type and storage width must agree")
     if case.get("mask") not in STATIC_MASKS or case.get("K_visible") is False:
         raise ValueError("Data-dependent mask needs a proven Host contract or fallback")
@@ -48,5 +46,4 @@ def predict(model, case, runtime_coefficients=None, *, enabled=True,
     value = sum(features[n] * c for n, c in zip(leaf["features"], leaf["coefficients"]))
     if not math.isfinite(value):
         raise ValueError("Nonfinite Load prediction")
-    return dict(eligible=True, ticks=max(1., value),
-                leaf=key if key in model["models"] else "fallback", accepted=False)
+    return dict(eligible=True, ticks=max(1., value), leaf=key if key in model["models"] else "fallback", accepted=False)

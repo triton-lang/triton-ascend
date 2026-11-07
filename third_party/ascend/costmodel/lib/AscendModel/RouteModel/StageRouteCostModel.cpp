@@ -1296,8 +1296,8 @@ bool StageImplementationCost::isValid() const {
   return implementation.isValid() &&
          std::isfinite(ordinaryStoreTargetIncrementSystemCycles) &&
          ordinaryStoreTargetIncrementSystemCycles >= 0.0 &&
-         std::isfinite(totalCycles) &&
-         totalCycles >= 0.0 && std::isfinite(cvPartitionIdealTotalCycles) &&
+         std::isfinite(totalCycles) && totalCycles >= 0.0 &&
+         std::isfinite(cvPartitionIdealTotalCycles) &&
          cvPartitionIdealTotalCycles >= 0.0 &&
          std::isfinite(cvPartitionPayloadEfficiency) &&
          cvPartitionPayloadEfficiency >= 0.0 &&
@@ -1328,11 +1328,14 @@ llvm::json::Object StageImplementationCost::toJSON() const {
          return entries;
        }()},
       {"ordinary_load_selected_used", ordinaryLoadSelectedUsed},
-      {"ordinary_load_target_increment_system_cycles", ordinaryLoadTargetIncrementSystemCycles},
+      {"ordinary_load_target_increment_system_cycles",
+       ordinaryLoadTargetIncrementSystemCycles},
       {"ordinary_load_candidate_reason", ordinaryLoadCandidateReason},
       {"ordinary_load_leaf", ordinaryLoadLeaf},
-      {"ordinary_store_round4_candidate_used", ordinaryStoreRound4CandidateUsed},
-      {"ordinary_store_target_increment_system_cycles", ordinaryStoreTargetIncrementSystemCycles},
+      {"ordinary_store_round4_candidate_used",
+       ordinaryStoreRound4CandidateUsed},
+      {"ordinary_store_target_increment_system_cycles",
+       ordinaryStoreTargetIncrementSystemCycles},
       {"ordinary_store_candidate_reason", ordinaryStoreCandidateReason},
       {"ordinary_store_leaf", ordinaryStoreLeaf},
       {"resource_system_cycles", resources.toJSON()}};
@@ -1356,11 +1359,14 @@ llvm::json::Object StageImplementationCost::toCompactJSON() const {
       {"total_system_cycles", totalCycles},
       {"formula_evidence", formulaEvidence},
       {"ordinary_load_selected_used", ordinaryLoadSelectedUsed},
-      {"ordinary_load_target_increment_system_cycles", ordinaryLoadTargetIncrementSystemCycles},
+      {"ordinary_load_target_increment_system_cycles",
+       ordinaryLoadTargetIncrementSystemCycles},
       {"ordinary_load_candidate_reason", ordinaryLoadCandidateReason},
       {"ordinary_load_leaf", ordinaryLoadLeaf},
-      {"ordinary_store_round4_candidate_used", ordinaryStoreRound4CandidateUsed},
-      {"ordinary_store_target_increment_system_cycles", ordinaryStoreTargetIncrementSystemCycles},
+      {"ordinary_store_round4_candidate_used",
+       ordinaryStoreRound4CandidateUsed},
+      {"ordinary_store_target_increment_system_cycles",
+       ordinaryStoreTargetIncrementSystemCycles},
       {"ordinary_store_candidate_reason", ordinaryStoreCandidateReason},
       {"ordinary_store_leaf", ordinaryStoreLeaf},
       {"resource_system_cycles", resources.toCompactJSON()}};

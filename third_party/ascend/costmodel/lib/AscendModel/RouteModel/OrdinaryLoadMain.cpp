@@ -1,8 +1,8 @@
 // Visible-geometry Load projection. Device index contents are never inspected.
 #include "AscendModel/RouteModel/OrdinaryLoadMain.h"
+#include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/RouteModel/OrdinaryLoadSelected.h"
 #include "AscendModel/RouteModel/OrdinaryStoreRound4VisibilityAnalysis.h"
-#include "AscendModel/Analysis/StagePartitioner.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "llvm/Support/JSON.h"
 using namespace mlir;
@@ -12,49 +12,71 @@ using namespace mlir::ascend::ordinary_store_main;
 using namespace indirect_store_round4;
 bool sameWidthLoadPointerBitcast(Operation *op) {
   if (op->getName().getStringRef() != "tt.bitcast" ||
-      op->getNumOperands() != 1 || op->getNumResults() != 1) return false;
-  Type source = op->getOperand(0).getType(), target = op->getResult(0).getType();
-  auto a = dyn_cast<RankedTensorType>(source), b = dyn_cast<RankedTensorType>(target);
-  if (bool(a) != bool(b)) return false;
+      op->getNumOperands() != 1 || op->getNumResults() != 1)
+    return false;
+  Type source = op->getOperand(0).getType(),
+       target = op->getResult(0).getType();
+  auto a = dyn_cast<RankedTensorType>(source),
+       b = dyn_cast<RankedTensorType>(target);
+  if (bool(a) != bool(b))
+    return false;
   if (a) {
-    if (a.getShape() != b.getShape()) return false;
-    source = a.getElementType(); target = b.getElementType();
+    if (a.getShape() != b.getShape())
+      return false;
+    source = a.getElementType();
+    target = b.getElementType();
   }
-  auto p = dyn_cast<triton::PointerType>(source), q = dyn_cast<triton::PointerType>(target);
-  if (!p || !q || p.getAddressSpace() != q.getAddressSpace()) return false;
+  auto p = dyn_cast<triton::PointerType>(source),
+       q = dyn_cast<triton::PointerType>(target);
+  if (!p || !q || p.getAddressSpace() != q.getAddressSpace())
+    return false;
   auto scalarBits = [](Type t) -> unsigned {
-    if (auto i = dyn_cast<IntegerType>(t)) return i.getWidth();
-    if (auto f = dyn_cast<FloatType>(t)) return f.getWidth();
+    if (auto i = dyn_cast<IntegerType>(t))
+      return i.getWidth();
+    if (auto f = dyn_cast<FloatType>(t))
+      return f.getWidth();
     return 0;
   };
-  const auto x = scalarBits(p.getPointeeType()), y = scalarBits(q.getPointeeType());
+  const auto x = scalarBits(p.getPointeeType()),
+             y = scalarBits(q.getPointeeType());
   return x && x == y;
 }
 Value loadPointerRoot(Value value) {
   for (unsigned depth = 0; depth < 48; ++depth) {
-    if (isa<BlockArgument>(value)) return value;
+    if (isa<BlockArgument>(value))
+      return value;
     Operation *op = value.getDefiningOp();
-    if (!op) return {};
+    if (!op)
+      return {};
     auto name = op->getName().getStringRef();
     if (name == "tt.addptr" && op->getNumOperands() == 2)
       value = op->getOperand(0);
-    else if (sameWidthLoadPointerBitcast(op)) value = op->getOperand(0);
-    else if ((name == "tt.splat" || name == "tt.broadcast" ||
-              name == "tt.expand_dims") && op->getNumOperands() == 1)
+    else if (sameWidthLoadPointerBitcast(op))
       value = op->getOperand(0);
-    else return {}; // Reshapes and numeric casts need a separate provenance proof.
+    else if ((name == "tt.splat" || name == "tt.broadcast" ||
+              name == "tt.expand_dims") &&
+             op->getNumOperands() == 1)
+      value = op->getOperand(0);
+    else
+      return {}; // Reshapes and numeric casts need a separate provenance proof.
   }
   return {};
 }
-OrdinaryLoadMainResult targetCost(triton::LoadOp load, const LogicalStage &stage,
-    const HardwareProfile &profile, const StageImplementation &implementation,
-    const llvm::json::Object &capability) {
+OrdinaryLoadMainResult targetCost(triton::LoadOp load,
+                                  const LogicalStage &stage,
+                                  const HardwareProfile &profile,
+                                  const StageImplementation &implementation,
+                                  const llvm::json::Object &capability) {
   OrdinaryLoadMainResult result;
-  auto fail = [&](const char *why) { result.reason = why; return result; };
+  auto fail = [&](const char *why) {
+    result.reason = why;
+    return result;
+  };
   auto tensor = dyn_cast<RankedTensorType>(load.getType());
   if (!tensor || !tensor.hasStaticShape() || tensor.getRank() < 2 ||
       tensor.getRank() > 5 || tensor.getNumElements() < 4 ||
-      tensor.getNumElements() > 8192) return fail("Load_static_geometry_outside_domain");
+      tensor.getNumElements() > 8192)
+    return fail("Load_static_geometry_outside_domain");
   auto entry = load->getParentOfType<triton::FuncOp>();
   auto root = dyn_cast_or_null<BlockArgument>(loadPointerRoot(load.getPtr()));
   if (!entry || !root || root.getOwner() != &entry.getBody().front())
@@ -64,20 +86,25 @@ OrdinaryLoadMainResult targetCost(triton::LoadOp load, const LogicalStage &stage
   // A byte transport cannot silently change logical FP8 into integer data.
   if (!pointer || !isa<IntegerType, FloatType>(pointer.getPointeeType()) ||
       !isa<IntegerType, FloatType>(element) ||
-      pointer.getPointeeType().getIntOrFloatBitWidth() != element.getIntOrFloatBitWidth())
+      pointer.getPointeeType().getIntOrFloatBitWidth() !=
+          element.getIntOrFloatBitWidth())
     return fail("Load_logical_payload_type_not_verified");
   const bool integer = element.isInteger(1) || element.isInteger(8) ||
-      element.isInteger(16) || element.isInteger(32) || element.isInteger(64);
-  const bool floating = isa<Float16Type, BFloat16Type, Float32Type,
-      Float8E4M3FNType, Float8E5M2Type>(element) ||
+                       element.isInteger(16) || element.isInteger(32) ||
+                       element.isInteger(64);
+  const bool floating =
+      isa<Float16Type, BFloat16Type, Float32Type, Float8E4M3FNType,
+          Float8E5M2Type>(element) ||
       (implementation.mode == StageMode::SIMT && element.isF64());
-  if (!integer && !floating) return fail("Load_payload_type_outside_domain");
+  if (!integer && !floating)
+    return fail("Load_payload_type_outside_domain");
   const Type logicalPayload = pointer.getPointeeType();
   const bool logicalFP8 = isa<Float8E4M3FNType, Float8E5M2Type>(logicalPayload);
   if (logicalPayload != element && !(logicalFP8 && element.isInteger(8)))
     return fail("Load_logical_payload_cast_outside_supported_transport");
-  if (logicalFP8 && ((implementation.mode == StageMode::SIMD && element.isInteger(8)) ||
-      (implementation.mode == StageMode::SIMT && !element.isInteger(8))))
+  if (logicalFP8 &&
+      ((implementation.mode == StageMode::SIMD && element.isInteger(8)) ||
+       (implementation.mode == StageMode::SIMT && !element.isInteger(8))))
     return fail("Load_FP8_transport_does_not_match_native_mode");
   if (load.getCache() != triton::CacheModifier::NONE ||
       load.getEvict() != triton::EvictionPolicy::NORMAL ||
@@ -94,10 +121,11 @@ OrdinaryLoadMainResult targetCost(triton::LoadOp load, const LogicalStage &stage
   m.payloadIsInt1 = logicalPayload.isInteger(1);
   m.payloadIsFloat8 = logicalFP8;
   auto staticAxes = axes(load.getPtr());
-  const bool known = staticAxes.size() == m.shape.size() &&
+  const bool known =
+      staticAxes.size() == m.shape.size() &&
       llvm::all_of(staticAxes, [](const Axis &axis) {
         return axis.valid && !(axis.loaded && axis.stride) &&
-            (axis.loaded ? axis.loadedScale > 0 : axis.stride > 0);
+               (axis.loaded ? axis.loadedScale > 0 : axis.stride > 0);
       });
   std::vector<int64_t> runtime;
   if (known) {
@@ -118,106 +146,152 @@ OrdinaryLoadMainResult targetCost(triton::LoadOp load, const LogicalStage &stage
       device |= axis.pitch.kind == PitchKind::DeviceScalarLoad;
       m.dAxes.push_back(bool(axis.loadedIndex));
     }
-    if (host && device) return fail("Load_mixed_Host_Device_strides_unsupported");
+    if (host && device)
+      return fail("Load_mixed_Host_Device_strides_unsupported");
     if (device) {
       // Unknown pitch features stay opaque. The positive/no-wrap domain must
       // be an explicit caller contract; it cannot be inferred from a load.
-      if (!capability.getBoolean("ordinary_load_device_stride_positive_no_wrap").value_or(false))
+      if (!capability.getBoolean("ordinary_load_device_stride_positive_no_wrap")
+               .value_or(false))
         return fail("Load_Device_stride_domain_not_declared");
       m.visibility = Visibility::Device;
     } else if (host) {
       m.visibility = Visibility::Host;
       for (const auto &axis : dynamicAxes) {
         auto value = hostPitchValue(axis.pitch, entry, capability);
-        if (!value) return fail("Load_Host_scalar_option_IR_binding_missing");
+        if (!value)
+          return fail("Load_Host_scalar_option_IR_binding_missing");
         runtime.push_back(*value);
       }
-    } else return fail("Load_unknown_stride_source");
+    } else
+      return fail("Load_unknown_stride_source");
   }
-  m.lower.assign(m.shape.size(), 0); m.upper = m.shape;
-  Value mask = load.getMask(); m.hasMask = bool(mask);
+  m.lower.assign(m.shape.size(), 0);
+  m.upper = m.shape;
+  Value mask = load.getMask();
+  m.hasMask = bool(mask);
   if (mask) {
     StaticMask evaluator;
     auto values = evaluator.evaluate(mask);
     if (!values || values->shape != SmallVector<int64_t>(tensor.getShape()) ||
         values->values.size() != static_cast<size_t>(tensor.getNumElements()))
-      return fail("Load_data_dependent_mask_requires_Host_contract_or_fallback");
+      return fail(
+          "Load_data_dependent_mask_requires_Host_contract_or_fallback");
     bool any = false;
-    std::fill(m.lower.begin(), m.lower.end(), std::numeric_limits<int64_t>::max());
+    std::fill(m.lower.begin(), m.lower.end(),
+              std::numeric_limits<int64_t>::max());
     std::fill(m.upper.begin(), m.upper.end(), 0);
-    for (int64_t k = 0; k < tensor.getNumElements(); ++k) if (values->values[k]) {
-      any = true; int64_t flat = k;
-      for (size_t i = m.shape.size(); i-- > 0;) {
-        const auto coordinate = flat % m.shape[i]; flat /= m.shape[i];
-        m.lower[i] = std::min(m.lower[i], coordinate);
-        m.upper[i] = std::max(m.upper[i], coordinate + 1);
+    for (int64_t k = 0; k < tensor.getNumElements(); ++k)
+      if (values->values[k]) {
+        any = true;
+        int64_t flat = k;
+        for (size_t i = m.shape.size(); i-- > 0;) {
+          const auto coordinate = flat % m.shape[i];
+          flat /= m.shape[i];
+          m.lower[i] = std::min(m.lower[i], coordinate);
+          m.upper[i] = std::max(m.upper[i], coordinate + 1);
+        }
       }
-    }
     if (!any) {
-      m.lower.assign(m.shape.size(), 0); m.upper = m.shape; m.upper.back() = 0;
+      m.lower.assign(m.shape.size(), 0);
+      m.upper = m.shape;
+      m.upper.back() = 0;
     }
     for (int64_t k = 0; k < tensor.getNumElements(); ++k) {
-      int64_t flat = k; bool active = true;
+      int64_t flat = k;
+      bool active = true;
       for (size_t i = m.shape.size(); i-- > 0;) {
-        const auto coordinate = flat % m.shape[i]; flat /= m.shape[i];
+        const auto coordinate = flat % m.shape[i];
+        flat /= m.shape[i];
         active &= m.lower[i] <= coordinate && coordinate < m.upper[i];
       }
-      if (active != bool(values->values[k])) return fail("Load_nonrectangular_mask");
+      if (active != bool(values->values[k]))
+        return fail("Load_nonrectangular_mask");
     }
   }
-  m.rectangularMaskVerified = true; m.stageOwnershipVerified = true;
+  m.rectangularMaskVerified = true;
+  m.stageOwnershipVerified = true;
   m.matchedIncrementContractVerified = true;
   auto estimate = indirect_load_selected::tryPredict(
       m, m.visibility == Visibility::Host ? &runtime : nullptr);
-  result.reason = estimate.reason; result.leaf = estimate.leaf;
-  if (!estimate.eligible || !estimate.ticks) return result;
-  StagePartition auxiliary; auxiliary.operationOwnershipComplete = true;
+  result.reason = estimate.reason;
+  result.leaf = estimate.leaf;
+  if (!estimate.eligible || !estimate.ticks)
+    return result;
+  StagePartition auxiliary;
+  auxiliary.operationOwnershipComplete = true;
   auxiliary.stages.push_back(stage);
-  auto &rest = auxiliary.stages.front(); rest.operations.clear();
+  auto &rest = auxiliary.stages.front();
+  rest.operations.clear();
   for (Operation *op : stage.operations)
-    if (op != load.getOperation()) rest.operations.push_back(op);
+    if (op != load.getOperation())
+      rest.operations.push_back(op);
   if (auto error = StageWorkloadAnalysis().analyze(auxiliary)) {
-    llvm::consumeError(std::move(error)); return fail("Load_auxiliary_reanalysis_failed");
+    llvm::consumeError(std::move(error));
+    return fail("Load_auxiliary_reanalysis_failed");
   }
-  if (rest.iterationCount != 1) return fail("Load_auxiliary_iteration_contract_changed");
+  if (rest.iterationCount != 1)
+    return fail("Load_auxiliary_iteration_contract_changed");
   result.auxiliaryStage = std::move(rest);
-  result.targetSystemCycles = *estimate.ticks; // SYS_CNT / profile system cycle = 1.
+  result.targetSystemCycles =
+      *estimate.ticks; // SYS_CNT / profile system cycle = 1.
   result.reason = "visible_Load_geometry_random_index_prior_target_only";
   return result;
 }
 } // namespace
 
-OrdinaryLoadMainResult mlir::ascend::ordinaryLoadMainCost(
-    const LogicalStage &stage, const HardwareProfile &profile,
-    const StageImplementation &implementation, bool operationOwnershipComplete) {
+OrdinaryLoadMainResult
+mlir::ascend::ordinaryLoadMainCost(const LogicalStage &stage,
+                                   const HardwareProfile &profile,
+                                   const StageImplementation &implementation,
+                                   bool operationOwnershipComplete) {
   OrdinaryLoadMainResult result;
   result.reason = "Load_no_eligible_single_target";
   if (!operationOwnershipComplete || stage.operations.empty() ||
       implementation.superblockFactor != 1 || implementation.localScope ||
       implementation.aivSubblocks != 1 || stage.iterationCount != 1 ||
       stage.features.hasLoop || stage.features.hasAtomicMemory ||
-      stage.features.hasDot || stage.features.hasReduction || stage.features.hasPrefixScan ||
+      stage.features.hasDot || stage.features.hasReduction ||
+      stage.features.hasPrefixScan ||
       profile.target != "Ascend950PR/dav-c310" ||
       profile.ordinaryStoreActiveProfileSha256.size() != 64 ||
-      profile.ordinaryStoreUnitSourceSha256.size() != 64) return result;
+      profile.ordinaryStoreUnitSourceSha256.size() != 64)
+    return result;
   auto module = stage.operations.front()->getParentOfType<ModuleOp>();
-  if (!module) return result;
+  if (!module)
+    return result;
   llvm::json::Object capability;
-  if (auto attr = module->getAttrOfType<StringAttr>("ascend.costmodel.ordinary_load.route_capability_json")) {
-    if (attr.getValue().size() > 131072) return result;
+  if (auto attr = module->getAttrOfType<StringAttr>(
+          "ascend.costmodel.ordinary_load.route_capability_json")) {
+    if (attr.getValue().size() > 131072)
+      return result;
     auto parsed = llvm::json::parse(attr.getValue());
-    if (!parsed) { llvm::consumeError(parsed.takeError()); return result; }
-    auto object = parsed->getAsObject(); if (!object) return result;
+    if (!parsed) {
+      llvm::consumeError(parsed.takeError());
+      return result;
+    }
+    auto object = parsed->getAsObject();
+    if (!object)
+      return result;
     capability = std::move(*object);
   }
   if (!capability.getBoolean("ordinary_load_selected_enabled").value_or(true)) {
-    result.reason = "Load_formula_explicitly_disabled"; return result;
+    result.reason = "Load_formula_explicitly_disabled";
+    return result;
   }
   for (Operation *op : stage.operations) {
-    if (op->getNumRegions()) return OrdinaryLoadMainResult{};
-    auto load = dyn_cast<triton::LoadOp>(op); if (!load) continue;
-    auto candidate = targetCost(load, stage, profile, implementation, capability);
-    if (!candidate.targetSystemCycles) { if (!result.targetSystemCycles) result.reason = candidate.reason; continue; }
+    if (op->getNumRegions())
+      return OrdinaryLoadMainResult{};
+    auto load = dyn_cast<triton::LoadOp>(op);
+    if (!load)
+      continue;
+    auto candidate =
+        targetCost(load, stage, profile, implementation, capability);
+    if (!candidate.targetSystemCycles) {
+      if (!result.targetSystemCycles)
+        result.reason = candidate.reason;
+      continue;
+    }
     if (result.targetSystemCycles) {
       result = OrdinaryLoadMainResult{};
       result.reason = "Load_multiple_targets_require_separate_accounting";

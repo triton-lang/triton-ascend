@@ -25,15 +25,20 @@ inline SmallVector<Axis> unknown(Value value) {
            : SmallVector<Axis>{};
 }
 inline std::optional<int64_t> constant(Value value, unsigned depth = 0) {
-  if (depth > 48) return std::nullopt;
+  if (depth > 48)
+    return std::nullopt;
   auto *op = value.getDefiningOp();
-  if (!op) return std::nullopt;
+  if (!op)
+    return std::nullopt;
   if ((op->getName().getStringRef() == "tt.splat" ||
-       op->getName().getStringRef() == "tt.broadcast") && op->getNumOperands() == 1)
+       op->getName().getStringRef() == "tt.broadcast") &&
+      op->getNumOperands() == 1)
     return constant(op->getOperand(0), depth + 1);
-  if (op->getName().getStringRef() != "arith.constant") return std::nullopt;
+  if (op->getName().getStringRef() != "arith.constant")
+    return std::nullopt;
   if (auto a = op->getAttrOfType<IntegerAttr>("value")) {
-    if (a.getValue().getBitWidth() > 64) return std::nullopt;
+    if (a.getValue().getBitWidth() > 64)
+      return std::nullopt;
     return a.getInt();
   }
   if (auto a = op->getAttrOfType<DenseIntElementsAttr>("value"))
@@ -41,26 +46,32 @@ inline std::optional<int64_t> constant(Value value, unsigned depth = 0) {
       return a.getSplatValue<APInt>().getSExtValue();
   return std::nullopt;
 }
-inline SmallVector<Axis> axesImpl(Value value, unsigned depth, unsigned &remaining) {
+inline SmallVector<Axis> axesImpl(Value value, unsigned depth,
+                                  unsigned &remaining) {
   auto result = unknown(value);
-  if (depth > 48 || !remaining) return result;
+  if (depth > 48 || !remaining)
+    return result;
   --remaining;
   auto *op = value.getDefiningOp();
-  if (!op) return result;
+  if (!op)
+    return result;
   const auto name = op->getName().getStringRef();
   const size_t rank = result.size();
   if (name == "tt.splat" && op->getNumOperands() == 1 &&
       !isa<RankedTensorType>(op->getOperand(0).getType())) {
     // A scalar pointer/program offset is uniform. It never determines an axis.
-    for (auto &a : result) a.valid = true;
+    for (auto &a : result)
+      a.valid = true;
     return result;
   }
   if (constant(value)) {
-    for (auto &a : result) a.valid = true;
+    for (auto &a : result)
+      a.valid = true;
     return result;
   }
   if (name == "tt.make_range" && rank == 1) {
-    result[0] = Axis{1, 0, {}, true}; return result;
+    result[0] = Axis{1, 0, {}, true};
+    return result;
   }
   if (name == "tt.load") {
     auto type = dyn_cast<RankedTensorType>(value.getType());
@@ -72,7 +83,8 @@ inline SmallVector<Axis> axesImpl(Value value, unsigned depth, unsigned &remaini
     for (size_t i = 0; i < rank; ++i) {
       result[i] = Axis{};
       if (type.getDimSize(i) > 1) {
-        result[i].loaded = value; result[i].loadedScale = 1;
+        result[i].loaded = value;
+        result[i].loadedScale = 1;
       }
     }
     return result;
@@ -80,8 +92,9 @@ inline SmallVector<Axis> axesImpl(Value value, unsigned depth, unsigned &remaini
   if (name == "tt.expand_dims" && op->getNumOperands() == 1) {
     auto axis = op->getAttrOfType<IntegerAttr>("axis");
     auto src = axesImpl(op->getOperand(0), depth + 1, remaining);
-    if (!axis || axis.getInt() < 0 || static_cast<size_t>(axis.getInt()) >= rank ||
-        src.size() + 1 != rank) return result;
+    if (!axis || axis.getInt() < 0 ||
+        static_cast<size_t>(axis.getInt()) >= rank || src.size() + 1 != rank)
+      return result;
     for (size_t i = 0, j = 0; i < rank; ++i)
       result[i] = i == static_cast<size_t>(axis.getInt()) ? Axis{} : src[j++];
     return result;
@@ -90,10 +103,13 @@ inline SmallVector<Axis> axesImpl(Value value, unsigned depth, unsigned &remaini
     auto srcType = dyn_cast<RankedTensorType>(op->getOperand(0).getType());
     auto dstType = dyn_cast<RankedTensorType>(value.getType());
     auto src = axesImpl(op->getOperand(0), depth + 1, remaining);
-    if (!srcType || !dstType || src.size() != rank) return result;
+    if (!srcType || !dstType || src.size() != rank)
+      return result;
     for (size_t i = 0; i < rank; ++i) {
-      if (srcType.getDimSize(i) == 1) result[i] = Axis{};
-      else if (srcType.getDimSize(i) == dstType.getDimSize(i)) result[i] = src[i];
+      if (srcType.getDimSize(i) == 1)
+        result[i] = Axis{};
+      else if (srcType.getDimSize(i) == dstType.getDimSize(i))
+        result[i] = src[i];
     }
     return result;
   }
@@ -104,21 +120,27 @@ inline SmallVector<Axis> axesImpl(Value value, unsigned depth, unsigned &remaini
     return src.size() == rank ? src : result;
   }
   if (op->getNumOperands() != 2 ||
-      (name != "tt.addptr" && name != "arith.addi" &&
-       name != "arith.subi" && name != "arith.muli")) return result;
+      (name != "tt.addptr" && name != "arith.addi" && name != "arith.subi" &&
+       name != "arith.muli"))
+    return result;
   auto lhs = axesImpl(op->getOperand(0), depth + 1, remaining);
   auto rhs = axesImpl(op->getOperand(1), depth + 1, remaining);
-  if (lhs.size() != rank || rhs.size() != rank) return result;
-  auto lconst = constant(op->getOperand(0)), rconst = constant(op->getOperand(1));
+  if (lhs.size() != rank || rhs.size() != rank)
+    return result;
+  auto lconst = constant(op->getOperand(0)),
+       rconst = constant(op->getOperand(1));
   for (size_t i = 0; i < rank; ++i) {
-    if (!lhs[i].valid || !rhs[i].valid) continue;
+    if (!lhs[i].valid || !rhs[i].valid)
+      continue;
     Axis a;
     if (name == "arith.muli") {
-      if (!lconst && !rconst) continue; // Dynamic Host/device pitch is unsupported.
+      if (!lconst && !rconst)
+        continue; // Dynamic Host/device pitch is unsupported.
       const auto scale = lconst ? *lconst : *rconst;
       const auto &source = lconst ? rhs[i] : lhs[i];
       if (__builtin_mul_overflow(source.stride, scale, &a.stride) ||
-          __builtin_mul_overflow(source.loadedScale, scale, &a.loadedScale)) continue;
+          __builtin_mul_overflow(source.loadedScale, scale, &a.loadedScale))
+        continue;
       a.loaded = source.loaded;
     } else {
       const int64_t sign = name == "arith.subi" ? -1 : 1;
@@ -126,11 +148,15 @@ inline SmallVector<Axis> axesImpl(Value value, unsigned depth, unsigned &remaini
       if (__builtin_mul_overflow(rhs[i].stride, sign, &stride) ||
           __builtin_add_overflow(lhs[i].stride, stride, &a.stride) ||
           __builtin_mul_overflow(rhs[i].loadedScale, sign, &loadedScale) ||
-          __builtin_add_overflow(lhs[i].loadedScale, loadedScale, &a.loadedScale)) continue;
-      if (lhs[i].loaded && rhs[i].loaded && lhs[i].loaded != rhs[i].loaded) continue;
+          __builtin_add_overflow(lhs[i].loadedScale, loadedScale,
+                                 &a.loadedScale))
+        continue;
+      if (lhs[i].loaded && rhs[i].loaded && lhs[i].loaded != rhs[i].loaded)
+        continue;
       a.loaded = lhs[i].loaded ? lhs[i].loaded : rhs[i].loaded;
     }
-    if (a.loaded && a.stride) continue; // No guessed mixed term on one logical axis.
+    if (a.loaded && a.stride)
+      continue; // No guessed mixed term on one logical axis.
     result[i] = a;
   }
   return result;
@@ -152,7 +178,8 @@ public:
   std::optional<Tensor> evaluate(Value value) {
     if (auto it = memo.find(value); it != memo.end())
       return it->second;
-    if (!remainingNodes) return std::nullopt;
+    if (!remainingNodes)
+      return std::nullopt;
     --remainingNodes;
     auto result = compute(value);
     memo[value] = result;

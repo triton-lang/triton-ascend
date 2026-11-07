@@ -3,8 +3,8 @@ import math
 from .visible_features import visible_features
 
 
-def predict(model, case, runtime_coefficients=None, *, enabled=True,
-            stage_ownership=False, first_store=False, matched_increment=False):
+def predict(model, case, runtime_coefficients=None, *, enabled=True, stage_ownership=False, first_store=False,
+            matched_increment=False):
     if not enabled:
         return dict(eligible=False, reason='selected_formula_candidate_disabled', accepted=False)
     if not (stage_ownership and first_store and matched_increment):

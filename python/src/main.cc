@@ -55,8 +55,9 @@ PYBIND11_MODULE(libtriton, m) {
   py::dict modules = py::module_::import("sys").attr("modules");
   py::str moduleName = m.attr("__name__");
   const bool hadParent = modules.contains(moduleName);
-  py::object previous = hadParent ? py::reinterpret_borrow<py::object>(modules[moduleName])
-                                  : py::none();
+  py::object previous =
+      hadParent ? py::reinterpret_borrow<py::object>(modules[moduleName])
+                : py::none();
   if (hadParent && !previous.is(m))
     throw py::import_error("libtriton parent already names a different module");
   modules[moduleName] = m;

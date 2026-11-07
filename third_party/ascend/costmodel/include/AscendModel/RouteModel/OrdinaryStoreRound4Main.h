@@ -10,9 +10,9 @@ struct OrdinaryStoreMainResult {
   std::string reason = "candidate_default_off";
   std::string leaf;
 };
-OrdinaryStoreMainResult ordinaryStoreMainCost(const LogicalStage &stage,
-                                            const HardwareProfile &profile,
-                                            const StageImplementation &implementation,
-                                            bool operationOwnershipComplete);
+OrdinaryStoreMainResult
+ordinaryStoreMainCost(const LogicalStage &stage, const HardwareProfile &profile,
+                      const StageImplementation &implementation,
+                      bool operationOwnershipComplete);
 } // namespace mlir::ascend
 #endif

@@ -10,6 +10,7 @@ from typing import Optional, Tuple
 
 
 class RuntimeArgMappingError(ValueError):
+
     def __init__(self, reason):
         self.reason = reason
         super().__init__(reason)
@@ -55,13 +56,13 @@ def _check_override(override, facts, compact_arity):
     parsed = []
     seen = set()
     for pair in override:
-        _require(type(pair) in (tuple, list) and len(pair) == 2,
-                 'runtime_scalar_override_requires_flat_index_value_pairs')
+        _require(
+            type(pair) in (tuple, list) and len(pair) == 2, 'runtime_scalar_override_requires_flat_index_value_pairs')
         index, value = pair
-        _require(type(index) is int and 0 <= index < compact_arity,
-                 'runtime_scalar_override_invalid_compact_index')
-        _require(type(value) is int and -(1 << 63) <= value < (1 << 63),
-                 'runtime_scalar_override_requires_signed_integer_not_bool')
+        _require(type(index) is int and 0 <= index < compact_arity, 'runtime_scalar_override_invalid_compact_index')
+        _require(
+            type(value) is int and -(1 << 63) <= value < (1 << 63),
+            'runtime_scalar_override_requires_signed_integer_not_bool')
         _require(index not in seen, 'runtime_scalar_override_duplicate_compact_index')
         seen.add(index)
         parsed.append((index, value))
@@ -96,14 +97,12 @@ def map_runtime_arguments(bound_args, specialization, *, scalar_override=None):
     for full, ((_, value), spec) in enumerate(zip(items, specialization)):
         _require(type(spec) is tuple and len(spec) == 2, 'flat_type_specialization_pair_required')
         tag, attribute = spec
-        _require(type(tag) is str and bool(tag) and len(tag) <= 128,
-                 'flat_scalar_or_pointer_type_tag_required')
+        _require(type(tag) is str and bool(tag) and len(tag) <= 128, 'flat_scalar_or_pointer_type_tag_required')
         _require(attribute is None or type(attribute) in (str, int, bool, float),
                  'nested_specialization_attribute_not_supported')
         _require(_flat_value(value), 'nested_or_aggregate_binder_argument_not_supported')
         if tag == 'constexpr':
-            _require(value is None or type(value) in (str, int, bool, float),
-                     'non_scalar_constexpr_not_supported')
+            _require(value is None or type(value) in (str, int, bool, float), 'non_scalar_constexpr_not_supported')
             full_to_compact.append(None)
             constexpr.append(full)
             continue
@@ -126,8 +125,8 @@ def map_runtime_arguments(bound_args, specialization, *, scalar_override=None):
         full_to_compact.append(compact)
         compact_to_full.append(full)
         compact_types.append(tag)
-    result = RuntimeArgMapping(tuple(full_to_compact), tuple(compact_to_full),
-                               tuple(compact_types), tuple(facts), tuple(constexpr))
+    result = RuntimeArgMapping(tuple(full_to_compact), tuple(compact_to_full), tuple(compact_types), tuple(facts),
+                               tuple(constexpr))
     _check_override(scalar_override, result.scalar_values, result.compact_arity)
     return result
 

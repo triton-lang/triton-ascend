@@ -9,8 +9,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[4]
 COSTMODEL = ROOT / "third_party/ascend/costmodel"
 sys.path.insert(0, str(COSTMODEL / "python"))
-from indirect_store_selected.predictor import predict
-from indirect_store_selected.visible_features import visible_features
+from indirect_store_selected.predictor import predict  # noqa: E402
+from indirect_store_selected.visible_features import visible_features  # noqa: E402
 
 
 def load_json(path):
@@ -18,8 +18,10 @@ def load_json(path):
 
 
 FIXTURES = load_json(COSTMODEL / "tests/indirect_store_selected_metadata.json")["cases"]
-MODELS = {mode: load_json(COSTMODEL / f"profiles/indirect_store_selected/{mode}_store.json")
-          for mode in ("SIMD", "SIMT")}
+MODELS = {
+    mode: load_json(COSTMODEL / f"profiles/indirect_store_selected/{mode}_store.json")
+    for mode in ("SIMD", "SIMT")
+}
 CONTRACT = dict(enabled=True, stage_ownership=True, first_store=True, matched_increment=True)
 
 
@@ -42,6 +44,7 @@ def test_explicit_disable_and_ownership_are_required():
 
 
 class UnreadableCoefficients:
+
     def __getitem__(self, index):
         raise AssertionError("Device-hidden coefficients were accessed")
 
@@ -50,16 +53,15 @@ class UnreadableCoefficients:
 
 
 def test_device_hidden_coefficients_are_never_read():
-    c = copy.deepcopy(next(row["metadata"] for row in FIXTURES
-                           if row["metadata"]["visibility"] == "device"))
+    c = copy.deepcopy(next(row["metadata"] for row in FIXTURES if row["metadata"]["visibility"] == "device"))
     before = visible_features(c)
     c["coefficients"] = UnreadableCoefficients()
     assert visible_features(c, UnreadableCoefficients()) == before
 
 
 def test_host_coefficients_must_be_explicit():
-    c = copy.deepcopy(next(row["metadata"] for row in FIXTURES
-                           if row["metadata"]["visibility"] == "host" and row["metadata"]["K"]))
+    c = copy.deepcopy(
+        next(row["metadata"] for row in FIXTURES if row["metadata"]["visibility"] == "host" and row["metadata"]["K"]))
     with pytest.raises(ValueError, match="coefficients"):
         predict(MODELS[c["mode"]], c, **CONTRACT)
 

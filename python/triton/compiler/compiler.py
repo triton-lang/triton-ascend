@@ -1,5 +1,7 @@
 from __future__ import annotations
 import hashlib
+
+OWNED_SD_COMPILED_ABI = "owned-sd-main-compiled-run-v1"
 import json
 from .._C.libtriton import get_cache_invalidating_env_vars, ir
 from ..backends import backends
@@ -224,6 +226,10 @@ class CompileTimer:
 
 
 def compile(src, target=None, options=None, _env_vars=None):
+    import sys
+    _owned = sys.modules.get("triton.backends.ascend.owned_store_runtime")
+    if _owned is not None:
+        _owned.validate_offline_compiler_source(src, options)
     compilation_listener = knobs.compilation.listener
     if compilation_listener:
         timer = CompileTimer()
@@ -434,6 +440,9 @@ class CompiledKernel:
         self._run = None
 
     def _init_handles(self):
+        if getattr(self.metadata, "ordinary_store_owned_guard_required", False):
+            from triton.backends.ascend.owned_store_runtime import prepare_owned_handles_guard
+            prepare_owned_handles_guard(self)
         if self.module is not None:
             return
 
@@ -474,6 +483,9 @@ class CompiledKernel:
     def run(self):
         if self._run is None:
             self._init_handles()
+        if getattr(self.metadata, "ordinary_store_owned_guard_required", False):
+            from triton.backends.ascend.owned_store_runtime import guarded_compiled_launcher
+            return guarded_compiled_launcher(self, self._run)
         return self._run
 
     def launch_metadata(self, grid, stream, *args):

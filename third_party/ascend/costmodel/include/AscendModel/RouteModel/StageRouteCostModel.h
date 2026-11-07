@@ -574,6 +574,12 @@ struct StageImplementationCost {
   /// Describes the strongest formula evidence used for this candidate.  It
   /// is report provenance, not a route multiplier.
   std::string formulaEvidence;
+  // This value is added once, after the original auxiliary Stage envelope.
+  // resource_system_cycles intentionally describes auxiliary work only.
+  bool ordinaryStoreRound4CandidateUsed = false;
+  double ordinaryStoreTargetIncrementSystemCycles = 0.0;
+  std::string ordinaryStoreCandidateReason;
+  std::string ordinaryStoreLeaf;
   /// Per-AIV work before SuperBlock replication. LogicalStageCost::workload
   /// remains the original, mode-independent logical-program workload.
   std::optional<StageWorkload> perAivWorkload;

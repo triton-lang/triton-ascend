@@ -621,6 +621,13 @@ struct HardwareProfile {
   std::string simtIndirectStoreModel;
   std::string simdIndirectStoreModel;
   /// Base warp count of one logical SIMT program.
+  // Identities of the actual main profile loader's canonical assets. Manual
+  // profiles without these fields never enable the explicit candidate.
+  std::string ordinaryStoreActiveProfileSha256;
+  std::string ordinaryStoreUnitSourceSha256;
+  /// Base warp count of one logical SIMT program. This is a compile option,
+  /// not a hardware constant. A SuperBlock-F implementation launches
+  /// baseSimtWarpCount * F active warps in the physical VF.
   int64_t baseSimtWarpCount = 1;
   /// CV1:2 work partition, applied before local SuperBlock grouping. This is
   /// not a divisor of Q or of the launch warp count.

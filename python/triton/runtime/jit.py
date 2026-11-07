@@ -1,5 +1,8 @@
 from __future__ import annotations, division
 import ast
+import sys
+
+OWNED_SD_JIT_ABI = "owned-sd-main-pre-cache-v1"
 import copy
 import hashlib
 import inspect
@@ -700,6 +703,9 @@ class JITFunction(JITCallable, KernelInterface[T]):
         device = driver.active.get_current_device()
         stream = driver.active.get_current_stream(device)
 
+        _owned = sys.modules.get("triton.backends.ascend.owned_store_runtime")
+        if _owned is not None:
+            _owned.owned_before_callbacks(self, warmup)
         # Execute pre run hooks with args and kwargs
         for hook in self.pre_run_hooks:
             hook(*args, **kwargs)
@@ -709,11 +715,22 @@ class JITFunction(JITCallable, KernelInterface[T]):
         # the type and the second parameter is the 'specialization' value.
         bound_args, specialization, options = binder(*args, **kwargs)
 
+        # Resolve real scalar values BEFORE key selection. Raw caller JSON
+        # outside the private offline context is stripped by the backend.
+        if _owned is not None and (options.get("ordinary_store_owned_recipe_json") or
+                                   _owned.offline_recipe() is not None):
+            updates = backend.get_runtime_compile_options(bound_args, specialization, options)
+            options.update(updates)
+            kwargs.update(updates)  # _pack_args reparses kwargs on a miss.
+        if _owned is not None:
+            _owned.owned_pre_cache_check(self, options)
         key = compute_cache_key(kernel_key_cache, specialization, options)
         kernel = kernel_cache.get(key, None)
 
         # Kernel is not cached; we have to compile.
         if kernel is None:
+            if _owned is not None:
+                _owned.reject_owned_cache_miss()
             options, signature, constexprs, attrs = self._pack_args(backend, kwargs, bound_args, specialization,
                                                                     options)
 

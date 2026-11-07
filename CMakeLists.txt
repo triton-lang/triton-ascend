@@ -181,6 +181,34 @@ if(TRITON_BUILD_PYTHON_MODULE)
     add_subdirectory(third_party/${CODEGEN_BACKEND})
   endforeach()
 
+  # Gluon bindings unconditionally expose AMD IR operations even when the
+  # AMD codegen backend is disabled. Build only their actual IR and utility
+  # objects and required converter, not the AMD plugin or transform pipeline.
+  if(NOT "amd" IN_LIST TRITON_CODEGEN_BACKENDS)
+    add_subdirectory(third_party/amd/include/Dialect/TritonAMDGPU/IR)
+    add_subdirectory(third_party/amd/lib/Dialect/TritonAMDGPU/Utility)
+    add_subdirectory(third_party/amd/lib/Dialect/TritonAMDGPU/IR)
+    # Proton's unconditional Python binding requires the real AMD LLVM
+    # converter too. Its only transform helpers are these two source files.
+    add_subdirectory(third_party/amd/include/TritonAMDGPUToLLVM)
+    add_subdirectory(third_party/amd/lib/Analysis)
+    add_triton_library(TritonAMDInstructionGroupHelpers
+      ${PROJECT_SOURCE_DIR}/third_party/amd/lib/TritonAMDGPUTransforms/MfmaGroup.cpp
+      ${PROJECT_SOURCE_DIR}/third_party/amd/lib/TritonAMDGPUTransforms/WmmaGroup.cpp
+      LINK_LIBS PUBLIC MLIRIR MLIRROCDLDialect)
+    add_subdirectory(third_party/amd/lib/TritonAMDGPUToLLVM)
+    add_subdirectory(third_party/amd/lib/TritonAMDGPUDialectToLLVM)
+    target_link_libraries(TritonAMDGPUToLLVM PUBLIC
+      TritonAMDAnalysis TritonAMDInstructionGroupHelpers TritonAMDGPUDialectToLLVM)
+    foreach(_amd_ir_target TritonAMDGPUIR TritonAMDUtils TritonAMDAnalysis
+        TritonAMDInstructionGroupHelpers TritonAMDGPUToLLVM TritonAMDGPUDialectToLLVM)
+      target_include_directories(${_amd_ir_target} PRIVATE
+        ${PROJECT_SOURCE_DIR}/third_party/amd/include
+        ${PROJECT_BINARY_DIR}/third_party/amd/include)
+    endforeach()
+    target_link_libraries(TritonAMDGPUIR PUBLIC TritonAMDUtils)
+  endif()
+
   if (TRITON_BUILD_PROTON)
     add_subdirectory(third_party/proton)
   endif()
@@ -286,6 +314,10 @@ if(TRITON_BUILD_PYTHON_MODULE)
                   ${PYTHON_SRC_PATH}/interpreter.cc
                   ${PYTHON_SRC_PATH}/llvm.cc
                   ${PYTHON_SRC_PATH}/specialize.cc)
+
+  if(NOT "amd" IN_LIST TRITON_CODEGEN_BACKENDS)
+    add_dependencies(triton TritonAMDGPUTableGen TritonAMDGPUAttrDefsIncGen)
+  endif()
 
   # Link triton with its dependencies
   target_link_libraries(triton PRIVATE ${TRITON_LIBRARIES})

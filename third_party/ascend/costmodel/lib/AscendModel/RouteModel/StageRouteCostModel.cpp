@@ -1293,7 +1293,10 @@ llvm::json::Object StageResourceCycles::toCompactJSON() const {
 }
 
 bool StageImplementationCost::isValid() const {
-  return implementation.isValid() && std::isfinite(totalCycles) &&
+  return implementation.isValid() &&
+         std::isfinite(ordinaryStoreTargetIncrementSystemCycles) &&
+         ordinaryStoreTargetIncrementSystemCycles >= 0.0 &&
+         std::isfinite(totalCycles) &&
          totalCycles >= 0.0 && std::isfinite(cvPartitionIdealTotalCycles) &&
          cvPartitionIdealTotalCycles >= 0.0 &&
          std::isfinite(cvPartitionPayloadEfficiency) &&
@@ -1324,6 +1327,10 @@ llvm::json::Object StageImplementationCost::toJSON() const {
            entries[name] = count;
          return entries;
        }()},
+      {"ordinary_store_round4_candidate_used", ordinaryStoreRound4CandidateUsed},
+      {"ordinary_store_target_increment_system_cycles", ordinaryStoreTargetIncrementSystemCycles},
+      {"ordinary_store_candidate_reason", ordinaryStoreCandidateReason},
+      {"ordinary_store_leaf", ordinaryStoreLeaf},
       {"resource_system_cycles", resources.toJSON()}};
   if (perAivWorkload)
     result["per_aiv_workload_before_superblock"] = perAivWorkload->toJSON();
@@ -1344,6 +1351,10 @@ llvm::json::Object StageImplementationCost::toCompactJSON() const {
       {"indirect_store_pricing", indirectStorePricing},
       {"total_system_cycles", totalCycles},
       {"formula_evidence", formulaEvidence},
+      {"ordinary_store_round4_candidate_used", ordinaryStoreRound4CandidateUsed},
+      {"ordinary_store_target_increment_system_cycles", ordinaryStoreTargetIncrementSystemCycles},
+      {"ordinary_store_candidate_reason", ordinaryStoreCandidateReason},
+      {"ordinary_store_leaf", ordinaryStoreLeaf},
       {"resource_system_cycles", resources.toCompactJSON()}};
   if (localScopeCompletionInclusive)
     result["local_scope_completion_inclusive"] = true;
@@ -2373,10 +2384,17 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
   const int64_t wholeKernelGroupIterations = parentSchedule.wholeIterations;
   const int64_t mixedLoopIterations = parentSchedule.mixedIterations;
 
+  const bool hasV1Schedule =
+      llvm::any_of(costTable.stages, [](const LogicalStageCost &stage) {
+        return stage.model == "auto_blockify_dispatch" ||
+               stage.model == "auto_blockify_loop";
+      });
+  // V1 keeps the logical grid in its launcher ABI; newer grid contracts
+  // materialize F logical programs in each physical block.
   // A whole-kernel SIMT SuperBlock materializes F logical programs in one
   // physical block.
   const int64_t launchedPhysicalPrograms =
-      plan.candidate == StageKernelRouteKind::AllSIMT
+      plan.candidate == StageKernelRouteKind::AllSIMT && !hasV1Schedule
           ? ceilDivNonNegative(logicalPrograms, factor)
           : logicalPrograms;
   plan.runtimePhysicalProgramCount =
@@ -2397,11 +2415,6 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
     break;
   }
 
-  const bool hasV1Schedule =
-      llvm::any_of(costTable.stages, [](const LogicalStageCost &stage) {
-        return stage.model == "auto_blockify_dispatch" ||
-               stage.model == "auto_blockify_loop";
-      });
   const bool hasGridStrideLoop =
       llvm::any_of(costTable.stages, [](const LogicalStageCost &stage) {
         return stage.features.isGridStrideLoopShell;

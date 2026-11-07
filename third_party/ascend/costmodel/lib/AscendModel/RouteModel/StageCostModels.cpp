@@ -6,6 +6,8 @@
 
 #include "AscendModel/RouteModel/Models/StridedShortCostModel.h"
 #include "AscendModel/RouteModel/Reduction/ReductionCostModel.h"
+#include "AscendModel/RouteModel/OrdinaryStoreRound4Main.h"
+#include "AscendModel/RouteModel/OrdinaryStoreRound4MainContract.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -4259,13 +4261,31 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
               stage.workload.dotFlops > 0.0);
       const LogicalStage executionStage =
           perAivStage(stage, implementation.aivSubblocks);
-      const StageMemoryCost fitted = IndirectGatherMemoryCostModel().cost(
-          executionStage, profile, implementation);
+      OrdinaryStoreMainResult ordinary =
+          ordinaryStoreMainCost(executionStage, profile, implementation,
+                                partition.operationOwnershipComplete);
+      const LogicalStage *pricingStage = ordinary.auxiliaryStage
+          ? &*ordinary.auxiliaryStage : &executionStage;
+      StageMemoryCost fitted = IndirectGatherMemoryCostModel().cost(
+          *pricingStage, profile, implementation);
       std::optional<StageResourceCycles> resources = mapWorkload(
-          executionStage, modeProfile, implementation.mode,
+          *pricingStage, modeProfile, implementation.mode,
           implementation.superblockFactor,
           implementation.mode == StageMode::SIMT && !implementation.localScope,
           std::nullopt, fitted);
+      if (!resources && ordinary.targetSystemCycles) {
+        // An unsupported auxiliary resource mapping cannot drop the Stage or
+        // turn target-only into an optimistic partial total. Restore fallback.
+        ordinary.auxiliaryStage.reset(); ordinary.targetSystemCycles.reset();
+        ordinary.reason = "auxiliary_resource_mapping_failed_original_fallback";
+        pricingStage = &executionStage;
+        fitted = IndirectGatherMemoryCostModel().cost(
+            executionStage, profile, implementation);
+        resources = mapWorkload(executionStage, modeProfile, implementation.mode,
+            implementation.superblockFactor,
+            implementation.mode == StageMode::SIMT && !implementation.localScope,
+            std::nullopt, fitted);
+      }
       if (!resources)
         continue;
       auto mapping =
@@ -4298,6 +4318,10 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
         cost.indirectLoadPricing = fitted.loadPricing;
       if (fitted.storePricing)
         cost.indirectStorePricing = fitted.storePricing;
+      cost.ordinaryStoreCandidateReason = ordinary.reason;
+      cost.ordinaryStoreLeaf = ordinary.leaf;
+      cost.ordinaryStoreRound4CandidateUsed = ordinary.targetSystemCycles.has_value();
+      cost.ordinaryStoreTargetIncrementSystemCycles = ordinary.targetSystemCycles.value_or(0.0);
       if (implementation.aivSubblocks > 1)
         cost.perAivWorkload = executionStage.workload;
       if (resources->recurrenceGroupCriticalPath > 0.0 ||
@@ -4461,8 +4485,8 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       if (resources->rowwiseReductionGroupBody > 0.0)
         cost.formulaEvidence += "+bounded_ttir_row_extent_surface";
       cost.totalCycles =
-          applySuperBlock(executionStage, *resources, implementation, profile,
-                          estimateStage(executionStage, profile,
+          applySuperBlock(*pricingStage, *resources, implementation, profile,
+                          estimateStage(*pricingStage, profile,
                                         implementation.mode, *resources));
       if (fitted.nativeSimdEnvelope)
         cost.formulaEvidence += "+native_simd_target_loop_completion";
@@ -4475,6 +4499,16 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
             estimateStage(executionStage, profile, implementation.mode, upper));
         cost.totalCycles = (cost.totalCycles + high) / 2;
         cost.formulaEvidence += "+stage_density_range_midpoint";
+      }
+      if (ordinary.targetSystemCycles) {
+        auto total = indirect_store_round4::main_ta::composeTargetOnly(
+            cost.totalCycles, *ordinary.targetSystemCycles, 1.0);
+        if (!total)
+          return llvm::createStringError(std::errc::invalid_argument,
+              "ordinary Store target-only composition produced invalid units");
+        cost.totalCycles = *total;
+        cost.formulaEvidence =
+            "frozen_round4_matched_target_increment_plus_original_auxiliary";
       }
       if (implementation.aivSubblocks > 1) {
         cost.cvPartitionIdealTotalCycles = cost.totalCycles;

@@ -39,6 +39,19 @@ add_subdirectory(bin)
 add_subdirectory(include)
 add_subdirectory(lib)
 
+# Propagate the selected NPUIR public-header ABI only through real targets.
+# The NPUIR library objects already receive these definitions in their own
+# directory; INTERFACE does not change those objects or unrelated backends.
+if(LLVM_MAJOR_VERSION_22_COMPATIBLE)
+  foreach(_npuir_public_target BiShengIRHIVMDialect BiShengIRHFusionDialect)
+    target_compile_definitions(${_npuir_public_target} INTERFACE
+      __LLVM_MAJOR_VERSION_21_COMPATIBLE__ __LLVM_MAJOR_VERSION_22_COMPATIBLE__)
+  endforeach()
+  # Both sources include HIVM public headers and require their target usage.
+  target_link_libraries(TritonToUnstructure PUBLIC BiShengIRHIVMDialect)
+  target_link_libraries(MLIRTritonNPUUtils PUBLIC BiShengIRHIVMDialect)
+endif()
+
 if(TRITON_BUILD_TD)
   if(NOT EXISTS "${TRITON_DISTRIBUTED_ASCEND_SRC_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "Triton-Distributed submodule is not initialized: ${TRITON_DISTRIBUTED_ASCEND_SRC_DIR}")
@@ -141,6 +154,12 @@ add_triton_plugin(TritonAscend
   BiShengIRScopeDialect
   BiShengIRHIVMDialect
 )
+
+# The plugin object itself includes Python/pybind headers. Its final parent
+# module's PRIVATE usage requirements do not propagate back to this object.
+if(TRITON_BUILD_PYTHON_MODULE)
+  target_link_libraries(TritonAscend PRIVATE Python3::Module pybind11::headers)
+endif()
 
 # Keep canonical Cost Model profiles under costmodel/profiles.  Python's
 # community-owned setup.py builds the native extension before build_py, so an

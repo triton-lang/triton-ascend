@@ -1183,6 +1183,30 @@ void init_tla_builder(py::module &&m) {
                    "TLA alloc requires a static memref");
              return self.create<memref::AllocOp>(memrefType).getResult();
            })
+      // Scalar broadcast into one buffer: hivm.hir.vbrc with an empty
+      // broadcast_dims array, which the verifier requires for scalar sources.
+      // Only UB is enabled: InferCoreType maps UB to VECTOR and rejects other
+      // spaces for this op.
+      .def(
+          "create_tla_fill",
+          [](TLABuilder &self, Value dst, Value value) {
+            auto dstType = dyn_cast<MemRefType>(dst.getType());
+            if (!dstType)
+              throw std::invalid_argument(
+                  "TLA fill requires a memref destination");
+            if (hivm::getOptionalHIVMAddressSpace(dstType) !=
+                hivm::AddressSpace::UB)
+              throw std::invalid_argument(
+                  "TLA fill requires a UB destination buffer");
+            if (isa<ShapedType>(value.getType()))
+              throw std::invalid_argument("TLA fill requires a scalar value");
+            if (value.getType() != dstType.getElementType())
+              throw std::invalid_argument(
+                  "TLA fill scalar type must match the destination element "
+                  "type");
+            self.create<hivm::VBrcOp>(TypeRange{}, value, dst);
+          },
+          py::arg("dst"), py::arg("value"))
       .def("create_tla_bind",
            [](TLABuilder &self, Value addr, Type type) -> Value {
              auto memrefType = dyn_cast<MemRefType>(type);

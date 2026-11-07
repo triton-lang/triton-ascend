@@ -23,6 +23,7 @@
 #include "ascend/include/Utils/InterleaveOptimization.h"
 #include "ascend/include/Utils/Utils.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
@@ -30,7 +31,11 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/OperationSupport.h"
+#include "mlir/IR/SymbolTable.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LogicalResult.h"
 
@@ -221,10 +226,48 @@ materializeDeinterleaveBaseOffset(const DeinterleaveOffsetInfo &offsetInfo,
   return base;
 }
 
-LogicalResult
-DeinterleaveStatusOptimization(triton::LoadOp op,
-                               triton::LoadOp::Adaptor adaptor,
-                               ConversionPatternRewriter &rewriter) {
+// Discrete loads replace the loop-carried insert_slice with a buffer write.
+// Validate that destination before creating IR so unsupported cases can use
+// the ordinary load lowering without leaving a partially applied optimization.
+static bool isValidDeinterleaveDestination(triton::LoadOp op, Value dest) {
+  if (!dest)
+    return true;
+  auto destType = dyn_cast<MemRefType>(dest.getType());
+  auto resultType = dyn_cast<RankedTensorType>(op.getType());
+  return destType && resultType && destType.hasStaticShape() &&
+         resultType.hasStaticShape() &&
+         destType.getShape() == resultType.getShape() &&
+         destType.getElementType() == resultType.getElementType();
+}
+
+static LogicalResult
+finishDeinterleavedLoad(triton::LoadOp op, Value slice, Value writebackDest,
+                        ConversionPatternRewriter &rewriter) {
+  if (writebackDest) {
+    auto write = rewriter.create<bufferization::MaterializeInDestinationOp>(
+        op.getLoc(), slice, writebackDest);
+    write.setWritable(true);
+    if (!op.getIsVolatile())
+      write->setAttr("triton.discrete_deinterleave", rewriter.getUnitAttr());
+    // The wide-load temporary is reused across iterations after bufferization.
+    // Unlike direct copies into disjoint result rows, it requires a backward
+    // V-to-MTE2 dependency. The parallel hint suppresses that synchronization.
+    for (Operation *loop = op->getParentOp();
+         loop && loop->hasAttr("ExtractedLoadOrStore");
+         loop = loop->getParentOp()) {
+      rewriter.modifyOpInPlace(loop,
+                               [&] { loop->removeAttr("hivm.parallel_loop"); });
+    }
+  }
+  rewriter.replaceOp(op, slice);
+  return success();
+}
+
+LogicalResult DeinterleaveStatusOptimization(
+    triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
+    ConversionPatternRewriter &rewriter, Value writebackDest) {
+  if (!isValidDeinterleaveDestination(op, writebackDest))
+    return failure();
   auto ptr = adaptor.getPtr();
   if (auto reinterpretCast = ptr.getDefiningOp<memref::ReinterpretCastOp>()) {
     auto loc = op.getLoc();
@@ -291,8 +334,8 @@ DeinterleaveStatusOptimization(triton::LoadOp op,
     Value deinterleaveSlice = rewriter.create<tensor::ExtractSliceOp>(
         loc, newTensor, extractOffsets, extractSizes, extractStrides);
 
-    rewriter.replaceOp(op, deinterleaveSlice);
-    return success();
+    return finishDeinterleavedLoad(op, deinterleaveSlice, writebackDest,
+                                   rewriter);
   }
 
   return failure();
@@ -300,7 +343,22 @@ DeinterleaveStatusOptimization(triton::LoadOp op,
 
 LogicalResult DeinterleaveStatusWithMaskOptimization(
     triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
-    ConversionPatternRewriter &rewriter, MaskState &mstate, Value localMem) {
+    ConversionPatternRewriter &rewriter, MaskState &mstate, Value localMem,
+    Value writebackDest) {
+  if (!isValidDeinterleaveDestination(op, writebackDest))
+    return failure();
+
+  // Inspect the existing fill before introducing any destination uses or IR.
+  linalg::FillOp originFillOp;
+  if (op.getOther()) {
+    if (!localMem.hasOneUse())
+      return failure();
+    originFillOp = dyn_cast<linalg::FillOp>(*localMem.getUsers().begin());
+    if (!originFillOp || !isa<scf::IfOp>(originFillOp->getParentOp()))
+      return failure();
+  }
+  if (mstate.dims.empty() || !getConstantIntValue(mstate.dims.back()))
+    return failure();
   auto ptr = adaptor.getPtr();
   if (auto reinterpretCast = ptr.getDefiningOp<memref::ReinterpretCastOp>()) {
     auto loc = op.getLoc();
@@ -337,19 +395,12 @@ LogicalResult DeinterleaveStatusWithMaskOptimization(
     rewriter.restoreInsertionPoint(savedInsertPoint);
 
     // 4. Broadcast other value by linalg.fill if necessary
-    auto other = op.getOther();
     // While deinterleave optimization will just adjust last dimension info
     // and origin mask state wouldn't involve last dimension. Therefore in
     // current `scf.if + linalg.fill` combination, condition of `if` could be
     // kept and just replace linalg.fill'
-    if (other) {
-      assert(localMem.hasOneUse() &&
-             llvm::isa<linalg::FillOp>(*(localMem.getUsers().begin())));
-      auto originFillOp =
-          llvm::dyn_cast<linalg::FillOp>(*(localMem.getUsers().begin()));
-
-      assert(llvm::isa<scf::IfOp>(originFillOp->getParentOp()));
-      auto ifOp = llvm::dyn_cast<scf::IfOp>(originFillOp->getParentOp());
+    if (originFillOp) {
+      auto ifOp = cast<scf::IfOp>(originFillOp->getParentOp());
 
       auto newFillOp = ifOp.getThenBodyBuilder().create<linalg::FillOp>(
           originFillOp.getLoc(), originFillOp.getInputs(),
@@ -413,10 +464,271 @@ LogicalResult DeinterleaveStatusWithMaskOptimization(
     Value deinterleaveSlice = rewriter.create<tensor::ExtractSliceOp>(
         loc, newTensor, extractOffsets, extractSizes, extractStrides);
 
-    rewriter.replaceOp(op, deinterleaveSlice);
-    return success();
+    return finishDeinterleavedLoad(op, deinterleaveSlice, writebackDest,
+                                   rewriter);
   }
   return failure();
+}
+
+namespace {
+struct DiscreteDeinterleaveGather {
+  scf::ForOp loop;
+  memref::AllocOp buffer;
+  bufferization::ToTensorOp tensor;
+  int64_t parity;
+};
+
+// Moving the lane extraction out of the loop removes the per-iteration
+// scratch buffer. Each iteration then writes a disjoint row of the wide tile,
+// so the parallel hint is valid without suppressing a scratch-buffer hazard.
+static FailureOr<DiscreteDeinterleaveGather>
+hoistDiscreteDeinterleave(bufferization::MaterializeInDestinationOp write,
+                          IRRewriter &rewriter) {
+  auto loop = dyn_cast<scf::ForOp>(write->getParentOp());
+  auto row = write.getDest().getDefiningOp<memref::SubViewOp>();
+  auto slice = write.getSource().getDefiningOp<tensor::ExtractSliceOp>();
+  if (!loop || !loop->hasAttr("ExtractedLoadOrStore") ||
+      loop.getNumResults() != 0 || !row || !slice || !slice->hasOneUse())
+    return failure();
+  auto full = row.getSource().getDefiningOp<memref::AllocOp>();
+  auto tensor = slice.getSource().getDefiningOp<bufferization::ToTensorOp>();
+  if (!full || !tensor || !tensor->hasOneUse() ||
+      full->getBlock() != loop->getBlock())
+    return failure();
+  auto scratch = tensor->getOperand(0).getDefiningOp<memref::AllocOp>();
+  if (!scratch || scratch->getParentOp() != loop ||
+      row->getParentOp() != loop || tensor->getParentOp() != loop ||
+      slice->getParentOp() != loop)
+    return failure();
+  auto fullType = full.getType();
+  auto rowType = row.getType();
+  auto scratchType = scratch.getType();
+  int64_t rank = fullType.getRank();
+  if (rank < 2 || !fullType.hasStaticShape() || !rowType.hasStaticShape() ||
+      !scratchType.hasStaticShape() || rowType.getRank() != rank ||
+      scratchType.getRank() != rank || !fullType.getLayout().isIdentity() ||
+      rowType.getElementType() != scratchType.getElementType())
+    return failure();
+  auto offsets = row.getMixedOffsets();
+  auto step = getConstantIntValue(loop.getStep());
+  if (!step || *step <= 0 || rowType.getDimSize(0) != *step ||
+      offsets.front().dyn_cast<Value>() != loop.getInductionVar())
+    return failure();
+  int64_t parity = slice.getStaticOffsets().back();
+  if (parity != 0 && parity != 1)
+    return failure();
+  for (int64_t dim = 0; dim < rank; ++dim) {
+    bool last = dim == rank - 1;
+    if (row.getStaticStrides()[dim] != 1 ||
+        (dim != 0 && (!isConstantIntValue(offsets[dim], 0) ||
+                      rowType.getDimSize(dim) != fullType.getDimSize(dim))) ||
+        scratchType.getDimSize(dim) !=
+            rowType.getDimSize(dim) * (last ? 2 : 1) ||
+        slice.getStaticOffsets()[dim] != (last ? parity : 0) ||
+        slice.getStaticSizes()[dim] != rowType.getDimSize(dim) ||
+        slice.getStaticStrides()[dim] != (last ? 2 : 1))
+      return failure();
+  }
+  bufferization::ToTensorOp fullTensor;
+  for (Operation *user : full->getUsers()) {
+    if (user == row)
+      continue;
+    auto candidate = dyn_cast<bufferization::ToTensorOp>(user);
+    if (!candidate || fullTensor || user->getBlock() != loop->getBlock() ||
+        !loop->isBeforeInBlock(user))
+      return failure();
+    fullTensor = candidate;
+  }
+  if (!fullTensor || !row->hasOneUse())
+    return failure();
+
+  SmallVector<memref::SubViewOp> maskedViews;
+  SmallVector<linalg::FillOp> fills;
+  memref::CopyOp copy;
+  auto collectCopy = [&](Value target) {
+    for (Operation *user : target.getUsers()) {
+      if (auto candidate = dyn_cast<memref::CopyOp>(user)) {
+        if (copy || candidate.getTarget() != target)
+          return false;
+        copy = candidate;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  };
+  for (Operation *user : scratch->getUsers()) {
+    if (user == tensor)
+      continue;
+    if (auto view = dyn_cast<memref::SubViewOp>(user)) {
+      if (!collectCopy(view))
+        return failure();
+      maskedViews.push_back(view);
+    } else if (auto fill = dyn_cast<linalg::FillOp>(user)) {
+      if (fill.getOutputs().size() != 1 || fill.getOutputs()[0] != scratch)
+        return failure();
+      fills.push_back(fill);
+    } else if (auto candidate = dyn_cast<memref::CopyOp>(user)) {
+      if (copy || candidate.getTarget() != scratch)
+        return failure();
+      copy = candidate;
+    } else {
+      return failure();
+    }
+  }
+  if (!copy)
+    return failure();
+  // Only generated copies/fills may write memory in this row loop.
+  bool supported = true;
+  loop.getBody()->walk([&](Operation *op) {
+    if (op == write || op == scratch || op == copy ||
+        llvm::is_contained(fills, dyn_cast<linalg::FillOp>(op)) ||
+        isa<scf::IfOp, scf::YieldOp, bufferization::ToTensorOp>(op) ||
+        isMemoryEffectFree(op))
+      return;
+    if (!isa<memref::LoadOp>(op))
+      supported = false;
+  });
+  if (!supported)
+    return failure();
+
+  auto loc = write.getLoc();
+  SmallVector<int64_t> wideShape(fullType.getShape());
+  wideShape.back() *= 2;
+  auto wideType =
+      MemRefType::get(wideShape, fullType.getElementType(),
+                      MemRefLayoutAttrInterface{}, fullType.getMemorySpace());
+  rewriter.setInsertionPoint(loop);
+  auto wide = rewriter.create<memref::AllocOp>(loc, wideType);
+  rewriter.setInsertionPoint(scratch);
+  auto rowSizes = row.getMixedSizes();
+  rowSizes.back() = rewriter.getIndexAttr(scratchType.getShape().back());
+  auto wideRowType = cast<MemRefType>(memref::SubViewOp::inferResultType(
+      wideType, offsets, rowSizes, row.getMixedStrides()));
+  auto wideRow = rewriter.create<memref::SubViewOp>(
+      loc, wideRowType, wide, offsets, rowSizes, row.getMixedStrides());
+  for (auto view : maskedViews) {
+    rewriter.setInsertionPoint(view);
+    auto type = cast<MemRefType>(memref::SubViewOp::inferResultType(
+        wideRowType, view.getMixedOffsets(), view.getMixedSizes(),
+        view.getMixedStrides()));
+    rewriter.replaceOpWithNewOp<memref::SubViewOp>(
+        view, type, wideRow, view.getMixedOffsets(), view.getMixedSizes(),
+        view.getMixedStrides());
+  }
+  if (copy.getTarget() == scratch)
+    rewriter.modifyOpInPlace(copy, [&] { copy->setOperand(1, wideRow); });
+  for (auto fill : fills) {
+    rewriter.setInsertionPoint(fill);
+    rewriter.replaceOpWithNewOp<linalg::FillOp>(fill, fill.getInputs(),
+                                                ValueRange{wideRow});
+  }
+  rewriter.setInsertionPoint(fullTensor);
+  auto wideTensor = rewriter.create<bufferization::ToTensorOp>(
+      loc, RankedTensorType::get(wideShape, fullType.getElementType()), wide,
+      true /* restrict */, true /* writable */);
+  SmallVector<OpFoldResult> fullSizes;
+  for (int64_t size : fullType.getShape())
+    fullSizes.push_back(rewriter.getIndexAttr(size));
+  auto result = rewriter.create<tensor::ExtractSliceOp>(
+      loc, wideTensor, slice.getMixedOffsets(), fullSizes,
+      slice.getMixedStrides());
+  rewriter.replaceOp(fullTensor, result.getResult());
+  rewriter.eraseOp(write);
+  rewriter.eraseOp(slice);
+  rewriter.eraseOp(tensor);
+  rewriter.eraseOp(scratch);
+  rewriter.eraseOp(row);
+  rewriter.eraseOp(full);
+  loop->setAttr("hivm.parallel_loop", rewriter.getUnitAttr());
+  return DiscreteDeinterleaveGather{loop, wide, wideTensor, parity};
+}
+
+// DevicePrintConverter emits this private declaration. Printing tensor values
+// cannot change the source memory of a gather. Do not treat arbitrary calls
+// with a similar name (or calls accepting pointers/memrefs) as read-only.
+static bool isTensorDevicePrint(Operation *op) {
+  auto call = dyn_cast<func::CallOp>(op);
+  if (!call || call.getNumResults() != 0 ||
+      !call.getCallee().starts_with("triton_print"))
+    return false;
+  auto callee = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
+      call, call.getCalleeAttr());
+  if (!callee || !callee.isExternal() ||
+      SymbolTable::getSymbolVisibility(callee) !=
+          SymbolTable::Visibility::Private ||
+      !callee->getAttrOfType<StringAttr>("prefix") ||
+      !callee->getAttrOfType<BoolAttr>("hex"))
+    return false;
+  return llvm::all_of(call.getOperandTypes(), [](Type type) {
+    if (auto tensor = dyn_cast<RankedTensorType>(type))
+      type = tensor.getElementType();
+    return isa<IntegerType, IndexType, FloatType>(type);
+  });
+}
+
+static bool canShareDiscreteGather(DiscreteDeinterleaveGather lhs,
+                                   DiscreteDeinterleaveGather rhs) {
+  if (lhs.parity == rhs.parity ||
+      lhs.buffer.getType() != rhs.buffer.getType() ||
+      lhs.loop->getBlock() != rhs.loop->getBlock() ||
+      !lhs.tensor->isBeforeInBlock(rhs.loop))
+    return false;
+
+  // The later gather may reuse the earlier snapshot only when intervening
+  // operations cannot modify its input. Unknown effects, stores and barriers
+  // deliberately prevent sharing, even when they might not alias the source.
+  for (Operation *op = lhs.loop->getNextNode(); op != rhs.loop;
+       op = op->getNextNode()) {
+    if (!op)
+      return false;
+    if (isMemoryEffectFree(op) ||
+        isa<memref::AllocOp, memref::LoadOp, bufferization::ToTensorOp>(op) ||
+        isTensorDevicePrint(op))
+      continue;
+    return false;
+  }
+
+  // Compare the complete loop, including masks, fill values, bounds and source
+  // addresses. Only the fresh destination buffer and local SSA names differ.
+  IRMapping mapping;
+  mapping.map(lhs.buffer.getResult(), rhs.buffer.getResult());
+  return OperationEquivalence::isEquivalentTo(
+      lhs.loop, rhs.loop,
+      [&](Value a, Value b) {
+        return success(a == b || mapping.lookupOrNull(a) == b);
+      },
+      [&](Value a, Value b) { mapping.map(a, b); },
+      OperationEquivalence::IgnoreLocations);
+}
+} // namespace
+
+void optimizeDiscreteDeinterleavedLoads(ModuleOp moduleOp) {
+  SmallVector<bufferization::MaterializeInDestinationOp> writes;
+  moduleOp.walk([&](bufferization::MaterializeInDestinationOp write) {
+    if (write->hasAttr("triton.discrete_deinterleave"))
+      writes.push_back(write);
+  });
+  IRRewriter rewriter(moduleOp.getContext());
+  SmallVector<DiscreteDeinterleaveGather> gathers;
+  for (auto write : writes) {
+    write->removeAttr("triton.discrete_deinterleave");
+    auto gather = hoistDiscreteDeinterleave(write, rewriter);
+    if (failed(gather))
+      continue;
+    bool shared = false;
+    for (auto previous : llvm::reverse(gathers)) {
+      if (!canShareDiscreteGather(previous, *gather))
+        continue;
+      rewriter.replaceOp(gather->tensor, previous.tensor.getResult());
+      rewriter.eraseOp(gather->loop);
+      rewriter.eraseOp(gather->buffer);
+      shared = true;
+      break;
+    }
+    if (!shared)
+      gathers.push_back(*gather);
+  }
 }
 
 LogicalResult

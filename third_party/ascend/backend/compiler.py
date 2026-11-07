@@ -1186,9 +1186,15 @@ def _publish_route_transform_capability(metadata, opt) -> str:
                                   and getattr(opt, "auto_tile_and_bind_subblock", True) else 1),
     }
     capability["dynamic_cv_pipeline_requested"] = bool(getattr(opt, "enable_dynamic_cv_pipeline", False))
+    capability["ordinary_load_selected_enabled"] = bool(getattr(opt, "ordinary_load_selected_enabled", True))
     forced_candidate = metadata.get("backend_forced_route_candidate")
     if forced_candidate in ("all_simd", "all_simt_only", "mixed_simd_simt"):
         capability["backend_forced_route_candidate"] = forced_candidate
+    from triton.backends.ascend.owned_store_runtime import compiler_capability
+    owned = compiler_capability(metadata, opt)
+    if owned is not None:
+        capability["ordinary_store_owned_recipe"] = owned
+        capability["backend_forced_route_candidate"] = owned["fixed_route"]
     # Keep this contract factual. Route-specific Q/group/tail composition has
     # one implementation in the native RouteSolver; duplicating that formula
     # in Python previously let the two sides drift apart.
@@ -1254,6 +1260,8 @@ def _run_cpp_simd_simt_costmodel(mod, metadata, opt, analysis_ttir_code: str = "
         superblock_factor = 1
     if not report or effective not in {"all_simd", "all_simt_only", "mixed_simd_simt", "backend_default"}:
         raise RuntimeError("invalid native SIMD/SIMT costmodel result")
+    from triton.backends.ascend.owned_store_runtime import consume_native_certificate
+    consume_native_certificate(metadata, report, effective, opt)
     _apply_cpp_simd_simt_decision(metadata, effective, superblock_factor, report, int(opt.num_warps))
     return effective
 
@@ -2610,6 +2618,10 @@ class NPUOptions:
     # model.  The JIT backend hook populates (TTIR argument index, value)
     # pairs before cache lookup, so a different loop bound cannot reuse a
     # cost-model decision compiled for another bound.
+    # Stable static recipe only. Allocation epochs/nonces never enter a
+    # positive compile artifact; its public launch always requires a lease.
+    ordinary_store_owned_recipe_json: str = ""
+    ordinary_load_selected_enabled: bool = True
     auto_simt_runtime_scalar_values: Tuple[Tuple[int, int], ...] = ()
     # Native AscendModel selection: Python only schedules the C++ passes.
     # Empty/"off" disables the route model; "auto" selects, "report" dumps.
@@ -2730,6 +2742,10 @@ class NPUOptions:
         object.__setattr__(self, "auto_simt_model_profile", profile)
         object.__setattr__(self, "auto_simt_model_assets_hash", asset_hash)
 
+        from triton.backends.ascend.owned_store_runtime import normalize_compile_request
+        object.__setattr__(self, "ordinary_store_owned_recipe_json",
+                           normalize_compile_request(self.ordinary_store_owned_recipe_json)
+                           if self.ordinary_store_owned_recipe_json else "")
     def hash(self):
         key = "_".join([f"{name}-{val}" for name, val in self.__dict__.items()])
         key = "_".join([key, get_cann_version_file_hash()])
@@ -3077,6 +3093,10 @@ class AscendBackend(BaseBackend):
         fact: it does not inspect a kernel name, argument name, source path, or
         tensor shape.
         """
+        from triton.backends.ascend.owned_store_runtime import runtime_compile_options
+        owned = runtime_compile_options(bound_args, specialization, options)
+        if owned is not None:
+            return owned
         compile_mode = options.get("compile_mode") or os.environ.get("TRITON_ASCEND_COMPILE_MODE", "")
         if compile_mode != "simd_simt":
             return {}

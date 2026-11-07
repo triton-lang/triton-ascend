@@ -19,6 +19,8 @@ add_mlir_library(AscendModelRouteModel
   Models/IndirectGatherMemoryCostModel.cpp
   Models/IndirectMemoryChainCostModel.cpp
   Models/StridedShortCostModel.cpp
+  OrdinaryStoreRound4Main.cpp
+  OrdinaryLoadMain.cpp
   StageRouteCostModel.cpp
   SimdSimtCostModel.cpp
   ../Transforms/SelectSimdSimtCostModel.cpp

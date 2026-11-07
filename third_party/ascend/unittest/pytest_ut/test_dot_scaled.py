@@ -175,9 +175,10 @@ def test_scaled_dot_fast_math(normal_type):
         tl.store(out_ptr, out_tensor.to(a.dtype))
 
     def make_scale_tensor(scale, data_dtype):
-        # E8M0 codes 0..254 represent 2**(code - 127); code 255 represents NaN.
+        # Decode finite E8M0 codes, including code 0 = 2**-127.
+        # Code 255 overflows to infinity here; golden_ref applies its NaN mask
+        # only when fast_math=False, matching upstream scaleTo16/maskNan.
         decoded = torch.exp2(scale.cpu().to(torch.float32) - 127)
-        decoded = torch.where(scale.cpu().eq(255), float("nan"), decoded)
         return decoded.to(device=scale.device, dtype=data_dtype)
 
     def golden_ref(x, scale_x, y, scale_y, fast_math):

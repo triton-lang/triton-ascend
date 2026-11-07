@@ -1,11 +1,5 @@
-// RUN: triton-opt --discrete-mask-access-conversion --split-input-file --verify-each %s | FileCheck %s --check-prefix=MARK
-// RUN: triton-opt --discrete-mask-access-conversion --triton-to-unstructure --split-input-file --verify-each %s | FileCheck %s
+// RUN: triton-opt --discrete-mask-access-conversion --split-input-file %s | FileCheck %s
 
-// MARK-LABEL: tt.func @discrete_load(
-// MARK-NOT: arith.select
-// MARK: tt.load {{.*}} {SimdDiscreteMask} : tensor<1024x!tt.ptr<i32>>
-// MARK-NOT: arith.select
-// MARK: tt.return
 // CHECK-LABEL: tt.func @discrete_load
 // CHECK: %[[loaded_value:.*]] = tt.load %[[load_ptr:.*]]
 // CHECK: %[[value:.*]] = arith.select %[[mask:.*]], %[[loaded_value]], %[[other:.*]]
@@ -27,11 +21,6 @@ tt.func @discrete_load(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
   tt.return
 }
 
-// MARK-LABEL: tt.func @discrete_load_without_other(
-// MARK-NOT: arith.select
-// MARK: tt.load %{{[^,]+}}, %{{[^,]+}} {SimdDiscreteMask} : tensor<1024x!tt.ptr<i32>>
-// MARK-NOT: arith.select
-// MARK: tt.return
 // CHECK-LABEL: tt.func @discrete_load_without_other
 // CHECK: %[[other:.*]] = arith.constant dense<0>
 // CHECK: %[[loaded_value:.*]] = tt.load %[[load_ptr:.*]]

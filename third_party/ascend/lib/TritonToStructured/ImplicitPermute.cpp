@@ -27,6 +27,7 @@
 #include "mlir/IR/Location.h"
 #include "mlir/IR/Value.h"
 #include "triton/Dialect/Triton/IR/Types.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "triton-to-structured-implicit-permute"
@@ -35,6 +36,43 @@ namespace ImplicitPermute {
 using namespace mlir;
 using namespace triton;
 using MemOpTransformer = MemOpConverter::MemOpTransformer;
+
+// Only remap other when pointer rebuilding is a pure permutation:
+// split or removed axes still need the existing mask analysis.
+static bool canPermuteLoadOperands(const TritonToStructured::PtrState &state,
+                                  Value oldPtr, Value newPtr) {
+  auto oldType = dyn_cast<RankedTensorType>(oldPtr.getType());
+  auto newType = dyn_cast<RankedTensorType>(newPtr.getType());
+  if (state.dynamicOffsets.empty() || state.isBlockPtr() || !oldType ||
+      !newType || oldType.getRank() != newType.getRank() ||
+      state.sizes.size() != oldType.getRank() ||
+      state.stateInfo.size() != oldType.getRank() ||
+      state.permuteIds.size() != oldType.getRank())
+    return false;
+
+  for (auto [i, id] : llvm::enumerate(state.permuteIds)) {
+    if (state.stateInfo[i].dimIndex != i ||
+        newType.getDimSize(i) != oldType.getDimSize(id))
+      return false;
+  }
+  return true;
+}
+
+static Value remapSplatOther(Value other, RankedTensorType targetType,
+                            Location loc, PatternRewriter &rewriter) {
+  if (!other)
+    return nullptr;
+  if (auto splat = other.getDefiningOp<triton::SplatOp>())
+    return rewriter.create<triton::SplatOp>(loc, targetType, splat.getSrc());
+  if (auto constant = other.getDefiningOp<arith::ConstantOp>()) {
+    auto value = dyn_cast<DenseElementsAttr>(constant.getValue());
+    if (value && value.isSplat())
+      return rewriter.create<arith::ConstantOp>(loc, value.reshape(targetType));
+  }
+  // FIXME: Support non-splat other without adding a data transpose. Reshaping
+  // an arbitrary tensor would associate its values with the wrong mask lanes.
+  return nullptr;
+}
 
 LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
                                              PatternRewriter &rewriter) const {
@@ -81,20 +119,22 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
     return success();
   }
 
+  auto resultType = triton::getPointeeType(newPtr.getType());
   auto newMask = tf.createNewMask(oldMask, loc, rewriter);
-
-  if (oldMask && !newMask) {
-    InFlightDiagnostic diag = emitWarning(loc)
-                              << "MaskAnalysis: failed to analyze load mask.";
-    return failure();
-  }
+  if (oldMask && !newMask)
+    return rewriter.notifyMatchFailure(
+        op, "cannot remap load mask without transpose");
 
   // Match the load's operand types, including shape, before creating it.
-  auto resultType = triton::getPointeeType(newPtr.getType());
   if (newMask && newMask.getType() != triton::getI1SameShape(resultType))
     return rewriter.notifyMatchFailure(op, "mask type does not match pointer");
 
-  auto newOther = tf.createNewOther(oldOther, loc, rewriter);
+  bool permuteOperands = canPermuteLoadOperands(tf.ptrState, oldPtr, newPtr);
+  auto newOther =
+      permuteOperands
+          ? remapSplatOther(oldOther, cast<RankedTensorType>(resultType), loc,
+                            rewriter)
+          : tf.createNewOther(oldOther, loc, rewriter);
   if (oldOther && !newOther)
     return rewriter.notifyMatchFailure(op, "failed to convert load other");
   if (newOther && newOther.getType() != resultType)

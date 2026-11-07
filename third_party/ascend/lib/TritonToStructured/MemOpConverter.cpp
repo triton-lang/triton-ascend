@@ -49,6 +49,7 @@
 #include "triton/Dialect/Triton/IR/Types.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -719,6 +720,67 @@ Value MemOpTransformer::createNewAdvancePtr(Value oldPtr, const Location loc,
                                             newBasePtr, newOffsets);
 }
 
+// Move broadcast axes without reordering the underlying mask data. In sparse
+// attention this changes broadcast(valid[None, :]) to broadcast(valid[:, None]).
+static Value remapBroadcastMask(Value mask, const PtrState &state, Location loc,
+                               PatternRewriter &rewriter) {
+  auto broadcast = mask.getDefiningOp<triton::BroadcastOp>();
+  if (!broadcast || !state.isPermuted || state.dynamicOffsets.empty() ||
+      state.isBlockPtr())
+    return nullptr;
+
+  auto maskType = cast<RankedTensorType>(mask.getType());
+  auto rank = maskType.getRank();
+  if (state.sizes.size() != rank || state.stateInfo.size() != rank ||
+      state.permuteIds.size() != rank)
+    return nullptr;
+
+  // Match createAddPtrOp's shape without splitting or dropping any mask axes.
+  for (auto [i, info] : llvm::enumerate(state.stateInfo)) {
+    auto extent = getIntAttr(info.shape);
+    if (info.dimIndex != i || isZero(info.stride) || !extent ||
+        *extent != maskType.getDimSize(i))
+      return nullptr;
+  }
+
+  Value source = broadcast.getSrc();
+  auto sourceType = cast<RankedTensorType>(source.getType());
+  SmallVector<int64_t> shape, targetShape;
+  size_t nextDataAxis = 0;
+  for (size_t id : state.permuteIds) {
+    int64_t extent = sourceType.getDimSize(id);
+    // Comparing extents alone is insufficient when two data axes have the
+    // same size. Their original axis order must be preserved as well.
+    if (extent != 1) {
+      if (id < nextDataAxis)
+        return nullptr;
+      nextDataAxis = id + 1;
+    }
+    shape.push_back(extent);
+    targetShape.push_back(maskType.getDimSize(id));
+  }
+
+  // Strip explicit singleton insertions so the common vector mask can be
+  // expanded directly at its new axis, without even a reshape of the mask.
+  Value unexpanded = source;
+  while (auto expand = unexpanded.getDefiningOp<triton::ExpandDimsOp>())
+    unexpanded = expand.getSrc();
+  auto unexpandedType = cast<RankedTensorType>(unexpanded.getType());
+  if (llvm::none_of(unexpandedType.getShape(),
+                   [](int64_t extent) { return extent == 1; })) {
+    source = unexpanded;
+    for (auto [i, extent] : llvm::enumerate(shape))
+      if (extent == 1)
+        source = rewriter.create<triton::ExpandDimsOp>(loc, source, i);
+  } else if (sourceType.getShape() != ArrayRef<int64_t>(shape)) {
+    // Only singleton axes move; allow_reorder=false preserves element order.
+    source = rewriter.create<triton::ReshapeOp>(loc, shape, source,
+                                              /*allowReorder=*/false);
+  }
+  auto targetType = RankedTensorType::get(targetShape, maskType.getElementType());
+  return rewriter.create<triton::BroadcastOp>(loc, targetType, source);
+}
+
 Value MemOpTransformer::createNewMask(Value oldMask, const Location loc,
                                       PatternRewriter &rewriter) {
   if (!oldMask)
@@ -730,6 +792,18 @@ Value MemOpTransformer::createNewMask(Value oldMask, const Location loc,
   });
 
   if (maskState.analysisMask(oldMask).failed()) {
+    if (enableDataTensorOffset) {
+      if (auto newMask = remapBroadcastMask(oldMask, ptrState, loc, rewriter)) {
+        // This mask is opaque: discard incomplete affine analysis, but record
+        // that it has been rebuilt. The implicit-permute load remaps other.
+        maskState = {};
+        maskState.newMask = newMask;
+        return newMask;
+      }
+      // FIXME: Handle unanalyzable masks that are not broadcasts, or whose data
+      // axes would need reordering. Keep the original load until these cases
+      // can be supported without inserting a mask transpose.
+    }
     LLVM_DEBUG({
       llvm::dbgs() << "----------------------------------------------\n";
       llvm::dbgs() << "MaskAnalysis: no mask or failed to analyze mask.\n";

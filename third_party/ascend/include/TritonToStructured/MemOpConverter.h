@@ -94,7 +94,7 @@ public:
   // Whether the ImplicitPermute path may treat a tt.load result (integer
   // tensor) as an opaque data-dependent offset (dynamicOffsets). Only the
   // createNewAddPtr path enables it; the linearization path keeps the legacy
-  // behavior.
+  // behavior. Also enables remapping broadcast masks when mask analysis fails.
   bool enableDataTensorOffset = false;
 
   MemType currentType = MemType::deafaultType;

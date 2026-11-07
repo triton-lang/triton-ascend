@@ -23,6 +23,7 @@
 #include "ascend/include/TritonToLinalg/TLAToLinalgPass.h"
 
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
+#include "ascend/include/TritonToLinalg/TritonOpConverter.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -148,7 +149,7 @@ public:
   }
 };
 
-class TLAPointerBitcastConversion final
+class TLABitcastConversion final
     : public OpConversionPattern<triton::BitcastOp> {
 public:
   using OpConversionPattern::OpConversionPattern;
@@ -156,11 +157,18 @@ public:
   LogicalResult
   matchAndRewrite(triton::BitcastOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (!isa<triton::PointerType>(op.getSrc().getType()) ||
-        !isa<triton::PointerType>(op.getType()))
+    Type srcType = op.getSrc().getType();
+    Type dstType = op.getType();
+    if (isa<triton::PointerType>(srcType) &&
+        isa<triton::PointerType>(dstType)) {
+      rewriter.replaceOp(op, adaptor.getSrc());
+      return success();
+    }
+    if (!srcType.isIntOrFloat() || !dstType.isIntOrFloat())
       return rewriter.notifyMatchFailure(
-          op, "TLA pointer bitcast requires scalar pointers");
-    rewriter.replaceOp(op, adaptor.getSrc());
+          op, "TLA bitcast requires scalar numeric values or scalar pointers");
+    rewriter.replaceOpWithNewOp<arith::BitcastOp>(op, dstType,
+                                                  adaptor.getSrc());
     return success();
   }
 };
@@ -284,11 +292,12 @@ public:
     TLATypeConverter typeConverter;
     RewritePatternSet patterns(&getContext());
     patterns.add<TLAKernelEntryConversion>(typeConverter, &getContext());
-    patterns.add<TLAAddPtrConversion, TLAPointerBitcastConversion,
-                 TLAPtrToIntConversion, TLAProgramIdConversion,
-                 TLANumProgramsConversion, TLAReturnConversion,
-                 TLAOverflowAssertConversion>(&getContext());
+    patterns
+        .add<TLAAddPtrConversion, TLABitcastConversion, TLAPtrToIntConversion,
+             TLAProgramIdConversion, TLANumProgramsConversion,
+             TLAReturnConversion, TLAOverflowAssertConversion>(&getContext());
     patterns.add<LoadStoreConverter::LoadConverter>(&getContext());
+    patterns.add<TTOpConverters::ClampFConverter>(&getContext());
 
     ConversionTarget target(getContext());
     // Convert only the operations owned by this pass, not the entire Triton
@@ -297,7 +306,7 @@ public:
     target.addIllegalOp<triton::FuncOp, triton::ReturnOp, triton::AddPtrOp,
                         triton::PtrToIntOp, triton::GetProgramIdOp,
                         triton::GetNumProgramsOp, triton::AssertOp,
-                        triton::LoadOp>();
+                        triton::LoadOp, triton::BitcastOp, triton::ClampFOp>();
     // Unsupported pointer uses still need a conversion. No pointer source
     // materialization is provided, so entry pointers cannot leak through.
     target.markUnknownOpDynamicallyLegal(
@@ -306,6 +315,7 @@ public:
       module.emitError(
           "unsupported TTIR or pointer use in TLA affinity module");
       signalPassFailure();
+      return;
     }
   }
 };

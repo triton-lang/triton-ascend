@@ -12,6 +12,12 @@ The default `all` auto-degrades to `ir` when no NPU is available.
 
 ## Layout
 
+- `scalar/` — select/maximum/minimum/XOR/cast/max_value/cdiv/infinity/clamp cases.
+  Per-interface files own `test_ir/test_compile/test_run` for actual writeback
+  kernels: buffer/VF structure, target objects, and device accuracy.
+  `scalar_frontend_contract.py` owns host-side parameter validation, type
+  promotion, literals, diagnostics, constant folding, scalar-only adapter IR,
+  and JIT helper composition (requires a TLA-enabled build, no NPU).
 - `simd/` — SIMD instruction cases: per-interface files (`vadd`, `vsub`,
   `vor`, `vxor`, `vmins`, `vsstb`, `vdiv`, `vexp`, `vmax`, `vmin`, `vmaxs`,
   `vdup`, `vdups`, `vdupv`), grouped cases (`add_cmp`, `elementwise`,
@@ -39,10 +45,20 @@ TLA_TEST_STAGE=compile python vadd.py
 TLA_TEST_STAGE=run     python vadd.py
 ```
 
-The same three stages apply to cases under `vector/`, `sync/`, and `cube/`.
+The same three stages apply to cases under `scalar/`, `vector/`, `sync/`, and `cube/`.
 On a real NPU, provide a TLA-capable Triton build, torch/torch_npu, and set
 `ASCEND_RT_VISIBLE_DEVICES` and `TRITON_CACHE_DIR`. Passing cases print
 `IR PASS` / `COMPILE PASS` / `<OP> OK` / `ALL PASS`.
+
+Run scalar API contracts independently with:
+
+```bash
+TLA_TEST_STAGE=ir pytest third_party/ascend/unittest/tla_ut/scalar/scalar_frontend_contract.py
+```
+
+Running the whole `scalar/` directory collects both the API contracts and the
+per-interface kernel tests. Frontend/IR success does not imply target compilation
+or NPU accuracy has passed.
 
 ## One-click pytest runner
 
@@ -51,6 +67,7 @@ the `output_dir` fixture. Any directory level can be run directly:
 
 ```bash
 TLA_TEST_STAGE=ir pytest third_party/ascend/unittest/tla_ut/simd
+TLA_TEST_STAGE=ir pytest third_party/ascend/unittest/tla_ut/scalar
 TLA_TEST_STAGE=ir pytest third_party/ascend/unittest/tla_ut/vector
 TLA_TEST_STAGE=ir pytest third_party/ascend/unittest/tla_ut
 pytest .../tla_ut/simd -k vadd

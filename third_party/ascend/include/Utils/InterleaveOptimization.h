@@ -69,11 +69,9 @@ enum class IndexMode : int { EVEN_MODE = 0, ODD_MODE = 1 };
 // Gather complete interleaved tiles before extracting their even/odd lanes.
 void optimizeDiscreteDeinterleavedLoads(ModuleOp moduleOp);
 
-LogicalResult
-DeinterleaveStatusOptimization(triton::LoadOp op,
-                               triton::LoadOp::Adaptor adaptor,
-                               ConversionPatternRewriter &rewriter,
-                               Value writebackDest);
+LogicalResult DeinterleaveStatusOptimization(
+    triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
+    ConversionPatternRewriter &rewriter, Value writebackDest);
 
 LogicalResult DeinterleaveStatusWithMaskOptimization(
     triton::LoadOp op, triton::LoadOp::Adaptor adaptor,

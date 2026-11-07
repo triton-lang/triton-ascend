@@ -698,7 +698,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
       if (ptrStrides.back() == 2 && (memRefShape.back() % 2 == 0) &&
           !skipNonComplementaryStaticDeinterleave(op) &&
           mlir::triton::DeinterleaveStatusOptimization(op, adaptor, rewriter,
-                                                     writebackDest)
+                                                       writebackDest)
               .succeeded()) {
         return success();
       }

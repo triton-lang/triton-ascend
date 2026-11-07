@@ -240,9 +240,9 @@ static bool isValidDeinterleaveDestination(triton::LoadOp op, Value dest) {
          destType.getElementType() == resultType.getElementType();
 }
 
-static LogicalResult finishDeinterleavedLoad(
-    triton::LoadOp op, Value slice, Value writebackDest,
-    ConversionPatternRewriter &rewriter) {
+static LogicalResult
+finishDeinterleavedLoad(triton::LoadOp op, Value slice, Value writebackDest,
+                        ConversionPatternRewriter &rewriter) {
   if (writebackDest) {
     auto write = rewriter.create<bufferization::MaterializeInDestinationOp>(
         op.getLoc(), slice, writebackDest);
@@ -255,19 +255,17 @@ static LogicalResult finishDeinterleavedLoad(
     for (Operation *loop = op->getParentOp();
          loop && loop->hasAttr("ExtractedLoadOrStore");
          loop = loop->getParentOp()) {
-      rewriter.modifyOpInPlace(
-          loop, [&] { loop->removeAttr("hivm.parallel_loop"); });
+      rewriter.modifyOpInPlace(loop,
+                               [&] { loop->removeAttr("hivm.parallel_loop"); });
     }
   }
   rewriter.replaceOp(op, slice);
   return success();
 }
 
-LogicalResult
-DeinterleaveStatusOptimization(triton::LoadOp op,
-                               triton::LoadOp::Adaptor adaptor,
-                               ConversionPatternRewriter &rewriter,
-                               Value writebackDest) {
+LogicalResult DeinterleaveStatusOptimization(
+    triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
+    ConversionPatternRewriter &rewriter, Value writebackDest) {
   if (!isValidDeinterleaveDestination(op, writebackDest))
     return failure();
   auto ptr = adaptor.getPtr();
@@ -337,7 +335,7 @@ DeinterleaveStatusOptimization(triton::LoadOp op,
         loc, newTensor, extractOffsets, extractSizes, extractStrides);
 
     return finishDeinterleavedLoad(op, deinterleaveSlice, writebackDest,
-                                  rewriter);
+                                   rewriter);
   }
 
   return failure();
@@ -467,7 +465,7 @@ LogicalResult DeinterleaveStatusWithMaskOptimization(
         loc, newTensor, extractOffsets, extractSizes, extractStrides);
 
     return finishDeinterleavedLoad(op, deinterleaveSlice, writebackDest,
-                                  rewriter);
+                                   rewriter);
   }
   return failure();
 }
@@ -483,14 +481,14 @@ struct DiscreteDeinterleaveGather {
 // Moving the lane extraction out of the loop removes the per-iteration
 // scratch buffer. Each iteration then writes a disjoint row of the wide tile,
 // so the parallel hint is valid without suppressing a scratch-buffer hazard.
-static FailureOr<DiscreteDeinterleaveGather> hoistDiscreteDeinterleave(
-    bufferization::MaterializeInDestinationOp write, IRRewriter &rewriter) {
+static FailureOr<DiscreteDeinterleaveGather>
+hoistDiscreteDeinterleave(bufferization::MaterializeInDestinationOp write,
+                          IRRewriter &rewriter) {
   auto loop = dyn_cast<scf::ForOp>(write->getParentOp());
   auto row = write.getDest().getDefiningOp<memref::SubViewOp>();
   auto slice = write.getSource().getDefiningOp<tensor::ExtractSliceOp>();
   if (!loop || !loop->hasAttr("ExtractedLoadOrStore") ||
-      loop.getNumResults() != 0 || !row || !slice ||
-      !slice->hasOneUse())
+      loop.getNumResults() != 0 || !row || !slice || !slice->hasOneUse())
     return failure();
   auto full = row.getSource().getDefiningOp<memref::AllocOp>();
   auto tensor = slice.getSource().getDefiningOp<bufferization::ToTensorOp>();
@@ -524,7 +522,8 @@ static FailureOr<DiscreteDeinterleaveGather> hoistDiscreteDeinterleave(
     if (row.getStaticStrides()[dim] != 1 ||
         (dim != 0 && (!isConstantIntValue(offsets[dim], 0) ||
                       rowType.getDimSize(dim) != fullType.getDimSize(dim))) ||
-        scratchType.getDimSize(dim) != rowType.getDimSize(dim) * (last ? 2 : 1) ||
+        scratchType.getDimSize(dim) !=
+            rowType.getDimSize(dim) * (last ? 2 : 1) ||
         slice.getStaticOffsets()[dim] != (last ? parity : 0) ||
         slice.getStaticSizes()[dim] != rowType.getDimSize(dim) ||
         slice.getStaticStrides()[dim] != (last ? 2 : 1))
@@ -596,9 +595,9 @@ static FailureOr<DiscreteDeinterleaveGather> hoistDiscreteDeinterleave(
   auto loc = write.getLoc();
   SmallVector<int64_t> wideShape(fullType.getShape());
   wideShape.back() *= 2;
-  auto wideType = MemRefType::get(wideShape, fullType.getElementType(),
-                                 MemRefLayoutAttrInterface{},
-                                 fullType.getMemorySpace());
+  auto wideType =
+      MemRefType::get(wideShape, fullType.getElementType(),
+                      MemRefLayoutAttrInterface{}, fullType.getMemorySpace());
   rewriter.setInsertionPoint(loop);
   auto wide = rewriter.create<memref::AllocOp>(loc, wideType);
   rewriter.setInsertionPoint(scratch);
@@ -622,7 +621,7 @@ static FailureOr<DiscreteDeinterleaveGather> hoistDiscreteDeinterleave(
   for (auto fill : fills) {
     rewriter.setInsertionPoint(fill);
     rewriter.replaceOpWithNewOp<linalg::FillOp>(fill, fill.getInputs(),
-                                             ValueRange{wideRow});
+                                                ValueRange{wideRow});
   }
   rewriter.setInsertionPoint(fullTensor);
   auto wideTensor = rewriter.create<bufferization::ToTensorOp>(
@@ -669,8 +668,9 @@ static bool isTensorDevicePrint(Operation *op) {
 }
 
 static bool canShareDiscreteGather(DiscreteDeinterleaveGather lhs,
-                                  DiscreteDeinterleaveGather rhs) {
-  if (lhs.parity == rhs.parity || lhs.buffer.getType() != rhs.buffer.getType() ||
+                                   DiscreteDeinterleaveGather rhs) {
+  if (lhs.parity == rhs.parity ||
+      lhs.buffer.getType() != rhs.buffer.getType() ||
       lhs.loop->getBlock() != rhs.loop->getBlock() ||
       !lhs.tensor->isBeforeInBlock(rhs.loop))
     return false;

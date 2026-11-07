@@ -19,6 +19,7 @@
 # THE SOFTWARE.
 
 import builtins
+import math
 import multiprocessing
 import os
 from datetime import datetime, timezone
@@ -41,25 +42,27 @@ class ProfilerResultMismatchError(RuntimeError):
             f"target_kernel_name={target_kernel_name!r}, expected_rows={expected_rows}, actual_rows={actual_rows}")
 
 
+def _npu_bench_options(warmup=5, active=30):
+    if active <= 0:
+        raise ValueError("active must be positive")
+    return (max(1, math.ceil(active / 10)), active, 4, 0.015, 0.25, 0.75, 3.0, 5)
+
+
 def do_bench_npu_profiler(
-    funcs,
-    warmup=5,
-    active=30,
-    clear_l2_cache=False,
-    prof_dir=None,
-    keep_res=False,
-    target_kernel_name: Optional[str] = None,
-    _raise_on_mismatch: bool = False,
+        funcs,
+        warmup=5,
+        active=30,
+        clear_l2_cache=False,
+        prof_dir=None,
+        keep_res=False,
+        target_kernel_name: Optional[str] = None,
+        _raise_on_mismatch: bool = False,
+        quantiles=(0, 1),
 ):
     import torch
     import torch_npu
     if not isinstance(funcs, list):
         funcs = [funcs]
-
-    # warmup kernel
-    for fn in funcs:
-        fn()
-        torch.npu.synchronize()
 
     experimental_config = torch_npu.profiler._ExperimentalConfig(
         aic_metrics=torch_npu.profiler.AiCMetrics.PipeUtilization,
@@ -114,6 +117,7 @@ def do_bench_npu_profiler(
             target_kernel_name=target_kernel_name,
             clear_l2_cache=clear_l2_cache,
             _raise_on_mismatch=_raise_on_mismatch,
+            quantiles=quantiles,
         )
     finally:
         _rm_dic(keep_res, torch_path)
@@ -129,13 +133,14 @@ def _rm_dic(keep_res, torch_path):
 
 
 def _collect_prof_result(
-    base_dir: str,
-    funcs,
-    num_warmup: int,
-    num_active: int,
-    target_kernel_name: Optional[str] = None,
-    clear_l2_cache: bool = False,
-    _raise_on_mismatch: bool = False,
+        base_dir: str,
+        funcs,
+        num_warmup: int,
+        num_active: int,
+        target_kernel_name: Optional[str] = None,
+        clear_l2_cache: bool = False,
+        _raise_on_mismatch: bool = False,
+        quantiles=(0, 1),
 ):
     """
     Collect kernel performance from task_time*.csv or kernel_details.csv, returned in millisecond.
@@ -204,8 +209,11 @@ def _collect_prof_result(
     expected_rows = num_funcs * (num_warmup + num_active)
     actual_rows = len(filter_df)
 
+    if (target_kernel_name is not None and _raise_on_mismatch and actual_rows != expected_rows
+            and not (all(fn is funcs[0] for fn in funcs) and actual_rows % expected_rows == 0)):
+        raise ProfilerResultMismatchError(target_kernel_name, expected_rows, actual_rows)
     mul = 1
-    if num_funcs == 1:
+    if num_funcs == 1 or all(fn is funcs[0] for fn in funcs):
         if actual_rows % expected_rows != 0:
             if target_kernel_name is not None and _raise_on_mismatch:
                 raise ProfilerResultMismatchError(target_kernel_name, expected_rows, actual_rows)
@@ -213,20 +221,22 @@ def _collect_prof_result(
                 f"Expected the actual row count to be a multiple of {expected_rows}, but got {actual_rows}. The expected row count and the actual row count do not match."
             )
         mul = actual_rows // expected_rows
-        num_warmup = num_warmup * mul
-        num_active = num_active * mul
     else:
         if actual_rows != expected_rows:
             print(
                 "[WARNING] Passing a list of functions where a function may contain multiple kernels or launch no kernel is not supported and may lead to incorrect results."
             )
+            return [float("inf")] * num_funcs
 
-    time_cost = [0] * num_funcs
-    for func_idx in np.arange(0, num_funcs):
-        for active_index in np.arange(0, num_active):
-            row_index = func_idx * (num_warmup + num_active) + num_warmup + active_index
-            time_cost[func_idx] += filter_df.iloc[row_index][col_time]
-    time_cost = [x * mul / num_active / 1e3 for x in time_cost]
+    if mul < 1:
+        return float("inf") if num_funcs == 1 else [float("inf")] * num_funcs
+    samples = filter_df[col_time].to_numpy(dtype=float).reshape(num_funcs, num_warmup + num_active, mul)[:, num_warmup:]
+    valid = np.isfinite(samples).all(axis=(1, 2)) & (samples > 0).all(axis=(1, 2))
+    samples = samples.sum(axis=2) / 1e3
+    if num_active >= 10 and quantiles != (0, 1):
+        start, end = (int(num_active * quantile) for quantile in quantiles)
+        samples = np.sort(samples, axis=1)[:, start:max(start + 1, end)]
+    time_cost = np.where(valid, samples.mean(axis=1), np.inf).tolist()
 
     if num_funcs == 1:
         return time_cost[0]
@@ -249,20 +259,17 @@ except ImportError:
 
 # If the CANN version is earlier than 9.1.0, it needs to set libmspti.so in LD_PRELOAD to use mspti.
 def do_bench_npu_mspti(
-    funcs,
-    warmup=5,
-    active=30,
-    clear_l2_cache=False,
-    target_kernel_name: Optional[str] = None,
+        funcs,
+        warmup=5,
+        active=30,
+        clear_l2_cache=False,
+        target_kernel_name: Optional[str] = None,
+        quantiles=(0, 1),
 ):
     import torch
     import torch_npu
     if not isinstance(funcs, list):
         funcs = [funcs]
-
-    for fn in funcs:
-        fn()
-        torch.npu.synchronize()
 
     if clear_l2_cache:
         buffer = runtime.driver.active.get_empty_cache_for_benchmark()
@@ -279,7 +286,7 @@ def do_bench_npu_mspti(
             return
         if target_kernel_name is not None and target_kernel_name not in data.name:
             return
-        all_kernel_durations.append(data.end - data.start)
+        all_kernel_durations.append((data.start, data.end - data.start))
 
     monitor = KernelMonitor()
     torch.npu.synchronize()
@@ -299,6 +306,9 @@ def do_bench_npu_mspti(
         torch.npu.synchronize()
         monitor.stop()
 
+    all_kernel_durations.sort(key=lambda row: row[0])
+    all_kernel_durations = [duration for _, duration in all_kernel_durations]
+
     num_funcs = len(funcs)
     duration_per_kernel = []
 
@@ -310,24 +320,32 @@ def do_bench_npu_mspti(
         return [float("inf")] * num_funcs
 
     mul = 1
-    if num_funcs == 1:
+    if num_funcs == 1 or all(fn is funcs[0] for fn in funcs):
         if actual_rows % expected_rows != 0:
-            return float("inf")
+            return float("inf") if num_funcs == 1 else [float("inf")] * num_funcs
         mul = actual_rows // expected_rows
         warmup = warmup * mul
-        total = actual_rows
+        total = actual_rows // num_funcs
     else:
         if actual_rows != expected_rows:
             print(
                 "[WARNING] Passing a list of functions containing multiple kernels is not fully supported and may lead to inaccurate results."
             )
+            return [float("inf")] * num_funcs
 
     current_idx = 0
     for i in range(num_funcs):
         current_func_records = all_kernel_durations[current_idx:current_idx + total]
         current_idx += total
         current_active_records = current_func_records[warmup:total]
-        avg_time = sum(current_active_records) * mul / len(current_active_records)
+        if mul > 1:
+            current_active_records = [
+                sum(current_active_records[index:index + mul]) for index in range(0, len(current_active_records), mul)
+            ]
+        if active >= 10 and quantiles != (0, 1):
+            start, end = (int(active * quantile) for quantile in quantiles)
+            current_active_records = sorted(current_active_records)[start:max(start + 1, end)]
+        avg_time = sum(current_active_records) / len(current_active_records)
         avg_time_ms = avg_time / 1000000.0
         duration_per_kernel.append(avg_time_ms)
 
@@ -352,6 +370,7 @@ def do_bench_npu(
     prof_dir=None,
     keep_res=False,
     target_kernel_name: Optional[str] = None,
+    _active_limit=None,
 ):
     """
     Benchmark the runtime of the provided function on NPU.
@@ -360,7 +379,8 @@ def do_bench_npu(
 
     :param funcs: Function (or list of functions) to benchmark. If a list is provided, returns a list of mean runtimes.
     :type funcs: Callable or List[Callable]
-    :param warmup: Warmup iterations. Runs the function `warmup` times before actual timing to stabilize performance. Defaults to 5.
+    :param warmup: Warmup iterations. Runs the function before actual timing to stabilize performance.
+        The argument is retained for compatibility; the effective count is max(ceil(active / 10), 1).
     :type warmup: int
     :param active: Active iterations to record for timing. The final result is the average over these iterations. Defaults to 30.
     :type active: int
@@ -370,36 +390,77 @@ def do_bench_npu(
     :type prof_dir: str, optional
     :param keep_res: Whether to keep the raw profiler result files (e.g., CSVs) after parsing. Defaults to False. If True, forces fallback to torch_npu.profiler.
     :type keep_res: bool, optional
-    :param target_kernel_name: Specific NPU kernel name to filter and benchmark. If None, benchmarks the entire function. If specified, returns the execution time of only that kernel. Defaults to None. Only used when falling back to torch_npu.profiler.
+    :param target_kernel_name: Specific NPU kernel name to filter and benchmark. If None, benchmarks the entire function. If specified, returns the execution time of only that kernel. Defaults to None.
+        Both profilers support filtering; specifying a target outside the NPU autotune route forces torch_npu.profiler.
     :type target_kernel_name: str, optional
     """
     import math
     import os
+    import torch
     mspti_available = True
     if KernelMonitor is None:
         mspti_available = False
         print(f"[WARNING] mspti package not found. Falling back to torch_npu.profiler.")
     _check_mspti_env()
 
+    warmup, active, confirmations, tolerance, lower, upper, budget, batches = _npu_bench_options(warmup, active)
+    if _active_limit is not None:
+        active = min(active, _active_limit)
+        budget = 0
     if not isinstance(funcs, list):
         funcs = [funcs]
         use_autotune = False
     else:
         use_autotune = knobs.ascend.bench_method.lower() == "npu"
 
-    results = None
-    need_fallback = True
-    force_fallback = (prof_dir is not None) or keep_res or (target_kernel_name is not None and not use_autotune)
+    for fn in funcs:
+        fn()
+        torch.npu.synchronize()
 
-    if mspti_available and not force_fallback:
-        try:
-            results = do_bench_npu_mspti(funcs, warmup, active, clear_l2_cache, target_kernel_name)
-            first_val = results[0] if isinstance(results, list) else results
-            if not math.isinf(first_val):
-                need_fallback = False
-        except Exception:
-            pass
-    if need_fallback:
-        results = do_bench_npu_profiler(funcs, warmup, active, clear_l2_cache, prof_dir, keep_res, target_kernel_name,
-                                        use_autotune)
-    return results
+    force_fallback = (prof_dir is not None) or keep_res or (target_kernel_name is not None and not use_autotune)
+    base_dir = prof_dir
+    if batches > 1 and base_dir is None:
+        timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+        base_dir = os.path.join(cache.get_triton_dir("profile_results"), f"prof_{timestamp}_{os.getpid()}")
+    histories = [[] for _ in funcs]
+    pending = list(builtins.range(len(funcs)))
+    for batch in builtins.range(max(1, batches)):
+        warmup = max(1, math.ceil(active / 10))
+        selected = [funcs[index] for index in pending] * confirmations
+        quantiles = (lower, upper)
+        results, need_fallback = None, True
+        if mspti_available and not force_fallback:
+            try:
+                results = do_bench_npu_mspti(selected, warmup, active, clear_l2_cache, target_kernel_name, quantiles)
+                values = results if isinstance(results, list) else [results]
+                need_fallback = not all(math.isfinite(value) and value > 0 for value in values)
+            except Exception:
+                pass
+        if need_fallback:
+            batch_dir = os.path.join(base_dir, f"batch_{batch}") if batches > 1 else prof_dir
+            results = do_bench_npu_profiler(selected, warmup, active, clear_l2_cache, batch_dir, keep_res,
+                                            target_kernel_name, use_autotune, quantiles)
+        if len(selected) == 1:
+            results = [results]
+        for position, index in enumerate(pending):
+            histories[index] = sorted(histories[index] + results[position::len(pending)])[:confirmations]
+        pending = [
+            index for index in pending
+            if confirmations > 1 and (len(histories[index]) < confirmations or not math.isfinite(histories[index][-1])
+                                      or histories[index][0] <= 0 or histories[index][-1] > histories[index][0] *
+                                      (1 + tolerance))
+        ]
+        if not pending:
+            break
+        if batch == 0 and batches > 1 and budget and 0 < min(results) < math.inf:
+            previous_active = active
+            active = max(active, math.ceil(budget / min(results)))
+            if active != previous_active:
+                for index in pending:
+                    histories[index].clear()
+    if batches > 1:
+        _rm_dic(keep_res, base_dir)
+    if pending:
+        print(f"NPU benchmark: minimum not confirmed for configurations {[index + 1 for index in pending]}")
+    scores = [history[0] for history in histories]
+    return scores[0] if len(funcs) == 1 else scores

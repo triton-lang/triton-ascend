@@ -32,8 +32,7 @@
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
-
-#include "DynamicCVPipeline/StandardizeOp/Passes.h"
+#include "ascend/include/DynamicCVPipeline/StandardizeOp/Passes.h"
 
 using namespace mlir;
 using namespace triton;

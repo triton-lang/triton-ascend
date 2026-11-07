@@ -181,6 +181,13 @@ if(TRITON_BUILD_PYTHON_MODULE)
     add_subdirectory(third_party/${CODEGEN_BACKEND})
   endforeach()
 
+  if (TRITON_BUILD_PROTON)
+    add_subdirectory(third_party/proton)
+  endif()
+  # We always build proton dialect
+  list(APPEND TRITON_PLUGIN_NAMES "proton")
+  add_subdirectory(third_party/proton/Dialect)
+
   # Gluon bindings unconditionally expose AMD IR operations even when the
   # AMD codegen backend is disabled. Build only their actual IR and utility
   # objects and required converter, not the AMD plugin or transform pipeline.
@@ -209,12 +216,6 @@ if(TRITON_BUILD_PYTHON_MODULE)
     target_link_libraries(TritonAMDGPUIR PUBLIC TritonAMDUtils)
   endif()
 
-  if (TRITON_BUILD_PROTON)
-    add_subdirectory(third_party/proton)
-  endif()
-  # We always build proton dialect
-  list(APPEND TRITON_PLUGIN_NAMES "proton")
-  add_subdirectory(third_party/proton/Dialect)
 
   if (DEFINED TRITON_PLUGIN_DIRS)
     foreach(PLUGIN_DIR ${TRITON_PLUGIN_DIRS})

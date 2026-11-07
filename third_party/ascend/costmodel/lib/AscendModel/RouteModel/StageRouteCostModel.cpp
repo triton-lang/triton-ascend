@@ -24,6 +24,50 @@ using namespace mlir::ascend;
 
 namespace {
 
+static constexpr double StageWorkload::*workloadScalarFields[] = {
+    &StageWorkload::scalarOperations,
+    &StageWorkload::loadBytes,
+    &StageWorkload::storeBytes,
+    &StageWorkload::loadOperations,
+    &StageWorkload::storeOperations,
+    &StageWorkload::loadWarpInstructions,
+    &StageWorkload::storeWarpInstructions,
+    &StageWorkload::indirectLoadBytes,
+    &StageWorkload::indirectStoreBytes,
+    &StageWorkload::indirectLoadTransactions,
+    &StageWorkload::indirectStoreTransactions,
+    &StageWorkload::partialContinuousLoadRows,
+    &StageWorkload::partialContinuousStoreRows,
+    &StageWorkload::partialContinuousLoadBytes,
+    &StageWorkload::partialContinuousStoreBytes,
+    &StageWorkload::partialContinuousLoadWarpInstructions,
+    &StageWorkload::partialContinuousStoreWarpInstructions,
+    &StageWorkload::sharedLocalLoadInstructions,
+    &StageWorkload::sharedLocalStoreInstructions,
+    &StageWorkload::privateStackLoadInstructions,
+    &StageWorkload::privateStackStoreInstructions,
+    &StageWorkload::reductionOperations,
+    &StageWorkload::shuffleLaneSteps,
+    &StageWorkload::dotOperations,
+    &StageWorkload::dotFlops,
+    &StageWorkload::loopBackedges,
+    &StageWorkload::conditionalBranches,
+    &StageWorkload::divergentBranches,
+    &StageWorkload::synchronizations,
+    &StageWorkload::scalarLoadCount,
+    &StageWorkload::scalarStoreCount,
+};
+
+template <typename Map> static void scaleCounts(Map &counts, double scale) {
+  for (auto &entry : counts)
+    entry.second *= scale;
+}
+
+template <typename Map> static void mergeCounts(Map &into, const Map &from) {
+  for (const auto &[key, count] : from)
+    into[key] += count;
+}
+
 static double mixedEquivalentStageCost(const LogicalStageCost &stage,
                                        const StageImplementationCost &selected,
                                        const ScopeHandoffCost &scopeHandoff) {
@@ -236,6 +280,7 @@ setDiagnostics(StageRoutePlan &plan,
 }
 
 struct MinmaxScanFacts {
+  size_t stageIndex = 0;
   bool exact = true;
   int64_t count = 0;
   int64_t sequences = 0;
@@ -261,13 +306,15 @@ static MinmaxScanFacts minmaxScanFacts(const StageCostTable &table) {
     const auto &[geometry, count] = *stage.workload.prefixScanCounts.begin();
     const auto exactCount = exactNonNegativeWorkCount(count);
     const auto &[extent, sequences, stride, results, reverse, combine, dataType,
-                 rank, dimension, elementBits] = geometry;
+                 rank, dimension, elementBits, fullShape, exactCombine,
+                 simpleBinary] = geometry;
     if (!exactCount || *exactCount != 1 || extent <= 1 || sequences <= 1 ||
         stride <= 0 || results != 1 || reverse || combine != "minmax") {
       facts.exact = false;
       continue;
     }
     ++facts.count;
+    facts.stageIndex = static_cast<size_t>(&stage - table.stages.data());
     facts.sequences = sequences;
     facts.extent = extent;
   }
@@ -286,6 +333,17 @@ findImplementationCost(const LogicalStageCost &stage,
         cost.implementation.aivSubblocks == implementation.aivSubblocks)
       return &cost;
   return nullptr;
+}
+
+static bool fittedScanOwnsCompletion(const MinmaxScanFacts &facts,
+                                     const StageCostTable &table,
+                                     const StageRoutePlan &plan) {
+  if (!facts.exact || facts.stageIndex >= plan.implementations.size())
+    return false;
+  const auto *selected = findImplementationCost(
+      table.stages[facts.stageIndex], plan.implementations[facts.stageIndex]);
+  // A fitted scan already owns its full completion cost.
+  return selected && selected->resources.scanCompletionCycles > 0.0;
 }
 
 /// AutoBlockify V1 is a route-conditional execution schedule.
@@ -771,6 +829,124 @@ llvm::json::Object AddressPatternSummary::toJSON() const {
   return result;
 }
 
+void StageWorkload::recomputeIssueElements() {
+  double elements = scalarOperations + scalarLoadCount + scalarStoreCount;
+  for (const auto &[size, count] : predicateCounts)
+    elements += static_cast<double>(size) * count;
+  for (const auto &entry : operationCounts)
+    for (const auto &[size, count] : entry.second)
+      elements += static_cast<double>(size) * count;
+  elements +=
+      32.0 * (loadWarpInstructions + storeWarpInstructions +
+              sharedLocalLoadInstructions + sharedLocalStoreInstructions +
+              privateStackLoadInstructions + privateStackStoreInstructions);
+  for (const AtomicWorkload &atomic : atomicWorkloads)
+    elements += atomic.logicalElements;
+  issueElements = elements;
+}
+
+void StageWorkload::scale(double factor) {
+  for (auto &reduction : reductionWorkloads)
+    reduction.instances *= factor;
+  for (auto field : workloadScalarFields)
+    this->*field *= factor;
+  for (auto &access : memoryAccesses)
+    access.count *= factor;
+  for (AtomicWorkload &atomic : atomicWorkloads) {
+    atomic.logicalElements *= factor;
+    atomic.logicalOperationInstances *= factor;
+  }
+  scaleCounts(indirectLoadCounts, factor);
+  scaleCounts(segmentedIndirectLoadCounts, factor);
+  scaleCounts(indirectStoreCounts, factor);
+  scaleCounts(segmentedIndirectStoreCounts, factor);
+  scaleCounts(continuousLoadCounts, factor);
+  scaleCounts(continuousStoreCounts, factor);
+  scaleCounts(predicateCounts, factor);
+  scaleCounts(prefixScanCounts, factor);
+  scaleCounts(reductionGeometryCounts, factor);
+  scaleCounts(reductionCombineClassCounts, factor);
+  scaleCounts(scalarizedMultiResultReductionCounts, factor);
+  scaleCounts(sortCounts, factor);
+  scaleCounts(oneTripMaskedAccumulatorReductionExtents, factor);
+  scaleCounts(dotFlopCounts, factor);
+  scaleCounts(dotShapeCounts, factor);
+  for (auto &[key, entry] : dotOperandPaths)
+    entry.second *= factor;
+  for (auto &entry : operationCounts)
+    for (auto &[size, count] : entry.second)
+      count *= factor;
+  for (TensorOperationWorkload &tensor : tensorOperationWorkloads) {
+    tensor.logicalElements *= factor;
+    tensor.segmentCount *= factor;
+  }
+  recomputeIssueElements();
+}
+
+void StageWorkload::merge(StageWorkload from) {
+  llvm::append_range(reductionWorkloads, std::move(from.reductionWorkloads));
+  for (auto field : workloadScalarFields)
+    this->*field += from.*field;
+  memoryAccesses.insert(memoryAccesses.end(), from.memoryAccesses.begin(),
+                        from.memoryAccesses.end());
+  llvm::append_range(atomicWorkloads, std::move(from.atomicWorkloads));
+  mergeCounts(indirectLoadCounts, from.indirectLoadCounts);
+  mergeCounts(segmentedIndirectLoadCounts, from.segmentedIndirectLoadCounts);
+  mergeCounts(indirectStoreCounts, from.indirectStoreCounts);
+  mergeCounts(segmentedIndirectStoreCounts, from.segmentedIndirectStoreCounts);
+  mergeCounts(continuousLoadCounts, from.continuousLoadCounts);
+  mergeCounts(continuousStoreCounts, from.continuousStoreCounts);
+  mergeCounts(predicateCounts, from.predicateCounts);
+  for (auto &[key, region] : from.prefixScanCombineWorkloads) {
+    auto found = prefixScanCombineWorkloads.find(key);
+    if (found == prefixScanCombineWorkloads.end()) {
+      prefixScanCombineWorkloads.emplace(key, std::move(region));
+      continue;
+    }
+    const double previous = prefixScanCounts.at(key);
+    const double added = from.prefixScanCounts.at(key);
+    const double total = previous + added;
+    if (total > 0) {
+      found->second.scale(previous / total);
+      region.scale(added / total);
+      found->second.merge(std::move(region));
+    }
+  }
+  mergeCounts(prefixScanCounts, from.prefixScanCounts);
+  mergeCounts(reductionGeometryCounts, from.reductionGeometryCounts);
+  mergeCounts(reductionCombineClassCounts, from.reductionCombineClassCounts);
+  mergeCounts(scalarizedMultiResultReductionCounts,
+              from.scalarizedMultiResultReductionCounts);
+  mergeCounts(sortCounts, from.sortCounts);
+  mergeCounts(oneTripMaskedAccumulatorReductionExtents,
+              from.oneTripMaskedAccumulatorReductionExtents);
+  mergeCounts(dotFlopCounts, from.dotFlopCounts);
+  mergeCounts(dotShapeCounts, from.dotShapeCounts);
+  for (const auto &[key, entry] : from.dotOperandPaths) {
+    dotOperandPaths[key].first = entry.first;
+    dotOperandPaths[key].second += entry.second;
+  }
+  for (const auto &[name, counts] : from.operationCounts)
+    for (const auto &[size, count] : counts)
+      operationCounts[name][size] += count;
+  for (TensorOperationWorkload &source : from.tensorOperationWorkloads) {
+    auto destination = llvm::find_if(
+        tensorOperationWorkloads, [&](const TensorOperationWorkload &item) {
+          return item.operation == source.operation &&
+                 item.elementBitWidth == source.elementBitWidth &&
+                 item.contiguousElementsPerSegment ==
+                     source.contiguousElementsPerSegment;
+        });
+    if (destination == tensorOperationWorkloads.end()) {
+      tensorOperationWorkloads.push_back(std::move(source));
+      continue;
+    }
+    destination->logicalElements += source.logicalElements;
+    destination->segmentCount += source.segmentCount;
+  }
+  recomputeIssueElements();
+}
+
 bool StageWorkload::isFiniteAndNonNegative() const {
   const double values[] = {scalarOperations,
                            loadBytes,
@@ -921,6 +1097,11 @@ bool StageWorkload::isFiniteAndNonNegative() const {
                       }) &&
          validMemoryCounts(continuousLoadCounts) &&
          validMemoryCounts(continuousStoreCounts) &&
+         llvm::all_of(prefixScanCombineWorkloads,
+                      [&](const auto &entry) {
+                        return prefixScanCounts.count(entry.first) &&
+                               entry.second.isFiniteAndNonNegative();
+                      }) &&
          llvm::all_of(operationCounts, [&](const auto &entry) {
            return validCounts(entry.second);
          });
@@ -1073,8 +1254,19 @@ llvm::json::Object StageWorkload::toJSON() const {
                            {"rank", std::get<7>(shape)},
                            {"axis", std::get<8>(shape)},
                            {"element_bit_width", std::get<9>(shape)},
+                           {"combine_operation", std::get<11>(shape)},
+                           {"simple_binary_combine", std::get<12>(shape)},
+                           {"shape", llvm::json::Array(std::get<10>(shape))},
                            {"count_per_iteration", count}});
   result["prefix_scan_instances_per_iteration"] = std::move(prefixScans);
+  llvm::json::Array scanRegions;
+  for (const auto &[key, region] : prefixScanCombineWorkloads)
+    scanRegions.push_back(
+        llvm::json::Object{{"extent", std::get<0>(key)},
+                           {"independent_sequences", std::get<1>(key)},
+                           {"combine_operation", std::get<11>(key)},
+                           {"workload_per_occurrence", region.toJSON()}});
+  result["prefix_scan_combine_workloads"] = std::move(scanRegions);
   result["reduction_operations_per_iteration"] = reductionOperations;
   result["shuffle_lane_steps_per_iteration"] = shuffleLaneSteps;
   result["reduction_instances_per_iteration"] =
@@ -1172,7 +1364,7 @@ llvm::json::Object StageModelFeatures::toJSON() const {
   return result;
 }
 
-std::array<std::pair<llvm::StringRef, double>, 53>
+std::array<std::pair<llvm::StringRef, double>, 54>
 StageResourceCycles::keyedValues() const {
   return {
       {{"setup", setup},
@@ -1228,6 +1420,7 @@ StageResourceCycles::keyedValues() const {
         irregularTailMaterialization},
        {"prefix_scan_issue_per_iteration", prefixScanIssue},
        {"prefix_scan_critical_path_per_iteration", prefixScanCriticalPath},
+       {"scan_completion_per_iteration", scanCompletionCycles},
        {"grid_stride_prefix_scan_body_per_iteration", gridStridePrefixScanBody},
        {"recurrence_group_critical_path_per_iteration",
         recurrenceGroupCriticalPath},
@@ -1255,6 +1448,10 @@ llvm::json::Object StageResourceCycles::toJSON() const {
   llvm::json::Object result;
   for (const auto &[key, value] : keyedValues())
     result[key] = value;
+  llvm::json::Object scanFormulas;
+  for (const auto &[id, count] : scanFormulaCounts)
+    scanFormulas[id] = count;
+  result["scan_formula_instances_per_iteration"] = std::move(scanFormulas);
   result["rowwise_additional_load_setups_owned_once"] =
       rowwiseAdditionalLoadSetupsOwnedOnce;
   result["dot_component_private_stack_floor_applied"] =
@@ -1272,6 +1469,12 @@ llvm::json::Object StageResourceCycles::toJSON() const {
 
 llvm::json::Object StageResourceCycles::toCompactJSON() const {
   llvm::json::Object result;
+  if (!scanFormulaCounts.empty()) {
+    llvm::json::Object scanFormulas;
+    for (const auto &[id, count] : scanFormulaCounts)
+      scanFormulas[id] = count;
+    result["scan_formula_instances_per_iteration"] = std::move(scanFormulas);
+  }
   for (const auto &[key, value] : keyedValues())
     if (value > 0.0)
       result[key] = value;
@@ -3216,7 +3419,8 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       const auto &[shape, count] = *stage.workload.prefixScanCounts.begin();
       const auto exactCount = exactNonNegativeWorkCount(count);
       const auto &[axis, sequences, stride, results, reverse, combine, dataType,
-                   rank, dimension, elementBits] = shape;
+                   rank, dimension, elementBits, fullShape, exactCombine,
+                   simpleBinary] = shape;
       if (!exactCount || *exactCount != 1 || reverse || stride != 1 ||
           combine != "add" ||
           axis < costTable.routeCompletions.multiResultPrefixScan
@@ -3431,7 +3635,8 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       costTable.routeCompletions.largeSequenceMinmaxScan.enabled) {
     const auto facts = minmaxScanFacts(costTable);
     const auto &fit = costTable.routeCompletions.largeSequenceMinmaxScan;
-    if (facts.exact && facts.sequences >= fit.minimumIndependentSequences &&
+    if (facts.exact && !fittedScanOwnsCompletion(facts, costTable, plan) &&
+        facts.sequences >= fit.minimumIndependentSequences &&
         facts.sequences <= fit.maximumIndependentSequences &&
         facts.extent >= fit.minimumExtent &&
         facts.extent <= fit.maximumExtent) {
@@ -3466,7 +3671,8 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
         facts.sequences <= fit.largeMaximumIndependentSequences &&
         facts.extent >= fit.largeMinimumExtent &&
         facts.extent <= fit.largeMaximumExtent;
-    if (facts.exact && (baseDomain || largeDomain)) {
+    if (facts.exact && !fittedScanOwnsCompletion(facts, costTable, plan) &&
+        (baseDomain || largeDomain)) {
       const double reduction =
           largeDomain
               ? std::min(

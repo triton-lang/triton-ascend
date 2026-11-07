@@ -8,6 +8,7 @@
 #ifndef ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 #define ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 
+#include "AscendModel/RouteModel/PrefixScan/PrefixScanFormulaModel.h"
 #include "AscendModel/RouteModel/Reduction/ReductionProfile.h"
 #include "AscendModel/RouteModel/StageRouteCostModel.h"
 
@@ -68,8 +69,6 @@ struct StageControlFlowRates {
 
   bool isFiniteAndNonNegative() const;
 };
-
-void mergeReductionResidualWorkload(StageWorkload &into, StageWorkload from);
 
 struct LogicalStage {
   std::string id;
@@ -141,6 +140,7 @@ struct StageOperationRate {
 /// Applied independently to each scan geometry and occurrence.
 struct CalibratedPrefixScanProfile {
   bool enabled = false;
+  std::vector<PrefixScanFormula> formulas;
   double prefixScanDependencyFactor = 1.0;
   double prefixScanDependencyFactor1d = 1.0;
   double prefixScanDependencyFactor1dSmall = 1.0;
@@ -293,6 +293,8 @@ struct StageAtomicRate {
 };
 
 struct StageModeProfile {
+  /// Warps per logical SIMT scan, excluding other SuperBlock programs.
+  int64_t prefixScanWarpCount = 0;
   /// Resolved by the evaluator; not an independently editable profile knob.
   int64_t activeWarpCount = 0;
   double setupCycles = 0.0;

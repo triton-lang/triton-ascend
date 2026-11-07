@@ -3182,9 +3182,8 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
       *value = rewriter.create<arith::ExtFOp>(loc, targetType, *value);
     } else {
       // BF16 and FP16 have equal widths; convert through FP32 numerically.
-      if (!elementType.isF32())
-        *value = rewriter.create<arith::ExtFOp>(
-            loc, type.clone(rewriter.getF32Type()), *value);
+      *value = rewriter.create<arith::ExtFOp>(
+          loc, type.clone(rewriter.getF32Type()), *value);
       auto converted =
           rewriter.create<arith::TruncFOp>(loc, targetType, *value);
       converted->setAttr("round_mode",

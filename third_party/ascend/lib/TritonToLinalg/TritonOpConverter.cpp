@@ -3085,6 +3085,20 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                      rhsElemType == triton::ScaleDotElemType::E5M2);
   bool isFP4Input = (lhsElemType == triton::ScaleDotElemType::E2M1) &&
                     (rhsElemType == triton::ScaleDotElemType::E2M1);
+  // MatMulMx consumes K-packed bytes and E8M0 scales. Its small-K
+  // decomposition requires at least 64 packed bytes (128 FP4 elements).
+  constexpr int64_t minimumNativeFp4StorageK = 64;
+  auto hasE8M0Scale = [](Value scale) {
+    return !scale || cast<RankedTensorType>(scale.getType())
+                         .getElementType()
+                         .isInteger(8);
+  };
+  bool useNativeMx =
+      (isFP8Input || isFP4Input) && dstType.getRank() == 2 &&
+      dstType.getElementType().isF32() && op.getLhsKPack() &&
+      op.getRhsKPack() && hasE8M0Scale(lhsScale) && hasE8M0Scale(rhsScale) &&
+      (!isFP4Input || cast<RankedTensorType>(lhs.getType()).getShape().back() >=
+                          minimumNativeFp4StorageK);
   if ((isFP8Input || isFP4Input) && !lhsScale) {
     auto lhsTy = cast<RankedTensorType>(lhs.getType());
     int64_t k = lhsTy.getShape().back();
@@ -3103,7 +3117,7 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                                            ValueRange{defaultScaleEmpty})
                    .getResult(0);
   }
-  if (isFP8Input || isFP4Input) {
+  if (useNativeMx) {
     if (!rhsScale) {
       auto rhsTy = cast<RankedTensorType>(rhs.getType());
       int64_t k = rhsTy.getDimSize(rhsTy.getRank() - 2);
@@ -3158,6 +3172,102 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     rewriter.replaceOp(op, finalResult);
     return success();
   }
+
+  // Follow DecomposeScaledBlocked::getComputeType and Fp4ToFpOp: decode
+  // directly to FP16 when either operand is FP16, and to BF16 otherwise.
+  FloatType fp4ComputeType =
+      lhsElemType == triton::ScaleDotElemType::FP16 ||
+              rhsElemType == triton::ScaleDotElemType::FP16
+          ? rewriter.getF16Type()
+          : rewriter.getBF16Type();
+  // E2M1 layout: [sign:1][exponent:2][fraction:1], exponent bias = 1.
+  constexpr unsigned fp4ExponentBits = 2;
+  constexpr unsigned fp4FractionBits = 1;
+  constexpr unsigned fp4SignBit = fp4ExponentBits + fp4FractionBits;
+  constexpr unsigned fp4StorageBits = fp4SignBit + 1;
+  constexpr unsigned fp4ValuesPerByte = 8 / fp4StorageBits;
+  constexpr uint16_t fp4SignMask = 1u << fp4SignBit;
+  constexpr uint16_t fp4MagnitudeMask = fp4SignMask - 1;
+  constexpr uint16_t fp4NibbleMask = (1u << fp4StorageBits) - 1;
+  constexpr uint16_t fp4FirstNormal = 1u << fp4FractionBits;
+  auto unpackFp4 = [&](Value packed, FloatType computeType,
+                       unsigned axis) -> Value {
+    // All E2M1 values are exact in both FP16 and BF16. Derive the target
+    // fields from the type rather than hard-coding either representation.
+    unsigned targetFractionBits = computeType.getFPMantissaWidth() - 1;
+    unsigned targetSignBit = computeType.getWidth() - 1;
+    uint16_t halfBits = rewriter.getFloatAttr(computeType, 0.5)
+                            .getValue()
+                            .bitcastToAPInt()
+                            .getZExtValue();
+    auto type = cast<RankedTensorType>(packed.getType());
+    auto shape = type.getShape();
+    auto i16Ty = type.clone(rewriter.getI16Type());
+    auto constant = [&](uint16_t value) -> Value {
+      return rewriter.create<arith::ConstantOp>(
+          loc, i16Ty, DenseElementsAttr::get(i16Ty, APInt(16, value)));
+    };
+    Value bits = rewriter.create<arith::ExtUIOp>(loc, i16Ty, packed);
+    auto decodeNibble = [&](Value nibble) -> Value {
+      Value magnitude = rewriter.create<arith::AndIOp>(
+          loc, nibble, constant(fp4MagnitudeMask));
+      Value sign =
+          rewriter.create<arith::AndIOp>(loc, nibble, constant(fp4SignMask));
+      sign = rewriter.create<arith::ShLIOp>(
+          loc, sign, constant(targetSignBit - fp4SignBit));
+      Value normal = rewriter.create<arith::ShLIOp>(
+          loc, magnitude, constant(targetFractionBits - fp4FractionBits));
+      normal = rewriter.create<arith::AddIOp>(loc, normal, constant(halfBits));
+      Value subnormal = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::ult, magnitude, constant(fp4FirstNormal));
+      Value zero = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
+                                                  magnitude, constant(0));
+      Value subnormalBits = rewriter.create<arith::SelectOp>(
+          loc, zero, constant(0), constant(halfBits));
+      Value fpBits = rewriter.create<arith::SelectOp>(loc, subnormal,
+                                                      subnormalBits, normal);
+      fpBits = rewriter.create<arith::OrIOp>(loc, fpBits, sign);
+      return rewriter.create<arith::BitcastOp>(loc, type.clone(computeType),
+                                               fpBits);
+    };
+    Value low = decodeNibble(
+        rewriter.create<arith::AndIOp>(loc, bits, constant(fp4NibbleMask)));
+    Value high = decodeNibble(
+        rewriter.create<arith::ShRUIOp>(loc, bits, constant(fp4StorageBits)));
+    SmallVector<int64_t> joinedShape(shape);
+    joinedShape.push_back(fp4ValuesPerByte);
+    Value joined = rewriter.create<triton::JoinOp>(
+        loc, RankedTensorType::get(joinedShape, computeType), low, high);
+    unsigned rank = type.getRank();
+    SmallVector<int32_t> order;
+    SmallVector<int64_t> interleavedShape;
+    SmallVector<ReassociationIndices> reassociation;
+    unsigned expandedAxis = 0;
+    for (unsigned i = 0; i < rank; ++i) {
+      order.push_back(i);
+      interleavedShape.push_back(shape[i]);
+      ReassociationIndices group{expandedAxis++};
+      if (i == axis) {
+        order.push_back(rank);
+        interleavedShape.push_back(fp4ValuesPerByte);
+        group.push_back(expandedAxis++);
+      }
+      reassociation.push_back(group);
+    }
+    if (axis != rank - 1)
+      joined = rewriter.create<triton::TransOp>(
+          loc, RankedTensorType::get(interleavedShape, computeType), joined,
+          rewriter.getDenseI32ArrayAttr(order));
+    SmallVector<int64_t> unpackedShape(shape);
+    unpackedShape[axis] *= fp4ValuesPerByte;
+    return rewriter.create<tensor::CollapseShapeOp>(
+        loc, RankedTensorType::get(unpackedShape, computeType), joined,
+        reassociation);
+  };
+  if (lhsElemType == triton::ScaleDotElemType::E2M1)
+    lhs = unpackFp4(lhs, fp4ComputeType, op.getLhsKPack() ? 1 : 0);
+  if (rhsElemType == triton::ScaleDotElemType::E2M1)
+    rhs = unpackFp4(rhs, fp4ComputeType, op.getRhsKPack() ? 0 : 1);
 
   if (!lhsScale) {
     return op.emitError("lhsScale is required for non-FP8 input");

@@ -27,6 +27,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include <optional>
@@ -86,6 +87,24 @@ public:
       }
       if (!dimVal.has_value() || dimVal.value() != tensorShape[i]) {
         return MaskPosition::Unknown;
+      }
+    }
+    // A tail reaches the end of the only dimension with a nonzero start.
+    // parseCmp(sge) represents its dynamic size as extent - offset. Recognize
+    // that form without creating IR; other intervals remain Middle.
+    auto offset = offsets[dynIndex];
+    auto size = dims[dynIndex];
+    int64_t extent = tensorShape[dynIndex];
+    auto constantOffset = mlir::getConstantIntValue(offset);
+    auto constantSize = mlir::getConstantIntValue(size);
+    if (constantOffset && constantSize && *constantOffset >= 0 &&
+        *constantOffset <= extent && *constantSize == extent - *constantOffset)
+      return MaskPosition::Tail;
+    if (auto sizeValue = mlir::dyn_cast<mlir::Value>(size)) {
+      if (auto sub = sizeValue.getDefiningOp<mlir::arith::SubIOp>()) {
+        if (mlir::isConstantIntValue(sub.getLhs(), extent) &&
+            mlir::isEqualConstantIntOrValue(sub.getRhs(), offset))
+          return MaskPosition::Tail;
       }
     }
     return MaskPosition::Middle;

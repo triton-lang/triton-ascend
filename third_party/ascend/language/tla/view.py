@@ -128,6 +128,42 @@ def subview(src, offsets, sizes, strides=None, _semantic=None):
 
 @builtin
 def view(src, shape, strides=None, offsets=None, space="gm", _semantic=None):
+    """Creates a buffer view from a kernel pointer or an existing buffer.
+
+    :param src: Pointer tensor (kernel argument) or ``tla.buffer`` source.
+    :type src: tl.tensor or tla.buffer
+    :param shape: Result extents in elements.
+    :type shape: tuple[int, ...] or list[int]
+    :param strides: Element strides. For a pointer source these are the final
+        memref strides; for a buffer source they are relative to the source
+        view. Defaults to ``None``, which selects row-major strides for a
+        pointer source and unit steps for a buffer source.
+    :type strides: tuple[int, ...] or None
+    :param offsets: Element offsets. For a pointer source these are relative to
+        the pointer; for a buffer source they are relative to the source view.
+        Defaults to ``None``, which selects zero offsets.
+    :type offsets: tuple[int or tl.tensor, ...] or None
+    :param space: Address space for a pointer source. Defaults to ``"gm"``.
+        Ignored for a buffer source, whose space is preserved; a non-default
+        value raises ``ValueError`` in that case.
+    :type space: str
+    :return: A buffer view aliasing the source memory.
+    :rtype: tla.buffer
+    :raises ValueError: If the rank of ``strides``/``offsets`` does not match
+        the result shape, or a static offset is outside the source buffer.
+    :raises TypeError: If ``src`` is neither a pointer tensor nor a
+        ``tla.buffer``.
+
+    A pointer source lowers to a one-dimensional ``hivm.hir.pointer_cast`` plus
+    a single ``memref.reinterpret_cast`` carrying the linear offset and the
+    full sizes/strides, so arbitrary strides and offsets are supported. A
+    buffer source lowers to ``memref.subview`` and preserves the source pitch;
+    use :func:`reshape` for a contiguous rank change.
+
+    .. note::
+        Only static positive extents are accepted. GM buffers must be created
+        from kernel pointers with this interface rather than :func:`alloc`.
+    """
     if isinstance(src, buffer):
         if space != "gm":
             raise ValueError("view space is ignored for a buffer source")

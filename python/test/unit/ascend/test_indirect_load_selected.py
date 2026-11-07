@@ -1,5 +1,4 @@
 """Load operation isolation, static-mask visibility and frozen formula limits."""
-import copy
 import json
 from pathlib import Path
 import sys
@@ -71,3 +70,11 @@ def test_Host_stride_values_and_formula_complexity():
     for model in MODELS.values():
         for formula in [*model["models"].values(), model["fallback"]]:
             assert 1 <= len(formula["features"]) == len(formula["coefficients"]) <= 8
+
+
+@pytest.mark.parametrize("dtype", ["int1", "float8e4nv", "float8e5"])
+def test_logical_payload_width_must_match(dtype):
+    c = case()
+    c["payload_dtype"] = dtype
+    with pytest.raises(ValueError, match="payload type"):
+        predict(MODELS["SIMD"], c, **CONTRACT)

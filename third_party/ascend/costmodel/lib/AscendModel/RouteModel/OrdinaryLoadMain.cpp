@@ -10,6 +10,26 @@ using namespace mlir::ascend;
 namespace {
 using namespace mlir::ascend::ordinary_store_main;
 using namespace indirect_store_round4;
+bool sameWidthLoadPointerBitcast(Operation *op) {
+  if (op->getName().getStringRef() != "tt.bitcast" ||
+      op->getNumOperands() != 1 || op->getNumResults() != 1) return false;
+  Type source = op->getOperand(0).getType(), target = op->getResult(0).getType();
+  auto a = dyn_cast<RankedTensorType>(source), b = dyn_cast<RankedTensorType>(target);
+  if (bool(a) != bool(b)) return false;
+  if (a) {
+    if (a.getShape() != b.getShape()) return false;
+    source = a.getElementType(); target = b.getElementType();
+  }
+  auto p = dyn_cast<triton::PointerType>(source), q = dyn_cast<triton::PointerType>(target);
+  if (!p || !q || p.getAddressSpace() != q.getAddressSpace()) return false;
+  auto scalarBits = [](Type t) -> unsigned {
+    if (auto i = dyn_cast<IntegerType>(t)) return i.getWidth();
+    if (auto f = dyn_cast<FloatType>(t)) return f.getWidth();
+    return 0;
+  };
+  const auto x = scalarBits(p.getPointeeType()), y = scalarBits(q.getPointeeType());
+  return x && x == y;
+}
 Value loadPointerRoot(Value value) {
   for (unsigned depth = 0; depth < 48; ++depth) {
     if (isa<BlockArgument>(value)) return value;
@@ -18,6 +38,7 @@ Value loadPointerRoot(Value value) {
     auto name = op->getName().getStringRef();
     if (name == "tt.addptr" && op->getNumOperands() == 2)
       value = op->getOperand(0);
+    else if (sameWidthLoadPointerBitcast(op)) value = op->getOperand(0);
     else if ((name == "tt.splat" || name == "tt.broadcast" ||
               name == "tt.expand_dims") && op->getNumOperands() == 1)
       value = op->getOperand(0);
@@ -41,7 +62,9 @@ OrdinaryLoadMainResult targetCost(triton::LoadOp load, const LogicalStage &stage
   auto pointer = dyn_cast<triton::PointerType>(root.getType());
   const Type element = tensor.getElementType();
   // A byte transport cannot silently change logical FP8 into integer data.
-  if (!pointer || pointer.getPointeeType() != element)
+  if (!pointer || !isa<IntegerType, FloatType>(pointer.getPointeeType()) ||
+      !isa<IntegerType, FloatType>(element) ||
+      pointer.getPointeeType().getIntOrFloatBitWidth() != element.getIntOrFloatBitWidth())
     return fail("Load_logical_payload_type_not_verified");
   const bool integer = element.isInteger(1) || element.isInteger(8) ||
       element.isInteger(16) || element.isInteger(32) || element.isInteger(64);
@@ -49,6 +72,13 @@ OrdinaryLoadMainResult targetCost(triton::LoadOp load, const LogicalStage &stage
       Float8E4M3FNType, Float8E5M2Type>(element) ||
       (implementation.mode == StageMode::SIMT && element.isF64());
   if (!integer && !floating) return fail("Load_payload_type_outside_domain");
+  const Type logicalPayload = pointer.getPointeeType();
+  const bool logicalFP8 = isa<Float8E4M3FNType, Float8E5M2Type>(logicalPayload);
+  if (logicalPayload != element && !(logicalFP8 && element.isInteger(8)))
+    return fail("Load_logical_payload_cast_outside_supported_transport");
+  if (logicalFP8 && ((implementation.mode == StageMode::SIMD && element.isInteger(8)) ||
+      (implementation.mode == StageMode::SIMT && !element.isInteger(8))))
+    return fail("Load_FP8_transport_does_not_match_native_mode");
   if (load.getCache() != triton::CacheModifier::NONE ||
       load.getEvict() != triton::EvictionPolicy::NORMAL ||
       !load.getBoundaryCheck().empty() || load.getIsVolatile())
@@ -61,8 +91,8 @@ OrdinaryLoadMainResult targetCost(triton::LoadOp load, const LogicalStage &stage
   const unsigned bits = element.getIntOrFloatBitWidth();
   m.elementBytes = bits == 1 ? 1 : bits / 8;
   m.payloadTypeVerified = true;
-  m.payloadIsInt1 = element.isInteger(1);
-  m.payloadIsFloat8 = isa<Float8E4M3FNType, Float8E5M2Type>(element);
+  m.payloadIsInt1 = logicalPayload.isInteger(1);
+  m.payloadIsFloat8 = logicalFP8;
   auto staticAxes = axes(load.getPtr());
   const bool known = staticAxes.size() == m.shape.size() &&
       llvm::all_of(staticAxes, [](const Axis &axis) {

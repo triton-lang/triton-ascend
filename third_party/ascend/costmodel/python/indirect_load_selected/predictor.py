@@ -13,6 +13,10 @@ def predict(model, case, runtime_coefficients=None, *, enabled=True,
         return dict(eligible=False, reason="Load_target_contract_missing_or_disabled")
     if case.get("op") != "load":
         raise ValueError("Load estimator requires an ordinary Load")
+    dtype = case.get("payload_dtype")
+    if not isinstance(dtype, str) or not dtype or (
+            (dtype == "int1" or dtype.startswith("float8")) and case["bytes"] != 1):
+        raise ValueError("Explicit Load payload type and storage width must agree")
     if case.get("mask") not in STATIC_MASKS or case.get("K_visible") is False:
         raise ValueError("Data-dependent mask needs a proven Host contract or fallback")
     if not 4 <= math.prod(case["shape"]) <= 8192 or any(not 1 <= n <= 4096 for n in case["shape"]):

@@ -35,10 +35,12 @@ exported C++ arithmetic matched 9384 real metadata rows and 375360 feature
 comparisons exactly; the maximum prediction difference was 2.91e-11.
 The checked-in Python API independently reproduced all 9384 frozen predictions
 with difference zero. The combined Load/Store Python regression suite passed
-57 tests. A native build of the current cost-model sources and their real
+60 tests. A native build of the current cost-model sources and their real
 OffsetAnalysis/Utils dependencies passed 104 positive IR checks, 416 guard
-rejections, 104 target-only Stage compositions and 16 Host/Device binding
-checks. Those registered-IR unit fixtures are synthetic; they are not measured
+rejections, 104 target-only Stage compositions, 16 Host/Device binding checks
+and four FP8 native/byte transport checks. Same-width pointer bitcasts preserve
+logical FP8 provenance; SIMD native and SIMT byte transports are distinguished.
+Those registered-IR unit fixtures are synthetic; they are not measured
 performance evidence. The complete current-upstream Triton extension has not
 been rebuilt.
 
@@ -50,7 +52,11 @@ generic static-mask integration falls back on that runtime-mask case.
 
 The generic final matrix contains 886 Load configurations, but no matching
 measurement files were present in the inspected existing measurement sessions.
-It must not be represented as an evaluated final set. The present generic
+It must not be represented as an evaluated final set. All 1772 A/B binaries now
+have verified hashes and complete ELF resource descriptors, including 30
+existing FP8 byte-transport alternatives to old native build failures. Their
+semantic case fields match the matrix. This verifies static preparation only.
+The present generic
 formula domain covers 26 mixed layouts ending in D, F=1, rank 2--5. The original
 52-layout plan, all factors, page/pointer-table structures and distribution
 pressure panels remain a broader acceptance task. Existing structured and

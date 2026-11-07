@@ -219,10 +219,10 @@ FailureOr<SymbolicOffsetInfo> castOffset(const SymbolicOffsetInfo &source,
   info.terms.irregular = math.cast(source.terms.irregular, type, isUnsigned);
   return info;
 }
-FailureOr<SymbolicOffsetInfo> addOffsets(const SymbolicOffsetInfo &lhs,
-                                         const SymbolicOffsetInfo &rhs,
-                                         bool subtract,
-                                         SymbolicArithmetic &math) {
+FailureOr<SymbolicOffsetInfo> addOffsetInfo(const SymbolicOffsetInfo &lhs,
+                                            const SymbolicOffsetInfo &rhs,
+                                            bool subtract,
+                                            SymbolicArithmetic &math) {
   if (lhs.terms.coefficients.size() != rhs.terms.coefficients.size())
     return failure();
   auto origin = math.add(lhs.terms.origin, rhs.terms.origin, subtract);
@@ -245,31 +245,24 @@ FailureOr<SymbolicOffsetInfo> addOffsets(const SymbolicOffsetInfo &lhs,
   info.fullOffsets = *full;
   return info;
 }
-FailureOr<SymbolicOffsetInfo> shapeOffset(const SymbolicOffsetInfo &source,
-                                          Type type,
-                                          ComponentExpression::Kind kind,
-                                          unsigned axis,
-                                          SymbolicArithmetic &math) {
+SymbolicOffsetInfo shapeOffset(const SymbolicOffsetInfo &source, Type type,
+                               ComponentExpression::Kind kind, unsigned axis,
+                               SymbolicArithmetic &math) {
   auto info = source;
   info.valueType = type;
   info.fullOffsets = math.shape(source.fullOffsets, type, kind, axis);
   info.terms.irregular = math.shape(source.terms.irregular, type, kind, axis);
   auto zero = math.constant(pd::getElementTypeOrSelf(type), 0);
+  // Update the copied coefficients; new or broadcast axes contribute zero.
+  auto &coefficients = info.terms.coefficients;
   if (kind == ComponentExpression::Splat)
-    info.terms.coefficients.assign(info.getShape().size(), zero);
-  else {
-    auto invariant = [&] { return zero; };
-    auto axes = kind == ComponentExpression::ExpandDims
-                    ? expandAxisFacts(
-                          ArrayRef<ComponentInfo>(source.terms.coefficients),
-                          axis, invariant)
-                    : broadcastAxisFacts(
-                          ArrayRef<ComponentInfo>(source.terms.coefficients),
-                          source.getShape(), info.getShape(), invariant);
-    if (failed(axes))
-      return failure();
-    info.terms.coefficients = std::move(*axes);
-  }
+    coefficients.assign(info.getShape().size(), zero);
+  else if (kind == ComponentExpression::ExpandDims) {
+    assert(axis <= coefficients.size() &&
+           "expanded axis must be within the result rank");
+    coefficients.insert(coefficients.begin() + axis, zero);
+  } else
+    broadcastAxes(coefficients, source.getShape(), info.getShape(), zero);
   return info;
 }
 // Validate each immutable recipe once, without copying the expression DAG.
@@ -489,7 +482,7 @@ FailureOr<Result> ControlFlowPtrRules::parseArithmetic(Value value,
     return Result{};
   SymbolicArithmetic math(value);
   if (isa<arith::AddIOp, arith::SubIOp>(op)) {
-    auto info = addOffsets(*lhs, *rhs, isa<arith::SubIOp>(op), math);
+    auto info = addOffsetInfo(*lhs, *rhs, isa<arith::SubIOp>(op), math);
     if (failed(info))
       return failure();
     return Result(*info);
@@ -530,23 +523,16 @@ FailureOr<Result> ControlFlowPtrRules::parseShape(Value value,
               : isa<BroadcastOp>(op) ? ComponentExpression::Broadcast
                                      : ComponentExpression::ExpandDims;
   unsigned axis = isa<ExpandDimsOp>(op) ? cast<ExpandDimsOp>(op).getAxis() : 0;
-  if (auto *integer = std::get_if<SymbolicOffsetInfo>(&*sourceInfo)) {
-    auto info = shapeOffset(*integer, value.getType(), kind, axis, math);
-    if (failed(info))
-      return failure();
-    return Result(*info);
-  }
+  if (auto *integer = std::get_if<SymbolicOffsetInfo>(&*sourceInfo))
+    return Result(shapeOffset(*integer, value.getType(), kind, axis, math));
   if (auto *ptr = std::get_if<SymbolicPtrInfo>(&*sourceInfo)) {
     if (ptr->block)
       return Result{};
     auto info = *ptr;
     info.ptrType = value.getType();
-    auto offsets =
+    info.offsets =
         shapeOffset(info.offsets, addressType(value.getType(), math.builder),
                     kind, axis, math);
-    if (failed(offsets))
-      return failure();
-    info.offsets = *offsets;
     if (isa<RankedTensorType>(info.base.type))
       info.base = math.shape(info.base, value.getType(), kind, axis);
     return Result(info);
@@ -583,7 +569,7 @@ FailureOr<Result> ControlFlowPtrRules::parseAddPtr(AddPtrOp op,
                           false, math);
   if (failed(delta))
     return Result{};
-  auto offsets = addOffsets(parent->offsets, *delta, false, math);
+  auto offsets = addOffsetInfo(parent->offsets, *delta, false, math);
   if (failed(offsets))
     return failure();
   auto info = *parent;

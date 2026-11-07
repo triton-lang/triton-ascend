@@ -25,6 +25,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Parser/Parser.h"
+#include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "gtest/gtest.h"
 
 using namespace mlir;
@@ -185,6 +186,89 @@ TEST(PtrAnalysisBitcast,
   SmallVector<Operation *> remaining;
   f.walk([&](triton::BitcastOp op) { remaining.push_back(op); });
   EXPECT_EQ(remaining, originalCasts);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(PtrAnalysisBitcast, EncodingChangesCannotReuseSourceOffsets) {
+  MLIRContext context;
+  load(context);
+  context.loadDialect<triton::gpu::TritonGPUDialect>();
+  auto module = parseSourceString<ModuleOp>(R"mlir(
+    #layout = #ttg.blocked<{sizePerThread=[1],threadsPerWarp=[32],warpsPerCTA=[4],order=[0]}>
+    module attributes {"ttg.num-warps"=4:i32, "ttg.threads-per-warp"=32:i32, "ttg.num-ctas"=1:i32} {
+      tt.func @remove_encoding(%base:!tt.ptr<i32>) {
+        %p=tt.splat %base:!tt.ptr<i32> -> tensor<4x!tt.ptr<i32>,#layout>
+        %c=tt.bitcast %p:tensor<4x!tt.ptr<i32>,#layout> -> tensor<4x!tt.ptr<f32>>
+        tt.return
+      }
+      tt.func @add_encoding(%base:!tt.ptr<i32>) {
+        %p=tt.splat %base:!tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+        %c=tt.bitcast %p:tensor<4x!tt.ptr<i32>> -> tensor<4x!tt.ptr<f32>,#layout>
+        tt.return
+      }
+    })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  // The verifier permits one missing encoding; offset reuse needs equality.
+  ASSERT_TRUE(succeeded(verify(*module)));
+  for (auto f : module->getOps<triton::FuncOp>()) {
+    auto cast = *f.getBody().front().getOps<triton::BitcastOp>().begin();
+    OpBuilder builder(f.getBody().front().getTerminator());
+    PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+    ASSERT_TRUE(succeeded(analysis.analyze(cast.getSrc())));
+    unsigned n = count(f);
+    EXPECT_TRUE(failed(analysis.analyze(cast.getResult())));
+    EXPECT_EQ(count(f), n);
+  }
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(PtrAnalysisBitcast, DynamicShapeKeepsSameWidthButRejectsRescaling) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @dynamic(%base8:!tt.ptr<i8>, %base32:!tt.ptr<i32>) {
+      %r=tt.make_range {start=0:i32,end=4:i32}:tensor<4xi32>
+      %four=arith.constant dense<4>:tensor<4xi32>
+      %offsets=arith.muli %r,%four:tensor<4xi32>
+      %p8=tt.splat %base8:!tt.ptr<i8> -> tensor<4x!tt.ptr<i8>>
+      %a8=tt.addptr %p8,%offsets:tensor<4x!tt.ptr<i8>>,tensor<4xi32>
+      %d8=tensor.cast %a8:tensor<4x!tt.ptr<i8>> to tensor<?x!tt.ptr<i8>>
+      %widen=tt.bitcast %d8 {tag="widen"}:tensor<?x!tt.ptr<i8>> -> tensor<?x!tt.ptr<i32>>
+      %p32=tt.splat %base32:!tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+      %a32=tt.addptr %p32,%offsets:tensor<4x!tt.ptr<i32>>,tensor<4xi32>
+      %d32=tensor.cast %a32:tensor<4x!tt.ptr<i32>> to tensor<?x!tt.ptr<i32>>
+      %narrow=tt.bitcast %d32 {tag="narrow"}:tensor<?x!tt.ptr<i32>> -> tensor<?x!tt.ptr<i8>>
+      %same=tt.bitcast %d32 {tag="same"}:tensor<?x!tt.ptr<i32>> -> tensor<?x!tt.ptr<f32>>
+      tt.return
+    }})mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  ASSERT_TRUE(succeeded(verify(*module)));
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder builder(f.getBody().front().getTerminator());
+  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+
+  // Both sources are analyzable, with aligned offsets [0, 4, 8, 12].
+  for (StringRef name : {"widen", "narrow"}) {
+    auto op = tagged(f, name).getDefiningOp<triton::BitcastOp>();
+    auto source = analysis.analyze(op.getSrc());
+    ASSERT_TRUE(succeeded(source));
+    ASSERT_TRUE(
+        mlir::triton::ptr::detail::canDivideDecomposition(source->offsets, 4));
+    unsigned n = count(f);
+    EXPECT_TRUE(failed(analysis.analyze(op.getResult())));
+    EXPECT_EQ(count(f), n);
+  }
+
+  // Equal-width casts can retain the dynamic offsets without a factor tensor.
+  auto op = tagged(f, "same").getDefiningOp<triton::BitcastOp>();
+  auto source = analysis.analyze(op.getSrc());
+  auto result = analysis.analyze(op.getResult());
+  ASSERT_TRUE(succeeded(source));
+  ASSERT_TRUE(succeeded(result));
+  EXPECT_EQ(result->offsets.fullOffsets, source->offsets.fullOffsets);
+  EXPECT_TRUE(result->getElementType().isF32());
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -380,8 +464,7 @@ TEST(PtrAnalysisBitcast, WideningKeepsProvenColumnsAndRejectsUnknownUnits) {
   ASSERT_TRUE(succeeded(test::getInfo(analysis.analyze(tagged(f, "source")))));
   unsigned before = count(f);
   auto rejected = analysis.analyze(tagged(f, "rejected"));
-  ASSERT_TRUE(succeeded(rejected));
-  EXPECT_TRUE(rejected->isEmpty());
+  EXPECT_TRUE(failed(rejected));
   EXPECT_EQ(count(f), before);
   EXPECT_TRUE(succeeded(verify(*module)));
 }
@@ -422,8 +505,7 @@ TEST(PtrAnalysisBitcast,
     ASSERT_TRUE(succeeded(test::getInfo(analysis.analyze(pointers))));
     unsigned n = count(fn);
     auto result = analysis.analyze(cast);
-    ASSERT_TRUE(succeeded(result));
-    EXPECT_TRUE(result->isEmpty());
+    EXPECT_TRUE(failed(result));
     EXPECT_EQ(count(fn), n);
     EXPECT_TRUE(succeeded(verify(fn)));
     fn.erase();

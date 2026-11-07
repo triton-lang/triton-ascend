@@ -40,6 +40,12 @@ FailureOr<unsigned> getIntegerWidth(Type type);
 Type getElementTypeOrSelf(Type type);
 FailureOr<OpFoldResult> typedZero(Type scalarType, OpBuilder &builder);
 FailureOr<llvm::APInt> getIntegerConstant(OpFoldResult value, unsigned width);
+/// Bounded divisibility proof from local integer expressions and hints.
+bool isKnownMultiple(OpFoldResult operand, uint64_t divisor,
+                     unsigned depth = 8);
+/// Local sign proof for address decompositions. Add/mul follow the analysis's
+/// no-overflow assumption; narrowing casts do not preserve the proof.
+bool isKnownNonNegative(OpFoldResult operand, unsigned depth = 8);
 FailureOr<OpFoldResult> foldOrCreateBinary(BinaryKind kind, OpFoldResult lhs,
                                            OpFoldResult rhs, Type resultType,
                                            OpBuilder &builder, Location loc);

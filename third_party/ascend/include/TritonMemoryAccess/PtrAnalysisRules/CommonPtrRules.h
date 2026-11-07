@@ -32,35 +32,48 @@
 namespace mlir::triton::ptr {
 /// Concrete integer/pointer rules. All recursive input queries use the current
 /// context.analyze through a borrowed callback. Parsers live in the
-/// implementation file and combine already analyzed inputs with shared Info
-/// utilities.
+/// implementation file and delegate result construction and transformations to
+/// PtrAnalysisInfo, using shared numerical and materialization utilities.
 class CommonPtrRules {
 public:
   using Result = PtrInfo;
   using Analyze = llvm::function_ref<FailureOr<Result>(Value)>;
+  using Binding = std::pair<Value, Result>;
+  using AnalyzeQuery = llvm::function_ref<LogicalResult(Analyze)>;
+  using WithBindings =
+      llvm::function_ref<LogicalResult(ArrayRef<Binding>, AnalyzeQuery)>;
   LogicalResult validateBinding(Value value, const Result &info) const;
 
   template <typename Context>
   FailureOr<Result> parse(Value value, Context &context) const {
     auto analyze = [&](Value input) { return context.analyze(input); };
+    if (isControlFlowValue(value)) {
+      auto withBindings = [&](ArrayRef<Binding> bindings, AnalyzeQuery query) {
+        return context.withBindings(bindings, [&](auto &child) {
+          auto nested = [&](Value input) { return child.analyze(input); };
+          return query(nested);
+        });
+      };
+      return parseControlFlow(value, analyze, withBindings,
+                              context.getBuilder());
+    }
     return parseOperation(value, analyze, context.getBuilder());
   }
 
   /// Rules that reuse these parsers supply their own session's recursion.
-  /// The callback is borrowed only for this synchronous call.
+  /// IR must be verified, and successful queries must return PtrInfo matching
+  /// the queried value. Unsupported analysis returns failure. The callback is
+  /// borrowed only for this synchronous call.
   /// Emits an error and fails for values outside the supported integer and
   /// pointer types.
   FailureOr<Result> parseOperation(Value value, Analyze analyze,
                                    OpBuilder &builder) const;
 
 private:
-  // Elementwise combinations.
-  /// Combine already analyzed operands at the caller-selected insertion point.
-  Result combineElementwise(Value value, const PtrInfo &lhs, const PtrInfo &rhs,
-                            OpBuilder &builder) const;
-  Result refineDivRem(Value value, const Result &lhs, const Result &rhs,
-                      const Result &fallback, bool divide,
-                      OpBuilder &builder) const;
+  static bool isControlFlowValue(Value value);
+  FailureOr<Result> parseControlFlow(Value value, Analyze analyze,
+                                     WithBindings withBindings,
+                                     OpBuilder &builder) const;
 
   // Shape and selection rules.
   FailureOr<Result> parseSplat(triton::SplatOp op, Analyze analyze,
@@ -85,14 +98,8 @@ private:
 
   // Integer rules.
   Result parseMakeRange(triton::MakeRangeOp op, OpBuilder &builder) const;
-  FailureOr<Result> parseAdd(arith::AddIOp op, Analyze analyze,
-                             OpBuilder &builder) const;
-  FailureOr<Result> parseSub(arith::SubIOp op, Analyze analyze,
-                             OpBuilder &builder) const;
-  FailureOr<Result> parseMul(arith::MulIOp op, Analyze analyze,
-                             OpBuilder &builder) const;
-  FailureOr<Result> parseElementwise(Value value, Analyze analyze,
-                                     OpBuilder &builder) const;
+  FailureOr<Result> parseBinaryArithmetic(Value value, Analyze analyze,
+                                          OpBuilder &builder) const;
   FailureOr<Result> parseCast(Value value, Value input, bool unsignedCast,
                               Analyze analyze, OpBuilder &builder) const;
   FailureOr<Result> parseFloatToInt(arith::FPToSIOp op, Analyze analyze,

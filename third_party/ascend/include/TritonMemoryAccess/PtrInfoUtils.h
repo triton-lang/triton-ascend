@@ -26,35 +26,24 @@
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/ConstantRange.h"
+#include <cassert>
 #include <optional>
 namespace mlir::triton::ptr {
 
-/// Shape facts use the same original-dimension mapping for concrete axes and
-/// symbolic coefficients. The caller constructs a typed invariant fact.
-template <typename Axis, typename MakeInvariant>
-FailureOr<SmallVector<Axis>>
-broadcastAxisFacts(ArrayRef<Axis> axes, ArrayRef<int64_t> sourceShape,
-                   ArrayRef<int64_t> targetShape, MakeInvariant invariant) {
-  if (axes.size() != sourceShape.size() || axes.size() != targetShape.size())
-    return failure();
-  SmallVector<Axis> result(axes);
+/// Update concrete axes or symbolic coefficients for a verified broadcast.
+/// Expanded singleton dimensions take the supplied invariant fact; other axes
+/// are retained. There must be one fact per source dimension.
+template <typename Axis>
+void broadcastAxes(SmallVectorImpl<Axis> &axes, ArrayRef<int64_t> sourceShape,
+                   ArrayRef<int64_t> targetShape, const Axis &invariant) {
+  assert(axes.size() == sourceShape.size() &&
+         axes.size() == targetShape.size() && "broadcast ranks must match");
   for (unsigned i = 0; i < axes.size(); ++i) {
     if (sourceShape[i] == targetShape[i])
       continue;
-    if (sourceShape[i] != 1)
-      return failure();
-    result[i] = invariant();
+    assert(sourceShape[i] == 1 && "only singleton dimensions can broadcast");
+    axes[i] = invariant;
   }
-  return result;
-}
-template <typename Axis, typename MakeInvariant>
-FailureOr<SmallVector<Axis>> expandAxisFacts(ArrayRef<Axis> axes, unsigned axis,
-                                             MakeInvariant invariant) {
-  if (axis > axes.size())
-    return failure();
-  SmallVector<Axis> result(axes);
-  result.insert(result.begin() + axis, invariant());
-  return result;
 }
 
 template <typename Component, typename Arithmetic>
@@ -116,34 +105,44 @@ struct ConcreteArithmetic {
   }
 };
 
-// Axis queries and normalization.
+// Compare identity or integer constants in the 64-bit descriptor domain.
+bool equalConstant(OpFoldResult lhs, OpFoldResult rhs);
+bool zero(OpFoldResult value);
+
+// Uniform origin materialization.
+/// Populate a missing origin once all axes are invariant. May extract and cast
+/// the value, placing helper IR after its actual scalar source.
+void setUniformOrigin(OffsetInfo &info, Value value, OpBuilder &builder,
+                      OpFoldResult scalar = {});
+
+// Address types and complete offset values.
+// Logical descriptors use index; complete tensor offsets use i64 storage.
+Type addressValueType(Type source, OpBuilder &builder);
+Type addressStorageType(Type source, OpBuilder &builder);
+/// Materialize fullOffsets; sign-extend without narrowing and splat scalars to
+/// tensor targets at the caller's insertion point when necessary.
+FailureOr<Value> materializeFullOffset(const OffsetInfo &info, Type target,
+                                       OpBuilder &builder, Location loc);
+
+// Axis alignment and stride queries.
+/// Express compatible axes in the same sub-axis partition, if provable.
+LogicalResult alignAxes(AxisInfo &lhs, AxisInfo &rhs,
+                        ConcreteArithmetic &arithmetic);
 SmallVector<OpFoldResult> axisStrides(const OffsetInfo &info);
-LogicalResult normalizeAxes(OffsetInfo &info, OpBuilder &builder);
+/// Infer a single stride from a valid sub-axis partition without emitting IR.
+/// Return null when the coefficients do not prove a linear axis.
+OpFoldResult inferAxisStride(ArrayRef<SubAxisInfo> subAxes, OpBuilder &builder);
 
-// Arithmetic combinations.
-FailureOr<OffsetInfo> addOffsets(OpFoldResult complete, const OffsetInfo &lhs,
-                                 const OffsetInfo &rhs, bool subtract,
-                                 OpBuilder &builder, Location loc);
-FailureOr<OffsetInfo> scaleOffsets(OpFoldResult complete,
-                                   const OffsetInfo &source, OpFoldResult scale,
-                                   OpBuilder &builder, Location loc);
-
-// Shape transformations.
-FailureOr<OffsetInfo> broadcastOffsets(OpFoldResult complete, Type target,
-                                       const OffsetInfo &source,
-                                       OpBuilder &builder);
-FailureOr<OffsetInfo> expandDimsOffsets(OpFoldResult complete, Type target,
-                                        const OffsetInfo &source, unsigned axis,
-                                        OpBuilder &builder);
-FailureOr<OffsetInfo> reshapeOffsets(OpFoldResult complete,
-                                     RankedTensorType target,
-                                     const OffsetInfo &source,
-                                     OpBuilder &builder, Location loc);
-FailureOr<OffsetInfo>
-sliceOffsets(OpFoldResult complete, RankedTensorType target,
-             const OffsetInfo &source, ArrayRef<OpFoldResult> starts,
-             ArrayRef<OpFoldResult> steps, ArrayRef<bool> dropped,
-             OpBuilder &builder, Location loc);
+// Divisibility proofs and exact unit conversion.
+bool canDivideDecomposition(const OffsetInfo &info, uint64_t divisor);
+/// Fold or materialize exact division of an index descriptor field.
+/// The caller has proved divisibility by the positive divisor.
+OpFoldResult divideIndex(OpFoldResult value, uint64_t divisor,
+                         OpBuilder &builder, Location loc);
+/// After the full value is proved divisible, convert descriptor fields whose
+/// exact division can also be proved. Leave fullOffsets to the caller.
+void divideDecomposition(OffsetInfo &info, uint64_t divisor, OpBuilder &builder,
+                         Location loc);
 
 // Range proofs for an existing decomposition.
 bool decompositionFitsSigned(const OffsetInfo &info, unsigned width);

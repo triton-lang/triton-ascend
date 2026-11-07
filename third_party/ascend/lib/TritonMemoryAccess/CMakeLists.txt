@@ -29,6 +29,7 @@ add_triton_library(TritonPtrAnalysis
   IntegerUtils.cpp
   PtrAnalysis.cpp
   PtrAnalysisRules/CommonPtrRules.cpp
+  PtrAnalysisRules/CommonPtrSCF.cpp
   PtrInfoUtils.cpp
   PtrAnalysisRules/ControlFlowPtrRules.cpp
   PtrAnalysisInfo.cpp
@@ -37,6 +38,7 @@ add_triton_library(TritonPtrAnalysis
   LLVMCore
   MLIRArithDialect
   MLIRIR
+  MLIRSCFDialect
   MLIRSideEffectInterfaces
   MLIRTensorDialect
   MLIRSupport

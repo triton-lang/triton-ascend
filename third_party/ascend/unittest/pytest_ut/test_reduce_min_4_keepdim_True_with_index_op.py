@@ -83,7 +83,9 @@ def test_min_dim4_keepdim(testfunc, sigtype, shape):
     dtype = eval('torch.' + sigtype)
     x0 = torch.randn(shape).to(dtype).npu()
 
-    x1 = torch.arange(x0.numel()).view(x0.shape).npu().to(torch.int32)
+    # x1 holds each element's position along the reduced dim, which is exactly
+    # what torch.min returns as indices.
+    x1 = (torch.arange(shape[4]).view(1, 1, 1, 1, -1).expand(shape).contiguous().to(torch.int32).npu())
     if 'int' in sigtype:
         ans, ans1 = torch.min(x0.to(torch.int64), 4)
         ans = ans.to(dtype)

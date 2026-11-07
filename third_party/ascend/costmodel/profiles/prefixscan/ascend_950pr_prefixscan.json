@@ -120,6 +120,17 @@
             "axis": 0,
             "branch": "tree",
             "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "branch": "chain",
+            "warps": 0
           }
         ],
         "terms": {
@@ -151,6 +162,17 @@
             "rank": 3,
             "axis": 0,
             "branch": "tree",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 0,
+            "branch": "chain",
             "warps": 0
           }
         ],
@@ -356,6 +378,17 @@
             "rank": 3,
             "axis": 0,
             "branch": "tree",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 3,
+            "axis": 0,
+            "branch": "chain",
             "warps": 0
           }
         ],
@@ -861,6 +894,32 @@
           "paddedwork": -22.15281739994401,
           "B": -594.8662418000007
         }
+      },
+      {
+        "id": "simd_minmax_dim1_full_groups",
+        "projection": "legacy",
+        "terms": {
+          "one": 67.95607209924357,
+          "direct_group_work": 8.474329731284362,
+          "direct_narrow_group_work": 37.827652148592485,
+          "direct_half_row_groups": 29.81774228056309
+        },
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "direct_full_groups",
+            "warps": 0
+          }
+        ]
       }
     ]
   },
@@ -1166,7 +1225,7 @@
         }
       },
       {
-        "id": "A200F0038",
+        "id": "ordinary_w4_A200F0038",
         "projection": "legacy",
         "domains": [
           {
@@ -1182,10 +1241,9 @@
           }
         ],
         "terms": {
-          "one": 935.3479263296139,
-          "local": 101.52326436774649,
-          "warp": -28.30163139433379,
-          "logE": -89.46629676567795
+          "one": 227.5482162162162,
+          "local": 21.287675675675676,
+          "pressure2_48": 7.548496030749528
         }
       },
       {
@@ -1232,6 +1290,28 @@
         }
       },
       {
+        "id": "ordinary_w4_A200F0041",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "one": 227.5482162162162,
+          "local": 21.287675675675676,
+          "pressure2_48": 7.548496030749528
+        }
+      },
+      {
         "id": "A200F0041",
         "projection": "legacy",
         "domains": [
@@ -1244,10 +1324,7 @@
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": [
-              4,
-              8
-            ]
+            "warps": 8
           }
         ],
         "terms": {
@@ -1327,6 +1404,25 @@
         }
       },
       {
+        "id": "ordinary_w4_A200F0045",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "one": 185.9054054054054,
+          "local": 17.39189189189189,
+          "pressure2_48": 6.167071920547
+        }
+      },
+      {
         "id": "A200F0045",
         "projection": "row_major",
         "domains": [
@@ -1336,10 +1432,7 @@
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": [
-              4,
-              8
-            ]
+            "warps": 8
           }
         ],
         "terms": {
@@ -1369,6 +1462,25 @@
         }
       },
       {
+        "id": "ordinary_w4_A200F0047",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "one": 185.9054054054054,
+          "local": 17.39189189189189,
+          "pressure2_48": 6.167071920547
+        }
+      },
+      {
         "id": "A200F0047",
         "projection": "row_major",
         "domains": [
@@ -1378,10 +1490,7 @@
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": [
-              4,
-              8
-            ]
+            "warps": 8
           }
         ],
         "terms": {
@@ -5916,6 +6025,40 @@
           "C": 4.4175272191562325,
           "E": 6.421504810789228,
           "logE": 6.215067491058508
+        }
+      },
+      {
+        "id": "ordinary_f16_w4_rank1",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cumprod",
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 1,
+            "axis": 0,
+            "branch": "cross_warp",
+            "warps": 4
+          },
+          {
+            "operation": [
+              "cumprod",
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "warp": 604.0,
+          "local": 16.482142857142858
         }
       }
     ]

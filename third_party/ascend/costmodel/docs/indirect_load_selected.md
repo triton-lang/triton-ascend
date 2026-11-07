@@ -4,7 +4,7 @@ The enabled Load route selects short formulas from visible physical geometry,
 including storage width, static mask, axis structure and warp geometry. Each
 executed formula has at most eight terms. Coefficients come from TRAIN fits;
 there is no case-name, kernel-name or hidden tensor-content lookup. The frozen
-program and exact profiles are checked in alongside the Python reference.
+program and exact profiles are checked in as compiler model data.
 Exact condition elimination reduces the exported program to 846 SIMD and 1459
 SIMT nodes; coefficients and all 7088 checked predictions remain unchanged.
 
@@ -26,14 +26,15 @@ MAPE. This meets the requested overall 20% observed-validation threshold; it is
 three-fold MAPE is **51.2145%** (folds 61.4717%, 38.8551%, 51.7185%). Do not
 interpret the selected validation score as evidence of comparable unseen-kernel
 accuracy. Earlier unsuccessful models and reductions remain preserved in the
-validation record. The old formula bank remains as a compatibility fallback
-when native callers do not supply verified logical-type facts.
+validation record. Missing verified logical-type facts reject this estimator and retain the
+original compiler model, rather than selecting a second legacy formula bank.
 
 Actual arithmetic verification covered 7088 input metadata rows and 843472
 feature comparisons, with zero feature differences and maximum C++ prediction
-difference 1.46e-11. The public Python reference reproduced all predictions
+difference 1.46e-11. The archived Python reference reproduced all predictions
 exactly. Device poison-pointer checks covered 496 inputs without reading hidden
-coefficients. All 60 Load/Store Python regression tests passed.
+coefficients. The earlier revision passed 60 Python API regression tests; those APIs and their
+tests are removed from the compiler-only scope.
 
 A native build of the current cost-model sources passed 104 positive IR checks,
 416 guard rejections, 104 target-only Stage compositions, 16 Host/Device binding
@@ -56,12 +57,7 @@ bindings. Device strides require an explicit positive/no-wrap contract and stay
 opaque. FP8 logical provenance is distinct from byte transport.
 
 The path is enabled by default; `ordinary_load_selected_enabled=False` disables
-it. The Python reference is `python/indirect_load_selected/predictor.py`:
-
-```python
-result = predict(model, case, explicit_host_coefficients,
-                 stage_ownership=True, matched_increment=True)
-```
+it. No standalone Python prediction API or owned/event runtime is added.
 
 A rejected contract requires the original fallback. Arithmetic eligibility does
 not certify arbitrary kernels or whole-kernel accuracy.

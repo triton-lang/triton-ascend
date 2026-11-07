@@ -44,8 +44,6 @@ from triton.backends.ascend.program_grid import (
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
 
-OWNED_SD_PRECOMPILED_DRIVER_ABI = "owned-sd-precompiled-driver-v1"
-
 
 class NPUUtils(object):
 
@@ -80,8 +78,7 @@ class NPUUtils(object):
         key = hashlib.md5("\0".join(key_parts).encode("utf-8")).hexdigest()
         cache = get_cache_manager(key)
         fname = "npu_utils.so"
-        from triton.backends.ascend.owned_store_runtime import verified_support_binary
-        cache_path = verified_support_binary("npu_utils", key) or cache.get_file(fname)
+        cache_path = cache.get_file(fname)
         if cache_path is not None and os.path.exists(cache_path):
             return cache_path
 
@@ -333,10 +330,6 @@ def make_npu_launcher_stub(header_src, wrapper_src, debug=False):
     Generate the launcher stub to launch the kernel
     """
     so_cache_key = hashlib.sha256((header_src + "\0" + wrapper_src).encode("utf-8")).hexdigest()
-    from triton.backends.ascend.owned_store_runtime import verified_support_binary
-    precompiled = verified_support_binary("launcher", so_cache_key)
-    if precompiled is not None:
-        return precompiled
     so_cache_manager = get_cache_manager(so_cache_key)
     use_cxx11_abi = _check_cxx11_abi()
     name = f"launcher_cxx11abi{use_cxx11_abi}"

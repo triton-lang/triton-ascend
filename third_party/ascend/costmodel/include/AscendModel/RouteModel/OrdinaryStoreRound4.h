@@ -47,8 +47,6 @@ struct Formula {
   const Term *terms;
   size_t size;
 };
-// This generated file preserves all 39/60 frozen coefficients and leaf order.
-#include "OrdinaryStoreRound4Formulas.inc"
 
 inline std::string validate(const Metadata &m) {
   if (m.mode != Mode::SIMD && m.mode != Mode::SIMT)
@@ -252,64 +250,5 @@ features(const Metadata &m, const std::vector<int64_t> *runtimeCoefficients,
   return x;
 }
 
-inline Estimate
-tryPredict(const Metadata &m,
-           const std::vector<int64_t> *runtimeCoefficients = nullptr,
-           bool enabled = false) {
-  auto fail = [](const char *reason) {
-    Estimate r;
-    r.reason = reason;
-    return r;
-  };
-  if (!enabled)
-    return fail("candidate_disabled");
-  if (!m.stageOwnershipVerified)
-    return fail("stage_ownership_not_proven");
-  if (!m.firstStore)
-    return fail("first_store_not_proven");
-  if (!m.matchedIncrementContractVerified)
-    return fail("matched_increment_contract_not_proven");
-  std::string reason;
-  auto x = features(m, runtimeCoefficients, reason);
-  if (!x) {
-    Estimate r;
-    r.reason = reason;
-    return r;
-  }
-  if (x->count("semantic_zero")) {
-    Estimate r;
-    r.eligible = true;
-    r.ticks = 0.0;
-    r.reason = "semantic_zero";
-    return r;
-  }
-  std::string key = std::to_string(m.elementBytes);
-  if (m.mode == Mode::SIMT)
-    key += std::string("_") + (m.hasMask ? "True" : "False") + "_" +
-           (x->at("E") <= 128 ? "True" : "False");
-  const auto &formulas = m.mode == Mode::SIMD ? simdFormulas : simtFormulas;
-  const Formula *formula = &formulas.back();
-  for (const auto &candidate : formulas)
-    if (key == candidate.key) {
-      formula = &candidate;
-      break;
-    }
-  double ticks = 0;
-  for (size_t i = 0; i < formula->size; ++i) {
-    const auto &term = formula->terms[i];
-    auto value = x->find(term.name);
-    if (value == x->end() || !std::isfinite(value->second))
-      return fail("required_feature_missing_or_nonfinite");
-    ticks += value->second * term.coefficient;
-  }
-  if (!std::isfinite(ticks))
-    return fail("prediction_nonfinite");
-  Estimate r;
-  r.eligible = true;
-  r.ticks = std::max(1.0, ticks);
-  r.reason = "eligible_unaccepted_candidate";
-  r.leaf = formula->key;
-  return r;
-}
 } // namespace indirect_store_round4
 #endif

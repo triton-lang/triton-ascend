@@ -12,13 +12,9 @@ Logical FP8 is tracked separately from the one-byte transport type. Ownership,
 first-store and matched-increment contracts are required before a formula can
 replace the target contribution. Unsupported cases retain the existing model.
 
-The selected estimator and owned-session API are enabled by default. Explicit
-disable remains supported. A formula does not grant a fresh-output lease or
-bypass event synchronization: the compiler-issued certificate, exact model and
-freeze identities, and per-launch buffer/event checks remain mandatory. The
-guarded owned runtime currently supports rank-2 SD, F=1, precompiled float32/int32
-kernels. Other shapes retain the existing route unless the explicit native
-cost-analysis contract proves their eligibility.
+This change contains compiler-side formula integration only. The explicit native
+contract still binds ownership, first-store, visibility and accounting facts.
+No new owned-session, event, launcher or standalone Python API is installed.
 
 ## Validation result and limits
 
@@ -47,14 +43,9 @@ four AST-to-TTIR/public-Select frontend checks passed on the validated 70f770c
 integration. After porting to current upstream b8b6a2d, all five changed native
 translation units passed syntax checks and the 15128-row parity check passed
 again. The complete current-upstream extension has not been rebuilt.
-After enabling the guarded production API and binding its selected-model/freeze
-identities, the two affected native translation units and 49 Python regression
-tests passed again.
-
-Real-device buffer ownership/lifetime, asynchronous event integration and the
-F>1 whole-kernel path remain unaccepted. F=1 formula accuracy does not establish
-those properties. The default-enabled API retains its runtime checks; this change
-does not claim that those hardware checks have been performed.
+Those checks describe the earlier integration revision. The scoped compiler-only
+refactor is validated separately; historical API tests are not evidence for it.
+Real-device ownership, asynchronous events and F>1 remain outside this change.
 
 ## Original matrix coverage
 
@@ -74,14 +65,6 @@ Exact model JSON files are in `profiles/indirect_store_selected/`. Their SHA256:
 * SIMD: `345cfe338c438661c8ccdab7a138114f8d8a94e87492084a6f4739f96d5b16ca`
 * SIMT: `88159dbe346d4c9fd152a164d017528386958071c013ef6c27267958ed29e534`
 
-The pure Python reference is in `python/indirect_store_selected/` and the C++
-feature bank and exact coefficients are `OrdinaryStoreSelected.h` and
-`OrdinaryStoreSelectedFormulas.inc`. CPU regression tests run with:
-
-```sh
-python -m pytest python/test/unit/ascend/test_indirect_store_selected.py
-```
-
-The checked-in metadata fixtures are synthetic arithmetic examples and contain
-no measured labels. The large real-metadata fixture and original measurements
-are retained in the separately delivered validation archive.
+The C++ feature bank and exact coefficients are `OrdinaryStoreSelected.h` and
+`OrdinaryStoreSelectedFormulas.inc`. The removed standalone Python reference is
+retained in the validation archive as an arithmetic oracle, not a public API.

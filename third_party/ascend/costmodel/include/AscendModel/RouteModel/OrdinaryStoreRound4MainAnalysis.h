@@ -347,5 +347,104 @@ private:
   }
 };
 
+inline std::optional<unsigned> scalarPayloadBits(Type type) {
+  if (auto integer = dyn_cast<IntegerType>(type))
+    return integer.getWidth();
+  if (auto floating = dyn_cast<FloatType>(type))
+    return floating.getWidth();
+  return std::nullopt;
+}
+inline bool sameWidthPointerBitcast(Operation *op) {
+  if (!op || op->getName().getStringRef() != "tt.bitcast" ||
+      op->getNumOperands() != 1 || op->getNumResults() != 1)
+    return false;
+  Type source = op->getOperand(0).getType(),
+       target = op->getResult(0).getType();
+  auto sTensor = dyn_cast<RankedTensorType>(source),
+       tTensor = dyn_cast<RankedTensorType>(target);
+  if (bool(sTensor) != bool(tTensor))
+    return false;
+  if (sTensor) {
+    if (sTensor.getShape() != tTensor.getShape())
+      return false;
+    source = sTensor.getElementType();
+    target = tTensor.getElementType();
+  }
+  auto s = dyn_cast<triton::PointerType>(source),
+       t = dyn_cast<triton::PointerType>(target);
+  if (!s || !t || s.getAddressSpace() != t.getAddressSpace())
+    return false;
+  auto a = scalarPayloadBits(s.getPointeeType()),
+       b = scalarPayloadBits(t.getPointeeType());
+  return a && b && *a == *b;
+}
+inline Value pointerRoot(Value value) {
+  for (unsigned depth = 0; depth < 48; ++depth) {
+    if (isa<BlockArgument>(value))
+      return value;
+    auto *op = value.getDefiningOp();
+    if (!op)
+      return {};
+    auto name = op->getName().getStringRef();
+    if (name == "tt.addptr" && op->getNumOperands() == 2)
+      value = op->getOperand(0);
+    else if (sameWidthPointerBitcast(op))
+      value = op->getOperand(0);
+    else if ((name == "tt.splat" || name == "tt.broadcast" ||
+              name == "tt.expand_dims") &&
+             op->getNumOperands() == 1)
+      value = op->getOperand(0);
+    else
+      return {};
+  }
+  return {};
+}
+
+template <typename Metadata>
+inline const char *rectangleMask(Value mask, RankedTensorType tensor,
+                                 Metadata &m, const char *staticFailure,
+                                 const char *rectangleFailure) {
+  if (mask) {
+    StaticMask evaluator;
+    auto values = evaluator.evaluate(mask);
+    if (!values || values->shape != SmallVector<int64_t>(tensor.getShape()) ||
+        values->values.size() != static_cast<size_t>(tensor.getNumElements()))
+      return staticFailure;
+    bool any = false;
+    std::fill(m.lower.begin(), m.lower.end(),
+              std::numeric_limits<int64_t>::max());
+    std::fill(m.upper.begin(), m.upper.end(), 0);
+    for (int64_t k = 0; k < tensor.getNumElements(); ++k)
+      if (values->values[k]) {
+        any = true;
+        int64_t flat = k;
+        for (size_t i = m.shape.size(); i-- > 0;) {
+          const auto coordinate = flat % m.shape[i];
+          flat /= m.shape[i];
+          m.lower[i] = std::min(m.lower[i], coordinate);
+          m.upper[i] = std::max(m.upper[i], coordinate + 1);
+        }
+      }
+    if (!any) { // K0: do not use invalid rectangle extrema.
+      m.lower.assign(m.shape.size(), 0);
+      m.upper = m.shape;
+      m.upper.back() = 0;
+    }
+    for (int64_t k = 0; k < tensor.getNumElements(); ++k) {
+      int64_t flat = k;
+      bool active = true;
+      for (size_t i = m.shape.size(); i-- > 0;) {
+        const auto coordinate = flat % m.shape[i];
+        flat /= m.shape[i];
+        active &= m.lower[i] <= coordinate && coordinate < m.upper[i];
+      }
+      if (active != bool(values->values[k]))
+        return rectangleFailure;
+    }
+  }
+  m.rectangularMaskVerified = true;
+  return nullptr;
+}
+
 } // namespace mlir::ascend::ordinary_store_main
 #endif

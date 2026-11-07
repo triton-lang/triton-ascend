@@ -10,58 +10,6 @@ using namespace mlir::ascend;
 namespace {
 using namespace mlir::ascend::ordinary_store_main;
 using namespace indirect_store_round4;
-bool sameWidthLoadPointerBitcast(Operation *op) {
-  if (op->getName().getStringRef() != "tt.bitcast" ||
-      op->getNumOperands() != 1 || op->getNumResults() != 1)
-    return false;
-  Type source = op->getOperand(0).getType(),
-       target = op->getResult(0).getType();
-  auto a = dyn_cast<RankedTensorType>(source),
-       b = dyn_cast<RankedTensorType>(target);
-  if (bool(a) != bool(b))
-    return false;
-  if (a) {
-    if (a.getShape() != b.getShape())
-      return false;
-    source = a.getElementType();
-    target = b.getElementType();
-  }
-  auto p = dyn_cast<triton::PointerType>(source),
-       q = dyn_cast<triton::PointerType>(target);
-  if (!p || !q || p.getAddressSpace() != q.getAddressSpace())
-    return false;
-  auto scalarBits = [](Type t) -> unsigned {
-    if (auto i = dyn_cast<IntegerType>(t))
-      return i.getWidth();
-    if (auto f = dyn_cast<FloatType>(t))
-      return f.getWidth();
-    return 0;
-  };
-  const auto x = scalarBits(p.getPointeeType()),
-             y = scalarBits(q.getPointeeType());
-  return x && x == y;
-}
-Value loadPointerRoot(Value value) {
-  for (unsigned depth = 0; depth < 48; ++depth) {
-    if (isa<BlockArgument>(value))
-      return value;
-    Operation *op = value.getDefiningOp();
-    if (!op)
-      return {};
-    auto name = op->getName().getStringRef();
-    if (name == "tt.addptr" && op->getNumOperands() == 2)
-      value = op->getOperand(0);
-    else if (sameWidthLoadPointerBitcast(op))
-      value = op->getOperand(0);
-    else if ((name == "tt.splat" || name == "tt.broadcast" ||
-              name == "tt.expand_dims") &&
-             op->getNumOperands() == 1)
-      value = op->getOperand(0);
-    else
-      return {}; // Reshapes and numeric casts need a separate provenance proof.
-  }
-  return {};
-}
 OrdinaryLoadMainResult targetCost(triton::LoadOp load,
                                   const LogicalStage &stage,
                                   const HardwareProfile &profile,
@@ -78,7 +26,7 @@ OrdinaryLoadMainResult targetCost(triton::LoadOp load,
       tensor.getNumElements() > 8192)
     return fail("Load_static_geometry_outside_domain");
   auto entry = load->getParentOfType<triton::FuncOp>();
-  auto root = dyn_cast_or_null<BlockArgument>(loadPointerRoot(load.getPtr()));
+  auto root = dyn_cast_or_null<BlockArgument>(pointerRoot(load.getPtr()));
   if (!entry || !root || root.getOwner() != &entry.getBody().front())
     return fail("Load_entry_pointer_provenance_not_verified");
   auto pointer = dyn_cast<triton::PointerType>(root.getType());
@@ -174,46 +122,11 @@ OrdinaryLoadMainResult targetCost(triton::LoadOp load,
   m.upper = m.shape;
   Value mask = load.getMask();
   m.hasMask = bool(mask);
-  if (mask) {
-    StaticMask evaluator;
-    auto values = evaluator.evaluate(mask);
-    if (!values || values->shape != SmallVector<int64_t>(tensor.getShape()) ||
-        values->values.size() != static_cast<size_t>(tensor.getNumElements()))
-      return fail(
-          "Load_data_dependent_mask_requires_Host_contract_or_fallback");
-    bool any = false;
-    std::fill(m.lower.begin(), m.lower.end(),
-              std::numeric_limits<int64_t>::max());
-    std::fill(m.upper.begin(), m.upper.end(), 0);
-    for (int64_t k = 0; k < tensor.getNumElements(); ++k)
-      if (values->values[k]) {
-        any = true;
-        int64_t flat = k;
-        for (size_t i = m.shape.size(); i-- > 0;) {
-          const auto coordinate = flat % m.shape[i];
-          flat /= m.shape[i];
-          m.lower[i] = std::min(m.lower[i], coordinate);
-          m.upper[i] = std::max(m.upper[i], coordinate + 1);
-        }
-      }
-    if (!any) {
-      m.lower.assign(m.shape.size(), 0);
-      m.upper = m.shape;
-      m.upper.back() = 0;
-    }
-    for (int64_t k = 0; k < tensor.getNumElements(); ++k) {
-      int64_t flat = k;
-      bool active = true;
-      for (size_t i = m.shape.size(); i-- > 0;) {
-        const auto coordinate = flat % m.shape[i];
-        flat /= m.shape[i];
-        active &= m.lower[i] <= coordinate && coordinate < m.upper[i];
-      }
-      if (active != bool(values->values[k]))
-        return fail("Load_nonrectangular_mask");
-    }
-  }
-  m.rectangularMaskVerified = true;
+  if (auto reason = rectangleMask(
+          mask, tensor, m,
+          "Load_data_dependent_mask_requires_Host_contract_or_fallback",
+          "Load_nonrectangular_mask"))
+    return fail(reason);
   m.stageOwnershipVerified = true;
   m.matchedIncrementContractVerified = true;
   auto estimate = indirect_load_selected::tryPredict(

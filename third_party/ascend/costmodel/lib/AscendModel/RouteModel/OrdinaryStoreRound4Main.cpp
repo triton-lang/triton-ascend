@@ -1,9 +1,6 @@
-// Main TA 70f770c seam: actual owned TTIR -> frozen matched-target increment.
-// The owned SD path below is conditional on a mandatory per-launch runtime
-// lease; compiler certificates never claim that an allocation was observed.
+// Compiler-side Store target increment with an explicit native contract.
 #include "AscendModel/RouteModel/OrdinaryStoreRound4Main.h"
 #include "AscendModel/Analysis/StagePartitioner.h"
-#include "AscendModel/RouteModel/OrdinaryStoreOwnedCompiler.h"
 #include "AscendModel/RouteModel/OrdinaryStoreRound4MainAnalysis.h"
 #include "AscendModel/RouteModel/OrdinaryStoreRound4MainContract.h"
 #include "AscendModel/RouteModel/OrdinaryStoreRound4VisibilityAnalysis.h"
@@ -60,58 +57,6 @@ bool singletonOne(const llvm::json::Object &o, StringRef key) {
 // Only pointer-shape operations and equal-width pointer bitcasts are
 // transparent to logical payload provenance. Numeric convert operations never
 // enter this proof; physical StoreOp type and logical public pointer differ.
-std::optional<unsigned> scalarPayloadBits(Type type) {
-  if (auto integer = dyn_cast<IntegerType>(type))
-    return integer.getWidth();
-  if (auto floating = dyn_cast<FloatType>(type))
-    return floating.getWidth();
-  return std::nullopt;
-}
-bool sameWidthPointerBitcast(Operation *op) {
-  if (!op || op->getName().getStringRef() != "tt.bitcast" ||
-      op->getNumOperands() != 1 || op->getNumResults() != 1)
-    return false;
-  Type source = op->getOperand(0).getType(),
-       target = op->getResult(0).getType();
-  auto sTensor = dyn_cast<RankedTensorType>(source),
-       tTensor = dyn_cast<RankedTensorType>(target);
-  if (bool(sTensor) != bool(tTensor))
-    return false;
-  if (sTensor) {
-    if (sTensor.getShape() != tTensor.getShape())
-      return false;
-    source = sTensor.getElementType();
-    target = tTensor.getElementType();
-  }
-  auto s = dyn_cast<triton::PointerType>(source),
-       t = dyn_cast<triton::PointerType>(target);
-  if (!s || !t || s.getAddressSpace() != t.getAddressSpace())
-    return false;
-  auto a = scalarPayloadBits(s.getPointeeType()),
-       b = scalarPayloadBits(t.getPointeeType());
-  return a && b && *a == *b;
-}
-Value pointerRoot(Value value) {
-  for (unsigned depth = 0; depth < 48; ++depth) {
-    if (isa<BlockArgument>(value))
-      return value;
-    auto *op = value.getDefiningOp();
-    if (!op)
-      return {};
-    auto name = op->getName().getStringRef();
-    if (name == "tt.addptr" && op->getNumOperands() == 2)
-      value = op->getOperand(0);
-    else if (sameWidthPointerBitcast(op))
-      value = op->getOperand(0);
-    else if ((name == "tt.splat" || name == "tt.broadcast" ||
-              name == "tt.expand_dims") &&
-             op->getNumOperands() == 1)
-      value = op->getOperand(0);
-    else
-      return {};
-  }
-  return {};
-}
 } // namespace
 
 OrdinaryStoreMainResult
@@ -143,13 +88,9 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
     return fail("malformed_compile_caller_contract");
   }
   auto *capability = parsed->getAsObject();
-  auto *owned = capability
-                    ? capability->getObject("ordinary_store_owned_conditional")
-                    : nullptr;
-  auto *c = owned ? owned
-                  : (capability ? capability->getObject(
-                                      "ordinary_store_main_compile_contract")
-                                : nullptr);
+  auto *c = capability
+                ? capability->getObject("ordinary_store_main_compile_contract")
+                : nullptr;
   if (!c || !truth(*c, "enabled"))
     return result;
   // Additive candidate only: existing R4 carriers/leases cannot silently
@@ -159,32 +100,13 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
       text(*c, "selected_SIMT_model_sha256") !=
           indirect_store_selected::selectedSimtModelSha256)
     return fail("selected_formula_pair_not_explicitly_bound");
-  if (owned &&
-      (!indirect_store_selected::selectedProductionEnabled ||
-       !indirect_store_selected::selectedFinalValidationMAPEPassed ||
-       std::string(indirect_store_selected::selectedFreezeSha256).empty() ||
-       text(*c, "selected_freeze_sha256") !=
-           indirect_store_selected::selectedFreezeSha256))
-    return fail("selected_production_policy_or_freeze_not_verified");
   if (!operationOwnershipComplete)
     return fail("operation_partition_ownership_not_complete");
-  if (!owned &&
-      (text(*c, "schema") != "ordinary_store_main_explicit_compile_v1" ||
+  if ((text(*c, "schema") != "ordinary_store_main_explicit_compile_v1" ||
        text(*c, "ir_contract") !=
            "mlir-local-no-debug-ordinary-attrs-stripped-v1" ||
        text(*c, "invocation_scope") != "explicit_native_cost_analysis_only"))
     return fail("unknown_explicit_native_compile_contract");
-  if (owned &&
-      (!ordinary_store_owned::verify(module, *capability, *owned,
-                                     profile.ordinaryStoreActiveProfileSha256,
-                                     profile.ordinaryStoreUnitSourceSha256) ||
-       capability->getObject("ordinary_store_owned_recipe")
-               ->getInteger("num_warps") !=
-           int64_t(profile.baseSimtWarpCount) ||
-       text(*owned, "fixed_route") != (implementation.mode == StageMode::SIMD
-                                           ? "all_simd"
-                                           : "all_simt_only")))
-    return fail("owned_actual_compiler_certificate_or_fixed_route_mismatch");
   // This is a native cost-analysis API. It does not declare a JIT launch safe,
   // enable a Python backend option, create an allocation or issue a permit.
   if (implementation.superblockFactor != 1 || implementation.localScope ||
@@ -229,13 +151,7 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
   if (!llvm::is_contained(stage.operations, store.getOperation()))
     return fail("target_not_owned_by_this_stage");
   main_ta::CallerFacts caller;
-  if (owned) {
-    // Compile-time CONDITION, not a lifecycle observation. The precompiled
-    // artifact carries a mandatory guard and cannot launch without the owned
-    // factory's live fresh-output/retention lease. No lifecycle SHA is minted.
-    caller.firstStore = true;
-    caller.ticksPerSystemCycle = 1.0;
-  } else {
+  {
     caller.enabled = true;
     caller.sourceSha256 = text(*c, "source_sha256");
     caller.entryAndIRBound =
@@ -406,8 +322,7 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
       // Device coefficients stay opaque. Positivity/no-wrap is an explicit
       // native caller assumption bound by the existing actual IR/source hash;
       // no allocator/business producer or device-load value is invented here.
-      if (!owned &&
-          (text(*c, "device_stride_value_contract") !=
+      if ((text(*c, "device_stride_value_contract") !=
                "signed_positive_integer_no_wrap_v1" ||
            !main_ta::sha256(text(*c, "device_stride_bounds_proof_sha256"))))
         return fail("opaque_device_coefficient_domain_not_declared");
@@ -425,45 +340,10 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
   Value mask = store.getMask();
   if (bool(mask) != m.hasMask)
     return fail("source_mask_IR_presence_conflict_or_canonicalized_full_mask");
-  if (mask) {
-    StaticMask evaluator;
-    auto values = evaluator.evaluate(mask);
-    if (!values || values->shape != SmallVector<int64_t>(tensor.getShape()) ||
-        values->values.size() != static_cast<size_t>(tensor.getNumElements()))
-      return fail("mask_not_static_constant_range_expression");
-    bool any = false;
-    std::fill(m.lower.begin(), m.lower.end(),
-              std::numeric_limits<int64_t>::max());
-    std::fill(m.upper.begin(), m.upper.end(), 0);
-    for (int64_t k = 0; k < tensor.getNumElements(); ++k)
-      if (values->values[k]) {
-        any = true;
-        int64_t flat = k;
-        for (size_t i = m.shape.size(); i-- > 0;) {
-          const auto coordinate = flat % m.shape[i];
-          flat /= m.shape[i];
-          m.lower[i] = std::min(m.lower[i], coordinate);
-          m.upper[i] = std::max(m.upper[i], coordinate + 1);
-        }
-      }
-    if (!any) { // K0: do not use invalid rectangle extrema.
-      m.lower.assign(m.shape.size(), 0);
-      m.upper = m.shape;
-      m.upper.back() = 0;
-    }
-    for (int64_t k = 0; k < tensor.getNumElements(); ++k) {
-      int64_t flat = k;
-      bool active = true;
-      for (size_t i = m.shape.size(); i-- > 0;) {
-        const auto coordinate = flat % m.shape[i];
-        flat /= m.shape[i];
-        active &= m.lower[i] <= coordinate && coordinate < m.upper[i];
-      }
-      if (active != bool(values->values[k]))
-        return fail("nonrectangular_mask");
-    }
-  }
-  m.rectangularMaskVerified = true;
+  if (auto reason = rectangleMask(mask, tensor, m,
+                                  "mask_not_static_constant_range_expression",
+                                  "nonrectangular_mask"))
+    return fail(reason);
   m.stageOwnershipVerified = true; // Exact target membership checked above.
   m.firstStore = caller.firstStore;
   m.matchedIncrementContractVerified = true; // Exact contract checked above.
@@ -493,7 +373,6 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
   result.auxiliaryStage = std::move(rest);
   result.targetSystemCycles = *estimate.ticks / caller.ticksPerSystemCycle;
   result.reason =
-      owned ? "selected_formula_owned_SD_runtime_lease_required"
-            : "selected_formula_native_compile_contract_eligible_unaccepted";
+      "selected_formula_native_compile_contract_eligible_unaccepted";
   return result;
 }

@@ -1,7 +1,6 @@
 // Frozen observed-data Load selection. No file, device or label access.
 #ifndef ORDINARY_LOAD_SELECTED_H
 #define ORDINARY_LOAD_SELECTED_H
-#include "OrdinaryLoadLegacy.h"
 #include "OrdinaryLoadVisibleFeatures.h"
 namespace indirect_load_selected {
 using Estimate = indirect_store_selected::Estimate;
@@ -115,7 +114,7 @@ tryPredict(const Metadata &m,
   if (!m.stageOwnershipVerified || !m.matchedIncrementContractVerified)
     return fail("Load_target_partition_or_increment_contract_missing");
   if (!m.logical.verified)
-    return indirect_load_legacy::tryPredict(m, runtimeCoefficients, enabled);
+    return fail("Load_logical_type_not_verified");
   std::string reason;
   auto x = indirect_load_visible::features(m, runtimeCoefficients, m.logical,
                                            reason);

@@ -412,7 +412,13 @@ Value MemOpTransformer::materializeImplicitBroadcast(
     Value srcTensor, const Location loc, PatternRewriter &rewriter) {
   SmallVector<int64_t> broadCastIndex;
   SmallVector<int64_t> broadCastShape;
-  for (auto [i, info] : llvm::enumerate(ptrState.stateInfo)) {
+  // The addptr load is already in permuted order; restore broadcast axes
+  // in that same order before materializeImplicitPermute applies the inverse.
+  for (size_t i = 0; i < ptrState.stateInfo.size(); ++i) {
+    size_t id = ptrState.isPermuted && !ptrState.isBlockPtr()
+                    ? ptrState.permuteIds[i]
+                    : i;
+    auto info = ptrState.stateInfo[id];
     if (isZero(info.stride)) {
       broadCastIndex.emplace_back(i);
     }
@@ -618,7 +624,8 @@ Value MemOpTransformer::createNewPtr(Value oldPtr, const Location loc,
 
 Value MemOpTransformer::createNewAddPtr(Value oldPtr, const Location loc,
                                         PatternRewriter &rewriter) {
-  TritonToStructured::PtrAnalysis ptrAnalysis(optimizeDynamicOffset);
+  TritonToStructured::PtrAnalysis ptrAnalysis(optimizeDynamicOffset,
+                                              enableDataTensorOffset);
 
   LLVM_DEBUG({
     llvm::dbgs() << "----------------------------------------------\n";
@@ -641,6 +648,9 @@ Value MemOpTransformer::createNewAddPtr(Value oldPtr, const Location loc,
   OpFoldResult maxStride = rewriter.getIndexAttr(1);
   for (auto it = ptrState.stateInfo.rbegin(); it != ptrState.stateInfo.rend();
        ++it) {
+    if (auto strideVal = dyn_cast<Value>(it->stride);
+        strideVal && isa<RankedTensorType>(strideVal.getType()))
+      continue; // data axis: dynamic stride, not part of the affine layout
     if (TritonToStructured::isOne(it->shape) && isZero(it->stride)) {
       it->stride = maxStride;
     }
@@ -719,7 +729,7 @@ Value MemOpTransformer::createNewMask(Value oldMask, const Location loc,
     llvm::dbgs() << "MaskAnalysis: analyzing load/store mask.\n";
   });
 
-  if (!oldMask || maskState.analysisMask(oldMask).failed()) {
+  if (maskState.analysisMask(oldMask).failed()) {
     LLVM_DEBUG({
       llvm::dbgs() << "----------------------------------------------\n";
       llvm::dbgs() << "MaskAnalysis: no mask or failed to analyze mask.\n";
@@ -772,7 +782,8 @@ Value MemOpTransformer::createNewMask(Value oldMask, const Location loc,
                                         itMask->dimIndex, itMask->hasBroadCast,
                                         itMask->currentType, itMask->rhs);
 
-    if (!isZero(itPtr->stride)) {
+    // Keep the full axis list until permuteIds has been applied.
+    if (ptrState.isPermuted || !isZero(itPtr->stride)) {
       newMaskInfo.emplace_back(newInfo);
     }
 
@@ -917,6 +928,12 @@ bool MemOpTransformer::applyPermuteOnMask() {
   }
   SmallVector<TritonToStructured::dimInfo> newMaskInfo;
   for (auto id : ptrState.permuteIds) {
+    if (isZero(ptrState.stateInfo[id].stride)) {
+      // Repeated addresses alone do not imply a broadcast mask.
+      if (!maskState.stateInfo[id].hasBroadCast)
+        return false;
+      continue;
+    }
     newMaskInfo.push_back(maskState.stateInfo[id]);
   }
   maskState.stateInfo = newMaskInfo;

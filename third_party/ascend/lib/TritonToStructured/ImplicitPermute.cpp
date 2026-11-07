@@ -26,6 +26,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Location.h"
 #include "mlir/IR/Value.h"
+#include "triton/Dialect/Triton/IR/Types.h"
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "triton-to-structured-implicit-permute"
@@ -37,24 +38,14 @@ using MemOpTransformer = MemOpConverter::MemOpTransformer;
 
 LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
                                              PatternRewriter &rewriter) const {
-  // no need to analyze and rewrite
-  if (compileOn91095Flag && !existDotFlag) {
-    LLVM_DEBUG({
-      llvm::dbgs() << "----------------------------------------------\n";
-      llvm::dbgs() << "compileOn91095Flag :" << compileOn91095Flag << "\n";
-      llvm::dbgs() << "!existDotFlag :" << !existDotFlag << "\n";
-      llvm::dbgs() << "no need to analyze and rewrite Load" << "\n";
-      llvm::dbgs() << "----------------------------------------------\n";
-    });
-    return success();
-  }
-
   auto loc = op.getLoc();
   auto oldPtr = op.getPtr();
   auto oldMask = op.getMask();
   auto oldOther = op.getOther();
 
-  MemOpTransformer tf(MemOpTransformer::MemType::load);
+  // enableDataTensorOffset: only the ImplicitPermute path accepts a tt.load
+  // result (integer tensor) as an opaque data-dependent offset.
+  MemOpTransformer tf(MemOpTransformer::MemType::load, false, true);
 
   Value newPtr = nullptr;
   if (oldPtr.getDefiningOp<triton::MakeTensorPtrOp>()) {
@@ -69,25 +60,45 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
                                  "AdvanceOp, and AddPtrOp are supported.";
     return success();
   }
+  if (!newPtr)
+    return rewriter.notifyMatchFailure(op, "failed to analyze load pointer");
+
   if (!tf.ptrState.isPermuted) {
     // no need to rewrite
     return success();
   }
 
-  auto newMask = tf.createNewMask(oldMask, loc, rewriter);
-  auto newOther = tf.createNewOther(oldOther, loc, rewriter);
-
-  if (!newPtr) {
-    InFlightDiagnostic diag = emitWarning(loc)
-                              << "PtrAnalysis: failed to analyze load pointer.";
-    return failure();
+  // skip only loads without data-dependent offsets.
+  if (compileOn91095Flag && !existDotFlag &&
+      tf.ptrState.dynamicOffsets.empty()) {
+    LLVM_DEBUG({
+      llvm::dbgs() << "----------------------------------------------\n";
+      llvm::dbgs() << "compileOn91095Flag :" << compileOn91095Flag << "\n";
+      llvm::dbgs() << "!existDotFlag :" << !existDotFlag << "\n";
+      llvm::dbgs() << "no need to analyze and rewrite Load" << "\n";
+      llvm::dbgs() << "----------------------------------------------\n";
+    });
+    return success();
   }
+
+  auto newMask = tf.createNewMask(oldMask, loc, rewriter);
 
   if (oldMask && !newMask) {
     InFlightDiagnostic diag = emitWarning(loc)
                               << "MaskAnalysis: failed to analyze load mask.";
     return failure();
   }
+
+  // Match the load's operand types, including shape, before creating it.
+  auto resultType = triton::getPointeeType(newPtr.getType());
+  if (newMask && newMask.getType() != triton::getI1SameShape(resultType))
+    return rewriter.notifyMatchFailure(op, "mask type does not match pointer");
+
+  auto newOther = tf.createNewOther(oldOther, loc, rewriter);
+  if (oldOther && !newOther)
+    return rewriter.notifyMatchFailure(op, "failed to convert load other");
+  if (newOther && newOther.getType() != resultType)
+    return rewriter.notifyMatchFailure(op, "other type does not match pointer");
 
   auto newBoundaryCheck = tf.getBoundaryCheck(op.getBoundaryCheck());
 
@@ -97,8 +108,11 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
   loadOp->setAttr(ImplicitPermuteHandledTAG,
                   UnitAttr::get(rewriter.getContext()));
 
+  auto broadCastResult =
+      tf.materializeImplicitBroadcast(loadOp.getResult(), loc, rewriter);
+
   auto permuteResult =
-      tf.materializeImplicitPermute(loadOp.getResult(), loc, rewriter);
+      tf.materializeImplicitPermute(broadCastResult, loc, rewriter);
 
   rewriter.replaceOp(op, permuteResult);
   return success();

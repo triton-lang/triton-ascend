@@ -120,9 +120,11 @@ def test_ir(output_dir=None):
 
 def _ref_rows(value, prefix):
     zero = torch.zeros_like(value)
+    # torch.where on CPU has no uint32 kernel; mask through int64 and cast back.
+    masked = (value.to(torch.int64) * prefix.to(torch.int64)).to(value.dtype)
     return torch.stack([
         value,
-        torch.where(prefix, value, zero),
+        masked,
         zero,
     ])
 

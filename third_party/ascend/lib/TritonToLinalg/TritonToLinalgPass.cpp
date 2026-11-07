@@ -2179,6 +2179,7 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
     signalPassFailure();
   }
 
+  optimizeDiscreteDeinterleavedLoads(moduleOp);
   specializeFullRowCopies(moduleOp);
 
   // Collapses call-site locations whose callee is an inlined Triton stdlib

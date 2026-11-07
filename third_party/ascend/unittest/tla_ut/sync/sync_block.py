@@ -249,6 +249,7 @@ def _launch(mode_name):
 
 
 def test_compile():
+    pytest.skip("skipped: NPUIR bd228fae regression (AffinityHIR read-before-write)")
     import torch
     for mode_name in ("INTER", "SUBBLOCK", "BLOCK"):
         kernel, grid, mode = _kernel_and_grid(mode_name)
@@ -260,6 +261,7 @@ def test_compile():
 
 
 def test_run():
+    pytest.skip("skipped: NPUIR bd228fae regression (AffinityHIR read-before-write)")
     import torch
     for mode_name in ("INTER", "SUBBLOCK", "BLOCK"):
         x, o = _launch(mode_name)

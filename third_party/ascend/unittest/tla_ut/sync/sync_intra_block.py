@@ -107,6 +107,7 @@ def test_rejects_out_of_range():
 
 
 def test_compile():
+    pytest.skip("skipped: NPUIR bd228fae regression (AffinityHIR read-before-write)")
     import torch
     x = torch.empty(N, dtype=torch.float32, device="npu")
     o = torch.empty(N, dtype=torch.float32, device="npu")
@@ -115,6 +116,7 @@ def test_compile():
 
 
 def test_run():
+    pytest.skip("skipped: NPUIR bd228fae regression (AffinityHIR read-before-write)")
     import torch
     x = torch.arange(N, dtype=torch.float32, device="npu")
     o = torch.full((N, ), -7.0, dtype=torch.float32, device="npu")

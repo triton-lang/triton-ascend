@@ -19,6 +19,24 @@ func.func @e8m0_boundaries(%a: tensor<16x32xbf16>, %b: tensor<32x32xbf16>, %sa: 
 
 // -----
 
+// Fast math keeps the upstream exponent-bit decode for both operands.
+// In particular, code 0 must not get the strict-mode subnormal correction.
+// CHECK-LABEL: func.func @e8m0_fast_math
+// CHECK: arith.extui {{.*}} : tensor<16x1xi8> to tensor<16x1xi16>
+// CHECK: arith.shli
+// CHECK-NEXT: {{.*}}arith.bitcast {{.*}} : tensor<16x1xi16> to tensor<16x1xbf16>
+// CHECK: arith.extui {{.*}} : tensor<1x32xi8> to tensor<1x32xi16>
+// CHECK: arith.shli
+// CHECK-NEXT: {{.*}}arith.bitcast {{.*}} : tensor<1x32xi16> to tensor<1x32xbf16>
+// CHECK-NOT: arith.select
+// CHECK: linalg.matmul
+func.func @e8m0_fast_math(%a: tensor<16x32xbf16>, %b: tensor<32x32xbf16>, %sa: tensor<16x1xi8>, %sb: tensor<32x1xi8>, %c: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  %d = tt.dot_scaled %a scale %sa, %b scale %sb, %c lhs = bf16 rhs = bf16 {fastMath = true} : tensor<16x32xbf16>, tensor<16x1xi8> * tensor<32x32xbf16>, tensor<32x1xi8> -> tensor<16x32xf32>
+  return %d : tensor<16x32xf32>
+}
+
+// -----
+
 // FP16 scales must take the upstream integer -> FP32 -> FP16 path.
 // CHECK-LABEL: func.func @e8m0_fp16
 // CHECK-NOT: bf16

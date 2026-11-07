@@ -3263,12 +3263,14 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     Value shifted =
         rewriter.create<arith::ShLIOp>(loc, zexted, constant(fractionBits));
 
-    // MXScaleTensor's E8M0 reference maps code 0 to 2^-127, not zero.
-    // BF16 and FP32 encode this as half of the minimum normal significand.
-    Value isZero = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
-                                                  zexted, constant(0));
-    shifted = rewriter.create<arith::SelectOp>(
-        loc, isZero, constant(uint64_t{1} << (fractionBits - 1)), shifted);
+    // Keep upstream's exponent-only decode for fast_math. In strict mode,
+    // E8M0 code 0 is 2^-127: half the minimum normal BF16/FP32 significand.
+    if (!fastMath) {
+      Value isZero = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::eq, zexted, constant(0));
+      shifted = rewriter.create<arith::SelectOp>(
+          loc, isZero, constant(uint64_t{1} << (fractionBits - 1)), shifted);
+    }
     Value scaleFP = rewriter.create<arith::BitcastOp>(
         loc, scaleTy.clone(largeFpType), shifted);
     if (largeFpType != computeType)

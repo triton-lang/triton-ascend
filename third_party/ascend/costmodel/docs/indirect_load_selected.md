@@ -53,14 +53,36 @@ generic static-mask integration falls back on that runtime-mask case.
 The newly evaluated generic final matrix contains 886 Load configurations,
 7088 input identities and two sessions. This check **did not pass**. There are
 164 nonpositive two-session median labels; the remaining 6924 positive-label
-inputs have MAPE 70.2104%. This positive subset is not a valid full-set MAPE.
-The original repeat-quality criteria fail for 386 configurations. The SIMD
+inputs have MAPE 70.2104%. The protocol diagnoses and retains nonpositive
+differential labels without including them in MAPE; there is no APE-based
+filtering. Repeat-quality diagnostics flag 386 configurations. The SIMD
 subset has positive labels throughout and MAPE 30.6038%. No observations were
 removed or replaced to declare acceptance. All retained quartet/window/label
 reductions were independently reproduced, and 352368 original-feature
 comparisons matched exactly. Existing-formula reuse therefore remains a
-candidate; these results do not establish final Load accuracy. Follow-up
-fitting uses TRAIN data, not the final measurement labels.
+candidate; these results do not establish final Load accuracy.
+
+An explicitly authorized post-observation re-split assigns 734 configurations
+to TRAIN and 152 to holdout by a fixed geometry hash. Initial refits use only
+the assigned TRAIN labels, with complete three-fold geometry validation and
+scalar recomputation. Among the completed candidates, the best combined
+two-session holdout MAPE was 42.0580% on 1187 positive inputs; 29 nonpositive
+inputs are retained and reported separately. This is re-split validation of previously
+observed data, not an unseen-test result. It also **does not pass** the overall
+20% target. These unsuccessful candidates have not replaced the checked-in
+coefficient profiles.
+
+Four complete observation rounds have since been verified: 3544 files and
+850560 retained quartets. Their four-round medians contain 173 nonpositive
+labels, retained and diagnosed outside MAPE. Further TRAIN-only candidates,
+including the permitted original-TRAIN anchor, improve the best combined
+holdout MAPE to 33.6309%, still above 20%. Each model in that combination
+completed the geometry folds and scalar check; holdout coefficients were not fitted.
+Discrete formula-bank screening reached 23.2816%, but that composite has not
+completed its own fold verification and is not an accepted model. A separate
+64-configuration admission-quality comparison also failed to establish final
+accuracy. All earlier measurements and failures remain retained. These results
+have not changed the checked-in coefficients.
 
 All 1772 existing A/B binaries had verified hashes and complete ELF resource
 descriptors, including 30 existing FP8 byte-transport alternatives. The current
@@ -69,8 +91,9 @@ Regular-fragment and dedicated-pattern models are separate work, outside this
 PR's responsibility. Existing structured and indirect fallback models remain
 available outside the generic domain.
 
-Direction and group metrics are reports under the revised overall-MAPE policy.
-No Load coefficients were fitted during this verification or export.
+Direction, group and repeat-quality metrics are reports under the revised
+overall-MAPE policy. The checked-in Load profiles remain the original TRAIN
+banks; their development accuracy is not substituted for final acceptance.
 
 ## Reference API
 

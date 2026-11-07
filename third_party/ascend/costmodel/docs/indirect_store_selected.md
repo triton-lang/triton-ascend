@@ -60,10 +60,10 @@ must not be presented as a Load result.
 
 ## Reproduction
 
-Exact model JSON files are in `profiles/indirect_store_selected/`. Their SHA256:
-
-* SIMD: `345cfe338c438661c8ccdab7a138114f8d8a94e87492084a6f4739f96d5b16ca`
-* SIMT: `88159dbe346d4c9fd152a164d017528386958071c013ef6c27267958ed29e534`
+The complete readable coefficient tables are in
+`OrdinaryStoreSelectedFormulas.inc`. The bound source-model SHA256 values remain
+in that table. Duplicate JSON exports are retained in the validation archive
+and prior revision, rather than shipped as a second unused coefficient copy.
 
 The C++ feature bank and exact coefficients are `OrdinaryStoreSelected.h` and
 `OrdinaryStoreSelectedFormulas.inc`. The removed standalone Python reference is

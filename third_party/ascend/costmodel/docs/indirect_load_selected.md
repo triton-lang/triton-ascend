@@ -4,7 +4,9 @@ The enabled Load route selects short formulas from visible physical geometry,
 including storage width, static mask, axis structure and warp geometry. Each
 executed formula has at most eight terms. Coefficients come from TRAIN fits;
 there is no case-name, kernel-name or hidden tensor-content lookup. The frozen
-program and exact profiles are checked in as compiler model data.
+program and exact coefficients are checked in as readable C++ compiler data.
+The duplicate JSON exports have no runtime consumer and remain in the validation
+archive and prior revision. `OrdinaryLoadProgram.inc` retains every model node.
 Exact condition elimination reduces the exported program to 846 SIMD and 1459
 SIMT nodes; coefficients and all 7088 checked predictions remain unchanged.
 

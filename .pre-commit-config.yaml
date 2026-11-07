@@ -14,7 +14,7 @@ repos:
       - id: check-ast
       - id: check-added-large-files
         # Generated, frozen Load formula programs; reviewed numeric artifacts.
-        exclude: ^third_party/ascend/costmodel/(profiles/indirect_load_selected/(SIMD|SIMT)_load\.json|include/AscendModel/RouteModel/OrdinaryLoadProgram\.inc)$
+        exclude: ^third_party/ascend/costmodel/include/AscendModel/RouteModel/OrdinaryLoadProgram\.inc$
       - id: check-merge-conflict
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable

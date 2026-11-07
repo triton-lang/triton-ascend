@@ -3319,6 +3319,34 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     return op.emitError("lhsScale is required for non-FP8 input");
   }
 
+  // Match upstream DecomposeScaledBlocked: use FP16 if either input format
+  // is FP16, otherwise BF16. Convert both operands before expanding scales.
+  Type computeType = rewriter.getBF16Type();
+  if (lhsElemType == triton::ScaleDotElemType::FP16 ||
+      rhsElemType == triton::ScaleDotElemType::FP16)
+    computeType = rewriter.getF16Type();
+  for (Value *value : {&lhs, &rhs}) {
+    auto type = cast<RankedTensorType>(value->getType());
+    Type elementType = type.getElementType();
+    if (elementType == computeType)
+      continue;
+    auto targetType = type.clone(computeType);
+    if (elementType.getIntOrFloatBitWidth() <
+        computeType.getIntOrFloatBitWidth()) {
+      *value = rewriter.create<arith::ExtFOp>(loc, targetType, *value);
+    } else {
+      // BF16 and FP16 have equal widths; convert through FP32 numerically.
+      *value = rewriter.create<arith::ExtFOp>(
+          loc, type.clone(rewriter.getF32Type()), *value);
+      auto converted =
+          rewriter.create<arith::TruncFOp>(loc, targetType, *value);
+      converted->setAttr("round_mode",
+                         hfusion::RoundModeAttr::get(rewriter.getContext(),
+                                                     hfusion::RoundMode::RINT));
+      *value = converted;
+    }
+  }
+
   RankedTensorType lhsTy = cast<RankedTensorType>(lhs.getType());
   RankedTensorType lhsScaleTy = cast<RankedTensorType>(lhsScale.getType());
   RankedTensorType rhsScaleTy =

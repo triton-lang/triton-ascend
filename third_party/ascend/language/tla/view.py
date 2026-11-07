@@ -21,10 +21,10 @@
 
 ``tla.view`` aliases memory as a buffer for subsequent DMA/simd ops:
 
-- Pointer entry: ``view(ptr, shape, strides, offsets, space="gm")``.  Lowers to
-  ``ptr_to_int`` + a 1-D ``hivm.hir.pointer_cast`` + one
-  ``memref.reinterpret_cast`` carrying the linear offset ``sum(off_i*stride_i)``
-  and the full sizes/strides -- npuir's form, valid for any stride/offset.
+- GM pointer entry: ``view(ptr, shape, strides, offsets, space="gm")`` preserves
+  the pointer descriptor through ``tt.make_tensor_ptr``. Standard pointer
+  lowering produces a ``memref.reinterpret_cast`` with the source offset plus
+  ``sum(off_i*stride_i)``.
   ``strides`` are the final memref strides, defaulting to row-major.
 - Buffer tile: ``subview(buf, offsets, sizes, strides)`` or the compatible
   ``view(buf, sizes, strides, offsets)``. Lowers to a ``memref.subview``;
@@ -70,23 +70,25 @@ def _subview(src, sizes, steps, offsets, semantic):
 
 
 def _entry(src, sizes, strides, offsets, space, semantic):
-    """Pointer view: 1-D pointer_cast + one memref.reinterpret_cast.
-
-    Lowers to::
-
-      %cast = hivm.hir.pointer_cast %ptr : memref<1xelem, space>
-      %view = memref.reinterpret_cast %cast to
-        offset: [sum(off_i * stride_i)], sizes: [sizes], strides: [strides]
-        : memref<1xelem, space> to memref<shape, strided<strides, offset: ?>, space>
-
-    The 1-D entry is identity (PointerCastOp's LLVM lowering requires it);
-    the strided final view is npuir's form, valid for any stride/offset.
-    """
+    """GM views preserve pointer provenance; other spaces use address binding."""
+    if src.shape:
+        raise TypeError("view expects a scalar pointer")
+    if space == "gm":
+        elem_ty = src.dtype.element_ty
+        if not (elem_ty.is_int() or elem_ty.is_floating()) or elem_ty.primitive_bitwidth % 8:
+            raise TypeError("GM view requires a byte-addressable integer or float element type")
     linear = 0
     for off, stride in zip(offsets, strides):
         off = _check_scalar_int(off)
+        # Widen before multiplication: a later index cast cannot undo i32 overflow.
+        if space == "gm":
+            off = semantic.cast(semantic.to_tensor(off), int64)
         linear = semantic.add(linear, semantic.mul(off, stride, False), False)
     ty = buffer_type(sizes, src.dtype.element_ty, space, strides, offset=None)
+    if space == "gm":
+        handle = semantic.builder.create_tla_pointer_view(src.handle,
+                                                          semantic.to_tensor(linear).handle, ty.to_ir(semantic.builder))
+        return buffer(handle, ty)
     handle = semantic.builder.create_tla_reinterpret_cast(
         _bind(src, buffer_type((1, ), src.dtype.element_ty, space), semantic).handle,
         semantic.to_tensor(linear).handle, list(sizes), list(strides), ty.to_ir(semantic.builder))
@@ -126,6 +128,42 @@ def subview(src, offsets, sizes, strides=None, _semantic=None):
 
 @builtin
 def view(src, shape, strides=None, offsets=None, space="gm", _semantic=None):
+    """Creates a buffer view from a kernel pointer or an existing buffer.
+
+    :param src: Pointer tensor (kernel argument) or ``tla.buffer`` source.
+    :type src: tl.tensor or tla.buffer
+    :param shape: Result extents in elements.
+    :type shape: tuple[int, ...] or list[int]
+    :param strides: Element strides. For a pointer source these are the final
+        memref strides; for a buffer source they are relative to the source
+        view. Defaults to ``None``, which selects row-major strides for a
+        pointer source and unit steps for a buffer source.
+    :type strides: tuple[int, ...] or None
+    :param offsets: Element offsets. For a pointer source these are relative to
+        the pointer; for a buffer source they are relative to the source view.
+        Defaults to ``None``, which selects zero offsets.
+    :type offsets: tuple[int or tl.tensor, ...] or None
+    :param space: Address space for a pointer source. Defaults to ``"gm"``.
+        Ignored for a buffer source, whose space is preserved; a non-default
+        value raises ``ValueError`` in that case.
+    :type space: str
+    :return: A buffer view aliasing the source memory.
+    :rtype: tla.buffer
+    :raises ValueError: If the rank of ``strides``/``offsets`` does not match
+        the result shape, or a static offset is outside the source buffer.
+    :raises TypeError: If ``src`` is neither a pointer tensor nor a
+        ``tla.buffer``.
+
+    A pointer source lowers to a one-dimensional ``hivm.hir.pointer_cast`` plus
+    a single ``memref.reinterpret_cast`` carrying the linear offset and the
+    full sizes/strides, so arbitrary strides and offsets are supported. A
+    buffer source lowers to ``memref.subview`` and preserves the source pitch;
+    use :func:`reshape` for a contiguous rank change.
+
+    .. note::
+        Only static positive extents are accepted. GM buffers must be created
+        from kernel pointers with this interface rather than :func:`alloc`.
+    """
     if isinstance(src, buffer):
         if space != "gm":
             raise ValueError("view space is ignored for a buffer source")

@@ -142,6 +142,45 @@ bool isKnownMultiple(OpFoldResult operand, uint64_t divisor, unsigned depth) {
   return false;
 }
 
+bool isKnownNonNegative(OpFoldResult operand, unsigned depth) {
+  auto constant = getIntegerConstant(operand, 64);
+  if (succeeded(constant))
+    return !constant->isNegative();
+  auto value = dyn_cast<Value>(operand);
+  auto *op = value ? value.getDefiningOp() : nullptr;
+  if (!op || !depth)
+    return false;
+  auto nonnegative = [&](Value input) {
+    return isKnownNonNegative(input, depth - 1);
+  };
+
+  // Program coordinates and zero-extended scalars supply nonnegative origins.
+  if (isa<triton::GetProgramIdOp, triton::GetNumProgramsOp>(op))
+    return true;
+  if (isa<arith::ExtSIOp, arith::ExtUIOp, arith::IndexCastOp,
+          arith::IndexCastUIOp>(op)) {
+    auto from = getIntegerWidth(op->getOperand(0).getType());
+    auto to = getIntegerWidth(value.getType());
+    if (failed(from) || failed(to) || *from > *to)
+      return false;
+    if (*from < *to && isa<arith::ExtUIOp, arith::IndexCastUIOp>(op))
+      return true;
+    return nonnegative(op->getOperand(0));
+  }
+
+  // Address arithmetic follows the same no-overflow contract as its axes.
+  if (isa<arith::AddIOp, arith::MulIOp>(op))
+    return nonnegative(op->getOperand(0)) && nonnegative(op->getOperand(1));
+  if (isa<arith::MaxSIOp>(op))
+    return nonnegative(op->getOperand(0)) || nonnegative(op->getOperand(1));
+  if (auto div = dyn_cast<arith::DivSIOp>(op)) {
+    auto divisor = getIntegerConstant(div.getRhs(), 64);
+    return succeeded(divisor) && divisor->isStrictlyPositive() &&
+           nonnegative(div.getLhs());
+  }
+  return false;
+}
+
 FailureOr<Value> materialize(OpFoldResult value, Type expectedType,
                              OpBuilder &builder, Location loc) {
   if (auto ssa = dyn_cast<Value>(value)) {

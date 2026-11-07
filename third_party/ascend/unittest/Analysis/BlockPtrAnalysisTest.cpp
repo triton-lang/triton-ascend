@@ -227,7 +227,7 @@ TEST(PtrAnalysis, PtrFormsShareAddressesAndBaseBindings) {
 }
 
 TEST(PtrAnalysis,
-     BlockBindingsRequireMetadataAndOrdinaryBindingsNeedExactFacts) {
+     BlockBindingsRequireMetadataAndOrdinaryBindingsNeedFullOffsets) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, triton::TritonDialect>();
   auto module = parseSourceString<ModuleOp>(R"mlir(
@@ -258,7 +258,9 @@ TEST(PtrAnalysis,
   auto noMetadata = *block;
   noMetadata.block.reset();
   EXPECT_TRUE(failed(analysis.bind(next, noMetadata)));
-  EXPECT_TRUE(succeeded(analysis.bind(ordinary, noMetadata)));
+  // Removing block metadata does not supply the ordinary pointer's full value.
+  ASSERT_FALSE(noMetadata.offsets.fullOffsets);
+  EXPECT_TRUE(failed(analysis.bind(ordinary, noMetadata)));
   auto invalidOrder = *block;
   invalidOrder.block->order[0] = 1;
   EXPECT_TRUE(failed(analysis.bind(next, invalidOrder)));

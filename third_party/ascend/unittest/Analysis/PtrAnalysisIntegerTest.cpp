@@ -177,6 +177,41 @@ TEST(PtrAnalysisInteger, ElementwiseOnlyInheritsCommonInvariantAxes) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
+TEST(PtrAnalysisInteger, ZeroAxisContributionsBecomeInvariant) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @test() {
+      %k=tt.make_range {start=0:i32,end=16:i32}:tensor<16xi32>
+      %four=arith.constant dense<4>:tensor<16xi32>
+      %zero=arith.constant dense<0>:tensor<16xi32>
+      %r=arith.remui %k,%four:tensor<16xi32>
+      %cancel=arith.subi %r,%r {tag="cancel"}:tensor<16xi32>
+      %linear=arith.muli %k,%zero {tag="linear"}:tensor<16xi32>
+      %split=arith.muli %r,%zero {tag="split"}:tensor<16xi32>
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<FuncOp>().begin();
+  OpBuilder b(f.getBody().front().getTerminator());
+  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  for (StringRef name : {"cancel", "linear", "split"}) {
+    Value value = tagged(f, name);
+    auto info = analysis.analyze(value);
+    ASSERT_TRUE(succeeded(info)) << name.str();
+    EXPECT_TRUE(info->offsets.isUniform()) << name.str();
+    EXPECT_EQ(info->offsets.axes[0].kind, AxisKind::Invariant);
+    EXPECT_EQ(info->offsets.axes[0].subAxes.empty(), name == "linear");
+    expectLanes(info->offsets.axes[0].stride, {0});
+    expectLanes(info->offsets, SmallVector<int64_t>(16, 0));
+    expectDecomposition(info->offsets);
+    EXPECT_TRUE(succeeded(CommonPtrRules{}.validateBinding(value, *info)));
+  }
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 TEST(PtrAnalysisInteger, LoadedOriginAndDynamicStrideKeepStructuredAddresses) {
   MLIRContext context;
   load(context);
@@ -396,6 +431,249 @@ TEST(PtrAnalysisInteger, StructuredNonzeroOriginStrideAndNestedDigits) {
       EXPECT_TRUE(succeeded(verify(*module)));
     }
   }
+}
+
+TEST(PtrAnalysisInteger, DynamicAlignedOriginsSplitDivRemAxes) {
+  MLIRContext context;
+  load(context);
+  for (StringRef op :
+       {"arith.divsi", "arith.remsi", "arith.divui", "arith.remui"}) {
+    // The Structured consumer uses this program-id/range expression for tiles.
+    std::string text = R"mlir(module {
+      tt.func @tile(%base:!tt.ptr<i32>) {
+        %pid = tt.get_program_id x {tag="pid"} : i32
+        %size = arith.constant 1024 : i32
+        %start = arith.muli %pid,%size : i32
+        %origin = tt.splat %start : i32 -> tensor<1024xi32>
+        %r = tt.make_range {start=0:i32,end=1024:i32} : tensor<1024xi32>
+        %x = arith.addi %origin,%r {tag="input"} : tensor<1024xi32>
+        %d = arith.constant dense<512> : tensor<1024xi32>
+        %v = OP %x,%d {tag="split"} : tensor<1024xi32>
+        %p = tt.splat %base : !tt.ptr<i32> -> tensor<1024x!tt.ptr<i32>>
+        %ptr = tt.addptr %p,%v {tag="ptr"} : tensor<1024x!tt.ptr<i32>>,tensor<1024xi32>
+        tt.return
+      }
+    })mlir";
+    text.replace(text.find("OP"), 2, op.str());
+    auto module = parseSourceString<ModuleOp>(text, &context);
+    ASSERT_TRUE(module);
+    auto f = *module->getOps<triton::FuncOp>().begin();
+    OpBuilder builder(&context);
+    PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+    auto input = test::getOffsets(analysis.analyze(tagged(f, "input")));
+    ASSERT_TRUE(succeeded(input));
+    ASSERT_TRUE(input->hasStructuredForm());
+    Value value = tagged(f, "split");
+    auto info = test::getOffsets(analysis.analyze(value));
+    ASSERT_TRUE(succeeded(info));
+    EXPECT_EQ(info->fullOffsets, OpFoldResult(value));
+    ASSERT_TRUE(info->hasStructuredDecomposition());
+    ASSERT_EQ(info->axes[0].subAxes.size(), 2u);
+    EXPECT_EQ(info->axes[0].subAxes[0].shape, 2);
+    EXPECT_EQ(info->axes[0].subAxes[1].shape, 512);
+    bool divide = op.contains("div");
+    expectLanes(info->axes[0].subAxes[0].stride, {divide ? 1 : 0});
+    expectLanes(info->axes[0].subAxes[1].stride, {divide ? 0 : 1});
+    auto ptr = test::getInfo(analysis.analyze(tagged(f, "ptr")));
+    ASSERT_TRUE(succeeded(ptr));
+    // Include the last program id whose entire tile fits in signed i32.
+    for (int64_t pid : {0, 7, 2097151}) {
+      test::Environment env{{tagged(f, "pid"), {llvm::APInt(32, pid)}}};
+      expectLanes(info->scalarOffset, {divide ? pid * 2 : 0}, env);
+      expectDecomposition(*info, env);
+      expectDecomposition(ptr->offsets, env);
+    }
+    EXPECT_TRUE(succeeded(verify(*module)));
+  }
+}
+
+TEST(PtrAnalysisInteger, NonnegativeScalarOriginsKeepDivRemSplits) {
+  MLIRContext context;
+  load(context);
+  for (StringRef op :
+       {"arith.divsi", "arith.remsi", "arith.divui", "arith.remui"}) {
+    std::string text = R"mlir(module {
+      tt.func @split(%x:i32, %small:i8) {
+        %zero = arith.constant 0 : i32
+        %positive = arith.maxsi %x,%zero : i32
+        %unsigned = arith.extui %small : i8 to i32
+        %sum = arith.addi %positive,%unsigned : i32
+        %size = arith.constant 16 : i32
+        %start = arith.muli %sum,%size : i32
+        %origin = tt.splat %start : i32 -> tensor<16xi32>
+        %r = tt.make_range {start=0:i32,end=16:i32} : tensor<16xi32>
+        %xv = arith.addi %origin,%r : tensor<16xi32>
+        %d = arith.constant dense<4> : tensor<16xi32>
+        %v = OP %xv,%d {tag="split"} : tensor<16xi32>
+        tt.return
+      }
+    })mlir";
+    text.replace(text.find("OP"), 2, op.str());
+    auto module = parseSourceString<ModuleOp>(text, &context);
+    ASSERT_TRUE(module);
+    auto f = *module->getOps<triton::FuncOp>().begin();
+    OpBuilder builder(&context);
+    PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+    auto info = test::getOffsets(analysis.analyze(tagged(f, "split")));
+    ASSERT_TRUE(succeeded(info));
+    ASSERT_TRUE(info->hasStructuredDecomposition());
+    for (int64_t x : {-8, 0, 7}) {
+      test::Environment env{{f.getArgument(0), {llvm::APInt(32, x, true)}},
+                            {f.getArgument(1), {llvm::APInt(8, 255)}}};
+      expectLanes(
+          info->scalarOffset,
+          {op.contains("div") ? (std::max<int64_t>(x, 0) + 255) * 4 : 0}, env);
+      expectDecomposition(*info, env);
+    }
+    EXPECT_TRUE(succeeded(verify(*module)));
+  }
+}
+
+TEST(PtrAnalysisInteger, DynamicSplitNeedsAlignedNonnegativeOrigins) {
+  MLIRContext context;
+  load(context);
+  // Multiplicity alone does not prove the sign; narrowing also loses it.
+  for (StringRef origin : {"%start = arith.muli %arg,%four : i32",
+                           "%start = arith.addi %scaled,%one : i32",
+                           "%small = arith.trunci %pid : i32 to i8\n"
+                           "%extended = arith.extsi %small : i8 to i32\n"
+                           "%start = arith.muli %extended,%four : i32",
+                           "%index = arith.index_cast %pid : i32 to index\n"
+                           "%small = arith.index_cast %index : index to i8\n"
+                           "%extended = arith.extsi %small : i8 to i32\n"
+                           "%start = arith.muli %extended,%four : i32"}) {
+    for (StringRef op :
+         {"arith.divsi", "arith.remsi", "arith.divui", "arith.remui"}) {
+      std::string text = R"mlir(module {
+        tt.func @unproved(%arg:i32) {
+          %pid = tt.get_program_id x {tag="pid"} : i32
+          %four = arith.constant 4 : i32
+          %one = arith.constant 1 : i32
+          %scaled = arith.muli %pid,%four : i32
+          ORIGIN
+          %origin = tt.splat %start : i32 -> tensor<8xi32>
+          %r = tt.make_range {start=0:i32,end=8:i32} : tensor<8xi32>
+          %x = arith.addi %origin,%r {tag="input"} : tensor<8xi32>
+          %d = arith.constant dense<4> : tensor<8xi32>
+          %v = OP %x,%d {tag="split"} : tensor<8xi32>
+          tt.return
+        }
+      })mlir";
+      text.replace(text.find("ORIGIN"), 6, origin.str());
+      text.replace(text.find("OP"), 2, op.str());
+      auto module = parseSourceString<ModuleOp>(text, &context);
+      ASSERT_TRUE(module);
+      auto f = *module->getOps<triton::FuncOp>().begin();
+      OpBuilder builder(&context);
+      PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+      auto input = test::getOffsets(analysis.analyze(tagged(f, "input")));
+      ASSERT_TRUE(succeeded(input));
+      ASSERT_TRUE(input->hasStructuredForm());
+      Value value = tagged(f, "split");
+      unsigned before = operations(f);
+      auto info = test::getOffsets(analysis.analyze(value));
+      ASSERT_TRUE(succeeded(info));
+      EXPECT_FALSE(info->hasStructuredDecomposition());
+      EXPECT_EQ(info->fullOffsets, OpFoldResult(value));
+      EXPECT_EQ(operations(f), before);
+      test::Environment env{{f.getArgument(0), {llvm::APInt(32, -4, true)}},
+                            {tagged(f, "pid"), {llvm::APInt(32, 252)}}};
+      auto source = evaluate(value, env);
+      ASSERT_TRUE(source);
+      SmallVector<int64_t> expected;
+      for (auto lane : *source)
+        expected.push_back(lane.getSExtValue());
+      expectLanes(*info, expected, env);
+      EXPECT_TRUE(succeeded(verify(*module)));
+    }
+  }
+}
+
+TEST(PtrAnalysisInteger, DynamicSplitRejectsNegativeStridesAndResidualCarries) {
+  MLIRContext context;
+  load(context);
+  for (StringRef op :
+       {"arith.divsi", "arith.remsi", "arith.divui", "arith.remui"}) {
+    std::string text = R"mlir(module {
+      tt.func @axes() {
+        %pid = tt.get_program_id x {tag="pid"} : i32
+        %size = arith.constant 16 : i32
+        %start = arith.muli %pid,%size : i32
+        %origin = tt.splat %start : i32 -> tensor<8x8xi32>
+        %r = tt.make_range {start=0:i32,end=8:i32} : tensor<8xi32>
+        %row = tt.expand_dims %r {axis=1:i32} : tensor<8xi32> -> tensor<8x1xi32>
+        %col = tt.expand_dims %r {axis=0:i32} : tensor<8xi32> -> tensor<1x8xi32>
+        %rows = tt.broadcast %row : tensor<8x1xi32> -> tensor<8x8xi32>
+        %cols = tt.broadcast %col : tensor<1x8xi32> -> tensor<8x8xi32>
+        %base = arith.addi %origin,%rows : tensor<8x8xi32>
+        %negative = arith.subi %base,%cols {tag="negative_input"} : tensor<8x8xi32>
+        %carry = arith.addi %base,%cols {tag="carry_input"} : tensor<8x8xi32>
+        %d = arith.constant dense<4> : tensor<8x8xi32>
+        %neg = OP %negative,%d {tag="negative"} : tensor<8x8xi32>
+        %sum = OP %carry,%d {tag="carry"} : tensor<8x8xi32>
+        tt.return
+      }
+    })mlir";
+    for (unsigned i = 0; i < 2; ++i)
+      text.replace(text.find("OP"), 2, op.str());
+    auto module = parseSourceString<ModuleOp>(text, &context);
+    ASSERT_TRUE(module);
+    auto f = *module->getOps<triton::FuncOp>().begin();
+    OpBuilder builder(&context);
+    PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+    for (StringRef tag : {"negative", "carry"}) {
+      auto input =
+          test::getOffsets(analysis.analyze(tagged(f, (tag + "_input").str())));
+      ASSERT_TRUE(succeeded(input));
+      ASSERT_TRUE(input->hasStructuredForm());
+      unsigned before = operations(f);
+      Value value = tagged(f, tag);
+      auto info = test::getOffsets(analysis.analyze(value));
+      ASSERT_TRUE(succeeded(info));
+      EXPECT_EQ(info->fullOffsets, OpFoldResult(value));
+      EXPECT_FALSE(info->hasStructuredDecomposition());
+      EXPECT_EQ(operations(f), before);
+    }
+    EXPECT_TRUE(succeeded(verify(*module)));
+  }
+}
+
+TEST(PtrAnalysisInteger, DynamicSplitRequiresCompleteAxisFacts) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @partial() {
+      %pid = tt.get_program_id x : i32
+      %size = arith.constant 16 : i32
+      %start = arith.muli %pid,%size : i32
+      %origin = tt.splat %start : i32 -> tensor<8xi32>
+      %r = tt.make_range {start=0:i32,end=8:i32} : tensor<8xi32>
+      %x = arith.addi %origin,%r {tag="input"} : tensor<8xi32>
+      %d = arith.constant dense<4> : tensor<8xi32>
+      %v = arith.divsi %x,%d {tag="split"} : tensor<8xi32>
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder builder(&context);
+  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  Value input = tagged(f, "input");
+  auto bound = analysis.analyze(input);
+  ASSERT_TRUE(succeeded(bound));
+  ASSERT_TRUE(bound->offsets.hasStructuredForm());
+  // A known origin with an Unknown axis is a valid partial binding. Its zero
+  // stride is only a placeholder and must not become an invariance proof.
+  bound->offsets.axes[0] = AxisInfo(AxisKind::Unknown, builder.getIndexAttr(0));
+  ASSERT_TRUE(succeeded(analysis.bind(input, *bound)));
+  Value value = tagged(f, "split");
+  auto info = test::getOffsets(analysis.analyze(value));
+  ASSERT_TRUE(succeeded(info));
+  EXPECT_EQ(info->fullOffsets, OpFoldResult(value));
+  EXPECT_FALSE(info->hasStructuredDecomposition());
+  EXPECT_EQ(info->axes[0].kind, AxisKind::Unknown);
+  EXPECT_TRUE(succeeded(verify(*module)));
 }
 
 TEST(PtrAnalysisInteger,

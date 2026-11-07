@@ -64,6 +64,54 @@ void expectNoWideTensors(Operation *scope) {
   });
 }
 
+TEST(PtrAnalysisOpCoverage, OptionalInvarianceFailureKeepsExactResults) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @optional(%mask: tensor<*xi1>, %input: tensor<*xi32>) {
+      %condition = tensor.cast %mask {tag="condition"} : tensor<*xi1> to tensor<4xi1>
+      %one = arith.constant dense<1> : tensor<4xi32>
+      %two = arith.constant dense<2> : tensor<4xi32>
+      %selected = arith.select %condition, %one, %two {tag="selected"} : tensor<4xi1>, tensor<4xi32>
+      %source = tensor.cast %input {tag="source"} : tensor<*xi32> to tensor<2x4xi32>
+      %float = arith.sitofp %source : tensor<2x4xi32> to tensor<2x4xf32>
+      %integer = arith.fptosi %float {tag="integer"} : tensor<2x4xf32> to tensor<2x4xi32>
+      %sum = "tt.reduce"(%source) ({
+        ^bb0(%a: i32, %b: i32):
+          %s = arith.addi %a, %b : i32
+          tt.reduce.return %s : i32
+      }) {axis=0:i32, tag="sum"} : (tensor<2x4xi32>) -> tensor<4xi32>
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  ASSERT_TRUE(succeeded(verify(*module)));
+  auto func = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder builder(func.getBody().front().getTerminator());
+  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+
+  // Unranked sources cannot supply per-axis facts through these casts.
+  EXPECT_TRUE(failed(analysis.analyze(tagged(func, "condition"))));
+  EXPECT_TRUE(failed(analysis.analyze(tagged(func, "source"))));
+  for (StringRef tag : {"selected", "integer", "sum"}) {
+    Value value = tagged(func, tag);
+    auto result = analysis.analyze(value);
+    ASSERT_TRUE(succeeded(result)) << tag.str();
+    EXPECT_EQ(result->offsets.fullOffsets, OpFoldResult(value));
+    EXPECT_EQ(result->offsets.valueType, value.getType());
+    for (const auto &axis : result->offsets.axes)
+      EXPECT_EQ(axis.kind, AxisKind::Unknown);
+  }
+  auto selected = analysis.analyze(tagged(func, "selected"));
+  ASSERT_TRUE(succeeded(selected));
+  test::Environment env{{tagged(func, "condition"),
+                         {llvm::APInt(1, 1), llvm::APInt(1, 0),
+                          llvm::APInt(1, 1), llvm::APInt(1, 0)}}};
+  expectLanes(selected->offsets, {1, 2, 1, 2}, env);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 TEST(PtrAnalysisOpCoverage, SingletonLoadsAndAtomicsSupplyDynamicOrigins) {
   MLIRContext context;
   load(context);
@@ -332,8 +380,7 @@ TEST(PtrAnalysisOpCoverage, InsertUpdatesSameBaseCompletePointerOffsets) {
                         {f.getArgument(3), {llvm::APInt(64, 2)}}};
   expectLanes(same->offsets, {0, 1, -13, 3, 4, 5, 6, 7}, env);
   auto other = analysis.analyze(tagged(f, "different"));
-  ASSERT_TRUE(succeeded(other));
-  EXPECT_TRUE(other->isEmpty());
+  EXPECT_TRUE(failed(other));
   auto zero = analysis.analyze(tagged(f, "zero"));
   ASSERT_TRUE(succeeded(zero));
   EXPECT_TRUE(zero->offsets.isUniform());
@@ -343,6 +390,83 @@ TEST(PtrAnalysisOpCoverage, InsertUpdatesSameBaseCompletePointerOffsets) {
   auto constant = analysis.analyze(tagged(f, "constant"));
   ASSERT_TRUE(succeeded(constant));
   expectLanes(constant->offsets, {0, 0, 3, 0, 0, 0, 0, 0}, env);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(PtrAnalysisOpCoverage, InsertSupportsDynamicPointerTensors) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @insert(%base:!tt.ptr<f32>, %other:!tt.ptr<f32>, %offset:i32,
+                    %size:index, %lane:index) {
+      %p = tt.splat %base : !tt.ptr<f32> -> tensor<8x!tt.ptr<f32>>
+      %r = tt.make_range {start=0:i32,end=8:i32} : tensor<8xi32>
+      %ptr = tt.addptr %p,%r : tensor<8x!tt.ptr<f32>>,tensor<8xi32>
+      %dest = tensor.extract_slice %ptr[1] [%size] [1] {tag="dest"}
+        : tensor<8x!tt.ptr<f32>> to tensor<?x!tt.ptr<f32>>
+      %src = tt.addptr %base,%offset {tag="src"} : !tt.ptr<f32>,i32
+      %same = tensor.insert %src into %dest[%lane] {tag="same"} : tensor<?x!tt.ptr<f32>>
+      %different = tensor.insert %other into %dest[%lane] {tag="different"} : tensor<?x!tt.ptr<f32>>
+      %uniform = tensor.extract_slice %p[0] [%size] [1] {tag="uniform"}
+        : tensor<8x!tt.ptr<f32>> to tensor<?x!tt.ptr<f32>>
+      %zero = tensor.insert %base into %uniform[%lane] {tag="zero"} : tensor<?x!tt.ptr<f32>>
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  ASSERT_TRUE(succeeded(verify(*module)));
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder builder(f.getBody().front().getTerminator());
+  auto insertion = builder.saveInsertionPoint();
+  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  // Both inputs already have valid facts before the insertion is analyzed.
+  auto source = analysis.analyze(tagged(f, "src"));
+  auto dest = analysis.analyze(tagged(f, "dest"));
+  ASSERT_TRUE(succeeded(source));
+  ASSERT_TRUE(succeeded(dest));
+  auto same = analysis.analyze(tagged(f, "same"));
+  ASSERT_TRUE(succeeded(same));
+  EXPECT_EQ(same->base, f.getArgument(0));
+  EXPECT_EQ(
+      same->offsets.valueType,
+      RankedTensorType::get({ShapedType::kDynamic}, builder.getIndexType()));
+  auto full =
+      cast<Value>(same->offsets.fullOffsets).getDefiningOp<tensor::InsertOp>();
+  ASSERT_TRUE(full);
+  EXPECT_EQ(full.getDest(), cast<Value>(dest->offsets.fullOffsets));
+  EXPECT_EQ(full.getIndices(), ValueRange{f.getArgument(4)});
+  EXPECT_EQ(full.getType(), RankedTensorType::get({ShapedType::kDynamic},
+                                                  builder.getI64Type()));
+  EXPECT_EQ(same->offsets.axes[0].kind, AxisKind::Unknown);
+  EXPECT_FALSE(same->offsets.scalarOffset);
+  EXPECT_TRUE(
+      succeeded(analysis.getRules().validateBinding(tagged(f, "same"), *same)));
+  test::Environment env{{f.getArgument(2), {llvm::APInt(32, -13, true)}},
+                        {f.getArgument(3), {llvm::APInt(64, 5)}},
+                        {f.getArgument(4), {llvm::APInt(64, 2)}}};
+  expectLanes(same->offsets, {1, 2, -13, 4, 5}, env);
+  env[f.getArgument(3)] = {llvm::APInt(64, 3)};
+  env[f.getArgument(4)] = {llvm::APInt(64, 0)};
+  expectLanes(same->offsets, {-13, 2, 3}, env);
+
+  // Uniform insertion retains its origin; unrelated pointer bases still fail.
+  auto zero = analysis.analyze(tagged(f, "zero"));
+  ASSERT_TRUE(succeeded(zero));
+  EXPECT_TRUE(zero->offsets.isUniform());
+  expectLanes(zero->offsets, {0, 0, 0}, env);
+  ASSERT_TRUE(succeeded(analysis.analyze(f.getArgument(1))));
+  EXPECT_TRUE(failed(analysis.analyze(tagged(f, "different"))));
+
+  // Reject a missing complete value at binding, before any later insertion.
+  auto uniform = analysis.analyze(tagged(f, "uniform"));
+  ASSERT_TRUE(succeeded(uniform));
+  ASSERT_TRUE(uniform->offsets.isUniform());
+  uniform->offsets.fullOffsets = {};
+  EXPECT_TRUE(failed(analysis.bind(tagged(f, "uniform"), *uniform)));
+  EXPECT_TRUE(succeeded(analysis.analyze(tagged(f, "zero"))));
+  EXPECT_EQ(builder.getInsertionBlock(), insertion.getBlock());
+  EXPECT_EQ(builder.getInsertionPoint(), insertion.getPoint());
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -384,8 +508,89 @@ TEST(PtrAnalysisOpCoverage,
                2147483649, 14, 2147483650},
               env);
   auto different = analysis.analyze(tagged(f, "different"));
-  ASSERT_TRUE(succeeded(different));
-  EXPECT_TRUE(different->isEmpty());
+  EXPECT_TRUE(failed(different));
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(PtrAnalysisOpCoverage, InsertSliceSupportsDynamicPointerTensors) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @slices(%base:!tt.ptr<f32>, %other:!tt.ptr<f32>, %rows:index,
+                    %count:index, %column:index, %step:index) {
+      %d = tt.splat %base : !tt.ptr<f32> -> tensor<2x8x!tt.ptr<f32>>
+      %dr = arith.constant dense<[[0,1,2,3,4,5,6,7],[8,9,10,11,12,13,14,15]]> : tensor<2x8xi32>
+      %dest = tt.addptr %d,%dr {tag="dest"} : tensor<2x8x!tt.ptr<f32>>,tensor<2x8xi32>
+      %dynamic_dest = tensor.extract_slice %dest[0,0] [%rows,8] [1,1] {tag="dynamic_dest"}
+        : tensor<2x8x!tt.ptr<f32>> to tensor<?x8x!tt.ptr<f32>>
+      %s = tt.splat %base : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
+      %sr = arith.constant dense<[100,101,102,103]> : tensor<4xi32>
+      %source = tt.addptr %s,%sr {tag="source"} : tensor<4x!tt.ptr<f32>>,tensor<4xi32>
+      %dynamic_source = tensor.extract_slice %source[0] [%count] [1] {tag="dynamic_source"}
+        : tensor<4x!tt.ptr<f32>> to tensor<?x!tt.ptr<f32>>
+      %source_only = tensor.insert_slice %dynamic_source into %dest[1,%column] [1,%count] [1,%step] {tag="source_only"}
+        : tensor<?x!tt.ptr<f32>> into tensor<2x8x!tt.ptr<f32>>
+      %dest_only = tensor.insert_slice %source into %dynamic_dest[1,%column] [1,4] [1,%step] {tag="dest_only"}
+        : tensor<4x!tt.ptr<f32>> into tensor<?x8x!tt.ptr<f32>>
+      %both = tensor.insert_slice %dynamic_source into %dynamic_dest[1,%column] [1,%count] [1,%step] {tag="both"}
+        : tensor<?x!tt.ptr<f32>> into tensor<?x8x!tt.ptr<f32>>
+      %o = tt.splat %other : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
+      %different = tensor.insert_slice %o into %dynamic_dest[1,%column] [1,4] [1,%step] {tag="different"}
+        : tensor<4x!tt.ptr<f32>> into tensor<?x8x!tt.ptr<f32>>
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  ASSERT_TRUE(succeeded(verify(*module)));
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder builder(f.getBody().front().getTerminator());
+  auto insertion = builder.saveInsertionPoint();
+  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  test::Environment env{{f.getArgument(2), {llvm::APInt(64, 2)}},
+                        {f.getArgument(3), {llvm::APInt(64, 3)}},
+                        {f.getArgument(4), {llvm::APInt(64, 1)}},
+                        {f.getArgument(5), {llvm::APInt(64, 2)}}};
+  // Exercise each formerly rejected shape independently, including the
+  // rank-reduced source and runtime slice coordinates.
+  for (StringRef name : {"source_only", "dest_only", "both"}) {
+    auto original = tagged(f, name).getDefiningOp<tensor::InsertSliceOp>();
+    auto source = analysis.analyze(original.getSource());
+    auto dest = analysis.analyze(original.getDest());
+    ASSERT_TRUE(succeeded(source)) << name.str();
+    ASSERT_TRUE(succeeded(dest)) << name.str();
+    auto result = analysis.analyze(original.getResult());
+    ASSERT_TRUE(succeeded(result)) << name.str();
+    EXPECT_EQ(result->base, f.getArgument(0));
+    EXPECT_EQ(result->offsets.valueType,
+              original.getType().clone(builder.getIndexType()));
+    auto full = cast<Value>(result->offsets.fullOffsets)
+                    .getDefiningOp<tensor::InsertSliceOp>();
+    ASSERT_TRUE(full);
+    EXPECT_EQ(full.getSource(), cast<Value>(source->offsets.fullOffsets));
+    EXPECT_EQ(full.getDest(), cast<Value>(dest->offsets.fullOffsets));
+    EXPECT_EQ(full.getType(), original.getType().clone(builder.getI64Type()));
+    EXPECT_EQ(full.getMixedOffsets(), original.getMixedOffsets());
+    EXPECT_EQ(full.getMixedSizes(), original.getMixedSizes());
+    EXPECT_EQ(full.getMixedStrides(), original.getMixedStrides());
+    EXPECT_EQ(full.getDroppedDims(), original.getDroppedDims());
+    EXPECT_EQ(test::axisKinds(result->offsets),
+              (SmallVector<AxisKind>{AxisKind::Unknown, AxisKind::Unknown}));
+    EXPECT_FALSE(result->offsets.scalarOffset);
+    EXPECT_TRUE(succeeded(
+        analysis.getRules().validateBinding(original.getResult(), *result)));
+    SmallVector<int64_t> expected{0, 1,   2,  3,   4,  5,   6,  7,
+                                  8, 100, 10, 101, 12, 102, 14, 15};
+    if (name == "dest_only")
+      expected.back() = 103;
+    expectLanes(result->offsets, expected, env);
+  }
+  auto different =
+      tagged(f, "different").getDefiningOp<tensor::InsertSliceOp>();
+  ASSERT_TRUE(succeeded(analysis.analyze(different.getSource())));
+  EXPECT_TRUE(failed(analysis.analyze(different.getResult())));
+  EXPECT_EQ(builder.getInsertionBlock(), insertion.getBlock());
+  EXPECT_EQ(builder.getInsertionPoint(), insertion.getPoint());
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 

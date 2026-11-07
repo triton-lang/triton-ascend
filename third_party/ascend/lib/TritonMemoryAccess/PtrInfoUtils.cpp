@@ -40,65 +40,6 @@ bool zero(OpFoldResult value) {
 }
 
 namespace {
-LogicalResult normalizeAxis(AxisInfo &axis, int64_t size, Type scalar,
-                            OpBuilder &builder) {
-  if (axis.subAxes.empty()) {
-    if (axis.kind != AxisKind::Unknown && !axis.stride)
-      return failure();
-    if (axis.kind != AxisKind::Unknown)
-      axis.kind =
-          zero(axis.stride) ? AxisKind::Invariant : AxisKind::Structured;
-    else
-      axis.stride = builder.getIntegerAttr(scalar, 0);
-    return success();
-  }
-  int64_t product = 1;
-  for (const auto &sub : axis.subAxes) {
-    if (sub.shape <= 0 || !sub.stride)
-      return failure();
-    if (__builtin_mul_overflow(product, sub.shape, &product))
-      return failure();
-  }
-  if (product != size)
-    return failure();
-  axis.kind = AxisKind::Unknown;
-  axis.stride = builder.getIntegerAttr(scalar, 0);
-  if (llvm::all_of(axis.subAxes,
-                   [&](const SubAxisInfo &sub) { return zero(sub.stride); })) {
-    axis.kind = AxisKind::Invariant;
-    return success();
-  }
-  // Prove that each outer coefficient equals the innermost coefficient times
-  // all inner lengths. Do not emit IR just to test a symbolic equality.
-  OpFoldResult stride = builder.getIntegerAttr(scalar, 0);
-  for (const auto &sub : llvm::reverse(axis.subAxes))
-    if (sub.shape != 1) {
-      stride = sub.stride;
-      break;
-    }
-  auto inner = getIntegerConstant(stride, 64);
-  llvm::APInt scale(64, 1);
-  bool linear = true;
-  for (const auto &sub : llvm::reverse(axis.subAxes)) {
-    int64_t n = sub.shape;
-    if (n != 1) {
-      if (scale.isOne())
-        linear &= equalConstant(sub.stride, stride);
-      else {
-        auto coefficient = getIntegerConstant(sub.stride, 64);
-        linear &= succeeded(inner) && succeeded(coefficient) &&
-                  *coefficient == *inner * scale;
-      }
-    }
-    scale *= llvm::APInt(64, n);
-  }
-  if (linear) {
-    axis.stride = stride;
-    axis.kind = zero(stride) ? AxisKind::Invariant : AxisKind::Structured;
-  }
-  return success();
-}
-
 FailureOr<SmallVector<SubAxisInfo>>
 expandLinear(const AxisInfo &axis, ArrayRef<SubAxisInfo> partition,
              ConcreteArithmetic &arithmetic) {
@@ -131,18 +72,6 @@ bool canDivideAxis(const AxisInfo &axis, uint64_t divisor) {
     });
   return axis.kind != AxisKind::Unknown &&
          isKnownMultiple(axis.stride, divisor);
-}
-
-OpFoldResult divideIndex(OpFoldResult value, uint64_t divisor,
-                         OpBuilder &builder, Location loc) {
-  if (divisor == 1)
-    return value;
-  auto constant = getIntegerConstant(value, 64);
-  if (succeeded(constant))
-    return builder.getIndexAttr(
-        constant->sdiv(llvm::APInt(64, divisor)).getSExtValue());
-  Value d = builder.create<arith::ConstantIndexOp>(loc, divisor);
-  return builder.create<arith::DivSIOp>(loc, cast<Value>(value), d).getResult();
 }
 
 } // namespace
@@ -199,10 +128,7 @@ Type addressStorageType(Type source, OpBuilder &builder) {
 
 FailureOr<Value> materializeFullOffset(const OffsetInfo &info, Type target,
                                        OpBuilder &builder, Location loc) {
-  // Prefer the exact full value; a uniform origin can supply every lane.
   OpFoldResult offset = info.fullOffsets;
-  if (!offset && info.isUniform())
-    offset = info.scalarOffset;
   if (!offset)
     return failure();
 
@@ -218,6 +144,9 @@ FailureOr<Value> materializeFullOffset(const OffsetInfo &info, Type target,
   // Convert the value, then broadcast a scalar if the target is a tensor.
   auto tensor = dyn_cast<RankedTensorType>(target);
   bool broadcast = tensor && !isa<RankedTensorType>(source);
+  // A scalar origin alone does not supply runtime tensor extents.
+  if (broadcast && !tensor.hasStaticShape())
+    return failure();
   Type castType = broadcast ? tensor.getElementType() : target;
   auto converted = foldOrCreateCast(offset, castType,
                                     IntegerExtensionKind::Signed, builder, loc);
@@ -229,7 +158,7 @@ FailureOr<Value> materializeFullOffset(const OffsetInfo &info, Type target,
   return broadcast ? splatTo(*value, tensor, builder, loc) : value;
 }
 
-// Axis alignment, queries and normalization.
+// Axis alignment and stride queries.
 // Only proven equal partitions are merged. A linear axis can be expressed in
 // either partition. Incompatible decompositions lose that axis proof, while
 // the exact fullOffsets and independent origin remain available.
@@ -264,15 +193,31 @@ SmallVector<OpFoldResult> axisStrides(const OffsetInfo &info) {
   return strides;
 }
 
-LogicalResult normalizeAxes(OffsetInfo &info, OpBuilder &builder) {
-  if (info.axes.size() != info.getShape().size())
-    return failure();
-  Type scalar = builder.getIndexType();
-  for (unsigned i = 0; i < info.axes.size(); ++i)
-    if (failed(
-            normalizeAxis(info.axes[i], info.getShape()[i], scalar, builder)))
-      return failure();
-  return success();
+OpFoldResult inferAxisStride(ArrayRef<SubAxisInfo> subAxes,
+                             OpBuilder &builder) {
+  // Unit sub-axes never change the coordinate; take the innermost varying
+  // sub-axis as the candidate stride. An all-unit partition is invariant.
+  OpFoldResult stride = builder.getIndexAttr(0);
+  for (const auto &sub : llvm::reverse(subAxes))
+    if (sub.shape != 1) {
+      stride = sub.stride;
+      break;
+    }
+
+  // Each outer coefficient must equal that stride times all inner lengths.
+  // Symbolic products remain unproved; no helper IR is needed for this query.
+  auto inner = getIntegerConstant(stride, 64);
+  llvm::APInt scale(64, 1);
+  for (const auto &sub : llvm::reverse(subAxes)) {
+    if (sub.shape != 1 && !scale.isOne()) {
+      auto coefficient = getIntegerConstant(sub.stride, 64);
+      if (failed(inner) || failed(coefficient) ||
+          *coefficient != *inner * scale)
+        return {};
+    }
+    scale *= llvm::APInt(64, sub.shape);
+  }
+  return zero(stride) ? builder.getIndexAttr(0) : stride;
 }
 
 // Divisibility proofs and exact unit conversion.
@@ -282,6 +227,18 @@ bool canDivideDecomposition(const OffsetInfo &info, uint64_t divisor) {
          llvm::all_of(info.axes, [&](const AxisInfo &axis) {
            return canDivideAxis(axis, divisor);
          });
+}
+
+OpFoldResult divideIndex(OpFoldResult value, uint64_t divisor,
+                         OpBuilder &builder, Location loc) {
+  if (divisor == 1)
+    return value;
+  auto constant = getIntegerConstant(value, 64);
+  if (succeeded(constant))
+    return builder.getIndexAttr(
+        constant->sdiv(llvm::APInt(64, divisor)).getSExtValue());
+  Value d = builder.create<arith::ConstantIndexOp>(loc, divisor);
+  return builder.create<arith::DivSIOp>(loc, cast<Value>(value), d).getResult();
 }
 
 // The caller has proved that the complete value can be divided exactly.
@@ -300,8 +257,9 @@ void divideDecomposition(OffsetInfo &info, uint64_t divisor, OpBuilder &builder,
     } else if (!axis.subAxes.empty()) {
       for (auto &sub : axis.subAxes)
         sub.stride = divideIndex(sub.stride, divisor, builder, loc);
+      axis = buildAxisInfo(std::move(axis.subAxes), builder);
     } else {
-      axis.stride = divideIndex(axis.stride, divisor, builder, loc);
+      axis = buildAxisInfo(divideIndex(axis.stride, divisor, builder, loc));
     }
   }
 }

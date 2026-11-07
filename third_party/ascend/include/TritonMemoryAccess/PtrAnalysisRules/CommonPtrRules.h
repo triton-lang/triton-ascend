@@ -47,7 +47,9 @@ public:
   }
 
   /// Rules that reuse these parsers supply their own session's recursion.
-  /// The callback is borrowed only for this synchronous call.
+  /// IR must be verified, and successful queries must return PtrInfo matching
+  /// the queried value. Unsupported analysis returns failure. The callback is
+  /// borrowed only for this synchronous call.
   /// Emits an error and fails for values outside the supported integer and
   /// pointer types.
   FailureOr<Result> parseOperation(Value value, Analyze analyze,
@@ -77,14 +79,8 @@ private:
 
   // Integer rules.
   Result parseMakeRange(triton::MakeRangeOp op, OpBuilder &builder) const;
-  FailureOr<Result> parseAdd(arith::AddIOp op, Analyze analyze,
-                             OpBuilder &builder) const;
-  FailureOr<Result> parseSub(arith::SubIOp op, Analyze analyze,
-                             OpBuilder &builder) const;
-  FailureOr<Result> parseMul(arith::MulIOp op, Analyze analyze,
-                             OpBuilder &builder) const;
-  FailureOr<Result> parseElementwise(Value value, Analyze analyze,
-                                     OpBuilder &builder) const;
+  FailureOr<Result> parseBinaryArithmetic(Value value, Analyze analyze,
+                                          OpBuilder &builder) const;
   FailureOr<Result> parseCast(Value value, Value input, bool unsignedCast,
                               Analyze analyze, OpBuilder &builder) const;
   FailureOr<Result> parseFloatToInt(arith::FPToSIOp op, Analyze analyze,

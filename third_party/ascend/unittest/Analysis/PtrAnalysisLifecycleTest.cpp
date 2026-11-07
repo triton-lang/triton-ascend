@@ -46,6 +46,55 @@ unsigned countOperations(Operation *scope) {
   return count;
 }
 
+TEST(PtrAnalysisLifecycle, FailedSourcesPropagateAndCanBeBoundForRetry) {
+  MLIRContext context;
+  context.loadDialect<arith::ArithDialect, triton::TritonDialect>();
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @retry(%base: !tt.ptr<i32>, %unknown: tensor<1x!tt.ptr<i32>>) {
+      %known = tt.splat %base : !tt.ptr<i32> -> tensor<1x!tt.ptr<i32>>
+      %expanded = tt.broadcast %unknown : tensor<1x!tt.ptr<i32>> -> tensor<4x!tt.ptr<i32>>
+      %one = arith.constant dense<1> : tensor<4xi32>
+      %next = tt.addptr %expanded, %one : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  ASSERT_TRUE(succeeded(verify(*module)));
+  auto func = *module->getOps<triton::FuncOp>().begin();
+  auto known = *func.getBody().front().getOps<triton::SplatOp>().begin();
+  auto expanded = *func.getBody().front().getOps<triton::BroadcastOp>().begin();
+  auto next = *func.getBody().front().getOps<triton::AddPtrOp>().begin();
+  OpBuilder builder(func.getBody().front().getTerminator());
+  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+
+  // An opaque pointer tensor has no base; dependent queries must also fail.
+  unsigned before = countOperations(func);
+  SmallVector<Value> queries{func.getArgument(1), expanded.getResult(),
+                             next.getResult()};
+  for (Value value : queries) {
+    EXPECT_TRUE(failed(analysis.analyze(value)));
+    EXPECT_EQ(analysis.findCached(value), nullptr);
+  }
+  EXPECT_EQ(countOperations(func), before);
+
+  // Supplying a valid boundary result lets the same queries succeed.
+  auto bound = analysis.analyze(known);
+  ASSERT_TRUE(succeeded(bound));
+  ASSERT_TRUE(succeeded(analysis.bind(func.getArgument(1), *bound)));
+  auto result = analysis.analyze(next);
+  ASSERT_TRUE(succeeded(result));
+  EXPECT_EQ(result->base, func.getArgument(0));
+  EXPECT_EQ(result->offsets.valueType,
+            RankedTensorType::get({4}, builder.getIndexType()));
+  auto offsets = test::evaluate(result->offsets);
+  ASSERT_TRUE(offsets);
+  ASSERT_EQ(offsets->size(), 4u);
+  for (const auto &offset : *offsets)
+    EXPECT_EQ(offset.getSExtValue(), 1);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 TEST(PtrAnalysisLifecycle, NumericHelpersCanBeCleanedAfterSession) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, triton::TritonDialect>();

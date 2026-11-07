@@ -422,4 +422,73 @@ TEST(PtrAnalysisExtension, SubAxisBindingsValidateIndexFieldsAndLengths) {
   }
   EXPECT_TRUE(succeeded(verify(*module)));
 }
+
+TEST(PtrAnalysisExtension, AxisBindingsRequireConsistentFacts) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @test(%boundary:tensor<16xi32>,%unit:tensor<1xi32>,%stride:index) {
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<FuncOp>().begin();
+  OpBuilder b(f.getBody().front().getTerminator());
+  PtrAnalysis<CommonPtrRules> driver(b, CommonPtrRules{});
+  auto offset = buildOffsetInfo(f.getArgument(0), b);
+  ASSERT_TRUE(succeeded(offset));
+  PtrInfo bound{{}, *offset};
+  auto &axis = bound.offsets.axes[0];
+  unsigned count = operations(*module);
+
+  // Unknown stride fields are placeholders, not facts to upgrade or rewrite.
+  axis.stride = b.getIndexAttr(7);
+  ASSERT_TRUE(succeeded(driver.bind(f.getArgument(0), bound)));
+  EXPECT_EQ(driver.findCached(f.getArgument(0))->offsets.axes[0].stride,
+            axis.stride);
+  axis.kind = AxisKind::Invariant;
+  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+  axis = AxisInfo(AxisKind::Structured, b.getIndexAttr(0));
+  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+
+  // Nonlinear digits retain Unknown. Linear lanes 0..15 require stride one.
+  axis = AxisInfo(AxisKind::Unknown, b.getIndexAttr(7));
+  axis.subAxes = {{4, b.getIndexAttr(0)}, {4, b.getIndexAttr(1)}};
+  ASSERT_TRUE(succeeded(driver.bind(f.getArgument(0), bound)));
+  axis.subAxes = {{4, b.getIndexAttr(4)}, {4, b.getIndexAttr(1)}};
+  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+  axis.kind = AxisKind::Structured;
+  axis.stride = b.getIndexAttr(1);
+  ASSERT_TRUE(succeeded(driver.bind(f.getArgument(0), bound)));
+  axis.stride = b.getIndexAttr(2);
+  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+  // The invalid length product would wrap back to 16 without overflow checks.
+  axis.stride = b.getIndexAttr(1);
+  axis.subAxes.front().shape = (int64_t{1} << 62) + 4;
+  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+
+  // Unit digits have no coordinate contribution; the sole varying digit
+  // can carry a dynamic stride directly.
+  axis.stride = f.getArgument(2);
+  axis.subAxes = {
+      {1, b.getIndexAttr(9)}, {16, f.getArgument(2)}, {1, b.getIndexAttr(3)}};
+  ASSERT_TRUE(succeeded(driver.bind(f.getArgument(0), bound)));
+  axis.kind = AxisKind::Unknown;
+  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+  axis.kind = AxisKind::Structured;
+  axis.stride = b.getIndexAttr(1);
+  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+
+  // A singleton partition is invariant even with arbitrary coefficients.
+  auto unit = buildOffsetInfo(f.getArgument(1), b);
+  ASSERT_TRUE(succeeded(unit));
+  unit->axes[0] = AxisInfo(AxisKind::Invariant, b.getIndexAttr(0));
+  unit->axes[0].subAxes = {{1, f.getArgument(2)}, {1, b.getIndexAttr(9)}};
+  ASSERT_TRUE(succeeded(driver.bind(f.getArgument(1), PtrInfo{{}, *unit})));
+  unit->axes[0].kind = AxisKind::Unknown;
+  EXPECT_TRUE(failed(driver.bind(f.getArgument(1), PtrInfo{{}, *unit})));
+  EXPECT_EQ(operations(*module), count);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
 } // namespace

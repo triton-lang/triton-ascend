@@ -50,62 +50,57 @@ bool hasInvariancePreservingCombiner(triton::ReduceOp op) {
 // Float intermediates need only per-axis equality facts. Integer inputs still
 // go through the caller's Rules. This local memo avoids rewalking shared float
 // expressions; it owns no SSA helpers and has no session lifecycle.
-FailureOr<SmallVector<bool>>
+// An unanalyzable input contributes no invariant axes.
+SmallVector<bool>
 inferInvariantAxes(Value value, CommonPtrRules::Analyze analyze,
-                   llvm::DenseMap<Value, SmallVector<bool>> &known) {
-  if (auto it = known.find(value); it != known.end())
+                   llvm::DenseMap<Value, SmallVector<bool>> &invarianceCache) {
+  if (auto it = invarianceCache.find(value); it != invarianceCache.end())
     return it->second;
-  auto type = dyn_cast<RankedTensorType>(value.getType());
-  SmallVector<bool> axes(type ? type.getRank() : 0, false);
-  if (!type)
-    return axes;
-  auto remember = [&]() -> FailureOr<SmallVector<bool>> {
-    known.try_emplace(value, axes);
-    return axes;
+  auto tensorType = dyn_cast<RankedTensorType>(value.getType());
+  SmallVector<bool> invariantAxes(tensorType ? tensorType.getRank() : 0, false);
+  if (!tensorType)
+    return invariantAxes;
+  auto remember = [&]() {
+    invarianceCache.try_emplace(value, invariantAxes);
+    return invariantAxes;
   };
-  if (!isa<FloatType>(type.getElementType())) {
+  if (!isa<FloatType>(tensorType.getElementType())) {
     auto info = analyze(value);
-    if (failed(info))
-      return failure();
-    if (!info->isEmpty())
-      for (unsigned i = 0; i < axes.size(); ++i)
-        axes[i] = info->offsets.axes[i].kind == AxisKind::Invariant;
+    if (succeeded(info))
+      for (unsigned i = 0; i < invariantAxes.size(); ++i)
+        invariantAxes[i] = info->offsets.axes[i].kind == AxisKind::Invariant;
     return remember();
   }
   if (value.getDefiningOp<triton::SplatOp>()) {
-    std::fill(axes.begin(), axes.end(), true);
+    std::fill(invariantAxes.begin(), invariantAxes.end(), true);
   } else if (auto constant = value.getDefiningOp<arith::ConstantOp>()) {
     if (auto dense = dyn_cast<DenseElementsAttr>(constant.getValue()))
       if (dense.isSplat())
-        std::fill(axes.begin(), axes.end(), true);
+        std::fill(invariantAxes.begin(), invariantAxes.end(), true);
   } else if (auto broadcast = value.getDefiningOp<triton::BroadcastOp>()) {
-    auto source = inferInvariantAxes(broadcast.getSrc(), analyze, known);
-    if (failed(source))
-      return failure();
-    auto shape =
+    auto sourceInvariantAxes =
+        inferInvariantAxes(broadcast.getSrc(), analyze, invarianceCache);
+    auto sourceShape =
         cast<RankedTensorType>(broadcast.getSrc().getType()).getShape();
-    for (unsigned i = 0; i < axes.size(); ++i)
-      axes[i] = shape[i] == 1 || (*source)[i];
+    for (unsigned i = 0; i < invariantAxes.size(); ++i)
+      invariantAxes[i] = sourceShape[i] == 1 || sourceInvariantAxes[i];
   } else if (auto expand = value.getDefiningOp<triton::ExpandDimsOp>()) {
-    auto source = inferInvariantAxes(expand.getSrc(), analyze, known);
-    if (failed(source))
-      return failure();
-    axes = std::move(*source);
-    axes.insert(axes.begin() + expand.getAxis(), true);
+    invariantAxes =
+        inferInvariantAxes(expand.getSrc(), analyze, invarianceCache);
+    invariantAxes.insert(invariantAxes.begin() + expand.getAxis(), true);
   } else if (Operation *op = value.getDefiningOp();
              op && (isInvariancePreservingArithmetic(*op) ||
                     isa<triton::ClampFOp>(op))) {
-    std::fill(axes.begin(), axes.end(), true);
+    std::fill(invariantAxes.begin(), invariantAxes.end(), true);
     for (Value operand : op->getOperands()) {
-      auto source = inferInvariantAxes(operand, analyze, known);
-      if (failed(source))
-        return failure();
+      auto sourceInvariantAxes =
+          inferInvariantAxes(operand, analyze, invarianceCache);
       if (!isa<RankedTensorType>(operand.getType()))
         continue;
-      if (source->size() != axes.size())
-        return SmallVector<bool>(axes.size(), false);
-      for (unsigned i = 0; i < axes.size(); ++i)
-        axes[i] = axes[i] && (*source)[i];
+      if (sourceInvariantAxes.size() != invariantAxes.size())
+        return SmallVector<bool>(invariantAxes.size(), false);
+      for (unsigned i = 0; i < invariantAxes.size(); ++i)
+        invariantAxes[i] = invariantAxes[i] && sourceInvariantAxes[i];
     }
   }
   return remember();
@@ -155,7 +150,7 @@ FailureOr<Result> CommonPtrRules::parseOperation(Value value, Analyze analyze,
       return parseMakeTensorPtr(op, analyze, builder);
     if (auto op = value.getDefiningOp<triton::AdvanceOp>())
       return parseAdvance(op, analyze, builder);
-    return Result{};
+    return failure();
   }
   // Shape and selection rules apply to both offsets and ordinary pointers.
   if (auto op = value.getDefiningOp<triton::BroadcastOp>())
@@ -186,23 +181,20 @@ FailureOr<Result> CommonPtrRules::parseOperation(Value value, Analyze analyze,
   if (auto op = value.getDefiningOp<triton::MakeRangeOp>()) {
     return parseMakeRange(op, builder);
   }
-  if (auto op = value.getDefiningOp<arith::AddIOp>())
-    return parseAdd(op, analyze, builder);
-  if (auto op = value.getDefiningOp<arith::SubIOp>())
-    return parseSub(op, analyze, builder);
-  if (auto op = value.getDefiningOp<arith::MulIOp>())
-    return parseMul(op, analyze, builder);
-  if (auto *op = value.getDefiningOp())
-    if (isa<arith::DivSIOp, arith::DivUIOp, arith::RemSIOp, arith::RemUIOp,
-            arith::MinSIOp, arith::MinUIOp, arith::MaxSIOp, arith::MaxUIOp,
-            arith::AndIOp, arith::OrIOp, arith::XOrIOp, arith::CmpIOp>(op))
-      return parseElementwise(value, analyze, builder);
-  // Integer casts share width checks; distinguish unsigned extension semantics.
-  if (auto *op = value.getDefiningOp();
-      op && isa<arith::ExtSIOp, arith::ExtUIOp, arith::TruncIOp,
-                arith::IndexCastOp, arith::IndexCastUIOp>(op)) {
-    bool unsignedCast = isa<arith::ExtUIOp, arith::IndexCastUIOp>(op);
-    return parseCast(value, op->getOperand(0), unsignedCast, analyze, builder);
+  if (auto *op = value.getDefiningOp()) {
+    if (isa<arith::AddIOp, arith::SubIOp, arith::MulIOp, arith::DivSIOp,
+            arith::DivUIOp, arith::RemSIOp, arith::RemUIOp, arith::MinSIOp,
+            arith::MinUIOp, arith::MaxSIOp, arith::MaxUIOp, arith::AndIOp,
+            arith::OrIOp, arith::XOrIOp, arith::CmpIOp>(op))
+      return parseBinaryArithmetic(value, analyze, builder);
+    // Integer casts share width checks; distinguish unsigned extension
+    // semantics.
+    if (isa<arith::ExtSIOp, arith::ExtUIOp, arith::TruncIOp, arith::IndexCastOp,
+            arith::IndexCastUIOp>(op)) {
+      bool unsignedCast = isa<arith::ExtUIOp, arith::IndexCastUIOp>(op);
+      return parseCast(value, op->getOperand(0), unsignedCast, analyze,
+                       builder);
+    }
   }
   if (auto op = value.getDefiningOp<arith::FPToSIOp>())
     return parseFloatToInt(op, analyze, builder);
@@ -221,14 +213,12 @@ FailureOr<Result> CommonPtrRules::parseSplat(triton::SplatOp op,
   auto sourceInfo = analyze(op.getSrc());
   if (failed(sourceInfo))
     return failure();
-  if (sourceInfo->isEmpty())
-    return Result{};
   builder.setInsertionPointAfter(op);
 
   // Integer splats use the source origin for every result lane.
   if (!sourceInfo->base) {
     if (!sourceInfo->offsets.getShape().empty())
-      return Result{};
+      return failure();
     OpFoldResult scalar = sourceInfo->offsets.scalarOffset;
     if (!scalar)
       scalar = op.getSrc();
@@ -238,19 +228,21 @@ FailureOr<Result> CommonPtrRules::parseSplat(triton::SplatOp op,
   // Pointer splats broadcast the element offset and retain the scalar base.
   builder.setInsertionPoint(op);
   PtrInfo info = *sourceInfo;
-  if (isa<RankedTensorType>(info.offsets.valueType))
-    return Result{};
-  auto target = cast<RankedTensorType>(addressValueType(op.getType(), builder));
-  auto full = materializeFullOffset(
-      info.offsets, addressStorageType(target, builder), builder, op.getLoc());
+  assert(info.offsets.valueType.isIndex() &&
+         "scalar pointer offsets must have index type");
+  auto targetType =
+      cast<RankedTensorType>(addressValueType(op.getType(), builder));
+  auto full = materializeFullOffset(info.offsets,
+                                    addressStorageType(targetType, builder),
+                                    builder, op.getLoc());
   if (failed(full))
-    return Result{};
+    return failure();
 
   // Every new tensor axis is invariant because all pointers came from one SSA.
-  info.offsets.valueType = target;
+  info.offsets.valueType = targetType;
   info.offsets.fullOffsets = *full;
-  info.offsets.axes.assign(
-      target.getRank(), AxisInfo(AxisKind::Invariant, builder.getIndexAttr(0)));
+  info.offsets.axes.assign(targetType.getRank(),
+                           makeInvariantAxisInfo(builder));
   return Result(std::move(info));
 }
 
@@ -261,36 +253,30 @@ FailureOr<Result> CommonPtrRules::parseBroadcast(triton::BroadcastOp op,
   auto sourceInfo = analyze(op.getSrc());
   if (failed(sourceInfo))
     return failure();
-  if (sourceInfo->isEmpty())
-    return Result{};
   builder.setInsertionPointAfter(op);
 
-  // Integer results already provide the complete value; broadcast their axes.
-  if (!sourceInfo->base) {
-    auto info = broadcastOffsets(op.getResult(), op.getType(),
-                                 sourceInfo->offsets, builder);
-    if (failed(info))
-      return Result{};
-    return Result{{}, std::move(*info)};
+  // Reuse the exact integer result and retain the source base.
+  PtrInfo info = *sourceInfo;
+  Value full = op.getResult();
+  auto targetType = op.getType();
+  if (info.base) {
+    // Broadcast the pointer tensor's complete numeric offsets.
+    builder.setInsertionPoint(op);
+    targetType = cast<RankedTensorType>(addressValueType(targetType, builder));
+    auto inputOffset = materializeFullOffset(
+        info.offsets, addressStorageType(info.offsets.valueType, builder),
+        builder, op.getLoc());
+    if (failed(inputOffset))
+      return failure();
+    full = builder.create<triton::BroadcastOp>(
+        op.getLoc(), addressStorageType(targetType, builder), *inputOffset);
   }
 
-  // Pointer results need the same broadcast applied to their complete offsets.
-  PtrInfo info = *sourceInfo;
-  builder.setInsertionPoint(op);
-  auto target = cast<RankedTensorType>(addressValueType(op.getType(), builder));
-  auto inputOffset = materializeFullOffset(
-      info.offsets, addressStorageType(info.offsets.valueType, builder),
-      builder, op.getLoc());
-  if (failed(inputOffset))
-    return Result{};
-  Value full = builder.create<triton::BroadcastOp>(
-      op.getLoc(), addressStorageType(target, builder), *inputOffset);
-
-  // Keep the descriptor's axis facts consistent with the broadcast value.
-  auto offsets = broadcastOffsets(full, target, info.offsets, builder);
-  if (failed(offsets))
-    return Result{};
-  info.offsets = std::move(*offsets);
+  // Broadcast the copied axes, then record the result type and complete value.
+  broadcastAxes(info.offsets.axes, sourceInfo->offsets.getShape(),
+                targetType.getShape(), makeInvariantAxisInfo(builder));
+  info.offsets.valueType = targetType;
+  info.offsets.fullOffsets = full;
   return Result(std::move(info));
 }
 
@@ -301,38 +287,32 @@ FailureOr<Result> CommonPtrRules::parseExpandDims(triton::ExpandDimsOp op,
   auto sourceInfo = analyze(op.getSrc());
   if (failed(sourceInfo))
     return failure();
-  if (sourceInfo->isEmpty())
-    return Result{};
   builder.setInsertionPointAfter(op);
 
-  // Integer offsets gain an invariant axis at the requested position.
-  if (!sourceInfo->base) {
-    auto info = expandDimsOffsets(op.getResult(), op.getType(),
-                                  sourceInfo->offsets, op.getAxis(), builder);
-    if (failed(info))
-      return Result{};
-    return Result{{}, std::move(*info)};
+  // Reuse the exact integer result and retain the source base.
+  PtrInfo info = *sourceInfo;
+  Value full = op.getResult();
+  auto targetType = op.getType();
+  if (info.base) {
+    // Insert the same dimension into the pointer tensor's numeric offsets.
+    builder.setInsertionPoint(op);
+    targetType = cast<RankedTensorType>(addressValueType(targetType, builder));
+    auto inputOffset = materializeFullOffset(
+        info.offsets, addressStorageType(info.offsets.valueType, builder),
+        builder, op.getLoc());
+    if (failed(inputOffset))
+      return failure();
+    full = builder.create<triton::ExpandDimsOp>(
+        op.getLoc(), addressStorageType(targetType, builder), *inputOffset,
+        op.getAxis());
   }
 
-  // Insert the same dimension into a pointer tensor's complete offsets.
-  PtrInfo info = *sourceInfo;
-  builder.setInsertionPoint(op);
-  auto target = cast<RankedTensorType>(addressValueType(op.getType(), builder));
-  auto inputOffset = materializeFullOffset(
-      info.offsets, addressStorageType(info.offsets.valueType, builder),
-      builder, op.getLoc());
-  if (failed(inputOffset))
-    return Result{};
-  Value full = builder.create<triton::ExpandDimsOp>(
-      op.getLoc(), addressStorageType(target, builder), *inputOffset,
-      op.getAxis());
-
-  // Insert the corresponding invariant axis into the pointer descriptor.
-  auto offsets =
-      expandDimsOffsets(full, target, info.offsets, op.getAxis(), builder);
-  if (failed(offsets))
-    return Result{};
-  info.offsets = std::move(*offsets);
+  // Insert the corresponding invariant axis into either descriptor.
+  unsigned axis = op.getAxis();
+  info.offsets.axes.insert(info.offsets.axes.begin() + axis,
+                           makeInvariantAxisInfo(builder));
+  info.offsets.valueType = targetType;
+  info.offsets.fullOffsets = full;
   return Result(std::move(info));
 }
 
@@ -343,58 +323,45 @@ FailureOr<Result> CommonPtrRules::parseReshape(triton::ReshapeOp op,
   // decision; analysis must not change the source op or choose two
   // permutations.
   if (op.getAllowReorder())
-    return Result{};
+    return failure();
 
   // Obtain the source facts under the fixed lane ordering.
-  auto input = analyze(op.getSrc());
-  if (failed(input))
+  auto sourceInfo = analyze(op.getSrc());
+  if (failed(sourceInfo))
     return failure();
-  if (input->isEmpty())
-    return Result{};
   builder.setInsertionPointAfter(op);
 
-  // Integer results reuse their SSA and repartition the known axis facts.
-  if (!input->base) {
-    auto offsets = reshapeOffsets(op.getResult(), op.getType(), input->offsets,
-                                  builder, op.getLoc());
-    if (failed(offsets))
-      return Result{};
-    return Result{{}, std::move(*offsets)};
+  // Reuse the exact integer result and retain the source base.
+  PtrInfo info = *sourceInfo;
+  Value full = op.getResult();
+  auto targetType = op.getType();
+  if (info.base) {
+    // Reshape the pointer tensor's offsets with the original lane ordering.
+    builder.setInsertionPoint(op);
+    targetType = cast<RankedTensorType>(addressValueType(targetType, builder));
+    auto inputOffset = materializeFullOffset(
+        info.offsets, addressStorageType(info.offsets.valueType, builder),
+        builder, op.getLoc());
+    if (failed(inputOffset))
+      return failure();
+    full = builder.create<triton::ReshapeOp>(
+        op.getLoc(), addressStorageType(targetType, builder), *inputOffset,
+        false, op.getEfficientLayout());
   }
 
-  // Pointer tensors reshape the complete offset value while keeping the base.
-  PtrInfo info = *input;
-  builder.setInsertionPoint(op);
-  auto type = cast<RankedTensorType>(addressValueType(op.getType(), builder));
-  auto inputOffset = materializeFullOffset(
-      info.offsets, addressStorageType(info.offsets.valueType, builder),
-      builder, op.getLoc());
-  if (failed(inputOffset))
-    return Result{};
-  Value full = builder.create<triton::ReshapeOp>(
-      op.getLoc(), addressStorageType(type, builder), *inputOffset, false,
-      op.getEfficientLayout());
-
-  // Repartition the descriptor to match the reshaped offset tensor.
-  auto offsets = reshapeOffsets(full, type, info.offsets, builder, op.getLoc());
-  if (failed(offsets))
-    return Result{};
-  info.offsets = std::move(*offsets);
+  // Preserve uniformity and axes whose coordinates only gain or lose unit dims.
+  info.offsets = reshapeOffsetInfo(full, targetType, info.offsets, builder);
   return Result(std::move(info));
 }
 
 FailureOr<Result> CommonPtrRules::parseExtractSlice(tensor::ExtractSliceOp op,
                                                     Analyze analyze,
                                                     OpBuilder &builder) const {
-  // Require a static result shape and available source facts.
-  auto target = op.getType();
-  if (!target.hasStaticShape())
-    return Result{};
-  auto input = analyze(op.getSource());
-  if (failed(input))
+  // Analyze the source; dynamic result extents still admit complete offsets.
+  auto targetType = op.getType();
+  auto sourceInfo = analyze(op.getSource());
+  if (failed(sourceInfo))
     return failure();
-  if (input->isEmpty())
-    return Result{};
   builder.setInsertionPointAfter(op);
 
   // Record which source dimensions disappear in a rank-reducing slice.
@@ -403,36 +370,31 @@ FailureOr<Result> CommonPtrRules::parseExtractSlice(tensor::ExtractSliceOp op,
   for (unsigned i = 0; i < op.getSourceType().getRank(); ++i)
     dropped.push_back(mask.test(i));
 
-  // Integer slices update the origin and axes using starts, steps and drops.
-  if (!input->base) {
-    auto offsets = sliceOffsets(op.getResult(), target, input->offsets,
-                                op.getMixedOffsets(), op.getMixedStrides(),
-                                dropped, builder, op.getLoc());
-    if (failed(offsets))
-      return Result{};
-    return Result{{}, std::move(*offsets)};
+  // Reuse the exact integer result and retain the source base.
+  PtrInfo info = *sourceInfo;
+  Value full = op.getResult();
+  if (info.base) {
+    // Apply the same slice to the pointer tensor's numeric offsets.
+    builder.setInsertionPoint(op);
+    targetType = cast<RankedTensorType>(addressValueType(targetType, builder));
+    auto inputOffset = materializeFullOffset(
+        info.offsets, addressStorageType(info.offsets.valueType, builder),
+        builder, op.getLoc());
+    if (failed(inputOffset))
+      return failure();
+    full = builder.create<tensor::ExtractSliceOp>(
+        op.getLoc(),
+        cast<RankedTensorType>(addressStorageType(targetType, builder)),
+        *inputOffset, op.getMixedOffsets(), op.getMixedSizes(),
+        op.getMixedStrides());
   }
 
-  // Pointer slices apply the identical slice to their complete offset tensor.
-  builder.setInsertionPoint(op);
-  PtrInfo info = *input;
-  auto type = cast<RankedTensorType>(addressValueType(target, builder));
-  auto inputOffset = materializeFullOffset(
-      info.offsets, addressStorageType(info.offsets.valueType, builder),
-      builder, op.getLoc());
-  if (failed(inputOffset))
-    return Result{};
-  Value full = builder.create<tensor::ExtractSliceOp>(
-      op.getLoc(), cast<RankedTensorType>(addressStorageType(type, builder)),
-      *inputOffset, op.getMixedOffsets(), op.getMixedSizes(),
-      op.getMixedStrides());
-
-  // Apply that same coordinate transformation to the descriptor.
+  // Update the origin and axes using the same starts, steps and dropped axes.
   auto offsets =
-      sliceOffsets(full, type, info.offsets, op.getMixedOffsets(),
-                   op.getMixedStrides(), dropped, builder, op.getLoc());
+      sliceOffsetInfo(full, targetType, info.offsets, op.getMixedOffsets(),
+                      op.getMixedStrides(), dropped, builder, op.getLoc());
   if (failed(offsets))
-    return Result{};
+    return failure();
   info.offsets = std::move(*offsets);
   return Result(std::move(info));
 }
@@ -444,9 +406,7 @@ FailureOr<Result> CommonPtrRules::parseInsert(tensor::InsertOp op,
   if (!isOrdinaryPtrType(op.getType()))
     return buildIntegerInfo(op.getResult(), builder);
 
-  // Analyze both pointer inputs for a statically shaped destination.
-  if (!op.getType().hasStaticShape())
-    return Result{};
+  // Analyze both pointer inputs; insertion reuses the destination's shape.
   auto source = analyze(op.getScalar()), dest = analyze(op.getDest());
   if (failed(source) || failed(dest))
     return failure();
@@ -469,9 +429,7 @@ FailureOr<Result> CommonPtrRules::parseInsertSlice(tensor::InsertSliceOp op,
   if (!isOrdinaryPtrType(op.getType()))
     return buildIntegerInfo(op.getResult(), builder);
 
-  // Analyze both pointer tensors after checking their static shapes.
-  if (!op.getType().hasStaticShape() || !op.getSourceType().hasStaticShape())
-    return Result{};
+  // Analyze both pointer tensors; the original slice carries dynamic extents.
   auto source = analyze(op.getSource()), dest = analyze(op.getDest());
   if (failed(source) || failed(dest))
     return failure();
@@ -491,22 +449,43 @@ FailureOr<Result> CommonPtrRules::parseInsertSlice(tensor::InsertSliceOp op,
 FailureOr<Result> CommonPtrRules::parseTensorCast(tensor::CastOp op,
                                                   Analyze analyze,
                                                   OpBuilder &builder) const {
-  // Only identical static tensor types preserve the current shape facts.
-  auto from = dyn_cast<RankedTensorType>(op.getSource().getType());
-  auto to = dyn_cast<RankedTensorType>(op.getType());
-  if (!from || !to || !from.hasStaticShape() || from != to)
-    return Result{};
-
-  // Reuse the source facts and update the complete integer value.
-  auto input = analyze(op.getSource());
-  if (failed(input))
+  // Axis facts require a known rank; verified casts preserve all coordinates.
+  auto sourceType = dyn_cast<RankedTensorType>(op.getSource().getType());
+  auto targetType = dyn_cast<RankedTensorType>(op.getType());
+  if (!sourceType || !targetType)
     return failure();
-  builder.setInsertionPointAfter(op);
-  if (!input->isEmpty() && !input->base)
-    input->offsets.fullOffsets = op.getResult();
-  // Identical pointer tensor types need no extra helper: offsets already have
-  // the same shape/encoding, and the cast preserves every lane.
-  return *input;
+
+  // Reuse the source base, origin and axis strides.
+  auto sourceInfo = analyze(op.getSource());
+  if (failed(sourceInfo))
+    return failure();
+  PtrInfo info = *sourceInfo;
+
+  // Integer results already carry the cast. Pointer offsets need the same
+  // shape cast, preserving their numeric element type.
+  if (!info.base) {
+    info.offsets.fullOffsets = op.getResult();
+  } else if (sourceType != targetType) {
+    builder.setInsertionPoint(op);
+    Value full = dyn_cast<Value>(info.offsets.fullOffsets);
+    if (!full)
+      full = builder.create<arith::ConstantOp>(
+          op.getLoc(),
+          cast<TypedAttr>(cast<Attribute>(info.offsets.fullOffsets)));
+    Type storageType = targetType.clone(
+        cast<RankedTensorType>(full.getType()).getElementType());
+    info.offsets.fullOffsets =
+        builder.create<tensor::CastOp>(op.getLoc(), storageType, full)
+            .getResult();
+  }
+  info.offsets.valueType =
+      info.base ? addressValueType(targetType, builder) : targetType;
+
+  // Fixed-size sub-axis partitions require a static extent in the result.
+  for (auto [axis, size] : llvm::zip(info.offsets.axes, targetType.getShape()))
+    if (ShapedType::isDynamic(size))
+      axis.subAxes.clear();
+  return Result(std::move(info));
 }
 
 FailureOr<Result> CommonPtrRules::parseSelect(arith::SelectOp op,
@@ -521,8 +500,6 @@ FailureOr<Result> CommonPtrRules::parseSelect(arith::SelectOp op,
   auto rhsInfo = analyze(op.getFalseValue());
   if (failed(lhsInfo) || failed(rhsInfo))
     return failure();
-  if (lhsInfo->isEmpty() || rhsInfo->isEmpty())
-    return Result{};
 
   // Combine branch facts; return pointer or fully structured results directly.
   if (!lhsInfo->base)
@@ -530,147 +507,94 @@ FailureOr<Result> CommonPtrRules::parseSelect(arith::SelectOp op,
   else
     builder.setInsertionPoint(op);
   auto result = combineSelectInfo(op, *lhsInfo, *rhsInfo, builder);
-  if (result.isEmpty() || result.base || result.offsets.hasStructuredForm())
+  if (failed(result) || result->base || result->offsets.hasStructuredForm())
     return result;
 
-  // Otherwise use condition invariance to refine the integer result.
-  auto condition = analyze(op.getCondition());
-  if (failed(condition))
-    return failure();
-  if (condition->isEmpty())
+  // Condition invariance may refine the integer result; unavailable facts
+  // leave the already known branch result intact.
+  auto conditionInfo = analyze(op.getCondition());
+  if (failed(conditionInfo))
     return result;
   // A tensor condition can be uniform on some axes too. Keep only equality
   // facts shared by all three inputs, then extract the original result if
   // every axis is invariant.
-  for (unsigned i = 0; i < result.offsets.axes.size(); ++i) {
-    bool uniformCondition =
-        condition->offsets.getShape().empty() ||
-        condition->offsets.axes[i].kind == AxisKind::Invariant;
-    if (uniformCondition &&
+  bool scalarCondition = conditionInfo->offsets.getShape().empty();
+  for (unsigned i = 0; i < result->offsets.axes.size(); ++i) {
+    bool conditionInvariantOnAxis =
+        scalarCondition ||
+        conditionInfo->offsets.axes[i].kind == AxisKind::Invariant;
+    if (conditionInvariantOnAxis &&
         lhsInfo->offsets.axes[i].kind == AxisKind::Invariant &&
         rhsInfo->offsets.axes[i].kind == AxisKind::Invariant)
-      result.offsets.axes[i].kind = AxisKind::Invariant;
+      result->offsets.axes[i].kind = AxisKind::Invariant;
   }
 
   // Recover a scalar origin when every result axis is invariant.
-  setUniformOrigin(result.offsets, op.getResult(), builder);
+  setUniformOrigin(result->offsets, op.getResult(), builder);
   return result;
 }
 
 // Integer rules.
 Result CommonPtrRules::parseMakeRange(triton::MakeRangeOp op,
                                       OpBuilder &builder) const {
-  // Require a nonempty one-dimensional i32 range.
-  auto width = getIntegerWidth(op.getType());
-  if (failed(width) || *width != 32)
-    return Result{};
-  auto info = buildOffsetInfo(op.getResult(), builder);
-  if (failed(info) || info->getShape().size() != 1 || info->getShape()[0] <= 0)
-    return Result{};
-
-  // Check that the signed bounds match the result extent.
+  // The verifier guarantees a nonempty 1D i32 range matching the signed bounds.
   int64_t start = op.getStartAttr().getInt();
-  int64_t end = op.getEndAttr().getInt();
-  if (end <= start || end - start != info->getShape()[0])
-    return Result{};
-
   // Represent the range as its starting offset plus a unit-stride axis.
-  info->axes = {AxisInfo(AxisKind::Structured, builder.getIndexAttr(1))};
-  info->scalarOffset = builder.getIndexAttr(start);
-  return Result{{}, std::move(*info)};
+  OffsetInfo info;
+  info.valueType = op.getType();
+  info.fullOffsets = op.getResult();
+  info.axes = {AxisInfo(AxisKind::Structured, builder.getIndexAttr(1))};
+  info.scalarOffset = builder.getIndexAttr(start);
+  return Result{{}, std::move(info)};
 }
 
-FailureOr<Result> CommonPtrRules::parseAdd(arith::AddIOp op, Analyze analyze,
-                                           OpBuilder &builder) const {
+FailureOr<Result>
+CommonPtrRules::parseBinaryArithmetic(Value value, Analyze analyze,
+                                      OpBuilder &builder) const {
   // Obtain both operands' origins and axis facts through the current session.
-  auto lhsInfo = analyze(op.getLhs());
-  auto rhsInfo = analyze(op.getRhs());
+  Operation *op = value.getDefiningOp();
+  auto lhsInfo = analyze(op->getOperand(0));
+  auto rhsInfo = analyze(op->getOperand(1));
   if (failed(lhsInfo) || failed(rhsInfo))
     return failure();
-  if (lhsInfo->isEmpty() || rhsInfo->isEmpty())
-    return Result{};
   const auto &lhs = *lhsInfo, &rhs = *rhsInfo;
   builder.setInsertionPointAfter(op);
 
-  // Add the origins and corresponding axis contributions.
+  // Add or subtract the origins and corresponding axis contributions.
   // Preserve the legacy no-overflow assumption for index descriptors. Dynamic
   // origins and strides do not need a separate propagated range proof.
-  auto offsets = addOffsets(op.getResult(), lhs.offsets, rhs.offsets, false,
-                            builder, op.getLoc());
-  if (failed(offsets))
-    return Result{};
-  return Result{{}, std::move(*offsets)};
-}
+  if (isa<arith::AddIOp, arith::SubIOp>(op)) {
+    auto offsets = addOffsetInfo(value, lhs.offsets, rhs.offsets,
+                                 isa<arith::SubIOp>(op), builder, op->getLoc());
+    if (failed(offsets))
+      return failure();
+    return Result{{}, std::move(*offsets)};
+  }
 
-FailureOr<Result> CommonPtrRules::parseSub(arith::SubIOp op, Analyze analyze,
-                                           OpBuilder &builder) const {
-  // Obtain both operands' origins and axis facts through the current session.
-  auto lhsInfo = analyze(op.getLhs());
-  auto rhsInfo = analyze(op.getRhs());
-  if (failed(lhsInfo) || failed(rhsInfo))
+  // A uniform multiplier scales the other operand's origin and axis strides.
+  if (isa<arith::MulIOp>(op)) {
+    bool lhsUniform = lhs.offsets.isUniform();
+    if (lhsUniform || rhs.offsets.isUniform()) {
+      const auto &varying = lhsUniform ? rhs.offsets : lhs.offsets;
+      const auto &scale = lhsUniform ? lhs.offsets : rhs.offsets;
+      auto offsets = scaleOffsetInfo(value, varying, scale.scalarOffset,
+                                     builder, op->getLoc());
+      if (failed(offsets))
+        return failure();
+      return Result{{}, std::move(*offsets)};
+    }
+  }
+
+  // Other cases retain the complete value and common invariant axes.
+  auto fallback = combineElementwise(value, lhs, rhs, builder);
+  if (failed(fallback))
     return failure();
-  if (lhsInfo->isEmpty() || rhsInfo->isEmpty())
-    return Result{};
-  const auto &lhs = *lhsInfo, &rhs = *rhsInfo;
-  builder.setInsertionPointAfter(op);
-
-  // Subtract the origins and corresponding axis contributions.
-  auto offsets = addOffsets(op.getResult(), lhs.offsets, rhs.offsets, true,
-                            builder, op.getLoc());
-  if (failed(offsets))
-    return Result{};
-  return Result{{}, std::move(*offsets)};
-}
-
-FailureOr<Result> CommonPtrRules::parseMul(arith::MulIOp op, Analyze analyze,
-                                           OpBuilder &builder) const {
-  // Obtain both operands' origins and axis facts through the current session.
-  auto lhsInfo = analyze(op.getLhs());
-  auto rhsInfo = analyze(op.getRhs());
-  if (failed(lhsInfo) || failed(rhsInfo))
-    return failure();
-  if (lhsInfo->isEmpty() || rhsInfo->isEmpty())
-    return Result{};
-  const auto &lhs = *lhsInfo, &rhs = *rhsInfo;
-  builder.setInsertionPointAfter(op);
-
-  // A uniform operand can scale a decomposition; otherwise keep invariance.
-  bool uniform = lhs.offsets.isUniform() || rhs.offsets.isUniform();
-  if (!uniform)
-    return combineElementwise(op, lhs, rhs, builder);
-
-  // Use the uniform origin to scale the other operand's descriptor.
-  const auto &varying = lhs.offsets.isUniform() ? rhs.offsets : lhs.offsets;
-  const auto &scale = lhs.offsets.isUniform() ? lhs.offsets : rhs.offsets;
-  auto offsets = scaleOffsets(op.getResult(), varying, scale.scalarOffset,
-                              builder, op.getLoc());
-  if (failed(offsets))
-    return Result{};
-  return Result{{}, std::move(*offsets)};
-}
-
-FailureOr<Result> CommonPtrRules::parseElementwise(Value value, Analyze analyze,
-                                                   OpBuilder &builder) const {
-  // Analyze both operands before propagating their shared axis facts.
-  Operation *op = value.getDefiningOp();
-  auto lhs = analyze(op->getOperand(0));
-  auto rhs = analyze(op->getOperand(1));
-  if (failed(lhs) || failed(rhs))
-    return failure();
-  if (lhs->isEmpty() || rhs->isEmpty())
-    return Result{};
-
-  // Start with axis invariance shared by both operands.
-  builder.setInsertionPointAfterValue(value);
-  auto fallback = combineElementwise(value, *lhs, *rhs, builder);
-  if (fallback.isEmpty())
-    return fallback;
 
   // Division and remainder may recover a stronger decomposition.
   if (isa<arith::DivSIOp, arith::DivUIOp>(op))
-    return refineDivRem(value, *lhs, *rhs, fallback, true, builder);
+    return refineDivRem(value, lhs, rhs, *fallback, true, builder);
   if (isa<arith::RemSIOp, arith::RemUIOp>(op))
-    return refineDivRem(value, *lhs, *rhs, fallback, false, builder);
+    return refineDivRem(value, lhs, rhs, *fallback, false, builder);
   return fallback;
 }
 
@@ -681,28 +605,28 @@ FailureOr<Result> CommonPtrRules::parseCast(Value value, Value input,
   auto sourceInfo = analyze(input);
   if (failed(sourceInfo))
     return failure();
-  if (sourceInfo->isEmpty())
-    return Result{};
-  const auto &source = sourceInfo->offsets;
+  const auto &sourceOffsets = sourceInfo->offsets;
   builder.setInsertionPointAfterValue(value);
-  auto width = getIntegerWidth(value.getType());
-  auto oldWidth = getIntegerWidth(source.valueType);
-  if (failed(width) || failed(oldWidth))
-    return Result{};
+  auto targetWidth = getIntegerWidth(value.getType());
+  auto sourceWidth = getIntegerWidth(sourceOffsets.valueType);
+  if (failed(targetWidth) || failed(sourceWidth))
+    return failure();
 
   // Check whether every represented lane keeps the same mathematical value.
-  bool keep = *width == *oldWidth || (*width > *oldWidth && !unsignedCast);
-  if (!keep) {
-    auto bounds = constantDecompositionRange(source, *oldWidth);
-    keep = bounds && (*width > *oldWidth
-                          ? bounds->isAllNonNegative()
-                          : bounds->getSignedMin().isSignedIntN(*width) &&
-                                bounds->getSignedMax().isSignedIntN(*width));
+  bool preservesValue = *targetWidth == *sourceWidth ||
+                        (*targetWidth > *sourceWidth && !unsignedCast);
+  if (!preservesValue) {
+    auto bounds = constantDecompositionRange(sourceOffsets, *sourceWidth);
+    preservesValue =
+        bounds && (*targetWidth > *sourceWidth
+                       ? bounds->isAllNonNegative()
+                       : bounds->getSignedMin().isSignedIntN(*targetWidth) &&
+                             bounds->getSignedMax().isSignedIntN(*targetWidth));
   }
-  if (keep) {
+  if (preservesValue) {
     // Signed widening keeps index descriptors. Other casts need the local
     // check above because they can change the value represented by a lane.
-    auto offsets = source;
+    auto offsets = sourceOffsets;
     offsets.valueType = value.getType();
     offsets.fullOffsets = value;
     return Result{{}, std::move(offsets)};
@@ -711,9 +635,9 @@ FailureOr<Result> CommonPtrRules::parseCast(Value value, Value input,
   // Otherwise retain the exact cast result and only the invariant axis facts.
   auto offsets = buildOffsetInfo(value, builder);
   if (failed(offsets))
-    return Result{};
-  for (unsigned i = 0; i < source.axes.size(); ++i)
-    if (source.axes[i].kind == AxisKind::Invariant)
+    return failure();
+  for (unsigned i = 0; i < sourceOffsets.axes.size(); ++i)
+    if (sourceOffsets.axes[i].kind == AxisKind::Invariant)
       offsets->axes[i].kind = AxisKind::Invariant;
   setUniformOrigin(*offsets, value, builder);
   return Result{{}, std::move(*offsets)};
@@ -728,12 +652,10 @@ FailureOr<Result> CommonPtrRules::parseFloatToInt(arith::FPToSIOp op,
     return info;
 
   // Floating arithmetic contributes axis equality, without integer strides.
-  llvm::DenseMap<Value, SmallVector<bool>> known;
-  auto axes = inferInvariantAxes(op.getIn(), analyze, known);
-  if (failed(axes))
-    return failure();
-  for (unsigned i = 0; i < axes->size(); ++i)
-    if ((*axes)[i])
+  llvm::DenseMap<Value, SmallVector<bool>> invarianceCache;
+  auto invariantAxes = inferInvariantAxes(op.getIn(), analyze, invarianceCache);
+  for (unsigned i = 0; i < invariantAxes.size(); ++i)
+    if (invariantAxes[i])
       info->offsets.axes[i].kind = AxisKind::Invariant;
   // Extract the integer result, preserving the actual conversion semantics.
   setUniformOrigin(info->offsets, op.getResult(), builder);
@@ -749,23 +671,22 @@ FailureOr<Result> CommonPtrRules::parseReduce(Value value, triton::ReduceOp op,
       !hasInvariancePreservingCombiner(op))
     return info;
 
-  llvm::DenseMap<Value, SmallVector<bool>> known;
-  SmallVector<bool> invariant(info->offsets.axes.size(), true);
+  llvm::DenseMap<Value, SmallVector<bool>> invarianceCache;
+  SmallVector<bool> invariantAxes(info->offsets.axes.size(), true);
   // Results can depend on every input (e.g. argmin). Intersect input facts,
   // then remove the reduced dimension; never copy a pre-reduction stride.
   for (Value operand : op.getSrcs()) {
-    auto source = inferInvariantAxes(operand, analyze, known);
-    if (failed(source))
-      return failure();
-    source->erase(source->begin() + op.getAxis());
-    for (unsigned i = 0; i < invariant.size(); ++i)
-      invariant[i] = invariant[i] && (*source)[i];
+    auto sourceInvariantAxes =
+        inferInvariantAxes(operand, analyze, invarianceCache);
+    sourceInvariantAxes.erase(sourceInvariantAxes.begin() + op.getAxis());
+    for (unsigned i = 0; i < invariantAxes.size(); ++i)
+      invariantAxes[i] = invariantAxes[i] && sourceInvariantAxes[i];
   }
 
   // Keep common invariant axes and singleton dimensions, then recover an
   // origin.
-  for (unsigned i = 0; i < invariant.size(); ++i)
-    if (invariant[i] || info->offsets.getShape()[i] == 1)
+  for (unsigned i = 0; i < invariantAxes.size(); ++i)
+    if (invariantAxes[i] || info->offsets.getShape()[i] == 1)
       info->offsets.axes[i].kind = AxisKind::Invariant;
   setUniformOrigin(info->offsets, value, builder);
   return info;
@@ -779,13 +700,9 @@ FailureOr<Result> CommonPtrRules::parseAddPtr(triton::AddPtrOp op,
   auto parentInfo = analyze(op.getPtr());
   if (failed(parentInfo))
     return failure();
-  if (parentInfo->isEmpty())
-    return Result{};
   auto sourceInfo = analyze(op.getOffset());
   if (failed(sourceInfo))
     return failure();
-  if (sourceInfo->isEmpty())
-    return Result{};
 
   // Descriptor fields are already index. The complete offset is widened
   // separately before accumulation, preserving each addptr increment.
@@ -793,7 +710,7 @@ FailureOr<Result> CommonPtrRules::parseAddPtr(triton::AddPtrOp op,
   auto info =
       addPtrOffsets(op.getResult(), *parentInfo, sourceInfo->offsets, builder);
   if (failed(info))
-    return Result{};
+    return failure();
   return Result(std::move(*info));
 }
 
@@ -805,16 +722,16 @@ FailureOr<Result> CommonPtrRules::parseBitcast(triton::BitcastOp op,
   if (isa<triton::PointerType>(op.getType()))
     return buildScalarPtrInfo(op.getResult(), builder);
 
-  // Require matching tensor shapes, encodings and address spaces.
-  auto target = dyn_cast<RankedTensorType>(op.getType());
-  auto source = dyn_cast<RankedTensorType>(op.getSrc().getType());
-  if (!source || !target || source.getShape() != target.getShape() ||
-      source.getEncoding() != target.getEncoding())
-    return Result{};
-  auto from = dyn_cast<triton::PointerType>(source.getElementType());
-  auto to = dyn_cast<triton::PointerType>(target.getElementType());
-  if (!from || !to || from.getAddressSpace() != to.getAddressSpace())
-    return Result{};
+  // Reusing offsets requires identical shapes and encodings. The verifier
+  // permits compatible dynamic shapes and an encoding on only one side.
+  auto sourceType = cast<RankedTensorType>(op.getSrc().getType());
+  auto targetType = cast<RankedTensorType>(op.getType());
+  if (sourceType.getShape() != targetType.getShape() ||
+      sourceType.getEncoding() != targetType.getEncoding())
+    return failure();
+  // The verifier guarantees pointer elements with the same address space.
+  auto sourcePtrType = cast<triton::PointerType>(sourceType.getElementType());
+  auto targetPtrType = cast<triton::PointerType>(targetType.getElementType());
 
   // Restrict element-unit conversion to the supported storage widths.
   auto storageWidth = [](Type type) -> unsigned {
@@ -823,63 +740,64 @@ FailureOr<Result> CommonPtrRules::parseBitcast(triton::BitcastOp op,
     unsigned width = type.getIntOrFloatBitWidth();
     return width == 8 || width == 16 || width == 32 || width == 64 ? width : 0;
   };
-  unsigned width = storageWidth(from.getPointeeType());
-  unsigned targetWidth = storageWidth(to.getPointeeType());
-  if (!width || !targetWidth)
-    return Result{};
+  unsigned sourceElementWidth = storageWidth(sourcePtrType.getPointeeType());
+  unsigned targetElementWidth = storageWidth(targetPtrType.getPointeeType());
+  if (!sourceElementWidth || !targetElementWidth)
+    return failure();
 
   // Recover the scalar base and element offsets of the source pointer tensor.
   auto sourceInfo = analyze(op.getSrc());
   if (failed(sourceInfo))
     return failure();
-  if (sourceInfo->isEmpty() || sourceInfo->block)
-    return Result{};
+  assert(!sourceInfo->block && "a pointer tensor cannot carry block metadata");
   PtrInfo info = *sourceInfo;
   builder.setInsertionPoint(op);
 
   // Equal-width casts reuse offsets; other casts must change their units.
-  if (width != targetWidth) {
-    uint64_t ratio =
-        std::max(width, targetWidth) / std::min(width, targetWidth);
-    bool widen = width < targetWidth;
+  if (sourceElementWidth != targetElementWidth) {
+    // Rescaling uses a dense factor tensor and therefore needs static extents.
+    if (!targetType.hasStaticShape())
+      return failure();
+    uint64_t ratio = std::max(sourceElementWidth, targetElementWidth) /
+                     std::min(sourceElementWidth, targetElementWidth);
+    bool widenElement = sourceElementWidth < targetElementWidth;
     // Widening needs exact division: offset_new * sizeof(new) must equal
     // offset_old * sizeof(old). Test the complete offset, never round terms.
-    if (widen && !canDivideDecomposition(info.offsets, ratio) &&
+    if (widenElement && !canDivideDecomposition(info.offsets, ratio) &&
         !isKnownMultiple(info.offsets.fullOffsets, ratio))
-      return Result{};
+      return failure();
 
     // Materialize the complete offset and the element-size conversion factor.
     auto full = materializeFullOffset(
         info.offsets, addressStorageType(info.offsets.valueType, builder),
         builder, op.getLoc());
     if (failed(full))
-      return Result{};
+      return failure();
     auto fullType = cast<RankedTensorType>((*full).getType());
     Value factor = builder.create<arith::ConstantOp>(
         op.getLoc(), DenseIntElementsAttr::get(fullType, int64_t(ratio)));
-    if (widen) {
+    if (widenElement) {
       // Divide the full offset and retain exactly divisible descriptor fields.
       info.offsets.fullOffsets =
           builder.create<arith::DivSIOp>(op.getLoc(), *full, factor)
               .getResult();
       divideDecomposition(info.offsets, ratio, builder, op.getLoc());
-      if (failed(normalizeAxes(info.offsets, builder)))
-        return Result{};
     } else {
       // Smaller elements scale up both the complete offset and its descriptor.
       Value scaled = builder.create<arith::MulIOp>(op.getLoc(), *full, factor);
       auto offsets =
-          scaleOffsets(scaled, info.offsets, builder.getIndexAttr(ratio),
-                       builder, op.getLoc());
+          scaleOffsetInfo(scaled, info.offsets, builder.getIndexAttr(ratio),
+                          builder, op.getLoc());
       if (failed(offsets))
-        return Result{};
+        return failure();
       info.offsets = std::move(*offsets);
     }
   }
 
   // Express the scalar base in the destination pointer type.
-  if (info.base.getType() != to)
-    info.base = builder.create<triton::BitcastOp>(op.getLoc(), to, info.base);
+  if (info.base.getType() != targetPtrType)
+    info.base = builder.create<triton::BitcastOp>(op.getLoc(), targetPtrType,
+                                                  info.base);
   return Result(std::move(info));
 }
 
@@ -891,9 +809,8 @@ FailureOr<Result> CommonPtrRules::parseMakeTensorPtr(triton::MakeTensorPtrOp op,
   auto baseInfo = analyze(op.getBase());
   if (failed(baseInfo))
     return failure();
-  if (baseInfo->isEmpty() || baseInfo->block ||
-      !baseInfo->offsets.valueType.isIndex())
-    return Result{};
+  if (baseInfo->block || !baseInfo->offsets.valueType.isIndex())
+    return failure();
 
   // Resolve each starting coordinate to its uniform index origin.
   SmallVector<OpFoldResult> coordinates;
@@ -901,8 +818,8 @@ FailureOr<Result> CommonPtrRules::parseMakeTensorPtr(triton::MakeTensorPtrOp op,
     auto sourceInfo = analyze(coordinate);
     if (failed(sourceInfo))
       return failure();
-    if (sourceInfo->isEmpty() || !sourceInfo->offsets.isUniform())
-      return Result{};
+    if (!sourceInfo->offsets.isUniform())
+      return failure();
     coordinates.push_back(sourceInfo->offsets.scalarOffset);
   }
 
@@ -918,23 +835,23 @@ FailureOr<Result> CommonPtrRules::parseAdvance(triton::AdvanceOp op,
   auto parentInfo = analyze(op.getPtr());
   if (failed(parentInfo))
     return failure();
-  if (parentInfo->isEmpty() || !parentInfo->block)
-    return Result{};
+  if (!parentInfo->block)
+    return failure();
 
   // Resolve each coordinate increment to its uniform index origin.
-  SmallVector<OpFoldResult> coordinates;
-  for (Value coordinate : op.getOffsets()) {
-    auto sourceInfo = analyze(coordinate);
-    if (failed(sourceInfo))
+  SmallVector<OpFoldResult> coordinateDeltas;
+  for (Value delta : op.getOffsets()) {
+    auto deltaInfo = analyze(delta);
+    if (failed(deltaInfo))
       return failure();
-    if (sourceInfo->isEmpty() || !sourceInfo->offsets.isUniform())
-      return Result{};
-    coordinates.push_back(sourceInfo->offsets.scalarOffset);
+    if (!deltaInfo->offsets.isUniform())
+      return failure();
+    coordinateDeltas.push_back(deltaInfo->offsets.scalarOffset);
   }
 
   // Update the coordinates and add their stride-weighted offset contribution.
   builder.setInsertionPoint(op);
-  return advanceBlockInfo(op, *parentInfo, coordinates, builder);
+  return advanceBlockInfo(op, *parentInfo, coordinateDeltas, builder);
 }
 
 } // namespace mlir::triton::ptr

@@ -640,7 +640,7 @@ TEST(PtrAnalysis, UnsignedWideningPreservesProvenShapeAndNegativeStride) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
-TEST(PtrAnalysis, IntegerSelectUsesTheSameConditionForAffineFields) {
+TEST(PtrAnalysis, IntegerSelectKeepsExactValuesAndSimpleUniformFacts) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, tensor::TensorDialect,
                       triton::TritonDialect>();
@@ -652,6 +652,8 @@ TEST(PtrAnalysis, IntegerSelectUsesTheSameConditionForAffineFields) {
       %s = arith.select %cond, %r, %reverse : tensor<4xi32>
       %same = arith.select %mask, %r, %r : tensor<4xi1>, tensor<4xi32>
       %mixed = arith.select %mask, %r, %reverse : tensor<4xi1>, tensor<4xi32>
+      %seven = arith.constant dense<7> : tensor<4xi32>
+      %uniform = arith.select %cond, %three, %seven : tensor<4xi32>
       tt.return
     } }
   )mlir",
@@ -667,8 +669,13 @@ TEST(PtrAnalysis, IntegerSelectUsesTheSameConditionForAffineFields) {
     ASSERT_TRUE(succeeded(result));
     auto &state = result->offsets;
     EXPECT_EQ(cast<Value>(state.fullOffsets), selects[k].getResult());
-    EXPECT_EQ(state.axes[0].kind,
-              k == 2 ? AxisKind::Unknown : AxisKind::Structured);
+    EXPECT_EQ(state.axes[0].kind, k == 1   ? AxisKind::Structured
+                                  : k == 3 ? AxisKind::Invariant
+                                           : AxisKind::Unknown);
+    if (k == 0 || k == 2) {
+      EXPECT_FALSE(state.scalarOffset);
+      EXPECT_TRUE(state.axes[0].subAxes.empty());
+    }
     for (bool condition : {false, true}) {
       test::Environment env{{f.getArgument(0), {llvm::APInt(1, condition)}},
                             {f.getArgument(1),
@@ -677,7 +684,12 @@ TEST(PtrAnalysis, IntegerSelectUsesTheSameConditionForAffineFields) {
       auto actual = evaluate(state, env);
       ASSERT_TRUE(actual);
       for (unsigned lane = 0; lane < 4; ++lane) {
-        if (k != 2) {
+        int64_t expected = k == 0   ? (condition ? lane : 3 - lane)
+                           : k == 1 ? lane
+                           : k == 2 ? (lane % 2 ? lane : 3 - lane)
+                                    : (condition ? 3 : 7);
+        EXPECT_EQ((*actual)[lane], llvm::APInt(64, expected));
+        if (k == 1 || k == 3) {
           auto c = evaluate(state.scalarOffset, env),
                s = evaluate(state.axes[0].stride, env);
           ASSERT_TRUE(c);
@@ -689,6 +701,10 @@ TEST(PtrAnalysis, IntegerSelectUsesTheSameConditionForAffineFields) {
     }
     EXPECT_TRUE(succeeded(verify(*module)));
   }
+  // Analysis must not introduce selects for per-axis descriptor fields.
+  unsigned selectCount = 0;
+  f.walk([&](arith::SelectOp) { ++selectCount; });
+  EXPECT_EQ(selectCount, selects.size());
 }
 
 TEST(PtrAnalysis, OpaqueRowsKeepBroadcastColumnStrides) {

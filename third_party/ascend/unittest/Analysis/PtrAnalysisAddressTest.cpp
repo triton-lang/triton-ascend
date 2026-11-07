@@ -120,7 +120,7 @@ TEST(PtrAnalysisAddress, IndependentExtensionsSurviveShapeAndSelect) {
   });
   EXPECT_TRUE(succeeded(verify(*module)));
 }
-TEST(PtrAnalysisAddress, SelectNarrowNegativeAndFullOrAffineBoundaries) {
+TEST(PtrAnalysisAddress, SelectNarrowNegativeAndFullOffsetBindings) {
   MLIRContext context;
   load(context);
   auto module = parseSourceString<ModuleOp>(R"mlir(module {
@@ -164,17 +164,20 @@ TEST(PtrAnalysisAddress, SelectNarrowNegativeAndFullOrAffineBoundaries) {
   left->offsets.axes[0] = AxisInfo(AxisKind::Unknown, b.getIndexAttr(0));
   ASSERT_TRUE(succeeded(analysis.bind(tagged(f, "left"), *left)));
   check(300);
-  // Affine-only, nonuniform branches explicitly fall back instead of losing
-  // their base displacement or materializing a new wide tensor for selection.
+  // Neither a linear nor a uniform description replaces complete offsets.
   left->offsets.fullOffsets = {};
   left->offsets.scalarOffset = b.getIndexAttr(17);
   left->offsets.axes[0] = AxisInfo(AxisKind::Structured, b.getIndexAttr(2));
-  ASSERT_TRUE(succeeded(analysis.bind(tagged(f, "left"), *left)));
-  auto unsupported = analysis.analyze(tagged(f, "selected"));
-  ASSERT_TRUE(succeeded(unsupported));
-  EXPECT_TRUE(unsupported->isEmpty());
-  // A uniform descriptor can be splatted into the complete offset tensor.
+  EXPECT_TRUE(failed(analysis.bind(tagged(f, "left"), *left)));
   left->offsets.axes[0] = AxisInfo(AxisKind::Invariant, b.getIndexAttr(0));
+  EXPECT_TRUE(failed(analysis.bind(tagged(f, "left"), *left)));
+  EXPECT_TRUE(failed(triton::ptr::detail::materializeFullOffset(
+      left->offsets, f.getArgument(4).getType(), b, f.getLoc())));
+  check(300);
+
+  // A complete constant tensor remains a valid uniform binding.
+  left->offsets.fullOffsets = DenseIntElementsAttr::get(
+      cast<RankedTensorType>(f.getArgument(4).getType()), int64_t(17));
   ASSERT_TRUE(succeeded(analysis.bind(tagged(f, "left"), *left)));
   check(17);
   EXPECT_TRUE(succeeded(verify(*module)));
@@ -273,6 +276,11 @@ TEST(PtrAnalysisAddress,
   invalid.offsets.fullOffsets = {};
   EXPECT_TRUE(
       failed(analysis.bind(add, invalid))); // partial proof is not exact
+  auto scalar = analysis.analyze(f.getArgument(0));
+  ASSERT_TRUE(succeeded(scalar));
+  ASSERT_TRUE(scalar->offsets.hasStructuredDecomposition());
+  scalar->offsets.fullOffsets = {};
+  EXPECT_TRUE(failed(analysis.bind(f.getArgument(0), *scalar)));
   ASSERT_TRUE(succeeded(analysis.bind(add, *analysis.findCached(add))));
   ASSERT_TRUE(analysis.findCached(add));
   PtrInfo other{{}, *buildOffsetInfo(f.getArgument(4), b)};
@@ -283,6 +291,23 @@ TEST(PtrAnalysisAddress,
   analysis.clear();
   EXPECT_FALSE(analysis.findCached(add));
   EXPECT_FALSE(analysis.findCached(f.getArgument(4)));
+
+  // Block pointers still bind and reconstruct lanes from their decomposition.
+  auto blockInfo = analysis.analyze(block);
+  ASSERT_TRUE(succeeded(blockInfo));
+  EXPECT_FALSE(blockInfo->offsets.fullOffsets);
+  ASSERT_TRUE(blockInfo->offsets.hasStructuredDecomposition());
+  ASSERT_TRUE(succeeded(analysis.bind(block, *blockInfo)));
+  int64_t expectedOffsets[] = {0, 16, 32, 48};
+  for (auto [i, expected] : llvm::enumerate(expectedOffsets)) {
+    Value index = b.create<arith::ConstantIndexOp>(f.getLoc(), i);
+    auto offset =
+        materializeOffsetAt(blockInfo->offsets, {index}, b, f.getLoc());
+    ASSERT_TRUE(succeeded(offset));
+    auto actual = test::evaluate(*offset);
+    ASSERT_TRUE(actual);
+    EXPECT_EQ(actual->front().getSExtValue(), expected);
+  }
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 TEST(PtrAnalysisAddress, ScalarAddPtrSharesOneSumAfterWideningEachIncrement) {

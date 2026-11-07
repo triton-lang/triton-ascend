@@ -41,7 +41,7 @@ bool OffsetInfo::hasStructuredDecomposition() const {
 }
 
 bool OffsetInfo::isUniform() const {
-  return hasStructuredForm() && llvm::all_of(axes, [](const AxisInfo &axis) {
+  return scalarOffset && llvm::all_of(axes, [](const AxisInfo &axis) {
            return axis.kind == AxisKind::Invariant;
          });
 }
@@ -131,27 +131,39 @@ bool validOffset(Type resultType, const OffsetInfo &components,
                     tensor.getEncoding() != target.getEncoding())))
       return false;
   }
-  for (const auto &axis : components.axes) {
+  // Bindings supply complete facts: check their types and consistency without
+  // rewriting them. Internal analysis constructs these fields together.
+  OpBuilder builder(resultType.getContext());
+  for (auto [axis, size] : llvm::zip(components.axes, components.getShape())) {
     if (!validOfrType(axis.stride, scalarType))
       return false;
-    for (const auto &sub : axis.subAxes)
-      if (!validOfrType(sub.stride, scalarType))
+    if (axis.subAxes.empty()) {
+      if (axis.kind != AxisKind::Unknown &&
+          axis.kind != (detail::zero(axis.stride) ? AxisKind::Invariant
+                                                  : AxisKind::Structured))
         return false;
-  }
-  OpBuilder builder(resultType.getContext());
-  OffsetInfo normalized = components;
-  if (failed(detail::normalizeAxes(normalized, builder)))
-    return false;
-  for (unsigned i = 0; i < components.axes.size(); ++i) {
-    if (normalized.axes[i].kind != components.axes[i].kind)
-      return false;
-    if (components.axes[i].kind != AxisKind::Unknown &&
-        normalized.axes[i].stride != components.axes[i].stride) {
-      auto a = detail::getIntegerConstant(normalized.axes[i].stride, 64);
-      auto b = detail::getIntegerConstant(components.axes[i].stride, 64);
-      if (failed(a) || failed(b) || *a != *b)
+      continue;
+    }
+
+    // A sub-axis partition must cover the axis exactly.
+    int64_t product = 1;
+    for (const auto &sub : axis.subAxes) {
+      if (!validOfrType(sub.stride, scalarType) || sub.shape <= 0 ||
+          __builtin_mul_overflow(product, sub.shape, &product))
         return false;
     }
+    if (product != size)
+      return false;
+    auto stride = detail::inferAxisStride(axis.subAxes, builder);
+    if (!stride) {
+      if (axis.kind != AxisKind::Unknown)
+        return false;
+      continue;
+    }
+    AxisKind kind =
+        detail::zero(stride) ? AxisKind::Invariant : AxisKind::Structured;
+    if (axis.kind != kind || !detail::equalConstant(axis.stride, stride))
+      return false;
   }
   return true;
 }
@@ -174,13 +186,29 @@ bool isBlockPtrType(Type type) {
 }
 
 // Initial result construction.
+AxisInfo buildAxisInfo(OpFoldResult stride) {
+  return AxisInfo(zero(stride) ? AxisKind::Invariant : AxisKind::Structured,
+                  stride);
+}
+
+AxisInfo buildAxisInfo(SmallVector<SubAxisInfo> subAxes, OpBuilder &builder) {
+  auto stride = inferAxisStride(subAxes, builder);
+  AxisInfo axis = stride ? buildAxisInfo(stride)
+                         : AxisInfo(AxisKind::Unknown, builder.getIndexAttr(0));
+  axis.subAxes = std::move(subAxes);
+  return axis;
+}
+
+AxisInfo makeInvariantAxisInfo(OpBuilder &builder) {
+  return AxisInfo(AxisKind::Invariant, builder.getIndexAttr(0));
+}
+
 OffsetInfo buildUniformOffsetInfo(Value value, OpBuilder &builder,
                                   OpFoldResult scalar) {
   OffsetInfo info;
   info.valueType = value.getType();
   info.fullOffsets = value;
-  info.axes.assign(info.getShape().size(),
-                   AxisInfo(AxisKind::Invariant, builder.getIndexAttr(0)));
+  info.axes.assign(info.getShape().size(), makeInvariantAxisInfo(builder));
   setUniformOrigin(info, value, builder, scalar);
   return info;
 }
@@ -225,10 +253,10 @@ FailureOr<PtrInfo> buildIntegerInfo(Value value, OpBuilder &builder) {
   return PtrInfo{{}, std::move(*info)};
 }
 
-PtrInfo buildScalarPtrInfo(Value value, OpBuilder &builder) {
+FailureOr<PtrInfo> buildScalarPtrInfo(Value value, OpBuilder &builder) {
   if (!isa<triton::PointerType>(value.getType()) ||
       !isOrdinaryPtrType(value.getType()))
-    return PtrInfo{};
+    return failure();
   PtrInfo info;
   info.base = value;
   info.offsets.valueType = builder.getIndexType();
@@ -238,33 +266,31 @@ PtrInfo buildScalarPtrInfo(Value value, OpBuilder &builder) {
 }
 
 // Integer offset combinations.
-PtrInfo combineElementwise(Value value, const PtrInfo &lhs, const PtrInfo &rhs,
-                           OpBuilder &builder) {
-  // Require matching shapes before combining the two sets of axis facts.
-  const auto *left = &lhs, *right = &rhs;
+FailureOr<PtrInfo> combineElementwise(Value value, const PtrInfo &lhs,
+                                      const PtrInfo &rhs, OpBuilder &builder) {
+  // Elementwise operands and results have matching shapes in verified IR.
   auto offsets = buildOffsetInfo(value, builder);
-  if (failed(offsets) || left->offsets.getShape() != offsets->getShape() ||
-      right->offsets.getShape() != offsets->getShape())
-    return PtrInfo{};
+  if (failed(offsets))
+    return failure();
+  assert(lhs.offsets.getShape() == offsets->getShape() &&
+         rhs.offsets.getShape() == offsets->getShape() &&
+         "elementwise facts must have matching shapes");
   // Only axes invariant in both inputs remain invariant in the result.
-  Type scalar = builder.getIndexType();
-  for (unsigned i = 0; i < offsets->axes.size(); ++i) {
-    bool invariant = left->offsets.axes[i].kind == AxisKind::Invariant &&
-                     right->offsets.axes[i].kind == AxisKind::Invariant;
-    offsets->axes[i] =
-        AxisInfo(invariant ? AxisKind::Invariant : AxisKind::Unknown,
-                 builder.getIntegerAttr(scalar, 0));
-  }
+  for (unsigned i = 0; i < offsets->axes.size(); ++i)
+    if (lhs.offsets.axes[i].kind == AxisKind::Invariant &&
+        rhs.offsets.axes[i].kind == AxisKind::Invariant)
+      offsets->axes[i].kind = AxisKind::Invariant;
   // Recover an origin when every result axis is invariant.
   setUniformOrigin(*offsets, value, builder);
   return PtrInfo{{}, std::move(*offsets)};
 }
 
-FailureOr<OffsetInfo> addOffsets(OpFoldResult complete, const OffsetInfo &lhs,
-                                 const OffsetInfo &rhs, bool subtract,
-                                 OpBuilder &builder, Location loc) {
-  if (lhs.valueType != rhs.valueType || lhs.axes.size() != rhs.axes.size())
-    return failure();
+FailureOr<OffsetInfo> addOffsetInfo(OpFoldResult complete,
+                                    const OffsetInfo &lhs,
+                                    const OffsetInfo &rhs, bool subtract,
+                                    OpBuilder &builder, Location loc) {
+  assert(lhs.valueType == rhs.valueType && lhs.axes.size() == rhs.axes.size() &&
+         "offset addition requires matching types and axes");
   OffsetInfo info = lhs;
   info.fullOffsets = complete;
   Type scalar = builder.getIndexType();
@@ -295,22 +321,21 @@ FailureOr<OffsetInfo> addOffsets(OpFoldResult complete, const OffsetInfo &lhs,
           return failure();
         l.stride = *stride;
       }
+      info.axes[i] = buildAxisInfo(std::move(left.subAxes), builder);
     } else {
       auto stride = arithmetic.add(left.stride, right.stride, subtract);
       if (failed(stride))
         return failure();
-      left.stride = *stride;
+      info.axes[i] = buildAxisInfo(*stride);
     }
-    info.axes[i] = std::move(left);
   }
-  if (failed(normalizeAxes(info, builder)))
-    return failure();
   return info;
 }
 
-FailureOr<OffsetInfo> scaleOffsets(OpFoldResult complete,
-                                   const OffsetInfo &source, OpFoldResult scale,
-                                   OpBuilder &builder, Location loc) {
+FailureOr<OffsetInfo> scaleOffsetInfo(OpFoldResult complete,
+                                      const OffsetInfo &source,
+                                      OpFoldResult scale, OpBuilder &builder,
+                                      Location loc) {
   OffsetInfo info = source;
   info.fullOffsets = complete;
   Type scalar = builder.getIndexType();
@@ -331,15 +356,14 @@ FailureOr<OffsetInfo> scaleOffsets(OpFoldResult complete,
           return failure();
         sub.stride = *stride;
       }
+      axis = buildAxisInfo(std::move(axis.subAxes), builder);
     } else if (axis.kind != AxisKind::Unknown) {
       auto stride = arithmetic.multiply(axis.stride, scale);
       if (failed(stride))
         return failure();
-      axis.stride = *stride;
+      axis = buildAxisInfo(*stride);
     }
   }
-  if (failed(normalizeAxes(info, builder)))
-    return failure();
   return info;
 }
 
@@ -355,289 +379,221 @@ PtrInfo refineDivRem(Value value, const PtrInfo &lhsInfo,
   auto constant = detail::getIntegerConstant(rhsInfo.offsets.scalarOffset, 64);
   if (failed(constant) || constant->isZero() || constant->isNegative())
     return fallback;
-  auto divisor = *constant;
-  uint64_t d = divisor.getZExtValue();
+  uint64_t divisor = constant->getZExtValue();
   auto bounds = detail::constantDecompositionRange(lhsInfo.offsets, *width);
   bool nonnegative = bounds && bounds->isAllNonNegative();
   bool signedOp = isa<arith::DivSIOp, arith::RemSIOp>(value.getDefiningOp());
   // Exact division needs no residual splitting: negative or dynamic origins
   // work too. Unsigned division can reuse signed descriptors only above zero.
-  if ((signedOp || nonnegative) && canDivideDecomposition(lhsInfo.offsets, d)) {
+  if ((signedOp || nonnegative) &&
+      canDivideDecomposition(lhsInfo.offsets, divisor)) {
     OffsetInfo info = lhsInfo.offsets;
     info.fullOffsets = value;
     if (divide) {
-      divideDecomposition(info, d, builder, value.getLoc());
+      divideDecomposition(info, divisor, builder, value.getLoc());
     } else {
       info.scalarOffset = builder.getIndexAttr(0);
-      info.axes.assign(info.getShape().size(),
-                       AxisInfo(AxisKind::Invariant, builder.getIndexAttr(0)));
+      info.axes.assign(info.getShape().size(), makeInvariantAxisInfo(builder));
     }
-    if (succeeded(detail::normalizeAxes(info, builder)))
-      return PtrInfo{{}, std::move(info)};
-    return fallback;
+    return PtrInfo{{}, std::move(info)};
   }
-  // Splitting residual digits still needs a nonnegative constant
-  // decomposition; otherwise signed division may change across zero.
-  if (!nonnegative)
+  // Split only complete axes with an aligned, nonnegative origin. Signed
+  // division across zero would change the residual digits' rounding.
+  if (!lhsInfo.offsets.hasStructuredDecomposition() ||
+      !isKnownMultiple(lhsInfo.offsets.scalarOffset, divisor))
     return fallback;
   auto origin = detail::getIntegerConstant(lhsInfo.offsets.scalarOffset, 64);
-  if (failed(origin) || !origin->urem(divisor).isZero())
+  // Keep the source-width range check for constant decompositions. Dynamic
+  // origins use local sign facts under the existing no-overflow contract.
+  if (succeeded(origin) ? !nonnegative
+                        : !isKnownNonNegative(lhsInfo.offsets.scalarOffset))
     return fallback;
   OffsetInfo info = lhsInfo.offsets;
   info.fullOffsets = value;
-  Type scalar = builder.getIndexType();
-  info.scalarOffset = builder.getIntegerAttr(
-      scalar, divide ? origin->udiv(divisor) : llvm::APInt(64, 0));
+  Type scalarType = builder.getIndexType();
+  // Split the static digits first, before creating a dynamic origin quotient.
   __int128 residualMaximum = 0;
   for (unsigned i = 0; i < info.axes.size(); ++i) {
     auto &axis = info.axes[i];
-    SmallVector<SubAxisInfo> input = axis.subAxes;
-    if (input.empty())
-      input.push_back({info.getShape()[i], axis.stride});
-    SmallVector<SubAxisInfo> output;
-    for (const auto &sub : input) {
+    SmallVector<SubAxisInfo> sourceSubAxes = axis.subAxes;
+    if (sourceSubAxes.empty())
+      sourceSubAxes.push_back({info.getShape()[i], axis.stride});
+    SmallVector<SubAxisInfo> resultSubAxes;
+    for (const auto &sub : sourceSubAxes) {
       auto stride = detail::getIntegerConstant(sub.stride, 64);
       if (sub.shape <= 0 || failed(stride) || stride->isNegative())
         return fallback;
-      uint64_t size = sub.shape, c = stride->getZExtValue();
-      auto push = [&](uint64_t length, uint64_t coefficient) {
-        output.push_back(
+      uint64_t subAxisSize = sub.shape, strideValue = stride->getZExtValue();
+      auto appendSubAxis = [&](uint64_t length, uint64_t coefficient) {
+        resultSubAxes.push_back(
             {static_cast<int64_t>(length),
-             builder.getIntegerAttr(scalar, llvm::APInt(64, coefficient))});
+             builder.getIntegerAttr(scalarType, llvm::APInt(64, coefficient))});
       };
-      if (c % d == 0) {
-        push(size, divide ? c / d : 0);
-      } else if (d % c == 0 && size % (d / c) == 0) {
-        uint64_t inner = d / c;
-        push(size / inner, divide ? 1 : 0);
-        push(inner, divide ? 0 : c);
-        residualMaximum += d - c;
-      } else if (__int128(size - 1) * c < d) {
-        push(size, divide ? 0 : c);
-        residualMaximum += __int128(size - 1) * c;
+      if (strideValue % divisor == 0) {
+        // Whole divisor multiples contribute only to the quotient.
+        appendSubAxis(subAxisSize, divide ? strideValue / divisor : 0);
+      } else if (divisor % strideValue == 0 &&
+                 subAxisSize % (divisor / strideValue) == 0) {
+        // Split complete periods into quotient and remainder sub-axes.
+        uint64_t innerSize = divisor / strideValue;
+        appendSubAxis(subAxisSize / innerSize, divide ? 1 : 0);
+        appendSubAxis(innerSize, divide ? 0 : strideValue);
+        residualMaximum += divisor - strideValue;
+      } else if (__int128(subAxisSize - 1) * strideValue < divisor) {
+        // A digit entirely below the divisor contributes only to the remainder.
+        appendSubAxis(subAxisSize, divide ? 0 : strideValue);
+        residualMaximum += __int128(subAxisSize - 1) * strideValue;
       } else {
         return fallback;
       }
     }
-    axis.subAxes = std::move(output);
+    axis = buildAxisInfo(std::move(resultSubAxes), builder);
   }
   // Multiple residual digits may carry into the quotient. Only accept their
   // independent decomposition when their total stays below the divisor.
-  if (residualMaximum >= d || failed(detail::normalizeAxes(info, builder)))
+  if (residualMaximum >= divisor)
     return fallback;
+  info.scalarOffset =
+      divide ? divideIndex(info.scalarOffset, divisor, builder, value.getLoc())
+             : builder.getIndexAttr(0);
   return PtrInfo{{}, std::move(info)};
 }
 
 // Offset shape transformations.
-FailureOr<OffsetInfo> broadcastOffsets(OpFoldResult complete, Type target,
-                                       const OffsetInfo &source,
-                                       OpBuilder &builder) {
-  OffsetInfo info = source;
-  info.valueType = target;
-  info.fullOffsets = complete;
-  auto axes = broadcastAxisFacts(
-      ArrayRef<AxisInfo>(source.axes), source.getShape(), info.getShape(),
-      [&] { return AxisInfo(AxisKind::Invariant, builder.getIndexAttr(0)); });
-  if (failed(axes))
-    return failure();
-  info.axes = std::move(*axes);
-  return info;
-}
+OffsetInfo reshapeOffsetInfo(OpFoldResult complete, RankedTensorType targetType,
+                             const OffsetInfo &sourceInfo, OpBuilder &builder) {
+  auto fromType = cast<RankedTensorType>(sourceInfo.valueType);
 
-FailureOr<OffsetInfo> expandDimsOffsets(OpFoldResult complete, Type target,
-                                        const OffsetInfo &source, unsigned axis,
-                                        OpBuilder &builder) {
-  OffsetInfo info = source;
-  info.valueType = target;
+  // Ordered reshape keeps the complete value and the known first-lane origin.
+  OffsetInfo info = sourceInfo;
+  info.valueType = targetType;
   info.fullOffsets = complete;
-  if (info.getShape().size() != source.getShape().size() + 1)
-    return failure();
-  auto axes = expandAxisFacts(ArrayRef<AxisInfo>(source.axes), axis, [&] {
-    return AxisInfo(AxisKind::Invariant, builder.getIndexAttr(0));
-  });
-  if (failed(axes))
-    return failure();
-  info.axes = std::move(*axes);
-  return info;
-}
+  info.axes.clear();
 
-FailureOr<OffsetInfo> reshapeOffsets(OpFoldResult complete,
-                                     RankedTensorType target,
-                                     const OffsetInfo &source,
-                                     OpBuilder &builder, Location loc) {
-  auto from = dyn_cast<RankedTensorType>(source.valueType);
-  if (!from || !from.hasStaticShape() || !target.hasStaticShape() ||
-      from.getNumElements() != target.getNumElements() ||
-      from.getElementType() != target.getElementType() ||
-      llvm::any_of(from.getShape(), [](int64_t size) { return size <= 0; }) ||
-      llvm::any_of(target.getShape(), [](int64_t size) { return size <= 0; }))
-    return failure();
-  OffsetInfo info = source;
-  info.valueType = target;
-  info.fullOffsets = complete;
-  Type scalar = builder.getIndexType();
-  auto zero = builder.getIntegerAttr(scalar, 0);
-  info.axes.assign(target.getRank(), AxisInfo(AxisKind::Unknown, zero));
-  for (unsigned i = 0; i < info.getShape().size(); ++i)
-    if (info.getShape()[i] == 1)
-      info.axes[i] = AxisInfo(AxisKind::Invariant, zero);
-  ConcreteArithmetic arithmetic{scalar, builder, loc};
-  // Flatten to ordered digits, then repartition them from the minor end.
-  // Unknown digits remain unknown; a shape change never invents an origin.
-  struct Digit {
-    int64_t size;
-    OpFoldResult stride;
-  };
-  SmallVector<Digit> digits;
-  for (unsigned i = 0; i < source.axes.size(); ++i) {
-    const auto &axis = source.axes[i];
-    if (source.getShape()[i] == 1)
-      continue;
-    if (axis.kind != AxisKind::Unknown) {
-      digits.push_back({source.getShape()[i], axis.stride});
-    } else if (!axis.subAxes.empty()) {
-      for (const auto &sub : axis.subAxes)
-        if (sub.shape != 1)
-          digits.push_back({sub.shape, sub.stride});
+  // Uniform values remain invariant along every target axis.
+  if (llvm::all_of(sourceInfo.axes, [](const AxisInfo &axis) {
+        return axis.kind == AxisKind::Invariant;
+      })) {
+    info.axes.assign(targetType.getRank(), makeInvariantAxisInfo(builder));
+    return info;
+  }
+
+  // Normalize shapes by removing unit dimensions. Matching shapes preserve
+  // the other axes' coordinates.
+  SmallVector<int64_t> sourceNormShape, targetNormShape;
+  for (int64_t size : fromType.getShape())
+    if (size != 1)
+      sourceNormShape.push_back(size);
+  for (int64_t size : targetType.getShape())
+    if (size != 1)
+      targetNormShape.push_back(size);
+  if (sourceNormShape == targetNormShape) {
+    unsigned sourceAxis = 0;
+    for (int64_t size : targetType.getShape()) {
+      if (size == 1) {
+        info.axes.push_back(makeInvariantAxisInfo(builder));
+      } else {
+        while (fromType.getDimSize(sourceAxis) == 1)
+          ++sourceAxis;
+        info.axes.push_back(sourceInfo.axes[sourceAxis++]);
+      }
+    }
+    return info;
+  }
+
+  // Other reshapes retain invariance only on target unit dimensions.
+  for (int64_t size : targetType.getShape()) {
+    if (size == 1) {
+      info.axes.push_back(makeInvariantAxisInfo(builder));
     } else {
-      digits.push_back({source.getShape()[i], {}});
+      info.axes.emplace_back(AxisKind::Unknown, builder.getIndexAttr(0));
     }
   }
-  // Coalesce proven contiguous digits before introducing new boundaries.
-  // For example [2, 6] with coefficients [6, 1] is one length-12 digit,
-  // which can be repartitioned as [3, 4]. Zero coefficients also coalesce,
-  // preserving uniform tensors. Compare in the source arithmetic width and
-  // do not generate helpers merely to guess a symbolic stride equality.
-  SmallVector<Digit> contiguous;
-  for (const auto &digit : digits) {
-    if (!contiguous.empty() && contiguous.back().stride && digit.stride) {
-      auto outer = getIntegerConstant(contiguous.back().stride, 64);
-      auto inner = getIntegerConstant(digit.stride, 64);
-      int64_t size;
-      if (succeeded(outer) && succeeded(inner) &&
-          *outer == *inner * llvm::APInt(64, digit.size) &&
-          !__builtin_mul_overflow(contiguous.back().size, digit.size, &size)) {
-        contiguous.back() = {size, digit.stride};
-        continue;
-      }
-    }
-    contiguous.push_back(digit);
-  }
-  digits = std::move(contiguous);
-  for (int i = target.getRank() - 1; i >= 0; --i) {
-    int64_t remaining = target.getDimSize(i);
-    if (remaining <= 0)
-      return failure();
-    SmallVector<SubAxisInfo> parts;
-    bool known = true;
-    while (remaining > 1) {
-      if (digits.empty())
-        return failure();
-      auto &digit = digits.back();
-      int64_t take = std::min(remaining, digit.size);
-      if (remaining % take || digit.size % take) {
-        // Only this and the remaining outer axes are unproved. Completed
-        // inner axes retain their independent coordinate relationships.
-        if (failed(normalizeAxes(info, builder)))
-          return failure();
-        return info;
-      }
-      known &= bool(digit.stride);
-      parts.push_back({take, digit.stride});
-      remaining /= take;
-      digit.size /= take;
-      if (digit.size == 1) {
-        digits.pop_back();
-      } else if (digit.stride) {
-        auto scaled = arithmetic.multiply(digit.stride,
-                                          builder.getIntegerAttr(scalar, take));
-        if (failed(scaled))
-          return failure();
-        digit.stride = *scaled;
-      }
-    }
-    if (!known)
-      continue;
-    if (parts.empty()) {
-      info.axes[i] = AxisInfo(AxisKind::Invariant, zero);
-    } else {
-      std::reverse(parts.begin(), parts.end());
-      info.axes[i].subAxes = std::move(parts);
-    }
-  }
-  if (failed(normalizeAxes(info, builder)))
-    return failure();
   return info;
 }
 
 FailureOr<OffsetInfo>
-sliceOffsets(OpFoldResult complete, RankedTensorType target,
-             const OffsetInfo &source, ArrayRef<OpFoldResult> starts,
-             ArrayRef<OpFoldResult> steps, ArrayRef<bool> dropped,
-             OpBuilder &builder, Location loc) {
-  // Require matching slice metadata and a statically shaped result.
-  if (!target.hasStaticShape() ||
-      target.getElementType() !=
-          detail::getElementTypeOrSelf(source.valueType) ||
-      llvm::count(dropped, false) != target.getRank() ||
-      starts.size() != source.axes.size() || steps.size() != starts.size() ||
-      dropped.size() != starts.size())
-    return failure();
-  OffsetInfo info = source;
-  info.valueType = target;
+sliceOffsetInfo(OpFoldResult complete, RankedTensorType targetType,
+                const OffsetInfo &sourceInfo, ArrayRef<OpFoldResult> starts,
+                ArrayRef<OpFoldResult> steps, ArrayRef<bool> dropped,
+                OpBuilder &builder, Location loc) {
+  // Verified slice metadata follows the source axes, with one result axis for
+  // each retained dimension. Origin and stride updates do not need its extent.
+  OffsetInfo info = sourceInfo;
+  info.valueType = targetType;
   info.fullOffsets = complete;
   info.axes.clear();
-  Type scalar = builder.getIndexType();
-  ConcreteArithmetic arithmetic{scalar, builder, loc};
-  // Convert slice coordinates to the descriptor index domain.
-  auto convert = [&](OpFoldResult index) -> FailureOr<OpFoldResult> {
-    auto constant = getIntegerConstant(index, 64);
+  Type scalarType = builder.getIndexType();
+  ConcreteArithmetic arithmetic{scalarType, builder, loc};
+  // Dynamic slice coordinates are already index values; normalize constants.
+  auto toIndex = [&](OpFoldResult coordinate) -> OpFoldResult {
+    auto constant = getIntegerConstant(coordinate, 64);
     if (succeeded(constant))
-      return OpFoldResult(builder.getIntegerAttr(scalar, *constant));
-    return foldOrCreateCast(index, scalar, IntegerExtensionKind::Signed,
-                            builder, loc);
+      return OpFoldResult(builder.getIntegerAttr(scalarType, *constant));
+    return coordinate;
   };
-  // Shift the origin and retain or scale each surviving axis.
-  unsigned next = 0;
-  for (unsigned i = 0; i < starts.size(); ++i) {
-    AxisInfo axis = source.axes[i];
-    auto start = convert(starts[i]);
-    auto step = convert(steps[i]);
-    bool unchanged =
-        zero(starts[i]) && equalConstant(steps[i], builder.getIndexAttr(1)) &&
-        !dropped[i] && target.getDimSize(next) == source.getShape()[i];
-    if (info.scalarOffset && !zero(starts[i])) {
-      if (axis.kind == AxisKind::Unknown || failed(start)) {
-        info.scalarOffset = {};
-      } else {
-        auto shift = arithmetic.multiply(*start, axis.stride);
-        if (failed(shift))
-          return failure();
-        auto origin = arithmetic.add(info.scalarOffset, *shift, false);
-        if (failed(origin))
-          return failure();
-        info.scalarOffset = *origin;
-      }
+
+  // Moving along an unknown axis prevents deriving the new origin. Check this
+  // before emitting any origin arithmetic that would later be discarded.
+  for (unsigned sourceAxis = 0; sourceAxis < starts.size(); ++sourceAxis) {
+    if (sourceInfo.axes[sourceAxis].kind == AxisKind::Unknown &&
+        !zero(starts[sourceAxis])) {
+      info.scalarOffset = {};
+      break;
     }
-    if (dropped[i])
+  }
+
+  // Shift a known origin by start * stride, including dropped and unit axes.
+  if (info.scalarOffset) {
+    for (unsigned sourceAxis = 0; sourceAxis < starts.size(); ++sourceAxis) {
+      const AxisInfo &axis = sourceInfo.axes[sourceAxis];
+      if (axis.kind == AxisKind::Invariant || zero(starts[sourceAxis]))
+        continue;
+      auto shift =
+          arithmetic.multiply(toIndex(starts[sourceAxis]), axis.stride);
+      if (failed(shift))
+        return failure();
+      auto origin = arithmetic.add(info.scalarOffset, *shift, false);
+      if (failed(origin))
+        return failure();
+      info.scalarOffset = *origin;
+    }
+  }
+
+  // Build result axes after the origin is settled.
+  unsigned targetAxis = 0;
+  for (unsigned sourceAxis = 0; sourceAxis < starts.size(); ++sourceAxis) {
+    // Dropped axes have no result axis; unit axes need no stride calculation.
+    if (dropped[sourceAxis])
       continue;
-    if (!unchanged) {
-      axis.subAxes.clear();
-      if (axis.kind != AxisKind::Unknown && succeeded(step)) {
-        auto stride = arithmetic.multiply(axis.stride, *step);
-        if (failed(stride))
-          return failure();
-        axis.stride = *stride;
-      } else {
-        axis = AxisInfo(AxisKind::Unknown, builder.getIntegerAttr(scalar, 0));
-      }
+    int64_t targetSize = targetType.getDimSize(targetAxis++);
+    if (targetSize == 1) {
+      info.axes.push_back(makeInvariantAxisInfo(builder));
+      continue;
     }
-    if (target.getDimSize(next++) == 1)
-      axis = AxisInfo(AxisKind::Invariant, builder.getIntegerAttr(scalar, 0));
+
+    AxisInfo axis = sourceInfo.axes[sourceAxis];
+    // An in-bounds, nonempty full-length slice with unit step must start at
+    // zero. Positive lengths exclude unknown dynamic extents and empty axes.
+    bool fullAxis = targetSize > 0 &&
+                    targetSize == sourceInfo.getShape()[sourceAxis] &&
+                    equalConstant(steps[sourceAxis], builder.getIndexAttr(1));
+    if (fullAxis) {
+      info.axes.push_back(std::move(axis));
+      continue;
+    }
+
+    // Other surviving axes keep only a stride scaled by the slice step.
+    axis.subAxes.clear();
+    if (axis.kind != AxisKind::Unknown) {
+      auto stride =
+          arithmetic.multiply(axis.stride, toIndex(steps[sourceAxis]));
+      if (failed(stride))
+        return failure();
+      axis = buildAxisInfo(*stride);
+    }
     info.axes.push_back(std::move(axis));
   }
-  if (failed(normalizeAxes(info, builder)))
-    return failure();
   return info;
 }
 
@@ -646,10 +602,11 @@ FailureOr<PtrInfo> addPtrOffsets(Value value, const PtrInfo &parent,
                                  const OffsetInfo &delta, OpBuilder &builder) {
   // Pointer increments preserve the pointee type and use address-domain
   // offsets.
-  if (parent.getElementType() !=
-      cast<triton::PointerType>(detail::getElementTypeOrSelf(value.getType()))
-          .getPointeeType())
-    return failure();
+  assert(parent.getElementType() ==
+             cast<triton::PointerType>(
+                 detail::getElementTypeOrSelf(value.getType()))
+                 .getPointeeType() &&
+         "addptr must preserve the pointee type");
   Type type = addressValueType(value.getType(), builder);
   OffsetInfo lhs = parent.offsets, rhs = delta;
   OpFoldResult complete;
@@ -665,8 +622,7 @@ FailureOr<PtrInfo> addPtrOffsets(Value value, const PtrInfo &parent,
                    .getResult();
     for (auto *info : {&lhs, &rhs}) {
       if (!isa<RankedTensorType>(info->valueType))
-        info->axes.assign(tensor.getRank(), AxisInfo(AxisKind::Invariant,
-                                                     builder.getIndexAttr(0)));
+        info->axes.assign(tensor.getRank(), makeInvariantAxisInfo(builder));
       info->valueType = type;
     }
   } else {
@@ -686,7 +642,8 @@ FailureOr<PtrInfo> addPtrOffsets(Value value, const PtrInfo &parent,
     return info;
   }
   // Combine the descriptor facts alongside the independently widened full sum.
-  auto offsets = addOffsets(complete, lhs, rhs, false, builder, value.getLoc());
+  auto offsets =
+      addOffsetInfo(complete, lhs, rhs, false, builder, value.getLoc());
   if (failed(offsets))
     return failure();
   PtrInfo info = parent;
@@ -695,62 +652,27 @@ FailureOr<PtrInfo> addPtrOffsets(Value value, const PtrInfo &parent,
 }
 
 // Selection and insertion of analyzed results.
-PtrInfo combineSelectInfo(arith::SelectOp op, const PtrInfo &lhsInfo,
-                          const PtrInfo &rhsInfo, OpBuilder &builder) {
+FailureOr<PtrInfo> combineSelectInfo(arith::SelectOp op, const PtrInfo &lhsInfo,
+                                     const PtrInfo &rhsInfo,
+                                     OpBuilder &builder) {
   Value value = op.getResult();
-  // Integer selections can retain origins and strides from their branches.
+  // Integer selections reuse identical branches or retain the exact result.
   if (!lhsInfo.base) {
-    const auto &lhs = lhsInfo, &rhs = rhsInfo;
     // Identical branches preserve all known offset facts.
     if (op.getTrueValue() == op.getFalseValue()) {
-      auto info = lhs.offsets;
+      auto info = lhsInfo.offsets;
       info.fullOffsets = value;
       return PtrInfo{{}, std::move(info)};
     }
     auto info = buildOffsetInfo(value, builder);
     if (failed(info))
-      return PtrInfo{};
-    // A scalar condition selects one entire descriptor for all tensor lanes.
-    if (op.getCondition().getType().isInteger(1) &&
-        lhs.offsets.hasStructuredForm() && rhs.offsets.hasStructuredForm()) {
-      Type scalar = builder.getIndexType();
-      auto choose = [&](OpFoldResult l,
-                        OpFoldResult r) -> FailureOr<OpFoldResult> {
-        if (l == r)
-          return l;
-        auto left = materialize(l, scalar, builder, value.getLoc()),
-             right = materialize(r, scalar, builder, value.getLoc());
-        if (failed(left) || failed(right))
-          return failure();
-        return OpFoldResult(builder
-                                .create<arith::SelectOp>(value.getLoc(),
-                                                         op.getCondition(),
-                                                         *left, *right)
-                                .getResult());
-      };
-      auto origin = choose(lhs.offsets.scalarOffset, rhs.offsets.scalarOffset);
-      if (failed(origin))
-        return PtrInfo{};
-      info->scalarOffset = *origin;
-      for (unsigned i = 0; i < info->axes.size(); ++i) {
-        auto stride =
-            choose(lhs.offsets.axes[i].stride, rhs.offsets.axes[i].stride);
-        if (failed(stride))
-          return PtrInfo{};
-        info->axes[i] =
-            AxisInfo(lhs.offsets.axes[i].kind == AxisKind::Invariant &&
-                             rhs.offsets.axes[i].kind == AxisKind::Invariant
-                         ? AxisKind::Invariant
-                         : AxisKind::Structured,
-                     *stride);
-      }
-    }
+      return failure();
     return PtrInfo{{}, std::move(*info)};
   }
   // Pointer selections need a common base and select the complete offsets.
   const auto &lhs = lhsInfo, &rhs = rhsInfo;
   if (lhs.base != rhs.base)
-    return PtrInfo{};
+    return failure();
   auto target =
       cast<RankedTensorType>(addressValueType(value.getType(), builder));
   Type storage = addressStorageType(target, builder);
@@ -758,22 +680,22 @@ PtrInfo combineSelectInfo(arith::SelectOp op, const PtrInfo &lhsInfo,
   auto right =
       materializeFullOffset(rhs.offsets, storage, builder, op.getLoc());
   if (failed(left) || failed(right))
-    return PtrInfo{};
+    return failure();
   PtrInfo info = lhs;
   info.offsets.fullOffsets =
       builder
           .create<arith::SelectOp>(op.getLoc(), op.getCondition(), *left,
                                    *right)
           .getResult();
-  info.offsets.scalarOffset = {};
-  info.offsets.axes.assign(
-      target.getRank(), AxisInfo(AxisKind::Unknown, builder.getIndexAttr(0)));
   // Equal uniform offsets remain independent of the selected branch.
   if (lhs.offsets.isUniform() && rhs.offsets.isUniform() &&
       lhs.offsets.scalarOffset == rhs.offsets.scalarOffset) {
     info.offsets.scalarOffset = lhs.offsets.scalarOffset;
-    for (auto &axis : info.offsets.axes)
-      axis.kind = AxisKind::Invariant;
+    info.offsets.axes.assign(target.getRank(), makeInvariantAxisInfo(builder));
+  } else {
+    info.offsets.scalarOffset = {};
+    info.offsets.axes.assign(
+        target.getRank(), AxisInfo(AxisKind::Unknown, builder.getIndexAttr(0)));
   }
   return PtrInfo(std::move(info));
 }
@@ -783,7 +705,7 @@ FailureOr<PtrInfo> insertPtrOffsets(
     llvm::function_ref<Value(Value, Value)> insert, OpBuilder &builder) {
   // Both inputs must describe ordinary pointers relative to the same base.
   if (!source.base || source.base != dest.base || source.block || dest.block)
-    return PtrInfo{};
+    return failure();
   // Materialize the source and destination in the pointer offset storage type.
   Type insertedType = builder.getI64Type();
   if (auto tensor = dyn_cast<RankedTensorType>(sourceType))
@@ -794,19 +716,21 @@ FailureOr<PtrInfo> insertPtrOffsets(
                                    addressStorageType(value.getType(), builder),
                                    builder, value.getLoc());
   if (failed(src) || failed(dst))
-    return PtrInfo{};
+    return failure();
   // Apply the caller's insertion and retain only facts valid for both inputs.
   PtrInfo info = dest;
   info.offsets.fullOffsets = insert(*src, *dst);
-  info.offsets.scalarOffset = {};
-  info.offsets.axes.assign(
-      info.offsets.getShape().size(),
-      AxisInfo(AxisKind::Unknown, builder.getIndexAttr(0)));
+  // Equal uniform offsets survive insertion; other cases keep only fullOffsets.
   if (source.offsets.isUniform() && dest.offsets.isUniform() &&
       source.offsets.scalarOffset == dest.offsets.scalarOffset) {
     info.offsets.scalarOffset = dest.offsets.scalarOffset;
-    for (auto &axis : info.offsets.axes)
-      axis.kind = AxisKind::Invariant;
+    info.offsets.axes.assign(info.offsets.getShape().size(),
+                             makeInvariantAxisInfo(builder));
+  } else {
+    info.offsets.scalarOffset = {};
+    info.offsets.axes.assign(
+        info.offsets.getShape().size(),
+        AxisInfo(AxisKind::Unknown, builder.getIndexAttr(0)));
   }
   return info;
 }
@@ -835,7 +759,7 @@ FailureOr<PtrInfo> makeBlockInfo(triton::MakeTensorPtrOp op,
         foldOrCreateCast(stride, builder.getIndexType(),
                          IntegerExtensionKind::Signed, builder, op.getLoc());
     if (failed(indexStride))
-      return PtrInfo{};
+      return failure();
     offsets.axes.emplace_back(succeeded(constant) && constant->isZero()
                                   ? AxisKind::Invariant
                                   : AxisKind::Structured,
@@ -846,7 +770,7 @@ FailureOr<PtrInfo> makeBlockInfo(triton::MakeTensorPtrOp op,
       addScaledCoordinates(*baseOffset, coordinates,
                            detail::axisStrides(offsets), builder, op.getLoc());
   if (failed(origin))
-    return PtrInfo{};
+    return failure();
   offsets.scalarOffset = *origin;
   // Keep the parent shape, coordinates and order for block boundary checks.
   ptr.block.emplace();
@@ -855,7 +779,7 @@ FailureOr<PtrInfo> makeBlockInfo(triton::MakeTensorPtrOp op,
         foldOrCreateCast(shape, builder.getIndexType(),
                          IntegerExtensionKind::Signed, builder, op.getLoc());
     if (failed(indexShape))
-      return PtrInfo{};
+      return failure();
     ptr.block->parentShape.push_back(*indexShape);
   }
   ptr.block->coordinateOffsets.assign(coordinates.begin(), coordinates.end());
@@ -876,13 +800,13 @@ FailureOr<PtrInfo> advanceBlockInfo(triton::AdvanceOp op, const PtrInfo &parent,
   auto updated = advanceCoordinateTerms<OpFoldResult>(
       ptr.block->coordinateOffsets, delta, arithmetic);
   if (failed(updated))
-    return PtrInfo{};
+    return failure();
   // Add only this advance, retaining the existing scalar base contribution.
   auto origin = addScaledCoordinates(ptr.offsets.scalarOffset, delta,
                                      detail::axisStrides(ptr.offsets), builder,
                                      op.getLoc());
   if (failed(origin))
-    return PtrInfo{};
+    return failure();
   // Keep the updated origin and coordinates as one validated descriptor.
   ptr.offsets.scalarOffset = *origin;
   ptr.offsets.fullOffsets = {};
@@ -931,6 +855,9 @@ bool validPtrBinding(Value boundary, const PtrInfo &components) {
     return false;
   auto blockType = dyn_cast<RankedTensorType>(ptrType.getPointeeType());
   if (!blockType && isa<ShapedType>(ptrType.getPointeeType()))
+    return false;
+  // Ordinary pointers retain complete offsets even with a full decomposition.
+  if (!blockType && !components.offsets.fullOffsets)
     return false;
   Type elementType =
       blockType ? blockType.getElementType() : ptrType.getPointeeType();

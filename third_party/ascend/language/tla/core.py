@@ -111,6 +111,27 @@ def is_gm(value):
 
 
 class buffer_type(tl.base_type):
+    """Structural type of a TLA buffer.
+
+    :param shape: Non-empty sequence of positive compile-time extents in
+        elements.
+    :type shape: tuple[int, ...] or list[int]
+    :param dtype: Compile-time element type, for example ``tl.float16``.
+    :type dtype: triton.language.dtype
+    :param space: Compile-time address space name or :class:`AddressSpace`
+        member. Defaults to ``"gm"``.
+    :type space: tla.AddressSpace, str
+    :param strides: Element strides. Defaults to ``None``, which selects
+        row-major strides. Must have the same rank as ``shape``.
+    :type strides: tuple[int, ...] or None
+    :param offset: Linear offset in elements. Defaults to ``0``; ``None``
+        denotes a dynamic subview offset.
+    :type offset: int or None
+
+    The type is structural: register-width, layout and operation-specific
+    restrictions belong to the DMA and SIMD ops that consume the buffer.
+    ``L0A_SF`` and ``L0B_SF`` are reserved and raise ``NotImplementedError``.
+    """
 
     def __init__(self, shape, dtype, space="gm", strides=None, offset=0):
         self.shape = _shape(shape)
@@ -158,6 +179,17 @@ class buffer_access:
 
 
 class buffer(tl.base_value):
+    """A typed TLA buffer value.
+
+    A buffer aliases global memory obtained from a kernel pointer via
+    :func:`view`, or on-chip storage obtained via :func:`alloc`, and is
+    consumed by the DMA, cube and SIMD memory interfaces. ``buf[i0, i1, ...]``
+    returns a :class:`buffer_access` carrying the indices for ``simd.vlds`` /
+    ``simd.vsts``.
+
+    GM buffers must be supplied as kernel arguments and wrapped with
+    :func:`view`; they cannot be produced by :func:`alloc`.
+    """
 
     def __init__(self, handle, ty):
         self.handle, self.type = handle, ty

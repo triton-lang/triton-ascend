@@ -13,18 +13,47 @@ from .core import buffer
 
 
 class PadMode(Enum):
+    """Padding mode for GM->UB loads and UB->L1 copies.
+
+    - ``PadNull``: no padding.
+    - ``PadFirstElem``: pad using the first element.
+    - ``PadValue``: pad using the configured pad value.
+
+    Whether a mode is valid with the supplied pad value or padding counts is
+    checked by the backend.
+    """
+
     PadNull = "PadNull"
     PadFirstElem = "PadFirstElem"
     PadValue = "PadValue"
 
 
 class EvictionPolicy(Enum):
+    """L2 eviction hint for GM loads.
+
+    - ``EvictNormal``: default eviction behavior.
+    - ``EvictFirst``: mark the data as likely to be evicted first.
+    - ``EvictLast``: mark the data as likely to be evicted last.
+
+    The hint does not change correctness; the backend decides whether a target
+    honors it.
+    """
+
     EvictNormal = "EvictNormal"
     EvictFirst = "EvictFirst"
     EvictLast = "EvictLast"
 
 
 class AtomicKind(Enum):
+    """Atomic operation kind for ``UB->GM`` stores.
+
+    ``ADD``, ``MAX`` and ``MIN`` are the native StoreOp atomic operations
+    documented by the backend. ``NONE`` omits the atomic attribute. The
+    remaining members are enumerated here but do not imply support for a
+    particular route, dtype or target; unsupported combinations are rejected
+    by the backend.
+    """
+
     NONE = "none"
     ADD = "add"
     MAX = "max"
@@ -37,6 +66,17 @@ class AtomicKind(Enum):
 
 
 class UnitFlagMode(IntEnum):
+    """UnitFlag synchronization mode for Cube transfers.
+
+    - ``DISABLED`` (0): UnitFlag disabled.
+    - ``RESERVED`` (1): reserved value.
+    - ``ENABLED_WITHOUT_UPDATE`` (2): enabled without updating the flag.
+    - ``ENABLED_WITH_UPDATE`` (3): enabled and updating the flag.
+
+    An unset ``unit_flag_ctrl`` differs from explicitly disabling UnitFlag;
+    see :class:`FixpipeL0C2GMParams` for the manual-mode launch option.
+    """
+
     DISABLED = 0
     RESERVED = 1
     ENABLED_WITHOUT_UPDATE = 2
@@ -44,23 +84,63 @@ class UnitFlagMode(IntEnum):
 
 
 class FixpipeDMAMode(Enum):
+    """Layout conversion performed by an L0C Fixpipe transfer.
+
+    - ``NZ2ND``: convert the fractal NZ layout to row-major ND.
+    - ``NZ2DN``: convert to transposed ND.
+    - ``NZ2NZ``: keep the fractal layout.
+
+    Which modes a destination supports is checked by the backend.
+    """
+
     NZ2ND = "nz2nd"
     NZ2DN = "nz2dn"
     NZ2NZ = "normal"
 
 
 class FixpipeDualDstMode(Enum):
+    """UB destination split for an L0C->UB Fixpipe transfer.
+
+    For an ``M x N`` matrix in L0C:
+
+    - ``NO_DUAL``: write the whole matrix to the UB indicated by the selected
+      AIV sub-block.
+    - ``ROW_SPLIT``: write ``M/2 x N`` to each UB; ``M`` must be a multiple of
+      2.
+    - ``COLUMN_SPLIT``: write ``M x N/2`` to each UB; ``N`` must be a multiple
+      of 32.
+    """
+
     NO_DUAL = "NO_DUAL"
     ROW_SPLIT = "ROW_SPLIT"
     COLUMN_SPLIT = "COLUMN_SPLIT"
 
 
 class FixpipeSubBlock(Enum):
+    """Target AIV sub-block for a single-destination Fixpipe transfer.
+
+    ``SUB_BLOCK_0`` and ``SUB_BLOCK_1`` select the first or second sub-block.
+    In a dual split, omit this attribute so the split mode determines both
+    destinations.
+    """
+
     SUB_BLOCK_0 = "sub_block_0"
     SUB_BLOCK_1 = "sub_block_1"
 
 
 class FixpipePreQuantMode(Enum):
+    """Pre-quantization conversion applied by an L0C Fixpipe transfer.
+
+    - ``NO_QUANT``: no conversion.
+    - ``F322F16``: ``float32`` to ``float16``.
+    - ``S322I8``: ``int32`` to ``int8``.
+    - ``QF322F32_PRE``: quantized ``float32`` to ``float32``.
+    - ``F322BF16``: ``float32`` to ``bfloat16``.
+
+    The source and destination dtypes must match the selected conversion; the
+    backend validates the combination.
+    """
+
     NO_QUANT = "NO_QUANT"
     F322F16 = "F322F16"
     S322I8 = "S322I8"
@@ -69,6 +149,16 @@ class FixpipePreQuantMode(Enum):
 
 
 class FixpipePreReluMode(Enum):
+    """Pre-activation applied by an L0C Fixpipe transfer.
+
+    - ``NO_RELU``: no activation.
+    - ``NORMAL_RELU``: standard ReLU.
+    - ``LEAKY_RELU``: leaky ReLU.
+    - ``P_RELU``: PReLU.
+
+    Activation support depends on the backend and target.
+    """
+
     NO_RELU = "NO_RELU"
     NORMAL_RELU = "NORMAL_RELU"
     LEAKY_RELU = "LEAKY_RELU"
@@ -644,6 +734,31 @@ def copy_l1_to_fb(src, dst, params=None, _semantic=None):
 
 @builtin
 def copy_l1_to_l0(src, dst, params=None, _semantic=None):
+    """Copies L1 data into L0A/L0B using ``hivm.hir.l12l0``.
+
+    :param src: L1 source with ``space="l1"``.
+    :type src: tla.buffer
+    :param dst: L0A or L0B destination with ``space="l0a"`` or ``"l0b"``.
+    :type dst: tla.buffer
+    :param params: Configuration object. ``None`` (default) constructs
+        ``tla.CopyL1ToL0Params()``, which is incomplete for this route. See
+        :class:`CopyL1ToL0Params` for the native K-partition fields.
+    :type params: tla.CopyL1ToL0Params or None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+    :raises ValueError: If a required K-partition field or ``m`` is ``None``.
+    :raises NotImplementedError: If ``actual_batch`` is set, because the native
+        ``L12L0Op`` has no corresponding field.
+
+    ``k_part_idx``, ``k_part``, ``k_part_ceil``, ``k_part_loop``,
+    ``k_part_actual`` and ``m`` must all be compile-time integers. Set
+    ``is_transpose`` to request the native transposed form.
+
+    .. note::
+        Emit this Cube transfer in ``tla.scope.cube()``. This interface emits
+        the native operation directly; backend layout, dtype and alignment
+        restrictions still apply.
+    """
     _route(src, dst, (("l1", "l0a"), ("l1", "l0b")))
     p = _params(params, CopyL1ToL0Params)
     if _unwrap_if_constexpr(p.actual_batch) is not None:

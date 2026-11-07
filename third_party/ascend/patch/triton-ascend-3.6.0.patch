@@ -1101,6 +1101,27 @@ index b1dd327bb..c49330d40 100644
  
  
  @core._tensor_member_fn
+diff --git a/python/triton/runtime/_async_compile.py b/python/triton/runtime/_async_compile.py
+index 518743bde..11a2062ca 100644
+--- a/python/triton/runtime/_async_compile.py
++++ b/python/triton/runtime/_async_compile.py
+@@ -56,7 +56,13 @@ class AsyncCompileMode:
+         return self
+ 
+     def __exit__(self, exc_type, exc_value, traceback):
+-        # Finalize any outstanding compiles
+-        for future in as_completed(self.raw_futures):
+-            self.future_kernels[future._key].result(self.ignore_errors)
++        # Match upstream exit ordering without requiring its newer submit API.
+         active_mode.set(None)
++        try:
++            # Finalize any outstanding compiles.
++            for future in as_completed(self.raw_futures):
++                self.future_kernels[future._key].result(self.ignore_errors)
++        finally:
++            # Completed futures can retain compile frames and their resources.
++            self.raw_futures = []
++            self.future_kernels = {}
 diff --git a/python/triton/runtime/autotuner.py b/python/triton/runtime/autotuner.py
 index 0c4d71049..42f463f55 100644
 --- a/python/triton/runtime/autotuner.py

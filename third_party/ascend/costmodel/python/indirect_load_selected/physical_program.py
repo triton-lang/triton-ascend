@@ -19,8 +19,7 @@ def evaluate(program, features):
             p = run(n['child'])
             assert p['link'] == 'linear'
             factor = n['value']
-            p['terms'] = {k: v * factor
-                          for k, v in p['terms'].items()}
+            p['terms'] = {k: v * factor for k, v in p['terms'].items()}
             p['floor'] = max(1., p['floor'] * factor)
             return p
         if kind == 'blend':
@@ -29,8 +28,7 @@ def evaluate(program, features):
             assert p['link'] == q['link'] == 'linear' and set(q['terms']) == {'one'} and 'one' in p['terms']
             constant = max(q['floor'], q['terms']['one'])
             a = n['value']
-            p['terms'] = {k: v * a
-                          for k, v in p['terms'].items()}
+            p['terms'] = {k: v * a for k, v in p['terms'].items()}
             p['terms']['one'] += (1 - a) * constant
             p['floor'] = a * p['floor'] + (1 - a) * constant
             assert len(p['terms']) <= 8
@@ -39,5 +37,4 @@ def evaluate(program, features):
 
     p = run(program['root'])
     v = math.fsum(features[k] * c for k, c in p['terms'].items())
-    return max(p['floor'],
-               math.exp(max(-20., min(30., v))) if p['link'] == 'exp' else v), len(p['terms'])
+    return max(p['floor'], math.exp(max(-20., min(30., v))) if p['link'] == 'exp' else v), len(p['terms'])

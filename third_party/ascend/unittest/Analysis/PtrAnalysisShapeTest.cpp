@@ -162,6 +162,81 @@ TEST(PtrAnalysisShape, OrderedReshapeKeepsAddressesWithoutRebuildingAxes) {
   }
 }
 
+TEST(PtrAnalysisShape, SliceRecoversUniformOriginAfterDroppingUnknownAxis) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(
+    module { tt.func @uniform_slice(%base: !tt.ptr<i32>, %x: tensor<3x4xi32>, %row: index) {
+      %s = tensor.extract_slice %x[%row, 0] [1, 4] [1, 1] {tag="slice"} : tensor<3x4xi32> to tensor<4xi32>
+      %r = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
+      %m = arith.muli %s, %r {tag="multiply"} : tensor<4xi32>
+      %p = tt.splat %base : !tt.ptr<i32> -> tensor<3x4x!tt.ptr<i32>>
+      %a = tt.addptr %p, %x : tensor<3x4x!tt.ptr<i32>>, tensor<3x4xi32>
+      %ps = tensor.extract_slice %a[%row, 0] [1, 4] [1, 1] {tag="pointer"} : tensor<3x4x!tt.ptr<i32>> to tensor<4x!tt.ptr<i32>>
+      tt.return
+    } }
+  )mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder b(&context);
+  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  auto input = buildOffsetInfo(f.getArgument(1), b);
+  ASSERT_TRUE(succeeded(input));
+  input->axes[1] = mlir::triton::ptr::detail::makeInvariantAxisInfo(b);
+  ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(1), PtrInfo{{}, *input})));
+  test::Environment env;
+  for (int64_t row : {7, 13, -5})
+    for (unsigned lane = 0; lane < 4; ++lane)
+      env[f.getArgument(1)].emplace_back(32, row, true);
+  env[f.getArgument(2)].emplace_back(64, 1);
+  for (StringRef name : {"slice", "pointer"}) {
+    auto info = analysis.analyze(tagged(f, name));
+    ASSERT_TRUE(succeeded(info));
+    EXPECT_TRUE(info->offsets.isUniform());
+    expectLanes(info->offsets.scalarOffset, {13}, env);
+    expectLanes(info->offsets, {13, 13, 13, 13}, env);
+  }
+  auto product = analysis.analyze(tagged(f, "multiply"));
+  ASSERT_TRUE(succeeded(product));
+  EXPECT_TRUE(product->offsets.hasStructuredForm());
+  expectLanes(product->offsets.axes[0].stride, {13}, env);
+  expectLanes(product->offsets, {0, 13, 26, 39}, env);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(PtrAnalysisShape, CastsCompleteUniformFactsFromExternalBindings) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(
+    module { tt.func @casts(%dynamic: tensor<?xi32>, %fixed: tensor<4xi32>) {
+      %shape = tensor.cast %dynamic {tag="shape"} : tensor<?xi32> to tensor<4xi32>
+      %wide = arith.extsi %fixed {tag="wide"} : tensor<4xi32> to tensor<4xi64>
+      tt.return
+    } }
+  )mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder b(&context);
+  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  test::Environment env;
+  for (Value input : f.getArguments()) {
+    auto offsets = buildOffsetInfo(input, b);
+    ASSERT_TRUE(succeeded(offsets));
+    offsets->axes[0] = mlir::triton::ptr::detail::makeInvariantAxisInfo(b);
+    ASSERT_TRUE(succeeded(analysis.bind(input, PtrInfo{{}, *offsets})));
+    env[input].assign(4, llvm::APInt(32, -7, true));
+  }
+  for (StringRef tag : {"shape", "wide"}) {
+    auto info = analysis.analyze(tagged(f, tag));
+    ASSERT_TRUE(succeeded(info));
+    EXPECT_TRUE(info->offsets.isUniform());
+    expectLanes(info->offsets.scalarOffset, {-7}, env);
+  }
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 TEST(PtrAnalysisShape, SliceCombinesOriginStrideAndRankReduction) {
   MLIRContext context;
   load(context);
@@ -407,6 +482,20 @@ TEST(PtrAnalysisShape, TensorCastPreservesPointerFactsAndOffsetStorage) {
       }
     }
   }
+  // Identity pointer casts can retain attribute-backed complete offsets.
+  PtrInfo uniform = *sourceInfo;
+  uniform.offsets.scalarOffset = {};
+  uniform.offsets.axes[0] = mlir::triton::ptr::detail::makeInvariantAxisInfo(b);
+  uniform.offsets.fullOffsets =
+      DenseIntElementsAttr::get(cast<RankedTensorType>(offsets.getType()),
+                                ArrayRef<int32_t>{-9, -9, -9, -9});
+  ASSERT_TRUE(succeeded(analysis.bind(source, uniform)));
+  unsigned count = operations(*module);
+  auto identity = analysis.analyze(tagged(f, "identity"));
+  ASSERT_TRUE(succeeded(identity));
+  EXPECT_TRUE(identity->offsets.isUniform());
+  expectLanes(identity->offsets.scalarOffset, {-9});
+  EXPECT_EQ(operations(*module), count);
   EXPECT_EQ(b.getInsertionPoint(), insertionPoint.getPoint());
   EXPECT_TRUE(succeeded(verify(*module)));
 }
@@ -838,7 +927,7 @@ TEST(PtrAnalysisShape, UniformReshapeRemainsInvariant) {
   expectDecomposition(*offsets, env);
   EXPECT_TRUE(succeeded(verify(*module)));
 
-  // Bound invariant axes remain useful even without a known scalar origin.
+  // Complete uniform facts even when an external binding omits its origin.
   Value source =
       tagged(f, "reshape").getDefiningOp<triton::ReshapeOp>().getSrc();
   auto bound = buildOffsetInfo(source, b);
@@ -846,14 +935,13 @@ TEST(PtrAnalysisShape, UniformReshapeRemainsInvariant) {
   for (auto &axis : bound->axes)
     axis.kind = AxisKind::Invariant;
   ASSERT_TRUE(succeeded(analysis.bind(source, PtrInfo{{}, std::move(*bound)})));
-  unsigned count = operations(*module);
   auto withoutOrigin = test::getOffsets(analysis.analyze(tagged(f, "reshape")));
   ASSERT_TRUE(succeeded(withoutOrigin));
-  EXPECT_FALSE(withoutOrigin->scalarOffset);
+  EXPECT_TRUE(withoutOrigin->isUniform());
+  expectLanes(withoutOrigin->scalarOffset, {-7}, env);
   EXPECT_EQ(cast<Value>(withoutOrigin->fullOffsets), tagged(f, "reshape"));
   EXPECT_EQ(test::axisKinds(*withoutOrigin),
             (SmallVector<AxisKind>{AxisKind::Invariant, AxisKind::Invariant}));
-  EXPECT_EQ(operations(*module), count);
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 

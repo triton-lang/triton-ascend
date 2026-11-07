@@ -277,6 +277,7 @@ FailureOr<Result> CommonPtrRules::parseBroadcast(triton::BroadcastOp op,
                 targetType.getShape(), makeInvariantAxisInfo(builder));
   info.offsets.valueType = targetType;
   info.offsets.fullOffsets = full;
+  setUniformOrigin(info.offsets, full, builder);
   return Result(std::move(info));
 }
 
@@ -313,6 +314,7 @@ FailureOr<Result> CommonPtrRules::parseExpandDims(triton::ExpandDimsOp op,
                            makeInvariantAxisInfo(builder));
   info.offsets.valueType = targetType;
   info.offsets.fullOffsets = full;
+  setUniformOrigin(info.offsets, full, builder);
   return Result(std::move(info));
 }
 
@@ -351,6 +353,7 @@ FailureOr<Result> CommonPtrRules::parseReshape(triton::ReshapeOp op,
 
   // Preserve uniformity and axes whose coordinates only gain or lose unit dims.
   info.offsets = reshapeOffsetInfo(full, targetType, info.offsets, builder);
+  setUniformOrigin(info.offsets, full, builder);
   return Result(std::move(info));
 }
 
@@ -396,6 +399,7 @@ FailureOr<Result> CommonPtrRules::parseExtractSlice(tensor::ExtractSliceOp op,
   if (failed(offsets))
     return failure();
   info.offsets = std::move(*offsets);
+  setUniformOrigin(info.offsets, full, builder);
   return Result(std::move(info));
 }
 
@@ -485,6 +489,13 @@ FailureOr<Result> CommonPtrRules::parseTensorCast(tensor::CastOp op,
   for (auto [axis, size] : llvm::zip(info.offsets.axes, targetType.getShape()))
     if (ShapedType::isDynamic(size))
       axis.subAxes.clear();
+  if (auto full = dyn_cast<Value>(info.offsets.fullOffsets)) {
+    setUniformOrigin(info.offsets, full, builder);
+  } else if (auto origin = getIntegerConstant(info.offsets.fullOffsets, 64);
+             succeeded(origin)) {
+    setUniformOrigin(info.offsets, op.getResult(), builder,
+                     builder.getIndexAttr(origin->getSExtValue()));
+  }
   return Result(std::move(info));
 }
 
@@ -629,6 +640,7 @@ FailureOr<Result> CommonPtrRules::parseCast(Value value, Value input,
     auto offsets = sourceOffsets;
     offsets.valueType = value.getType();
     offsets.fullOffsets = value;
+    setUniformOrigin(offsets, value, builder);
     return Result{{}, std::move(offsets)};
   }
 

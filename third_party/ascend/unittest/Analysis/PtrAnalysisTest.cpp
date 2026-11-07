@@ -296,7 +296,7 @@ TEST(PtrAnalysis, SupportedIntegerWidthsAndIndex) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
-TEST(PtrAnalysis, BroadcastDoesNotInventAUniformPtrOffset) {
+TEST(PtrAnalysis, BroadcastRecoversUniformPtrOffsetFromSelectedLane) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, tensor::TensorDialect,
                       triton::TritonDialect>();
@@ -323,7 +323,19 @@ TEST(PtrAnalysis, BroadcastDoesNotInventAUniformPtrOffset) {
   EXPECT_EQ(ptrInfo->base, func.getArgument(0));
   EXPECT_EQ(test::axisKinds(ptrInfo->offsets),
             SmallVector<AxisKind>({AxisKind::Invariant}));
-  EXPECT_FALSE(ptrInfo->offsets.scalarOffset);
+  EXPECT_TRUE(ptrInfo->offsets.isUniform());
+  for (bool condition : {false, true}) {
+    test::Environment env{{func.getArgument(1), {llvm::APInt(1, condition)}},
+                          {func.getArgument(2), {llvm::APInt(32, -7, true)}},
+                          {func.getArgument(3), {llvm::APInt(32, 11)}}};
+    auto origin = evaluate(ptrInfo->offsets.scalarOffset, env);
+    auto lanes = evaluate(ptrInfo->offsets, env);
+    ASSERT_TRUE(origin && lanes);
+    EXPECT_EQ(origin->front().getSExtValue(), condition ? -7 : 11);
+    ASSERT_EQ(lanes->size(), 4u);
+    for (const auto &lane : *lanes)
+      EXPECT_EQ(lane.getSExtValue(), condition ? -7 : 11);
+  }
   EXPECT_EQ(scalar(ptrInfo->offsets.axes[0].stride), 0);
   EXPECT_TRUE(succeeded(verify(*module)));
 }

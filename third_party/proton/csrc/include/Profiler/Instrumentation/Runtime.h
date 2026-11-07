@@ -4,8 +4,10 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
+#include <optional>
 
 #include "Device.h"
+#include "TraceDataIO/Parser.h"
 
 namespace proton {
 class Runtime {
@@ -28,6 +30,16 @@ public:
                     uint8_t *deviceBuffer, size_t deviceBufferSize,
                     void *stream,
                     std::function<void(uint8_t *, size_t)> callback) = 0;
+
+  // Preserve the upstream policies unless a runtime explicitly opts in.
+  virtual ParserConfig::ErrorPolicy getParserErrorPolicy() const {
+    return ParserConfig::ErrorPolicy::Strict;
+  }
+  virtual bool allowRepeatedFunctionMetadata() const { return false; }
+  virtual double getCycleCounterFreqMhz() const { return 1000.0; }
+  virtual std::optional<int64_t> getTimeShiftCost() const {
+    return std::nullopt;
+  }
 
   DeviceType getDeviceType() const { return deviceType; }
 

@@ -1,8 +1,12 @@
 from triton.compiler import LazyDict
 from abc import abstractmethod
+from contextvars import ContextVar
 from typing import Dict, Any, Optional
 from collections import defaultdict
 import triton.knobs as knobs
+from triton._C.libproton import proton as libproton
+
+_mspti_correlation_op = ContextVar("mspti_correlation_op", default=None)
 
 
 class Hook:
@@ -28,6 +32,42 @@ class Hook:
     @abstractmethod
     def deactivate(self) -> None:
         raise NotImplementedError
+
+
+class MsptiCorrelationHook(Hook):
+    """Capture the Triton launch context without evaluating launch metadata."""
+
+    priority = 100
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def init_handle(self, module, function, name, metadata_group, hash):
+        pass
+
+    def activate(self):
+        pass
+
+    def deactivate(self):
+        pass
+
+    def enter(self, metadata: LazyDict) -> None:
+        kernel_name = metadata.data.get("name")
+        if not kernel_name:
+            return
+        scope_id = libproton.record_scope()
+        libproton.enter_op(scope_id, kernel_name)
+        _mspti_correlation_op.set((scope_id, kernel_name))
+
+    def exit(self, metadata: LazyDict) -> None:
+        op = _mspti_correlation_op.get()
+        if op is None:
+            return
+        libproton.exit_op(*op)
+        _mspti_correlation_op.set(None)
 
 
 class HookManager:

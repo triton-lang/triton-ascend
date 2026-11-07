@@ -22,6 +22,7 @@ import pytest
 
 import triton
 import triton.language as tl
+from triton.backends.ascend.utils import is_register_based_arch
 
 import torch
 import torch_npu
@@ -58,3 +59,19 @@ def test_divRn(param_list):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_divRn[ncore, 1, 1](x0, x2, y_cal, xblock, xblock_sub)
     test_common.validate_cmp(dtype, y_cal, y_ref)
+
+
+def test_div_rn_near_integer_boundary():
+    arch = triton.runtime.driver.active.get_current_target().arch
+    if not is_register_based_arch(arch):
+        pytest.skip("Requires a register-based Ascend target")
+
+    block_size = 64
+    numerator = torch.full((block_size, ), 0x3FF2B021, dtype=torch.int32).view(torch.float32).npu()
+    denominator = torch.full((block_size, ), 0.001, dtype=torch.float32, device="npu")
+    result = torch.empty_like(numerator)
+    triton_divRn[(1, )](numerator, denominator, result, block_size, block_size)
+
+    # The correctly rounded quotient is one f32 ULP below 1896.0.
+    expected = torch.full((block_size, ), 1895.9998779296875, dtype=torch.float32)
+    torch.testing.assert_close(result.cpu(), expected, rtol=0, atol=0)

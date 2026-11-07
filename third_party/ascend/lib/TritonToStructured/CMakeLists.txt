@@ -22,6 +22,7 @@ add_triton_library(TritonToStructured
   TritonTransforms
   TritonAnalysis
   TritonMemoryAccessCore
+  TritonPtrAnalysis
   MLIRTritonNPUUtils
   MLIRSCFTransforms
   MLIRLinalgTransforms

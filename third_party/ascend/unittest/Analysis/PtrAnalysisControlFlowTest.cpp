@@ -21,6 +21,7 @@
  */
 
 #include "PtrAnalysisTestUtils.h"
+#include "TritonMemoryAccess/InvariantAxisAnalysis.h"
 #include "TritonMemoryAccess/PtrAnalysis.h"
 #include "TritonMemoryAccess/PtrAnalysisRules/CommonPtrRules.h"
 #include "TritonMemoryAccess/PtrAnalysisRules/ControlFlowPtrRules.h"
@@ -62,6 +63,61 @@ std::optional<int64_t> scalar(ComponentMaterializer &materializer,
     return std::nullopt;
   return lanes->front().getSExtValue();
 }
+
+TEST(InvariantAxisAnalysis, ComposesForAndIfFacts) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @test(%base: !tt.ptr<i32>, %cond: i1) {
+      %c0 = arith.constant 0 : index
+      %c4 = arith.constant 4 : index
+      %c1 = arith.constant 1 : index
+      %zero = arith.constant dense<0> : tensor<4x4xi32>
+      %cols = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
+      %base1 = tt.splat %base : !tt.ptr<i32> -> tensor<1x4x!tt.ptr<i32>>
+      %cols_row = tt.expand_dims %cols {axis=0:i32} : tensor<4xi32> -> tensor<1x4xi32>
+      %row = tt.addptr %base1, %cols_row : tensor<1x4x!tt.ptr<i32>>, tensor<1x4xi32>
+      %init = tt.broadcast %row : tensor<1x4x!tt.ptr<i32>> -> tensor<4x4x!tt.ptr<i32>>
+      %step = arith.constant dense<1> : tensor<4x4xi32>
+      %loop:2 = scf.for %iv = %c0 to %c4 step %c1 iter_args(%ptr = %init, %acc = %zero) -> (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>) {
+        %next = tt.addptr %ptr, %step : tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>
+        %selected = scf.if %cond -> (tensor<4x4x!tt.ptr<i32>>) {
+          scf.yield %next : tensor<4x4x!tt.ptr<i32>>
+        } else {
+          scf.yield %ptr : tensor<4x4x!tt.ptr<i32>>
+        }
+        %rows = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
+        %row_col = tt.expand_dims %rows {axis=1:i32} : tensor<4xi32> -> tensor<4x1xi32>
+        %row_grid = tt.broadcast %row_col : tensor<4x1xi32> -> tensor<4x4xi32>
+        %vary = tt.addptr %next, %row_grid : tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>
+        %mixed = scf.if %cond -> (tensor<4x4x!tt.ptr<i32>>) {
+          scf.yield %vary : tensor<4x4x!tt.ptr<i32>>
+        } else {
+          scf.yield %ptr : tensor<4x4x!tt.ptr<i32>>
+        }
+        scf.yield %selected, %acc : tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>
+      }
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<FuncOp>().begin();
+  auto forOp = *f.getBody().front().getOps<scf::ForOp>().begin();
+  SmallVector<scf::IfOp> ifOps;
+  f.walk([&](scf::IfOp op) { ifOps.push_back(op); });
+  ASSERT_EQ(ifOps.size(), 2u);
+  OpBuilder b(f.getBody().front().getTerminator());
+  InvariantAxisAnalysis analysis(b);
+  auto loopAxes = analysis.analyze(forOp.getResult(0));
+  ASSERT_TRUE(succeeded(loopAxes));
+  EXPECT_EQ(*loopAxes, (InvariantAxisAnalysis::AxisMask{true, false}));
+  auto ifAxes = analysis.analyze(ifOps[1].getResult(0));
+  ASSERT_TRUE(succeeded(ifAxes));
+  EXPECT_EQ(*ifAxes, (InvariantAxisAnalysis::AxisMask{false, false}));
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 TEST(ControlFlowPtrRules, WideIntegersAreUnavailableInQueriesAndBindings) {
   MLIRContext context;
   load(context);

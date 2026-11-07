@@ -13,8 +13,8 @@ The default `all` auto-degrades to `ir` when no NPU is available.
 ## Layout
 
 - `simd/` — SIMD instruction cases: per-interface files (`vadd`, `vsub`,
-  `vor`, `vxor`, `vmins`, `vsstb`, `vdiv`, `vexp`, `vmax`, `vmin`, `vmaxs`,
-  `vdup`, `vdups`, `vdupv`), grouped cases (`add_cmp`, `elementwise`,
+  `vsubc`, `vor`, `vxor`, `vmins`, `vsstb`, `vdiv`, `vexp`, `vmax`, `vmin`,
+  `vmaxs`, `vdup`, `vdups`, `vdupv`), grouped cases (`add_cmp`, `elementwise`,
   `hardware_spec`), the runtime-N long-vector case (`simd_tail`), and the
   tilelang-derived `vecadd`.
 - `vector/` — TLA vector kernel cases (`cast_back`, `expand`, `rope`, ...),

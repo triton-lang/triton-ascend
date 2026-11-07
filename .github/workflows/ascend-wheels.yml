@@ -90,7 +90,7 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # PR: checkout the PR head, not the matrix.branch ref (main).
           # push/workflow_dispatch/schedule: use the matrix branch ref.
@@ -325,7 +325,7 @@ jobs:
     steps:
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Add git safe directory
         run: git config --global --add safe.directory "*"
@@ -444,7 +444,7 @@ jobs:
           - {runs_on: ['linux-amd64-a5-2'], chip_type: '950', arch: 'x86_64', cann_version: '9.1.0', os: 'ubuntu22.04', python_version: '3.12', python: 'cp312'}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name != 'pull_request' && 'main' || '' }}
           submodules: "true"

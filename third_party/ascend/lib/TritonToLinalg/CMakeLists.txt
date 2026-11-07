@@ -1,6 +1,7 @@
 add_triton_library(TritonToLinalg
         TritonToLinalgPass.cpp
         TLAToLinalgPass.cpp
+        VectorAddressLookahead.cpp
         LoadStoreConverter.cpp
         FunctionConverter.cpp
         ArgMinMaxConverter.cpp

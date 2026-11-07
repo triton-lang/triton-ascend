@@ -110,6 +110,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     pm.addPass(mlir::triton::createTLAToLinalgPass());
   });
 
+  m.def("add_vector_address_lookahead", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createVectorAddressLookaheadPass());
+  });
+
   m.def("add_merge_concat_load_buffer", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::cfg::createMergeConcatLoadBufferPass());
   });

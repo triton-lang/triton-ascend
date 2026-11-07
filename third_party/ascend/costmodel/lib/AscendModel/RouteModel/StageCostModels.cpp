@@ -7,6 +7,7 @@
 #include "AscendModel/RouteModel/Models/StridedShortCostModel.h"
 #include "AscendModel/RouteModel/Reduction/ReductionCostModel.h"
 #include "AscendModel/RouteModel/OrdinaryStoreRound4Main.h"
+#include "AscendModel/RouteModel/OrdinaryLoadMain.h"
 #include "AscendModel/RouteModel/OrdinaryStoreRound4MainContract.h"
 
 #include "llvm/ADT/STLExtras.h"
@@ -4264,6 +4265,14 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       OrdinaryStoreMainResult ordinary =
           ordinaryStoreMainCost(executionStage, profile, implementation,
                                 partition.operationOwnershipComplete);
+      OrdinaryLoadMainResult ordinaryLoad;
+      bool useOrdinaryLoad = false;
+      if (!ordinary.targetSystemCycles) {
+        ordinaryLoad = ordinaryLoadMainCost(executionStage, profile,
+            implementation, partition.operationOwnershipComplete);
+        useOrdinaryLoad = ordinaryLoad.targetSystemCycles.has_value();
+        if (useOrdinaryLoad) ordinary = ordinaryLoad;
+      }
       const LogicalStage *pricingStage = ordinary.auxiliaryStage
           ? &*ordinary.auxiliaryStage : &executionStage;
       StageMemoryCost fitted = IndirectGatherMemoryCostModel().cost(
@@ -4318,10 +4327,15 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
         cost.indirectLoadPricing = fitted.loadPricing;
       if (fitted.storePricing)
         cost.indirectStorePricing = fitted.storePricing;
-      cost.ordinaryStoreCandidateReason = ordinary.reason;
-      cost.ordinaryStoreLeaf = ordinary.leaf;
-      cost.ordinaryStoreRound4CandidateUsed = ordinary.targetSystemCycles.has_value();
-      cost.ordinaryStoreTargetIncrementSystemCycles = ordinary.targetSystemCycles.value_or(0.0);
+      cost.ordinaryLoadCandidateReason = ordinaryLoad.reason;
+      cost.ordinaryLoadLeaf = ordinaryLoad.leaf;
+      cost.ordinaryLoadSelectedUsed = useOrdinaryLoad && ordinary.targetSystemCycles.has_value();
+      cost.ordinaryLoadTargetIncrementSystemCycles = cost.ordinaryLoadSelectedUsed
+          ? ordinary.targetSystemCycles.value_or(0.0) : 0.0;
+      cost.ordinaryStoreCandidateReason = useOrdinaryLoad ? "Store_not_selected_Load_target_used" : ordinary.reason;
+      cost.ordinaryStoreLeaf = useOrdinaryLoad ? "" : ordinary.leaf;
+      cost.ordinaryStoreRound4CandidateUsed = !useOrdinaryLoad && ordinary.targetSystemCycles.has_value();
+      cost.ordinaryStoreTargetIncrementSystemCycles = useOrdinaryLoad ? 0.0 : ordinary.targetSystemCycles.value_or(0.0);
       if (implementation.aivSubblocks > 1)
         cost.perAivWorkload = executionStage.workload;
       if (resources->recurrenceGroupCriticalPath > 0.0 ||
@@ -4505,10 +4519,12 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
             cost.totalCycles, *ordinary.targetSystemCycles, 1.0);
         if (!total)
           return llvm::createStringError(std::errc::invalid_argument,
-              "ordinary Store target-only composition produced invalid units");
+              "ordinary memory target-only composition produced invalid units");
         cost.totalCycles = *total;
         cost.formulaEvidence =
-            "frozen_round4_matched_target_increment_plus_original_auxiliary";
+            useOrdinaryLoad
+                ? "existing_Load_matched_target_increment_plus_original_auxiliary"
+                : "frozen_round4_matched_target_increment_plus_original_auxiliary";
       }
       if (implementation.aivSubblocks > 1) {
         cost.cvPartitionIdealTotalCycles = cost.totalCycles;

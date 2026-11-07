@@ -29,7 +29,9 @@ std::string fingerprint(Operation *operation) {
   copy->walk([](Operation *op) {
     SmallVector<StringAttr> names;
     for (NamedAttribute a : op->getAttrs())
-      if (a.getName().getValue().starts_with(prefix)) names.push_back(a.getName());
+      if (a.getName().getValue().starts_with(prefix) ||
+          a.getName().getValue().starts_with("ascend.costmodel.ordinary_load."))
+        names.push_back(a.getName());
     for (StringAttr name : names) op->removeAttr(name);
   });
   std::string text;

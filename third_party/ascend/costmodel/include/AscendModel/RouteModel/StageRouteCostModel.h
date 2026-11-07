@@ -576,6 +576,10 @@ struct StageImplementationCost {
   std::string formulaEvidence;
   // This value is added once, after the original auxiliary Stage envelope.
   // resource_system_cycles intentionally describes auxiliary work only.
+  bool ordinaryLoadSelectedUsed = false;
+  double ordinaryLoadTargetIncrementSystemCycles = 0.0;
+  std::string ordinaryLoadCandidateReason;
+  std::string ordinaryLoadLeaf;
   bool ordinaryStoreRound4CandidateUsed = false;
   double ordinaryStoreTargetIncrementSystemCycles = 0.0;
   std::string ordinaryStoreCandidateReason;

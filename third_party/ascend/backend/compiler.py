@@ -1186,6 +1186,7 @@ def _publish_route_transform_capability(metadata, opt) -> str:
                                   and getattr(opt, "auto_tile_and_bind_subblock", True) else 1),
     }
     capability["dynamic_cv_pipeline_requested"] = bool(getattr(opt, "enable_dynamic_cv_pipeline", False))
+    capability["ordinary_load_selected_enabled"] = bool(getattr(opt, "ordinary_load_selected_enabled", True))
     forced_candidate = metadata.get("backend_forced_route_candidate")
     if forced_candidate in ("all_simd", "all_simt_only", "mixed_simd_simt"):
         capability["backend_forced_route_candidate"] = forced_candidate
@@ -2620,6 +2621,7 @@ class NPUOptions:
     # Stable static recipe only. Allocation epochs/nonces never enter a
     # positive compile artifact; its public launch always requires a lease.
     ordinary_store_owned_recipe_json: str = ""
+    ordinary_load_selected_enabled: bool = True
     auto_simt_runtime_scalar_values: Tuple[Tuple[int, int], ...] = ()
     # Native AscendModel selection: Python only schedules the C++ passes.
     # Empty/"off" disables the route model; "auto" selects, "report" dumps.

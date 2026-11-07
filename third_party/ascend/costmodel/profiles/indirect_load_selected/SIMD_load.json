@@ -1,0 +1,256 @@
+{
+  "schema": "existing_TRAIN_fitted_Load_formula_export_v1",
+  "mode": "SIMD",
+  "op": "load",
+  "source_sha256": "1c3bce7f57ef10c37ac7e5102b0ab391dac7d847e1688432384feca7538bd710",
+  "coefficient_refit": false,
+  "model": {
+    "link": "linear",
+    "strategy": "width_mask_prefix",
+    "models": {
+      "4_True_False": {
+        "features": [
+          "one",
+          "KlogStride",
+          "EAbove64",
+          "logDstride",
+          "logK",
+          "tailMasked",
+          "hidden",
+          "KlogDstride2"
+        ],
+        "coefficients": [
+          -1218.1474234456643,
+          1.6604159467629864,
+          5.804748967039562,
+          -33.27708112683776,
+          223.73309879229276,
+          750.1125982444346,
+          575.2267783432326,
+          -0.30377688241806816
+        ],
+        "train_MAPE": 0.19912039337170742,
+        "development_MAPE": 0.16934293248489193,
+        "train_inputs": 504,
+        "development_inputs": 408
+      },
+      "4_False_False": {
+        "features": [
+          "one",
+          "KlogStride",
+          "hidden",
+          "K",
+          "sqrtD",
+          "logDstride",
+          "KlogTail",
+          "activeRows"
+        ],
+        "coefficients": [
+          115.35334162735573,
+          0.6683464665017559,
+          464.56006880663347,
+          6.531401428005312,
+          77.89397668940744,
+          -99.44794731447354,
+          0.6058686862966182,
+          5.192608311895434
+        ],
+        "train_MAPE": 0.1411983765642845,
+        "development_MAPE": 0.13625817749834873,
+        "train_inputs": 360,
+        "development_inputs": 360
+      },
+      "2_True_False": {
+        "features": [
+          "one",
+          "K",
+          "partialLogical32",
+          "KsumInvActiveD",
+          "leading",
+          "KlogTail",
+          "logDstride",
+          "maxSlog"
+        ],
+        "coefficients": [
+          335.4209269099979,
+          5.402953728840071,
+          -46.427734328381824,
+          13.202835348365257,
+          -13.863715556016663,
+          1.9661633842665984,
+          -331.92687921087656,
+          22.55457402720241
+        ],
+        "train_MAPE": 0.17712458599004766,
+        "development_MAPE": 0.19203146790308662,
+        "train_inputs": 184,
+        "development_inputs": 296
+      },
+      "2_False_False": {
+        "features": [
+          "one",
+          "KAbove32",
+          "nD",
+          "KlogTail",
+          "KlogDstride",
+          "KlogStride"
+        ],
+        "coefficients": [
+          -28.91550447938594,
+          8.410437138128525,
+          372.1073030571015,
+          0.6569222305871572,
+          -3.9887406474688305,
+          0.24527696249468053
+        ],
+        "train_MAPE": 0.1482915892682378,
+        "development_MAPE": 0.1349844118520921,
+        "train_inputs": 184,
+        "development_inputs": 296
+      },
+      "8_True_False": {
+        "features": [
+          "one",
+          "EAbove32",
+          "KlogTail",
+          "hidden"
+        ],
+        "coefficients": [
+          739.7875270730963,
+          21.679226906748568,
+          1.7763040925564038,
+          581.8827121721006
+        ],
+        "train_MAPE": 0.1729820458642007,
+        "development_MAPE": 0.1663770170787138,
+        "train_inputs": 184,
+        "development_inputs": 168
+      },
+      "8_False_False": {
+        "features": [
+          "one",
+          "KAbove32",
+          "activeRows",
+          "KAbove16"
+        ],
+        "coefficients": [
+          1011.7306376173069,
+          19.96067844860511,
+          -44.07311426911842,
+          19.34796702476496
+        ],
+        "train_MAPE": 0.13874028700662164,
+        "development_MAPE": 0.11698000809929274,
+        "train_inputs": 184,
+        "development_inputs": 168
+      },
+      "1_True_False": {
+        "features": [
+          "one",
+          "KnD",
+          "hidden",
+          "KmaxSlog",
+          "activeDlog"
+        ],
+        "coefficients": [
+          132.10990897548822,
+          2.3345439663185514,
+          540.0611120269323,
+          0.8291233166401781,
+          -23.869251182629295
+        ],
+        "train_MAPE": 0.17805182508899442,
+        "development_MAPE": 0.18255452629273913,
+        "train_inputs": 144,
+        "development_inputs": 336
+      },
+      "1_False_False": {
+        "features": [
+          "one",
+          "KnD",
+          "hidden",
+          "Kbool",
+          "KlogTail",
+          "logTail",
+          "leading"
+        ],
+        "coefficients": [
+          506.5589068719385,
+          1.9047812659229872,
+          291.26974587304045,
+          0.46413886063371723,
+          0.5728496445832683,
+          -104.80191247522849,
+          -14.952955530391678
+        ],
+        "train_MAPE": 0.19237429380344936,
+        "development_MAPE": 0.1880138016043041,
+        "train_inputs": 152,
+        "development_inputs": 336
+      },
+      "4_True_True": {
+        "features": [
+          "one",
+          "KmaskedAxes",
+          "groups32"
+        ],
+        "coefficients": [
+          -202.61673175100182,
+          13.085044068168388,
+          253.16518646751427
+        ],
+        "train_MAPE": 0.10517340646597513,
+        "development_MAPE": 0.11488848096425092,
+        "train_inputs": 56,
+        "development_inputs": 16
+      }
+    },
+    "fallback": {
+      "features": [
+        "one",
+        "KlogDstride",
+        "KmaxSlog",
+        "KlogDstride2",
+        "KmaskedAxes",
+        "hidden",
+        "nD"
+      ],
+      "coefficients": [
+        -216.68939756648578,
+        8.423489273707496,
+        0.6545428527160453,
+        -1.318517324624459,
+        4.183832554594925,
+        688.9059014243014,
+        269.56937282359524
+      ],
+      "train_MAPE": 0.28819034616804234,
+      "development_MAPE": 0.2891559522266526,
+      "train_inputs": 1952,
+      "development_inputs": 2384
+    },
+    "parameters": 60,
+    "formulas": 10,
+    "metrics": {
+      "train": {
+        "inputs": 1952,
+        "MAPE": 0.16864326104061114,
+        "MRE": -0.02241519579790601,
+        "P95": 0.5554768202155127,
+        "above20": 592,
+        "above25": 486,
+        "maxAPE": 1.405997203272002
+      },
+      "development": {
+        "inputs": 2384,
+        "MAPE": 0.1631269777095277,
+        "MRE": -0.05112631188834657,
+        "P95": 0.4336598813737496,
+        "above20": 700,
+        "above25": 476,
+        "maxAPE": 2.334817157712296
+      }
+    },
+    "score": 0.18064326104061115
+  }
+}

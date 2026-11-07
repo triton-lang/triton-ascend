@@ -50,9 +50,9 @@ def positive_integer(value, name):
         raise ValueError(f'{name} must be a positive integer')
     return value
 
-def validate_case(c):
-    if c.get('op') != 'store' or c.get('mode') not in ('SIMD', 'SIMT'):
-        raise ValueError('Predictor scope is ordinary SIMD/SIMT Store only')
+def validate_case(c, operation='store'):
+    if operation not in ('load', 'store') or c.get('op') != operation or c.get('mode') not in ('SIMD', 'SIMT'):
+        raise ValueError('Predictor operation or mode does not match its explicit scope')
     if c.get('F') != 1:
         raise ValueError('F>1 is not accepted by this F1 predictor')
     shape = c['shape']
@@ -112,8 +112,8 @@ def logical_mask_features(c):
 class _VisibleFeatures:
     original_features=ORIGINAL_FEATURES
     extended=staticmethod(extended_features)
-    def features(self, case, runtime_coefficients=None):
-        validate_case(case)
+    def features(self, case, runtime_coefficients=None, *, operation='store'):
+        validate_case(case, operation)
         if case['K'] == 0:
             return {'semantic_zero': 1}
         co = visible_coefficients(case, runtime_coefficients)
@@ -145,5 +145,5 @@ class _VisibleFeatures:
             raise ValueError('Incomplete frozen 86-feature reconstruction: ' + ', '.join(missing))
         return x
 
-def visible_features(case, runtime_coefficients=None):
-    return _VisibleFeatures().features(case,runtime_coefficients)
+def visible_features(case, runtime_coefficients=None, *, operation='store'):
+    return _VisibleFeatures().features(case, runtime_coefficients, operation=operation)

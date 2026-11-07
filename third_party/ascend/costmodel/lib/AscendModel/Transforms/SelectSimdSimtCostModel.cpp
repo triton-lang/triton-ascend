@@ -201,6 +201,7 @@ struct SelectSimdSimtCostModelPass
 
     // Never reuse a prior native-analysis carrier from the source IR.
     analysisModule->removeAttr("ascend.costmodel.ordinary_store.main_route_capability_json");
+    analysisModule->removeAttr("ascend.costmodel.ordinary_load.route_capability_json");
     SimdSimtCostModelOptions options;
     options.loopWorkloadModule = module;
     options.profilePath = profilePath.getValue();
@@ -244,6 +245,8 @@ struct SelectSimdSimtCostModelPass
           analysisModule->setAttr(
               "ascend.costmodel.ordinary_store.main_route_capability_json",
               StringAttr::get(analysisModule.getContext(), routeTransformCapabilityJSON.getValue()));
+        analysisModule->setAttr("ascend.costmodel.ordinary_load.route_capability_json",
+            StringAttr::get(analysisModule.getContext(), routeTransformCapabilityJSON.getValue()));
         if (failed(attachRuntimeScalarValues(analysisModule, *object))) {
           module.emitError("invalid runtime scalar values in route capability");
           signalPassFailure();

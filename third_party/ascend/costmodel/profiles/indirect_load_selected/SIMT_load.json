@@ -1,0 +1,418 @@
+{
+  "schema": "existing_TRAIN_fitted_Load_formula_export_v1",
+  "mode": "SIMT",
+  "op": "load",
+  "source_sha256": "286824a6e6c9334e2aa3402209fc1d251bb091a1f8c16ec332ed1a2a465ae8a2",
+  "coefficient_refit": false,
+  "model": {
+    "strategy": "width_mask_ns",
+    "models": {
+      "1_True_True": {
+        "features": [
+          "one",
+          "KactiveSlog",
+          "logW"
+        ],
+        "coefficients": [
+          127.61542792792788,
+          0.16439681869369366,
+          -6.823761261261227
+        ],
+        "train_inputs": 80,
+        "development_inputs": 128,
+        "selection": {
+          "inputs": 128,
+          "MAPE": 0.08610520683217365,
+          "MRE": 0.04002227608455375,
+          "P95": 0.2311024211291479,
+          "above20": 10,
+          "above25": 2,
+          "maxAPE": 0.40213008109827
+        }
+      },
+      "1_False_True": {
+        "features": [
+          "one",
+          "KactiveSlog",
+          "activeWarpProxy",
+          "logW"
+        ],
+        "coefficients": [
+          114.80783800890134,
+          0.16042114461097892,
+          -29.980183358162492,
+          28.0686467045722
+        ],
+        "train_inputs": 88,
+        "development_inputs": 128,
+        "selection": {
+          "inputs": 128,
+          "MAPE": 0.141802487978902,
+          "MRE": -0.11850919654724101,
+          "P95": 0.3173896029859261,
+          "above20": 35,
+          "above25": 16,
+          "maxAPE": 0.38917420171460104
+        }
+      },
+      "2_True_True": {
+        "features": [
+          "one",
+          "KactiveSlog",
+          "leading",
+          "Krank"
+        ],
+        "coefficients": [
+          119.96333333333335,
+          -0.2076692708333333,
+          -14.104166666666666,
+          0.6496419270833332
+        ],
+        "train_inputs": 72,
+        "development_inputs": 96,
+        "selection": {
+          "inputs": 96,
+          "MAPE": 0.16940770225113763,
+          "MRE": -0.010111816340864678,
+          "P95": 0.2675729090578184,
+          "above20": 20,
+          "above25": 11,
+          "maxAPE": 0.2775888382207601
+        }
+      },
+      "2_False_True": {
+        "features": [
+          "one",
+          "Krank",
+          "leading",
+          "KlogStride"
+        ],
+        "coefficients": [
+          90.63277174204367,
+          0.2763278036517837,
+          -5.5840502237022065,
+          0.010615974121984072
+        ],
+        "train_inputs": 72,
+        "development_inputs": 96,
+        "selection": {
+          "inputs": 96,
+          "MAPE": 0.1855159459611302,
+          "MRE": 0.09843281179953944,
+          "P95": 0.4703673228791108,
+          "above20": 38,
+          "above25": 33,
+          "maxAPE": 0.49705860235151356
+        }
+      },
+      "1_True_False": {
+        "features": [
+          "one",
+          "leading"
+        ],
+        "coefficients": [
+          173.91666666666669,
+          -2.8541666666666665
+        ],
+        "train_inputs": 24,
+        "development_inputs": 16,
+        "selection": {
+          "inputs": 16,
+          "MAPE": 0.09227470220483724,
+          "MRE": -0.09227470220483724,
+          "P95": 0.14577935060740096,
+          "above20": 0,
+          "above25": 0,
+          "maxAPE": 0.19424820837977785
+        }
+      },
+      "1_False_False": {
+        "features": [
+          "one",
+          "suffixD"
+        ],
+        "coefficients": [
+          49.75167013442798,
+          20.927253092547236
+        ],
+        "train_inputs": 24,
+        "development_inputs": 16,
+        "selection": {
+          "inputs": 16,
+          "MAPE": 0.10218463242676974,
+          "MRE": 0.06036657802147778,
+          "P95": 0.15674334616032187,
+          "above20": 0,
+          "above25": 0,
+          "maxAPE": 0.16149953025608732
+        }
+      },
+      "2_True_False": {
+        "features": [
+          "one",
+          "KlogStride",
+          "KmaxSlog"
+        ],
+        "coefficients": [
+          135.6400804507522,
+          0.33135335078317396,
+          -0.11691122844875931
+        ],
+        "train_inputs": 32,
+        "development_inputs": 8,
+        "selection": {
+          "inputs": 8,
+          "MAPE": 0.009245952380267805,
+          "MRE": 0.006626412720840982,
+          "P95": 0.018705961914730316,
+          "above20": 0,
+          "above25": 0,
+          "maxAPE": 0.019697334323099946
+        }
+      },
+      "2_False_False": {
+        "features": [
+          "one",
+          "KlogTail",
+          "KoverSqrtActiveD",
+          "suffixD"
+        ],
+        "coefficients": [
+          167.08288051610364,
+          0.2467031683229735,
+          -0.45953545434444315,
+          5.177600629248739
+        ],
+        "train_inputs": 32,
+        "development_inputs": 8,
+        "selection": {
+          "inputs": 8,
+          "MAPE": 0.01412062516876142,
+          "MRE": 0.01412062516876142,
+          "P95": 0.02041276818675248,
+          "above20": 0,
+          "above25": 0,
+          "maxAPE": 0.022339113757763096
+        }
+      },
+      "4_True_True": {
+        "features": [
+          "one",
+          "Krank",
+          "activeLogical32",
+          "KlogDstride2",
+          "KlogDstride"
+        ],
+        "coefficients": [
+          135.4937150024541,
+          0.026952471637546573,
+          6.5463263386283685,
+          -0.05829904659547497,
+          0.21686373539816697
+        ],
+        "train_inputs": 288,
+        "development_inputs": 184,
+        "selection": {
+          "inputs": 184,
+          "MAPE": 0.10927703494675019,
+          "MRE": -0.02145412969285685,
+          "P95": 0.32532242092118474,
+          "above20": 23,
+          "above25": 18,
+          "maxAPE": 0.44294897061605687
+        }
+      },
+      "4_True_False": {
+        "features": [
+          "one",
+          "hidden",
+          "KlogDstride",
+          "maxSlog",
+          "KlogW2"
+        ],
+        "coefficients": [
+          165.0956203105217,
+          -121.59562031052171,
+          0.4697244264755573,
+          -3.256673787249455,
+          -0.03515625000000004
+        ],
+        "train_inputs": 216,
+        "development_inputs": 72,
+        "selection": {
+          "inputs": 72,
+          "MAPE": 0.11651989480112407,
+          "MRE": -0.027207413276801103,
+          "P95": 0.7436025958592235,
+          "above20": 11,
+          "above25": 10,
+          "maxAPE": 0.7769578235328133
+        }
+      },
+      "4_False_False": {
+        "features": [
+          "one",
+          "Krank",
+          "sqrtK"
+        ],
+        "coefficients": [
+          112.28760480208716,
+          0.2526258669667858,
+          -4.287634400528372
+        ],
+        "train_inputs": 64,
+        "development_inputs": 32,
+        "selection": {
+          "inputs": 32,
+          "MAPE": 0.1373774963490249,
+          "MRE": -0.04594262347458412,
+          "P95": 0.4416263847350599,
+          "above20": 5,
+          "above25": 5,
+          "maxAPE": 0.459441469848363
+        }
+      },
+      "4_False_True": {
+        "features": [
+          "one",
+          "Krank",
+          "KlogTail",
+          "KlogW",
+          "logDstride"
+        ],
+        "coefficients": [
+          127.52280254064283,
+          0.18732647412355646,
+          0.02890526903877666,
+          -0.04521556668452322,
+          -6.455781447272833
+        ],
+        "train_inputs": 240,
+        "development_inputs": 184,
+        "selection": {
+          "inputs": 184,
+          "MAPE": 0.10146772638547046,
+          "MRE": -0.03296792204625918,
+          "P95": 0.25052901715879056,
+          "above20": 35,
+          "above25": 10,
+          "maxAPE": 0.3433006195209247
+        }
+      },
+      "8_True_True": {
+        "features": [
+          "one",
+          "KlogDstride",
+          "leading",
+          "KoverSqrtActiveD",
+          "KlogTail",
+          "KlogStride"
+        ],
+        "coefficients": [
+          65.31095707680231,
+          0.5113625794505182,
+          35.46921174136866,
+          1.4914910915045192,
+          0.17237137184175189,
+          -0.06555658439961404
+        ],
+        "train_inputs": 48,
+        "development_inputs": 88,
+        "selection": {
+          "inputs": 88,
+          "MAPE": 0.09966172798184053,
+          "MRE": 0.03466916987551343,
+          "P95": 0.2710193846125579,
+          "above20": 17,
+          "above25": 8,
+          "maxAPE": 0.3889012604176436
+        }
+      },
+      "8_False_True": {
+        "features": [
+          "one",
+          "Krank",
+          "hidden",
+          "KlogStride",
+          "KlogDstride",
+          "KoverSqrtActiveD"
+        ],
+        "coefficients": [
+          58.795213602956835,
+          0.6746914326690584,
+          5.406619160122722,
+          -0.03218614127618382,
+          0.2780655958162735,
+          -0.9098773288809474
+        ],
+        "train_inputs": 40,
+        "development_inputs": 88,
+        "selection": {
+          "inputs": 88,
+          "MAPE": 0.07501347054503214,
+          "MRE": 0.019602920560687173,
+          "P95": 0.17297278159448204,
+          "above20": 3,
+          "above25": 2,
+          "maxAPE": 0.5853293205551315
+        }
+      }
+    },
+    "fallback": {
+      "features": [
+        "one",
+        "activeLogical32",
+        "logDstride",
+        "Krank",
+        "tailMasked",
+        "nS",
+        "KsmallActiveD",
+        "activeWarpProxy"
+      ],
+      "coefficients": [
+        124.2516375432288,
+        4.9104632847748935,
+        8.592680724008813,
+        0.2299188183618695,
+        30.979482460659835,
+        -23.89436696998389,
+        -0.1482974288414639,
+        -8.36513480472331
+      ],
+      "train_inputs": 1352,
+      "development_inputs": 1144,
+      "selection": {
+        "inputs": 1144,
+        "MAPE": 0.18075728357616774,
+        "MRE": -0.035642214484149344,
+        "P95": 0.4477014128317109,
+        "above20": 417,
+        "above25": 316,
+        "maxAPE": 0.9976225739633331
+      }
+    },
+    "parameters": 64,
+    "formulas": 15,
+    "metrics": {
+      "train": {
+        "inputs": 1352,
+        "MAPE": 0.12234139513264712,
+        "MRE": -0.036992651303583486,
+        "P95": 0.4339920344955025,
+        "above20": 274,
+        "above25": 239,
+        "maxAPE": 0.7286956521739132
+      },
+      "development": {
+        "inputs": 1144,
+        "MAPE": 0.11770969091470723,
+        "MRE": -0.009498604318042447,
+        "P95": 0.3247630958353916,
+        "above20": 201,
+        "above25": 118,
+        "maxAPE": 0.7787234042553193
+      }
+    },
+    "score": 0.13486828120061595
+  }
+}

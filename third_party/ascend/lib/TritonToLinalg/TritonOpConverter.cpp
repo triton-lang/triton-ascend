@@ -3175,8 +3175,13 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     return success();
   }
 
-  // Every E2M1 value is exact in BF16. Decode before applying either scale;
-  // the software arithmetic path can then promote the decoded operands.
+  // Follow DecomposeScaledBlocked::getComputeType and Fp4ToFpOp: decode
+  // directly to FP16 when either operand is FP16, and to BF16 otherwise.
+  FloatType fp4ComputeType =
+      lhsElemType == triton::ScaleDotElemType::FP16 ||
+              rhsElemType == triton::ScaleDotElemType::FP16
+          ? rewriter.getF16Type()
+          : rewriter.getBF16Type();
   // E2M1 layout: [sign:1][exponent:2][fraction:1], exponent bias = 1.
   constexpr unsigned fp4ExponentBits = 2;
   constexpr unsigned fp4FractionBits = 1;
@@ -3187,14 +3192,16 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
   constexpr uint16_t fp4MagnitudeMask = fp4SignMask - 1;
   constexpr uint16_t fp4NibbleMask = (1u << fp4StorageBits) - 1;
   constexpr uint16_t fp4FirstNormal = 1u << fp4FractionBits;
-  constexpr unsigned fp4TargetFractionBits = 7;
-  constexpr unsigned bf16SignBit = 15;
-  constexpr unsigned bf16ExponentBias = 127;
-  constexpr unsigned fp4ExponentBias = (1u << (fp4ExponentBits - 1)) - 1;
-  // Re-bias the exponent and align the fraction. This is also BF16's 0.5.
-  constexpr uint16_t bf16HalfBits = (bf16ExponentBias - fp4ExponentBias)
-                                    << fp4TargetFractionBits;
-  auto unpackFp4 = [&](Value packed, unsigned axis) -> Value {
+  auto unpackFp4 = [&](Value packed, FloatType computeType,
+                       unsigned axis) -> Value {
+    // All E2M1 values are exact in both FP16 and BF16. Derive the target
+    // fields from the type rather than hard-coding either representation.
+    unsigned targetFractionBits = computeType.getFPMantissaWidth() - 1;
+    unsigned targetSignBit = computeType.getWidth() - 1;
+    uint16_t halfBits = rewriter.getFloatAttr(computeType, 0.5)
+                            .getValue()
+                            .bitcastToAPInt()
+                            .getZExtValue();
     auto type = cast<RankedTensorType>(packed.getType());
     auto shape = type.getShape();
     auto i16Ty = type.clone(rewriter.getI16Type());
@@ -3208,23 +3215,22 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
           loc, nibble, constant(fp4MagnitudeMask));
       Value sign =
           rewriter.create<arith::AndIOp>(loc, nibble, constant(fp4SignMask));
-      sign = rewriter.create<arith::ShLIOp>(loc, sign,
-                                            constant(bf16SignBit - fp4SignBit));
+      sign = rewriter.create<arith::ShLIOp>(
+          loc, sign, constant(targetSignBit - fp4SignBit));
       Value normal = rewriter.create<arith::ShLIOp>(
-          loc, magnitude, constant(fp4TargetFractionBits - fp4FractionBits));
-      normal =
-          rewriter.create<arith::AddIOp>(loc, normal, constant(bf16HalfBits));
+          loc, magnitude, constant(targetFractionBits - fp4FractionBits));
+      normal = rewriter.create<arith::AddIOp>(loc, normal, constant(halfBits));
       Value subnormal = rewriter.create<arith::CmpIOp>(
           loc, arith::CmpIPredicate::ult, magnitude, constant(fp4FirstNormal));
       Value zero = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
                                                   magnitude, constant(0));
       Value subnormalBits = rewriter.create<arith::SelectOp>(
-          loc, zero, constant(0), constant(bf16HalfBits));
+          loc, zero, constant(0), constant(halfBits));
       Value fpBits = rewriter.create<arith::SelectOp>(loc, subnormal,
                                                       subnormalBits, normal);
       fpBits = rewriter.create<arith::OrIOp>(loc, fpBits, sign);
-      return rewriter.create<arith::BitcastOp>(
-          loc, type.clone(rewriter.getBF16Type()), fpBits);
+      return rewriter.create<arith::BitcastOp>(loc, type.clone(computeType),
+                                               fpBits);
     };
     Value low = decodeNibble(
         rewriter.create<arith::AndIOp>(loc, bits, constant(fp4NibbleMask)));
@@ -3233,8 +3239,7 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     SmallVector<int64_t> joinedShape(shape);
     joinedShape.push_back(fp4ValuesPerByte);
     Value joined = rewriter.create<triton::JoinOp>(
-        loc, RankedTensorType::get(joinedShape, rewriter.getBF16Type()), low,
-        high);
+        loc, RankedTensorType::get(joinedShape, computeType), low, high);
     unsigned rank = type.getRank();
     SmallVector<int32_t> order;
     SmallVector<int64_t> interleavedShape;
@@ -3253,18 +3258,18 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     }
     if (axis != rank - 1)
       joined = rewriter.create<triton::TransOp>(
-          loc, RankedTensorType::get(interleavedShape, rewriter.getBF16Type()),
-          joined, rewriter.getDenseI32ArrayAttr(order));
+          loc, RankedTensorType::get(interleavedShape, computeType), joined,
+          rewriter.getDenseI32ArrayAttr(order));
     SmallVector<int64_t> unpackedShape(shape);
     unpackedShape[axis] *= fp4ValuesPerByte;
     return rewriter.create<tensor::CollapseShapeOp>(
-        loc, RankedTensorType::get(unpackedShape, rewriter.getBF16Type()),
-        joined, reassociation);
+        loc, RankedTensorType::get(unpackedShape, computeType), joined,
+        reassociation);
   };
   if (lhsElemType == triton::ScaleDotElemType::E2M1)
-    lhs = unpackFp4(lhs, op.getLhsKPack() ? 1 : 0);
+    lhs = unpackFp4(lhs, fp4ComputeType, op.getLhsKPack() ? 1 : 0);
   if (rhsElemType == triton::ScaleDotElemType::E2M1)
-    rhs = unpackFp4(rhs, op.getRhsKPack() ? 0 : 1);
+    rhs = unpackFp4(rhs, fp4ComputeType, op.getRhsKPack() ? 0 : 1);
 
   if (!lhsScale) {
     return op.emitError("lhsScale is required for non-FP8 input");

@@ -43,6 +43,7 @@ add_triton_ut(
     PtrAnalysisLifecycleTest.cpp
     PtrAnalysisExtensionTest.cpp
     PtrAnalysisControlFlowTest.cpp
+    CommonPtrSCFTest.cpp
   LIBS
     TritonPtrAnalysis
     TritonIR

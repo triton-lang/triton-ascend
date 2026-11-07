@@ -26,6 +26,7 @@
 #include "mlir/IR/Builders.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 
 namespace mlir::triton::ptr {
@@ -87,6 +88,23 @@ public:
     bindings.insert_or_assign(value, std::move(boundInfo));
     return success();
   }
+  /// Run a synchronous query under local hypotheses. The child preserves
+  /// this Rules configuration and explicit bindings, but has independent
+  /// computed results and recursion state. Overrides are checked by Rules.
+  /// Neither the child nor references to its cache may escape the callback;
+  /// copied results still reference the same stable source/helper IR.
+  LogicalResult
+  withBindings(ArrayRef<std::pair<Value, Result>> overrides,
+               llvm::function_ref<LogicalResult(PtrAnalysis &)> query) const {
+    PtrAnalysis child(builder, rules);
+    child.bindings = bindings;
+    for (const auto &[value, info] : overrides)
+      if (failed(child.bind(value, info)))
+        return failure();
+    OpBuilder::InsertionGuard guard(builder);
+    return query(child);
+  }
+
   void clear() {
     assert(active.empty() && "cannot clear during analysis");
     cache.clear();

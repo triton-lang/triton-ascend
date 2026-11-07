@@ -38,11 +38,25 @@ class CommonPtrRules {
 public:
   using Result = PtrInfo;
   using Analyze = llvm::function_ref<FailureOr<Result>(Value)>;
+  using Binding = std::pair<Value, Result>;
+  using AnalyzeQuery = llvm::function_ref<LogicalResult(Analyze)>;
+  using WithBindings =
+      llvm::function_ref<LogicalResult(ArrayRef<Binding>, AnalyzeQuery)>;
   LogicalResult validateBinding(Value value, const Result &info) const;
 
   template <typename Context>
   FailureOr<Result> parse(Value value, Context &context) const {
     auto analyze = [&](Value input) { return context.analyze(input); };
+    if (isControlFlowValue(value)) {
+      auto withBindings = [&](ArrayRef<Binding> bindings, AnalyzeQuery query) {
+        return context.withBindings(bindings, [&](auto &child) {
+          auto nested = [&](Value input) { return child.analyze(input); };
+          return query(nested);
+        });
+      };
+      return parseControlFlow(value, analyze, withBindings,
+                              context.getBuilder());
+    }
     return parseOperation(value, analyze, context.getBuilder());
   }
 
@@ -56,6 +70,11 @@ public:
                                    OpBuilder &builder) const;
 
 private:
+  static bool isControlFlowValue(Value value);
+  FailureOr<Result> parseControlFlow(Value value, Analyze analyze,
+                                     WithBindings withBindings,
+                                     OpBuilder &builder) const;
+
   // Shape and selection rules.
   FailureOr<Result> parseSplat(triton::SplatOp op, Analyze analyze,
                                OpBuilder &builder) const;

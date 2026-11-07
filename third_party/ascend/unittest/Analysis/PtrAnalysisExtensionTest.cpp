@@ -122,6 +122,131 @@ TEST(PtrAnalysisExtension, DriverAcceptsAnIndependentResultAndSharesHelpers) {
   EXPECT_EQ(b.getInsertionPoint(), ip.getPoint());
   EXPECT_TRUE(succeeded(verify(*module)));
 }
+TEST(PtrAnalysisExtension, HypothesisQueriesIsolateBindingsAndComputedResults) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(
+    module { tt.func @test(%x:i32, %y:i32) {
+      %sum = arith.addi %x, %y : i32
+      tt.return
+    } }
+  )mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  auto sum = *f.getBody().front().getOps<arith::AddIOp>().begin();
+  Value x = f.getArgument(0), y = f.getArgument(1);
+  OpBuilder builder(f.getBody().front().getTerminator());
+  auto ip = builder.saveInsertionPoint();
+  PtrAnalysis<TokenRules> analysis(builder, TokenRules{});
+  auto parent = analysis.analyze(sum);
+  ASSERT_TRUE(succeeded(parent));
+  TokenInfo childResult, grandchildResult;
+  ASSERT_TRUE(succeeded(analysis.withBindings({{x, {y, y}}}, [&](auto &child) {
+    EXPECT_FALSE(child.findCached(sum));
+    auto info = child.analyze(sum);
+    if (failed(info))
+      return failure();
+    childResult = *info;
+    EXPECT_TRUE(
+        succeeded(child.withBindings({{y, {x, x}}}, [&](auto &grandchild) {
+          EXPECT_FALSE(grandchild.findCached(sum));
+          auto nested = grandchild.analyze(sum);
+          if (failed(nested))
+            return failure();
+          grandchildResult = *nested;
+          return success();
+        })));
+    EXPECT_EQ(child.findCached(sum)->helper, childResult.helper);
+    return success();
+  })));
+  EXPECT_EQ(analysis.findCached(sum)->helper, parent->helper);
+  EXPECT_FALSE(analysis.findCached(x)->helper == y);
+  test::Environment env{{x, {llvm::APInt(32, 2)}}, {y, {llvm::APInt(32, 5)}}};
+  auto before = test::evaluate(parent->helper, env);
+  auto local = test::evaluate(childResult.helper, env);
+  auto nested = test::evaluate(grandchildResult.helper, env);
+  ASSERT_TRUE(before && local && nested);
+  EXPECT_EQ(before->front().getSExtValue(), 7);
+  EXPECT_EQ(local->front().getSExtValue(), 10);
+  EXPECT_EQ(nested->front().getSExtValue(), 7);
+  bool called = false;
+  EXPECT_TRUE(failed(analysis.withBindings({{x, {}}}, [&](auto &) {
+    called = true;
+    return success();
+  })));
+  EXPECT_FALSE(called);
+  EXPECT_EQ(analysis.findCached(sum)->helper, parent->helper);
+  EXPECT_EQ(builder.getInsertionPoint(), ip.getPoint());
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+// An extension can recognize an exact identity that Common does not model.
+// Its configuration and recursive input queries must survive loop hypotheses.
+struct IdentityShiftRules : CommonPtrRules {
+  IdentityShiftRules(bool enabled, unsigned &queries)
+      : enabled(enabled), queries(queries) {}
+  bool enabled;
+  unsigned &queries;
+  template <typename Context>
+  FailureOr<Result> parse(Value value, Context &context) const {
+    if (auto shift = value.getDefiningOp<arith::ShLIOp>(); shift && enabled) {
+      auto amount =
+          mlir::triton::ptr::detail::getIntegerConstant(shift.getRhs(), 64);
+      if (succeeded(amount) && amount->isZero()) {
+        ++queries;
+        auto input = context.analyze(shift.getLhs());
+        if (failed(input))
+          return failure();
+        input->offsets.fullOffsets = value;
+        return input;
+      }
+    }
+    return CommonPtrRules::parse(value, context);
+  }
+};
+
+TEST(PtrAnalysisExtension, LoopProofKeepsConfiguredRulesAndExternalBindings) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(
+    module { tt.func @loop(%seed: tensor<4xi32>, %n: index) {
+      %c0 = arith.constant 0 : index
+      %c1 = arith.constant 1 : index
+      %zero = arith.constant dense<0> : tensor<4xi32>
+      %out = scf.for %i = %c0 to %n step %c1 iter_args(%x = %seed) -> tensor<4xi32> {
+        %shift = arith.shli %x, %zero : tensor<4xi32>
+        %next = arith.addi %shift, %seed : tensor<4xi32>
+        scf.yield %next : tensor<4xi32>
+      }
+      tt.return
+    } }
+  )mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  auto loop = *f.getBody().front().getOps<scf::ForOp>().begin();
+  OpBuilder builder(loop);
+  auto seed = buildOffsetInfo(f.getArgument(0), builder);
+  ASSERT_TRUE(succeeded(seed));
+  seed->scalarOffset = builder.getIndexAttr(7);
+  seed->axes[0] = AxisInfo(AxisKind::Structured, builder.getIndexAttr(3));
+  unsigned queries = 0;
+  for (bool enabled : {false, true}) {
+    PtrAnalysis<IdentityShiftRules> analysis(
+        builder, IdentityShiftRules(enabled, queries));
+    ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(0), PtrInfo{{}, *seed})));
+    auto result = analysis.analyze(loop.getResult(0));
+    ASSERT_TRUE(succeeded(result));
+    EXPECT_EQ(result->offsets.axes[0].kind,
+              enabled ? AxisKind::Structured : AxisKind::Unknown);
+    EXPECT_EQ(analysis.findCached(f.getArgument(0))->offsets.scalarOffset,
+              seed->scalarOffset);
+  }
+  EXPECT_GT(queries, 0u);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 TEST(PtrAnalysisExtension, RecursiveCurrentNodeIsAnError) {
   MLIRContext context;
   load(context);

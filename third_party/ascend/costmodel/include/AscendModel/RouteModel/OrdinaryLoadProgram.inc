@@ -2,206 +2,128 @@
 inline constexpr Term terms0[] = {{"one",1366.574353448276},{"EAbove64",14.861194791909373},{"lastSSize",-61.569970293569455},{"KoverTail",37.926942567567565},{"KnD",-2.9248674860205064},{"Dunder128",-336.6912278657967},{"leading",-41.64433830382109},{"KsmallActiveD",1.7293229045316902}};
 inline constexpr Term terms1[] = {{"one",1175.1125767568824},{"minSbytes",0.018208437571071257},{"D_axis4_extent",-1.9032010461668087},{"KlogDstride2",0.4183223291448955},{"payload_integer",27.833551284969158},{"D_to_S_transitions",-149.67727996359588},{"D_axis0_inner_payload_bytes",1.8836440328630337},{"KoverTail",6.329032934386545}};
 inline constexpr Term terms2[] = {{"one",247.54206628720527},{"E",6.1824947870817075},{"D_axis4_inner_payload_bytes",224.5287876429779},{"D_axis2_inner_payload_bytes",-18.826815886933172},{"KsuffixLog",1.1553414514794318},{"S_axis3_extent",96.14343409577053},{"logTail",-62.836468879505134},{"EAbove128",-1.9497526272868348}};
-inline constexpr Term terms3[] = {{"one",877.2500000000005},{"Kfp8",-1.4804687499999987},{"KactiveSlog",0.2651367187499996},{"Kbool",-0.3496093749999986}};
+inline constexpr Term terms3[] = {{"one",703.952244892291},{"EAbove32",1.4715925693818597},{"logTail",-173.93225332279326},{"KlogTail",0.5323535363731445},{"EAbove128",-4.592583809028961},{"KsuffixLog",2.184393132920969},{"suffixD",-11.52369033796136},{"KoverTail",9.369089381886342}};
 inline constexpr Term terms4[] = {{"one",774.1249999999997},{"EAbove32",21.384375000000006},{"KlogTail",1.096874999999997},{"hidden",1137.25}};
-inline constexpr Term terms5[] = {{"one",170.79653258715317},{"E",28.81900069966089},{"KsmallActiveD",0.24534380551331958},{"S_axis2_stride_log2",60.20107592244756},{"D_axis1_extent",-189.3733875523812},{"K_hidden",10.483355185286873},{"S_axis3_extent",229.9358197109134},{"K_S_axis3_stride_log2",-0.42982265270109293}};
-inline constexpr Term terms6[] = {{"one",703.952244892291},{"EAbove32",1.4715925693818597},{"logTail",-173.93225332279326},{"KlogTail",0.5323535363731445},{"EAbove128",-4.592583809028961},{"KsuffixLog",2.184393132920969},{"suffixD",-11.52369033796136},{"KoverTail",9.369089381886342}};
-inline constexpr Term terms7[] = {{"one",7641.433333333333},{"D",-16.695833333333333},{"partialLogical32",-183.01562499999977},{"S_axis3_extent",349.6614583333333},{"D_axis3_extent",183.60624999999973},{"KlogRuns",0.0},{"S_axis3_stride_log2",0.0},{"nD",-76.65000000000038}};
-inline constexpr Term terms8[] = {{"one",5816.375}};
-inline constexpr Term terms9[] = {{"one",142.8864395753216},{"KlogStride",0.9156733295987896},{"activeDlog",75.02907375480699},{"EAbove64",1.2815083440480703},{"D_axis2_extent",40.38226843870176},{"D_axis1_extent",0.0},{"EAbove32",5.090736402452124},{"KAbove16",6.4506501190312076}};
-inline constexpr Term terms10[] = {{"one",1465.875}};
-inline constexpr Term terms11[] = {{"one",4.386581341844172},{"E",5.51630068015532},{"K_over_D_axis4_extent",17.511921205099636},{"K_D_axis1_extent_log2",2.1612881613337973},{"S_axis2_stride_log2",62.958442164972304},{"K_hidden",6.711646689198529},{"K_D_axis2_extent_log2",3.172520527006589},{"EAbove256",-4.3693909165539235}};
-inline constexpr Term terms12[] = {{"one",-75.93157270060257},{"E",28.89115287549682},{"KsmallActiveD",0.06422264361153819},{"S_axis2_stride_log2",67.99345813692406},{"D_axis1_extent",31.658807476776673},{"K_hidden",10.483355185286873},{"S_axis3_extent",270.04869430143196},{"K_S_axis3_stride_log2",-0.3923028028215234}};
-inline constexpr Term terms13[] = {{"one",-3620.337450347661},{"K",4.61821013701393},{"sqrtK",781.5825781390215},{"activeRows",-27.60160703400499},{"groups32",-91.96181671947224},{"partialLogical32",70.47488533139209},{"activeDlog",-33.46160551007522},{"KlogW",0.0}};
-inline constexpr Term terms14[] = {{"one",-208.40173021083172},{"E",4.646361387939445},{"hidden",977.3488999802041},{"maxSlog",43.367218855415594},{"logTail",-21.557186121040203},{"S",-26.705609697131774},{"KoverTail",29.470617880725506},{"KsmallD",-1.6377485314941154}};
-inline constexpr Term terms15[] = {{"one",197.89605598027617},{"KmaxSlog",0.4303005610496022},{"KlogDstride",1.5297113262874484},{"KunitS",-5.144516577187788},{"hidden",825.7996482913586},{"KmaskedAxes",4.58927442305573},{"KoverTail",7.055939273822743},{"KlogDstride2",1.8049920234952768}};
-inline constexpr Term terms16[] = {{"one",333.4855790708652},{"KlogStride",1.5417390558430297},{"hidden",971.4025983713918},{"D_SspanRatio",-0.0003847089876239628},{"EAbove64",6.547428574700694},{"prefixMasked",-273.2062316626377},{"KunitS",-0.6757759311336893},{"KoverSqrtActiveD",5.428863909858927}};
-inline constexpr Term terms17[] = {{"one",0.0},{"D_axis1_stride_log2",629.5163043478275},{"activeLogical32",46.23641304347819},{"KoverTail",47.083559782608674},{"logTail",228.47418478260866},{"KlogDstride",4.978388247282603},{"nD",-139.6249999999996},{"Kfp8",-1.4426587975543437}};
-inline constexpr Term terms18[] = {{"one",597.8142600228135},{"sqrtE",121.79899014147017},{"D_axis2_inner_payload_bytes",-11.664225071281216},{"sqrtK",121.79899014146966},{"S_axis3_extent",291.1414438617053},{"KsuffixLog",2.3296742743532595},{"logDstride",-164.3981016161902},{"EAbove64",13.320333478181082}};
-inline constexpr Term terms19[] = {{"one",1758.75}};
-inline constexpr Term terms20[] = {{"one",-80.3928571428562},{"E",34.08900669642857},{"D_axis2_inner_payload_bytes",-12.710797991071441},{"S_axis3_extent",90.3593750000006},{"D_axis0_inner_payload_bytes",-1.0363071986607089},{"K_D_axis4_extent_log2",-7.041992187499975},{"D_axis4_extent",219.1249999999991},{"KlogDstride",-4.499069940476197}};
-inline constexpr Term terms21[] = {{"one",6535.384391047309},{"KlogStride",2.023891459995036},{"hidden",0.0},{"K",0.0},{"sqrtD",-1831.2638715490089},{"logDstride",0.0},{"KlogTail",5.5162529981324635},{"activeRows",29.976106143367304}};
-inline constexpr Term terms22[] = {{"one",3437.875}};
-inline constexpr Term terms23[] = {{"one",1740.0}};
-inline constexpr Term terms24[] = {{"one",2043.625}};
-inline constexpr Term terms25[] = {{"one",2423.125}};
-inline constexpr Term terms26[] = {{"one",210.47222334923492},{"KlogStride",1.6082306309668142},{"K_hidden",24.672773241984785},{"D_SspanRatio",-0.00045421624551127506},{"EAbove64",3.3888011064234993},{"prefixMasked",-152.71154641532448},{"KunitS",-0.7426608666234831},{"K_tailMasked",8.416588401992453}};
-inline constexpr Term terms27[] = {{"one",26.007957522946047},{"E",14.804757108433908},{"KlogDstride2",-0.27258962837240513},{"D_axis1_extent",21.22198371758406},{"K_S_axis3_extent_log2",-3.3044558397226624},{"S_axis2_stride_log2",68.59511872625077},{"S_axis3_extent",280.8908825821707},{"K_D_axis2_extent_log2",1.4731258825159446}};
-inline constexpr Term terms28[] = {{"one",-58.71232247941572},{"KlogStride",4.5107020154963475},{"EAbove64",0.0},{"logDstride",0.0},{"logK",0.0},{"tailMasked",0.0},{"hidden",0.0},{"KlogDstride2",0.0}};
-inline constexpr Term terms29[] = {{"one",-4903.850030566105},{"KoverSqrtActiveD",68.43481122212143},{"maxSlog",392.7035464224887},{"activeRuns",16.816211602299454},{"fullSuffix",-40.20735486405899},{"KAbove64",-4.8946293142003965},{"KsmallActiveD",1.451769221364314},{"KlogStride",0.17935207762935912}};
-inline constexpr Term terms30[] = {{"one",-112.99980768683858},{"E",4.803138557055001},{"K_hidden",8.299243112758527},{"maxSlog",47.35094019326609},{"Kfp8",-1.3616563403295403},{"D_axis2_inner_payload_bytes",-59.193495455119496},{"K_over_D_axis2_extent",13.44194313388243},{"K_S_axis1_extent_log2",-0.5399044997187572}};
-inline constexpr Term terms31[] = {{"one",69.25000000000001},{"KoverTail",3.484374999999999},{"D_axis0_extent",21.312499999999993},{"KsmallActiveD",0.0},{"KnD",0.08007812500000008}};
-inline constexpr Term terms32[] = {{"one",0.0},{"D_axis0_stride_log2",10.4923260521054},{"fullSuffix",-1.5939424202403862},{"KnD",0.20105197304678693},{"activeDlog",-14.602844152202971},{"D_axis0_inner_payload_bytes",-0.9278382277382748},{"KlogStride",0.03315135444958191},{"sqrtK",2.7736912750339897}};
-inline constexpr Term terms33[] = {{"one",33.85389217461942},{"EAbove64",0.6101520887427638},{"D_axis0_stride_log2",-1.8208125605449381},{"D_axis3_extent",-2.98400868015114},{"K_D_axis4_extent_log2",-0.07141015207266144},{"smallE32",32.548129304762455},{"S_to_D_transitions",43.65217981387376},{"KoneWarp",0.3232104179899632}};
-inline constexpr Term terms34[] = {{"one",72.20730426910937},{"Krank",0.2365334896242178},{"D_SspanRatio",-9.870483693320662e-06},{"logW",4.799999921944013},{"leading",9.81964584432397},{"logTail",10.498457177092074},{"KlogW2",0.030456261725573426},{"logW2",-2.5998951818718123}};
-inline constexpr Term terms35[] = {{"one",141.75}};
-inline constexpr Term terms36[] = {{"one",101.25}};
-inline constexpr Term terms37[] = {{"one",73.20422789616589},{"K_S_axis0_extent_log2",0.056302618024398086},{"maxSlog",-1.1321597127239373},{"K_S_axis0_stride_log2",0.002055572251215983},{"Dunder128",51.34669923807303},{"D_axis1_stride_log2",-5.537925374612652},{"KoverTail",1.3706615834025517},{"K_D_axis1_extent_log2",0.06263965186457902}};
-inline constexpr Term terms38[] = {{"one",122.21402372901882},{"K",0.6684254243646612},{"sqrtK",-6.534452785744754},{"activeRows",0.9578583593100714},{"groups32",15.405080461063049},{"partialLogical32",3.961516476517044},{"activeDlog",-12.6713181213641},{"KlogW",-0.11285077432720045}};
-inline constexpr Term terms39[] = {{"one",138.5}};
-inline constexpr Term terms40[] = {{"one",0.7468631258697241},{"maxSlog",-2.461609493278203},{"KlogW2",0.09788971962494118},{"S_axis0_stride_log2",0.6056962380480094},{"Dunder128",65.35509726329636},{"logTail",11.38224149042811},{"sqrtS",18.136102475492944},{"KlogWAbove2",-0.9209114784527282}};
-inline constexpr Term terms41[] = {{"one",8.125}};
-inline constexpr Term terms42[] = {{"one",103.46571017583088},{"Kfp8",-0.04585987307929873},{"EAbove128",2.234912093634508},{"EAbove64",-1.3044817936231858},{"D_axis1_inner_payload_bytes",-0.6074665662654983},{"S_axis0_stride_log2",0.6395036166970414},{"KoverTail",0.34711915347471217},{"S_axis1_extent",-1.5014301204958116}};
-inline constexpr Term terms43[] = {{"one",61.0105732716233},{"sqrtE",9.1049214972778},{"KoverTail",1.5847211678764765},{"oneWarp",23.748249407670297},{"KlogWAbove2",1.25807447664008},{"KsumInvD",-0.22912096936298235},{"minW8",-2.281617760545506},{"KlogDstride",0.19096048683371178}};
-inline constexpr Term terms44[] = {{"one",61.41081120134302},{"E",0.517035721630372},{"EAbove32",-0.035665174931600555},{"EAbove8",0.4861535711560646},{"payload_integer",-1.6385221939199364},{"logWAbove2",21.270020220605353},{"smallE32",56.66763435504766},{"EAbove16",0.43584701200781717}};
-inline constexpr Term terms45[] = {{"one",121.625}};
-inline constexpr Term terms46[] = {{"one",98.25}};
-inline constexpr Term terms47[] = {{"one",59.295560577485745},{"sqrtE",8.993042252425695},{"KoverTail",1.5333297604598453},{"oneWarp",23.84965095782759},{"KlogWAbove2",1.2727051525573034},{"KsumInvD",-0.34228683234187546},{"minW8",-2.8031634333895177},{"KlogDstride",0.19253209258675216}};
-inline constexpr Term terms48[] = {{"one",72.96354411105641},{"K_S_axis0_extent_log2",0.0636181047473233},{"smallE32",-17.566551878228893},{"logE",0.007776680425203875},{"K_D_axis1_extent_log2",0.0784280927175894},{"sqrtD",-8.020229413231274},{"activeRuns",72.9635441110631},{"activeLogical32",-2.131877542622251}};
-inline constexpr Term terms49[] = {{"one",157.25}};
-inline constexpr Term terms50[] = {{"one",204.375}};
-inline constexpr Term terms51[] = {{"one",152.8192061584318},{"KmaxSlog",0.009525582590474847},{"oneWarp",110.20317011853182},{"D_axis4_stride_log2",-8.250522155776343},{"KlogDstride",-0.01438801556780952},{"KsumInvActiveD",-0.11723891243235231},{"KunitS",-0.3176930336957218},{"KlogDstride2",0.10129587496724039}};
-inline constexpr Term terms52[] = {{"one",164.3495762711862},{"hidden",-75.08156779661012},{"logTail",2.3739406779662193},{"EAbove128",1.0809884798728837},{"groups32",-44.24788135593241},{"minW8",-3.9565677966101633},{"KoverTail",0.7145127118644188},{"Kbool",-0.005859375000001929}};
-inline constexpr Term terms53[] = {{"one",146.09696969696975},{"hidden",-129.57632575757577},{"KoneWarp",-0.6089592211174251},{"minW8",-4.931912878787885},{"KoverTail",0.545833333333333},{"Kbool",-0.020919152462121098},{"Kfp8",-0.03166133996212144},{"smallE32",-10.980042613636371}};
-inline constexpr Term terms54[] = {{"one",106.98571428571414},{"Kfp8",-0.041015625000000014},{"EAbove128",2.1148995535714255},{"EAbove64",-0.9100260416666619},{"KnD",-0.1719145275297629},{"Dunder128",7.792261904762134},{"KlogTail",-0.12463262648809569},{"KactiveDlog",0.11169317336309526}};
-inline constexpr Term terms55[] = {{"one",348.757605110221},{"KAbove256",1.6600372126765535},{"KlogStride",-0.040086312128676076},{"D_axis1_extent",1.6512960555726743},{"KsuffixLog",-0.09853014540198032},{"S_axis1_extent",1.5264592654133775},{"KmaxSlog",0.046840398501541224},{"KlogDstride2",0.0}};
-inline constexpr Term terms56[] = {{"one",22.0}};
-inline constexpr Term terms57[] = {{"one",99.37662928706753},{"KactiveSlog",0.060664811065311935},{"KlogWAbove2",-0.1813397515791109},{"activeLogical32",4.313316040232934},{"maxSlog",-4.472804203019657},{"KmaxSlog",0.03081173764685662},{"Dunder128",43.782909712658395},{"smallE32",4.364394298172946}};
-inline constexpr Term terms58[] = {{"one",73.74812688229296},{"K_S_axis0_extent_log2",0.0580815701411488},{"maxSlog",-0.9729824294770424},{"K_S_axis0_stride_log2",0.0011601629498581222},{"Dunder128",52.25091730306161},{"D_axis1_stride_log2",-5.070290231742361},{"KoverTail",1.6643432705095293},{"K_D_axis1_extent_log2",0.06369061663845715}};
-inline constexpr Term terms59[] = {{"one",116.625}};
-inline constexpr Term terms60[] = {{"one",96.1377691955769},{"sqrtK",30.29413874380285},{"minW4",-12.876824170795718},{"logTail",-14.380472512387072},{"KlogWAbove2",1.4808107820239962},{"nD",-11.00547251238465},{"EAbove256",0.49952484015607396},{"activeLogical32",-6.426554975221029}};
-inline constexpr Term terms61[] = {{"one",94.75}};
-inline constexpr Term terms62[] = {{"one",20.294859126412856},{"EAbove64",0.8706785251107692},{"activeDlog",7.008768912406271},{"minW4",11.205828055735493},{"KlogW",-0.09570582049012565},{"EAbove128",-0.354721752729375},{"lastSSize",0.18461074317756232},{"KoverTail",1.3516701221521064}};
-inline constexpr Term terms63[] = {{"one",214.5}};
-inline constexpr Term terms64[] = {{"one",0.0},{"D_axis2_stride_log2",18.604166666666657},{"logTail",11.5},{"KlogDstride",0.6406250000000007},{"idleWarpProxy",2.250000000000001},{"D_axis3_inner_payload_bytes",14.802083333333313},{"logDstride",14.02083333333335},{"D_axis0_extent",11.375000000000009}};
-inline constexpr Term terms65[] = {{"one",130.125}};
-inline constexpr Term terms66[] = {{"one",28.055340465347953},{"KlogDstride",0.48692757532336356},{"S_axis1_extent",80.74044478153394},{"KoneWarp",0.5304277936315765},{"KactiveDlog",-0.034768775648517075},{"S_axis2_extent",-20.850769211492416},{"D_SspanRatio",1.4088927631777232e-05},{"S_axis1_stride_log2",0.0}};
-inline constexpr Term terms67[] = {{"one",17.75}};
-inline constexpr Term terms68[] = {{"one",46.125}};
-inline constexpr Term terms69[] = {{"one",17.09614785755461},{"EAbove64",1.5591653181650305},{"smallE32",85.73515542959521},{"EAbove128",-1.295189908925088},{"KlogWAbove2",-0.21237768607898988},{"nS",8.673412232620212},{"activeRows_logW",0.27598760067883743},{"payload_floating",24.668083947836998}};
-inline constexpr Term terms70[] = {{"one",163.5}};
-inline constexpr Term terms71[] = {{"one",150.0}};
-inline constexpr Term terms72[] = {{"one",153.625}};
-inline constexpr Term terms73[] = {{"one",151.25}};
-inline constexpr Term terms74[] = {{"one",-281.465376661708},{"logE",77.09163341660222},{"maxSlog",-7.589195804051748},{"Dunder128",100.73934989126651},{"S_axis0_stride_log2",0.9854994892512101},{"sqrtD",47.24114940141834},{"logDstride",3.2578291534474446},{"activeDlog",-56.567524069688105}};
-inline constexpr Term terms75[] = {{"one",187.875}};
-inline constexpr Term terms76[] = {{"one",276.8596935530601},{"activeDlog",-39.176718262510526},{"sqrtD",100.2740922997562},{"nD",-95.65064160880088},{"minW8",4.320337389213396},{"logTail",-49.234403094504934},{"maxSlog",-1.989550147714719},{"Dunder128",-44.4899483751357}};
-inline constexpr Term terms77[] = {{"one",113.125}};
-inline constexpr Term terms78[] = {{"one",35.77845550616075},{"KmaxSlog",0.04902745037813835},{"S_axis1_extent",-7.029144623485206},{"D_axis0_extent",31.366844693524072},{"activeSlog",13.540791747396478},{"Dunder128",48.65870119680057},{"S_axis0_stride_log2",-0.46269705461099603},{"logTail",6.863579572271059}};
-inline constexpr Term terms79[] = {{"one",189.625}};
-inline constexpr Term terms80[] = {{"one",115.25}};
-inline constexpr Term terms81[] = {{"one",110.56019009982354},{"K_hidden",0.04981024086046229},{"EAbove256",0.5356383611584422},{"KoverTail",0.8932927219841308},{"partialLogical32",-0.4658783407703557},{"KlogW2",-1.6404227147130953e-05},{"hidden",4.905941587838742},{"Kbool",0.04949440467352288}};
-inline constexpr Term terms82[] = {{"one",67.87196601214313},{"KactiveSlog",0.080557182870711},{"KlogWAbove2",-0.16626277246887075},{"activeLogical32",11.40791189089078},{"maxSlog",-0.5115992064443954},{"KmaxSlog",0.011523222323347545},{"Dunder128",31.039304425097175},{"smallE32",14.646930215507647}};
-inline constexpr Term terms83[] = {{"one",36.875}};
-inline constexpr Term terms84[] = {{"one",71.75}};
-inline constexpr Term terms85[] = {{"one",172.0}};
-inline constexpr Term terms86[] = {{"one",124.25}};
-inline constexpr Term terms87[] = {{"one",125.58101173020522},{"E",20.12915468635447},{"KlogDstride2",-0.2718643680695564},{"KlogTail",0.0},{"EAbove128",0.0},{"KoverTail",0.0},{"leading",-37.835043988269796},{"lastSSize",-23.53977272727272}};
-inline constexpr Term terms88[] = {{"one",1378.5401961167202},{"EAbove64",15.280869720360847},{"logTail",-156.60206386462704},{"KlogRuns",-2.287661522863031},{"KlogDstride",-9.201569416900973},{"KmaxSlog",0.5743908551833927},{"KoverTail",6.4097927016876834},{"KAbove256",0.24570295326921524}};
-inline constexpr Term terms89[] = {{"one",54.72292418772578},{"E",22.305272732400717},{"D",-1.5342114169675007},{"activeLogical32",0.0},{"KoverTail",0.0},{"KlogDstride2",0.0},{"KlogTail",1.2454591606498193},{"KactiveSlog",0.0}};
-inline constexpr Term terms90[] = {{"one",0.0},{"EAbove16",30.893568686487242},{"KsmallActiveD",-0.1504097628599282},{"S",-0.6316817123282625},{"logTail",270.0235494920507},{"leading",-11.69605485993545},{"KlogDstride2",0.0},{"KoverTail",0.0}};
-inline constexpr Term terms91[] = {{"one",305.8202317976449},{"E",7.467373878728111},{"hidden",585.0286887985703},{"maxSlog",40.70573775971405},{"Kfp8",-1.2719726562500013},{"logTail",-150.49079873532378},{"S",-10.696265243902443},{"Krank",-0.3142057084189328}};
-inline constexpr Term terms92[] = {{"one",114.30462184873943},{"hidden",-32.59348739495797},{"EAbove256",0.16632678462009803},{"logTail",4.10661764705884},{"EAbove128",1.0168764771533614},{"EAbove64",-0.6774471507352943},{"minW8",-3.642857142857143},{"KoverTail",0.8216911764705892}};
-inline constexpr Term terms93[] = {{"one",105.37585382513664},{"Kfp8",-0.03710937500000063},{"EAbove128",2.2194730831625686},{"EAbove64",-1.1703888106215876},{"KsumInvActiveD",-0.16590889685792243},{"Dunder128",2.378073770491802},{"KoverTail",0.899344689207643},{"KactiveSlog",-0.03723744877049106}};
-inline constexpr Term terms94[] = {{"one",-154.24999999999997},{"groups32",136.87499999999997},{"KlogDstride",-0.26171874999999994},{"nS",26.62499999999999},{"logWAbove4",12527.250000000011},{"idleWarpProxy",57.37500000000003},{"KlogWAbove2",-36.472656250000036},{"EAbove128",-1.5185546874999998}};
-inline constexpr Term terms95[] = {{"one",2.380244755244631},{"EAbove64",-0.2368562427156176},{"oneWarp",242.02884615384613},{"minW4",71.26835664335664},{"logTail",-67.99155011655009},{"KlogW",-0.10494973776223789},{"KlogTail",0.2523674242424241},{"Dunder128",18.069930069930138}};
-inline constexpr Term terms96[] = {{"one",95.7660974687557},{"KmaxSlog",0.05968273633621181},{"Dunder128",66.08618137354513},{"maxSlog",-3.1545182627188812},{"smallE32",-5.704191435677673},{"hidden",-51.266097468755696},{"highWarp32",2.3597879638936266},{"D_SspanRatio",-9.546775741937468e-06}};
-inline constexpr Term terms97[] = {{"one",101.24916695764138},{"activeSlog",11.178524285386354},{"EAbove256",0.09964874804083591},{"maxSlog",-7.146733115388053},{"Dunder128",56.643006980093645},{"suffixD",-0.057908012398349265},{"logWAbove4",-87.26412448596145},{"KmaxSlog",0.04615801503376822}};
-inline constexpr Term terms98[] = {{"one",214.7935997500128},{"sqrtE",3.480865349534953},{"KoverTail",1.4658322659144036},{"oneWarp",-77.46032446990478},{"KlogWAbove2",3.353654478588178},{"KsumInvD",-0.3054324623845037},{"minW8",-27.17123804861217},{"KlogDstride",0.28426563927479437}};
-inline constexpr Term terms99[] = {{"one",-356.1031386993024},{"sqrtE",19.84511633129359},{"EAbove256",1.0268412361323584},{"activeSlog",10.124999999999964},{"logWAbove2",36.14583333333327},{"smallE32",123.9945346748255},{"logE",51.99453467482565},{"KlogWAbove2",-0.17317708333333295}};
-inline constexpr Term terms100[] = {{"one",90.2043347321381},{"EAbove64",0.34802652095765424},{"EAbove8",-0.050610835811539426},{"Dunder128",9.78460384935088},{"KlogWAbove2",-0.148092604424161},{"KlogDstride2",0.08687112001964198},{"sqrtS",6.742567055989172},{"Kfp8",-0.3146854045003297}};
+inline constexpr Term terms5[] = {{"one",142.8864395753216},{"KlogStride",0.9156733295987896},{"activeDlog",75.02907375480699},{"EAbove64",1.2815083440480703},{"D_axis2_extent",40.38226843870176},{"D_axis1_extent",0.0},{"EAbove32",5.090736402452124},{"KAbove16",6.4506501190312076}};
+inline constexpr Term terms6[] = {{"one",333.4855790708652},{"KlogStride",1.5417390558430297},{"hidden",971.4025983713918},{"D_SspanRatio",-0.0003847089876239628},{"EAbove64",6.547428574700694},{"prefixMasked",-273.2062316626377},{"KunitS",-0.6757759311336893},{"KoverSqrtActiveD",5.428863909858927}};
+inline constexpr Term terms7[] = {{"one",4.386581341844172},{"E",5.51630068015532},{"K_over_D_axis4_extent",17.511921205099636},{"K_D_axis1_extent_log2",2.1612881613337973},{"S_axis2_stride_log2",62.958442164972304},{"K_hidden",6.711646689198529},{"K_D_axis2_extent_log2",3.172520527006589},{"EAbove256",-4.3693909165539235}};
+inline constexpr Term terms8[] = {{"one",-75.93157270060257},{"E",28.89115287549682},{"KsmallActiveD",0.06422264361153819},{"S_axis2_stride_log2",67.99345813692406},{"D_axis1_extent",31.658807476776673},{"K_hidden",10.483355185286873},{"S_axis3_extent",270.04869430143196},{"K_S_axis3_stride_log2",-0.3923028028215234}};
+inline constexpr Term terms9[] = {{"one",597.8142600228135},{"sqrtE",121.79899014147017},{"D_axis2_inner_payload_bytes",-11.664225071281216},{"sqrtK",121.79899014146966},{"S_axis3_extent",291.1414438617053},{"KsuffixLog",2.3296742743532595},{"logDstride",-164.3981016161902},{"EAbove64",13.320333478181082}};
+inline constexpr Term terms10[] = {{"one",-208.40173021083172},{"E",4.646361387939445},{"hidden",977.3488999802041},{"maxSlog",43.367218855415594},{"logTail",-21.557186121040203},{"S",-26.705609697131774},{"KoverTail",29.470617880725506},{"KsmallD",-1.6377485314941154}};
+inline constexpr Term terms11[] = {{"one",197.89605598027617},{"KmaxSlog",0.4303005610496022},{"KlogDstride",1.5297113262874484},{"KunitS",-5.144516577187788},{"hidden",825.7996482913586},{"KmaskedAxes",4.58927442305573},{"KoverTail",7.055939273822743},{"KlogDstride2",1.8049920234952768}};
+inline constexpr Term terms12[] = {{"one",1758.75}};
+inline constexpr Term terms13[] = {{"one",6535.384391047309},{"KlogStride",2.023891459995036},{"hidden",0.0},{"K",0.0},{"sqrtD",-1831.2638715490089},{"logDstride",0.0},{"KlogTail",5.5162529981324635},{"activeRows",29.976106143367304}};
+inline constexpr Term terms14[] = {{"one",2043.625}};
+inline constexpr Term terms15[] = {{"one",2423.125}};
+inline constexpr Term terms16[] = {{"one",210.47222334923492},{"KlogStride",1.6082306309668142},{"K_hidden",24.672773241984785},{"D_SspanRatio",-0.00045421624551127506},{"EAbove64",3.3888011064234993},{"prefixMasked",-152.71154641532448},{"KunitS",-0.7426608666234831},{"K_tailMasked",8.416588401992453}};
+inline constexpr Term terms17[] = {{"one",26.007957522946047},{"E",14.804757108433908},{"KlogDstride2",-0.27258962837240513},{"D_axis1_extent",21.22198371758406},{"K_S_axis3_extent_log2",-3.3044558397226624},{"S_axis2_stride_log2",68.59511872625077},{"S_axis3_extent",280.8908825821707},{"K_D_axis2_extent_log2",1.4731258825159446}};
+inline constexpr Term terms18[] = {{"one",-112.99980768683858},{"E",4.803138557055001},{"K_hidden",8.299243112758527},{"maxSlog",47.35094019326609},{"Kfp8",-1.3616563403295403},{"D_axis2_inner_payload_bytes",-59.193495455119496},{"K_over_D_axis2_extent",13.44194313388243},{"K_S_axis1_extent_log2",-0.5399044997187572}};
+inline constexpr Term terms19[] = {{"one",69.25000000000001},{"KoverTail",3.484374999999999},{"D_axis0_extent",21.312499999999993},{"KsmallActiveD",0.0},{"KnD",0.08007812500000008}};
+inline constexpr Term terms20[] = {{"one",0.0},{"D_axis0_stride_log2",10.4923260521054},{"fullSuffix",-1.5939424202403862},{"KnD",0.20105197304678693},{"activeDlog",-14.602844152202971},{"D_axis0_inner_payload_bytes",-0.9278382277382748},{"KlogStride",0.03315135444958191},{"sqrtK",2.7736912750339897}};
+inline constexpr Term terms21[] = {{"one",33.85389217461942},{"EAbove64",0.6101520887427638},{"D_axis0_stride_log2",-1.8208125605449381},{"D_axis3_extent",-2.98400868015114},{"K_D_axis4_extent_log2",-0.07141015207266144},{"smallE32",32.548129304762455},{"S_to_D_transitions",43.65217981387376},{"KoneWarp",0.3232104179899632}};
+inline constexpr Term terms22[] = {{"one",72.20730426910937},{"Krank",0.2365334896242178},{"D_SspanRatio",-9.870483693320662e-06},{"logW",4.799999921944013},{"leading",9.81964584432397},{"logTail",10.498457177092074},{"KlogW2",0.030456261725573426},{"logW2",-2.5998951818718123}};
+inline constexpr Term terms23[] = {{"one",138.5}};
+inline constexpr Term terms24[] = {{"one",101.25}};
+inline constexpr Term terms25[] = {{"one",96.1377691955769},{"sqrtK",30.29413874380285},{"minW4",-12.876824170795718},{"logTail",-14.380472512387072},{"KlogWAbove2",1.4808107820239962},{"nD",-11.00547251238465},{"EAbove256",0.49952484015607396},{"activeLogical32",-6.426554975221029}};
+inline constexpr Term terms26[] = {{"one",122.21402372901882},{"K",0.6684254243646612},{"sqrtK",-6.534452785744754},{"activeRows",0.9578583593100714},{"groups32",15.405080461063049},{"partialLogical32",3.961516476517044},{"activeDlog",-12.6713181213641},{"KlogW",-0.11285077432720045}};
+inline constexpr Term terms27[] = {{"one",8.125}};
+inline constexpr Term terms28[] = {{"one",61.0105732716233},{"sqrtE",9.1049214972778},{"KoverTail",1.5847211678764765},{"oneWarp",23.748249407670297},{"KlogWAbove2",1.25807447664008},{"KsumInvD",-0.22912096936298235},{"minW8",-2.281617760545506},{"KlogDstride",0.19096048683371178}};
+inline constexpr Term terms29[] = {{"one",163.5}};
+inline constexpr Term terms30[] = {{"one",67.87196601214313},{"KactiveSlog",0.080557182870711},{"KlogWAbove2",-0.16626277246887075},{"activeLogical32",11.40791189089078},{"maxSlog",-0.5115992064443954},{"KmaxSlog",0.011523222323347545},{"Dunder128",31.039304425097175},{"smallE32",14.646930215507647}};
+inline constexpr Term terms31[] = {{"one",106.98571428571414},{"Kfp8",-0.041015625000000014},{"EAbove128",2.1148995535714255},{"EAbove64",-0.9100260416666619},{"KnD",-0.1719145275297629},{"Dunder128",7.792261904762134},{"KlogTail",-0.12463262648809569},{"KactiveDlog",0.11169317336309526}};
+inline constexpr Term terms32[] = {{"one",59.295560577485745},{"sqrtE",8.993042252425695},{"KoverTail",1.5333297604598453},{"oneWarp",23.84965095782759},{"KlogWAbove2",1.2727051525573034},{"KsumInvD",-0.34228683234187546},{"minW8",-2.8031634333895177},{"KlogDstride",0.19253209258675216}};
+inline constexpr Term terms33[] = {{"one",72.96354411105641},{"K_S_axis0_extent_log2",0.0636181047473233},{"smallE32",-17.566551878228893},{"logE",0.007776680425203875},{"K_D_axis1_extent_log2",0.0784280927175894},{"sqrtD",-8.020229413231274},{"activeRuns",72.9635441110631},{"activeLogical32",-2.131877542622251}};
+inline constexpr Term terms34[] = {{"one",153.625}};
+inline constexpr Term terms35[] = {{"one",115.25}};
+inline constexpr Term terms36[] = {{"one",28.055340465347953},{"KlogDstride",0.48692757532336356},{"S_axis1_extent",80.74044478153394},{"KoneWarp",0.5304277936315765},{"KactiveDlog",-0.034768775648517075},{"S_axis2_extent",-20.850769211492416},{"D_SspanRatio",1.4088927631777232e-05},{"S_axis1_stride_log2",0.0}};
+inline constexpr Term terms37[] = {{"one",22.0}};
+inline constexpr Term terms38[] = {{"one",94.75}};
+inline constexpr Term terms39[] = {{"one",73.74812688229296},{"K_S_axis0_extent_log2",0.0580815701411488},{"maxSlog",-0.9729824294770424},{"K_S_axis0_stride_log2",0.0011601629498581222},{"Dunder128",52.25091730306161},{"D_axis1_stride_log2",-5.070290231742361},{"KoverTail",1.6643432705095293},{"K_D_axis1_extent_log2",0.06369061663845715}};
+inline constexpr Term terms40[] = {{"one",35.77845550616075},{"KmaxSlog",0.04902745037813835},{"S_axis1_extent",-7.029144623485206},{"D_axis0_extent",31.366844693524072},{"activeSlog",13.540791747396478},{"Dunder128",48.65870119680057},{"S_axis0_stride_log2",-0.46269705461099603},{"logTail",6.863579572271059}};
+inline constexpr Term terms41[] = {{"one",0.0},{"D_axis2_stride_log2",18.604166666666657},{"logTail",11.5},{"KlogDstride",0.6406250000000007},{"idleWarpProxy",2.250000000000001},{"D_axis3_inner_payload_bytes",14.802083333333313},{"logDstride",14.02083333333335},{"D_axis0_extent",11.375000000000009}};
+inline constexpr Term terms42[] = {{"one",130.125}};
+inline constexpr Term terms43[] = {{"one",17.75}};
+inline constexpr Term terms44[] = {{"one",46.125}};
+inline constexpr Term terms45[] = {{"one",150.0}};
+inline constexpr Term terms46[] = {{"one",113.125}};
+inline constexpr Term terms47[] = {{"one",71.75}};
+inline constexpr Term terms48[] = {{"one",125.58101173020522},{"E",20.12915468635447},{"KlogDstride2",-0.2718643680695564},{"KlogTail",0.0},{"EAbove128",0.0},{"KoverTail",0.0},{"leading",-37.835043988269796},{"lastSSize",-23.53977272727272}};
+inline constexpr Term terms49[] = {{"one",1378.5401961167202},{"EAbove64",15.280869720360847},{"logTail",-156.60206386462704},{"KlogRuns",-2.287661522863031},{"KlogDstride",-9.201569416900973},{"KmaxSlog",0.5743908551833927},{"KoverTail",6.4097927016876834},{"KAbove256",0.24570295326921524}};
+inline constexpr Term terms50[] = {{"one",54.72292418772578},{"E",22.305272732400717},{"D",-1.5342114169675007},{"activeLogical32",0.0},{"KoverTail",0.0},{"KlogDstride2",0.0},{"KlogTail",1.2454591606498193},{"KactiveSlog",0.0}};
+inline constexpr Term terms51[] = {{"one",0.0},{"EAbove16",30.893568686487242},{"KsmallActiveD",-0.1504097628599282},{"S",-0.6316817123282625},{"logTail",270.0235494920507},{"leading",-11.69605485993545},{"KlogDstride2",0.0},{"KoverTail",0.0}};
+inline constexpr Term terms52[] = {{"one",305.8202317976449},{"E",7.467373878728111},{"hidden",585.0286887985703},{"maxSlog",40.70573775971405},{"Kfp8",-1.2719726562500013},{"logTail",-150.49079873532378},{"S",-10.696265243902443},{"Krank",-0.3142057084189328}};
+inline constexpr Term terms53[] = {{"one",114.30462184873943},{"hidden",-32.59348739495797},{"EAbove256",0.16632678462009803},{"logTail",4.10661764705884},{"EAbove128",1.0168764771533614},{"EAbove64",-0.6774471507352943},{"minW8",-3.642857142857143},{"KoverTail",0.8216911764705892}};
+inline constexpr Term terms54[] = {{"one",105.37585382513664},{"Kfp8",-0.03710937500000063},{"EAbove128",2.2194730831625686},{"EAbove64",-1.1703888106215876},{"KsumInvActiveD",-0.16590889685792243},{"Dunder128",2.378073770491802},{"KoverTail",0.899344689207643},{"KactiveSlog",-0.03723744877049106}};
+inline constexpr Term terms55[] = {{"one",-154.24999999999997},{"groups32",136.87499999999997},{"KlogDstride",-0.26171874999999994},{"nS",26.62499999999999},{"logWAbove4",12527.250000000011},{"idleWarpProxy",57.37500000000003},{"KlogWAbove2",-36.472656250000036},{"EAbove128",-1.5185546874999998}};
+inline constexpr Term terms56[] = {{"one",2.380244755244631},{"EAbove64",-0.2368562427156176},{"oneWarp",242.02884615384613},{"minW4",71.26835664335664},{"logTail",-67.99155011655009},{"KlogW",-0.10494973776223789},{"KlogTail",0.2523674242424241},{"Dunder128",18.069930069930138}};
+inline constexpr Term terms57[] = {{"one",95.7660974687557},{"KmaxSlog",0.05968273633621181},{"Dunder128",66.08618137354513},{"maxSlog",-3.1545182627188812},{"smallE32",-5.704191435677673},{"hidden",-51.266097468755696},{"highWarp32",2.3597879638936266},{"D_SspanRatio",-9.546775741937468e-06}};
+inline constexpr Term terms58[] = {{"one",101.24916695764138},{"activeSlog",11.178524285386354},{"EAbove256",0.09964874804083591},{"maxSlog",-7.146733115388053},{"Dunder128",56.643006980093645},{"suffixD",-0.057908012398349265},{"logWAbove4",-87.26412448596145},{"KmaxSlog",0.04615801503376822}};
+inline constexpr Term terms59[] = {{"one",214.7935997500128},{"sqrtE",3.480865349534953},{"KoverTail",1.4658322659144036},{"oneWarp",-77.46032446990478},{"KlogWAbove2",3.353654478588178},{"KsumInvD",-0.3054324623845037},{"minW8",-27.17123804861217},{"KlogDstride",0.28426563927479437}};
+inline constexpr Term terms60[] = {{"one",-356.1031386993024},{"sqrtE",19.84511633129359},{"EAbove256",1.0268412361323584},{"activeSlog",10.124999999999964},{"logWAbove2",36.14583333333327},{"smallE32",123.9945346748255},{"logE",51.99453467482565},{"KlogWAbove2",-0.17317708333333295}};
+inline constexpr Term terms61[] = {{"one",90.2043347321381},{"EAbove64",0.34802652095765424},{"EAbove8",-0.050610835811539426},{"Dunder128",9.78460384935088},{"KlogWAbove2",-0.148092604424161},{"KlogDstride2",0.08687112001964198},{"sqrtS",6.742567055989172},{"Kfp8",-0.3146854045003297}};
 inline constexpr Piece pieces[] = {
 {terms0,8},
 {terms1,8},
 {terms2,8},
-{terms3,4},
+{terms3,8},
 {terms4,4},
 {terms5,8},
 {terms6,8},
 {terms7,8},
-{terms8,1},
+{terms8,8},
 {terms9,8},
-{terms10,1},
+{terms10,8},
 {terms11,8},
-{terms12,8},
+{terms12,1},
 {terms13,8},
-{terms14,8},
-{terms15,8},
+{terms14,1},
+{terms15,1},
 {terms16,8},
 {terms17,8},
 {terms18,8},
-{terms19,1},
+{terms19,5},
 {terms20,8},
 {terms21,8},
-{terms22,1},
+{terms22,8},
 {terms23,1},
 {terms24,1},
-{terms25,1},
+{terms25,8},
 {terms26,8},
-{terms27,8},
+{terms27,1},
 {terms28,8},
-{terms29,8},
+{terms29,1},
 {terms30,8},
-{terms31,5},
+{terms31,8},
 {terms32,8},
 {terms33,8},
-{terms34,8},
+{terms34,1},
 {terms35,1},
-{terms36,1},
-{terms37,8},
-{terms38,8},
-{terms39,1},
+{terms36,8},
+{terms37,1},
+{terms38,1},
+{terms39,8},
 {terms40,8},
-{terms41,1},
-{terms42,8},
-{terms43,8},
-{terms44,8},
+{terms41,8},
+{terms42,1},
+{terms43,1},
+{terms44,1},
 {terms45,1},
 {terms46,1},
-{terms47,8},
+{terms47,1},
 {terms48,8},
-{terms49,1},
-{terms50,1},
+{terms49,8},
+{terms50,8},
 {terms51,8},
 {terms52,8},
 {terms53,8},
 {terms54,8},
 {terms55,8},
-{terms56,1},
+{terms56,8},
 {terms57,8},
 {terms58,8},
-{terms59,1},
+{terms59,8},
 {terms60,8},
-{terms61,1},
-{terms62,8},
-{terms63,1},
-{terms64,8},
-{terms65,1},
-{terms66,8},
-{terms67,1},
-{terms68,1},
-{terms69,8},
-{terms70,1},
-{terms71,1},
-{terms72,1},
-{terms73,1},
-{terms74,8},
-{terms75,1},
-{terms76,8},
-{terms77,1},
-{terms78,8},
-{terms79,1},
-{terms80,1},
-{terms81,8},
-{terms82,8},
-{terms83,1},
-{terms84,1},
-{terms85,1},
-{terms86,1},
-{terms87,8},
-{terms88,8},
-{terms89,8},
-{terms90,8},
-{terms91,8},
-{terms92,8},
-{terms93,8},
-{terms94,8},
-{terms95,8},
-{terms96,8},
-{terms97,8},
-{terms98,8},
-{terms99,8},
-{terms100,8},
+{terms61,8},
 };
 inline constexpr RouteColumn routeColumns[] = {
 {"width",false,0.},
@@ -229,140 +151,140 @@ inline constexpr PhysicalRoute simdRoutes[] = {
 {{2,0,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},2},
 {{2,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},3},
 {{8,0,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},4},
-{{8,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},5},
-{{1,0,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},6},
-{{1,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},3},
-{{4,0,1,4,1,1,0,0,0,0,0,0,1,1,0,0,1,0},7},
-{{4,0,0,4,1,1,0,0,0,0,0,0,1,1,0,0,1,1},8},
-{{4,0,1,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},9},
-{{4,0,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},10},
-{{2,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},11},
+{{8,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},2},
+{{1,0,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},3},
+{{1,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},2},
+{{4,0,1,4,1,1,0,0,0,0,0,0,1,1,0,0,1,0},4},
+{{4,0,0,4,1,1,0,0,0,0,0,0,1,1,0,0,1,1},4},
+{{4,0,1,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},5},
+{{4,0,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},6},
+{{2,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},7},
 {{2,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},0},
-{{8,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},12},
-{{8,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},13},
-{{1,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},14},
-{{1,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},15},
-{{4,0,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,1},16},
-{{2,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},17},
-{{8,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},18},
-{{1,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},19},
-{{8,0,1,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},20},
-{{8,0,0,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},18},
-{{4,0,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,1},21},
-{{2,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},22},
-{{8,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},18},
-{{1,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},23},
-{{2,0,1,2,2,1,0,0,0,0,0,0,1,1,1,0,1,0},24},
-{{2,0,0,2,2,1,0,0,0,0,0,0,1,1,1,0,1,1},25},
-{{4,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},26},
-{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,1},19},
-{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},27},
-{{4,0,0,1,1,0,0,0,1,0,0,0,1,1,0,0,1,1},26},
-{{4,0,1,1,2,1,0,0,0,0,0,0,1,1,0,0,0,0},28},
-{{4,0,1,1,2,1,1,0,0,0,0,0,0,0,0,0,1,0},16},
+{{8,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},8},
+{{8,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},9},
+{{1,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},10},
+{{1,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},11},
+{{4,0,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,1},6},
+{{2,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},0},
+{{8,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},9},
+{{1,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},12},
+{{8,0,1,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},4},
+{{8,0,0,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},9},
+{{4,0,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,1},13},
+{{2,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},2},
+{{8,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},9},
+{{1,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},12},
+{{2,0,1,2,2,1,0,0,0,0,0,0,1,1,1,0,1,0},14},
+{{2,0,0,2,2,1,0,0,0,0,0,0,1,1,1,0,1,1},15},
+{{4,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},16},
+{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,1},12},
+{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},17},
+{{4,0,0,1,1,0,0,0,1,0,0,0,1,1,0,0,1,1},16},
+{{4,0,1,1,2,1,0,0,0,0,0,0,1,1,0,0,0,0},16},
+{{4,0,1,1,2,1,1,0,0,0,0,0,0,0,0,0,1,0},6},
 {{4,0,0,1,2,1,1,0,0,0,0,0,0,0,0,0,1,0},0},
-{{2,0,1,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},29},
-{{2,0,0,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},30},
+{{2,0,1,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},5},
+{{2,0,0,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},18},
 };
 inline constexpr BaseRoute simdBase[] = {
-{4,true,false,16},
-{4,false,false,87},
-{2,true,false,88},
-{2,false,false,6},
-{8,true,false,89},
-{8,false,false,90},
-{1,true,false,14},
-{1,false,false,91},
-{4,true,true,16},
+{4,true,false,6},
+{4,false,false,48},
+{2,true,false,49},
+{2,false,false,3},
+{8,true,false,50},
+{8,false,false,51},
+{1,true,false,10},
+{1,false,false,52},
+{4,true,true,6},
 };
-inline constexpr unsigned simdFallback = 15;
+inline constexpr unsigned simdFallback = 11;
 inline constexpr bool simdPrefix = true;
 inline constexpr PhysicalRoute simtRoutes[] = {
-{{4,2,1,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},31},
-{{4,2,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},31},
-{{2,1,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},32},
-{{2,1,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},33},
-{{8,3,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},34},
-{{8,3,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},31},
-{{1,0,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},35},
-{{1,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},36},
-{{4,1,1,4,1,1,0,0,0,0,0,0,1,1,0,0,1,0},37},
-{{4,1,0,4,1,1,0,0,0,0,0,0,1,1,0,0,1,1},38},
-{{4,2,1,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},39},
-{{4,2,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},40},
-{{2,1,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},41},
-{{2,1,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},42},
-{{8,3,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},43},
-{{8,3,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},44},
-{{1,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},45},
-{{1,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},46},
-{{4,6,1,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},47},
-{{4,6,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,1},48},
-{{2,5,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},49},
-{{2,5,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},50},
-{{8,2,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},51},
-{{8,2,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},44},
-{{1,4,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},52},
-{{1,4,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},53},
-{{8,2,1,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},54},
-{{8,2,0,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},55},
-{{4,6,1,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},56},
-{{4,6,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,1},57},
-{{2,5,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},58},
-{{2,5,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},59},
-{{8,2,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},43},
-{{8,2,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},60},
-{{1,4,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},61},
-{{1,4,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},62},
-{{2,0,1,2,2,1,0,0,0,0,0,0,1,1,1,0,1,0},63},
-{{2,0,0,2,2,1,0,0,0,0,0,0,1,1,1,0,1,1},64},
-{{4,2,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},65},
-{{4,2,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,1},39},
-{{4,2,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},66},
-{{4,2,0,1,1,0,0,0,1,0,0,0,1,1,0,0,1,1},54},
-{{2,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},67},
-{{2,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},68},
-{{2,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},69},
-{{4,4,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},70},
-{{4,4,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},71},
-{{4,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},72},
-{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},73},
-{{8,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},74},
-{{8,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},75},
-{{1,0,1,1,1,0,0,0,0,0,1,0,1,1,1,0,1,0},76},
-{{1,0,0,1,1,0,0,0,0,0,1,0,1,1,1,0,1,0},77},
-{{1,0,1,1,1,0,0,0,0,0,0,1,1,1,1,0,1,0},77},
-{{1,0,0,1,1,0,0,0,0,0,0,1,1,1,1,0,1,0},77},
-{{4,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},49},
-{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},78},
-{{8,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},79},
-{{8,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},47},
-{{1,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},80},
-{{1,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},81},
-{{4,2,1,1,1,0,0,0,1,0,0,0,1,1,0,0,1,1},82},
-{{4,1,1,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},60},
-{{4,1,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,1},38},
-{{4,2,1,1,2,1,0,0,0,0,0,0,1,1,0,0,0,0},83},
-{{4,2,1,1,2,1,1,0,0,0,0,0,0,0,0,0,1,0},84},
-{{4,2,0,1,2,1,1,0,0,0,0,0,0,0,0,0,1,0},85},
-{{2,1,1,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},86},
-{{2,1,0,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},83},
+{{4,2,1,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},19},
+{{4,2,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},19},
+{{2,1,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},20},
+{{2,1,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},21},
+{{8,3,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},22},
+{{8,3,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},19},
+{{1,0,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},23},
+{{1,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},24},
+{{4,1,1,4,1,1,0,0,0,0,0,0,1,1,0,0,1,0},25},
+{{4,1,0,4,1,1,0,0,0,0,0,0,1,1,0,0,1,1},26},
+{{4,2,1,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},23},
+{{4,2,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},19},
+{{2,1,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},27},
+{{2,1,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},24},
+{{8,3,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},28},
+{{8,3,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},29},
+{{1,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},30},
+{{1,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},31},
+{{4,6,1,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},32},
+{{4,6,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,1},33},
+{{2,5,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},34},
+{{2,5,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},19},
+{{8,2,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},32},
+{{8,2,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},25},
+{{1,4,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},35},
+{{1,4,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},35},
+{{8,2,1,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},31},
+{{8,2,0,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},36},
+{{4,6,1,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},37},
+{{4,6,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,1},38},
+{{2,5,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},39},
+{{2,5,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},35},
+{{8,2,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},28},
+{{8,2,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},25},
+{{1,4,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},38},
+{{1,4,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},34},
+{{2,0,1,2,2,1,0,0,0,0,0,0,1,1,1,0,1,0},40},
+{{2,0,0,2,2,1,0,0,0,0,0,0,1,1,1,0,1,1},41},
+{{4,2,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},42},
+{{4,2,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,1},23},
+{{4,2,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},36},
+{{4,2,0,1,1,0,0,0,1,0,0,0,1,1,0,0,1,1},31},
+{{2,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},43},
+{{2,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},44},
+{{2,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},44},
+{{4,4,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},29},
+{{4,4,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},45},
+{{4,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},34},
+{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},45},
+{{8,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},28},
+{{8,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},32},
+{{1,0,1,1,1,0,0,0,0,0,1,0,1,1,1,0,1,0},30},
+{{1,0,0,1,1,0,0,0,0,0,1,0,1,1,1,0,1,0},46},
+{{1,0,1,1,1,0,0,0,0,0,0,1,1,1,1,0,1,0},46},
+{{1,0,0,1,1,0,0,0,0,0,0,1,1,1,1,0,1,0},46},
+{{4,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},25},
+{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},40},
+{{8,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},33},
+{{8,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},32},
+{{1,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},35},
+{{1,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},46},
+{{4,2,1,1,1,0,0,0,1,0,0,0,1,1,0,0,1,1},30},
+{{4,1,1,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},25},
+{{4,1,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,1},26},
+{{4,2,1,1,2,1,0,0,0,0,0,0,1,1,0,0,0,0},44},
+{{4,2,1,1,2,1,1,0,0,0,0,0,0,0,0,0,1,0},47},
+{{4,2,0,1,2,1,1,0,0,0,0,0,0,0,0,0,1,0},32},
+{{2,1,1,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},42},
+{{2,1,0,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},44},
 };
 inline constexpr BaseRoute simtBase[] = {
-{1,true,true,92},
-{1,false,true,93},
-{2,true,true,94},
-{2,false,true,95},
-{1,true,false,92},
-{1,false,false,93},
-{2,true,false,94},
-{2,false,false,95},
-{4,true,true,96},
-{4,true,false,96},
-{4,false,false,97},
-{4,false,true,97},
-{8,true,true,98},
-{8,false,true,99},
+{1,true,true,53},
+{1,false,true,54},
+{2,true,true,55},
+{2,false,true,56},
+{1,true,false,53},
+{1,false,false,54},
+{2,true,false,55},
+{2,false,false,56},
+{4,true,true,57},
+{4,true,false,57},
+{4,false,false,58},
+{4,false,true,58},
+{8,true,true,59},
+{8,false,true,60},
 };
-inline constexpr unsigned simtFallback = 100;
+inline constexpr unsigned simtFallback = 61;
 inline constexpr bool simtPrefix = false;

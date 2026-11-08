@@ -5,7 +5,7 @@ including storage width, static mask, axis structure and warp geometry. Each
 executed formula has at most eight terms. Coefficients come from TRAIN fits;
 there is no case-name, kernel-name or hidden tensor-content lookup. The frozen
 program and exact coefficients are checked in as readable C++ compiler data.
-The flat table contains 108 physical routes and 101 unique short formulas,
+The flat table contains 108 physical routes and 62 unique short formulas,
 including the TRAIN base formulas for unmatched domains. It replaces the nested
 conditional, scale and blend interpreter. Every selected path evaluates one
 linear formula with at most eight terms; the minimum prediction remains one tick.
@@ -18,8 +18,8 @@ rounds retain 3544 files and 850560 quartets. Nonpositive differential labels ar
 retained and diagnosed, not removed by prediction error. Discrete physical-route
 selection used the observed validation results, as explicitly permitted.
 
-The selected program's validation MAPE is **19.9012%** on 1187 positive inputs:
-SIMD **21.5790%** (472 inputs), SIMT **18.7937%** (715 inputs). The other 29
+The selected program's validation MAPE is **19.9795%** on 1187 positive inputs:
+SIMD **21.6531%** (472 inputs), SIMT **18.8747%** (715 inputs). The other 29
 validation inputs have nonpositive differential labels and are reported outside
 MAPE. This meets the requested overall 20% observed-validation threshold; it is
 **not an unseen-test result**. Groups, direction and repeat quality are reports.

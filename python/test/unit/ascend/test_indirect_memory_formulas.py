@@ -29,6 +29,23 @@ int main() {
   assert(!indirect_load_selected::value({negative, 1}, extreme));
   assert(!indirect_load_selected::value({cancellation, 2}, extreme));
   assert(indirect_load_selected::value({negative, 1}, {{"x", 1.}}) == 1.);
+  {
+    indirect_load_selected::Metadata m;
+    m.shape = m.upper = {16, 16};
+    m.lower = {0, 0};
+    m.dAxes = {false, true};
+    m.knownStrides = {256, 1};
+    m.mode = Mode::SIMT;
+    m.visibility = Visibility::Known;
+    m.elementBytes = 2;
+    m.baseWarps = m.factor = 1;
+    m.rectangularMaskVerified = m.stageOwnershipVerified = true;
+    m.matchedIncrementContractVerified = m.payloadTypeVerified = true;
+    m.logical.verified = m.logical.floating = true;
+    auto result = indirect_load_selected::tryPredict(m);
+    assert(result.eligible && result.ticks);
+    assert(std::abs(*result.ticks - 394.5833333333333) < 1e-8);
+  }
   for (auto mode : {Mode::SIMD, Mode::SIMT}) {
     for (bool masked : {false, true}) {
       indirect_load_selected::Metadata m;

@@ -61,6 +61,7 @@ inline constexpr Term terms58[] = {{"one",101.24916695764138},{"activeSlog",11.1
 inline constexpr Term terms59[] = {{"one",214.7935997500128},{"sqrtE",3.480865349534953},{"KoverTail",1.4658322659144036},{"oneWarp",-77.46032446990478},{"KlogWAbove2",3.353654478588178},{"KsumInvD",-0.3054324623845037},{"minW8",-27.17123804861217},{"KlogDstride",0.28426563927479437}};
 inline constexpr Term terms60[] = {{"one",-356.1031386993024},{"sqrtE",19.84511633129359},{"EAbove256",1.0268412361323584},{"activeSlog",10.124999999999964},{"logWAbove2",36.14583333333327},{"smallE32",123.9945346748255},{"logE",51.99453467482565},{"KlogWAbove2",-0.17317708333333295}};
 inline constexpr Term terms61[] = {{"one",90.2043347321381},{"EAbove64",0.34802652095765424},{"EAbove8",-0.050610835811539426},{"Dunder128",9.78460384935088},{"KlogWAbove2",-0.148092604424161},{"KlogDstride2",0.08687112001964198},{"sqrtS",6.742567055989172},{"Kfp8",-0.3146854045003297}};
+inline constexpr Term terms62[] = {{"activeRows",18.697916666666668},{"logDstride",69.75},{"KlogDstride",0.10026041666666691}};
 inline constexpr Piece pieces[] = {
 {terms0,8},
 {terms1,8},
@@ -124,6 +125,7 @@ inline constexpr Piece pieces[] = {
 {terms59,8},
 {terms60,8},
 {terms61,8},
+{terms62,3},
 };
 inline constexpr RouteColumn routeColumns[] = {
 {"width",false,0.},
@@ -200,6 +202,7 @@ inline constexpr BaseRoute simdBase[] = {
 inline constexpr unsigned simdFallback = 11;
 inline constexpr bool simdPrefix = true;
 inline constexpr PhysicalRoute simtRoutes[] = {
+{{2,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,1},62},
 {{4,2,1,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},19},
 {{4,2,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},19},
 {{2,1,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},20},

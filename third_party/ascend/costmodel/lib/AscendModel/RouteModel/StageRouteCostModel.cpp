@@ -3140,6 +3140,46 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
             totalResidual},
            {"grid_stride_composition_evidence", compositionEvidence}});
       plan.totalCycles += totalResidual;
+      // Inclusion-exclusion residuals depend on their component basis.
+      // Rebase only the factor-one SIMT contract with a single replaced
+      // indirect component; retain the generic target and expose the offset.
+      if (plan.candidate == StageKernelRouteKind::AllSIMT && factor == 1) {
+        const StageImplementationCost *replacement = nullptr;
+        unsigned replacements = 0;
+        for (size_t index = 0; index < costTable.stages.size(); ++index) {
+          if (!costTable.stages[index].features.insideGridStrideLoopBody)
+            continue;
+          const auto *selected = findImplementationCost(
+              costTable.stages[index], plan.implementations[index]);
+          if (selected && selected->ordinaryLoadCompositionReference) {
+            replacement = selected;
+            ++replacements;
+          }
+        }
+        if (replacements == 1 && replacement &&
+            !plan.diagnostic<bool>(
+                "grid_stride_first_indirect_service_owned_by_boundary")) {
+          const auto &reference =
+              *replacement->ordinaryLoadCompositionReference;
+          if (reference.gridStrideStartup > 0.0 &&
+              reference.indirectLoadGroup > 0.0) {
+            const double oldStartup =
+                plan.diagnostic<double>("grid_stride_startup_system_cycles");
+            const double rebase =
+                static_cast<double>(programsPerSchedulingSlot) *
+                    (replacement->ordinaryLoadCompositionReferenceCycles -
+                     replacement->totalCycles) +
+                std::max(oldStartup, reference.gridStrideStartup) - oldStartup -
+                reference.indirectLoadGroup;
+            plan.totalCycles += rebase;
+            setDiagnostics(
+                plan,
+                {{"ordinary_load_composition_basis_rebased", true},
+                 {"ordinary_load_composition_basis_adjustment_system_cycles",
+                  rebase}});
+          }
+        }
+      }
     }
   }
   if (plan.candidate == StageKernelRouteKind::AllSIMT ||

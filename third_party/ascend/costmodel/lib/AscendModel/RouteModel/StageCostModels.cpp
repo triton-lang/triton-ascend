@@ -4540,6 +4540,26 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
                                    : "frozen_round4_matched_target_increment_"
                                      "plus_original_auxiliary";
       }
+      // Composition residuals were trained against the original components.
+      // Retain that basis for an exact residual rebase, without changing the
+      // independently trained target increment or fitting kernel labels.
+      if (cost.ordinaryLoadSelectedUsed &&
+          stage.features.insideGridStrideLoopBody &&
+          implementation.mode == StageMode::SIMT &&
+          implementation.superblockFactor == 1) {
+        auto referenceFit = IndirectGatherMemoryCostModel().cost(
+            executionStage, profile, implementation);
+        auto reference =
+            mapWorkload(executionStage, modeProfile, implementation.mode, 1,
+                        !implementation.localScope, std::nullopt, referenceFit);
+        if (reference && !referenceFit.densityRange) {
+          cost.ordinaryLoadCompositionReference = *reference;
+          cost.ordinaryLoadCompositionReferenceCycles = applySuperBlock(
+              executionStage, *reference, implementation, profile,
+              estimateStage(executionStage, profile, implementation.mode,
+                            *reference));
+        }
+      }
       if (implementation.aivSubblocks > 1) {
         cost.cvPartitionIdealTotalCycles = cost.totalCycles;
         cost.cvPartitionPayloadEfficiency =

@@ -578,6 +578,8 @@ struct StageImplementationCost {
   // resource_system_cycles intentionally describes auxiliary work only.
   bool ordinaryLoadSelectedUsed = false;
   double ordinaryLoadTargetIncrementSystemCycles = 0.0;
+  std::optional<StageResourceCycles> ordinaryLoadCompositionReference;
+  double ordinaryLoadCompositionReferenceCycles = 0.0;
   std::string ordinaryLoadCandidateReason;
   std::string ordinaryLoadLeaf;
   bool ordinaryStoreRound4CandidateUsed = false;

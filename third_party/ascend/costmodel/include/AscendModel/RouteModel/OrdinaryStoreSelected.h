@@ -112,12 +112,13 @@ features(const Metadata &m, const std::vector<int64_t> *runtimeCoefficients,
       {"KsuffixLog", K * std::log2(double(std::max<int64_t>(suffixD, 1)))},
       {"KsmallD", double(K * smallD)}};
   x->insert(additions.begin(), additions.end());
-  for (const char *name : selectedFeatureNames) {
-    const auto it = x->find(name);
-    if (it == x->end() || !std::isfinite(it->second)) {
-      reason = "complete_88_feature_bank_missing_or_nonfinite";
-      return std::nullopt;
-    }
+  // Construction has a fixed 88-key schema; validate each constructed value.
+  if (x->size() != 88 ||
+      std::any_of(x->begin(), x->end(), [](const auto &item) {
+        return !std::isfinite(item.second);
+      })) {
+    reason = "complete_88_feature_bank_missing_or_nonfinite";
+    return std::nullopt;
   }
   return x;
 }

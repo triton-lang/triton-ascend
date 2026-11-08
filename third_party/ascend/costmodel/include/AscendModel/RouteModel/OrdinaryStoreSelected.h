@@ -52,23 +52,6 @@ features(const Metadata &m, const std::vector<int64_t> *runtimeCoefficients,
     suffixD *= m.upper[i] - m.lower[i];
     fullSuffix *= m.shape[i];
   }
-  // Count logical 32-element chunks, retaining the E<32 final-chunk convention.
-  int64_t activeLogical32 = 0;
-  for (int64_t start = 0; start < E; start += 32) {
-    bool any = false;
-    for (int64_t index = start; index < std::min<int64_t>(start + 32, E);
-         ++index) {
-      int64_t suffix = E;
-      bool alive = true;
-      for (size_t i = 0; i < m.shape.size(); ++i) {
-        suffix /= m.shape[i];
-        const auto q = (index / suffix) % m.shape[i];
-        alive &= m.lower[i] <= q && q < m.upper[i];
-      }
-      any |= alive;
-    }
-    activeLogical32 += any;
-  }
   const double lw = std::log2(double(W)), ld = x->at("logDstride");
   const double activeS = x->at("activeS"), activeD = x->at("activeD");
   const int64_t work = (E + 31) / 32;
@@ -88,7 +71,6 @@ features(const Metadata &m, const std::vector<int64_t> *runtimeCoefficients,
       {"tailMasked",
        m.upper.back() - m.lower.back() != m.shape.back() ? 1.0 : 0.0},
       {"KnD", K * x->at("nD")},
-      {"activeLogical32", double(activeLogical32)},
       {"EminusK", double(E - K)},
       {"KlogRuns", K * std::log2(std::max(x->at("activeRuns"), 1.0))},
       {"logW", lw},

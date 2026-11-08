@@ -163,7 +163,7 @@ features(const Metadata &m, const std::vector<int64_t> *runtimeCoefficients,
   for (int64_t i = 0; i < lastS; ++i)
     leading *= active[i];
   std::vector<bool> logical(E);
-  int64_t runs = 0, partial32 = 0;
+  int64_t runs = 0, partial32 = 0, activeLogical32 = 0;
   for (int64_t index = 0; index < E; ++index) {
     int64_t suffix = E;
     bool alive = true;
@@ -182,6 +182,7 @@ features(const Metadata &m, const std::vector<int64_t> *runtimeCoefficients,
       all &= logical[i];
     }
     partial32 += any && !all;
+    activeLogical32 += any;
   }
   double ratio = 0, under128 = 0;
   if (co) {
@@ -234,6 +235,7 @@ features(const Metadata &m, const std::vector<int64_t> *runtimeCoefficients,
       {"KoverSqrtS", K / std::sqrt(double(activeS))},
       {"activeRuns", double(runs)},
       {"partialLogical32", double(partial32)},
+      {"activeLogical32", double(activeLogical32)},
       {"logE", std::log2(double(E))},
       {"sqrtS", std::sqrt(double(activeS))},
       {"sqrtE", std::sqrt(double(E))},

@@ -17,8 +17,18 @@ def test_native_formula_guards(tmp_path):
         r'''
 #include "OrdinaryLoadSelected.h"
 #include <cassert>
+#include <limits>
 using namespace indirect_store_selected;
 int main() {
+  const double large = std::numeric_limits<double>::max();
+  const Features extreme{{"x", large}};
+  const Term positive[] = {{"x", 2.}};
+  const Term negative[] = {{"x", -2.}};
+  const Term cancellation[] = {{"x", 2.}, {"x", -2.}};
+  assert(!indirect_load_selected::value({positive, 1}, extreme));
+  assert(!indirect_load_selected::value({negative, 1}, extreme));
+  assert(!indirect_load_selected::value({cancellation, 2}, extreme));
+  assert(indirect_load_selected::value({negative, 1}, {{"x", 1.}}) == 1.);
   for (auto mode : {Mode::SIMD, Mode::SIMT}) {
     for (bool masked : {false, true}) {
       indirect_load_selected::Metadata m;

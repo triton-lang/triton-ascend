@@ -68,8 +68,9 @@ inline std::optional<double> value(const Piece &p, const Features &x) {
       return std::nullopt;
     result += f->second * p.terms[i].coefficient;
   }
-  result = std::max(1., result);
-  return std::isfinite(result) ? std::optional<double>(result) : std::nullopt;
+  if (!std::isfinite(result))
+    return std::nullopt;
+  return std::max(1., result);
 }
 inline Estimate
 tryPredict(const Metadata &m,

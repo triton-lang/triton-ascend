@@ -51,11 +51,32 @@ inline std::optional<int64_t> constant(Value value, unsigned depth = 0) {
 template <typename AxisFacts, typename Analyze>
 std::optional<SmallVector<AxisFacts>>
 propagateAxisShape(Value value, SmallVector<AxisFacts> result, AxisFacts zero,
-                   Analyze analyze) {
+                   AxisFacts range, AxisFacts loaded, Analyze analyze) {
   Operation *op = value.getDefiningOp();
-  if (!op || op->getNumOperands() != 1)
+  if (!op)
     return std::nullopt;
   const auto name = op->getName().getStringRef();
+  if (constant(value) ||
+      (name == "tt.splat" && op->getNumOperands() == 1 &&
+       !isa<RankedTensorType>(op->getOperand(0).getType()))) {
+    std::fill(result.begin(), result.end(), zero);
+    return result;
+  }
+  if (name == "tt.make_range" && result.size() == 1) {
+    result[0] = range;
+    return result;
+  }
+  if (name == "tt.load") {
+    auto type = dyn_cast<RankedTensorType>(value.getType());
+    // Both proofs admit only separable i32 indices, with one varying axis.
+    if (type && type.getElementType().isInteger(32) &&
+        llvm::count_if(type.getShape(), [](int64_t n) { return n > 1; }) == 1)
+      for (size_t i = 0; i < result.size(); ++i)
+        result[i] = type.getDimSize(i) > 1 ? loaded : zero;
+    return result;
+  }
+  if (op->getNumOperands() != 1)
+    return std::nullopt;
   if (name != "tt.expand_dims" && name != "tt.broadcast" &&
       name != "arith.extsi")
     return std::nullopt;
@@ -96,42 +117,9 @@ inline SmallVector<Axis> axesImpl(Value value, unsigned depth,
     return result;
   const auto name = op->getName().getStringRef();
   const size_t rank = result.size();
-  if (name == "tt.splat" && op->getNumOperands() == 1 &&
-      !isa<RankedTensorType>(op->getOperand(0).getType())) {
-    // A scalar pointer/program offset is uniform. It never determines an axis.
-    for (auto &a : result)
-      a.valid = true;
-    return result;
-  }
-  if (constant(value)) {
-    for (auto &a : result)
-      a.valid = true;
-    return result;
-  }
-  if (name == "tt.make_range" && rank == 1) {
-    result[0] = Axis{1, 0, {}, true};
-    return result;
-  }
-  if (name == "tt.load") {
-    auto type = dyn_cast<RankedTensorType>(value.getType());
-    // Only integer one-dimensional/separable indices have the measured D
-    // contract. Arbitrary multi-axis loaded tensors are not separable geometry.
-    if (!type || !type.getElementType().isInteger(32) ||
-        llvm::count_if(type.getShape(), [](int64_t n) { return n > 1; }) != 1)
-      return result;
-    for (size_t i = 0; i < rank; ++i) {
-      result[i] = Axis{};
-      if (type.getDimSize(i) > 1) {
-        result[i].loaded = value;
-        result[i].loadedScale = 1;
-      }
-    }
-    return result;
-  }
-  if (auto shaped =
-          propagateAxisShape(value, result, Axis{}, [&](Value source) {
-            return axesImpl(source, depth + 1, remaining);
-          }))
+  if (auto shaped = propagateAxisShape(
+          value, result, Axis{}, Axis{1, 0, {}, true}, Axis{0, 1, value, true},
+          [&](Value source) { return axesImpl(source, depth + 1, remaining); }))
     return *shaped;
   if (op->getNumOperands() != 2 ||
       (name != "tt.addptr" && name != "arith.addi" && name != "arith.subi" &&
@@ -394,13 +382,13 @@ inline const char *rectangleMask(Value mask, RankedTensorType tensor,
     if (!values || values->shape != SmallVector<int64_t>(tensor.getShape()) ||
         values->values.size() != static_cast<size_t>(tensor.getNumElements()))
       return staticFailure;
-    bool any = false;
+    int64_t activeCount = 0;
     std::fill(m.lower.begin(), m.lower.end(),
               std::numeric_limits<int64_t>::max());
     std::fill(m.upper.begin(), m.upper.end(), 0);
     for (int64_t k = 0; k < tensor.getNumElements(); ++k)
       if (values->values[k]) {
-        any = true;
+        ++activeCount;
         int64_t flat = k;
         for (size_t i = m.shape.size(); i-- > 0;) {
           const auto coordinate = flat % m.shape[i];
@@ -409,22 +397,18 @@ inline const char *rectangleMask(Value mask, RankedTensorType tensor,
           m.upper[i] = std::max(m.upper[i], coordinate + 1);
         }
       }
-    if (!any) { // K0: do not use invalid rectangle extrema.
+    if (!activeCount) { // K0: do not use invalid rectangle extrema.
       m.lower.assign(m.shape.size(), 0);
       m.upper = m.shape;
       m.upper.back() = 0;
     }
-    for (int64_t k = 0; k < tensor.getNumElements(); ++k) {
-      int64_t flat = k;
-      bool active = true;
-      for (size_t i = m.shape.size(); i-- > 0;) {
-        const auto coordinate = flat % m.shape[i];
-        flat /= m.shape[i];
-        active &= m.lower[i] <= coordinate && coordinate < m.upper[i];
-      }
-      if (active != bool(values->values[k]))
-        return rectangleFailure;
-    }
+    // Every active point lies in these tight bounds. Equal cardinality proves
+    // that the bounding rectangle has no holes, without a second tensor scan.
+    int64_t volume = 1;
+    for (size_t i = 0; i < m.shape.size(); ++i)
+      volume *= m.upper[i] - m.lower[i];
+    if (volume != activeCount)
+      return rectangleFailure;
   }
   m.rectangularMaskVerified = true;
   return nullptr;

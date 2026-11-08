@@ -122,37 +122,14 @@ inline SmallVector<VisibilityAxis> visibilityAxesImpl(Value value,
     return result;
   const auto name = op->getName().getStringRef();
   const size_t rank = result.size();
-  auto zero = [&]() {
-    for (auto &a : result)
-      a.valid = true;
-    return result;
-  };
-  if (constant(value) || (name == "tt.splat" && op->getNumOperands() == 1 &&
-                          !isa<RankedTensorType>(op->getOperand(0).getType())))
-    return zero();
-  if (name == "tt.make_range" && rank == 1) {
-    result[0].valid = true;
-    result[0].coordinate = true;
-    return result;
-  }
-  if (name == "tt.load") {
-    auto type = dyn_cast<RankedTensorType>(value.getType());
-    if (!type || !type.getElementType().isInteger(32) ||
-        llvm::count_if(type.getShape(), [](int64_t n) { return n > 1; }) != 1)
-      return result;
-    for (size_t i = 0; i < rank; ++i) {
-      result[i].valid = true;
-      if (type.getDimSize(i) > 1) {
-        result[i].coordinate = true;
-        result[i].loadedIndex = value;
-      }
-    }
-    return result;
-  }
-  VisibilityAxis zeroAxis;
-  zeroAxis.valid = true;
-  if (auto shaped =
-          propagateAxisShape(value, result, zeroAxis, [&](Value source) {
+  VisibilityAxis zero, range, loaded;
+  zero.valid = true;
+  range = zero;
+  range.coordinate = true;
+  loaded = range;
+  loaded.loadedIndex = value;
+  if (auto shaped = propagateAxisShape(
+          value, result, zero, range, loaded, [&](Value source) {
             return visibilityAxesImpl(source, entry, depth + 1, remaining);
           }))
     return *shaped;

@@ -16,10 +16,17 @@ inline constexpr const char *simdSourceSha256 =
     "529a0219c8c4241e1f9565888132ef2cc0a82de806c2580a7d7f301612e4fc65";
 inline constexpr const char *simtSourceSha256 =
     "0e66084dd52a8f272c167fdbd6a613646e30206d425739a513064a414b6c096c";
-enum class Instruction { Linear, Exp, LE, EQ, Scale, Blend, Constant };
+enum class Instruction { Linear, Exp, LE, EQ, Scale, Blend };
+struct Operand {
+  int index;
+  double constant;
+  bool isLiteral;
+  static constexpr Operand node(int index) { return {index, 0., false}; }
+  static constexpr Operand literal(double value) { return {-1, value, true}; }
+};
 struct ProgramNode {
   Instruction kind;
-  int a, b;
+  Operand a, b;
   const char *feature;
   double value;
   const Term *terms;
@@ -34,10 +41,10 @@ struct RouteColumn {
 };
 struct PhysicalRoute {
   std::array<int64_t, 18> key;
-  int root;
+  Operand root;
 };
 #include "OrdinaryLoadProgram.inc"
-inline std::optional<int> physicalRoot(Mode mode, const Features &x) {
+inline std::optional<Operand> physicalRoot(Mode mode, const Features &x) {
   std::array<int64_t, 18> key;
   for (size_t i = 0; i < key.size(); ++i) {
     const auto &column = routeColumns[i];
@@ -86,12 +93,18 @@ inline std::optional<double> value(const Piece &p, const Features &x) {
   result = std::max(p.floor, p.scale * result + p.shift);
   return std::isfinite(result) ? std::optional<double>(result) : std::nullopt;
 }
-inline std::optional<Piece> expression(int index, const Features &x,
+inline std::optional<Piece> expression(Operand operand, const Features &x,
                                        unsigned depth = 0) {
   if (depth > 128)
     return std::nullopt;
   unsigned steps = 0;
   for (;;) {
+    if (operand.isLiteral) {
+      if (!std::isfinite(operand.constant))
+        return std::nullopt;
+      return Piece{nullptr, 0, 1., 0., 1., false, true, operand.constant};
+    }
+    const int index = operand.index;
     if (index < 0 || size_t(index) >= std::size(programNodes) ||
         ++steps > std::size(programNodes))
       return std::nullopt;
@@ -103,11 +116,9 @@ inline std::optional<Piece> expression(int index, const Features &x,
       bool condition = n.kind == Instruction::LE
                            ? f->second <= n.value
                            : int64_t(f->second) == n.value;
-      index = condition ? n.a : n.b;
+      operand = condition ? n.a : n.b;
       continue;
     }
-    if (n.kind == Instruction::Constant)
-      return Piece{nullptr, 0, 1., 0., 1., false, true, n.value};
     if (n.kind == Instruction::Linear || n.kind == Instruction::Exp)
       return Piece{n.terms, n.count, 1., 0., 1., n.kind == Instruction::Exp};
     auto first = expression(n.a, x, depth + 1);

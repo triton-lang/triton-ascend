@@ -2,6 +2,7 @@
 #ifndef ORDINARY_LOAD_SELECTED_H
 #define ORDINARY_LOAD_SELECTED_H
 #include "OrdinaryLoadVisibleFeatures.h"
+#include <array>
 namespace indirect_load_selected {
 using Estimate = indirect_store_selected::Estimate;
 using Mode = indirect_store_selected::Mode;
@@ -24,7 +25,41 @@ struct ProgramNode {
   const Term *terms;
   unsigned count;
 };
+
+// Ordered physical-feature columns, followed by one explicit key per route.
+struct RouteColumn {
+  const char *feature;
+  bool thresholded;
+  double threshold;
+};
+struct PhysicalRoute {
+  std::array<int64_t, 18> key;
+  int root;
+};
 #include "OrdinaryLoadProgram.inc"
+inline std::optional<int> physicalRoot(Mode mode, const Features &x) {
+  std::array<int64_t, 18> key;
+  for (size_t i = 0; i < key.size(); ++i) {
+    const auto &column = routeColumns[i];
+    auto f = x.find(column.feature);
+    if (f == x.end() || !std::isfinite(f->second))
+      return std::nullopt;
+    // Integral columns are bounded by the metadata contract. Keep conversion
+    // defined even for malformed direct callers of this internal helper.
+    if (!column.thresholded && (f->second < -0x1p63 || f->second >= 0x1p63))
+      return std::nullopt;
+    key[i] =
+        column.thresholded ? f->second > column.threshold : int64_t(f->second);
+  }
+  const auto *routes = mode == Mode::SIMD ? simdRoutes : simtRoutes;
+  const auto count =
+      mode == Mode::SIMD ? std::size(simdRoutes) : std::size(simtRoutes);
+  for (size_t i = 0; i < count; ++i)
+    if (routes[i].key == key)
+      return routes[i].root;
+  return mode == Mode::SIMD ? simdRoot : simtRoot;
+}
+
 struct Piece {
   const Term *terms = nullptr;
   unsigned count = 0;
@@ -138,7 +173,10 @@ tryPredict(const Metadata &m,
     e.reason = "semantic_zero";
     return e;
   }
-  auto p = expression(m.mode == Mode::SIMD ? simdRoot : simtRoot, *x);
+  auto root = physicalRoot(m.mode, *x);
+  if (!root)
+    return fail("Load_physical_route_missing_feature");
+  auto p = expression(*root, *x);
   if (!p)
     return fail("Load_physical_program_contract_invalid");
   auto ticks = value(*p, *x);

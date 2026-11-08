@@ -15,7 +15,7 @@ inline constexpr const char *simdSourceSha256 =
     "529a0219c8c4241e1f9565888132ef2cc0a82de806c2580a7d7f301612e4fc65";
 inline constexpr const char *simtSourceSha256 =
     "0e66084dd52a8f272c167fdbd6a613646e30206d425739a513064a414b6c096c";
-enum class Instruction { Linear, Exp, LE, EQ, Scale, Blend };
+enum class Instruction { Linear, Exp, LE, EQ, Scale, Blend, Constant };
 struct ProgramNode {
   Instruction kind;
   int a, b;
@@ -30,16 +30,21 @@ struct Piece {
   unsigned count = 0;
   double scale = 1., shift = 0., floor = 1.;
   bool exponential = false;
+  bool literal = false;
+  double constant = 0.;
 };
 inline std::optional<double> value(const Piece &p, const Features &x) {
-  if (!p.terms || !p.count || p.count > 8)
-    return std::nullopt;
-  double result = 0.;
-  for (unsigned i = 0; i < p.count; ++i) {
-    auto f = x.find(p.terms[i].name);
-    if (f == x.end() || !std::isfinite(f->second))
+  double result = p.constant;
+  if (!p.literal) {
+    if (!p.terms || !p.count || p.count > 8)
       return std::nullopt;
-    result += f->second * p.terms[i].coefficient;
+    result = 0.;
+    for (unsigned i = 0; i < p.count; ++i) {
+      auto f = x.find(p.terms[i].name);
+      if (f == x.end() || !std::isfinite(f->second))
+        return std::nullopt;
+      result += f->second * p.terms[i].coefficient;
+    }
   }
   if (p.exponential)
     result = std::exp(std::max(-20., std::min(30., result)));
@@ -66,6 +71,8 @@ inline std::optional<Piece> expression(int index, const Features &x,
       index = condition ? n.a : n.b;
       continue;
     }
+    if (n.kind == Instruction::Constant)
+      return Piece{nullptr, 0, 1., 0., 1., false, true, n.value};
     if (n.kind == Instruction::Linear || n.kind == Instruction::Exp)
       return Piece{n.terms, n.count, 1., 0., 1., n.kind == Instruction::Exp};
     auto first = expression(n.a, x, depth + 1);
@@ -82,10 +89,11 @@ inline std::optional<Piece> expression(int index, const Features &x,
     if (n.kind != Instruction::Blend || n.value < 0. || n.value > 1.)
       return std::nullopt;
     auto second = expression(n.b, x, depth + 1);
-    if (!second || second->exponential || second->count != 1 ||
-        std::string(second->terms[0].name) != "one")
+    if (!second || second->exponential ||
+        (!second->literal &&
+         (second->count != 1 || std::string(second->terms[0].name) != "one")))
       return std::nullopt;
-    bool hasConstant = false;
+    bool hasConstant = first->literal;
     for (unsigned i = 0; i < first->count; ++i)
       hasConstant |= std::string(first->terms[i].name) == "one";
     if (!hasConstant)

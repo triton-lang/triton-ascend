@@ -1,36 +1,6 @@
 // Exact elimination using validated width, mask and visibility contracts.
 inline constexpr Term programTerms0[] = {{"one",333.4855790708652},{"KlogStride",1.5417390558430297},{"hidden",971.4025983713918},{"D_SspanRatio",-0.0003847089876239628},{"EAbove64",6.547428574700694},{"prefixMasked",-273.2062316626377},{"KunitS",-0.6757759311336893},{"KoverSqrtActiveD",5.428863909858927}};
 inline constexpr Term programTerms1[] = {{"one",-662.977949706186},{"KlogStride",2.019843025583572},{"hidden",1206.389767026425},{"minSbytes",-0.003036710955744994},{"EAbove64",2.65299981635888},{"nS",194.67454372196593},{"activeRuns",14.015776450046419},{"logTail",172.42914245247462}};
-inline constexpr Term programTerms2[] = {{"one",257.875}};
-inline constexpr Term programTerms3[] = {{"one",566.5}};
-inline constexpr Term programTerms4[] = {{"one",766.125}};
-inline constexpr Term programTerms6[] = {{"one",384.625}};
-inline constexpr Term programTerms9[] = {{"one",1176.125}};
-inline constexpr Term programTerms10[] = {{"one",1410.125}};
-inline constexpr Term programTerms12[] = {{"one",724.25}};
-inline constexpr Term programTerms13[] = {{"one",1435.75}};
-inline constexpr Term programTerms16[] = {{"one",733.75}};
-inline constexpr Term programTerms19[] = {{"one",1100.125}};
-inline constexpr Term programTerms20[] = {{"one",1245.375}};
-inline constexpr Term programTerms22[] = {{"one",1740.0}};
-inline constexpr Term programTerms24[] = {{"one",1466.875}};
-inline constexpr Term programTerms25[] = {{"one",2583.75}};
-inline constexpr Term programTerms27[] = {{"one",2423.125}};
-inline constexpr Term programTerms28[] = {{"one",4479.625}};
-inline constexpr Term programTerms33[] = {{"one",3033.25}};
-inline constexpr Term programTerms34[] = {{"one",2024.375}};
-inline constexpr Term programTerms35[] = {{"one",2365.75}};
-inline constexpr Term programTerms37[] = {{"one",1305.75}};
-inline constexpr Term programTerms40[] = {{"one",3080.625}};
-inline constexpr Term programTerms41[] = {{"one",4726.625}};
-inline constexpr Term programTerms42[] = {{"one",5746.375}};
-inline constexpr Term programTerms44[] = {{"one",3296.75}};
-inline constexpr Term programTerms45[] = {{"one",4135.875}};
-inline constexpr Term programTerms50[] = {{"one",4665.5}};
-inline constexpr Term programTerms51[] = {{"one",6035.75}};
-inline constexpr Term programTerms52[] = {{"one",7302.375}};
-inline constexpr Term programTerms55[] = {{"one",9530.625}};
-inline constexpr Term programTerms57[] = {{"one",18673.375}};
 inline constexpr Term programTerms72[] = {{"one",-1410.0775748437177},{"K",0.0},{"sqrtK",301.80304855422133},{"activeRows",58.46917452964485},{"groups32",-91.96181671947224},{"partialLogical32",70.47488533139209},{"activeDlog",-32.10490826511393},{"KlogW",0.0}};
 inline constexpr Term programTerms84[] = {{"one",142.8864395753216},{"KlogStride",0.9156733295987896},{"activeDlog",75.02907375480699},{"EAbove64",1.2815083440480703},{"D_axis2_extent",40.38226843870176},{"D_axis1_extent",0.0},{"EAbove32",5.090736402452124},{"KAbove16",6.4506501190312076}};
 inline constexpr Term programTerms95[] = {{"one",210.47222334923492},{"KlogStride",1.6082306309668142},{"K_hidden",24.672773241984785},{"D_SspanRatio",-0.00045421624551127506},{"EAbove64",3.3888011064234993},{"prefixMasked",-152.71154641532448},{"KunitS",-0.7426608666234831},{"K_tailMasked",8.416588401992453}};
@@ -40,36 +10,8 @@ inline constexpr Term programTerms109[] = {{"one",-58.71232247941572},{"KlogStri
 inline constexpr Term programTerms116[] = {{"one",242.29971783773306},{"KlogStride",1.6075512736019675},{"K_hidden",25.97703902916947},{"D_SspanRatio",-0.000458591398694457},{"EAbove64",3.741337010199507},{"prefixMasked",-184.550191183443},{"KunitS",-0.7576359135618075},{"K_tailMasked",7.5482143677304245}};
 inline constexpr Term programTerms117[] = {{"one",221.01000515750894},{"KlogStride",1.6221361445549818},{"K_hidden",19.54883480143793},{"D_SspanRatio",-0.00043056024129378944},{"EAbove64",3.679928363954893},{"prefixMasked",-180.30512839844118},{"KunitS",-0.7637856479871459},{"K_tailMasked",8.784907540497159}};
 inline constexpr Term programTerms118[] = {{"one",440.37539742294786},{"KlogStride",1.4849253122723653},{"K_hidden",24.03763440681391},{"D_SspanRatio",0.012191748608752766},{"EAbove64",3.312481562181901},{"prefixMasked",-180.30512839844118},{"KunitS",-0.7637856479871459},{"K_tailMasked",7.621028402275657}};
-inline constexpr Term programTerms121[] = {{"one",572.625}};
-inline constexpr Term programTerms122[] = {{"one",1155.875}};
-inline constexpr Term programTerms124[] = {{"one",1139.25}};
-inline constexpr Term programTerms125[] = {{"one",1522.25}};
 inline constexpr Term programTerms141[] = {{"one",125.58101173020522},{"E",20.12915468635447},{"KlogDstride2",-0.2718643680695564},{"KlogTail",0.0},{"EAbove128",0.0},{"KoverTail",0.0},{"leading",-37.835043988269796},{"lastSSize",-23.53977272727272}};
 inline constexpr Term programTerms142[] = {{"one",31.54099754166069},{"E",16.646533035491636},{"KlogDstride",0.0},{"D_axis1_extent",6.365200058049049},{"S_axis2_stride_log2",33.99005727308146},{"KlogTail",0.0},{"KoverTail",-8.444441703288},{"leading",9.714821348786025}};
-inline constexpr Term programTerms143[] = {{"one",697.75}};
-inline constexpr Term programTerms144[] = {{"one",776.125}};
-inline constexpr Term programTerms146[] = {{"one",1118.625}};
-inline constexpr Term programTerms151[] = {{"one",1274.875}};
-inline constexpr Term programTerms152[] = {{"one",1110.0}};
-inline constexpr Term programTerms154[] = {{"one",1391.0}};
-inline constexpr Term programTerms155[] = {{"one",1445.875}};
-inline constexpr Term programTerms157[] = {{"one",1493.625}};
-inline constexpr Term programTerms158[] = {{"one",2043.625}};
-inline constexpr Term programTerms166[] = {{"one",1107.625}};
-inline constexpr Term programTerms167[] = {{"one",1008.625}};
-inline constexpr Term programTerms171[] = {{"one",2806.0}};
-inline constexpr Term programTerms172[] = {{"one",2721.375}};
-inline constexpr Term programTerms173[] = {{"one",1591.875}};
-inline constexpr Term programTerms176[] = {{"one",2552.625}};
-inline constexpr Term programTerms177[] = {{"one",2285.0}};
-inline constexpr Term programTerms183[] = {{"one",3390.375}};
-inline constexpr Term programTerms184[] = {{"one",3088.375}};
-inline constexpr Term programTerms186[] = {{"one",2450.0}};
-inline constexpr Term programTerms189[] = {{"one",3417.875}};
-inline constexpr Term programTerms190[] = {{"one",5816.375}};
-inline constexpr Term programTerms191[] = {{"one",4216.75}};
-inline constexpr Term programTerms198[] = {{"one",10391.125}};
-inline constexpr Term programTerms199[] = {{"one",9293.875}};
 inline constexpr Term programTerms206[] = {{"one",6535.384391047309},{"KlogStride",2.023891459995036},{"hidden",0.0},{"K",0.0},{"sqrtD",-1831.2638715490089},{"logDstride",0.0},{"KlogTail",5.5162529981324635},{"activeRows",29.976106143367304}};
 inline constexpr Term programTerms216[] = {{"one",820.375},{"D_axis2_extent",46.26562499999999},{"D_axis3_inner_payload_bytes",-136.25000000000034},{"D_axis0_inner_payload_bytes",4.007812500000009},{"Kfp8",-1.3662109374999993},{"payload_integer",-39.74999999999998},{"D_axis1_inner_payload_bytes",-37.062500000000064},{"S_axis1_extent",0.0}};
 inline constexpr Term programTerms217[] = {{"one",18.784225708088314},{"Kfp8",-2.744140625000005},{"KlogStride",3.247797036841853},{"KoverSqrtActiveD",4.1710456741878765},{"KmaxSlog",-3.0529892805944785},{"S_axis0_stride_log2",46.94023206905736},{"minSbytes",-0.0063705574987792885},{"logDstride",48.73580921108877}};
@@ -91,10 +33,6 @@ inline constexpr Term programTerms243[] = {{"one",5921.267133815433},{"D_axis1_i
 inline constexpr Term programTerms247[] = {{"one",6184.985012571842},{"KunitS",-3.1317020089975727},{"D_axis4_extent",-227.2808122306034},{"fullSuffix",58.6234422705639},{"D_axis1_stride_log2",203.667843031609},{"KoverTail",7.3778645833333245},{"S_axis0_stride_log2",0.0},{"minSbytes",-0.0803956568926231}};
 inline constexpr Term programTerms248[] = {{"one",526.8788048288833},{"KlogDstride",11.107716318005929},{"D_axis2_inner_payload_bytes",-1.3524998770653045},{"D_axis2_stride_log2",0.0},{"D_axis3_inner_payload_bytes",-25.32632861673878},{"KactiveSlog",0.0},{"nS",953.3950629425644},{"S_axis1_extent",-384.82754720692367}};
 inline constexpr Term programTerms250[] = {{"one",0.0},{"EAbove32",0.0},{"logDstride",8228.480427046263},{"KsuffixLog",0.33976903080515974},{"D_axis1_stride_log2",-129.44572953736625},{"sqrtE",0.0},{"logE",0.0},{"KlogTail",0.0}};
-inline constexpr Term programTerms255[] = {{"one",2027.5}};
-inline constexpr Term programTerms256[] = {{"one",3437.875}};
-inline constexpr Term programTerms258[] = {{"one",6332.375}};
-inline constexpr Term programTerms259[] = {{"one",10253.75}};
 inline constexpr Term programTerms273[] = {{"one",9.166425398370633},{"E",12.765548541113905},{"KlogDstride2",-0.24219203443510423},{"D_axis1_extent",14.09924007820425},{"KsuffixLog",0.9214569990400753},{"S_axis2_stride_log2",50.03394548383052},{"KlogDstride",-0.27640963308244865},{"D_axis2_extent",47.58447976171411}};
 inline constexpr Term programTerms287[] = {{"one",-363.3676391587948},{"K",0.0},{"sqrtK",204.97257819645046},{"activeRows",17.977227939133464},{"groups32",-91.96181671947224},{"partialLogical32",70.47488533139209},{"activeDlog",6.500000000000063},{"KlogW",0.0}};
 inline constexpr Term programTerms288[] = {{"one",2.4319445994074798},{"E",16.735879646946568},{"KlogDstride2",0.02248677923661164},{"D_axis1_extent",14.86511396869701},{"KsuffixLog",0.7641417709942766},{"S_axis2_stride_log2",48.176401191699036},{"KlogDstride",-2.4301174129769207},{"D_axis2_extent",48.82389446925605}};
@@ -102,16 +40,8 @@ inline constexpr Term programTerms294[] = {{"one",-14.866195514025055},{"E",14.7
 inline constexpr Term programTerms295[] = {{"one",-14.673497078570195},{"E",14.860860021384298},{"KlogDstride2",-0.27340665808845466},{"D_axis1_extent",20.126343902387276},{"K_S_axis3_extent_log2",-3.355012424322075},{"S_axis2_stride_log2",50.92053700088058},{"S_axis3_extent",275.9517112733202},{"K_D_axis2_extent_log2",1.6685564684195833}};
 inline constexpr Term programTerms296[] = {{"one",26.007957522946047},{"E",14.804757108433908},{"KlogDstride2",-0.27258962837240513},{"D_axis1_extent",21.22198371758406},{"K_S_axis3_extent_log2",-3.3044558397226624},{"S_axis2_stride_log2",68.59511872625077},{"S_axis3_extent",280.8908825821707},{"K_D_axis2_extent_log2",1.4731258825159446}};
 inline constexpr Term programTerms314[] = {{"one",1.921941097071196},{"E",17.423802401839687},{"KlogDstride2",0.07546720616489011},{"D_axis1_extent",14.824793570825381},{"KsuffixLog",0.7650512739240863},{"S_axis2_stride_log2",47.6246901257289},{"KlogDstride",-2.839712024283407},{"D_axis2_extent",29.694788182779618}};
-inline constexpr Term programTerms315[] = {{"one",998.5}};
-inline constexpr Term programTerms317[] = {{"one",1423.0}};
-inline constexpr Term programTerms318[] = {{"one",1514.875}};
 inline constexpr Term programTerms337[] = {{"one",1378.5401961167202},{"EAbove64",15.280869720360847},{"logTail",-156.60206386462704},{"KlogRuns",-2.287661522863031},{"KlogDstride",-9.201569416900973},{"KmaxSlog",0.5743908551833927},{"KoverTail",6.4097927016876834},{"KAbove256",0.24570295326921524}};
 inline constexpr Term programTerms338[] = {{"one",197.89605598027617},{"KmaxSlog",0.4303005610496022},{"KlogDstride",1.5297113262874484},{"KunitS",-5.144516577187788},{"hidden",825.7996482913586},{"KmaskedAxes",4.58927442305573},{"KoverTail",7.055939273822743},{"KlogDstride2",1.8049920234952768}};
-inline constexpr Term programTerms340[] = {{"one",1398.875}};
-inline constexpr Term programTerms343[] = {{"one",1465.875}};
-inline constexpr Term programTerms344[] = {{"one",1756.125}};
-inline constexpr Term programTerms348[] = {{"one",3091.75}};
-inline constexpr Term programTerms349[] = {{"one",4133.0}};
 inline constexpr Term programTerms366[] = {{"one",485.18265978261684},{"KoverSqrtActiveD",14.213760013356385},{"maxSlog",41.217822047666665},{"KlogDstride2",3.1982421875000044},{"S_axis2_stride_log2",43.46570982476593},{"lastSSize",-317.6513022980614},{"KlogDstride",-4.1313331569948035},{"fullSuffix",-1.3836117535007302}};
 inline constexpr Term programTerms367[] = {{"one",0.0},{"KlogDstride2",-2.7084097916447987},{"minSbytes",0.16958243134520098},{"nS",286.5676068826825},{"suffixD",20.35142560430698},{"D_axis0_inner_payload_bytes",7.93401454274948},{"D_axis1_stride_log2",57.181363517134045},{"KoverTail",12.064656020253608}};
 inline constexpr Term programTerms368[] = {{"one",0.0},{"D_axis2_stride_log2",154.43487845215736},{"D_axis0_extent",43.96277611482385},{"KsmallActiveD",1.1826171874999287},{"payload_integer",-41.58666663542414},{"minSbytes",0.0017879000802446738},{"maxSlog",-47.06987835842737},{"D_axis4_inner_payload_bytes",31.88642182643595}};
@@ -125,42 +55,11 @@ inline constexpr Term programTerms382[] = {{"one",7641.433333333333},{"D",-16.69
 inline constexpr Term programTerms383[] = {{"one",0.0},{"EAbove8",2.997318674340955},{"logE",918.073528208109},{"KoverSqrtActiveD",45.08442947183017},{"nD",0.0},{"leading",0.0},{"D_axis2_stride_log2",-85.22682833001302},{"KactiveDlog",0.0}};
 inline constexpr Term programTerms398[] = {{"one",2.9743366794429473},{"E",5.55023678926338},{"K_over_D_axis4_extent",17.651324879574833},{"K_D_axis1_extent_log2",2.1671345048013695},{"S_axis2_stride_log2",63.39682335657474},{"K_hidden",6.710736112216716},{"K_D_axis2_extent_log2",3.192334555728816},{"EAbove256",-4.435035469338034}};
 inline constexpr Term programTerms399[] = {{"one",4.386581341844172},{"E",5.51630068015532},{"K_over_D_axis4_extent",17.511921205099636},{"K_D_axis1_extent_log2",2.1612881613337973},{"S_axis2_stride_log2",62.958442164972304},{"K_hidden",6.711646689198529},{"K_D_axis2_extent_log2",3.172520527006589},{"EAbove256",-4.3693909165539235}};
-inline constexpr Term programTerms401[] = {{"one",2231.75}};
-inline constexpr Term programTerms402[] = {{"one",1728.625}};
 inline constexpr Term programTerms421[] = {{"one",-830.0180153689639},{"sqrtE",241.8866736300954},{"KoverTail",31.37418502096541},{"logTail",0.0},{"Dunder128",-341.7977164463241},{"sqrtD",-142.43587013903334},{"S",-44.436407495523746},{"maxSlog",33.13418628490584}};
-inline constexpr Term programTerms422[] = {{"one",755.625}};
-inline constexpr Term programTerms424[] = {{"one",1354.0}};
-inline constexpr Term programTerms425[] = {{"one",830.5}};
-inline constexpr Term programTerms428[] = {{"one",1391.375}};
-inline constexpr Term programTerms430[] = {{"one",1490.625}};
-inline constexpr Term programTerms431[] = {{"one",2549.25}};
-inline constexpr Term programTerms435[] = {{"one",2723.0}};
-inline constexpr Term programTerms436[] = {{"one",1943.75}};
-inline constexpr Term programTerms438[] = {{"one",4153.375}};
-inline constexpr Term programTerms441[] = {{"one",6930.5}};
-inline constexpr Term programTerms442[] = {{"one",5219.75}};
-inline constexpr Term programTerms444[] = {{"one",9302.375}};
-inline constexpr Term programTerms445[] = {{"one",11574.125}};
 inline constexpr Term programTerms465[] = {{"one",703.952244892291},{"EAbove32",1.4715925693818597},{"logTail",-173.93225332279326},{"KlogTail",0.5323535363731445},{"EAbove128",-4.592583809028961},{"KsuffixLog",2.184393132920969},{"suffixD",-11.52369033796136},{"KoverTail",9.369089381886342}};
 inline constexpr Term programTerms466[] = {{"one",-52.49999999999982},{"KactiveSlog",5.443359375000002},{"Dunder128",575.125},{"activeSlog",-134.25000000000034},{"KlogStride",0.0}};
-inline constexpr Term programTerms467[] = {{"one",1438.75}};
-inline constexpr Term programTerms468[] = {{"one",1758.75}};
 inline constexpr Term programTerms476[] = {{"one",-4903.850030566105},{"KoverSqrtActiveD",68.43481122212143},{"maxSlog",392.7035464224887},{"activeRuns",16.816211602299454},{"fullSuffix",-40.20735486405899},{"KAbove64",-4.8946293142003965},{"KsmallActiveD",1.451769221364314},{"KlogStride",0.17935207762935912}};
 inline constexpr Term programTerms488[] = {{"one",247.54206628720527},{"E",6.1824947870817075},{"D_axis4_inner_payload_bytes",224.5287876429779},{"D_axis2_inner_payload_bytes",-18.826815886933172},{"KsuffixLog",1.1553414514794318},{"S_axis3_extent",96.14343409577053},{"logTail",-62.836468879505134},{"EAbove128",-1.9497526272868348}};
-inline constexpr Term programTerms490[] = {{"one",367.0}};
-inline constexpr Term programTerms491[] = {{"one",745.625}};
-inline constexpr Term programTerms493[] = {{"one",761.875}};
-inline constexpr Term programTerms494[] = {{"one",1319.0}};
-inline constexpr Term programTerms497[] = {{"one",1045.125}};
-inline constexpr Term programTerms499[] = {{"one",1490.0}};
-inline constexpr Term programTerms500[] = {{"one",2610.0}};
-inline constexpr Term programTerms504[] = {{"one",2735.875}};
-inline constexpr Term programTerms505[] = {{"one",1942.5}};
-inline constexpr Term programTerms507[] = {{"one",3086.0}};
-inline constexpr Term programTerms508[] = {{"one",4161.875}};
-inline constexpr Term programTerms511[] = {{"one",6868.625}};
-inline constexpr Term programTerms512[] = {{"one",5060.0}};
-inline constexpr Term programTerms514[] = {{"one",9316.125}};
 inline constexpr Term programTerms520[] = {{"one",1366.574353448276},{"EAbove64",14.861194791909373},{"lastSSize",-61.569970293569455},{"KoverTail",37.926942567567565},{"KnD",-2.9248674860205064},{"Dunder128",-336.6912278657967},{"leading",-41.64433830382109},{"KsmallActiveD",1.7293229045316902}};
 inline constexpr Term programTerms531[] = {{"one",436.1302104478392},{"E",7.6426333682945105},{"D_axis4_inner_payload_bytes",144.08054064865692},{"D_axis2_inner_payload_bytes",-20.208680636412847},{"KsuffixLog",1.5725563331904708},{"S_axis3_extent",133.65942128469928},{"logTail",-178.6535544219416},{"EAbove128",-5.879435783752153}};
 inline constexpr Term programTerms544[] = {{"one",868.6826644348926},{"KlogDstride2",4.795662347860088},{"sqrtD",-579.132264150191},{"EminusK",8.08132526611088},{"KlogTail",2.5441203136620785},{"D_SspanRatio",0.0003640383608153711},{"maxSlog",20.444024342385546},{"D_axis0_inner_payload_bytes",0.8624858591721516}};
@@ -180,7 +79,6 @@ inline constexpr Term programTerms619[] = {{"one",170.79653258715317},{"E",28.81
 inline constexpr Term programTerms632[] = {{"one",-3620.337450347661},{"K",4.61821013701393},{"sqrtK",781.5825781390215},{"activeRows",-27.60160703400499},{"groups32",-91.96181671947224},{"partialLogical32",70.47488533139209},{"activeDlog",-33.46160551007522},{"KlogW",0.0}};
 inline constexpr Term programTerms633[] = {{"one",4.006807209150086},{"logK",0.6047598240380168},{"hidden",0.2053199330081803},{"logTail",0.08009495918104961},{"nS",0.09042195621702032},{"activeSlog",-0.02775896561292357},{"maxSlog",-0.004664005649594162},{"fullSuffix",-0.001379429781812497}};
 inline constexpr Term programTerms642[] = {{"one",536.8965486398542},{"EAbove16",30.343204081004664},{"KsmallActiveD",-2.0282410705344276},{"D_axis1_stride_log2",38.62249792557994},{"S_axis2_stride_log2",54.158733957708456},{"S_axis3_extent",258.21248019687994},{"KlogDstride2",0.0},{"KsuffixLog",0.8749447113263672}};
-inline constexpr Term programTerms643[] = {{"one",4391.375}};
 inline constexpr Term programTerms665[] = {{"one",-208.40173021083172},{"E",4.646361387939445},{"hidden",977.3488999802041},{"maxSlog",43.367218855415594},{"logTail",-21.557186121040203},{"S",-26.705609697131774},{"KoverTail",29.470617880725506},{"KsmallD",-1.6377485314941154}};
 inline constexpr Term programTerms667[] = {{"one",-2750.29762670529},{"sqrtE",221.48343578833018},{"maxSlog",26.025348396181286},{"KnD",1.3874079917213857},{"KoverTail",4.334632250622019},{"nS",105.62072506144789},{"partialLogical32",-44.66114394178903},{"smallE128",1050.1808474998072}};
 inline constexpr Term programTerms696[] = {{"one",305.8202317976449},{"E",7.467373878728111},{"hidden",585.0286887985703},{"maxSlog",40.70573775971405},{"Kfp8",-1.2719726562500013},{"logTail",-150.49079873532378},{"S",-10.696265243902443},{"Krank",-0.3142057084189328}};
@@ -192,55 +90,7 @@ inline constexpr Term programTerms732[] = {{"one",-4603.02326456484},{"logE",110
 inline constexpr Term programTerms753[] = {{"one",35.77845550616075},{"KmaxSlog",0.04902745037813835},{"S_axis1_extent",-7.029144623485206},{"D_axis0_extent",31.366844693524072},{"activeSlog",13.540791747396478},{"Dunder128",48.65870119680057},{"S_axis0_stride_log2",-0.46269705461099603},{"logTail",6.863579572271059}};
 inline constexpr Term programTerms754[] = {{"one",36.036375227402075},{"KmaxSlog",0.048810660539715646},{"S_axis1_extent",-8.855168698673088},{"D_axis0_extent",31.44690489338724},{"activeSlog",13.651904405692846},{"Dunder128",48.51844837310656},{"S_axis0_stride_log2",-0.42069802936834805},{"logTail",6.977419790897462}};
 inline constexpr Term programTerms756[] = {{"one",83.47966864985077},{"KmaxSlog",0.05198665893271431},{"S_axis1_extent",-12.675555757187489},{"D_axis0_extent",30.753616979885805},{"activeSlog",11.734338747100212},{"D_axis2_extent",1.8093556048120654},{"Dunder128",23.188544807224847},{"highWarp32",1.525930815829055}};
-inline constexpr Term programTerms757[] = {{"one",105.875}};
-inline constexpr Term programTerms758[] = {{"one",132.625}};
-inline constexpr Term programTerms760[] = {{"one",78.375}};
-inline constexpr Term programTerms762[] = {{"one",142.25}};
-inline constexpr Term programTerms763[] = {{"one",116.625}};
-inline constexpr Term programTerms766[] = {{"one",151.5}};
-inline constexpr Term programTerms768[] = {{"one",153.625}};
-inline constexpr Term programTerms769[] = {{"one",94.75}};
-inline constexpr Term programTerms771[] = {{"one",1.0}};
-inline constexpr Term programTerms772[] = {{"one",98.5}};
-inline constexpr Term programTerms774[] = {{"one",135.0}};
-inline constexpr Term programTerms777[] = {{"one",115.25}};
-inline constexpr Term programTerms778[] = {{"one",61.25}};
-inline constexpr Term programTerms780[] = {{"one",171.625}};
-inline constexpr Term programTerms781[] = {{"one",142.75}};
-inline constexpr Term programTerms784[] = {{"one",19.0}};
-inline constexpr Term programTerms788[] = {{"one",155.25}};
-inline constexpr Term programTerms789[] = {{"one",169.625}};
-inline constexpr Term programTerms791[] = {{"one",189.25}};
-inline constexpr Term programTerms793[] = {{"one",244.75}};
-inline constexpr Term programTerms794[] = {{"one",279.375}};
-inline constexpr Term programTerms796[] = {{"one",346.375}};
-inline constexpr Term programTerms798[] = {{"one",405.375}};
-inline constexpr Term programTerms799[] = {{"one",486.5}};
-inline constexpr Term programTerms801[] = {{"one",919.75}};
-inline constexpr Term programTerms802[] = {{"one",1519.25}};
-inline constexpr Term programTerms807[] = {{"one",134.875}};
-inline constexpr Term programTerms808[] = {{"one",101.25}};
-inline constexpr Term programTerms810[] = {{"one",419.625}};
-inline constexpr Term programTerms811[] = {{"one",243.125}};
-inline constexpr Term programTerms814[] = {{"one",71.75}};
 inline constexpr Term programTerms829[] = {{"one",72.20730426910937},{"Krank",0.2365334896242178},{"D_SspanRatio",-9.870483693320662e-06},{"logW",4.799999921944013},{"leading",9.81964584432397},{"logTail",10.498457177092074},{"KlogW2",0.030456261725573426},{"logW2",-2.5998951818718123}};
-inline constexpr Term programTerms830[] = {{"one",114.0}};
-inline constexpr Term programTerms831[] = {{"one",74.25}};
-inline constexpr Term programTerms833[] = {{"one",149.125}};
-inline constexpr Term programTerms834[] = {{"one",162.75}};
-inline constexpr Term programTerms837[] = {{"one",121.0}};
-inline constexpr Term programTerms838[] = {{"one",0.5}};
-inline constexpr Term programTerms841[] = {{"one",182.625}};
-inline constexpr Term programTerms842[] = {{"one",163.625}};
-inline constexpr Term programTerms844[] = {{"one",184.875}};
-inline constexpr Term programTerms845[] = {{"one",200.5}};
-inline constexpr Term programTerms848[] = {{"one",257.375}};
-inline constexpr Term programTerms849[] = {{"one",414.75}};
-inline constexpr Term programTerms851[] = {{"one",972.125}};
-inline constexpr Term programTerms854[] = {{"one",110.5}};
-inline constexpr Term programTerms855[] = {{"one",141.75}};
-inline constexpr Term programTerms857[] = {{"one",268.5}};
-inline constexpr Term programTerms859[] = {{"one",69.125}};
 inline constexpr Term programTerms874[] = {{"one",56.49645374678114},{"KlogDstride2",-0.16902791932614356},{"KlogDstride",0.8900437942795244},{"payload_integer",-0.12306303423700948},{"minSbytes",-0.03327535251892577},{"D_axis1_inner_payload_bytes",-5.774358335194845},{"S_axis0_stride_log2",10.177915616546397},{"D_SspanRatio",-0.015521205905118489}};
 inline constexpr Term programTerms875[] = {{"one",47.05516098484852},{"KlogDstride2",-1.1452414772727266},{"EAbove64",2.5292968750000004},{"minSbytes",-0.34978693181818193},{"D_SspanRatio",0.055456912878787894},{"D_axis1_stride_log2",88.85227272727268},{"activeD",10.668161103219699},{"prefixMasked",-113.125}};
 inline constexpr Term programTerms877[] = {{"one",0.0},{"payload_floating",122.125},{"D",-8.354166666666673},{"Kbool",-0.38281250000000017},{"Kfp8",-0.1875000000000003},{"minSbytes",0.007812500000000071},{"S_axis0_stride_log2",0.0},{"K",3.985677083333334}};
@@ -264,78 +114,17 @@ inline constexpr Term programTerms910[] = {{"one",152.8192061584318},{"KmaxSlog"
 inline constexpr Term programTerms911[] = {{"one",57.602941176471624},{"KlogDstride",0.5687327665441163},{"KsmallActiveD",-0.039550781250000076},{"KsumInvActiveD",0.0},{"payload_floating",5.875000000000041},{"D_axis0_extent",-4.106617647058761},{"D_axis4_stride_log2",33.39705882352927},{"leading",-2.7647058823529234}};
 inline constexpr Term programTerms913[] = {{"one",625.3928571428571},{"partialLogical32",-8.478306361607142},{"D_axis4_extent",112.63839285714283},{"S_axis1_extent",-5.1132812500001155},{"KoneWarp",0.30576869419642866},{"activeD",-0.4165736607142858},{"S_axis1_stride_log2",9.375000000000037},{"KlogDstride",0.1491176060267857}};
 inline constexpr Term programTerms914[] = {{"one",28.055340465347953},{"KlogDstride",0.48692757532336356},{"S_axis1_extent",80.74044478153394},{"KoneWarp",0.5304277936315765},{"KactiveDlog",-0.034768775648517075},{"S_axis2_extent",-20.850769211492416},{"D_SspanRatio",1.4088927631777232e-05},{"S_axis1_stride_log2",0.0}};
-inline constexpr Term programTerms919[] = {{"one",152.5}};
-inline constexpr Term programTerms920[] = {{"one",159.625}};
-inline constexpr Term programTerms923[] = {{"one",180.875}};
-inline constexpr Term programTerms924[] = {{"one",163.5}};
-inline constexpr Term programTerms926[] = {{"one",189.625}};
-inline constexpr Term programTerms928[] = {{"one",249.0}};
-inline constexpr Term programTerms929[] = {{"one",293.5}};
-inline constexpr Term programTerms931[] = {{"one",404.5}};
-inline constexpr Term programTerms932[] = {{"one",524.375}};
-inline constexpr Term programTerms936[] = {{"one",138.5}};
-inline constexpr Term programTerms937[] = {{"one",75.875}};
-inline constexpr Term programTerms947[] = {{"one",107.25}};
-inline constexpr Term programTerms948[] = {{"one",154.125}};
-inline constexpr Term programTerms950[] = {{"one",167.0}};
-inline constexpr Term programTerms952[] = {{"one",280.375}};
-inline constexpr Term programTerms955[] = {{"one",117.75}};
 inline constexpr Term programTerms971[] = {{"one",91.32440141309903},{"smallE32",-166.9923485833549},{"KlogStride",0.03888630888023028},{"lastSSize",70.02894414504635},{"fullSuffix",4.835190097602987},{"S",-14.999689316450096},{"KsumInvActiveD",-0.5249844658224067},{"minSbytes",0.0014605030520247126}};
 inline constexpr Term programTerms978[] = {{"one",0.0},{"D_axis2_stride_log2",18.604166666666657},{"logTail",11.5},{"KlogDstride",0.6406250000000007},{"idleWarpProxy",2.250000000000001},{"D_axis3_inner_payload_bytes",14.802083333333313},{"logDstride",14.02083333333335},{"D_axis0_extent",11.375000000000009}};
-inline constexpr Term programTerms979[] = {{"one",108.125}};
-inline constexpr Term programTerms981[] = {{"one",0.875}};
 inline constexpr Term programTerms996[] = {{"one",62.77238570550444},{"KactiveSlog",0.07205181561783489},{"KlogWAbove2",-0.1676954673991838},{"activeLogical32",10.280572230157983},{"maxSlog",-0.5181293392616078},{"KmaxSlog",0.011663958177763405},{"Dunder128",31.303109519067423},{"smallE32",14.705843368046265}};
 inline constexpr Term programTerms997[] = {{"one",67.87196601214313},{"KactiveSlog",0.080557182870711},{"KlogWAbove2",-0.16626277246887075},{"activeLogical32",11.40791189089078},{"maxSlog",-0.5115992064443954},{"KmaxSlog",0.011523222323347545},{"Dunder128",31.039304425097175},{"smallE32",14.646930215507647}};
 inline constexpr Term programTerms999[] = {{"one",169.9545123892787},{"activeSlog",9.092322810120487},{"EAbove256",0.1464575154761389},{"maxSlog",-6.7996175161844485},{"suffixD",-0.09059956877162822},{"logWAbove4",-86.96766125900692},{"KmaxSlog",0.04233506127746849},{"smallE32",-20.27889587928803}};
-inline constexpr Term programTerms1000[] = {{"one",98.25}};
-inline constexpr Term programTerms1001[] = {{"one",114.25}};
-inline constexpr Term programTerms1002[] = {{"one",102.5}};
-inline constexpr Term programTerms1007[] = {{"one",143.125}};
-inline constexpr Term programTerms1008[] = {{"one",159.375}};
-inline constexpr Term programTerms1010[] = {{"one",130.125}};
-inline constexpr Term programTerms1012[] = {{"one",108.0}};
-inline constexpr Term programTerms1013[] = {{"one",126.5}};
-inline constexpr Term programTerms1017[] = {{"one",151.25}};
-inline constexpr Term programTerms1018[] = {{"one",157.25}};
-inline constexpr Term programTerms1020[] = {{"one",204.375}};
-inline constexpr Term programTerms1023[] = {{"one",12.125}};
-inline constexpr Term programTerms1028[] = {{"one",119.25}};
-inline constexpr Term programTerms1029[] = {{"one",109.375}};
-inline constexpr Term programTerms1035[] = {{"one",227.625}};
-inline constexpr Term programTerms1036[] = {{"one",184.5}};
-inline constexpr Term programTerms1038[] = {{"one",120.875}};
-inline constexpr Term programTerms1039[] = {{"one",160.625}};
-inline constexpr Term programTerms1043[] = {{"one",183.75}};
-inline constexpr Term programTerms1044[] = {{"one",169.75}};
-inline constexpr Term programTerms1046[] = {{"one",164.375}};
-inline constexpr Term programTerms1049[] = {{"one",201.75}};
-inline constexpr Term programTerms1050[] = {{"one",172.0}};
-inline constexpr Term programTerms1054[] = {{"one",175.75}};
-inline constexpr Term programTerms1055[] = {{"one",187.875}};
-inline constexpr Term programTerms1057[] = {{"one",199.375}};
-inline constexpr Term programTerms1058[] = {{"one",214.5}};
-inline constexpr Term programTerms1062[] = {{"one",238.5}};
-inline constexpr Term programTerms1063[] = {{"one",251.125}};
-inline constexpr Term programTerms1065[] = {{"one",267.0}};
-inline constexpr Term programTerms1066[] = {{"one",296.125}};
-inline constexpr Term programTerms1070[] = {{"one",407.5}};
-inline constexpr Term programTerms1071[] = {{"one",356.375}};
-inline constexpr Term programTerms1077[] = {{"one",111.0}};
-inline constexpr Term programTerms1078[] = {{"one",121.625}};
-inline constexpr Term programTerms1080[] = {{"one",150.0}};
-inline constexpr Term programTerms1082[] = {{"one",98.75}};
-inline constexpr Term programTerms1086[] = {{"one",46.125}};
-inline constexpr Term programTerms1087[] = {{"one",76.75}};
 inline constexpr Term programTerms1102[] = {{"one",0.7468631258697241},{"maxSlog",-2.461609493278203},{"KlogW2",0.09788971962494118},{"S_axis0_stride_log2",0.6056962380480094},{"Dunder128",65.35509726329636},{"logTail",11.38224149042811},{"sqrtS",18.136102475492944},{"KlogWAbove2",-0.9209114784527282}};
 inline constexpr Term programTerms1112[] = {{"one",45.9626083815029},{"Krank",0.4451177519869942},{"KlogTail",-0.02418685648482658},{"KlogW",0.0},{"logDstride",-4.8021134393063685}};
 inline constexpr Term programTerms1119[] = {{"one",112.77437851197996},{"K_S_axis0_extent_log2",0.031173521083921026},{"maxSlog",-7.070241560251237},{"K_S_axis0_stride_log2",0.023239204843579615},{"Dunder128",72.58021457010749},{"D_axis1_stride_log2",-7.209720888391303},{"KoverTail",1.2899861683157936},{"EAbove256",0.39597285974413193}};
 inline constexpr Term programTerms1130[] = {{"one",235.4175973840268},{"hidden",0.0},{"KlogDstride",0.0},{"maxSlog",-11.315087572967947},{"KlogW2",0.0}};
 inline constexpr Term programTerms1144[] = {{"one",3.996544909338053},{"logK",0.16136437339562962},{"logWAbove2",0.04051966318660777},{"nD",0.21256410000280512},{"hidden",-0.6322988156842267},{"maxSlog",-0.05166482611870822},{"nS",0.28015303023033544},{"fullSuffix",0.007304331715041935}};
 inline constexpr Term programTerms1155[] = {{"one",76.13242537366503},{"KlogStride",0.16788106813765227},{"KsuffixLog",0.010791662341335384},{"smallE32",-5.264753090833908},{"hidden",-63.71827720268168},{"KoverSqrtS",-3.9890280998369025},{"nD",57.522804463253856},{"lastSSize",3.3757705229327764}};
-inline constexpr Term programTerms1156[] = {{"one",113.125}};
-inline constexpr Term programTerms1158[] = {{"one",173.5}};
-inline constexpr Term programTerms1159[] = {{"one",284.875}};
-inline constexpr Term programTerms1161[] = {{"one",125.625}};
 inline constexpr Term programTerms1178[] = {{"one",109.1702586206982},{"KactiveSlog",0.06161323635050498},{"KlogWAbove2",-0.18187774828570322},{"activeLogical32",0.0},{"maxSlog",-4.4136565390669},{"KmaxSlog",0.030155043054032223},{"Dunder128",43.63505747123065},{"EAbove64",0.13724631824742003}};
 inline constexpr Term programTerms1199[] = {{"one",201.54400048694717},{"minW8",-14.784707008470686},{"KactiveSlog",0.16855619657189597},{"activeSlog",-21.02538632240461},{"minSbytes",-0.0044060143933821565},{"Dunder128",37.22392614823598},{"suffixD",2.6901601267645256},{"KlogW2",-0.01294078285619702}};
 inline constexpr Term programTerms1215[] = {{"one",0.0},{"D_runs",158.125},{"S",4.656250000000003},{"D_axis2_extent",53.53124999999999},{"smallE32",139.5},{"S_axis3_extent",42.875}};
@@ -349,17 +138,6 @@ inline constexpr Term programTerms1315[] = {{"one",129.61718749999972},{"Krank",
 inline constexpr Term programTerms1335[] = {{"one",10.912734801620923},{"EAbove64",0.9400841110317633},{"activeDlog",2.292813098476928},{"minW4",8.898765776677896},{"KlogW",-0.14600314799746072},{"EAbove128",-0.3585416207269855},{"lastSSize",-0.2189479661117775},{"KoverTail",0.9751069817521153}};
 inline constexpr Term programTerms1336[] = {{"one",20.294859126412856},{"EAbove64",0.8706785251107692},{"activeDlog",7.008768912406271},{"minW4",11.205828055735493},{"KlogW",-0.09570582049012565},{"EAbove128",-0.354721752729375},{"lastSSize",0.18461074317756232},{"KoverTail",1.3516701221521064}};
 inline constexpr Term programTerms1338[] = {{"one",119.60794479385163},{"K",0.6684254243646612},{"sqrtK",-6.534452785744754},{"activeRows",1.0234374999999958},{"groups32",15.405080461063049},{"partialLogical32",3.961516476517044},{"activeDlog",-34.81249999999997},{"KlogW",-0.11285077432720045}};
-inline constexpr Term programTerms1339[] = {{"one",104.75}};
-inline constexpr Term programTerms1340[] = {{"one",126.375}};
-inline constexpr Term programTerms1342[] = {{"one",145.5}};
-inline constexpr Term programTerms1345[] = {{"one",136.75}};
-inline constexpr Term programTerms1347[] = {{"one",124.25}};
-inline constexpr Term programTerms1348[] = {{"one",36.875}};
-inline constexpr Term programTerms1352[] = {{"one",164.625}};
-inline constexpr Term programTerms1354[] = {{"one",256.625}};
-inline constexpr Term programTerms1355[] = {{"one",422.125}};
-inline constexpr Term programTerms1358[] = {{"one",117.0}};
-inline constexpr Term programTerms1359[] = {{"one",268.0}};
 inline constexpr Term programTerms1376[] = {{"one",17.09614785755461},{"EAbove64",1.5591653181650305},{"smallE32",85.73515542959521},{"EAbove128",-1.295189908925088},{"KlogWAbove2",-0.21237768607898988},{"nS",8.673412232620212},{"activeRows_logW",0.27598760067883743},{"payload_floating",24.668083947836998}};
 inline constexpr Term programTerms1389[] = {{"one",155.7173913043482},{"EAbove64",0.16621477905021567},{"activeDlog",-10.941576086956943},{"oneWarp",-36.02461827122099},{"EAbove128",-0.05902516619759494},{"KoneWarp",0.9172732272256731},{"KactiveSlog",0.026579483695649785},{"nS",-7.921874999999495}};
 inline constexpr Term programTerms1415[] = {{"one",19.206994946906196},{"D_axis3_extent",-0.5726006158000821},{"EAbove64",0.47539961172315937},{"D_axis4_extent",-5.034989301970203},{"D_axis0_stride_log2",-0.33543997003372567},{"KoneWarp",0.5604447693492838},{"S_to_D_transitions",20.98124291762261},{"sqrtW",9.497479713620603}};
@@ -370,21 +148,12 @@ inline constexpr Term programTerms1439[] = {{"one",51.206394360114054},{"D_axis3
 inline constexpr Term programTerms1453[] = {{"one",-22.84131623856558},{"K",0.6684254243646612},{"sqrtK",-6.534452785744754},{"activeRows",4.099539765170514},{"groups32",15.405080461063049},{"partialLogical32",3.961516476517044},{"activeDlog",-12.6713181213641},{"KlogW",-0.11285077432720045}};
 inline constexpr Term programTerms1469[] = {{"one",151.03684736471106},{"EAbove64",1.646049717389818},{"KlogDstride",-0.10311768808494479},{"activeDlog",-17.637823974082362},{"KoverTail",2.8572526697864524},{"KlogRuns",-0.47197040642999183},{"K_D_axis2_extent_log2",0.4690490678714545},{"EAbove128",-0.5371672170523457}};
 inline constexpr Term programTerms1482[] = {{"one",263.0472680827491},{"KoverTail",-1.980554329418944},{"EAbove128",-1.2136161274999224},{"maxSlog",-8.295035857840745},{"logTail",-87.70940289189393},{"EAbove16",2.0320650570136003},{"leading",-1.1987589644601855},{"lastSSize",9.395590453993611}};
-inline constexpr Term programTerms1483[] = {{"one",169.375}};
-inline constexpr Term programTerms1484[] = {{"one",206.25}};
-inline constexpr Term programTerms1486[] = {{"one",145.125}};
-inline constexpr Term programTerms1487[] = {{"one",117.875}};
 inline constexpr Term programTerms1509[] = {{"one",30.21525249582847},{"D_axis3_extent",-12.872242647058831},{"EAbove64",0.427159926470589},{"D_axis4_extent",-9.209903492647063},{"S_axis3_stride_log2",-7.07836748266056},{"S_to_D_transitions",68.25533573946572},{"KoneWarp",0.47412109374999534},{"baseWarps",2.6286764705882297}};
 inline constexpr Term programTerms1521[] = {{"one",33.85389217461942},{"EAbove64",0.6101520887427638},{"D_axis0_stride_log2",-1.8208125605449381},{"D_axis3_extent",-2.98400868015114},{"K_D_axis4_extent_log2",-0.07141015207266144},{"smallE32",32.548129304762455},{"S_to_D_transitions",43.65217981387376},{"KoneWarp",0.3232104179899632}};
 inline constexpr Term programTerms1536[] = {{"one",11.004967875816453},{"EAbove64",0.9501375177955854},{"activeDlog",2.335552317748422},{"minW4",9.225414826699557},{"KlogW",-0.13319106939293848},{"EAbove128",-0.38476568243040116},{"lastSSize",-0.22306412148424018},{"KoverTail",0.9748385086939984}};
 inline constexpr Term programTerms1537[] = {{"one",10.837697375105016},{"EAbove64",0.9370609326480762},{"activeDlog",2.27247454291396},{"minW4",8.835638186780598},{"KlogW",-0.1470280016454771},{"EAbove128",-0.3464837185400853},{"lastSSize",-0.16717777863562727},{"KoverTail",0.9734808326578516}};
 inline constexpr Term programTerms1538[] = {{"one",18.239111698208163},{"EAbove64",0.8900466155393567},{"activeDlog",3.2927508400393646},{"minW4",14.623818087622938},{"KlogW",0.3236854968183419},{"EAbove128",-0.42177257260415235},{"lastSSize",0.9892750472726357},{"KoverTail",1.0413268253194063}};
 inline constexpr Term programTerms1553[] = {{"one",5.8092928596766145},{"EAbove64",1.0024456507422823},{"smallE32",98.82078127618799},{"EAbove128",-0.47798235678543344},{"KlogWAbove2",-0.17365960279579484},{"nS",6.203006213665729},{"activeRows_logW",0.3117594337413883},{"payload_floating",73.60265132169016}};
-inline constexpr Term programTerms1554[] = {{"one",129.125}};
-inline constexpr Term programTerms1556[] = {{"one",109.5}};
-inline constexpr Term programTerms1557[] = {{"one",17.75}};
-inline constexpr Term programTerms1561[] = {{"one",152.0}};
-inline constexpr Term programTerms1562[] = {{"one",168.875}};
 inline constexpr Term programTerms1608[] = {{"one",404.6948069852938},{"nD",-82.18786764705884},{"EAbove64",-0.7031965667126215},{"logTail",-76.37345281862733},{"KoneWarp",0.5429446949678326},{"S",-0.8061351102941182},{"KlogTail",0.29897269454656794},{"KsmallActiveD",0.2134661506204055}};
 inline constexpr Term programTerms1627[] = {{"one",59.295560577485745},{"sqrtE",8.993042252425695},{"KoverTail",1.5333297604598453},{"oneWarp",23.84965095782759},{"KlogWAbove2",1.2727051525573034},{"KsumInvD",-0.34228683234187546},{"minW8",-2.8031634333895177},{"KlogDstride",0.19253209258675216}};
 inline constexpr Term programTerms1628[] = {{"one",61.0105732716233},{"sqrtE",9.1049214972778},{"KoverTail",1.5847211678764765},{"oneWarp",23.748249407670297},{"KlogWAbove2",1.25807447664008},{"KsumInvD",-0.22912096936298235},{"minW8",-2.281617760545506},{"KlogDstride",0.19096048683371178}};
@@ -394,7 +163,6 @@ inline constexpr Term programTerms1680[] = {{"one",63.72386351973972},{"E",0.533
 inline constexpr Term programTerms1681[] = {{"one",60.34462192048711},{"E",0.5161494397712942},{"EAbove32",-0.03151376142336029},{"EAbove8",0.48591245856974047},{"payload_integer",-3.312022101037162},{"logWAbove2",19.287304434493805},{"smallE32",56.66763435504766},{"EAbove16",0.4365417074898678}};
 inline constexpr Term programTerms1683[] = {{"one",69.25000000000001},{"KoverTail",3.484374999999999},{"D_axis0_extent",21.312499999999993},{"KsmallActiveD",0.0},{"KnD",0.08007812500000008}};
 inline constexpr Term programTerms1693[] = {{"one",158.94791666666657},{"KoverTail",-0.3385416666666667},{"idleWarpProxy",-18.338541666666654},{"minSbytes",-0.04003906249999991},{"logE",3.406250000000011},{"payload_integer",3.3750000000000058}};
-inline constexpr Term programTerms1713[] = {{"one",424.5}};
 inline constexpr Term programTerms1728[] = {{"one",101.99743759578304},{"KoverTail",2.209102772237659},{"S_axis1_extent",53.33074806225083},{"D_axis0_extent",0.0},{"S_axis0_stride_log2",0.3298661499335409},{"D_axis3_extent",5.277583033651136},{"KoverSqrtS",0.0},{"leading",1.9203009447245818}};
 inline constexpr Term programTerms1741[] = {{"one",192.79157618019468},{"sqrtE",4.674997792815885},{"KoverTail",1.462338122885652},{"oneWarp",-63.61669332428925},{"KlogWAbove2",3.1075159191468864},{"KsumInvD",-0.376897293936705},{"minW8",-23.95322174471884},{"KlogDstride",0.2681385951534425}};
 inline constexpr Term programTerms1764[] = {{"one",131.18520408163272},{"KoverTail",3.0620110544217676},{"S_axis1_extent",93.87499999999999},{"EAbove256",0.4120064041241498},{"D_axis0_extent",0.0},{"D_axis3_extent",2.785714285714284},{"KsmallActiveD",0.0},{"leading",1.3440476190476187}};
@@ -413,12 +181,9 @@ inline constexpr Term programTerms1870[] = {{"one",146.09696969696975},{"hidden"
 inline constexpr Term programTerms1877[] = {{"one",110.56019009982354},{"K_hidden",0.04981024086046229},{"EAbove256",0.5356383611584422},{"KoverTail",0.8932927219841308},{"partialLogical32",-0.4658783407703557},{"KlogW2",-1.6404227147130953e-05},{"hidden",4.905941587838742},{"Kbool",0.04949440467352288}};
 inline constexpr Term programTerms1878[] = {{"one",109.78540386024979},{"K_hidden",0.04921574057636559},{"EAbove256",0.5354582184386757},{"KoverTail",0.9062739859000007},{"partialLogical32",-0.4455868250275719},{"KlogW2",-0.0011664091212052069},{"hidden",4.85529342185649},{"Kbool",0.05117329067941042}};
 inline constexpr Term programTerms1887[] = {{"one",121.46454234219824},{"K_hidden",-0.5057752858864677},{"KoverTail",0.9480022755606546},{"KoneWarp",-0.7282778385252393},{"oneWarp",31.80333385773737},{"smallE32",-21.715985841061908},{"partialLogical32",-2.9120512013965314},{"Kfp8",-0.01906567748703613}};
-inline constexpr Term programTerms1888[] = {{"one",8.125}};
 inline constexpr Term programTerms1907[] = {{"one",51.50854209780635},{"EAbove128",0.33474262939926375},{"EAbove64",-0.21059180093195087},{"Kfp8",-0.02141357150304045},{"D_axis1_inner_payload_bytes",-0.6595083878533132},{"activeRuns",51.50854209780617},{"KAbove128",0.3347426293992511},{"KoverTail",0.31214346838209267}};
 inline constexpr Term programTerms1908[] = {{"one",52.50132635840753},{"EAbove128",0.3338836003096709},{"EAbove64",-0.1957361410354303},{"Kfp8",-0.014333123078684364},{"D_axis1_inner_payload_bytes",0.761178031479344},{"activeRuns",52.50132635840736},{"KAbove128",0.3338836003096581},{"KoverTail",0.38519078480774976}};
 inline constexpr Term programTerms1910[] = {{"one",106.98571428571414},{"Kfp8",-0.041015625000000014},{"EAbove128",2.1148995535714255},{"EAbove64",-0.9100260416666619},{"KnD",-0.1719145275297629},{"Dunder128",7.792261904762134},{"KlogTail",-0.12463262648809569},{"KactiveDlog",0.11169317336309526}};
-inline constexpr Term programTerms1911[] = {{"one",22.0}};
-inline constexpr Term programTerms1912[] = {{"one",145.0}};
 inline constexpr Term programTerms1931[] = {{"one",91.80446852825685},{"Kfp8",-0.06089350127022124},{"EAbove128",2.116950837076558},{"EAbove64",-1.1849287423499952},{"D_axis1_inner_payload_bytes",-0.5761718750000001},{"S_axis0_stride_log2",0.8358699071869959},{"KoverTail",0.4520089285714289},{"smallE32",18.18833595366532}};
 inline constexpr Term programTerms1946[] = {{"one",103.46571017583088},{"Kfp8",-0.04585987307929873},{"EAbove128",2.234912093634508},{"EAbove64",-1.3044817936231858},{"D_axis1_inner_payload_bytes",-0.6074665662654983},{"S_axis0_stride_log2",0.6395036166970414},{"KoverTail",0.34711915347471217},{"S_axis1_extent",-1.5014301204958116}};
 inline constexpr Term programTerms1953[] = {{"one",54.285090950803124},{"EAbove128",0.9363301604374811},{"EAbove64",-1.0524147254496843},{"Kfp8",-0.010152998469227884},{"D_axis1_inner_payload_bytes",-0.6393363563932858},{"activeRuns",54.28509095079348},{"KAbove128",0.9363301604328166},{"KoverTail",0.2905490235659797}};
@@ -428,62 +193,62 @@ inline constexpr Term programTerms1994[] = {{"one",5.443575553567205},{"activeDl
 inline constexpr ProgramNode programNodes[] = {
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms0,8},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms1,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms2,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms3,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms4,1},
+{Instruction::Constant,-1,-1,nullptr,257.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,566.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,766.125,nullptr,0},
 {Instruction::LE,3,4,"KlogStride",250.30169677734375,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms6,1},
+{Instruction::Constant,-1,-1,nullptr,384.625,nullptr,0},
 {Instruction::LE,5,6,"Dunder128",1.5,nullptr,0},
 {Instruction::LE,2,7,"KmaxSlog",197.7139663696289,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms9,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms10,1},
+{Instruction::Constant,-1,-1,nullptr,1176.125,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1410.125,nullptr,0},
 {Instruction::LE,9,10,"maxSlog",8.453445434570312,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms12,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms13,1},
+{Instruction::Constant,-1,-1,nullptr,724.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1435.75,nullptr,0},
 {Instruction::LE,12,13,"maxSlog",16.821928024291992,nullptr,0},
 {Instruction::LE,11,14,"minSbytes",24064.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms16,1},
+{Instruction::Constant,-1,-1,nullptr,733.75,nullptr,0},
 {Instruction::LE,15,16,"S_to_D_transitions",1.5,nullptr,0},
 {Instruction::LE,8,17,"KoverTail",12.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms19,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms20,1},
+{Instruction::Constant,-1,-1,nullptr,1100.125,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1245.375,nullptr,0},
 {Instruction::LE,19,20,"suffixD",3.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms22,1},
+{Instruction::Constant,-1,-1,nullptr,1740.0,nullptr,0},
 {Instruction::LE,21,22,"KlogDstride",80.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms24,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms25,1},
+{Instruction::Constant,-1,-1,nullptr,1466.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,2583.75,nullptr,0},
 {Instruction::LE,24,25,"KlogDstride",96.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms27,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms28,1},
+{Instruction::Constant,-1,-1,nullptr,2423.125,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,4479.625,nullptr,0},
 {Instruction::LE,27,28,"activeRows",48.0,nullptr,0},
 {Instruction::LE,26,29,"activeRows",24.0,nullptr,0},
 {Instruction::LE,23,30,"D",6.0,nullptr,0},
 {Instruction::LE,18,31,"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms33,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms34,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms35,1},
+{Instruction::Constant,-1,-1,nullptr,3033.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,2024.375,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,2365.75,nullptr,0},
 {Instruction::LE,34,35,"minSbytes",512.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms37,1},
+{Instruction::Constant,-1,-1,nullptr,1305.75,nullptr,0},
 {Instruction::LE,36,37,"fullSuffix",12.0,nullptr,0},
 {Instruction::LE,33,38,"KactiveDlog",160.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms40,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms41,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms42,1},
+{Instruction::Constant,-1,-1,nullptr,3080.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,4726.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,5746.375,nullptr,0},
 {Instruction::LE,41,42,"KlogDstride",384.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms44,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms45,1},
+{Instruction::Constant,-1,-1,nullptr,3296.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,4135.875,nullptr,0},
 {Instruction::LE,44,45,"leading",1.5,nullptr,0},
 {Instruction::LE,43,46,"KsmallD",192.0,nullptr,0},
 {Instruction::LE,40,47,"KlogDstride2",384.0,nullptr,0},
 {Instruction::LE,39,48,"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms50,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms51,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms52,1},
+{Instruction::Constant,-1,-1,nullptr,4665.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,6035.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,7302.375,nullptr,0},
 {Instruction::LE,51,52,"KmaxSlog",1753.1083374023438,nullptr,0},
 {Instruction::LE,50,53,"lastSSize",3.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms55,1},
+{Instruction::Constant,-1,-1,nullptr,9530.625,nullptr,0},
 {Instruction::LE,54,55,"KmaxSlog",2804.08203125,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms57,1},
+{Instruction::Constant,-1,-1,nullptr,18673.375,nullptr,0},
 {Instruction::LE,56,57,"EAbove64",576.0,nullptr,0},
 {Instruction::LE,49,58,"KlogDstride2",1088.0,nullptr,0},
 {Instruction::LE,32,59,"KlogDstride",160.0,nullptr,0},
@@ -547,11 +312,11 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms118,8},
 {Instruction::EQ,117,118,"leading_band",1.0,nullptr,0},
 {Instruction::EQ,116,119,"leading_band",0.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms121,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms122,1},
+{Instruction::Constant,-1,-1,nullptr,572.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1155.875,nullptr,0},
 {Instruction::LE,121,122,"activeRows",12.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms124,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms125,1},
+{Instruction::Constant,-1,-1,nullptr,1139.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1522.25,nullptr,0},
 {Instruction::LE,124,125,"D",6.0,nullptr,0},
 {Instruction::LE,123,126,"KoverSqrtActiveD",19.313708305358887,nullptr,0},
 {Instruction::Blend,120,127,nullptr,0.5,nullptr,0},
@@ -569,22 +334,22 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::EQ,71,139,"nD",3.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms141,8},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms142,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms143,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms144,1},
+{Instruction::Constant,-1,-1,nullptr,697.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,776.125,nullptr,0},
 {Instruction::LE,143,144,"KmaxSlog",511.90965270996094,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms146,1},
+{Instruction::Constant,-1,-1,nullptr,1118.625,nullptr,0},
 {Instruction::LE,145,146,"D_axis0_inner_payload_bytes",96.0,nullptr,0},
 {Instruction::LE,3,147,"KlogStride",250.30169677734375,nullptr,0},
 {Instruction::LE,148,6,"Dunder128",1.5,nullptr,0},
 {Instruction::LE,2,149,"KmaxSlog",197.7139663696289,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms151,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms152,1},
+{Instruction::Constant,-1,-1,nullptr,1274.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1110.0,nullptr,0},
 {Instruction::LE,151,152,"partialLogical32",1.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms154,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms155,1},
+{Instruction::Constant,-1,-1,nullptr,1391.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1445.875,nullptr,0},
 {Instruction::LE,154,155,"D_axis0_inner_payload_bytes",48.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms157,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms158,1},
+{Instruction::Constant,-1,-1,nullptr,1493.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,2043.625,nullptr,0},
 {Instruction::LE,157,158,"maxSlog",12.821928024291992,nullptr,0},
 {Instruction::LE,156,159,"KlogStride",393.8353576660156,nullptr,0},
 {Instruction::LE,153,160,"maxSlog",8.453445434570312,nullptr,0},
@@ -592,40 +357,40 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::LE,161,162,"minSbytes",24064.0,nullptr,0},
 {Instruction::LE,163,16,"S_to_D_transitions",1.5,nullptr,0},
 {Instruction::LE,150,164,"KoverTail",12.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms166,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms167,1},
+{Instruction::Constant,-1,-1,nullptr,1107.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1008.625,nullptr,0},
 {Instruction::LE,166,167,"KlogDstride2",16.0,nullptr,0},
 {Instruction::LE,168,20,"suffixD",3.0,nullptr,0},
 {Instruction::LE,169,22,"KlogDstride",80.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms171,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms172,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms173,1},
+{Instruction::Constant,-1,-1,nullptr,2806.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,2721.375,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1591.875,nullptr,0},
 {Instruction::LE,172,173,"KsumInvD",28.0,nullptr,0},
 {Instruction::LE,171,174,"KlogDstride",96.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms176,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms177,1},
+{Instruction::Constant,-1,-1,nullptr,2552.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,2285.0,nullptr,0},
 {Instruction::LE,176,177,"D_axis2_inner_payload_bytes",2.5,nullptr,0},
 {Instruction::LE,178,28,"activeRows",48.0,nullptr,0},
 {Instruction::LE,175,179,"activeRows",24.0,nullptr,0},
 {Instruction::LE,170,180,"D",6.0,nullptr,0},
 {Instruction::LE,165,181,"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms183,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms184,1},
+{Instruction::Constant,-1,-1,nullptr,3390.375,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,3088.375,nullptr,0},
 {Instruction::LE,183,184,"S_axis2_stride_log2",4.660964012145996,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms186,1},
+{Instruction::Constant,-1,-1,nullptr,2450.0,nullptr,0},
 {Instruction::LE,185,186,"D_axis2_inner_payload_bytes",12.0,nullptr,0},
 {Instruction::LE,41,42,"logK",7.5,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms189,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms190,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms191,1},
+{Instruction::Constant,-1,-1,nullptr,3417.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,5816.375,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,4216.75,nullptr,0},
 {Instruction::LE,190,191,"D_SspanRatio",24500.0,nullptr,0},
 {Instruction::LE,189,192,"KactiveSlog",448.0,nullptr,0},
 {Instruction::LE,44,193,"leading",1.5,nullptr,0},
 {Instruction::LE,188,194,"KsmallD",192.0,nullptr,0},
 {Instruction::LE,187,195,"KlogDstride2",384.0,nullptr,0},
 {Instruction::LE,39,196,"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms198,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms199,1},
+{Instruction::Constant,-1,-1,nullptr,10391.125,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,9293.875,nullptr,0},
 {Instruction::LE,198,199,"minSbytes",8192.0,nullptr,0},
 {Instruction::LE,54,200,"KmaxSlog",2804.08203125,nullptr,0},
 {Instruction::LE,201,57,"EAbove64",576.0,nullptr,0},
@@ -681,11 +446,11 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::LE,246,251,"KlogDstride",704.0,nullptr,0},
 {Instruction::LE,239,252,"KlogDstride2",448.0,nullptr,0},
 {Instruction::LE,232,253,"activeLogical32",3.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms255,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms256,1},
+{Instruction::Constant,-1,-1,nullptr,2027.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,3437.875,nullptr,0},
 {Instruction::LE,255,256,"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms258,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms259,1},
+{Instruction::Constant,-1,-1,nullptr,6332.375,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,10253.75,nullptr,0},
 {Instruction::LE,258,259,"KmaxSlog",2804.08203125,nullptr,0},
 {Instruction::LE,257,260,"KlogDstride2",1088.0,nullptr,0},
 {Instruction::LE,127,261,"KlogDstride",160.0,nullptr,0},
@@ -741,10 +506,10 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::EQ,311,141,"hidden",0.0,nullptr,0},
 {Instruction::LE,312,141,"leading",1.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms314,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms315,1},
+{Instruction::Constant,-1,-1,nullptr,998.5,nullptr,0},
 {Instruction::LE,121,315,"activeRows",12.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms317,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms318,1},
+{Instruction::Constant,-1,-1,nullptr,1423.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1514.875,nullptr,0},
 {Instruction::LE,317,318,"KactiveSlog",320.0,nullptr,0},
 {Instruction::LE,124,319,"D",6.0,nullptr,0},
 {Instruction::LE,316,320,"KoverSqrtActiveD",19.313708305358887,nullptr,0},
@@ -766,16 +531,16 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms337,8},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms338,8},
 {Instruction::EQ,337,338,"prefixMasked",0.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms340,1},
+{Instruction::Constant,-1,-1,nullptr,1398.875,nullptr,0},
 {Instruction::LE,315,340,"KlogDstride2",96.0,nullptr,0},
 {Instruction::LE,121,341,"activeRows",12.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms343,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms344,1},
+{Instruction::Constant,-1,-1,nullptr,1465.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1756.125,nullptr,0},
 {Instruction::LE,343,344,"KlogStride",1160.2741088867188,nullptr,0},
 {Instruction::LE,124,345,"D",6.0,nullptr,0},
 {Instruction::LE,342,346,"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms348,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms349,1},
+{Instruction::Constant,-1,-1,nullptr,3091.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,4133.0,nullptr,0},
 {Instruction::LE,348,349,"logDstride",1.5,nullptr,0},
 {Instruction::LE,255,350,"KmaxSlog",1300.6033935546875,nullptr,0},
 {Instruction::LE,351,260,"KlogDstride2",1088.0,nullptr,0},
@@ -827,8 +592,8 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms398,8},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms399,8},
 {Instruction::EQ,398,399,"warp_band",0.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms401,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms402,1},
+{Instruction::Constant,-1,-1,nullptr,2231.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1728.625,nullptr,0},
 {Instruction::LE,401,402,"KlogStride",1726.5458984375,nullptr,0},
 {Instruction::LE,319,403,"KlogStride",1160.2741088867188,nullptr,0},
 {Instruction::LE,124,404,"D",6.0,nullptr,0},
@@ -848,30 +613,30 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::EQ,418,339,"nS",2.0,nullptr,0},
 {Instruction::EQ,397,419,"nS",1.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms421,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms422,1},
+{Instruction::Constant,-1,-1,nullptr,755.625,nullptr,0},
 {Instruction::LE,6,422,"KlogDstride2",96.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms424,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms425,1},
+{Instruction::Constant,-1,-1,nullptr,1354.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,830.5,nullptr,0},
 {Instruction::LE,424,425,"D_axis2_inner_payload_bytes",3.0,nullptr,0},
 {Instruction::LE,423,426,"KoverTail",12.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms428,1},
+{Instruction::Constant,-1,-1,nullptr,1391.375,nullptr,0},
 {Instruction::LE,167,428,"minSbytes",24.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms430,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms431,1},
+{Instruction::Constant,-1,-1,nullptr,1490.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,2549.25,nullptr,0},
 {Instruction::LE,430,431,"activeRows",24.0,nullptr,0},
 {Instruction::LE,429,432,"D",6.0,nullptr,0},
 {Instruction::LE,427,433,"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms435,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms436,1},
+{Instruction::Constant,-1,-1,nullptr,2723.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1943.75,nullptr,0},
 {Instruction::LE,435,436,"KsuffixLog",224.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms438,1},
+{Instruction::Constant,-1,-1,nullptr,4153.375,nullptr,0},
 {Instruction::LE,40,438,"KlogDstride2",384.0,nullptr,0},
 {Instruction::LE,437,439,"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms441,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms442,1},
+{Instruction::Constant,-1,-1,nullptr,6930.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,5219.75,nullptr,0},
 {Instruction::LE,441,442,"KsumInvD",92.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms444,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms445,1},
+{Instruction::Constant,-1,-1,nullptr,9302.375,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,11574.125,nullptr,0},
 {Instruction::LE,444,445,"activeS",6.0,nullptr,0},
 {Instruction::LE,443,446,"KmaxSlog",2804.08203125,nullptr,0},
 {Instruction::LE,440,447,"KlogDstride2",1088.0,nullptr,0},
@@ -893,8 +658,8 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::EQ,365,463,"nD",3.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms465,8},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms466,5},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms467,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms468,1},
+{Instruction::Constant,-1,-1,nullptr,1438.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1758.75,nullptr,0},
 {Instruction::LE,467,468,"KmaxSlog",2431.9097900390625,nullptr,0},
 {Instruction::LE,469,174,"KlogDstride",96.0,nullptr,0},
 {Instruction::LE,470,179,"activeRows",24.0,nullptr,0},
@@ -916,31 +681,31 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::EQ,486,465,"nS",2.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms488,8},
 {Instruction::Scale,488,-1,nullptr,0.9637243288684131,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms490,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms491,1},
+{Instruction::Constant,-1,-1,nullptr,367.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,745.625,nullptr,0},
 {Instruction::LE,490,491,"KlogDstride",48.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms493,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms494,1},
+{Instruction::Constant,-1,-1,nullptr,761.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1319.0,nullptr,0},
 {Instruction::LE,493,494,"minSbytes",120.0,nullptr,0},
 {Instruction::LE,492,495,"activeRows",12.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms497,1},
+{Instruction::Constant,-1,-1,nullptr,1045.125,nullptr,0},
 {Instruction::LE,497,428,"minSbytes",24.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms499,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms500,1},
+{Instruction::Constant,-1,-1,nullptr,1490.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,2610.0,nullptr,0},
 {Instruction::LE,499,500,"activeRows",24.0,nullptr,0},
 {Instruction::LE,498,501,"D",6.0,nullptr,0},
 {Instruction::LE,496,502,"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms504,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms505,1},
+{Instruction::Constant,-1,-1,nullptr,2735.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1942.5,nullptr,0},
 {Instruction::LE,504,505,"KsuffixLog",224.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms507,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms508,1},
+{Instruction::Constant,-1,-1,nullptr,3086.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,4161.875,nullptr,0},
 {Instruction::LE,507,508,"KlogDstride2",384.0,nullptr,0},
 {Instruction::LE,506,509,"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms511,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms512,1},
+{Instruction::Constant,-1,-1,nullptr,6868.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,5060.0,nullptr,0},
 {Instruction::LE,511,512,"KsumInvD",92.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms514,1},
+{Instruction::Constant,-1,-1,nullptr,9316.125,nullptr,0},
 {Instruction::LE,514,445,"sqrtS",2.414213538169861,nullptr,0},
 {Instruction::LE,513,515,"KmaxSlog",2804.08203125,nullptr,0},
 {Instruction::LE,510,516,"KlogDstride2",1088.0,nullptr,0},
@@ -1069,7 +834,7 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::EQ,639,609,"hidden",0.0,nullptr,0},
 {Instruction::LE,609,640,"leading",1.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms642,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms643,1},
+{Instruction::Constant,-1,-1,nullptr,4391.375,nullptr,0},
 {Instruction::LE,643,29,"activeRows",24.0,nullptr,0},
 {Instruction::LE,23,644,"D",6.0,nullptr,0},
 {Instruction::LE,18,645,"KoverSqrtActiveD",19.313708305358887,nullptr,0},
@@ -1183,64 +948,64 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms754,8},
 {Instruction::EQ,753,754,"hidden",0.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms756,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms757,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms758,1},
+{Instruction::Constant,-1,-1,nullptr,105.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,132.625,nullptr,0},
 {Instruction::LE,757,758,"lastSSize",3.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms760,1},
+{Instruction::Constant,-1,-1,nullptr,78.375,nullptr,0},
 {Instruction::LE,759,760,"D_axis1_extent",12.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms762,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms763,1},
+{Instruction::Constant,-1,-1,nullptr,142.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,116.625,nullptr,0},
 {Instruction::LE,762,763,"logTail",3.5,nullptr,0},
 {Instruction::LE,761,764,"KlogRuns",20.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms766,1},
+{Instruction::Constant,-1,-1,nullptr,151.5,nullptr,0},
 {Instruction::LE,765,766,"KactiveSlog",448.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms768,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms769,1},
+{Instruction::Constant,-1,-1,nullptr,153.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,94.75,nullptr,0},
 {Instruction::LE,768,769,"D_axis4_inner_payload_bytes",1.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms771,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms772,1},
+{Instruction::Constant,-1,-1,nullptr,1.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,98.5,nullptr,0},
 {Instruction::LE,771,772,"D_axis3_stride_log2",2.5,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms774,1},
+{Instruction::Constant,-1,-1,nullptr,135.0,nullptr,0},
 {Instruction::LE,773,774,"fullSuffix",24.0,nullptr,0},
 {Instruction::LE,770,775,"minSbytes",208.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms777,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms778,1},
+{Instruction::Constant,-1,-1,nullptr,115.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,61.25,nullptr,0},
 {Instruction::LE,777,778,"KlogStride",164.9176788330078,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms780,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms781,1},
+{Instruction::Constant,-1,-1,nullptr,171.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,142.75,nullptr,0},
 {Instruction::LE,780,781,"S_axis0_stride_log2",7.0,nullptr,0},
 {Instruction::LE,779,782,"tailMasked",0.5,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms784,1},
+{Instruction::Constant,-1,-1,nullptr,19.0,nullptr,0},
 {Instruction::LE,783,784,"maxSlog",15.923051357269287,nullptr,0},
 {Instruction::LE,776,785,"logDstride",1.5,nullptr,0},
 {Instruction::LE,767,786,"KlogDstride",28.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms788,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms789,1},
+{Instruction::Constant,-1,-1,nullptr,155.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,169.625,nullptr,0},
 {Instruction::LE,788,789,"KlogDstride2",272.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms791,1},
+{Instruction::Constant,-1,-1,nullptr,189.25,nullptr,0},
 {Instruction::LE,790,791,"EAbove64",128.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms793,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms794,1},
+{Instruction::Constant,-1,-1,nullptr,244.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,279.375,nullptr,0},
 {Instruction::LE,793,794,"KmaskedAxes",64.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms796,1},
+{Instruction::Constant,-1,-1,nullptr,346.375,nullptr,0},
 {Instruction::LE,795,796,"activeRuns",48.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms798,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms799,1},
+{Instruction::Constant,-1,-1,nullptr,405.375,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,486.5,nullptr,0},
 {Instruction::LE,798,799,"KoverTail",48.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms801,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms802,1},
+{Instruction::Constant,-1,-1,nullptr,919.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,1519.25,nullptr,0},
 {Instruction::LE,801,802,"KlogDstride",2560.0,nullptr,0},
 {Instruction::LE,800,803,"KactiveSlog",2560.0,nullptr,0},
 {Instruction::LE,797,804,"KlogDstride",640.0,nullptr,0},
 {Instruction::LE,792,805,"KlogDstride",320.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms807,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms808,1},
+{Instruction::Constant,-1,-1,nullptr,134.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,101.25,nullptr,0},
 {Instruction::LE,807,808,"D_axis4_extent",6.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms810,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms811,1},
+{Instruction::Constant,-1,-1,nullptr,419.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,243.125,nullptr,0},
 {Instruction::LE,810,811,"D_SspanRatio",8645.0,nullptr,0},
 {Instruction::LE,809,812,"KlogDstride2",384.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms814,1},
+{Instruction::Constant,-1,-1,nullptr,71.75,nullptr,0},
 {Instruction::LE,813,814,"KlogW2",7808.0,nullptr,0},
 {Instruction::LE,806,815,"sqrtW",4.828427076339722,nullptr,0},
 {Instruction::LE,787,816,"KlogDstride",80.0,nullptr,0},
@@ -1256,36 +1021,36 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::LE,755,826,"leading",1.0,nullptr,0},
 {Instruction::EQ,827,755,"nS",2.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms829,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms830,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms831,1},
+{Instruction::Constant,-1,-1,nullptr,114.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,74.25,nullptr,0},
 {Instruction::LE,830,831,"KlogDstride",20.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms833,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms834,1},
+{Instruction::Constant,-1,-1,nullptr,149.125,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,162.75,nullptr,0},
 {Instruction::LE,833,834,"KsmallD",8.0,nullptr,0},
 {Instruction::LE,832,835,"lastSSize",6.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms837,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms838,1},
+{Instruction::Constant,-1,-1,nullptr,121.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,0.5,nullptr,0},
 {Instruction::LE,837,838,"logDstride",0.5,nullptr,0},
 {Instruction::LE,836,839,"leading",6.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms841,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms842,1},
+{Instruction::Constant,-1,-1,nullptr,182.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,163.625,nullptr,0},
 {Instruction::LE,841,842,"KlogTail",80.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms844,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms845,1},
+{Instruction::Constant,-1,-1,nullptr,184.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,200.5,nullptr,0},
 {Instruction::LE,844,845,"KlogDstride2",384.0,nullptr,0},
 {Instruction::LE,843,846,"EAbove64",128.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms848,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms849,1},
+{Instruction::Constant,-1,-1,nullptr,257.375,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,414.75,nullptr,0},
 {Instruction::LE,848,849,"KlogDstride2",1600.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms851,1},
+{Instruction::Constant,-1,-1,nullptr,972.125,nullptr,0},
 {Instruction::LE,850,851,"KactiveSlog",2560.0,nullptr,0},
 {Instruction::LE,847,852,"KlogDstride",320.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms854,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms855,1},
+{Instruction::Constant,-1,-1,nullptr,110.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,141.75,nullptr,0},
 {Instruction::LE,854,855,"KoverTail",24.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms857,1},
+{Instruction::Constant,-1,-1,nullptr,268.5,nullptr,0},
 {Instruction::LE,856,857,"KlogDstride2",384.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms859,1},
+{Instruction::Constant,-1,-1,nullptr,69.125,nullptr,0},
 {Instruction::LE,858,859,"KlogDstride2",768.0,nullptr,0},
 {Instruction::LE,853,860,"idleWarpProxy",18.0,nullptr,0},
 {Instruction::LE,840,861,"KlogDstride",80.0,nullptr,0},
@@ -1345,25 +1110,25 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::LE,912,915,"KmaxSlog",6606.682861328125,nullptr,0},
 {Instruction::LE,909,916,"KlogDstride",704.0,nullptr,0},
 {Instruction::LE,892,917,"KlogDstride",80.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms919,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms920,1},
+{Instruction::Constant,-1,-1,nullptr,152.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,159.625,nullptr,0},
 {Instruction::LE,919,920,"activeRuns",12.0,nullptr,0},
 {Instruction::LE,832,921,"lastSSize",6.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms923,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms924,1},
+{Instruction::Constant,-1,-1,nullptr,180.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,163.5,nullptr,0},
 {Instruction::LE,923,924,"logTail",2.5,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms926,1},
+{Instruction::Constant,-1,-1,nullptr,189.625,nullptr,0},
 {Instruction::LE,925,926,"EAbove8",184.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms928,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms929,1},
+{Instruction::Constant,-1,-1,nullptr,249.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,293.5,nullptr,0},
 {Instruction::LE,928,929,"activeRuns",6.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms931,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms932,1},
+{Instruction::Constant,-1,-1,nullptr,404.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,524.375,nullptr,0},
 {Instruction::LE,931,932,"S",12.0,nullptr,0},
 {Instruction::LE,930,933,"KlogDstride",640.0,nullptr,0},
 {Instruction::LE,927,934,"KlogDstride",320.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms936,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms937,1},
+{Instruction::Constant,-1,-1,nullptr,138.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,75.875,nullptr,0},
 {Instruction::LE,936,937,"KactiveDlog",1152.0,nullptr,0},
 {Instruction::LE,935,938,"idleWarpProxy",18.0,nullptr,0},
 {Instruction::LE,922,939,"KlogDstride",80.0,nullptr,0},
@@ -1373,15 +1138,15 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::EQ,943,753,"payload_integer",0.0,nullptr,0},
 {Instruction::LE,753,944,"D_SspanRatio",1.0,nullptr,0},
 {Instruction::LE,753,945,"Dunder128",0.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms947,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms948,1},
+{Instruction::Constant,-1,-1,nullptr,107.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,154.125,nullptr,0},
 {Instruction::LE,947,948,"lastSSize",6.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms950,1},
+{Instruction::Constant,-1,-1,nullptr,167.0,nullptr,0},
 {Instruction::LE,950,926,"EAbove64",128.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms952,1},
+{Instruction::Constant,-1,-1,nullptr,280.375,nullptr,0},
 {Instruction::LE,952,851,"KactiveSlog",2560.0,nullptr,0},
 {Instruction::LE,951,953,"KlogDstride",320.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms955,1},
+{Instruction::Constant,-1,-1,nullptr,117.75,nullptr,0},
 {Instruction::LE,955,857,"KlogDstride2",384.0,nullptr,0},
 {Instruction::LE,956,859,"KlogDstride2",768.0,nullptr,0},
 {Instruction::LE,954,957,"idleWarpProxy",18.0,nullptr,0},
@@ -1405,9 +1170,9 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::LE,975,753,"E",256.0,nullptr,0},
 {Instruction::EQ,976,753,"prefixMasked",0.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms978,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms979,1},
+{Instruction::Constant,-1,-1,nullptr,108.125,nullptr,0},
 {Instruction::LE,979,921,"lastSSize",6.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms981,1},
+{Instruction::Constant,-1,-1,nullptr,0.875,nullptr,0},
 {Instruction::LE,980,981,"leading",6.0,nullptr,0},
 {Instruction::Blend,978,982,nullptr,0.5,nullptr,0},
 {Instruction::LE,983,754,"K",128.0,nullptr,0},
@@ -1426,94 +1191,94 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms997,8},
 {Instruction::EQ,996,997,"hidden",0.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms999,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1000,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1001,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1002,1},
+{Instruction::Constant,-1,-1,nullptr,98.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,114.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,102.5,nullptr,0},
 {Instruction::LE,1001,1002,"minSbytes",240.0,nullptr,0},
 {Instruction::LE,1000,1003,"minSbytes",56.0,nullptr,0},
 {Instruction::LE,1004,758,"lastSSize",3.0,nullptr,0},
 {Instruction::LE,1005,760,"D_axis1_extent",12.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1007,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1008,1},
+{Instruction::Constant,-1,-1,nullptr,143.125,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,159.375,nullptr,0},
 {Instruction::LE,1007,1008,"D_SspanRatio",468.5,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1010,1},
+{Instruction::Constant,-1,-1,nullptr,130.125,nullptr,0},
 {Instruction::LE,1009,1010,"D_axis4_extent",0.5,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1012,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1013,1},
+{Instruction::Constant,-1,-1,nullptr,108.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,126.5,nullptr,0},
 {Instruction::LE,1012,1013,"S_axis0_stride_log2",8.69615888595581,nullptr,0},
 {Instruction::LE,1011,1014,"logTail",3.5,nullptr,0},
 {Instruction::LE,1006,1015,"KlogRuns",20.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1017,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1018,1},
+{Instruction::Constant,-1,-1,nullptr,151.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,157.25,nullptr,0},
 {Instruction::LE,1017,1018,"activeRows",24.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1020,1},
+{Instruction::Constant,-1,-1,nullptr,204.375,nullptr,0},
 {Instruction::LE,1019,1020,"D_axis1_inner_payload_bytes",6.0,nullptr,0},
 {Instruction::LE,1016,1021,"KactiveSlog",448.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1023,1},
+{Instruction::Constant,-1,-1,nullptr,12.125,nullptr,0},
 {Instruction::LE,771,1023,"D_SspanRatio",3584.125,nullptr,0},
 {Instruction::LE,1024,772,"D_axis3_stride_log2",2.5,nullptr,0},
 {Instruction::LE,1025,774,"fullSuffix",24.0,nullptr,0},
 {Instruction::LE,770,1026,"minSbytes",208.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1028,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1029,1},
+{Instruction::Constant,-1,-1,nullptr,119.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,109.375,nullptr,0},
 {Instruction::LE,1028,1029,"KmaxSlog",120.0,nullptr,0},
 {Instruction::LE,1030,778,"KlogStride",164.9176788330078,nullptr,0},
 {Instruction::LE,1031,784,"maxSlog",15.923051357269287,nullptr,0},
 {Instruction::LE,1027,1032,"logDstride",1.5,nullptr,0},
 {Instruction::LE,1022,1033,"KlogDstride",28.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1035,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1036,1},
+{Instruction::Constant,-1,-1,nullptr,227.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,184.5,nullptr,0},
 {Instruction::LE,1035,1036,"minSbytes",2112.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1038,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1039,1},
+{Instruction::Constant,-1,-1,nullptr,120.875,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,160.625,nullptr,0},
 {Instruction::LE,1039,788,"logK",6.5,nullptr,0},
 {Instruction::LE,1038,1040,"EAbove8",88.0,nullptr,0},
 {Instruction::LE,1037,1041,"lastSSize",3.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1043,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1044,1},
+{Instruction::Constant,-1,-1,nullptr,183.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,169.75,nullptr,0},
 {Instruction::LE,1043,1044,"logTail",1.5,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1046,1},
+{Instruction::Constant,-1,-1,nullptr,164.375,nullptr,0},
 {Instruction::LE,781,1046,"D_axis1_extent",3.0,nullptr,0},
 {Instruction::LE,1045,1047,"KlogTail",80.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1049,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1050,1},
+{Instruction::Constant,-1,-1,nullptr,201.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,172.0,nullptr,0},
 {Instruction::LE,1049,1050,"groups32",3.0,nullptr,0},
 {Instruction::LE,1048,1051,"fullSuffix",24.0,nullptr,0},
 {Instruction::LE,1042,1052,"KlogDstride2",272.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1054,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1055,1},
+{Instruction::Constant,-1,-1,nullptr,175.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,187.875,nullptr,0},
 {Instruction::LE,1054,1055,"KlogW2",768.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1057,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1058,1},
+{Instruction::Constant,-1,-1,nullptr,199.375,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,214.5,nullptr,0},
 {Instruction::LE,1057,1058,"activeRows",40.0,nullptr,0},
 {Instruction::LE,1056,1059,"D_axis1_stride_log2",1.5,nullptr,0},
 {Instruction::LE,1053,1060,"EAbove64",128.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1062,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1063,1},
+{Instruction::Constant,-1,-1,nullptr,238.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,251.125,nullptr,0},
 {Instruction::LE,1062,1063,"activeRows",12.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1065,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1066,1},
+{Instruction::Constant,-1,-1,nullptr,267.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,296.125,nullptr,0},
 {Instruction::LE,1065,1066,"S",6.0,nullptr,0},
 {Instruction::LE,1064,1067,"activeRuns",2.5,nullptr,0},
 {Instruction::LE,1068,796,"activeRuns",48.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1070,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1071,1},
+{Instruction::Constant,-1,-1,nullptr,407.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,356.375,nullptr,0},
 {Instruction::LE,1070,1071,"KsumInvD",248.0,nullptr,0},
 {Instruction::LE,1072,799,"KoverTail",48.0,nullptr,0},
 {Instruction::LE,1073,803,"KactiveSlog",2560.0,nullptr,0},
 {Instruction::LE,1069,1074,"KlogDstride",640.0,nullptr,0},
 {Instruction::LE,1061,1075,"KlogDstride",320.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1077,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1078,1},
+{Instruction::Constant,-1,-1,nullptr,111.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,121.625,nullptr,0},
 {Instruction::LE,1077,1078,"KsmallD",64.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1080,1},
+{Instruction::Constant,-1,-1,nullptr,150.0,nullptr,0},
 {Instruction::LE,1079,1080,"activeRows",24.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1082,1},
+{Instruction::Constant,-1,-1,nullptr,98.75,nullptr,0},
 {Instruction::LE,1029,1082,"D_axis0_stride_log2",15.5,nullptr,0},
 {Instruction::LE,1081,1083,"D_axis4_extent",6.0,nullptr,0},
 {Instruction::LE,1084,812,"KlogDstride2",384.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1086,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1087,1},
+{Instruction::Constant,-1,-1,nullptr,46.125,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,76.75,nullptr,0},
 {Instruction::LE,1086,1087,"D_axis3_extent",3.0,nullptr,0},
 {Instruction::LE,1085,1088,"KlogW2",7808.0,nullptr,0},
 {Instruction::LE,1076,1089,"sqrtW",4.828427076339722,nullptr,0},
@@ -1582,12 +1347,12 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::LE,755,1152,"leading",1.0,nullptr,0},
 {Instruction::EQ,1153,755,"nS",1.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms1155,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1156,1},
+{Instruction::Constant,-1,-1,nullptr,113.125,nullptr,0},
 {Instruction::LE,1156,839,"leading",6.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1158,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1159,1},
+{Instruction::Constant,-1,-1,nullptr,173.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,284.875,nullptr,0},
 {Instruction::LE,1158,1159,"KlogDstride",320.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1161,1},
+{Instruction::Constant,-1,-1,nullptr,125.625,nullptr,0},
 {Instruction::LE,1161,859,"KlogDstride2",768.0,nullptr,0},
 {Instruction::LE,1160,1162,"idleWarpProxy",18.0,nullptr,0},
 {Instruction::LE,1157,1163,"KlogDstride",80.0,nullptr,0},
@@ -1765,27 +1530,27 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms1336,8},
 {Instruction::EQ,1335,1336,"hidden",0.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms1338,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1339,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1340,1},
+{Instruction::Constant,-1,-1,nullptr,104.75,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,126.375,nullptr,0},
 {Instruction::LE,1339,1340,"activeRuns",3.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1342,1},
+{Instruction::Constant,-1,-1,nullptr,145.5,nullptr,0},
 {Instruction::LE,1342,1008,"KoverTail",24.0,nullptr,0},
 {Instruction::LE,1341,1343,"KactiveSlog",448.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1345,1},
+{Instruction::Constant,-1,-1,nullptr,136.75,nullptr,0},
 {Instruction::LE,1345,771,"minSbytes",208.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1347,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1348,1},
+{Instruction::Constant,-1,-1,nullptr,124.25,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,36.875,nullptr,0},
 {Instruction::LE,1347,1348,"D_SspanRatio",18273.25,nullptr,0},
 {Instruction::LE,1346,1349,"logDstride",1.5,nullptr,0},
 {Instruction::LE,1344,1350,"KlogDstride",28.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1352,1},
+{Instruction::Constant,-1,-1,nullptr,164.625,nullptr,0},
 {Instruction::LE,1352,791,"EAbove64",128.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1354,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1355,1},
+{Instruction::Constant,-1,-1,nullptr,256.625,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,422.125,nullptr,0},
 {Instruction::LE,1354,1355,"KlogDstride",640.0,nullptr,0},
 {Instruction::LE,1353,1356,"KlogDstride",320.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1358,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1359,1},
+{Instruction::Constant,-1,-1,nullptr,117.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,268.0,nullptr,0},
 {Instruction::LE,1358,1359,"KlogDstride2",384.0,nullptr,0},
 {Instruction::LE,1360,814,"KlogW2",7808.0,nullptr,0},
 {Instruction::LE,1357,1361,"sqrtW",4.828427076339722,nullptr,0},
@@ -1909,11 +1674,11 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::LE,1337,1479,"leading",1.0,nullptr,0},
 {Instruction::EQ,1480,1337,"nS",1.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms1482,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1483,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1484,1},
+{Instruction::Constant,-1,-1,nullptr,169.375,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,206.25,nullptr,0},
 {Instruction::LE,1483,1484,"leading",3.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1486,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1487,1},
+{Instruction::Constant,-1,-1,nullptr,145.125,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,117.875,nullptr,0},
 {Instruction::LE,1486,1487,"idleWarpProxy",2.5,nullptr,0},
 {Instruction::LE,1485,1488,"S_axis0_stride_log2",7.0,nullptr,0},
 {Instruction::LE,1031,1489,"tailMasked",0.5,nullptr,0},
@@ -1980,15 +1745,15 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::LE,1337,1550,"leading",1.0,nullptr,0},
 {Instruction::EQ,1551,1337,"nS",2.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms1553,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1554,1},
+{Instruction::Constant,-1,-1,nullptr,129.125,nullptr,0},
 {Instruction::LE,979,1554,"maxSlog",9.903677463531494,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1556,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1557,1},
+{Instruction::Constant,-1,-1,nullptr,109.5,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,17.75,nullptr,0},
 {Instruction::LE,1556,1557,"fullSuffix",12.0,nullptr,0},
 {Instruction::LE,1555,1558,"KlogDstride",20.0,nullptr,0},
 {Instruction::LE,1559,921,"lastSSize",6.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1561,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1562,1},
+{Instruction::Constant,-1,-1,nullptr,152.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,168.875,nullptr,0},
 {Instruction::LE,1561,1562,"EAbove16",80.0,nullptr,0},
 {Instruction::LE,923,1563,"logTail",2.5,nullptr,0},
 {Instruction::LE,1564,926,"EAbove8",184.0,nullptr,0},
@@ -2139,7 +1904,7 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::EQ,1679,1709,"mask",1.0,nullptr,0},
 {Instruction::LE,949,981,"leading",6.0,nullptr,0},
 {Instruction::LE,950,926,"EAbove8",184.0,nullptr,0},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1713,1},
+{Instruction::Constant,-1,-1,nullptr,424.5,nullptr,0},
 {Instruction::LE,848,1713,"KlogDstride",640.0,nullptr,0},
 {Instruction::LE,1712,1714,"KlogDstride",320.0,nullptr,0},
 {Instruction::LE,1715,938,"idleWarpProxy",18.0,nullptr,0},
@@ -2314,7 +2079,7 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::LE,1839,1884,"Dunder128",0.0,nullptr,0},
 {Instruction::LE,1876,1885,"Kbool",0.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms1887,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1888,1},
+{Instruction::Constant,-1,-1,nullptr,8.125,nullptr,0},
 {Instruction::LE,1156,1888,"Kfp8",48.0,nullptr,0},
 {Instruction::LE,1889,1163,"KlogDstride",80.0,nullptr,0},
 {Instruction::Blend,1887,1890,nullptr,0.75,nullptr,0},
@@ -2337,8 +2102,8 @@ inline constexpr ProgramNode programNodes[] = {
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms1908,8},
 {Instruction::EQ,1907,1908,"hidden",0.0,nullptr,0},
 {Instruction::Linear,-1,-1,nullptr,0.0,programTerms1910,8},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1911,1},
-{Instruction::Linear,-1,-1,nullptr,0.0,programTerms1912,1},
+{Instruction::Constant,-1,-1,nullptr,22.0,nullptr,0},
+{Instruction::Constant,-1,-1,nullptr,145.0,nullptr,0},
 {Instruction::LE,1911,1912,"logE",7.5,nullptr,0},
 {Instruction::LE,1913,1018,"activeRows",24.0,nullptr,0},
 {Instruction::LE,1914,1020,"D_axis1_inner_payload_bytes",6.0,nullptr,0},

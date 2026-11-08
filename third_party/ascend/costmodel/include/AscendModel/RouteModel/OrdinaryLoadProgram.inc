@@ -1,1129 +1,368 @@
-// Readable frozen formulas: literals are operands, not separate nodes.
-inline constexpr Term programTerms0[] = {{"one",-662.977949706186},{"KlogStride",2.019843025583572},{"hidden",1206.389767026425},{"minSbytes",-0.003036710955744994},{"EAbove64",2.65299981635888},{"nS",194.67454372196593},{"activeRuns",14.015776450046419},{"logTail",172.42914245247462}};
-inline constexpr Term programTerms31[] = {{"one",31.54099754166069},{"E",16.646533035491636},{"KlogDstride",0.0},{"D_axis1_extent",6.365200058049049},{"S_axis2_stride_log2",33.99005727308146},{"KlogTail",0.0},{"KoverTail",-8.444441703288},{"leading",9.714821348786025}};
-inline constexpr Term programTerms82[] = {{"one",-52.49999999999982},{"KactiveSlog",5.443359375000002},{"Dunder128",575.125},{"activeSlog",-134.25000000000034},{"KlogStride",0.0}};
-inline constexpr Term programTerms90[] = {{"one",774.1249999999997},{"EAbove32",21.384375000000006},{"KlogTail",1.096874999999997},{"hidden",1137.25}};
-inline constexpr Term programTerms107[] = {{"one",606.3509887683726},{"sqrtE",122.0185097925038},{"D_axis2_inner_payload_bytes",-11.938760031470103},{"sqrtK",122.01850979250335},{"S_axis3_extent",293.7494881052174},{"KsuffixLog",2.291271563543873},{"logDstride",-161.55252536767043},{"EAbove64",12.826426393253024}};
-inline constexpr Term programTerms108[] = {{"one",567.4932339554905},{"sqrtE",118.1638128908538},{"D_axis2_inner_payload_bytes",-13.647548919760476},{"sqrtK",118.1638128908533},{"S_axis3_extent",293.7494881052174},{"KsuffixLog",2.1851375309243726},{"logDstride",-174.5051103052977},{"EAbove64",13.331163404789434}};
-inline constexpr Term programTerms109[] = {{"one",597.8142600228135},{"sqrtE",121.79899014147017},{"D_axis2_inner_payload_bytes",-11.664225071281216},{"sqrtK",121.79899014146966},{"S_axis3_extent",291.1414438617053},{"KsuffixLog",2.3296742743532595},{"logDstride",-164.3981016161902},{"EAbove64",13.320333478181082}};
-inline constexpr Term programTerms120[] = {{"one",-2750.29762670529},{"sqrtE",221.48343578833018},{"maxSlog",26.025348396181286},{"KnD",1.3874079917213857},{"KoverTail",4.334632250622019},{"nS",105.62072506144789},{"partialLogical32",-44.66114394178903},{"smallE128",1050.1808474998072}};
-inline constexpr Term programTerms122[] = {{"one",305.8202317976449},{"E",7.467373878728111},{"hidden",585.0286887985703},{"maxSlog",40.70573775971405},{"Kfp8",-1.2719726562500013},{"logTail",-150.49079873532378},{"S",-10.696265243902443},{"Krank",-0.3142057084189328}};
-inline constexpr Term programTerms139[] = {{"one",-1410.0775748437177},{"K",0.0},{"sqrtK",301.80304855422133},{"activeRows",58.46917452964485},{"groups32",-91.96181671947224},{"partialLogical32",70.47488533139209},{"activeDlog",-32.10490826511393},{"KlogW",0.0}};
-inline constexpr Term programTerms141[] = {{"one",820.375},{"D_axis2_extent",46.26562499999999},{"D_axis3_inner_payload_bytes",-136.25000000000034},{"D_axis0_inner_payload_bytes",4.007812500000009},{"Kfp8",-1.3662109374999993},{"payload_integer",-39.74999999999998},{"D_axis1_inner_payload_bytes",-37.062500000000064},{"S_axis1_extent",0.0}};
-inline constexpr Term programTerms142[] = {{"one",18.784225708088314},{"Kfp8",-2.744140625000005},{"KlogStride",3.247797036841853},{"KoverSqrtActiveD",4.1710456741878765},{"KmaxSlog",-3.0529892805944785},{"S_axis0_stride_log2",46.94023206905736},{"minSbytes",-0.0063705574987792885},{"logDstride",48.73580921108877}};
-inline constexpr Term programTerms144[] = {{"one",52.06250000000002},{"logDstride",66.62500000000003},{"D_axis1_stride_log2",195.87500000000003},{"activeDlog",54.01388888888889},{"D_axis0_inner_payload_bytes",-3.695312499999998},{"KnD",1.0731336805555547},{"KlogDstride",0.4843749999999987},{"activeRuns",6.201388888888893}};
-inline constexpr Term programTerms146[] = {{"one",-1286.5416666666647},{"KactiveSlog",13.695312500000027},{"KAbove32",-38.68750000000008},{"D_axis1_inner_payload_bytes",217.06250000000003},{"S_axis0_stride_log2",22.958333333333258},{"KsmallD",7.533854166666655},{"KoverTail",-36.75000000000021},{"activeLogical32",371.08333333333195}};
-inline constexpr Term programTerms148[] = {{"one",-217.00419149531777},{"groups32",320.97276870988935},{"nS",423.04167178357005},{"S_axis0_stride_log2",16.377104617685283},{"logE",64.69698894839877},{"logDstride",-84.80519820800538},{"KmaxSlog",-0.3452997484513478},{"EminusK",0.996049525281347}};
-inline constexpr Term programTerms150[] = {{"one",-210.37500000000912},{"nD",477.7500000000002},{"D_axis0_stride_log2",-43.79375000000005},{"D_axis3_extent",102.06250000000439},{"D_axis4_stride_log2",476.4166666666735},{"S_to_D_transitions",-331.5999999999992},{"Dunder128",178.97499999999917},{"KlogDstride",0.49088541666671565}};
-inline constexpr Term programTerms151[] = {{"one",1175.1125767568824},{"minSbytes",0.018208437571071257},{"D_axis4_extent",-1.9032010461668087},{"KlogDstride2",0.4183223291448955},{"payload_integer",27.833551284969158},{"D_to_S_transitions",-149.67727996359588},{"D_axis0_inner_payload_bytes",1.8836440328630337},{"KoverTail",6.329032934386545}};
-inline constexpr Term programTerms152[] = {{"one",0.0},{"D_axis4_inner_payload_bytes",114.56924323759438},{"S_axis0_stride_log2",-59.619601955843954},{"D_SspanRatio",-9.292266204972157e-05},{"payload_floating",384.7814741989037},{"KlogDstride",-3.450764435081929},{"sqrtS",1018.5293433041232},{"D_axis1_inner_payload_bytes",10.64995516021853}};
-inline constexpr Term programTerms154[] = {{"one",3503.9117647058797},{"S_to_D_transitions",-1530.474264705883},{"S_axis3_extent",304.90625000000085},{"S_axis2_extent",234.1875000000009},{"D_axis2_stride_log2",55.15073529411783},{"KlogTail",0.0},{"D_axis2_extent",-46.12867647058809},{"S_axis0_extent",-52.468749999999744}};
-inline constexpr Term programTerms158[] = {{"one",-316.8727272727688},{"KoverSqrtActiveD",55.745225124842015},{"D_SspanRatio",1.4727272727273009},{"KsmallActiveD",8.26396414212539},{"Krank",0.0},{"prefixMasked",-210.263636363639},{"hidden",334.7568181817863},{"lastSSize",20.171875000000743}};
-inline constexpr Term programTerms159[] = {{"one",877.2500000000005},{"Kfp8",-1.4804687499999987},{"KactiveSlog",0.2651367187499996},{"Kbool",-0.3496093749999986}};
-inline constexpr Term programTerms161[] = {{"one",-1997.6864087301615},{"Dunder128",2221.9749999999995},{"KlogDstride2",4.484374999999999},{"EAbove64",3.9228190104166742},{"fullSuffix",19.127083333333317},{"activeRuns",5.551587301587301},{"maxSlog",-35.68749999999975},{"logDstride",-4.717261904760908}};
-inline constexpr Term programTerms162[] = {{"one",731.386115460022},{"lastSSize",206.71926140604378},{"S_axis0_extent",280.43311462875573},{"KactiveSlog",0.7353084247413288},{"D_axis2_extent",0.0},{"leading",120.73106840435331},{"minSbytes",-0.0009209015833064715},{"KsmallActiveD",1.2395977125862225}};
-inline constexpr Term programTerms165[] = {{"one",3857.3824681771853},{"logDstride",-490.75373408859224},{"S_axis2_stride_log2",-39.40503221097673},{"KmaxSlog",0.3778042124779972},{"S_axis1_stride_log2",16.287247275203995},{"D_SspanRatio",-0.020729758036949403},{"D_axis2_inner_payload_bytes",17.9885666813815},{"D_axis4_extent",-170.40331128063255}};
-inline constexpr Term programTerms166[] = {{"one",-2396.9410900028506},{"sqrtS",875.3775437649742},{"EminusK",3.856459148892084},{"D_axis1_extent",29.64469023531087},{"Dunder128",888.3043695293777},{"tailMasked",1883.1196868254433},{"D_axis4_extent",-114.96875000000007},{"S_to_D_transitions",1159.1300875299476}};
-inline constexpr Term programTerms167[] = {{"one",4847.218750000002},{"EminusK",6.530273437499948},{"S_axis3_extent",301.7578125},{"D_axis3_inner_payload_bytes",-16.425781249999794},{"D_axis0_extent",0.0},{"prefixMasked",-1864.7499999999861},{"Dunder128",835.0312499999981},{"KlogRuns",0.0}};
-inline constexpr Term programTerms168[] = {{"one",5921.267133815433},{"D_axis1_inner_payload_bytes",-16.957165107933076},{"KactiveSlog",-5.890591535516732},{"KsmallActiveD",3.124933071033463},{"D_axis4_inner_payload_bytes",138.9524920885043},{"logK",0.0},{"S_axis3_stride_log2",31.168614376689177},{"S_axis1_extent",0.0}};
-inline constexpr Term programTerms172[] = {{"one",6184.985012571842},{"KunitS",-3.1317020089975727},{"D_axis4_extent",-227.2808122306034},{"fullSuffix",58.6234422705639},{"D_axis1_stride_log2",203.667843031609},{"KoverTail",7.3778645833333245},{"S_axis0_stride_log2",0.0},{"minSbytes",-0.0803956568926231}};
-inline constexpr Term programTerms173[] = {{"one",526.8788048288833},{"KlogDstride",11.107716318005929},{"D_axis2_inner_payload_bytes",-1.3524998770653045},{"D_axis2_stride_log2",0.0},{"D_axis3_inner_payload_bytes",-25.32632861673878},{"KactiveSlog",0.0},{"nS",953.3950629425644},{"S_axis1_extent",-384.82754720692367}};
-inline constexpr Term programTerms175[] = {{"one",0.0},{"EAbove32",0.0},{"logDstride",8228.480427046263},{"KsuffixLog",0.33976903080515974},{"D_axis1_stride_log2",-129.44572953736625},{"sqrtE",0.0},{"logE",0.0},{"KlogTail",0.0}};
-inline constexpr Term programTerms181[] = {{"one",142.8864395753216},{"KlogStride",0.9156733295987896},{"activeDlog",75.02907375480699},{"EAbove64",1.2815083440480703},{"D_axis2_extent",40.38226843870176},{"D_axis1_extent",0.0},{"EAbove32",5.090736402452124},{"KAbove16",6.4506501190312076}};
-inline constexpr Term programTerms182[] = {{"one",9.166425398370633},{"E",12.765548541113905},{"KlogDstride2",-0.24219203443510423},{"D_axis1_extent",14.09924007820425},{"KsuffixLog",0.9214569990400753},{"S_axis2_stride_log2",50.03394548383052},{"KlogDstride",-0.27640963308244865},{"D_axis2_extent",47.58447976171411}};
-inline constexpr Term programTerms187[] = {{"one",485.18265978261684},{"KoverSqrtActiveD",14.213760013356385},{"maxSlog",41.217822047666665},{"KlogDstride2",3.1982421875000044},{"S_axis2_stride_log2",43.46570982476593},{"lastSSize",-317.6513022980614},{"KlogDstride",-4.1313331569948035},{"fullSuffix",-1.3836117535007302}};
-inline constexpr Term programTerms188[] = {{"one",0.0},{"KlogDstride2",-2.7084097916447987},{"minSbytes",0.16958243134520098},{"nS",286.5676068826825},{"suffixD",20.35142560430698},{"D_axis0_inner_payload_bytes",7.93401454274948},{"D_axis1_stride_log2",57.181363517134045},{"KoverTail",12.064656020253608}};
-inline constexpr Term programTerms189[] = {{"one",0.0},{"D_axis2_stride_log2",154.43487845215736},{"D_axis0_extent",43.96277611482385},{"KsmallActiveD",1.1826171874999287},{"payload_integer",-41.58666663542414},{"minSbytes",0.0017879000802446738},{"maxSlog",-47.06987835842737},{"D_axis4_inner_payload_bytes",31.88642182643595}};
-inline constexpr Term programTerms192[] = {{"one",886.8125000000002},{"D_axis1_stride_log2",1002.4374999999999},{"D_axis3_inner_payload_bytes",227.49999999999997},{"logDstride",-343.68749999999994},{"Kfp8",-1.47998046875},{"KAbove128",1.5869140624999991},{"D_runs",194.43749999999983},{"payload_floating",87.75000000000033}};
-inline constexpr Term programTerms193[] = {{"one",0.0},{"D_axis1_stride_log2",629.5163043478275},{"activeLogical32",46.23641304347819},{"KoverTail",47.083559782608674},{"logTail",228.47418478260866},{"KlogDstride",4.978388247282603},{"nD",-139.6249999999996},{"Kfp8",-1.4426587975543437}};
-inline constexpr Term programTerms194[] = {{"one",5959.113265724939},{"logTail",-918.006254396596},{"nD",-287.09450253514933},{"KlogDstride",7.840670213043541},{"tailMasked",-49.45274873242513},{"payload_floating",-108.54725126757612},{"KmaxSlog",-0.02154511619720899},{"D_axis4_stride_log2",1966.2769876036698}};
-inline constexpr Term programTerms198[] = {{"one",2086.4890075779135},{"KunitS",-4.354492187500001},{"activeRuns",17.9265873015873},{"S_axis2_extent",296.1673565804834},{"S_axis1_extent",-311.79220256024973},{"S_axis3_stride_log2",129.99637239466992},{"leading",-68.41559487950057},{"S_axis2_stride_log2",42.15323772032233}};
-inline constexpr Term programTerms199[] = {{"one",-0.5034867668172877},{"logE",0.0},{"lastSSize",316.5213631029371},{"S_axis0_extent",503.2380130954401},{"S_axis1_stride_log2",27.99954859418274},{"minSbytes",-0.0010175321240186448},{"KnD",2.4726596042382254},{"D",-8.110562045651378}};
-inline constexpr Term programTerms200[] = {{"one",3000.383449303914},{"D_axis2_stride_log2",-57.060733811450454},{"S_axis3_extent",400.5956604125235},{"KlogTail",1.5401904976393965},{"KsumInvActiveD",-0.8964338966200808},{"D_axis3_extent",74.88810884692593},{"KnD",1.1912878199548973},{"KsmallD",-2.2585308461720843}};
-inline constexpr Term programTerms203[] = {{"one",7641.433333333333},{"D",-16.695833333333333},{"partialLogical32",-183.01562499999977},{"S_axis3_extent",349.6614583333333},{"D_axis3_extent",183.60624999999973},{"KlogRuns",0.0},{"S_axis3_stride_log2",0.0},{"nD",-76.65000000000038}};
-inline constexpr Term programTerms204[] = {{"one",0.0},{"EAbove8",2.997318674340955},{"logE",918.073528208109},{"KoverSqrtActiveD",45.08442947183017},{"nD",0.0},{"leading",0.0},{"D_axis2_stride_log2",-85.22682833001302},{"KactiveDlog",0.0}};
-inline constexpr Term programTerms209[] = {{"one",247.54206628720527},{"E",6.1824947870817075},{"D_axis4_inner_payload_bytes",224.5287876429779},{"D_axis2_inner_payload_bytes",-18.826815886933172},{"KsuffixLog",1.1553414514794318},{"S_axis3_extent",96.14343409577053},{"logTail",-62.836468879505134},{"EAbove128",-1.9497526272868348}};
-inline constexpr Term programTerms212[] = {{"one",4.690302854202126},{"logK",0.6127677596934683},{"activeSlog",-0.018511173106982803},{"fullSuffix",-0.0030304027352246674},{"maxSlog",0.015300053044649988},{"logDstride",-0.0915647312851573},{"nS",-0.024756318951108077},{"nD",-0.018328025888477602}};
-inline constexpr Term programTerms213[] = {{"one",-3620.337450347661},{"K",4.61821013701393},{"sqrtK",781.5825781390215},{"activeRows",-27.60160703400499},{"groups32",-91.96181671947224},{"partialLogical32",70.47488533139209},{"activeDlog",-33.46160551007522},{"KlogW",0.0}};
-inline constexpr Term programTerms230[] = {{"one",-958.5501044717026},{"sqrtE",267.9700179808843},{"smallE128",483.9001497297168},{"nS",-27.72089385665787},{"logTail",-317.36780200297255},{"KoverTail",-23.001469280068303},{"maxSlog",10.669790548520128},{"Krank",-0.007273073495217721}};
-inline constexpr Term programTerms232[] = {{"one",1366.574353448276},{"EAbove64",14.861194791909373},{"lastSSize",-61.569970293569455},{"KoverTail",37.926942567567565},{"KnD",-2.9248674860205064},{"Dunder128",-336.6912278657967},{"leading",-41.64433830382109},{"KsmallActiveD",1.7293229045316902}};
-inline constexpr Term programTerms234[] = {{"one",4.006807209150086},{"logK",0.6047598240380168},{"hidden",0.2053199330081803},{"logTail",0.08009495918104961},{"nS",0.09042195621702032},{"activeSlog",-0.02775896561292357},{"maxSlog",-0.004664005649594162},{"fullSuffix",-0.001379429781812497}};
-inline constexpr Term programTerms235[] = {{"one",-4603.02326456484},{"logE",1108.2520517618889},{"lastSSize",0.7834038219977051},{"logTail",-387.81455176188496},{"leading",-12.3219584891252},{"KsumInvActiveD",-3.633994558630198},{"S",-32.12662938082663},{"Kfp8",-1.2807617187499793}};
-inline constexpr Term programTerms243[] = {{"one",-80.3928571428562},{"E",34.08900669642857},{"D_axis2_inner_payload_bytes",-12.710797991071441},{"S_axis3_extent",90.3593750000006},{"D_axis0_inner_payload_bytes",-1.0363071986607089},{"K_D_axis4_extent_log2",-7.041992187499975},{"D_axis4_extent",219.1249999999991},{"KlogDstride",-4.499069940476197}};
-inline constexpr Term programTerms244[] = {{"one",536.8965486398542},{"EAbove16",30.343204081004664},{"KsmallActiveD",-2.0282410705344276},{"D_axis1_stride_log2",38.62249792557994},{"S_axis2_stride_log2",54.158733957708456},{"S_axis3_extent",258.21248019687994},{"KlogDstride2",0.0},{"KsuffixLog",0.8749447113263672}};
-inline constexpr Term programTerms250[] = {{"one",6535.384391047309},{"KlogStride",2.023891459995036},{"hidden",0.0},{"K",0.0},{"sqrtD",-1831.2638715490089},{"logDstride",0.0},{"KlogTail",5.5162529981324635},{"activeRows",29.976106143367304}};
-inline constexpr Term programTerms251[] = {{"one",-4903.850030566105},{"KoverSqrtActiveD",68.43481122212143},{"maxSlog",392.7035464224887},{"activeRuns",16.816211602299454},{"fullSuffix",-40.20735486405899},{"KAbove64",-4.8946293142003965},{"KsmallActiveD",1.451769221364314},{"KlogStride",0.17935207762935912}};
-inline constexpr Term programTerms253[] = {{"one",-84.22125011839825},{"E",28.743342129625745},{"KsmallActiveD",0.14840486393641936},{"S_axis2_stride_log2",67.38419579378777},{"D_axis1_extent",41.687558894836634},{"K_hidden",10.554267630882432},{"S_axis3_extent",268.3677157577755},{"K_S_axis3_stride_log2",-0.4083762821392269}};
-inline constexpr Term programTerms254[] = {{"one",-75.93157270060257},{"E",28.89115287549682},{"KsmallActiveD",0.06422264361153819},{"S_axis2_stride_log2",67.99345813692406},{"D_axis1_extent",31.658807476776673},{"K_hidden",10.483355185286873},{"S_axis3_extent",270.04869430143196},{"K_S_axis3_stride_log2",-0.3923028028215234}};
-inline constexpr Term programTerms255[] = {{"one",170.79653258715317},{"E",28.81900069966089},{"KsmallActiveD",0.24534380551331958},{"S_axis2_stride_log2",60.20107592244756},{"D_axis1_extent",-189.3733875523812},{"K_hidden",10.483355185286873},{"S_axis3_extent",229.9358197109134},{"K_S_axis3_stride_log2",-0.42982265270109293}};
-inline constexpr Term programTerms259[] = {{"one",-123.52573053098241},{"E",4.68879275965928},{"K_hidden",8.481828973784234},{"maxSlog",44.495060044003566},{"Kfp8",-1.698450524576919},{"D_axis2_inner_payload_bytes",-60.44093317140811},{"K_over_D_axis2_extent",13.898763991662596},{"K_S_axis1_extent_log2",-0.546985058447111}};
-inline constexpr Term programTerms260[] = {{"one",-112.99980768683858},{"E",4.803138557055001},{"K_hidden",8.299243112758527},{"maxSlog",47.35094019326609},{"Kfp8",-1.3616563403295403},{"D_axis2_inner_payload_bytes",-59.193495455119496},{"K_over_D_axis2_extent",13.44194313388243},{"K_S_axis1_extent_log2",-0.5399044997187572}};
-inline constexpr Term programTerms261[] = {{"one",-120.69271662787199},{"E",4.775768454242115},{"K_hidden",8.299243112758527},{"maxSlog",44.81064458863642},{"Kfp8",-1.3881334623240715},{"D_axis2_inner_payload_bytes",-58.99243679387711},{"K_over_D_axis2_extent",13.467882799505254},{"K_S_axis1_extent_log2",-0.5212051251474638}};
-inline constexpr Term programTerms265[] = {{"one",2.9743366794429473},{"E",5.55023678926338},{"K_over_D_axis4_extent",17.651324879574833},{"K_D_axis1_extent_log2",2.1671345048013695},{"S_axis2_stride_log2",63.39682335657474},{"K_hidden",6.710736112216716},{"K_D_axis2_extent_log2",3.192334555728816},{"EAbove256",-4.435035469338034}};
-inline constexpr Term programTerms266[] = {{"one",4.386581341844172},{"E",5.51630068015532},{"K_over_D_axis4_extent",17.511921205099636},{"K_D_axis1_extent_log2",2.1612881613337973},{"S_axis2_stride_log2",62.958442164972304},{"K_hidden",6.711646689198529},{"K_D_axis2_extent_log2",3.172520527006589},{"EAbove256",-4.3693909165539235}};
-inline constexpr Term programTerms269[] = {{"one",436.1302104478392},{"E",7.6426333682945105},{"D_axis4_inner_payload_bytes",144.08054064865692},{"D_axis2_inner_payload_bytes",-20.208680636412847},{"KsuffixLog",1.5725563331904708},{"S_axis3_extent",133.65942128469928},{"logTail",-178.6535544219416},{"EAbove128",-5.879435783752153}};
-inline constexpr Term programTerms271[] = {{"one",210.47222334923492},{"KlogStride",1.6082306309668142},{"K_hidden",24.672773241984785},{"D_SspanRatio",-0.00045421624551127506},{"EAbove64",3.3888011064234993},{"prefixMasked",-152.71154641532448},{"KunitS",-0.7426608666234831},{"K_tailMasked",8.416588401992453}};
-inline constexpr Term programTerms272[] = {{"one",212.7418160719346},{"KlogStride",1.6291396097723219},{"K_hidden",21.98269792744534},{"D_SspanRatio",-0.0004214556899503913},{"EAbove64",3.4522430633870664},{"prefixMasked",-151.79458072160713},{"KunitS",-0.7392826298201717},{"K_tailMasked",8.7365711675668}};
-inline constexpr Term programTerms273[] = {{"one",253.4493631654747},{"KlogStride",1.571288889228014},{"K_hidden",23.60989459644191},{"D_SspanRatio",0.005951028536106228},{"EAbove64",3.2540823300189055},{"prefixMasked",-151.79458072160713},{"KunitS",-0.7392826298201717},{"K_tailMasked",8.393112746402574}};
-inline constexpr Term programTerms276[] = {{"one",2.4319445994074798},{"E",16.735879646946568},{"KlogDstride2",0.02248677923661164},{"D_axis1_extent",14.86511396869701},{"KsuffixLog",0.7641417709942766},{"S_axis2_stride_log2",48.176401191699036},{"KlogDstride",-2.4301174129769207},{"D_axis2_extent",48.82389446925605}};
-inline constexpr Term programTerms277[] = {{"one",-363.3676391587948},{"K",0.0},{"sqrtK",204.97257819645046},{"activeRows",17.977227939133464},{"groups32",-91.96181671947224},{"partialLogical32",70.47488533139209},{"activeDlog",6.500000000000063},{"KlogW",0.0}};
-inline constexpr Term programTerms278[] = {{"one",-14.866195514025055},{"E",14.75636661827346},{"KlogDstride2",-0.2686297468550578},{"D_axis1_extent",20.2189709643068},{"K_S_axis3_extent_log2",-3.22239330018972},{"S_axis2_stride_log2",53.30645964641966},{"S_axis3_extent",280.1955232455556},{"K_D_axis2_extent_log2",1.548241116110886}};
-inline constexpr Term programTerms279[] = {{"one",-14.673497078570195},{"E",14.860860021384298},{"KlogDstride2",-0.27340665808845466},{"D_axis1_extent",20.126343902387276},{"K_S_axis3_extent_log2",-3.355012424322075},{"S_axis2_stride_log2",50.92053700088058},{"S_axis3_extent",275.9517112733202},{"K_D_axis2_extent_log2",1.6685564684195833}};
-inline constexpr Term programTerms280[] = {{"one",26.007957522946047},{"E",14.804757108433908},{"KlogDstride2",-0.27258962837240513},{"D_axis1_extent",21.22198371758406},{"K_S_axis3_extent_log2",-3.3044558397226624},{"S_axis2_stride_log2",68.59511872625077},{"S_axis3_extent",280.8908825821707},{"K_D_axis2_extent_log2",1.4731258825159446}};
-inline constexpr Term programTerms289[] = {{"one",-58.71232247941572},{"KlogStride",4.5107020154963475},{"EAbove64",0.0},{"logDstride",0.0},{"logK",0.0},{"tailMasked",0.0},{"hidden",0.0},{"KlogDstride2",0.0}};
-inline constexpr Term programTerms290[] = {{"one",242.29971783773306},{"KlogStride",1.6075512736019675},{"K_hidden",25.97703902916947},{"D_SspanRatio",-0.000458591398694457},{"EAbove64",3.741337010199507},{"prefixMasked",-184.550191183443},{"KunitS",-0.7576359135618075},{"K_tailMasked",7.5482143677304245}};
-inline constexpr Term programTerms291[] = {{"one",221.01000515750894},{"KlogStride",1.6221361445549818},{"K_hidden",19.54883480143793},{"D_SspanRatio",-0.00043056024129378944},{"EAbove64",3.679928363954893},{"prefixMasked",-180.30512839844118},{"KunitS",-0.7637856479871459},{"K_tailMasked",8.784907540497159}};
-inline constexpr Term programTerms292[] = {{"one",440.37539742294786},{"KlogStride",1.4849253122723653},{"K_hidden",24.03763440681391},{"D_SspanRatio",0.012191748608752766},{"EAbove64",3.312481562181901},{"prefixMasked",-180.30512839844118},{"KunitS",-0.7637856479871459},{"K_tailMasked",7.621028402275657}};
-inline constexpr Term programTerms296[] = {{"one",1.921941097071196},{"E",17.423802401839687},{"KlogDstride2",0.07546720616489011},{"D_axis1_extent",14.824793570825381},{"KsuffixLog",0.7650512739240863},{"S_axis2_stride_log2",47.6246901257289},{"KlogDstride",-2.839712024283407},{"D_axis2_extent",29.694788182779618}};
-inline constexpr Term programTerms301[] = {{"one",-830.0180153689639},{"sqrtE",241.8866736300954},{"KoverTail",31.37418502096541},{"logTail",0.0},{"Dunder128",-341.7977164463241},{"sqrtD",-142.43587013903334},{"S",-44.436407495523746},{"maxSlog",33.13418628490584}};
-inline constexpr Term programTerms303[] = {{"one",868.6826644348926},{"KlogDstride2",4.795662347860088},{"sqrtD",-579.132264150191},{"EminusK",8.08132526611088},{"KlogTail",2.5441203136620785},{"D_SspanRatio",0.0003640383608153711},{"maxSlog",20.444024342385546},{"D_axis0_inner_payload_bytes",0.8624858591721516}};
-inline constexpr Term programTerms306[] = {{"one",428.56603773584754},{"KactiveSlog",2.6522700471698117},{"tailMasked",598.8679245283016},{"S_axis2_extent",-9.112617924528251},{"D_axis1_inner_payload_bytes",4.261792452830188},{"Kbool",1.2802734375000067},{"D_axis3_extent",-4.989386792453007},{"nS",-298.17688679245134}};
-inline constexpr Term programTerms307[] = {{"one",-2515.110150846649},{"S",170.2310592400734},{"Dunder128",1960.4713312679496},{"D_axis4_inner_payload_bytes",-529.233361891201},{"KmaxSlog",-0.08471389635899385},{"activeRuns",1.5406678383564785},{"EminusK",-1.7184836220856017},{"activeDlog",117.38669303185273}};
-inline constexpr Term programTerms313[] = {{"one",333.4855790708652},{"KlogStride",1.5417390558430297},{"hidden",971.4025983713918},{"D_SspanRatio",-0.0003847089876239628},{"EAbove64",6.547428574700694},{"prefixMasked",-273.2062316626377},{"KunitS",-0.6757759311336893},{"KoverSqrtActiveD",5.428863909858927}};
-inline constexpr Term programTerms314[] = {{"one",125.58101173020522},{"E",20.12915468635447},{"KlogDstride2",-0.2718643680695564},{"KlogTail",0.0},{"EAbove128",0.0},{"KoverTail",0.0},{"leading",-37.835043988269796},{"lastSSize",-23.53977272727272}};
-inline constexpr Term programTerms316[] = {{"one",1378.5401961167202},{"EAbove64",15.280869720360847},{"logTail",-156.60206386462704},{"KlogRuns",-2.287661522863031},{"KlogDstride",-9.201569416900973},{"KmaxSlog",0.5743908551833927},{"KoverTail",6.4097927016876834},{"KAbove256",0.24570295326921524}};
-inline constexpr Term programTerms317[] = {{"one",197.89605598027617},{"KmaxSlog",0.4303005610496022},{"KlogDstride",1.5297113262874484},{"KunitS",-5.144516577187788},{"hidden",825.7996482913586},{"KmaskedAxes",4.58927442305573},{"KoverTail",7.055939273822743},{"KlogDstride2",1.8049920234952768}};
-inline constexpr Term programTerms319[] = {{"one",703.952244892291},{"EAbove32",1.4715925693818597},{"logTail",-173.93225332279326},{"KlogTail",0.5323535363731445},{"EAbove128",-4.592583809028961},{"KsuffixLog",2.184393132920969},{"suffixD",-11.52369033796136},{"KoverTail",9.369089381886342}};
-inline constexpr Term programTerms321[] = {{"one",54.72292418772578},{"E",22.305272732400717},{"D",-1.5342114169675007},{"activeLogical32",0.0},{"KoverTail",0.0},{"KlogDstride2",0.0},{"KlogTail",1.2454591606498193},{"KactiveSlog",0.0}};
-inline constexpr Term programTerms323[] = {{"one",0.0},{"EAbove16",30.893568686487242},{"KsmallActiveD",-0.1504097628599282},{"S",-0.6316817123282625},{"logTail",270.0235494920507},{"leading",-11.69605485993545},{"KlogDstride2",0.0},{"KoverTail",0.0}};
-inline constexpr Term programTerms325[] = {{"one",-208.40173021083172},{"E",4.646361387939445},{"hidden",977.3488999802041},{"maxSlog",43.367218855415594},{"logTail",-21.557186121040203},{"S",-26.705609697131774},{"KoverTail",29.470617880725506},{"KsmallD",-1.6377485314941154}};
-inline constexpr Term programTerms331[] = {{"one",83.47966864985077},{"KmaxSlog",0.05198665893271431},{"S_axis1_extent",-12.675555757187489},{"D_axis0_extent",30.753616979885805},{"activeSlog",11.734338747100212},{"D_axis2_extent",1.8093556048120654},{"Dunder128",23.188544807224847},{"highWarp32",1.525930815829055}};
-inline constexpr Term programTerms363[] = {{"one",169.9545123892787},{"activeSlog",9.092322810120487},{"EAbove256",0.1464575154761389},{"maxSlog",-6.7996175161844485},{"suffixD",-0.09059956877162822},{"logWAbove4",-86.96766125900692},{"KmaxSlog",0.04233506127746849},{"smallE32",-20.27889587928803}};
-inline constexpr Term programTerms418[] = {{"one",119.60794479385163},{"K",0.6684254243646612},{"sqrtK",-6.534452785744754},{"activeRows",1.0234374999999958},{"groups32",15.405080461063049},{"partialLogical32",3.961516476517044},{"activeDlog",-34.81249999999997},{"KlogW",-0.11285077432720045}};
-inline constexpr Term programTerms453[] = {{"one",128.99999999999997},{"activeLogical32",0.0},{"logDstride",0.0},{"Krank",0.3031250000000001},{"tailMasked",0.0},{"nS",0.0},{"KsmallActiveD",0.0},{"activeWarpProxy",0.0}};
-inline constexpr Term programTerms468[] = {{"one",69.25000000000001},{"KoverTail",3.484374999999999},{"D_axis0_extent",21.312499999999993},{"KsmallActiveD",0.0},{"KnD",0.08007812500000008}};
-inline constexpr Term programTerms469[] = {{"one",-36.31190411322857},{"nD",-35.572762731489156},{"KoneWarp",6.577833812076177},{"nS",-50.4199484675568},{"KmaxSlog",0.06563631339228379},{"logTail",45.1335475636462},{"KoverTail",2.3975181865472646},{"Dunder128",8.572383917075223}};
-inline constexpr Term programTerms471[] = {{"one",106.98571428571414},{"Kfp8",-0.041015625000000014},{"EAbove128",2.1148995535714255},{"EAbove64",-0.9100260416666619},{"KnD",-0.1719145275297629},{"Dunder128",7.792261904762134},{"KlogTail",-0.12463262648809569},{"KactiveDlog",0.11169317336309526}};
-inline constexpr Term programTerms479[] = {{"one",3.996544909338053},{"logK",0.16136437339562962},{"logWAbove2",0.04051966318660777},{"nD",0.21256410000280512},{"hidden",-0.6322988156842267},{"maxSlog",-0.05166482611870822},{"nS",0.28015303023033544},{"fullSuffix",0.007304331715041935}};
-inline constexpr Term programTerms480[] = {{"one",109.1702586206982},{"KactiveSlog",0.06161323635050498},{"KlogWAbove2",-0.18187774828570322},{"activeLogical32",0.0},{"maxSlog",-4.4136565390669},{"KmaxSlog",0.030155043054032223},{"Dunder128",43.63505747123065},{"EAbove64",0.13724631824742003}};
-inline constexpr Term programTerms492[] = {{"one",72.20730426910937},{"Krank",0.2365334896242178},{"D_SspanRatio",-9.870483693320662e-06},{"logW",4.799999921944013},{"leading",9.81964584432397},{"logTail",10.498457177092074},{"KlogW2",0.030456261725573426},{"logW2",-2.5998951818718123}};
-inline constexpr Term programTerms508[] = {{"one",0.7468631258697241},{"maxSlog",-2.461609493278203},{"KlogW2",0.09788971962494118},{"S_axis0_stride_log2",0.6056962380480094},{"Dunder128",65.35509726329636},{"logTail",11.38224149042811},{"sqrtS",18.136102475492944},{"KlogWAbove2",-0.9209114784527282}};
-inline constexpr Term programTerms509[] = {{"one",17.09614785755461},{"EAbove64",1.5591653181650305},{"smallE32",85.73515542959521},{"EAbove128",-1.295189908925088},{"KlogWAbove2",-0.21237768607898988},{"nS",8.673412232620212},{"activeRows_logW",0.27598760067883743},{"payload_floating",24.668083947836998}};
-inline constexpr Term programTerms511[] = {{"one",55.462585279397295},{"D_axis3_extent",-2.3058950687211226},{"EAbove64",0.4608785562686416},{"D_axis4_extent",-4.952276924527138},{"D_axis0_stride_log2",-1.3531325566400016},{"K_D_axis0_extent_log2",0.01906601680733055},{"S_to_D_transitions",51.06783827660884},{"KoneWarp",0.07522236414618294}};
-inline constexpr Term programTerms512[] = {{"one",51.56232510472562},{"D_axis3_extent",-2.3122063927594567},{"EAbove64",0.6441633864666779},{"D_axis4_extent",-2.740282476964401},{"D_axis0_stride_log2",-1.3553280382023045},{"K_D_axis0_extent_log2",0.01980584476962331},{"S_to_D_transitions",47.13766790115998},{"KoneWarp",0.17865584910644414}};
-inline constexpr Term programTerms513[] = {{"one",51.206394360114054},{"D_axis3_extent",-2.4912530207986947},{"EAbove64",0.49135716028064097},{"D_axis4_extent",-5.0397870254054915},{"D_axis0_stride_log2",-1.2694003832779157},{"K_D_axis0_extent_log2",0.018337107215054042},{"S_to_D_transitions",37.88154140577901},{"KoneWarp",0.42245232786214587}};
-inline constexpr Term programTerms517[] = {{"one",111.97434934417143},{"sqrtE",3.3286545551716236},{"KoverTail",1.6249036426031287},{"minW4",23.7664338332319},{"KlogWAbove2",3.1004946072698654},{"KsumInvActiveD",-0.31463578546027166},{"minW8",-24.79094943060358},{"KlogDstride2",0.09639699217638747}};
-inline constexpr Term programTerms541[] = {{"one",56.49645374678114},{"KlogDstride2",-0.16902791932614356},{"KlogDstride",0.8900437942795244},{"payload_integer",-0.12306303423700948},{"minSbytes",-0.03327535251892577},{"D_axis1_inner_payload_bytes",-5.774358335194845},{"S_axis0_stride_log2",10.177915616546397},{"D_SspanRatio",-0.015521205905118489}};
-inline constexpr Term programTerms542[] = {{"one",47.05516098484852},{"KlogDstride2",-1.1452414772727266},{"EAbove64",2.5292968750000004},{"minSbytes",-0.34978693181818193},{"D_SspanRatio",0.055456912878787894},{"D_axis1_stride_log2",88.85227272727268},{"activeD",10.668161103219699},{"prefixMasked",-113.125}};
-inline constexpr Term programTerms544[] = {{"one",0.0},{"payload_floating",122.125},{"D",-8.354166666666673},{"Kbool",-0.38281250000000017},{"Kfp8",-0.1875000000000003},{"minSbytes",0.007812500000000071},{"S_axis0_stride_log2",0.0},{"K",3.985677083333334}};
-inline constexpr Term programTerms545[] = {{"one",29.72870368923535},{"tailMasked",-26.175479042095898},{"partialLogical32",-12.949885556434975},{"minSbytes",-0.0005704210950182632},{"D_axis1_extent",-8.253970148627952},{"sqrtE",24.04403010713721},{"KlogDstride",0.6989337705981991},{"D_SspanRatio",2.4721219942167224e-05}};
-inline constexpr Term programTerms548[] = {{"one",158.94791666666657},{"KoverTail",-0.3385416666666667},{"idleWarpProxy",-18.338541666666654},{"minSbytes",-0.04003906249999991},{"logE",3.406250000000011},{"payload_integer",3.3750000000000058}};
-inline constexpr Term programTerms550[] = {{"one",-272.84499441551054},{"sqrtE",20.085178222397985},{"D_axis1_inner_payload_bytes",25.232142857142854},{"Kfp8",-0.024414062499999913},{"D_axis1_stride_log2",-42.050000000000004},{"S_axis1_extent",11.55357142857142},{"payload_floating",22.303571428571367},{"nD",82.12499999999997}};
-inline constexpr Term programTerms552[] = {{"one",124.59567580723557},{"activeRuns",6.227330766334947},{"KlogRuns",-0.17633781541996899},{"Dunder128",-6.756954685967427},{"nS",19.749999999999936},{"D_axis1_extent",8.374999999999984},{"D_axis0_extent",-12.595525943801562},{"D_axis0_stride_log2",-2.1249999999999973}};
-inline constexpr Term programTerms553[] = {{"one",275.6258328950784},{"KlogTail",-0.13600001070761406},{"S_axis1_stride_log2",3.309186322302189},{"KactiveSlog",-0.04721406035847723},{"D_axis2_inner_payload_bytes",0.050798016172855634},{"logWAbove4",-1.8259329170627958},{"D_axis4_inner_payload_bytes",1.1873901318629374},{"D_to_S_transitions",-11.1882230269413}};
-inline constexpr Term programTerms555[] = {{"one",-525.055762724029},{"sqrtW",297.6767449693999},{"D_runs",81.37499999999879},{"activeD",4.737357950923024},{"sqrtD",-45.898863607384634},{"KnD",0.08593749999997849},{"D_axis0_extent",16.500000000001666},{"Dunder128",5.9999999999990274}};
-inline constexpr Term programTerms556[] = {{"one",709.9189218523874},{"nD",-154.6537626628075},{"D_SspanRatio",0.011685962373371928},{"D_axis3_extent",-75.555589725036},{"D_axis1_extent",14.73726483357457},{"activeD",-2.071716714905916},{"D_axis3_inner_payload_bytes",16.50000000000001},{"activeDlog",8.944862518089597}};
-inline constexpr Term programTerms560[] = {{"one",128.44708392093395},{"KmaskedAxes",0.5195312500000007},{"D_axis0_extent",-1.6123444110507663},{"KAbove64",0.386718750000003},{"KoverTail",2.415260490116761},{"smallE32",25.829374118599105},{"KlogDstride",0.21679687500000028},{"KoverSqrtActiveD",-1.6786328675875675}};
-inline constexpr Term programTerms561[] = {{"one",115.64916402868396},{"KlogDstride2",0.10038819006482924},{"KoneWarp",0.28201898609212883},{"S",1.1532973397046573},{"fullSuffix",0.6205882790892187},{"S_axis0_stride_log2",-1.1993766565950812},{"activeLogical32",2.3920255166775934},{"lastSSize",-0.621581943643446}};
-inline constexpr Term programTerms562[] = {{"one",231.11076281251596},{"Dunder128",-77.1625402776109},{"D_axis1_extent",-15.126456281097294},{"D_axis1_inner_payload_bytes",1.0112174999197563},{"D_SspanRatio",-0.0002909868076990908},{"D_axis2_stride_log2",52.769028573419014},{"D_axis2_inner_payload_bytes",-14.595734400769576},{"KlogDstride2",0.4985230675224626}};
-inline constexpr Term programTerms565[] = {{"one",97.87500000000007},{"KunitS",-0.1295166015625},{"Dunder128",111.31249999999994},{"KAbove256",0.9970703124999999},{"nS",35.56249999999998},{"D_axis4_extent",-6.062499999999983},{"tailMasked",30.875000000000018},{"D_axis3_extent",-3.812499999999997}};
-inline constexpr Term programTerms566[] = {{"one",348.757605110221},{"KAbove256",1.6600372126765535},{"KlogStride",-0.040086312128676076},{"D_axis1_extent",1.6512960555726743},{"KsuffixLog",-0.09853014540198032},{"S_axis1_extent",1.5264592654133775},{"KmaxSlog",0.046840398501541224},{"KlogDstride2",0.0}};
-inline constexpr Term programTerms569[] = {{"one",-204.83937193610464},{"KoverTail",0.21541467851327784},{"logW",61.901256014564744},{"activeRuns",1.3232407136971205},{"KAbove128",0.3626278826498756},{"D_axis1_inner_payload_bytes",-0.432711807094858},{"S_axis1_stride_log2",-2.611831832083638},{"KmaxSlog",0.008499766632176586}};
-inline constexpr Term programTerms570[] = {{"one",0.0},{"D_axis0_stride_log2",10.4923260521054},{"fullSuffix",-1.5939424202403862},{"KnD",0.20105197304678693},{"activeDlog",-14.602844152202971},{"D_axis0_inner_payload_bytes",-0.9278382277382748},{"KlogStride",0.03315135444958191},{"sqrtK",2.7736912750339897}};
-inline constexpr Term programTerms572[] = {{"one",1316.4212540174053},{"S_axis0_extent",-244.135945583798},{"S_to_D_transitions",-445.65861487810696},{"D_axis1_inner_payload_bytes",-20.143220266324455},{"D_axis1_stride_log2",165.73951213059576},{"D_axis3_inner_payload_bytes",-30.37907827565274},{"D_axis3_stride_log2",87.54336124284755},{"S_axis1_extent",-91.98951213059567}};
-inline constexpr Term programTerms574[] = {{"one",47.6746574685367},{"KoverSqrtS",-0.718138163839926},{"minSbytes",0.000481855264946773},{"S_to_D_transitions",21.750950859234194},{"D_SspanRatio",-2.7439843029431785e-05},{"S_axis0_extent",54.07475758219496},{"D_axis0_stride_log2",6.001694518735502},{"D_axis4_inner_payload_bytes",-1.8092387417553022}};
-inline constexpr Term programTerms577[] = {{"one",152.8192061584318},{"KmaxSlog",0.009525582590474847},{"oneWarp",110.20317011853182},{"D_axis4_stride_log2",-8.250522155776343},{"KlogDstride",-0.01438801556780952},{"KsumInvActiveD",-0.11723891243235231},{"KunitS",-0.3176930336957218},{"KlogDstride2",0.10129587496724039}};
-inline constexpr Term programTerms578[] = {{"one",57.602941176471624},{"KlogDstride",0.5687327665441163},{"KsmallActiveD",-0.039550781250000076},{"KsumInvActiveD",0.0},{"payload_floating",5.875000000000041},{"D_axis0_extent",-4.106617647058761},{"D_axis4_stride_log2",33.39705882352927},{"leading",-2.7647058823529234}};
-inline constexpr Term programTerms580[] = {{"one",625.3928571428571},{"partialLogical32",-8.478306361607142},{"D_axis4_extent",112.63839285714283},{"S_axis1_extent",-5.1132812500001155},{"KoneWarp",0.30576869419642866},{"activeD",-0.4165736607142858},{"S_axis1_stride_log2",9.375000000000037},{"KlogDstride",0.1491176060267857}};
-inline constexpr Term programTerms581[] = {{"one",28.055340465347953},{"KlogDstride",0.48692757532336356},{"S_axis1_extent",80.74044478153394},{"KoneWarp",0.5304277936315765},{"KactiveDlog",-0.034768775648517075},{"S_axis2_extent",-20.850769211492416},{"D_SspanRatio",1.4088927631777232e-05},{"S_axis1_stride_log2",0.0}};
-inline constexpr Term programTerms587[] = {{"one",164.3495762711862},{"hidden",-75.08156779661012},{"logTail",2.3739406779662193},{"EAbove128",1.0809884798728837},{"groups32",-44.24788135593241},{"minW8",-3.9565677966101633},{"KoverTail",0.7145127118644188},{"Kbool",-0.005859375000001929}};
-inline constexpr Term programTerms589[] = {{"one",91.80446852825685},{"Kfp8",-0.06089350127022124},{"EAbove128",2.116950837076558},{"EAbove64",-1.1849287423499952},{"D_axis1_inner_payload_bytes",-0.5761718750000001},{"S_axis0_stride_log2",0.8358699071869959},{"KoverTail",0.4520089285714289},{"smallE32",18.18833595366532}};
-inline constexpr Term programTerms602[] = {{"one",0.0},{"D_runs",158.125},{"S",4.656250000000003},{"D_axis2_extent",53.53124999999999},{"smallE32",139.5},{"S_axis3_extent",42.875}};
-inline constexpr Term programTerms603[] = {{"one",72.96354411105641},{"K_S_axis0_extent_log2",0.0636181047473233},{"smallE32",-17.566551878228893},{"logE",0.007776680425203875},{"K_D_axis1_extent_log2",0.0784280927175894},{"sqrtD",-8.020229413231274},{"activeRuns",72.9635441110631},{"activeLogical32",-2.131877542622251}};
-inline constexpr Term programTerms604[] = {{"one",151.03684736471106},{"EAbove64",1.646049717389818},{"KlogDstride",-0.10311768808494479},{"activeDlog",-17.637823974082362},{"KoverTail",2.8572526697864524},{"KlogRuns",-0.47197040642999183},{"K_D_axis2_extent_log2",0.4690490678714545},{"EAbove128",-0.5371672170523457}};
-inline constexpr Term programTerms606[] = {{"one",30.21525249582847},{"D_axis3_extent",-12.872242647058831},{"EAbove64",0.427159926470589},{"D_axis4_extent",-9.209903492647063},{"S_axis3_stride_log2",-7.07836748266056},{"S_to_D_transitions",68.25533573946572},{"KoneWarp",0.47412109374999534},{"baseWarps",2.6286764705882297}};
-inline constexpr Term programTerms616[] = {{"one",122.21402372901882},{"K",0.6684254243646612},{"sqrtK",-6.534452785744754},{"activeRows",0.9578583593100714},{"groups32",15.405080461063049},{"partialLogical32",3.961516476517044},{"activeDlog",-12.6713181213641},{"KlogW",-0.11285077432720045}};
-inline constexpr Term programTerms626[] = {{"one",25.39493727598568},{"Kfp8",-2.191406249999999},{"oneWarp",63.55857974910395},{"S_axis0_extent",3.594534050179208},{"minW8",7.74921594982079},{"S_to_D_transitions",21.394041218637977},{"KlogDstride2",0.4283154121863802},{"activeRuns",0.5282258064516125}};
-inline constexpr Term programTerms637[] = {{"one",101.99743759578304},{"KoverTail",2.209102772237659},{"S_axis1_extent",53.33074806225083},{"D_axis0_extent",0.0},{"S_axis0_stride_log2",0.3298661499335409},{"D_axis3_extent",5.277583033651136},{"KoverSqrtS",0.0},{"leading",1.9203009447245818}};
-inline constexpr Term programTerms638[] = {{"one",131.18520408163272},{"KoverTail",3.0620110544217676},{"S_axis1_extent",93.87499999999999},{"EAbove256",0.4120064041241498},{"D_axis0_extent",0.0},{"D_axis3_extent",2.785714285714284},{"KsmallActiveD",0.0},{"leading",1.3440476190476187}};
-inline constexpr Term programTerms640[] = {{"one",99.37662928706753},{"KactiveSlog",0.060664811065311935},{"KlogWAbove2",-0.1813397515791109},{"activeLogical32",4.313316040232934},{"maxSlog",-4.472804203019657},{"KmaxSlog",0.03081173764685662},{"Dunder128",43.782909712658395},{"smallE32",4.364394298172946}};
-inline constexpr Term programTerms641[] = {{"one",263.0472680827491},{"KoverTail",-1.980554329418944},{"EAbove128",-1.2136161274999224},{"maxSlog",-8.295035857840745},{"logTail",-87.70940289189393},{"EAbove16",2.0320650570136003},{"leading",-1.1987589644601855},{"lastSSize",9.395590453993611}};
-inline constexpr Term programTerms645[] = {{"one",33.85389217461942},{"EAbove64",0.6101520887427638},{"D_axis0_stride_log2",-1.8208125605449381},{"D_axis3_extent",-2.98400868015114},{"K_D_axis4_extent_log2",-0.07141015207266144},{"smallE32",32.548129304762455},{"S_to_D_transitions",43.65217981387376},{"KoneWarp",0.3232104179899632}};
-inline constexpr Term programTerms647[] = {{"one",192.79157618019468},{"sqrtE",4.674997792815885},{"KoverTail",1.462338122885652},{"oneWarp",-63.61669332428925},{"KlogWAbove2",3.1075159191468864},{"KsumInvD",-0.376897293936705},{"minW8",-23.95322174471884},{"KlogDstride",0.2681385951534425}};
-inline constexpr Term programTerms649[] = {{"one",63.59137380892916},{"E",0.5384302264213445},{"EAbove32",-0.025269601915625283},{"EAbove8",0.507759814928278},{"payload_integer",0.002143374363593793},{"logWAbove2",18.15975771600784},{"smallE32",57.08984123769687},{"EAbove16",0.4570309232545451}};
-inline constexpr Term programTerms650[] = {{"one",61.41081120134302},{"E",0.517035721630372},{"EAbove32",-0.035665174931600555},{"EAbove8",0.4861535711560646},{"payload_integer",-1.6385221939199364},{"logWAbove2",21.270020220605353},{"smallE32",56.66763435504766},{"EAbove16",0.43584701200781717}};
-inline constexpr Term programTerms651[] = {{"one",65.74855294861551},{"E",0.5313056336877932},{"EAbove32",-0.020405630737439923},{"EAbove8",0.5007644405333052},{"payload_integer",2.699219553352654},{"logWAbove2",19.287304434493805},{"smallE32",56.66763435504766},{"EAbove16",0.4507535201833356}};
-inline constexpr Term programTerms655[] = {{"one",5.443575553567205},{"activeDlog",-0.19689741879285236},{"nS",0.11443213504609116},{"logW",0.07047909452664136},{"maxSlog",-0.04939284556674973},{"nD",0.11887283001721417},{"fullSuffix",0.0012151822212971622},{"logTail",0.027100025791907144}};
-inline constexpr Term programTerms656[] = {{"one",51.50854209780635},{"EAbove128",0.33474262939926375},{"EAbove64",-0.21059180093195087},{"Kfp8",-0.02141357150304045},{"D_axis1_inner_payload_bytes",-0.6595083878533132},{"activeRuns",51.50854209780617},{"KAbove128",0.3347426293992511},{"KoverTail",0.31214346838209267}};
-inline constexpr Term programTerms663[] = {{"one",11.004967875816453},{"EAbove64",0.9501375177955854},{"activeDlog",2.335552317748422},{"minW4",9.225414826699557},{"KlogW",-0.13319106939293848},{"EAbove128",-0.38476568243040116},{"lastSSize",-0.22306412148424018},{"KoverTail",0.9748385086939984}};
-inline constexpr Term programTerms664[] = {{"one",10.837697375105016},{"EAbove64",0.9370609326480762},{"activeDlog",2.27247454291396},{"minW4",8.835638186780598},{"KlogW",-0.1470280016454771},{"EAbove128",-0.3464837185400853},{"lastSSize",-0.16717777863562727},{"KoverTail",0.9734808326578516}};
-inline constexpr Term programTerms665[] = {{"one",18.239111698208163},{"EAbove64",0.8900466155393567},{"activeDlog",3.2927508400393646},{"minW4",14.623818087622938},{"KlogW",0.3236854968183419},{"EAbove128",-0.42177257260415235},{"lastSSize",0.9892750472726357},{"KoverTail",1.0413268253194063}};
-inline constexpr Term programTerms669[] = {{"one",19.206994946906196},{"D_axis3_extent",-0.5726006158000821},{"EAbove64",0.47539961172315937},{"D_axis4_extent",-5.034989301970203},{"D_axis0_stride_log2",-0.33543997003372567},{"KoneWarp",0.5604447693492838},{"S_to_D_transitions",20.98124291762261},{"sqrtW",9.497479713620603}};
-inline constexpr Term programTerms680[] = {{"one",45.9626083815029},{"Krank",0.4451177519869942},{"KlogTail",-0.02418685648482658},{"KlogW",0.0},{"logDstride",-4.8021134393063685}};
-inline constexpr Term programTerms681[] = {{"one",112.77437851197996},{"K_S_axis0_extent_log2",0.031173521083921026},{"maxSlog",-7.070241560251237},{"K_S_axis0_stride_log2",0.023239204843579615},{"Dunder128",72.58021457010749},{"D_axis1_stride_log2",-7.209720888391303},{"KoverTail",1.2899861683157936},{"EAbove256",0.39597285974413193}};
-inline constexpr Term programTerms683[] = {{"one",5.8092928596766145},{"EAbove64",1.0024456507422823},{"smallE32",98.82078127618799},{"EAbove128",-0.47798235678543344},{"KlogWAbove2",-0.17365960279579484},{"nS",6.203006213665729},{"activeRows_logW",0.3117594337413883},{"payload_floating",73.60265132169016}};
-inline constexpr Term programTerms686[] = {{"one",404.6948069852938},{"nD",-82.18786764705884},{"EAbove64",-0.7031965667126215},{"logTail",-76.37345281862733},{"KoneWarp",0.5429446949678326},{"S",-0.8061351102941182},{"KlogTail",0.29897269454656794},{"KsmallActiveD",0.2134661506204055}};
-inline constexpr Term programTerms688[] = {{"one",10.912734801620923},{"EAbove64",0.9400841110317633},{"activeDlog",2.292813098476928},{"minW4",8.898765776677896},{"KlogW",-0.14600314799746072},{"EAbove128",-0.3585416207269855},{"lastSSize",-0.2189479661117775},{"KoverTail",0.9751069817521153}};
-inline constexpr Term programTerms696[] = {{"one",35.77845550616075},{"KmaxSlog",0.04902745037813835},{"S_axis1_extent",-7.029144623485206},{"D_axis0_extent",31.366844693524072},{"activeSlog",13.540791747396478},{"Dunder128",48.65870119680057},{"S_axis0_stride_log2",-0.46269705461099603},{"logTail",6.863579572271059}};
-inline constexpr Term programTerms702[] = {{"one",73.20422789616589},{"K_S_axis0_extent_log2",0.056302618024398086},{"maxSlog",-1.1321597127239373},{"K_S_axis0_stride_log2",0.002055572251215983},{"Dunder128",51.34669923807303},{"D_axis1_stride_log2",-5.537925374612652},{"KoverTail",1.3706615834025517},{"K_D_axis1_extent_log2",0.06263965186457902}};
-inline constexpr Term programTerms703[] = {{"one",73.74812688229296},{"K_S_axis0_extent_log2",0.0580815701411488},{"maxSlog",-0.9729824294770424},{"K_S_axis0_stride_log2",0.0011601629498581222},{"Dunder128",52.25091730306161},{"D_axis1_stride_log2",-5.070290231742361},{"KoverTail",1.6643432705095293},{"K_D_axis1_extent_log2",0.06369061663845715}};
-inline constexpr Term programTerms704[] = {{"one",68.23926376287953},{"K_S_axis0_extent_log2",0.06111825649729161},{"maxSlog",-1.5300385196004764},{"K_S_axis0_stride_log2",0.0010137706070395794},{"Dunder128",46.742054183648186},{"D_axis1_stride_log2",-6.058365431017503},{"KoverTail",1.0635341694552836},{"K_D_axis1_extent_log2",0.05919763285521478}};
-inline constexpr Term programTerms708[] = {{"one",4.173618674897106},{"logK",0.19645835952839547},{"logWAbove2",0.31952537863172914},{"hidden",-0.5476020336620055},{"nD",0.20837880043490517},{"logW2",-0.03538845790168921},{"maxSlog",-0.045890710182188245},{"fullSuffix",0.004864260915864269}};
-inline constexpr Term programTerms709[] = {{"one",62.77238570550444},{"KactiveSlog",0.07205181561783489},{"KlogWAbove2",-0.1676954673991838},{"activeLogical32",10.280572230157983},{"maxSlog",-0.5181293392616078},{"KmaxSlog",0.011663958177763405},{"Dunder128",31.303109519067423},{"smallE32",14.705843368046265}};
-inline constexpr Term programTerms716[] = {{"one",132.54578546599575},{"maxSlog",-3.695649566245737},{"Dunder128",58.16630859749185},{"sqrtD",2.3449393944916},{"fullSuffix",0.375331115184938},{"logTail",-3.665313476554865},{"EAbove64",0.6426807267263346},{"activeWarpProxy",3.40651518568018}};
-inline constexpr Term programTerms724[] = {{"one",276.8596935530601},{"activeDlog",-39.176718262510526},{"sqrtD",100.2740922997562},{"nD",-95.65064160880088},{"minW8",4.320337389213396},{"logTail",-49.234403094504934},{"maxSlog",-1.989550147714719},{"Dunder128",-44.4899483751357}};
-inline constexpr Term programTerms726[] = {{"one",121.46454234219824},{"K_hidden",-0.5057752858864677},{"KoverTail",0.9480022755606546},{"KoneWarp",-0.7282778385252393},{"oneWarp",31.80333385773737},{"smallE32",-21.715985841061908},{"partialLogical32",-2.9120512013965314},{"Kfp8",-0.01906567748703613}};
-inline constexpr Term programTerms730[] = {{"one",143.30357142857142},{"KactiveSlog",-0.43136160714285715},{"logW",0.0}};
-inline constexpr Term programTerms732[] = {{"one",110.56019009982354},{"K_hidden",0.04981024086046229},{"EAbove256",0.5356383611584422},{"KoverTail",0.8932927219841308},{"partialLogical32",-0.4658783407703557},{"KlogW2",-1.6404227147130953e-05},{"hidden",4.905941587838742},{"Kbool",0.04949440467352288}};
-inline constexpr Term programTerms733[] = {{"one",109.78540386024979},{"K_hidden",0.04921574057636559},{"EAbove256",0.5354582184386757},{"KoverTail",0.9062739859000007},{"partialLogical32",-0.4455868250275719},{"KlogW2",-0.0011664091212052069},{"hidden",4.85529342185649},{"Kbool",0.05117329067941042}};
-inline constexpr Term programTerms736[] = {{"one",54.285090950803124},{"EAbove128",0.9363301604374811},{"EAbove64",-1.0524147254496843},{"Kfp8",-0.010152998469227884},{"D_axis1_inner_payload_bytes",-0.6393363563932858},{"activeRuns",54.28509095079348},{"KAbove128",0.9363301604328166},{"KoverTail",0.2905490235659797}};
-inline constexpr Term programTerms738[] = {{"one",129.61718749999972},{"Krank",0.04345703125000095},{"KlogTail",0.09960937500000093},{"KlogW",-0.11080932617187621},{"logDstride",-10.394531249999895}};
-inline constexpr Term programTerms741[] = {{"one",96.1377691955769},{"sqrtK",30.29413874380285},{"minW4",-12.876824170795718},{"logTail",-14.380472512387072},{"KlogWAbove2",1.4808107820239962},{"nD",-11.00547251238465},{"EAbove256",0.49952484015607396},{"activeLogical32",-6.426554975221029}};
-inline constexpr Term programTerms743[] = {{"one",-281.465376661708},{"logE",77.09163341660222},{"maxSlog",-7.589195804051748},{"Dunder128",100.73934989126651},{"S_axis0_stride_log2",0.9854994892512101},{"sqrtD",47.24114940141834},{"logDstride",3.2578291534474446},{"activeDlog",-56.567524069688105}};
-inline constexpr Term programTerms745[] = {{"one",146.09696969696975},{"hidden",-129.57632575757577},{"KoneWarp",-0.6089592211174251},{"minW8",-4.931912878787885},{"KoverTail",0.545833333333333},{"Kbool",-0.020919152462121098},{"Kfp8",-0.03166133996212144},{"smallE32",-10.980042613636371}};
-inline constexpr Term programTerms747[] = {{"one",103.46571017583088},{"Kfp8",-0.04585987307929873},{"EAbove128",2.234912093634508},{"EAbove64",-1.3044817936231858},{"D_axis1_inner_payload_bytes",-0.6074665662654983},{"S_axis0_stride_log2",0.6395036166970414},{"KoverTail",0.34711915347471217},{"S_axis1_extent",-1.5014301204958116}};
-inline constexpr Term programTerms750[] = {{"one",76.13242537366503},{"KlogStride",0.16788106813765227},{"KsuffixLog",0.010791662341335384},{"smallE32",-5.264753090833908},{"hidden",-63.71827720268168},{"KoverSqrtS",-3.9890280998369025},{"nD",57.522804463253856},{"lastSSize",3.3757705229327764}};
-inline constexpr Term programTerms752[] = {{"one",201.54400048694717},{"minW8",-14.784707008470686},{"KactiveSlog",0.16855619657189597},{"activeSlog",-21.02538632240461},{"minSbytes",-0.0044060143933821565},{"Dunder128",37.22392614823598},{"suffixD",2.6901601267645256},{"KlogW2",-0.01294078285619702}};
-inline constexpr Term programTerms754[] = {{"one",91.32440141309903},{"smallE32",-166.9923485833549},{"KlogStride",0.03888630888023028},{"lastSSize",70.02894414504635},{"fullSuffix",4.835190097602987},{"S",-14.999689316450096},{"KsumInvActiveD",-0.5249844658224067},{"minSbytes",0.0014605030520247126}};
-inline constexpr Term programTerms755[] = {{"one",0.0},{"D_axis2_stride_log2",18.604166666666657},{"logTail",11.5},{"KlogDstride",0.6406250000000007},{"idleWarpProxy",2.250000000000001},{"D_axis3_inner_payload_bytes",14.802083333333313},{"logDstride",14.02083333333335},{"D_axis0_extent",11.375000000000009}};
-inline constexpr Term programTerms759[] = {{"one",235.4175973840268},{"hidden",0.0},{"KlogDstride",0.0},{"maxSlog",-11.315087572967947},{"KlogW2",0.0}};
-inline constexpr Term programTerms761[] = {{"one",155.7173913043482},{"EAbove64",0.16621477905021567},{"activeDlog",-10.941576086956943},{"oneWarp",-36.02461827122099},{"EAbove128",-0.05902516619759494},{"KoneWarp",0.9172732272256731},{"KactiveSlog",0.026579483695649785},{"nS",-7.921874999999495}};
-inline constexpr Term programTerms773[] = {{"one",-22.84131623856558},{"K",0.6684254243646612},{"sqrtK",-6.534452785744754},{"activeRows",4.099539765170514},{"groups32",15.405080461063049},{"partialLogical32",3.961516476517044},{"activeDlog",-12.6713181213641},{"KlogW",-0.11285077432720045}};
-inline constexpr Term programTerms775[] = {{"one",52.50132635840753},{"EAbove128",0.3338836003096709},{"EAbove64",-0.1957361410354303},{"Kfp8",-0.014333123078684364},{"D_axis1_inner_payload_bytes",0.761178031479344},{"activeRuns",52.50132635840736},{"KAbove128",0.3338836003096581},{"KoverTail",0.38519078480774976}};
-inline constexpr Term programTerms777[] = {{"one",113.80663671655564},{"hidden",4.488337584042308},{"EAbove256",0.5077605449524321},{"KoverTail",0.9447149503161762},{"partialLogical32",0.296899949180535},{"KlogWAbove2",0.059103881956190936},{"logWAbove2",-14.726366826718861},{"lastSSize",-0.2032894037457369}};
-inline constexpr Term programTerms778[] = {{"one",111.747166149986},{"hidden",4.768921137439319},{"EAbove256",0.5055659936601734},{"KoverTail",0.9591067381717331},{"partialLogical32",0.46252858548739195},{"KlogWAbove2",0.059618111374009165},{"logWAbove2",-14.276123787269833},{"lastSSize",-0.15911762774204727}};
-inline constexpr Term programTerms781[] = {{"one",32.049877952142914},{"D_axis3_extent",-0.5674054233966083},{"EAbove64",0.6617555168731875},{"D_axis4_extent",-5.006003395836383},{"D_axis0_stride_log2",-0.3324868266870228},{"KoneWarp",0.5576905946094366},{"S_to_D_transitions",33.807017970312586},{"sqrtW",15.933916528119909}};
-inline constexpr Term programTerms783[] = {{"one",20.294859126412856},{"EAbove64",0.8706785251107692},{"activeDlog",7.008768912406271},{"minW4",11.205828055735493},{"KlogW",-0.09570582049012565},{"EAbove128",-0.354721752729375},{"lastSSize",0.18461074317756232},{"KoverTail",1.3516701221521064}};
-inline constexpr Term programTerms786[] = {{"one",67.87196601214313},{"KactiveSlog",0.080557182870711},{"KlogWAbove2",-0.16626277246887075},{"activeLogical32",11.40791189089078},{"maxSlog",-0.5115992064443954},{"KmaxSlog",0.011523222323347545},{"Dunder128",31.039304425097175},{"smallE32",14.646930215507647}};
-inline constexpr Term programTerms788[] = {{"one",36.036375227402075},{"KmaxSlog",0.048810660539715646},{"S_axis1_extent",-8.855168698673088},{"D_axis0_extent",31.44690489338724},{"activeSlog",13.651904405692846},{"Dunder128",48.51844837310656},{"S_axis0_stride_log2",-0.42069802936834805},{"logTail",6.977419790897462}};
-inline constexpr Term programTerms791[] = {{"one",63.72386351973972},{"E",0.5330788648834673},{"EAbove32",-0.025801608051250976},{"EAbove8",0.5019026013206989},{"payload_integer",0.06610116100751387},{"logWAbove2",19.417624850430702},{"smallE32",57.09866259249823},{"EAbove16",0.45102408719351034}};
-inline constexpr Term programTerms792[] = {{"one",60.34462192048711},{"E",0.5161494397712942},{"EAbove32",-0.03151376142336029},{"EAbove8",0.48591245856974047},{"payload_integer",-3.312022101037162},{"logWAbove2",19.287304434493805},{"smallE32",56.66763435504766},{"EAbove16",0.4365417074898678}};
-inline constexpr Term programTerms794[] = {{"one",59.295560577485745},{"sqrtE",8.993042252425695},{"KoverTail",1.5333297604598453},{"oneWarp",23.84965095782759},{"KlogWAbove2",1.2727051525573034},{"KsumInvD",-0.34228683234187546},{"minW8",-2.8031634333895177},{"KlogDstride",0.19253209258675216}};
-inline constexpr Term programTerms795[] = {{"one",61.0105732716233},{"sqrtE",9.1049214972778},{"KoverTail",1.5847211678764765},{"oneWarp",23.748249407670297},{"KlogWAbove2",1.25807447664008},{"KsumInvD",-0.22912096936298235},{"minW8",-2.281617760545506},{"KlogDstride",0.19096048683371178}};
-inline constexpr ProgramNode programNodes[] = {
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms0,8},
-{Instruction::LE,Operand::literal(566.5),Operand::literal(766.125),"KlogStride",250.30169677734375,nullptr,0},
-{Instruction::LE,Operand::node(1),Operand::literal(384.625),"Dunder128",1.5,nullptr,0},
-{Instruction::LE,Operand::literal(257.875),Operand::node(2),"KmaxSlog",197.7139663696289,nullptr,0},
-{Instruction::LE,Operand::literal(1176.125),Operand::literal(1410.125),"maxSlog",8.453445434570312,nullptr,0},
-{Instruction::LE,Operand::literal(724.25),Operand::literal(1435.75),"maxSlog",16.821928024291992,nullptr,0},
-{Instruction::LE,Operand::node(4),Operand::node(5),"minSbytes",24064.0,nullptr,0},
-{Instruction::LE,Operand::node(6),Operand::literal(733.75),"S_to_D_transitions",1.5,nullptr,0},
-{Instruction::LE,Operand::node(3),Operand::node(7),"KoverTail",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(1100.125),Operand::literal(1245.375),"suffixD",3.0,nullptr,0},
-{Instruction::LE,Operand::node(9),Operand::literal(1740.0),"KlogDstride",80.0,nullptr,0},
-{Instruction::LE,Operand::literal(1466.875),Operand::literal(2583.75),"KlogDstride",96.0,nullptr,0},
-{Instruction::LE,Operand::literal(2423.125),Operand::literal(4479.625),"activeRows",48.0,nullptr,0},
-{Instruction::LE,Operand::node(11),Operand::node(12),"activeRows",24.0,nullptr,0},
-{Instruction::LE,Operand::node(10),Operand::node(13),"D",6.0,nullptr,0},
-{Instruction::LE,Operand::node(8),Operand::node(14),"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::LE,Operand::literal(2024.375),Operand::literal(2365.75),"minSbytes",512.0,nullptr,0},
-{Instruction::LE,Operand::node(16),Operand::literal(1305.75),"fullSuffix",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(3033.25),Operand::node(17),"KactiveDlog",160.0,nullptr,0},
-{Instruction::LE,Operand::literal(4726.625),Operand::literal(5746.375),"KlogDstride",384.0,nullptr,0},
-{Instruction::LE,Operand::literal(3296.75),Operand::literal(4135.875),"leading",1.5,nullptr,0},
-{Instruction::LE,Operand::node(19),Operand::node(20),"KsmallD",192.0,nullptr,0},
-{Instruction::LE,Operand::literal(3080.625),Operand::node(21),"KlogDstride2",384.0,nullptr,0},
-{Instruction::LE,Operand::node(18),Operand::node(22),"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::LE,Operand::literal(6035.75),Operand::literal(7302.375),"KmaxSlog",1753.1083374023438,nullptr,0},
-{Instruction::LE,Operand::literal(4665.5),Operand::node(24),"lastSSize",3.0,nullptr,0},
-{Instruction::LE,Operand::node(25),Operand::literal(9530.625),"KmaxSlog",2804.08203125,nullptr,0},
-{Instruction::LE,Operand::node(26),Operand::literal(18673.375),"EAbove64",576.0,nullptr,0},
-{Instruction::LE,Operand::node(23),Operand::node(27),"KlogDstride2",1088.0,nullptr,0},
-{Instruction::LE,Operand::node(15),Operand::node(28),"KlogDstride",160.0,nullptr,0},
-{Instruction::Blend,Operand::node(0),Operand::node(29),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms31,8},
-{Instruction::LE,Operand::literal(697.75),Operand::literal(776.125),"KmaxSlog",511.90965270996094,nullptr,0},
-{Instruction::LE,Operand::node(32),Operand::literal(1118.625),"D_axis0_inner_payload_bytes",96.0,nullptr,0},
-{Instruction::LE,Operand::literal(566.5),Operand::node(33),"KlogStride",250.30169677734375,nullptr,0},
-{Instruction::LE,Operand::node(34),Operand::literal(384.625),"Dunder128",1.5,nullptr,0},
-{Instruction::LE,Operand::literal(257.875),Operand::node(35),"KmaxSlog",197.7139663696289,nullptr,0},
-{Instruction::LE,Operand::literal(1274.875),Operand::literal(1110.0),"partialLogical32",1.0,nullptr,0},
-{Instruction::LE,Operand::literal(1391.0),Operand::literal(1445.875),"D_axis0_inner_payload_bytes",48.0,nullptr,0},
-{Instruction::LE,Operand::literal(1493.625),Operand::literal(2043.625),"maxSlog",12.821928024291992,nullptr,0},
-{Instruction::LE,Operand::node(38),Operand::node(39),"KlogStride",393.8353576660156,nullptr,0},
-{Instruction::LE,Operand::node(37),Operand::node(40),"maxSlog",8.453445434570312,nullptr,0},
-{Instruction::LE,Operand::literal(724.25),Operand::literal(1435.75),"D_axis1_stride_log2",11.5,nullptr,0},
-{Instruction::LE,Operand::node(41),Operand::node(42),"minSbytes",24064.0,nullptr,0},
-{Instruction::LE,Operand::node(43),Operand::literal(733.75),"S_to_D_transitions",1.5,nullptr,0},
-{Instruction::LE,Operand::node(36),Operand::node(44),"KoverTail",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(1107.625),Operand::literal(1008.625),"KlogDstride2",16.0,nullptr,0},
-{Instruction::LE,Operand::node(46),Operand::literal(1245.375),"suffixD",3.0,nullptr,0},
-{Instruction::LE,Operand::node(47),Operand::literal(1740.0),"KlogDstride",80.0,nullptr,0},
-{Instruction::LE,Operand::literal(2721.375),Operand::literal(1591.875),"KsumInvD",28.0,nullptr,0},
-{Instruction::LE,Operand::literal(2806.0),Operand::node(49),"KlogDstride",96.0,nullptr,0},
-{Instruction::LE,Operand::literal(2552.625),Operand::literal(2285.0),"D_axis2_inner_payload_bytes",2.5,nullptr,0},
-{Instruction::LE,Operand::node(51),Operand::literal(4479.625),"activeRows",48.0,nullptr,0},
-{Instruction::LE,Operand::node(50),Operand::node(52),"activeRows",24.0,nullptr,0},
-{Instruction::LE,Operand::node(48),Operand::node(53),"D",6.0,nullptr,0},
-{Instruction::LE,Operand::node(45),Operand::node(54),"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::LE,Operand::literal(3390.375),Operand::literal(3088.375),"S_axis2_stride_log2",4.660964012145996,nullptr,0},
-{Instruction::LE,Operand::node(56),Operand::literal(2450.0),"D_axis2_inner_payload_bytes",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(4726.625),Operand::literal(5746.375),"logK",7.5,nullptr,0},
-{Instruction::LE,Operand::literal(5816.375),Operand::literal(4216.75),"D_SspanRatio",24500.0,nullptr,0},
-{Instruction::LE,Operand::literal(3417.875),Operand::node(59),"KactiveSlog",448.0,nullptr,0},
-{Instruction::LE,Operand::literal(3296.75),Operand::node(60),"leading",1.5,nullptr,0},
-{Instruction::LE,Operand::node(58),Operand::node(61),"KsmallD",192.0,nullptr,0},
-{Instruction::LE,Operand::node(57),Operand::node(62),"KlogDstride2",384.0,nullptr,0},
-{Instruction::LE,Operand::node(18),Operand::node(63),"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::LE,Operand::literal(10391.125),Operand::literal(9293.875),"minSbytes",8192.0,nullptr,0},
-{Instruction::LE,Operand::node(25),Operand::node(65),"KmaxSlog",2804.08203125,nullptr,0},
-{Instruction::LE,Operand::node(66),Operand::literal(18673.375),"EAbove64",576.0,nullptr,0},
-{Instruction::LE,Operand::node(64),Operand::node(67),"KlogDstride2",1088.0,nullptr,0},
-{Instruction::LE,Operand::node(55),Operand::node(68),"KlogDstride",160.0,nullptr,0},
-{Instruction::Blend,Operand::node(31),Operand::node(69),nullptr,0.25,nullptr,0},
-{Instruction::LE,Operand::literal(998.5),Operand::literal(1398.875),"KlogDstride2",96.0,nullptr,0},
-{Instruction::LE,Operand::literal(572.625),Operand::node(71),"activeRows",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(1465.875),Operand::literal(1756.125),"KlogStride",1160.2741088867188,nullptr,0},
-{Instruction::LE,Operand::literal(1139.25),Operand::node(73),"D",6.0,nullptr,0},
-{Instruction::LE,Operand::node(72),Operand::node(74),"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::LE,Operand::literal(3091.75),Operand::literal(4133.0),"logDstride",1.5,nullptr,0},
-{Instruction::LE,Operand::literal(2027.5),Operand::node(76),"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::LE,Operand::literal(6332.375),Operand::literal(10253.75),"KmaxSlog",2804.08203125,nullptr,0},
-{Instruction::LE,Operand::node(77),Operand::node(78),"KlogDstride2",1088.0,nullptr,0},
-{Instruction::LE,Operand::node(75),Operand::node(79),"KlogDstride",160.0,nullptr,0},
-{Instruction::Blend,Operand::node(29),Operand::node(80),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms82,5},
-{Instruction::LE,Operand::literal(1438.75),Operand::literal(1758.75),"KmaxSlog",2431.9097900390625,nullptr,0},
-{Instruction::LE,Operand::node(83),Operand::node(49),"KlogDstride",96.0,nullptr,0},
-{Instruction::LE,Operand::node(84),Operand::node(52),"activeRows",24.0,nullptr,0},
-{Instruction::LE,Operand::node(48),Operand::node(85),"D",6.0,nullptr,0},
-{Instruction::LE,Operand::node(45),Operand::node(86),"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::LE,Operand::node(87),Operand::node(68),"KlogDstride",160.0,nullptr,0},
-{Instruction::Blend,Operand::node(82),Operand::node(88),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms90,4},
-{Instruction::LE,Operand::literal(367.0),Operand::literal(745.625),"KlogDstride",48.0,nullptr,0},
-{Instruction::LE,Operand::literal(761.875),Operand::literal(1319.0),"minSbytes",120.0,nullptr,0},
-{Instruction::LE,Operand::node(91),Operand::node(92),"activeRows",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(1045.125),Operand::literal(1391.375),"minSbytes",24.0,nullptr,0},
-{Instruction::LE,Operand::literal(1490.0),Operand::literal(2610.0),"activeRows",24.0,nullptr,0},
-{Instruction::LE,Operand::node(94),Operand::node(95),"D",6.0,nullptr,0},
-{Instruction::LE,Operand::node(93),Operand::node(96),"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::LE,Operand::literal(2735.875),Operand::literal(1942.5),"KsuffixLog",224.0,nullptr,0},
-{Instruction::LE,Operand::literal(3086.0),Operand::literal(4161.875),"KlogDstride2",384.0,nullptr,0},
-{Instruction::LE,Operand::node(98),Operand::node(99),"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::LE,Operand::literal(6868.625),Operand::literal(5060.0),"KsumInvD",92.0,nullptr,0},
-{Instruction::LE,Operand::literal(9316.125),Operand::literal(11574.125),"sqrtS",2.414213538169861,nullptr,0},
-{Instruction::LE,Operand::node(101),Operand::node(102),"KmaxSlog",2804.08203125,nullptr,0},
-{Instruction::LE,Operand::node(100),Operand::node(103),"KlogDstride2",1088.0,nullptr,0},
-{Instruction::LE,Operand::node(97),Operand::node(104),"KlogDstride",160.0,nullptr,0},
-{Instruction::Blend,Operand::node(90),Operand::node(105),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms107,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms108,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms109,8},
-{Instruction::EQ,Operand::node(109),Operand::node(107),"rank",5.0,nullptr,0},
-{Instruction::EQ,Operand::node(108),Operand::node(110),"rank",4.0,nullptr,0},
-{Instruction::EQ,Operand::node(107),Operand::node(111),"rank",2.0,nullptr,0},
-{Instruction::LE,Operand::literal(572.625),Operand::literal(1155.875),"activeRows",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(1139.25),Operand::literal(1522.25),"D",6.0,nullptr,0},
-{Instruction::LE,Operand::node(113),Operand::node(114),"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::LE,Operand::literal(2027.5),Operand::literal(3437.875),"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::LE,Operand::node(116),Operand::node(78),"KlogDstride2",1088.0,nullptr,0},
-{Instruction::LE,Operand::node(115),Operand::node(117),"KlogDstride",160.0,nullptr,0},
-{Instruction::Blend,Operand::node(112),Operand::node(118),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms120,8},
-{Instruction::Blend,Operand::node(120),Operand::node(88),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms122,8},
-{Instruction::Scale,Operand::node(122),Operand::node(-1),nullptr,1.126942028213538,nullptr,0},
-{Instruction::Scale,Operand::node(122),Operand::node(-1),nullptr,1.3968709398538832,nullptr,0},
-{Instruction::LE,Operand::node(123),Operand::node(124),"KsmallD",48.0,nullptr,0},
-{Instruction::Scale,Operand::node(122),Operand::node(-1),nullptr,1.0771654920085854,nullptr,0},
-{Instruction::Scale,Operand::node(122),Operand::node(-1),nullptr,0.9919254874334464,nullptr,0},
-{Instruction::LE,Operand::node(126),Operand::node(127),"activeS",48.0,nullptr,0},
-{Instruction::LE,Operand::node(125),Operand::node(128),"KlogTail",160.0,nullptr,0},
-{Instruction::Scale,Operand::node(122),Operand::node(-1),nullptr,1.0352805089647195,nullptr,0},
-{Instruction::Scale,Operand::node(122),Operand::node(-1),nullptr,0.6917004714913871,nullptr,0},
-{Instruction::LE,Operand::node(130),Operand::node(131),"logTail",2.5,nullptr,0},
-{Instruction::Scale,Operand::node(122),Operand::node(-1),nullptr,0.9557087817819432,nullptr,0},
-{Instruction::Scale,Operand::node(122),Operand::node(-1),nullptr,1.066745885232125,nullptr,0},
-{Instruction::LE,Operand::node(133),Operand::node(134),"KsmallD",224.0,nullptr,0},
-{Instruction::LE,Operand::node(132),Operand::node(135),"activeS",3.0,nullptr,0},
-{Instruction::LE,Operand::node(129),Operand::node(136),"D_axis2_inner_payload_bytes",3.0,nullptr,0},
-{Instruction::Blend,Operand::node(137),Operand::node(88),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms139,8},
-{Instruction::Blend,Operand::node(139),Operand::node(29),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms141,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms142,8},
-{Instruction::LE,Operand::node(141),Operand::node(142),"S_axis0_stride_log2",2.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms144,8},
-{Instruction::LE,Operand::node(143),Operand::node(144),"fullSuffix",12.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms146,8},
-{Instruction::LE,Operand::node(145),Operand::node(146),"D_axis1_inner_payload_bytes",3.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms148,8},
-{Instruction::LE,Operand::node(147),Operand::node(148),"KlogDstride2",96.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms150,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms151,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms152,8},
-{Instruction::LE,Operand::node(151),Operand::node(152),"D_SspanRatio",49090.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms154,8},
-{Instruction::LE,Operand::node(153),Operand::node(154),"KlogDstride2",432.0,nullptr,0},
-{Instruction::LE,Operand::node(150),Operand::node(155),"minSbytes",104.0,nullptr,0},
-{Instruction::LE,Operand::node(149),Operand::node(156),"activeRows",12.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms158,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms159,4},
-{Instruction::LE,Operand::node(158),Operand::node(159),"lastSSize",48.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms161,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms162,8},
-{Instruction::LE,Operand::node(161),Operand::node(162),"maxSlog",9.160964012145996,nullptr,0},
-{Instruction::LE,Operand::node(160),Operand::node(163),"KlogDstride",112.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms165,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms166,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms167,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms168,8},
-{Instruction::LE,Operand::node(167),Operand::node(168),"D_axis2_inner_payload_bytes",17.0,nullptr,0},
-{Instruction::LE,Operand::node(166),Operand::node(169),"KlogDstride",320.0,nullptr,0},
-{Instruction::LE,Operand::node(165),Operand::node(170),"minSbytes",96.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms172,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms173,8},
-{Instruction::LE,Operand::node(172),Operand::node(173),"KmaxSlog",3506.2166748046875,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms175,8},
-{Instruction::LE,Operand::node(174),Operand::node(175),"KlogDstride",1408.0,nullptr,0},
-{Instruction::LE,Operand::node(171),Operand::node(176),"KlogDstride",704.0,nullptr,0},
-{Instruction::LE,Operand::node(164),Operand::node(177),"KlogDstride2",448.0,nullptr,0},
-{Instruction::LE,Operand::node(157),Operand::node(178),"activeLogical32",3.0,nullptr,0},
-{Instruction::Blend,Operand::node(179),Operand::node(118),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms181,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms182,8},
-{Instruction::Scale,Operand::node(182),Operand::node(-1),nullptr,1.0500861452444719,nullptr,0},
-{Instruction::Scale,Operand::node(182),Operand::node(-1),nullptr,0.9637243288684131,nullptr,0},
-{Instruction::EQ,Operand::node(183),Operand::node(184),"warp_band",0.0,nullptr,0},
-{Instruction::Blend,Operand::node(185),Operand::node(69),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms187,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms188,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms189,8},
-{Instruction::LE,Operand::node(188),Operand::node(189),"D_axis2_inner_payload_bytes",3.0,nullptr,0},
-{Instruction::LE,Operand::node(187),Operand::node(190),"KoverTail",12.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms192,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms193,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms194,8},
-{Instruction::LE,Operand::node(193),Operand::node(194),"D_axis1_inner_payload_bytes",3.0,nullptr,0},
-{Instruction::LE,Operand::node(192),Operand::node(195),"D",6.0,nullptr,0},
-{Instruction::LE,Operand::node(191),Operand::node(196),"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms198,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms199,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms200,8},
-{Instruction::LE,Operand::node(199),Operand::node(200),"logDstride",1.5,nullptr,0},
-{Instruction::LE,Operand::node(198),Operand::node(201),"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms203,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms204,8},
-{Instruction::LE,Operand::node(203),Operand::node(204),"KmaxSlog",2804.08203125,nullptr,0},
-{Instruction::LE,Operand::node(202),Operand::node(205),"KlogDstride2",1088.0,nullptr,0},
-{Instruction::LE,Operand::node(197),Operand::node(206),"KlogDstride",160.0,nullptr,0},
-{Instruction::Blend,Operand::node(207),Operand::node(29),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms209,8},
-{Instruction::Scale,Operand::node(209),Operand::node(-1),nullptr,0.9637243288684131,nullptr,0},
-{Instruction::Blend,Operand::node(210),Operand::node(105),nullptr,0.25,nullptr,0},
-{Instruction::Exp,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms212,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms213,8},
-{Instruction::LE,Operand::literal(384.625),Operand::literal(755.625),"KlogDstride2",96.0,nullptr,0},
-{Instruction::LE,Operand::literal(1354.0),Operand::literal(830.5),"D_axis2_inner_payload_bytes",3.0,nullptr,0},
-{Instruction::LE,Operand::node(214),Operand::node(215),"KoverTail",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(1008.625),Operand::literal(1391.375),"minSbytes",24.0,nullptr,0},
-{Instruction::LE,Operand::literal(1490.625),Operand::literal(2549.25),"activeRows",24.0,nullptr,0},
-{Instruction::LE,Operand::node(217),Operand::node(218),"D",6.0,nullptr,0},
-{Instruction::LE,Operand::node(216),Operand::node(219),"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::LE,Operand::literal(2723.0),Operand::literal(1943.75),"KsuffixLog",224.0,nullptr,0},
-{Instruction::LE,Operand::literal(3080.625),Operand::literal(4153.375),"KlogDstride2",384.0,nullptr,0},
-{Instruction::LE,Operand::node(221),Operand::node(222),"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::LE,Operand::literal(6930.5),Operand::literal(5219.75),"KsumInvD",92.0,nullptr,0},
-{Instruction::LE,Operand::literal(9302.375),Operand::literal(11574.125),"activeS",6.0,nullptr,0},
-{Instruction::LE,Operand::node(224),Operand::node(225),"KmaxSlog",2804.08203125,nullptr,0},
-{Instruction::LE,Operand::node(223),Operand::node(226),"KlogDstride2",1088.0,nullptr,0},
-{Instruction::LE,Operand::node(220),Operand::node(227),"KlogDstride",160.0,nullptr,0},
-{Instruction::Blend,Operand::node(120),Operand::node(228),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms230,8},
-{Instruction::Blend,Operand::node(230),Operand::node(118),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms232,8},
-{Instruction::Blend,Operand::node(232),Operand::node(228),nullptr,0.5,nullptr,0},
-{Instruction::Exp,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms234,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms235,8},
-{Instruction::LE,Operand::literal(1423.0),Operand::literal(1514.875),"KactiveSlog",320.0,nullptr,0},
-{Instruction::LE,Operand::literal(2231.75),Operand::literal(1728.625),"KlogStride",1726.5458984375,nullptr,0},
-{Instruction::LE,Operand::node(236),Operand::node(237),"KlogStride",1160.2741088867188,nullptr,0},
-{Instruction::LE,Operand::literal(1139.25),Operand::node(238),"D",6.0,nullptr,0},
-{Instruction::LE,Operand::node(72),Operand::node(239),"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::LE,Operand::node(240),Operand::node(79),"KlogDstride",160.0,nullptr,0},
-{Instruction::Blend,Operand::node(235),Operand::node(241),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms243,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms244,8},
-{Instruction::LE,Operand::literal(4391.375),Operand::node(12),"activeRows",24.0,nullptr,0},
-{Instruction::LE,Operand::node(10),Operand::node(245),"D",6.0,nullptr,0},
-{Instruction::LE,Operand::node(8),Operand::node(246),"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::LE,Operand::node(247),Operand::node(28),"KlogDstride",160.0,nullptr,0},
-{Instruction::Blend,Operand::node(244),Operand::node(248),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms250,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms251,8},
-{Instruction::Blend,Operand::node(251),Operand::node(80),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms253,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms254,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms255,8},
-{Instruction::EQ,Operand::node(254),Operand::node(255),"leading_band",1.0,nullptr,0},
-{Instruction::EQ,Operand::node(253),Operand::node(256),"leading_band",0.0,nullptr,0},
-{Instruction::Blend,Operand::node(257),Operand::node(118),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms259,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms260,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms261,8},
-{Instruction::EQ,Operand::node(260),Operand::node(261),"K_band",2.0,nullptr,0},
-{Instruction::EQ,Operand::node(259),Operand::node(262),"K_band",1.0,nullptr,0},
-{Instruction::Blend,Operand::node(263),Operand::node(118),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms265,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms266,8},
-{Instruction::EQ,Operand::node(265),Operand::node(266),"warp_band",0.0,nullptr,0},
-{Instruction::Blend,Operand::node(267),Operand::node(241),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms269,8},
-{Instruction::Blend,Operand::node(269),Operand::node(118),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms271,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms272,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms273,8},
-{Instruction::EQ,Operand::node(272),Operand::node(273),"leading_band",1.0,nullptr,0},
-{Instruction::EQ,Operand::node(271),Operand::node(274),"leading_band",0.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms276,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms277,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms278,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms279,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms280,8},
-{Instruction::EQ,Operand::node(279),Operand::node(280),"K_band",1.0,nullptr,0},
-{Instruction::EQ,Operand::node(278),Operand::node(281),"K_band",0.0,nullptr,0},
-{Instruction::LE,Operand::node(58),Operand::literal(3296.75),"KsmallD",192.0,nullptr,0},
-{Instruction::LE,Operand::node(57),Operand::node(283),"KlogDstride2",384.0,nullptr,0},
-{Instruction::LE,Operand::node(18),Operand::node(284),"KmaxSlog",1300.6033935546875,nullptr,0},
-{Instruction::LE,Operand::node(285),Operand::node(67),"KlogDstride2",1088.0,nullptr,0},
-{Instruction::LE,Operand::node(55),Operand::node(286),"KlogDstride",160.0,nullptr,0},
-{Instruction::Blend,Operand::node(282),Operand::node(287),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms289,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms290,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms291,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms292,8},
-{Instruction::EQ,Operand::node(291),Operand::node(292),"leading_band",1.0,nullptr,0},
-{Instruction::EQ,Operand::node(290),Operand::node(293),"leading_band",0.0,nullptr,0},
-{Instruction::Blend,Operand::node(294),Operand::node(115),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms296,8},
-{Instruction::LE,Operand::literal(572.625),Operand::literal(998.5),"activeRows",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(1139.25),Operand::node(236),"D",6.0,nullptr,0},
-{Instruction::LE,Operand::node(297),Operand::node(298),"KoverSqrtActiveD",19.313708305358887,nullptr,0},
-{Instruction::Blend,Operand::node(296),Operand::node(299),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms301,8},
-{Instruction::Blend,Operand::node(301),Operand::node(228),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms303,8},
-{Instruction::LE,Operand::node(147),Operand::node(303),"KlogDstride2",96.0,nullptr,0},
-{Instruction::LE,Operand::node(304),Operand::node(156),"activeRows",12.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms306,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms307,8},
-{Instruction::LE,Operand::node(306),Operand::node(307),"KoverTail",24.0,nullptr,0},
-{Instruction::LE,Operand::node(308),Operand::node(159),"lastSSize",48.0,nullptr,0},
-{Instruction::LE,Operand::node(309),Operand::node(163),"KlogDstride",112.0,nullptr,0},
-{Instruction::LE,Operand::node(310),Operand::node(177),"KlogDstride2",448.0,nullptr,0},
-{Instruction::LE,Operand::node(305),Operand::node(311),"activeLogical32",3.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms313,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms314,8},
-{Instruction::EQ,Operand::node(313),Operand::node(314),"mask",1.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms316,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms317,8},
-{Instruction::EQ,Operand::node(316),Operand::node(317),"prefixMasked",0.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms319,8},
-{Instruction::EQ,Operand::node(318),Operand::node(319),"mask",1.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms321,8},
-{Instruction::EQ,Operand::node(321),Operand::node(317),"prefixMasked",0.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms323,8},
-{Instruction::EQ,Operand::node(322),Operand::node(323),"mask",1.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms325,8},
-{Instruction::EQ,Operand::node(325),Operand::node(317),"prefixMasked",0.0,nullptr,0},
-{Instruction::EQ,Operand::node(326),Operand::node(122),"mask",1.0,nullptr,0},
-{Instruction::EQ,Operand::node(324),Operand::node(327),"width",8.0,nullptr,0},
-{Instruction::EQ,Operand::node(320),Operand::node(328),"width",2.0,nullptr,0},
-{Instruction::EQ,Operand::node(315),Operand::node(329),"width",4.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms331,8},
-{Instruction::LE,Operand::literal(105.875),Operand::literal(132.625),"lastSSize",3.0,nullptr,0},
-{Instruction::LE,Operand::node(332),Operand::literal(78.375),"D_axis1_extent",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(142.25),Operand::literal(116.625),"logTail",3.5,nullptr,0},
-{Instruction::LE,Operand::node(333),Operand::node(334),"KlogRuns",20.0,nullptr,0},
-{Instruction::LE,Operand::node(335),Operand::literal(151.5),"KactiveSlog",448.0,nullptr,0},
-{Instruction::LE,Operand::literal(153.625),Operand::literal(94.75),"D_axis4_inner_payload_bytes",1.0,nullptr,0},
-{Instruction::LE,Operand::literal(1.0),Operand::literal(98.5),"D_axis3_stride_log2",2.5,nullptr,0},
-{Instruction::LE,Operand::node(338),Operand::literal(135.0),"fullSuffix",24.0,nullptr,0},
-{Instruction::LE,Operand::node(337),Operand::node(339),"minSbytes",208.0,nullptr,0},
-{Instruction::LE,Operand::literal(115.25),Operand::literal(61.25),"KlogStride",164.9176788330078,nullptr,0},
-{Instruction::LE,Operand::literal(171.625),Operand::literal(142.75),"S_axis0_stride_log2",7.0,nullptr,0},
-{Instruction::LE,Operand::node(341),Operand::node(342),"tailMasked",0.5,nullptr,0},
-{Instruction::LE,Operand::node(343),Operand::literal(19.0),"maxSlog",15.923051357269287,nullptr,0},
-{Instruction::LE,Operand::node(340),Operand::node(344),"logDstride",1.5,nullptr,0},
-{Instruction::LE,Operand::node(336),Operand::node(345),"KlogDstride",28.0,nullptr,0},
-{Instruction::LE,Operand::literal(155.25),Operand::literal(169.625),"KlogDstride2",272.0,nullptr,0},
-{Instruction::LE,Operand::node(347),Operand::literal(189.25),"EAbove64",128.0,nullptr,0},
-{Instruction::LE,Operand::literal(244.75),Operand::literal(279.375),"KmaskedAxes",64.0,nullptr,0},
-{Instruction::LE,Operand::node(349),Operand::literal(346.375),"activeRuns",48.0,nullptr,0},
-{Instruction::LE,Operand::literal(405.375),Operand::literal(486.5),"KoverTail",48.0,nullptr,0},
-{Instruction::LE,Operand::literal(919.75),Operand::literal(1519.25),"KlogDstride",2560.0,nullptr,0},
-{Instruction::LE,Operand::node(351),Operand::node(352),"KactiveSlog",2560.0,nullptr,0},
-{Instruction::LE,Operand::node(350),Operand::node(353),"KlogDstride",640.0,nullptr,0},
-{Instruction::LE,Operand::node(348),Operand::node(354),"KlogDstride",320.0,nullptr,0},
-{Instruction::LE,Operand::literal(134.875),Operand::literal(101.25),"D_axis4_extent",6.0,nullptr,0},
-{Instruction::LE,Operand::literal(419.625),Operand::literal(243.125),"D_SspanRatio",8645.0,nullptr,0},
-{Instruction::LE,Operand::node(356),Operand::node(357),"KlogDstride2",384.0,nullptr,0},
-{Instruction::LE,Operand::node(358),Operand::literal(71.75),"KlogW2",7808.0,nullptr,0},
-{Instruction::LE,Operand::node(355),Operand::node(359),"sqrtW",4.828427076339722,nullptr,0},
-{Instruction::LE,Operand::node(346),Operand::node(360),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(331),Operand::node(361),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms363,8},
-{Instruction::LE,Operand::literal(114.25),Operand::literal(102.5),"minSbytes",240.0,nullptr,0},
-{Instruction::LE,Operand::literal(98.25),Operand::node(364),"minSbytes",56.0,nullptr,0},
-{Instruction::LE,Operand::node(365),Operand::literal(132.625),"lastSSize",3.0,nullptr,0},
-{Instruction::LE,Operand::node(366),Operand::literal(78.375),"D_axis1_extent",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(143.125),Operand::literal(159.375),"D_SspanRatio",468.5,nullptr,0},
-{Instruction::LE,Operand::node(368),Operand::literal(130.125),"D_axis4_extent",0.5,nullptr,0},
-{Instruction::LE,Operand::literal(108.0),Operand::literal(126.5),"S_axis0_stride_log2",8.69615888595581,nullptr,0},
-{Instruction::LE,Operand::node(369),Operand::node(370),"logTail",3.5,nullptr,0},
-{Instruction::LE,Operand::node(367),Operand::node(371),"KlogRuns",20.0,nullptr,0},
-{Instruction::LE,Operand::literal(151.25),Operand::literal(157.25),"activeRows",24.0,nullptr,0},
-{Instruction::LE,Operand::node(373),Operand::literal(204.375),"D_axis1_inner_payload_bytes",6.0,nullptr,0},
-{Instruction::LE,Operand::node(372),Operand::node(374),"KactiveSlog",448.0,nullptr,0},
-{Instruction::LE,Operand::literal(1.0),Operand::literal(12.125),"D_SspanRatio",3584.125,nullptr,0},
-{Instruction::LE,Operand::node(376),Operand::literal(98.5),"D_axis3_stride_log2",2.5,nullptr,0},
-{Instruction::LE,Operand::node(377),Operand::literal(135.0),"fullSuffix",24.0,nullptr,0},
-{Instruction::LE,Operand::node(337),Operand::node(378),"minSbytes",208.0,nullptr,0},
-{Instruction::LE,Operand::literal(119.25),Operand::literal(109.375),"KmaxSlog",120.0,nullptr,0},
-{Instruction::LE,Operand::node(380),Operand::literal(61.25),"KlogStride",164.9176788330078,nullptr,0},
-{Instruction::LE,Operand::node(381),Operand::literal(19.0),"maxSlog",15.923051357269287,nullptr,0},
-{Instruction::LE,Operand::node(379),Operand::node(382),"logDstride",1.5,nullptr,0},
-{Instruction::LE,Operand::node(375),Operand::node(383),"KlogDstride",28.0,nullptr,0},
-{Instruction::LE,Operand::literal(227.625),Operand::literal(184.5),"minSbytes",2112.0,nullptr,0},
-{Instruction::LE,Operand::literal(160.625),Operand::literal(155.25),"logK",6.5,nullptr,0},
-{Instruction::LE,Operand::literal(120.875),Operand::node(386),"EAbove8",88.0,nullptr,0},
-{Instruction::LE,Operand::node(385),Operand::node(387),"lastSSize",3.0,nullptr,0},
-{Instruction::LE,Operand::literal(183.75),Operand::literal(169.75),"logTail",1.5,nullptr,0},
-{Instruction::LE,Operand::literal(142.75),Operand::literal(164.375),"D_axis1_extent",3.0,nullptr,0},
-{Instruction::LE,Operand::node(389),Operand::node(390),"KlogTail",80.0,nullptr,0},
-{Instruction::LE,Operand::literal(201.75),Operand::literal(172.0),"groups32",3.0,nullptr,0},
-{Instruction::LE,Operand::node(391),Operand::node(392),"fullSuffix",24.0,nullptr,0},
-{Instruction::LE,Operand::node(388),Operand::node(393),"KlogDstride2",272.0,nullptr,0},
-{Instruction::LE,Operand::literal(175.75),Operand::literal(187.875),"KlogW2",768.0,nullptr,0},
-{Instruction::LE,Operand::literal(199.375),Operand::literal(214.5),"activeRows",40.0,nullptr,0},
-{Instruction::LE,Operand::node(395),Operand::node(396),"D_axis1_stride_log2",1.5,nullptr,0},
-{Instruction::LE,Operand::node(394),Operand::node(397),"EAbove64",128.0,nullptr,0},
-{Instruction::LE,Operand::literal(238.5),Operand::literal(251.125),"activeRows",12.0,nullptr,0},
-{Instruction::LE,Operand::literal(267.0),Operand::literal(296.125),"S",6.0,nullptr,0},
-{Instruction::LE,Operand::node(399),Operand::node(400),"activeRuns",2.5,nullptr,0},
-{Instruction::LE,Operand::node(401),Operand::literal(346.375),"activeRuns",48.0,nullptr,0},
-{Instruction::LE,Operand::literal(407.5),Operand::literal(356.375),"KsumInvD",248.0,nullptr,0},
-{Instruction::LE,Operand::node(403),Operand::literal(486.5),"KoverTail",48.0,nullptr,0},
-{Instruction::LE,Operand::node(404),Operand::node(352),"KactiveSlog",2560.0,nullptr,0},
-{Instruction::LE,Operand::node(402),Operand::node(405),"KlogDstride",640.0,nullptr,0},
-{Instruction::LE,Operand::node(398),Operand::node(406),"KlogDstride",320.0,nullptr,0},
-{Instruction::LE,Operand::literal(111.0),Operand::literal(121.625),"KsmallD",64.0,nullptr,0},
-{Instruction::LE,Operand::node(408),Operand::literal(150.0),"activeRows",24.0,nullptr,0},
-{Instruction::LE,Operand::literal(109.375),Operand::literal(98.75),"D_axis0_stride_log2",15.5,nullptr,0},
-{Instruction::LE,Operand::node(409),Operand::node(410),"D_axis4_extent",6.0,nullptr,0},
-{Instruction::LE,Operand::node(411),Operand::node(357),"KlogDstride2",384.0,nullptr,0},
-{Instruction::LE,Operand::literal(46.125),Operand::literal(76.75),"D_axis3_extent",3.0,nullptr,0},
-{Instruction::LE,Operand::node(412),Operand::node(413),"KlogW2",7808.0,nullptr,0},
-{Instruction::LE,Operand::node(407),Operand::node(414),"sqrtW",4.828427076339722,nullptr,0},
-{Instruction::LE,Operand::node(384),Operand::node(415),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(363),Operand::node(416),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms418,8},
-{Instruction::LE,Operand::literal(104.75),Operand::literal(126.375),"activeRuns",3.0,nullptr,0},
-{Instruction::LE,Operand::literal(145.5),Operand::literal(159.375),"KoverTail",24.0,nullptr,0},
-{Instruction::LE,Operand::node(419),Operand::node(420),"KactiveSlog",448.0,nullptr,0},
-{Instruction::LE,Operand::literal(136.75),Operand::literal(1.0),"minSbytes",208.0,nullptr,0},
-{Instruction::LE,Operand::literal(124.25),Operand::literal(36.875),"D_SspanRatio",18273.25,nullptr,0},
-{Instruction::LE,Operand::node(422),Operand::node(423),"logDstride",1.5,nullptr,0},
-{Instruction::LE,Operand::node(421),Operand::node(424),"KlogDstride",28.0,nullptr,0},
-{Instruction::LE,Operand::literal(164.625),Operand::literal(189.25),"EAbove64",128.0,nullptr,0},
-{Instruction::LE,Operand::literal(256.625),Operand::literal(422.125),"KlogDstride",640.0,nullptr,0},
-{Instruction::LE,Operand::node(426),Operand::node(427),"KlogDstride",320.0,nullptr,0},
-{Instruction::LE,Operand::literal(117.0),Operand::literal(268.0),"KlogDstride2",384.0,nullptr,0},
-{Instruction::LE,Operand::node(429),Operand::literal(71.75),"KlogW2",7808.0,nullptr,0},
-{Instruction::LE,Operand::node(428),Operand::node(430),"sqrtW",4.828427076339722,nullptr,0},
-{Instruction::LE,Operand::node(425),Operand::node(431),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(418),Operand::node(432),nullptr,0.25,nullptr,0},
-{Instruction::LE,Operand::node(341),Operand::literal(19.0),"maxSlog",15.923051357269287,nullptr,0},
-{Instruction::LE,Operand::node(340),Operand::node(434),"logDstride",1.5,nullptr,0},
-{Instruction::LE,Operand::node(336),Operand::node(435),"KlogDstride",28.0,nullptr,0},
-{Instruction::LE,Operand::literal(244.75),Operand::literal(346.375),"activeRuns",48.0,nullptr,0},
-{Instruction::LE,Operand::node(437),Operand::node(353),"KlogDstride",640.0,nullptr,0},
-{Instruction::LE,Operand::node(348),Operand::node(438),"KlogDstride",320.0,nullptr,0},
-{Instruction::LE,Operand::node(439),Operand::node(359),"sqrtW",4.828427076339722,nullptr,0},
-{Instruction::LE,Operand::node(436),Operand::node(440),"KlogDstride",80.0,nullptr,0},
-{Instruction::LE,Operand::literal(107.25),Operand::literal(154.125),"lastSSize",6.0,nullptr,0},
-{Instruction::LE,Operand::literal(121.0),Operand::literal(0.5),"logDstride",0.5,nullptr,0},
-{Instruction::LE,Operand::node(442),Operand::node(443),"leading",6.0,nullptr,0},
-{Instruction::LE,Operand::literal(167.0),Operand::literal(189.625),"EAbove64",128.0,nullptr,0},
-{Instruction::LE,Operand::literal(280.375),Operand::literal(972.125),"KactiveSlog",2560.0,nullptr,0},
-{Instruction::LE,Operand::node(445),Operand::node(446),"KlogDstride",320.0,nullptr,0},
-{Instruction::LE,Operand::literal(117.75),Operand::literal(268.5),"KlogDstride2",384.0,nullptr,0},
-{Instruction::LE,Operand::node(448),Operand::literal(69.125),"KlogDstride2",768.0,nullptr,0},
-{Instruction::LE,Operand::node(447),Operand::node(449),"idleWarpProxy",18.0,nullptr,0},
-{Instruction::LE,Operand::node(444),Operand::node(450),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(441),Operand::node(451),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms453,8},
-{Instruction::LE,Operand::literal(114.0),Operand::literal(74.25),"KlogDstride",20.0,nullptr,0},
-{Instruction::LE,Operand::literal(152.5),Operand::literal(159.625),"activeRuns",12.0,nullptr,0},
-{Instruction::LE,Operand::node(454),Operand::node(455),"lastSSize",6.0,nullptr,0},
-{Instruction::LE,Operand::node(456),Operand::literal(0.875),"leading",6.0,nullptr,0},
-{Instruction::LE,Operand::literal(180.875),Operand::literal(163.5),"logTail",2.5,nullptr,0},
-{Instruction::LE,Operand::node(458),Operand::literal(189.625),"EAbove8",184.0,nullptr,0},
-{Instruction::LE,Operand::literal(249.0),Operand::literal(293.5),"activeRuns",6.0,nullptr,0},
-{Instruction::LE,Operand::literal(404.5),Operand::literal(524.375),"S",12.0,nullptr,0},
-{Instruction::LE,Operand::node(460),Operand::node(461),"KlogDstride",640.0,nullptr,0},
-{Instruction::LE,Operand::node(459),Operand::node(462),"KlogDstride",320.0,nullptr,0},
-{Instruction::LE,Operand::literal(138.5),Operand::literal(75.875),"KactiveDlog",1152.0,nullptr,0},
-{Instruction::LE,Operand::node(463),Operand::node(464),"idleWarpProxy",18.0,nullptr,0},
-{Instruction::LE,Operand::node(457),Operand::node(465),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(453),Operand::node(466),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms468,5},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms469,8},
-{Instruction::Blend,Operand::node(469),Operand::node(361),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms471,8},
-{Instruction::LE,Operand::literal(22.0),Operand::literal(145.0),"logE",7.5,nullptr,0},
-{Instruction::LE,Operand::node(472),Operand::literal(157.25),"activeRows",24.0,nullptr,0},
-{Instruction::LE,Operand::node(473),Operand::literal(204.375),"D_axis1_inner_payload_bytes",6.0,nullptr,0},
-{Instruction::LE,Operand::node(372),Operand::node(474),"KactiveSlog",448.0,nullptr,0},
-{Instruction::LE,Operand::node(475),Operand::node(383),"KlogDstride",28.0,nullptr,0},
-{Instruction::LE,Operand::node(476),Operand::node(415),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(471),Operand::node(477),nullptr,0.75,nullptr,0},
-{Instruction::Exp,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms479,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms480,8},
-{Instruction::Scale,Operand::node(480),Operand::node(-1),nullptr,0.9703744229969276,nullptr,0},
-{Instruction::Scale,Operand::node(480),Operand::node(-1),nullptr,0.8722820873895624,nullptr,0},
-{Instruction::LE,Operand::node(481),Operand::node(482),"S_axis0_stride_log2",9.69615888595581,nullptr,0},
-{Instruction::Scale,Operand::node(480),Operand::node(-1),nullptr,0.5,nullptr,0},
-{Instruction::LE,Operand::node(483),Operand::node(484),"D_axis0_inner_payload_bytes",24.0,nullptr,0},
-{Instruction::Scale,Operand::node(480),Operand::node(-1),nullptr,0.9901473287060241,nullptr,0},
-{Instruction::Scale,Operand::node(480),Operand::node(-1),nullptr,0.8783930510314875,nullptr,0},
-{Instruction::LE,Operand::node(486),Operand::node(487),"S_axis1_stride_log2",15.794357299804688,nullptr,0},
-{Instruction::Scale,Operand::node(480),Operand::node(-1),nullptr,1.1086056180952173,nullptr,0},
-{Instruction::LE,Operand::node(488),Operand::node(489),"Dunder128",1.5,nullptr,0},
-{Instruction::LE,Operand::node(485),Operand::node(490),"KlogW2",200.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms492,8},
-{Instruction::LE,Operand::literal(149.125),Operand::literal(162.75),"KsmallD",8.0,nullptr,0},
-{Instruction::LE,Operand::node(454),Operand::node(493),"lastSSize",6.0,nullptr,0},
-{Instruction::LE,Operand::node(494),Operand::node(443),"leading",6.0,nullptr,0},
-{Instruction::LE,Operand::literal(182.625),Operand::literal(163.625),"KlogTail",80.0,nullptr,0},
-{Instruction::LE,Operand::literal(184.875),Operand::literal(200.5),"KlogDstride2",384.0,nullptr,0},
-{Instruction::LE,Operand::node(496),Operand::node(497),"EAbove64",128.0,nullptr,0},
-{Instruction::LE,Operand::literal(257.375),Operand::literal(414.75),"KlogDstride2",1600.0,nullptr,0},
-{Instruction::LE,Operand::node(499),Operand::literal(972.125),"KactiveSlog",2560.0,nullptr,0},
-{Instruction::LE,Operand::node(498),Operand::node(500),"KlogDstride",320.0,nullptr,0},
-{Instruction::LE,Operand::literal(110.5),Operand::literal(141.75),"KoverTail",24.0,nullptr,0},
-{Instruction::LE,Operand::node(502),Operand::literal(268.5),"KlogDstride2",384.0,nullptr,0},
-{Instruction::LE,Operand::node(503),Operand::literal(69.125),"KlogDstride2",768.0,nullptr,0},
-{Instruction::LE,Operand::node(501),Operand::node(504),"idleWarpProxy",18.0,nullptr,0},
-{Instruction::LE,Operand::node(495),Operand::node(505),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(492),Operand::node(506),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms508,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms509,8},
-{Instruction::Blend,Operand::node(509),Operand::node(432),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms511,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms512,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms513,8},
-{Instruction::EQ,Operand::node(512),Operand::node(513),"K_band",1.0,nullptr,0},
-{Instruction::EQ,Operand::node(511),Operand::node(514),"K_band",0.0,nullptr,0},
-{Instruction::Blend,Operand::node(515),Operand::node(451),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms517,8},
-{Instruction::Scale,Operand::node(517),Operand::node(-1),nullptr,0.9549947930972652,nullptr,0},
-{Instruction::Scale,Operand::node(517),Operand::node(-1),nullptr,1.0094237401703512,nullptr,0},
-{Instruction::LE,Operand::node(518),Operand::node(519),"KsmallActiveD",12.0,nullptr,0},
-{Instruction::Scale,Operand::node(517),Operand::node(-1),nullptr,0.5,nullptr,0},
-{Instruction::Scale,Operand::node(517),Operand::node(-1),nullptr,0.946964018196678,nullptr,0},
-{Instruction::LE,Operand::node(521),Operand::node(522),"D_axis1_stride_log2",1.5,nullptr,0},
-{Instruction::LE,Operand::node(520),Operand::node(523),"S_axis0_stride_log2",9.69615888595581,nullptr,0},
-{Instruction::Scale,Operand::node(517),Operand::node(-1),nullptr,0.5120594155416196,nullptr,0},
-{Instruction::LE,Operand::node(524),Operand::node(525),"maxSlog",15.357122898101807,nullptr,0},
-{Instruction::Scale,Operand::node(517),Operand::node(-1),nullptr,0.8592944980147718,nullptr,0},
-{Instruction::LE,Operand::node(521),Operand::node(527),"S_axis1_stride_log2",10.24592638015747,nullptr,0},
-{Instruction::LE,Operand::node(526),Operand::node(528),"D_axis0_inner_payload_bytes",24.0,nullptr,0},
-{Instruction::Scale,Operand::node(517),Operand::node(-1),nullptr,1.209343378045868,nullptr,0},
-{Instruction::Scale,Operand::node(517),Operand::node(-1),nullptr,0.9803165719020175,nullptr,0},
-{Instruction::Scale,Operand::node(517),Operand::node(-1),nullptr,1.0564603691639523,nullptr,0},
-{Instruction::LE,Operand::node(531),Operand::node(532),"KlogWAbove2",640.0,nullptr,0},
-{Instruction::Scale,Operand::node(517),Operand::node(-1),nullptr,0.8621064060803475,nullptr,0},
-{Instruction::LE,Operand::node(533),Operand::node(534),"D_axis0_stride_log2",15.584962368011475,nullptr,0},
-{Instruction::Scale,Operand::node(517),Operand::node(-1),nullptr,1.1550789844919809,nullptr,0},
-{Instruction::LE,Operand::node(535),Operand::node(536),"D_axis2_extent",3.0,nullptr,0},
-{Instruction::LE,Operand::node(530),Operand::node(537),"logTail",1.5,nullptr,0},
-{Instruction::LE,Operand::node(529),Operand::node(538),"KlogW2",200.0,nullptr,0},
-{Instruction::Blend,Operand::node(539),Operand::node(451),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms541,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms542,8},
-{Instruction::LE,Operand::node(541),Operand::node(542),"KnD",24.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms544,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms545,8},
-{Instruction::LE,Operand::node(544),Operand::node(545),"KlogStride",338.0685272216797,nullptr,0},
-{Instruction::LE,Operand::node(543),Operand::node(546),"KlogStride",300.9176788330078,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms548,6},
-{Instruction::LE,Operand::node(547),Operand::node(548),"KsmallActiveD",12.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms550,8},
-{Instruction::LE,Operand::node(549),Operand::node(550),"KactiveSlog",448.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms552,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms553,8},
-{Instruction::LE,Operand::node(552),Operand::node(553),"KactiveSlog",448.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms555,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms556,8},
-{Instruction::LE,Operand::node(555),Operand::node(556),"D_axis3_stride_log2",1.5,nullptr,0},
-{Instruction::LE,Operand::node(554),Operand::node(557),"KlogDstride",16.0,nullptr,0},
-{Instruction::LE,Operand::node(551),Operand::node(558),"D_axis0_inner_payload_bytes",24.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms560,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms561,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms562,8},
-{Instruction::LE,Operand::node(561),Operand::node(562),"D_axis3_stride_log2",0.5,nullptr,0},
-{Instruction::LE,Operand::node(560),Operand::node(563),"EAbove32",160.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms565,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms566,8},
-{Instruction::LE,Operand::node(565),Operand::node(566),"KlogRuns",704.0,nullptr,0},
-{Instruction::LE,Operand::node(564),Operand::node(567),"KlogDstride",320.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms569,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms570,8},
-{Instruction::LE,Operand::node(569),Operand::node(570),"D_axis4_extent",6.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms572,8},
-{Instruction::LE,Operand::node(571),Operand::node(572),"KlogDstride2",384.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms574,8},
-{Instruction::LE,Operand::node(573),Operand::node(574),"KlogWAbove2",896.0,nullptr,0},
-{Instruction::LE,Operand::node(568),Operand::node(575),"logWAbove4",0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms577,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms578,8},
-{Instruction::LE,Operand::node(577),Operand::node(578),"activeRows",48.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms580,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms581,8},
-{Instruction::LE,Operand::node(580),Operand::node(581),"KlogDstride",2560.0,nullptr,0},
-{Instruction::LE,Operand::node(579),Operand::node(582),"KmaxSlog",6606.682861328125,nullptr,0},
-{Instruction::LE,Operand::node(576),Operand::node(583),"KlogDstride",704.0,nullptr,0},
-{Instruction::LE,Operand::node(559),Operand::node(584),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(585),Operand::node(432),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms587,8},
-{Instruction::Blend,Operand::node(587),Operand::node(506),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms589,8},
-{Instruction::LE,Operand::literal(108.125),Operand::literal(129.125),"maxSlog",9.903677463531494,nullptr,0},
-{Instruction::LE,Operand::literal(109.5),Operand::literal(17.75),"fullSuffix",12.0,nullptr,0},
-{Instruction::LE,Operand::node(590),Operand::node(591),"KlogDstride",20.0,nullptr,0},
-{Instruction::LE,Operand::node(592),Operand::node(455),"lastSSize",6.0,nullptr,0},
-{Instruction::LE,Operand::node(593),Operand::literal(0.875),"leading",6.0,nullptr,0},
-{Instruction::LE,Operand::literal(152.0),Operand::literal(168.875),"EAbove16",80.0,nullptr,0},
-{Instruction::LE,Operand::literal(180.875),Operand::node(595),"logTail",2.5,nullptr,0},
-{Instruction::LE,Operand::node(596),Operand::literal(189.625),"EAbove8",184.0,nullptr,0},
-{Instruction::LE,Operand::node(597),Operand::node(462),"KlogDstride",320.0,nullptr,0},
-{Instruction::LE,Operand::node(598),Operand::node(464),"idleWarpProxy",18.0,nullptr,0},
-{Instruction::LE,Operand::node(594),Operand::node(599),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(589),Operand::node(600),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms602,6},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms603,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms604,8},
-{Instruction::Blend,Operand::node(604),Operand::node(506),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms606,8},
-{Instruction::Blend,Operand::node(606),Operand::node(441),nullptr,0.5,nullptr,0},
-{Instruction::LE,Operand::node(442),Operand::literal(0.875),"leading",6.0,nullptr,0},
-{Instruction::LE,Operand::literal(167.0),Operand::literal(189.625),"EAbove8",184.0,nullptr,0},
-{Instruction::LE,Operand::literal(257.375),Operand::literal(424.5),"KlogDstride",640.0,nullptr,0},
-{Instruction::LE,Operand::node(609),Operand::node(610),"KlogDstride",320.0,nullptr,0},
-{Instruction::LE,Operand::node(611),Operand::node(464),"idleWarpProxy",18.0,nullptr,0},
-{Instruction::LE,Operand::node(608),Operand::node(612),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(361),Operand::node(613),nullptr,0.5,nullptr,0},
-{Instruction::Blend,Operand::node(466),Operand::node(506),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms616,8},
-{Instruction::LE,Operand::literal(169.375),Operand::literal(206.25),"leading",3.0,nullptr,0},
-{Instruction::LE,Operand::literal(145.125),Operand::literal(117.875),"idleWarpProxy",2.5,nullptr,0},
-{Instruction::LE,Operand::node(617),Operand::node(618),"S_axis0_stride_log2",7.0,nullptr,0},
-{Instruction::LE,Operand::node(381),Operand::node(619),"tailMasked",0.5,nullptr,0},
-{Instruction::LE,Operand::node(620),Operand::literal(19.0),"maxSlog",15.923051357269287,nullptr,0},
-{Instruction::LE,Operand::node(379),Operand::node(621),"logDstride",1.5,nullptr,0},
-{Instruction::LE,Operand::node(475),Operand::node(622),"KlogDstride",28.0,nullptr,0},
-{Instruction::LE,Operand::node(623),Operand::node(415),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(616),Operand::node(624),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms626,8},
-{Instruction::LE,Operand::node(547),Operand::node(626),"KsmallActiveD",12.0,nullptr,0},
-{Instruction::LE,Operand::node(627),Operand::node(550),"KactiveSlog",448.0,nullptr,0},
-{Instruction::LE,Operand::node(628),Operand::node(558),"D_axis0_inner_payload_bytes",24.0,nullptr,0},
-{Instruction::LE,Operand::node(629),Operand::node(584),"KlogDstride",80.0,nullptr,0},
-{Instruction::LE,Operand::literal(113.125),Operand::node(443),"leading",6.0,nullptr,0},
-{Instruction::LE,Operand::literal(173.5),Operand::literal(284.875),"KlogDstride",320.0,nullptr,0},
-{Instruction::LE,Operand::literal(125.625),Operand::literal(69.125),"KlogDstride2",768.0,nullptr,0},
-{Instruction::LE,Operand::node(632),Operand::node(633),"idleWarpProxy",18.0,nullptr,0},
-{Instruction::LE,Operand::node(631),Operand::node(634),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(630),Operand::node(635),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms637,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms638,8},
-{Instruction::Blend,Operand::node(638),Operand::node(441),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms640,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms641,8},
-{Instruction::LE,Operand::node(375),Operand::node(622),"KlogDstride",28.0,nullptr,0},
-{Instruction::LE,Operand::node(642),Operand::node(415),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(641),Operand::node(643),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms645,8},
-{Instruction::Blend,Operand::node(645),Operand::node(441),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms647,8},
-{Instruction::Blend,Operand::node(647),Operand::node(451),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms649,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms650,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms651,8},
-{Instruction::EQ,Operand::node(650),Operand::node(651),"leading_band",1.0,nullptr,0},
-{Instruction::EQ,Operand::node(649),Operand::node(652),"leading_band",0.0,nullptr,0},
-{Instruction::Blend,Operand::node(653),Operand::node(416),nullptr,0.5,nullptr,0},
-{Instruction::Exp,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms655,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms656,8},
-{Instruction::Scale,Operand::node(656),Operand::node(-1),nullptr,0.8621444397322566,nullptr,0},
-{Instruction::Scale,Operand::node(656),Operand::node(-1),nullptr,0.9136831799610802,nullptr,0},
-{Instruction::Scale,Operand::node(656),Operand::node(-1),nullptr,0.9722308749989264,nullptr,0},
-{Instruction::EQ,Operand::node(658),Operand::node(659),"K_band",2.0,nullptr,0},
-{Instruction::EQ,Operand::node(657),Operand::node(660),"K_band",1.0,nullptr,0},
-{Instruction::Blend,Operand::node(661),Operand::node(477),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms663,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms664,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms665,8},
-{Instruction::EQ,Operand::node(664),Operand::node(665),"leading_band",1.0,nullptr,0},
-{Instruction::EQ,Operand::node(663),Operand::node(666),"leading_band",0.0,nullptr,0},
-{Instruction::Blend,Operand::node(667),Operand::node(451),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms669,8},
-{Instruction::Scale,Operand::node(669),Operand::node(-1),nullptr,0.8621444397322566,nullptr,0},
-{Instruction::Scale,Operand::node(669),Operand::node(-1),nullptr,0.9136831799610802,nullptr,0},
-{Instruction::Scale,Operand::node(669),Operand::node(-1),nullptr,0.9722308749989264,nullptr,0},
-{Instruction::EQ,Operand::node(671),Operand::node(672),"K_band",2.0,nullptr,0},
-{Instruction::EQ,Operand::node(670),Operand::node(673),"K_band",1.0,nullptr,0},
-{Instruction::Blend,Operand::node(674),Operand::node(506),nullptr,0.5,nullptr,0},
-{Instruction::LE,Operand::node(456),Operand::node(465),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(630),Operand::node(676),nullptr,0.75,nullptr,0},
-{Instruction::LE,Operand::node(442),Operand::node(450),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(630),Operand::node(678),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms680,5},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms681,8},
-{Instruction::Blend,Operand::node(681),Operand::node(676),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms683,8},
-{Instruction::LE,Operand::node(593),Operand::node(599),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(683),Operand::node(684),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms686,8},
-{Instruction::Blend,Operand::node(686),Operand::node(432),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms688,8},
-{Instruction::Scale,Operand::node(688),Operand::node(-1),nullptr,0.9059310173342632,nullptr,0},
-{Instruction::Scale,Operand::node(688),Operand::node(-1),nullptr,0.8059272712828643,nullptr,0},
-{Instruction::Scale,Operand::node(688),Operand::node(-1),nullptr,0.9450707315511389,nullptr,0},
-{Instruction::EQ,Operand::node(690),Operand::node(691),"warp_band",2.0,nullptr,0},
-{Instruction::EQ,Operand::node(689),Operand::node(692),"warp_band",0.0,nullptr,0},
-{Instruction::LE,Operand::node(494),Operand::node(505),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(693),Operand::node(694),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms696,8},
-{Instruction::Scale,Operand::node(696),Operand::node(-1),nullptr,0.8210664425613642,nullptr,0},
-{Instruction::Scale,Operand::node(696),Operand::node(-1),nullptr,0.9497783733633481,nullptr,0},
-{Instruction::Scale,Operand::node(696),Operand::node(-1),nullptr,1.1337417192624824,nullptr,0},
-{Instruction::EQ,Operand::node(698),Operand::node(699),"warp_band",0.0,nullptr,0},
-{Instruction::EQ,Operand::node(697),Operand::node(700),"warp_band",2.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms702,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms703,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms704,8},
-{Instruction::EQ,Operand::node(703),Operand::node(704),"warp_band",1.0,nullptr,0},
-{Instruction::EQ,Operand::node(702),Operand::node(705),"warp_band",0.0,nullptr,0},
-{Instruction::Blend,Operand::node(706),Operand::node(678),nullptr,0.5,nullptr,0},
-{Instruction::Exp,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms708,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms709,8},
-{Instruction::Scale,Operand::node(709),Operand::node(-1),nullptr,0.9059310173342632,nullptr,0},
-{Instruction::Scale,Operand::node(709),Operand::node(-1),nullptr,0.8059272712828643,nullptr,0},
-{Instruction::Scale,Operand::node(709),Operand::node(-1),nullptr,0.9450707315511389,nullptr,0},
-{Instruction::EQ,Operand::node(711),Operand::node(712),"warp_band",2.0,nullptr,0},
-{Instruction::EQ,Operand::node(710),Operand::node(713),"warp_band",0.0,nullptr,0},
-{Instruction::Blend,Operand::node(714),Operand::node(694),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms716,8},
-{Instruction::LE,Operand::literal(169.375),Operand::node(618),"S_axis0_stride_log2",7.0,nullptr,0},
-{Instruction::LE,Operand::node(381),Operand::node(717),"tailMasked",0.5,nullptr,0},
-{Instruction::LE,Operand::node(718),Operand::literal(19.0),"maxSlog",15.923051357269287,nullptr,0},
-{Instruction::LE,Operand::node(379),Operand::node(719),"logDstride",1.5,nullptr,0},
-{Instruction::LE,Operand::node(375),Operand::node(720),"KlogDstride",28.0,nullptr,0},
-{Instruction::LE,Operand::node(721),Operand::node(415),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(716),Operand::node(722),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms724,8},
-{Instruction::Blend,Operand::node(724),Operand::node(678),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms726,8},
-{Instruction::LE,Operand::literal(113.125),Operand::literal(8.125),"Kfp8",48.0,nullptr,0},
-{Instruction::LE,Operand::node(727),Operand::node(634),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(726),Operand::node(728),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms730,3},
-{Instruction::Blend,Operand::node(730),Operand::node(432),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms732,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms733,8},
-{Instruction::EQ,Operand::node(732),Operand::node(733),"rank",2.0,nullptr,0},
-{Instruction::Blend,Operand::node(734),Operand::node(694),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms736,8},
-{Instruction::Blend,Operand::node(736),Operand::node(694),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms738,5},
-{Instruction::LE,Operand::literal(113.125),Operand::node(634),"KlogDstride",80.0,nullptr,0},
-{Instruction::Blend,Operand::node(738),Operand::node(739),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms741,8},
-{Instruction::Blend,Operand::node(741),Operand::node(722),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms743,8},
-{Instruction::Blend,Operand::node(743),Operand::node(678),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms745,8},
-{Instruction::Blend,Operand::node(745),Operand::node(678),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms747,8},
-{Instruction::Blend,Operand::node(747),Operand::node(694),nullptr,0.25,nullptr,0},
-{Instruction::Blend,Operand::node(361),Operand::node(678),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms750,8},
-{Instruction::Blend,Operand::node(750),Operand::node(635),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms752,8},
-{Instruction::Blend,Operand::node(752),Operand::node(451),nullptr,0.75,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms754,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms755,8},
-{Instruction::LE,Operand::literal(108.125),Operand::node(455),"lastSSize",6.0,nullptr,0},
-{Instruction::LE,Operand::node(756),Operand::literal(0.875),"leading",6.0,nullptr,0},
-{Instruction::Blend,Operand::node(755),Operand::node(757),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms759,5},
-{Instruction::Blend,Operand::node(759),Operand::node(757),nullptr,0.5,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms761,8},
-{Instruction::Scale,Operand::node(761),Operand::node(-1),nullptr,0.9703744229969276,nullptr,0},
-{Instruction::Scale,Operand::node(761),Operand::node(-1),nullptr,0.8722820873895624,nullptr,0},
-{Instruction::LE,Operand::node(762),Operand::node(763),"S_axis0_stride_log2",9.69615888595581,nullptr,0},
-{Instruction::Scale,Operand::node(761),Operand::node(-1),nullptr,0.5,nullptr,0},
-{Instruction::LE,Operand::node(764),Operand::node(765),"D_axis0_inner_payload_bytes",24.0,nullptr,0},
-{Instruction::Scale,Operand::node(761),Operand::node(-1),nullptr,0.9901473287060241,nullptr,0},
-{Instruction::Scale,Operand::node(761),Operand::node(-1),nullptr,0.8783930510314875,nullptr,0},
-{Instruction::LE,Operand::node(767),Operand::node(768),"S_axis1_stride_log2",15.794357299804688,nullptr,0},
-{Instruction::Scale,Operand::node(761),Operand::node(-1),nullptr,1.1086056180952173,nullptr,0},
-{Instruction::LE,Operand::node(769),Operand::node(770),"Dunder128",1.5,nullptr,0},
-{Instruction::LE,Operand::node(766),Operand::node(771),"KlogW2",200.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms773,8},
-{Instruction::Blend,Operand::node(773),Operand::node(635),nullptr,0.25,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms775,8},
-{Instruction::EQ,Operand::node(656),Operand::node(775),"hidden",0.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms777,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms778,8},
-{Instruction::EQ,Operand::node(777),Operand::node(778),"hidden",0.0,nullptr,0},
-{Instruction::EQ,Operand::node(776),Operand::node(779),"mask",0.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms781,8},
-{Instruction::EQ,Operand::node(669),Operand::node(781),"hidden",0.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms783,8},
-{Instruction::EQ,Operand::node(688),Operand::node(783),"hidden",0.0,nullptr,0},
-{Instruction::EQ,Operand::node(782),Operand::node(784),"mask",0.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms786,8},
-{Instruction::EQ,Operand::node(709),Operand::node(786),"hidden",0.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms788,8},
-{Instruction::EQ,Operand::node(696),Operand::node(788),"hidden",0.0,nullptr,0},
-{Instruction::EQ,Operand::node(787),Operand::node(789),"mask",0.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms791,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms792,8},
-{Instruction::EQ,Operand::node(791),Operand::node(792),"hidden",0.0,nullptr,0},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms794,8},
-{Instruction::Linear,Operand::node(-1),Operand::node(-1),nullptr,0.0,programTerms795,8},
-{Instruction::EQ,Operand::node(794),Operand::node(795),"hidden",0.0,nullptr,0},
-{Instruction::EQ,Operand::node(793),Operand::node(796),"mask",0.0,nullptr,0},
-{Instruction::EQ,Operand::node(790),Operand::node(797),"width",4.0,nullptr,0},
-{Instruction::EQ,Operand::node(785),Operand::node(798),"width",2.0,nullptr,0},
-{Instruction::EQ,Operand::node(780),Operand::node(799),"width",1.0,nullptr,0}
+// TRAIN-derived short formulas, selected on the observed development set.
+inline constexpr Term terms0[] = {{"one",1366.574353448276},{"EAbove64",14.861194791909373},{"lastSSize",-61.569970293569455},{"KoverTail",37.926942567567565},{"KnD",-2.9248674860205064},{"Dunder128",-336.6912278657967},{"leading",-41.64433830382109},{"KsmallActiveD",1.7293229045316902}};
+inline constexpr Term terms1[] = {{"one",1175.1125767568824},{"minSbytes",0.018208437571071257},{"D_axis4_extent",-1.9032010461668087},{"KlogDstride2",0.4183223291448955},{"payload_integer",27.833551284969158},{"D_to_S_transitions",-149.67727996359588},{"D_axis0_inner_payload_bytes",1.8836440328630337},{"KoverTail",6.329032934386545}};
+inline constexpr Term terms2[] = {{"one",247.54206628720527},{"E",6.1824947870817075},{"D_axis4_inner_payload_bytes",224.5287876429779},{"D_axis2_inner_payload_bytes",-18.826815886933172},{"KsuffixLog",1.1553414514794318},{"S_axis3_extent",96.14343409577053},{"logTail",-62.836468879505134},{"EAbove128",-1.9497526272868348}};
+inline constexpr Term terms3[] = {{"one",877.2500000000005},{"Kfp8",-1.4804687499999987},{"KactiveSlog",0.2651367187499996},{"Kbool",-0.3496093749999986}};
+inline constexpr Term terms4[] = {{"one",774.1249999999997},{"EAbove32",21.384375000000006},{"KlogTail",1.096874999999997},{"hidden",1137.25}};
+inline constexpr Term terms5[] = {{"one",170.79653258715317},{"E",28.81900069966089},{"KsmallActiveD",0.24534380551331958},{"S_axis2_stride_log2",60.20107592244756},{"D_axis1_extent",-189.3733875523812},{"K_hidden",10.483355185286873},{"S_axis3_extent",229.9358197109134},{"K_S_axis3_stride_log2",-0.42982265270109293}};
+inline constexpr Term terms6[] = {{"one",703.952244892291},{"EAbove32",1.4715925693818597},{"logTail",-173.93225332279326},{"KlogTail",0.5323535363731445},{"EAbove128",-4.592583809028961},{"KsuffixLog",2.184393132920969},{"suffixD",-11.52369033796136},{"KoverTail",9.369089381886342}};
+inline constexpr Term terms7[] = {{"one",7641.433333333333},{"D",-16.695833333333333},{"partialLogical32",-183.01562499999977},{"S_axis3_extent",349.6614583333333},{"D_axis3_extent",183.60624999999973},{"KlogRuns",0.0},{"S_axis3_stride_log2",0.0},{"nD",-76.65000000000038}};
+inline constexpr Term terms8[] = {{"one",5816.375}};
+inline constexpr Term terms9[] = {{"one",142.8864395753216},{"KlogStride",0.9156733295987896},{"activeDlog",75.02907375480699},{"EAbove64",1.2815083440480703},{"D_axis2_extent",40.38226843870176},{"D_axis1_extent",0.0},{"EAbove32",5.090736402452124},{"KAbove16",6.4506501190312076}};
+inline constexpr Term terms10[] = {{"one",1465.875}};
+inline constexpr Term terms11[] = {{"one",4.386581341844172},{"E",5.51630068015532},{"K_over_D_axis4_extent",17.511921205099636},{"K_D_axis1_extent_log2",2.1612881613337973},{"S_axis2_stride_log2",62.958442164972304},{"K_hidden",6.711646689198529},{"K_D_axis2_extent_log2",3.172520527006589},{"EAbove256",-4.3693909165539235}};
+inline constexpr Term terms12[] = {{"one",-75.93157270060257},{"E",28.89115287549682},{"KsmallActiveD",0.06422264361153819},{"S_axis2_stride_log2",67.99345813692406},{"D_axis1_extent",31.658807476776673},{"K_hidden",10.483355185286873},{"S_axis3_extent",270.04869430143196},{"K_S_axis3_stride_log2",-0.3923028028215234}};
+inline constexpr Term terms13[] = {{"one",-3620.337450347661},{"K",4.61821013701393},{"sqrtK",781.5825781390215},{"activeRows",-27.60160703400499},{"groups32",-91.96181671947224},{"partialLogical32",70.47488533139209},{"activeDlog",-33.46160551007522},{"KlogW",0.0}};
+inline constexpr Term terms14[] = {{"one",-208.40173021083172},{"E",4.646361387939445},{"hidden",977.3488999802041},{"maxSlog",43.367218855415594},{"logTail",-21.557186121040203},{"S",-26.705609697131774},{"KoverTail",29.470617880725506},{"KsmallD",-1.6377485314941154}};
+inline constexpr Term terms15[] = {{"one",197.89605598027617},{"KmaxSlog",0.4303005610496022},{"KlogDstride",1.5297113262874484},{"KunitS",-5.144516577187788},{"hidden",825.7996482913586},{"KmaskedAxes",4.58927442305573},{"KoverTail",7.055939273822743},{"KlogDstride2",1.8049920234952768}};
+inline constexpr Term terms16[] = {{"one",333.4855790708652},{"KlogStride",1.5417390558430297},{"hidden",971.4025983713918},{"D_SspanRatio",-0.0003847089876239628},{"EAbove64",6.547428574700694},{"prefixMasked",-273.2062316626377},{"KunitS",-0.6757759311336893},{"KoverSqrtActiveD",5.428863909858927}};
+inline constexpr Term terms17[] = {{"one",0.0},{"D_axis1_stride_log2",629.5163043478275},{"activeLogical32",46.23641304347819},{"KoverTail",47.083559782608674},{"logTail",228.47418478260866},{"KlogDstride",4.978388247282603},{"nD",-139.6249999999996},{"Kfp8",-1.4426587975543437}};
+inline constexpr Term terms18[] = {{"one",597.8142600228135},{"sqrtE",121.79899014147017},{"D_axis2_inner_payload_bytes",-11.664225071281216},{"sqrtK",121.79899014146966},{"S_axis3_extent",291.1414438617053},{"KsuffixLog",2.3296742743532595},{"logDstride",-164.3981016161902},{"EAbove64",13.320333478181082}};
+inline constexpr Term terms19[] = {{"one",1758.75}};
+inline constexpr Term terms20[] = {{"one",-80.3928571428562},{"E",34.08900669642857},{"D_axis2_inner_payload_bytes",-12.710797991071441},{"S_axis3_extent",90.3593750000006},{"D_axis0_inner_payload_bytes",-1.0363071986607089},{"K_D_axis4_extent_log2",-7.041992187499975},{"D_axis4_extent",219.1249999999991},{"KlogDstride",-4.499069940476197}};
+inline constexpr Term terms21[] = {{"one",6535.384391047309},{"KlogStride",2.023891459995036},{"hidden",0.0},{"K",0.0},{"sqrtD",-1831.2638715490089},{"logDstride",0.0},{"KlogTail",5.5162529981324635},{"activeRows",29.976106143367304}};
+inline constexpr Term terms22[] = {{"one",3437.875}};
+inline constexpr Term terms23[] = {{"one",1740.0}};
+inline constexpr Term terms24[] = {{"one",2043.625}};
+inline constexpr Term terms25[] = {{"one",2423.125}};
+inline constexpr Term terms26[] = {{"one",210.47222334923492},{"KlogStride",1.6082306309668142},{"K_hidden",24.672773241984785},{"D_SspanRatio",-0.00045421624551127506},{"EAbove64",3.3888011064234993},{"prefixMasked",-152.71154641532448},{"KunitS",-0.7426608666234831},{"K_tailMasked",8.416588401992453}};
+inline constexpr Term terms27[] = {{"one",26.007957522946047},{"E",14.804757108433908},{"KlogDstride2",-0.27258962837240513},{"D_axis1_extent",21.22198371758406},{"K_S_axis3_extent_log2",-3.3044558397226624},{"S_axis2_stride_log2",68.59511872625077},{"S_axis3_extent",280.8908825821707},{"K_D_axis2_extent_log2",1.4731258825159446}};
+inline constexpr Term terms28[] = {{"one",-58.71232247941572},{"KlogStride",4.5107020154963475},{"EAbove64",0.0},{"logDstride",0.0},{"logK",0.0},{"tailMasked",0.0},{"hidden",0.0},{"KlogDstride2",0.0}};
+inline constexpr Term terms29[] = {{"one",-4903.850030566105},{"KoverSqrtActiveD",68.43481122212143},{"maxSlog",392.7035464224887},{"activeRuns",16.816211602299454},{"fullSuffix",-40.20735486405899},{"KAbove64",-4.8946293142003965},{"KsmallActiveD",1.451769221364314},{"KlogStride",0.17935207762935912}};
+inline constexpr Term terms30[] = {{"one",-112.99980768683858},{"E",4.803138557055001},{"K_hidden",8.299243112758527},{"maxSlog",47.35094019326609},{"Kfp8",-1.3616563403295403},{"D_axis2_inner_payload_bytes",-59.193495455119496},{"K_over_D_axis2_extent",13.44194313388243},{"K_S_axis1_extent_log2",-0.5399044997187572}};
+inline constexpr Term terms31[] = {{"one",69.25000000000001},{"KoverTail",3.484374999999999},{"D_axis0_extent",21.312499999999993},{"KsmallActiveD",0.0},{"KnD",0.08007812500000008}};
+inline constexpr Term terms32[] = {{"one",0.0},{"D_axis0_stride_log2",10.4923260521054},{"fullSuffix",-1.5939424202403862},{"KnD",0.20105197304678693},{"activeDlog",-14.602844152202971},{"D_axis0_inner_payload_bytes",-0.9278382277382748},{"KlogStride",0.03315135444958191},{"sqrtK",2.7736912750339897}};
+inline constexpr Term terms33[] = {{"one",33.85389217461942},{"EAbove64",0.6101520887427638},{"D_axis0_stride_log2",-1.8208125605449381},{"D_axis3_extent",-2.98400868015114},{"K_D_axis4_extent_log2",-0.07141015207266144},{"smallE32",32.548129304762455},{"S_to_D_transitions",43.65217981387376},{"KoneWarp",0.3232104179899632}};
+inline constexpr Term terms34[] = {{"one",72.20730426910937},{"Krank",0.2365334896242178},{"D_SspanRatio",-9.870483693320662e-06},{"logW",4.799999921944013},{"leading",9.81964584432397},{"logTail",10.498457177092074},{"KlogW2",0.030456261725573426},{"logW2",-2.5998951818718123}};
+inline constexpr Term terms35[] = {{"one",141.75}};
+inline constexpr Term terms36[] = {{"one",101.25}};
+inline constexpr Term terms37[] = {{"one",73.20422789616589},{"K_S_axis0_extent_log2",0.056302618024398086},{"maxSlog",-1.1321597127239373},{"K_S_axis0_stride_log2",0.002055572251215983},{"Dunder128",51.34669923807303},{"D_axis1_stride_log2",-5.537925374612652},{"KoverTail",1.3706615834025517},{"K_D_axis1_extent_log2",0.06263965186457902}};
+inline constexpr Term terms38[] = {{"one",122.21402372901882},{"K",0.6684254243646612},{"sqrtK",-6.534452785744754},{"activeRows",0.9578583593100714},{"groups32",15.405080461063049},{"partialLogical32",3.961516476517044},{"activeDlog",-12.6713181213641},{"KlogW",-0.11285077432720045}};
+inline constexpr Term terms39[] = {{"one",138.5}};
+inline constexpr Term terms40[] = {{"one",0.7468631258697241},{"maxSlog",-2.461609493278203},{"KlogW2",0.09788971962494118},{"S_axis0_stride_log2",0.6056962380480094},{"Dunder128",65.35509726329636},{"logTail",11.38224149042811},{"sqrtS",18.136102475492944},{"KlogWAbove2",-0.9209114784527282}};
+inline constexpr Term terms41[] = {{"one",8.125}};
+inline constexpr Term terms42[] = {{"one",103.46571017583088},{"Kfp8",-0.04585987307929873},{"EAbove128",2.234912093634508},{"EAbove64",-1.3044817936231858},{"D_axis1_inner_payload_bytes",-0.6074665662654983},{"S_axis0_stride_log2",0.6395036166970414},{"KoverTail",0.34711915347471217},{"S_axis1_extent",-1.5014301204958116}};
+inline constexpr Term terms43[] = {{"one",61.0105732716233},{"sqrtE",9.1049214972778},{"KoverTail",1.5847211678764765},{"oneWarp",23.748249407670297},{"KlogWAbove2",1.25807447664008},{"KsumInvD",-0.22912096936298235},{"minW8",-2.281617760545506},{"KlogDstride",0.19096048683371178}};
+inline constexpr Term terms44[] = {{"one",61.41081120134302},{"E",0.517035721630372},{"EAbove32",-0.035665174931600555},{"EAbove8",0.4861535711560646},{"payload_integer",-1.6385221939199364},{"logWAbove2",21.270020220605353},{"smallE32",56.66763435504766},{"EAbove16",0.43584701200781717}};
+inline constexpr Term terms45[] = {{"one",121.625}};
+inline constexpr Term terms46[] = {{"one",98.25}};
+inline constexpr Term terms47[] = {{"one",59.295560577485745},{"sqrtE",8.993042252425695},{"KoverTail",1.5333297604598453},{"oneWarp",23.84965095782759},{"KlogWAbove2",1.2727051525573034},{"KsumInvD",-0.34228683234187546},{"minW8",-2.8031634333895177},{"KlogDstride",0.19253209258675216}};
+inline constexpr Term terms48[] = {{"one",72.96354411105641},{"K_S_axis0_extent_log2",0.0636181047473233},{"smallE32",-17.566551878228893},{"logE",0.007776680425203875},{"K_D_axis1_extent_log2",0.0784280927175894},{"sqrtD",-8.020229413231274},{"activeRuns",72.9635441110631},{"activeLogical32",-2.131877542622251}};
+inline constexpr Term terms49[] = {{"one",157.25}};
+inline constexpr Term terms50[] = {{"one",204.375}};
+inline constexpr Term terms51[] = {{"one",152.8192061584318},{"KmaxSlog",0.009525582590474847},{"oneWarp",110.20317011853182},{"D_axis4_stride_log2",-8.250522155776343},{"KlogDstride",-0.01438801556780952},{"KsumInvActiveD",-0.11723891243235231},{"KunitS",-0.3176930336957218},{"KlogDstride2",0.10129587496724039}};
+inline constexpr Term terms52[] = {{"one",164.3495762711862},{"hidden",-75.08156779661012},{"logTail",2.3739406779662193},{"EAbove128",1.0809884798728837},{"groups32",-44.24788135593241},{"minW8",-3.9565677966101633},{"KoverTail",0.7145127118644188},{"Kbool",-0.005859375000001929}};
+inline constexpr Term terms53[] = {{"one",146.09696969696975},{"hidden",-129.57632575757577},{"KoneWarp",-0.6089592211174251},{"minW8",-4.931912878787885},{"KoverTail",0.545833333333333},{"Kbool",-0.020919152462121098},{"Kfp8",-0.03166133996212144},{"smallE32",-10.980042613636371}};
+inline constexpr Term terms54[] = {{"one",106.98571428571414},{"Kfp8",-0.041015625000000014},{"EAbove128",2.1148995535714255},{"EAbove64",-0.9100260416666619},{"KnD",-0.1719145275297629},{"Dunder128",7.792261904762134},{"KlogTail",-0.12463262648809569},{"KactiveDlog",0.11169317336309526}};
+inline constexpr Term terms55[] = {{"one",348.757605110221},{"KAbove256",1.6600372126765535},{"KlogStride",-0.040086312128676076},{"D_axis1_extent",1.6512960555726743},{"KsuffixLog",-0.09853014540198032},{"S_axis1_extent",1.5264592654133775},{"KmaxSlog",0.046840398501541224},{"KlogDstride2",0.0}};
+inline constexpr Term terms56[] = {{"one",22.0}};
+inline constexpr Term terms57[] = {{"one",99.37662928706753},{"KactiveSlog",0.060664811065311935},{"KlogWAbove2",-0.1813397515791109},{"activeLogical32",4.313316040232934},{"maxSlog",-4.472804203019657},{"KmaxSlog",0.03081173764685662},{"Dunder128",43.782909712658395},{"smallE32",4.364394298172946}};
+inline constexpr Term terms58[] = {{"one",73.74812688229296},{"K_S_axis0_extent_log2",0.0580815701411488},{"maxSlog",-0.9729824294770424},{"K_S_axis0_stride_log2",0.0011601629498581222},{"Dunder128",52.25091730306161},{"D_axis1_stride_log2",-5.070290231742361},{"KoverTail",1.6643432705095293},{"K_D_axis1_extent_log2",0.06369061663845715}};
+inline constexpr Term terms59[] = {{"one",116.625}};
+inline constexpr Term terms60[] = {{"one",96.1377691955769},{"sqrtK",30.29413874380285},{"minW4",-12.876824170795718},{"logTail",-14.380472512387072},{"KlogWAbove2",1.4808107820239962},{"nD",-11.00547251238465},{"EAbove256",0.49952484015607396},{"activeLogical32",-6.426554975221029}};
+inline constexpr Term terms61[] = {{"one",94.75}};
+inline constexpr Term terms62[] = {{"one",20.294859126412856},{"EAbove64",0.8706785251107692},{"activeDlog",7.008768912406271},{"minW4",11.205828055735493},{"KlogW",-0.09570582049012565},{"EAbove128",-0.354721752729375},{"lastSSize",0.18461074317756232},{"KoverTail",1.3516701221521064}};
+inline constexpr Term terms63[] = {{"one",214.5}};
+inline constexpr Term terms64[] = {{"one",0.0},{"D_axis2_stride_log2",18.604166666666657},{"logTail",11.5},{"KlogDstride",0.6406250000000007},{"idleWarpProxy",2.250000000000001},{"D_axis3_inner_payload_bytes",14.802083333333313},{"logDstride",14.02083333333335},{"D_axis0_extent",11.375000000000009}};
+inline constexpr Term terms65[] = {{"one",130.125}};
+inline constexpr Term terms66[] = {{"one",28.055340465347953},{"KlogDstride",0.48692757532336356},{"S_axis1_extent",80.74044478153394},{"KoneWarp",0.5304277936315765},{"KactiveDlog",-0.034768775648517075},{"S_axis2_extent",-20.850769211492416},{"D_SspanRatio",1.4088927631777232e-05},{"S_axis1_stride_log2",0.0}};
+inline constexpr Term terms67[] = {{"one",17.75}};
+inline constexpr Term terms68[] = {{"one",46.125}};
+inline constexpr Term terms69[] = {{"one",17.09614785755461},{"EAbove64",1.5591653181650305},{"smallE32",85.73515542959521},{"EAbove128",-1.295189908925088},{"KlogWAbove2",-0.21237768607898988},{"nS",8.673412232620212},{"activeRows_logW",0.27598760067883743},{"payload_floating",24.668083947836998}};
+inline constexpr Term terms70[] = {{"one",163.5}};
+inline constexpr Term terms71[] = {{"one",150.0}};
+inline constexpr Term terms72[] = {{"one",153.625}};
+inline constexpr Term terms73[] = {{"one",151.25}};
+inline constexpr Term terms74[] = {{"one",-281.465376661708},{"logE",77.09163341660222},{"maxSlog",-7.589195804051748},{"Dunder128",100.73934989126651},{"S_axis0_stride_log2",0.9854994892512101},{"sqrtD",47.24114940141834},{"logDstride",3.2578291534474446},{"activeDlog",-56.567524069688105}};
+inline constexpr Term terms75[] = {{"one",187.875}};
+inline constexpr Term terms76[] = {{"one",276.8596935530601},{"activeDlog",-39.176718262510526},{"sqrtD",100.2740922997562},{"nD",-95.65064160880088},{"minW8",4.320337389213396},{"logTail",-49.234403094504934},{"maxSlog",-1.989550147714719},{"Dunder128",-44.4899483751357}};
+inline constexpr Term terms77[] = {{"one",113.125}};
+inline constexpr Term terms78[] = {{"one",35.77845550616075},{"KmaxSlog",0.04902745037813835},{"S_axis1_extent",-7.029144623485206},{"D_axis0_extent",31.366844693524072},{"activeSlog",13.540791747396478},{"Dunder128",48.65870119680057},{"S_axis0_stride_log2",-0.46269705461099603},{"logTail",6.863579572271059}};
+inline constexpr Term terms79[] = {{"one",189.625}};
+inline constexpr Term terms80[] = {{"one",115.25}};
+inline constexpr Term terms81[] = {{"one",110.56019009982354},{"K_hidden",0.04981024086046229},{"EAbove256",0.5356383611584422},{"KoverTail",0.8932927219841308},{"partialLogical32",-0.4658783407703557},{"KlogW2",-1.6404227147130953e-05},{"hidden",4.905941587838742},{"Kbool",0.04949440467352288}};
+inline constexpr Term terms82[] = {{"one",67.87196601214313},{"KactiveSlog",0.080557182870711},{"KlogWAbove2",-0.16626277246887075},{"activeLogical32",11.40791189089078},{"maxSlog",-0.5115992064443954},{"KmaxSlog",0.011523222323347545},{"Dunder128",31.039304425097175},{"smallE32",14.646930215507647}};
+inline constexpr Term terms83[] = {{"one",36.875}};
+inline constexpr Term terms84[] = {{"one",71.75}};
+inline constexpr Term terms85[] = {{"one",172.0}};
+inline constexpr Term terms86[] = {{"one",124.25}};
+inline constexpr Term terms87[] = {{"one",125.58101173020522},{"E",20.12915468635447},{"KlogDstride2",-0.2718643680695564},{"KlogTail",0.0},{"EAbove128",0.0},{"KoverTail",0.0},{"leading",-37.835043988269796},{"lastSSize",-23.53977272727272}};
+inline constexpr Term terms88[] = {{"one",1378.5401961167202},{"EAbove64",15.280869720360847},{"logTail",-156.60206386462704},{"KlogRuns",-2.287661522863031},{"KlogDstride",-9.201569416900973},{"KmaxSlog",0.5743908551833927},{"KoverTail",6.4097927016876834},{"KAbove256",0.24570295326921524}};
+inline constexpr Term terms89[] = {{"one",54.72292418772578},{"E",22.305272732400717},{"D",-1.5342114169675007},{"activeLogical32",0.0},{"KoverTail",0.0},{"KlogDstride2",0.0},{"KlogTail",1.2454591606498193},{"KactiveSlog",0.0}};
+inline constexpr Term terms90[] = {{"one",0.0},{"EAbove16",30.893568686487242},{"KsmallActiveD",-0.1504097628599282},{"S",-0.6316817123282625},{"logTail",270.0235494920507},{"leading",-11.69605485993545},{"KlogDstride2",0.0},{"KoverTail",0.0}};
+inline constexpr Term terms91[] = {{"one",305.8202317976449},{"E",7.467373878728111},{"hidden",585.0286887985703},{"maxSlog",40.70573775971405},{"Kfp8",-1.2719726562500013},{"logTail",-150.49079873532378},{"S",-10.696265243902443},{"Krank",-0.3142057084189328}};
+inline constexpr Term terms92[] = {{"one",114.30462184873943},{"hidden",-32.59348739495797},{"EAbove256",0.16632678462009803},{"logTail",4.10661764705884},{"EAbove128",1.0168764771533614},{"EAbove64",-0.6774471507352943},{"minW8",-3.642857142857143},{"KoverTail",0.8216911764705892}};
+inline constexpr Term terms93[] = {{"one",105.37585382513664},{"Kfp8",-0.03710937500000063},{"EAbove128",2.2194730831625686},{"EAbove64",-1.1703888106215876},{"KsumInvActiveD",-0.16590889685792243},{"Dunder128",2.378073770491802},{"KoverTail",0.899344689207643},{"KactiveSlog",-0.03723744877049106}};
+inline constexpr Term terms94[] = {{"one",-154.24999999999997},{"groups32",136.87499999999997},{"KlogDstride",-0.26171874999999994},{"nS",26.62499999999999},{"logWAbove4",12527.250000000011},{"idleWarpProxy",57.37500000000003},{"KlogWAbove2",-36.472656250000036},{"EAbove128",-1.5185546874999998}};
+inline constexpr Term terms95[] = {{"one",2.380244755244631},{"EAbove64",-0.2368562427156176},{"oneWarp",242.02884615384613},{"minW4",71.26835664335664},{"logTail",-67.99155011655009},{"KlogW",-0.10494973776223789},{"KlogTail",0.2523674242424241},{"Dunder128",18.069930069930138}};
+inline constexpr Term terms96[] = {{"one",95.7660974687557},{"KmaxSlog",0.05968273633621181},{"Dunder128",66.08618137354513},{"maxSlog",-3.1545182627188812},{"smallE32",-5.704191435677673},{"hidden",-51.266097468755696},{"highWarp32",2.3597879638936266},{"D_SspanRatio",-9.546775741937468e-06}};
+inline constexpr Term terms97[] = {{"one",101.24916695764138},{"activeSlog",11.178524285386354},{"EAbove256",0.09964874804083591},{"maxSlog",-7.146733115388053},{"Dunder128",56.643006980093645},{"suffixD",-0.057908012398349265},{"logWAbove4",-87.26412448596145},{"KmaxSlog",0.04615801503376822}};
+inline constexpr Term terms98[] = {{"one",214.7935997500128},{"sqrtE",3.480865349534953},{"KoverTail",1.4658322659144036},{"oneWarp",-77.46032446990478},{"KlogWAbove2",3.353654478588178},{"KsumInvD",-0.3054324623845037},{"minW8",-27.17123804861217},{"KlogDstride",0.28426563927479437}};
+inline constexpr Term terms99[] = {{"one",-356.1031386993024},{"sqrtE",19.84511633129359},{"EAbove256",1.0268412361323584},{"activeSlog",10.124999999999964},{"logWAbove2",36.14583333333327},{"smallE32",123.9945346748255},{"logE",51.99453467482565},{"KlogWAbove2",-0.17317708333333295}};
+inline constexpr Term terms100[] = {{"one",90.2043347321381},{"EAbove64",0.34802652095765424},{"EAbove8",-0.050610835811539426},{"Dunder128",9.78460384935088},{"KlogWAbove2",-0.148092604424161},{"KlogDstride2",0.08687112001964198},{"sqrtS",6.742567055989172},{"Kfp8",-0.3146854045003297}};
+inline constexpr Piece pieces[] = {
+{terms0,8},
+{terms1,8},
+{terms2,8},
+{terms3,4},
+{terms4,4},
+{terms5,8},
+{terms6,8},
+{terms7,8},
+{terms8,1},
+{terms9,8},
+{terms10,1},
+{terms11,8},
+{terms12,8},
+{terms13,8},
+{terms14,8},
+{terms15,8},
+{terms16,8},
+{terms17,8},
+{terms18,8},
+{terms19,1},
+{terms20,8},
+{terms21,8},
+{terms22,1},
+{terms23,1},
+{terms24,1},
+{terms25,1},
+{terms26,8},
+{terms27,8},
+{terms28,8},
+{terms29,8},
+{terms30,8},
+{terms31,5},
+{terms32,8},
+{terms33,8},
+{terms34,8},
+{terms35,1},
+{terms36,1},
+{terms37,8},
+{terms38,8},
+{terms39,1},
+{terms40,8},
+{terms41,1},
+{terms42,8},
+{terms43,8},
+{terms44,8},
+{terms45,1},
+{terms46,1},
+{terms47,8},
+{terms48,8},
+{terms49,1},
+{terms50,1},
+{terms51,8},
+{terms52,8},
+{terms53,8},
+{terms54,8},
+{terms55,8},
+{terms56,1},
+{terms57,8},
+{terms58,8},
+{terms59,1},
+{terms60,8},
+{terms61,1},
+{terms62,8},
+{terms63,1},
+{terms64,8},
+{terms65,1},
+{terms66,8},
+{terms67,1},
+{terms68,1},
+{terms69,8},
+{terms70,1},
+{terms71,1},
+{terms72,1},
+{terms73,1},
+{terms74,8},
+{terms75,1},
+{terms76,8},
+{terms77,1},
+{terms78,8},
+{terms79,1},
+{terms80,1},
+{terms81,8},
+{terms82,8},
+{terms83,1},
+{terms84,1},
+{terms85,1},
+{terms86,1},
+{terms87,8},
+{terms88,8},
+{terms89,8},
+{terms90,8},
+{terms91,8},
+{terms92,8},
+{terms93,8},
+{terms94,8},
+{terms95,8},
+{terms96,8},
+{terms97,8},
+{terms98,8},
+{terms99,8},
+{terms100,8},
 };
 inline constexpr RouteColumn routeColumns[] = {
-{"width", false, 0.},
-{"logW", false, 0.},
-{"mask", false, 0.},
-{"nD", false, 0.},
-{"nS", false, 0.},
-{"leading", true, 1.0},
-{"hidden", false, 0.},
-{"prefixMasked", false, 0.},
-{"E", true, 256.0},
-{"E", true, 2048.0},
-{"Kfp8", true, 0.0},
-{"Kbool", true, 0.0},
-{"Dunder128", true, 0.0},
-{"D_SspanRatio", true, 1.0},
-{"payload_integer", false, 0.},
-{"payload_bfloat16", false, 0.},
-{"K", true, 16.0},
-{"K", true, 128.0},
+{"width",false,0.},
+{"logW",false,0.},
+{"mask",false,0.},
+{"nD",false,0.},
+{"nS",false,0.},
+{"leading",true,1.0},
+{"hidden",false,0.},
+{"prefixMasked",false,0.},
+{"E",true,256.0},
+{"E",true,2048.0},
+{"Kfp8",true,0.0},
+{"Kbool",true,0.0},
+{"Dunder128",true,0.0},
+{"D_SspanRatio",true,1.0},
+{"payload_integer",false,0.},
+{"payload_bfloat16",false,0.},
+{"K",true,16.0},
+{"K",true,128.0},
 };
 inline constexpr PhysicalRoute simdRoutes[] = {
-{{4, 0, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(30)},
-{{4, 0, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(70)},
-{{2, 0, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(81)},
-{{2, 0, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(89)},
-{{8, 0, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(106)},
-{{8, 0, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(119)},
-{{1, 0, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(121)},
-{{1, 0, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(138)},
-{{4, 0, 1, 4, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(140)},
-{{4, 0, 0, 4, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(180)},
-{{4, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(181)},
-{{4, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(186)},
-{{2, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(208)},
-{{2, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(211)},
-{{8, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(212)},
-{{8, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(213)},
-{{1, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(229)},
-{{1, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(231)},
-{{4, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(69)},
-{{2, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(233)},
-{{8, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(234)},
-{{1, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(242)},
-{{8, 0, 1, 2, 3, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(243)},
-{{8, 0, 0, 2, 3, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(249)},
-{{4, 0, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(250)},
-{{2, 0, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(252)},
-{{8, 0, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(258)},
-{{1, 0, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(264)},
-{{2, 0, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(268)},
-{{2, 0, 0, 2, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(270)},
-{{4, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(275)},
-{{4, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(276)},
-{{4, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(277)},
-{{4, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(288)},
-{{4, 0, 1, 1, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0}, Operand::node(289)},
-{{4, 0, 1, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, Operand::node(295)},
-{{4, 0, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, Operand::node(300)},
-{{2, 0, 1, 1, 4, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(302)},
-{{2, 0, 0, 1, 4, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(312)},
+{{4,0,1,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},0},
+{{4,0,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},1},
+{{2,0,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},2},
+{{2,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},3},
+{{8,0,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},4},
+{{8,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},5},
+{{1,0,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},6},
+{{1,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},3},
+{{4,0,1,4,1,1,0,0,0,0,0,0,1,1,0,0,1,0},7},
+{{4,0,0,4,1,1,0,0,0,0,0,0,1,1,0,0,1,1},8},
+{{4,0,1,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},9},
+{{4,0,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},10},
+{{2,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},11},
+{{2,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},0},
+{{8,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},12},
+{{8,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},13},
+{{1,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},14},
+{{1,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},15},
+{{4,0,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,1},16},
+{{2,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},17},
+{{8,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},18},
+{{1,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},19},
+{{8,0,1,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},20},
+{{8,0,0,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},18},
+{{4,0,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,1},21},
+{{2,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},22},
+{{8,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},18},
+{{1,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},23},
+{{2,0,1,2,2,1,0,0,0,0,0,0,1,1,1,0,1,0},24},
+{{2,0,0,2,2,1,0,0,0,0,0,0,1,1,1,0,1,1},25},
+{{4,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},26},
+{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,1},19},
+{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},27},
+{{4,0,0,1,1,0,0,0,1,0,0,0,1,1,0,0,1,1},26},
+{{4,0,1,1,2,1,0,0,0,0,0,0,1,1,0,0,0,0},28},
+{{4,0,1,1,2,1,1,0,0,0,0,0,0,0,0,0,1,0},16},
+{{4,0,0,1,2,1,1,0,0,0,0,0,0,0,0,0,1,0},0},
+{{2,0,1,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},29},
+{{2,0,0,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},30},
 };
-inline constexpr Operand simdRoot = Operand::node(330);
+inline constexpr BaseRoute simdBase[] = {
+{4,true,false,16},
+{4,false,false,87},
+{2,true,false,88},
+{2,false,false,6},
+{8,true,false,89},
+{8,false,false,90},
+{1,true,false,14},
+{1,false,false,91},
+{4,true,true,16},
+};
+inline constexpr unsigned simdFallback = 15;
+inline constexpr bool simdPrefix = true;
 inline constexpr PhysicalRoute simtRoutes[] = {
-{{4, 2, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(362)},
-{{4, 2, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(417)},
-{{2, 1, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(433)},
-{{2, 1, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(452)},
-{{8, 3, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(467)},
-{{8, 3, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(468)},
-{{1, 0, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(470)},
-{{1, 0, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(478)},
-{{4, 1, 1, 4, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(479)},
-{{4, 1, 0, 4, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(491)},
-{{4, 2, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(507)},
-{{4, 2, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(508)},
-{{2, 1, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(510)},
-{{2, 1, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(516)},
-{{8, 3, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(540)},
-{{8, 3, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(586)},
-{{1, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(588)},
-{{1, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(601)},
-{{4, 6, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(602)},
-{{4, 6, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(603)},
-{{2, 5, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(605)},
-{{2, 5, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(607)},
-{{8, 2, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(614)},
-{{8, 2, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(615)},
-{{1, 4, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(625)},
-{{1, 4, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(636)},
-{{8, 2, 1, 2, 3, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(637)},
-{{8, 2, 0, 2, 3, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(639)},
-{{4, 6, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(636)},
-{{4, 6, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(640)},
-{{2, 5, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(644)},
-{{2, 5, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(646)},
-{{8, 2, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(648)},
-{{8, 2, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(654)},
-{{1, 4, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(655)},
-{{1, 4, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(662)},
-{{2, 0, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(668)},
-{{2, 0, 0, 2, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1}, Operand::node(675)},
-{{4, 2, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(677)},
-{{4, 2, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(679)},
-{{4, 2, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(680)},
-{{4, 2, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(682)},
-{{2, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(685)},
-{{2, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(687)},
-{{2, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(695)},
-{{4, 4, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(701)},
-{{4, 4, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(707)},
-{{4, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(708)},
-{{4, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(715)},
-{{8, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(723)},
-{{8, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(725)},
-{{1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0}, Operand::node(729)},
-{{1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0}, Operand::node(731)},
-{{1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0}, Operand::node(735)},
-{{1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0}, Operand::node(737)},
-{{4, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(708)},
-{{4, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(740)},
-{{8, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(742)},
-{{8, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(744)},
-{{1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(746)},
-{{1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(748)},
-{{4, 2, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(749)},
-{{4, 1, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0}, Operand::node(751)},
-{{4, 1, 0, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1}, Operand::node(753)},
-{{4, 2, 1, 1, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0}, Operand::node(754)},
-{{4, 2, 1, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, Operand::node(758)},
-{{4, 2, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, Operand::node(760)},
-{{2, 1, 1, 1, 4, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(772)},
-{{2, 1, 0, 1, 4, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0}, Operand::node(774)},
+{{4,2,1,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},31},
+{{4,2,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},31},
+{{2,1,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},32},
+{{2,1,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},33},
+{{8,3,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},34},
+{{8,3,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},31},
+{{1,0,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},35},
+{{1,0,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},36},
+{{4,1,1,4,1,1,0,0,0,0,0,0,1,1,0,0,1,0},37},
+{{4,1,0,4,1,1,0,0,0,0,0,0,1,1,0,0,1,1},38},
+{{4,2,1,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},39},
+{{4,2,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},40},
+{{2,1,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},41},
+{{2,1,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},42},
+{{8,3,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},43},
+{{8,3,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},44},
+{{1,0,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},45},
+{{1,0,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},46},
+{{4,6,1,2,1,1,0,0,0,0,0,0,1,1,0,0,1,0},47},
+{{4,6,0,2,1,1,0,0,0,0,0,0,1,1,0,0,1,1},48},
+{{2,5,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},49},
+{{2,5,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},50},
+{{8,2,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},51},
+{{8,2,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},44},
+{{1,4,1,2,1,1,0,0,0,0,0,0,1,1,1,0,1,0},52},
+{{1,4,0,2,1,1,0,0,0,0,0,0,1,1,1,0,1,1},53},
+{{8,2,1,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},54},
+{{8,2,0,2,3,1,0,0,1,0,0,0,1,1,1,0,1,1},55},
+{{4,6,1,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},56},
+{{4,6,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,1},57},
+{{2,5,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},58},
+{{2,5,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},59},
+{{8,2,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},43},
+{{8,2,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},60},
+{{1,4,1,3,2,1,0,0,0,0,0,0,1,1,1,0,1,0},61},
+{{1,4,0,3,2,1,0,0,0,0,0,0,1,1,1,0,1,1},62},
+{{2,0,1,2,2,1,0,0,0,0,0,0,1,1,1,0,1,0},63},
+{{2,0,0,2,2,1,0,0,0,0,0,0,1,1,1,0,1,1},64},
+{{4,2,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},65},
+{{4,2,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,1},39},
+{{4,2,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},66},
+{{4,2,0,1,1,0,0,0,1,0,0,0,1,1,0,0,1,1},54},
+{{2,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},67},
+{{2,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},68},
+{{2,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},69},
+{{4,4,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},70},
+{{4,4,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},71},
+{{4,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},72},
+{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},73},
+{{8,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},74},
+{{8,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0},75},
+{{1,0,1,1,1,0,0,0,0,0,1,0,1,1,1,0,1,0},76},
+{{1,0,0,1,1,0,0,0,0,0,1,0,1,1,1,0,1,0},77},
+{{1,0,1,1,1,0,0,0,0,0,0,1,1,1,1,0,1,0},77},
+{{1,0,0,1,1,0,0,0,0,0,0,1,1,1,1,0,1,0},77},
+{{4,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},49},
+{{4,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},78},
+{{8,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},79},
+{{8,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},47},
+{{1,0,1,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},80},
+{{1,0,0,1,1,0,0,0,0,0,0,0,1,1,1,0,1,0},81},
+{{4,2,1,1,1,0,0,0,1,0,0,0,1,1,0,0,1,1},82},
+{{4,1,1,3,2,1,0,0,0,0,0,0,1,1,0,0,1,0},60},
+{{4,1,0,3,2,1,0,0,0,0,0,0,1,1,0,0,1,1},38},
+{{4,2,1,1,2,1,0,0,0,0,0,0,1,1,0,0,0,0},83},
+{{4,2,1,1,2,1,1,0,0,0,0,0,0,0,0,0,1,0},84},
+{{4,2,0,1,2,1,1,0,0,0,0,0,0,0,0,0,1,0},85},
+{{2,1,1,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},86},
+{{2,1,0,1,4,1,0,0,0,0,0,0,1,1,1,0,1,0},83},
 };
-inline constexpr Operand simtRoot = Operand::node(800);
+inline constexpr BaseRoute simtBase[] = {
+{1,true,true,92},
+{1,false,true,93},
+{2,true,true,94},
+{2,false,true,95},
+{1,true,false,92},
+{1,false,false,93},
+{2,true,false,94},
+{2,false,false,95},
+{4,true,true,96},
+{4,true,false,96},
+{4,false,false,97},
+{4,false,true,97},
+{8,true,true,98},
+{8,false,true,99},
+};
+inline constexpr unsigned simtFallback = 100;
+inline constexpr bool simtPrefix = false;

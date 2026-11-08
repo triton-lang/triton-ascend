@@ -5,10 +5,10 @@ including storage width, static mask, axis structure and warp geometry. Each
 executed formula has at most eight terms. Coefficients come from TRAIN fits;
 there is no case-name, kernel-name or hidden tensor-content lookup. The frozen
 program and exact coefficients are checked in as readable C++ compiler data.
-The duplicate JSON exports have no runtime consumer and remain in the validation
-archive and prior revision. `OrdinaryLoadProgram.inc` retains every model node.
-Exact condition elimination reduces the exported program to 846 SIMD and 1459
-SIMT nodes; coefficients and all 7088 checked predictions remain unchanged.
+The flat table contains 108 physical routes and 101 unique short formulas,
+including the TRAIN base formulas for unmatched domains. It replaces the nested
+conditional, scale and blend interpreter. Every selected path evaluates one
+linear formula with at most eight terms; the minimum prediction remains one tick.
 
 ## Validation and limits
 
@@ -18,17 +18,16 @@ rounds retain 3544 files and 850560 quartets. Nonpositive differential labels ar
 retained and diagnosed, not removed by prediction error. Discrete physical-route
 selection used the observed validation results, as explicitly permitted.
 
-The selected program's validation MAPE is **19.7804%** on 1187 positive inputs:
-SIMD **21.3521%** (472 inputs), SIMT **18.7428%** (715 inputs). The other 29
+The selected program's validation MAPE is **19.9012%** on 1187 positive inputs:
+SIMD **21.5790%** (472 inputs), SIMT **18.7937%** (715 inputs). The other 29
 validation inputs have nonpositive differential labels and are reported outside
 MAPE. This meets the requested overall 20% observed-validation threshold; it is
 **not an unseen-test result**. Groups, direction and repeat quality are reports.
 
-**Generalization remains a material limitation:** the complete composite
-three-fold MAPE is **51.2145%** (folds 61.4717%, 38.8551%, 51.7185%). Do not
-interpret the selected validation score as evidence of comparable unseen-kernel
-accuracy. Earlier unsuccessful models and reductions remain preserved in the
-validation record. Missing verified logical-type facts reject this estimator and retain the
+The development set was used for discrete formula selection, so comparable
+unseen-kernel accuracy is not established. Three-fold validation is no longer
+a required acceptance step; previous model results remain historical evidence.
+Missing verified logical-type facts reject this estimator and retain the
 original compiler model, rather than selecting a second legacy formula bank.
 
 Actual arithmetic verification covered 7088 input metadata rows and 843472

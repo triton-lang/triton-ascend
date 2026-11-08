@@ -34,7 +34,6 @@ struct Estimate {
   std::optional<double> ticks;
   std::string reason;
   std::string leaf;
-  bool modelAccepted = false;
   const char *scope = "matched_target_increment_ticks";
 };
 using Features = std::map<std::string, double>;

@@ -12,10 +12,6 @@ struct Metadata : indirect_store_selected::Metadata {
   indirect_load_visible::LogicalKind logical;
 };
 inline constexpr bool productionEnabled = true;
-inline constexpr const char *simdSourceSha256 =
-    "529a0219c8c4241e1f9565888132ef2cc0a82de806c2580a7d7f301612e4fc65";
-inline constexpr const char *simtSourceSha256 =
-    "0e66084dd52a8f272c167fdbd6a613646e30206d425739a513064a414b6c096c";
 enum class Instruction { Linear, Exp, LE, EQ, Scale, Blend };
 struct Operand {
   int index;

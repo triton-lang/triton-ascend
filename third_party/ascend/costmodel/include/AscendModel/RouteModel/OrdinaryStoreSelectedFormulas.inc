@@ -1,12 +1,6 @@
 // Generated single SHA-bound formula pair. No model selection or fitting.
-inline constexpr bool selectedProductionAccepted = false;
 inline constexpr bool selectedDefaultEnabled = true;
 // Explicit enablement policy; independent/hardware acceptance stays separate.
-inline constexpr bool selectedProductionEnabled = true;
-inline constexpr bool selectedFinalValidationMAPEPassed = true;
-inline constexpr bool selectedIndependentMetricsPassed = false;
-inline constexpr const char *selectedFreezeSha256 =
-    "869ff94ea391c5d25fcd0f6f3675ad0f2122a2dc43a8a0656ebc6e52012a15ff";
 inline constexpr const char *selectedFeatureNames[] = {"one",
                                                        "K",
                                                        "E",

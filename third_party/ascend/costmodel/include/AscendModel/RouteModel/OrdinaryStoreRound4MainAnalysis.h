@@ -311,38 +311,8 @@ private:
           return std::nullopt;
         z = name.contains("div") ? x / y : x % y;
       } else if (auto cmp = dyn_cast<arith::CmpIOp>(op)) {
-        switch (cmp.getPredicate()) {
-        case arith::CmpIPredicate::eq:
-          z = x == y;
-          break;
-        case arith::CmpIPredicate::ne:
-          z = x != y;
-          break;
-        case arith::CmpIPredicate::slt:
-          z = x < y;
-          break;
-        case arith::CmpIPredicate::sle:
-          z = x <= y;
-          break;
-        case arith::CmpIPredicate::sgt:
-          z = x > y;
-          break;
-        case arith::CmpIPredicate::sge:
-          z = x >= y;
-          break;
-        case arith::CmpIPredicate::ult:
-          z = uint64_t(x) < uint64_t(y);
-          break;
-        case arith::CmpIPredicate::ule:
-          z = uint64_t(x) <= uint64_t(y);
-          break;
-        case arith::CmpIPredicate::ugt:
-          z = uint64_t(x) > uint64_t(y);
-          break;
-        case arith::CmpIPredicate::uge:
-          z = uint64_t(x) >= uint64_t(y);
-          break;
-        }
+        z = arith::applyCmpPredicate(cmp.getPredicate(), APInt(64, uint64_t(x)),
+                                     APInt(64, uint64_t(y)));
       } else
         return std::nullopt;
       Type scalarType = value.getType();

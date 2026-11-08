@@ -72,52 +72,14 @@ OrdinaryLoadMainResult targetCost(triton::LoadOp load,
   m.logical.integer = isa<IntegerType>(logicalPayload);
   m.logical.floating = isa<FloatType>(logicalPayload);
   m.logical.bfloat16 = isa<BFloat16Type>(logicalPayload);
-  auto staticAxes = axes(load.getPtr());
-  const bool known =
-      staticAxes.size() == m.shape.size() &&
-      llvm::all_of(staticAxes, [](const Axis &axis) {
-        return axis.valid && !(axis.loaded && axis.stride) &&
-               (axis.loaded ? axis.loadedScale > 0 : axis.stride > 0);
-      });
   std::vector<int64_t> runtime;
-  if (known) {
-    m.visibility = Visibility::Known;
-    for (const auto &axis : staticAxes) {
-      m.dAxes.push_back(bool(axis.loaded));
-      m.knownStrides.push_back(axis.loaded ? axis.loadedScale : axis.stride);
-    }
-  } else {
-    auto dynamicAxes = visibilityAxes(load.getPtr(), entry);
-    if (dynamicAxes.size() != m.shape.size())
-      return fail("Load_separable_axes_not_proven");
-    bool host = false, device = false;
-    for (const auto &axis : dynamicAxes) {
-      if (!axis.valid || !axis.coordinate || axis.pitch.scale <= 0)
-        return fail("Load_separable_scalar_stride_not_proven");
-      host |= axis.pitch.kind == PitchKind::HostArgument;
-      device |= axis.pitch.kind == PitchKind::DeviceScalarLoad;
-      m.dAxes.push_back(bool(axis.loadedIndex));
-    }
-    if (host && device)
-      return fail("Load_mixed_Host_Device_strides_unsupported");
-    if (device) {
-      // Unknown pitch features stay opaque. The positive/no-wrap domain must
-      // be an explicit caller contract; it cannot be inferred from a load.
-      if (!capability.getBoolean("ordinary_load_device_stride_positive_no_wrap")
-               .value_or(false))
-        return fail("Load_Device_stride_domain_not_declared");
-      m.visibility = Visibility::Device;
-    } else if (host) {
-      m.visibility = Visibility::Host;
-      for (const auto &axis : dynamicAxes) {
-        auto value = hostPitchValue(axis.pitch, entry, capability);
-        if (!value)
-          return fail("Load_Host_scalar_option_IR_binding_missing");
-        runtime.push_back(*value);
-      }
-    } else
-      return fail("Load_unknown_stride_source");
-  }
+  if (auto reason = projectAxisGeometry(load.getPtr(), entry, capability, m,
+                                        runtime, std::nullopt, false))
+    return fail(reason);
+  if (m.visibility == Visibility::Device &&
+      !capability.getBoolean("ordinary_load_device_stride_positive_no_wrap")
+           .value_or(false))
+    return fail("Load_Device_stride_domain_not_declared");
   m.lower.assign(m.shape.size(), 0);
   m.upper = m.shape;
   Value mask = load.getMask();

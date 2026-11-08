@@ -237,5 +237,62 @@ hostPitchValue(const Pitch &pitch, triton::FuncOp entry,
     return std::nullopt;
   return result;
 }
+// Project proved axes once; callers retain their own target and domain
+// contracts. No requested visibility means Load may infer it; Store supplies
+// its declaration.
+template <typename Metadata>
+const char *projectAxisGeometry(Value pointer, triton::FuncOp entry,
+                                const llvm::json::Object &capability,
+                                Metadata &m, std::vector<int64_t> &runtime,
+                                std::optional<decltype(m.visibility)> requested,
+                                bool requireNondegenerate) {
+  using Visibility = decltype(m.visibility);
+  if (requireNondegenerate &&
+      llvm::any_of(m.shape, [](int64_t n) { return n <= 1; }))
+    return "axis_extent_outside_non_degenerate_domain";
+  if (!requested || *requested == Visibility::Known) {
+    auto terms = axes(pointer);
+    const bool known =
+        terms.size() == m.shape.size() &&
+        llvm::all_of(terms, [](const Axis &axis) {
+          return axis.valid && !(axis.loaded && axis.stride) &&
+                 (axis.loaded ? axis.loadedScale > 0 : axis.stride > 0);
+        });
+    if (known) {
+      m.visibility = Visibility::Known;
+      for (const auto &axis : terms) {
+        m.dAxes.push_back(bool(axis.loaded));
+        m.knownStrides.push_back(axis.loaded ? axis.loadedScale : axis.stride);
+      }
+      return nullptr;
+    }
+    if (requested)
+      return "static_positive_separable_axis_proof_missing";
+  }
+  auto terms = visibilityAxes(pointer, entry);
+  if (terms.size() != m.shape.size())
+    return "dynamic_axis_proof_missing";
+  bool host = false, device = false;
+  for (const auto &axis : terms) {
+    if (!axis.valid || !axis.coordinate || axis.pitch.scale <= 0)
+      return "axis_or_uniform_scalar_coefficient_not_proven";
+    host |= axis.pitch.kind == PitchKind::HostArgument;
+    device |= axis.pitch.kind == PitchKind::DeviceScalarLoad;
+    m.dAxes.push_back(bool(axis.loadedIndex));
+  }
+  if (host == device)
+    return "mixed_or_missing_dynamic_stride_source";
+  m.visibility = host ? Visibility::Host : Visibility::Device;
+  if (requested && *requested != m.visibility)
+    return "declared_visibility_does_not_match_actual_scalar_sources";
+  if (host)
+    for (const auto &axis : terms) {
+      auto value = hostPitchValue(axis.pitch, entry, capability);
+      if (!value)
+        return "public_integer_scalar_option_and_IR_fact_mismatch";
+      runtime.push_back(*value);
+    }
+  return nullptr;
+}
 } // namespace mlir::ascend::ordinary_store_main
 #endif

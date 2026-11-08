@@ -10,7 +10,6 @@
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/SHA256.h"
 #include "llvm/Support/raw_ostream.h"
-#include <array>
 
 using namespace mlir;
 using namespace mlir::ascend;
@@ -150,15 +149,12 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
   triton::StoreOp store = stores[*ordinal];
   if (!llvm::is_contained(stage.operations, store.getOperation()))
     return fail("target_not_owned_by_this_stage");
-  main_ta::CallerFacts caller;
   {
-    caller.enabled = true;
-    caller.sourceSha256 = text(*c, "source_sha256");
-    caller.entryAndIRBound =
+    const bool entryAndIRBound =
         pointerRoot(store.getPtr()) == argument &&
         fingerprint(module) == text(*c, "module_fingerprint_sha256") &&
         fingerprint(store) == text(*c, "store_fingerprint_sha256");
-    caller.addressIntegerDomainDeclared =
+    const bool addressIntegerDomainDeclared =
         text(*c, "loaded_index_value_contract") ==
             "signed_nonnegative_axis_extent_v1" &&
         main_ta::sha256(text(*c, "loaded_index_bounds_proof_sha256")) &&
@@ -166,7 +162,7 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
             "no_wrap_in_actual_IR_integer_width" &&
         main_ta::sha256(text(*c, "integer_no_wrap_proof_sha256"));
     const auto *transform = c->getObject("transform");
-    caller.transformBound =
+    const bool transformBound =
         transform && transform->getBoolean("layout_merge_applied") &&
         transform->getBoolean("layout_merge_applied") ==
             capability->getBoolean("layout_merge_applied") &&
@@ -180,35 +176,9 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
         singletonOne(*transform, "scope_superblock_factors") &&
         singletonOne(*capability, "whole_kernel_superblock_factors") &&
         singletonOne(*capability, "scope_superblock_factors");
-    if (const auto *life = c->getObject("lifecycle")) {
-      caller.firstStore = truth(*life, "first_store");
-      caller.allocationFresh =
-          text(*life, "allocation") == "fresh_for_this_launch";
-      caller.initializationGuardsOnly =
-          text(*life, "initialization") == "uninitialized_payload_guards_only";
-      caller.exclusiveAlias =
-          text(*life, "aliasing") == "exclusive_target_no_external_alias";
-      caller.notReused = text(*life, "reuse") == "not_reused";
-      caller.retainedUntilCompletion =
-          text(*life, "retention") == "valid_until_kernel_completion";
-      caller.launchId = text(*life, "launch_id");
-      caller.allocationId = text(*life, "allocation_id");
-      caller.allocationEpoch = life->getInteger("allocation_epoch").value_or(0);
-      std::array<StringRef, 5> names = {
-          "allocation_proof_sha256", "initialization_proof_sha256",
-          "alias_proof_sha256", "reuse_proof_sha256", "retention_proof_sha256"};
-      for (size_t i = 0; i < names.size(); ++i)
-        caller.lifecycleProofSha256[i] = text(*life, names[i]);
-    }
-    caller.incrementContract = text(*c, "increment_contract");
-    caller.accountingBoundary = text(*c, "accounting_boundary");
-    caller.unitContract = text(*c, "unit_contract");
-    caller.ticksPerSystemCycle =
-        c->getNumber("syscnt_ticks_per_system_cycle").value_or(0.0);
-    caller.profileSha256 = text(*c, "profile_sha256");
-    caller.unitSourceSha256 = text(*c, "unit_source_sha256");
-    result.reason = main_ta::validateCaller(
-        caller, profile.ordinaryStoreActiveProfileSha256,
+    result.reason = main_ta::validateDirectCaller(
+        *c, entryAndIRBound, transformBound, addressIntegerDomainDeclared,
+        profile.ordinaryStoreActiveProfileSha256,
         profile.ordinaryStoreUnitSourceSha256);
     if (!result.reason.empty())
       return result;
@@ -282,55 +252,17 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
         "SIMT_FP8_native_store_outside_original_bit_transport_coverage");
   m.shape.assign(tensor.getShape().begin(), tensor.getShape().end());
   std::vector<int64_t> runtimeCoefficients;
-  if (visibility == "known") {
-    auto terms = axes(store.getPtr());
-    if (terms.size() != m.shape.size())
-      return fail("static_axis_proof_missing");
-    for (size_t i = 0; i < terms.size(); ++i) {
-      const auto &axis = terms[i];
-      if (m.shape[i] <= 1 || !axis.valid || (axis.loaded && axis.stride) ||
-          (axis.loaded ? axis.loadedScale <= 0 : axis.stride <= 0))
-        return fail("axis_not_exact_positive_separable_static_S_or_loaded_D");
-      m.dAxes.push_back(bool(axis.loaded));
-      m.knownStrides.push_back(axis.loaded ? axis.loadedScale : axis.stride);
-    }
-    m.visibility = Visibility::Known;
-  } else {
-    const auto terms = visibilityAxes(store.getPtr(), entry);
-    if (terms.size() != m.shape.size())
-      return fail("dynamic_axis_proof_missing");
-    bool sawHost = false, sawDevice = false;
-    for (size_t i = 0; i < terms.size(); ++i) {
-      const auto &axis = terms[i];
-      if (m.shape[i] <= 1 || !axis.valid || !axis.coordinate ||
-          axis.pitch.scale <= 0)
-        return fail("axis_or_uniform_scalar_coefficient_not_proven");
-      m.dAxes.push_back(bool(axis.loadedIndex));
-      sawHost |= axis.pitch.kind == PitchKind::HostArgument;
-      sawDevice |= axis.pitch.kind == PitchKind::DeviceScalarLoad;
-      if (visibility == "host") {
-        auto value = hostPitchValue(axis.pitch, entry, *capability);
-        if (!value)
-          return fail("public_integer_scalar_option_and_IR_fact_mismatch");
-        runtimeCoefficients.push_back(*value);
-      }
-    }
-    if ((visibility == "host" && (!sawHost || sawDevice)) ||
-        (visibility == "device" && (!sawDevice || sawHost)))
-      return fail("declared_visibility_does_not_match_actual_scalar_sources");
-    if (visibility == "device") {
-      // Device coefficients stay opaque. Positivity/no-wrap is an explicit
-      // native caller assumption bound by the existing actual IR/source hash;
-      // no allocator/business producer or device-load value is invented here.
-      if ((text(*c, "device_stride_value_contract") !=
-               "signed_positive_integer_no_wrap_v1" ||
-           !main_ta::sha256(text(*c, "device_stride_bounds_proof_sha256"))))
-        return fail("opaque_device_coefficient_domain_not_declared");
-      m.visibility = Visibility::Device;
-      // Deliberately leave both vectors empty; hidden features remain zero.
-    } else
-      m.visibility = Visibility::Host;
-  }
+  const Visibility declared = visibility == "known"  ? Visibility::Known
+                              : visibility == "host" ? Visibility::Host
+                                                     : Visibility::Device;
+  if (auto reason = projectAxisGeometry(store.getPtr(), entry, *capability, m,
+                                        runtimeCoefficients, declared, true))
+    return fail(reason);
+  if (m.visibility == Visibility::Device &&
+      (text(*c, "device_stride_value_contract") !=
+           "signed_positive_integer_no_wrap_v1" ||
+       !main_ta::sha256(text(*c, "device_stride_bounds_proof_sha256"))))
+    return fail("opaque_device_coefficient_domain_not_declared");
   m.lower.assign(m.shape.size(), 0);
   m.upper = m.shape;
   const auto representation = text(*c, "mask_representation");
@@ -345,7 +277,7 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
                                   "nonrectangular_mask"))
     return fail(reason);
   m.stageOwnershipVerified = true; // Exact target membership checked above.
-  m.firstStore = caller.firstStore;
+  m.firstStore = true;             // Required by validateDirectCaller above.
   m.matchedIncrementContractVerified = true; // Exact contract checked above.
   auto estimate = indirect_store_selected::tryPredict(
       m, m.visibility == Visibility::Host ? &runtimeCoefficients : nullptr,
@@ -371,7 +303,7 @@ mlir::ascend::ordinaryStoreMainCost(const LogicalStage &stage,
   if (rest.iterationCount != 1)
     return fail("auxiliary_reanalysis_changed_iteration_contract");
   result.auxiliaryStage = std::move(rest);
-  result.targetSystemCycles = *estimate.ticks / caller.ticksPerSystemCycle;
+  result.targetSystemCycles = *estimate.ticks;
   result.reason =
       "selected_formula_native_compile_contract_eligible_unaccepted";
   return result;

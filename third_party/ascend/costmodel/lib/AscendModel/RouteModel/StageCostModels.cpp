@@ -5,6 +5,9 @@
 #include "mlir/IR/BuiltinTypes.h"
 
 #include "AscendModel/RouteModel/Models/StridedShortCostModel.h"
+#include "AscendModel/RouteModel/OrdinaryLoadMain.h"
+#include "AscendModel/RouteModel/OrdinaryStoreRound4Main.h"
+#include "AscendModel/RouteModel/OrdinaryStoreRound4MainContract.h"
 #include "AscendModel/RouteModel/Reduction/ReductionCostModel.h"
 
 #include "llvm/ADT/STLExtras.h"
@@ -4259,13 +4262,44 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
               stage.workload.dotFlops > 0.0);
       const LogicalStage executionStage =
           perAivStage(stage, implementation.aivSubblocks);
-      const StageMemoryCost fitted = IndirectGatherMemoryCostModel().cost(
-          executionStage, profile, implementation);
+      OrdinaryStoreMainResult ordinary =
+          ordinaryStoreMainCost(executionStage, profile, implementation,
+                                partition.operationOwnershipComplete);
+      OrdinaryLoadMainResult ordinaryLoad;
+      bool useOrdinaryLoad = false;
+      if (!ordinary.targetSystemCycles) {
+        ordinaryLoad =
+            ordinaryLoadMainCost(executionStage, profile, implementation,
+                                 partition.operationOwnershipComplete);
+        useOrdinaryLoad = ordinaryLoad.targetSystemCycles.has_value();
+        if (useOrdinaryLoad)
+          ordinary = ordinaryLoad;
+      }
+      const LogicalStage *pricingStage =
+          ordinary.auxiliaryStage ? &*ordinary.auxiliaryStage : &executionStage;
+      StageMemoryCost fitted = IndirectGatherMemoryCostModel().cost(
+          *pricingStage, profile, implementation);
       std::optional<StageResourceCycles> resources = mapWorkload(
-          executionStage, modeProfile, implementation.mode,
+          *pricingStage, modeProfile, implementation.mode,
           implementation.superblockFactor,
           implementation.mode == StageMode::SIMT && !implementation.localScope,
           std::nullopt, fitted);
+      if (!resources && ordinary.targetSystemCycles) {
+        // An unsupported auxiliary resource mapping cannot drop the Stage or
+        // turn target-only into an optimistic partial total. Restore fallback.
+        ordinary.auxiliaryStage.reset();
+        ordinary.targetSystemCycles.reset();
+        ordinary.reason = "auxiliary_resource_mapping_failed_original_fallback";
+        pricingStage = &executionStage;
+        fitted = IndirectGatherMemoryCostModel().cost(executionStage, profile,
+                                                      implementation);
+        resources =
+            mapWorkload(executionStage, modeProfile, implementation.mode,
+                        implementation.superblockFactor,
+                        implementation.mode == StageMode::SIMT &&
+                            !implementation.localScope,
+                        std::nullopt, fitted);
+      }
       if (!resources)
         continue;
       auto mapping =
@@ -4298,6 +4332,22 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
         cost.indirectLoadPricing = fitted.loadPricing;
       if (fitted.storePricing)
         cost.indirectStorePricing = fitted.storePricing;
+      cost.ordinaryLoadCandidateReason = ordinaryLoad.reason;
+      cost.ordinaryLoadLeaf = ordinaryLoad.leaf;
+      cost.ordinaryLoadSelectedUsed =
+          useOrdinaryLoad && ordinary.targetSystemCycles.has_value();
+      cost.ordinaryLoadTargetIncrementSystemCycles =
+          cost.ordinaryLoadSelectedUsed
+              ? ordinary.targetSystemCycles.value_or(0.0)
+              : 0.0;
+      cost.ordinaryStoreCandidateReason =
+          useOrdinaryLoad ? "Store_not_selected_Load_target_used"
+                          : ordinary.reason;
+      cost.ordinaryStoreLeaf = useOrdinaryLoad ? "" : ordinary.leaf;
+      cost.ordinaryStoreRound4CandidateUsed =
+          !useOrdinaryLoad && ordinary.targetSystemCycles.has_value();
+      cost.ordinaryStoreTargetIncrementSystemCycles =
+          useOrdinaryLoad ? 0.0 : ordinary.targetSystemCycles.value_or(0.0);
       if (implementation.aivSubblocks > 1)
         cost.perAivWorkload = executionStage.workload;
       if (resources->recurrenceGroupCriticalPath > 0.0 ||
@@ -4461,8 +4511,8 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       if (resources->rowwiseReductionGroupBody > 0.0)
         cost.formulaEvidence += "+bounded_ttir_row_extent_surface";
       cost.totalCycles =
-          applySuperBlock(executionStage, *resources, implementation, profile,
-                          estimateStage(executionStage, profile,
+          applySuperBlock(*pricingStage, *resources, implementation, profile,
+                          estimateStage(*pricingStage, profile,
                                         implementation.mode, *resources));
       if (fitted.nativeSimdEnvelope)
         cost.formulaEvidence += "+native_simd_target_loop_completion";
@@ -4475,6 +4525,40 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
             estimateStage(executionStage, profile, implementation.mode, upper));
         cost.totalCycles = (cost.totalCycles + high) / 2;
         cost.formulaEvidence += "+stage_density_range_midpoint";
+      }
+      if (ordinary.targetSystemCycles) {
+        auto total = indirect_store_round4::main_ta::composeTargetOnly(
+            cost.totalCycles, *ordinary.targetSystemCycles, 1.0);
+        if (!total)
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "ordinary memory target-only composition produced invalid units");
+        cost.totalCycles = *total;
+        cost.formulaEvidence = useOrdinaryLoad
+                                   ? "existing_Load_matched_target_increment_"
+                                     "plus_original_auxiliary"
+                                   : "frozen_round4_matched_target_increment_"
+                                     "plus_original_auxiliary";
+      }
+      // Composition residuals were trained against the original components.
+      // Retain that basis for an exact residual rebase, without changing the
+      // independently trained target increment or fitting kernel labels.
+      if (cost.ordinaryLoadSelectedUsed &&
+          stage.features.insideGridStrideLoopBody &&
+          implementation.mode == StageMode::SIMT &&
+          implementation.superblockFactor == 1) {
+        auto referenceFit = IndirectGatherMemoryCostModel().cost(
+            executionStage, profile, implementation);
+        auto reference =
+            mapWorkload(executionStage, modeProfile, implementation.mode, 1,
+                        !implementation.localScope, std::nullopt, referenceFit);
+        if (reference && !referenceFit.densityRange) {
+          cost.ordinaryLoadCompositionReference = *reference;
+          cost.ordinaryLoadCompositionReferenceCycles = applySuperBlock(
+              executionStage, *reference, implementation, profile,
+              estimateStage(executionStage, profile, implementation.mode,
+                            *reference));
+        }
       }
       if (implementation.aivSubblocks > 1) {
         cost.cvPartitionIdealTotalCycles = cost.totalCycles;

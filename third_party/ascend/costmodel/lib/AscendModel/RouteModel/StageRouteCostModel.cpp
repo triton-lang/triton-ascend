@@ -1293,8 +1293,11 @@ llvm::json::Object StageResourceCycles::toCompactJSON() const {
 }
 
 bool StageImplementationCost::isValid() const {
-  return implementation.isValid() && std::isfinite(totalCycles) &&
-         totalCycles >= 0.0 && std::isfinite(cvPartitionIdealTotalCycles) &&
+  return implementation.isValid() &&
+         std::isfinite(ordinaryStoreTargetIncrementSystemCycles) &&
+         ordinaryStoreTargetIncrementSystemCycles >= 0.0 &&
+         std::isfinite(totalCycles) && totalCycles >= 0.0 &&
+         std::isfinite(cvPartitionIdealTotalCycles) &&
          cvPartitionIdealTotalCycles >= 0.0 &&
          std::isfinite(cvPartitionPayloadEfficiency) &&
          cvPartitionPayloadEfficiency >= 0.0 &&
@@ -1324,6 +1327,17 @@ llvm::json::Object StageImplementationCost::toJSON() const {
            entries[name] = count;
          return entries;
        }()},
+      {"ordinary_load_selected_used", ordinaryLoadSelectedUsed},
+      {"ordinary_load_target_increment_system_cycles",
+       ordinaryLoadTargetIncrementSystemCycles},
+      {"ordinary_load_candidate_reason", ordinaryLoadCandidateReason},
+      {"ordinary_load_leaf", ordinaryLoadLeaf},
+      {"ordinary_store_round4_candidate_used",
+       ordinaryStoreRound4CandidateUsed},
+      {"ordinary_store_target_increment_system_cycles",
+       ordinaryStoreTargetIncrementSystemCycles},
+      {"ordinary_store_candidate_reason", ordinaryStoreCandidateReason},
+      {"ordinary_store_leaf", ordinaryStoreLeaf},
       {"resource_system_cycles", resources.toJSON()}};
   if (perAivWorkload)
     result["per_aiv_workload_before_superblock"] = perAivWorkload->toJSON();
@@ -1344,6 +1358,17 @@ llvm::json::Object StageImplementationCost::toCompactJSON() const {
       {"indirect_store_pricing", indirectStorePricing},
       {"total_system_cycles", totalCycles},
       {"formula_evidence", formulaEvidence},
+      {"ordinary_load_selected_used", ordinaryLoadSelectedUsed},
+      {"ordinary_load_target_increment_system_cycles",
+       ordinaryLoadTargetIncrementSystemCycles},
+      {"ordinary_load_candidate_reason", ordinaryLoadCandidateReason},
+      {"ordinary_load_leaf", ordinaryLoadLeaf},
+      {"ordinary_store_round4_candidate_used",
+       ordinaryStoreRound4CandidateUsed},
+      {"ordinary_store_target_increment_system_cycles",
+       ordinaryStoreTargetIncrementSystemCycles},
+      {"ordinary_store_candidate_reason", ordinaryStoreCandidateReason},
+      {"ordinary_store_leaf", ordinaryStoreLeaf},
       {"resource_system_cycles", resources.toCompactJSON()}};
   if (localScopeCompletionInclusive)
     result["local_scope_completion_inclusive"] = true;
@@ -2373,10 +2398,17 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
   const int64_t wholeKernelGroupIterations = parentSchedule.wholeIterations;
   const int64_t mixedLoopIterations = parentSchedule.mixedIterations;
 
+  const bool hasV1Schedule =
+      llvm::any_of(costTable.stages, [](const LogicalStageCost &stage) {
+        return stage.model == "auto_blockify_dispatch" ||
+               stage.model == "auto_blockify_loop";
+      });
+  // V1 keeps the logical grid in its launcher ABI; newer grid contracts
+  // materialize F logical programs in each physical block.
   // A whole-kernel SIMT SuperBlock materializes F logical programs in one
   // physical block.
   const int64_t launchedPhysicalPrograms =
-      plan.candidate == StageKernelRouteKind::AllSIMT
+      plan.candidate == StageKernelRouteKind::AllSIMT && !hasV1Schedule
           ? ceilDivNonNegative(logicalPrograms, factor)
           : logicalPrograms;
   plan.runtimePhysicalProgramCount =
@@ -2397,11 +2429,6 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
     break;
   }
 
-  const bool hasV1Schedule =
-      llvm::any_of(costTable.stages, [](const LogicalStageCost &stage) {
-        return stage.model == "auto_blockify_dispatch" ||
-               stage.model == "auto_blockify_loop";
-      });
   const bool hasGridStrideLoop =
       llvm::any_of(costTable.stages, [](const LogicalStageCost &stage) {
         return stage.features.isGridStrideLoopShell;
@@ -3113,6 +3140,46 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
             totalResidual},
            {"grid_stride_composition_evidence", compositionEvidence}});
       plan.totalCycles += totalResidual;
+      // Inclusion-exclusion residuals depend on their component basis.
+      // Rebase only the factor-one SIMT contract with a single replaced
+      // indirect component; retain the generic target and expose the offset.
+      if (plan.candidate == StageKernelRouteKind::AllSIMT && factor == 1) {
+        const StageImplementationCost *replacement = nullptr;
+        unsigned replacements = 0;
+        for (size_t index = 0; index < costTable.stages.size(); ++index) {
+          if (!costTable.stages[index].features.insideGridStrideLoopBody)
+            continue;
+          const auto *selected = findImplementationCost(
+              costTable.stages[index], plan.implementations[index]);
+          if (selected && selected->ordinaryLoadCompositionReference) {
+            replacement = selected;
+            ++replacements;
+          }
+        }
+        if (replacements == 1 && replacement &&
+            !plan.diagnostic<bool>(
+                "grid_stride_first_indirect_service_owned_by_boundary")) {
+          const auto &reference =
+              *replacement->ordinaryLoadCompositionReference;
+          if (reference.gridStrideStartup > 0.0 &&
+              reference.indirectLoadGroup > 0.0) {
+            const double oldStartup =
+                plan.diagnostic<double>("grid_stride_startup_system_cycles");
+            const double rebase =
+                static_cast<double>(programsPerSchedulingSlot) *
+                    (replacement->ordinaryLoadCompositionReferenceCycles -
+                     replacement->totalCycles) +
+                std::max(oldStartup, reference.gridStrideStartup) - oldStartup -
+                reference.indirectLoadGroup;
+            plan.totalCycles += rebase;
+            setDiagnostics(
+                plan,
+                {{"ordinary_load_composition_basis_rebased", true},
+                 {"ordinary_load_composition_basis_adjustment_system_cycles",
+                  rebase}});
+          }
+        }
+      }
     }
   }
   if (plan.candidate == StageKernelRouteKind::AllSIMT ||

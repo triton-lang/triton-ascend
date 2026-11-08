@@ -48,15 +48,38 @@ void init_native_specialize(pybind11::module &m);
 FOR_EACH_P(DECLARE_BACKEND, TRITON_BACKENDS_TUPLE)
 
 PYBIND11_MODULE(libtriton, m) {
-  m.doc() = "Python bindings to the C++ Triton API";
-  init_triton_stacktrace_hook(m);
-  init_triton_env_vars(m);
-  init_native_specialize(m);
-  init_triton_ir(m.def_submodule("ir"));
-  init_triton_passes(m.def_submodule("passes"));
-  init_triton_interpreter(m.def_submodule("interpreter"));
-  init_triton_llvm(m.def_submodule("llvm"));
-  init_linear_layout(m.def_submodule("linear_layout"));
-  init_gluon_ir(m.def_submodule("gluon_ir"));
-  FOR_EACH_P(INIT_BACKEND, TRITON_BACKENDS_TUPLE)
+  // Ascend initialization imports this parent to attach buffer/IR bindings.
+  // pybind11's supported single-phase initializer has not published it yet.
+  // Publish this exact module while those callbacks run, and undo only our
+  // entry if initialization throws; never shadow a different loaded module.
+  py::dict modules = py::module_::import("sys").attr("modules");
+  py::str moduleName = m.attr("__name__");
+  const bool hadParent = modules.contains(moduleName);
+  py::object previous =
+      hadParent ? py::reinterpret_borrow<py::object>(modules[moduleName])
+                : py::none();
+  if (hadParent && !previous.is(m))
+    throw py::import_error("libtriton parent already names a different module");
+  modules[moduleName] = m;
+  try {
+    m.doc() = "Python bindings to the C++ Triton API";
+    init_triton_stacktrace_hook(m);
+    init_triton_env_vars(m);
+    init_native_specialize(m);
+    init_triton_ir(m.def_submodule("ir"));
+    init_triton_passes(m.def_submodule("passes"));
+    init_triton_interpreter(m.def_submodule("interpreter"));
+    init_triton_llvm(m.def_submodule("llvm"));
+    init_linear_layout(m.def_submodule("linear_layout"));
+    init_gluon_ir(m.def_submodule("gluon_ir"));
+    FOR_EACH_P(INIT_BACKEND, TRITON_BACKENDS_TUPLE)
+  } catch (...) {
+    if (modules.contains(moduleName) && modules[moduleName].ptr() == m.ptr()) {
+      if (hadParent)
+        modules[moduleName] = previous;
+      else
+        modules.attr("pop")(moduleName);
+    }
+    throw;
+  }
 }

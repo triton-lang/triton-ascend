@@ -149,41 +149,13 @@ inline SmallVector<VisibilityAxis> visibilityAxesImpl(Value value,
     }
     return result;
   }
-  if (name == "tt.expand_dims" && op->getNumOperands() == 1) {
-    auto axis = op->getAttrOfType<IntegerAttr>("axis");
-    auto source =
-        visibilityAxesImpl(op->getOperand(0), entry, depth + 1, remaining);
-    if (!axis || axis.getInt() < 0 ||
-        static_cast<size_t>(axis.getInt()) >= rank || source.size() + 1 != rank)
-      return result;
-    for (size_t i = 0, j = 0; i < rank; ++i) {
-      if (i == static_cast<size_t>(axis.getInt()))
-        result[i].valid = true;
-      else
-        result[i] = source[j++];
-    }
-    return result;
-  }
-  if (name == "tt.broadcast" && op->getNumOperands() == 1) {
-    auto from = dyn_cast<RankedTensorType>(op->getOperand(0).getType());
-    auto to = dyn_cast<RankedTensorType>(value.getType());
-    auto source =
-        visibilityAxesImpl(op->getOperand(0), entry, depth + 1, remaining);
-    if (!from || !to || source.size() != rank)
-      return result;
-    for (size_t i = 0; i < rank; ++i) {
-      if (from.getDimSize(i) == 1)
-        result[i].valid = true;
-      else if (from.getDimSize(i) == to.getDimSize(i))
-        result[i] = source[i];
-    }
-    return result;
-  }
-  if (name == "arith.extsi" && op->getNumOperands() == 1) {
-    auto source =
-        visibilityAxesImpl(op->getOperand(0), entry, depth + 1, remaining);
-    return source.size() == rank ? source : result;
-  }
+  VisibilityAxis zeroAxis;
+  zeroAxis.valid = true;
+  if (auto shaped =
+          propagateAxisShape(value, result, zeroAxis, [&](Value source) {
+            return visibilityAxesImpl(source, entry, depth + 1, remaining);
+          }))
+    return *shaped;
   if (op->getNumOperands() != 2 ||
       (name != "tt.addptr" && name != "arith.addi" && name != "arith.muli"))
     return result;

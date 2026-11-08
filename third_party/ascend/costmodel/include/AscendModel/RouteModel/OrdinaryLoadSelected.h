@@ -12,9 +12,9 @@ struct Metadata : indirect_store_selected::Metadata {
 };
 inline constexpr bool productionEnabled = true;
 inline constexpr const char *simdSourceSha256 =
-    "1e94c138dedd419af9bfd64bbf4b928fc0e6ca5a8eb5feb460d647e5d1df8672";
+    "529a0219c8c4241e1f9565888132ef2cc0a82de806c2580a7d7f301612e4fc65";
 inline constexpr const char *simtSourceSha256 =
-    "970d83be1e6e95afa65adc4f1127e34ed0ff53da5340f68b4a3b31b3cad79f67";
+    "0e66084dd52a8f272c167fdbd6a613646e30206d425739a513064a414b6c096c";
 enum class Instruction { Linear, Exp, LE, EQ, Scale, Blend };
 struct ProgramNode {
   Instruction kind;

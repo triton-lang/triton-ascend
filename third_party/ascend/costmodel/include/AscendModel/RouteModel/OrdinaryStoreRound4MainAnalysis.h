@@ -46,6 +46,45 @@ inline std::optional<int64_t> constant(Value value, unsigned depth = 0) {
       return a.getSplatValue<APInt>().getSExtValue();
   return std::nullopt;
 }
+// Shape-only operations preserve either static or visible-stride axis facts.
+// The supplied recursive analysis retains its own depth and node budget.
+template <typename AxisFacts, typename Analyze>
+std::optional<SmallVector<AxisFacts>>
+propagateAxisShape(Value value, SmallVector<AxisFacts> result, AxisFacts zero,
+                   Analyze analyze) {
+  Operation *op = value.getDefiningOp();
+  if (!op || op->getNumOperands() != 1)
+    return std::nullopt;
+  const auto name = op->getName().getStringRef();
+  if (name != "tt.expand_dims" && name != "tt.broadcast" &&
+      name != "arith.extsi")
+    return std::nullopt;
+  const size_t rank = result.size();
+  auto source = analyze(op->getOperand(0));
+  if (name == "arith.extsi")
+    return source.size() == rank ? source : result;
+  if (name == "tt.expand_dims") {
+    auto axis = op->getAttrOfType<IntegerAttr>("axis");
+    if (!axis || axis.getInt() < 0 ||
+        static_cast<size_t>(axis.getInt()) >= rank || source.size() + 1 != rank)
+      return result;
+    for (size_t i = 0, j = 0; i < rank; ++i)
+      result[i] = i == static_cast<size_t>(axis.getInt()) ? zero : source[j++];
+    return result;
+  }
+  auto from = dyn_cast<RankedTensorType>(op->getOperand(0).getType());
+  auto to = dyn_cast<RankedTensorType>(value.getType());
+  if (!from || !to || source.size() != rank)
+    return result;
+  for (size_t i = 0; i < rank; ++i) {
+    if (from.getDimSize(i) == 1)
+      result[i] = zero;
+    else if (from.getDimSize(i) == to.getDimSize(i))
+      result[i] = source[i];
+  }
+  return result;
+}
+
 inline SmallVector<Axis> axesImpl(Value value, unsigned depth,
                                   unsigned &remaining) {
   auto result = unknown(value);
@@ -89,36 +128,11 @@ inline SmallVector<Axis> axesImpl(Value value, unsigned depth,
     }
     return result;
   }
-  if (name == "tt.expand_dims" && op->getNumOperands() == 1) {
-    auto axis = op->getAttrOfType<IntegerAttr>("axis");
-    auto src = axesImpl(op->getOperand(0), depth + 1, remaining);
-    if (!axis || axis.getInt() < 0 ||
-        static_cast<size_t>(axis.getInt()) >= rank || src.size() + 1 != rank)
-      return result;
-    for (size_t i = 0, j = 0; i < rank; ++i)
-      result[i] = i == static_cast<size_t>(axis.getInt()) ? Axis{} : src[j++];
-    return result;
-  }
-  if (name == "tt.broadcast" && op->getNumOperands() == 1) {
-    auto srcType = dyn_cast<RankedTensorType>(op->getOperand(0).getType());
-    auto dstType = dyn_cast<RankedTensorType>(value.getType());
-    auto src = axesImpl(op->getOperand(0), depth + 1, remaining);
-    if (!srcType || !dstType || src.size() != rank)
-      return result;
-    for (size_t i = 0; i < rank; ++i) {
-      if (srcType.getDimSize(i) == 1)
-        result[i] = Axis{};
-      else if (srcType.getDimSize(i) == dstType.getDimSize(i))
-        result[i] = src[i];
-    }
-    return result;
-  }
-  // Signed widening preserves loaded integer values; truncation, zero
-  // extension and reshape do not receive an implicit geometry equivalence.
-  if (name == "arith.extsi" && op->getNumOperands() == 1) {
-    auto src = axesImpl(op->getOperand(0), depth + 1, remaining);
-    return src.size() == rank ? src : result;
-  }
+  if (auto shaped =
+          propagateAxisShape(value, result, Axis{}, [&](Value source) {
+            return axesImpl(source, depth + 1, remaining);
+          }))
+    return *shaped;
   if (op->getNumOperands() != 2 ||
       (name != "tt.addptr" && name != "arith.addi" && name != "arith.subi" &&
        name != "arith.muli"))

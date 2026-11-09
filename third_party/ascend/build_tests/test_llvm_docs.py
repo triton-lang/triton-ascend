@@ -1,9 +1,6 @@
-import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import textwrap
 
 import pytest
@@ -43,17 +40,13 @@ def test_documented_checkout_uses_the_local_manifest(document, tmp_path):
     root = tmp_path / "ascend"
     build = root / "cmake"
     build.mkdir(parents=True)
-    deps = build
     patch_dir = root / "third_party/ascend/patch"
     patch_dir.mkdir(parents=True)
     patch_name = "llvm_patch_fixture.patch"
-    (deps / "llvm-info.json").write_text(
-        json.dumps({"schema_version": 1, "llvm_hash": revision, "patches": [patch_name]}))
+    (build / "llvm-hash.txt").write_text(revision)
     (patch_dir / patch_name).write_text(
         "diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n"
         "@@ -1 +1 @@\n-original\n+patched\n", newline="\n")
     command = command.replace("https://github.com/llvm/llvm-project.git", f'"{upstream.as_posix()}" llvm-project')
-    wrapper = 'set -eu\npython3() { "$TEST_PYTHON" "$@"; }\n' + command
-    subprocess.run([bash, "-c", wrapper], cwd=root, env={**os.environ, "TEST_PYTHON": Path(sys.executable).as_posix()},
-                   check=True, capture_output=True, text=True)
+    subprocess.run([bash, "-c", "set -eu\n" + command], cwd=root, check=True, capture_output=True, text=True)
     assert (root / "llvm-project/example.txt").read_text() == "patched\n"

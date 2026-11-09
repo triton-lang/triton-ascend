@@ -1,6 +1,5 @@
 import glob
 import hashlib
-import json
 from pathlib import Path
 import re
 import shutil
@@ -24,7 +23,7 @@ def fingerprint(root, patterns):
 ])
 def test_compiler_cache_inputs_follow_the_canonical_pin_and_patch_bytes(workflow, tmp_path):
     text = (REPO / ".github/workflows" / workflow).read_text(encoding="utf-8")
-    keys = [key for key in re.findall(r"hashFiles\(([^)]+)\)", text) if "llvm-info.json" in key]
+    keys = [key for key in re.findall(r"hashFiles\(([^)]+)\)", text) if "llvm-hash.txt" in key]
     assert keys
     for key in keys:
         patterns = re.findall(r"'([^']+)'", key)
@@ -35,12 +34,10 @@ def test_compiler_cache_inputs_follow_the_canonical_pin_and_patch_bytes(workflow
                     target = tmp_path / source.relative_to(REPO)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(source, target)
-        pin = tmp_path / "cmake/llvm-info.json"
+        pin = tmp_path / "cmake/llvm-hash.txt"
         pin.parent.mkdir(parents=True, exist_ok=True)
         before = fingerprint(tmp_path, patterns)
-        data = json.loads(pin.read_text())
-        data["llvm_hash"] = "b" * 40
-        pin.write_text(json.dumps(data))
+        pin.write_text("b" * 40)
         assert fingerprint(tmp_path, patterns) != before, f"{workflow}: canonical pin missing from cache inputs"
 
         json_pin = tmp_path / "cmake/json-version.txt"

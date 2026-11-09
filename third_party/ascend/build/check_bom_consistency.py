@@ -9,7 +9,7 @@ import os
 import re
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 DEPS_DIR = REPO_ROOT / "cmake"
 WORKFLOWS_DIR = REPO_ROOT / ".github/workflows"
 SCHEMA_VERSION = 1
@@ -51,23 +51,14 @@ def _line_no(text, pos):
 
 def _load_llvm_info():
     root = REPO_ROOT
-    info = _load_json(DEPS_DIR / "llvm-info.json")
-    if set(info) != {"schema_version", "llvm_hash", "patches"}:
-        raise ValueError("llvm-info.json requires schema_version, llvm_hash and patches")
-    revision = info["llvm_hash"]
-    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-fA-F]{40}", revision) is None:
-        raise ValueError("llvm_hash must contain exactly 40 hexadecimal characters")
-    patches = info["patches"]
-    if (not isinstance(patches, list)
-            or any(not isinstance(name, str) or re.fullmatch(r"llvm_patch_[A-Za-z0-9_.-]+\.patch", name) is None
-                   for name in patches)):
-        raise ValueError("patches must list LLVM patch basenames")
-    if patches != sorted(set(patches)):
-        raise ValueError("patches must be unique and sorted to preserve the existing patch order")
+    revision = _read(DEPS_DIR / "llvm-hash.txt").strip()
+    if re.fullmatch(r"[0-9a-fA-F]{40}", revision) is None:
+        raise ValueError("llvm-hash.txt must contain exactly 40 hexadecimal characters")
     patch_dir = root / "third_party/ascend/patch"
-    actual = sorted(path.name for path in patch_dir.glob("llvm_patch_*.patch") if path.is_file())
-    if patches != actual:
-        raise ValueError(f"LLVM patch manifest mismatch: declared {patches}, found {actual}")
+    patches = sorted(path.name for path in patch_dir.glob("llvm_patch_*.patch") if path.is_file())
+    if any(re.fullmatch(r"llvm_patch_[A-Za-z0-9_.-]+\.patch", name) is None for name in patches):
+        raise ValueError("LLVM patches must have safe basenames")
+    info = {"llvm_hash": revision, "patches": patches}
     return info
 
 
@@ -110,7 +101,7 @@ def _glob_exists(relative):
     """Check a (possibly checkout-prefixed) hashFiles() argument against the repo.
 
     Some workflows check the PR out under a ``pr/`` directory, so arguments
-    like ``pr/cmake/llvm-info.json`` must match after stripping the prefix.
+    like ``pr/cmake/llvm-hash.txt`` must match after stripping the prefix.
     Only the declared :data:`CHECKOUT_ROOTS` prefixes may be stripped; an
     arbitrary leading component (a typo like ``wrng/requirements.txt``) must
     keep failing even when the remaining path exists.
@@ -127,7 +118,7 @@ def _glob_exists(relative):
 
 
 def check_docs_llvm_hash():
-    """Check reintroduced literals against the local pin and patch manifest."""
+    """Check reintroduced literals against the local pin and patch files."""
     info = _load_llvm_info()
     llvm_hash = info["llvm_hash"]
     checkout_re = re.compile(r"git checkout ([0-9a-f]{40})\b")
@@ -139,13 +130,13 @@ def check_docs_llvm_hash():
                 _fail(
                     "docs-llvm-hash",
                     f"{rel}:{_line_no(text, match.start())} hardcodes 'git checkout {match.group(1)}', "
-                    f"but the BOM pins {llvm_hash}; read cmake/llvm-info.json instead")
+                    f"but the BOM pins {llvm_hash}; read cmake/llvm-hash.txt instead")
         for match in patch_re.finditer(text):
             if match.group(0) not in info["patches"]:
                 _fail(
                     "docs-llvm-hash",
                     f"{rel}:{_line_no(text, match.start())} references patch {match.group(0)}, which does "
-                    f"not appear in the local LLVM patch manifest")
+                    f"not appear in the local LLVM patch set")
 
 
 def check_workflow_cache_paths():
@@ -160,15 +151,15 @@ def check_workflow_cache_paths():
 
 
 def check_release_llvm():
-    info = _load_json(DEPS_DIR / "llvm-info.json")
+    info = _load_llvm_info()
     text = _read(REPO_ROOT / "docs/en/community/release_policy.md")
     row = next((line for line in text.splitlines() if re.match(r"\|\s*`main`\s*\|", line)), "")
     commits = re.findall(r"\[([0-9a-f]{7,40})\]\(https://github.com/llvm/llvm-project/commit/([0-9a-f]{7,40})\)", row)
     if len(commits) != 1 or any(not info["llvm_hash"].startswith(value) for value in commits[0]):
-        _fail("release-policy", "main LLVM differs from cmake/llvm-info.json")
+        _fail("release-policy", "main LLVM differs from cmake/llvm-hash.txt")
     patches = set(re.findall(r"llvm_patch_[A-Za-z0-9_.-]+\.patch", row))
     if patches != set(info["patches"]):
-        _fail("release-policy", "main patch list differs from cmake/llvm-info.json")
+        _fail("release-policy", "main patch list differs from cmake/llvm-hash.txt")
 
 
 def main():

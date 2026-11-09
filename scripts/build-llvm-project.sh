@@ -6,7 +6,7 @@ LLVM_TARGETS=${LLVM_TARGETS:-Native;NVPTX;AMDGPU}
 LLVM_PROJECTS=${LLVM_PROJECTS:-mlir;llvm;lld}
 LLVM_BUILD_TYPE=${LLVM_BUILD_TYPE:-RelWithDebInfo}
 if [ -z "${LLVM_COMMIT_HASH:-}" ]; then
-    LLVM_COMMIT_HASH=$("${PYTHON:-python3}" -c 'import json, sys; print(json.load(open(sys.argv[1]))["llvm_hash"])' "$REPO_ROOT/cmake/llvm-info.json") || exit 1
+    LLVM_COMMIT_HASH=$(cat "$REPO_ROOT/cmake/llvm-hash.txt") || exit 1
 fi
 LLVM_PROJECT_PATH=${LLVM_PROJECT_PATH:-"$REPO_ROOT/llvm-project"}
 LLVM_BUILD_PATH=${LLVM_BUILD_PATH:-"$LLVM_PROJECT_PATH/build"}

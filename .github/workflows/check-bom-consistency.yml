@@ -27,4 +27,4 @@ jobs:
           python -m pytest -q third_party/ascend/build_tests
 
       - name: Run BOM consistency checks
-        run: python3 scripts/check_bom_consistency.py
+        run: python3 third_party/ascend/build/check_bom_consistency.py

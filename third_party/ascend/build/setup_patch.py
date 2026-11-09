@@ -18,7 +18,6 @@ All Ascend-specific behavior stays isolated under ``third_party/ascend/build``;
 import glob
 import os
 import platform
-import json
 import shutil
 import subprocess
 import sys
@@ -29,8 +28,6 @@ try:
     from setuptools.command.bdist_wheel import bdist_wheel
 except ImportError:
     from wheel.bdist_wheel import bdist_wheel
-
-from python.build_helpers import check_env_flag, get_llvm_system_suffix, is_linux_os
 
 from .build_npuir import build_npuir
 
@@ -54,6 +51,38 @@ def _is_git_repo():
     return (_REPO_ROOT / ".git").is_dir()
 
 
+def check_env_flag(name: str, default: str = "") -> bool:
+    return os.getenv(name, default).upper() in ["ON", "1", "YES", "TRUE", "Y"]
+
+
+def _is_linux_os(os_id):
+    if os.path.exists("/etc/os-release"):
+        with open("/etc/os-release", "r") as f:
+            return f'ID="{os_id}"' in f.read()
+    return False
+
+
+def _get_llvm_system_suffix():
+    if env_system_suffix := os.environ.get("TRITON_LLVM_SYSTEM_SUFFIX"):
+        return env_system_suffix
+    system = platform.system()
+    machine = platform.machine()
+    arch = {"x86_64": "x64", "aarch64": "arm64"}.get(machine, machine)
+    if system == "Darwin":
+        return f"macos-{arch}"
+    if system == "Linux":
+        if arch == "arm64":
+            return "almalinux-arm64" if _is_linux_os("almalinux") else "ubuntu-arm64"
+        if arch == "x64":
+            # Ascend manylinux must keep its AlmaLinux artifact even when
+            # glibc > 2.28 would select Ubuntu in the upstream heuristic.
+            if _is_linux_os("almalinux"):
+                return "almalinux-x64"
+            major, minor, *_ = map(int, platform.libc_ver()[1].split("."))
+            return "ubuntu-x64" if major * 100 + minor > 228 else "almalinux-x64"
+    return None
+
+
 def _get_llvm_patch_hash():
     patch_dir = _REPO_ROOT / "third_party" / "ascend" / "patch"
     patch_files = sorted(path for path in patch_dir.glob("llvm_patch_*.patch") if path.is_file())
@@ -67,19 +96,11 @@ def _get_llvm_patch_hash():
 
 
 def _get_ascend_llvm_package_info(base_dir):
-    # Ascend manylinux must use the AlmaLinux artifact even with glibc > 2.28;
-    # the common upstream heuristic would select an Ubuntu artifact there.
-    if (not os.getenv("TRITON_LLVM_SYSTEM_SUFFIX") and platform.system() == "Linux" and platform.machine() == "x86_64"
-            and is_linux_os("almalinux")):
-        system_suffix = "almalinux-x64"
-    else:
-        system_suffix = get_llvm_system_suffix()
+    system_suffix = _get_llvm_system_suffix()
     if system_suffix is None:
         return None
 
-    with open(Path(base_dir) / "cmake/llvm-info.json", encoding="utf-8") as llvm_info_file:
-        llvm_info = json.load(llvm_info_file)
-    rev = llvm_info["llvm_hash"][:8]
+    rev = (Path(base_dir) / "cmake/llvm-hash.txt").read_text(encoding="utf-8")[:8]
     patch_hash = _get_llvm_patch_hash()
     name = f"llvm-{rev}-{patch_hash}-{system_suffix}"
     sym_name = f"llvm-{system_suffix}"
@@ -482,6 +503,14 @@ def patch_module(mod):
         return _orig_get_llvm_package_info()
 
     mod.get_llvm_package_info = get_llvm_package_info
+
+    # Keep the upstream setup.py definitions intact; only Ascend reads this tag.
+    def get_json_package_info():
+        version = (Path(mod.get_base_dir()) / "cmake/json-version.txt").read_text(encoding="utf-8").strip()
+        url = f"https://github.com/nlohmann/json/releases/download/{version}/include.zip"
+        return mod.Package("json", "", url, "JSON_INCLUDE_DIR", "", "JSON_SYSPATH")
+
+    mod.get_json_package_info = get_json_package_info
 
     # 3. Skip downloading NVIDIA proprietary toolchain dependencies
     #    (ptxas/cuobjdump/...); they are irrelevant for the Ascend wheel.

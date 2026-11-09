@@ -12,7 +12,7 @@ on:
       - python/build_helpers.py
       - pyproject.toml
       - version.txt
-      - cmake/llvm-info.json
+      - cmake/llvm-hash.txt
       - cmake/json-version.txt
       - cmake/bisheng-info.json
       - third_party/ascend/build/**

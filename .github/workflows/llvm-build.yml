@@ -3,16 +3,16 @@ name: LLVM Build
 on:
   push:
     paths:
-      - cmake/llvm-info.json
+      - cmake/llvm-hash.txt
       - third_party/ascend/patch/llvm_patch_*.patch
-      - python/build_helpers.py
+      - third_party/ascend/build/setup_patch.py
       - .github/workflows/llvm-build.yml
       - .github/workflows/build/almalinux.Dockerfile
   pull_request:
     paths:
-      - cmake/llvm-info.json
+      - cmake/llvm-hash.txt
       - third_party/ascend/patch/llvm_patch_*.patch
-      - python/build_helpers.py
+      - third_party/ascend/build/setup_patch.py
       - .github/workflows/llvm-build.yml
       - .github/workflows/build/almalinux.Dockerfile
   workflow_dispatch:
@@ -63,8 +63,7 @@ jobs:
         sed -i 's|http://security.ubuntu.com|http://cache-service.nginx-pypi-cache.svc.cluster.local:8081|g' /etc/apt/sources.list 2>/dev/null || true
         apt-get update
         # AlmaLinux targets also run in this Ubuntu container before buildx.
-        # jq reads metadata; Python/pip install the build prerequisites below.
-        apt-get install -y --no-install-recommends jq python3 python3-pip
+        apt-get install -y --no-install-recommends python3 python3-pip
         if [ "${{ matrix.config.target-os }}" = 'ubuntu' ]; then
           apt-get install -y --no-install-recommends clang lld
         fi
@@ -72,7 +71,8 @@ jobs:
     - name: Fetch LLVM Commit Hash
       shell: bash
       run: |
-        LLVM_COMMIT_HASH=$(jq -er '.llvm_hash | strings | select(test("^[0-9a-fA-F]{40}$"))' cmake/llvm-info.json)
+        LLVM_COMMIT_HASH=$(cat cmake/llvm-hash.txt)
+        [[ "$LLVM_COMMIT_HASH" =~ ^[0-9a-fA-F]{40}$ ]]
         echo "llvm_commit_hash=${LLVM_COMMIT_HASH}" | tee -a "$GITHUB_ENV"
         echo "short_llvm_commit_hash=${LLVM_COMMIT_HASH:0:8}" | tee -a "$GITHUB_ENV"
 

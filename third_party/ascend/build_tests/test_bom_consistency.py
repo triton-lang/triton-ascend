@@ -1,26 +1,6 @@
-import importlib.util
 import json
-from pathlib import Path
-import shutil
 
 import pytest
-
-REPO = Path(__file__).resolve().parents[3]
-
-
-@pytest.fixture
-def checker(tmp_path, monkeypatch):
-    spec = importlib.util.spec_from_file_location("bom_checker_test", REPO / "scripts/check_bom_consistency.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    for relative in ["requirements.txt", "docker/Dockerfile", "docs/en/community/release_policy.md"]:
-        target = tmp_path / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(REPO / relative, target)
-    shutil.copytree(REPO / "cmake", tmp_path / "cmake")
-    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(module, "DEPS_DIR", tmp_path / "cmake")
-    return module
 
 
 def test_unknown_checkout_prefix_stays_invalid(checker):
@@ -61,3 +41,10 @@ def test_release_policy_cannot_silently_drift_llvm_or_patch(checker, field):
     path.write_text(text, encoding="utf-8")
     checker.check_release_llvm()
     assert checker.errors
+
+
+def test_duplicate_json_keys_are_rejected(checker):
+    path = checker.DEPS_DIR / "bisheng-info.json"
+    path.write_text('{"schema_version": 1, "schema_version": 1}')
+    with pytest.raises(ValueError, match="duplicate"):
+        checker._load_bisheng_info()

@@ -3,7 +3,11 @@ import ctypes as C
 import json
 import os
 import threading
+import time
 import warnings
+from pathlib import Path
+
+_CHANNEL_IDS = range(11, 29)
 
 
 class ScopeRecord(C.Structure):
@@ -20,17 +24,6 @@ class MsptiInstrumentationCollector:
     _lock = threading.Lock()
 
     def __init__(self):
-        selection = os.environ.get("PROTON_INSTRUMENTATION_CHANNELS")
-        self.channels = None
-        if selection is not None:
-            try:
-                self.channels = [int(value.strip()) for value in selection.split(",")]
-            except ValueError as error:
-                raise ValueError(
-                    "PROTON_INSTRUMENTATION_CHANNELS must be a comma-separated subset of 11..28") from error
-            if not self.channels or len(set(self.channels)) != len(self.channels) or any(channel < 11 or channel > 28
-                                                                                         for channel in self.channels):
-                raise ValueError("PROTON_INSTRUMENTATION_CHANNELS must contain unique channel IDs in 11..28")
         self.lib = C.CDLL(os.environ.get("PROTON_MSPTI_LIBRARY_PATH", "libmspti.so"))
         signatures = {
             "msptiInstrumentationStart": [C.c_uint32, C.POINTER(C.c_void_p)],
@@ -45,11 +38,6 @@ class MsptiInstrumentationCollector:
             [C.c_void_p, C.c_uint32, C.POINTER(C.POINTER(C.c_uint8)),
              C.POINTER(C.c_size_t)],
         }
-        if self.channels is not None:
-            signatures["msptiInstrumentationStartWithChannels"] = [
-                C.c_uint32, C.POINTER(C.c_uint32), C.c_size_t,
-                C.POINTER(C.c_void_p)
-            ]
         for name, args in signatures.items():
             try:
                 fn = getattr(self.lib, name)
@@ -58,10 +46,9 @@ class MsptiInstrumentationCollector:
                     f"A5 instrumentation requires the MSPTI instrumentation PoC library with {name}") from error
             fn.argtypes, fn.restype = args, C.c_int
         self.handle = C.c_void_p()
-        requested = self.channels if self.channels is not None else list(range(11, 29))
         warnings.warn(
-            f"A5 instrumentation samples hardware channels {requested}, not every Triton program/block. "
-            "Channel IDs are not core IDs; an empty capture can mean the selected channels did not observe the kernel.",
+            "A5 instrumentation samples hardware channels, not every Triton program/block. "
+            "Channel IDs are not core IDs; an empty capture does not prove that the kernel did not execute.",
             stacklevel=2)
 
     @staticmethod
@@ -81,13 +68,7 @@ class MsptiInstrumentationCollector:
             convert.argtypes = [C.c_uint32, C.POINTER(C.c_uint32)]
             convert.restype = C.c_int
             self._check(convert(torch.npu.current_device(), C.byref(physical)), "physical device lookup")
-            if self.channels is None:
-                rc = self.lib.msptiInstrumentationStart(physical.value, C.byref(self.handle))
-            else:
-                channels = (C.c_uint32 * len(self.channels))(*self.channels)
-                rc = self.lib.msptiInstrumentationStartWithChannels(physical.value, channels, len(channels),
-                                                                    C.byref(self.handle))
-            self._check(rc, "start")
+            self._check(self.lib.msptiInstrumentationStart(physical.value, C.byref(self.handle)), "start")
         except BaseException:
             self._lock.release()
             raise
@@ -105,26 +86,7 @@ class MsptiInstrumentationCollector:
                 "read")
             status = {name: getattr(stats, name) for name, _ in CollectionStats._fields_}
             values = [(r.channel, r.pipe, r.scope, r.start, r.end, r.frequency) for r in records[:count.value]]
-            if os.environ.get("PROTON_INSTRUMENTATION_DEBUG_DIR"):
-                from pathlib import Path
-                import time
-                directory = Path(os.environ["PROTON_INSTRUMENTATION_DEBUG_DIR"]) / str(time.time_ns())
-                directory.mkdir(parents=True)
-                requested = self.channels if self.channels is not None else list(range(11, 29))
-                coverage = {
-                    "kind": "sampled_hardware_channels", "requested_channels": requested, "observed_channels":
-                    sorted({row[0]
-                            for row in values}), "all_logical_blocks": False
-                }
-                (directory / "records.json").write_text(
-                    json.dumps({"stats": status, "records": values, "coverage": coverage}, indent=2))
-                for channel in requested:
-                    raw, size = C.POINTER(C.c_uint8)(), C.c_size_t()
-                    self._check(
-                        self.lib.msptiInstrumentationGetRawData(self.handle, channel, C.byref(raw), C.byref(size)),
-                        "raw read")
-                    if size.value:
-                        (directory / f"channel-{channel}.bin").write_bytes(C.string_at(raw, size.value))
+            self._dump_debug(status, values)
             if rc or not count.value:
                 raise RuntimeError(
                     f"Incomplete/empty MSPTI instrumentation capture: rc={rc}, stats={json.dumps(status)}; "
@@ -137,7 +99,29 @@ class MsptiInstrumentationCollector:
                 raise RuntimeError("Mixed AIC/AIV frequencies require separate instrumentation clock domains")
             return values
         finally:
-            rc = self.lib.msptiInstrumentationDestroy(self.handle)
-            self.handle = C.c_void_p()
-            self._lock.release()
+            try:
+                rc = self.lib.msptiInstrumentationDestroy(self.handle)
+            finally:
+                self.handle = C.c_void_p()
+                self._lock.release()
             self._check(rc, "destroy")
+
+    def _dump_debug(self, status, records):
+        root = os.environ.get("PROTON_INSTRUMENTATION_DEBUG_DIR")
+        if not root:
+            return
+        directory = Path(root) / str(time.time_ns())
+        directory.mkdir(parents=True)
+        observed = sorted({record[0] for record in records})
+        coverage = {
+            "kind": "sampled_hardware_channels", "requested_channels": list(_CHANNEL_IDS), "observed_channels":
+            observed, "all_logical_blocks": False
+        }
+        (directory / "records.json").write_text(
+            json.dumps({"stats": status, "records": records, "coverage": coverage}, indent=2))
+        for channel in _CHANNEL_IDS:
+            raw, size = C.POINTER(C.c_uint8)(), C.c_size_t()
+            self._check(self.lib.msptiInstrumentationGetRawData(self.handle, channel, C.byref(raw), C.byref(size)),
+                        "raw read")
+            if size.value:
+                (directory / f"channel-{channel}.bin").write_bytes(C.string_at(raw, size.value))

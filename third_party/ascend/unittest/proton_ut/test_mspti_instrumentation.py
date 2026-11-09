@@ -41,10 +41,6 @@ def collector(collector_module, monkeypatch):
         calls.append(("stop", ))
         return status.stop
 
-    def start_with_channels(device, channels, count, handle):
-        calls.append(("channels", list(channels[:count])))
-        return start(device, handle)
-
     def get_records(_handle, output, count, stats):
         ctypes.cast(output, ctypes.POINTER(ctypes.POINTER(module.ScopeRecord)))[0] = records
         ctypes.cast(count, ctypes.POINTER(ctypes.c_size_t))[0] = status.count
@@ -60,8 +56,7 @@ def collector(collector_module, monkeypatch):
         ctypes.cast(output, ctypes.POINTER(ctypes.c_uint32))[0] = 5
         return 0
 
-    library = SimpleNamespace(msptiInstrumentationStart=start,
-                              msptiInstrumentationStartWithChannels=start_with_channels, msptiInstrumentationStop=stop,
+    library = SimpleNamespace(msptiInstrumentationStart=start, msptiInstrumentationStop=stop,
                               msptiInstrumentationGetRecords=get_records,
                               msptiInstrumentationGetRawData=lambda *_args: 0, msptiInstrumentationDestroy=destroy)
     runtime = SimpleNamespace(rtGetDevicePhyIdByIndex=physical_device)
@@ -71,7 +66,6 @@ def collector(collector_module, monkeypatch):
         SimpleNamespace(
             npu=SimpleNamespace(synchronize=lambda: calls.append(("synchronize", )), current_device=lambda: 0)))
     monkeypatch.delenv("PROTON_INSTRUMENTATION_DEBUG_DIR", raising=False)
-    monkeypatch.delenv("PROTON_INSTRUMENTATION_CHANNELS", raising=False)
     with pytest.warns(UserWarning, match="not every Triton program/block"):
         instance = module.MsptiInstrumentationCollector()
     yield instance, status, calls
@@ -129,24 +123,6 @@ def test_missing_api_is_reported(collector_module, monkeypatch):
         collector_module.MsptiInstrumentationCollector()
 
 
-def test_selected_channels(collector, collector_module, monkeypatch):
-    _default, _status, calls = collector
-    monkeypatch.setenv("PROTON_INSTRUMENTATION_CHANNELS", "12, 15")
-    with pytest.warns(UserWarning, match=r"\[12, 15\]"):
-        selected = collector_module.MsptiInstrumentationCollector()
-    selected.start()
-    assert selected.stop() == [(12, 0, 1, 10, 30, 1650)]
-    assert ("channels", [12, 15]) in calls
-    assert not selected._lock.locked()
-
-
-@pytest.mark.parametrize("selection", ["", "12,", "a", "10", "29", "12,12", "-1"])
-def test_invalid_channel_selection(collector_module, monkeypatch, selection):
-    monkeypatch.setenv("PROTON_INSTRUMENTATION_CHANNELS", selection)
-    with pytest.raises(ValueError, match="PROTON_INSTRUMENTATION_CHANNELS"):
-        collector_module.MsptiInstrumentationCollector()
-
-
 def test_flush_failure_is_visible(collector):
     instance, status, _calls = collector
     status.flush_error = 65534
@@ -171,9 +147,15 @@ def test_debug_dump_labels_partial_coverage(collector, monkeypatch, tmp_path):
     }
 
 
-def test_selection_requires_new_api(collector, collector_module, monkeypatch):
+def test_destroy_exception_releases_lock(collector, monkeypatch):
     instance, _status, _calls = collector
-    del instance.lib.msptiInstrumentationStartWithChannels
-    monkeypatch.setenv("PROTON_INSTRUMENTATION_CHANNELS", "12")
-    with pytest.raises(RuntimeError, match="msptiInstrumentationStartWithChannels"):
-        collector_module.MsptiInstrumentationCollector()
+
+    def fail_destroy(_handle):
+        raise RuntimeError("destroy exception")
+
+    monkeypatch.setattr(instance.lib, "msptiInstrumentationDestroy", fail_destroy)
+    instance.start()
+    with pytest.raises(RuntimeError, match="destroy exception"):
+        instance.stop()
+    assert not instance.handle
+    assert not instance._lock.locked()

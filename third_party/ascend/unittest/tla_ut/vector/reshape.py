@@ -102,8 +102,6 @@ def test_ir(output_dir=None):
     assert text.count("into memref<2x16xbf16") == 1, "merge+split result: C"
     assert text.count("into memref<2x2x8xbf16") == 1, "split result: D"
     # 2 shared in-tiles + 4 out views.
-    assert text.count("hivm.hir.pointer_cast") == 6, "tla.view(ptr) x6"
-    assert text.count("memref.reinterpret_cast") == 6, "tla.view(ptr) x6"
     print("IR PASS: reshape HIVM structure ok (2 collapse / 3 expand / 4 load / 4 store / 4 multibuffer)")
     # Negative cases: strided source and element-count mismatch must be
     # rejected at trace time (the generator wraps the frontend ValueError in

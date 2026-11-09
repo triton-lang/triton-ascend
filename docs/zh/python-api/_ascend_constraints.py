@@ -1158,7 +1158,8 @@ CONSTRAINTS = {
             "TLA 内核必须使用 ``@tla.jit``；``@triton.jit`` 会走通用前端，不会识别 ``tla.*`` 接口。",
             "不要通过 ``enable_tla_mode`` 等 launch 参数选择 TLA 前端。",
         ],
-        "example": "scope",
+        "example":
+        "scope",
     },
 
     # ------------------------------------------------------------------
@@ -1192,7 +1193,8 @@ CONSTRAINTS = {
             "``cond`` 必须是 Python/constexpr bool 或标量 ``int1`` tensor。",
             "仅作为 ``llvm.intr.assume`` 优化提示，不生成运行时检查；条件为假时行为未定义。",
         ],
-        "example": "buffer",
+        "example":
+        "buffer",
     },
     f"{_TLA_PREFIX}.copy": {
         "constraints": [
@@ -1213,25 +1215,26 @@ CONSTRAINTS = {
                 "``src`` / ``dst`` 必须是 ``tla.buffer``，其地址空间必须与接口名一致。",
                 "``params`` 必须是对应的 ``*Params`` 配置对象；默认 ``None`` 使用该路由的默认配置。",
             ],
-            "example": "dma",
+            "example":
+            "dma",
         }
-        for name in (
-            "load_gm_to_ub", "store_ub_to_gm", "load_gm_to_l1", "copy_ub_to_l1", "copy_l1_to_ub", "copy_l1_to_bt",
-            "copy_l1_to_fb", "copy_l1_to_l0", "store_l0c_to_gm", "copy_l0c_to_ub", "copy_l0c_to_l1")
+        for name in ("load_gm_to_ub", "store_ub_to_gm", "load_gm_to_l1", "copy_ub_to_l1", "copy_l1_to_ub", "copy_l1_to_bt", "copy_l1_to_fb", "copy_l1_to_l0", "store_l0c_to_gm", "copy_l0c_to_ub", "copy_l0c_to_l1")
     },
     f"{_TLA_PREFIX}.load_gm_to_l1_mx_scale": {
         "constraints": [
             "``src`` 为 GM scale（逻辑形状 ``(rows, K // 32)``），``dst`` 为 L1 ``int8`` / ``uint8`` buffer。",
             "必须在 ``tla.scope.cube()`` 内使用；``params`` 必须为 ``None``。",
         ],
-        "example": "dma",
+        "example":
+        "dma",
     },
     f"{_TLA_PREFIX}.set_ctrl": {
         "constraints": [
             "签名为 ``set_ctrl(enable, idx)``：``enable`` 为编译期 bool，``idx`` 为编译期位索引。",
             "位索引必须由目标硬件和 backend 支持，前序状态不会自动恢复。",
         ],
-        "example": "dma",
+        "example":
+        "dma",
     },
     f"{_TLA_PREFIX}.view": {
         "constraints": [
@@ -1249,7 +1252,8 @@ CONSTRAINTS = {
             "``offsets`` 可以是标量整数或整数 tensor；静态越界会被拒绝，动态 offset 需在运行时保证越界安全。",
             "保持源 dtype 和地址空间，不拷贝数据。",
         ],
-        "example": "view",
+        "example":
+        "view",
     },
     f"{_TLA_PREFIX}.reshape": {
         "constraints": [
@@ -1290,7 +1294,8 @@ CONSTRAINTS = {
             "在区域内部分配 L1 / L0C buffer，执行 GM->L1、``tla.cube.mmad`` / ``mmad_mx`` 和 L0C Fixpipe。",
             "与 Vector scope 之间的数据交接需要显式同步。",
         ],
-        "example": "cube_mmad",
+        "example":
+        "cube_mmad",
     },
 
     # ------------------------------------------------------------------
@@ -1419,7 +1424,8 @@ CONSTRAINTS = {
             "两个分支都会立即求值；``condition`` 可以是 Python/constexpr bool、标量 int1 tensor 或 ``tla.vector<int1>`` mask。",
             "向量分支要求 ``x`` / ``y`` 都是同类型 ``tla.vector``；SIMD 向量 mask 会自动转为 ``vsel``。",
         ],
-        "example": "simd_compare",
+        "example":
+        "simd_compare",
     },
 
     # ------------------------------------------------------------------
@@ -1518,7 +1524,8 @@ CONSTRAINTS = {
             "每 32 个逻辑 K 元素共享一个 scale 字节；scale 通过 ``tla.load_gm_to_l1_mx_scale`` 加载。",
             "``format_a`` / ``format_b`` 使用 ``tla.MxFormat``，FP4 要求两侧都为 ``E2M1``。",
         ],
-        "example": "cube_mmad",
+        "example":
+        "cube_mmad",
     },
     f"{_TLA_PREFIX}.cube.MxFormat": {
         "constraints": [
@@ -1550,7 +1557,8 @@ CONSTRAINTS = {
             "``event_id`` 范围 ``[0, 7]``，必须与对应的 ``set_flag`` 一致。",
             "``pipe1`` / ``pipe2`` 是编译期 ``tla.sync.PIPE`` 枚举。",
         ],
-        "example": "sync",
+        "example":
+        "sync",
     },
     f"{_TLA_PREFIX}.sync.sync_all": {
         "constraints": [
@@ -1573,14 +1581,16 @@ CONSTRAINTS = {
             "签名为 ``block_wait_flag(mode, pipe, flagid)``，``mode`` / ``pipe`` 必须与对应的 ``block_set_flag`` 一致。",
             "``flag`` 范围 ``[0, 15]``。",
         ],
-        "example": "sync",
+        "example":
+        "sync",
     },
     f"{_TLA_PREFIX}.sync.sub_block_id": {
         "constraints": [
             "返回当前 AIV sub-block 在其 Cube block 内的索引，类型为 ``int64``。",
             "常用于在 Vector scope 内区分多个 AIV sub-block 的搬运和计算。",
         ],
-        "example": "sync",
+        "example":
+        "sync",
     },
 
     # ------------------------------------------------------------------

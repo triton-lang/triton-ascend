@@ -51,14 +51,8 @@ void AscendRuntime::synchronizeStream(void *stream) {
 }
 
 std::optional<int64_t> AscendRuntime::getTimeShiftCost() const {
-  const char *name = aclrtGetSocName();
-  const std::string socName = name ? name : "";
-  if (socName.find("Ascend910_9382") != std::string::npos)
-    return 0;
-  // Preserve the legacy calibration; other SoCs use the raw counter.
-  if (socName.find("Ascend910A") != std::string::npos ||
-      socName.find("Ascend910B") != std::string::npos)
-    return 12;
+  // Uncalibrated subtraction can invert short and nested scope intervals.
+  // Keep raw timestamps until a device-specific calibration is validated.
   return 0;
 }
 

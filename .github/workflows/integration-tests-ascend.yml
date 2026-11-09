@@ -123,7 +123,7 @@ jobs:
           CCACHE_COMPRESS: "true"
           TRITON_BUILD_WITH_O1: true
           TRITON_BUILD_TD: ON
-          TRITON_BUILD_PROTON: OFF
+          TRITON_BUILD_PROTON: ON
           TRITON_WHEEL_NAME: triton-ascend
           TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=ON"
         run: |

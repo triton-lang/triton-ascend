@@ -213,7 +213,7 @@ index 819db4524..1f44a4acd 100644
  
    throw e;
 diff --git a/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp b/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
-index 320a4f193..1f24b12ce 100644
+index 320a4f193..99c62f936 100644
 --- a/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
 +++ b/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
 @@ -1,5 +1,6 @@
@@ -257,11 +257,14 @@ index 320a4f193..1f24b12ce 100644
  
            // Global time is in `ns` unit. With 1GHz assumption, we
            // could subtract with blockToMInCycle: (ns - ns) / 1GHz - cycle
-@@ -236,6 +247,14 @@ void StreamChromeTraceWriter::writeKernel(json &object,
+@@ -236,6 +247,17 @@ void StreamChromeTraceWriter::writeKernel(json &object,
            args["Frequency (MHz)"] = freq;
            element["args"] = args;
            element["args"]["call_stack"] = callStack;
 +          if (metadata->channelTrace) {
++            element["args"]["coverage"] = "sampled_hardware_channels";
++            element["args"]["all_logical_blocks"] = false;
++            element["args"]["channel_id_is_core_id"] = false;
 +            element["args"]["clock_domain"] =
 +                "channel-relative; not host synchronized";
 +            element["args"]["start_cycle"] = event.first->cycle;
@@ -1972,15 +1975,16 @@ index aac27ad18..a6d715e01 100644
              alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
 diff --git a/third_party/proton/proton/mspti_instrumentation.py b/third_party/proton/proton/mspti_instrumentation.py
 new file mode 100644
-index 000000000..86cae3280
+index 000000000..3b7bffff1
 --- /dev/null
 +++ b/third_party/proton/proton/mspti_instrumentation.py
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,143 @@
 +"""Experimental serialized A5 instrumentation capture through the MSPTI PoC C API."""
 +import ctypes as C
 +import json
 +import os
 +import threading
++import warnings
 +
 +
 +class ScopeRecord(C.Structure):
@@ -1997,6 +2001,17 @@ index 000000000..86cae3280
 +    _lock = threading.Lock()
 +
 +    def __init__(self):
++        selection = os.environ.get("PROTON_INSTRUMENTATION_CHANNELS")
++        self.channels = None
++        if selection is not None:
++            try:
++                self.channels = [int(value.strip()) for value in selection.split(",")]
++            except ValueError as error:
++                raise ValueError(
++                    "PROTON_INSTRUMENTATION_CHANNELS must be a comma-separated subset of 11..28") from error
++            if not self.channels or len(set(self.channels)) != len(self.channels) or any(channel < 11 or channel > 28
++                                                                                         for channel in self.channels):
++                raise ValueError("PROTON_INSTRUMENTATION_CHANNELS must contain unique channel IDs in 11..28")
 +        self.lib = C.CDLL(os.environ.get("PROTON_MSPTI_LIBRARY_PATH", "libmspti.so"))
 +        signatures = {
 +            "msptiInstrumentationStart": [C.c_uint32, C.POINTER(C.c_void_p)],
@@ -2011,13 +2026,24 @@ index 000000000..86cae3280
 +            [C.c_void_p, C.c_uint32, C.POINTER(C.POINTER(C.c_uint8)),
 +             C.POINTER(C.c_size_t)],
 +        }
++        if self.channels is not None:
++            signatures["msptiInstrumentationStartWithChannels"] = [
++                C.c_uint32, C.POINTER(C.c_uint32), C.c_size_t,
++                C.POINTER(C.c_void_p)
++            ]
 +        for name, args in signatures.items():
 +            try:
 +                fn = getattr(self.lib, name)
 +            except AttributeError as error:
-+                raise RuntimeError("A5 instrumentation requires the MSPTI instrumentation PoC library") from error
++                raise RuntimeError(
++                    f"A5 instrumentation requires the MSPTI instrumentation PoC library with {name}") from error
 +            fn.argtypes, fn.restype = args, C.c_int
 +        self.handle = C.c_void_p()
++        requested = self.channels if self.channels is not None else list(range(11, 29))
++        warnings.warn(
++            f"A5 instrumentation samples hardware channels {requested}, not every Triton program/block. "
++            "Channel IDs are not core IDs; an empty capture can mean the selected channels did not observe the kernel.",
++            stacklevel=2)
 +
 +    @staticmethod
 +    def _check(rc, operation):
@@ -2036,7 +2062,13 @@ index 000000000..86cae3280
 +            convert.argtypes = [C.c_uint32, C.POINTER(C.c_uint32)]
 +            convert.restype = C.c_int
 +            self._check(convert(torch.npu.current_device(), C.byref(physical)), "physical device lookup")
-+            self._check(self.lib.msptiInstrumentationStart(physical.value, C.byref(self.handle)), "start")
++            if self.channels is None:
++                rc = self.lib.msptiInstrumentationStart(physical.value, C.byref(self.handle))
++            else:
++                channels = (C.c_uint32 * len(self.channels))(*self.channels)
++                rc = self.lib.msptiInstrumentationStartWithChannels(physical.value, channels, len(channels),
++                                                                    C.byref(self.handle))
++            self._check(rc, "start")
 +        except BaseException:
 +            self._lock.release()
 +            raise
@@ -2059,8 +2091,15 @@ index 000000000..86cae3280
 +                import time
 +                directory = Path(os.environ["PROTON_INSTRUMENTATION_DEBUG_DIR"]) / str(time.time_ns())
 +                directory.mkdir(parents=True)
-+                (directory / "records.json").write_text(json.dumps({"stats": status, "records": values}, indent=2))
-+                for channel in range(11, 29):
++                requested = self.channels if self.channels is not None else list(range(11, 29))
++                coverage = {
++                    "kind": "sampled_hardware_channels", "requested_channels": requested, "observed_channels":
++                    sorted({row[0]
++                            for row in values}), "all_logical_blocks": False
++                }
++                (directory / "records.json").write_text(
++                    json.dumps({"stats": status, "records": values, "coverage": coverage}, indent=2))
++                for channel in requested:
 +                    raw, size = C.POINTER(C.c_uint8)(), C.c_size_t()
 +                    self._check(
 +                        self.lib.msptiInstrumentationGetRawData(self.handle, channel, C.byref(raw), C.byref(size)),
@@ -2069,7 +2108,12 @@ index 000000000..86cae3280
 +                        (directory / f"channel-{channel}.bin").write_bytes(C.string_at(raw, size.value))
 +            if rc or not count.value:
 +                raise RuntimeError(
-+                    f"Incomplete/empty MSPTI instrumentation capture: rc={rc}, stats={json.dumps(status)}")
++                    f"Incomplete/empty MSPTI instrumentation capture: rc={rc}, stats={json.dumps(status)}; "
++                    "this is partial hardware sampling, not guaranteed coverage of every logical block")
++            if stats.flush_error:
++                warnings.warn(
++                    f"MSPTI instrumentation flush returned {stats.flush_error}; received records are returned, "
++                    "but their presence does not establish complete capture.", stacklevel=2)
 +            if len({row[5] for row in values}) != 1:
 +                raise RuntimeError("Mixed AIC/AIV frequencies require separate instrumentation clock domains")
 +            return values

@@ -96,6 +96,8 @@ def main():
     assert {e["name"] for e in events} == {"kernel", "load", "compute", "store"}
     assert all(e["dur"] > 0 and e["args"]["Frequency (MHz)"] > 0 for e in events)
     assert all("profiling channel" in str(e["pid"]) and "pipe" in str(e["tid"]) for e in events)
+    assert all(e["args"]["coverage"] == "sampled_hardware_channels" for e in events)
+    assert all(e["args"]["all_logical_blocks"] is False for e in events)
     capture_ids = {e["pid"].split(" profiling channel")[0] for e in events}
     assert len(capture_ids) == (2 if args.lifecycle else 1), capture_ids
     validate_intervals(events)

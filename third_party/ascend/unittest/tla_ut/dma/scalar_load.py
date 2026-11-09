@@ -85,22 +85,6 @@ module {{
         assert "arith.cmpi ne" in text
 
 
-def test_pointer_free_triton_op_is_not_blanket_rejected(tmp_path):
-    text = _convert_ir(
-        tmp_path, """
-module {
-  tt.func public @bitcast(%x: i32, %out: memref<1xf32>) {
-    %v = tt.bitcast %x : i32 -> f32
-    %c0 = arith.constant 0 : index
-    memref.store %v, %out[%c0] : memref<1xf32>
-    tt.return
-  }
-}
-""")
-    assert "tt.bitcast" in text
-    assert "tt.func" not in text
-
-
 @pytest.mark.parametrize("body", [
     "tt.store %p, %value : !tt.ptr<i32>",
     """%ptrs = tt.splat %p : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>

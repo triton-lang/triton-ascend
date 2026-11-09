@@ -1949,7 +1949,9 @@ static bool hasKnownAtMostOneIteration(Operation *operation) {
   if (!operation)
     return false;
   const LoopTripCountInfo solution = analyzeLoopTripCount(operation);
-  return solution.constantTripCount && *solution.constantTripCount <= 1;
+  const auto exact = solution.constantTripCount ? solution.constantTripCount
+                                                : solution.launchBoundTripCount;
+  return exact && *exact <= 1;
 }
 
 /// Accumulate dynamic work, not merely the number of syntactic TTIR ops.

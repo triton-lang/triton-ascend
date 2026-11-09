@@ -4429,6 +4429,8 @@ static std::string stageDependencyCompletionRejectionReason(
   const auto &expression = expressions.front();
   if (expression.constantTripCount)
     return "loop_trip_count_is_static";
+  if (expression.launchBoundTripCount)
+    return "loop_trip_count_is_launch_bound";
   if (!expression.supported || !expression.operation ||
       expression.operation->getName().getStringRef() != "scf.for")
     return "dynamic_loop_expression_not_supported";

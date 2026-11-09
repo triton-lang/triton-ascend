@@ -20,6 +20,8 @@ struct LoopTripCountInfo {
   std::string loopId;
   Operation *operation = nullptr;
   std::optional<int64_t> constantTripCount;
+  /// Exact only for the scalar launch bindings carried by the analysis module.
+  std::optional<int64_t> launchBoundTripCount;
   std::optional<int64_t> upperBoundTripCount;
   std::optional<int64_t> gridStrideTripCount;
   int64_t workloadTripCount = 1;

@@ -63,18 +63,25 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
 1. **代码准备**：通过`git checkout`检出指定版本的LLVM源码并应用补丁。
 
     ```bash
+    # 在当前 triton-ascend 仓库根目录执行；使用唯一 LLVM pin 和本地补丁清单。
+    TRITON_ROOT="$(pwd)"
+    LLVM_COMMIT=$(cat "$TRITON_ROOT/cmake/llvm-hash.txt") || exit 1
+
     git clone --no-checkout https://github.com/llvm/llvm-project.git
     cd llvm-project
-    git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-    wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
-    git apply llvm_patch_f6ded0b.patch
+    git checkout "$LLVM_COMMIT"
+    export LC_ALL=C
+    for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
+      [ -f "$patch" ] || continue
+      git apply "$patch" || exit 1
+    done
     ```
 
 2. **构建LLVM**：路径`/path/llvm-install`为用户规划的LLVM安装路径，需根据实际调整；路径`{PATH_TO}`为第一步中检出LLVM源码的路径。
 
     ```bash
     export LLVM_INSTALL_PREFIX=/path/llvm-install
-    cd {PATH_TO}/llvm-project
+    cd "$TRITON_ROOT/llvm-project"
     mkdir build
     cd build
     cmake ../llvm \

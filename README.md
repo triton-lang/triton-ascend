@@ -108,18 +108,23 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
 #### Custom LLVM Build (Optional)
 
 ```bash
-# If you need to customize the LLVM build process, you can execute this step first before compiling Triton-Ascend
-# Check out the specified version of LLVM source code and apply patches
+# Run from this triton-ascend checkout; use its sole LLVM pin and local patches.
+TRITON_ROOT="$(pwd)"
+LLVM_COMMIT=$(cat "$TRITON_ROOT/cmake/llvm-hash.txt") || exit 1
+
 git clone --no-checkout https://github.com/llvm/llvm-project.git
 cd llvm-project
-git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
-git apply llvm_patch_f6ded0b.patch
+git checkout "$LLVM_COMMIT"
+export LC_ALL=C
+for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
+  [ -f "$patch" ] || continue
+  git apply "$patch" || exit 1
+done
 
 export LLVM_INSTALL_PREFIX=/path/to/llvm-install
 
 # Build a custom LLVM version
-cd {PATH_TO}/llvm_project
+cd "$TRITON_ROOT/llvm-project"
 mkdir build
 cd build
 cmake ../llvm \

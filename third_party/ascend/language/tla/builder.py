@@ -68,6 +68,7 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_tla_l12l0',
         'create_tla_fixpipe',
         'create_tla_set_ctrl',
+        'create_tla_set_atomic',
         'create_tla_get_sub_block_idx',
         'create_hivm_load',
         'create_hivm_store',

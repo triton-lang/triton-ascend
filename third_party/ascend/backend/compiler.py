@@ -443,7 +443,12 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
         if AscendBackend.instrumentation:
-            AscendBackend.instrumentation.patch("ttir_to_linalg", pm, mod.context)
+            if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
+                # NPU-IR emits A5 DFX regions; MSPTI collects them at runtime.
+                metadata["proton_collection"] = "mspti_dfx"
+                metadata["profile_scratch_size"] = 0
+            else:
+                AscendBackend.instrumentation.patch("ttir_to_linalg", pm, mod.context)
 
         if _enable_msdebug():
             ascend.passes.ttir.add_normalize_debug_line_locations(pm)
@@ -736,6 +741,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         bin_path = os.path.join(tmpdir, bin_file_with_ext)
         callback_path = os.path.join(tmpdir, "libkernel.so")
         _compile_option_list = get_common_bishengir_compile_options(metadata)
+        proton_metadata_path = None
+        if metadata.get("proton_collection") == "mspti_dfx":
+            proton_metadata_path = Path(tmpdir) / "proton_metadata.json"
+            _compile_option_list.append(f"--proton-metadata-output={proton_metadata_path}")
 
         multibuffer_mode = metadata.get("multibuffer_mode")
         if multibuffer_mode is not None:
@@ -936,6 +945,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 
         if opt.debug:
             _save_npuir_debug_output(ret.stdout, ret.stderr, tmpdir, metadata["hash"])
+
+        if proton_metadata_path is not None:
+            metadata["proton_metadata"] = json.loads(proton_metadata_path.read_text(encoding="utf-8"))
 
         stdout_str = ret.stdout.decode('utf-8') if ret.stdout else ''
         match = re.search(r'UB\s+size\s*=\s*(\d+)\s*bits', stdout_str)

@@ -17,6 +17,7 @@ struct KernelMetadata {
   std::string kernelName;
   std::vector<std::string> callStack;
   double cycleCounterFreqMhz = 1000.0;
+  bool dfxChannel = false;
 };
 
 using KernelTrace = std::pair<std::shared_ptr<CircularLayoutParserResult>,

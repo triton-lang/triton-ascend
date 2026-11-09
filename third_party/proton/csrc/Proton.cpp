@@ -1,4 +1,5 @@
 #include "Proton.h"
+#include "Profiler/Instrumentation/InstrumentationProfiler.h"
 
 #include <map>
 #include <stdexcept>
@@ -82,6 +83,13 @@ static void initProton(pybind11::module &&m) {
     SessionManager::instance().enterInstrumentedOp(
         streamId, functionId, reinterpret_cast<uint8_t *>(buffer), size);
   });
+
+  m.def("record_dfx_events",
+        [](uint64_t functionId,
+           const std::vector<std::array<uint64_t, 6>> &records) {
+          InstrumentationProfiler::instance().recordDfxEvents(functionId,
+                                                              records);
+        });
 
   m.def("exit_instrumented_op", [](uint64_t streamId, uint64_t functionId,
                                    uint64_t buffer, size_t size) {

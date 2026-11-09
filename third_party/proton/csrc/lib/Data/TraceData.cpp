@@ -406,6 +406,7 @@ convertToTimelineTrace(TraceData::Trace *trace,
     metadata->callStack = std::move(callStack);
     metadata->cycleCounterFreqMhz =
         kernelEvent.cycleMetric->getCycleCounterFreqMhz();
+    metadata->dfxChannel = kernelEvent.cycleMetric->isDfxChannel();
     if (timeShiftCost > 0)
       timeShift(timeShiftCost, parserResult);
     results.emplace_back(parserResult, metadata);

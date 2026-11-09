@@ -8,7 +8,8 @@ Shape, dtype and hardware restrictions are checked by the backend verifier.
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 
-from triton.language.core import builtin, float32, _unwrap_if_constexpr
+from triton.language.core import (builtin, dtype as triton_dtype, float32, float16, bfloat16, int8, int16, int32,
+                                  _unwrap_if_constexpr)
 from .core import buffer
 
 
@@ -778,3 +779,16 @@ def set_ctrl(enable, idx, _semantic=None):
         For example, ``tla.set_ctrl(False, 48)`` emits a clear of CTRL bit 48.
     """
     _semantic.builder.create_tla_set_ctrl(_boolean(enable, "enable"), _integer(idx, "idx"))
+
+
+@builtin
+def set_atomic(kind, dtype, _semantic=None):
+    """Set the atomic mode for following GM stores; use NONE to reset it."""
+    kind = _unwrap_if_constexpr(kind)
+    dtype = _unwrap_if_constexpr(dtype)
+    if not isinstance(kind, AtomicKind) or kind not in (AtomicKind.NONE, AtomicKind.ADD, AtomicKind.MAX,
+                                                        AtomicKind.MIN):
+        raise ValueError("set_atomic kind must be AtomicKind.NONE, ADD, MAX, or MIN")
+    if not isinstance(dtype, triton_dtype) or dtype not in (float32, float16, bfloat16, int8, int16, int32):
+        raise ValueError("set_atomic dtype must be tl.float32, float16, bfloat16, int8, int16, or int32")
+    _semantic.builder.create_tla_set_atomic(kind.value, dtype.to_ir(_semantic.builder))

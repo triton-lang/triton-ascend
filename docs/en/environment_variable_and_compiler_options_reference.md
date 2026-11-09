@@ -44,7 +44,7 @@ The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilatio
 | Compilation | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | Allows non-`constexpr` globals in the JIT frontend. | Off | Yes | Yes |
 | Compilation | `TRITON_ENABLE_LIBDEVICE` | Adds a libdevice link on the A2/A3 compiler path. Any nonempty value, including `"0"`, enables it. | Unset | Yes | — |
 | Compilation | `TRITON_ENABLE_LIBDEVICE_SIMT` | Selects SIMT libdevice extern symbols on Ascend 950. Any nonempty value, including `"0"`, enables it. | Unset | — | Yes |
-| Cache and autotuning | `TRITON_ASCEND_ENABLE_DYNAMIC_REUSE` | Controls automatic reuse of kernels across changes to eligible `constexpr` parameters: `0` disables reuse, `1` enables dynamicization, and `2` also enables tile reuse and background compilation. | `0` | Yes | Yes; tile reuse excludes `simt_only` |
+| Cache and autotuning | `TRITON_ASCEND_ENABLE_DYNAMIC_REUSE` | Controls automatic reuse of kernels across changes to eligible `constexpr` parameters: `0` disables reuse, `1` enables dynamic reuse, and `2` also enables tile reuse and background compilation. | `0` | Yes | Yes; tile reuse excludes `simt_only` |
 | Cache and autotuning | `TRITON_HOME` | Sets the base for cache, dump, and override directories. | User home | Yes | Yes |
 | Cache and autotuning | `TRITON_CACHE_DIR` | Sets the compilation cache directory. | `$TRITON_HOME/.triton/cache` | Yes | Yes |
 | Cache and autotuning | `TRITON_CACHE_AUTOTUNING` | Caches autotune selections. | Off | Yes | Yes |

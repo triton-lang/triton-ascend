@@ -24,8 +24,6 @@ jobs:
     env:
       PROTON_SKIP_PC_SAMPLING_TEST: 1
       PYTHON: "python${{ matrix.config.python_version }}"
-      PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
-      PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
       PIP_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
 
     steps:
@@ -56,7 +54,7 @@ jobs:
             exit 0
           fi
 
-          # The ascendnpu-ir run package is arch-specific: aarch64 (a3) and
+          # The ascendnpu-ir package is arch-specific: aarch64 (a3) and
           # x86_64 (a5) each have their own; select by the container's arch.
           ARCH=$(uname -m)
           OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
@@ -74,17 +72,44 @@ jobs:
           # networks; -C - resumes from where the previous attempt stopped.
           curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
             --retry-delay 10 -C - \
-            "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
+            "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.pkg
 
           if [ -n "${BISHENG_SHA256}" ]; then
             echo "Verifying SHA256 checksum..."
-            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
+            echo "${BISHENG_SHA256}  bisheng.pkg" | sha256sum -c -
           else
             echo "Warning: No SHA256 checksum provided, skipping verification"
           fi
 
-          chmod +x bisheng.run
-          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
+          # Two package formats are supported, selected by file extension:
+          #   *.run    official self-extracting installer
+          #   *.tar.gz plain payload tarball with bin/, lib/, ... at the
+          #            archive root (e.g. extracted from a wheel's bundled
+          #            payload and published by upload-wheels.yml)
+          case "${BISHENG_FILENAME}" in
+            *.run)
+              chmod +x bisheng.pkg
+              ./bisheng.pkg --quiet --install --install-path=/usr/local/bisheng
+              ;;
+            *.tar.gz)
+              mkdir -p /usr/local/bisheng/tools/bishengir
+              tar xzf bisheng.pkg -C /usr/local/bisheng/tools/bishengir
+              # Only chmod when bin/ exists; a payload without it is caught
+              # with a clear message by the guard below.
+              if [ -d /usr/local/bisheng/tools/bishengir/bin ]; then
+                chmod -R a+x /usr/local/bisheng/tools/bishengir/bin
+              fi
+              ;;
+            *)
+              echo "Error: unsupported Bisheng package format: ${BISHENG_FILENAME} (expected .run or .tar.gz)" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ ! -x /usr/local/bisheng/tools/bishengir/bin/bishengir-compile ]; then
+            echo "Error: bishengir-compile not found under /usr/local/bisheng/tools/bishengir/bin after install" >&2
+            exit 1
+          fi
           echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
 
       - name: Build and install triton-ascend
@@ -141,6 +166,7 @@ jobs:
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut
+          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/reuse_ut
           # NOTE: kernel tests are temporarily disabled due to intermittent failures
           # that cause CI instability. TODO: Fix flaky kernel tests and re-enable.
           # ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/kernels/test_triton_kernel.py

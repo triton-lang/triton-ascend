@@ -28,6 +28,7 @@ import subprocess
 from typing import Optional
 import functools
 import hashlib
+from triton.runtime import _allocation
 from triton.runtime.cache import get_cache_manager
 from triton import knobs
 from triton.backends.driver import DriverBase
@@ -47,6 +48,9 @@ _NPU_UTILS_CFLAGS = ("-O2", )
 def _npu_utils_key(source, fingerprint):
     inputs = [source, json.loads(fingerprint)]
     return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
+
+
+_NPU_DEVICE_LIMIT_REGEX = re.compile(r'^\d+ *, *\d+$')
 
 
 class NPUUtils(object):
@@ -78,7 +82,11 @@ class NPUUtils(object):
         fingerprint = json.dumps(_ascend_utils.npu_extension_fingerprint("npu_utils", extra_cflags=_NPU_UTILS_CFLAGS),
                                  sort_keys=True)
         key = _npu_utils_key(src, fingerprint)
-        cache = get_cache_manager(key)
+        # The helper lands under the backend's in-package bin/ directory, not
+        # TRITON_CACHE_DIR: PyTorch Inductor repoints that directory to a fresh
+        # temporary root around every test case, which would strand the helper
+        # (and any launcher runtime that baked its path) under earlier roots.
+        cache = _ascend_utils.bin_cache_manager(key, Path(dirname) / "bin")
         fname = "npu_utils.so"
 
         def build():
@@ -132,7 +140,7 @@ class NPUUtils(object):
         if npu_device_limit_str is None:
             return num_aic, num_aiv
 
-        is_valid = re.match(r'^\d+ *, *\d+$', npu_device_limit_str.strip())
+        is_valid = _NPU_DEVICE_LIMIT_REGEX.match(npu_device_limit_str.strip())
         if is_valid:
             parts = [part.strip() for part in npu_device_limit_str.split(",")]
             num_aic_env = int(parts[0])
@@ -175,12 +183,13 @@ class NPUUtils(object):
         cube_core_num, vector_core_num = prop.cube_core_num, prop.vector_core_num
         return cube_core_num, vector_core_num
 
-    def has_device_limit(self):
-        num_aic, num_aiv = self.get_device_core()
+    def get_device_limit(self):
         try:
-            return num_aic != self.get_aicore_num() or num_aiv != self.get_aivector_core_num()
+            limited_aic, limited_aiv = self._get_npu_device_limit_form_env()
         except ValueError:
-            return False
+            return False, None, None
+        num_aic, num_aiv = self.get_device_core()
+        return num_aic != limited_aic or num_aiv != limited_aiv, limited_aic, limited_aiv
 
     def get_device_properties(self, device):
         # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain
@@ -199,6 +208,14 @@ class NPUUtils(object):
     def get_aivector_core_num(self):
         return self.get_device_properties("npu")["num_vectorcore"]
 
+    def get_vector_clock_rate(self, device):
+        """Return the vector-core clock in kHz for a logical device ID, or warn and return zero."""
+        return self._load_mod().get_vector_clock_rate(device)
+
+    def get_hbm_clock_rate(self, device):
+        """Return the HBM clock in kHz for a logical device ID, or warn and return zero."""
+        return self._load_mod().get_hbm_clock_rate(device)
+
 
 class NPULauncher(object):
 
@@ -216,7 +233,9 @@ class NPULauncher(object):
         self._argument_types = argument_types(self.signature, constants)
         runtime, self._runtime_path = get_runtime(npu_utils.get_so_path(), metadata.debug)
         native = runtime.create_launcher(self.launch_spec.as_dict(), self._argument_types)
-        self.launch = wrap_handle_tensordesc(native, self.signature)
+        self.profile_scratch_size = int(getattr(metadata, "profile_scratch_size", 0) or 0)
+        self.profile_scratch_align = int(getattr(metadata, "profile_scratch_align", 128) or 128)
+        self.launch = wrap_handle_tensordesc(native, self.signature, bool(self.profile_scratch_size))
         self._so_launcher_path = None
 
     def _make_launcher_stub_path(self):
@@ -238,7 +257,26 @@ class NPULauncher(object):
             print("[INFO]: skip running kernel")
             print(f"[INFO]: The compiled kernel cache is in {cache_manager.cache_dir}")
             return
-        profiler_registered = self.launch(*args, **kwargs)
+        if self.profile_scratch_size:
+            gridX, gridY, gridZ, stream = args[:4]
+            if min(gridX, gridY, gridZ) <= 0:
+                return
+            scratch = _allocation._profile_allocator.get()(gridX * gridY * gridZ * self.profile_scratch_size,
+                                                           self.profile_scratch_align, stream)
+            exit_hook = args[8]
+            if exit_hook is not None:
+
+                def synchronized_exit(launch_metadata):
+                    # CANN stream synchronization alone does not drain Torch-NPU's
+                    # host task queue. Complete submission before Proton reads
+                    # the profile buffer from the launch-exit callback.
+                    get_backend_func("get_device_interface").synchronize()
+                    return exit_hook(launch_metadata)
+
+                args = (*args[:8], synchronized_exit, *args[9:])
+            profiler_registered = self.launch(*args, scratch, **kwargs)
+        else:
+            profiler_registered = self.launch(*args, **kwargs)
         _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
 
 

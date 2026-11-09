@@ -22,6 +22,7 @@ Triton-Ascend
 
 ## 🔥 Latest News
 
+- [2026.10.29] Triton-Ascend 3.6.0.post2 official releases are now available
 - [2026.10.15] Triton-Ascend 3.2.2.post2 and 3.6.0 official releases are now available
 - [2026.07.31] Triton-Ascend 3.2.2 official release is now available
 - [2026.04.30] Triton-Ascend 3.2.1 official release is now available
@@ -99,8 +100,10 @@ pip install ninja cmake wheel pybind11 # build-time dependencies
 ```bash
 git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
 git checkout main
-pip install -e .
+pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/simple
 ```
+
+> Tip: Pass `--no-build-isolation` to `pip install` to make nop builds faster.
 
 #### Custom LLVM Build (Optional)
 
@@ -143,6 +146,22 @@ TRITON_WHEEL_NAME="triton-ascend" \
 TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
 python3 setup.py install
 ```
+
+#### Verify the Installation
+
+Run:
+
+```bash
+python3 -c "import triton.backends.ascend as ascend;print('triton-ascend version:', ascend.__version__)"
+```
+
+If the output is:
+
+```bash
+triton-ascend version: <version>
+```
+
+Triton-Ascend is installed successfully.
 
 </details>
 </div>

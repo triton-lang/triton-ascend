@@ -23,11 +23,13 @@
 #include "TritonToGraph/ResourceCostModel.h"
 
 #include "mlir/IR/BuiltinTypes.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL
@@ -38,6 +40,8 @@
 #include <limits>
 #include <tuple>
 #include <utility>
+
+#define DEBUG_TYPE "resource-cost"
 
 using namespace mlir;
 using namespace triton;
@@ -79,8 +83,12 @@ bool isUBResidentTensor(Value value) {
   if (!value)
     return false;
   auto tensor = dyn_cast<RankedTensorType>(value.getType());
-  return tensor && tensor.hasStaticShape() &&
-         isa<FloatType>(tensor.getElementType());
+  if (!tensor || !tensor.hasStaticShape())
+    return false;
+  Type elementType = tensor.getElementType();
+  if (isa<triton::PointerType>(elementType))
+    return false;
+  return isa<FloatType, IntegerType>(elementType);
 }
 
 bool isStorageViewOperation(Operation *operation) {
@@ -257,49 +265,99 @@ bool ResourceSnapshot::isKnown() const {
          ubSafetyPercent > 0 && ubSafetyPercent <= 100;
 }
 
-std::optional<uint64_t> ResourceSnapshot::getSafeUBBudget() const {
-  if (!isKnown())
-    return std::nullopt;
+bool ResourceSnapshot::hasL0Budgets() const {
+  const bool capacitiesKnown =
+      l0aCapacityBytes != 0 && l0bCapacityBytes != 0 && l0cCapacityBytes != 0;
+  return capacitiesKnown && l0SafetyPercent > 0 && l0SafetyPercent <= 100;
+}
 
-  const uint64_t available = ubCapacityBytes - reservedUBBytes;
-  const uint64_t wholePercent = available / 100;
-  const uint64_t remainder = available % 100;
+namespace {
+
+std::optional<uint64_t> scaledSafeBudget(uint64_t availableBytes,
+                                         unsigned safetyPercent) {
+  if (safetyPercent == 0 || safetyPercent > 100)
+    return std::nullopt;
+  const uint64_t wholePercent = availableBytes / 100;
+  const uint64_t remainder = availableBytes % 100;
   uint64_t budget = 0;
-  if (!checkedMul(wholePercent, ubSafetyPercent, budget))
+  if (!checkedMul(wholePercent, safetyPercent, budget))
     return std::nullopt;
   uint64_t remainderBudget = 0;
-  if (!checkedMul(remainder, ubSafetyPercent, remainderBudget))
+  if (!checkedMul(remainder, safetyPercent, remainderBudget))
     return std::nullopt;
   if (!checkedAdd(budget, remainderBudget / 100, budget))
     return std::nullopt;
   return budget;
 }
 
-ResourceSnapshot ResourceSnapshot::fromExplicit(uint64_t ubCapacity,
-                                                unsigned safetyPercent,
-                                                uint64_t reservedUB) {
+} // namespace
+
+std::optional<uint64_t> ResourceSnapshot::getSafeUBBudget() const {
+  if (!isKnown())
+    return std::nullopt;
+  return scaledSafeBudget(ubCapacityBytes - reservedUBBytes, ubSafetyPercent);
+}
+
+std::optional<uint64_t> ResourceSnapshot::getSafeL0ABudget() const {
+  if (l0aCapacityBytes == 0)
+    return std::nullopt;
+  return scaledSafeBudget(l0aCapacityBytes, l0SafetyPercent);
+}
+
+std::optional<uint64_t> ResourceSnapshot::getSafeL0BBudget() const {
+  if (l0bCapacityBytes == 0)
+    return std::nullopt;
+  return scaledSafeBudget(l0bCapacityBytes, l0SafetyPercent);
+}
+
+std::optional<uint64_t> ResourceSnapshot::getSafeL0CBudget() const {
+  if (l0cCapacityBytes == 0)
+    return std::nullopt;
+  return scaledSafeBudget(l0cCapacityBytes, l0SafetyPercent);
+}
+
+ResourceSnapshot
+ResourceSnapshot::fromExplicit(uint64_t ubCapacity, unsigned ubSafety,
+                               uint64_t reservedUB, uint64_t l0aCapacity,
+                               uint64_t l0bCapacity, uint64_t l0cCapacity,
+                               unsigned l0Safety) {
   ResourceSnapshot result;
   result.ubCapacityBytes = ubCapacity;
   result.reservedUBBytes = reservedUB;
-  result.ubSafetyPercent = safetyPercent;
+  result.ubSafetyPercent = ubSafety;
+  result.l0aCapacityBytes = l0aCapacity;
+  result.l0bCapacityBytes = l0bCapacity;
+  result.l0cCapacityBytes = l0cCapacity;
+  result.l0SafetyPercent = l0Safety;
   return result;
 }
 
 ResourceSnapshot
 ResourceSnapshot::fromHardwareConfig(const ascend::HardwareConfig &hardware,
-                                     unsigned safetyPercent,
-                                     uint64_t reservedUB) {
+                                     unsigned ubSafety, uint64_t reservedUB,
+                                     unsigned l0Safety) {
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL
   const ascend::MemorySpace *ub = hardware.getMemorySpace("ub");
   if (!ub || ub->sizeBytes == 0 ||
       ub->sizeBytes > std::numeric_limits<uint64_t>::max())
     return {};
-  return fromExplicit(static_cast<uint64_t>(ub->sizeBytes), safetyPercent,
-                      reservedUB);
+  uint64_t l0aCapacity = 0;
+  uint64_t l0bCapacity = 0;
+  uint64_t l0cCapacity = 0;
+  if (const ascend::MemorySpace *l0a = hardware.getMemorySpace("l0a"))
+    l0aCapacity = l0a->sizeBytes;
+  if (const ascend::MemorySpace *l0b = hardware.getMemorySpace("l0b"))
+    l0bCapacity = l0b->sizeBytes;
+  if (const ascend::MemorySpace *l0c = hardware.getMemorySpace("l0c"))
+    l0cCapacity = l0c->sizeBytes;
+  return fromExplicit(static_cast<uint64_t>(ub->sizeBytes), ubSafety,
+                      reservedUB, l0aCapacity, l0bCapacity, l0cCapacity,
+                      l0Safety);
 #else
   (void)hardware;
-  (void)safetyPercent;
+  (void)ubSafety;
   (void)reservedUB;
+  (void)l0Safety;
   return {};
 #endif
 }
@@ -314,6 +372,9 @@ std::optional<uint64_t> cfg::getStaticTensorBytes(Type type) {
   if (!elementBits || *elementBits == 0)
     return std::nullopt;
 
+  const uint64_t elementBytes =
+      std::max<uint64_t>(1, (static_cast<uint64_t>(*elementBits) + 7) / 8);
+
   uint64_t elements = 1;
   for (int64_t dimension : tensor.getShape()) {
     if (dimension < 0)
@@ -322,12 +383,10 @@ std::optional<uint64_t> cfg::getStaticTensorBytes(Type type) {
       return std::nullopt;
   }
 
-  uint64_t totalBits = 0;
-  if (!checkedMul(elements, *elementBits, totalBits))
+  uint64_t totalBytes = 0;
+  if (!checkedMul(elements, elementBytes, totalBytes))
     return std::nullopt;
-  if (totalBits > std::numeric_limits<uint64_t>::max() - 7)
-    return std::nullopt;
-  return (totalBits + 7) / 8;
+  return totalBytes;
 }
 
 LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
@@ -473,6 +532,7 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
   llvm::sort(positions);
   positions.erase(std::unique(positions.begin(), positions.end()),
                   positions.end());
+  uint64_t bestPosition = 0;
   for (uint64_t position : positions) {
     llvm::SmallVector<const IntervalState *, 16> live;
     for (const auto &entry : intervals) {
@@ -505,11 +565,76 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
       selected.push_back(state);
     }
     estimate.peakLiveBytes = std::max(estimate.peakLiveBytes, liveBytes);
+    if (liveBytes >= estimate.peakLiveBytes)
+      bestPosition = position;
   }
 
   estimate.known = true;
   estimate.reason = ResourceCostRejectReason::None;
   return estimate;
+}
+
+bool cfg::exceedsCubeBudgets(Operation *root,
+                             const ResourceSnapshot &resources) {
+  // Target without known cube capacities: the query is disabled.
+  if (!root || !resources.hasL0Budgets())
+    return false;
+
+  uint64_t peakL0ABytes = 0;
+  uint64_t peakL0BBytes = 0;
+  uint64_t peakL0CBytes = 0;
+  uint64_t dotSiteCount = 0;
+  bool analyzable = true;
+  root->walk([&](Operation *operation) {
+    Value lhs;
+    Value rhs;
+    Value accumulator;
+    Value result;
+    if (auto dot = dyn_cast<DotOp>(operation)) {
+      lhs = dot.getA();
+      rhs = dot.getB();
+      accumulator = dot.getC();
+      result = dot.getD();
+    } else if (auto scaled = dyn_cast<DotScaledOp>(operation)) {
+      lhs = scaled.getA();
+      rhs = scaled.getB();
+      accumulator = scaled.getC();
+      result = scaled.getD();
+    } else {
+      return;
+    }
+    ++dotSiteCount;
+
+    // L0A holds the lhs (A matrix) tile, L0B the rhs (B matrix) tile, and
+    // L0C the accumulator/result tiles, including loop-carried accumulation
+    // across scf.for iterations (the acc operand reaches the next dot).
+    const auto record = [&](Value value, uint64_t &peak) {
+      std::optional<uint64_t> bytes = getStaticTensorBytes(value.getType());
+      if (bytes)
+        peak = std::max(peak, *bytes);
+      else
+        analyzable = false;
+    };
+    record(lhs, peakL0ABytes);
+    record(rhs, peakL0BBytes);
+    record(accumulator, peakL0CBytes);
+    record(result, peakL0CBytes);
+  });
+
+  // No dot sites: zero cube demand, nothing can exceed.
+  if (dotSiteCount == 0)
+    return false;
+  // Unanalyzable tiles cannot be proven to fit; report as exceeding.
+  if (!analyzable)
+    return true;
+
+  const std::optional<uint64_t> safeL0A = resources.getSafeL0ABudget();
+  const std::optional<uint64_t> safeL0B = resources.getSafeL0BBudget();
+  const std::optional<uint64_t> safeL0C = resources.getSafeL0CBudget();
+  if (!safeL0A || !safeL0B || !safeL0C)
+    return true;
+  return peakL0ABytes > *safeL0A || peakL0BBytes > *safeL0B ||
+         peakL0CBytes > *safeL0C;
 }
 
 CandidateEvaluation

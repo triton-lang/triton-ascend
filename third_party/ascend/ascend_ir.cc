@@ -35,6 +35,7 @@
 #include "ascend/include/TritonToGraph/ProgramMappingScalarSpecialization.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/HIVMAVE/IR/HIVMAVE.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 
 #include "mlir/AsmParser/AsmParser.h"
@@ -56,32 +57,8 @@
 using namespace mlir;
 namespace py = pybind11;
 
-struct AscendNPUIROpBuilder : public TritonOpBuilder {
-  std::string target;
-  std::string compile_mode;
-  static constexpr char kTarget910_95[] = "Ascend910_95";
-  static constexpr char kTarget950[] = "Ascend950";
-
-  explicit AscendNPUIROpBuilder(MLIRContext *context, std::string target = "",
-                                std::string compile_mode = "simd")
-      : TritonOpBuilder(context), target(target), compile_mode(compile_mode) {}
-
-  bool isSimtMode() const { return compile_mode == "simt"; }
-
-  bool is_910_95() const {
-    // TODO: Use enum instead of strings after enabling HACC in satandalone
-    // build
-    constexpr size_t kLen910 = sizeof(kTarget910_95) - 1;
-    bool match_910 = target.size() >= kLen910 &&
-                     target.compare(0, kLen910, kTarget910_95) == 0;
-
-    constexpr size_t kLen950 = sizeof(kTarget950) - 1;
-    bool match_950 =
-        target.size() >= kLen950 && target.compare(0, kLen950, kTarget950) == 0;
-
-    return match_910 || match_950;
-  }
-};
+// Shared IR OpBuilder; subclasses inherit it across TUs.
+#include "Utils/AscendNPUIROpBuilder.h"
 
 namespace {
 MLIRContext *gDefaultAscendContext = nullptr;
@@ -507,11 +484,16 @@ void init_ascend_ir(py::module &&m) {
       "computation placement in the Ascend NPU compiler.";
 
   py::enum_<hivm::AddressSpace>(m, "AddressSpace", py::module_local())
+      .value("Zero", hivm::AddressSpace::Zero)
+      .value("GM", hivm::AddressSpace::GM)
       .value("L1", hivm::AddressSpace::L1)
-      .value("UB", hivm::AddressSpace::UB)
       .value("L0A", hivm::AddressSpace::L0A)
       .value("L0B", hivm::AddressSpace::L0B)
       .value("L0C", hivm::AddressSpace::L0C)
+      .value("UB", hivm::AddressSpace::UB)
+      .value("SSBUF", hivm::AddressSpace::SSBUF)
+      .value("FixBUF", hivm::AddressSpace::FixBUF)
+      .value("BiasBUF", hivm::AddressSpace::BiasBUF)
       .export_values();
 
   py::enum_<hivm::TCoreType>(m, "CoreType", py::module_local())
@@ -599,15 +581,17 @@ void init_ascend_ir(py::module &&m) {
       .value("P_RELU", hivm::FixpipePreReluMode::P_RELU)
       .export_values();
   py::enum_<hivm::DataLayout>(m, "DataLayout", py::module_local())
+      .value("ND", hivm::DataLayout::ND)
       .value("nZ", hivm::DataLayout::nZ)
       .value("zN", hivm::DataLayout::zN)
+      .value("Fractal", hivm::DataLayout::Fractal)
       .export_values();
 
   m.def("load_dialects", [](MLIRContext &context) {
     gDefaultAscendContext = &context;
     DialectRegistry registry;
     registry.insert<annotation::AnnotationDialect, mlir::hivm::HIVMDialect,
-                    scope::ScopeDialect>();
+                    mlir::hivmave::AVEDialect, scope::ScopeDialect>();
     context.appendDialectRegistry(registry);
     context.loadAllAvailableDialects();
   });
@@ -1256,6 +1240,12 @@ void init_ascend_ir(py::module &&m) {
            [](AscendNPUIROpBuilder &self, hivm::VFMode mode) -> Attribute {
              return self.getBuilder().getAttr<hivm::VFModeAttr>(mode);
            })
+      .def(
+          "get_data_layout_attr",
+          [](AscendNPUIROpBuilder &self, hivm::DataLayout layout) -> Attribute {
+            auto *ctx = self.getBuilder().getContext();
+            return hivm::DataLayoutAttr::get(ctx, layout);
+          })
       .def("get_iterator_types_attr",
            [](AscendNPUIROpBuilder &self,
               const std::vector<hivm::IteratorType> &array) {

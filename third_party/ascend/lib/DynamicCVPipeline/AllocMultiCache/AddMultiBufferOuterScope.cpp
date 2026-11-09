@@ -15,6 +15,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Dominance.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
@@ -408,12 +409,6 @@ static int collectExtraSync(const SmallVector<Operation *> &ops,
     }
   }
 
-  // Fallback: use first available pair if exact match not found
-  if (!extraSets.empty() && !extraWaits.empty()) {
-    info.setOp = extraSets.front();
-    info.waitOp = extraWaits.front();
-  }
-
   return 0;
 }
 
@@ -578,10 +573,33 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
   return 0;
 }
 
+/// A reused flag may carry its seed/drain tags on a different transfer_id.
+/// Only borrow a lifecycle enclosing the transfers on both cores. Sync ops
+/// remain owned by their original group so they are not duplicated.
+static bool hasSharedSyncLifecycle(const TransferGroupInfo &group,
+                                   const TransferGroupInfo &owner,
+                                   DominanceInfo &dom,
+                                   PostDominanceInfo &postDom) {
+  if (!owner.extraSyncSetOp || !owner.extraSyncWaitOp ||
+      !group.senderChain.setOp || !group.receiverChain.waitOp)
+    return false;
+  Operation *seed = owner.extraSyncSetOp;
+  Operation *drain = owner.extraSyncWaitOp;
+  Operation *sender = group.senderChain.setOp;
+  Operation *receiver = group.receiverChain.waitOp;
+  return seed->getParentOfType<scope::ScopeOp>() ==
+             receiver->getParentOfType<scope::ScopeOp>() &&
+         drain->getParentOfType<scope::ScopeOp>() ==
+             sender->getParentOfType<scope::ScopeOp>() &&
+         dom.properlyDominates(seed, receiver) &&
+         postDom.properlyPostDominates(drain, sender);
+}
+
 /// Collect TransferGroupInfo for all transfer groups
 static int collectTransferGroupData(
     ModuleOp module, DenseMap<int, SmallVector<Operation *>> &opsByTid,
-    FlagIdManager &flagIdMgr, DenseMap<int, TransferGroupInfo> &groups) {
+    FlagIdManager &flagIdMgr, DenseMap<int, TransferGroupInfo> &groups,
+    bool isDoubleBuf) {
   for (auto &p : opsByTid) {
     TransferGroupInfo info;
     if (buildTransferGroupData(p.first, p.second, info)) {
@@ -589,6 +607,38 @@ static int collectTransferGroupData(
     }
     if (info.senderChain.transferOp || info.receiverChain.transferOp) {
       groups[p.first] = info;
+    }
+  }
+
+  // Single-buffer mode does not need a second flag or lifecycle proof.
+  if (!isDoubleBuf)
+    return 0;
+
+  // A missing per-tid seed/drain must be covered by another group's lifecycle
+  // on the same channel. Expose an unproven lifecycle as an SSBUFFER failure
+  // instead of silently changing the channel's buffering policy.
+  DominanceInfo dom(module);
+  PostDominanceInfo postDom(module);
+  for (auto &p : groups) {
+    const auto &group = p.second;
+    if (group.extraSyncSetOp && group.extraSyncWaitOp)
+      continue;
+    bool covered = false;
+    for (auto &q : groups) {
+      const auto &owner = q.second;
+      if (group.originalFlag == owner.originalFlag &&
+          group.isCtoV == owner.isCtoV &&
+          hasSharedSyncLifecycle(group, owner, dom, postDom)) {
+        covered = true;
+        break;
+      }
+    }
+    if (!covered) {
+      LDBG("FALLBACK: no complete shared sync lifecycle, tid="
+           << group.tid << ", originalFlag=" << group.originalFlag
+           << ", direction=" << (group.isCtoV ? "C->V" : "V->C")
+           << ", rc=" << CVPipeline::ERRCODE_FAILED << ".");
+      return -1;
     }
   }
 
@@ -742,13 +792,12 @@ static int createOutputBufferForGroup(TransferGroupInfo &g,
                                               << " (sender scope).");
   }
 
-  // Insert output sync wait at extra_sync position
-  Operation *outputWaitInsertOp =
-      g.extraSyncWaitOp ? g.extraSyncWaitOp : g.receiverChain.waitOp;
-  if (outputWaitInsertOp) {
-    createOutputSyncWaitOp(outputWaitInsertOp, g.outputFlag, g.tid, builder);
+  // Only a real drain is a valid insertion point. An in-loop receiver wait
+  // consumes data and must not acquire a second fixed-flag wait.
+  if (g.extraSyncWaitOp) {
+    createOutputSyncWaitOp(g.extraSyncWaitOp, g.outputFlag, g.tid, builder);
     LDBG("Created output sync wait with flag="
-         << g.outputFlag << " at block_id=" << getBlockId(outputWaitInsertOp)
+         << g.outputFlag << " at block_id=" << getBlockId(g.extraSyncWaitOp)
          << " (receiver scope).");
   }
   return 0;
@@ -966,14 +1015,18 @@ static Value createPollingCondition(scf::ForOp forOp, OpBuilder &builder,
   setSsbufferTags(divOp.getOperation(), builder, blockId, tid);
 
   Type counterType = divOp.getResult().getType();
-  int bitWidth = counterType.getIntOrFloatBitWidth();
-  auto c2Val = builder.create<arith::ConstantIntOp>(loc, 2, bitWidth);
+  // SCF loop counters may be index-typed as well as fixed-width integers.
+  // Preserve that type so polling arithmetic does not query an index bitwidth
+  // or mix an index counter with an integer constant.
+  auto c2Val = builder.create<arith::ConstantOp>(
+      loc, builder.getIntegerAttr(counterType, 2));
   setSsbufferTags(c2Val.getOperation(), builder, blockId, tid);
   auto remOp =
       builder.create<arith::RemSIOp>(loc, divOp.getResult(), c2Val.getResult());
   setSsbufferTags(remOp.getOperation(), builder, blockId, tid);
 
-  auto c0Val = builder.create<arith::ConstantIntOp>(loc, 0, bitWidth);
+  auto c0Val = builder.create<arith::ConstantOp>(
+      loc, builder.getIntegerAttr(counterType, 0));
   auto cmpOp = builder.create<arith::CmpIOp>(
       loc, arith::CmpIPredicate::eq, remOp.getResult(), c0Val.getResult());
   setSsbufferTags(cmpOp.getOperation(), builder, blockId, tid);
@@ -1557,7 +1610,8 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
   DenseMap<int, SmallVector<Operation *>> opsByTid;
   collectOpsByTransferId(module, opsByTid);
   DenseMap<int, TransferGroupInfo> groups;
-  if (collectTransferGroupData(module, opsByTid, flagIdMgr, groups)) {
+  if (collectTransferGroupData(module, opsByTid, flagIdMgr, groups,
+                               isDoubleBuf)) {
     LDBG("FALLBACK: Step 1/3 failed, no valid transfer groups found, rc="
          << CVPipeline::ERRCODE_FAILED << ".");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);

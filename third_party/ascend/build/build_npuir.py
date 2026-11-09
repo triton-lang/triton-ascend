@@ -17,6 +17,10 @@ def _log(msg):
     print(f"[build_npuir] {msg}", flush=True)
 
 
+def _is_git_repo(dir_path):
+    return (Path(dir_path) / ".git").exists()
+
+
 def _check_disk_space(min_free_gb=_MIN_FREE_DISK_GB):
     """Check that the disk hosting the repo has at least ``min_free_gb`` free.
 
@@ -67,79 +71,62 @@ def _is_submodule_initialized(dir_path):
     return dir_path.is_dir() and (dir_path / "CMakeLists.txt").exists()
 
 
-def _nested_submodule_gitlinks(npuir_dir):
-    """Map {relative_path: sha} for the nested submodules the fetched npuir tree records."""
-    out = subprocess.check_output(
-        ["git", "ls-tree", "HEAD", "third-party/"],
-        cwd=str(npuir_dir),
-        text=True,
-    )
-    links = {}
-    for line in out.splitlines():
-        fields = line.split()
-        if len(fields) >= 4:
-            links[fields[3]] = fields[2]
-    return links
-
-
-def _fetch_nested_via_sha(npuir_dir, path, sha):
-    """Fetch one nested repo at its exact SHA.
-
-    Direct depth-1 fetches of an exact commit SHA work where branch clones do
-    not (gitcode serves `want <sha>` requests but branch clones fail).
-    """
-    url = subprocess.check_output(
-        ["git", "-C", str(npuir_dir), "config", "-f", ".gitmodules", "--get", f"submodule.{path}.url"],
-        text=True,
-    ).strip()
-    dest = npuir_dir / path
-    shutil.rmtree(dest, ignore_errors=True)
-    _run_with_retry(["git", "init", "-q", str(dest)])
-    _run_with_retry(["git", "-C", str(dest), "remote", "add", "origin", url])
-    # gitcode intermittently answers 503 (server-side throttling) on large
-    # depth-1 fetches; retry with a longer window than the default.
-    _run_with_retry(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", sha], retries=5, interval=10)
-    _run_with_retry(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"])
-
-
-def _init_nested_submodule_sources(npuir_dir):
-    """Fetch the nested submodule sources (llvm-project, torch-mlir, shmem)
-    via direct depth-1 SHA fetches from the gitcode remotes.
-    """
-    links = _nested_submodule_gitlinks(npuir_dir)
-    if not links:
-        raise RuntimeError("No nested submodules recorded in the fetched AscendNPU-IR tree.")
-    for path, sha in links.items():
-        dest = npuir_dir / path
-        if _is_submodule_initialized(dest):
-            _log(f"{path} already initialized, skipping")
-            continue
-        _log(f"Fetching {path} @ {sha}")
-        _fetch_nested_via_sha(npuir_dir, path, sha)
-
-
 def _init_npuir_repo():
-    """Fetch the AscendNPU-IR stable branch and its nested submodule sources.
+    """Initialize the AscendNPU-IR submodule and its nested submodules.
 
-    No longer uses the pinned gitlink submodule: the payload tracks the
-    upstream stable branch. The shared workflow script resolves stable -> SHA
-    via ls-remote and fetches that exact SHA depth-1 (gitcode branch clones
-    are unreliable from the CI network, `want <sha>` fetches are fine); the
-    nested sources (llvm-project / torch-mlir / shmem) are then fetched here
-    in Python so they keep their dedicated retry handling.
+    Local builds use the version pinned by the submodule gitlink (the
+    relatively stable, tested revision), NOT the upstream stable branch:
+    tracking stable HEAD is the wheel CI's job, which pre-fetches the
+    sources before running setup.py (see wheels.Dockerfile) — an existing
+    source tree is therefore left untouched here.
+
+    AscendNPU-IR depends on LLVM and Torch-MLIR, which are pulled in as
+    nested submodules, hence the recursive update.
     """
-    _log("Fetching AscendNPU-IR stable branch ...")
-    script = _REPO_ROOT / ".github" / "workflows" / "build" / "fetch-npuir-stable.sh"
-    if not script.is_file():
-        raise RuntimeError(f"npuir fetch script not found: {script}")
-    _run_with_retry(["bash", str(script), str(_NPUIR_DIR), "--skip-nested"])
+    if _is_submodule_initialized(_NPUIR_DIR):
+        _log(f"AscendNPU-IR sources already present at {_NPUIR_DIR}, skipping initialization.")
+        return
+
+    _log("Initializing AscendNPU-IR repository ...")
+    if not _is_git_repo(_REPO_ROOT):
+        raise RuntimeError(f"{_REPO_ROOT} is not a git repository; cannot initialize the "
+                           f"Triton-Ascend submodule.")
+
+    # First initialize the AscendNPU-IR submodule itself from the root repo.
+    _run_with_retry([
+        "git",
+        "submodule",
+        "update",
+        "--init",
+        "--depth",
+        "1",
+        "--",
+        "third_party/ascend/AscendNPU-IR",
+    ], cwd=_REPO_ROOT)
+
+    # Then initialize the nested submodules recorded by the pinned revision
+    # (third-party/llvm-project, torch-mlir, shmem) — single level, depth-1,
+    # mirroring what the wheel CI fetches (fetch-npuir-stable.sh). NOT
+    # --recursive: the torch-mlir fork's own .gitmodules points at github.com
+    # (externals/llvm-project — the full upstream LLVM monorepo — and
+    # stablehlo), which recursive init would try to clone with no depth
+    # limit; build-tools/build.sh consumes third-party/* directly and never
+    # uses those externals (the CI payload builds prove it daily).
+    if _is_submodule_initialized(_NPUIR_DIR):
+        _run_with_retry([
+            "git",
+            "submodule",
+            "update",
+            "--init",
+            "--depth",
+            "1",
+        ], cwd=_NPUIR_DIR)
+    else:
+        raise RuntimeError(f"AscendNPU-IR submodule initialization failed: {_NPUIR_DIR} is not git repository.")
 
     if not _is_submodule_initialized(_NPUIR_DIR):
-        raise RuntimeError(f"AscendNPU-IR fetch failed: {_NPUIR_DIR} has no source tree.")
-    _log("AscendNPU-IR stable HEAD checked out.")
-
-    _init_nested_submodule_sources(_NPUIR_DIR)
-    _log("Nested submodule sources ready.")
+        raise RuntimeError(f"AscendNPU-IR initialization failed: {_NPUIR_DIR} is still empty.")
+    _log("AscendNPU-IR repository initialized.")
 
 
 def _cgroup_limits():
@@ -210,23 +197,6 @@ def _host_memory_bytes():
     return None
 
 
-def _create_clang_wrapper():
-    """Wrap clang++ with the workarounds the Ascend LLVM fork needs.
-
-    The Ascend LLVM fork excludes <cstdint> in Affine
-    ValueBoundsOpInterfaceImpl.h under BSPUB_DAVINCI_BISHENGIR_A5, and the
-    clang in the manylinux CI images resolves a libstdc++ that no longer
-    provides stdint.h transitively — so force-include cstdint. clang 21's
-    new -Wall warnings (e.g. -Wunnecessary-virtual-specifier) also trip
-    -Werror on LLVM 19 code, so demote warnings to non-fatal (clang
-    last-wins semantics; warnings still print).
-    """
-    wrapper = Path("/tmp/clang++-cstdint")
-    wrapper.write_text('#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error\n')
-    wrapper.chmod(0o755)
-    return wrapper
-
-
 def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Release", rebuild=True):
     """Configure, build and install AscendNPU-IR via its build.sh script."""
     repo_dir = Path(repo_dir)
@@ -254,11 +224,18 @@ def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Rele
         "bash",
         str(build_script), f"--build-type={str(build_type)}", "-o",
         str(build_path), "-t", "-j",
-        str(max_jobs), f"--bisheng-compiler={str(bisheng_compiler_path)}",
-        f"--cxx-compiler={str(_create_clang_wrapper())}", "--add-cmake-options", "-DLLVM_ENABLE_LLD=ON",
-        "--build-triton", "--build-torch-mlir", "--build-shmem-template", "--bishengir-publish", "ON",
-        "--collect-binary"
+        str(max_jobs), f"--bisheng-compiler={str(bisheng_compiler_path)}", "--add-cmake-options",
+        "-DLLVM_ENABLE_LLD=ON", "--build-triton", "--build-torch-mlir", "--build-shmem-template", "--bishengir-publish",
+        "ON", "--collect-binary"
     ]
+    # CI-only override: the manylinux wheel images need a clang++ wrapper
+    # (-include cstdint -Wno-error) for the Ascend LLVM fork; they create it
+    # themselves and point NPUIR_CXX_COMPILER at it. Local builds use the
+    # toolchain's default C++ compiler (no --cxx-compiler).
+    cxx_compiler = os.getenv("NPUIR_CXX_COMPILER", "")
+    if cxx_compiler:
+        _log(f"Using C++ compiler override: {cxx_compiler}")
+        cmd.append(f"--cxx-compiler={cxx_compiler}")
     if rebuild:
         cmd.append("-r")
     _log(f"Building AscendNPU-IR (bisheng): {' '.join(cmd)}")

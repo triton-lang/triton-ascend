@@ -54,6 +54,8 @@ git checkout main
 pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/simple
 ```
 
+> 提醒：`pip install` 传入 `--no-build-isolation` 参数，可加快无变更构建速度。
+
 ### 自定义LLVM构建（可选）
 
 如需自定义构建LLVM，可执行以下步骤编译Triton-Ascend。
@@ -190,7 +192,19 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 ### 验证安装
 
-运行tutorials中向量加法示例验证安装**Triton-Ascend**结果。向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)。
+执行以下命令：
+
+```bash
+python3 -c "import triton.backends.ascend as ascend;print('triton-ascend version:', ascend.__version__)"
+```
+
+如果输出：
+
+```bash
+triton-ascend version: 版本号
+```
+
+说明Triton-Ascend包安装成功了。继续运行tutorials中向量加法示例验证后端是否编译成功。向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)。
 
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
@@ -296,7 +310,7 @@ triton-ascend 3.2.1 requires triton==3.5.0, but you have triton 3.5.1 which is i
 
 **问题五：Triton-Ascend 3.2.1版本依赖的Triton版本为何不一致？**
 
-答复：x86与Arm使用不同版本的社区Triton安装包，是因为社区从Triton 3.2版本开始提供x86安装包，而Arm安装包是从Triton 3.5版本开始提供的。
+答复：x86与ARM使用不同版本的社区Triton安装包，是因为社区从Triton 3.2版本开始提供x86安装包，而ARM安装包是从Triton 3.5版本开始提供的。
 
 **问题六：如何确认芯片类型？**
 

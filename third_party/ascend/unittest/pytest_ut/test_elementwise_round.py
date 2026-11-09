@@ -36,8 +36,9 @@ def standard_round_to_nearest_neighbor_even(x0):  # TO BE FIXED round to nearest
 
 
 def standard_round(x0):
-    res = torch.where(x0 >= 0, torch.floor(x0 + 0.5), torch.ceil(x0 - 0.5))
-    return res
+    x = x0.to(torch.float32)
+    res = torch.where(x >= 0, torch.floor(x + 0.5), torch.ceil(x - 0.5))
+    return res.to(x0.dtype)
 
 
 @triton.jit

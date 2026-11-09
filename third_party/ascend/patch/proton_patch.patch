@@ -161,14 +161,15 @@ index c774e5f41d85c09a929e0fca56f7fc1f2312c0be..2dba446281781b29325fb6e2cd6b1d4f
    // Device type that generated the trace
    Device device;
 diff --git a/third_party/proton/common/include/TraceDataIO/TraceWriter.h b/third_party/proton/common/include/TraceDataIO/TraceWriter.h
-index 9558661f8a62fd41853fafcd5a91e63bbfd3a2b5..8a412cd6f397d37d0918ffd0103e57b5d30fcc12 100644
+index 9558661f8a62fd41853fafcd5a91e63bbfd3a2b5..a00827b5a854235297f126ea8f1d0ae01ec2fb85 100644
 --- a/third_party/proton/common/include/TraceDataIO/TraceWriter.h
 +++ b/third_party/proton/common/include/TraceDataIO/TraceWriter.h
-@@ -16,6 +16,7 @@ struct KernelMetadata {
+@@ -16,6 +16,8 @@ struct KernelMetadata {
    std::map<int, std::string> scopeName;
    std::string kernelName;
    std::vector<std::string> callStack;
 +  double cycleCounterFreqMhz = 1000.0;
++  bool channelTrace = false;
  };
  
  using KernelTrace = std::pair<std::shared_ptr<CircularLayoutParserResult>,
@@ -212,7 +213,7 @@ index 819db452449f47d12fe62255d223d31ee2d5c081..1f44a4acd9451a67cb7b12b9128201c6
  
    throw e;
 diff --git a/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp b/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
-index 320a4f193a0f857cb86479cacd1ce67cec1cb1a2..ae742e1d5e35bf7e5c61fafa1067da4555a8ed33 100644
+index 320a4f193a0f857cb86479cacd1ce67cec1cb1a2..99c62f93696235499f4c0c903a4558cd6f1a1985 100644
 --- a/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
 +++ b/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
 @@ -1,5 +1,6 @@
@@ -233,7 +234,19 @@ index 320a4f193a0f857cb86479cacd1ce67cec1cb1a2..ae742e1d5e35bf7e5c61fafa1067da45
  
    json callStack = json::array();
    for (auto const &frame : metadata->callStack) {
-@@ -210,8 +215,8 @@ void StreamChromeTraceWriter::writeKernel(json &object,
+@@ -204,14 +209,20 @@ void StreamChromeTraceWriter::writeKernel(json &object,
+                 " CTA" + std::to_string(ctaId);
+           tid = "warp " + std::to_string(warpId) + " (line " +
+                 std::to_string(lineId) + ")";
++          if (metadata->channelTrace) {
++            pid = metadata->kernelName + " profiling channel " +
++                  std::to_string(ctaId);
++            tid = "pipe " + std::to_string(warpId) + " (line " +
++                  std::to_string(lineId) + ")";
++          }
+           category = metadata->kernelName;
+           if (!metadata->scopeName.count(scopeId))
+             name = "scope_" + std::to_string(scopeId);
            else
              name = metadata->scopeName.at(scopeId);
  
@@ -244,6 +257,48 @@ index 320a4f193a0f857cb86479cacd1ce67cec1cb1a2..ae742e1d5e35bf7e5c61fafa1067da45
  
            // Global time is in `ns` unit. With 1GHz assumption, we
            // could subtract with blockToMInCycle: (ns - ns) / 1GHz - cycle
+@@ -236,6 +247,17 @@ void StreamChromeTraceWriter::writeKernel(json &object,
+           args["Frequency (MHz)"] = freq;
+           element["args"] = args;
+           element["args"]["call_stack"] = callStack;
++          if (metadata->channelTrace) {
++            element["args"]["coverage"] = "sampled_hardware_channels";
++            element["args"]["all_logical_blocks"] = false;
++            element["args"]["channel_id_is_core_id"] = false;
++            element["args"]["clock_domain"] =
++                "channel-relative; not host synchronized";
++            element["args"]["start_cycle"] = event.first->cycle;
++            element["args"]["end_cycle"] = event.second->cycle;
++            element["args"]["channel_id"] = ctaId;
++            element["args"]["pipe_id"] = warpId;
++          }
+ 
+           object["traceEvents"].push_back(element);
+ 
+diff --git a/third_party/proton/csrc/Proton.cpp b/third_party/proton/csrc/Proton.cpp
+index 62468da69925478388f3d944c889175a0fd147b2..1e9c8f3e1209eb2528e8d3780f82fc67fe512542 100644
+--- a/third_party/proton/csrc/Proton.cpp
++++ b/third_party/proton/csrc/Proton.cpp
+@@ -1,4 +1,5 @@
+ #include "Proton.h"
++#include "Profiler/Instrumentation/InstrumentationProfiler.h"
+ 
+ #include <map>
+ #include <stdexcept>
+@@ -83,6 +84,13 @@ static void initProton(pybind11::module &&m) {
+         streamId, functionId, reinterpret_cast<uint8_t *>(buffer), size);
+   });
+ 
++  m.def("record_instrumentation_events",
++        [](uint64_t functionId,
++           const std::vector<std::array<uint64_t, 6>> &records) {
++          InstrumentationProfiler::instance().recordInstrumentationEvents(
++              functionId, records);
++        });
++
+   m.def("exit_instrumented_op", [](uint64_t streamId, uint64_t functionId,
+                                    uint64_t buffer, size_t size) {
+     SessionManager::instance().exitInstrumentedOp(
 diff --git a/third_party/proton/csrc/include/Context/Context.h b/third_party/proton/csrc/include/Context/Context.h
 index 134ec7579b54be83744671375f77ef69ef90fc54..c7a8dfbe3aae1187d7c28305fed5572ba8d42723 100644
 --- a/third_party/proton/csrc/include/Context/Context.h
@@ -285,7 +340,7 @@ index 134ec7579b54be83744671375f77ef69ef90fc54..c7a8dfbe3aae1187d7c28305fed5572b
  struct Scope : public Context {
    const static size_t DummyScopeId = std::numeric_limits<size_t>::max();
 diff --git a/third_party/proton/csrc/include/Data/Metric.h b/third_party/proton/csrc/include/Data/Metric.h
-index 039b3006d2bf00c2726826c0f29c7c43f96d3824..d7d75734ccc618418e8ca4c313f43c9d1e842a31 100644
+index 039b3006d2bf00c2726826c0f29c7c43f96d3824..47620bee17cf1122e452740337fcc7f44124d934 100644
 --- a/third_party/proton/csrc/include/Data/Metric.h
 +++ b/third_party/proton/csrc/include/Data/Metric.h
 @@ -3,6 +3,7 @@
@@ -302,27 +357,30 @@ index 039b3006d2bf00c2726826c0f29c7c43f96d3824..d7d75734ccc618418e8ca4c313f43c9d
                uint64_t deviceType, uint64_t timeShiftCost, uint64_t initTime,
 -              uint64_t preFinalTime, uint64_t postFinalTime)
 +              uint64_t preFinalTime, uint64_t postFinalTime,
-+              double cycleCounterFreqMhz = 1000.0)
++              double cycleCounterFreqMhz = 1000.0, bool channelTrace = false)
        : CycleMetric() {
      this->values[StartCycle] = startCycle;
      this->values[EndCycle] = endCycle;
-@@ -313,8 +315,11 @@ public:
+@@ -313,8 +315,13 @@ public:
      this->values[InitTime] = initTime;
      this->values[PreFinalTime] = preFinalTime;
      this->values[PostFinalTime] = postFinalTime;
 +    this->cycleCounterFreqMhz = cycleCounterFreqMhz;
++    this->channelTrace = channelTrace;
    }
  
 +  double getCycleCounterFreqMhz() const { return cycleCounterFreqMhz; }
++  bool isChannelTrace() const { return channelTrace; }
 +
    virtual const std::string getName() const { return "CycleMetric"; }
  
    virtual const std::string getValueName(int valueId) const {
-@@ -326,6 +331,7 @@ public:
+@@ -326,6 +333,8 @@ public:
    virtual bool isExclusive(int valueId) const { return EXCLUSIVE[valueId]; }
  
  private:
 +  double cycleCounterFreqMhz{1000.0};
++  bool channelTrace{false};
    const static inline bool PROPERTY[CycleMetricKind::Count] = {
        false, false, false, false, true,  true,  true, true,
        true,  true,  true,  true,  false, false, false};
@@ -443,10 +501,27 @@ index 0000000000000000000000000000000000000000..c22544d69ae8ece9418fcc6e89cbf148
 +
 +#endif // PROTON_PROFILER_INSTRUMENTATION_ASCEND_RUNTIME_H
 diff --git a/third_party/proton/csrc/include/Profiler/Instrumentation/InstrumentationProfiler.h b/third_party/proton/csrc/include/Profiler/Instrumentation/InstrumentationProfiler.h
-index 5e85eb8e1b6e22c55476af45465d736fe4cb29de..0919a4a598500f2ad3e7ef40515d03543aa9e01a 100644
+index 5e85eb8e1b6e22c55476af45465d736fe4cb29de..bb6f942bc1b208adaf8b2bb6f16df8661383ec9a 100644
 --- a/third_party/proton/csrc/include/Profiler/Instrumentation/InstrumentationProfiler.h
 +++ b/third_party/proton/csrc/include/Profiler/Instrumentation/InstrumentationProfiler.h
-@@ -58,6 +58,7 @@ private:
+@@ -8,6 +8,7 @@
+ #include "Runtime.h"
+ #include "TraceDataIO/Parser.h"
+ #include "Utility/Singleton.h"
++#include <array>
+ 
+ namespace proton {
+ 
+@@ -18,6 +19,8 @@ class InstrumentationProfiler : public Profiler,
+ public:
+   InstrumentationProfiler() = default;
+   virtual ~InstrumentationProfiler();
++  void recordInstrumentationEvents(
++      uint64_t functionId, const std::vector<std::array<uint64_t, 6>> &records);
+ 
+ protected:
+   // Profiler
+@@ -58,6 +61,7 @@ private:
    uint8_t *hostBuffer{nullptr};
    // functionId -> scopeId -> scopeName
    std::map<uint64_t, std::map<size_t, std::string>> functionScopeIdNames;
@@ -570,15 +645,16 @@ index ba3d67f44e4a21d9d9d1f39f48ae7b78bf143f6c..2d7ade79ad294ea280cb3bf27c2bea6b
  
  /*static*/ thread_local std::map<OpInterface *, bool> OpInterface::opInProgress;
 diff --git a/third_party/proton/csrc/lib/Data/TraceData.cpp b/third_party/proton/csrc/lib/Data/TraceData.cpp
-index 38728127faa7b73f058a8f683833ce3054651031..6549d9b33ca5258b6276e0d10bd7fcb1e0f3c856 100644
+index 38728127faa7b73f058a8f683833ce3054651031..662323a1b714b42cf8cb4ad91349f151b27107e9 100644
 --- a/third_party/proton/csrc/lib/Data/TraceData.cpp
 +++ b/third_party/proton/csrc/lib/Data/TraceData.cpp
-@@ -404,6 +404,8 @@ convertToTimelineTrace(TraceData::Trace *trace,
+@@ -404,6 +404,9 @@ convertToTimelineTrace(TraceData::Trace *trace,
          getStringValue(kernelEvent.cycleMetric, CycleMetric::KernelName);
      metadata->scopeName = scopeIdToName;
      metadata->callStack = std::move(callStack);
 +    metadata->cycleCounterFreqMhz =
 +        kernelEvent.cycleMetric->getCycleCounterFreqMhz();
++    metadata->channelTrace = kernelEvent.cycleMetric->isChannelTrace();
      if (timeShiftCost > 0)
        timeShift(timeShiftCost, parserResult);
      results.emplace_back(parserResult, metadata);
@@ -810,10 +886,10 @@ index 9ebee5d9131ec5da9fafeb4e150c54710b61b5cf..0211aaea3689e271d2188587f0946d92
 +add_proton_library(ProtonProfiler ${PROTON_PROFILER_SOURCES})
 diff --git a/third_party/proton/csrc/lib/Profiler/Instrumentation/AscendRuntime.cpp b/third_party/proton/csrc/lib/Profiler/Instrumentation/AscendRuntime.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f332d22b552
+index 0000000000000000000000000000000000000000..ff3115fc4a3a6f1239d05658ebfe88a14ac990a8
 --- /dev/null
 +++ b/third_party/proton/csrc/lib/Profiler/Instrumentation/AscendRuntime.cpp
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,94 @@
 +#include "Profiler/Instrumentation/AscendRuntime.h"
 +
 +#include <acl/acl.h>
@@ -867,14 +943,8 @@ index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f33
 +}
 +
 +std::optional<int64_t> AscendRuntime::getTimeShiftCost() const {
-+  const char *name = aclrtGetSocName();
-+  const std::string socName = name ? name : "";
-+  if (socName.find("Ascend910_9382") != std::string::npos)
-+    return 0;
-+  // Preserve the legacy calibration; other SoCs use the raw counter.
-+  if (socName.find("Ascend910A") != std::string::npos ||
-+      socName.find("Ascend910B") != std::string::npos)
-+    return 12;
++  // Uncalibrated subtraction can invert short and nested scope intervals.
++  // Keep raw timestamps until a device-specific calibration is validated.
 +  return 0;
 +}
 +
@@ -915,7 +985,7 @@ index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f33
 +
 +} // namespace proton
 diff --git a/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp b/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp
-index aa0868fe8fc3a119c528cbcba5d7e9a37ccd36aa..ae99aa42a742978dff7b017ea8a333cd4fdae1c0 100644
+index aa0868fe8fc3a119c528cbcba5d7e9a37ccd36aa..ff47b9472a40b17b37ec6ea48fd43ffa358e2d3f 100644
 --- a/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp
 +++ b/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp
 @@ -1,9 +1,16 @@
@@ -943,7 +1013,46 @@ index aa0868fe8fc3a119c528cbcba5d7e9a37ccd36aa..ae99aa42a742978dff7b017ea8a333cd
  
  namespace proton {
  
-@@ -56,10 +64,25 @@ void InstrumentationProfiler::doSetMode(
+@@ -24,6 +32,38 @@ thread_local std::map<Data *, size_t> InstrumentationProfiler::dataScopeIdMap =
+ 
+ InstrumentationProfiler::~InstrumentationProfiler() {}
+ 
++void InstrumentationProfiler::recordInstrumentationEvents(
++    uint64_t functionId, const std::vector<std::array<uint64_t, 6>> &records) {
++  if (!runtime || runtime->getDeviceType() != DeviceType::NPU)
++    throw std::runtime_error(
++        "Instrumentation events require an active NPU instrumentation session");
++  auto &contexts = functionScopeIdContexts.at(functionId);
++  for (const auto &r : records) {
++    if (r[0] < 11 || r[0] > 28 || r[1] > 10 || r[4] < r[3] || r[5] == 0 ||
++        !contexts.count(r[2]))
++      throw std::runtime_error("Invalid instrumentation scope event");
++  }
++  auto device = runtime->getDevice();
++  const auto &name = functionNames.at(functionId);
++  for (auto *data : getDataSet()) {
++    auto kernelId = Scope::getNewScopeId();
++    data->addOp(kernelId, name);
++    for (const auto &r : records) {
++      auto scopeId = data->addOp(kernelId, contexts.at(r[2]));
++      auto duration = r[4] - r[3];
++      data->addMetric(scopeId,
++                      std::make_shared<CycleMetric>(
++                          r[3], r[4], duration, static_cast<double>(duration),
++                          kernelId,
++                          name + " [instrumentation capture " +
++                              std::to_string(kernelId) + "]",
++                          r[0], (r[0] - 11) / 3, r[1], device,
++                          static_cast<uint64_t>(runtime->getDeviceType()), 0, 0,
++                          0, 0, static_cast<double>(r[5]), true));
++    }
++  }
++}
++
+ void InstrumentationProfiler::doStart() {
+   // Start the instrumentation profiler.
+ }
+@@ -56,10 +96,25 @@ void InstrumentationProfiler::doSetMode(
    }
    if (proton::toLower(modeAndOptions[0]) ==
        proton::toLower(DeviceTraits<DeviceType::CUDA>::name)) {
@@ -969,7 +1078,7 @@ index aa0868fe8fc3a119c528cbcba5d7e9a37ccd36aa..ae99aa42a742978dff7b017ea8a333cd
    } else {
      throw std::runtime_error("Unknown device type: " + modeAndOptions[0]);
    }
-@@ -106,13 +129,14 @@ InstrumentationProfiler::getParserConfig(uint64_t functionId,
+@@ -106,13 +161,14 @@ InstrumentationProfiler::getParserConfig(uint64_t functionId,
    // Only support circular layout parser for now, but we will extend the support
    // to other parsers in the future
    auto config = std::make_shared<CircularLayoutParserConfig>();
@@ -985,7 +1094,7 @@ index aa0868fe8fc3a119c528cbcba5d7e9a37ccd36aa..ae99aa42a742978dff7b017ea8a333cd
    config->numBlocks = bufferSize / config->scratchMemSize;
    config->uidVec = getUnitIdVector(modeOptions, config->totalUnits);
  
-@@ -137,6 +161,18 @@ void InstrumentationProfiler::initFunctionMetadata(
+@@ -137,6 +193,18 @@ void InstrumentationProfiler::initFunctionMetadata(
      const std::vector<std::pair<size_t, size_t>> &scopeIdParentPairs,
      const std::string &metadataPath) {
    if (functionScopeIdNames.count(functionId)) {
@@ -1004,7 +1113,7 @@ index aa0868fe8fc3a119c528cbcba5d7e9a37ccd36aa..ae99aa42a742978dff7b017ea8a333cd
      throw std::runtime_error(
          "Duplicate function id: " + std::to_string(functionId) +
          " for function " + functionName);
-@@ -159,6 +195,7 @@ void InstrumentationProfiler::initFunctionMetadata(
+@@ -159,6 +227,7 @@ void InstrumentationProfiler::initFunctionMetadata(
      auto parentId = pair.second;
      scopeIdParentMap[scopeId] = parentId;
    }
@@ -1012,7 +1121,7 @@ index aa0868fe8fc3a119c528cbcba5d7e9a37ccd36aa..ae99aa42a742978dff7b017ea8a333cd
    for (auto &[scopeId, name] : functionScopeIdNames[functionId]) {
      std::vector<Context> contexts = {name};
      auto currentId = scopeId;
-@@ -224,46 +261,50 @@ void InstrumentationProfiler::exitInstrumentedOp(uint64_t streamId,
+@@ -224,46 +293,50 @@ void InstrumentationProfiler::exitInstrumentedOp(uint64_t streamId,
    }
  
    int64_t timeShiftCost = 0;
@@ -1622,7 +1731,7 @@ index a672722a1279f68cf80d5fde3d0b654100611d7a..c59e4d63797650f49f014f34f1c7921c
      # active hooks
      active_hooks: list[Hook] = []
 diff --git a/third_party/proton/proton/hooks/instrumentation.py b/third_party/proton/proton/hooks/instrumentation.py
-index aac27ad1887339d44c3d16e47ce48c456b474d4c..f5b924f0aef755c9b94552f4a21743868bbeda3a 100644
+index aac27ad1887339d44c3d16e47ce48c456b474d4c..a6d715e0107eee995dd92ee12fe0f72ccfd5b6fd 100644
 --- a/third_party/proton/proton/hooks/instrumentation.py
 +++ b/third_party/proton/proton/hooks/instrumentation.py
 @@ -42,6 +42,30 @@ class CudaAllocator:
@@ -1686,7 +1795,7 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..f5b924f0aef755c9b94552f4a2174386
      else:
          raise RuntimeError(f"Unsupported backend: {backend}")
  
-@@ -139,7 +179,9 @@ class InstrumentationHook(Hook):
+@@ -139,9 +179,15 @@ class InstrumentationHook(Hook):
          # Mapping of function objects to their scope ID pairs
          self.mode: mode.InstrumentationMode = _interpret_mode(mode_obj)
  
@@ -1696,8 +1805,14 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..f5b924f0aef755c9b94552f4a2174386
 +        self.allocator = NpuAllocator(self) if _get_backend_name() == "ascend" else CudaAllocator(self)
          self.buffer = None
          self.metadata_path: Dict[Any, Optional[str]] = {}
++        self._mspti_functions = set()
++        self._mspti_collector = None
++        self._mspti_warmup_remaining = {}
++        self._mspti_skipping_warmup = False
  
-@@ -152,8 +194,14 @@ class InstrumentationHook(Hook):
+     def activate(self):
+         if InstrumentationHook.active_count > 0:
+@@ -152,8 +198,14 @@ class InstrumentationHook(Hook):
          flags.instrumentation_on = True
  
          device = triton.runtime.driver.active.get_current_device()
@@ -1713,7 +1828,7 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..f5b924f0aef755c9b94552f4a2174386
  
          def to_llvmir_passes(pm):
              is_long_clk = False if mode.Optimize.CLOCK32 in self.mode.optimizations else True
-@@ -181,12 +229,27 @@ class InstrumentationHook(Hook):
+@@ -181,12 +233,27 @@ class InstrumentationHook(Hook):
                  arch = triton.runtime.driver.active.utils.get_device_properties(device)["arch"].split(":")[0]
                  triton_proton.add_convert_proton_amd_gpu_to_llvm(pm, arch)
  
@@ -1747,7 +1862,17 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..f5b924f0aef755c9b94552f4a2174386
  
          # Set up the profiling allocator
          set_profile_allocator(self.allocator)
-@@ -225,18 +288,29 @@ class InstrumentationHook(Hook):
+@@ -198,6 +265,9 @@ class InstrumentationHook(Hook):
+         if InstrumentationHook.active_count == 0:
+             return
+ 
++        if self._mspti_collector is not None and self._mspti_collector.handle:
++            self._mspti_collector.stop()
++
+         InstrumentationHook.active_count -= 1
+ 
+         backend_name = _get_backend_name()
+@@ -225,18 +295,55 @@ class InstrumentationHook(Hook):
              return
  
          # Find the IR path in metadata
@@ -1759,6 +1884,32 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..f5b924f0aef755c9b94552f4a2174386
          metadata_path = next((path for key, path in metadata_group.items() if key.endswith(("json"))), None)
          self.metadata_path[function] = metadata_path
  
++        if backend_name == "ascend" and metadata_path:
++            import json
++            with open(metadata_path) as file:
++                compiled_metadata = json.load(file)
++            if compiled_metadata.get("proton_collection") == "mspti":
++                entries = compiled_metadata.get("proton_metadata", [])
++                if len(entries) != 1 or entries[0]["proton"]["format_version"] != 2:
++                    raise RuntimeError(
++                        "A5 instrumentation capture requires NPU-IR instrumentation drain protocol version 2")
++                scopes = entries[0]["proton"]["scopes"]
++                names = [(s["start_region_id"] & 0x3ff, s["name"]) for s in scopes]
++                parents = [(s["start_region_id"] & 0x3ff, s["parent_id"]) for s in scopes if s["parent_id"] >= 0]
++                libproton.init_function_metadata(function, name, names, parents, metadata_path)
++                self._mspti_functions.add(function)
++                import os
++                import warnings
++                warmup = int(os.environ.get("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES", "0"))
++                if not 0 <= warmup <= 100:
++                    raise ValueError("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES must be between 0 and 100")
++                self._mspti_warmup_remaining[function] = warmup
++                if warmup:
++                    warnings.warn(
++                        f"A5 instrumentation PoC: the first {warmup} launch(es) of {name} are explicit warmup and not collected"
++                    )
++                return
++
          if ir_path:
              context = triton_ir.context()
              triton_ir.load_dialects(context)
@@ -1779,7 +1930,40 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..f5b924f0aef755c9b94552f4a2174386
              triton_proton.load_dialects(context)
              module = triton_ir.parse_mlir_module(ir_path, context)
              module.context = context
-@@ -279,6 +353,9 @@ class InstrumentationHook(Hook):
+@@ -252,6 +359,16 @@ class InstrumentationHook(Hook):
+ 
+     def enter(self, metadata: LazyDict) -> None:
+         func = metadata.data.get("function")
++        if func in self._mspti_functions:
++            if self._mspti_collector is None:
++                from ..mspti_instrumentation import MsptiInstrumentationCollector
++                self._mspti_collector = MsptiInstrumentationCollector()
++            if self._mspti_warmup_remaining[func]:
++                self._mspti_warmup_remaining[func] -= 1
++                self._mspti_skipping_warmup = True
++                return
++            self._mspti_collector.start()
++            return
+         stream = metadata.data.get("stream")
+         alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
+         libproton.enter_instrumented_op(stream, func, self._data_ptr(), alloc_size)
+@@ -260,6 +377,15 @@ class InstrumentationHook(Hook):
+ 
+     def exit(self, metadata: LazyDict) -> None:
+         func = metadata.data.get("function")
++        if func in self._mspti_functions:
++            if self._mspti_skipping_warmup:
++                import torch
++                torch.npu.synchronize()
++                self._mspti_skipping_warmup = False
++                return
++            records = self._mspti_collector.stop()
++            libproton.record_instrumentation_events(func, records)
++            return
+         stream = metadata.data.get("stream")
+         alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
+         libproton.exit_instrumented_op(stream, func, self._data_ptr(), alloc_size)
+@@ -279,6 +405,9 @@ class InstrumentationHook(Hook):
                      return 1
                  elif target["backend"] == "hip":
                      return 2
@@ -1789,6 +1973,139 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..f5b924f0aef755c9b94552f4a2174386
                  return 0
  
              alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
+diff --git a/third_party/proton/proton/mspti_instrumentation.py b/third_party/proton/proton/mspti_instrumentation.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..fadaf923bde18557669bfa993adc44d2227226b7
+--- /dev/null
++++ b/third_party/proton/proton/mspti_instrumentation.py
+@@ -0,0 +1,127 @@
++"""Experimental serialized A5 instrumentation capture through the MSPTI PoC C API."""
++import ctypes as C
++import json
++import os
++import threading
++import time
++import warnings
++from pathlib import Path
++
++_CHANNEL_IDS = range(11, 29)
++
++
++class ScopeRecord(C.Structure):
++    _fields_ = [("start", C.c_uint64), ("end", C.c_uint64), ("channel", C.c_uint32), ("pipe", C.c_uint32),
++                ("scope", C.c_uint32), ("frequency", C.c_uint32)]
++
++
++class CollectionStats(C.Structure):
++    _fields_ = [("bytes", C.c_uint64), ("incomplete", C.c_uint64), ("overflow", C.c_uint64),
++                ("driver_error", C.c_int32), ("flush_error", C.c_int32)]
++
++
++class MsptiInstrumentationCollector:
++    _lock = threading.Lock()
++
++    def __init__(self):
++        self.lib = C.CDLL(os.environ.get("PROTON_MSPTI_LIBRARY_PATH", "libmspti.so"))
++        signatures = {
++            "msptiInstrumentationStart": [C.c_uint32, C.POINTER(C.c_void_p)],
++            "msptiInstrumentationStop": [C.c_void_p],
++            "msptiInstrumentationGetRecords":
++            [C.c_void_p,
++             C.POINTER(C.POINTER(ScopeRecord)),
++             C.POINTER(C.c_size_t),
++             C.POINTER(CollectionStats)],
++            "msptiInstrumentationDestroy": [C.c_void_p],
++            "msptiInstrumentationGetRawData":
++            [C.c_void_p, C.c_uint32, C.POINTER(C.POINTER(C.c_uint8)),
++             C.POINTER(C.c_size_t)],
++        }
++        for name, args in signatures.items():
++            try:
++                fn = getattr(self.lib, name)
++            except AttributeError as error:
++                raise RuntimeError(
++                    f"A5 instrumentation requires the MSPTI instrumentation PoC library with {name}") from error
++            fn.argtypes, fn.restype = args, C.c_int
++        self.handle = C.c_void_p()
++        warnings.warn(
++            "A5 instrumentation samples hardware channels, not every Triton program/block. "
++            "Channel IDs are not core IDs; an empty capture does not prove that the kernel did not execute.",
++            stacklevel=2)
++
++    @staticmethod
++    def _check(rc, operation):
++        if rc:
++            raise RuntimeError(f"MSPTI instrumentation {operation} failed: {rc}")
++
++    def start(self):
++        import torch
++        if not self._lock.acquire(blocking=False):
++            raise RuntimeError("The A5 instrumentation PoC supports only serialized kernel captures")
++        try:
++            torch.npu.synchronize()
++            runtime = C.CDLL("libruntime.so")
++            physical = C.c_uint32()
++            convert = runtime.rtGetDevicePhyIdByIndex
++            convert.argtypes = [C.c_uint32, C.POINTER(C.c_uint32)]
++            convert.restype = C.c_int
++            self._check(convert(torch.npu.current_device(), C.byref(physical)), "physical device lookup")
++            self._check(self.lib.msptiInstrumentationStart(physical.value, C.byref(self.handle)), "start")
++        except BaseException:
++            self._lock.release()
++            raise
++
++    def stop(self):
++        import torch
++        if not self.handle:
++            return []
++        try:
++            torch.npu.synchronize()
++            rc = self.lib.msptiInstrumentationStop(self.handle)
++            records, count, stats = C.POINTER(ScopeRecord)(), C.c_size_t(), CollectionStats()
++            self._check(
++                self.lib.msptiInstrumentationGetRecords(self.handle, C.byref(records), C.byref(count), C.byref(stats)),
++                "read")
++            status = {name: getattr(stats, name) for name, _ in CollectionStats._fields_}
++            values = [(r.channel, r.pipe, r.scope, r.start, r.end, r.frequency) for r in records[:count.value]]
++            self._dump_debug(status, values)
++            if rc or not count.value:
++                raise RuntimeError(
++                    f"Incomplete/empty MSPTI instrumentation capture: rc={rc}, stats={json.dumps(status)}; "
++                    "this is partial hardware sampling, not guaranteed coverage of every logical block")
++            if stats.flush_error:
++                warnings.warn(
++                    f"MSPTI instrumentation flush returned {stats.flush_error}; received records are returned, "
++                    "but their presence does not establish complete capture.", stacklevel=2)
++            if len({row[5] for row in values}) != 1:
++                raise RuntimeError("Mixed AIC/AIV frequencies require separate instrumentation clock domains")
++            return values
++        finally:
++            try:
++                rc = self.lib.msptiInstrumentationDestroy(self.handle)
++            finally:
++                self.handle = C.c_void_p()
++                self._lock.release()
++            self._check(rc, "destroy")
++
++    def _dump_debug(self, status, records):
++        root = os.environ.get("PROTON_INSTRUMENTATION_DEBUG_DIR")
++        if not root:
++            return
++        directory = Path(root) / str(time.time_ns())
++        directory.mkdir(parents=True)
++        observed = sorted({record[0] for record in records})
++        coverage = {
++            "kind": "sampled_hardware_channels", "requested_channels": list(_CHANNEL_IDS), "observed_channels":
++            observed, "all_logical_blocks": False
++        }
++        (directory / "records.json").write_text(
++            json.dumps({"stats": status, "records": records, "coverage": coverage}, indent=2))
++        for channel in _CHANNEL_IDS:
++            raw, size = C.POINTER(C.c_uint8)(), C.c_size_t()
++            self._check(self.lib.msptiInstrumentationGetRawData(self.handle, channel, C.byref(raw), C.byref(size)),
++                        "raw read")
++            if size.value:
++                (directory / f"channel-{channel}.bin").write_bytes(C.string_at(raw, size.value))
 diff --git a/third_party/proton/proton/profile.py b/third_party/proton/proton/profile.py
 index 126b3abbeaf71fed1781f283fd53704cca41b42e..c1ca884d5d09e0453990310d44b42651cbfad2d9 100644
 --- a/third_party/proton/proton/profile.py

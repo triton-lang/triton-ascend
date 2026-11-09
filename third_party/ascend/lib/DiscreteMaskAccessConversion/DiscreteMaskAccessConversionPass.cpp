@@ -418,7 +418,8 @@ static bool isAxisDiscreteMaskLoad(triton::LoadOp op,
   if (!ptrType || !maskType || ptrType.getRank() != 2)
     return false;
   auto shape = ptrType.getShape();
-  if (shape[0] <= 0 || shape[1] <= 0)
+  // Keep singleton axes on the general masked-load path.
+  if (shape[0] <= 1 || shape[1] <= 1)
     return false;
   if (maskType.getShape() != shape)
     return false;

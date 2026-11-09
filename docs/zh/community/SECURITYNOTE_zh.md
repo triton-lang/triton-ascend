@@ -4,7 +4,9 @@
 
 建议用户在系统中配置开启ASLR（Address Space Layout Randomization，地址空间布局随机化），推荐使用级别2（完全随机化模式），可参考以下方式进行配置：
 
-    echo 2 > /proc/sys/kernel/randomize_va_space
+```bash
+echo 2 > /proc/sys/kernel/randomize_va_space
+```
 
 ## 运行用户建议
 
@@ -46,7 +48,7 @@ Triton-Ascend支持源码编译安装，在编译时会下载依赖的第三方�
 
 ## 公网地址声明
 
-在Triton-Ascend的配置文件和脚本中存在[公网IP地址](#public-network-addresses)
+在Triton-Ascend的配置文件和脚本中存在[公网IP地址](#public-network-addresses)。
 
 <a id="public-network-addresses"></a>
 

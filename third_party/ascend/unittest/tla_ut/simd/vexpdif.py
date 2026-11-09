@@ -28,10 +28,10 @@ SIGNATURE = {"X": "*fp32", "Y": "*fp32", "T": "*i32", "O": "*fp32"}
 
 @tla.jit
 def vexpdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    xb = tla.alloc_buffer((TILES, N), tl.float32, space="ub")
-    yb = tla.alloc_buffer((TILES, N), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float32, space="ub")
+    xb = tla.alloc_buffer((TILES, N), tl.float32, space=tla.space.ub)
+    yb = tla.alloc_buffer((TILES, N), tl.float32, space=tla.space.ub)
+    tb = tla.alloc_buffer((N, ), tl.int32, space=tla.space.ub)
+    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float32, space=tla.space.ub)
     tla.copy(tla.view(X, (TILES, N)), xb)
     tla.copy(tla.view(Y, (TILES, N)), yb)
     tla.copy(tla.view(T, (N, )), tb)

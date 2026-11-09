@@ -24,9 +24,9 @@ ALPHA = 0.25
 
 @tla.jit
 def vlrelu_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((ROWS_C, N), tl.float32, space="ub")
+    xb = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    tb = tla.alloc_buffer((N, ), tl.int32, space=tla.space.ub)
+    ob = tla.alloc_buffer((ROWS_C, N), tl.float32, space=tla.space.ub)
     tla.copy(tla.view(X, (N, )), xb)
     tla.copy(tla.view(T, (N, )), tb)
     with tla.scope.simd():
@@ -45,10 +45,10 @@ def vlrelu_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vprelu_f32(X, A, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    ab = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((ROWS_C, N), tl.float32, space="ub")
+    xb = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    ab = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    tb = tla.alloc_buffer((N, ), tl.int32, space=tla.space.ub)
+    ob = tla.alloc_buffer((ROWS_C, N), tl.float32, space=tla.space.ub)
     tla.copy(tla.view(X, (N, )), xb)
     tla.copy(tla.view(A, (N, )), ab)
     tla.copy(tla.view(T, (N, )), tb)
@@ -69,9 +69,9 @@ def vprelu_f32(X, A, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vlrelu_f16(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float16, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((ROWS_C, N), tl.float16, space="ub")
+    xb = tla.alloc_buffer((N, ), tl.float16, space=tla.space.ub)
+    tb = tla.alloc_buffer((N, ), tl.int32, space=tla.space.ub)
+    ob = tla.alloc_buffer((ROWS_C, N), tl.float16, space=tla.space.ub)
     tla.copy(tla.view(X, (N, )), xb)
     tla.copy(tla.view(T, (N, )), tb)
     with tla.scope.simd():
@@ -90,10 +90,10 @@ def vlrelu_f16(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vprelu_f16(X, A, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float16, space="ub")
-    ab = tla.alloc_buffer((N, ), tl.float16, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((ROWS_C, N), tl.float16, space="ub")
+    xb = tla.alloc_buffer((N, ), tl.float16, space=tla.space.ub)
+    ab = tla.alloc_buffer((N, ), tl.float16, space=tla.space.ub)
+    tb = tla.alloc_buffer((N, ), tl.int32, space=tla.space.ub)
+    ob = tla.alloc_buffer((ROWS_C, N), tl.float16, space=tla.space.ub)
     tla.copy(tla.view(X, (N, )), xb)
     tla.copy(tla.view(A, (N, )), ab)
     tla.copy(tla.view(T, (N, )), tb)

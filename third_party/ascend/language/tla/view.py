@@ -21,7 +21,7 @@
 
 ``tla.view`` aliases memory as a buffer for subsequent DMA/simd ops:
 
-- Pointer entry: ``view(ptr, shape, strides, offsets, space="gm")``.  Lowers to
+- Pointer entry: ``view(ptr, shape, strides, offsets, space=tla.space.gm)``.  Lowers to
   ``ptr_to_int`` + a 1-D ``hivm.hir.pointer_cast`` + one
   ``memref.reinterpret_cast`` carrying the linear offset ``sum(off_i*stride_i)``
   and the full sizes/strides -- npuir's form, valid for any stride/offset.
@@ -33,7 +33,7 @@
 ``space`` only applies to a pointer entry; a buffer's space is its own.
 """
 from triton.language.core import builtin, tensor, int64, _unwrap_if_constexpr
-from .core import buffer, buffer_type, _shape, _row_major_strides
+from .core import AddressSpace, buffer, buffer_type, _require_space, _shape, _row_major_strides
 
 
 def _numel(sizes):
@@ -125,7 +125,7 @@ def subview(src, offsets, sizes, strides=None, _semantic=None):
 
 
 @builtin
-def view(src, shape, strides=None, offsets=None, space="gm", _semantic=None):
+def view(src, shape, strides=None, offsets=None, space=AddressSpace.gm, _semantic=None):
     """Creates a buffer view from a kernel pointer or an existing buffer.
 
     :param src: Pointer tensor (kernel argument) or ``tla.buffer`` source.
@@ -141,10 +141,10 @@ def view(src, shape, strides=None, offsets=None, space="gm", _semantic=None):
         the pointer; for a buffer source they are relative to the source view.
         Defaults to ``None``, which selects zero offsets.
     :type offsets: tuple[int or tl.tensor, ...] or None
-    :param space: Address space for a pointer source. Defaults to ``"gm"``.
+    :param space: Address space for a pointer source. Defaults to ``tla.space.gm``.
         Ignored for a buffer source, whose space is preserved; a non-default
         value raises ``ValueError`` in that case.
-    :type space: str
+    :type space: tla.space
     :return: A buffer view aliasing the source memory.
     :rtype: tla.buffer
     :raises ValueError: If the rank of ``strides``/``offsets`` does not match
@@ -162,8 +162,9 @@ def view(src, shape, strides=None, offsets=None, space="gm", _semantic=None):
         Only static positive extents are accepted. GM buffers must be created
         from kernel pointers with this interface rather than :func:`alloc`.
     """
+    space = _require_space(space)
     if isinstance(src, buffer):
-        if space != "gm":
+        if space is not AddressSpace.gm:
             raise ValueError("view space is ignored for a buffer source")
         offsets = (0, ) * len(src.shape) if offsets is None else offsets
         return subview(src, offsets, shape, strides, _semantic=_semantic)

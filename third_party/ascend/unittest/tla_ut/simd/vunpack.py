@@ -36,9 +36,9 @@ def unpack_kernel(X, M, O, SB: tl.constexpr, DB: tl.constexpr, SIGNED: tl.conste
     D: tl.constexpr = 2048 // DB
     ST: tl.constexpr = tl.int8 if SB == 8 else tl.int16
     DT: tl.constexpr = tl.int16 if DB == 16 else tl.int32
-    x = tla.alloc_buffer((S, ), ST, space="ub")
-    m = tla.alloc_buffer((D, ), DT, space="ub")
-    out = tla.alloc_buffer((3, D), DT, space="ub")
+    x = tla.alloc_buffer((S, ), ST, space=tla.space.ub)
+    m = tla.alloc_buffer((D, ), DT, space=tla.space.ub)
+    out = tla.alloc_buffer((3, D), DT, space=tla.space.ub)
     tla.copy(tla.view(X, (S, )), x)
     tla.copy(tla.view(M, (D, )), m)
     with tla.scope.simd():

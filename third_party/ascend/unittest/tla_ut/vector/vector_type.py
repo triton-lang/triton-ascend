@@ -109,7 +109,7 @@ def _scalar_truncmod(out, a, b, DTYPE: tl.constexpr):
 def test_truncmod_scalar_ir(output_dir=None):
     for kind, dtype, op in (("i32", tl.int32, "arith.remsi"), ("u32", tl.uint32, "arith.remui")):
         module, ctx = compile_offline(_scalar_truncmod, {
-            "out": tla.buffer_type((64, ), dtype, "ub"),
+            "out": tla.buffer_type((64, ), dtype, tla.space.ub),
             "a": kind,
             "b": kind,
         }, {"DTYPE": dtype}, output_dir)
@@ -135,8 +135,8 @@ def _vector_sqrt(out):
 
 def test_sqrt_ir(output_dir=None):
     for kernel, signature in (
-        (_scalar_sqrt, {"out": tla.buffer_type((64, ), tl.float32, "ub"), "x": "fp32"}),
-        (_vector_sqrt, {"out": tla.buffer_type((64, ), tl.float32, "ub")}),
+        (_scalar_sqrt, {"out": tla.buffer_type((64, ), tl.float32, tla.space.ub), "x": "fp32"}),
+        (_vector_sqrt, {"out": tla.buffer_type((64, ), tl.float32, tla.space.ub)}),
     ):
         module, ctx = compile_offline(kernel, signature, {}, output_dir)
         text = str(module)
@@ -147,8 +147,8 @@ def test_sqrt_ir(output_dir=None):
 def test_scalar_where_ir(output_dir=None):
     # vci materializes an i32 vector, so the UB view must be int32 (f32 here
     # made the vsts dtype mismatch).
-    module, ctx = compile_offline(_scalar_where, {"out": tla.buffer_type((64, ), tl.int32, "ub"), "cond": "i1"}, {},
-                                  output_dir)
+    module, ctx = compile_offline(_scalar_where, {"out": tla.buffer_type((64, ), tl.int32, tla.space.ub), "cond": "i1"},
+                                  {}, output_dir)
     text = str(module)
     assert "arith.select" in text, text
     assert "tensor<" not in text
@@ -169,8 +169,9 @@ def test_assume_scalar_ir(output_dir=None):
 
 
 def test_ir(output_dir=None):
-    module, ctx = compile_offline(_vector_control_flow, {"out": tla.buffer_type((64, ), tl.float32, "ub"), "n": "i32"},
-                                  {}, output_dir)
+    module, ctx = compile_offline(_vector_control_flow,
+                                  {"out": tla.buffer_type(
+                                      (64, ), tl.float32, tla.space.ub), "n": "i32"}, {}, output_dir)
     text = str(module)
     assert "vector<64xf32>" in text
     assert "vector<64xi1>" in text

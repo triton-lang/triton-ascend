@@ -56,7 +56,7 @@ def signature(case):
 @tla.jit
 def subview_alias(X, Y, O, Backing, offset, DTYPE: tl.constexpr, MODE: tl.constexpr):
     with tla.scope.vector():
-        root = tla.alloc((8, 2064), DTYPE, space="ub")
+        root = tla.alloc((8, 2064), DTYPE, space=tla.space.ub)
         tla.load_gm_to_ub(tla.view(X, (8, 2064)), root)
         if MODE == "pitched":
             tile = tla.subview(root, offsets=(0, 0), sizes=(8, 1040))

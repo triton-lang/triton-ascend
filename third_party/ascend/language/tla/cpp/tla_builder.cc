@@ -1321,22 +1321,9 @@ void init_tla_builder(py::module &&m) {
           py::arg("mask"))
       .def("create_tla_buffer_type",
            [](TLABuilder &self, const std::vector<int64_t> &shape,
-              Type elementType, const std::string &space,
+              Type elementType, hivm::AddressSpace space,
               const std::vector<int64_t> &strides,
               std::optional<int64_t> offset) -> Type {
-             auto memorySpace = hivm::symbolizeAddressSpace(space);
-             if (!memorySpace) {
-               // TLA frontend names -> HIVM #hivm.address_space mnemonics.
-               static const llvm::StringMap<llvm::StringRef> kTlaToHivm = {
-                   {"l1", "cbuf"}, {"l0a", "ca"},     {"l0b", "cb"},
-                   {"l0c", "cc"},  {"bt", "biasbuf"}, {"fb", "fixbuf"}};
-               auto it = kTlaToHivm.find(space);
-               if (it != kTlaToHivm.end())
-                 memorySpace = hivm::symbolizeAddressSpace(it->second);
-             }
-             if (!memorySpace)
-               throw std::invalid_argument("unknown TLA address space: " +
-                                           space);
              if (shape.size() != strides.size())
                throw std::invalid_argument(
                    "TLA buffer shape and strides must have the same rank");
@@ -1344,7 +1331,7 @@ void init_tla_builder(py::module &&m) {
              return MemRefType::get(
                  shape, elementType,
                  tlaBufferLayout(ctx, shape, strides, offset),
-                 hivm::AddressSpaceAttr::get(ctx, *memorySpace));
+                 hivm::AddressSpaceAttr::get(ctx, space));
            })
       .def("create_tla_alloc",
            [](TLABuilder &self, Type type) -> Value {

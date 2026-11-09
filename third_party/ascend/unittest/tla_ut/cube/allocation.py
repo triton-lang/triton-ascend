@@ -20,7 +20,7 @@ from utils.tla_test_utils import get_stages, compile_offline, lower_offline, che
 @tla.jit
 def _allocate_only(SPACE: tl.constexpr, VERSIONS: tl.constexpr):
     with tla.scope.cube():
-        tla.alloc((16, 16), tl.float32, scope=SPACE, versions=VERSIONS)
+        tla.alloc((16, 16), tl.float32, space=SPACE, versions=VERSIONS)
 
 
 @tla.jit
@@ -30,7 +30,7 @@ def _copy_two_tiles(X, Y):
         tla.load_gm_to_ub(tla.view(X, (16, 32)), first)
         tla.store_ub_to_gm(first, tla.view(Y, (16, 32)))
         # Disjoint use ranges still require independent storage under mem_unique.
-        second = tla.alloc_buffer((16, 32), tl.float32, scope=tla.AddressSpace.UB)
+        second = tla.alloc_buffer((16, 32), tl.float32, space=tla.space.ub)
         tla.load_gm_to_ub(tla.view(X + 512, (16, 32)), second)
         tla.store_ub_to_gm(second, tla.view(Y + 512, (16, 32)))
 
@@ -38,9 +38,9 @@ def _copy_two_tiles(X, Y):
 @tla.jit
 def _cube_product(A, B, C):
     with tla.scope.cube():
-        a = tla.alloc((2, 1, 16, 16), tl.float16, scope=tla.AddressSpace.L1)
-        b = tla.alloc_buffer((4, 2, 16, 16), tl.float16, space=tla.AddressSpace.L1)
-        acc = tla.alloc((4, 1, 16, 16), tl.float32, scope=tla.AddressSpace.L0C)
+        a = tla.alloc((16, 32), tl.float16, space=tla.space.l1, layout=tla.layout.nz)
+        b = tla.alloc_buffer((32, 64), tl.float16, space=tla.space.l1, layout=tla.layout.nz)
+        acc = tla.alloc((16, 64), tl.float32, space=tla.space.l0c, layout=tla.layout.nz)
         tla.load_gm_to_l1(tla.view(A, (16, 32)), a)
         tla.load_gm_to_l1(tla.view(B, (32, 64)), b)
         tla.cube.mmad(a, b, acc, clear_accum=True)
@@ -48,18 +48,16 @@ def _cube_product(A, B, C):
 
 
 def test_ir():
-    spaces = ((tla.AddressSpace.UB, "ub"), (tla.AddressSpace.L1, "cbuf"), (tla.AddressSpace.L0A, "ca"),
-              (tla.AddressSpace.L0B, "cb"), (tla.AddressSpace.L0C, "cc"), (tla.AddressSpace.SSBUF, "ssbuf"),
-              (tla.AddressSpace.BT, "biasbuf"), (tla.AddressSpace.FB, "fixbuf"))
+    spaces = ((tla.space.ub, "ub"), (tla.space.l1, "cbuf"), (tla.space.l0a, "ca"), (tla.space.l0b, "cb"),
+              (tla.space.l0c, "cc"), (tla.space.ssbuf, "ssbuf"), (tla.space.bt, "biasbuf"), (tla.space.fb, "fixbuf"))
     for space, native in spaces:
         # Inspect frontend IR: dead allocations can disappear during lowering.
-        for spelling in (space, space.value):
-            module, _ = compile_offline(_allocate_only, {}, dict(SPACE=spelling, VERSIONS=2))
-            text = str(module)
-            assert f"#hivm.address_space<{native}>" in text
-            assert "annotation.mark" in text and "{mem_unique}" in text
-            assert "hivm.multi_buffer = 2" in text
-            assert "#hivm.tcore_type<CUBE>" in text
+        module, _ = compile_offline(_allocate_only, {}, dict(SPACE=space, VERSIONS=2))
+        text = str(module)
+        assert f"#hivm.address_space<{native}>" in text
+        assert "annotation.mark" in text and "{mem_unique}" in text
+        assert "hivm.multi_buffer = 2" in text
+        assert "#hivm.tcore_type<CUBE>" in text
 
     for fn, signature, allocs, core in (
         (_copy_two_tiles, {"X": "*fp32", "Y": "*fp32"}, 2, "VECTOR"),
@@ -75,27 +73,30 @@ def test_ir():
     print("IR PASS: allocation spaces, independent storage, versions and Cube scope")
 
 
-@pytest.mark.parametrize("space", [tla.AddressSpace.L0A_SF, tla.AddressSpace.L0B_SF, "l0a_sf", "l0b_sf"])
+@pytest.mark.parametrize("space", [tla.space.l0a_sf, tla.space.l0b_sf])
 def test_scale_mapping_is_explicitly_unsupported(space):
     with pytest.raises(NotImplementedError, match="scale-factor buffer mapping"):
         tla.buffer_type((16, 16), tl.float16, space)
 
 
-def test_enum_and_legacy_types_agree():
-    enum_type = tla.buffer_type((16, 16), tl.float32, tla.AddressSpace.L0C)
-    old_type = tla.buffer_type((16, 16), tl.float32, "l0c")
-    assert enum_type == old_type
-    assert enum_type.mangle() == old_type.mangle()
-    assert enum_type.space == "l0c"
+def test_buffer_type_stores_address_space():
+    ty = tla.buffer_type((16, 16), tl.float32, tla.space.l0c)
+    assert ty.space is tla.space.l0c
+    assert ty.mangle().startswith("TLA_l0c_")
 
 
 def test_invalid_allocation_arguments():
     # Errors must precede builder access; these calls need no native builder.
     semantic = object()
-    with pytest.raises(ValueError, match="only one of space and scope"):
-        tla.alloc((16, 16), tl.float32, "ub", scope=tla.AddressSpace.L1, _semantic=semantic)
+    with pytest.raises(TypeError, match="unexpected keyword argument 'scope'"):
+        tla.alloc((16, 16), tl.float32, scope=tla.space.l1, _semantic=semantic)
     with pytest.raises(ValueError, match="kernel arguments"):
-        tla.alloc((16, 16), tl.float32, scope=tla.AddressSpace.GM, _semantic=semantic)
+        tla.alloc((16, 16), tl.float32, space=tla.space.gm, _semantic=semantic)
+    for invalid_space in ("ub", 1, None):
+        with pytest.raises(TypeError, match="expected a tla.space member"):
+            tla.alloc((16, 16), tl.float32, space=invalid_space, _semantic=semantic)
+    with pytest.raises(TypeError, match="expected a tla.space member"):
+        tla.buffer_type((16, 16), tl.float32, "l0c")
     with pytest.raises(ValueError, match="positive integer"):
         tla.alloc((16, 16), tl.float32, versions=0, _semantic=semantic)
 
@@ -132,9 +133,9 @@ def main():
     do_ir, do_compile, do_run = get_stages()
     if do_ir:
         test_ir()
-        test_enum_and_legacy_types_agree()
+        test_buffer_type_stores_address_space()
         test_invalid_allocation_arguments()
-        for space in (tla.AddressSpace.L0A_SF, tla.AddressSpace.L0B_SF):
+        for space in (tla.space.l0a_sf, tla.space.l0b_sf):
             test_scale_mapping_is_explicitly_unsupported(space)
     if do_compile:
         test_compile()

@@ -10,9 +10,9 @@ def cube_mmad_example(A_ptr, B_ptr, O_ptr, M: tl.constexpr, K: tl.constexpr, N: 
     o = tla.view(O_ptr, (M, N), strides=(N, 1))
 
     # A/B 放在 L1，累加器放在 L0C。
-    a_l1 = tla.alloc_buffer((M, K), tl.float16, space="l1")
-    b_l1 = tla.alloc_buffer((K, N), tl.float16, space="l1")
-    acc = tla.alloc_buffer((M, N), tl.float32, space="l0c")
+    a_l1 = tla.alloc_buffer((M, K), tl.float16, space=tla.space.l1)
+    b_l1 = tla.alloc_buffer((K, N), tl.float16, space=tla.space.l1)
+    acc = tla.alloc_buffer((M, N), tl.float32, space=tla.space.l0c)
 
     # GM -> L1（ND -> NZ 布局转换）。
     tla.copy(a, a_l1)

@@ -9,7 +9,7 @@ def view_example(X_ptr, O_ptr, N: tl.constexpr):
     x = tla.view(X_ptr, (N, ), strides=(1, ), offsets=(0, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))
 
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    x_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
     tla.copy(x, x_ub)
 
     # buffer 切片：strides 相对于源视图，offset 为静态或标量整数。

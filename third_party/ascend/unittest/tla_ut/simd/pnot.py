@@ -19,9 +19,9 @@ SIGNATURE = {"X": "*u32", "T1": "*u32", "O": "*u32"}
 
 @tla.jit
 def pnot(X, T1, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    t1 = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    o = tla.alloc_buffer((2, N), tl.uint32, space="ub")
+    x = tla.alloc_buffer((N, ), tl.uint32, space=tla.space.ub)
+    t1 = tla.alloc_buffer((N, ), tl.uint32, space=tla.space.ub)
+    o = tla.alloc_buffer((2, N), tl.uint32, space=tla.space.ub)
     tla.copy(tla.view(X, (N, )), x)
     tla.copy(tla.view(T1, (N, )), t1)
     with tla.scope.simd():

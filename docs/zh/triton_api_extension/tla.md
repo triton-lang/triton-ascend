@@ -15,6 +15,8 @@ TLA 的核心组成如下：
 | 模块 | 作用 |
 | --- | --- |
 | `tla` | 缓冲区、视图、拷贝、作用域与编译提示 |
+| `tla.space` | 地址空间枚举，例如 `tla.space.ub`、`tla.space.l1`、`tla.space.l0c` |
+| `tla.layout` | `alloc` / `alloc_buffer` 的布局构造选项：`nd`、`nz` |
 | `tla.scope` | 指定 `vector` / `simd` / `cube` 核心作用域 |
 | `tla.simd` | SIMD 向量寄存器加载、存储、计算、比较与规约 |
 | `tla.cube` | Cube 矩阵乘加 `mmad` |
@@ -53,8 +55,8 @@ UB buffer --tla.copy--> GM
 ```python
 @triton.jit
 def simd_only(X_ptr, O_ptr, N: tl.constexpr):
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    x_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
     x_blk = tla.view(X_ptr, (N, ), strides=(1, ))
     o_blk = tla.view(O_ptr, (N, ), strides=(1, ))
     tla.copy(x_blk, x_ub)
@@ -74,11 +76,29 @@ def simd_only(X_ptr, O_ptr, N: tl.constexpr):
 | --- | --- |
 | `shape` | 各维大小（编译期正整数） |
 | `dtype` | 元素类型 |
-| `space` | 地址空间：`gm` / `ub` / `l1` / `l0a` / `l0b` / `l0c` |
+| `space` | `tla.space` 枚举成员，例如 `tla.space.gm`、`tla.space.ub` 或 `tla.space.l1` |
 | `strides` | 各维步长，默认行主序 |
 | `offset` | 缓冲区偏移 |
 
 `buf[i0, i1, ...]` 返回 `buffer_access`，可作为 `vlds` / `vsts` 的地址参数，例如 `tla.simd.vlds(x_ub[0, c * 64])`。
+
+`layout` 是带校验的分配语法糖，不是 buffer 的类型属性：
+
+```python
+with tla.scope.cube():
+    acc = tla.alloc((32, 64), tl.float32, space=tla.space.l0c, layout=tla.layout.nz)
+    # 等价于分配物理 shape (4, 2, 16, 16)，acc.shape 也是这个四维 shape。
+```
+
+省略 `layout` 或指定 `tla.layout.nd` 时，输入仍是物理 shape，保持原有行为。
+`tla.layout.nz` 接受逻辑 `(M, N)`，生成 `(N // N0, M // 16, 16, N0)`：
+L1 的 float16/bfloat16 使用 `N0=16`，float32 使用 `N0=8`；L0C 的 float32/int32 使用 `N0=16`。
+其他 NZ 组合、非二维 shape、未对齐尺寸会报错，不会自动补齐。
+
+分配不转换或初始化数据，DMA 的转换参数和 VSSTB 等指令的特殊索引仍需显式指定。
+`subview` 继续使用物理坐标并保留原 stride；也可以先 `reshape` 展平、截取连续空间，
+再 `reshape` 成较小的物理 shape 来复用内存。合法的视图不代表所有 DMA/计算指令都支持该 stride，
+所读取区域的初始化仍由算子负责。
 
 ### 3.2 `tla.vector` / `tla.vector_type`
 
@@ -117,9 +137,9 @@ import triton.language.extra.tla as tla
 
 @triton.jit
 def sync_intra(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
-    a_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    b_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    a_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    b_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
 
     a = tla.view(A_ptr, (N, ), strides=(1, ), offsets=(0, ))
     b = tla.view(B_ptr, (N, ), strides=(1, ), offsets=(0, ))

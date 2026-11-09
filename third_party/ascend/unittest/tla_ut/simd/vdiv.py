@@ -46,9 +46,9 @@ EXACT_B = [3.0, 7.0, 3e-30, 0.1, 3.0, 3.0, 3.0, 7e-21, 3.0, 7.0, 13.0, 7.0]
 
 @tla.jit
 def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
+    xy = tla.alloc_buffer((2, N), tl.float32, space=tla.space.ub)
+    tb = tla.alloc_buffer((N, ), tl.int32, space=tla.space.ub)
+    ob = tla.alloc_buffer((6, N), tl.float32, space=tla.space.ub)
     tla.copy(tla.view(X, (2, N)), xy)
     tla.copy(tla.view(T, (N, )), tb)
     with tla.scope.simd():
@@ -70,8 +70,8 @@ def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vdiv_exact(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.float32, space="ub")
-    ob = tla.alloc_buffer((4, N), tl.float32, space="ub")
+    xy = tla.alloc_buffer((2, N), tl.float32, space=tla.space.ub)
+    ob = tla.alloc_buffer((4, N), tl.float32, space=tla.space.ub)
     tla.copy(tla.view(X, (2, N)), xy)
     with tla.scope.simd():
         a = tla.simd.vlds(xy[0, 0])
@@ -88,9 +88,9 @@ def vdiv_exact(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.uint32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.uint32, space="ub")
+    xy = tla.alloc_buffer((2, N), tl.uint32, space=tla.space.ub)
+    tb = tla.alloc_buffer((N, ), tl.int32, space=tla.space.ub)
+    ob = tla.alloc_buffer((6, N), tl.uint32, space=tla.space.ub)
     tla.copy(tla.view(X, (2, N)), xy)
     tla.copy(tla.view(T, (N, )), tb)
     with tla.scope.simd():
@@ -112,10 +112,10 @@ def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vdiv_u16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.uint16, space="ub")
-    ib = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.uint16, space="ub")
+    xy = tla.alloc_buffer((2, N), tl.uint16, space=tla.space.ub)
+    ib = tla.alloc_buffer((N, ), tl.int16, space=tla.space.ub)
+    tb = tla.alloc_buffer((N, ), tl.int16, space=tla.space.ub)
+    ob = tla.alloc_buffer((6, N), tl.uint16, space=tla.space.ub)
     tla.copy(tla.view(X, (2, N)), xy)
     tla.copy(tla.view(I, (N, )), ib)
     tla.copy(tla.view(T, (N, )), tb)

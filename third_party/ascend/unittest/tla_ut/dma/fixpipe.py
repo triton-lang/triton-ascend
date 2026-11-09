@@ -12,17 +12,18 @@ import triton.language.extra.tla as tla
 from utils.tla_test_utils import (compile_offline, lower_offline, get_stages, check_kernel_binary, matrix)
 
 CONFIGS = [
-    dict(name=target + "_" + dtype, target=target, dtype=dtype, mode=tla.FixpipeDMAMode.NZ2ND)
-    for target in ("gm", "ub")
+    dict(name=target.name + "_" + dtype, target=target, dtype=dtype, mode=tla.FixpipeDMAMode.NZ2ND)
+    for target in (tla.space.gm, tla.space.ub)
     for dtype in ("fp32", "fp16", "bf16")
 ]
 CONFIGS += [
-    dict(name="gm_nz", target="gm", dtype="fp32", mode=tla.FixpipeDMAMode.NZ2NZ),
-    dict(name="gm_transpose", target="gm", dtype="fp32", mode=tla.FixpipeDMAMode.NZ2DN),
-    dict(name="l1_nz", target="l1", dtype="fp16", mode=tla.FixpipeDMAMode.NZ2NZ),
-    dict(name="gm_relu", target="gm", dtype="fp32", mode=tla.FixpipeDMAMode.NZ2ND, relu=True),
-    dict(name="gm_scale", target="gm", dtype="fp32", mode=tla.FixpipeDMAMode.NZ2ND, scale=0.5),
-    dict(name="gm_unit0", target="gm", dtype="fp32", mode=tla.FixpipeDMAMode.NZ2ND, unit=tla.UnitFlagMode.DISABLED)
+    dict(name="gm_nz", target=tla.space.gm, dtype="fp32", mode=tla.FixpipeDMAMode.NZ2NZ),
+    dict(name="gm_transpose", target=tla.space.gm, dtype="fp32", mode=tla.FixpipeDMAMode.NZ2DN),
+    dict(name="l1_nz", target=tla.space.l1, dtype="fp16", mode=tla.FixpipeDMAMode.NZ2NZ),
+    dict(name="gm_relu", target=tla.space.gm, dtype="fp32", mode=tla.FixpipeDMAMode.NZ2ND, relu=True),
+    dict(name="gm_scale", target=tla.space.gm, dtype="fp32", mode=tla.FixpipeDMAMode.NZ2ND, scale=0.5),
+    dict(name="gm_unit0", target=tla.space.gm, dtype="fp32", mode=tla.FixpipeDMAMode.NZ2ND,
+         unit=tla.UnitFlagMode.DISABLED)
 ]
 DTYPES = {
     "fp32": (tl.float32, torch.float32), "fp16": (tl.float16, torch.float16), "bf16": (tl.bfloat16, torch.bfloat16)
@@ -30,7 +31,10 @@ DTYPES = {
 
 
 def params(case):
-    cls = {"gm": tla.FixpipeL0C2GMParams, "ub": tla.FixpipeL0C2UBParams, "l1": tla.FixpipeL0C2L1Params}[case["target"]]
+    cls = {
+        tla.space.gm: tla.FixpipeL0C2GMParams, tla.space.ub: tla.FixpipeL0C2UBParams, tla.space.l1:
+        tla.FixpipeL0C2L1Params
+    }[case["target"]]
     quant = {
         "fp32": tla.FixpipePreQuantMode.NO_QUANT, "fp16": tla.FixpipePreQuantMode.F322F16, "bf16":
         tla.FixpipePreQuantMode.F322BF16
@@ -44,16 +48,16 @@ def params(case):
 
 @tla.jit
 def product(A, B, Y, P: tl.constexpr, TARGET: tl.constexpr, DTYPE: tl.constexpr, MODE: tl.constexpr):
-    if TARGET == "ub" or TARGET == "l1":
+    if TARGET == tla.space.ub or TARGET == tla.space.l1:
         out = tla.alloc((16, 32), DTYPE)
     with tla.scope.cube():
-        a = tla.alloc((1, 1, 16, 16), tl.float16, space="l1")
-        b = tla.alloc((2, 1, 16, 16), tl.float16, space="l1")
-        acc = tla.alloc((2, 1, 16, 16), tl.float32, space="l0c")
+        a = tla.alloc((1, 1, 16, 16), tl.float16, space=tla.space.l1)
+        b = tla.alloc((2, 1, 16, 16), tl.float16, space=tla.space.l1)
+        acc = tla.alloc((2, 1, 16, 16), tl.float32, space=tla.space.l0c)
         tla.load_gm_to_l1(tla.view(A, (16, 16)), a)
         tla.load_gm_to_l1(tla.view(B, (16, 32)), b)
         tla.cube.mmad(a, b, acc, clear_accum=True)
-        if TARGET == "gm":
+        if TARGET == tla.space.gm:
             if MODE == tla.FixpipeDMAMode.NZ2NZ:
                 dst = tla.view(Y, (2, 1, 16, 16))
             elif MODE == tla.FixpipeDMAMode.NZ2DN:
@@ -61,15 +65,15 @@ def product(A, B, Y, P: tl.constexpr, TARGET: tl.constexpr, DTYPE: tl.constexpr,
             else:
                 dst = tla.view(Y, (16, 32))
             tla.store_l0c_to_gm(acc, dst, P)
-        elif TARGET == "ub":
+        elif TARGET == tla.space.ub:
             tla.copy_l0c_to_ub(acc, out, P)
             tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 0)
         else:
-            l1 = tla.alloc((2, 1, 16, 16), DTYPE, space="l1")
+            l1 = tla.alloc((2, 1, 16, 16), DTYPE, space=tla.space.l1)
             tla.copy_l0c_to_l1(acc, l1, P)
             tla.copy_l1_to_ub(l1, out)
             tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE1, 0)
-    if TARGET == "ub" or TARGET == "l1":
+    if TARGET == tla.space.ub or TARGET == tla.space.l1:
         with tla.scope.vector():
             # Both AIVs participate in the block handshake. The default
             # single-target Fixpipe/L12UB writes only sub-block 0's UB.
@@ -80,9 +84,9 @@ def product(A, B, Y, P: tl.constexpr, TARGET: tl.constexpr, DTYPE: tl.constexpr,
 
 @tla.jit
 def config_ir(src, dst, P: tl.constexpr, TARGET: tl.constexpr):
-    if TARGET == "gm":
+    if TARGET == tla.space.gm:
         tla.store_l0c_to_gm(src, dst, P)
-    elif TARGET == "l1":
+    elif TARGET == tla.space.l1:
         tla.copy_l0c_to_l1(src, dst, P)
     else:
         tla.copy_l0c_to_ub(src, dst, P)
@@ -90,25 +94,26 @@ def config_ir(src, dst, P: tl.constexpr, TARGET: tl.constexpr):
 
 def check_params():
     cases = [
-        ("l1", tla.FixpipeL0C2L1Params(channel_split=True,
-                                       c0_pad_en=False), ("channel_split = true", "c0_pad_en = false")),
-        ("gm", tla.FixpipeL0C2GMParams(unit_flag_ctrl=tla.UnitFlagMode.ENABLED_WITH_UPDATE, unit_flag_group_id=7),
-         ("unit_flag<ENABLED_WITH_UPDATE>", "unit_flag_group_id = 7")),
-        ("ub", tla.FixpipeL0C2UBParams(sub_block_idx=tla.FixpipeSubBlock.SUB_BLOCK_1), ("sub_block_1", )),
-        ("ub", tla.FixpipeL0C2UBParams(dual_dst_mode=tla.FixpipeDualDstMode.ROW_SPLIT,
-                                       sub_block_idx=None), ("ROW_SPLIT", )),
-        ("ub", tla.FixpipeL0C2UBParams(dual_dst_mode=tla.FixpipeDualDstMode.COLUMN_SPLIT,
-                                       sub_block_idx=None), ("COLUMN_SPLIT", )),
+        (tla.space.l1, tla.FixpipeL0C2L1Params(channel_split=True,
+                                               c0_pad_en=False), ("channel_split = true", "c0_pad_en = false")),
+        (tla.space.gm, tla.FixpipeL0C2GMParams(unit_flag_ctrl=tla.UnitFlagMode.ENABLED_WITH_UPDATE,
+                                               unit_flag_group_id=7), ("unit_flag<ENABLED_WITH_UPDATE>",
+                                                                       "unit_flag_group_id = 7")),
+        (tla.space.ub, tla.FixpipeL0C2UBParams(sub_block_idx=tla.FixpipeSubBlock.SUB_BLOCK_1), ("sub_block_1", )),
+        (tla.space.ub, tla.FixpipeL0C2UBParams(dual_dst_mode=tla.FixpipeDualDstMode.ROW_SPLIT,
+                                               sub_block_idx=None), ("ROW_SPLIT", )),
+        (tla.space.ub, tla.FixpipeL0C2UBParams(dual_dst_mode=tla.FixpipeDualDstMode.COLUMN_SPLIT,
+                                               sub_block_idx=None), ("COLUMN_SPLIT", )),
     ]
     for target, p, probes in cases:
         signature = {
-            "src": tla.buffer_type((2, 1, 16, 16), tl.float32, "l0c"), "dst": tla.buffer_type((2, 1, 16, 16),
-                                                                                              tl.float32, target)
+            "src": tla.buffer_type((2, 1, 16, 16), tl.float32, tla.space.l0c), "dst": tla.buffer_type(
+                (2, 1, 16, 16), tl.float32, target)
         }
         mod, _ = compile_offline(config_ir, signature, {"P": p, "TARGET": target})
         for probe in probes:
             assert probe in str(mod), probe
-        if target == "ub" and p.dual_dst_mode == tla.FixpipeDualDstMode.NO_DUAL:
+        if target == tla.space.ub and p.dual_dst_mode == tla.FixpipeDualDstMode.NO_DUAL:
             assert "dual_dst_mode" not in str(mod)
 
 
@@ -127,7 +132,7 @@ def test_ir(case, output_dir=None):
         assert case["mode"].value in text
     if case.get("scale") is not None:
         assert "quant_scale = %" in text and "QF322F32_PRE" in text
-    if case["target"] in ("ub", "l1"):
+    if case["target"] in (tla.space.ub, tla.space.l1):
         assert text.count("hivm.hir.sync_block_set") == 1
         assert text.count("hivm.hir.sync_block_wait") == 1
         assert "hivm.hir.get_sub_block_idx" in text
@@ -152,7 +157,7 @@ def launch(case, compile_only=False, seed=42):
         expected = expected.clamp_min(0)
     if case["mode"] == tla.FixpipeDMAMode.NZ2DN:
         expected = expected.T.contiguous()
-    if case["mode"] == tla.FixpipeDMAMode.NZ2NZ and case["target"] == "gm":
+    if case["mode"] == tla.FixpipeDMAMode.NZ2NZ and case["target"] == tla.space.gm:
         expected = expected.reshape(1, 16, 2, 16).permute(2, 0, 1, 3).contiguous()
     return y.cpu().flatten(), expected.to(y.dtype).flatten()
 

@@ -28,9 +28,9 @@ SIGNATURE = {"H_ptr": "*bf16", "E_ptr": "*bf16", "O_ptr": "*fp32"}
 @tla.jit
 def fused_weight(H_ptr, E_ptr, O_ptr, H: tl.constexpr, HC: tl.constexpr, CORES: tl.constexpr, VERSIONS: tl.constexpr):
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
-    hu = tla.alloc_buffer((256, ), tl.bfloat16, space="ub", versions=VERSIONS)
-    eu = tla.alloc_buffer((256, ), tl.bfloat16, space="ub", versions=VERSIONS)
-    ou = tla.alloc_buffer((256, ), tl.float32, space="ub", versions=VERSIONS)
+    hu = tla.alloc_buffer((256, ), tl.bfloat16, space=tla.space.ub, versions=VERSIONS)
+    eu = tla.alloc_buffer((256, ), tl.bfloat16, space=tla.space.ub, versions=VERSIONS)
+    ou = tla.alloc_buffer((256, ), tl.float32, space=tla.space.ub, versions=VERSIONS)
     num_tiles = H // 256
     for task in range(tl.program_id(0), HC * num_tiles, CORES):
         head = task % HC

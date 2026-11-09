@@ -60,8 +60,8 @@ class Semantic:
         self.builder = Recorder()
 
 
-def buf(shape, space="l1", dtype=None):
-    dtype = dtype or (tl.float32 if space == "l0c" else tl.float8e5)
+def buf(shape, space=core.AddressSpace.l1, dtype=None):
+    dtype = dtype or (tl.float32 if space is core.AddressSpace.l0c else tl.float8e5)
     return core.buffer(object(), core.buffer_type(shape, dtype, space))
 
 
@@ -81,7 +81,7 @@ def mx(a_shape=(32, 64), b_shape=(64, 128), acc_shape=(32, 128), **kwargs):
     b = buf(b_shape)
     sa = buf(zz(m, k // 32), dtype=tl.uint8)
     sb = buf(zz(n, k // 32), dtype=tl.uint8)
-    acc = buf(acc_shape, "l0c")
+    acc = buf(acc_shape, core.AddressSpace.l0c)
     return a, b, sa, sb, acc, kwargs
 
 
@@ -101,7 +101,7 @@ def test_integer_operands_require_and_forward_native_format(fmt, code):
     b = buf((k // 2 if fmt is cube.MxFormat.E2M1 else k, 128), dtype=tl.int8)
     sa = buf(zz(32, k // 32), dtype=tl.uint8)
     sb = buf(zz(128, k // 32), dtype=tl.uint8)
-    acc = buf((32, 128), "l0c")
+    acc = buf((32, 128), core.AddressSpace.l0c)
     sem = Semantic()
     cube.mmad_mx(a, b, sa, sb, acc, format_a=fmt, format_b=fmt, _semantic=sem)
     args = sem.builder.calls[0][1]
@@ -115,8 +115,8 @@ def test_integer_operand_without_format_is_rejected():
     a = buf((32, 64), dtype=tl.int8)
     b = buf((64, 128), dtype=tl.int8)
     with pytest.raises(ValueError, match="format_a"):
-        cube.mmad_mx(a, b, buf(zz(32, 2), dtype=tl.uint8), buf(zz(128, 2), dtype=tl.uint8), buf((32, 128), "l0c"),
-                     _semantic=sem)
+        cube.mmad_mx(a, b, buf(zz(32, 2), dtype=tl.uint8), buf(zz(128, 2), dtype=tl.uint8),
+                     buf((32, 128), core.AddressSpace.l0c), _semantic=sem)
     assert not sem.builder.calls
 
 
@@ -132,7 +132,8 @@ def test_mixed_fp8_fp4_is_rejected():
     sa = buf(zz(32, 2), dtype=tl.uint8)
     sb = buf(zz(128, 2), dtype=tl.uint8)
     with pytest.raises(ValueError, match="mixed FP8/FP4"):
-        cube.mmad_mx(a, b, sa, sb, buf((32, 128), "l0c"), format_b=cube.MxFormat.E2M1, _semantic=Semantic())
+        cube.mmad_mx(a, b, sa, sb, buf((32, 128), core.AddressSpace.l0c), format_b=cube.MxFormat.E2M1,
+                     _semantic=Semantic())
 
 
 @pytest.mark.parametrize("ta,tb", [(False, False), (True, False), (False, True), (True, True)])
@@ -143,7 +144,7 @@ def test_transpose_swaps_logical_extents(ta, tb):
     sa = buf(zz(32, 2), dtype=tl.uint8)
     sb = buf(zz(128, 2), dtype=tl.uint8)
     sem = Semantic()
-    cube.mmad_mx(a, b, sa, sb, buf((32, 128), "l0c"), transpose_a=ta, transpose_b=tb, _semantic=sem)
+    cube.mmad_mx(a, b, sa, sb, buf((32, 128), core.AddressSpace.l0c), transpose_a=ta, transpose_b=tb, _semantic=sem)
     args = sem.builder.calls[0][1]
     assert (args["real_m"], args["real_k"], args["real_n"]) == (32, 64, 128)
     assert (args["transpose_a"], args["transpose_b"]) == (ta, tb)
@@ -155,7 +156,7 @@ def test_4d_fractal_operands_and_scale_buffers_are_accepted():
     sa = buf(zz(32, 2), dtype=tl.uint8)
     sb = buf(zz(128, 2), dtype=tl.uint8)
     sem = Semantic()
-    cube.mmad_mx(a, b, sa, sb, buf(nz(32, 128), "l0c"), _semantic=sem)
+    cube.mmad_mx(a, b, sa, sb, buf(nz(32, 128), core.AddressSpace.l0c), _semantic=sem)
     assert sem.builder.calls[0][1]["real_m"] == 32
 
 
@@ -176,14 +177,16 @@ def test_bias_is_forwarded_as_l1_operand():
     assert sem.builder.calls[0][1]["per_channel_bias"] == bias.handle
 
 
-@pytest.mark.parametrize("bias", [buf((1, 128), dtype=tl.float16), buf((1, 128), "ub", dtype=tl.float32)])
+@pytest.mark.parametrize("bias",
+                         [buf((1, 128), dtype=tl.float16),
+                          buf((1, 128), core.AddressSpace.ub, dtype=tl.float32)])
 def test_invalid_bias_is_rejected(bias):
     a, b, sa, sb, acc, _ = mx()
     with pytest.raises(ValueError, match="bias"):
         cube.mmad_mx(a, b, sa, sb, acc, bias=bias, _semantic=Semantic())
 
 
-@pytest.mark.parametrize("scale", [buf((32, 2), dtype=tl.float32), buf((32, 2), "ub", dtype=tl.uint8)])
+@pytest.mark.parametrize("scale", [buf((32, 2), dtype=tl.float32), buf((32, 2), core.AddressSpace.ub, dtype=tl.uint8)])
 def test_invalid_scale_operand_is_rejected(scale):
     a, b, _, sb, acc, _ = mx()
     with pytest.raises(ValueError, match="scale_a"):
@@ -203,26 +206,26 @@ def test_odd_k_group_count_pads_only_the_4d_fractal_scale():
     sa = buf(zz(32, 3), dtype=tl.uint8)
     sb = buf(zz(128, 3), dtype=tl.uint8)
     sem = Semantic()
-    cube.mmad_mx(a, b, sa, sb, buf((32, 128), "l0c"), _semantic=sem)
+    cube.mmad_mx(a, b, sa, sb, buf((32, 128), core.AddressSpace.l0c), _semantic=sem)
     assert len(sem.builder.calls) == 1
     # A 2-D ND scale must carry the exact logical K//32 extent.
     with pytest.raises(ValueError, match="scale_a"):
-        cube.mmad_mx(a, b, buf((32, 4), dtype=tl.uint8), buf((128, 3), dtype=tl.uint8), buf((32, 128), "l0c"),
-                     _semantic=Semantic())
+        cube.mmad_mx(a, b, buf((32, 4), dtype=tl.uint8), buf((128, 3), dtype=tl.uint8),
+                     buf((32, 128), core.AddressSpace.l0c), _semantic=Semantic())
 
 
 def test_reduction_must_be_a_multiple_of_the_mx_group():
     a = buf((32, 48))
     b = buf((48, 128))
     with pytest.raises(ValueError, match="multiple of 32"):
-        cube.mmad_mx(a, b, buf(zz(32, 2), dtype=tl.uint8), buf(zz(128, 2), dtype=tl.uint8), buf((32, 128), "l0c"),
-                     _semantic=Semantic())
+        cube.mmad_mx(a, b, buf(zz(32, 2), dtype=tl.uint8), buf(zz(128, 2), dtype=tl.uint8),
+                     buf((32, 128), core.AddressSpace.l0c), _semantic=Semantic())
 
 
 def test_reduction_mismatch_is_rejected():
     with pytest.raises(ValueError, match="reduction"):
         cube.mmad_mx(buf((32, 64)), buf((96, 128)), buf(zz(32, 2), dtype=tl.uint8), buf(zz(128, 3), dtype=tl.uint8),
-                     buf((32, 128), "l0c"), _semantic=Semantic())
+                     buf((32, 128), core.AddressSpace.l0c), _semantic=Semantic())
 
 
 @pytest.mark.parametrize("axis,bound", [("real_m", 32), ("real_k", 64), ("real_n", 128)])
@@ -236,7 +239,7 @@ def test_scale_shape_uses_full_tile_not_real_extents():
     # real_m/real_n restrict the accumulator only; scales cover the whole L1 tile.
     a, b, sa, sb, _, _ = mx()
     sem = Semantic()
-    cube.mmad_mx(a, b, sa, sb, buf((16, 64), "l0c"), real_m=16, real_n=64, _semantic=sem)
+    cube.mmad_mx(a, b, sa, sb, buf((16, 64), core.AddressSpace.l0c), real_m=16, real_n=64, _semantic=sem)
     args = sem.builder.calls[0][1]
     assert (args["real_m"], args["real_k"], args["real_n"]) == (16, 64, 64)
 
@@ -244,20 +247,20 @@ def test_scale_shape_uses_full_tile_not_real_extents():
 def test_accumulator_must_match_actual_extents():
     a, b, sa, sb, _, _ = mx()
     with pytest.raises(ValueError, match="acc must"):
-        cube.mmad_mx(a, b, sa, sb, buf((32, 128), "l0c"), real_n=64, _semantic=Semantic())
+        cube.mmad_mx(a, b, sa, sb, buf((32, 128), core.AddressSpace.l0c), real_n=64, _semantic=Semantic())
 
 
 def test_operand_spaces_are_checked():
     with pytest.raises(ValueError, match="L1"):
-        cube.mmad_mx(buf((32, 64), "ub"), buf((64, 128)), buf(zz(32, 2), dtype=tl.uint8),
-                     buf(zz(128, 2), dtype=tl.uint8), buf((32, 128), "l0c"), _semantic=Semantic())
+        cube.mmad_mx(buf((32, 64), core.AddressSpace.ub), buf((64, 128)), buf(zz(32, 2), dtype=tl.uint8),
+                     buf(zz(128, 2), dtype=tl.uint8), buf((32, 128), core.AddressSpace.l0c), _semantic=Semantic())
     with pytest.raises(ValueError, match="L0C"):
         cube.mmad_mx(buf((32, 64)), buf((64, 128)), buf(zz(32, 2), dtype=tl.uint8), buf(zz(128, 2), dtype=tl.uint8),
-                     buf((32, 128), "ub"), _semantic=Semantic())
+                     buf((32, 128), core.AddressSpace.ub), _semantic=Semantic())
 
 
 def test_scale_dma_emits_load_mx_scale():
-    src = buf((32, 2), space="gm", dtype=tl.uint8)
+    src = buf((32, 2), space=core.AddressSpace.gm, dtype=tl.uint8)
     dst = buf(zz(32, 2), dtype=tl.uint8)
     sem = Semantic()
     dma.load_gm_to_l1_mx_scale(src, dst, _semantic=sem)
@@ -265,7 +268,7 @@ def test_scale_dma_emits_load_mx_scale():
 
 
 def test_scale_dma_rejects_configuration_and_wrong_spaces():
-    src = buf((32, 2), space="gm", dtype=tl.uint8)
+    src = buf((32, 2), space=core.AddressSpace.gm, dtype=tl.uint8)
     dst = buf(zz(32, 2), dtype=tl.uint8)
     with pytest.raises(TypeError, match="no configuration"):
         dma.load_gm_to_l1_mx_scale(src, dst, params=object(), _semantic=Semantic())

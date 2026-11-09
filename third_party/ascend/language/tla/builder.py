@@ -23,10 +23,25 @@ Ascend-specific builder utilities for code generation.
 
 # The wrapper helpers are shared verbatim with the cann extension; only the
 # method list below is TLA-specific.
+from triton._C.libtriton.ascend.ir import AddressSpace as HIVMAddressSpace
 from triton.language.extra.cann.extension.builder import (
     create_builder_method_wrapper,
     attach_builder_methods,
 )
+
+from .core import AddressSpace
+
+_HIVM_ADDRESS_SPACES = {
+    AddressSpace.gm: HIVMAddressSpace.GM,
+    AddressSpace.ub: HIVMAddressSpace.UB,
+    AddressSpace.l1: HIVMAddressSpace.L1,
+    AddressSpace.l0a: HIVMAddressSpace.L0A,
+    AddressSpace.l0b: HIVMAddressSpace.L0B,
+    AddressSpace.l0c: HIVMAddressSpace.L0C,
+    AddressSpace.ssbuf: HIVMAddressSpace.SSBUF,
+    AddressSpace.bt: HIVMAddressSpace.BiasBUF,
+    AddressSpace.fb: HIVMAddressSpace.FixBUF,
+}
 
 __all__ = [
     "create_builder_method_wrapper",
@@ -53,7 +68,6 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_tla_block_wait_flag',
         'create_tla_mutex_lock',
         'create_tla_mutex_unlock',
-        'create_tla_buffer_type',
         'create_tla_vector_type',
         'create_tla_alloc',
         'create_tla_bind',
@@ -121,3 +135,9 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_simd_vmull',
     ]
     attach_builder_methods(main_builder, ascend_builder, ascend_methods)
+
+    def create_tla_buffer_type(shape, element_type, space, strides, offset):
+        native_space = _HIVM_ADDRESS_SPACES[space]
+        return ascend_builder.create_tla_buffer_type(shape, element_type, native_space, strides, offset)
+
+    main_builder.create_tla_buffer_type = create_tla_buffer_type

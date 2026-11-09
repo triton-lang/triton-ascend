@@ -70,8 +70,8 @@ def test_ir(case, output_dir=None):
         assert "atomic = <" + case["atomic"].value + ">" in text
     if case["name"] == "plain_fp32":
         sig = {
-            "src": tla.buffer_type((2, 32), tl.float32, "gm"), "dst": tla.buffer_type((2, 40), tl.float32, "ub"),
-            "value": "fp32", "left": "i32", "right": "i32"
+            "src": tla.buffer_type((2, 32), tl.float32, tla.space.gm), "dst": tla.buffer_type(
+                (2, 40), tl.float32, tla.space.ub), "value": "fp32", "left": "i32", "right": "i32"
         }
         dynamic, _ = compile_offline(dynamic_padding, sig, {})
         ir = str(dynamic)

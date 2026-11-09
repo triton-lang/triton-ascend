@@ -10,8 +10,8 @@ def buffer_example(X_ptr, O_ptr, N: tl.constexpr):
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))
 
     # 在 UB 上分配 buffer；versions=2 声明双缓冲。
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub", versions=2)
+    x_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub, versions=2)
 
     tla.copy(x, x_ub)
 

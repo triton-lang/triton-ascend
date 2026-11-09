@@ -22,7 +22,7 @@ SIGNATURE = {"O": "*u32"}
 
 @tla.jit
 def tail_mask(O, N: tl.constexpr):
-    o = tla.alloc_buffer((3, N), tl.uint32, space="ub")
+    o = tla.alloc_buffer((3, N), tl.uint32, space=tla.space.ub)
     with tla.scope.simd():
         ones = tla.simd.vsplat(1, tl.uint32)
         zeros = tla.simd.vsplat(0, tl.uint32)

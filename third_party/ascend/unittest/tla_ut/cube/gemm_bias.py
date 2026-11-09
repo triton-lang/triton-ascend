@@ -24,11 +24,11 @@ SIGNATURE = {"A": "*fp16", "B": "*fp16", "Y": "*fp32"}
 def gemm_bias(A, B, Y, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, BIAS: tl.constexpr):
     tl.static_assert(M % 16 == 0 and K % 16 == 0 and N == 64)
     # Fixpipe ROW_SPLIT gives each AIV half the rows in its own UB.
-    product_ub = tla.alloc((M // 2, N), tl.float32, space="ub")
+    product_ub = tla.alloc((M // 2, N), tl.float32, space=tla.space.ub)
     with tla.scope.cube():
-        a_l1 = tla.alloc((K // 16, M // 16, 16, 16), tl.float16, space="l1")
-        b_l1 = tla.alloc((N // 16, K // 16, 16, 16), tl.float16, space="l1")
-        acc = tla.alloc((N // 16, M // 16, 16, 16), tl.float32, space="l0c")
+        a_l1 = tla.alloc((K // 16, M // 16, 16, 16), tl.float16, space=tla.space.l1)
+        b_l1 = tla.alloc((N // 16, K // 16, 16, 16), tl.float16, space=tla.space.l1)
+        acc = tla.alloc((N // 16, M // 16, 16, 16), tl.float32, space=tla.space.l0c)
         tla.load_gm_to_l1(tla.view(A, (M, K)), a_l1)
         tla.load_gm_to_l1(tla.view(B, (K, N)), b_l1)
         tla.cube.mmad(a_l1, b_l1, acc, clear_accum=True)

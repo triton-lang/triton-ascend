@@ -8,9 +8,9 @@ def simd_arith_example(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     a = tla.view(A_ptr, (N, ), strides=(1, ))
     b = tla.view(B_ptr, (N, ), strides=(1, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ))
-    a_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    b_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    a_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    b_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
 
     tla.copy(a, a_ub)
     tla.copy(b, b_ub)

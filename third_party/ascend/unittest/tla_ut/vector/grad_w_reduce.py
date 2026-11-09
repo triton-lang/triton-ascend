@@ -28,11 +28,11 @@ def grad_w_reduce(P_ptr, WH_ptr, WE_ptr, GH_ptr, GE_ptr, H: tl.constexpr, HC: tl
     tl.static_assert(NP > 0 and HC > 0 and CORES > 0)
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
     # UB 5-buffer: partial (NP,1,BW) matches strided GM view; two read_write grads.
-    p_ub = tla.alloc_buffer((NP, 1, BW), tl.float32, space="ub", versions=VERSIONS)
-    wh_ub = tla.alloc_buffer((1, BW), tl.bfloat16, space="ub", versions=VERSIONS)
-    we_ub = tla.alloc_buffer((1, BW), tl.bfloat16, space="ub", versions=VERSIONS)
-    gh_ub = tla.alloc_buffer((1, BW), tl.float32, space="ub", versions=VERSIONS)
-    ge_ub = tla.alloc_buffer((1, BW), tl.float32, space="ub", versions=VERSIONS)
+    p_ub = tla.alloc_buffer((NP, 1, BW), tl.float32, space=tla.space.ub, versions=VERSIONS)
+    wh_ub = tla.alloc_buffer((1, BW), tl.bfloat16, space=tla.space.ub, versions=VERSIONS)
+    we_ub = tla.alloc_buffer((1, BW), tl.bfloat16, space=tla.space.ub, versions=VERSIONS)
+    gh_ub = tla.alloc_buffer((1, BW), tl.float32, space=tla.space.ub, versions=VERSIONS)
+    ge_ub = tla.alloc_buffer((1, BW), tl.float32, space=tla.space.ub, versions=VERSIONS)
     for task in range(tl.program_id(0), (H // BW) * HC, CORES):
         shard = task // HC
         head = task % HC

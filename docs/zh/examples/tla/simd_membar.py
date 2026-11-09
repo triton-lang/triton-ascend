@@ -7,8 +7,8 @@ import triton.language.extra.tla as tla
 def simd_membar_example(X_ptr, O_ptr, N: tl.constexpr):
     x = tla.view(X_ptr, (N, ), strides=(1, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ))
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    x_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
 
     tla.copy(x, x_ub)
 

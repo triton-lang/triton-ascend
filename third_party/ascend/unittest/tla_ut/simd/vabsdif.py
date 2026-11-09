@@ -32,10 +32,10 @@ SIGNATURE_H = {"X": "*fp16", "Y": "*fp16", "I": "*i16", "T": "*i16", "O": "*fp16
 
 @tla.jit
 def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    xb = tla.alloc_buffer((TILES, N), tl.float32, space="ub")
-    yb = tla.alloc_buffer((TILES, N), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float32, space="ub")
+    xb = tla.alloc_buffer((TILES, N), tl.float32, space=tla.space.ub)
+    yb = tla.alloc_buffer((TILES, N), tl.float32, space=tla.space.ub)
+    tb = tla.alloc_buffer((N, ), tl.int32, space=tla.space.ub)
+    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float32, space=tla.space.ub)
     tla.copy(tla.view(X, (TILES, N)), xb)
     tla.copy(tla.view(Y, (TILES, N)), yb)
     tla.copy(tla.view(T, (N, )), tb)
@@ -67,11 +67,11 @@ def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.con
 
 @tla.jit
 def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    xb = tla.alloc_buffer((TILES, N), tl.float16, space="ub")
-    yb = tla.alloc_buffer((TILES, N), tl.float16, space="ub")
-    ib = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float16, space="ub")
+    xb = tla.alloc_buffer((TILES, N), tl.float16, space=tla.space.ub)
+    yb = tla.alloc_buffer((TILES, N), tl.float16, space=tla.space.ub)
+    ib = tla.alloc_buffer((N, ), tl.int16, space=tla.space.ub)
+    tb = tla.alloc_buffer((N, ), tl.int16, space=tla.space.ub)
+    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float16, space=tla.space.ub)
     tla.copy(tla.view(X, (TILES, N)), xb)
     tla.copy(tla.view(Y, (TILES, N)), yb)
     tla.copy(tla.view(I, (N, )), ib)

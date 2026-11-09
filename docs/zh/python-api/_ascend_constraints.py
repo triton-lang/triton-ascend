@@ -1159,16 +1159,19 @@ CONSTRAINTS = {
     # ------------------------------------------------------------------
     f"{_TLA_PREFIX}.alloc": {
         "constraints": [
-            "``space`` 默认 ``\"ub\"``，不能为 ``\"gm\"``；GM buffer 必须由内核指针经 ``tla.view`` 获得。",
+            "``space`` 默认 ``tla.space.ub``，不能为 ``tla.space.gm``；GM buffer 必须由内核指针经 ``tla.view`` 获得。",
             "``versions`` 必须是正整数；``1`` 表示关闭多缓冲。",
+            "``layout`` 默认 ``tla.layout.nd``，保留输入的物理 shape；``tla.layout.nz`` 接受对齐的逻辑 ``(M, N)``，不自动补齐。",
+            "NZ 仅支持 L1 的 float16/bfloat16/float32 和 L0C 的 float32/int32；返回的 buffer 仍使用物理坐标和 stride。",
         ],
         "example":
         "buffer",
     },
     f"{_TLA_PREFIX}.alloc_buffer": {
         "constraints": [
-            "``space`` 默认 ``\"ub\"``，不能为 ``\"gm\"``；GM buffer 必须由内核指针经 ``tla.view`` 获得。",
+            "``space`` 默认 ``tla.space.ub``，不能为 ``tla.space.gm``；GM buffer 必须由内核指针经 ``tla.view`` 获得。",
             "``versions`` 必须是正整数；``1`` 表示关闭多缓冲。",
+            "与 ``tla.alloc`` 相同：``layout`` 只校验和构造物理 shape，不转换数据或改变视图语义。",
         ],
         "example":
         "buffer",

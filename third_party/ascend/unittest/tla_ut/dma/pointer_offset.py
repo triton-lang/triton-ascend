@@ -19,7 +19,7 @@ def offset_copy(X, Y, first, second):
         ub = tla.alloc((64, ), tl.float32)
         # The two addptr operations must each scale by sizeof(f32), while
         # view's own offset remains an element offset on the GM memref.
-        src = tla.view((X + first) + second, (64, ), offsets=(3, ))
+        src = tla.view((X + first) + second, (64, ), offsets=(3, ), space=tla.space.gm)
         dst = tla.view(Y + second, (64, ), offsets=(5, ))
         tla.load_gm_to_ub(src, ub)
         tla.store_ub_to_gm(ub, dst)

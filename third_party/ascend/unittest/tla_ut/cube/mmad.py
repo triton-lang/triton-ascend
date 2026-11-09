@@ -76,9 +76,9 @@ def gemm_extents(A, B, C, M: tl.constexpr, K: tl.constexpr, N: tl.constexpr, TA:
     OUT_M: tl.constexpr = M if RM is None else RM
     OUT_N: tl.constexpr = N if RN is None else RN
     with tla.scope.cube():
-        a = tla.alloc((A_COLS // 16, A_ROWS // 16, 16, 16), A.dtype.element_ty, space=tla.space.l1)
-        b = tla.alloc((B_COLS // 16, B_ROWS // 16, 16, 16), B.dtype.element_ty, space=tla.space.l1)
-        acc = tla.alloc((OUT_N // 16, OUT_M // 16, 16, 16), tl.float32, space=tla.space.l0c)
+        a = tla.alloc((A_ROWS, A_COLS), A.dtype.element_ty, space=tla.space.l1, layout=tla.layout.nz)
+        b = tla.alloc((B_ROWS, B_COLS), B.dtype.element_ty, space=tla.space.l1, layout=tla.layout.nz)
+        acc = tla.alloc((OUT_M, OUT_N), tl.float32, space=tla.space.l0c, layout=tla.layout.nz)
         tla.load_gm_to_l1(tla.view(A, (A_ROWS, A_COLS)), a)
         tla.load_gm_to_l1(tla.view(B, (B_ROWS, B_COLS)), b)
         tla.cube.mmad(a, b, acc, transpose_a=TA, transpose_b=TB, clear_accum=True, real_m=RM, real_k=RK, real_n=RN)

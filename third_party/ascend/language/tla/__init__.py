@@ -70,6 +70,7 @@ from .core import AddressSpace as space
 from .core import buffer, buffer_type, vector, vector_type
 from .scope import scope
 from .alloc import alloc_buffer, alloc
+from .alloc import Layout as layout
 from .copy import copy
 from .dma import (
     PadMode,
@@ -157,6 +158,7 @@ __all__ = [
     "uint32",
     "uint64",
     "space",
+    "layout",
     "PadMode",
     "EvictionPolicy",
     "AtomicKind",

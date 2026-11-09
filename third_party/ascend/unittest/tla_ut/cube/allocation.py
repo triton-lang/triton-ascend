@@ -38,9 +38,9 @@ def _copy_two_tiles(X, Y):
 @tla.jit
 def _cube_product(A, B, C):
     with tla.scope.cube():
-        a = tla.alloc((2, 1, 16, 16), tl.float16, space=tla.space.l1)
-        b = tla.alloc_buffer((4, 2, 16, 16), tl.float16, space=tla.space.l1)
-        acc = tla.alloc((4, 1, 16, 16), tl.float32, space=tla.space.l0c)
+        a = tla.alloc((16, 32), tl.float16, space=tla.space.l1, layout=tla.layout.nz)
+        b = tla.alloc_buffer((32, 64), tl.float16, space=tla.space.l1, layout=tla.layout.nz)
+        acc = tla.alloc((16, 64), tl.float32, space=tla.space.l0c, layout=tla.layout.nz)
         tla.load_gm_to_l1(tla.view(A, (16, 32)), a)
         tla.load_gm_to_l1(tla.view(B, (32, 64)), b)
         tla.cube.mmad(a, b, acc, clear_accum=True)

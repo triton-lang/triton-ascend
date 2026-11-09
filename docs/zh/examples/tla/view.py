@@ -13,7 +13,7 @@ def view_example(X_ptr, O_ptr, N: tl.constexpr):
     tla.load_gm_to_ub(x, x_ub)
 
     # buffer 切片：strides 相对于源视图，offset 为静态或标量整数。
-    tile = tla.view(x_ub, (64, ), strides=(1, ), offsets=(0, ))
+    tile = tla.subview(x_ub, offsets=(0, ), sizes=(64, ), strides=(1, ))
 
     with tla.scope.simd():
         v = tla.simd.vlds(tile[0])

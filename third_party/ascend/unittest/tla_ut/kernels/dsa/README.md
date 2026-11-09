@@ -1,6 +1,6 @@
 # DSA / Sparse MLA prefill
 
-使用 TLA 实现的稀疏注意力 prefill 算子，支持 pytest 精度检测、完整调用计时和 NPU profiling。
+使用 TLA 实现的稀疏注意力 prefill 算子，支持 pytest 离线 IR 检测、精度检测、完整调用计时和 NPU profiling。
 当前仅有四个 prefill 规格：B=1、SQ=KV length=8192、TopK=2048，Q heads 分别为 16、32、64、128。
 
 ## 性能
@@ -34,7 +34,8 @@ normal 输入，seed=1103。测量日期 2026-11-03，物理卡 7，编译目标
 
 运行需要兼容的 Ascend950、CANN、torch_npu 和 TLA 构建，包含 `copy_ub_to_l1` 等公共接口。
 先激活 Python 环境并加载 CANN 的 `set_env.sh`。
-本目录不提供 IR/compile 检测；运行设备用例仍会触发必要的 JIT 编译。
+`test_ir` 离线编译四种 heads 的 attention 内核并验证 subview、MMAD 和 Fixpipe 结构，无需 NPU 或 torch_npu。
+设备用例仍会触发必要的 JIT 编译，本目录不提供独立的 compile 阶段检测。
 
 ## 配置与运行
 
@@ -56,6 +57,9 @@ normal 输入，seed=1103。测量日期 2026-11-03，物理卡 7，编译目标
 从仓库根目录运行：
 
 ```bash
+# 离线 IR 检测
+TLA_TEST_STAGE=ir pytest -q third_party/ascend/unittest/tla_ut/kernels/dsa -k test_ir
+
 # 全量精度检测；默认性能用例跳过
 TLA_TEST_STAGE=run pytest -q third_party/ascend/unittest/tla_ut/kernels/dsa
 
@@ -66,7 +70,7 @@ TLA_TEST_STAGE=run pytest -q third_party/ascend/unittest/tla_ut/kernels/dsa -k t
 TLA_TEST_STAGE=run pytest -q -s third_party/ascend/unittest/tla_ut/kernels/dsa -k test_perf
 ```
 
-沿用公共 `TLA_TEST_STAGE`：`run` 执行设备测试，`ir`/`compile` 跳过，默认 `all` 在有 NPU 时运行。
+沿用公共 `TLA_TEST_STAGE`：`run` 执行设备测试，`ir`/`compile` 跳过设备测试，默认 `all` 在有 NPU 时运行。
 设备由父目录 fixture 分配；可通过已有的 `ASCEND_RT_VISIBLE_DEVICES` 选择可见物理卡。
 性能测试不使用 xdist，启动采样前检查设备上是否有其他进程。
 pytest 收集仍需父目录公共工具依赖的 Triton/TLA 扩展。
@@ -96,7 +100,7 @@ pytest 收集仍需父目录公共工具依赖的 Triton/TLA 扩展。
 
 输入和编译预热不计入采样，完整调用包含分配、核数查询、发射及同步。
 设备任务时间和完整调用时间分别采集；流水线计数时间可能重叠，不能相加作为总延迟。
-每个用例结束都会保存结果，包括精度或采样失败。入口不导出 IR 或二进制。
+每个用例结束都会保存结果，包括精度或采样失败。性能测试入口不导出 IR 或二进制；离线 IR 测试沿用公共 `TLA_IR_DUMP_DIR`。
 
 ## 输入输出
 

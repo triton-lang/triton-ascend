@@ -42,7 +42,9 @@ GM --tla.view--> buffer --tla.load_gm_to_ub--> UB buffer
 UB buffer --tla.store_ub_to_gm--> GM
 ```
 
-- `tla.view`：把内核指针或已有缓冲区切片转换为 `tla.buffer`。
+- `tla.view`：只接受标量 GM 指针，建立 `tla.buffer` 视图。
+- `tla.subview`：对已有 buffer（包括 GM buffer）切片，保留源步长、元素类型和地址空间。
+- `tla.reshape`：改变连续 buffer 的形状，保留其偏移。
 - `tla.alloc_buffer`：在 UB / L1 / L0A / L0B / L0C 上分配缓冲区。
 - 显式 DMA：`tla.load_gm_to_ub`、`tla.store_ub_to_gm`、`tla.load_gm_to_l1`、`tla.copy_ub_to_l1` 等接口指定搬运路径。
 - L0C Fixpipe：使用 `tla.store_l0c_to_gm`、`tla.copy_l0c_to_ub` 或 `tla.copy_l0c_to_l1`，通过配置对象显式指定 `NZ2ND` / `NZ2NZ` 等布局模式。

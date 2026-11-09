@@ -37,6 +37,30 @@ def test_ir():
     assert lowered.count("memref.extract_aligned_pointer_as_index") == 2
 
 
+@tla.jit
+def strided_gm_subview(X, Y, row):
+    with tla.scope.vector():
+        source = tla.view(X, (8, 64), strides=(80, 1))
+        tile = tla.subview(source, offsets=(row, 0), sizes=(2, 64), strides=(2, 1))
+        ub = tla.alloc((2, 64), tl.float32)
+        tla.load_gm_to_ub(tile, ub)
+        tla.store_ub_to_gm(ub, tla.view(Y, (2, 64)))
+
+
+def test_gm_subview_ir():
+    mod, ctx = compile_offline(strided_gm_subview, {"X": "*fp32", "Y": "*fp32", "row": "i32"}, {})
+    source = str(mod)
+    assert source.count("hivm.hir.pointer_cast") == 2
+    assert source.count("memref.subview") == 1
+    assert "strided<[160, 1], offset: ?>" in source
+    assert source.count("memref.alloc()") == 1
+    lowered = str(lower_offline(mod, ctx))
+    assert "!tt.ptr" not in lowered
+    assert lowered.count("hivm.hir.load ") == 1
+    assert lowered.count("hivm.hir.store ") == 1
+    assert "strided<[160, 1], offset: ?>" in lowered
+
+
 def test_run():
     x = torch.arange(128, dtype=torch.float32, device="npu")
     y = torch.full((128, ), -1, dtype=torch.float32, device="npu")

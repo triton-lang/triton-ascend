@@ -69,7 +69,7 @@ def reshape_strided(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
     x_ub = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
     x = tla.view(X_ptr, (H, D), strides=(D, 1), offsets=(0, 0))
     tla.load_gm_to_ub(x, x_ub)
-    sub = tla.view(x_ub, (H, D // 2), strides=(1, 2), offsets=(0, 0))  # strided tile
+    sub = tla.subview(x_ub, offsets=(0, 0), sizes=(H, D // 2), strides=(1, 2))  # strided tile
     tla.reshape(sub, (H * D // 2, ))
 
 

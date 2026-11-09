@@ -82,17 +82,36 @@ def buf(shape=(8, 2064), strides=None, offset=0):
     return view.buffer(Handle(), view.buffer_type(shape, tl.bfloat16, "ub", strides, offset))
 
 
-def test_subview_preserves_pitch_and_legacy_view_contract():
+def test_subview_preserves_pitch():
     source = buf()
-    explicit = Semantic()
-    legacy = Semantic()
-    sliced = view.subview(source, (0, 0), (8, 1040), _semantic=explicit)
-    compatible = view.view(source, (8, 1040), _semantic=legacy)
-    assert sliced.type == compatible.type
+    sem = Semantic()
+    sliced = view.subview(source, (0, 0), (8, 1040), _semantic=sem)
     assert sliced.shape == (8, 1040) and sliced.strides == (2064, 1)
     assert sliced.dtype == source.dtype and sliced.space == "ub"
     assert sliced.offset is None
-    assert explicit.builder.calls[0][0] == legacy.builder.calls[0][0] == "subview"
+    assert sem.builder.calls[0][0] == "subview"
+
+
+@pytest.mark.parametrize("space", ["gm", "ub", "l1", "l0c"])
+def test_view_rejects_existing_buffers(space):
+    source = view.buffer(Handle(), view.buffer_type((8, 64), tl.bfloat16, space))
+    sem = Semantic()
+    with pytest.raises(TypeError, match="use tla.subview"):
+        view.view(source, (4, 64), _semantic=sem)
+    assert not sem.builder.calls
+    sliced = view.subview(source, (1, 0), (4, 64), _semantic=sem)
+    assert sliced.space == space and sliced.dtype == source.dtype
+
+
+@pytest.mark.parametrize("source", [
+    Handle(),
+    tl.tensor(Handle(), tl.int64),
+    tl.tensor(Handle(), tl.block_type(tl.pointer_type(tl.bfloat16), [4])),
+    tl.tensor(Handle(), tl.pointer_type(tl.bfloat16, address_space=3)),
+])
+def test_view_requires_scalar_gm_pointer(source):
+    with pytest.raises(TypeError, match="scalar GM pointer"):
+        view.view(source, (64, ), _semantic=Semantic())
 
 
 def test_relative_subview_strides():

@@ -182,7 +182,8 @@ class buffer(tl.base_value):
     """A typed TLA buffer value.
 
     A buffer aliases global memory obtained from a kernel pointer via
-    :func:`view`, or on-chip storage obtained via :func:`alloc`, and is
+    :func:`view`, or on-chip storage obtained via :func:`alloc`. Use
+    :func:`subview` to slice an existing buffer in any address space. It is
     consumed by the DMA, cube and SIMD memory interfaces. ``buf[i0, i1, ...]``
     returns a :class:`buffer_access` carrying the indices for ``simd.vlds`` /
     ``simd.vsts``.

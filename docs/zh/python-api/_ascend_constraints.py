@@ -1190,17 +1190,26 @@ CONSTRAINTS = {
     },
     f"{_TLA_PREFIX}.view": {
         "constraints": [
-            "指针入口：``src`` 必须是指针 tensor，``strides`` 为最终 memref 步长，默认行主序。",
-            "缓冲区切片：``src`` 必须是 ``tla.buffer``，``strides`` 相对于源视图，``space`` 必须保持默认值。",
+            "``src`` 必须是标量 GM 指针；已有 buffer（包括 GM buffer）请使用 ``tla.subview``。",
+            "``strides`` 为最终元素步长，默认行主序；不接受地址空间参数。",
             "``strides`` / ``offsets`` 的秩必须与结果形状一致。",
-            "静态 offset 必须位于源 buffer 范围内。",
+            "调用者负责保证视图位于指针指向的分配范围内。",
+        ],
+        "example":
+        "view",
+    },
+    f"{_TLA_PREFIX}.subview": {
+        "constraints": [
+            "``src`` 必须是已有 buffer，保留其 dtype 和地址空间。",
+            "``strides`` 为相对源视图的采样步长，默认全 1；切片保留源 pitch。",
+            "静态越界切片会报错；动态 offset 由调用者保证合法。",
         ],
         "example":
         "view",
     },
     f"{_TLA_PREFIX}.reshape": {
         "constraints": [
-            "只支持连续、行主序、无偏移的 buffer；带步长或偏移的切片请先使用 ``tla.view``。",
+            "只支持连续、行主序的 buffer，保留静态或动态偏移；使用 ``tla.subview`` 表达带步长的切片。",
             "元素总数必须保持不变。",
         ],
         "example": "reshape",

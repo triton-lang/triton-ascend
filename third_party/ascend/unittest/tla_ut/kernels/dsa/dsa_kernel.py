@@ -23,7 +23,6 @@ and the next P store waits for BMM2 to release the previous P tile.
 from dataclasses import dataclass
 
 import torch
-import torch_npu
 import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
@@ -46,6 +45,9 @@ def default_config(heads):
 
 def device_cores(device):
     """Query runtime core limits, rather than assuming a physical core count."""
+    # Register torch.npu only for device execution; IR compilation needs no NPU runtime.
+    import torch_npu
+
     with torch.npu.device(device):
         properties = driver.active.utils.get_device_properties(device)
     cube, vector = properties['num_aicore'], properties['num_vectorcore']
@@ -131,11 +133,11 @@ def _sparse_mla(
         # Pad each gathered row to a full 128-BF16 SIMD load for its RoPE tail.
         key0 = tla.alloc((GR, 640), tl.bfloat16, space='ub')
         key1 = tla.alloc((GR, 640), tl.bfloat16, space='ub')
-        rope0 = tla.view(key0, (GR, 128), offsets=(0, 512))
-        rope1 = tla.view(key1, (GR, 128), offsets=(0, 512))
+        rope0 = tla.subview(key0, offsets=(0, 512), sizes=(GR, 128))
+        rope1 = tla.subview(key1, offsets=(0, 512), sizes=(GR, 128))
         packed0 = tla.alloc((36, GRP * 16), tl.bfloat16, space='ub')
         packed1 = tla.alloc((36, GRP * 16), tl.bfloat16, space='ub')
-        ids_view0 = tla.view(ids, (BN, ), offsets=(0, ))
+        ids_view0 = tla.subview(ids, offsets=(0, ), sizes=(BN, ))
 
         with tla.scope.cube():
             tla.load_gm_to_l1(tla.view(Q + (token * H + head) * 512, (BM, 512)), q_lat)
@@ -171,11 +173,11 @@ def _sparse_mla(
                         row = pair * 2
                         tla.load_gm_to_ub(
                             tla.view(PACKED_KV + safe0 * 576, (1, 576)),
-                            tla.view(keys, (1, 576), offsets=(row, 0)),
+                            tla.subview(keys, offsets=(row, 0), sizes=(1, 576)),
                         )
                         tla.load_gm_to_ub(
                             tla.view(PACKED_KV + safe1 * 576, (1, 576)),
-                            tla.view(keys, (1, 576), offsets=(row + 1, 0)),
+                            tla.subview(keys, offsets=(row + 1, 0), sizes=(1, 576)),
                         )
                     with tla.scope.simd():
                         # Only the first 64 BF16 lanes of the RoPE tail are valid.
@@ -187,26 +189,18 @@ def _sparse_mla(
                             rope = tla.simd.vlds(ropes[local_row, 0])
                             tla.simd.vsstb(rope, packed[32, local_row * 16], GRP * 16, mask=half)
                     tla.copy_ub_to_l1(
-                        tla.view(packed, (32, GR * 16)),
-                        tla.view(
-                            kv_lat_flat,
-                            (32, GR * 16),
-                            offsets=(0, position * 16),
-                        ),
+                        tla.subview(packed, offsets=(0, 0), sizes=(32, GR * 16)),
+                        tla.subview(kv_lat_flat, offsets=(0, position * 16), sizes=(32, GR * 16)),
                     )
                     tla.copy_ub_to_l1(
-                        tla.view(packed, (4, GR * 16), offsets=(32, 0)),
-                        tla.view(
-                            kv_rope_flat,
-                            (4, GR * 16),
-                            offsets=(0, position * 16),
-                        ),
+                        tla.subview(packed, offsets=(32, 0), sizes=(4, GR * 16)),
+                        tla.subview(kv_rope_flat, offsets=(0, position * 16), sizes=(4, GR * 16)),
                     )
             tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, FLAG_KV_READY)
 
         for t in tl.range(TILES):
-            lat_cur = tla.view(kv_lat, (32, BN // 16, 16, 16), offsets=((t % 3) * 32, 0, 0, 0))
-            rope_cur = tla.view(kv_rope, (4, BN // 16, 16, 16), offsets=((t % 2) * 4, 0, 0, 0))
+            lat_cur = tla.subview(kv_lat, offsets=((t % 3) * 32, 0, 0, 0), sizes=(32, BN // 16, 16, 16))
+            rope_cur = tla.subview(kv_rope, offsets=((t % 2) * 4, 0, 0, 0), sizes=(4, BN // 16, 16, 16))
             with tla.scope.cube():
                 # BMM1(t): 512-wide latent part plus the 64-wide RoPE part.
                 tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_KV_READY)
@@ -226,7 +220,7 @@ def _sparse_mla(
                 tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, FLAG_SCORE_TILE)
                 if t >= 1:
                     # BMM2(t-1): P(t-1) x V(t-1), one 512-wide fixpipe.
-                    lat_prev = tla.view(kv_lat, (32, BN // 16, 16, 16), offsets=(((t - 1) % 3) * 32, 0, 0, 0))
+                    lat_prev = tla.subview(kv_lat, offsets=(((t - 1) % 3) * 32, 0, 0, 0), sizes=(32, BN // 16, 16, 16))
                     tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_P_TILE)
                     tla.cube.mmad(p, lat_prev, pv_l0c, clear_accum=True)
                     tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.M, FLAG_P_FREE)
@@ -249,7 +243,7 @@ def _sparse_mla(
                     gather_start = (t + 1) * BN
                     tla.load_gm_to_ub(
                         tla.view(IDS + token * TOPK + gather_start, (BN, )),
-                        tla.view(ids, (BN, ), offsets=(((t + 1) % 2) * BN, )),
+                        tla.subview(ids, offsets=(((t + 1) % 2) * BN, ), sizes=(BN, )),
                     )
                     # Rolling two-stage gather: keep one group of row DMAs in flight while
                     # the previous group is packed into nZ and copied to L1.
@@ -271,12 +265,14 @@ def _sparse_mla(
                                     rope = tla.simd.vlds(ropes[local_row, 0])
                                     tla.simd.vsstb(rope, packed[32, local_row * 16], GRP * 16, mask=half)
                             tla.copy_ub_to_l1(
-                                tla.view(packed, (32, GR * 16)),
-                                tla.view(kv_lat_flat, (32, GR * 16), offsets=(((t + 1) % 3) * 32, position * 16)),
+                                tla.subview(packed, offsets=(0, 0), sizes=(32, GR * 16)),
+                                tla.subview(kv_lat_flat, offsets=(((t + 1) % 3) * 32, position * 16),
+                                            sizes=(32, GR * 16)),
                             )
                             tla.copy_ub_to_l1(
-                                tla.view(packed, (4, GR * 16), offsets=(32, 0)),
-                                tla.view(kv_rope_flat, (4, GR * 16), offsets=(((t + 1) % 2) * 4, position * 16)),
+                                tla.subview(packed, offsets=(32, 0), sizes=(4, GR * 16)),
+                                tla.subview(kv_rope_flat, offsets=(((t + 1) % 2) * 4, position * 16),
+                                            sizes=(4, GR * 16)),
                             )
                         if step < 4:
                             position = sub * (BN // 2) + step * GR
@@ -287,16 +283,16 @@ def _sparse_mla(
                                 row = pair * 2
                                 tla.load_gm_to_ub(
                                     tla.view(PACKED_KV + safe0 * 576, (1, 576)),
-                                    tla.view(keys, (1, 576), offsets=(row, 0)),
+                                    tla.subview(keys, offsets=(row, 0), sizes=(1, 576)),
                                 )
                                 tla.load_gm_to_ub(
                                     tla.view(PACKED_KV + safe1 * 576, (1, 576)),
-                                    tla.view(keys, (1, 576), offsets=(row + 1, 0)),
+                                    tla.subview(keys, offsets=(row + 1, 0), sizes=(1, 576)),
                                 )
                     tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, FLAG_KV_READY)
                 tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_SCORE_TILE)
-                ids_cur = tla.view(ids, (BN, ), offsets=((t % 2) * BN, ))
-                corr_view = tla.view(corrections, (64, ), offsets=((t % 2) * 64, ))
+                ids_cur = tla.subview(ids, offsets=((t % 2) * BN, ), sizes=(BN, ))
+                corr_view = tla.subview(corrections, offsets=((t % 2) * 64, ), sizes=(64, ))
                 with tla.scope.simd():
                     neg = tla.simd.vfull(float('-inf'), tl.float32, 64)
                     scale = tla.simd.vsplat(1.0 / 24.0, tl.float32)
@@ -332,13 +328,13 @@ def _sparse_mla(
                 if t >= 1:
                     tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_P_FREE)
                 tla.copy_ub_to_l1(
-                    tla.view(prob, (BN // 16, VM * 16)),
-                    tla.view(pflat, (BN // 16, VM * 16), offsets=(0, sub * VM * 16)),
+                    tla.subview(prob, offsets=(0, 0), sizes=(BN // 16, VM * 16)),
+                    tla.subview(pflat, offsets=(0, sub * VM * 16), sizes=(BN // 16, VM * 16)),
                 )
                 tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, FLAG_P_TILE)
                 if t >= 1:
                     tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_PV_TILE)
-                    corr_prev = tla.view(corrections, (64, ), offsets=(((t - 1) % 2) * 64, ))
+                    corr_prev = tla.subview(corrections, offsets=(((t - 1) % 2) * 64, ), sizes=(64, ))
                     with tla.scope.simd():
                         # In-place FP32 accumulator: acc = pv + alpha * acc.
                         for row in tl.range(VM):
@@ -353,7 +349,7 @@ def _sparse_mla(
                     tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, FLAG_PV_FREE)
         # Drain: BMM2(TILES-1) and the last accumulator update.
         with tla.scope.cube():
-            lat_last = tla.view(kv_lat, (32, BN // 16, 16, 16), offsets=((TILES - 1) % 3 * 32, 0, 0, 0))
+            lat_last = tla.subview(kv_lat, offsets=((TILES - 1) % 3 * 32, 0, 0, 0), sizes=(32, BN // 16, 16, 16))
             tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_P_TILE)
             tla.cube.mmad(p, lat_last, pv_l0c, clear_accum=True)
             tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_PV_FREE)
@@ -372,7 +368,7 @@ def _sparse_mla(
             tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_PV_TILE)
             with tla.scope.simd():
                 for row in tl.range(VM):
-                    alpha = tla.simd.vlds(tla.view(corrections, (64, ), offsets=(64, ))[row], dist='BRC_B32')
+                    alpha = tla.simd.vlds(tla.subview(corrections, offsets=(64, ), sizes=(64, ))[row], dist='BRC_B32')
                     for col in tl.static_range(8):
                         value = tla.simd.vfma(
                             tla.simd.vlds(pv[row, col * 64]),
@@ -405,8 +401,10 @@ def _sparse_mla(
                         strides=(512, 1),
                     ),
                 )
-            tla.store_ub_to_gm(tla.view(maximum, (VM, )), tla.view(MAX + token * H + head + sub * VM, (VM, )))
-            tla.store_ub_to_gm(tla.view(denominator, (VM, )), tla.view(SUM + token * H + head + sub * VM, (VM, )))
+            tla.store_ub_to_gm(tla.subview(maximum, offsets=(0, ), sizes=(VM, )),
+                               tla.view(MAX + token * H + head + sub * VM, (VM, )))
+            tla.store_ub_to_gm(tla.subview(denominator, offsets=(0, ), sizes=(VM, )),
+                               tla.view(SUM + token * H + head + sub * VM, (VM, )))
             tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, FLAG_JOB_DONE)
             tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_JOB_ACK)
         with tla.scope.cube():

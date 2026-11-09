@@ -54,7 +54,7 @@ def expand_to_mhc_fwd(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, H: tl.conste
         # folding coefficients AND the final memref strides, so the m-row
         # stride (H) would conflict with the n fold coefficient (MHC*H).
         for m in tl.static_range(MHC):
-            o_ub_row = tla.view(o_ub, (1, 1, H_BLK), strides=(1, 1, 1), offsets=(m, 0, 0))
+            o_ub_row = tla.subview(o_ub, offsets=(m, 0, 0), sizes=(1, 1, H_BLK), strides=(1, 1, 1))
             o_row = tla.view(O_ptr, (1, 1, H_BLK), strides=(MHC * H, H, 1), offsets=(n, m, hb * H_BLK))
             tla.store_ub_to_gm(o_ub_row, o_row)
 

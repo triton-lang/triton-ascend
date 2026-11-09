@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-26 23:54+0800\n"
-"PO-Revision-Date: 2026-10-26 23:54+0800\n"
+"POT-Creation-Date: 2026-11-09 10:04+0800\n"
+"PO-Revision-Date: 2026-11-09 10:04+0800\n"
 
-"X-Source-Commit: c0b2191310934f1e5edfa95ddc862fa4913e05e5\n"
+"X-Source-Commit: ddb214209e1297621a07371e034a07fc36b463cf\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -16,8 +16,8 @@
 msgid "架构差异分析"
 msgstr "Architecture Difference Analysis"
 
-msgid "本⽂系统性梳理两⼤平台的核⼼架构、编程规则与优化⼿段差异，拆解昇腾NPU Triton专属开发特性与适配要点，帮助开发者快速建⽴昇腾NPU Triton开发思维，精准完成算⼦迁移、代码适配与性能调优⼯作，规避迁移常⻅问题。"
-msgstr "This document systematically reviews the differences in core architecture, programming rules, and optimization methods between the two major platforms. It breaks down the Ascend NPU Triton-specific development features and key adaptation points. This helps developers quickly establish an Ascend NPU Triton development mindset to accurately complete operator migration, code adaptation, and performance tuning, and to avoid common migration issues."
+msgid "本文系统性梳理两大平台的核心架构、编程规则与优化手段差异，拆解昇腾NPU Triton专属开发特性与适配要点，帮助开发者快速建立昇腾NPU Triton开发思维，精准完成算子迁移、代码适配与性能调优工作，规避迁移常见问题。"
+msgstr "This article systematically outlines the differences in core architecture, programming rules, and optimization methods between the two platforms. It also breaks down the Ascend NPU Triton-specific development features and adaptation points. This helps you quickly establish an Ascend NPU Triton development mindset. You can then accurately complete operator migration, code adaptation, and performance tuning, and avoid common migration issues."
 
 msgid "多核任务并行策略"
 msgstr "Multi-core task parallel strategy"
@@ -52,8 +52,8 @@ msgstr "grid dimensions / size have no hard limits"
 msgid "grid 大小≤AI Core 总数，2D 需匹配拓扑"
 msgstr "The grid size must be less than or equal to the total number of AI Cores, and the 2D grid must match the topology."
 
-msgid "GPU可绑定多个维度轴（三维grid=[n,m,l] 等同于乘积n×m×l个并行线程），每个线程仅对应一次kernel执行，且仅执行一次。 NPU的Vector核、Cube核属于多个物理核，不同代际硬件核数不同，每个核仅执行一次Block,且支持对该Block重复调度执行。"
-msgstr "A GPU can bind multiple dimension axes (a three-dimensional grid=[n,m,l] is equivalent to the product of n×m×l parallel threads). Each thread corresponds to only one kernel execution and executes only once. The Vector cores and Cube cores of the NPU are multiple physical cores. Different hardware generations have different numbers of cores. Each core executes a Block only once and supports repeated scheduling of that Block for execution."
+msgid "GPU可绑定多个维度轴（三维grid=[n,m,l] 等同于乘积n×m×l个并行线程），每个线程仅对应一次kernel执行，且仅执行一次。 NPU的Vector核、Cube核属于多个物理核，不同代际硬件核数不同，每个核仅执行一次Block，且支持对该Block重复调度执行。"
+msgstr "A GPU can bind multiple dimension axes (a three-dimensional grid=[n,m,l] is equivalent to the product n×m×l of parallel threads). Each thread corresponds to only one kernel execution and executes only once. The Vector cores and Cube cores of an NPU are multiple physical cores. Different hardware generations have different numbers of cores. Each core executes a Block only once and supports repeated scheduling and execution of the Block."
 
 msgid ""
 "<br />\n"
@@ -224,8 +224,8 @@ msgstr "Memory limit: In the preceding approach, all input data is loaded into m
 msgid "适用场景：尽管这种方法有助于快速理解和入门 Triton 编程，但对于大规模数据集或高性能要求的应用场景，建议采用更复杂的数据切分策略（如 Tiling）， 以充分利用硬件资源并避免内存溢出问题。通过这种方式，开发者可以快速上手 Triton 编程，同时了解如何定义、调用以及优化 Triton 内核函数。"
 msgstr "Applicable scenarios: Although this method helps you quickly understand and get started with Triton programming, for large-scale datasets or high-performance scenarios, we recommend a more complex data tiling strategy (such as Tiling). This strategy fully utilizes hardware resources and avoids out-of-memory issues. In this way, developers can quickly get started with Triton programming and understand how to define, call, and optimize Triton kernel functions."
 
-msgid "更高效triton写法"
-msgstr "More efficient Triton writing methods"
+msgid "更高效Triton写法"
+msgstr "More efficient Triton writing"
 
 msgid "在昇腾 NPU 上使用 Triton 编写高性能算子时，为了充分利用硬件资源、避免内存溢出并提升执行效率，通常需要采用数据切分（Tiling）策略。 下面是一个经过优化的 Triton 内核实现示例，适用于大规模张量计算。"
 msgstr "When you write high-performance operators using Triton on an Ascend NPU, you typically need to adopt a data tiling strategy. This strategy fully utilizes hardware resources, avoids memory overflow, and improves execution efficiency. The following optimized Triton kernel implementation sample is suitable for large-scale tensor computation."
@@ -355,8 +355,8 @@ msgstr "Defaults to true; true, false. Configurable in autotune."
 msgid "unit_flag"
 msgstr "unit_flag"
 
-msgid "cube搬出的一个优化项"
-msgstr "An optimization item moved out of cube"
+msgid "Cube搬出的一个优化项"
+msgstr "An optimization item moved out by Cube"
 
 msgid "默认None；true , false。autotune中可配置"
 msgstr "Default is None; valid values are true and false. Can be configured in autotune."
@@ -364,14 +364,14 @@ msgstr "Default is None; valid values are true and false. Can be configured in a
 msgid "limit_auto_multi_buffer_only_for_local_buffer"
 msgstr "limit_auto_multi_buffer_only_for_local_buffer"
 
-msgid "CV算子一个优化项，cube搬出的一个优化项"
-msgstr "An optimization item for CV operators, an optimization item for Cube move-out."
+msgid "CV算子一个优化项，Cube搬出的一个优化项"
+msgstr "An optimization item for CV operators, an optimization item offloaded from Cube"
 
 msgid "limit_auto_multi_buffer_of_local_buffer"
 msgstr "limit_auto_multi_buffer_of_local_buffer"
 
-msgid "cube算子开启double buffer具体的scope"
-msgstr "Specific scope for enabling double buffer in cube operators"
+msgid "Cube算子开启double buffer具体的scope"
+msgstr "Specific scope of enabling double buffer for Cube operators"
 
 msgid "默认None；可取值 \"no-limit\" 或 \"no-l0c\"，autotune中可配置"
 msgstr "Defaults to None; possible values are \"no-limit\" or \"no-l0c\", and it is configurable in autotune."
@@ -394,8 +394,8 @@ msgstr "Enable or disable automatic CV balance to balance Cube and Vector execut
 msgid "tile_mix_vector_loop"
 msgstr "tile_mix_vector_loop"
 
-msgid "CV算子的一个优化项，当前vector可以切几份"
-msgstr "One optimization item for CV operators: the vector can currently be split into multiple parts."
+msgid "CV算子的一个优化项，当前Vector可以切几份"
+msgstr "An optimization item for CV operators is how many parts the current Vector can be split into."
 
 msgid "默认None；可取单个值，如 2、4 或 8；autotune中可配置候选值"
 msgstr "The default value is None; it can take a single value, for example, 2, 4, or 8; you can configure candidate values in autotune."
@@ -403,8 +403,8 @@ msgstr "The default value is None; it can take a single value, for example, 2, 4
 msgid "tile_mix_cube_loop"
 msgstr "tile_mix_cube_loop"
 
-msgid "CV算子一个优化项，当前cube可以切几份"
-msgstr "An optimization item for CV operators: how many parts the cube can currently be split into"
+msgid "CV算子一个优化项，当前Cube可以切几份"
+msgstr "An optimization item for CV operators: the Cube can currently be split into multiple parts."
 
 msgid "注：优化编译选项位于 `third_party/ascend/backend/compiler.py`。"
 msgstr "Note: The optimization compilation options are located in `third_party/ascend/backend/compiler.py`."

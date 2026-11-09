@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-26 23:23+0800\n"
-"PO-Revision-Date: 2026-10-26 23:23+0800\n"
+"POT-Creation-Date: 2026-11-09 09:57+0800\n"
+"PO-Revision-Date: 2026-11-09 09:57+0800\n"
 
-"X-Source-Commit: 3126627dadee51a53a36838b41a4da44b86f74a6\n"
+"X-Source-Commit: ce522ef32717bc8083e47125291b4d84464e2153\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -16,8 +16,8 @@
 msgid "环境变量与编译选项"
 msgstr "Environment Variables and Compilation Options"
 
-msgid "本文面向Triton-Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及A2/A3、950支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。"
-msgstr "This document is intended for Triton-Ascend operator developers. It provides a reference point for compilation, running, debugging, and autotuning configurations. It explains the purpose, default values, and A2/A3 and 950 support status of each configuration item. Environment variables set the compilation and running behaviors within a process. Compilation options configure a single kernel. The migration methods for old configurations are centralized in [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility) at the end of this document."
+msgid "本文面向Triton-Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及A2/A3、950支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel；环境变量也可以不经启动脚本，直接通过 `triton.knobs`（含 Ascend 专用的 `triton.knobs.ascend` 分组）在进程内读写。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。"
+msgstr "This article is for Triton-Ascend operator developers. It provides a reference for compilation, running, debugging, and autotune configurations. It explains the purpose, default values, and A2/A3 and 950 support for each configuration item. Environment variables set in-process compilation and running behaviors, and compilation options configure a single kernel. You can also read and write environment variables in-process directly through `triton.knobs` (including the Ascend-specific `triton.knobs.ascend` group) without using a startup script. For the migration methods of old configurations, refer to [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility) at the end of this article."
 
 msgid "环境变量"
 msgstr "Environment Variables"
@@ -340,6 +340,646 @@ msgstr "`TRITON_BUILD_DIR`"
 msgid "查找 `triton-opt`、`triton-mlir-opt` 时，在随包工具之后、`PATH` 之前查找该目录的 `bin/`。"
 msgstr "When searching for `triton-opt` and `triton-mlir-opt`, search the `bin/` directory of this directory after the bundled tools and before `PATH`."
 
+msgid "triton.knobs 接口"
+msgstr "triton.knobs interface"
+
+msgid "`triton.knobs` 是社区 Triton 3.4 引入的类型化配置接口：描述符字段对应一个环境变量，少数条目是 Python 对象（如回调函数），不对应环境变量，只能在进程内设置。如果只需要在启动前配置一次，直接设置环境变量即可；需要在进程内读取当前取值、临时修改或按作用域恢复时，使用 `triton.knobs`。上游分组由 `triton.knobs` 直接提供；Triton-Ascend 在 Triton 3.6 增加了 `triton.knobs.ascend` 分组，导入 Ascend 后端后即可使用。"
+msgstr "`triton.knobs` is a typed configuration interface introduced in community Triton 3.4. Descriptor fields correspond to environment variables. A few entries are Python objects (such as callback functions) that do not correspond to environment variables and can only be set in-process. If you only need to configure once before startup, set the environment variable directly. If you need to read the current value in-process, temporarily modify it, or restore it by scope, use `triton.knobs`. Upstream groups are provided directly by `triton.knobs`. Triton-Ascend adds the `triton.knobs.ascend` group in Triton 3.6, and you can use it after importing the Ascend backend."
+
+msgid "快速上手"
+msgstr "Quick Start"
+
+msgid ""
+"import triton\n"
+"import triton.backends.ascend.runtime  # 触发 Ascend 后端注册，安装 triton.knobs.ascend\n"
+"\n"
+"# 查看一个分组的全部字段和当前取值\n"
+"print(triton.knobs.ascend.knobs)\n"
+"\n"
+"# 读取、修改某个字段\n"
+"print(triton.knobs.compilation.dump_ir)\n"
+"triton.knobs.ascend.device_print = True\n"
+msgstr ""
+"import triton\n"
+"import triton.backends.ascend.runtime  # Triggers Ascend backend registration and installs triton.knobs.ascend\n"
+"\n"
+"# View all fields and current values of a group\n"
+"print(triton.knobs.ascend.knobs)\n"
+"\n"
+"# Read and modify a specific field\n"
+"print(triton.knobs.compilation.dump_ir)\n"
+"triton.knobs.ascend.device_print = True\n"
+
+msgid "赋值对之后的读取生效，并默认同步写回环境变量，详见下文的读写规则。"
+msgstr "The assignment takes effect for subsequent reads and synchronously writes back to the environment variable by default. For details, refer to the read/write rules below."
+
+msgid "读写规则"
+msgstr "Read/Write Rules"
+
+msgid "读取：优先返回进程内值，其次环境变量，最后默认值。"
+msgstr "Reading: Returns the in-process value first, then the environment variable, and finally the default value."
+
+msgid "赋值：写入进程内值，并默认同步写回环境变量。"
+msgstr "Assignment: writes the in-process value and by default synchronously writes back to the environment variable."
+
+msgid "`scope()`：记录进入时的进程内值和环境变量，退出时（包括异常）完整恢复，推荐用于临时切换。"
+msgstr "`scope()`: Records the in-process values and environment variables upon entry and fully restores them upon exit (including exceptions). It is recommended for temporary switching."
+
+msgid "`reset()` / `knobs.env`：只清除进程内覆盖，不撤销已经写入的环境变量。"
+msgstr "`reset()` / `knobs.env`: Clears only in-process overrides and does not revert environment variables that have already been written."
+
+msgid "`copy()`：复制当前进程内覆盖，返回独立的分组对象。"
+msgstr "`copy()`: Copies the in-process overrides and returns an independent group object."
+
+msgid "`propagate_env = False`：赋值只影响当前 Python 进程；子进程和直接读取 `os.getenv` 的工具看不到，确认没有外部读取方时再使用。"
+msgstr "`propagate_env = False`: The assignment only affects the current Python process; child processes and tools that directly read `os.getenv` cannot see it. Use this option only after confirming that there are no external readers."
+
+msgid "例如临时打开 `device_print`，退出 `with` 块后自动恢复："
+msgstr "For example, temporarily enable `device_print`, and it is automatically restored after exiting the `with` block:"
+
+msgid ""
+"with triton.knobs.ascend.scope():\n"
+"    triton.knobs.ascend.device_print = True\n"
+"    kernel[grid](x, y, out)\n"
+"# 退出 with 块后恢复\n"
+msgstr ""
+"with triton.knobs.ascend.scope():\n"
+"    triton.knobs.ascend.device_print = True\n"
+"    kernel[grid](x, y, out)\n"
+"# Restored after exiting the with block\n"
+
+msgid "模块级字段"
+msgstr "Module-level fields"
+
+msgid "`propagate_env` 作用于 `triton.knobs` 整体，不属于任何分组，也没有对应环境变量，只能通过 Python 赋值："
+msgstr "`propagate_env` applies to the entire `triton.knobs`, does not belong to any group, and has no corresponding environment variable. It can only be set through Python assignment:"
+
+msgid ""
+"triton.knobs.propagate_env = False  # 之后的赋值不再写回 os.environ\n"
+msgstr ""
+"triton.knobs.propagate_env = False  # Subsequent assignments no longer write back to os.environ\n"
+
+msgid "字段"
+msgstr "Field"
+
+msgid "取值范围"
+msgstr "Value range"
+
+msgid "说明"
+msgstr "Description"
+
+msgid "`propagate_env`"
+msgstr "`propagate_env`"
+
+msgid "`True`"
+msgstr "`True`"
+
+msgid "`True` / `False`"
+msgstr "`True` / `False`"
+
+msgid "控制 knob 赋值是否同步写回 `os.environ`；为 `False` 时只影响当前进程。"
+msgstr "Controls whether knob assignments are synchronously written back to `os.environ`; when set to `False`, it only affects the current process."
+
+msgid "分组一览"
+msgstr "Group Overview"
+
+msgid "下表按用途列出各配置分组，各分组的字段说明见后续章节；如需仅关注 Ascend 专用开关，请直接查阅 `triton.knobs.ascend` 分组。"
+msgstr "The following table lists the configuration groups by purpose. The subsequent sections describe the fields in each group. If you need to focus only on Ascend-specific switches, refer directly to the `triton.knobs.ascend` group."
+
+msgid "分组"
+msgstr "Group"
+
+msgid "用途"
+msgstr "Usage"
+
+msgid "Ascend 适用"
+msgstr "Applicable to Ascend"
+
+msgid "[`triton.knobs.ascend`](#knobs-ascend)"
+msgstr "[`triton.knobs.ascend`](#knobs-ascend)"
+
+msgid "Ascend 专用的编译、autotune、launcher 开关"
+msgstr "Ascend-specific compilation, autotune, and launcher switches"
+
+msgid "[`triton.knobs.compilation`](#knobs-compilation)"
+msgstr "[`triton.knobs.compilation`](#knobs-compilation)"
+
+msgid "缓存覆盖、IR dump、调试信息等编译行为"
+msgstr "Compilation behaviors such as cache override, IR dump, and debugging information"
+
+msgid "部分字段适用"
+msgstr "Some fields apply"
+
+msgid "[`triton.knobs.runtime`](#knobs-runtime)"
+msgstr "[`triton.knobs.runtime`](#knobs-runtime)"
+
+msgid "解释器模式与运行时开关"
+msgstr "Interpreter Mode and Runtime Switches"
+
+msgid "[`triton.knobs.cache`](#knobs-cache)"
+msgstr "[`triton.knobs.cache`](#knobs-cache)"
+
+msgid "缓存目录与缓存管理器"
+msgstr "Cache Directory and Cache Manager"
+
+msgid "[`triton.knobs.autotuning`](#knobs-autotuning)"
+msgstr "[`triton.knobs.autotuning`](#knobs-autotuning)"
+
+msgid "autotune 结果缓存与打印"
+msgstr "Autotune Result Caching and Printing"
+
+msgid "[`triton.knobs.language`](#knobs-language)"
+msgstr "[`triton.knobs.language`](#knobs-language)"
+
+msgid "语言级默认值（FP32 精度等）"
+msgstr "Language-level default values (such as FP32 precision)"
+
+msgid "[`triton.knobs.build`](#knobs-build)"
+msgstr "[`triton.knobs.build`](#knobs-build)"
+
+msgid "CPU launcher 扩展的编译工具与自定义构建入口"
+msgstr "Compilation tools and custom build entry for the CPU launcher extension"
+
+msgid "仅 `cc`、`impl` 适用"
+msgstr "Only `cc` and `impl` are applicable."
+
+msgid "[`triton.knobs.redis`](#knobs-redis)"
+msgstr "[`triton.knobs.redis`](#knobs-redis)"
+
+msgid "远程缓存的 Redis 存储后端"
+msgstr "Redis storage backend for remote cache"
+
+msgid "`triton.knobs.nvidia` / `.amd` / `.proton`"
+msgstr "`triton.knobs.nvidia` / `.amd` / `.proton`"
+
+msgid "其他后端专用"
+msgstr "Specific to other backends"
+
+msgid "不使用"
+msgstr "Do not use"
+
+msgid "<a id=\"knobs-ascend\"></a>"
+msgstr "<a id=\"knobs-ascend\"></a>"
+
+msgid "<a id=\"knobs-ascend\">"
+msgstr "<a id=\"knobs-ascend\">"
+
+msgid "</a>"
+msgstr "</a>"
+
+msgid "**`triton.knobs.ascend`**"
+msgstr "**`triton.knobs.ascend`**"
+
+msgid "`enable_sanitizer`"
+msgstr "`enable_sanitizer`"
+
+msgid "`False`"
+msgstr "`False`"
+
+msgid "向 Ascend NPU 编译器传入 sanitizer 开关。"
+msgstr "Pass the sanitizer flag to the Ascend NPU compiler."
+
+msgid "`print_ub_bits`"
+msgstr "`print_ub_bits`"
+
+msgid "请求编译器打印 UB 占用位数。"
+msgstr "Requests the compiler to print the number of UB bits used."
+
+msgid "`memory_display`"
+msgstr "`memory_display`"
+
+msgid "`npu_compiler_path`"
+msgstr "`npu_compiler_path`"
+
+msgid "`None`"
+msgstr "`None`"
+
+msgid "目录路径 / `None`"
+msgstr "Directory path / `None`"
+
+msgid "仅当随包工具与 `PATH` 查找均失败时，作为 Ascend 编译器工具目录的后备路径。"
+msgstr "Serves as the fallback path for the Ascend compiler tool directory only when both the bundled tool and `PATH` lookup fail."
+
+msgid "`enable_ubtuner`"
+msgstr "`enable_ubtuner`"
+
+msgid "`\"\"`"
+msgstr "`\"\"`"
+
+msgid "`\"\"`（关闭）、`\"compile\"`、`\"run\"`"
+msgstr "`\"\"` (disabled), `\"compile\"`, `\"run\"`"
+
+msgid "选择 UB 调优模式。"
+msgstr "Select the UB tuning mode."
+
+msgid "`autotune_parallel_compile`"
+msgstr "`autotune_parallel_compile`"
+
+msgid "控制 Ascend autotune 的并行编译。"
+msgstr "Controls the parallel compilation of Ascend autotune."
+
+msgid "`bench_method`"
+msgstr "`bench_method`"
+
+msgid "`\"default\"`"
+msgstr "`\"default\"`"
+
+msgid "`\"default\"`、`\"npu\"`"
+msgstr "`\"default\"`、`\"npu\"`"
+
+msgid "`\"npu\"` 时使用 Ascend 的 `do_bench_npu`，`\"default\"` 使用通用测量方法。"
+msgstr "When the value is `\"npu\"`, Ascend's `do_bench_npu` is used; when the value is `\"default\"`, the general measurement method is used."
+
+msgid "`compile_only`"
+msgstr "`compile_only`"
+
+msgid "不启动 kernel；编译及 launcher 扩展加载仍会执行。"
+msgstr "The kernel is not launched; compilation and launcher extension loading are still executed."
+
+msgid "`enable_taskqueue`"
+msgstr "`enable_taskqueue`"
+
+msgid "控制 Ascend launcher 的 task queue。"
+msgstr "Controls the Ascend launcher task queue."
+
+msgid "`device_print`"
+msgstr "`device_print`"
+
+msgid "启用 `tl.device_print` 的设备端 GM 打印缓冲区。"
+msgstr "Enables the device-side GM print buffer for `tl.device_print`."
+
+msgid "`grid_warn_print`"
+msgstr "`grid_warn_print`"
+
+msgid "打印 Ascend launcher 的 grid 大小警告。"
+msgstr "Prints the grid size warning for the Ascend launcher."
+
+msgid "<a id=\"knobs-compilation\"></a>"
+msgstr "<a id=\"knobs-compilation\"></a>"
+
+msgid "<a id=\"knobs-compilation\">"
+msgstr "<a id=\"knobs-compilation\">"
+
+msgid "**`triton.knobs.compilation`**"
+msgstr "**`triton.knobs.compilation`**"
+
+msgid "`override`"
+msgstr "`override`"
+
+msgid "从覆盖目录读取与编译阶段同名的外部 IR/二进制。"
+msgstr "Reads external IR/binary with the same name as the compilation stage from the override directory."
+
+msgid "`dump_ir`"
+msgstr "`dump_ir`"
+
+msgid "`dump_ir_extract_di_local_variables`"
+msgstr "`dump_ir_extract_di_local_variables`"
+
+msgid "`store_binary_only`"
+msgstr "`store_binary_only`"
+
+msgid "`TRITON_STORE_BINARY_ONLY`"
+msgstr "`TRITON_STORE_BINARY_ONLY`"
+
+msgid "只写入 `cubin`/`hsaco`/`json` 产物，不写中间 IR；Ascend 二进制扩展名为 `npubin`，不在该列表内。"
+msgstr "Only `cubin`/`hsaco`/`json` artifacts are written, and the intermediate IR is not written; the Ascend binary extension is `npubin`, which is not in this list."
+
+msgid "`always_compile`"
+msgstr "`always_compile`"
+
+msgid "`use_ir_loc`"
+msgstr "`use_ir_loc`"
+
+msgid "`None`、阶段名（如 `\"ttir\"`）、源文件位置快照"
+msgstr "`None`, stage name (for example, `\"ttir\"`), source file location snapshot"
+
+msgid "以指定阶段的 IR 文件行号重建位置信息。"
+msgstr "Rebuild the location information using the IR file line numbers of the specified stage."
+
+msgid "`enable_asan`"
+msgstr "`enable_asan`"
+
+msgid "`TRITON_ENABLE_ASAN`"
+msgstr "`TRITON_ENABLE_ASAN`"
+
+msgid "Ascend 不支持。"
+msgstr "Ascend does not support this."
+
+msgid "`disable_line_info`"
+msgstr "`disable_line_info`"
+
+msgid "禁止向毕昇编译器请求行号信息。Ascend 后端直接读取该环境变量，未设置时按 `True` 处理。"
+msgstr "Disables requesting line number information from the BiSheng compiler. The Ascend backend directly reads this environment variable; if it is not set, it is treated as `True`."
+
+msgid "`front_end_debugging`"
+msgstr "`front_end_debugging`"
+
+msgid "前端错误发生时保留原始 Python 异常堆栈。"
+msgstr "Preserves the original Python exception stack trace when a frontend error occurs."
+
+msgid "`allow_non_constexpr_globals`"
+msgstr "`allow_non_constexpr_globals`"
+
+msgid "允许 JIT 前端引用非 `constexpr` 全局变量。"
+msgstr "Allows the JIT frontend to reference non-`constexpr` global variables."
+
+msgid "`instrumentation_mode`"
+msgstr "`instrumentation_mode`"
+
+msgid "`TRITON_INSTRUMENTATION_MODE`"
+msgstr "`TRITON_INSTRUMENTATION_MODE`"
+
+msgid "`\"\"`（关闭）、`\"consan\"`"
+msgstr "`\"\"` (disabled), `\"consan\"`"
+
+msgid "`listener`"
+msgstr "`listener`"
+
+msgid "`CompilationListener` / `None`"
+msgstr "`CompilationListener` / `None`"
+
+msgid "编译完成（含缓存命中）后调用，接收 `src`、`metadata`、`metadata_group`、`times`、`cache_hit`，可用于统计编译耗时。"
+msgstr "It is called after compilation is complete (including cache hits), receives `src`, `metadata`, `metadata_group`, `times`, and `cache_hit`, and can be used to collect compilation duration statistics."
+
+msgid "<a id=\"knobs-runtime\"></a>"
+msgstr "<a id=\"knobs-runtime\"></a>"
+
+msgid "<a id=\"knobs-runtime\">"
+msgstr "<a id=\"knobs-runtime\">"
+
+msgid "**`triton.knobs.runtime`**"
+msgstr "**`triton.knobs.runtime`**"
+
+msgid "`interpret`"
+msgstr "`interpret`"
+
+msgid "在 CPU 解释器中执行其支持的 Triton 操作。"
+msgstr "This option executes supported Triton operations in the CPU interpreter."
+
+msgid "`override_arch`"
+msgstr "`override_arch`"
+
+msgid "`TRITON_OVERRIDE_ARCH`"
+msgstr "`TRITON_OVERRIDE_ARCH`"
+
+msgid "架构字符串 / `None`"
+msgstr "Architecture string / `None`"
+
+msgid "`debug`"
+msgstr "`debug`"
+
+msgid "开启 JIT 调试及设备断言；环境变量在模块导入时读取一次。"
+msgstr "Enables JIT debugging and device assertions; the environment variable is read once when the module is imported."
+
+msgid "`launch_enter_hook`"
+msgstr "`launch_enter_hook`"
+
+msgid "`HookChain()`"
+msgstr "`HookChain()`"
+
+msgid "`HookChain[LaunchHook]`"
+msgstr "`HookChain[LaunchHook]`"
+
+msgid "kernel 启动前调用，参数为 launch metadata；用 `.add(func)` / `.remove(func)` 增删回调。"
+msgstr "It is called before the kernel launch with launch metadata as the parameter; use `.add(func)` / `.remove(func)` to add or remove callbacks."
+
+msgid "`launch_exit_hook`"
+msgstr "`launch_exit_hook`"
+
+msgid "`HookChain(reversed=True)`"
+msgstr "`HookChain(reversed=True)`"
+
+msgid "kernel 启动后调用；链按注册顺序的逆序执行。"
+msgstr "This is called after the kernel is launched; the chain executes in the reverse order of registration."
+
+msgid "`kernel_load_start_hook`"
+msgstr "`kernel_load_start_hook`"
+
+msgid "`HookChain[InitHandleHook]`"
+msgstr "`HookChain[InitHandleHook]`"
+
+msgid "kernel 二进制/模块加载前调用，此时 `module`、`function` 可能为 `None`。"
+msgstr "This is called before the kernel binary or module is loaded, at which point `module` and `function` may be `None`."
+
+msgid "`kernel_load_end_hook`"
+msgstr "`kernel_load_end_hook`"
+
+msgid "加载完成后调用；链按注册顺序的逆序执行。"
+msgstr "Called after loading is complete; the chain executes in the reverse order of registration."
+
+msgid "`jit_cache_hook`"
+msgstr "`jit_cache_hook`"
+
+msgid "`JITHook` / `None`"
+msgstr "`JITHook` / `None`"
+
+msgid "每次 JIT 编译前调用，可检查 key、签名和编译选项；返回真值时跳过本次编译。"
+msgstr "It is called before each JIT compilation and can check the key, signature, and compilation options. When it returns a truthy value, the current compilation is skipped."
+
+msgid "`jit_post_compile_hook`"
+msgstr "`jit_post_compile_hook`"
+
+msgid "JIT 编译调用结束后调用；同一 kernel 的 `jit_cache_hook` 总在它之前。"
+msgstr "Called after the JIT compilation call completes; the `jit_cache_hook` of the same kernel is always called before it."
+
+msgid "`add_stages_inspection_hook`"
+msgstr "`add_stages_inspection_hook`"
+
+msgid "`PipelineStagesHook` / `None`"
+msgstr "`PipelineStagesHook` / `None`"
+
+msgid "<a id=\"knobs-cache\"></a>"
+msgstr "<a id=\"knobs-cache\"></a>"
+
+msgid "<a id=\"knobs-cache\">"
+msgstr "<a id=\"knobs-cache\">"
+
+msgid "**`triton.knobs.cache`**"
+msgstr "**`triton.knobs.cache`**"
+
+msgid "`home_dir`"
+msgstr "`home_dir`"
+
+msgid "目录路径"
+msgstr "Directory path"
+
+msgid "Triton 缓存、dump 和 override 目录的根位置。"
+msgstr "The root location of the Triton cache, dump, and override directories."
+
+msgid "`dump_dir`"
+msgstr "`dump_dir`"
+
+msgid "IR dump 的输出目录。"
+msgstr "The output directory for the IR dump."
+
+msgid "`override_dir`"
+msgstr "`override_dir`"
+
+msgid "覆盖文件目录。"
+msgstr "Overwrite the file directory."
+
+msgid "`dir`"
+msgstr "`dir`"
+
+msgid "编译缓存目录。"
+msgstr "Specifies the compilation cache directory."
+
+msgid "`manager_class`"
+msgstr "`manager_class`"
+
+msgid "`MODULE:CLASS` / `None`"
+msgstr "`MODULE:CLASS` / `None`"
+
+msgid "编译缓存管理器；远程缓存设为 `triton.runtime.cache:RemoteCacheManager`。"
+msgstr "Compilation cache manager; set the remote cache to `triton.runtime.cache:RemoteCacheManager`."
+
+msgid "`remote_manager_class`"
+msgstr "`remote_manager_class`"
+
+msgid "远程缓存的存储后端，需配合远程缓存管理器使用。"
+msgstr "The storage backend for the remote cache must be used together with the remote cache manager."
+
+msgid "<a id=\"knobs-autotuning\"></a>"
+msgstr "<a id=\"knobs-autotuning\"></a>"
+
+msgid "<a id=\"knobs-autotuning\">"
+msgstr "<a id=\"knobs-autotuning\">"
+
+msgid "**`triton.knobs.autotuning`**"
+msgstr "**`triton.knobs.autotuning`**"
+
+msgid "`cache`"
+msgstr "`cache`"
+
+msgid "缓存 autotune 的选择结果。"
+msgstr "Caches the autotune selection results."
+
+msgid "`print`"
+msgstr "`print`"
+
+msgid "打印 autotune 结果及常规路径的编译命令。"
+msgstr "Prints the autotune results and the compilation commands for the normal path."
+
+msgid "<a id=\"knobs-language\"></a>"
+msgstr "<a id=\"knobs-language\"></a>"
+
+msgid "<a id=\"knobs-language\">"
+msgstr "<a id=\"knobs-language\">"
+
+msgid "**`triton.knobs.language`**"
+msgstr "**`triton.knobs.language`**"
+
+msgid "`fp32_default`"
+msgstr "`fp32_default`"
+
+msgid "`None`、`\"ieee\"`、`\"hf32\"`、`\"tf32\"`（映射为 `hf32`）"
+msgstr "`None`, `\"ieee\"`, `\"hf32\"`, `\"tf32\"` (mapped to `hf32`)"
+
+msgid "`tl.dot` 的默认 FP32 输入精度；`None` 时使用后端默认值 `ieee`。"
+msgstr "The default FP32 input precision of `tl.dot`; when `None`, the backend default value `ieee` is used."
+
+msgid "`default_fp_fusion`"
+msgstr "`default_fp_fusion`"
+
+msgid "`TRITON_DEFAULT_FP_FUSION`"
+msgstr "`TRITON_DEFAULT_FP_FUSION`"
+
+msgid "默认是否允许浮点运算融合。"
+msgstr "Indicates whether floating-point operation fusion is allowed by default."
+
+msgid "<a id=\"knobs-build\"></a>"
+msgstr "<a id=\"knobs-build\"></a>"
+
+msgid "<a id=\"knobs-build\">"
+msgstr "<a id=\"knobs-build\">"
+
+msgid "**`triton.knobs.build`**"
+msgstr "**`triton.knobs.build`**"
+
+msgid "`cc`"
+msgstr "`cc`"
+
+msgid "编译器路径或名称 / `None`"
+msgstr "Compiler path or name / `None`"
+
+msgid "CPU launcher 扩展的 C/C++ 编译器。"
+msgstr "C/C++ compiler for the CPU launcher extension."
+
+msgid "`cudacrt_path`"
+msgstr "`cudacrt_path`"
+
+msgid "`TRITON_CUDACRT_PATH`"
+msgstr "`TRITON_CUDACRT_PATH`"
+
+msgid "`cudart_path`"
+msgstr "`cudart_path`"
+
+msgid "`TRITON_CUDART_PATH`"
+msgstr "`TRITON_CUDART_PATH`"
+
+msgid "`impl`"
+msgstr "`impl`"
+
+msgid "`BuildImpl` / `None`"
+msgstr "`BuildImpl` / `None`"
+
+msgid "替代默认的本地编译流程，用于生成 CPU launcher 扩展；签名为 `(name, src, srcdir, library_dirs, include_dirs, libraries)`。"
+msgstr "Replaces the default local compilation process for generating the CPU launcher extension; the signature is `(name, src, srcdir, library_dirs, include_dirs, libraries)`."
+
+msgid "<a id=\"knobs-redis\"></a>"
+msgstr "<a id=\"knobs-redis\"></a>"
+
+msgid "<a id=\"knobs-redis\">"
+msgstr "<a id=\"knobs-redis\">"
+
+msgid "**`triton.knobs.redis`**"
+msgstr "**`triton.knobs.redis`**"
+
+msgid "`key_format`"
+msgstr "`key_format`"
+
+msgid "`TRITON_REDIS_KEY_FORMAT`"
+msgstr "`TRITON_REDIS_KEY_FORMAT`"
+
+msgid "`\"triton:{key}:{filename}\"`"
+msgstr "`\"triton:{key}:{filename}\"`"
+
+msgid "含 `{key}`、`{filename}` 的格式串"
+msgstr "Format string containing `{key}` and `{filename}`"
+
+msgid "远程缓存键格式。"
+msgstr "Remote cache key format."
+
+msgid "`host`"
+msgstr "`host`"
+
+msgid "`TRITON_REDIS_HOST`"
+msgstr "`TRITON_REDIS_HOST`"
+
+msgid "`\"localhost\"`"
+msgstr "`\"localhost\"`"
+
+msgid "主机名或 IP"
+msgstr "Hostname or IP"
+
+msgid "Redis 地址。"
+msgstr "Redis address."
+
+msgid "`port`"
+msgstr "`port`"
+
+msgid "`TRITON_REDIS_PORT`"
+msgstr "`TRITON_REDIS_PORT`"
+
+msgid "`6379`"
+msgstr "`6379`"
+
+msgid "整数，有效端口 `1`–`65535`"
+msgstr "Integer, valid port `1`–`65535`"
+
+msgid "Redis 端口。"
+msgstr "Redis port."
+
 msgid "编译选项"
 msgstr "Compilation Options"
 
@@ -380,9 +1020,6 @@ msgstr "<a id=\"compiler-options-reference\"></a>"
 msgid "<a id=\"compiler-options-reference\">"
 msgstr "<a id=\"compiler-options-reference\">"
 
-msgid "</a>"
-msgstr "</a>"
-
 msgid "编译选项参考表"
 msgstr "Compilation Option Reference Table"
 
@@ -403,9 +1040,6 @@ msgstr "Default value/Optional value"
 
 msgid "Triton通用"
 msgstr "Triton General"
-
-msgid "`debug`"
-msgstr "`debug`"
 
 msgid "开启设备断言与编译调试；JIT下与环境变量 `TRITON_DEBUG` 任一开启即生效。"
 msgstr "Enables device assertion and compilation debugging. This takes effect when either JIT or the environment variable `TRITON_DEBUG` is enabled."

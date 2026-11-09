@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-26 23:59+0800\n"
-"PO-Revision-Date: 2026-10-26 23:59+0800\n"
+"POT-Creation-Date: 2026-11-09 10:05+0800\n"
+"PO-Revision-Date: 2026-11-09 10:05+0800\n"
 
-"X-Source-Commit: 8360549dcce5e7c437e03e4994fcb11eb4affa85\n"
+"X-Source-Commit: 3e74a53a469fc3402083aeeef3de6f90297cd858\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -94,8 +94,8 @@ msgstr "Check single-core data movement"
 msgid "完成设备替换后，需要继续检查单个program内的数据搬运方式："
 msgstr "After completing device replacement, you need to continue checking the data movement method within a single program:"
 
-msgid "Vector算子场景下要求32字节访存对齐，cube-vector融合算子场景下要求512字节对齐。"
-msgstr "Vector operator scenarios require 32-byte memory access alignment, and cube-vector fusion operator scenarios require 512-byte alignment."
+msgid "Vector算子场景下要求32Byte访存对齐，cube-vector融合算子场景下要求512字节对齐。"
+msgstr "Vector operator scenarios require 32-byte memory access alignment, while cube-vector fusion operator scenarios require 512-byte alignment."
 
 msgid "保留tail mask，确认边界元素不会越界访问。"
 msgstr "Keep the tail mask to ensure that boundary elements are not accessed out of bounds."
@@ -312,8 +312,8 @@ msgstr "Resolving the coreDim Over-limit Issue"
 msgid "问题分析： NPU的coreDim参数不能超过UINT16_MAX（65535）。当处理大规模数据时，简单的grid划分可能导致该限制被突破。"
 msgstr "Problem analysis: The coreDim parameter of the NPU cannot exceed UINT16_MAX (65535). When processing large-scale data, a simple grid partition may exceed this limit."
 
-msgid "案例：zeros_like函数优化 数据规模：N = 1073741824，原始BLOCK_SIZE = 2048，计算得到的coreDim = 524288 > 65535（超限）"
-msgstr "Case: zeros_like function optimization Data size: N = 1073741824, original BLOCK_SIZE = 2048, calculated coreDim = 524288 > 65535 (exceeds the limit)"
+msgid "案例：zeros_like函数优化 数据规模：N = 1073741824，原始BLOCK_SIZE = 2048，计算得到的coreDim = 524288 > 65535（超限）。"
+msgstr "Case: zeros_like function optimization. Data size: N = 1073741824, original BLOCK_SIZE = 2048, calculated coreDim = 524288 > 65535 (exceeds the limit)."
 
 msgid "解决思路1： 后端会对通过IR安全分析的kernel自动启用block mapping，无需再设置环境变量。需要确认各逻辑program之间不存在顺序依赖；如果编译器提示自动block mapping已跳过，请采用解决思路2中的显式tiling。"
 msgstr "Solution 1: The backend automatically enables block mapping for kernels that pass IR safety analysis, and you do not need to set environment variables. You need to confirm that there is no sequential dependency between logical programs; if the compiler indicates that automatic block mapping has been skipped, use the explicit tiling in Solution 2."
@@ -483,8 +483,8 @@ msgstr ""
 "    zeros_kernel[grid_fn](out, N, BLOCK_SIZE=BLOCK_SIZE)\n"
 "    return out\n"
 
-msgid "动态计算适合的BLOCK_SIZE以避免coreDim超限"
-msgstr "Dynamically calculate a suitable BLOCK_SIZE to avoid coreDim exceeding the limit"
+msgid "动态计算合适的BLOCK_SIZE以避免coreDim超限"
+msgstr "Dynamically calculate an appropriate BLOCK_SIZE to avoid coreDim exceeding the limit."
 
 msgid ""
 "optimal_block_size = 32768  # 根据计算得出的优化值\n"
@@ -507,8 +507,8 @@ msgstr "Handling compound issues: coreDim + UB overflow"
 msgid "问题分析： 在某些情况下，解决了coreDim问题后可能引发新的UB溢出问题。这通常发生在增大BLOCK_SIZE后，单个线程块需要处理的数据量超出了NPU的UB缓存容量。"
 msgstr "Problem analysis: In some cases, resolving the coreDim issue may trigger a new UB overflow issue. This usually occurs after increasing BLOCK_SIZE, when the amount of data a single thread block needs to process exceeds the NPU UB cache capacity."
 
-msgid "案例： 数据规模：N = 1073741824，原始BLOCK_SIZE = 4096，计算得到的coreDim = 262144 > 65535（超限），调整为BLOCK_SIZE = 32768后，coreDim = 32768（合规），但出现UB溢出"
-msgstr "Example: Data size: N = 1073741824, original BLOCK_SIZE = 4096, the calculated coreDim = 262144 > 65535 (exceeds the limit). After adjusting BLOCK_SIZE to 32768, coreDim = 32768 (compliant), but a UB overflow occurs."
+msgid "案例： 数据规模：N = 1073741824，原始BLOCK_SIZE = 4096，计算得到的coreDim = 262144 > 65535（超限），调整为BLOCK_SIZE = 32768后，coreDim = 32768（合规），但出现UB溢出。"
+msgstr "Case: Data size: N = 1073741824, original BLOCK_SIZE = 4096, calculated coreDim = 262144 > 65535 (exceeds the limit). After you adjust BLOCK_SIZE to 32768, coreDim = 32768 (compliant), but a UB overflow occurs."
 
 msgid "解决思路： 引入BLOCK_SIZE_SUB参数，将大块进一步细分，在保持合理coreDim的同时控制内存使用。 优化前代码："
 msgstr "Solution: Introduce the BLOCK_SIZE_SUB parameter to further subdivide large blocks, controlling memory usage while maintaining a reasonable coreDim. Code before optimization:"
@@ -675,25 +675,25 @@ msgstr ""
 msgid "为什么会出现UBSIZE超出内存的错误"
 msgstr "Why does the UBSIZE out-of-memory error occur?"
 
-msgid "切分不合理，存在过多的非对齐访存或者运算，例如对(64, 32)二维数据搬运，对应stride(128, 32)，如果是对齐数据的访存，对应的stride(32, 1)。对于非对齐访问内容，在最内轴新增一个大小为1的轴，变为(64, 32, 4)，由于硬件要求vector算子场景ub内存32Byte对齐，假设type=float16，对应stride应该为(12832, 128, 1)"
-msgstr "Improper tiling results in excessive unaligned memory accesses or operations. For example, for (64, 32) two-dimensional data movement, the corresponding stride is (128, 32). If the data memory access is aligned, the corresponding stride is (32, 1). For unaligned access content, add an axis of size 1 on the innermost axis, making it (64, 32, 4). Because the hardware requires 32-byte alignment for UB memory in vector operator scenarios, assuming type=float16, the corresponding stride should be (12832, 128, 1)."
+msgid "切分不合理，存在过多的非对齐访存或者运算，例如对(64, 32)二维数据搬运，对应stride(128, 32)，如果是对齐数据的访存，对应的stride(32, 1)。对于非对齐访问的数据，在最内轴新增一个大小为1的轴，变为(64, 32, 4)，由于硬件要求Vector算子场景ub内存32Byte对齐，假设type=float16，对应stride应该为(12832, 128, 1)。"
+msgstr "Improper tiling results in excessive unaligned memory accesses or operations. For example, for moving 2D data of shape (64, 32), the corresponding stride is (128, 32). If the data access is aligned, the corresponding stride is (32, 1). For data with unaligned access, add an axis of size 1 to the innermost axis, changing the shape to (64, 32, 4). Because the hardware requires 32-byte alignment for UB memory in Vector operator scenarios, assuming type=float16, the corresponding stride should be (12832, 128, 1)."
 
 msgid "离散访存代码逐行对比观察scalar低效映射"
 msgstr "Line-by-line comparison of discrete memory access code to observe inefficient scalar mapping"
 
-msgid "设置环境变量TRITON_DEBUG=1，保存~/.triton/cache/xxx.ttadapter，然后执行"
-msgstr "Set the environment variable TRITON_DEBUG=1, save ~/.triton/cache/xxx.ttadapter, and then run"
+msgid "设置环境变量TRITON_DEBUG=1，保存~/.triton/cache/xxx.ttadapter，然后执行："
+msgstr "Set the environment variable TRITON_DEBUG=1, save ~/.triton/cache/xxx.ttadapter, and then execute:"
 
 msgid ""
 "bishengir-compile xxx.ttadapter --target=Ascend910B3 --enable-auto-multi-buffer=True --enable-hfusion-compile=true --enable-hivm-compile=true --enable-triton-kernel-compile=true --hivm-compile-args=bishengir-print-ir-after=hivm-inject-sync\n"
 msgstr ""
 "bishengir-compile xxx.ttadapter --target=Ascend910B3 --enable-auto-multi-buffer=True --enable-hfusion-compile=true --enable-hivm-compile=true --enable-triton-kernel-compile=true --hivm-compile-args=bishengir-print-ir-after=hivm-inject-sync\n"
 
-msgid "会有输出IR，对比Triton算子逻辑与IR内部的操作，观察是否有未映射成指令的操作。 观察HIVM IR阶段是否存在纯scalar搬运或者计算，没有映射为SIMD指令，这会成为性能瓶颈。"
-msgstr "The IR is output. Compare the Triton operator logic with the operations in the IR. Check if any operations are not mapped to instructions. Check the HIVM IR stage for any pure scalar data movement or computation that is not mapped to SIMD instructions. This becomes a performance bottleneck."
+msgid "会输出IR，对比Triton算子逻辑与IR内部的操作，观察是否有未映射成指令的操作。 观察HIVM IR阶段是否存在纯scalar搬运或者计算，没有映射为SIMD指令，这会成为性能瓶颈。"
+msgstr "This outputs the IR. Compare the Triton operator logic with the operations in the IR to check whether any operations are not mapped to instructions. Check whether there is pure scalar data movement or computation in the HIVM IR stage that is not mapped to SIMD instructions. This will become a performance bottleneck."
 
-msgid "问题：离散访存 && scalar低效映射 b[1024, 32] = a[1024, 32]  Triton原先写法利用thread的方式对[1024,32]中的最低维度32绑定线程块，再对1024切16，分为[64，16，32]，再对64绑定线程块"
-msgstr "Problem: Scattered memory access && inefficient scalar mapping. b[1024, 32] = a[1024, 32]  The original Triton approach uses a thread-based method to bind thread blocks to the lowest dimension 32 in [1024, 32], then divides 1024 by 16 into [64, 16, 32], and then binds thread blocks to 64."
+msgid "问题：离散访存 && scalar低效映射 b[1024, 32] = a[1024, 32] Triton原先写法利用thread的方式将线程块绑定到[1024, 32]中的最低维度32，再对1024切16，分为[64, 16, 32]，再对64绑定线程块。"
+msgstr "Problem: Discrete memory access && inefficient scalar mapping b[1024, 32] = a[1024, 32] The original Triton implementation uses a thread-based approach to bind the thread block to the lowest dimension 32 in [1024, 32], then splits 1024 by 16 into [64, 16, 32], and binds the thread block to 64."
 
 msgid ""
 "chunk_fwd_kernel_o[(NT, B * H)](\n"
@@ -723,8 +723,8 @@ msgstr ""
 msgid "优化思路"
 msgstr "Optimization Approach"
 
-msgid "调整block_ptr的shape/stride: 把 (1024, 32) 看成二维矩阵，最低维度32是连续的，所以stride应该是 (32, 1)，而不是 (32,)，这样每个线程块能访问连续的32元素。让线程块绑定到行维度（1024），每个线程处理一整行的32元素。这样访存就是连续的，亲和性好。"
-msgstr "Adjust the shape/stride of block_ptr: Treat (1024, 32) as a two-dimensional matrix. The lowest dimension 32 is contiguous, so the stride should be (32, 1) instead of (32,). This way, each thread block can access contiguous 32 elements. Bind the thread block to the row dimension (1024), and each thread processes an entire row of 32 elements. This makes memory access contiguous and improves locality."
+msgid "调整block_ptr的shape/stride： 把 (1024, 32) 看成二维矩阵，最低维度32是连续的，所以stride应该是 (32, 1)，而不是 (32,)，这样每个线程块能访问连续的32个元素。让线程块绑定到行维度（1024），每个线程处理一整行的32个元素。这样访存就是连续的，亲和性好。"
+msgstr "Adjust the shape/stride of block_ptr: Treat (1024, 32) as a two-dimensional matrix. The lowest dimension 32 is contiguous, so the stride should be (32, 1) instead of (32,). This way, each thread block can access 32 contiguous elements. Bind the thread block to the row dimension (1024), and each thread processes an entire row of 32 elements. This makes memory access contiguous with good affinity."
 
 msgid "比如："
 msgstr "For example:"

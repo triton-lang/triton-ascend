@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-26 23:25+0800\n"
-"PO-Revision-Date: 2026-10-26 23:25+0800\n"
+"POT-Creation-Date: 2026-11-09 09:58+0800\n"
+"PO-Revision-Date: 2026-11-09 09:58+0800\n"
 
-"X-Source-Commit: 16f3413b6f6d76a6c47d95ec232b07c845a9c61f\n"
+"X-Source-Commit: 2bf21fccd3c0a678ad76573b5caa5e529749c6de\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -13,7 +13,7 @@
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "融合 Softmax （Fused Softmax）"
+msgid "融合 Softmax（Fused Softmax）"
 msgstr "Fused Softmax"
 
 msgid "在本节中，我们将使用 Triton 编写一个融合的 softmax 操作的程序。 在此过程中，你会学习到："
@@ -22,7 +22,7 @@ msgstr "In this section, we use Triton to write a program for a fused softmax op
 msgid "内核融合对于带宽受限操作的优势。"
 msgstr "The advantages of kernel fusion for bandwidth-bound operations."
 
-msgid "Triton 中缩减操作。"
+msgid "Triton 中的缩减操作。"
 msgstr "Reduction operations in Triton."
 
 msgid "使用原生 PyTorch 对 X 逐行进行 Softmax 计算"
@@ -210,8 +210,8 @@ msgstr ""
 msgid "单元测试"
 msgstr "Unit Testing"
 
-msgid "需要在一个具有不规则行和列数的矩阵上测试处理好的内核，此举可以验证Padding机制是否起作用"
-msgstr "You need to test the prepared kernel on a matrix with irregular numbers of rows and columns. This verifies whether the padding mechanism works."
+msgid "需要在一个具有不规则行和列数的矩阵上测试处理好的内核，此举可以验证Padding机制是否起作用。"
+msgstr "You need to test the processed kernel on a matrix with irregular numbers of rows and columns. This verifies whether the Padding mechanism works."
 
 msgid ""
 "torch.manual_seed(0)\n"

@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-27 00:20+0800\n"
-"PO-Revision-Date: 2026-10-27 00:20+0800\n"
+"POT-Creation-Date: 2026-11-09 10:07+0800\n"
+"PO-Revision-Date: 2026-11-09 10:07+0800\n"
 
-"X-Source-Commit: 3c4369bcfb6bec18e9909c1c66eed2a51d5e7a1c\n"
+"X-Source-Commit: 14f2df7587e135ddedd731035f9fc276e6d4e2c4\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -19,11 +19,11 @@ msgstr "Quick Start"
 msgid "项目介绍"
 msgstr "Project Introduction"
 
-msgid "**Triton-Ascend**是适配华为Ascend处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对昇腾NPU特性进行深度优化，能够帮助用户在昇腾平台上快速开发和部署高性能计算任务。"
-msgstr "**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors to efficiently perform kernel autotuning, operator compilation, and deployment. It maintains compatibility with core Triton syntax and deeply optimizes for Ascend NPU features. This helps you quickly develop and deploy high-performance computing tasks on the Ascend platform."
+msgid "**Triton-Ascend**是适配华为昇腾处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对华为昇腾NPU特性进行深度优化，能够帮助用户在华为昇腾平台上快速开发和部署高性能计算任务。"
+msgstr "**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It efficiently performs kernel autotuning, operator compilation, and deployment. It maintains compatibility with core Triton syntax and applies deep optimizations for Huawei Ascend NPU features. This helps users quickly develop and deploy high-performance computing tasks on the Huawei Ascend platform."
 
-msgid "本文以**Ubuntu 22.04**环境下通过软件包部署方式在线安装并运行向量加法示例为例，指导用户快速上手使用**Triton-Ascend**。如需体验更多安装方式请阅读[安装指南](./installation_guide.md)文档。"
-msgstr "This guide uses the vector addition sample to help you quickly get started with **Triton-Ascend**. The sample is installed and run online through software package deployment in an **Ubuntu 22.04** environment. For more installation methods, refer to the [Installation Guide](./installation_guide.md) document."
+msgid "本文以**Ubuntu**环境下通过软件包部署方式在线安装并运行向量加法示例为例，指导用户快速上手使用**Triton-Ascend**。如需体验更多安装方式请阅读[安装指南](./installation_guide.md)文档。"
+msgstr "This guide uses the vector addition sample to help you quickly get started with **Triton-Ascend** by installing and running the sample online using a software package in an **Ubuntu** environment. For more installation methods, refer to the [Installation Guide](./installation_guide.md)."
 
 msgid "环境准备"
 msgstr "Preparing the Environment"
@@ -34,8 +34,8 @@ msgstr "**Hardware requirements**"
 msgid "支持的操作系统：Linux（aarch64/x86_64）"
 msgstr "Supported operating systems: Linux (aarch64/x86_64)"
 
-msgid "支持的Ascend产品：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品"
-msgstr "Supported Ascend products: Atlas A2 products, Atlas A3 products, and Ascend 950PR&950DT products."
+msgid "支持的华为昇腾产品：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品"
+msgstr "Supported Huawei Ascend products: Atlas A2 products, Atlas A3 products, Ascend 950PR&950DT products"
 
 msgid "最小硬件配置：单卡32GB内存（推荐）"
 msgstr "Minimum hardware configuration: Single device with 32 GB memory (recommended)"
@@ -43,8 +43,8 @@ msgstr "Minimum hardware configuration: Single device with 32 GB memory (recomme
 msgid "**软件依赖**"
 msgstr "**Software Dependencies**"
 
-msgid "确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。"
-msgstr "Determine and install the software versions of CANN, Python, and TorchNPU. To install the driver and firmware, refer to [CANN Quick Installation](https://www.hiascend.com/cann/download) on the Ascend community official website."
+msgid "确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考华为昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。"
+msgstr "Determine the software versions of CANN, Python, and TorchNPU, and install them. For the driver and firmware installation, refer to \"[CANN Quick Installation](https://www.hiascend.com/cann/download)\" on the Huawei Ascend community official website."
 
 msgid "CANN版本：9.2.0"
 msgstr "CANN version: 9.2.0"
@@ -72,8 +72,8 @@ msgstr "Quick start"
 msgid "**运行tutorials中的向量加法示例验证结果**"
 msgstr "**Run the vector addition sample in tutorials to verify the results**"
 
-msgid "向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py) 通过对比Triton算子与PyTorch原生计算的输出结果，证明昇腾NPU设备可正确调用Triton算子并保证计算精度。"
-msgstr "Vector addition sample: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py) proves that the Ascend NPU device can correctly call the Triton operator and ensure computation precision by comparing the output results of the Triton operator and the native PyTorch computation."
+msgid "向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py) 通过对比Triton算子与PyTorch原生计算的输出结果，证明华为昇腾NPU设备可正确调用Triton算子并保证计算精度。"
+msgstr "Vector addition sample: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py) compares the output results of the Triton operator and the native PyTorch computation. This proves that the Huawei Ascend NPU device can correctly call the Triton operator and ensure computational accuracy."
 
 msgid "⚠️ 下述命令需在bash环境下执行。若使用POSIX sh，请将 `source` 替换为 `.`。"
 msgstr "⚠️ Run the following commands in a bash environment. If you use POSIX sh, replace `source` with `.`."
@@ -120,8 +120,8 @@ msgstr "**Autotune**: Use Autotune to select an appropriate tiling configuration
 msgid "**调试与调优**：掌握打印调试与性能采集方法。"
 msgstr "**Debugging and Tuning**: Master print debugging and performance collection methods."
 
-msgid "**迁移与进阶**：从GPU Triton迁移到Ascend，或查阅环境变量与编译选项。"
-msgstr "**Migration and Advanced Topics**: Migrate from GPU Triton to Ascend, or review environment variables and compilation options."
+msgid "**迁移与进阶**：从GPU Triton迁移到华为昇腾，或查阅环境变量与编译选项。"
+msgstr "**Migration and Advanced Topics**: Migrate from GPU Triton to Huawei Ascend, or review environment variables and compilation options."
 
 msgid "开发指南"
 msgstr "Development Guide"
@@ -141,8 +141,8 @@ msgstr "General development principles such as core partitioning, on-chip memory
 msgid "[Triton-Ascend算子迁移](./migration_guide/index.md)"
 msgstr "[Triton-Ascend operator migration](./migration_guide/index.md)"
 
-msgid "GPU Triton算子迁移到昇腾NPU"
-msgstr "Migrating GPU Triton Operators to Ascend NPU"
+msgid "GPU Triton算子迁移到华为昇腾NPU"
+msgstr "GPU Triton Operator Migration to Huawei Ascend NPU"
 
 msgid "[Triton-Ascend算子调试与调优](./debug_guide/index.md)"
 msgstr "[Triton-Ascend operator debugging and tuning](./debug_guide/index.md)"

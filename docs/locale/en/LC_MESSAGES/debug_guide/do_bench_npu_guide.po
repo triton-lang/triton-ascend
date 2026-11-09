@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-26 23:05+0800\n"
-"PO-Revision-Date: 2026-10-26 23:05+0800\n"
+"POT-Creation-Date: 2026-11-09 09:39+0800\n"
+"PO-Revision-Date: 2026-11-09 09:39+0800\n"
 
-"X-Source-Commit: 79dcafbf87085b589387a6b53d11491e4c88722a\n"
+"X-Source-Commit: bd7ebbae16cbd1883d5bc2a19bedde17712bc9a3\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -259,8 +259,8 @@ msgstr "When you pass a single function, `do_bench_npu` measures the total time 
 msgid "当传入多个函数时，`do_bench_npu` 只有在每个函数只包含一个 kernel 时，才能准确返回每个函数的 Device 侧时间。如果函数包含多个 kernel（包括非kernel的其他指令），`do_bench_npu` 无法正确区分哪个 kernel 属于哪个函数。请避免测试复杂函数的列表。"
 msgstr "When you pass multiple functions, `do_bench_npu` accurately returns the device-side time of each function only if each function contains a single kernel. If a function contains multiple kernels (including other non-kernel instructions), `do_bench_npu` cannot correctly distinguish which kernel belongs to which function. Avoid testing lists of complex functions."
 
-msgid "2. 清除 L2 Cache"
-msgstr "2\\. Clear the L2 Cache"
+msgid "2. 清除 L2 缓存"
+msgstr "2\\. Clear the L2 cache"
 
 msgid "要测量最坏情况下的性能或模拟冷启动内存场景，可以在每次迭代前清除 L2 缓存："
 msgstr "To measure worst-case performance or simulate cold-start memory scenarios, you can clear the L2 cache before each iteration:"
@@ -330,11 +330,11 @@ msgstr "The collection mechanism focuses on the on-chip execution time. This fea
 msgid "2. 自动过滤缓存清除操作"
 msgstr "2\\. Automatically filter cache clearing operations"
 
-msgid "当使用 `clear_l2_cache=True` 时，profiler 会自动识别并过滤掉用于清除缓存的虚拟 kernel（例如包含 “ReduceSum” 或 “zero” 的操作），确保它们不会污染最终的计时计算。"
-msgstr "When you use `clear_l2_cache=True`, the profiler automatically identifies and filters out dummy kernels used to clear the cache (for example, operations containing \"ReduceSum\" or \"zero\"). This ensures that they do not pollute the final timing calculation."
+msgid "当使用 `clear_l2_cache=True` 时，profiler 会自动识别并过滤掉用于清除缓存的虚拟 kernel（例如包含“ReduceSum”或“zero”的操作），确保它们不会污染最终的计时计算。"
+msgstr "When `clear_l2_cache=True` is used, the profiler automatically identifies and filters out dummy kernels used to clear the cache (for example, operations containing \"ReduceSum\" or \"zero\") to ensure they do not pollute the final timing calculation."
 
-msgid "3. 单function中含有多kernel的时间收集"
-msgstr "3\\. Time collection for a single function containing multiple kernels"
+msgid "3. 单函数中含有多kernel的时间收集"
+msgstr "3\\. Time collection in a single function containing multiple kernels"
 
 msgid "在实际 NPU 执行中，单次 Triton kernel 启动可能会被底层调度程序拆分为多个硬件任务。`do_bench_npu` 会自动检测捕获到的实际行数（任务数）是否为预期迭代次数的倍数。如果是，它会计算倍数并正确平均时间，从而返回逻辑函数的准确总时间。"
 msgstr "In actual NPU execution, the underlying scheduler might split a single Triton kernel launch into multiple hardware tasks. `do_bench_npu` automatically detects whether the captured actual number of rows (number of tasks) is a multiple of the expected number of iterations. If this is the case, it calculates the multiple and correctly averages the time to return the accurate total time of the logical function."
@@ -350,8 +350,8 @@ msgid ""
 msgstr ""
 "export TRITON_BENCH_METHOD=\"npu\"\n"
 
-msgid "对于执行时间短的 kernel，建议使用此方法，否则 Host 侧启动延迟将主导社区 `do_bench` 的测量结果，从而导致选择配置非device侧最优。"
-msgstr "Use this method for kernels with short execution times. Otherwise, host-side launch latency will dominate the community `do_bench` measurement results, causing the selected configuration to be suboptimal for the device side."
+msgid "对于执行时间短的 kernel，建议使用此方法，否则 Host 侧启动延迟将主导社区 `do_bench` 的测量结果，从而导致选择配置非Device侧最优。"
+msgstr "For kernels with short execution times, we recommend using this method. Otherwise, the host-side launch latency will dominate the community `do_bench` measurement results, resulting in a configuration that is not optimal on the device side."
 
 msgid "总结"
 msgstr "Summary"
@@ -368,5 +368,5 @@ msgstr "If you need to isolate a specific kernel in a complex function, use `tar
 msgid "如果需要稳定的最坏情况性能基线，请启用 `clear_l2_cache=True`；"
 msgstr "If you need a stable worst-case performance baseline, enable `clear_l2_cache=True`;"
 
-msgid "确保安装了 `mspti` ，以保持与社区 `do_bench` 的运行时性能持平。"
-msgstr "Ensure that `mspti` is installed to maintain runtime performance parity with the community `do_bench`."
+msgid "确保安装了 `mspti`，以保持与社区 `do_bench` 的运行时性能持平。"
+msgstr "Ensure that `mspti` is installed to maintain the same runtime performance as the community `do_bench`."

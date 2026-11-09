@@ -288,6 +288,11 @@ struct StageAtomicRate {
   double unknownContentionMultiplier = 1.0;
   /// Optional rate for the one-physical-program hardware regime.
   double singlePhysicalProgramLogicalElementsPerCycle = 0.0;
+  /// Optional measured body curve (system cycles) indexed by the workload's
+  /// logical element count. When present it replaces the linear
+  /// startup + element/rate form so the measured body shape can reproduce
+  /// target contention after the kernel boundary has been externalized.
+  std::map<int64_t, double> bodySystemCyclesByLogicalElements;
 
   bool isValid() const;
 };

@@ -2135,6 +2135,9 @@ static void readStageResources(ProfileJSONReader &reader,
           reader.number(object, "result_dependency_system_cycles", ratePath);
       rate.unknownContentionMultiplier =
           reader.number(object, "unknown_contention_multiplier", ratePath);
+      readPositiveIntegerNumberCurve(
+          object, "body_system_cycles_by_logical_elements", reader, ratePath,
+          rate.bodySystemCyclesByLogicalElements);
       profile.atomicRates[key] = rate;
     };
     if (const auto *fallback = atomic->getObject("default"))

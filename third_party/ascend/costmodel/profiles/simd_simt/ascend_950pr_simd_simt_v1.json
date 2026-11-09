@@ -2,7 +2,7 @@
   "reduction_profile": "../reduction/david_v100_reduction_v1.json",
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 19,
-  "profile_version": "ascend-950pr-simd-simt-20261027-v152-indirect-memory-loop-dependency-prefixscan-v1",
+  "profile_version": "ascend-950pr-simd-simt-20261027-v152-indirect-memory-loop-dependency-prefixscan-atomic-service-v2",
   "simt_indirect_store_model": "prefix_mask_rank_factor_20261017",
   "simd_indirect_store_model": "simd_mask_envelope_20261019",
   "simt_indirect_load_model": "prefix_mask_rank_factor_20261017",
@@ -342,10 +342,10 @@
           "intercept_system_cycles": 233.13893010359232,
           "coefficient_system_cycles": [
             0.2451482631596979,
-            99.292319920040171,
+            99.29231992004017,
             0.6014874004037386,
             0.026348222847080462,
-            0.038518219183032401
+            0.0385182191830324
           ],
           "structural_constants": [],
           "evidence": "data_provider/strided_ldst/pre-explore/results/final/errors_masked_store.csv, stride>=3 branch; 384 points (int8/float16/float32, n=4..512, stride=3/4/5/6/8/16/32/64/128, 15 rank-two shapes), MAPE 6.96%. Masked-only: a runtime mask makes the SIMD store read the destination back, so the fit carries an extra 1 KB aggregate term. Worst regime is stride>=32 with n<=16 (40-56%, 15/384 points), see README 3.5(a)."
@@ -429,12 +429,535 @@
           "unknown_contention_multiplier": 1
         },
         "operations": {
+          "add.i32.contiguous.result_used": {
+            "logical_elements_per_system_cycle": 0.63716,
+            "operation_startup_system_cycles": 71125.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "fadd.f32.contiguous.result_used": {
+            "logical_elements_per_system_cycle": 0.63716,
+            "operation_startup_system_cycles": 71125.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "max.i32.contiguous.result_used": {
+            "logical_elements_per_system_cycle": 0.63716,
+            "operation_startup_system_cycles": 71125.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "min.i32.contiguous.result_used": {
+            "logical_elements_per_system_cycle": 0.63716,
+            "operation_startup_system_cycles": 71125.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "and.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 8.606e-05,
+            "operation_startup_system_cycles": 44916.8,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 5947318.514615148,
+              "1024": 11896656.186007202,
+              "2048": 23795331.528791305,
+              "4096": 47592682.214359514
+            }
+          },
+          "and.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 7.492e-05,
+            "operation_startup_system_cycles": 47748.5,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 6831937.063191062,
+              "1024": 13665893.283159029,
+              "2048": 27333805.72309496,
+              "4096": 54669630.60296682
+            }
+          },
+          "or.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 8.606e-05,
+            "operation_startup_system_cycles": 45557.8,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 5947318.514615148,
+              "1024": 11896656.186007202,
+              "2048": 23795331.528791305,
+              "4096": 47592682.214359514
+            }
+          },
+          "or.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 7.491e-05,
+            "operation_startup_system_cycles": 46129.9,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 6832849.352100415,
+              "1024": 13667717.860977735,
+              "2048": 27337454.878732372,
+              "4096": 54676928.91424165
+            }
+          },
+          "xor.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 8.606e-05,
+            "operation_startup_system_cycles": 45973.7,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 5947318.514615148,
+              "1024": 11896656.186007202,
+              "2048": 23795331.528791305,
+              "4096": 47592682.214359514
+            }
+          },
+          "xor.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 7.492e-05,
+            "operation_startup_system_cycles": 48161.7,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 6831937.063191062,
+              "1024": 13665893.283159029,
+              "2048": 27333805.72309496,
+              "4096": 54669630.60296682
+            }
+          },
+          "and.i32.contiguous": {
+            "logical_elements_per_system_cycle": 0.35216924,
+            "operation_startup_system_cycles": 51081.1,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
+          "and.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.16154655,
+            "operation_startup_system_cycles": 51576.6,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
+          "or.i32.contiguous": {
+            "logical_elements_per_system_cycle": 0.32290344,
+            "operation_startup_system_cycles": 51021.4,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
+          "or.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.16621656,
+            "operation_startup_system_cycles": 51517.3,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
+          "xor.i32.contiguous": {
+            "logical_elements_per_system_cycle": 0.3982535,
+            "operation_startup_system_cycles": 51408.4,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
+          "xor.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.18127428,
+            "operation_startup_system_cycles": 50627.1,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
           "loaded_index": {
             "logical_elements_per_system_cycle": 0.0076,
             "single_physical_program_logical_elements_per_system_cycle": 0.0086464095358345,
             "operation_startup_system_cycles": 0,
             "result_dependency_system_cycles": 470,
             "unknown_contention_multiplier": 1
+          },
+          "fadd.f32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.007041,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line, 128 to 4096 elements per program. The hardware atomic store covers add, max and min up to 32 bits.",
+            "confidence": "high",
+            "body_system_cycles_by_logical_elements": {
+              "512": 70697.78683905971,
+              "1024": 143414.73045502335,
+              "2048": 288848.61768695066,
+              "4096": 579716.3921508052
+            }
+          },
+          "fadd.f32.contiguous": {
+            "logical_elements_per_system_cycle": 88.1964,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "fadd.f16.loaded_index": {
+            "logical_elements_per_system_cycle": 0.007041,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line, 128 to 4096 elements per program. The hardware atomic store covers add, max and min up to 32 bits.",
+            "confidence": "high",
+            "body_system_cycles_by_logical_elements": {
+              "512": 70697.78683905971,
+              "1024": 143414.73045502335,
+              "2048": 288848.61768695066,
+              "4096": 579716.3921508052
+            }
+          },
+          "fadd.f16.contiguous": {
+            "logical_elements_per_system_cycle": 38.8626,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "fadd.bf16.loaded_index": {
+            "logical_elements_per_system_cycle": 0.007042,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line, 128 to 4096 elements per program. The hardware atomic store covers add, max and min up to 32 bits.",
+            "confidence": "high",
+            "body_system_cycles_by_logical_elements": {
+              "512": 70687.46066132386,
+              "1024": 143394.07809955164,
+              "2048": 288807.31297600723,
+              "4096": 579633.7827289184
+            }
+          },
+          "add.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.007039,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line, 128 to 4096 elements per program. The hardware atomic store covers add, max and min up to 32 bits.",
+            "confidence": "high",
+            "body_system_cycles_by_logical_elements": {
+              "512": 70718.44799650139,
+              "1024": 143456.0527699067,
+              "2048": 288931.26231671736,
+              "4096": 579881.6814103386
+            }
+          },
+          "add.i32.contiguous": {
+            "logical_elements_per_system_cycle": 400.0,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "add.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 7.4e-05,
+            "single_physical_program_logical_elements_per_system_cycle": 0.004114,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line. 64-bit operations are outside the hardware atomic store whitelist and lower to the software emulation, which costs about two orders of magnitude more.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 6916899.762142015,
+              "1024": 13835818.681060934,
+              "2048": 27673656.51889877,
+              "4096": 55349332.194574445
+            }
+          },
+          "add.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.1998,
+            "operation_startup_system_cycles": 50752,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "max.f32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.007042,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line, 128 to 4096 elements per program. The hardware atomic store covers add, max and min up to 32 bits.",
+            "confidence": "high",
+            "body_system_cycles_by_logical_elements": {
+              "512": 70687.46066132386,
+              "1024": 143394.07809955164,
+              "2048": 288807.31297600723,
+              "4096": 579633.7827289184
+            }
+          },
+          "max.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.00704,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line, 128 to 4096 elements per program. The hardware atomic store covers add, max and min up to 32 bits.",
+            "confidence": "high",
+            "body_system_cycles_by_logical_elements": {
+              "512": 70708.1159503688,
+              "1024": 143435.38867764152,
+              "2048": 288889.934132187,
+              "4096": 579799.0250412779
+            }
+          },
+          "max.i32.contiguous": {
+            "logical_elements_per_system_cycle": 61.9495,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "max.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 7.3e-05,
+            "single_physical_program_logical_elements_per_system_cycle": 0.00409,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line. 64-bit operations are outside the hardware atomic store whitelist and lower to the software emulation, which costs about two orders of magnitude more.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 7011679.473360082,
+              "1024": 14025378.10349707,
+              "2048": 28052775.36377104,
+              "4096": 56107569.884318985
+            }
+          },
+          "max.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.1639,
+            "operation_startup_system_cycles": 49850,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "min.f32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.007041,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line, 128 to 4096 elements per program. The hardware atomic store covers add, max and min up to 32 bits.",
+            "confidence": "high",
+            "body_system_cycles_by_logical_elements": {
+              "512": 70697.78683905971,
+              "1024": 143414.73045502335,
+              "2048": 288848.61768695066,
+              "4096": 579716.3921508052
+            }
+          },
+          "min.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.007042,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line, 128 to 4096 elements per program. The hardware atomic store covers add, max and min up to 32 bits.",
+            "confidence": "high",
+            "body_system_cycles_by_logical_elements": {
+              "512": 70687.46066132386,
+              "1024": 143394.07809955164,
+              "2048": 288807.31297600723,
+              "4096": 579633.7827289184
+            }
+          },
+          "min.i32.contiguous": {
+            "logical_elements_per_system_cycle": 400.0,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "min.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 7.3e-05,
+            "single_physical_program_logical_elements_per_system_cycle": 0.004089,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line. 64-bit operations are outside the hardware atomic store whitelist and lower to the software emulation, which costs about two orders of magnitude more.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 7011679.473360082,
+              "1024": 14025378.10349707,
+              "2048": 28052775.36377104,
+              "4096": 56107569.884318985
+            }
+          },
+          "min.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.1594,
+            "operation_startup_system_cycles": 48947,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "exch.f32.loaded_index": {
+            "logical_elements_per_system_cycle": 7.6e-05,
+            "single_physical_program_logical_elements_per_system_cycle": 0.004251,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line. Exchange is outside the hardware atomic store whitelist and lowers to AtomicXchg or the software emulation, which costs about two orders of magnitude more.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 6734822.948486254,
+              "1024": 13471665.053749412,
+              "2048": 26945349.264275726,
+              "4096": 53892717.68532836
+            }
+          },
+          "exch.f32.contiguous": {
+            "logical_elements_per_system_cycle": 0.5372,
+            "operation_startup_system_cycles": 48271,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "exch.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 7.6e-05,
+            "single_physical_program_logical_elements_per_system_cycle": 0.004251,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line. Exchange is outside the hardware atomic store whitelist and lowers to AtomicXchg or the software emulation, which costs about two orders of magnitude more.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 6734822.948486254,
+              "1024": 13471665.053749412,
+              "2048": 26945349.264275726,
+              "4096": 53892717.68532836
+            }
+          },
+          "exch.i32.contiguous": {
+            "logical_elements_per_system_cycle": 0.798,
+            "operation_startup_system_cycles": 49850,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "exch.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 7.6e-05,
+            "single_physical_program_logical_elements_per_system_cycle": 0.004302,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line. Exchange is outside the hardware atomic store whitelist and lowers to AtomicXchg or the software emulation, which costs about two orders of magnitude more.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 6734822.948486254,
+              "1024": 13471665.053749412,
+              "2048": 26945349.264275726,
+              "4096": 53892717.68532836
+            }
+          },
+          "exch.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.1888,
+            "operation_startup_system_cycles": 47594,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "cas.f32.loaded_index": {
+            "logical_elements_per_system_cycle": 8.4e-05,
+            "single_physical_program_logical_elements_per_system_cycle": 0.004685,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line. Compare-and-swap is outside the hardware atomic store whitelist and lowers to the Software linalg body, which costs about two orders of magnitude more.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 6093218.938461191,
+              "1024": 12188457.033699287,
+              "2048": 24378933.224175476,
+              "4096": 48759885.605127856
+            }
+          },
+          "cas.f32.contiguous": {
+            "logical_elements_per_system_cycle": 0.4225,
+            "operation_startup_system_cycles": 49850,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "cas.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 8.5e-05,
+            "single_physical_program_logical_elements_per_system_cycle": 0.004699,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line. Compare-and-swap is outside the hardware atomic store whitelist and lowers to the Software linalg body, which costs about two orders of magnitude more.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 6021510.254987801,
+              "1024": 12045039.666752508,
+              "2048": 24092098.490281917,
+              "4096": 48186216.13734074
+            }
+          },
+          "cas.i32.contiguous": {
+            "logical_elements_per_system_cycle": 0.4664,
+            "operation_startup_system_cycles": 50301,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "cas.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 7e-05,
+            "single_physical_program_logical_elements_per_system_cycle": 0.003916,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "SIMD atomic sweep on Ascend950PR, 56 programs, one element per 128 B line. Compare-and-swap is outside the hardware atomic store whitelist and lowers to the Software linalg body, which costs about two orders of magnitude more.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 7312266.55750881,
+              "1024": 14626552.271794526,
+              "2048": 29255123.700365953,
+              "4096": 58512266.55750881
+            }
+          },
+          "cas.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.1571,
+            "operation_startup_system_cycles": 48722,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
           }
         }
       },
@@ -983,11 +1506,597 @@
           "unknown_contention_multiplier": 1
         },
         "operations": {
-          "loaded_index": {
-            "logical_elements_per_system_cycle": 1.477,
+          "add.i32.loaded_index.result_used": {
+            "logical_elements_per_system_cycle": 0.18973,
+            "operation_startup_system_cycles": 3390.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "fadd.f32.loaded_index.result_used": {
+            "logical_elements_per_system_cycle": 0.18973,
+            "operation_startup_system_cycles": 3390.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "max.i32.loaded_index.result_used": {
+            "logical_elements_per_system_cycle": 0.18973,
+            "operation_startup_system_cycles": 3390.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "max.f32.loaded_index.result_used": {
+            "logical_elements_per_system_cycle": 0.18973,
+            "operation_startup_system_cycles": 3390.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "min.i32.loaded_index.result_used": {
+            "logical_elements_per_system_cycle": 0.18973,
+            "operation_startup_system_cycles": 3390.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "min.f32.loaded_index.result_used": {
+            "logical_elements_per_system_cycle": 0.18973,
+            "operation_startup_system_cycles": 3390.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "add.i32.contiguous.result_used": {
+            "logical_elements_per_system_cycle": 0.03194,
+            "operation_startup_system_cycles": 0.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "fadd.f32.contiguous.result_used": {
+            "logical_elements_per_system_cycle": 0.03194,
+            "operation_startup_system_cycles": 0.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "max.i32.contiguous.result_used": {
+            "logical_elements_per_system_cycle": 0.03194,
+            "operation_startup_system_cycles": 0.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "max.f32.contiguous.result_used": {
+            "logical_elements_per_system_cycle": 0.03194,
+            "operation_startup_system_cycles": 0.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "min.i32.contiguous.result_used": {
+            "logical_elements_per_system_cycle": 0.03194,
+            "operation_startup_system_cycles": 0.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "min.f32.contiguous.result_used": {
+            "logical_elements_per_system_cycle": 0.03194,
+            "operation_startup_system_cycles": 0.0,
+            "result_dependency_system_cycles": 0,
+            "unknown_contention_multiplier": 1,
+            "source": "Used-result delta: measured used minus unused atomic kernel on Ascend950PR; the read-back/critical-section cost of storing the returned old value.",
+            "confidence": "medium"
+          },
+          "and.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.072606,
+            "operation_startup_system_cycles": 1721.8,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 7145.0,
+              "1024": 14664.0,
+              "2048": 29064.0,
+              "4096": 58158.0
+            }
+          },
+          "and.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 0.07036434,
+            "operation_startup_system_cycles": 3036.0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 5085.673587786128,
+              "1024": 12362.086611769584,
+              "2048": 26914.912659736496,
+              "4096": 56020.56475567032
+            }
+          },
+          "or.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.072786,
+            "operation_startup_system_cycles": 1814.4,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 7145.0,
+              "1024": 14664.0,
+              "2048": 29064.0,
+              "4096": 58158.0
+            }
+          },
+          "or.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 0.07057044,
+            "operation_startup_system_cycles": 3120.5,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 5064.422923566903,
+              "1024": 12319.585283331133,
+              "2048": 26829.910002859593,
+              "4096": 55850.55944191651
+            }
+          },
+          "xor.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.071622,
+            "operation_startup_system_cycles": 1722.4,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 7145.0,
+              "1024": 14664.0,
+              "2048": 29064.0,
+              "4096": 58158.0
+            }
+          },
+          "xor.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 0.06942522,
+            "operation_startup_system_cycles": 2566.0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise loaded_index atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 5184.1021559503115,
+              "1024": 12558.943748097949,
+              "2048": 27308.626932393225,
+              "4096": 56807.99330098378
+            }
+          },
+          "and.i32.contiguous": {
+            "logical_elements_per_system_cycle": 0.02150628,
+            "operation_startup_system_cycles": 0.0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
+          "and.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.02222447,
+            "operation_startup_system_cycles": 3325.5,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
+          "or.i32.contiguous": {
+            "logical_elements_per_system_cycle": 0.02174412,
+            "operation_startup_system_cycles": 0.0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
+          "or.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.02210514,
+            "operation_startup_system_cycles": 1287.5,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
+          "xor.i32.contiguous": {
+            "logical_elements_per_system_cycle": 0.0215799,
+            "operation_startup_system_cycles": 0.0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
+          "xor.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.02236862,
+            "operation_startup_system_cycles": 3494.0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Bitwise contiguous atomic sweep on Ascend950PR, 56 programs. and/or/xor lower to the locked read-modify-write decomposition; fitted over the linear block range.",
+            "confidence": "medium"
+          },
+          "fadd.f32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.16707,
             "operation_startup_system_cycles": 0,
             "result_dependency_system_cycles": 470,
-            "unknown_contention_multiplier": 1
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line, 128 to 4096 elements per program. Slope of the measured minimum against the route work, startup from the linear intercept.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "1024": 4360.092,
+              "2048": 11778.915,
+              "4096": 24682.227
+            }
+          },
+          "fadd.f32.contiguous": {
+            "logical_elements_per_system_cycle": 97.3659,
+            "operation_startup_system_cycles": 2707,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program, fitted as startup plus rate.",
+            "confidence": "high"
+          },
+          "add.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.17079,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line, 128 to 4096 elements per program. Slope of the measured minimum against the route work, startup from the linear intercept.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "1024": 4390.356,
+              "2048": 10965.109,
+              "4096": 24985.783
+            }
+          },
+          "add.i32.contiguous": {
+            "logical_elements_per_system_cycle": 43.5135,
+            "operation_startup_system_cycles": 2481,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program, fitted as startup plus rate.",
+            "confidence": "high"
+          },
+          "max.f32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.175,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Includes the two-backend factor of two removed by the float min/max pair fusion.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "1024": 4360.092,
+              "2048": 11778.915,
+              "4096": 24682.227
+            }
+          },
+          "max.f32.contiguous": {
+            "logical_elements_per_system_cycle": 18.9047,
+            "operation_startup_system_cycles": 2256,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program, fitted as startup plus rate.",
+            "confidence": "high"
+          },
+          "max.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.175,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Slope of the measured minimum against the route work, startup from the linear intercept.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "1024": 4390.356,
+              "2048": 10965.109,
+              "4096": 24985.783
+            }
+          },
+          "max.i32.contiguous": {
+            "logical_elements_per_system_cycle": 129.1628,
+            "operation_startup_system_cycles": 2707,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program, fitted as startup plus rate.",
+            "confidence": "high"
+          },
+          "min.f32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.175,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Includes the two-backend factor of two removed by the float min/max pair fusion.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "1024": 4360.092,
+              "2048": 11778.915,
+              "4096": 24682.227
+            }
+          },
+          "min.f32.contiguous": {
+            "logical_elements_per_system_cycle": 400.0,
+            "operation_startup_system_cycles": 2481,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program, fitted as startup plus rate.",
+            "confidence": "high"
+          },
+          "min.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.175,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Slope of the measured minimum against the route work, startup from the linear intercept.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "1024": 4390.356,
+              "2048": 10965.109,
+              "4096": 24985.783
+            }
+          },
+          "min.i32.contiguous": {
+            "logical_elements_per_system_cycle": 400.0,
+            "operation_startup_system_cycles": 2707,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program, fitted as startup plus rate.",
+            "confidence": "high"
+          },
+          "exch.f32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.0844,
+            "operation_startup_system_cycles": 1800,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Slope of the measured minimum against the route work; startup is the linear intercept the operation carries on top of the kernel boundary.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "1024": 11031.928,
+              "2048": 23967.193,
+              "4096": 50972.116
+            }
+          },
+          "exch.f32.contiguous": {
+            "logical_elements_per_system_cycle": 0.0337,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "exch.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.0844,
+            "operation_startup_system_cycles": 1800,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Slope of the measured minimum against the route work; startup is the linear intercept the operation carries on top of the kernel boundary.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "1024": 11031.928,
+              "2048": 23967.193,
+              "4096": 50972.116
+            }
+          },
+          "exch.i32.contiguous": {
+            "logical_elements_per_system_cycle": 0.0337,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "cas.f32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.0844,
+            "operation_startup_system_cycles": 1800,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Slope of the measured minimum against the route work; startup is the linear intercept the operation carries on top of the kernel boundary.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "1024": 11546.152,
+              "2048": 24136.535,
+              "4096": 52091.801
+            }
+          },
+          "cas.f32.contiguous": {
+            "logical_elements_per_system_cycle": 0.0337,
+            "operation_startup_system_cycles": 226,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "cas.i32.loaded_index": {
+            "logical_elements_per_system_cycle": 0.0844,
+            "operation_startup_system_cycles": 1800,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Slope of the measured minimum against the route work; startup is the linear intercept the operation carries on top of the kernel boundary.",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "1024": 11546.152,
+              "2048": 24136.535,
+              "4096": 52091.801
+            }
+          },
+          "cas.i32.contiguous": {
+            "logical_elements_per_system_cycle": 0.0337,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "add.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 0.088195,
+            "operation_startup_system_cycles": 3338,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line, 512 to 4096 elements per program. Startup and rate are a two-parameter minimax fit of the measured minimum against max(kernel boundary, startup + loads + elements/rate).",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 3614.5783255805522,
+              "1024": 9419.896087358431,
+              "2048": 21030.53161091419,
+              "4096": 44251.80265802571
+            }
+          },
+          "add.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.0351,
+            "operation_startup_system_cycles": 3158,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "max.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 0.089549,
+            "operation_startup_system_cycles": 3519,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line, 512 to 4096 elements per program. Startup and rate are a two-parameter minimax fit of the measured minimum against max(kernel boundary, startup + loads + elements/rate).",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 3526.8006815035965,
+              "1024": 9244.34079920452,
+              "2048": 20679.421034606366,
+              "4096": 43549.58150541006
+            }
+          },
+          "max.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.0342,
+            "operation_startup_system_cycles": 2481,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "min.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 0.090902,
+            "operation_startup_system_cycles": 3639,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line, 512 to 4096 elements per program. Startup and rate are a two-parameter minimax fit of the measured minimum against max(kernel boundary, startup + loads + elements/rate).",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 3441.699894070434,
+              "1024": 9074.139224338194,
+              "2048": 20339.017884873716,
+              "4096": 42868.77520594476
+            }
+          },
+          "min.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.0351,
+            "operation_startup_system_cycles": 2932,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "exch.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 0.088872,
+            "operation_startup_system_cycles": 3459,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line, 512 to 4096 elements per program. Startup and rate are a two-parameter minimax fit of the measured minimum against max(kernel boundary, startup + loads + elements/rate).",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 3570.355171778188,
+              "1024": 9331.449779753702,
+              "2048": 20853.638995704732,
+              "4096": 43898.01742760679
+            }
+          },
+          "exch.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.0346,
+            "operation_startup_system_cycles": 2481,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "cas.i64.loaded_index": {
+            "logical_elements_per_system_cycle": 0.088872,
+            "operation_startup_system_cycles": 3609,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line, 512 to 4096 elements per program. Startup and rate are a two-parameter minimax fit of the measured minimum against max(kernel boundary, startup + loads + elements/rate).",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 3570.355171778188,
+              "1024": 9331.449779753702,
+              "2048": 20853.638995704732,
+              "4096": 43898.01742760679
+            }
+          },
+          "cas.i64.contiguous": {
+            "logical_elements_per_system_cycle": 0.0332,
+            "operation_startup_system_cycles": 1805,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "fadd.f16.loaded_index": {
+            "logical_elements_per_system_cycle": 0.068571,
+            "operation_startup_system_cycles": 4241,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line, 512 to 4096 elements per program. Startup and rate are a two-parameter minimax fit of the measured minimum against max(kernel boundary, startup + loads + elements/rate).",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 5275.973897427675,
+              "1024": 12742.687231052678,
+              "2048": 27676.113898302683,
+              "4096": 57542.96723280269
+            }
+          },
+          "fadd.f16.contiguous": {
+            "logical_elements_per_system_cycle": 0.0203,
+            "operation_startup_system_cycles": 9474,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
+          },
+          "fadd.bf16.loaded_index": {
+            "logical_elements_per_system_cycle": 0.066541,
+            "operation_startup_system_cycles": 3925,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line, 512 to 4096 elements per program. Startup and rate are a two-parameter minimax fit of the measured minimum against max(kernel boundary, startup + loads + elements/rate).",
+            "confidence": "medium",
+            "body_system_cycles_by_logical_elements": {
+              "512": 5503.764704107147,
+              "1024": 13198.26884441162,
+              "2048": 28587.277125020566,
+              "4096": 59365.29368623846
+            }
+          },
+          "fadd.bf16.contiguous": {
+            "logical_elements_per_system_cycle": 0.0205,
+            "operation_startup_system_cycles": 10150,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1,
+            "source": "Contiguous-address atomic sweep on Ascend950PR, 56 programs, 512 to 4096 elements per program. The atomic target is a direct pointer expression, so the workload takes the contiguous address class.",
+            "confidence": "high"
           }
         }
       },

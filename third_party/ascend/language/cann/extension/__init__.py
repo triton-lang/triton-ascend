@@ -81,6 +81,7 @@ from .mem_ops import (
     gather_out_to_ub,
     scatter_ub_to_out,
     index_select_simd,
+    sparse_gather_load_to_L1buffer,
 )
 
 __all__ = [
@@ -162,6 +163,7 @@ __all__ = [
     "gather_out_to_ub",
     "scatter_ub_to_out",
     "index_select_simd",
+    "sparse_gather_load_to_L1buffer",
 
     # utils
     "is_register_based_arch",

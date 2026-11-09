@@ -998,7 +998,7 @@ def vextf(src, target_dtype, mask=None, part="part_even", _semantic=None) -> vec
     if mask is None:
         mask = _all_mask(out_lanes, _semantic)
     _check_mask(mask, out_lanes)
-    handle = _semantic.builder.create_simd_vcvt("vextf", src.handle, mask.handle, out_tag, part)
+    handle = _semantic.builder.create_simd_vcvt("extf", src.handle, mask.handle, out_tag, part)
     return vector(handle, vector_type(out_lanes, target_dtype))
 
 

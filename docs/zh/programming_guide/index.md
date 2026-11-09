@@ -21,8 +21,8 @@
 虽然运行时接口允许下发并发任务数最大为65535，但超过物理核数的部分是通过新一轮的下发来完成的。如果直接将GPU上的Triton算子拿到昇腾平台上运行，这些大量的任务会引入可观的核启动和核初始化时的额外开销，影响到算子性能表现。\
 因此，需要针对昇腾平台特性修改分核逻辑。最推荐的做法是**将分核的数量直接固定为硬件的物理核数**，在核内做更为细致的数据分块：
 
-* 对于纯Vector算子，分核数等于**Vector核数量**。
-* 对于CV融合算子，分核数等于**Cube核数量**（通常为Vector核数量的一半），算子执行时会按1：2的比例调用Vector核。
+- 对于纯Vector算子，分核数等于**Vector核数量**。
+- 对于CV融合算子，分核数等于**Cube核数量**（通常为Vector核数量的一半），算子执行时会按1：2的比例调用Vector核。
 
 一般而言，在NPU卡上，一个计算核心AI Core含有一个Cube核，每个Cube核配有两个Vector核，因此可以通过以下接口获取**Vector核数(vectorcore_num)**与**Cube核数量(aicore_num)**：
 
@@ -56,7 +56,7 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
               BLOCK_N: tl.constexpr,
               STAGE: tl.constexpr
               ):
-    # 计算任务总量,将三维任务(Z,H,M)展平为一维总任务数
+    # 计算任务总量，将三维任务(Z,H,M)展平为一维总任务数
     NUM_BLOCKS_M = N_CTX // BLOCK_M
     NUM_BLOCKS = NUM_BLOCKS_M * Z * H
 
@@ -123,8 +123,8 @@ def add_kernel(x_ptr,
 
 | 算子类型 | 使用的计算单元 | 尾轴对齐要求 |
 | --- | --- | --- |
-| VV类算子（Vector-Vector，纯向量计算类算子） | 仅使用Vector核 | 尾轴大小能被32B整除 |
-| CV类算子（Cube-Vector，Cube核与Vector核融合计算类算子） | 使用Cube核+Vector核 | 尾轴大小能被512B整除 |
+| VV类算子（Vector-Vector，纯向量计算类算子） | 仅使用Vector核 | 尾轴大小能被32Byte整除 |
+| CV类算子（Cube-Vector，Cube核与Vector核融合计算类算子） | 使用Cube核+Vector核 | 尾轴大小能被512Byte整除 |
 
 【描述】对模型中shape为(2048,3)和(2048,1)Tensor的种种操作，都会因为自动补齐导致性能明显恶化，此时可考虑通过转置操作将对齐轴转到低维，直到store时再转置为原始状态，从而规避自动补齐，优化计算速度。
 同时由于转置操作本身也受自动补齐规则的影响，因此同样需要特殊技巧来规避补齐。这里列出一个“借轴转置”的tip，适用于**tensor.numel() % 256Byte == 0**的场景，具体操作如下：
@@ -188,7 +188,7 @@ def pick_kernel(
 
 通过分析表格中的数据可以发现，优化前后的aiv_mte2_time(μs)和aiv_mte2_ratio差距较大，优化方案通过先将大部分数据搬运到UB上，减少小批量数据通过L2搬运到UB的次数，减少了L2搬运到UB上的总时间。
 
-> 注意：优化后的 aiv_mte2_time 反而更高，这是因为优化方案一次性将大量数据搬运到 UB（增加 MTE2 耗时），但消除了原先通过 L2 逐条搬运 UB 的低效路径，整体性能更优。
+> 注意：优化后的 aiv_mte2_time 反而更高，这是因为优化方案一次性将大量数据搬运到 UB（增加 MTE2 耗时），但消除了原先通过 L2 逐条搬运到 UB 的低效路径，整体性能更优。
 
 ### 存算并行
 
@@ -256,7 +256,7 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
     import triton.language as tl
 
     @triton.autotune(
-    configs=[ # 待测试的参数配置列表,参数候选值需要是2的幂次
+    configs=[ # 待测试的参数配置列表，参数候选值需要是2的幂次
             triton.Config({'BLOCK_SIZE': 128}),
             triton.Config({'BLOCK_SIZE': 256}),
             triton.Config({'BLOCK_SIZE': 512}),
@@ -424,7 +424,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 
     关闭multi-buffer会降低搬运与计算的流水重叠度、可能影响性能，建议仅在UB紧张时使用，并优先通过autotune在多组配置间对比取舍（参见本文档「存算并行」章节）。
 
-4. **重新编译验证。** 重新运行核函数编译或测试用例，确认日志中不再出现`ub overflow`、`MLIRCompilationError`报错，核函数编译通过且输出结果与预期一致，即为解决。若以上步骤全部执行后仍溢出，请对照日志中`requires`与`available`两个数值继续减小分块参数，并核对目标产品的UB规格（见文末规格表）。
+4. **重新编译验证。** 重新运行核函数编译或测试用例，确认日志中不再出现`ub overflow`、`MLIRCompilationError`报错，核函数编译通过且输出结果与预期一致，即为解决。若以上步骤全部执行后仍溢出，请对照日志中`requires`与`available`两个数值继续减小分块参数，并核对目标产品的UB规格（见本节末规格表）。
 
 #### 预防措施
 
@@ -435,7 +435,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 | 关注multi-buffer影响 | 编译器默认开启存算并行（`multiBuffer=True`），多缓冲使UB占用按buffer份数成倍增加；UB紧张时在Config中设置`multibuffer=False`（参见本文档「存算并行」章节） |
 | 长序列分批处理 | 当序列长度导致单tile估算占用接近或超过UB上限时，在核函数内用for循环按序列维度分块load/计算/store，避免单次整段搬运 |
 
-UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）时，仅该张量即需65536×4×2×8 = 4194304 bit，已超过Atlas A2系列产品可用的1572864 bit；按Atlas A2系列产品1572864 bit上限反推，单张量float16、双缓冲下的理论上限约49152个元素（1572864÷8÷2÷2 = 49152）。
+UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）时，仅该张量即需65536×4×2×8 = 4194304 bit，已超过Atlas A2系列产品可用的1572864 bit；按Atlas A2系列产品1572864 bit上限反推，单个float16张量、双缓冲下的理论上限约49152个元素（1572864÷8÷2÷2 = 49152）。
 
 【注意】Atlas A2系列产品UB大小为192KB（即1572864bit）。各产品系列片上内存规格如下：
 
@@ -464,14 +464,14 @@ UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）�
     ```python
 
     @triton.jit
-    def add_kernel(x_ptr, # Pointer to first input vector.
-        y_ptr, # Pointer to second input vector.
-        output_ptr, # output 向量的指针.
-        n_elements, # 向量的大小.
-        BLOCK_SIZE: tl.constexpr, # 每个进程需要处理的元素个数.
-        # 注意：constexpr属性表示它可以被用作shape值.
+    def add_kernel(x_ptr, # 指向第一个输入向量的指针。
+        y_ptr, # 指向第二个输入向量的指针。
+        output_ptr, # output 向量的指针。
+        n_elements, # 向量的大小。
+        BLOCK_SIZE: tl.constexpr, # 每个程序需要处理的元素个数。
+        # 注意：constexpr属性表示它可以被用作shape值。
     ):
-        pid = tl.program_id(axis=0) # We use a 1D launch grid so axis is 0.
+        pid = tl.program_id(axis=0) # 我们使用一维发射网格，所以axis是0。
         block_start = pid * BLOCK_SIZE
         offsets = block_start + tl.arange(0, BLOCK_SIZE)
         mask = offsets < n_elements
@@ -492,7 +492,7 @@ UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）�
         return output
     ```
 
-    使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性
+    使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性。
 
     ```python
     torch.manual_seed(0)

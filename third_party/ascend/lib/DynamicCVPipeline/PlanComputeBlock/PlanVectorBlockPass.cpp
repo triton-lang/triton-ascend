@@ -20,19 +20,9 @@
  * THE SOFTWARE.
  */
 
-#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
-#include "ascend/include/DynamicCVPipeline/Common/SyncWall.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
-#include "bishengir/Dialect/Annotation/IR/Annotation.h"
-#include "mlir/Analysis/AliasAnalysis.h"
-#include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/IR/Block.h"
-#include "mlir/IR/Operation.h"
-#include "mlir/Support/LLVM.h"
-#include "mlir/Support/WalkResult.h"
+#include <algorithm>
+#include <memory>
+
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -41,8 +31,23 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
-#include <algorithm>
-#include <memory>
+
+#include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Block.h"
+#include "mlir/IR/Operation.h"
+#include "mlir/Support/LLVM.h"
+#include "mlir/Support/WalkResult.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/SyncWall.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
+
+#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 static constexpr const char *DEBUG_TYPE = "plan-vector-block";
 #define LOG_DEBUG(...)                                                         \
@@ -330,20 +335,18 @@ extractWholeFuseGroup(Block *block,
 
   SetVector<Operation *> toRemove;
   auto *terminator = block->getTerminator();
-  if (llvm::isa_and_present<scf::YieldOp>(terminator) &&
-      isa<scf::ForOp, scf::WhileOp>(block->getParentOp())) {
+  if (llvm::isa_and_present<scf::YieldOp>(terminator)) {
     for (auto *op : nowFuseGroup) {
-      auto walkResult = op->walk(
-          [block, terminator, &bm, &nowFuseGroup](Operation *nestedOp) {
-            for (auto operand : nestedOp->getOperands()) {
-              auto *defOp = getLoopCarriedDefOp(operand, block);
-              if (defOp && bm.getBlockIdByOp(defOp) == -1 &&
-                  !llvm::is_contained(nowFuseGroup, defOp)) {
-                return WalkResult::interrupt();
-              }
-            }
-            return WalkResult::advance();
-          });
+      auto walkResult = op->walk([&](Operation *nestedOp) {
+        for (auto operand : nestedOp->getOperands()) {
+          auto *defOp = getLoopCarriedDefOp(operand, block);
+          if (defOp && bm.getBlockIdByOp(defOp) == -1 &&
+              !llvm::is_contained(nowFuseGroup, defOp)) {
+            return WalkResult::interrupt();
+          }
+        }
+        return WalkResult::advance();
+      });
       if (walkResult.wasInterrupted()) {
         collectAllUsersInFuseGroup(op, nowFuseGroup, toRemove);
       }
@@ -638,6 +641,11 @@ void PlanVectorBlockPass::runOnOperation() {
   // 2. search blocks in topo order and assign block id for each block
   auto result =
       moduleOp.walk<WalkOrder::PreOrder>([&](Block *block) -> WalkResult {
+        // Packed scope units are atomic and already carry their core type;
+        // never assign block ids to the ops nested inside them.
+        if (isa_and_nonnull<scope::ScopeOp>(block->getParentOp())) {
+          return WalkResult::skip();
+        }
         if (bm.shouldInheritFromParent(block, CoreType::VECTOR_ONLY)) {
           LOG_DEBUG("Inherit from parentOp: " << block->getParentOp() << "\n");
           if (llvm::failed(bm.inheritFromParent(block))) {

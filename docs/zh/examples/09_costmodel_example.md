@@ -2,7 +2,7 @@
 
 本示例展示 costmodel 后端的基本调用流程：
 
-- 使用 Triton 前端算子生成 TTIR；
+- 使用 Triton 前端 Kernel 生成 TTIR；
 - 为多个候选 config 构造 `costmodel_bench` item；
 - 对每个 item 调用一次 `costmodel_bench`，并汇总每个 config 的预测耗时。
 

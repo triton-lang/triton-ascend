@@ -29,7 +29,7 @@ def _copy_two_tiles(X, Y):
         first = tla.alloc((16, 32), tl.float32)
         tla.load_gm_to_ub(tla.view(X, (16, 32)), first)
         tla.store_ub_to_gm(first, tla.view(Y, (16, 32)))
-        # Disjoint use ranges still require independent storage under mem_unique.
+        # Separate logical buffers do not force distinct physical storage.
         second = tla.alloc_buffer((16, 32), tl.float32, scope=tla.AddressSpace.UB)
         tla.load_gm_to_ub(tla.view(X + 512, (16, 32)), second)
         tla.store_ub_to_gm(second, tla.view(Y + 512, (16, 32)))
@@ -57,7 +57,7 @@ def test_ir():
             module, _ = compile_offline(_allocate_only, {}, dict(SPACE=spelling, VERSIONS=2))
             text = str(module)
             assert f"#hivm.address_space<{native}>" in text
-            assert "annotation.mark" in text and "{mem_unique}" in text
+            assert "mem_unique" not in text
             assert "hivm.multi_buffer = 2" in text
             assert "#hivm.tcore_type<CUBE>" in text
 
@@ -68,11 +68,11 @@ def test_ir():
         module, ctx = compile_offline(fn, signature, {})
         text = str(lower_offline(module, ctx))
         assert text.count("memref.alloc()") == allocs
-        assert text.count("{mem_unique}") == allocs
+        assert "mem_unique" not in text
         assert f"#hivm.tcore_type<{core}>" in text
         assert "hivm.vector_function" not in text
         assert "!tt.ptr" not in text
-    print("IR PASS: allocation spaces, independent storage, versions and Cube scope")
+    print("IR PASS: allocation spaces, unpinned storage, versions and Cube scope")
 
 
 @pytest.mark.parametrize("space", [tla.AddressSpace.L0A_SF, tla.AddressSpace.L0B_SF, "l0a_sf", "l0b_sf"])

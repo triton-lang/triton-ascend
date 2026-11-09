@@ -4269,10 +4269,9 @@ completeCandidateCosts(const SimdSimtCostReport &report,
   return scores;
 }
 
-static void
-populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
-                                       const CandidateProfile &profile,
-                                       int64_t kernelArgumentCount) {
+static void populateSelectedRouteElapsedPrediction(
+    SimdSimtCostReport &report, const CandidateProfile &profile,
+    int64_t kernelArgumentCount, int64_t numWarps) {
   auto &prediction = report.selectedRouteElapsed;
   const StageRoutePlan *plan = nullptr;
   double baseScore = 0.0;
@@ -4312,7 +4311,7 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
                        "system_counter_frequency_mhz";
   prediction.evidence = profile.kernelTiming.evidence;
   prediction.superblockFactor = plan->routeSuperblockFactor;
-  prediction.baseWarpCount = profile.hardware.baseSimtWarpCount;
+  prediction.baseWarpCount = numWarps;
   prediction.runtimeSchedulingSlotCount = plan->runtimeSchedulingSlotCount;
   prediction.selectionScoreScale = 1.0;
   prediction.schedulingSlotScale = 0.0;
@@ -4859,7 +4858,7 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
     report.decision = forced;
   }
   populateSelectedRouteElapsedPrediction(report, profile,
-                                         report.kernelArgumentCount);
+                                         report.kernelArgumentCount, numWarps);
   ModuleOp expressionModule =
       options.loopWorkloadModule ? options.loopWorkloadModule : module;
   const bool separateSource = expressionModule != module;

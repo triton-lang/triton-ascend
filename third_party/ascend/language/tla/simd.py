@@ -45,6 +45,10 @@ API                           AVE op
 ``vabsdif`` / ``vexpdif``     ``ave.hir.vabs_diff`` / ``ave.hir.vexpdif``
 ``vdup`` / ``vdups``          ``ave.hir.broadcast`` (masked ``vdups``)
 ``vdupv``                     ``ave.hir.vector_broadcast`` (lowest/highest lane)
+``ppack`` / ``punpack``        ``ave.hir.preg.pack`` / ``ave.hir.preg.unpack``
+``pintlv`` / ``pdintlv``       ``ave.hir.preg.interleave`` / ``ave.hir.preg.deinterleave``
+``vselr``                     ``ave.hir.vselr`` (bitwise register gather)
+``vcgadd/max/min``            ``ave.hir.group_reduction`` (Ascend950 only)
 ============================  ==========================================
 
 Element-type support is per op (``_OP_ELEM_SUPPORT``) because the AVE
@@ -160,6 +164,14 @@ __all__ = [
     "vci",
     "pge",
     "membar",
+    "ppack",
+    "punpack",
+    "pintlv",
+    "pdintlv",
+    "vselr",
+    "vcgadd",
+    "vcgmax",
+    "vcgmin",
 ]
 
 
@@ -2066,6 +2078,8 @@ class PART:
     """Sub-register selector for width-changing conversions."""
     EVEN = "part_even"
     ODD = "part_odd"
+    LOWER = "lower"
+    HIGHER = "higher"
 
 
 class PAT:
@@ -2833,3 +2847,145 @@ def membar(scope, _semantic=None):
     """
     scope = str(_unwrap_if_constexpr(scope)).upper()
     _semantic.builder.create_simd_vmembar(scope)
+
+
+def _predicate_lanes(src, name):
+    _require_vector(src, name)
+    if src.dtype != tl.int1 or src.type.lanes not in (64, 128, 256):
+        raise ValueError(f"{name} requires a 64/128/256-lane predicate")
+    return src.type.lanes
+
+
+def _predicate_pack(src, part, unpack, _semantic):
+    lanes = _predicate_lanes(src, "punpack" if unpack else "ppack")
+    part = _unwrap_if_constexpr(part)
+    if part not in (PART.LOWER, PART.HIGHER):
+        raise ValueError("predicate pack/unpack part must be LOWER or HIGHER")
+    allowed = (256, 128) if unpack else (128, 64)
+    if lanes not in allowed:
+        raise ValueError(f"{'punpack' if unpack else 'ppack'} requires {allowed} logical lanes")
+    out_lanes = lanes // 2 if unpack else lanes * 2
+    handle = _semantic.builder.create_simd_pred_pack(src.handle, unpack, int(part == PART.HIGHER))
+    return vector(handle, vector_type(out_lanes, tl.int1))
+
+
+@builtin
+def ppack(src, part=PART.LOWER, _semantic=None):
+    """Pack a 64/128-lane predicate into half of a 128/256-lane predicate.
+
+    LOWER/HIGHER places all source lanes in the first/second result half;
+    the other half is false. This changes density by two using native ppack.
+    """
+    return _predicate_pack(src, part, False, _semantic)
+
+
+@builtin
+def punpack(src, part=PART.LOWER, _semantic=None):
+    """Select LOWER/HIGHER half of a 256/128-lane predicate, returning 128/64 lanes.
+
+    The selected logical bits are unchanged; native punpack adjusts their
+    physical spacing to the wider data-lane density. No extra mask or mode.
+    """
+    return _predicate_pack(src, part, True, _semantic)
+
+
+def _predicate_interleave(a, b, inverse, _semantic):
+    _predicate_lanes(a, "predicate interleave")
+    _predicate_lanes(b, "predicate interleave")
+    if a.type != b.type:
+        raise ValueError("predicate interleave requires identical mask densities")
+    lo, hi = _semantic.builder.create_simd_pred_interleave(a.handle, b.handle, inverse)
+    return vector(lo, a.type), vector(hi, a.type)
+
+
+@builtin
+def pintlv(src0, src1, _semantic=None):
+    """Interleave logical predicate lanes; return the first and second halves.
+
+    Inputs must have identical 256/128/64-lane density, selecting native
+    pintlv.b8/b16/b32 respectively. Output density matches the inputs.
+    """
+    return _predicate_interleave(src0, src1, False, _semantic)
+
+
+@builtin
+def pdintlv(src0, src1, _semantic=None):
+    """Deinterleave two concatenated predicates into even and odd logical lanes.
+
+    Inverse of pintlv at matching 256/128/64-lane density. Both outputs have
+    the input density; padding physical bits are not exposed as logical lanes.
+    """
+    return _predicate_interleave(src0, src1, True, _semantic)
+
+
+@builtin
+def vselr(src, index, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Permute a full register: result[i] = src[index[i]], using native vselr.
+
+    Supports integer 8/16/32-bit, f16/bf16/f32 and fp8e4nv/fp8e5. Indices
+    must be a full unsigned register with the same lane width, and every
+    index must be in range (including masked-off lanes). Repeated indices
+    are allowed. An optional result mask zeros inactive lanes in both modes;
+    preserving old values requires explicit vsel. No UB round-trip.
+    """
+    _require_vector(src, "src")
+    _require_vector(index, "index")
+    tag = _elem_tag(src.dtype)
+    if tag not in ("i8", "i16", "i32", "f16", "bf16", "f32", "fp8e4nv", "fp8e5"):
+        raise ValueError("vselr supports 8/16/32-bit data")
+    bits, lanes = _ELEM_SPECS[tag], _lanes_for(tag)
+    if src.type.lanes != lanes or index.type != vector_type(lanes, {8: tl.uint8, 16: tl.uint16, 32: tl.uint32}[bits]):
+        raise ValueError("vselr requires a full source and same-width unsigned indices")
+    _check_mode(mode)
+    mask = _mask_for(mask, lanes, _semantic)
+    return vector(_semantic.builder.create_simd_vselr(src.handle, index.handle, mask.handle), src.type)
+
+
+def _group_reduce_native(kind, src, mask, mode, _semantic):
+    _require_vector(src, "src")
+    tag = _elem_tag(src.dtype)
+    if tag not in ("i16", "i32", "f16", "f32") or src.type.lanes != _lanes_for(tag):
+        raise ValueError(
+            "group reduction requires a full i16/i32/f16/f32 register; native i8 is unavailable on Ascend950")
+    _check_mode(mode)
+    mask = _mask_for(mask, src.type.lanes, _semantic)
+    handle = _semantic.builder.create_simd_group_reduce(kind, src.handle, mask.handle, _is_unsigned(src.dtype))
+    out_type = vector_type(
+        64, tl.uint32 if _is_unsigned(src.dtype) else tl.int32) if kind == "add" and tag == "i16" else src.type
+    return vector(handle, out_type)
+
+
+@builtin
+def vcgadd(src, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Sum active lanes in each 32-byte group on Ascend950 via AVE.
+
+    Returns a full register: eight group results in lanes 0..7, zeros after.
+    Native 8-bit group reductions are unavailable on Ascend950 and rejected.
+    Mask density matches the source. Empty groups sum to zero; integer sums
+    widen from i16/u16 to i32/u32 (64 output lanes), while i32/u32 wrap
+    to 32 bits. Floating sums use the hardware reduction order.
+    Both modes use the same native result, with no old destination operand.
+    """
+    return _group_reduce_native("add", src, mask, mode, _semantic)
+
+
+@builtin
+def vcgmax(src, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Ascend950 maximum of active lanes per 32-byte group; eight results then zeros.
+
+    Returns the input dtype, including i16/u16. Empty groups use the
+    native maximum-reduction identity. Floating special values follow the
+    target's native reduction semantics, not a sequential Python max.
+    """
+    return _group_reduce_native("max", src, mask, mode, _semantic)
+
+
+@builtin
+def vcgmin(src, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Ascend950 minimum of active lanes per 32-byte group; eight results then zeros.
+
+    Returns the input dtype, including i16/u16. Empty groups use the
+    native minimum-reduction identity. Floating special values follow the
+    target's native reduction semantics, not a sequential Python min.
+    """
+    return _group_reduce_native("min", src, mask, mode, _semantic)

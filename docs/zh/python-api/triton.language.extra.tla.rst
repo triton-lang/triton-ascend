@@ -11,8 +11,8 @@ TLA（Triton Language for Ascend）是面向 Ascend NPU 的显式片上内存、
 本页。平台约束和示例由 ``_ascend_constraints.py`` 注入，示例源码位于
 ``docs/zh/examples/tla``。
 
-当前页面只列出 ``tla``、``tla.scope``、``tla.simd``、``tla.cube`` 和
-``tla.sync`` 的对外接口。
+当前页面覆盖 ``tla`` 顶层接口，以及 ``tla.scope``、``tla.simd``、``tla.cube``、
+``tla.dma``、``tla.sync`` 和 ``tla.math`` 等子模块的对外接口。
 
 编程模型和完整内核示例请参考 :doc:`../triton_api_extension/tla`。
 
@@ -53,6 +53,16 @@ Cube 接口
     :undoc-members:
     :member-order: bysource
 
+DMA 接口
+--------
+
+.. automodule:: triton.language.extra.tla.dma
+
+``tla.dma`` 提供显式的 GM / UB / L1 / L0 DMA 路由，例如
+``load_gm_to_ub``、``load_gm_to_l1``、``copy_ub_to_l1``、``copy_l1_to_l0``、
+``store_l0c_to_gm`` 和 ``set_ctrl``。这些名称同时从顶层
+``triton.language.extra.tla`` 导出，签名与约束见上方“顶层接口”。
+
 同步接口
 --------
 
@@ -60,3 +70,11 @@ Cube 接口
     :members:
     :undoc-members:
     :member-order: bysource
+
+数学接口
+--------
+
+.. automodule:: triton.language.extra.tla.math
+
+``tla.math`` 提供 ``sqrt``、``truncmod`` 和 ``compensated_rstd``。
+这些名称同时从顶层 ``triton.language.extra.tla`` 导出。

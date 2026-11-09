@@ -1,9 +1,8 @@
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
 
-@triton.jit
+@tla.jit
 def compensated_rstd_example(SQ_ptr, O_ptr, N: tl.constexpr, HIDDEN: tl.constexpr):
     sq = tla.view(SQ_ptr, (N, ), strides=(1, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ))

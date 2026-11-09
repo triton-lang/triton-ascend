@@ -1,9 +1,8 @@
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
 
-@triton.jit
+@tla.jit
 def simd_reduce_example(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     a = tla.view(A_ptr, (N, ), strides=(1, ))
     b = tla.view(B_ptr, (N, ), strides=(1, ))

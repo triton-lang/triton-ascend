@@ -1,9 +1,8 @@
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
 
-@triton.jit
+@tla.jit
 def simd_const_example(O_ptr, N: tl.constexpr):
     o = tla.view(O_ptr, (N, ), strides=(1, ))
     o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")

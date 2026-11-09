@@ -1,9 +1,8 @@
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
 
-@triton.jit
+@tla.jit
 def simd_compare_example(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     a = tla.view(A_ptr, (N, ), strides=(1, ))
     b = tla.view(B_ptr, (N, ), strides=(1, ))
@@ -23,7 +22,8 @@ def simd_compare_example(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
         mask = tla.simd.vcmp(av, bv, "gt")
 
         # mask 的 lane 数必须与两个值向量一致。
-        selected = tla.simd.vsel(mask, av, bv)
+        # tla.where 与 tla.simd.vsel 等价，两臂都是 tla.vector。
+        selected = tla.where(mask, av, bv)
         tla.simd.vsts(o_ub[0], selected, dist="NORM_B32")
 
     tla.copy(o_ub, o)

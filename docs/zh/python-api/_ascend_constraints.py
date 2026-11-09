@@ -1153,6 +1153,13 @@ CONSTRAINTS = {
         ],
         "example": "buffer",
     },
+    f"{_TLA_PREFIX}.jit": {
+        "constraints": [
+            "TLA 内核必须使用 ``@tla.jit``；``@triton.jit`` 会走通用前端，不会识别 ``tla.*`` 接口。",
+            "不要通过 ``enable_tla_mode`` 等 launch 参数选择 TLA 前端。",
+        ],
+        "example": "scope",
+    },
 
     # ------------------------------------------------------------------
     # Allocation / view / copy
@@ -1180,16 +1187,51 @@ CONSTRAINTS = {
         ],
         "example": "buffer",
     },
+    f"{_TLA_PREFIX}.assume": {
+        "constraints": [
+            "``cond`` 必须是 Python/constexpr bool 或标量 ``int1`` tensor。",
+            "仅作为 ``llvm.intr.assume`` 优化提示，不生成运行时检查；条件为假时行为未定义。",
+        ],
+        "example": "buffer",
+    },
     f"{_TLA_PREFIX}.copy": {
         "constraints": [
             "``src`` 和 ``dst`` 都必须是 ``tla.buffer``，不接受指针或 tensor。",
             "源和目标元素类型必须一致。",
-            "支持的地址空间组合：``gm->ub``、``ub->gm``、``gm->l1``、``l0c->*``。",
+            "支持 ``gm->ub``、``ub->gm``、``gm->l1``、``ub->l1``、``l1->ub``、``l1->bt``、"
+            "``l1->fb``、``l1->l0a`` / ``l1->l0b`` 和 ``l0c->gm`` / ``l0c->ub`` / ``l0c->l1``。",
+            "``params`` 是可选的路线配置对象，必须与源/目标组合匹配，例如 UB->L1 使用 ``CopyUB2L1Params``。",
             "除 ``gm->l1`` 的 ND->NZ 和 ``l0c`` Fixpipe 的 fractal 关系外，源和目标形状必须一致。",
             "其他地址空间组合会报错。",
         ],
         "example":
         "copy",
+    },
+    **{
+        f"{_TLA_PREFIX}.{name}": {
+            "constraints": [
+                "``src`` / ``dst`` 必须是 ``tla.buffer``，其地址空间必须与接口名一致。",
+                "``params`` 必须是对应的 ``*Params`` 配置对象；默认 ``None`` 使用该路由的默认配置。",
+            ],
+            "example": "dma",
+        }
+        for name in (
+            "load_gm_to_ub", "store_ub_to_gm", "load_gm_to_l1", "copy_ub_to_l1", "copy_l1_to_ub", "copy_l1_to_bt",
+            "copy_l1_to_fb", "copy_l1_to_l0", "store_l0c_to_gm", "copy_l0c_to_ub", "copy_l0c_to_l1")
+    },
+    f"{_TLA_PREFIX}.load_gm_to_l1_mx_scale": {
+        "constraints": [
+            "``src`` 为 GM scale（逻辑形状 ``(rows, K // 32)``），``dst`` 为 L1 ``int8`` / ``uint8`` buffer。",
+            "必须在 ``tla.scope.cube()`` 内使用；``params`` 必须为 ``None``。",
+        ],
+        "example": "dma",
+    },
+    f"{_TLA_PREFIX}.set_ctrl": {
+        "constraints": [
+            "签名为 ``set_ctrl(enable, idx)``：``enable`` 为编译期 bool，``idx`` 为编译期位索引。",
+            "位索引必须由目标硬件和 backend 支持，前序状态不会自动恢复。",
+        ],
+        "example": "dma",
     },
     f"{_TLA_PREFIX}.view": {
         "constraints": [
@@ -1200,6 +1242,14 @@ CONSTRAINTS = {
         ],
         "example":
         "view",
+    },
+    f"{_TLA_PREFIX}.subview": {
+        "constraints": [
+            "``src`` 必须是 ``tla.buffer``；``sizes`` / ``strides`` 是正的编译期整数，``strides`` 相对于源视图。",
+            "``offsets`` 可以是标量整数或整数 tensor；静态越界会被拒绝，动态 offset 需在运行时保证越界安全。",
+            "保持源 dtype 和地址空间，不拷贝数据。",
+        ],
+        "example": "view",
     },
     f"{_TLA_PREFIX}.reshape": {
         "constraints": [
@@ -1236,9 +1286,11 @@ CONSTRAINTS = {
     },
     f"{_TLA_PREFIX}.scope.cube": {
         "constraints": [
-            "Cube 核区域当前保留，Cube 算子尚未通过该作用域暴露。",
+            "Cube 核区域，必须配合 ``@tla.jit`` 使用。",
+            "在区域内部分配 L1 / L0C buffer，执行 GM->L1、``tla.cube.mmad`` / ``mmad_mx`` 和 L0C Fixpipe。",
+            "与 Vector scope 之间的数据交接需要显式同步。",
         ],
-        "example": "scope",
+        "example": "cube_mmad",
     },
 
     # ------------------------------------------------------------------
@@ -1362,6 +1414,13 @@ CONSTRAINTS = {
         ],
         "example": "simd_compare",
     },
+    f"{_TLA_PREFIX}.where": {
+        "constraints": [
+            "两个分支都会立即求值；``condition`` 可以是 Python/constexpr bool、标量 int1 tensor 或 ``tla.vector<int1>`` mask。",
+            "向量分支要求 ``x`` / ``y`` 都是同类型 ``tla.vector``；SIMD 向量 mask 会自动转为 ``vsel``。",
+        ],
+        "example": "simd_compare",
+    },
 
     # ------------------------------------------------------------------
     # SIMD reduction / broadcast / constants / predicate
@@ -1442,14 +1501,30 @@ CONSTRAINTS = {
     # ------------------------------------------------------------------
     f"{_TLA_PREFIX}.cube.mmad": {
         "constraints": [
+            "必须在 ``tla.scope.cube()`` 内使用。",
             "``a`` / ``b`` 必须是 L1 buffer，``acc`` 必须是 L0C buffer。",
             "``a`` 和 ``b`` 元素类型必须一致。",
             "形状必须满足 ``a=(M, K)``、``b=(K, N)``、``acc=(M, N)``。",
             "操作数可以是 2 维 ND 形状，也可以是等价的 4 维 zN 形状。",
-            "只暴露 ``transpose_b``；``transpose_a`` 可通过 GM->L1 拷贝调整布局实现。",
+            "支持 ``transpose_a`` / ``transpose_b``；``real_m`` / ``real_k`` / ``real_n`` 可限制为前导子矩阵。",
+            "``unit_flag_ctrl`` / ``unit_flag_group_id`` 控制 UnitFlag 协议。",
         ],
         "example":
         "cube_mmad",
+    },
+    f"{_TLA_PREFIX}.cube.mmad_mx": {
+        "constraints": [
+            "必须在 ``tla.scope.cube()`` 内使用；``a`` / ``b`` 为 L1，``scale_a`` / ``scale_b`` 为 L1 E8M0 buffer，``acc`` 为 L0C。",
+            "每 32 个逻辑 K 元素共享一个 scale 字节；scale 通过 ``tla.load_gm_to_l1_mx_scale`` 加载。",
+            "``format_a`` / ``format_b`` 使用 ``tla.MxFormat``，FP4 要求两侧都为 ``E2M1``。",
+        ],
+        "example": "cube_mmad",
+    },
+    f"{_TLA_PREFIX}.cube.MxFormat": {
+        "constraints": [
+            "``E5M2`` / ``E4M3`` 对应 FP8，``E2M1`` 对应打包 FP4；packed FP4 的 L1 buffer 每字节存两个逻辑 K 值。",
+        ],
+        "example": "cube_mmad",
     },
 
     # ------------------------------------------------------------------
@@ -1457,8 +1532,8 @@ CONSTRAINTS = {
     # ------------------------------------------------------------------
     f"{_TLA_PREFIX}.sync.barrier": {
         "constraints": [
-            "``pipe`` 是编译期字符串，例如 ``\"V\"``、``\"MTE2\"`` 或 ``\"PIPE_V\"``。",
-            "``barrier(\"ALL\")`` 等价于 ``PIPE_ALL``。",
+            "``pipe`` 是编译期 ``tla.sync.PIPE`` 枚举，例如 ``PIPE.V``、``PIPE.MTE2``。",
+            "``barrier(PIPE.ALL)`` 表示全流水屏障。",
         ],
         "example":
         "sync",
@@ -1466,14 +1541,14 @@ CONSTRAINTS = {
     f"{_TLA_PREFIX}.sync.set_flag": {
         "constraints": [
             "``event_id`` 范围 ``[0, 7]``。",
-            "``pipe1`` / ``pipe2`` 是编译期流水字符串。",
+            "``pipe1`` / ``pipe2`` 是编译期 ``tla.sync.PIPE`` 枚举。",
         ],
         "example": "sync",
     },
     f"{_TLA_PREFIX}.sync.wait_flag": {
         "constraints": [
             "``event_id`` 范围 ``[0, 7]``，必须与对应的 ``set_flag`` 一致。",
-            "``pipe1`` / ``pipe2`` 是编译期流水字符串。",
+            "``pipe1`` / ``pipe2`` 是编译期 ``tla.sync.PIPE`` 枚举。",
         ],
         "example": "sync",
     },
@@ -1486,15 +1561,24 @@ CONSTRAINTS = {
     },
     f"{_TLA_PREFIX}.sync.block_set_flag": {
         "constraints": [
-            "``mode`` 取值：``0`` inter-block、``1`` inter-subblock、``2`` intra-block。",
-            "``flag`` 范围 ``[0, 15]``。",
+            "签名为 ``block_set_flag(mode, pipe, flagid)``。",
+            "``mode`` 使用 ``tla.sync.MODE``：``INTER`` / ``SUBBLOCK`` / ``BLOCK``。",
+            "``pipe`` 使用 ``tla.sync.PIPE``；``flag`` 范围 ``[0, 15]``。",
         ],
         "example":
         "sync",
     },
     f"{_TLA_PREFIX}.sync.block_wait_flag": {
         "constraints": [
-            "``flag`` 范围 ``[0, 15]``，必须与对应的 ``block_set_flag`` 一致。",
+            "签名为 ``block_wait_flag(mode, pipe, flagid)``，``mode`` / ``pipe`` 必须与对应的 ``block_set_flag`` 一致。",
+            "``flag`` 范围 ``[0, 15]``。",
+        ],
+        "example": "sync",
+    },
+    f"{_TLA_PREFIX}.sync.sub_block_id": {
+        "constraints": [
+            "返回当前 AIV sub-block 在其 Cube block 内的索引，类型为 ``int64``。",
+            "常用于在 Vector scope 内区分多个 AIV sub-block 的搬运和计算。",
         ],
         "example": "sync",
     },
@@ -1502,6 +1586,20 @@ CONSTRAINTS = {
     # ------------------------------------------------------------------
     # Math / debug
     # ------------------------------------------------------------------
+    f"{_TLA_PREFIX}.sqrt": {
+        "constraints": [
+            "支持 ``f16`` / ``f32`` SIMD 向量和 ``f32`` 标量；不做隐式整数到浮点转换。",
+            "不改变输入 dtype 和向量 lane 数。",
+        ],
+        "example": "math",
+    },
+    f"{_TLA_PREFIX}.truncmod": {
+        "constraints": [
+            "整数取余，向零截断；非零结果符号与被除数一致。",
+            "操作数必须是非布尔整数标量或整数 tensor；不支持浮点、block tensor 和 SIMD 向量。",
+        ],
+        "example": "math",
+    },
     f"{_TLA_PREFIX}.compensated_rstd": {
         "constraints": [
             "``square_sum`` 必须是 ``f32`` 向量寄存器，通常为广播到所有 lane 的值。",

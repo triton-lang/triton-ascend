@@ -1,0 +1,25 @@
+import triton.language as tl
+import triton.language.extra.tla as tla
+
+
+@tla.jit
+def cube_mmad_example(A_ptr, B_ptr, O_ptr, M: tl.constexpr, K: tl.constexpr, N: tl.constexpr):
+    a = tla.view(A_ptr, (M, K), strides=(K, 1))
+    b = tla.view(B_ptr, (K, N), strides=(N, 1))
+    o = tla.view(O_ptr, (M, N), strides=(N, 1))
+
+    with tla.scope.cube():
+        # Place A/B in L1 using the 4-D fractal shape for ND->NZ; place the accumulator in L0C.
+        a_l1 = tla.alloc_buffer((K // 16, M // 16, 16, 16), tl.float16, space="l1")
+        b_l1 = tla.alloc_buffer((N // 16, K // 16, 16, 16), tl.float16, space="l1")
+        acc = tla.alloc_buffer((M, N), tl.float32, space="l0c")
+
+        # GM -> L1 (ND -> NZ layout conversion).
+        tla.copy(a, a_l1)
+        tla.copy(b, b_l1)
+
+        # C = A x B.
+        tla.cube.mmad(a_l1, b_l1, acc, transpose_b=False, clear_accum=True)
+
+        # L0C -> GM (Fixpipe).
+        tla.copy(acc, o)

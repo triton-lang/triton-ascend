@@ -61,6 +61,8 @@ OrdinaryLoadMainResult targetCost(triton::LoadOp load,
   indirect_load_selected::Metadata m;
   m.shape.assign(tensor.getShape().begin(), tensor.getShape().end());
   m.mode = implementation.mode == StageMode::SIMD ? Mode::SIMD : Mode::SIMT;
+  // Extrapolate the trained per-logical-target increment to legal SIMT F.
+  // Scheduling and auxiliary work retain the candidate implementation factor.
   m.factor = 1;
   m.baseWarps = m.mode == Mode::SIMD ? 1 : profile.baseSimtWarpCount;
   const unsigned bits = element.getIntOrFloatBitWidth();
@@ -127,11 +129,15 @@ mlir::ascend::ordinaryLoadMainCost(const LogicalStage &stage,
   OrdinaryLoadMainResult result;
   result.reason = "Load_no_eligible_single_target";
   if (!operationOwnershipComplete || stage.operations.empty() ||
-      implementation.superblockFactor != 1 || implementation.localScope ||
-      implementation.aivSubblocks != 1 || stage.iterationCount != 1 ||
-      stage.features.hasLoop || stage.features.hasAtomicMemory ||
-      stage.features.hasDot || stage.features.hasReduction ||
-      stage.features.hasPrefixScan ||
+      implementation.superblockFactor <= 0 ||
+      (implementation.superblockFactor &
+       (implementation.superblockFactor - 1)) != 0 ||
+      (implementation.mode == StageMode::SIMD &&
+       implementation.superblockFactor != 1) ||
+      implementation.localScope || implementation.aivSubblocks != 1 ||
+      stage.iterationCount != 1 || stage.features.hasLoop ||
+      stage.features.hasAtomicMemory || stage.features.hasDot ||
+      stage.features.hasReduction || stage.features.hasPrefixScan ||
       profile.target != "Ascend950PR/dav-c310" ||
       profile.ordinaryStoreActiveProfileSha256.size() != 64 ||
       profile.ordinaryStoreUnitSourceSha256.size() != 64)

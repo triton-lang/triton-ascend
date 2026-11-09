@@ -1,11 +1,13 @@
 """Host-only checks for Proton's experimental MSPTI collector."""
 import ctypes
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 
 @pytest.fixture(scope="module", autouse=True)
 def assign_npu():
@@ -27,7 +29,7 @@ def collector(collector_module, monkeypatch):
     module = collector_module
     calls = []
     records = (module.ScopeRecord * 1)(module.ScopeRecord(10, 30, 12, 0, 1, 1650))
-    status = SimpleNamespace(start=0, stop=0, count=1)
+    status = SimpleNamespace(start=0, stop=0, count=1, flush_error=0)
 
     def start(device, handle):
         calls.append(("start", device))
@@ -39,10 +41,15 @@ def collector(collector_module, monkeypatch):
         calls.append(("stop", ))
         return status.stop
 
+    def start_with_channels(device, channels, count, handle):
+        calls.append(("channels", list(channels[:count])))
+        return start(device, handle)
+
     def get_records(_handle, output, count, stats):
         ctypes.cast(output, ctypes.POINTER(ctypes.POINTER(module.ScopeRecord)))[0] = records
         ctypes.cast(count, ctypes.POINTER(ctypes.c_size_t))[0] = status.count
-        ctypes.cast(stats, ctypes.POINTER(module.CollectionStats))[0] = module.CollectionStats()
+        ctypes.cast(stats,
+                    ctypes.POINTER(module.CollectionStats))[0] = module.CollectionStats(flush_error=status.flush_error)
         return 0
 
     def destroy(_handle):
@@ -53,7 +60,8 @@ def collector(collector_module, monkeypatch):
         ctypes.cast(output, ctypes.POINTER(ctypes.c_uint32))[0] = 5
         return 0
 
-    library = SimpleNamespace(msptiInstrumentationStart=start, msptiInstrumentationStop=stop,
+    library = SimpleNamespace(msptiInstrumentationStart=start,
+                              msptiInstrumentationStartWithChannels=start_with_channels, msptiInstrumentationStop=stop,
                               msptiInstrumentationGetRecords=get_records,
                               msptiInstrumentationGetRawData=lambda *_args: 0, msptiInstrumentationDestroy=destroy)
     runtime = SimpleNamespace(rtGetDevicePhyIdByIndex=physical_device)
@@ -63,7 +71,9 @@ def collector(collector_module, monkeypatch):
         SimpleNamespace(
             npu=SimpleNamespace(synchronize=lambda: calls.append(("synchronize", )), current_device=lambda: 0)))
     monkeypatch.delenv("PROTON_INSTRUMENTATION_DEBUG_DIR", raising=False)
-    instance = module.MsptiInstrumentationCollector()
+    monkeypatch.delenv("PROTON_INSTRUMENTATION_CHANNELS", raising=False)
+    with pytest.warns(UserWarning, match="not every Triton program/block"):
+        instance = module.MsptiInstrumentationCollector()
     yield instance, status, calls
     if instance.handle:
         instance.stop()
@@ -116,4 +126,54 @@ def test_concurrent_capture_is_rejected(collector, collector_module):
 def test_missing_api_is_reported(collector_module, monkeypatch):
     monkeypatch.setattr(collector_module.C, "CDLL", lambda _path: SimpleNamespace())
     with pytest.raises(RuntimeError, match="MSPTI instrumentation PoC library"):
+        collector_module.MsptiInstrumentationCollector()
+
+
+def test_selected_channels(collector, collector_module, monkeypatch):
+    _default, _status, calls = collector
+    monkeypatch.setenv("PROTON_INSTRUMENTATION_CHANNELS", "12, 15")
+    with pytest.warns(UserWarning, match=r"\[12, 15\]"):
+        selected = collector_module.MsptiInstrumentationCollector()
+    selected.start()
+    assert selected.stop() == [(12, 0, 1, 10, 30, 1650)]
+    assert ("channels", [12, 15]) in calls
+    assert not selected._lock.locked()
+
+
+@pytest.mark.parametrize("selection", ["", "12,", "a", "10", "29", "12,12", "-1"])
+def test_invalid_channel_selection(collector_module, monkeypatch, selection):
+    monkeypatch.setenv("PROTON_INSTRUMENTATION_CHANNELS", selection)
+    with pytest.raises(ValueError, match="PROTON_INSTRUMENTATION_CHANNELS"):
+        collector_module.MsptiInstrumentationCollector()
+
+
+def test_flush_failure_is_visible(collector):
+    instance, status, _calls = collector
+    status.flush_error = 65534
+    instance.start()
+    with pytest.warns(UserWarning, match="flush returned 65534"):
+        assert instance.stop() == [(12, 0, 1, 10, 30, 1650)]
+    assert not instance.handle
+    assert not instance._lock.locked()
+
+
+def test_debug_dump_labels_partial_coverage(collector, monkeypatch, tmp_path):
+    instance, _status, _calls = collector
+    monkeypatch.setenv("PROTON_INSTRUMENTATION_DEBUG_DIR", str(tmp_path))
+    instance.start()
+    instance.stop()
+    paths = list(tmp_path.glob("*/records.json"))
+    assert len(paths) == 1
+    coverage = json.loads(paths[0].read_text())["coverage"]
+    assert coverage == {
+        "kind": "sampled_hardware_channels", "requested_channels": list(range(11, 29)), "observed_channels": [12],
+        "all_logical_blocks": False
+    }
+
+
+def test_selection_requires_new_api(collector, collector_module, monkeypatch):
+    instance, _status, _calls = collector
+    del instance.lib.msptiInstrumentationStartWithChannels
+    monkeypatch.setenv("PROTON_INSTRUMENTATION_CHANNELS", "12")
+    with pytest.raises(RuntimeError, match="msptiInstrumentationStartWithChannels"):
         collector_module.MsptiInstrumentationCollector()

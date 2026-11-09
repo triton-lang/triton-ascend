@@ -248,6 +248,9 @@ void StreamChromeTraceWriter::writeKernel(json &object,
           element["args"] = args;
           element["args"]["call_stack"] = callStack;
           if (metadata->channelTrace) {
+            element["args"]["coverage"] = "sampled_hardware_channels";
+            element["args"]["all_logical_blocks"] = false;
+            element["args"]["channel_id_is_core_id"] = false;
             element["args"]["clock_domain"] =
                 "channel-relative; not host synchronized";
             element["args"]["start_cycle"] = event.first->cycle;

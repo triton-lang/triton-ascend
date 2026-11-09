@@ -21,7 +21,9 @@
 SIMD vector-register primitives for the engram_fused_weight decode chains.
 
 SIMD primitives use AVE dialect ops (``ave.hir.*``) built through
-``tla_builder.cc`` bindings. Some interfaces compose multiple AVE ops:
+``tla_builder.cc`` bindings. Predicate pack/interleave and group reductions
+call existing Regbase intrinsic ops; their type handling stays in TLA.
+Some interfaces compose multiple AVE ops:
 
 ============================  ==========================================
 API                           AVE op
@@ -159,6 +161,13 @@ __all__ = [
     "vreduce_max",
     "vreduce_min",
     "vci",
+    "ppack",
+    "punpack",
+    "pintlv",
+    "pdintlv",
+    "vcgadd",
+    "vcgmax",
+    "vcgmin",
     "pge",
     "membar",
 ]
@@ -2219,6 +2228,8 @@ class PART:
     """Sub-register selector for width-changing conversions."""
     EVEN = "part_even"
     ODD = "part_odd"
+    LOWER = "lower"
+    HIGHER = "higher"
 
 
 class PAT:
@@ -3045,3 +3056,128 @@ def membar(scope, _semantic=None):
     """
     scope = str(_unwrap_if_constexpr(scope)).upper()
     _semantic.builder.create_simd_vmembar(scope)
+
+
+def _predicate_lanes(src, name):
+    _require_vector(src, name)
+    if src.dtype != tl.int1 or src.type.lanes not in (64, 128, 256):
+        raise ValueError(f"{name} requires a 64/128/256-lane predicate")
+    return src.type.lanes
+
+
+def _predicate_pack(src, part, unpack, _semantic):
+    lanes = _predicate_lanes(src, "punpack" if unpack else "ppack")
+    part = _unwrap_if_constexpr(part)
+    if part not in (PART.LOWER, PART.HIGHER):
+        raise ValueError("predicate pack/unpack part must be LOWER or HIGHER")
+    allowed = (256, 128) if unpack else (128, 64)
+    if lanes not in allowed:
+        raise ValueError(f"{'punpack' if unpack else 'ppack'} requires {allowed} logical lanes")
+    out_lanes = lanes // 2 if unpack else lanes * 2
+    handle = _semantic.builder.create_simd_pred_pack(src.handle, unpack, int(part == PART.HIGHER))
+    return vector(handle, vector_type(out_lanes, tl.int1))
+
+
+@builtin
+def ppack(src, part=PART.LOWER, _semantic=None):
+    """Ascend950: pack 64/128 predicate lanes into half of a 128/256-lane result.
+
+    LOWER/HIGHER places all source lanes in the first/second result half;
+    the other half is false. This changes density by two using native ppack.
+    """
+    return _predicate_pack(src, part, False, _semantic)
+
+
+@builtin
+def punpack(src, part=PART.LOWER, _semantic=None):
+    """Ascend950: select LOWER/HIGHER half of 256/128 predicate lanes.
+
+    Returns 128/64 logical lanes.
+
+    The selected logical bits are unchanged; native punpack adjusts their
+    physical spacing to the wider data-lane density. No extra mask or mode.
+    """
+    return _predicate_pack(src, part, True, _semantic)
+
+
+def _predicate_interleave(a, b, inverse, _semantic):
+    _predicate_lanes(a, "predicate interleave")
+    _predicate_lanes(b, "predicate interleave")
+    if a.type != b.type:
+        raise ValueError("predicate interleave requires identical mask densities")
+    lo, hi = _semantic.builder.create_simd_pred_interleave(a.handle, b.handle, inverse)
+    return vector(lo, a.type), vector(hi, a.type)
+
+
+@builtin
+def pintlv(src0, src1, _semantic=None):
+    """Ascend950: interleave predicates and return the first and second halves.
+
+    Inputs must have identical 256/128/64-lane density, selecting native
+    pintlv.b8/b16/b32 respectively. Output density matches the inputs.
+    """
+    return _predicate_interleave(src0, src1, False, _semantic)
+
+
+@builtin
+def pdintlv(src0, src1, _semantic=None):
+    """Ascend950: deinterleave concatenated predicates into even and odd lanes.
+
+    Inverse of pintlv at matching 256/128/64-lane density. Both outputs have
+    the input density; padding physical bits are not exposed as logical lanes.
+    """
+    return _predicate_interleave(src0, src1, True, _semantic)
+
+
+def _group_reduce_native(kind, src, mask, mode, _semantic):
+    _require_vector(src, "src")
+    tag = _elem_tag(src.dtype)
+    if tag not in ("i16", "i32", "f16", "f32") or src.type.lanes != _lanes_for(tag):
+        raise ValueError(
+            "group reduction requires a full i16/i32/f16/f32 register; native i8 is unavailable on Ascend950")
+    _check_mode(mode)
+    mask = _mask_for(mask, src.type.lanes, _semantic)
+    handle = _semantic.builder.create_simd_group_reduce(kind, src.handle, mask.handle, _is_unsigned(src.dtype))
+    out_type = vector_type(
+        64, tl.uint32 if _is_unsigned(src.dtype) else tl.int32) if kind == "add" and tag == "i16" else src.type
+    result = vector(handle, out_type)
+    # The native min wrapper does not initialize every tail lane.
+    first_eight = pge(8, out_type.lanes, _semantic=_semantic)
+    zero = vsplat(0, out_type.element_ty, _semantic=_semantic)
+    return vsel(first_eight, result, zero, _semantic=_semantic)
+
+
+@builtin
+def vcgadd(src, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Sum active lanes in each 32-byte group on Ascend950 using the native group instruction.
+
+    Returns a full register: eight group results in lanes 0..7, zeros after.
+    Native 8-bit group reductions are unavailable on Ascend950 and rejected.
+    Mask density matches the source. Empty groups sum to zero; integer sums
+    widen from i16/u16 to i32/u32 (64 output lanes), while i32/u32 wrap
+    to 32 bits. Floating sums use the hardware reduction order.
+    Both modes use the same native result, with no old destination operand.
+    """
+    return _group_reduce_native("add", src, mask, mode, _semantic)
+
+
+@builtin
+def vcgmax(src, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Ascend950 maximum of active lanes per 32-byte group; eight results then zeros.
+
+    Returns the input dtype, including i16/u16. Empty groups use the
+    native maximum-reduction identity. Floating special values follow the
+    target's native reduction semantics, not a sequential Python max.
+    """
+    return _group_reduce_native("max", src, mask, mode, _semantic)
+
+
+@builtin
+def vcgmin(src, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Ascend950 minimum of active lanes per 32-byte group; eight results then zeros.
+
+    Returns the input dtype, including i16/u16. Empty groups use the
+    native minimum-reduction identity. Floating special values follow the
+    target's native reduction semantics, not a sequential Python min.
+    """
+    return _group_reduce_native("min", src, mask, mode, _semantic)

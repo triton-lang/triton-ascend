@@ -80,3 +80,32 @@ Host-only SIMD contract tests do not need a build or NPU:
 ```bash
 pytest third_party/ascend/unittest/tla_ut -k simd_frontend
 ```
+
+## Native predicate and group operations (Ascend950)
+
+These APIs call the existing NPU-IR Regbase operations. They do not require
+new AVE operations or a different NPU-IR revision.
+
+| API | Result | Test file |
+| --- | --- | --- |
+| `ppack` | Put 64/128 predicate lanes in the lower or higher half of a 128/256-lane result; zero the other half. | `simd/predicate_ops.py` |
+| `punpack` | Select the lower or higher half of 128/256 predicate lanes. | `simd/predicate_ops.py` |
+| `pintlv` / `pdintlv` | Interleave/deinterleave two predicates, returning both results at the same density. | `simd/predicate_ops.py` |
+| `vcgadd` | Sum each 32-byte group; i16/u16 sums widen to i32/u32. | `simd/group_reduce.py` |
+| `vcgmax` / `vcgmin` | Maximum/minimum of each 32-byte group, preserving the source dtype. | `simd/group_reduce.py` |
+
+Group operations accept full i16/u16/i32/u32/f16/f32 registers. The eight
+results occupy lanes 0..7; the remaining lanes are zero. Empty groups use
+the native reduction identity. Both modes return the same result because
+there is no previous destination operand. Ascend960 and other targets are
+rejected until their instruction contracts are supported.
+
+```bash
+TLA_TEST_STAGE=run pytest third_party/ascend/unittest/tla_ut/simd/predicate_ops.py \
+  third_party/ascend/unittest/tla_ut/simd/group_reduce.py \
+  third_party/ascend/unittest/tla_ut/simd/native_register_contract.py
+```
+
+Use `TLA_TEST_STAGE=ir` for host-only IR and parameter checks; these require
+a TLA-enabled build. The device tests check both predicate results, padding,
+shared producers, roundtrips, signedness, widening, masks and zero tails.

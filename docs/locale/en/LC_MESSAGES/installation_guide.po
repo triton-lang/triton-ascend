@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-11-09 10:03+0800\n"
-"PO-Revision-Date: 2026-11-09 10:03+0800\n"
+"POT-Creation-Date: 2026-11-09 15:01+0800\n"
+"PO-Revision-Date: 2026-11-09 15:01+0800\n"
 
-"X-Source-Commit: 355b8cb2ad0dba8c614270a045c451c0e03615b9\n"
+"X-Source-Commit: 674f6d74b38d8b4dc41a21b048eb98d63d1ed879\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -19,11 +19,11 @@ msgstr "Installation Guide"
 msgid "**Triton-Ascend**是适配华为昇腾处理器的Triton优化版本，提供核函数自动调优、算子编译及部署能力。支持Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品，兼容Triton核心语法，并针对华为昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。"
 msgstr "**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It provides capabilities for kernel autotuning, operator compilation, and deployment. It supports Atlas A2 products, Atlas A3 products, and Ascend 950PR&950DT products. It is compatible with the core syntax of Triton and is deeply optimized for Huawei Ascend NPU features. These optimizations include automatically parsing kernel parameters, optimizing memory access logic, and improving secure deployment mechanisms."
 
-msgid "本指南指导开发者在**Ubuntu**环境下安装**Triton-Ascend**，涵盖快速安装、源码安装及镜像安装三种方式，并包含环境验证与常见问题排查。"
-msgstr "This guide instructs developers to install **Triton-Ascend** in an **Ubuntu** environment; it covers three methods: quick installation, source code installation, and image installation, and includes environment verification and troubleshooting."
-
 msgid "环境准备"
 msgstr "Environment Preparation"
+
+msgid "这一段用于测试"
+msgstr "This paragraph is used for testing."
 
 msgid "**硬件要求**"
 msgstr "**Hardware requirements**"

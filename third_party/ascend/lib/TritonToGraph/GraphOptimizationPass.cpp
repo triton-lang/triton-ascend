@@ -598,7 +598,11 @@ void populateBuiltinGraphOptimizationRules(
     rules.push_back(
         createStoreCoveragePlanningRule(options.storeCoveragePlanning));
   }
-  if (isRuleEnabled(options.enabledRuleMask,
+  // Interleaved-load packing is opt-in and currently validated only for
+  // the SIMD/template path. Do not change SIMT or native mixed layouts.
+  if ((options.compileMode == "simd" ||
+       options.compileMode == "simd_simt_template") &&
+      isRuleEnabled(options.enabledRuleMask,
                     GraphOptimizationRuleId::ContiguousBlockAccessFormation)) {
     rules.push_back(createContiguousBlockAccessFormationRule(
         options.contiguousBlockAccessFormation));

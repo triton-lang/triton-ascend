@@ -11,6 +11,7 @@
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/Profile/MicrobenchmarkProfile.h"
 #include "AscendModel/RouteModel/Models/IndirectGatherMemoryCostModel.h"
+#include "AscendModel/RouteModel/SpecializedMemoryMain.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
 
@@ -4009,7 +4010,45 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
       nativeChain = true;
     }
   }
-  if (nativeChain) {
+  bool specializedFragment = false;
+  if (partition->operationOwnershipComplete && logicalProgramCountHint == 1 &&
+      options.sourceLogicalProgramCountHint <= 1 &&
+      hardwareProfile.target == "Ascend950PR/dav-c310" &&
+      profile.kernelTiming.isValid()) {
+    if (auto geometry = proveSpecializedMemoryFragment(module)) {
+      auto applyFragment = [&](StageRoutePlan &plan,
+                               SpecializedMemoryMode mode) {
+        if (!plan.legal || plan.routeSuperblockFactor != 1 ||
+            plan.runtimePhysicalProgramCount != 1 ||
+            plan.runtimeLoopIterationCount != 1 ||
+            llvm::any_of(plan.implementations,
+                         [](const StageImplementation &impl) {
+                           return impl.localScope || impl.aivSubblocks != 1;
+                         }))
+          return;
+        auto g = *geometry;
+        g.mode = mode;
+        g.warps = mode == SpecializedMemoryMode::SIMD ? 1 : numWarps;
+        auto estimate = estimateSpecializedMemory(g);
+        if (!estimate.supported)
+          return;
+        const double elapsed = estimate.microseconds *
+                               profile.kernelTiming.systemCounterFrequencyMHz;
+        if (!std::isfinite(elapsed) || elapsed <= 0.0)
+          return;
+        plan.diagnostic<bool>("specialized_memory_complete_applied") = true;
+        plan.diagnostic<double>("specialized_memory_elapsed_system_cycles") =
+            elapsed;
+        plan.diagnostic<std::string>("specialized_memory_model_sha256") =
+            estimate.modelSHA256;
+        specializedFragment = true;
+      };
+      applyFragment(routes->allSimd, SpecializedMemoryMode::SIMD);
+      for (auto &[factor, plan] : routes->allSimtFactorPlans)
+        applyFragment(plan, SpecializedMemoryMode::SIMT);
+    }
+  }
+  if (nativeChain || specializedFragment) {
     // Compare complete elapsed costs for factors; the native envelope already
     // includes fixed/setup/helper costs and supersedes old route residuals.
     const StageRoutePlan *best = nullptr;
@@ -4029,6 +4068,9 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
                         kAllSimtOnly) +
                     profile.kernelTiming.runtimeArgumentSetupSystemCycles(
                         kAllSimtOnly, kernelArgumentCount);
+      if (plan.diagnostic<bool>("specialized_memory_complete_applied"))
+        elapsed =
+            plan.diagnostic<double>("specialized_memory_elapsed_system_cycles");
       if (!best || elapsed < bestElapsed) {
         best = &plan;
         bestElapsed = elapsed;
@@ -4266,6 +4308,12 @@ completeCandidateCosts(const SimdSimtCostReport &report,
           "native_indirect_chain_applied"))
     scores.allSimtOnly = report.stageModel.allSimt.diagnostic<double>(
         "native_indirect_chain_elapsed_system_cycles");
+  for (auto pair :
+       {std::make_pair(&report.stageModel.allSimd, &scores.allSimd),
+        std::make_pair(&report.stageModel.allSimt, &scores.allSimtOnly)})
+    if (pair.first->diagnostic<bool>("specialized_memory_complete_applied"))
+      *pair.second = pair.first->diagnostic<double>(
+          "specialized_memory_elapsed_system_cycles");
   return scores;
 }
 
@@ -4378,6 +4426,19 @@ static void populateSelectedRouteElapsedPrediction(
         prediction.scalarEpilogueSystemCycles = 0;
     prediction.baseSelectionScore = prediction.predictedSystemCounterCycles =
         plan->diagnostic<double>("native_indirect_chain_elapsed_system_cycles");
+    prediction.predictedMicroseconds = prediction.predictedSystemCounterCycles /
+                                       prediction.systemCounterFrequencyMHz;
+  }
+  if (plan->diagnostic<bool>("specialized_memory_complete_applied")) {
+    prediction.reason = "specialized_memory_complete_fragment";
+    prediction.calibrationName = "specialized_segments_direct_F1";
+    prediction.formula = "complete_fragment_microseconds";
+    prediction.evidence = "TTIR-proved index, DS payload and contiguous "
+                          "source/sink; full elapsed replacement";
+    prediction.fixedSystemCycles = prediction.scalarPrologueSystemCycles =
+        prediction.scalarEpilogueSystemCycles = 0;
+    prediction.baseSelectionScore = prediction.predictedSystemCounterCycles =
+        plan->diagnostic<double>("specialized_memory_elapsed_system_cycles");
     prediction.predictedMicroseconds = prediction.predictedSystemCounterCycles /
                                        prediction.systemCounterFrequencyMHz;
   }

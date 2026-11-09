@@ -61,5 +61,5 @@ add_triton_ut(
 add_triton_ut(
   NAME SpecializedMemoryCostModel
   SRCS specialized_memory/SpecializedMemoryCostModelTest.cpp
-  LIBS AscendModelRouteModel
+  LIBS AscendModelRouteModel MLIRParser
 )

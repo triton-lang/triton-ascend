@@ -1,8 +1,9 @@
 """TLA 3-in-1 test: device_print (route A: hivm.hir.debug directly).
 
 Semantics: copy GM->UB, print two UB slices outside the SIMD scope, then copy
-UB->GM inside it.  Each value emits one hivm.hir.debug op; buf[i0, i1, ...]
-element ranges lower to a 0-d memref subview so only that element is dumped.
+UB->GM inside the vector (non-SIMD DMA) scope.  Each value emits one
+hivm.hir.debug op; buf[i0, i1, ...] element ranges lower to a 0-d memref
+subview so only that element is dumped.
 
 Validation (see device_print.py): calls inside a tla.scope and non-UB/GM
 values (L1/L0*) are rejected with RuntimeError.
@@ -39,8 +40,8 @@ def device_print_kernel(A_ptr, M: tl.constexpr, N: tl.constexpr):
     tla.copy(a_blk, a_ub)  # GM -> UB (hivm.hir.load)
     tla.device_print("ub[0, 0] = ", a_ub[0, 0])
     tla.device_print("ub[0, 1] = ", a_ub[0, 1], hex=True)
-    with tla.scope.simd():
-        tla.copy(a_ub, a_blk)  # UB -> GM (hivm.hir.store)
+    with tla.scope.vector():
+        tla.copy(a_ub, a_blk)  # UB -> GM (hivm.hir.store), non-SIMD DMA
 
 
 # negative kernels: must raise RuntimeError at compile time.

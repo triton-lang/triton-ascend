@@ -154,7 +154,9 @@ def test_ir(output_dir=None):
 
 def _rows(bits, prefix):
     zero = torch.zeros_like(bits)
-    return torch.stack([bits, torch.where(prefix, bits, zero), zero])
+    # torch.where on CPU has no uint16 kernel; mask through int32 and cast back.
+    masked = (bits.to(torch.int32) * prefix.to(torch.int32)).to(bits.dtype)
+    return torch.stack([bits, masked, zero])
 
 
 def _bits(t):

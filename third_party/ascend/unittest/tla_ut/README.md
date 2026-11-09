@@ -26,7 +26,9 @@ The default `all` auto-degrades to `ir` when no NPU is available.
 - `vector/` — TLA vector kernel cases (`cast_back`, `expand`, `rope`, ...),
   including `subview.py` for compact/pitched aliases and offset-preserving reshape,
   and `view_frontend_contract.py` for host-only bounds/layout contracts.
-- `sync/` — `sync_pipe` (intra-core pipes) and `sync_block` (cross-core block flags, INTER/SUBBLOCK/BLOCK).
+- `sync/` — `sync_pipe` (intra-core pipes), `sync_block` (cross-core block flags,
+  INTER/SUBBLOCK/BLOCK), `sync_intra_block` (`INTRA` mode), and `buffer_sync`
+  (`mutex_lock` / `mutex_unlock`).
 - `dma/` — explicit load/store/copy/fixpipe/nd2nz cases.
 - `cube/` — matmul / mixed-core cases, including `mmad.py` for transposed
   operands and actual extents, and `mmad_frontend_contract.py` for host contracts.

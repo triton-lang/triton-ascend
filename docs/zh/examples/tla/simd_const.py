@@ -24,4 +24,4 @@ def simd_const_example(O_ptr, N: tl.constexpr):
         selected = tla.simd.vsel(prefix, ones, zero)
         tla.simd.vsts(o_ub[0], selected, dist="NORM_B32")
 
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)

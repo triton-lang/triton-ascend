@@ -57,11 +57,11 @@ def intra_block_data(X_ptr, O_ptr, N: tl.constexpr):
 
     with tla.scope.vector():
         tla.sync.block_wait_flag(tla.sync.MODE.INTRA, tla.sync.PIPE.V, 0)
-        tla.copy(x, x_ub)
+        tla.load_gm_to_ub(x, x_ub)
         with tla.scope.simd():
             v = tla.simd.vlds(x_ub[0], dist="NORM")
             tla.simd.vsts(o_ub[0], v, dist="NORM_B32")
-        tla.copy(o_ub, o)
+        tla.store_ub_to_gm(o_ub, o)
 
 
 def test_ir(output_dir=None):

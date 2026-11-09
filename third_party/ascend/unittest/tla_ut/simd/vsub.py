@@ -29,8 +29,8 @@ def vsub(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TA
     x = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
     y = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
     o = tla.alloc_buffer((4 + TILES, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), x)
-    tla.copy(tla.view(Y, (TILES, N)), y)
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), x)
+    tla.load_gm_to_ub(tla.view(Y, (TILES, N)), y)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0, 0])
         b = tla.simd.vlds(y[0, 0])
@@ -51,7 +51,7 @@ def vsub(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TA
                 tla.simd.vsts(o[4 + t, 0], tla.simd.vsub(va, vb, tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(o[4 + t, 0], tla.simd.vsub(va, vb))
-    tla.copy(o, tla.view(O, (4 + TILES, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (4 + TILES, N)))
 
 
 def constexprs():

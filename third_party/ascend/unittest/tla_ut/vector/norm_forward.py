@@ -34,10 +34,10 @@ def rmsnorm(X_ptr, W_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.constex
     for task in range(tl.program_id(0), num_tokens, CORES):
         x_blk = tla.view(X_ptr, (1, PAD_H), strides=(PAD_H, 1), offsets=(task, 0))
         o_blk = tla.view(O_ptr, (1, PAD_H), strides=(PAD_H, 1), offsets=(task, 0))
-        tla.copy(x_blk, x_ub)
+        tla.load_gm_to_ub(x_blk, x_ub)
         if WITH_W:
             w_blk = tla.view(W_ptr, (PAD_H, ), strides=(1, ), offsets=(0, ))
-            tla.copy(w_blk, w_ub)
+            tla.load_gm_to_ub(w_blk, w_ub)
         with tla.scope.simd():
             # UNPK_B16 reads 64 contiguous bf16 values into even sublanes.
             ss = tla.simd.vsplat(0.0, tl.float32)
@@ -56,7 +56,7 @@ def rmsnorm(X_ptr, W_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.constex
                     w = tla.simd.vextf(tla.simd.vlds(w_ub[c * 64], dist="UNPK_B16"), tl.float32, part="part_even")
                     y = tla.simd.vmul(y, w)
                 tla.simd.vsts(out_ub[0, c * 64], y, dist="NORM_B32")
-        tla.copy(out_ub, o_blk)
+        tla.store_ub_to_gm(out_ub, o_blk)
 
 
 def constexprs():

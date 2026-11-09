@@ -10,7 +10,7 @@ def compensated_rstd_example(SQ_ptr, O_ptr, N: tl.constexpr, HIDDEN: tl.constexp
     sq_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
 
-    tla.copy(sq, sq_ub)
+    tla.load_gm_to_ub(sq, sq_ub)
 
     with tla.scope.simd():
         # square_sum 为 f32 向量寄存器，通常已广播到所有 lane。
@@ -20,4 +20,4 @@ def compensated_rstd_example(SQ_ptr, O_ptr, N: tl.constexpr, HIDDEN: tl.constexp
         rstd = tla.compensated_rstd(square_sum, HIDDEN, 1e-6)
         tla.simd.vsts(o_ub[0], rstd, dist="NORM_B32")
 
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)

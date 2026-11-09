@@ -10,7 +10,7 @@ def simd_load_store_example(X_ptr, O_ptr, N: tl.constexpr):
     x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
 
-    tla.copy(x, x_ub)
+    tla.load_gm_to_ub(x, x_ub)
 
     with tla.scope.simd():
         # 从 UB 加载一个满向量寄存器。
@@ -18,4 +18,4 @@ def simd_load_store_example(X_ptr, O_ptr, N: tl.constexpr):
         # 默认使用 NORM_B32 分布和全真 mask 写回 UB。
         tla.simd.vsts(o_ub[0], v, dist="NORM_B32")
 
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)

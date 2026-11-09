@@ -12,8 +12,8 @@ def sync_example(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     b_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
 
-    tla.copy(a, a_ub)
-    tla.copy(b, b_ub)
+    tla.load_gm_to_ub(a, a_ub)
+    tla.load_gm_to_ub(b, b_ub)
 
     # 生产者 MTE2 -> 消费者 V，事件 ID 范围为 [0, 7]。
     tla.sync.set_flag("MTE2", "V", 0)
@@ -28,7 +28,7 @@ def sync_example(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     tla.sync.barrier("ALL")
     tla.sync.set_flag("V", "MTE3", 1)
     tla.sync.wait_flag("V", "MTE3", 1)
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)
 
     # 核间 flag：flag 范围 [0, 15]。
     tla.sync.block_set_flag(0, "V", 3)

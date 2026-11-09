@@ -43,8 +43,8 @@ def sync_pipe(A_ptr, B_ptr, O_ptr, N: tl.constexpr, SYNC_ALL: tl.constexpr):
     b = tla.view(B_ptr, (N, ), strides=(1, ), offsets=(0, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))
 
-    tla.copy(a, a_ub)
-    tla.copy(b, b_ub)
+    tla.load_gm_to_ub(a, a_ub)
+    tla.load_gm_to_ub(b, b_ub)
     # GM -> UB must finish before the vector stage reads the buffers.
     tla.sync.set_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.V, 0)
     tla.sync.wait_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.V, 0)
@@ -58,7 +58,7 @@ def sync_pipe(A_ptr, B_ptr, O_ptr, N: tl.constexpr, SYNC_ALL: tl.constexpr):
     tla.sync.barrier(tla.sync.PIPE.ALL)
     tla.sync.set_flag(tla.sync.PIPE.V, tla.sync.PIPE.MTE3, 1)
     tla.sync.wait_flag(tla.sync.PIPE.V, tla.sync.PIPE.MTE3, 1)
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)
 
     # Hardware barrier across the AIV blocks after the GM writes.
     if SYNC_ALL:
@@ -79,8 +79,8 @@ def sync_all_mix(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
 
     with tla.scope.vector():
         # GM -> UB copies are Vector-core operations.
-        tla.copy(a, a_ub)
-        tla.copy(b, b_ub)
+        tla.load_gm_to_ub(a, a_ub)
+        tla.load_gm_to_ub(b, b_ub)
         tla.sync.sync_all(True)
         with tla.scope.simd():
             av = tla.simd.vlds(a_ub[0], dist="NORM")
@@ -90,7 +90,7 @@ def sync_all_mix(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
         tla.sync.barrier(tla.sync.PIPE.ALL)
         tla.sync.set_flag(tla.sync.PIPE.V, tla.sync.PIPE.MTE3, 1)
         tla.sync.wait_flag(tla.sync.PIPE.V, tla.sync.PIPE.MTE3, 1)
-        tla.copy(o_ub, o)
+        tla.store_ub_to_gm(o_ub, o)
 
 
 def constexprs(sync_all=True):

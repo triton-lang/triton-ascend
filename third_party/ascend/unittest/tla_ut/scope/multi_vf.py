@@ -28,16 +28,16 @@ def multi_vf(X_ptr, W_ptr, O1_ptr, O2_ptr, N: tl.constexpr):
     o1_blk = tla.view(O1_ptr, (N, ), strides=(1, ))
     o2_blk = tla.view(O2_ptr, (N, ), strides=(1, ))
     with tla.scope.vector():
-        tla.copy(x_blk, x_ub)
-        tla.copy(w_blk, w_ub)
+        tla.load_gm_to_ub(x_blk, x_ub)
+        tla.load_gm_to_ub(w_blk, w_ub)
         with tla.scope.simd():  # VF 1: o1 = x + x
             x = tla.simd.vlds(x_ub[0])
             tla.simd.vsts(o1_ub[0], tla.simd.vadd(x, x))
         with tla.scope.simd():  # VF 2: o2 = w * w
             w = tla.simd.vlds(w_ub[0])
             tla.simd.vsts(o2_ub[0], tla.simd.vmul(w, w))
-        tla.copy(o1_ub, o1_blk)
-        tla.copy(o2_ub, o2_blk)
+        tla.store_ub_to_gm(o1_ub, o1_blk)
+        tla.store_ub_to_gm(o2_ub, o2_blk)
 
 
 def constexprs():

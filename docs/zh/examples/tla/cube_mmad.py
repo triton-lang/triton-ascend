@@ -15,11 +15,11 @@ def cube_mmad_example(A_ptr, B_ptr, O_ptr, M: tl.constexpr, K: tl.constexpr, N: 
     acc = tla.alloc_buffer((M, N), tl.float32, space="l0c")
 
     # GM -> L1（ND -> NZ 布局转换）。
-    tla.copy(a, a_l1)
-    tla.copy(b, b_l1)
+    tla.load_gm_to_l1(a, a_l1)
+    tla.load_gm_to_l1(b, b_l1)
 
     # C = A x B + C。
     tla.cube.mmad(a_l1, b_l1, acc, transpose_b=False, clear_accum=False)
 
     # L0C -> GM（Fixpipe）。
-    tla.copy(acc, o)
+    tla.store_l0c_to_gm(acc, o, tla.FixpipeL0C2GMParams(dma_mode=tla.FixpipeDMAMode.NZ2ND))

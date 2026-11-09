@@ -48,7 +48,7 @@ def simd_elementwise(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, BLK: tl.const
     for p in range(tl.program_id(0), num_tokens // 2, CORES):
         xy = tla.view(X_ptr, (2, BLK), strides=(BLK, 1), offsets=(2 * p, 0))
         o = tla.view(O_ptr, (BLK, ), strides=(1, ), offsets=(p * BLK, ))
-        tla.copy(xy, xy_ub)
+        tla.load_gm_to_ub(xy, xy_ub)
         with tla.scope.simd():
             a = tla.simd.vlds(xy_ub[0, 0], dist="NORM")
             b = tla.simd.vlds(xy_ub[1, 0], dist="NORM")
@@ -63,7 +63,7 @@ def simd_elementwise(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, BLK: tl.const
             acc = tla.simd.vadd(acc, ex)
             res = tla.simd.vsel(tla.simd.pge(32, BLK), acc, half)
             tla.simd.vsts(o_ub[0], res, dist="NORM_B32")
-        tla.copy(o_ub, o)
+        tla.store_ub_to_gm(o_ub, o)
 
 
 def constexprs():

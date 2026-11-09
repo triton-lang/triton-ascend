@@ -1180,16 +1180,13 @@ CONSTRAINTS = {
         ],
         "example": "buffer",
     },
-    f"{_TLA_PREFIX}.copy": {
-        "constraints": [
-            "``src`` 和 ``dst`` 都必须是 ``tla.buffer``，不接受指针或 tensor。",
-            "源和目标元素类型必须一致。",
-            "支持的地址空间组合：``gm->ub``、``ub->gm``、``gm->l1``、``l0c->*``。",
-            "除 ``gm->l1`` 的 ND->NZ 和 ``l0c`` Fixpipe 的 fractal 关系外，源和目标形状必须一致。",
-            "其他地址空间组合会报错。",
-        ],
-        "example":
-        "copy",
+    f"{_TLA_PREFIX}.load_gm_to_ub": {
+        "constraints": ["源必须是 GM buffer，目标必须是 UB buffer。"],
+        "example": "copy",
+    },
+    f"{_TLA_PREFIX}.store_ub_to_gm": {
+        "constraints": ["源必须是 UB buffer，目标必须是 GM buffer。"],
+        "example": "copy",
     },
     f"{_TLA_PREFIX}.view": {
         "constraints": [
@@ -1222,7 +1219,7 @@ CONSTRAINTS = {
     },
     f"{_TLA_PREFIX}.scope.vector": {
         "constraints": [
-            "承载 ``tla.copy``、控制流等非 SIMD 操作。",
+            "承载显式 DMA、控制流等非 SIMD 操作。",
             "可以嵌套 ``tla.scope.simd()``。",
         ],
         "example": "scope",

@@ -82,10 +82,10 @@ def add_cmp(A_ptr, B_ptr, C_ptr, S_ptr, MX_ptr, MN_ptr, M_ptr, C2_ptr, I_ptr, J_
     umax_out = tla.view(UMAX_ptr, (N, ), strides=(1, ), offsets=(0, ))
     umin_out = tla.view(UMIN_ptr, (N, ), strides=(1, ), offsets=(0, ))
 
-    tla.copy(a, a_ub)
-    tla.copy(b, b_ub)
-    tla.copy(i, i_ub)
-    tla.copy(j, j_ub)
+    tla.load_gm_to_ub(a, a_ub)
+    tla.load_gm_to_ub(b, b_ub)
+    tla.load_gm_to_ub(i, i_ub)
+    tla.load_gm_to_ub(j, j_ub)
 
     with tla.scope.simd():
         av = tla.simd.vlds(a_ub[0], dist="NORM")
@@ -128,17 +128,17 @@ def add_cmp(A_ptr, B_ptr, C_ptr, S_ptr, MX_ptr, MN_ptr, M_ptr, C2_ptr, I_ptr, J_
         tla.simd.vsts(umax_ub[0], umax, dist="ONEPT_B32")
         tla.simd.vsts(umin_ub[0], umin, dist="ONEPT_B32")
 
-    tla.copy(c_ub, c)
-    tla.copy(c2_ub, c2)
-    tla.copy(s_ub, s)
-    tla.copy(mx_ub, mx)
-    tla.copy(mn_ub, mn)
-    tla.copy(m_ub, m)
-    tla.copy(sum_ub, total)
-    tla.copy(car_ub, carry)
-    tla.copy(ult_ub, ult_out)
-    tla.copy(umax_ub, umax_out)
-    tla.copy(umin_ub, umin_out)
+    tla.store_ub_to_gm(c_ub, c)
+    tla.store_ub_to_gm(c2_ub, c2)
+    tla.store_ub_to_gm(s_ub, s)
+    tla.store_ub_to_gm(mx_ub, mx)
+    tla.store_ub_to_gm(mn_ub, mn)
+    tla.store_ub_to_gm(m_ub, m)
+    tla.store_ub_to_gm(sum_ub, total)
+    tla.store_ub_to_gm(car_ub, carry)
+    tla.store_ub_to_gm(ult_ub, ult_out)
+    tla.store_ub_to_gm(umax_ub, umax_out)
+    tla.store_ub_to_gm(umin_ub, umin_out)
 
 
 def constexprs():

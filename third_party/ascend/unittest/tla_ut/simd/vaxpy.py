@@ -27,8 +27,8 @@ def vaxpy(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
     x = tla.alloc_buffer((N, ), tl.float32, space="ub")
     y = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o = tla.alloc_buffer((4, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(Y, (N, )), y)
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         acc = tla.simd.vlds(x[0])
         a = tla.simd.vlds(y[0])
@@ -39,7 +39,7 @@ def vaxpy(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(o[1, 0], tla.simd.vaxpy(acc, a, 1.5, prefix))
         tla.simd.vsts(o[2, 0], tla.simd.vaxpy(acc, a, 1.5, none))
         tla.simd.vsts(o[3, 0], tla.simd.vaxpy(acc, a, 1.5, mask=prefix, mode=tla.simd.MODE.MERGING))
-    tla.copy(o, tla.view(O, (4, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (4, N)))
 
 
 def constexprs():

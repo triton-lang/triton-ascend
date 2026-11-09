@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-26 23:11+0800\n"
-"PO-Revision-Date: 2026-10-26 23:11+0800\n"
+"POT-Creation-Date: 2026-11-09 09:40+0800\n"
+"PO-Revision-Date: 2026-11-09 09:40+0800\n"
 
-"X-Source-Commit: 26c1f7e5c6072ca975864efa444213fb3bbe29fd\n"
+"X-Source-Commit: fbe62cfc5be0a4aeef6d7aebb4dcbcdfbb0dfa00\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -19,17 +19,17 @@ msgstr "Triton-Ascend Performance Analysis Methods"
 msgid "获取性能数据"
 msgstr "Collect performance data"
 
-msgid "在进行性能优化之前，需要获取准确的性能数据，了解性能现状，并根据性能现状分析下一步的优化方向。MindStudio提供了多种针对Triton算子性能测试方法，包括上板Profiling、单算子性能仿真流水图等手段。"
-msgstr "Before optimizing performance, obtain accurate performance data, understand the current performance status, and analyze the next optimization direction based on this status. MindStudio provides multiple performance testing methods for Triton operators, including on-board Profiling and single-operator performance simulation pipeline diagrams."
+msgid "在进行性能优化之前，需要获取准确的性能数据，了解性能现状，并根据性能现状分析下一步的优化方向。MindStudio提供了多种针对Triton算子的性能测试方法，包括上板Profiling、单算子性能仿真流水图等手段。"
+msgstr "Before performing performance optimization, obtain accurate performance data to understand the current performance status, and analyze the next optimization direction based on the current performance status. MindStudio provides multiple performance testing methods for Triton operators, including on-board profiling and single-operator performance simulation pipeline diagrams."
 
 msgid "上板Profiling"
 msgstr "On-Board Profiling"
 
-msgid "msProf工具用于采集和分析运行在昇腾AI处理器上算子的关键性能指标，用户可根据输出的性能数据，快速定位算子的软、硬件性能瓶颈，提升算子性能的分析效率。"
-msgstr "The msProf tool collects and analyzes the key performance metrics of operators running on the Ascend AI processor. You can use the output performance data to quickly locate software and hardware performance bottlenecks, improving the efficiency of operator performance analysis."
+msgid "msProf工具用于采集和分析运行在昇腾AI处理器上的算子的关键性能指标，用户可根据输出的性能数据，快速定位算子的软、硬件性能瓶颈，提升算子性能的分析效率。"
+msgstr "The msProf tool collects and analyzes the key performance metrics of operators running on the Ascend AI processor. Based on the output performance data, you can quickly locate software and hardware performance bottlenecks of operators and improve operator performance analysis efficiency."
 
-msgid "注： msProf工具的使用依赖CANN包中的msopprof可执行文件，该文件中的接口功能和msprof op一致，该文件为CANN包自带，无需单独安装，msProf工具常用命令请参考[msProf常用命令](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html)。"
-msgstr "Note: The msProf tool depends on the msopprof executable file in the CANN package. The interface functions in this file are consistent with those of msprof op. This file is included in the CANN package and does not need to be installed separately. For common commands of the msProf tool, refer to [Common msProf Commands](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html)."
+msgid "注：msProf工具的使用依赖CANN包中的msprof可执行文件，该文件中的接口功能和msprof op一致，该文件为CANN包自带，无需单独安装，msProf工具常用命令请参考[msProf常用命令](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html)。"
+msgstr "Note: Using the msProf tool depends on the msprof executable file in the CANN package. The interface functions of this file are consistent with msprof op. This file is included in the CANN package and does not need to be installed separately. For common commands of the msProf tool, refer to [Common msProf Commands](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html)."
 
 msgid "如下命令行是一个算子上板性能数据采集的示例，可以根据自身的需要灵活组合配置参数。示例中 --output为可选参数，用于指定收集到的性能数据的存放路径；--kernel-name为可选参数，用于指定需要收集的单个kernel的性能数据（如果不指定，则只对程序运行过程中调度的第一个算子进行采集）；$HOME/projects/test_op.py为算子可执行脚本。"
 msgstr "The following command line is an example of on-board performance data collection for an operator. You can flexibly combine configuration parameters according to your needs. In the example, --output is an optional parameter that specifies the storage path for the collected performance data. --kernel-name is an optional parameter that specifies the performance data of a single kernel to be collected. If you do not specify this parameter, only the first operator scheduled during program execution is collected. $HOME/projects/test_op.py is the operator executable script."
@@ -39,8 +39,8 @@ msgid ""
 msgstr ""
 "msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python3 $HOME/projects/test_op.py\n"
 
-msgid "以示范测试用例[03-layer-norm.py](../../../third_party/ascend/unittest/autotune_ut/03-layer-norm.py)为例(不指定--output时生成的数据文件保存在当前路径下)："
-msgstr "Take the sample test case [03-layer-norm.py](../../../third_party/ascend/unittest/autotune_ut/03-layer-norm.py) as an example (when --output is not specified, the generated data files are saved in the current path):"
+msgid "以示范测试用例[03-layer-norm.py](../../../third_party/ascend/unittest/autotune_ut/03-layer-norm.py)为例（不指定--output时生成的数据文件保存在当前路径下）："
+msgstr "Use the sample test case [03-layer-norm.py](../../../third_party/ascend/unittest/autotune_ut/03-layer-norm.py) as an example (when --output is not specified, the generated data file is saved in the current path):"
 
 msgid ""
 "msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py\n"
@@ -82,25 +82,25 @@ msgstr ""
 "# Collect the operator simulation pipeline\n"
 "msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-version} python3 03-layer-norm.py\n"
 
-msgid "注：上述示例 `soc-version=Ascend910B3`。下面列表基于cann 9.2.0 版本整理输出。"
+msgid "注：上述示例`soc-version=Ascend910B3`。下面列表基于CANN 9.2.0 版本整理输出。"
 msgstr "Note: The preceding example uses `soc-version=Ascend910B3`. The following list is compiled based on CANN 9.2.0."
 
-msgid "Ascend 910 系列"
+msgid "Ascend 910系列"
 msgstr "Ascend 910 series"
 
-msgid "Ascend 310 / 310P 系列"
-msgstr "Ascend 310 / 310P series"
+msgid "Ascend 310/310P系列"
+msgstr "Ascend 310/310P series"
 
-msgid "Ascend 310B 系列"
+msgid "Ascend 310B系列"
 msgstr "Ascend 310B series"
 
-msgid "Ascend 610 系列"
-msgstr "Ascend 610 series"
+msgid "Ascend 610系列"
+msgstr "Ascend 610 products"
 
-msgid "Ascend 920 系列"
-msgstr "Ascend 920 series"
+msgid "Ascend 920系列"
+msgstr "Ascend 920 products"
 
-msgid "Ascend 950 系列"
+msgid "Ascend 950系列"
 msgstr "Ascend 950 series"
 
 msgid "Ascend910A"
@@ -304,8 +304,8 @@ msgstr "visualize_data.bin"
 msgid "trace.json 支持以下两种可视化呈现方式："
 msgstr "trace.json supports the following two visualization methods:"
 
-msgid "Chrome浏览器 在Chrome浏览器中输入 ```chrome://tracing``` 地址，并将通过msprof op simulator 生成指令流水图文件（trace.json）拖到空白处打开，键盘上输入快捷键（W：放大；S：缩小；A：左移；D：右移）可进行查看。 **图2** Chrome浏览器时间线界面 ![alt text](../figures/trace_json_with_chrome.png)"
-msgstr "Chrome Browser Enter the ```chrome://tracing``` address in the Chrome browser. Drag the instruction pipeline diagram file (trace.json) generated by msprof op simulator to the blank area to open it. Use keyboard shortcuts (W: zoom in; S: zoom out; A: move left; D: move right) to view the diagram. **Figure 2** Chrome browser timeline interface ![alt text](../figures/trace_json_with_chrome.png)"
+msgid "Chrome浏览器 在Chrome浏览器中输入 ```chrome://tracing``` 地址，并将通过msprof op simulator 生成的指令流水图文件（trace.json）拖到空白处打开，键盘上输入快捷键（W：放大；S：缩小；A：左移；D：右移）可进行查看。 **图2** Chrome浏览器时间线界面 ![alt text](../figures/trace_json_with_chrome.png)"
+msgstr "Chrome browser: In the Chrome browser, enter the address ```chrome://tracing```, and drag the instruction pipeline trace file (trace.json) generated by msprof op simulator to the blank area to open it. Use the keyboard shortcuts (W: zoom in; S: zoom out; A: move left; D: move right) to view the file. **Figure 2** Chrome browser timeline interface ![alt text](../figures/trace_json_with_chrome.png)"
 
 msgid ".. image:: ../figures/trace_json_with_chrome.png"
 msgstr ".. image:: ../figures/trace_json_with_chrome.png"
@@ -381,8 +381,8 @@ msgstr "When data movement instructions run simultaneously, they share the bandw
 msgid "搬运不同大小的数据块时，对带宽的利用率（有效带宽/理论带宽）不一样。针对每次搬运数据量较小的情况，实测性能达不到理论带宽。"
 msgstr "When moving data blocks of different sizes, the bandwidth utilization (effective bandwidth/theoretical bandwidth) varies. When the amount of data moved each time is small, the measured performance cannot reach the theoretical bandwidth."
 
-msgid "计算相关流水（Cube/Vector/Scalar等）的理论耗时 = 计算数据量（单位：Element） / 理论算力。例如：某款AI处理器对float数据类型的Vector理论峰值算力为11.06 TOPS，想要进行一次32k float类型的Element单指令计算，计算的理论耗时是32k / 11.06TOPS = 3ns（按照1k = 1000来计算）。"
-msgstr "The theoretical execution time of computation pipelines (Cube/Vector/Scalar, and so on) = computation data volume (unit: Element) / theoretical computing power. For example, the theoretical peak Vector computing power of an AI processor for the float data type is 11.06 TOPS. To perform a single-instruction computation on 32k float Elements, the theoretical execution time is 32k / 11.06TOPS = 3ns (calculated based on 1k = 1000)."
+msgid "计算相关流水（Cube/Vector/Scalar等）的理论耗时 = 计算数据量（单位：Element）/ 理论算力。例如：某款AI处理器对float数据类型的Vector理论峰值算力为11.06 TOPS，想要进行一次32k float类型的Element单指令计算，计算的理论耗时是32k / 11.06TOPS = 3ns（按照1k = 1000来计算）。"
+msgstr "The theoretical time consumption of computation-related pipelines (Cube/Vector/Scalar, and so on) = computation data volume (unit: Element) / theoretical computing power. For example, an AI processor has a theoretical peak Vector computing power of 11.06 TOPS for the float data type. To perform a single-instruction computation of 32k float Elements, the theoretical computation time is 32k / 11.06TOPS = 3ns (calculated based on 1k = 1000)."
 
 msgid "<a id=\"locating-bottlenecks\"></a>"
 msgstr "<a id=\"locating-bottlenecks\"></a>"
@@ -415,8 +415,14 @@ msgstr "analyse_data_op_summary"
 msgid ".. image:: ../figures/performance_analysis_analyse_data_op_summary.png"
 msgstr ".. image:: ../figures/performance_analysis_analyse_data_op_summary.png"
 
-msgid "每条流水线的利用率理想情况下应为100%，没有达到100%的流水就可能有提升空间。上图示例中为某款AI处理器上获取的数据，可以看到Vector算子_layer_norm_fwd_fused的第一个场景中，Vector流水的利用率aiv_vec_ratio小于10%，判断未充分发挥算力；Scalar流水的利用率aiv_scalar_ratio已经在60%左右，判断Scalar是最长的流水。   当Scalar是最长的流水时：需要分析算子源码中是否对标量值进行复杂的运算，昇腾的SIMD微架构更适合多数据并行计算；另一种可能性是，由于一部分指令在硬件上不支持特定的数据类型，Triton栈将向量计算退化为标量计算。需要结合流水和标量优化手段进行优化，可参考方法三、查看仿真流水图，以及方法四、查看代码热点的情况进一步分析。   对于更一般的情况，例如MTE2搬运和实际的场景：三个输入矩阵的shape分别为(128,128)、(128,1)、(128,1)，数据类型为float16。当前算法为Two-pass方法，因此有三次X的搬入，以及W、B的各一次搬入，由此可以计算出总共需要搬运的数据量，继而通过[理论参数](#theoretical-parameters)中介绍的搬运流水理论耗时计算方法计算出理论值为 `sizeof(float16) * (128 * 128 * 3 + 128 + 128) / 1.8 TB/s ≈ 55ns`（按照1 TB = $10^{12}$ Byte来计算），与实际性能数据aiv_mte2_time存在比较大的差距。经分析，输入数据的总大小小于UB的空间（A2型号为192KB）。因此MTE2时间过长可能是Tiling计算得到的基本块太小，导致发射冗余的搬运指令。需要结合流水优化和Tiling优化手段进行优化。可参考方法三，查看仿真流水图，进一步分析各条流水的情况。"
-msgstr "Ideally, the utilization of each pipeline should be 100%. Pipelines that do not reach 100% may have room for improvement. The preceding figure shows data obtained from an AI processor. In the first scenario of the Vector operator `_layer_norm_fwd_fused`, the utilization of the Vector pipeline `aiv_vec_ratio` is less than 10%. This indicates that the computing power is not fully utilized. The utilization of the Scalar pipeline `aiv_scalar_ratio` is around 60%, indicating that the Scalar pipeline is the longest.   When the Scalar pipeline is the longest: analyze whether complex operations are performed on scalar values in the operator source code. The Ascend SIMD microarchitecture is more suitable for multi-data parallel computing. Another possibility is that the Triton stack degrades vector computing to scalar computing because some instructions do not support specific data types on the hardware. To optimize this, combine pipeline and scalar optimization methods. For further analysis, refer to Method 3: View the simulation pipeline diagram, and Method 4: View code hotspots.   For more general cases, such as MTE2 data movement and actual scenarios: the shapes of the three input matrices are (128, 128), (128, 1), and (128, 1). The data type is float16. The current algorithm uses the Two-pass method. Therefore, X is moved in three times, and W and B are each moved in once. From this, the total amount of data to be moved can be calculated. Then, calculate the theoretical value using the method introduced in [theoretical parameters](#theoretical-parameters): `sizeof(float16) * (128 * 128 * 3 + 128 + 128) / 1.8 TB/s ≈ 55ns` (calculated based on 1 TB = $10^{12}$ Byte). This value has a large gap compared with the actual performance data `aiv_mte2_time`. Analysis shows that the total size of the input data is smaller than the UB space (192 KB for the A2 model). Therefore, the excessively long MTE2 time may be caused by the basic block calculated by Tiling being too small. This results in the emission of redundant movement instructions. To optimize this, combine pipeline optimization and Tiling optimization methods. Refer to Method 3 to view the simulation pipeline diagram for further analysis of each pipeline."
+msgid "每条流水线的利用率理想情况下应为100%，没有达到100%的流水就可能有提升空间。上图示例中为某款AI处理器上获取的数据，可以看到Vector算子_layer_norm_fwd_fused的第一个场景中，Vector流水的利用率aiv_vec_ratio小于10%，判断未充分发挥算力；Scalar流水的利用率aiv_scalar_ratio已经在60%左右，判断Scalar是最长的流水。"
+msgstr "Ideally, the utilization of each pipeline should be 100%. Pipelines that do not reach 100% may have room for improvement. The example above shows data obtained from an AI processor. In the first scenario of the Vector operator _layer_norm_fwd_fused, the utilization of the Vector pipeline, aiv_vec_ratio, is less than 10%, indicating that the computing power is not fully utilized. The utilization of the Scalar pipeline, aiv_scalar_ratio, is around 60%, indicating that Scalar is the longest pipeline."
+
+msgid "当Scalar是最长的流水时：需要分析算子源码中是否对标量值进行复杂的运算，昇腾的SIMD微架构更适合多数据并行计算；另一种可能性是，由于一部分指令在硬件上不支持特定的数据类型，Triton栈将向量计算退化为标量计算。需要结合流水和标量优化手段进行优化，可参考方法三、查看仿真流水图，以及方法四、查看代码热点的情况进一步分析。"
+msgstr "When Scalar is the longest pipeline: Analyze whether the operator source code performs complex operations on scalar values. The Ascend SIMD microarchitecture is more suitable for multi-data parallel computing. Another possibility is that because some instructions do not support specific data types in hardware, the Triton stack degrades vector computing to scalar computing. Combine pipeline and scalar optimization methods to optimize this. For further analysis, refer to Method 3: View the simulation pipeline diagram, and Method 4: View code hotspots."
+
+msgid "对于更一般的情况，例如MTE2搬运的实际场景：三个输入矩阵的shape分别为(128,128)、(128,1)、(128,1)，数据类型为float16。当前算法为Two-pass方法，因此有三次X的搬入，以及W、B的各一次搬入，由此可以计算出总共需要搬运的数据量，继而通过[理论参数](#theoretical-parameters)中介绍的搬运流水理论耗时计算方法计算出理论值为 `sizeof(float16) * (128 * 128 * 3 + 128 + 128) / 1.8 TB/s ≈ 55ns`（按照1 TB = $10^{12}$ Byte来计算），与实际性能数据aiv_mte2_time存在比较大的差距。经分析，输入数据的总大小小于UB的空间（A2型号为192KB）。因此MTE2时间过长可能是Tiling计算得到的基本块太小，导致发射冗余的搬运指令。需要结合流水优化和Tiling优化手段进行优化。可参考方法三，查看仿真流水图，进一步分析各条流水的情况。"
+msgstr "For a more general case, such as the actual MTE2 data movement scenario: the shapes of the three input matrices are (128,128), (128,1), and (128,1), and the data type is float16. The current algorithm is a two-pass method, so there are three data movements of X and one data movement each for W and B. From this, you can calculate the total amount of data to be moved. Then, using the theoretical data movement pipeline time calculation method introduced in [Theoretical Parameters](#theoretical-parameters), the theoretical value is calculated as `sizeof(float16) * (128 * 128 * 3 + 128 + 128) / 1.8 TB/s ≈ 55ns` (calculated based on 1 TB = $10^{12}$ Byte). There is a significant gap between this value and the actual performance data aiv_mte2_time. Analysis shows that the total size of the input data is smaller than the UB space (192 KB for the A2 model). Therefore, the excessively long MTE2 time may be caused by the basic block calculated by Tiling being too small, resulting in the emission of redundant data movement instructions. You need to combine pipeline optimization and Tiling optimization methods for optimization. Refer to method three to view the simulation pipeline diagram and further analyze the status of each pipeline."
 
 msgid "方法二：通过上板Profiling分析Tiling情况 先前示例中使用的AI处理器，可以通过硬件平台查看到有48个Vector核，_layer_norm_fwd_fused算子是一个纯Vector算子，但是有些场景下发了过多的Block（Block Dim > 48），造成Host调度开销过大。那么下一步的主要优化方向为Tiling优化。"
 msgstr "Method 2: Analyze tiling through on-board profiling. The AI processor used in the previous sample has 48 Vector cores, which can be viewed on the hardware platform. The `_layer_norm_fwd_fused` operator is a pure Vector operator. However, in some scenarios, the system dispatches too many blocks (Block Dim > 48), causing excessive host scheduling overhead. Therefore, the main optimization direction for the next step is tiling optimization."
@@ -430,8 +436,8 @@ msgstr "analyse_data_waveform"
 msgid ".. image:: ../figures/performance_analysis_analyse_data_waveform.png"
 msgstr ".. image:: ../figures/performance_analysis_analyse_data_waveform.png"
 
-msgid "方法四：通过代码热点分析情况 ![analyse_data_code_mapping](../figures/performance_analysis_analyse_data_code_mapping.png)   上图示例中为某款AI处理器仿真器上获取的数据，可以看到左侧load接口对应到右侧的一组汇编指令中（已筛选仅显示代码行相关指令，并按运行周期数降序排序），标量指令占比高，不符合load作为访存接口应该MTE占比高的情况。因此主要优化方向为标量计算。"
-msgstr "Method 4: Analyze through code hotspot analysis ![analyse_data_code_mapping](../figures/performance_analysis_analyse_data_code_mapping.png)   The example above shows data obtained from an AI processor simulator. You can see that the load interface on the left corresponds to a set of assembly instructions on the right (filtered to show only code-line-related instructions, sorted in descending order by execution cycle count). Scalar instructions account for a high proportion, which does not match the expectation that load, as a memory access interface, should have a high MTE proportion. Therefore, the main optimization direction is scalar computation."
+msgid "方法四：通过代码热点分析情况 ![analyse_data_code_mapping](../figures/performance_analysis_analyse_data_code_mapping.png)   上图示例中为某款AI处理器仿真器上获取的数据，可以看到左侧load接口对应到右侧的一组汇编指令中（已筛选仅显示代码行相关指令，并按运行周期数降序排序），标量指令占比高，不符合load作为访存接口应该是MTE占比高的情况。因此主要优化方向为标量计算。"
+msgstr "Method 4: Analyze code hotspots ![analyse_data_code_mapping](../figures/performance_analysis_analyse_data_code_mapping.png)   The example in the figure above shows data obtained from an AI processor simulator. You can see that the load interface on the left corresponds to a set of assembly instructions on the right (filtered to show only code-line-related instructions, sorted in descending order by cycle count). Scalar instructions account for a high proportion. This does not match the expectation that load, as a memory access interface, should have a high MTE proportion. Therefore, the main optimization direction is scalar computation."
 
 msgid "analyse_data_code_mapping"
 msgstr "analyse_data_code_mapping"
@@ -439,11 +445,11 @@ msgstr "analyse_data_code_mapping"
 msgid ".. image:: ../figures/performance_analysis_analyse_data_code_mapping.png"
 msgstr ".. image:: ../figures/performance_analysis_analyse_data_code_mapping.png"
 
-msgid "示例：i64/i32 的compare在npu上无法启用vector导致向量计算转为标量计算"
-msgstr "Example: The compare operation for i64/i32 cannot enable vector on the NPU, causing vector computation to be converted to scalar computation."
+msgid "示例：i64/i32 的compare在NPU上无法启用vector导致向量计算转为标量计算"
+msgstr "Example: The i64/i32 compare cannot enable vector on the NPU, causing vector computation to be converted to scalar computation."
 
-msgid "【描述】i64/i32 的cmp在npu上无法启用vector，退化为scalar计算效率降低；通过转化为fp32来利用vec_cast和vec_cmp实现vector操作加速。 【注意】在tl.load和tl.store中的mask使用cmp功能，大部分情况下编译器可以自动优化为vec操作，本例中tl.where则需要手动转换。"
-msgstr "[Description] The cmp operation on i64/i32 cannot enable vector computation on the NPU and degrades to scalar computation, reducing efficiency; by converting to fp32, you can leverage vec_cast and vec_cmp to accelerate vector operations. [Note] The mask in tl.load and tl.store uses the cmp function. In most cases, the compiler can automatically optimize it to vec operations, but in this example, tl.where requires manual conversion."
+msgid "【描述】i64/i32 的cmp在NPU上无法启用Vector，退化为scalar计算效率降低；通过转化为fp32来利用vec_cast和vec_cmp实现vector操作加速。 【注意】在tl.load和tl.store中的mask使用cmp功能，大部分情况下编译器可以自动优化为vec操作，本例中tl.where则需要手动转换。"
+msgstr "[Description] The cmp operation for i64/i32 cannot enable Vector on the NPU and degrades to scalar computation, reducing efficiency. Converting to fp32 uses vec_cast and vec_cmp to accelerate vector operations. [Note] The mask in tl.load and tl.store uses the cmp function. In most cases, the compiler can automatically optimize it to vec operations. In this example, tl.where requires manual conversion."
 
 msgid ""
 "import triton\n"

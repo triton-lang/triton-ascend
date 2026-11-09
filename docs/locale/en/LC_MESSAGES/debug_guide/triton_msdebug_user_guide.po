@@ -1,0 +1,1663 @@
+"POT-Creation-Date: 2026-11-09 09:52+0800\n"
+"PO-Revision-Date: 2026-11-09 09:52+0800\n"
+
+"X-Source-Commit: a200a5da0f38f76994c212824871b8a436b3c0cd\n"
+
+"X-Skill-Version: 2.0.0\\n"
+
+"Last-Translator: Auto Translation (glm-5.2)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Triton msdebug 使用指南"
+msgstr "Triton msdebug User Guide"
+
+msgid "简介"
+msgstr "Introduction"
+
+msgid "MindStudio Debugger（msdebug）用于调试运行在昇腾 NPU 上的设备程序，支持源码断点、单步、变量与内存查看、寄存器读取、核切换、运行状态查询和异常算子 Core Dump 解析等功能。"
+msgstr "MindStudio Debugger (msdebug) debugs device programs running on the Ascend NPU. It supports setting source code breakpoints, single-stepping, viewing variables and memory, reading registers, switching cores, querying execution status, and parsing core dumps for exception operators."
+
+msgid "msdebug 适合排查以下问题："
+msgstr "msdebug is suitable for troubleshooting the following issues:"
+
+msgid "Triton Kernel 运行结果错误；"
+msgstr "The Triton kernel execution result is incorrect;"
+
+msgid "`tl.load`、计算或 `tl.store` 阶段的数据不符合预期；"
+msgstr "The data during the `tl.load`, computation, or `tl.store` phase does not match expectations;"
+
+msgid "多 Block、多核场景中，部分核的计算结果异常；"
+msgstr "In multi-block and multi-core scenarios, the computation results of some cores are abnormal;"
+
+msgid "Kernel 运行卡住，需要确认停止位置；"
+msgstr "The kernel execution is stuck, and you need to confirm the stopping location;"
+
+msgid "NPU 发生 MTE、VEC、CUBE 等硬件异常；"
+msgstr "A hardware exception such as MTE, VEC, or CUBE occurs on the NPU;"
+
+msgid "需要分析异常现场生成的 `.core` 文件；"
+msgstr "Analyze the `.core` file generated during the exception;"
+
+msgid "源码断点、行号映射或变量调试信息异常。"
+msgstr "An exception occurs in source code breakpoints, line number mapping, or variable debugging information."
+
+msgid "msdebug 不用于调试 Triton 编译器 Pass 本身。如果程序在生成 `kernel.o` 之前已经编译失败，应使用 IR Dump、编译日志以及 GDB/LLDB 调试 `triton-opt` 或编译器进程。"
+msgstr "Do not use msdebug to debug the Triton compiler pass itself. If compilation fails before `kernel.o` is generated, use IR dumps, compilation logs, and GDB/LLDB to debug `triton-opt` or the compiler process."
+
+msgid "使用前准备"
+msgstr "Preparations Before Use"
+
+msgid "环境准备"
+msgstr "Environment Preparation"
+
+msgid "请参考 [MindStudio Debugger 安装指南](https://gitcode.com/Ascend/msdebug/blob/master/docs/zh/install_guide/msdebug_install_guide.md)安装 msdebug 工具。"
+msgstr "To install the msdebug tool, refer to the [MindStudio Debugger Installation Guide](https://gitcode.com/Ascend/msdebug/blob/master/docs/zh/install_guide/msdebug_install_guide.md)."
+
+msgid "若要使能 msdebug 工具，需通过以下两种方法安装 NPU 驱动固件（CANN 8.1.RC1 之后的版本且驱动为 25.0.RC1 之后的版本，推荐使用方法一）。"
+msgstr "To enable the msdebug tool, you need to install the NPU driver and firmware using one of the following two methods. (For CANN versions later than 8.1.RC1 and driver versions later than 25.0.RC1, method 1 is recommended.)"
+
+msgid "**方法一**：驱动安装时指定 `--full` 参数，然后再使用 root 用户执行 `echo 1 > /proc/debug_switch` 命令启用调试通道，msdebug 工具便可正常使用。"
+msgstr "**Method 1**: Specify the `--full` parameter during driver installation, and then run the `echo 1 > /proc/debug_switch` command as the root user to enable the debug channel. The msdebug tool can then be used normally."
+
+msgid ""
+"./Ascend-hdk-<chip_type>-npu-driver_<version>_linux-<arch>.run --full\n"
+msgstr ""
+"./Ascend-hdk-<chip_type>-npu-driver_<version>_linux-<arch>.run --full\n"
+
+msgid "**方法二**：驱动安装时指定 `--debug` 参数，具体安装操作请参见《CANN 软件安装指南》中的“[安装 NPU 驱动固件](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/softwareinst/instg/instg_0005.html?Mode=PmIns&InstallType=netconda&OS=openEuler&Software=cannToolKit)”章节。"
+msgstr "**Method 2**: Specify the `--debug` parameter during driver installation. For detailed installation operations, refer to the \"[Installing the NPU Driver and Firmware](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/softwareinst/instg/instg_0005.html?Mode=PmIns&InstallType=netconda&OS=openEuler&Software=cannToolKit)\" chapter in the CANN Software Installation Guide."
+
+msgid ""
+"./Ascend-hdk-<chip_type>-npu-driver_<version>_linux-<arch>.run --debug\n"
+msgstr ""
+"./Ascend-hdk-<chip_type>-npu-driver_<version>_linux-<arch>.run --debug\n"
+
+msgid "为 Triton Kernel 生成调试信息"
+msgstr "Generate debug information for Triton Kernel"
+
+msgid "当前 Triton-Ascend 启用 msdebug 功能需要开启以下环境变量："
+msgstr "Currently, to enable the msdebug feature in Triton-Ascend, set the following environment variables:"
+
+msgid ""
+"export LLVM_EXTRACT_DI_LOCAL_VARIABLES=1\n"
+"export TRITON_DISABLE_LINE_INFO=0\n"
+msgstr ""
+"export LLVM_EXTRACT_DI_LOCAL_VARIABLES=1\n"
+"export TRITON_DISABLE_LINE_INFO=0\n"
+
+msgid "环境变量"
+msgstr "environment variable"
+
+msgid "用途"
+msgstr "Purpose"
+
+msgid "`LLVM_EXTRACT_DI_LOCAL_VARIABLES=1`"
+msgstr "`LLVM_EXTRACT_DI_LOCAL_VARIABLES=1`"
+
+msgid "开启 Ascend 后端局部变量调试流程，并启用相关 Location、NOP 和行表处理"
+msgstr "Starts the Ascend backend local variable debugging process and enables related Location, NOP, and line table processing."
+
+msgid "`TRITON_DISABLE_LINE_INFO=0`"
+msgstr "`TRITON_DISABLE_LINE_INFO=0`"
+
+msgid "开启源码行号调试信息；当前后端默认可能关闭该信息，因此需要显式设置"
+msgstr "Enable source line number debugging information; the current backend may disable this information by default, so you must set it explicitly."
+
+msgid "当前实现中，Ascend 后端会据此向后端编译器传递 `--enable-debug-info=true` 和 `--enable-debug-variables=true`。"
+msgstr "In the current implementation, the Ascend backend uses this to pass `--enable-debug-info=true` and `--enable-debug-variables=true` to the backend compiler."
+
+msgid "约束"
+msgstr "Constraints"
+
+msgid "调试通道权限较高，不建议在生产环境长期启用；"
+msgstr "The debug channel has high privileges; it is not recommended to keep it enabled for a long time in production environments;"
+
+msgid "同一 Device 建议只启动一个 msdebug 会话，并暂停其他算子任务；"
+msgstr "For the same Device, we recommend that you start only one msdebug session and pause other operator tasks;"
+
+msgid "被调 Python 程序最好只调用一个目标 Triton Kernel；"
+msgstr "The called Python program should ideally invoke only one target Triton Kernel;"
+
+msgid "首次排查时建议关闭 Autotune，固定一组 `BLOCK_SIZE`、`num_warps` 等编译参数；"
+msgstr "During initial troubleshooting, disable Autotune and fix a set of compilation options such as `BLOCK_SIZE` and `num_warps`;"
+
+msgid "在线 msdebug 和异常算子 Dump 使用同一调试通道时可能冲突，不应同时开启；"
+msgstr "Online msdebug and exception operator dump may conflict when they use the same debug channel; do not enable both at the same time;"
+
+msgid "部分优化会改变变量生命周期，即使开启变量调试信息，也不能保证每个源码变量始终可打印；"
+msgstr "Some optimizations change variable lifetimes; even if variable debugging information is enabled, it cannot be guaranteed that every source variable is always printable;"
+
+msgid "msdebug、CANN、驱动、固件、芯片和 Triton-Ascend 需要使用相互兼容的版本。"
+msgstr "msdebug, CANN, the driver, firmware, the chip, and Triton-Ascend require mutually compatible versions."
+
+msgid "官方环境和约束说明可参考 [msdebug 使用前准备](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0063.html?framework=mindspore)。"
+msgstr "For the official environment and constraints, refer to [msdebug Preparation](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0063.html?framework=mindspore)."
+
+msgid "产品支持情况"
+msgstr "Supported products"
+
+msgid "官方 msdebug 当前文档列出了昇腾 A2、A3、310P 以及 950 系列等产品形态，但具体功能范围仍取决于 msdebug、驱动和 CANN 版本。"
+msgstr "The current official msdebug documentation lists products such as the Ascend A2, A3, 310P, and 950 series. However, the specific functional scope still depends on the versions of msdebug, the driver, and CANN."
+
+msgid "对于 Triton 场景，还必须确认当前 Triton-Ascend 后端支持目标芯片。可以通过编译日志、Kernel Dump 中的目标信息或 Triton 后端 Target 信息确认实际架构。"
+msgstr "For Triton scenarios, you must also confirm that the current Triton-Ascend backend supports the target chip. You can confirm the actual architecture through compilation logs, target information in Kernel Dump, or Triton backend Target information."
+
+msgid "SIMD、SIMT、AIC、AIV、Core Dump 和局部变量打印的支持范围可能不同。本文中的功能均应以本机 msdebug 的 `help` 输出和对应版本发行说明为准。"
+msgstr "The support scope for SIMD, SIMT, AIC, AIV, Core Dump, and local variable printing may vary. For the features in this document, refer to the `help` output of the local msdebug and the release notes of the corresponding version."
+
+msgid "命令参考"
+msgstr "Command Reference"
+
+msgid "命令"
+msgstr "Command"
+
+msgid "缩写"
+msgstr "Abbreviations"
+
+msgid "说明"
+msgstr "Description"
+
+msgid "Triton 示例"
+msgstr "Triton samples"
+
+msgid "`breakpoint set -f <file> -l <line>`"
+msgstr "`breakpoint set -f <file> -l <line>`"
+
+msgid "`b`"
+msgstr "`b`"
+
+msgid "设置源码行断点"
+msgstr "Set a source code line breakpoint"
+
+msgid "`b /data/demo/multibuffer.py:15`"
+msgstr "`b /data/demo/multibuffer.py:15`"
+
+msgid "`run`"
+msgstr "`run`"
+
+msgid "`r`"
+msgstr "`r`"
+
+msgid "启动 Python 程序"
+msgstr "Start the Python program"
+
+msgid "`continue`"
+msgstr "`continue`"
+
+msgid "`c`"
+msgstr "`c`"
+
+msgid "从断点继续运行"
+msgstr "Continue running from the breakpoint"
+
+msgid "`print <variable>`"
+msgstr "`print <variable>`"
+
+msgid "`p`"
+msgstr "`p`"
+
+msgid "打印当前 PC 可用的变量"
+msgstr "Print the variables available at the current PC"
+
+msgid "`p x`"
+msgstr "`p x`"
+
+msgid "`frame variable`"
+msgstr "`frame variable`"
+
+msgid "`var`"
+msgstr "`var`"
+
+msgid "打印当前作用域局部变量"
+msgstr "Print local variables in the current scope"
+
+msgid "`memory read`"
+msgstr "`memory read`"
+
+msgid "`x`"
+msgstr "`x`"
+
+msgid "读取 GM、UB 等内存"
+msgstr "Read memory such as GM and UB"
+
+msgid "`x -m UB -f float32[] 0x600 -s 128 -c 1`"
+msgstr "`x -m UB -f float32[] 0x600 -s 128 -c 1`"
+
+msgid "`thread step-over`"
+msgstr "`thread step-over`"
+
+msgid "`n`"
+msgstr "`n`"
+
+msgid "单步到下一可执行源码行"
+msgstr "Step to the next executable source line"
+
+msgid "`thread step-in`"
+msgstr "`thread step-in`"
+
+msgid "`s`"
+msgstr "`s`"
+
+msgid "尝试进入函数"
+msgstr "Try to enter the function"
+
+msgid "`thread step-out`"
+msgstr "`thread step-out`"
+
+msgid "`finish`"
+msgstr "`finish`"
+
+msgid "执行到当前函数返回"
+msgstr "Execute until the current function returns"
+
+msgid "`register read -a`"
+msgstr "`register read -a`"
+
+msgid "`re r -a`"
+msgstr "`re r -a`"
+
+msgid "读取当前核全部可用寄存器"
+msgstr "Read all available registers of the current core"
+
+msgid "`register read`"
+msgstr "`register read`"
+
+msgid "`re r`"
+msgstr "`re r`"
+
+msgid "读取指定寄存器"
+msgstr "Read the specified register"
+
+msgid "见下方示例"
+msgstr "See the example below"
+
+msgid "`ascend info devices`"
+msgstr "`ascend info devices`"
+
+msgid "-"
+msgstr "-"
+
+msgid "查看 Device 信息"
+msgstr "View Device Information"
+
+msgid "`ascend info cores`"
+msgstr "`ascend info cores`"
+
+msgid "查看核、PC、Block 和停止原因"
+msgstr "View the core, PC, Block, and stop reason"
+
+msgid "`ascend info tasks`"
+msgstr "`ascend info tasks`"
+
+msgid "查看 Task 信息"
+msgstr "View Task information"
+
+msgid "`ascend info stream`"
+msgstr "`ascend info stream`"
+
+msgid "查看 Stream 信息"
+msgstr "View Stream Information"
+
+msgid "`ascend info blocks`"
+msgstr "`ascend info blocks`"
+
+msgid "查看 Block 信息"
+msgstr "View Block Information"
+
+msgid "`ascend info blocks -d`"
+msgstr "`ascend info blocks -d`"
+
+msgid "`ascend aiv <id>`"
+msgstr "`ascend aiv <id>`"
+
+msgid "切换当前焦点 AIV"
+msgstr "Switch the current focus to AIV"
+
+msgid "`ascend aiv 3`"
+msgstr "`ascend aiv 3`"
+
+msgid "`ascend aic <id>`"
+msgstr "`ascend aic <id>`"
+
+msgid "切换当前焦点 AIC"
+msgstr "Switch the current focus to AIC"
+
+msgid "`ascend aic 17`"
+msgstr "`ascend aic 17`"
+
+msgid "`ascend info threads`"
+msgstr "`ascend info threads`"
+
+msgid "查看 SIMT 线程"
+msgstr "View SIMT threads"
+
+msgid "`ascend thread <id>`"
+msgstr "`ascend thread <id>`"
+
+msgid "切换 SIMT 线程"
+msgstr "Switch SIMT thread"
+
+msgid "`ascend thread (0,8,0)`"
+msgstr "`ascend thread (0,8,0)`"
+
+msgid "`image add <kernel.o>`"
+msgstr "`image add <kernel.o>`"
+
+msgid "导入 Kernel 调试信息"
+msgstr "Import Kernel debugging information"
+
+msgid "`image add /data/dump/hash/kernel.o`"
+msgstr "`image add /data/dump/hash/kernel.o`"
+
+msgid "`image load -f <kernel.o> -s <slide>`"
+msgstr "`image load -f <kernel.o> -s <slide>`"
+
+msgid "按运行时偏移加载调试信息"
+msgstr "Load debug information by runtime offset"
+
+msgid "`image load -f /data/dump/hash/kernel.o -s 0`"
+msgstr "`image load -f /data/dump/hash/kernel.o -s 0`"
+
+msgid "`thread backtrace`"
+msgstr "`thread backtrace`"
+
+msgid "`bt`"
+msgstr "`bt`"
+
+msgid "查看调用栈，当前主要用于 Core Dump"
+msgstr "View the call stack, which is currently mainly used for Core Dump."
+
+msgid "`ascend info summary`"
+msgstr "`ascend info summary`"
+
+msgid "查看 Core Dump 摘要"
+msgstr "View Core Dump Summary"
+
+msgid "`help <command>`"
+msgstr "`help <command>`"
+
+msgid "查看本机命令帮助"
+msgstr "View local command help"
+
+msgid "`help memory read`"
+msgstr "`help memory read`"
+
+msgid "读取指定寄存器时，寄存器名前需添加 `$`，例如："
+msgstr "When you read a specified register, add `$` before the register name, for example:"
+
+msgid ""
+"(msdebug) register read $PC $GPR0\n"
+msgstr ""
+"(msdebug) register read $PC $GPR0\n"
+
+msgid "`memory read` 常用选项："
+msgstr "`memory read` common options:"
+
+msgid "选项"
+msgstr "Options"
+
+msgid "含义"
+msgstr "Meaning"
+
+msgid "`-m`"
+msgstr "`-m`"
+
+msgid "内存类型，如 `GM`、`UB`、`L0A`、`L0B`、`L0C`、`L1` 等"
+msgstr "Memory types, such as `GM`, `UB`, `L0A`, `L0B`, `L0C`, `L1`, and so on"
+
+msgid "`-f`"
+msgstr "`-f`"
+
+msgid "显示数据类型，如 `float16[]`、`float32[]`、`int32_t[]`"
+msgstr "Displays the data type, such as `float16[]`, `float32[]`, and `int32_t[]`"
+
+msgid "`-s`"
+msgstr "`-s`"
+
+msgid "每行打印的字节数"
+msgstr "Number of bytes printed per line"
+
+msgid "`-c`"
+msgstr "`-c`"
+
+msgid "打印行数"
+msgstr "Number of lines to print"
+
+msgid "`-E` / `--offset`"
+msgstr "`-E` / `--offset`"
+
+msgid "打印前跳过的元素数"
+msgstr "Number of elements skipped before printing"
+
+msgid "不同版本的格式名称可能略有不同，使用前执行："
+msgstr "The format names may vary slightly across different versions. Run the following before use:"
+
+msgid ""
+"(msdebug) help memory read\n"
+"(msdebug) help x\n"
+msgstr ""
+"(msdebug) help memory read\n"
+"(msdebug) help x\n"
+
+msgid "工具使用"
+msgstr "Using the Tool"
+
+msgid "准备 Triton 调试用例"
+msgstr "Prepare a Triton debugging test case"
+
+msgid "下面使用一个简单的向量加法说明。保存为 `triton_msdebug_demo.py`："
+msgstr "The following uses a simple vector addition to illustrate. Save it as `triton_msdebug_demo.py`:"
+
+msgid ""
+"import torch\n"
+"import triton\n"
+"import triton.language as tl\n"
+"\n"
+"@triton.jit\n"
+"def add_kernel(\n"
+"    x_ptr,\n"
+"    y_ptr,\n"
+"    output_ptr,\n"
+"    n_elements,\n"
+"    BLOCK_SIZE: tl.constexpr\n"
+"):\n"
+"    pid = tl.program_id(axis = 0)\n"
+"\n"
+"    block_start = pid * BLOCK_SIZE\n"
+"    offsets = block_start + tl.arange(0, BLOCK_SIZE)\n"
+"\n"
+"    x = tl.load(x_ptr + offsets)\n"
+"    y = tl.load(y_ptr + offsets)\n"
+"\n"
+"    output = x + y\n"
+"\n"
+"    tl.store(output_ptr + offsets, output)\n"
+"\n"
+"\n"
+"def vector_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:\n"
+"\n"
+"    n_elements = x.numel()\n"
+"\n"
+"    output = torch.empty_like(x)\n"
+"\n"
+"    BLOCK_SIZE = 128\n"
+"\n"
+"    grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )\n"
+"\n"
+"    add_kernel[grid](\n"
+"        x, y, output,\n"
+"        n_elements,\n"
+"        BLOCK_SIZE=BLOCK_SIZE\n"
+"    )\n"
+"\n"
+"    return output\n"
+"\n"
+"if __name__ == \"__main__\":\n"
+"    a = [1.0, 2.0, 3.0, 4.0]\n"
+"    b = [2.0, 4.0, 6.0, 8.0]\n"
+"\n"
+"    x = torch.tensor(a, device = 'npu')\n"
+"    y = torch.tensor(b, device = 'npu')\n"
+"\n"
+"    output_triton = vector_add(x, y)\n"
+"\n"
+"    print(output_triton)\n"
+"\n"
+msgstr ""
+"import torch\n"
+"import triton\n"
+"import triton.language as tl\n"
+"\n"
+"@triton.jit\n"
+"def add_kernel(\n"
+"    x_ptr,\n"
+"    y_ptr,\n"
+"    output_ptr,\n"
+"    n_elements,\n"
+"    BLOCK_SIZE: tl.constexpr\n"
+"):\n"
+"    pid = tl.program_id(axis = 0)\n"
+"\n"
+"    block_start = pid * BLOCK_SIZE\n"
+"    offsets = block_start + tl.arange(0, BLOCK_SIZE)\n"
+"\n"
+"    x = tl.load(x_ptr + offsets)\n"
+"    y = tl.load(y_ptr + offsets)\n"
+"\n"
+"    output = x + y\n"
+"\n"
+"    tl.store(output_ptr + offsets, output)\n"
+"\n"
+"\n"
+"def vector_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:\n"
+"\n"
+"    n_elements = x.numel()\n"
+"\n"
+"    output = torch.empty_like(x)\n"
+"\n"
+"    BLOCK_SIZE = 128\n"
+"\n"
+"    grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )\n"
+"\n"
+"    add_kernel[grid](\n"
+"        x, y, output,\n"
+"        n_elements,\n"
+"        BLOCK_SIZE=BLOCK_SIZE\n"
+"    )\n"
+"\n"
+"    return output\n"
+"\n"
+"if __name__ == \"__main__\":\n"
+"    a = [1.0, 2.0, 3.0, 4.0]\n"
+"    b = [2.0, 4.0, 6.0, 8.0]\n"
+"\n"
+"    x = torch.tensor(a, device = 'npu')\n"
+"    y = torch.tensor(b, device = 'npu')\n"
+"\n"
+"    output_triton = vector_add(x, y)\n"
+"\n"
+"    print(output_triton)\n"
+"\n"
+
+msgid "启动工具"
+msgstr "Starting the tool"
+
+msgid ""
+"export LLVM_EXTRACT_DI_LOCAL_VARIABLES=1\n"
+"export TRITON_DISABLE_LINE_INFO=0\n"
+"msdebug python triton_msdebug_demo.py\n"
+msgstr ""
+"export LLVM_EXTRACT_DI_LOCAL_VARIABLES=1\n"
+"export TRITON_DISABLE_LINE_INFO=0\n"
+"msdebug python triton_msdebug_demo.py\n"
+
+msgid "典型回显："
+msgstr "Typical output:"
+
+msgid ""
+"=================================================================\n"
+"                   >>>>>   MindStudio   <<<<<\n"
+"    THE END-TO-END TOOLCHAIN TO UNLEASH HUAWEI ASCEND COMPUTE\n"
+"=================================================================\n"
+"\n"
+"msdebug 26.0.0\n"
+"(msdebug) target create \"python\"\n"
+"Current executable set to '/usr/local/python3.11.13/bin/python' (x86_64).\n"
+"(msdebug) settings set -- target.run-args  \"multibuffer.py\"\n"
+"Cannot read termcap database;\n"
+"using dumb terminal settings.\n"
+"(msdebug)\n"
+msgstr ""
+"=================================================================\n"
+"                   >>>>>   MindStudio   <<<<<\n"
+"    THE END-TO-END TOOLCHAIN TO UNLEASH HUAWEI ASCEND COMPUTE\n"
+"=================================================================\n"
+"\n"
+"msdebug 26.0.0\n"
+"(msdebug) target create \"python\"\n"
+"Current executable set to '/usr/local/python3.11.13/bin/python' (x86_64).\n"
+"(msdebug) settings set -- target.run-args  \"multibuffer.py\"\n"
+"Cannot read termcap database;\n"
+"using dumb terminal settings.\n"
+"(msdebug)\n"
+
+msgid "修改了 Triton 源码、编译常量或编译器代码后，需要重新开启强制编译并重新生成二进制。"
+msgstr "After you modify the Triton source code, compilation constants, or compiler code, you need to re-enable forced compilation and regenerate the binary."
+
+msgid ""
+"export TRITON_ALWAYS_COMPILE=1\n"
+msgstr ""
+"export TRITON_ALWAYS_COMPILE=1\n"
+
+msgid "指定 Device ID"
+msgstr "Specify Device ID"
+
+msgid "多 Device 程序可在运行前指定调试焦点："
+msgstr "You can specify a debugging focus for multi-Device programs before running them:"
+
+msgid ""
+"(msdebug) ascend device 1\n"
+"(msdebug) r\n"
+msgstr ""
+"(msdebug) ascend device 1\n"
+"(msdebug) r\n"
+
+msgid "如果不指定，通常调试目标程序首次设置的 Device。调试用例应尽量固定 Device，避免目标 Kernel 被下发到另一个 Device。"
+msgstr "If you do not specify it, the system usually debugs the Device first configured by the target program. For debugging test cases, try to use a fixed Device to prevent the target Kernel from being dispatched to another Device."
+
+msgid "调试退出"
+msgstr "Exit Debugging"
+
+msgid ""
+"(msdebug) q\n"
+"Quitting LLDB will kill one or more processes. Do you really want to proceed: [Y/n] y\n"
+msgstr ""
+"(msdebug) q\n"
+"Quitting LLDB will kill one or more processes. Do you really want to proceed: [Y/n] y\n"
+
+msgid "断点设置功能介绍"
+msgstr "Introduction to the Breakpoint Setting Function"
+
+msgid "功能说明"
+msgstr "Function Description"
+
+msgid "msdebug 可以在 Triton Python Kernel 源码的指定行设置断点。设备 PC 与 Python 行号的对应关系来自 `kernel.o` 中的 DWARF 行表。"
+msgstr "msdebug can set breakpoints at specified lines in the Triton Python Kernel source code. The mapping between the device PC and Python line numbers comes from the DWARF line table in `kernel.o`."
+
+msgid "注意事项"
+msgstr "Precautions"
+
+msgid "建议对 `.py` 文件使用绝对路径，避免同名文件或路径改写导致错误匹配；"
+msgstr "Use absolute paths for `.py` files to avoid incorrect matching caused by files with the same name or path rewriting;"
+
+msgid "应在 `tl.load`、实际计算、`tl.store` 等会生成设备指令的语句上设置断点；"
+msgstr "Set breakpoints on statements that generate device instructions, such as `tl.load`, actual computation, and `tl.store`;"
+
+msgid "仅用于组织代码的 Python 语句、装饰器或被编译期消除的表达式不一定有设备地址；"
+msgstr "Python statements used only for organizing code, decorators, or expressions eliminated at compile time do not necessarily have a device address;"
+
+msgid "Triton JIT 模块在执行 `r` 后才装载，因此运行前断点显示 pending 通常是正常现象；"
+msgstr "The Triton JIT module is loaded only after `r` is executed, so it is normal for breakpoints to show as pending before running;"
+
+msgid "一条 Triton 语句可能扩展成多条地址计算、cast、memref 和 load/store 指令，断点可能解析出多个 Location；"
+msgstr "A single Triton statement may expand into multiple address calculation, cast, memref, and load/store instructions, and a breakpoint may resolve to multiple Locations;"
+
+msgid "`debug_line_rewriter.py`、Location 归一化 Pass 和调试 NOP 会影响最终可停位置，但 msdebug 本身不会重新生成缺失的行表。"
+msgstr "`debug_line_rewriter.py`, the Location normalization Pass, and debug NOPs affect the final breakpoint positions, but msdebug itself does not regenerate the missing line table."
+
+msgid "使用示例"
+msgstr "Usage Examples"
+
+msgid "设置行断点"
+msgstr "Set a line breakpoint"
+
+msgid "假设 `BREAK_X` 位于第 13 行："
+msgstr "Assume `BREAK_X` is on line 13:"
+
+msgid ""
+"(msdebug) b triton_msdebug_demo.py:13\n"
+"Breakpoint 1: no locations (pending on future shared library load).\n"
+"WARNING:  Unable to resolve breakpoint to any actual locations.\n"
+"(msdebug) r\n"
+msgstr ""
+"(msdebug) b triton_msdebug_demo.py:13\n"
+"Breakpoint 1: no locations (pending on future shared library load).\n"
+"WARNING:  Unable to resolve breakpoint to any actual locations.\n"
+"(msdebug) r\n"
+
+msgid "Kernel 完成 JIT 装载后，预期出现类似信息："
+msgstr "After the kernel completes JIT loading, similar information appears:"
+
+msgid ""
+"[Launch of Kernel add_kernel ...]\n"
+"1 location added to breakpoint 1\n"
+"Process ... stopped\n"
+"[Switching to focus on Kernel add_kernel, CoreId ..., Type aiv]\n"
+msgstr ""
+"[Launch of Kernel add_kernel ...]\n"
+"1 location added to breakpoint 1\n"
+"Process ... stopped\n"
+"[Switching to focus on Kernel add_kernel, CoreId ..., Type aiv]\n"
+
+msgid "pending 的含义是“当前尚未装载包含该源码行的设备模块”，不是立即失败。"
+msgstr "The \"pending\" status means that the device module containing this source line has not been loaded yet; it is not an immediate failure."
+
+msgid "查看断点"
+msgstr "View breakpoints"
+
+msgid ""
+"(msdebug) breakpoint list\n"
+msgstr ""
+"(msdebug) breakpoint list\n"
+
+msgid "删除断点"
+msgstr "Delete breakpoint"
+
+msgid ""
+"(msdebug) breakpoint delete 1\n"
+msgstr ""
+"(msdebug) breakpoint delete 1\n"
+
+msgid "内存与变量打印功能介绍"
+msgstr "Introduction to Memory and Variable Printing Features"
+
+msgid "Triton 源码中的变量可能位于寄存器、UB 或 GM，也可能只是编译器 SSA 值，没有固定内存地址。msdebug 可以在断点停止后打印当前 PC 可用的变量，并读取当前焦点核的内存。"
+msgstr "Variables in the Triton source code may be located in registers, UB, or GM, or they may be just compiler SSA values without fixed memory addresses. After a breakpoint stop, msdebug can print the variables available to the current PC and read the memory of the current focused core."
+
+msgid "`p x` 成功需要 `kernel.o` 同时包含变量 DIE 和当前 PC 有效的 Location；"
+msgstr "For `p x` to succeed, `kernel.o` must contain both the variable DIE and a valid Location for the current PC;"
+
+msgid "源码断点能命中，只能说明 `.debug_line` 有效，不能说明变量 Location 一定存在；"
+msgstr "That source code breakpoints can be hit only indicates that `.debug_line` is valid; it does not indicate that the variable Location necessarily exists;"
+
+msgid "UB 是核内局部存储，切换 AIV/AIC 后，相同 UB 偏移对应另一核的数据；"
+msgstr "UB is the local storage within the core; after switching between AIV and AIC, the same UB offset corresponds to the data of the other core;"
+
+msgid "GM 使用设备全局地址，读取前必须确认地址和长度合法；"
+msgstr "GM uses device global addresses; before reading, you must verify that the address and length are valid;"
+
+msgid "编译器可能把 Triton 变量保存在寄存器中，变量不一定拥有 UB 地址；"
+msgstr "The compiler may store Triton variables in registers, and the variables do not necessarily have UB addresses;"
+
+msgid "寄存器和 UB 会在变量最后一次使用后复用；"
+msgstr "Registers and UB are reused after the last use of a variable;"
+
+msgid "`tl.load` 的 mask 为 false 时，部分 lane 的数据可能无效；"
+msgstr "When the mask of `tl.load` is false, the data of some lanes may be invalid;"
+
+msgid "`-f`内存显示格式必须与真实元素类型一致,不指定默认十六进制表示；"
+msgstr "The memory display format specified by `-f` must be consistent with the actual element type; if not specified, it defaults to hexadecimal representation;"
+
+msgid "不使用`-c`指定打印行数默认为打印`4`行，不使用`-s`指定每行打印字节数默认为`128`字节。"
+msgstr "If you do not use `-c` to specify the number of lines to print, the default is 4 lines. If you do not use `-s` to specify the number of bytes to print per line, the default is 128 bytes."
+
+msgid "打印指定变量"
+msgstr "Print the specified variable"
+
+msgid ""
+"(msdebug) p x\n"
+"(msdebug) p y\n"
+"(msdebug) p z\n"
+msgstr ""
+"(msdebug) p x\n"
+"(msdebug) p y\n"
+"(msdebug) p z\n"
+
+msgid "若变量信息可用，msdebug 会显示变量值、地址或其所在位置；如果显示 `<unavailable>`，应判断当前 PC 是否处于变量有效范围。"
+msgstr "If the variable information is available, msdebug displays the variable value, address, or location. If `<unavailable>` is displayed, determine whether the current PC is within the valid scope of the variable."
+
+msgid "打印所有局部变量"
+msgstr "Print all local variables"
+
+msgid ""
+"(msdebug) var\n"
+msgstr ""
+"(msdebug) var\n"
+
+msgid "Triton 编译后的变量名可能与 Python 源码名不同，也可能只保留部分变量。"
+msgstr "Variable names after Triton compilation may differ from the Python source code names, or the compilation may retain only some variables."
+
+msgid "按 Triton 变量读取 UB"
+msgstr "Read UB using Triton variables"
+
+msgid "在支持变量名解析的版本中，可以使用："
+msgstr "In versions that support variable name resolution, you can use:"
+
+msgid ""
+"(msdebug) x -m UB -f float32 x\n"
+"(msdebug) x -m UB -f float32 z -s 32\n"
+msgstr ""
+"(msdebug) x -m UB -f float32 x\n"
+"(msdebug) x -m UB -f float32 z -s 32\n"
+
+msgid "如果 `x` 对应一组 128 个 `float32` 元素，`-s 32` 表示每行显示 32 字节，即每行 8 个 `float32`；因此可能看到 4 行或更多行，具体总长度由变量调试信息和命令参数共同决定。"
+msgstr "If `x` corresponds to a set of 128 `float32` elements, `-s 32` indicates that 32 bytes are displayed per line. That is, 8 `float32` values are displayed per line. Therefore, you may see 4 or more lines. The variable debugging information and command parameters determine the total length."
+
+msgid "按已知 UB 地址读取"
+msgstr "Read using a known UB address"
+
+msgid ""
+"(msdebug) x -m UB -f float32[] 0x600 -s 128 -c 1\n"
+msgstr ""
+"(msdebug) x -m UB -f float32[] 0x600 -s 128 -c 1\n"
+
+msgid "该命令从当前焦点核的 UB 偏移 `0x600` 开始，按 `float32` 解释数据，每行打印 128 字节，共打印 1 行，即最多显示 32 个 `float32` 元素。"
+msgstr "This command starts from the UB offset `0x600` of the current focus core, interprets the data as `float32`, prints 128 bytes per line, and prints 1 line in total, displaying up to 32 `float32` elements."
+
+msgid "按已知 GM 地址读取"
+msgstr "Read by a known GM address"
+
+msgid ""
+"(msdebug) x -m GM -f float32[] 0x00001240c0037000 -s 128 -c 2\n"
+msgstr ""
+"(msdebug) x -m GM -f float32[] 0x00001240c0037000 -s 128 -c 2\n"
+
+msgid "该命令从指定 GM 地址开始，按 `float32` 格式打印两行，每行 128 字节。"
+msgstr "This command prints two lines in `float32` format starting from the specified GM address, with 128 bytes per line."
+
+msgid "若需要从起始地址跳过若干元素："
+msgstr "If you need to skip several elements from the starting address:"
+
+msgid ""
+"(msdebug) x -m GM -f float32[] 0x00001240c0037000 -s 128 -c 1 -E 16\n"
+msgstr ""
+"(msdebug) x -m GM -f float32[] 0x00001240c0037000 -s 128 -c 1 -E 16\n"
+
+msgid "处理默认读取上限"
+msgstr "Handling the default read limit"
+
+msgid "当读取超过默认上限时，msdebug 可能提示："
+msgstr "When reading exceeds the default limit, msdebug may display the following message:"
+
+msgid ""
+"Normally, 'memory read' will not read over 1024 bytes of data.\n"
+msgstr ""
+"Normally, 'memory read' will not read over 1024 bytes of data.\n"
+
+msgid "仅本次强制读取时，按本机 `help memory read` 中的 `--force` 选项执行；需要多次读取时，可调整："
+msgstr "For a one-time forced read, follow the `--force` option in the local `help memory read`; when multiple reads are needed, you can adjust:"
+
+msgid ""
+"(msdebug) settings set target.max-memory-read-size 4096\n"
+msgstr ""
+"(msdebug) settings set target.max-memory-read-size 4096\n"
+
+msgid "修改上限前应先验证地址、元素类型和读取范围。"
+msgstr "Before modifying the upper limit, verify the address, the element type, and the read range."
+
+msgid "`x`、`y`、`z` 地址与 PC 生命周期"
+msgstr "`x`, `y`, and `z` Addresses and PC Lifecycle"
+
+msgid "以下是一个典型而非绝对的生命周期："
+msgstr "The following is a typical but not absolute lifecycle:"
+
+msgid "当前停点"
+msgstr "Current breakpoint"
+
+msgid "`y`"
+msgstr "`y`"
+
+msgid "`z`"
+msgstr "`z`"
+
+msgid "`tl.load(x)` 执行前"
+msgstr "Before executing `tl.load(x)`"
+
+msgid "尚未产生"
+msgstr "Not yet generated"
+
+msgid "`tl.load(x)` 执行后"
+msgstr "After `tl.load(x)` is executed"
+
+msgid "可能位于寄存器或 UB"
+msgstr "May be located in a register or UB"
+
+msgid "`tl.load(y)` 执行后"
+msgstr "After `tl.load(y)` is executed"
+
+msgid "可能可用"
+msgstr "May be available"
+
+msgid "`z = x + y` 执行后"
+msgstr "After `z = x + y` is executed"
+
+msgid "可能仍可用，也可能开始复用"
+msgstr "May still be available, or may start to be reused"
+
+msgid "`tl.store(z)` 执行后"
+msgstr "After `tl.store(z)` is executed"
+
+msgid "可能失效"
+msgstr "May fail"
+
+msgid "可能失效或只剩 GM 输出"
+msgstr "May become invalid or only GM output remains"
+
+msgid "建议在多个连续停点分别执行："
+msgstr "We recommend that you execute separately at multiple consecutive breakpoints:"
+
+msgid ""
+"(msdebug) n\n"
+"(msdebug) p x\n"
+"(msdebug) p y\n"
+"(msdebug) p z\n"
+"(msdebug) register read -a\n"
+msgstr ""
+"(msdebug) n\n"
+"(msdebug) p x\n"
+"(msdebug) p y\n"
+"(msdebug) p z\n"
+"(msdebug) register read -a\n"
+
+msgid "变量无法打印时，离线检查："
+msgstr "If variables cannot be printed, perform an offline check:"
+
+msgid ""
+"llvm-dwarfdump --debug-info \"$KERNEL_O\" | less\n"
+"llvm-dwarfdump --debug-loc \"$KERNEL_O\" | less\n"
+"llvm-dwarfdump --debug-loclists \"$KERNEL_O\" | less\n"
+msgstr ""
+"llvm-dwarfdump --debug-info \"$KERNEL_O\" | less\n"
+"llvm-dwarfdump --debug-loc \"$KERNEL_O\" | less\n"
+"llvm-dwarfdump --debug-loclists \"$KERNEL_O\" | less\n"
+
+msgid "重点查看："
+msgstr "Focus on reviewing:"
+
+msgid "是否有对应 `DW_TAG_variable`；"
+msgstr "Check whether a corresponding `DW_TAG_variable` exists;"
+
+msgid "是否有 `DW_AT_location`；"
+msgstr "Whether `DW_AT_location` exists;"
+
+msgid "Location List 的 PC 范围是否覆盖当前断点 PC；"
+msgstr "Whether the PC range of the Location List covers the current breakpoint PC;"
+
+msgid "Location 是寄存器、UB 地址还是其他表达式；"
+msgstr "Location is a register, a UB address, or another expression;"
+
+msgid "同名变量是否属于另一个编译单元或词法作用域。"
+msgstr "Whether a variable with the same name belongs to another compilation unit or lexical scope."
+
+msgid "如果变量 DIE 存在但没有 `DW_AT_location`，msdebug 知道变量名称，却无法恢复它当前存放的位置，此时按变量名打印失败是预期结果。"
+msgstr "If the variable DIE exists but does not have `DW_AT_location`, msdebug knows the variable name but cannot recover its current storage location. In this case, printing by variable name fails as expected."
+
+msgid "官方内存命令和各选项说明可参考 [内存与变量打印](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0067.html?framework=mindspore)。"
+msgstr "For the official memory commands and descriptions of each option, refer to [Memory and Variable Printing](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0067.html?framework=mindspore)."
+
+msgid "单步调试功能介绍"
+msgstr "Introduction to the Single-Step Debugging Feature"
+
+msgid "命中源码断点后，可以使用 `n`、`s` 和 `finish` 控制当前焦点核继续执行。"
+msgstr "After you hit a source code breakpoint, you can use `n`, `s`, and `finish` to control the current focused core to continue execution."
+
+msgid "Triton Python 函数经过内联和多级 Lowering，`s` 不一定能进入 Python 层函数；"
+msgstr "After inlining and multi-level lowering of Triton Python functions, `s` may not necessarily enter the Python-layer function;"
+
+msgid "一条 Python 语句可能对应多条设备指令，同一源码行可能停止多次；"
+msgstr "A single Python statement may correspond to multiple device instructions, and the same source code line may stop multiple times;"
+
+msgid "多条内部 IR 也可能统一映射到同一源码行；"
+msgstr "Multiple internal IRs may also map to the same source code line;"
+
+msgid "被优化掉或没有独立设备指令的行会被跳过；"
+msgstr "Lines that are optimized away or do not have independent device instructions are skipped;"
+
+msgid "load/store 扩展出的 cast、memref、地址计算和调试 NOP 会影响单步停点；"
+msgstr "The cast, memref, address calculation, and debug NOP expanded from load/store affect single-step stop points;"
+
+msgid "单步针对当前带 `*` 的焦点核，其他核可能仍停在原断点；"
+msgstr "Single-stepping applies to the current focused core marked with `*`; other cores may still remain at the original breakpoint;"
+
+msgid "如果 Kernel 使用同步指令，单独推进一个核可能表现为等待，应结合所有核的 PC 判断。"
+msgstr "If the kernel uses synchronization instructions, advancing a single core may appear as waiting. Analyze the PCs of all cores together."
+
+msgid "Step Over"
+msgstr "Step Over"
+
+msgid ""
+"(msdebug) b triton_msdebug_demo.py:<BREAK_X行号>\n"
+"(msdebug) r\n"
+"(msdebug) n\n"
+msgstr ""
+"(msdebug) b triton_msdebug_demo.py:<BREAK_X_line_number>\n"
+"(msdebug) r\n"
+"(msdebug) n\n"
+
+msgid "执行后查看所有核状态："
+msgstr "After execution, check the status of all cores:"
+
+msgid ""
+"(msdebug) ascend info cores\n"
+msgstr ""
+"(msdebug) ascend info cores\n"
+
+msgid "当前核的 `stop reason` 应显示 `step over` 或仍显示同时命中的 breakpoint。"
+msgstr "The `stop reason` of the current core should display `step over` or still display the breakpoint that was hit simultaneously."
+
+msgid "Step In"
+msgstr "Step In"
+
+msgid ""
+"(msdebug) s\n"
+msgstr ""
+"(msdebug) s\n"
+
+msgid "如果后端已将函数内联，`s` 可能表现为移动到同一函数中的下一个有效 Location，而不是进入新的 Python 栈帧。"
+msgstr "If the backend has inlined the function, `s` may appear to move to the next valid Location in the same function rather than entering a new Python stack frame."
+
+msgid "Step Out"
+msgstr "Step Out"
+
+msgid ""
+"(msdebug) finish\n"
+msgstr ""
+"(msdebug) finish\n"
+
+msgid "对于完全内联的 Triton Kernel，可能不存在可见的独立调用帧，此命令的效果取决于最终 DWARF 调用信息。"
+msgstr "For a fully inlined Triton kernel, there may be no visible independent call frame. The effect of this command depends on the final DWARF call information."
+
+msgid "判断是重复执行还是行号重复"
+msgstr "Determine whether it is repeated execution or repeated line numbers."
+
+msgid "如果 `n` 多次停在同一源码行，结合当前 PC 和反汇编判断："
+msgstr "If `n` stops at the same source line multiple times, analyze the current PC and disassembly:"
+
+msgid ""
+"(msdebug) re r $PC\n"
+"(msdebug) disassemble\n"
+msgstr ""
+"(msdebug) re r $PC\n"
+"(msdebug) disassemble\n"
+
+msgid "同时离线查看："
+msgstr "View offline simultaneously:"
+
+msgid ""
+"llvm-dwarfdump --debug-line \"$KERNEL_O\"\n"
+msgstr ""
+"llvm-dwarfdump --debug-line \"$KERNEL_O\"\n"
+
+msgid "只要 PC 在变化，通常说明调试器正在执行映射到同一源码行的不同设备指令，并不代表 Python 语句被重复运行。"
+msgstr "As long as the PC changes, the debugger is typically executing different device instructions mapped to the same source line; this does not mean that the Python statement is run repeatedly."
+
+msgid "中断运行功能介绍"
+msgstr "Introduction to the Interrupt Execution Feature"
+
+msgid "当 Triton Kernel 长时间不返回时，可通过 `Ctrl+C` 中断在 msdebug 内启动的程序，查看当前停止位置。"
+msgstr "When a Triton kernel does not return for a long time, press `Ctrl+C` to interrupt the program started in msdebug and view the current stop position."
+
+msgid "只能中断由当前 msdebug 会话启动的程序；"
+msgstr "You can only interrupt the program started by the current msdebug session;"
+
+msgid "卡住可能来自 Kernel 死循环、核间同步、等待事件或错误的控制流；"
+msgstr "A hang may result from a kernel infinite loop, inter-core synchronization, waiting for events, or incorrect control flow;"
+
+msgid "根据官方当前约束，`Ctrl+C` 中断后主要支持调试信息展示和核切换；单步、寄存器读取、变量/内存打印和 `continue` 可能不可用；"
+msgstr "According to the current official constraints, after a `Ctrl+C` interrupt, the system mainly supports debugging information display and core switching; single-step, register reading, variable/memory printing, and `continue` may be unavailable;"
+
+msgid "因此，`Ctrl+C` 主要用于确认各核卡在什么位置，而不是替代普通断点调试。"
+msgstr "Therefore, `Ctrl+C` is mainly used to confirm the position of each core and card, rather than to replace standard breakpoint debugging."
+
+msgid ""
+"(msdebug) r\n"
+"<按 Ctrl+C>\n"
+"(msdebug) ascend info cores\n"
+"(msdebug) ascend info blocks -d\n"
+msgstr ""
+"(msdebug) r\n"
+"<Press Ctrl+C>\n"
+"(msdebug) ascend info cores\n"
+"(msdebug) ascend info blocks -d\n"
+
+msgid "观察是否出现："
+msgstr "Check whether the following occurs:"
+
+msgid "某个核 PC 长时间不变；"
+msgstr "The PC of a core remains unchanged for a long time;"
+
+msgid "多个核停在同步或等待位置；"
+msgstr "Multiple cores are stopped at a synchronization or wait location;"
+
+msgid "某个 Block 未到达与其他 Block 相同的阶段；"
+msgstr "A block has not reached the same stage as the other blocks;"
+
+msgid "当前源码位置落在 Triton 循环或 load/store 等待附近。"
+msgstr "The current source code location falls near a Triton loop or a load/store wait."
+
+msgid "完成信息收集后退出："
+msgstr "Exit after completing information collection:"
+
+msgid ""
+"(msdebug) q\n"
+msgstr ""
+"(msdebug) q\n"
+
+msgid "核切换功能介绍"
+msgstr "Core switching feature overview"
+
+msgid "将调试焦点切换到指定 AIV 或 AIC。切换后，源码位置、寄存器以及 UB 等局部内存操作都针对新焦点核。"
+msgstr "Switch the debug focus to a specified AIV or AIC. After the switch, source code locations, registers, and local memory operations such as UB apply to the new focus core."
+
+msgid "查看当前核："
+msgstr "View the current core:"
+
+msgid "切换到 AIV 3："
+msgstr "Switch to AIV 3:"
+
+msgid ""
+"(msdebug) ascend aiv 3\n"
+msgstr ""
+"(msdebug) ascend aiv 3\n"
+
+msgid "切换到 AIC 17："
+msgstr "Switch to AIC 17:"
+
+msgid ""
+"(msdebug) ascend aic 17\n"
+msgstr ""
+"(msdebug) ascend aic 17\n"
+
+msgid "再次确认焦点："
+msgstr "Confirm the focus again:"
+
+msgid "输出中带 `*` 的行是当前焦点核。"
+msgstr "In the output, the line with `*` is the current focus core."
+
+msgid "Triton 多 Block 场景说明"
+msgstr "Triton Multi-Block Scenario Description"
+
+msgid "Triton 的 `program_id`/Block 会被调度到设备核执行。查询映射："
+msgstr "Triton's `program_id`/Block is scheduled to device cores for execution. Query the mapping:"
+
+msgid ""
+"(msdebug) ascend info blocks\n"
+"(msdebug) ascend info blocks -d\n"
+msgstr ""
+"(msdebug) ascend info blocks\n"
+"(msdebug) ascend info blocks -d\n"
+
+msgid "读取分核数据前，应先执行："
+msgstr "Before reading per-core data, execute the following:"
+
+msgid ""
+"(msdebug) ascend aiv <core-id>\n"
+"(msdebug) p x\n"
+"(msdebug) x -m UB -f float32 x\n"
+msgstr ""
+"(msdebug) ascend aiv <core-id>\n"
+"(msdebug) p x\n"
+"(msdebug) x -m UB -f float32 x\n"
+
+msgid "切换到另一个 AIV 后再次读取，即可比较不同 Block/核的数据。两个核即使都显示 `UB 0x600`，也代表各自核的局部 UB 数据，不是同一物理上下文。"
+msgstr "Switch to another AIV and read again to compare data across different blocks/cores. Even if both cores display `UB 0x600`, they represent the local UB data of their respective cores, not the same physical context."
+
+msgid "官方核切换示例可参考 [Vector 算子调试示例](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0074.html?framework=mindspore)。"
+msgstr "For the official core switching example, refer to [Vector operator debugging example](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0074.html?framework=mindspore)."
+
+msgid "检查程序状态功能介绍"
+msgstr "Introduction to the Program Status Check Feature"
+
+msgid "在普通断点或单步停点，可以读取当前焦点核的寄存器，确认 PC、通用寄存器及状态寄存器。"
+msgstr "At a normal or single-step breakpoint, you can read the registers of the current focus core to check the PC, general-purpose registers, and status registers."
+
+msgid "读取全部可用寄存器："
+msgstr "Read all available registers:"
+
+msgid ""
+"(msdebug) register read -a\n"
+msgstr ""
+"(msdebug) register read -a\n"
+
+msgid "读取指定寄存器："
+msgstr "Read the specified register:"
+
+msgid ""
+"(msdebug) register read $PC $GPR0 $GPR30\n"
+msgstr ""
+"(msdebug) register read $PC $GPR0 $GPR30\n"
+
+msgid "也可使用缩写："
+msgstr "You can also use the abbreviation:"
+
+msgid ""
+"(msdebug) re r $PC\n"
+msgstr ""
+"(msdebug) re r $PC\n"
+
+msgid "对 Triton 问题，优先关注："
+msgstr "For Triton issues, prioritize the following:"
+
+msgid "`PC`：与 `.debug_line`、反汇编及变量 Location List 对照；"
+msgstr "`PC`: Compare with `.debug_line`, disassembly, and variable Location List;"
+
+msgid "通用寄存器：分析地址计算、循环索引或指针；"
+msgstr "General-purpose registers: analyze address calculation, loop index, or pointer;"
+
+msgid "状态和事件寄存器：分析 Kernel 等待或同步问题；"
+msgstr "Status and event registers: Analyze Kernel wait or synchronization issues;"
+
+msgid "切核后的寄存器差异：判断是否只有单个 Block/核异常。"
+msgstr "Register differences after switching cores: Determine whether only a single Block/core is abnormal."
+
+msgid "寄存器名无效时会返回相应错误，应使用 `register read -a` 确认当前芯片和核类型实际支持的名称。"
+msgstr "If the register name is invalid, an error is returned. Use `register read -a` to confirm the names actually supported by the current chip and core type."
+
+msgid "调试信息展示功能介绍"
+msgstr "Overview of the debugging information display feature"
+
+msgid "查询当前 Kernel 所在的 Device、Stream、Task、Block、核和停止原因。"
+msgstr "Query the Device, Stream, Task, Block, core, and stop reason of the current kernel."
+
+msgid "Device 信息"
+msgstr "Device Information"
+
+msgid ""
+"(msdebug) ascend info devices\n"
+msgstr ""
+"(msdebug) ascend info devices\n"
+
+msgid "`*` 表示当前焦点 Device。常见字段包括 Device ID、AIC/AIV 数量和核 Mask。"
+msgstr "`*` indicates the current focus Device. Common fields include the Device ID, AIC/AIV quantity, and core Mask."
+
+msgid "核信息"
+msgstr "Core Information"
+
+msgid "重点字段："
+msgstr "Key fields:"
+
+msgid "字段"
+msgstr "Field"
+
+msgid "Triton 调试含义"
+msgstr "Triton Debugging Meaning"
+
+msgid "`CoreId`"
+msgstr "`CoreId`"
+
+msgid "当前 AIC/AIV 的核 ID"
+msgstr "Current AIC/AIV core ID"
+
+msgid "`Type`"
+msgstr "`Type`"
+
+msgid "核类型，通常为 `aic` 或 `aiv`"
+msgstr "Core type, typically `aic` or `aiv`"
+
+msgid "`Device`"
+msgstr "`Device`"
+
+msgid "逻辑 Device ID"
+msgstr "Logical Device ID"
+
+msgid "`Stream`"
+msgstr "`Stream`"
+
+msgid "Kernel 下发所在 Stream"
+msgstr "Stream where the kernel is dispatched"
+
+msgid "`Task`"
+msgstr "`Task`"
+
+msgid "当前 Stream 中的 Task"
+msgstr "Task in the current Stream"
+
+msgid "`Block`"
+msgstr "`Block`"
+
+msgid "Triton program/Block 对应的逻辑 Block ID"
+msgstr "Logical Block ID corresponding to the Triton program/Block"
+
+msgid "`PC`"
+msgstr "`PC`"
+
+msgid "当前核设备 PC"
+msgstr "Current core device PC"
+
+msgid "`stop reason`"
+msgstr "`stop reason`"
+
+msgid "breakpoint、step over、step in、Ctrl+C 或异常类型等"
+msgstr "breakpoint, step over, step in, Ctrl+C, or exception type, and so on"
+
+msgid "`Filename/Line`"
+msgstr "`Filename/Line`"
+
+msgid "PC 对应的 Triton 源文件和行号，无法映射时可能为 `NA`"
+msgstr "The Triton source file and line number corresponding to the PC, which may be `NA` when it cannot be mapped."
+
+msgid "Task 信息"
+msgstr "Task Information"
+
+msgid ""
+"(msdebug) ascend info tasks\n"
+msgstr ""
+"(msdebug) ascend info tasks\n"
+
+msgid "用于确认当前 Task 对应的 Kernel Invocation，特别适合一个 Python 脚本调用多个 Kernel 时筛选目标。"
+msgstr "Use this to confirm the Kernel Invocation corresponding to the current Task. It is especially useful for filtering the target when a Python script calls multiple kernels."
+
+msgid "Stream 信息"
+msgstr "Stream Information"
+
+msgid ""
+"(msdebug) ascend info stream\n"
+msgstr ""
+"(msdebug) ascend info stream\n"
+
+msgid "用于确认目标 Kernel 所在的 Stream 和核类型。"
+msgstr "Confirms the Stream and core type of the target Kernel."
+
+msgid "Block 信息"
+msgstr "Block Information"
+
+msgid "`-d` 会显示所有 Block 当前停止位置，适合排查多核不同步、某个 Block 路径异常以及分核数据差异。"
+msgstr "`-d` displays the current stop positions of all Blocks. It is suitable for troubleshooting multi-core desynchronization, abnormal paths of a specific Block, and per-core data differences."
+
+msgid "SIMT 线程切换功能介绍"
+msgstr "Introduction to the SIMT Thread Switching Function"
+
+msgid "如果目标 Triton Kernel 在当前芯片和后端上以受 msdebug 支持的 SIMT 方式执行，可以查询并切换 SIMT 线程。SIMD Kernel 或不支持 SIMT 调试的版本不适用本节。"
+msgstr "If the target Triton kernel executes in the SIMT mode supported by msdebug on the current chip and backend, you can query and switch SIMT threads. SIMD kernels or versions that do not support SIMT debugging are not applicable to this section."
+
+msgid "查询线程："
+msgstr "Query thread:"
+
+msgid ""
+"(msdebug) ascend info threads\n"
+msgstr ""
+"(msdebug) ascend info threads\n"
+
+msgid "查询或切换线程："
+msgstr "Query or switch threads:"
+
+msgid ""
+"(msdebug) ascend thread 100\n"
+"(msdebug) ascend thread (0,8,0)\n"
+msgstr ""
+"(msdebug) ascend thread 100\n"
+"(msdebug) ascend thread (0,8,0)\n"
+
+msgid "切换线程后，源码位置和变量上下文会变化。应重新确认："
+msgstr "After you switch threads, the source code location and variable context change. Reconfirm the following:"
+
+msgid ""
+"(msdebug) ascend info threads\n"
+"(msdebug) var\n"
+msgstr ""
+"(msdebug) ascend info threads\n"
+"(msdebug) var\n"
+
+msgid "若命令不受支持或没有线程信息，应先确认 Kernel 编程模式、芯片和 msdebug 版本，而不是把它判断为 Triton 行号问题。"
+msgstr "If a command is not supported or lacks thread information, first verify the kernel programming mode, chip, and msdebug version. Do not assume it is a Triton line number issue."
+
+msgid "解析异常算子 Dump 文件功能介绍"
+msgstr "Introduction to Parsing Abnormal Operator Dump Files"
+
+msgid "NPU 发生硬件异常时，可以生成异常算子 Core Dump，离线恢复异常核、PC、寄存器和部分内存现场。此功能适用于在线断点无法稳定复现或程序已经异常退出的场景。"
+msgstr "When a hardware exception occurs on the NPU, you can generate a Core Dump for the abnormal operator to offline restore the abnormal core, PC, registers, and partial memory state. This feature applies to scenarios where online breakpoints cannot be stably reproduced or the program has already exited abnormally."
+
+msgid "开启异常算子 Dump 后，不应同时使用在线 msdebug；"
+msgstr "After enabling the exception operator dump, do not use online msdebug at the same time;"
+
+msgid "必须尽量使用异常现场完全匹配的 `kernel.o`；"
+msgstr "You must try to use a `kernel.o` that exactly matches the exception scene;"
+
+msgid "Python 源码相同不代表二进制相同，Block Size、Autotune、编译器版本和后端选项都会改变二进制；"
+msgstr "Identical Python source code does not guarantee identical binaries; Block Size, Autotune, compiler version, and backend options all change the binary;"
+
+msgid "硬件可能在产生异常后继续执行若干指令再上报，因此 Core 中部分内存和寄存器可能不是最初故障瞬间的值；"
+msgstr "The hardware may continue to execute several instructions after an exception occurs before reporting it; therefore, some memory and registers in the Core may not hold the values from the moment of the initial fault;"
+
+msgid "异常 PC 通常比普通数据更可靠，应先从 PC、停止原因和反汇编开始；"
+msgstr "The exception PC is usually more reliable than regular data; start from the PC, stop reason, and disassembly;"
+
+msgid "官方当前说明中，`bt` 主要用于 Core Dump，且只在部分硬件异常停止原因下保证准确性。"
+msgstr "In the current official documentation, `bt` is mainly used for Core Dump and guarantees accuracy only for certain hardware exception stop reasons."
+
+msgid "生成异常算子 Core 文件"
+msgstr "Generating a Core File for an Abnormal Operator"
+
+msgid "在线 msdebug 退出后，在普通终端设置："
+msgstr "After you exit online msdebug, set the following in a standard terminal:"
+
+msgid ""
+"export ASCEND_DUMP_SCENE=aic_err_detail_dump\n"
+"export ASCEND_DUMP_PATH=/data/ascend_core_dump\n"
+"mkdir -p \"$ASCEND_DUMP_PATH\"\n"
+"python triton_msdebug_demo.py\n"
+msgstr ""
+"export ASCEND_DUMP_SCENE=aic_err_detail_dump\n"
+"export ASCEND_DUMP_PATH=/data/ascend_core_dump\n"
+"mkdir -p \"$ASCEND_DUMP_PATH\"\n"
+"python triton_msdebug_demo.py\n"
+
+msgid "只有触发相应设备异常时才会生成 `.core` 文件。"
+msgstr "A `.core` file is generated only when a corresponding device exception is triggered."
+
+msgid "加载 Core 文件和 `kernel.o`"
+msgstr "Load the Core file and `kernel.o`"
+
+msgid ""
+"msdebug --core /data/ascend_core_dump/<error>.core \\\n"
+"  /data/triton_msdebug_dump/<hash>/kernel.o\n"
+msgstr ""
+"msdebug --core /data/ascend_core_dump/<error>.core \\\n"
+"  /data/triton_msdebug_dump/<hash>/kernel.o\n"
+
+msgid "如果暂时没有二进制，也可以只加载 Core："
+msgstr "If you do not have a binary yet, you can load only the Core:"
+
+msgid ""
+"msdebug --core /data/ascend_core_dump/<error>.core\n"
+msgstr ""
+"msdebug --core /data/ascend_core_dump/<error>.core\n"
+
+msgid "但缺少匹配 `kernel.o` 时，源码行、符号和调用栈解析会受到限制。"
+msgstr "However, when the matching `kernel.o` is missing, source line, symbol, and call stack resolution is limited."
+
+msgid "查看异常摘要"
+msgstr "View exception summary"
+
+msgid ""
+"(msdebug) ascend info summary\n"
+"(msdebug) ascend info devices\n"
+"(msdebug) ascend info cores\n"
+"(msdebug) ascend info blocks -d\n"
+msgstr ""
+"(msdebug) ascend info summary\n"
+"(msdebug) ascend info devices\n"
+"(msdebug) ascend info cores\n"
+"(msdebug) ascend info blocks -d\n"
+
+msgid "切换异常核"
+msgstr "Switching to the Abnormal Core"
+
+msgid ""
+"(msdebug) ascend aiv <id>\n"
+"(msdebug) ascend aic <id>\n"
+msgstr ""
+"(msdebug) ascend aiv <id>\n"
+"(msdebug) ascend aic <id>\n"
+
+msgid "选择 `stop reason` 为 `MTE_ERROR`、`VEC_ERROR`、`CUBE_ERROR` 等异常的核，然后查看："
+msgstr "Select the core whose `stop reason` is an exception such as `MTE_ERROR`, `VEC_ERROR`, or `CUBE_ERROR`, and then view:"
+
+msgid ""
+"(msdebug) bt\n"
+"(msdebug) frame select 0\n"
+"(msdebug) register read -a\n"
+msgstr ""
+"(msdebug) bt\n"
+"(msdebug) frame select 0\n"
+"(msdebug) register read -a\n"
+
+msgid "根据 PC 定位指令"
+msgstr "Locate instructions based on PC"
+
+msgid ""
+"(msdebug) re r $PC\n"
+"(msdebug) image list -o -f\n"
+"(msdebug) image lookup -a <pc-address>\n"
+"(msdebug) disassemble -s <start-address> -e <end-address>\n"
+msgstr ""
+"(msdebug) re r $PC\n"
+"(msdebug) image list -o -f\n"
+"(msdebug) image lookup -a <pc-address>\n"
+"(msdebug) disassemble -s <start-address> -e <end-address>\n"
+
+msgid "读取 Core 中内存"
+msgstr "Read memory in the Core"
+
+msgid "根据 `ascend info summary` 输出的内存段和当前核读取："
+msgstr "Based on the memory segments output by `ascend info summary` and the current core reads:"
+
+msgid ""
+"(msdebug) x -m GM -f uint8_t[] <address> -s 128 -c 1\n"
+"(msdebug) x -m STACK -f uint8_t[] <address> -s 128 -c 1\n"
+"(msdebug) x -m DCACHE -f uint8_t[] <address> -s 128 -c 1\n"
+msgstr ""
+"(msdebug) x -m GM -f uint8_t[] <address> -s 128 -c 1\n"
+"(msdebug) x -m STACK -f uint8_t[] <address> -s 128 -c 1\n"
+"(msdebug) x -m DCACHE -f uint8_t[] <address> -s 128 -c 1\n"
+
+msgid "具体支持的 Core Dump 内存类型应以 `help memory read` 为准。"
+msgstr "For the specific supported Core Dump memory types, refer to `help memory read`."
+
+msgid "常见问题"
+msgstr "Frequently Asked Questions"
+
+msgid "msdebug 初始化失败并提示 `0x20102`"
+msgstr "msdebug fails to initialize and displays `0x20102`"
+
+msgid "典型信息："
+msgstr "Typical information:"
+
+msgid ""
+"msdebug failed to initialize, please run \"echo 1 > /proc/debug_switch\"\n"
+msgstr ""
+"msdebug failed to initialize, please run \"echo 1 > /proc/debug_switch\"\n"
+
+msgid "检查："
+msgstr "Check:"
+
+msgid ""
+"echo 1 > /proc/debug_switch\n"
+"cat /proc/debug_switch\n"
+"ls -l /dev/drv_debug\n"
+msgstr ""
+"echo 1 > /proc/debug_switch\n"
+"cat /proc/debug_switch\n"
+"ls -l /dev/drv_debug\n"
+
+msgid "容器中无法修改时应回到宿主机处理。"
+msgstr "If you cannot modify it in the container, return to the host machine to handle it."
+
+msgid "断点命中，但 `var` 没有变量"
+msgstr "The breakpoint is hit, but `var` has no variable."
+
+msgid "断点使用 `.debug_line`，变量使用 `.debug_info` 和 `.debug_loc*`。按以下顺序检查："
+msgstr "Breakpoints use `.debug_line`, and variables use `.debug_info` and `.debug_loc*`. Check in the following order:"
+
+msgid ""
+"echo \"$LLVM_EXTRACT_DI_LOCAL_VARIABLES\"\n"
+"echo \"$TRITON_DISABLE_LINE_INFO\"\n"
+"llvm-dwarfdump --verify \"$KERNEL_O\"\n"
+"llvm-dwarfdump --debug-info \"$KERNEL_O\" | less\n"
+"llvm-dwarfdump --debug-loc \"$KERNEL_O\" | less\n"
+msgstr ""
+"echo \"$LLVM_EXTRACT_DI_LOCAL_VARIABLES\"\n"
+"echo \"$TRITON_DISABLE_LINE_INFO\"\n"
+"llvm-dwarfdump --verify \"$KERNEL_O\"\n"
+"llvm-dwarfdump --debug-info \"$KERNEL_O\" | less\n"
+"llvm-dwarfdump --debug-loc \"$KERNEL_O\" | less\n"
+
+msgid "如果变量存在但没有 Location，或当前 PC 不在 Location List 范围内，msdebug 无法打印该变量。"
+msgstr "If the variable exists but has no Location, or the current PC is outside the Location List range, msdebug cannot print the variable."
+
+msgid "可以用 msdebug 给 `NormalizeDebugLineLocations.cpp` 下断点吗"
+msgstr "Can you use msdebug to set a breakpoint in `NormalizeDebugLineLocations.cpp`?"
+
+msgid "不可以。它是主机侧 MLIR Pass，应使用编译日志、Pass 前后 IR、GDB/LLDB 调试 `triton-opt`。msdebug 调试的是已经装载到 NPU 的 `kernel.o`。"
+msgstr "No. It is a host-side MLIR pass. Use compilation logs, IR before and after the pass, and GDB/LLDB to debug `triton-opt`. msdebug debugs the `kernel.o` loaded onto the NPU."
+
+msgid "读出的 UB 数据不符合预期"
+msgstr "The read UB data does not match expectations"
+
+msgid "依次检查："
+msgstr "Check the following in sequence:"
+
+msgid "`ascend info cores` 中的焦点核是否正确；"
+msgstr "Whether the focus core in `ascend info cores` is correct;"
+
+msgid "是否在 `tl.load` 完成后、内存复用前停止；"
+msgstr "Whether to stop after `tl.load` completes and before memory reuse;"
+
+msgid "数据类型和 `-f` 是否一致；"
+msgstr "Whether the data type is consistent with `-f`;"
+
+msgid "`-s` 是否按字节理解；"
+msgstr "`-s` Whether it is interpreted by bytes;"
+
+msgid "mask 是否使部分 lane 无效；"
+msgstr "Whether the mask invalidates some lanes;"
+
+msgid "Block Size 和实际向量长度是否一致；"
+msgstr "Whether the Block Size matches the actual vector length;"
+
+msgid "是否正在调试另一份 Autotune Kernel；"
+msgstr "Are you debugging another Autotune Kernel;"
+
+msgid "地址是 UB 偏移还是 GM 绝对地址。"
+msgstr "The address is a UB offset or a GM absolute address."
+
+msgid "`LD_PRELOAD detected` 是否需要处理"
+msgstr "Whether `LD_PRELOAD detected` needs to be handled"
+
+msgid "该警告单独出现时通常不是失败原因。如果 msdebug 后续可以初始化、命中断点并读取设备信息，可以先保留当前环境。只有发生库冲突、符号加载失败或进程初始化失败时，再核对 `LD_PRELOAD` 指向的库。"
+msgstr "This warning alone is usually not the cause of the failure. If msdebug can initialize, hit breakpoints, and read device information afterward, keep the current environment. Check the library specified by `LD_PRELOAD` only if a library conflict, symbol loading failure, or process initialization failure occurs."
+
+msgid "附录：`kernel.o` 调试信息检查"
+msgstr "Appendix: Checking `kernel.o` Debugging Information"
+
+msgid "检查 Section"
+msgstr "Check Section"
+
+msgid ""
+"readelf -S \"$KERNEL_O\" | grep -E 'debug|symtab|strtab'\n"
+msgstr ""
+"readelf -S \"$KERNEL_O\" | grep -E 'debug|symtab|strtab'\n"
+
+msgid "校验 DWARF"
+msgstr "Verify DWARF"
+
+msgid ""
+"llvm-dwarfdump --verify \"$KERNEL_O\"\n"
+msgstr ""
+"llvm-dwarfdump --verify \"$KERNEL_O\"\n"
+
+msgid "查看行表"
+msgstr "View the line table"
+
+msgid ""
+"llvm-dwarfdump --debug-line \"$KERNEL_O\" | less\n"
+msgstr ""
+"llvm-dwarfdump --debug-line \"$KERNEL_O\" | less\n"
+
+msgid "查看编译单元和变量"
+msgstr "View compilation units and variables"
+
+msgid ""
+"llvm-dwarfdump --debug-info \"$KERNEL_O\" | less\n"
+msgstr ""
+"llvm-dwarfdump --debug-info \"$KERNEL_O\" | less\n"
+
+msgid "查看变量位置"
+msgstr "View Variable Location"
+
+msgid ""
+"llvm-dwarfdump --debug-loc \"$KERNEL_O\" | less\n"
+"llvm-dwarfdump --debug-loclists \"$KERNEL_O\" | less\n"
+msgstr ""
+"llvm-dwarfdump --debug-loc \"$KERNEL_O\" | less\n"
+"llvm-dwarfdump --debug-loclists \"$KERNEL_O\" | less\n"
+
+msgid "保存分析结果"
+msgstr "Save analysis results"
+
+msgid ""
+"llvm-dwarfdump --verify \"$KERNEL_O\" > dwarf-verify.txt 2>&1\n"
+"llvm-dwarfdump --debug-info \"$KERNEL_O\" > dwarf-info.txt\n"
+"llvm-dwarfdump --debug-line \"$KERNEL_O\" > dwarf-line.txt\n"
+"llvm-dwarfdump --debug-loc \"$KERNEL_O\" > dwarf-locations.txt\n"
+msgstr ""
+"llvm-dwarfdump --verify \"$KERNEL_O\" > dwarf-verify.txt 2>&1\n"
+"llvm-dwarfdump --debug-info \"$KERNEL_O\" > dwarf-info.txt\n"
+"llvm-dwarfdump --debug-line \"$KERNEL_O\" > dwarf-line.txt\n"
+"llvm-dwarfdump --debug-loc \"$KERNEL_O\" > dwarf-locations.txt\n"
+
+msgid "提交 Triton-Ascend 调试问题时，建议同时提供最小 Python 用例、版本信息、环境变量、完全匹配的 `kernel.o`、上述 DWARF 输出、msdebug 会话日志、目标 Device/核/Block 和实际停止 PC。"
+msgstr "When you submit a Triton-Ascend debugging issue, also provide the minimal Python sample, version information, environment variables, the exactly matching `kernel.o`, the preceding DWARF output, msdebug session logs, the target Device/Core/Block, and the actual stopped PC."
+
+msgid "参考资料"
+msgstr "References"
+
+msgid "[MindStudio Debugger 用户指南](https://gitcode.com/Ascend/msdebug/blob/master/docs/zh/user_guide/msdebug_user_guide.md)"
+msgstr "[MindStudio Debugger User Guide](https://gitcode.com/Ascend/msdebug/blob/master/docs/zh/user_guide/msdebug_user_guide.md)"
+
+msgid "[MindStudio Debugger 工具概述](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0062.html?framework=mindspore)"
+msgstr "[MindStudio Debugger Tool Overview](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0062.html?framework=mindspore)"
+
+msgid "[Cuda-gdb官方文档](https://docs.nvidia.com/cuda/cuda-gdb/index.html#single-stepping)"
+msgstr "[Cuda-gdb official documentation](https://docs.nvidia.com/cuda/cuda-gdb/index.html#single-stepping)"
+
+msgid "[DWARF location list 说明](https://dwarfstd.org/doc/040408.1.html)"
+msgstr "[DWARF location list description](https://dwarfstd.org/doc/040408.1.html)"
+
+msgid "[LLVM 调试变量说明](https://llvm.org/docs/SourceLevelDebugging.html)"
+msgstr "[LLVM debugging variables description](https://llvm.org/docs/SourceLevelDebugging.html)"

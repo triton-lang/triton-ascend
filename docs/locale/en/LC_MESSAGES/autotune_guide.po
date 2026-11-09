@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-26 22:51+0800\n"
-"PO-Revision-Date: 2026-10-26 22:51+0800\n"
+"POT-Creation-Date: 2026-11-09 09:37+0800\n"
+"PO-Revision-Date: 2026-11-09 09:37+0800\n"
 
-"X-Source-Commit: a256647c52aeb7646018c6311c0319589080af1d\n"
+"X-Source-Commit: d104e65928d1d7076a758315885045a826a45334\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -330,8 +330,8 @@ msgstr "The reason is that when autotune evaluates different candidate configura
 msgid "使用注意事项"
 msgstr "Usage Precautions"
 
-msgid "autotune的benchmark语义与社区一致，会多次执行kernel。如果kernel存在副作用，例如包含原子操作、inplace写入，或会修改输入/输出buffer的累积状态，仍然需要通过社区已有的hook机制处理。"
-msgstr "Autotune executes the kernel multiple times, and its benchmark semantics are consistent with the community. If the kernel has side effects, such as atomic operations, in-place writes, or modifying the accumulated state of input/output buffers, you still need to handle them using the existing community hook mechanism."
+msgid "autotune的benchmark语义与社区一致，会多次执行kernel。如果kernel存在副作用，例如包含原子操作、in-place写入，或会修改输入/输出buffer的累积状态，仍然需要通过社区已有的hook机制处理。"
+msgstr "The benchmark semantics of autotune are consistent with the community, and the kernel is executed multiple times. If the kernel has side effects, for example, atomic operations, in-place writes, or modifications to the accumulated state of input or output buffers, you still need to handle them through the existing hook mechanism provided by the community."
 
 msgid "Triton-Ascend相比社区autotune的扩展"
 msgstr "Triton-Ascend extensions compared to community autotune"
@@ -339,8 +339,8 @@ msgstr "Triton-Ascend extensions compared to community autotune"
 msgid "社区版 `triton.autotune` 的典型模式是：用户手工提供一组 `triton.Config`，框架做benchmark，然后缓存最优结果。"
 msgstr "The typical pattern for the community version of `triton.autotune` is as follows: users manually provide a set of `triton.Config`, the framework runs benchmarks, and then caches the optimal result."
 
-msgid "Triton-Ascend在保持这套接口习惯不变的前提下，主要扩展了下面几件事。"
-msgstr "While maintaining these interface conventions, Triton-Ascend mainly extends the following features."
+msgid "Triton-Ascend在保持这套接口习惯不变的前提下，主要扩展了下面几件事："
+msgstr "Triton-Ascend mainly extends the following aspects while keeping these interface conventions unchanged:"
 
 msgid "1. 支持 `configs=[]` 自动生成候选配置"
 msgstr "1\\. Supports automatically generating candidate configurations using `configs=[]`"
@@ -366,8 +366,8 @@ msgstr "Triton-Ascend supports switching the performance collection method when 
 msgid "自动Tiling生成能力的范围与行为"
 msgstr "Scope and Behavior of the Automatic Tiling Generation Capability"
 
-msgid "前面的第1点说明了Triton-Ascend支持 `configs=[]` 自动生成候选配置。对这项能力，进行以下几点说明。"
-msgstr "Point 1 above explains that Triton-Ascend supports automatically generating candidate configurations using `configs=[]`. The following points provide further details about this capability."
+msgid "前面的第1点说明了Triton-Ascend支持 `configs=[]` 自动生成候选配置。对这项能力，进行以下几点说明："
+msgstr "Point 1 above indicates that Triton-Ascend supports automatically generating candidate configurations with `configs=[]`. The following points explain this capability:"
 
 msgid "1. 自动生成范围聚焦在Tiling参数"
 msgstr "1\\. The auto-generated range focuses on tiling parameters"
@@ -381,8 +381,8 @@ msgstr "This capability is not equivalent to \"automatically tuning all paramete
 msgid "2. 候选配置会带上Ascend硬件约束"
 msgstr "2\\. Candidate configurations incorporate Ascend hardware constraints"
 
-msgid "Ascend backend在生成候选时，会结合NPU的片上存储容量、对齐约束、核数利用等边界做筛选，而不是单纯枚举一批配置再盲目benchmark。"
-msgstr "When generating candidates, the Ascend backend filters them based on NPU constraints such as on-chip memory capacity, alignment, and core utilization. It does not simply enumerate a batch of configurations and blindly benchmark them."
+msgid "Ascend backend在生成候选时，会结合NPU的片上内存容量、对齐约束、核数利用等边界做筛选，而不是单纯枚举一批配置再盲目benchmark。"
+msgstr "When generating candidates, the Ascend backend filters them based on NPU boundaries such as on-chip memory capacity, alignment constraints, and core utilization. It avoids simply enumerating configurations and blindly benchmarking them."
 
 msgid "3. 自动Tiling模式的目标是方便给出“性能不错”的配置"
 msgstr "3\\. The automatic Tiling mode aims to make it easy to provide configurations with good performance."
@@ -457,8 +457,8 @@ msgstr ""
 "  config=BLOCK_M: 128, BLOCK_N: 128, ...; p50=0.0100 ms, p20=0.0090 ms, p80=0.0110 ms [selected]\n"
 "  config=BLOCK_M: 64, BLOCK_N: 256, ...; p50=0.0140 ms, p20=0.0130 ms, p80=0.0150 ms\n"
 
-msgid "`[selected]` 标记被选中的最佳配置。`p50`、`p20`、`p80` 分别为第50、20、80百分位耗时，单位为毫秒；若测速返回平均耗时，则显示 `mean=... ms`。"
-msgstr "`[selected]` marks the selected best configuration. `p50`, `p20`, and `p80` indicate the 50th, 20th, and 80th percentile latency in milliseconds, respectively; if the speed test returns the average latency, the output displays `mean=... ms`."
+msgid "`[selected]` 标记被选中的最佳配置。`p50`、`p20`、`p80` 分别为第50、20、80百分位耗时，单位为 `ms`；若测速返回平均耗时，则显示 `mean=... ms`。"
+msgstr "`[selected]` marks the selected best configuration. `p50`, `p20`, and `p80` are the 50th, 20th, and 80th percentile latencies in `ms`, respectively; if the benchmark returns the average latency, `mean=... ms` is displayed."
 
 msgid "用户配置（`configs`，包括通过 `hints` 展开的配置）发生失败，或调优因异常中断时，会打印相应配置的状态和原因。以下分别为编译失败和调优中断的示意输出："
 msgstr "If a user configuration (`configs`, including configurations expanded through `hints`) fails, or an exception interrupts tuning, the system prints the status and reason of the corresponding configuration. The following shows sample outputs for a compilation failure and a tuning interruption, respectively:"
@@ -476,8 +476,8 @@ msgstr "Here, `compile_failed` indicates a compilation failure, `not_evaluated` 
 msgid "进阶用法：自动Tiling与其他参数联合调优"
 msgstr "Advanced Usage: Joint Tuning of Automatic Tiling and Other Parameters"
 
-msgid "以下内容属于进阶用法，只有当用户希望在自动Tiling模式下，继续联合调优kernel的非Tiling参数或编译参数时，再考虑使用。"
-msgstr "The following content is for advanced usage. Consider it only if you want to continue jointly tuning non-tiling or compilation parameters of the kernel in automatic tiling mode."
+msgid "以下内容属于进阶用法，只有当用户希望在自动Tiling模式下，继续联合调优kernel的非Tiling参数或编译参数时，再考虑使用："
+msgstr "The following content is for advanced usage. Consider using it only when you want to jointly tune the non-Tiling parameters or compilation parameters of the kernel in automatic Tiling mode:"
 
 msgid "1. 社区autotune：手工枚举全部调优参数"
 msgstr "1\\. Community autotune: Manually enumerate all tuning parameters"

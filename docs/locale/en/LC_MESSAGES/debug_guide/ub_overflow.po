@@ -5,10 +5,10 @@ msgid ""
 msgstr ""
 "Project-Id-Version: triton-ascend-docs\n"
 
-"POT-Creation-Date: 2026-10-26 23:13+0800\n"
-"PO-Revision-Date: 2026-10-26 23:13+0800\n"
+"POT-Creation-Date: 2026-11-09 09:52+0800\n"
+"PO-Revision-Date: 2026-11-09 09:52+0800\n"
 
-"X-Source-Commit: 2e8b9c27428eceea851e8fa4a32cf62e9b6ed420\n"
+"X-Source-Commit: 383bd4efbbf2507de7e8e172802458a4781b1533\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -65,7 +65,7 @@ msgstr "In scenarios where UB space is limited, prioritize parameter configurati
 msgid "2. 中间变量过多"
 msgstr "2\\. Too many intermediate variables"
 
-msgid "**问题：** kernel 中定义了大量临时张量或中间计算结果"
+msgid "**问题：** Kernel 中定义了大量临时张量或中间计算结果。"
 msgstr "**Problem:** The kernel defines a large number of temporary tensors or intermediate computation results."
 
 msgid "减少不必要的中间变量"
@@ -80,11 +80,11 @@ msgstr "Split large computations into multiple small kernels."
 msgid "3. shape 过大"
 msgstr "3\\. The shape is too large"
 
-msgid "**问题：** 处理高维/大 shape 张量"
-msgstr "**Problem:** Handling high-dimensional/large shape tensors"
+msgid "**问题：** 处理高维/大shape张量。"
+msgstr "**Problem:** Processing high-dimensional/large-shape tensors."
 
-msgid "考虑将大 tensor 分块处理"
-msgstr "Consider tiling large tensors"
+msgid "考虑将大Tensor分块处理"
+msgstr "Consider processing large tensors in blocks"
 
 msgid "修改分块策略，减小每块的大小"
 msgstr "Modify the tiling strategy to reduce the size of each block."
@@ -95,10 +95,10 @@ msgstr "Debugging Recommendations"
 msgid "**开启详细日志**"
 msgstr "**Enable detailed logs**"
 
-msgid "使用 `TRITON_DEBUG=1` 查看详细的编译信息"
+msgid "使用`TRITON_DEBUG=1`查看详细的编译信息"
 msgstr "Use `TRITON_DEBUG=1` to view detailed compilation information."
 
-msgid "定位具体哪个算子导致 UB 溢出"
+msgid "定位具体哪个算子导致UB溢出"
 msgstr "Identify the specific operator that causes a UB overflow"
 
 msgid "**逐步排查**"
@@ -113,14 +113,14 @@ msgstr "**Reference documents**"
 msgid "查看各接口文档中的\"特殊限制说明\"部分"
 msgstr "View the \"Special Limitations\" section in each API document."
 
-msgid "了解可能增加 UB 开销的参数配置"
-msgstr "Understand parameter configurations that may increase UB overhead"
+msgid "了解可能增加UB开销的参数配置"
+msgstr "Understanding parameter configurations that may increase UB overhead"
 
 msgid "**优化策略**"
 msgstr "**Optimization Strategy**"
 
-msgid "优先处理占用 UB 空间较大的算子"
-msgstr "Prioritize operators that occupy a large amount of UB space."
+msgid "优先处理占用UB空间较大的算子"
+msgstr "Prioritize operators that occupy a larger UB space."
 
 msgid "考虑重新设计算法以减少中间变量"
 msgstr "Consider redesigning the algorithm to reduce intermediate variables."

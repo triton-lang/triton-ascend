@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-26 23:25+0800\n"
-"PO-Revision-Date: 2026-10-26 23:25+0800\n"
+"POT-Creation-Date: 2026-11-09 09:58+0800\n"
+"PO-Revision-Date: 2026-11-09 09:58+0800\n"
 
-"X-Source-Commit: 7f3d7f0138daf56161151f159c0c1d48990451ff\n"
+"X-Source-Commit: d29b03c12d29beb3ddf18d056bccb91d2617fac2\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -13,11 +13,11 @@
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "层标准化 （Layer Normalization）"
+msgid "层标准化（Layer Normalization）"
 msgstr "Layer Normalization"
 
-msgid "在本节中，我们将使用 Triton 编写一个高性能层标准化 (Layer Normalization) 内核。通过将均值、方差计算和归一化融合到单个 kernel 中，减少了全局内存的读写次数，相比 PyTorch 的逐操作实现可以获得更好的性能。"
-msgstr "In this section, you use Triton to write a high-performance layer normalization (Layer Normalization) kernel. Fusing the mean, variance calculation, and normalization into a single kernel reduces the number of global memory reads and writes. This approach achieves better performance than the operation-by-operation implementation in PyTorch."
+msgid "在本节中，我们将使用 Triton 编写一个高性能层标准化 (Layer Normalization) 内核。通过将均值、方差计算和归一化融合到单个 Kernel 中，减少了全局内存的读写次数，相比 PyTorch 的逐操作实现可以获得更好的性能。"
+msgstr "In this section, you use Triton to write a high-performance layer normalization (Layer Normalization) kernel. Fusing mean and variance calculation and normalization into a single kernel reduces global memory read and write operations. This approach achieves better performance than the operation-by-operation implementation in PyTorch."
 
 msgid "计算内核"
 msgstr "compute kernel"

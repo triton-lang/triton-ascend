@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-26 23:37+0800\n"
-"PO-Revision-Date: 2026-10-26 23:37+0800\n"
+"POT-Creation-Date: 2026-11-09 10:02+0800\n"
+"PO-Revision-Date: 2026-11-09 10:02+0800\n"
 
-"X-Source-Commit: ac32c52985b4d0a2d0b8109224eece3d476920db\n"
+"X-Source-Commit: 8138b24c2b567fff70ff2bbeb225b5d7316ae934\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -19,8 +19,8 @@ msgstr "Costmodel end-to-end sample"
 msgid "本示例展示 costmodel 后端的基本调用流程："
 msgstr "This sample demonstrates the basic invocation flow of the costmodel backend:"
 
-msgid "使用 Triton 前端算子生成 TTIR；"
-msgstr "Use Triton frontend operators to generate TTIR;"
+msgid "使用 Triton 前端 Kernel 生成 TTIR；"
+msgstr "Use the Triton frontend kernel to generate TTIR;"
 
 msgid "为多个候选 config 构造 `costmodel_bench` item；"
 msgstr "Construct `costmodel_bench` items for multiple candidate configurations;"

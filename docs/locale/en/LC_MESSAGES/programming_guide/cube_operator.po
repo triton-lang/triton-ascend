@@ -5,10 +5,10 @@ msgid ""
 msgstr ""
 "Project-Id-Version: triton-ascend-docs\n"
 
-"POT-Creation-Date: 2026-10-27 00:03+0800\n"
-"PO-Revision-Date: 2026-10-27 00:03+0800\n"
+"POT-Creation-Date: 2026-11-09 10:05+0800\n"
+"PO-Revision-Date: 2026-11-09 10:05+0800\n"
 
-"X-Source-Commit: 33d20cbe0982ab5d5a5f87317aa5058e2ef87789\n"
+"X-Source-Commit: fa87e86297c726106096151bcc27a64b23b2409a\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -38,8 +38,8 @@ msgstr "Specify the input and output shapes and strides, for example, `A[M, K]`,
 msgid "用 `tl.program_id` 映射当前program到输出矩阵的 `(pid_m, pid_n)` tile。"
 msgstr "Use `tl.program_id` to map the current program to the `(pid_m, pid_n)` tile of the output matrix."
 
-msgid "用 `BLOCK_SIZE_M/N/K` 构造A/B的二维偏移。"
-msgstr "Use `BLOCK_SIZE_M/N/K` to construct the 2D offsets of A/B."
+msgid "用 `BLOCK_M/N/K` 构造A/B的二维偏移。"
+msgstr "Use `BLOCK_M/N/K` to construct the 2D offsets of A/B."
 
 msgid "沿K维循环加载A/B子块，并用 `tl.dot` 累加到fp32 accumulator。"
 msgstr "Loop over the K dimension to load A and B sub-blocks, and accumulate them into an fp32 accumulator using `tl.dot`."

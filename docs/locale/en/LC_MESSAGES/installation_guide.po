@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-26 23:45+0800\n"
-"PO-Revision-Date: 2026-10-26 23:45+0800\n"
+"POT-Creation-Date: 2026-11-09 10:03+0800\n"
+"PO-Revision-Date: 2026-11-09 10:03+0800\n"
 
-"X-Source-Commit: 44518e947f575f8222d48135070cd0269a597628\n"
+"X-Source-Commit: 355b8cb2ad0dba8c614270a045c451c0e03615b9\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -16,8 +16,8 @@
 msgid "安装指南"
 msgstr "Installation Guide"
 
-msgid "**Triton-Ascend**是适配华为Ascend处理器的Triton优化版本，提供核函数自动调优、算子编译及部署能力。支持Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品，兼容Triton核心语法，并针对昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。"
-msgstr "**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors, providing kernel autotune, operator compilation, and deployment capabilities. It supports Atlas A2 products, Atlas A3 products, and Ascend 950PR&950DT products. It is compatible with core Triton syntax and deeply optimizes for Ascend NPU features. These optimizations include automatically parsing kernel parameters, optimizing memory access logic, and enhancing secure deployment mechanisms, and so on."
+msgid "**Triton-Ascend**是适配华为昇腾处理器的Triton优化版本，提供核函数自动调优、算子编译及部署能力。支持Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品，兼容Triton核心语法，并针对华为昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。"
+msgstr "**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It provides capabilities for kernel autotuning, operator compilation, and deployment. It supports Atlas A2 products, Atlas A3 products, and Ascend 950PR&950DT products. It is compatible with the core syntax of Triton and is deeply optimized for Huawei Ascend NPU features. These optimizations include automatically parsing kernel parameters, optimizing memory access logic, and improving secure deployment mechanisms."
 
 msgid "本指南指导开发者在**Ubuntu**环境下安装**Triton-Ascend**，涵盖快速安装、源码安装及镜像安装三种方式，并包含环境验证与常见问题排查。"
 msgstr "This guide instructs developers to install **Triton-Ascend** in an **Ubuntu** environment; it covers three methods: quick installation, source code installation, and image installation, and includes environment verification and troubleshooting."
@@ -28,8 +28,8 @@ msgstr "Environment Preparation"
 msgid "**硬件要求**"
 msgstr "**Hardware requirements**"
 
-msgid "Ascend产品：支持Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品。"
-msgstr "Ascend products: Support Atlas A2 products, Atlas A3 products, and Ascend 950PR&950DT products."
+msgid "华为昇腾产品：支持Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品。"
+msgstr "Huawei Ascend products: These products support Atlas A2 products, Atlas A3 products, and Ascend 950PR&950DT products."
 
 msgid "NPU配置：建议单卡32GB及以上内存。"
 msgstr "NPU configuration: We recommend a single device with 32 GB or more memory."
@@ -40,8 +40,8 @@ msgstr "Operating system: Requires a Linux system. For details, refer to the [Co
 msgid "**软件依赖**"
 msgstr "**Software dependencies**"
 
-msgid "确定CANN、Python和TorchNPU软件版本并安装。如需具体安装步骤，请参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。"
-msgstr "Determine and install the software versions for CANN, Python, and TorchNPU. For specific installation steps, refer to \"[CANN Quick Installation](https://www.hiascend.com/cann/download)\" on the Ascend community website to complete the driver and firmware installation."
+msgid "确定CANN、Python和TorchNPU软件版本并安装。如需具体安装步骤，请参考华为昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。"
+msgstr "Determine and install the CANN, Python, and TorchNPU software versions. For specific installation steps, refer to the [CANN Quick Installation](https://www.hiascend.com/cann/download) on the Ascend community official website to complete the driver and firmware installation."
 
 msgid "CANN版本：9.2.0"
 msgstr "CANN version: 9.2.0"
@@ -100,12 +100,15 @@ msgid ""
 "git clone https://github.com/triton-lang/triton-ascend.git\n"
 "cd triton-ascend\n"
 "git checkout main\n"
-"pip install -e .\n"
+"pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/simple\n"
 msgstr ""
 "git clone https://github.com/triton-lang/triton-ascend.git\n"
 "cd triton-ascend\n"
 "git checkout main\n"
-"pip install -e .\n"
+"pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/simple\n"
+
+msgid "提醒：`pip install` 传入 `--no-build-isolation` 参数，可加快无变更构建速度。"
+msgstr "Tip: Pass the `--no-build-isolation` parameter to `pip install` to speed up unchanged builds."
 
 msgid "自定义LLVM构建（可选）"
 msgstr "Custom LLVM build (optional)"
@@ -327,101 +330,71 @@ msgstr "Chip type"
 msgid "镜像标签"
 msgstr "Image tag"
 
-msgid "Dockerfile"
-msgstr "Dockerfile"
-
 msgid "镜像下载命令"
 msgstr "Image download command"
 
 msgid "A2"
 msgstr "A2"
 
-msgid "3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11"
-msgstr "3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11"
+msgid "3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-debian12-py3.11"
+msgstr "3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-debian12-py3.11"
 
-msgid "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11/Dockerfile)"
-msgstr "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11/Dockerfile)"
+msgid "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-debian12-py3.11`"
+msgstr "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-debian12-py3.11`"
 
-msgid "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11`"
-msgstr "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11`"
+msgid "3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11"
+msgstr "3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11"
 
-msgid "3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11"
-msgstr "3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11"
+msgid "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11`"
+msgstr "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11`"
 
-msgid "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11/Dockerfile)"
-msgstr "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11/Dockerfile)"
+msgid "3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-openeuler24.03-py3.11"
+msgstr "3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-openeuler24.03-py3.11"
 
-msgid "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11`"
-msgstr "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11`"
-
-msgid "3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11"
-msgstr "3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11"
-
-msgid "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11/Dockerfile)"
-msgstr "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11/Dockerfile)"
-
-msgid "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11`"
-msgstr "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11`"
+msgid "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-openeuler24.03-py3.11`"
+msgstr "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-openeuler24.03-py3.11`"
 
 msgid "A3"
 msgstr "A3"
 
-msgid "3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11"
-msgstr "3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11"
+msgid "3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-debian12-py3.11"
+msgstr "3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-debian12-py3.11"
 
-msgid "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11/Dockerfile)"
-msgstr "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11/Dockerfile)"
+msgid "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-debian12-py3.11`"
+msgstr "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-debian12-py3.11`"
 
-msgid "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11`"
-msgstr "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11`"
+msgid "3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-ubuntu24.04-py3.11"
+msgstr "3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-ubuntu24.04-py3.11"
 
-msgid "3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11"
-msgstr "3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11"
+msgid "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-ubuntu24.04-py3.11`"
+msgstr "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-ubuntu24.04-py3.11`"
 
-msgid "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11/Dockerfile)"
-msgstr "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11/Dockerfile)"
+msgid "3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-openeuler24.03-py3.11"
+msgstr "3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-openeuler24.03-py3.11"
 
-msgid "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11`"
-msgstr "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11`"
-
-msgid "3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11"
-msgstr "3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11"
-
-msgid "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11/Dockerfile)"
-msgstr "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11/Dockerfile)"
-
-msgid "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11`"
-msgstr "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11`"
+msgid "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-openeuler24.03-py3.11`"
+msgstr "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-openeuler24.03-py3.11`"
 
 msgid "950"
 msgstr "950"
 
-msgid "3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11"
-msgstr "3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11"
+msgid "3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-debian12-py3.11"
+msgstr "3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-debian12-py3.11"
 
-msgid "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11/Dockerfile)"
-msgstr "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11/Dockerfile)"
+msgid "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-debian12-py3.11`"
+msgstr "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-debian12-py3.11`"
 
-msgid "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11`"
-msgstr "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11`"
+msgid "3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-ubuntu24.04-py3.11"
+msgstr "3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-ubuntu24.04-py3.11"
 
-msgid "3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11"
-msgstr "3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11"
+msgid "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-ubuntu24.04-py3.11`"
+msgstr "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-ubuntu24.04-py3.11`"
 
-msgid "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11/Dockerfile)"
-msgstr "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11/Dockerfile)"
+msgid "3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-openeuler24.03-py3.11"
+msgstr "3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-openeuler24.03-py3.11"
 
-msgid "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11`"
-msgstr "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11`"
-
-msgid "3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11"
-msgstr "3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11"
-
-msgid "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11/Dockerfile)"
-msgstr "[Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11/Dockerfile)"
-
-msgid "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11`"
-msgstr "`docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11`"
+msgid "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-openeuler24.03-py3.11`"
+msgstr "`docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-openeuler24.03-py3.11`"
 
 msgid "更多镜像请参考[OVERVIEW.md](https://github.com/triton-lang/triton-ascend/blob/main/docker/OVERVIEW.zh.md)。"
 msgstr "For more images, refer to [OVERVIEW.md](https://github.com/triton-lang/triton-ascend/blob/main/docker/OVERVIEW.zh.md)."
@@ -430,7 +403,7 @@ msgid "**镜像使用**"
 msgstr "**Image Usage**"
 
 msgid ""
-"# 以 `3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11` 为例\n"
+"# 以 `3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11` 为例\n"
 "docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container \\\n"
 "--security-opt seccomp=unconfined \\\n"
 "--device=/dev/davinci0 \\\n"
@@ -450,13 +423,13 @@ msgid ""
 "-v /usr/local/Ascend/driver:/usr/local/Ascend/driver \\\n"
 "-v /home:/home \\\n"
 "-v /etc/ascend_install.info:/etc/ascend_install.info \\\n"
-"quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11 \\\n"
+"quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11 \\\n"
 "/bin/bash\n"
 "\n"
 "# 镜像已安装运行算子所需的基础组件（CANN、TorchNPU、Triton-Ascend等），可直接运行样例\n"
 "docker exec -u root -it triton-ascend_container /bin/bash\n"
 msgstr ""
-"# Using `3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11` as an example\n"
+"# Using `3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11` as an example\n"
 "docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container \\\n"
 "--security-opt seccomp=unconfined \\\n"
 "--device=/dev/davinci0 \\\n"
@@ -476,10 +449,10 @@ msgstr ""
 "-v /usr/local/Ascend/driver:/usr/local/Ascend/driver \\\n"
 "-v /home:/home \\\n"
 "-v /etc/ascend_install.info:/etc/ascend_install.info \\\n"
-"quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11 \\\n"
+"quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11 \\\n"
 "/bin/bash\n"
 "\n"
-"# The image includes the basic components required to run operators (CANN, TorchNPU, Triton-Ascend, and so on), so you can directly run samples.\n"
+"# The image includes the basic components required to run operators (CANN, TorchNPU, Triton-Ascend, and so on), so you can run samples directly.\n"
 "docker exec -u root -it triton-ascend_container /bin/bash\n"
 
 msgid "**注**：如需使用该类镜像测试源码编译安装，则先运行`pip uninstall triton-ascend triton`命令卸载已安装的**Triton-Ascend**组件。"
@@ -491,8 +464,24 @@ msgstr "Verification and Testing"
 msgid "验证安装"
 msgstr "Verifying the Installation"
 
-msgid "运行tutorials中向量加法示例验证安装**Triton-Ascend**结果。向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)。"
-msgstr "Run the vector addition sample in the tutorials to verify the **Triton-Ascend** installation result. Vector addition sample: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)."
+msgid "执行以下命令："
+msgstr "Run the following command:"
+
+msgid ""
+"python3 -c \"import triton.backends.ascend as ascend;print('triton-ascend version:', ascend.__version__)\"\n"
+msgstr ""
+"python3 -c \"import triton.backends.ascend as ascend;print('triton-ascend version:', ascend.__version__)\"\n"
+
+msgid "如果输出："
+msgstr "If the output is as follows:"
+
+msgid ""
+"triton-ascend version: 版本号\n"
+msgstr ""
+"triton-ascend version: version number\n"
+
+msgid "说明Triton-Ascend包安装成功了。继续运行tutorials中向量加法示例验证后端是否编译成功。向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)。"
+msgstr "This indicates that the Triton-Ascend package is successfully installed. Continue running the vector addition sample in the tutorials to verify whether the backend is compiled successfully. Vector addition sample: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)."
 
 msgid ""
 "# 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）\n"
@@ -644,8 +633,8 @@ msgstr "If you encounter this issue and want to restore Triton-Ascend functional
 msgid "**问题五：Triton-Ascend 3.2.1版本依赖的Triton版本为何不一致？**"
 msgstr "**Question 5: Why is the Triton version dependency inconsistent in Triton-Ascend 3.2.1?**"
 
-msgid "答复：x86与Arm使用不同版本的社区Triton安装包，是因为社区从Triton 3.2版本开始提供x86安装包，而Arm安装包是从Triton 3.5版本开始提供的。"
-msgstr "Answer: x86 and Arm use different versions of the community Triton installation package because the community has provided the x86 installation package since Triton version 3.2, and the Arm installation package since Triton version 3.5."
+msgid "答复：x86与ARM使用不同版本的社区Triton安装包，是因为社区从Triton 3.2版本开始提供x86安装包，而ARM安装包是从Triton 3.5版本开始提供的。"
+msgstr "Answer: x86 and ARM use different versions of the community Triton installation packages because the community provides x86 installation packages starting from Triton version 3.2, while ARM installation packages are available starting from Triton version 3.5."
 
 msgid "**问题六：如何确认芯片类型？**"
 msgstr "**Question 6: How do I confirm the chip type?**"

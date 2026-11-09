@@ -5,10 +5,10 @@ msgid ""
 msgstr ""
 "Project-Id-Version: triton-ascend-docs\n"
 
-"POT-Creation-Date: 2026-10-26 23:41+0800\n"
-"PO-Revision-Date: 2026-10-26 23:41+0800\n"
+"POT-Creation-Date: 2026-11-09 10:02+0800\n"
+"PO-Revision-Date: 2026-11-09 10:02+0800\n"
 
-"X-Source-Commit: 6d7ed3d44e0c51f8ccb19119496ceec061d709ef\n"
+"X-Source-Commit: efa684ffe3826957f47fd3253e3bf8fbe45afd75\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -148,5 +148,5 @@ msgstr ""
 "<a href=\"https://deepwiki.com/triton-lang/triton-ascend\"><img src=\"https://deepwiki.com/badge.svg\" alt=\"Ask DeepWiki\"></a>\n"
 "</p>"
 
-msgid "**Triton-Ascend** 是适配华为Ascend处理器的Triton优化版本，主要用于提供高效的核函数自动调优、算子编译及部署能力，支持Ascend Atlas A2/A3/950系列产品，兼容Triton核心语法的同时，针对昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。"
-msgstr "**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It provides efficient kernel autotuning, operator compilation, and deployment capabilities. It supports Ascend Atlas A2/A3/950 products. While remaining compatible with the core Triton syntax, it is deeply optimized for Ascend NPU features. These optimizations include automatically parsing kernel parameters, optimizing memory access logic, and improving secure deployment mechanisms."
+msgid "**Triton-Ascend** 是适配华为昇腾处理器的Triton优化版本，主要用于提供高效的核函数自动调优、算子编译及部署能力，支持Atlas A2/A3和Ascend 950PR&950DT系列产品，兼容Triton核心语法的同时，针对华为昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。"
+msgstr "**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It mainly provides efficient kernel autotuning, operator compilation, and deployment capabilities. It supports Atlas A2/A3 and Ascend 950PR&950DT products. While maintaining compatibility with core Triton syntax, it is deeply optimized for Huawei Ascend NPU characteristics. These optimizations include automatically parsing kernel parameters, optimizing memory access logic, and enhancing secure deployment mechanisms."

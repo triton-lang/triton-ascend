@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-27 00:17+0800\n"
-"PO-Revision-Date: 2026-10-27 00:17+0800\n"
+"POT-Creation-Date: 2026-11-09 10:06+0800\n"
+"PO-Revision-Date: 2026-11-09 10:06+0800\n"
 
-"X-Source-Commit: 92045059b7178ee6ee9009bd8cbe86a839416267\n"
+"X-Source-Commit: dfa30004cc43592a395a054b8ca0b2dcdb3fc6e8\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -34,10 +34,10 @@ msgstr "Use `mask` to protect the tail block and avoid out-of-bounds load/store.
 msgid "完成逐元素计算后写回结果。"
 msgstr "Write back the result after completing the element-wise computation."
 
-msgid "当grid数远大于物理核数时，将grid固定为 `num_vectorcore`，在kernel内用 `range(pid, num_blocks, num_core)` 分批处理。"
-msgstr "When the number of grids is much larger than the number of physical cores, set the grid to `num_vectorcore`. Use `range(pid, num_blocks, num_core)` to process data in batches within the kernel."
+msgid "当grid数远大于物理核数时，将grid固定为 `num_vectorcore`，在Kernel内用 `range(pid, num_blocks, num_core)` 分批处理。"
+msgstr "When the number of grids is much larger than the number of physical cores, fix the grid to `num_vectorcore` and use `range(pid, num_blocks, num_core)` inside the kernel to process data in batches."
 
-msgid "基础kernel结构如下："
+msgid "基础Kernel结构如下："
 msgstr "The basic kernel structure is as follows:"
 
 msgid ""
@@ -109,8 +109,8 @@ msgstr "**Merging fine-grained discrete tasks using `SUB_BLOCK_SIZE`**: Load a g
 msgid "**用扩展语义管理UB内局部数据**：先通过 `import triton.language.extra.cann.extension as extension` 引入扩展模块，再使用 `extension.insert_slice` 合并多行数据，使用 `extension.extract_slice` 取出子块后再分散写回。"
 msgstr "**Managing local data in the UB using extension semantics**: First, import the extension module using `import triton.language.extra.cann.extension as extension`. Then, use `extension.insert_slice` to merge multiple rows of data, and use `extension.extract_slice` to extract a sub-block and write it back to scattered locations."
 
-msgid "**为尾块保留统一mask**：复杂gather/scatter中同时存在index mask、column mask和expert/bin边界，建议分别命名并只在load/store处组合。"
-msgstr "**Retain a unified mask for tail blocks**: In complex gather/scatter operations where index masks, column masks, and expert/bin boundaries coexist, name them separately and combine them only at load/store points."
+msgid "**为尾块保留统一Mask**：复杂gather/scatter中同时存在index Mask、column Mask和expert/bin边界，建议分别命名并只在load/store处组合。"
+msgstr "**Retain a unified mask for tail blocks**: In complex gather/scatter operations, index masks, column masks, and expert/bin boundaries coexist. Name them separately and combine them only at the load/store points."
 
 msgid "典型的UB预算思路如下："
 msgstr "The typical approach to UB budgeting is as follows:"
@@ -118,6 +118,7 @@ msgstr "The typical approach to UB budgeting is as follows:"
 msgid ""
 "# 获取NPU硬件属性，详见“通用多核任务并行”一节\n"
 "import torch_npu\n"
+"import triton\n"
 "import triton.runtime.driver as driver\n"
 "device = torch_npu.npu.current_device()\n"
 "properties = driver.active.utils.get_device_properties(device)\n"
@@ -129,8 +130,9 @@ msgid ""
 "sub_block_size = max((ub_budget - block_x * element_bytes) //\n"
 "                     (block_x * element_bytes + index_bytes), 1)\n"
 msgstr ""
-"# Get NPU hardware properties. For details, see the \"General Multi-Core Task Parallelism\" section\n"
+"# Obtain NPU hardware properties. For details, see the \"General Multi-Core Task Parallelism\" section.\n"
 "import torch_npu\n"
+"import triton\n"
 "import triton.runtime.driver as driver\n"
 "device = torch_npu.npu.current_device()\n"
 "properties = driver.active.utils.get_device_properties(device)\n"
@@ -151,8 +153,8 @@ msgstr "Whether the grid is significantly larger than the number of physical Vec
 msgid "离散访存是否可转化为“批量搬入UB后在UB内选择”。"
 msgstr "Whether scattered memory access can be converted to \"batch loading into the UB and then selecting within the UB\"."
 
-msgid "尾轴（最后一个维度）是否满足32B对齐；不满足时是否可用转置或借轴转置规避自动padding。"
-msgstr "Check whether the tail axis (last dimension) is 32B-aligned; if not, check whether transpose or borrowed-axis transpose can avoid automatic padding."
+msgid "尾轴（最后一个维度）是否满足32Byte对齐；不满足时是否可用转置或借轴转置规避自动padding。"
+msgstr "Check whether the tail axis (last dimension) meets 32-byte alignment; if it does not, check whether you can use transpose or axis-borrowing transpose to avoid automatic padding."
 
 msgid "`BLOCK_X` 和 `SUB_BLOCK_SIZE` 是否造成UB overflow或过小的搬运粒度。"
 msgstr "Whether `BLOCK_X` and `SUB_BLOCK_SIZE` cause a UB overflow or an overly small data movement granularity."

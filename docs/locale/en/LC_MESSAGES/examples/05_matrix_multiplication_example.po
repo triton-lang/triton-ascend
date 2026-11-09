@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-26 23:29+0800\n"
-"PO-Revision-Date: 2026-10-26 23:29+0800\n"
+"POT-Creation-Date: 2026-11-09 09:59+0800\n"
+"PO-Revision-Date: 2026-11-09 09:59+0800\n"
 
-"X-Source-Commit: 10cbbdbd83182fe1bfc838ffde324ffc12bfdc3d\n"
+"X-Source-Commit: 0413b499385a8861c457ba97935764d90bd97304\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -13,7 +13,7 @@
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "矩阵乘法 （Matrix Multiplication）"
+msgid "矩阵乘法（Matrix Multiplication）"
 msgstr "Matrix Multiplication"
 
 msgid "在本节中，我们展示了使用 Triton 进行矩阵乘法的内核实现。"

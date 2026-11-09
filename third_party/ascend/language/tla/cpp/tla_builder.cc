@@ -563,6 +563,73 @@ void init_tla_builder(py::module &&m) {
           py::arg("buf_id"), py::arg("pipe"), py::arg("nonblocking") = false)
       // SIMD vector-register ops (AVE dialect, ave.hir.*).
       .def(
+          "create_simd_vgatherb",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             Value index, Value mask, py::object elem) -> Value {
+            auto type = VectorType::get(
+                {64},
+                resolveSimdElementType(self.getBuilder().getContext(), elem));
+            auto offsets = toIndexValues(self, indices);
+            return self
+                .create<hivmave::VFBlockGatherOp>(
+                    type, ptr, ValueRange(offsets), index, mask)
+                .getRes();
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("index"), py::arg("mask"),
+          py::arg("elem"))
+      .def(
+          "create_simd_vscatter",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             Value index, Value mask, Value value) {
+            auto offsets = toIndexValues(self, indices);
+            self.create<hivmave::VFScatterOp>(ptr, ValueRange(offsets), index,
+                                              mask, value);
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("index"), py::arg("mask"),
+          py::arg("value"))
+      .def(
+          "create_simd_pred_pack",
+          [](TLABuilder &self, Value src, bool unpack, int32_t part) -> Value {
+            if (unpack)
+              return self.create<hivmave::PregUnpackOp>(src, part).getRes();
+            return self.create<hivmave::PregPackOp>(src, part).getRes();
+          },
+          py::arg("src"), py::arg("unpack"), py::arg("part"))
+      .def(
+          "create_simd_pred_interleave",
+          [](TLABuilder &self, Value a, Value b,
+             bool inverse) -> std::pair<Value, Value> {
+            if (inverse) {
+              auto op = self.create<hivmave::PregDeinterleaveOp>(a, b);
+              return {op.getRes0(), op.getRes1()};
+            }
+            auto op = self.create<hivmave::PregInterleaveOp>(a, b);
+            return {op.getRes0(), op.getRes1()};
+          },
+          py::arg("a"), py::arg("b"), py::arg("inverse"))
+      .def(
+          "create_simd_vselr",
+          [](TLABuilder &self, Value src, Value index, Value mask) -> Value {
+            return self.create<hivmave::VFRegisterGatherOp>(src, index, mask)
+                .getRes();
+          },
+          py::arg("src"), py::arg("index"), py::arg("mask"))
+      .def(
+          "create_simd_group_reduce",
+          [](TLABuilder &self, const std::string &kind, Value src, Value mask,
+             bool isUnsigned) -> Value {
+            auto combiningKind = hivmave::symbolizeCombiningKind(kind);
+            if (!combiningKind)
+              throw std::invalid_argument("unknown group reduction kind");
+            return self
+                .create<hivmave::GroupReductionOp>(
+                    *combiningKind, src, mask,
+                    isUnsigned ? hivm::TypeFn::cast_unsigned
+                               : hivm::TypeFn::cast_signed)
+                .getRes();
+          },
+          py::arg("kind"), py::arg("src"), py::arg("mask"), py::arg("unsigned"))
+      .def(
           "create_simd_vgather",
           [](TLABuilder &self, Value ptr, std::vector<Value> indices,
              Value index, Value mask, py::object elem, int32_t lanes) -> Value {
@@ -774,9 +841,7 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("kind"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"),
           py::arg("sign"), py::arg("mode") = "zeroing")
-      // Elementwise vector-scalar left shift (``ave.hir.vshls``).  The scalar
-      // must already have the vector element type; ``mode`` is consumed by
-      // applySimdMode.
+      // Vector-scalar shifts. The scalar must have the vector element type.
       .def(
           "create_simd_shift_scalar",
           [](TLABuilder &self, std::string &kind, Value &vec, Value &scalar,
@@ -786,13 +851,18 @@ void init_tla_builder(py::module &&m) {
             auto signVal = builder.create<arith::ConstantOp>(
                 loc, builder.getBoolAttr(sign));
             auto resTy = vec.getType();
-            if (kind != "shls") {
+            Value result;
+            if (kind == "shls") {
+              result = self.create<hivmave::VFShlsOp>(resTy, vec, scalar, mask,
+                                                    signVal)
+                           .getResult();
+            } else if (kind == "shrs") {
+              result = self.create<hivmave::VFShrsOp>(resTy, vec, scalar, mask,
+                                                    signVal)
+                           .getResult();
+            } else {
               throw std::invalid_argument("unknown scalar shift kind: " + kind);
             }
-            auto result = self
-                              .create<hivmave::VFShlsOp>(resTy, vec, scalar,
-                                                         mask, signVal)
-                              .getResult();
             return applySimdMode(self, result, mask, mode);
           },
           py::arg("kind"), py::arg("vec"), py::arg("scalar"),

@@ -131,9 +131,19 @@ bool StageRouteCompletionProfile::MultiSequenceMinmaxScan::isValid() const {
 bool StageRouteCompletionProfile::StraightLineAddReduction::isValid() const {
   if (!enabled)
     return true;
-  return minimumRows > 0 && maximumRows >= minimumRows && minimumExtent > 1 &&
-         maximumExtent >= minimumExtent &&
-         finiteNonNegative({sharedCompletionSystemCycles}) && !evidence.empty();
+  const bool base = minimumRows > 0 && maximumRows >= minimumRows &&
+                    minimumExtent > 1 && maximumExtent >= minimumExtent &&
+                    finiteNonNegative({sharedCompletionSystemCycles});
+  const bool hasLarge = largeMinimumRows != 0 || largeMaximumRows != 0 ||
+                        largeMinimumExtent != 0 || largeMaximumExtent != 0 ||
+                        largeAdditionalCompletionSystemCycles != 0.0;
+  const bool large =
+      !hasLarge ||
+      (largeMinimumRows > 0 && largeMaximumRows >= largeMinimumRows &&
+       largeMinimumExtent > maximumExtent &&
+       largeMaximumExtent >= largeMinimumExtent &&
+       finiteNonNegative({largeAdditionalCompletionSystemCycles}));
+  return base && large && !evidence.empty();
 }
 
 bool StageRouteCompletionProfile::TwoLoopSingleReduction::isValid() const {
@@ -162,6 +172,8 @@ namespace {
 constexpr llvm::StringLiteral kAllSimd = "all_simd";
 constexpr llvm::StringLiteral kAllSimtOnly = "all_simt_only";
 constexpr llvm::StringLiteral kMixedSimdSimt = "mixed_simd_simt";
+constexpr llvm::StringLiteral kAivLaunchDomain = "aiv";
+constexpr llvm::StringLiteral kAicLaunchDomain = "aic";
 
 static bool isKnownRoute(llvm::StringRef route) {
   return route == kAllSimd || route == kAllSimtOnly || route == kMixedSimdSimt;
@@ -203,7 +215,8 @@ struct KernelTimingProfile {
     bool enabled = false;
     std::string target;
     std::string loweringContract;
-    double taskEnvelopeSystemCycles = 0.0;
+    double completionIncludingLaunchSystemCycles = 0.0;
+    double initiationIntervalEfficiency = 1.0;
     double dynamicCVFirstFillSystemCycles = 0.0;
     double dynamicCVPerIterationDeltaSystemCycles = 0.0;
     std::string scheduleContract;
@@ -213,8 +226,10 @@ struct KernelTimingProfile {
     bool isValid() const {
       return !enabled ||
              (target == "Ascend950PR_9579" && !loweringContract.empty() &&
-              finitePositive(
-                  {taskEnvelopeSystemCycles, dynamicCVFirstFillSystemCycles}) &&
+              finitePositive({completionIncludingLaunchSystemCycles,
+                              dynamicCVFirstFillSystemCycles}) &&
+              initiationIntervalEfficiency > 0.0 &&
+              initiationIntervalEfficiency <= 1.0 &&
               finiteValues({dynamicCVPerIterationDeltaSystemCycles}) &&
               !scheduleContract.empty() &&
               fullKernelValidationSHA256.size() == 64 && !evidence.empty());
@@ -366,6 +381,9 @@ struct KernelTimingProfile {
 
   double scalarPrologueSystemCycles = 0.0;
   double scalarEpilogueSystemCycles = 0.0;
+  /// Preferred physical launch envelope. The sampled boundary curves below
+  /// remain a compatibility fallback for older profiles.
+  std::map<std::string, KernelLaunchCost> launchCostByExecutionDomain;
   std::map<int64_t, double> boundaryResidualSystemCyclesByPhysicalProgramCount;
   std::map<std::string, std::map<int64_t, std::map<int64_t, double>>>
       boundaryResidualSystemCyclesByRouteFactorAndPhysicalProgramCount;
@@ -373,6 +391,9 @@ struct KernelTimingProfile {
   /// global load.
   std::map<std::string, double> globalLoadBoundaryResidualSystemCyclesByRoute;
   std::map<std::string, RuntimeArgumentSetup> runtimeArgumentSetupByRoute;
+  int64_t nativeIndirectStoreMaximumElements = 0;
+  double nativeIndirectStoreSignedCompletionCycles = 0.0;
+  std::string nativeIndirectStoreCompletionEvidence;
   int64_t scalarizedRank2IndirectLoadMaximumElements = 0;
   std::map<int64_t, double>
       scalarizedRank2IndirectLoadResidualByPhysicalProgramCount;
@@ -398,6 +419,14 @@ struct KernelTimingProfile {
   std::string evidence;
 
   bool isValid() const {
+    const bool validLaunchCosts =
+        launchCostByExecutionDomain.empty() ||
+        (launchCostByExecutionDomain.size() == 2 &&
+         launchCostByExecutionDomain.count(kAivLaunchDomain.str()) != 0 &&
+         launchCostByExecutionDomain.count(kAicLaunchDomain.str()) != 0 &&
+         llvm::all_of(launchCostByExecutionDomain, [](const auto &entry) {
+           return entry.second.isValid();
+         }));
     const bool validCurve = validNonNegativeCurve(
         boundaryResidualSystemCyclesByPhysicalProgramCount);
     const bool validRouteCurves = llvm::all_of(
@@ -420,6 +449,13 @@ struct KernelTimingProfile {
           const llvm::StringRef route(entry.first);
           return isKnownRoute(route) && entry.second.isValid();
         });
+    const bool validNativeIndirectStore =
+        (nativeIndirectStoreMaximumElements == 0 &&
+         nativeIndirectStoreSignedCompletionCycles == 0.0 &&
+         nativeIndirectStoreCompletionEvidence.empty()) ||
+        (nativeIndirectStoreMaximumElements > 0 &&
+         std::isfinite(nativeIndirectStoreSignedCompletionCycles) &&
+         !nativeIndirectStoreCompletionEvidence.empty());
     const bool hasScalarizedRank2Residual =
         scalarizedRank2IndirectLoadMaximumElements != 0 ||
         !scalarizedRank2IndirectLoadResidualByPhysicalProgramCount.empty() ||
@@ -458,8 +494,9 @@ struct KernelTimingProfile {
                         return entry.first > 0 && std::isfinite(entry.second);
                       });
              }));
-    return validCurve && validRouteCurves && validGlobalLoadResiduals &&
-           validArgumentSetup && validScalarizedRank2Residual &&
+    return validLaunchCosts && validCurve && validRouteCurves &&
+           validGlobalLoadResiduals && validArgumentSetup &&
+           validNativeIndirectStore && validScalarizedRank2Residual &&
            simdRank2StridedDirectLoad.isValid() &&
            simtRank2StridedDirectLoad.isValid() &&
            validSubwarpIndirectComposite && validSimtRank2Residual &&
@@ -494,7 +531,14 @@ struct KernelTimingProfile {
   }
 
   double boundarySystemCycles(llvm::StringRef route, int64_t factor,
-                              int64_t physicalProgramCount) const {
+                              int64_t physicalProgramCount,
+                              llvm::StringRef executionDomain = {}) const {
+    if (!executionDomain.empty()) {
+      const auto launch =
+          launchCostByExecutionDomain.find(executionDomain.str());
+      if (launch != launchCostByExecutionDomain.end())
+        return launch->second.estimate(physicalProgramCount);
+    }
     const double fallback =
         scalarPrologueSystemCycles + scalarEpilogueSystemCycles;
     const auto routeIt =
@@ -519,6 +563,28 @@ struct KernelTimingProfile {
     return found == globalLoadBoundaryResidualSystemCyclesByRoute.end()
                ? 0.0
                : found->second;
+  }
+
+  double completeWithLaunchSystemCycles(llvm::StringRef route, int64_t factor,
+                                        int64_t physicalProgramCount,
+                                        llvm::StringRef executionDomain,
+                                        double bodySystemCycles) const {
+    const auto launch = launchCostByExecutionDomain.find(executionDomain.str());
+    if (launch != launchCostByExecutionDomain.end())
+      return launch->second.combineWithBody(physicalProgramCount,
+                                            bodySystemCycles);
+    return bodySystemCycles +
+           boundarySystemCycles(route, factor, physicalProgramCount);
+  }
+
+  double
+  globalLoadCompletionSystemCycles(llvm::StringRef route, int64_t factor,
+                                   int64_t physicalProgramCount,
+                                   double effectiveLaunchContribution) const {
+    const double legacyComplete =
+        boundarySystemCycles(route, factor, physicalProgramCount) +
+        globalLoadBoundarySystemCycles(route);
+    return std::max(0.0, legacyComplete - effectiveLaunchContribution);
   }
 
   double runtimeArgumentSetupSystemCycles(llvm::StringRef route,
@@ -1796,6 +1862,11 @@ static void readStageResources(ProfileJSONReader &reader,
         *scan, "dependency_factor", profile.prefixScanDependencyFactor);
     profile.straightLinePrefixScanElementsPerCycle = reader.optionalNumber(
         *scan, "straight_line_completion_elements_per_system_cycle", 0.0);
+    profile.straightLinePrefixScanKernelCompletionCycles =
+        reader.optionalNumber(
+            *scan, "straight_line_kernel_completion_system_cycles", 0.0);
+    profile.nonUnitPrefixScanKernelCompletionCycles = reader.optionalNumber(
+        *scan, "non_unit_kernel_completion_system_cycles", 0.0);
     if (auto evidence = scan->getString("straight_line_completion_evidence"))
       profile.straightLinePrefixScanCompletionEvidence = evidence->str();
     if (const auto *helpers =
@@ -2456,8 +2527,10 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
       result.target = reader.string(*completion, "target", path);
       result.loweringContract =
           reader.string(*completion, "lowering_contract", path);
-      result.taskEnvelopeSystemCycles =
-          reader.number(*completion, "task_envelope_system_cycles", path);
+      result.completionIncludingLaunchSystemCycles = reader.number(
+          *completion, "completion_including_launch_system_cycles", path);
+      result.initiationIntervalEfficiency =
+          reader.number(*completion, "initiation_interval_efficiency", path);
       result.dynamicCVFirstFillSystemCycles = reader.number(
           *completion, "dynamic_cv_first_fill_system_cycles", path);
       result.dynamicCVPerIterationDeltaSystemCycles = reader.number(
@@ -2474,6 +2547,26 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
     timing.scalarEpilogueSystemCycles =
         reader.number(*kernelTiming, "scalar_epilogue_system_cycles",
                       "profile.kernel_timing");
+    if (const auto *launchCosts = kernelTiming->getObject(
+            "launch_system_cycles_by_execution_domain")) {
+      const std::string path =
+          "profile.kernel_timing.launch_system_cycles_by_execution_domain";
+      for (llvm::StringRef domain : {kAivLaunchDomain, kAicLaunchDomain}) {
+        const auto *object = reader.object(*launchCosts, domain, path);
+        if (!object)
+          continue;
+        auto &cost = timing.launchCostByExecutionDomain[domain.str()];
+        const std::string domainPath = path + "." + domain.str();
+        cost.baseSystemCycles =
+            reader.number(*object, "base_system_cycles", domainPath);
+        cost.incrementalSystemCyclesPerPhysicalProgram = reader.number(
+            *object, "incremental_system_cycles_per_physical_program",
+            domainPath);
+        cost.overlapNormExponent =
+            reader.number(*object, "overlap_norm_exponent", domainPath);
+        cost.evidence = reader.string(*object, "evidence", domainPath);
+      }
+    }
     readPositiveIntegerNumberCurve(
         *kernelTiming,
         "boundary_residual_system_cycles_by_physical_program_count", reader,
@@ -2493,6 +2586,17 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
     readRuntimeArgumentSetupByRoute(*kernelTiming, reader,
                                     "profile.kernel_timing",
                                     timing.runtimeArgumentSetupByRoute);
+    if (const auto *nativeStore =
+            kernelTiming->getObject("native_indirect_store_completion")) {
+      const std::string path =
+          "profile.kernel_timing.native_indirect_store_completion";
+      timing.nativeIndirectStoreMaximumElements =
+          reader.integer(*nativeStore, "maximum_elements", path);
+      timing.nativeIndirectStoreSignedCompletionCycles =
+          reader.number(*nativeStore, "signed_completion_system_cycles", path);
+      timing.nativeIndirectStoreCompletionEvidence =
+          reader.string(*nativeStore, "evidence", path);
+    }
     if (const auto *scalarizedRank2 = kernelTiming->getObject(
             "scalarized_rank2_indirect_load_completion")) {
       const std::string path =
@@ -2735,6 +2839,15 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
       readNumbers(reader, *addReduction, path,
                   {{"shared_completion_system_cycles",
                     &result.sharedCompletionSystemCycles}});
+      readOptionalIntegers(
+          *addReduction,
+          {{"large_minimum_rows", &result.largeMinimumRows},
+           {"large_maximum_rows", &result.largeMaximumRows},
+           {"large_minimum_extent", &result.largeMinimumExtent},
+           {"large_maximum_extent", &result.largeMaximumExtent}});
+      readOptionalNumbers(reader, *addReduction,
+                          {{"large_additional_completion_system_cycles",
+                            &result.largeAdditionalCompletionSystemCycles}});
       result.evidence = reader.string(*addReduction, "evidence", path);
     }
     if (const auto *twoLoopReduction = kernelTiming->getObject(
@@ -2867,6 +2980,18 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
         simdProfile.independentLoadGroupMaximumOperations =
             reader.integer(*group, "maximum_operations", path);
         if (reader.string(*group, "evidence", path).empty())
+          reader.setError(path + ".evidence must identify calibration data");
+      }
+      if (const auto *completion =
+              memory->getObject("independent_loop_composition_completion")) {
+        const std::string path =
+            "simd.memory.independent_loop_composition_completion";
+        simdProfile.independentLoopExpDivPairCyclesPerElement = reader.number(
+            *completion, "exp_div_pair_system_cycles_per_element", path);
+        simdProfile.independentLoopPredicateSelectCyclesPerElement =
+            reader.number(*completion,
+                          "predicate_select_system_cycles_per_element", path);
+        if (reader.string(*completion, "evidence", path).empty())
           reader.setError(path + ".evidence must identify calibration data");
       }
       if (const auto *completion =
@@ -3061,6 +3186,8 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
           *reduction, "lane_steps_per_system_cycle",
           "lane_step_throughput_measurement", "lane_step/system_cycle",
           microbench, reader, "simd.reduction");
+      simdProfile.largeRowTwoReductionCompletionCycles = reader.optionalNumber(
+          *reduction, "large_row_two_reduction_completion_system_cycles", 0.0);
       if (reduction->getString(
               "masked_accumulator_completion_setup_measurement") ||
           reduction->getNumber(
@@ -3194,6 +3321,9 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
       readMaskedStridedCopyCompletion(
           *memory, "masked_strided_store_copy_completion", "simt.memory",
           reader, simtProfile.maskedStridedStoreCopyCompletionByStrideBytes);
+      if (auto startup = memory->getNumber(
+              "masked_strided_store_kernel_startup_system_cycles"))
+        simtProfile.maskedStridedStoreKernelStartupCycles = *startup;
       readStridedShortCompletionFits(reader, *memory, "simt.memory",
                                      simtProfile.stridedShortCompletionFits);
     }
@@ -3352,10 +3482,152 @@ static double setRouteTotal(StageRoutePlan &plan, size_t owner,
   return adjustment;
 }
 
+static bool usesCubeExecution(const StageCostModelSummary &stageModel,
+                              const StageRoutePlan &plan) {
+  if (plan.implementations.size() != stageModel.stages.size())
+    return false;
+  for (size_t index = 0; index < stageModel.stages.size(); ++index)
+    if (stageModel.stages[index].features.hasDot &&
+        plan.implementations[index].mode == StageMode::SIMD)
+      return true;
+  return false;
+}
+
+static llvm::StringRef
+launchExecutionDomain(const StageCostModelSummary &stageModel,
+                      const StageRoutePlan &plan) {
+  return usesCubeExecution(stageModel, plan) ? kAicLaunchDomain
+                                             : kAivLaunchDomain;
+}
+
+static bool
+launchDistributionOverlapsBody(const StageCostModelSummary &stageModel) {
+  return llvm::none_of(stageModel.stages, [](const LogicalStageCost &stage) {
+    return stage.model == "independent_pipelined_loop" &&
+           (!stage.features.isGridStrideLoopShell ||
+            stage.features.hasContiguousMemory);
+  });
+}
+
+static bool
+usesCompletionInclusivePhysicalGroupBody(const StageRoutePlan &plan) {
+  return plan.diagnostic<bool>(
+      "rank2_interleaved_prefix_scan_completion_applied");
+}
+
+static bool
+requiresGlobalLoadCompletion(const StageCostModelSummary &stageModel,
+                             const StageRoutePlan &plan) {
+  if (usesCompletionInclusivePhysicalGroupBody(plan))
+    return false;
+  bool hasGlobalLoad = false;
+  bool hasNontrivialWork = false;
+  bool hasDot = false;
+  bool hasIndirectMemory = false;
+  bool hasGridStrideLoop = false;
+  bool hasPrefixScan = false;
+  bool hasReduction = false;
+  bool hasNonMinMaxReduction = false;
+  bool hasClassifiedReduction = false;
+  for (const LogicalStageCost &stage : stageModel.stages) {
+    hasGlobalLoad |= stage.workload.loadOperations > 0.0 ||
+                     stage.workload.loadBytes > 0.0 ||
+                     stage.workload.scalarLoadCount > 0.0;
+    hasDot |= stage.features.hasDot;
+    hasPrefixScan |= stage.features.hasPrefixScan;
+    hasIndirectMemory |= stage.features.hasIndirectMemory;
+    hasGridStrideLoop |= stage.features.isGridStrideLoopShell ||
+                         stage.features.insideGridStrideLoopBody;
+    hasReduction |= stage.features.hasReduction;
+    for (const auto &[combineClass, count] :
+         stage.workload.reductionCombineClassCounts) {
+      hasClassifiedReduction |= count > 0.0;
+      hasNonMinMaxReduction |= count > 0.0 && combineClass != "minmax";
+    }
+    if (stage.features.hasIndirectMemory || stage.features.hasDot ||
+        stage.features.hasReduction || stage.features.hasPrefixScan ||
+        stage.features.hasAtomicMemory) {
+      hasNontrivialWork = true;
+      continue;
+    }
+    const llvm::StringRef model = stage.model;
+    if (model == "continuous_tile_memory" || model == "continuous_tile_store") {
+      for (const auto &operation : stage.workload.operationCounts) {
+        const llvm::StringRef name = operation.getKey();
+        if (name != "generic.issue" && name != "predicate.cmp" &&
+            name != "simd.folded_flat_address") {
+          hasNontrivialWork = true;
+          break;
+        }
+      }
+      hasNontrivialWork |= llvm::any_of(stage.workload.memoryAccesses,
+                                        [](const StageMemoryAccess &access) {
+                                          return access.hasNonUnitInnerStride();
+                                        });
+    }
+    hasNontrivialWork |=
+        model != "auto_blockify_dispatch" && model != "auto_blockify_loop" &&
+        model != "continuous_tile_memory" && model != "continuous_tile_store" &&
+        model != "index_generation" && model != "predicate_mask" &&
+        model != "view_layout" && model != "scalar_issue" &&
+        model != "independent_pipelined_loop";
+  }
+  return hasGlobalLoad && hasNontrivialWork && !hasPrefixScan &&
+         (!hasReduction || hasNonMinMaxReduction || hasIndirectMemory ||
+          !hasClassifiedReduction) &&
+         (plan.runtimeLoopIterationCount == 1 || hasDot ||
+          (hasIndirectMemory && !hasGridStrideLoop));
+}
+
+static double routeGlobalLoadCompletionSystemCycles(
+    const KernelTimingProfile &timing, llvm::StringRef route, int64_t factor,
+    int64_t physicalProgramCount, llvm::StringRef launchDomain,
+    double effectiveLaunchContribution,
+    const StageCostModelSummary &stageModel) {
+  const bool hasAtomic =
+      llvm::any_of(stageModel.stages, [](const LogicalStageCost &stage) {
+        return stage.features.hasAtomicMemory;
+      });
+  const int64_t reductionStageCount = static_cast<int64_t>(
+      llvm::count_if(stageModel.stages, [](const LogicalStageCost &stage) {
+        return stage.features.hasReduction;
+      }));
+  double completion = 0.0;
+  const bool capAtomicCompletion = hasAtomic && physicalProgramCount > 8;
+  if (!capAtomicCompletion && reductionStageCount < 2) {
+    completion = timing.globalLoadCompletionSystemCycles(
+        route, factor, physicalProgramCount, effectiveLaunchContribution);
+  } else {
+    const double singleProgramLaunch =
+        timing.boundarySystemCycles(route, factor, 1, launchDomain);
+    completion = timing.globalLoadCompletionSystemCycles(route, factor, 1,
+                                                         singleProgramLaunch);
+  }
+  const bool hasUnclassifiedReduction =
+      llvm::any_of(stageModel.stages, [](const LogicalStageCost &stage) {
+        return stage.features.hasReduction &&
+               stage.workload.reductionCombineClassCounts.empty();
+      });
+  return hasUnclassifiedReduction ? 0.7 * completion : completion;
+}
+
 static void addRouteResidual(StageRoutePlan &plan, size_t owner,
                              double residual) {
   setRouteTotal(plan, owner, plan.totalCycles + residual);
 }
+
+struct RouteFixedCost {
+  double launch = 0.0;
+  double overlap = 0.0;
+  double globalLoadCompletion = 0.0;
+  double fixed = 0.0;
+};
+
+static RouteFixedCost routeFixedCost(const CandidateProfile &profile,
+                                     llvm::StringRef route,
+                                     const StageCostModelSummary &stageModel,
+                                     const StageRoutePlan &plan,
+                                     int64_t kernelArgumentCount);
 
 static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     const SimdSimtFeatureSummary &features, const CandidateProfile &profile,
@@ -3784,8 +4056,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
             ? std::min(logicalProgramCountHint, physicalCoreCountHint)
             : logicalProgramCountHint;
     multiResultScan.fixedBoundaryCycles =
-        profile.kernelTiming.boundarySystemCycles(kAllSimd, 1,
-                                                  physicalPrograms) +
+        profile.kernelTiming.boundarySystemCycles(kAllSimd, 1, physicalPrograms,
+                                                  kAivLaunchDomain) +
         profile.kernelTiming.globalLoadBoundarySystemCycles(kAllSimd) +
         profile.kernelTiming.runtimeArgumentSetupSystemCycles(kAllSimd,
                                                               argumentCount);
@@ -3795,13 +4067,44 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     return routes.takeError();
   auto refreshBestAllSimt = [&]() {
     std::optional<StageRoutePlan> best;
-    for (const auto &[factor, plan] : routes->allSimtFactorPlans) {
-      if (plan.legal && (!best || plan.totalCycles < best->totalCycles))
+    double bestCompleteCycles = std::numeric_limits<double>::infinity();
+    for (auto &entry : routes->allSimtFactorPlans) {
+      StageRoutePlan &plan = entry.second;
+      if (!plan.legal)
+        continue;
+      const double completeCycles =
+          plan.totalCycles + routeFixedCost(profile, kAllSimtOnly, *routes,
+                                            plan, kernelArgumentCount)
+                                 .fixed;
+      if (!best || completeCycles < bestCompleteCycles) {
         best = plan;
+        bestCompleteCycles = completeCycles;
+      }
     }
     if (best)
       routes->allSimt = std::move(*best);
   };
+  refreshBestAllSimt();
+  auto refreshBestMixed = [&]() {
+    std::optional<StageRoutePlan> best;
+    double bestCompleteCycles = std::numeric_limits<double>::infinity();
+    for (StageRoutePlan &plan : routes->mixedFactorPlans) {
+      if (!plan.legal ||
+          plan.implementations.size() != costTable->stages.size())
+        continue;
+      const double completeCycles =
+          plan.totalCycles + routeFixedCost(profile, kMixedSimdSimt, *routes,
+                                            plan, kernelArgumentCount)
+                                 .fixed;
+      if (!best || completeCycles < bestCompleteCycles) {
+        best = plan;
+        bestCompleteCycles = completeCycles;
+      }
+    }
+    if (best)
+      routes->mixed = std::move(*best);
+  };
+  refreshBestMixed();
   auto usesFittedIndirectLoad = [&](const StageRoutePlan &plan, size_t owner) {
     if (owner >= plan.implementations.size() ||
         owner >= costTable->stages.size())
@@ -3885,7 +4188,7 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
         return;
       double fixedCycles = profile.kernelTiming.boundarySystemCycles(
           kAllSimtOnly, plan.routeSuperblockFactor,
-          plan.runtimePhysicalProgramCount);
+          plan.runtimePhysicalProgramCount, kAivLaunchDomain);
       fixedCycles +=
           profile.kernelTiming.globalLoadBoundarySystemCycles(kAllSimtOnly);
       fixedCycles += profile.kernelTiming.runtimeArgumentSetupSystemCycles(
@@ -3993,15 +4296,37 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
       applyResidual(plan);
   }
   bool nativeChain = false;
+  double nativeIndirectStoreElements = 0.0;
+  bool hasNativeIndirectLoad = false;
+  for (const LogicalStageCost &stage : routes->stages) {
+    hasNativeIndirectLoad |= !stage.workload.indirectLoadCounts.empty();
+    for (const auto &[shape, count] : stage.workload.indirectStoreCounts)
+      nativeIndirectStoreElements += static_cast<double>(shape.second) * count;
+  }
   for (auto &[factor, plan] : routes->allSimtFactorPlans) {
     // Frozen native labels use profiler microseconds * 1000.
     if (profile.kernelTiming.systemCounterFrequencyMHz != 1000)
       continue;
     if (auto elapsed = IndirectGatherMemoryCostModel::nativeChainCost(
             *partition, hardwareProfile, plan)) {
+      double correctedElapsed = *elapsed;
+      if (!hasNativeIndirectLoad && nativeIndirectStoreElements > 0.0 &&
+          nativeIndirectStoreElements <=
+              profile.kernelTiming.nativeIndirectStoreMaximumElements) {
+        correctedElapsed = std::max(
+            0.0,
+            correctedElapsed +
+                profile.kernelTiming.nativeIndirectStoreSignedCompletionCycles);
+        plan.diagnostic<double>(
+            "native_indirect_store_completion_system_cycles") =
+            profile.kernelTiming.nativeIndirectStoreSignedCompletionCycles;
+        plan.diagnostic<std::string>(
+            "native_indirect_store_completion_evidence") =
+            profile.kernelTiming.nativeIndirectStoreCompletionEvidence;
+      }
       plan.diagnostic<bool>("native_indirect_chain_applied") = true;
       plan.diagnostic<double>("native_indirect_chain_elapsed_system_cycles") =
-          *elapsed;
+          correctedElapsed;
       plan.diagnostic<int64_t>("native_indirect_chain_warp_count") = numWarps;
       nativeChain = true;
     }
@@ -4011,21 +4336,17 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     // includes fixed/setup/helper costs and supersedes old route residuals.
     const StageRoutePlan *best = nullptr;
     double bestElapsed = 0;
-    for (const auto &[factor, plan] : routes->allSimtFactorPlans) {
+    for (const auto &entry : routes->allSimtFactorPlans) {
+      const StageRoutePlan &plan = entry.second;
       if (!plan.legal)
         continue;
-      double elapsed =
-          plan.diagnostic<bool>("native_indirect_chain_applied")
-              ? plan.diagnostic<double>(
-                    "native_indirect_chain_elapsed_system_cycles")
-              : plan.totalCycles +
-                    profile.kernelTiming.boundarySystemCycles(
-                        kAllSimtOnly, factor,
-                        plan.runtimePhysicalProgramCount) +
-                    profile.kernelTiming.globalLoadBoundarySystemCycles(
-                        kAllSimtOnly) +
-                    profile.kernelTiming.runtimeArgumentSetupSystemCycles(
-                        kAllSimtOnly, kernelArgumentCount);
+      double elapsed = plan.diagnostic<bool>("native_indirect_chain_applied")
+                           ? plan.diagnostic<double>(
+                                 "native_indirect_chain_elapsed_system_cycles")
+                           : plan.totalCycles +
+                                 routeFixedCost(profile, kAllSimtOnly, *routes,
+                                                plan, kernelArgumentCount)
+                                     .fixed;
       if (!best || elapsed < bestElapsed) {
         best = &plan;
         bestElapsed = elapsed;
@@ -4034,6 +4355,30 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     if (best)
       routes->allSimt = *best;
   }
+  auto recordRouteCost = [&](StageRoutePlan &plan, llvm::StringRef route) {
+    if (!plan.legal)
+      return;
+    const llvm::StringRef domain = launchExecutionDomain(*routes, plan);
+    const RouteFixedCost cost =
+        routeFixedCost(profile, route, *routes, plan, kernelArgumentCount);
+    plan.diagnostic<std::string>("kernel_launch_execution_domain") =
+        domain.str();
+    plan.diagnostic<double>("kernel_launch_system_cycles") = cost.launch;
+    plan.diagnostic<double>("kernel_launch_body_overlap_system_cycles") =
+        cost.overlap;
+    plan.diagnostic<double>("global_load_completion_system_cycles") =
+        cost.globalLoadCompletion;
+    plan.diagnostic<double>("complete_fixed_system_cycles") = cost.fixed;
+    plan.diagnostic<double>("complete_kernel_system_cycles") =
+        plan.totalCycles + cost.fixed;
+  };
+  recordRouteCost(routes->allSimd, kAllSimd);
+  for (auto &[factor, plan] : routes->allSimtFactorPlans)
+    recordRouteCost(plan, kAllSimtOnly);
+  for (StageRoutePlan &plan : routes->mixedFactorPlans)
+    recordRouteCost(plan, kMixedSimdSimt);
+  recordRouteCost(routes->allSimt, kAllSimtOnly);
+  recordRouteCost(routes->mixed, kMixedSimdSimt);
   return std::move(*routes);
 }
 
@@ -4109,14 +4454,6 @@ correlateLoopTripCountInfos(const std::vector<LoopTripCountInfo> &source,
     }
   }
   return {};
-}
-
-static bool hasGlobalLoad(const StageCostModelSummary &stageModel) {
-  return llvm::any_of(stageModel.stages, [](const LogicalStageCost &stage) {
-    return stage.workload.loadOperations > 0.0 ||
-           stage.workload.loadBytes > 0.0 ||
-           stage.workload.scalarLoadCount > 0.0;
-  });
 }
 
 static std::optional<double> tinyStraightLineSimtMemoryAdjustment(
@@ -4219,18 +4556,50 @@ static std::optional<double> simtNonAffineRank1MemoryAdjustment(
       fit.residualBySourceProgramCount, sourceProgramCount, 0.0);
 }
 
+static RouteFixedCost routeFixedCost(const CandidateProfile &profile,
+                                     llvm::StringRef route,
+                                     const StageCostModelSummary &stageModel,
+                                     const StageRoutePlan &plan,
+                                     int64_t kernelArgumentCount) {
+  const llvm::StringRef launchDomain = launchExecutionDomain(stageModel, plan);
+  const double launch = profile.kernelTiming.boundarySystemCycles(
+      route, plan.routeSuperblockFactor, plan.runtimePhysicalProgramCount,
+      launchDomain);
+  const double launchAndBodyCycles =
+      usesCompletionInclusivePhysicalGroupBody(plan)
+          ? plan.totalCycles +
+                profile.kernelTiming.boundarySystemCycles(
+                    route, plan.routeSuperblockFactor, 1, launchDomain)
+      : launchDistributionOverlapsBody(stageModel)
+          ? profile.kernelTiming.completeWithLaunchSystemCycles(
+                route, plan.routeSuperblockFactor,
+                plan.runtimePhysicalProgramCount, launchDomain,
+                plan.totalCycles)
+          : plan.totalCycles + launch;
+  const double effectiveLaunchCycles =
+      std::max(0.0, launchAndBodyCycles - plan.totalCycles);
+  RouteFixedCost cost;
+  cost.launch = launch;
+  cost.overlap = std::max(0.0, launch - effectiveLaunchCycles);
+  cost.fixed = effectiveLaunchCycles;
+  if (requiresGlobalLoadCompletion(stageModel, plan))
+    cost.globalLoadCompletion = routeGlobalLoadCompletionSystemCycles(
+        profile.kernelTiming, route, plan.routeSuperblockFactor,
+        plan.runtimePhysicalProgramCount, launchDomain, effectiveLaunchCycles,
+        stageModel);
+  cost.fixed += cost.globalLoadCompletion;
+  cost.fixed += profile.kernelTiming.runtimeArgumentSetupSystemCycles(
+      route, kernelArgumentCount);
+  return cost;
+}
+
 static double routeFixedSystemCycles(const CandidateProfile &profile,
                                      llvm::StringRef route,
+                                     const StageCostModelSummary &stageModel,
                                      const StageRoutePlan &plan,
-                                     int64_t kernelArgumentCount,
-                                     bool routeHasGlobalLoad) {
-  double cycles = profile.kernelTiming.boundarySystemCycles(
-      route, plan.routeSuperblockFactor, plan.runtimePhysicalProgramCount);
-  if (routeHasGlobalLoad)
-    cycles += profile.kernelTiming.globalLoadBoundarySystemCycles(route);
-  cycles += profile.kernelTiming.runtimeArgumentSetupSystemCycles(
-      route, kernelArgumentCount);
-  return cycles;
+                                     int64_t kernelArgumentCount) {
+  return routeFixedCost(profile, route, stageModel, plan, kernelArgumentCount)
+      .fixed;
 }
 
 static SimdSimtCandidateScores
@@ -4238,13 +4607,12 @@ completeCandidateCosts(const SimdSimtCostReport &report,
                        const CandidateProfile &profile,
                        int64_t kernelArgumentCount) {
   SimdSimtCandidateScores scores = report.candidateCosts;
-  const bool routeHasGlobalLoad = hasGlobalLoad(report.stageModel);
   scores.allSimd +=
-      routeFixedSystemCycles(profile, kAllSimd, report.stageModel.allSimd,
-                             kernelArgumentCount, routeHasGlobalLoad);
+      routeFixedSystemCycles(profile, kAllSimd, report.stageModel,
+                             report.stageModel.allSimd, kernelArgumentCount);
   scores.allSimtOnly +=
-      routeFixedSystemCycles(profile, kAllSimtOnly, report.stageModel.allSimt,
-                             kernelArgumentCount, routeHasGlobalLoad);
+      routeFixedSystemCycles(profile, kAllSimtOnly, report.stageModel,
+                             report.stageModel.allSimt, kernelArgumentCount);
   if (auto adjustment = tinyStraightLineSimtMemoryAdjustment(
           report.stageModel, report.stageModel.allSimt,
           profile.kernelTiming.tinyStraightLineSimtMemoryCompletion))
@@ -4257,8 +4625,8 @@ completeCandidateCosts(const SimdSimtCostReport &report,
           profile.kernelTiming.simtNonAffineRank1MemoryCompletion))
     scores.allSimtOnly = std::max(0.0, scores.allSimtOnly + *adjustment);
   scores.mixedSimdSimt +=
-      routeFixedSystemCycles(profile, kMixedSimdSimt, report.stageModel.mixed,
-                             kernelArgumentCount, routeHasGlobalLoad);
+      routeFixedSystemCycles(profile, kMixedSimdSimt, report.stageModel,
+                             report.stageModel.mixed, kernelArgumentCount);
   if (report.stageModel.allSimt.diagnostic<bool>(
           "native_indirect_chain_applied"))
     scores.allSimtOnly = report.stageModel.allSimt.diagnostic<double>(
@@ -4298,29 +4666,38 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
   prediction.reason = "generic_stage_resource_formula";
   prediction.calibrationName = "generic_stage_resource_formula_v1";
   prediction.candidate = stringifySimdSimtCandidate(report.decision).str();
-  prediction.formula = "(kernel_boundary_residual_system_cycles("
-                       "candidate, superblock_factor, "
+  prediction.formula = "(launch_base + "
+                       "schedule_combine(launch_increment * "
+                       "(runtime_physical_program_count - 1), "
+                       "route_resource_system_cycles; overlap=norm_p, "
+                       "independent_pipeline=add) + "
+                       "qualified_global_load_path * "
+                       "global_load_completion_system_cycles(route, "
                        "runtime_physical_program_count) + "
-                       "has_global_load * "
-                       "global_load_boundary_residual_system_cycles(route) + "
                        "runtime_argument_setup_system_cycles(route, "
                        "kernel_argument_count) + "
                        "route_resource_system_cycles) / "
                        "system_counter_frequency_mhz";
   prediction.evidence = profile.kernelTiming.evidence;
   prediction.superblockFactor = plan->routeSuperblockFactor;
+  prediction.launchExecutionDomain =
+      launchExecutionDomain(report.stageModel, *plan).str();
   prediction.baseWarpCount = profile.hardware.baseSimtWarpCount;
   prediction.runtimeSchedulingSlotCount = plan->runtimeSchedulingSlotCount;
+  prediction.runtimePhysicalProgramCount = plan->runtimePhysicalProgramCount;
   prediction.selectionScoreScale = 1.0;
   prediction.schedulingSlotScale = 0.0;
-  const bool routeHasGlobalLoad = hasGlobalLoad(report.stageModel);
   prediction.runtimeKernelArgumentCount = kernelArgumentCount;
   prediction.runtimeArgumentSetupSystemCycles =
       profile.kernelTiming.runtimeArgumentSetupSystemCycles(
           prediction.candidate, kernelArgumentCount);
-  prediction.fixedSystemCycles =
-      routeFixedSystemCycles(profile, prediction.candidate, *plan,
-                             kernelArgumentCount, routeHasGlobalLoad);
+  const RouteFixedCost cost =
+      routeFixedCost(profile, prediction.candidate, report.stageModel, *plan,
+                     kernelArgumentCount);
+  prediction.kernelLaunchSystemCycles = cost.launch;
+  prediction.kernelLaunchBodyOverlapSystemCycles = cost.overlap;
+  prediction.globalLoadCompletionSystemCycles = cost.globalLoadCompletion;
+  prediction.fixedSystemCycles = cost.fixed;
   if (report.decision == SimdSimtCandidateKind::AllSIMTOnly) {
     if (auto adjustment = tinyStraightLineSimtMemoryAdjustment(
             report.stageModel, *plan,
@@ -4372,8 +4749,12 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
                           "uncovered operations retain resource prices";
     prediction.baseWarpCount =
         plan->diagnostic<int64_t>("native_indirect_chain_warp_count");
-    prediction.fixedSystemCycles = prediction.scalarPrologueSystemCycles =
-        prediction.scalarEpilogueSystemCycles = 0;
+    prediction.kernelLaunchSystemCycles =
+        prediction.kernelLaunchBodyOverlapSystemCycles =
+            prediction.globalLoadCompletionSystemCycles =
+                prediction.fixedSystemCycles =
+                    prediction.scalarPrologueSystemCycles =
+                        prediction.scalarEpilogueSystemCycles = 0;
     prediction.baseSelectionScore = prediction.predictedSystemCounterCycles =
         plan->diagnostic<double>("native_indirect_chain_elapsed_system_cycles");
     prediction.predictedMicroseconds = prediction.predictedSystemCounterCycles /
@@ -4461,6 +4842,7 @@ static void populateStageDependencyCompletion(
   const auto *tripCount = expression.description.get("trip_count");
   const auto *effectiveTripCount =
       expression.description.get("effective_trip_count");
+  const StageCostModelSummary &model = report.stageModel;
   const StageRoutePlan &plan = report.stageModel.allSimd;
   const double scheduledCore =
       plan.diagnostic<double>("stage_dependency_schedule_total_system_cycles");
@@ -4470,14 +4852,21 @@ static void populateStageDependencyCompletion(
       "stage_dependency_schedule_fixed_setup_system_cycles");
   const double fill =
       plan.diagnostic<double>("stage_dependency_schedule_fill_system_cycles");
-  const double perIteration = plan.diagnostic<double>(
+  const double rawPerIteration = plan.diagnostic<double>(
       "stage_dependency_schedule_initiation_interval_system_cycles");
+  const auto &completion = profile.kernelTiming.stageDependencyCompletion;
+  const double perIteration =
+      rawPerIteration * completion.initiationIntervalEfficiency;
   const double nonrecurrentRouteBody = scheduledCore - scheduledLoop;
   const double routeOffset =
-      nonrecurrentRouteBody + fixedSetup + fill - perIteration;
-  const auto &completion = profile.kernelTiming.stageDependencyCompletion;
+      nonrecurrentRouteBody + fixedSetup + fill - rawPerIteration;
+  const llvm::StringRef launchDomain = launchExecutionDomain(model, plan);
+  const double genericLaunchReference =
+      profile.kernelTiming.boundarySystemCycles(
+          kAllSimd, plan.routeSuperblockFactor,
+          plan.runtimePhysicalProgramCount, launchDomain);
   const double correctedOffset =
-      routeOffset + completion.taskEnvelopeSystemCycles;
+      routeOffset + completion.completionIncludingLaunchSystemCycles;
   if (!tripCount || !effectiveTripCount || !std::isfinite(correctedOffset) ||
       !std::isfinite(perIteration) || perIteration <= 0.0) {
     report.stageDependencyElapsedPrediction =
@@ -4492,12 +4881,18 @@ static void populateStageDependencyCompletion(
       {"effective_trip_count_expression", *effectiveTripCount},
       {"solution_method", "symbolic_periodic_difference_constraints_v1"},
       {"offset_system_cycles", correctedOffset},
+      {"raw_per_iteration_system_cycles", rawPerIteration},
+      {"initiation_interval_efficiency",
+       completion.initiationIntervalEfficiency},
       {"per_iteration_system_cycles", perIteration},
       {"system_counter_frequency_mhz",
        profile.kernelTiming.systemCounterFrequencyMHz},
       {"nonrecurrent_route_body_system_cycles", nonrecurrentRouteBody},
-      {"independent_task_envelope_system_cycles",
-       completion.taskEnvelopeSystemCycles},
+      {"kernel_launch_execution_domain", launchDomain},
+      {"kernel_launch_system_cycles_reference", genericLaunchReference},
+      {"kernel_launch_ownership", "included_in_stage_dependency_completion"},
+      {"stage_dependency_completion_including_launch_system_cycles",
+       completion.completionIncludingLaunchSystemCycles},
       {"generic_fixed_system_cycles_replaced",
        report.selectedRouteElapsed.fixedSystemCycles},
       {"runtime_condition", "entry_guard_and_positive_trip_count"},
@@ -4528,7 +4923,7 @@ static void populateStageDependencyCompletion(
         completion.dynamicCVPerIterationDeltaSystemCycles;
     prediction["backend_effective_dynamic_cv_confirmed"] = false;
     prediction["formula"] =
-        "(nonrecurrent_route_body + task_envelope + "
+        "(route_offset + completion_including_launch + "
         "dynamic_cv_first_fill + effective_trip_count_expression * "
         "(route_per_iteration + dynamic_cv_per_iteration_delta)) / "
         "system_counter_frequency";
@@ -4571,9 +4966,11 @@ SimdSimtCostReport::SelectedRouteElapsedPrediction::toJSON() const {
     return result;
   result["calibration_name"] = calibrationName;
   result["candidate"] = candidate;
+  result["launch_execution_domain"] = launchExecutionDomain;
   result["superblock_factor"] = superblockFactor;
   result["base_warp_count"] = baseWarpCount;
   result["runtime_scheduling_slot_count"] = runtimeSchedulingSlotCount;
+  result["runtime_physical_program_count"] = runtimePhysicalProgramCount;
   if (minimumRuntimeSchedulingSlotCount > 0)
     result["minimum_runtime_scheduling_slot_count"] =
         minimumRuntimeSchedulingSlotCount;
@@ -4593,6 +4990,11 @@ SimdSimtCostReport::SelectedRouteElapsedPrediction::toJSON() const {
   result["formula"] = formula;
   result["selection_score_scale"] = selectionScoreScale;
   result["scheduling_slot_scale"] = schedulingSlotScale;
+  result["kernel_launch_system_cycles"] = kernelLaunchSystemCycles;
+  result["kernel_launch_body_overlap_system_cycles"] =
+      kernelLaunchBodyOverlapSystemCycles;
+  result["global_load_completion_system_cycles"] =
+      globalLoadCompletionSystemCycles;
   result["fixed_system_cycles"] = fixedSystemCycles;
   result["runtime_kernel_argument_count"] = runtimeKernelArgumentCount;
   result["runtime_argument_setup_system_cycles"] =

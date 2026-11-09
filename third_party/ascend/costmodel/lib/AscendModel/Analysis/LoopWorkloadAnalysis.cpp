@@ -4,6 +4,7 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -51,6 +52,13 @@ static std::optional<int64_t> constantValue(const Json &expr) {
 }
 
 static std::optional<int64_t> integerConstant(Value value) {
+  if (auto argument = dyn_cast<BlockArgument>(value)) {
+    if (auto function = dyn_cast_or_null<FunctionOpInterface>(
+            argument.getOwner()->getParentOp()))
+      if (auto attribute = function.getArgAttrOfType<IntegerAttr>(
+              argument.getArgNumber(), "ascend.costmodel.runtime_value"))
+        return attribute.getInt();
+  }
   Operation *definition = value.getDefiningOp();
   if (!definition || definition->getName().getStringRef() != "arith.constant")
     return std::nullopt;

@@ -296,8 +296,8 @@ def test_select_promotes_branch_types(left, right, result_type):
     tl.tensor(None, tl.block_type(tl.int1, [64])),
     tl.tensor(None, tl.pointer_type(tl.float32)),
     tla.vector(None, tla.vector_type(64, tl.float32)),
-    tla.buffer(None, tla.buffer_type((64, ), tl.float32, "ub")),
-    tla.buffer(None, tla.buffer_type((64, ), tl.float32, "ub"))[0],
+    tla.buffer(None, tla.buffer_type((64, ), tl.float32, tla.space.ub)),
+    tla.buffer(None, tla.buffer_type((64, ), tl.float32, tla.space.ub))[0],
     None,
     [1],
     "1",
@@ -834,8 +834,8 @@ module {
     tl.tensor(None, tl.block_type(tl.int1, [64])),
     tl.tensor(None, tl.pointer_type(tl.float32)),
     tla.vector(None, tla.vector_type(64, tl.float32)),
-    tla.buffer(None, tla.buffer_type((64, ), tl.float32, "ub")),
-    tla.buffer(None, tla.buffer_type((64, ), tl.float32, "ub"))[0],
+    tla.buffer(None, tla.buffer_type((64, ), tl.float32, tla.space.ub)),
+    tla.buffer(None, tla.buffer_type((64, ), tl.float32, tla.space.ub))[0],
     None,
     [1],
     "1",
@@ -1000,7 +1000,7 @@ def test_infinity_reject_unsupported_dtype(dtype):
     tl.tensor(None, tl.int32),
     tl.tensor(None, tl.block_type(tl.float32, [1])),
     tla.vector(None, tla.vector_type(64, tl.float32)),
-    tla.buffer(None, tla.buffer_type((64, ), tl.float32, "ub")),
+    tla.buffer(None, tla.buffer_type((64, ), tl.float32, tla.space.ub)),
 ])
 def test_infinity_reject_non_scalar_dtype(value):
     with pytest.raises(TypeError, match="tla.infinity expects a compile-time dtype"):

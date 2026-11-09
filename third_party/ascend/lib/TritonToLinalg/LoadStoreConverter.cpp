@@ -473,14 +473,26 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     }
 
     auto resTy = op.getResult().getType();
+    Type elementType =
+        cast<MemRefType>(scalarMemref.getType()).getElementType();
+    // Boolean pointers in the kernel ABI can be backed by byte storage.
+    bool loadBoolFromByte = resTy.isInteger(1) && elementType.isInteger(8);
+    if (resTy != elementType && !loadBoolFromByte)
+      return rewriter.notifyMatchFailure(
+          op, "scalar load result must match the backing element type");
+
     auto idxZero =
         rewriter.create<arith::ConstantOp>(loc, rewriter.getIndexAttr(0));
     auto createScalarLoad = [&]() -> Value {
-      auto load = rewriter.create<memref::LoadOp>(loc, resTy, scalarMemref,
+      auto load = rewriter.create<memref::LoadOp>(loc, scalarMemref,
                                                   idxZero.getResult());
       propagateWasBoolToInt8Attr(op.getOperation(), load.getOperation(),
                                  rewriter);
-      return load.getResult();
+      if (!loadBoolFromByte)
+        return load.getResult();
+      auto zero = rewriter.create<arith::ConstantIntOp>(loc, 0, 8);
+      return rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::ne,
+                                            load.getResult(), zero);
     };
     if (!mask) {
       rewriter.replaceOp(op, createScalarLoad());

@@ -17,7 +17,7 @@ CONFIGS = [dict(name="ub_l1_" + str(n), n=n) for n in (16, 32, 64)]
 
 @tla.jit
 def transfer(X, Y, N: tl.constexpr):
-    l1 = tla.alloc((N // 16, 1, 16, 16), tl.float16, space="l1")
+    l1 = tla.alloc((N // 16, 1, 16, 16), tl.float16, space=tla.space.l1)
     out = tla.alloc((16, N), tl.float16)
     with tla.scope.vector():
         if tla.sub_block_id() == 0:
@@ -61,11 +61,11 @@ def route_ir(src_space, dst_space, p, name, dtype=tl.float16):
 
 def check_param_contracts():
     # Typed function arguments isolate frontend mapping without fake L0/BT allocations.
-    for dst in ("l0a", "l0b"):
+    for dst in (tla.space.l0a, tla.space.l0b):
         for transpose in (False, True):
             p = tla.CopyL1ToL0Params(is_transpose=transpose, k_part_idx=0, k_part=64, k_part_ceil=64, k_part_loop=1,
                                      k_part_actual=64, m=16)
-            text = route_ir("l1", dst, p, "l0")
+            text = route_ir(tla.space.l1, dst, p, "l0")
             assert "hivm.hir.l12l0 " in text
             for field, value in (("k_part_idx", 0), ("k_part", 64), ("k_part_ceil", 64), ("k_part_loop", 1),
                                  ("k_part_actual", 64), ("m", 16)):
@@ -74,17 +74,17 @@ def check_param_contracts():
                 assert "is_transposed = true" in text
             assert "memref.alloc" not in text and "pointer_cast" not in text
     for dtype in (tl.float16, tl.float32):
-        text = route_ir("l1", "bt", tla.CopyL12BTParams(n=48), "bt", dtype)
+        text = route_ir(tla.space.l1, tla.space.bt, tla.CopyL12BTParams(n=48), "bt", dtype)
         assert "hivm.hir.l12bt " in text and "48 : index" in text
         assert "memref.alloc" not in text and "pointer_cast" not in text
-    text = route_ir("ub", "l1", tla.CopyUB2L1Params(collapse_reassociation=((0, 1), )), "ub_l1")
+    text = route_ir(tla.space.ub, tla.space.l1, tla.CopyUB2L1Params(collapse_reassociation=((0, 1), )), "ub_l1")
     assert "collapse_reassociation = [[0, 1]]" in text
-    errors = [("l1", "fb", tla.CopyL12FBParams(), "fb", "no L1->FixBUF"),
-              ("l1", "l0a", tla.CopyL1ToL0Params(actual_batch=1), "l0", "actual_batch"),
-              ("gm", "l1", tla.LoadGM2L1Params(enable_nz2nd=True), "l1", "reverse-layout"),
-              ("gm", "l1", tla.LoadGM2L1Params(enable_nz2dn=True), "l1", "reverse-layout"),
-              ("ub", "l1", tla.LoadGM2UBParams(), "ub_l1", "CopyUB2L1Params"),
-              ("gm", "ub", tla.CopyUB2L1Params(), "ub_l1", "DMA interface expects")]
+    errors = [(tla.space.l1, tla.space.fb, tla.CopyL12FBParams(), "fb", "no L1->FixBUF"),
+              (tla.space.l1, tla.space.l0a, tla.CopyL1ToL0Params(actual_batch=1), "l0", "actual_batch"),
+              (tla.space.gm, tla.space.l1, tla.LoadGM2L1Params(enable_nz2nd=True), "l1", "reverse-layout"),
+              (tla.space.gm, tla.space.l1, tla.LoadGM2L1Params(enable_nz2dn=True), "l1", "reverse-layout"),
+              (tla.space.ub, tla.space.l1, tla.LoadGM2UBParams(), "ub_l1", "CopyUB2L1Params"),
+              (tla.space.gm, tla.space.ub, tla.CopyUB2L1Params(), "ub_l1", "DMA interface expects")]
     for src, dst, p, name, message in errors:
         with pytest.raises(Exception, match=message):
             route_ir(src, dst, p, name)

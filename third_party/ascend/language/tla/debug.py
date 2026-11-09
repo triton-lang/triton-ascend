@@ -34,11 +34,7 @@ conditions are rejected to keep the ``tensor<``-free IR contract.
 from triton.language.core import _unwrap_if_constexpr
 from triton.language.core import builtin
 
-from .core import buffer
-from .core import buffer_access
-from .core import is_gm
-from .core import is_ub
-from .core import space_of
+from .core import AddressSpace, buffer, buffer_access
 
 __all__ = ["device_assert", "device_print"]
 
@@ -61,17 +57,6 @@ def _in_scope(generator):
     return found[0]
 
 
-def _printable(value):
-    """True for UB/GM-backed buffers or scalars; L1/L0* are rejected."""
-    return is_ub(value) or is_gm(value)
-
-
-def _reject(space):
-    """L1/L0* cannot be printed directly by hardware; copy to UB/GM first."""
-    return RuntimeError(f"tla.device_print: only UB/GM values are supported, got {space} "
-                        "(L1/L0 cannot be printed directly; copy the value to UB or GM first)")
-
-
 def _print_arg(semantic, builder, arg):
     """Map a tla value to an ``hivm.hir.debug`` operand.
 
@@ -80,18 +65,17 @@ def _print_arg(semantic, builder, arg):
     spaces are rejected: hardware cannot print them directly — copy to UB/GM
     first.
     """
+    src = arg.buffer if isinstance(arg, buffer_access) else arg
+    if isinstance(src, buffer) and src.space not in (AddressSpace.ub, AddressSpace.gm):
+        raise RuntimeError(f"tla.device_print: only UB/GM values are supported, got {src.space.name} "
+                           "(L1/L0 cannot be printed directly; copy the value to UB or GM first)")
     if isinstance(arg, buffer_access):
-        src = arg.buffer
-        if not _printable(src):
-            raise _reject(space_of(src))
         offsets = [semantic.to_tensor(i).handle for i in arg.indices]
         rank = len(src.shape)
         return builder.create_tla_subview(src.handle, offsets, [1] * rank, [1] * rank)
-    if isinstance(arg, buffer):
-        if not _printable(arg):
-            raise _reject(space_of(arg))
-        return arg.handle
-    return semantic.to_tensor(arg).handle
+    if isinstance(src, buffer):
+        return src.handle
+    return semantic.to_tensor(src).handle
 
 
 @builtin

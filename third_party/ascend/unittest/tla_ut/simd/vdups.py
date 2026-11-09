@@ -29,8 +29,8 @@ SIGNATURE = {"X": "*fp32", "O": "*fp32"}
 
 @tla.jit
 def vdups(X, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    ob = tla.alloc_buffer((8, N), tl.float32, space="ub")
+    xb = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    ob = tla.alloc_buffer((8, N), tl.float32, space=tla.space.ub)
     tla.copy(tla.view(X, (N, )), xb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0])

@@ -30,12 +30,12 @@ SIGNATURE = {"X": "*u32", "Y": "*u32", "A": "*fp32", "P": "*fp32", "O": "*u32", 
 
 @tla.jit
 def pat_mask(X, Y, A, P, O, F, N: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    a = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    p = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o = tla.alloc_buffer((2, N), tl.uint32, space="ub")
-    f = tla.alloc_buffer((2, N), tl.float32, space="ub")
+    x = tla.alloc_buffer((N, ), tl.uint32, space=tla.space.ub)
+    y = tla.alloc_buffer((N, ), tl.uint32, space=tla.space.ub)
+    a = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    p = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o = tla.alloc_buffer((2, N), tl.uint32, space=tla.space.ub)
+    f = tla.alloc_buffer((2, N), tl.float32, space=tla.space.ub)
     tla.copy(tla.view(X, (N, )), x)
     tla.copy(tla.view(Y, (N, )), y)
     tla.copy(tla.view(A, (N, )), a)

@@ -6,7 +6,7 @@ import triton.language.extra.tla as tla
 @triton.jit
 def simd_const_example(O_ptr, N: tl.constexpr):
     o = tla.view(O_ptr, (N, ), strides=(1, ))
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    o_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
 
     with tla.scope.simd():
         # vsplat：按元素类型推导满寄存器 lane 数。

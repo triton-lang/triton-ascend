@@ -26,9 +26,9 @@ SIGNATURE = {name: "*u32" for name in ("X", "Y", "O")}
 
 @tla.jit
 def vadd(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    x = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    y = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    o = tla.alloc_buffer((4 + TILES, N), tl.uint32, space="ub")
+    x = tla.alloc_buffer((TILES, N), tl.uint32, space=tla.space.ub)
+    y = tla.alloc_buffer((TILES, N), tl.uint32, space=tla.space.ub)
+    o = tla.alloc_buffer((4 + TILES, N), tl.uint32, space=tla.space.ub)
     tla.copy(tla.view(X, (TILES, N)), x)
     tla.copy(tla.view(Y, (TILES, N)), y)
     with tla.scope.simd():

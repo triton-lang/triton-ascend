@@ -33,9 +33,9 @@ def gemm_basic(A, B, C, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, UNIT:
                ACCUMULATE: tl.constexpr):
     tl.static_assert(M % 16 == 0 and N % 16 == 0 and K % 16 == 0)
     with tla.scope.cube():
-        a_l1 = tla.alloc((K // 16, M // 16, 16, 16), tl.float16, space="l1")
-        b_l1 = tla.alloc((N // 16, K // 16, 16, 16), tl.float16, space="l1")
-        acc = tla.alloc((N // 16, M // 16, 16, 16), tl.float32, space="l0c")
+        a_l1 = tla.alloc((K // 16, M // 16, 16, 16), tl.float16, space=tla.space.l1)
+        b_l1 = tla.alloc((N // 16, K // 16, 16, 16), tl.float16, space=tla.space.l1)
+        acc = tla.alloc((N // 16, M // 16, 16, 16), tl.float32, space=tla.space.l0c)
         tla.load_gm_to_l1(tla.view(A, (M, K)), a_l1)
         tla.load_gm_to_l1(tla.view(B, (K, N)), b_l1)
         if ACCUMULATE:

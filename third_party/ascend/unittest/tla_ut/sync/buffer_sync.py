@@ -28,9 +28,9 @@ SIGNATURE = {"A_ptr": "*fp32", "B_ptr": "*fp32", "O_ptr": "*fp32"}
 
 @tla.jit
 def buffer_token_add(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
-    a_ub = tla.alloc((N, ), tl.float32, space="ub")
-    b_ub = tla.alloc((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc((N, ), tl.float32, space="ub")
+    a_ub = tla.alloc((N, ), tl.float32, space=tla.space.ub)
+    b_ub = tla.alloc((N, ), tl.float32, space=tla.space.ub)
+    o_ub = tla.alloc((N, ), tl.float32, space=tla.space.ub)
     a = tla.view(A_ptr, (N, ), strides=(1, ), offsets=(0, ))
     b = tla.view(B_ptr, (N, ), strides=(1, ), offsets=(0, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))

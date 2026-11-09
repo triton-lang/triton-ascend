@@ -20,25 +20,26 @@
 """Compatibility dispatcher; new code can use load/store/copy route APIs."""
 from triton.language.core import builtin
 from . import dma
+from .core import AddressSpace
 
 _COPY_ROUTES = {
-    ("gm", "ub"): dma.load_gm_to_ub,
-    ("ub", "gm"): dma.store_ub_to_gm,
-    ("gm", "l1"): dma.load_gm_to_l1,
-    ("ub", "l1"): dma.copy_ub_to_l1,
-    ("l1", "ub"): dma.copy_l1_to_ub,
-    ("l1", "bt"): dma.copy_l1_to_bt,
-    ("l1", "fb"): dma.copy_l1_to_fb,
-    ("l1", "l0a"): dma.copy_l1_to_l0,
-    ("l1", "l0b"): dma.copy_l1_to_l0,
-    ("l0c", "gm"): dma.store_l0c_to_gm,
-    ("l0c", "ub"): dma.copy_l0c_to_ub,
-    ("l0c", "l1"): dma.copy_l0c_to_l1,
+    (AddressSpace.gm, AddressSpace.ub): dma.load_gm_to_ub,
+    (AddressSpace.ub, AddressSpace.gm): dma.store_ub_to_gm,
+    (AddressSpace.gm, AddressSpace.l1): dma.load_gm_to_l1,
+    (AddressSpace.ub, AddressSpace.l1): dma.copy_ub_to_l1,
+    (AddressSpace.l1, AddressSpace.ub): dma.copy_l1_to_ub,
+    (AddressSpace.l1, AddressSpace.bt): dma.copy_l1_to_bt,
+    (AddressSpace.l1, AddressSpace.fb): dma.copy_l1_to_fb,
+    (AddressSpace.l1, AddressSpace.l0a): dma.copy_l1_to_l0,
+    (AddressSpace.l1, AddressSpace.l0b): dma.copy_l1_to_l0,
+    (AddressSpace.l0c, AddressSpace.gm): dma.store_l0c_to_gm,
+    (AddressSpace.l0c, AddressSpace.ub): dma.copy_l0c_to_ub,
+    (AddressSpace.l0c, AddressSpace.l1): dma.copy_l0c_to_l1,
 }
 _FIXPIPE_PARAMS = {
-    "gm": dma.FixpipeL0C2GMParams,
-    "ub": dma.FixpipeL0C2UBParams,
-    "l1": dma.FixpipeL0C2L1Params,
+    AddressSpace.gm: dma.FixpipeL0C2GMParams,
+    AddressSpace.ub: dma.FixpipeL0C2UBParams,
+    AddressSpace.l1: dma.FixpipeL0C2L1Params,
 }
 
 
@@ -76,7 +77,7 @@ def copy(src, dst, params=None, _semantic=None):
     route = _COPY_ROUTES.get((src.space, dst.space))
     if route is None:
         raise ValueError(f"tla.copy unsupported space pair {(src.space, dst.space)}")
-    if src.space == "l0c" and dma._unwrap_if_constexpr(params) is None:
+    if src.space is AddressSpace.l0c and dma._unwrap_if_constexpr(params) is None:
         mode = dma.FixpipeDMAMode.NZ2ND if len(dst.shape) == 2 else dma.FixpipeDMAMode.NZ2NZ
         params = _FIXPIPE_PARAMS[dst.space](dma_mode=mode)
     route(src, dst, params, _semantic=_semantic)

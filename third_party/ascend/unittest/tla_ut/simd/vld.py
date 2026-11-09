@@ -34,10 +34,10 @@ def indexed_load(X, I, M, O, DT: tl.constexpr, W: tl.constexpr, BASE: tl.constex
     N: tl.constexpr = 2048 // W
     IT: tl.constexpr = tl.uint32 if W == 32 else tl.uint16
     MT: tl.constexpr = tl.int16 if W == 16 else tl.int32
-    x = tla.alloc_buffer((1024, ), DT, space="ub")
-    indices = tla.alloc_buffer((N, ), IT, space="ub")
-    m = tla.alloc_buffer((N, ), MT, space="ub")
-    o = tla.alloc_buffer((3, N), DT, space="ub")
+    x = tla.alloc_buffer((1024, ), DT, space=tla.space.ub)
+    indices = tla.alloc_buffer((N, ), IT, space=tla.space.ub)
+    m = tla.alloc_buffer((N, ), MT, space=tla.space.ub)
+    o = tla.alloc_buffer((3, N), DT, space=tla.space.ub)
     tla.copy(tla.view(X, (1024, )), x)
     tla.copy(tla.view(I, (N, )), indices)
     tla.copy(tla.view(M, (N, )), m)

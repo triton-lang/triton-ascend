@@ -79,7 +79,7 @@ class Semantic:
 
 
 def buf(shape=(8, 2064), strides=None, offset=0):
-    return view.buffer(Handle(), view.buffer_type(shape, tl.bfloat16, "ub", strides, offset))
+    return view.buffer(Handle(), view.buffer_type(shape, tl.bfloat16, view.AddressSpace.ub, strides, offset))
 
 
 def test_subview_preserves_pitch_and_legacy_view_contract():
@@ -90,7 +90,7 @@ def test_subview_preserves_pitch_and_legacy_view_contract():
     compatible = view.view(source, (8, 1040), _semantic=legacy)
     assert sliced.type == compatible.type
     assert sliced.shape == (8, 1040) and sliced.strides == (2064, 1)
-    assert sliced.dtype == source.dtype and sliced.space == "ub"
+    assert sliced.dtype == source.dtype and sliced.space is source.space is view.AddressSpace.ub
     assert sliced.offset is None
     assert explicit.builder.calls[0][0] == legacy.builder.calls[0][0] == "subview"
 
@@ -114,7 +114,7 @@ def test_compact_prefix_uses_subview_and_reshape():
     assert compact.shape == (8, 1040) and compact.strides == (1040, 1)
     assert compact.offset is None
     assert [c[0] for c in sem.builder.calls] == ["collapse", "subview", "expand"]
-    assert sem.builder.calls[-1][2] == ((8, 1040), "bf16", "ub", (1040, 1), None)
+    assert sem.builder.calls[-1][2] == ((8, 1040), "bf16", view.AddressSpace.ub, (1040, 1), None)
 
 
 @pytest.mark.parametrize("offset", [0, 128, None])
@@ -171,3 +171,8 @@ def test_reshape_rejects_non_contiguous_slices(shape, strides):
 def test_reshape_rejects_element_count_change():
     with pytest.raises(ValueError, match="element count mismatch"):
         view.reshape(buf((8320, ), offset=None), (8, 2064), _semantic=Semantic())
+
+
+def test_view_rejects_string_address_space():
+    with pytest.raises(TypeError, match="expected a tla.space member"):
+        view.view(buf(), (8, 1040), space="gm", _semantic=Semantic())

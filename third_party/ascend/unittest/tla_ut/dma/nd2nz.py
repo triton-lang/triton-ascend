@@ -18,7 +18,7 @@ CONFIGS = [dict(name="cache_" + str(cache), cache=cache) for cache in (None, 0, 
 def roundtrip(X, Y, P: tl.constexpr):
     out = tla.alloc((16, 32), tl.float16)
     with tla.scope.cube():
-        l1 = tla.alloc((2, 1, 16, 16), tl.float16, space="l1")
+        l1 = tla.alloc((2, 1, 16, 16), tl.float16, space=tla.space.l1)
         tla.load_gm_to_l1(tla.view(X, (16, 32)), l1, P)
         tla.copy_l1_to_ub(l1, out, tla.CopyL12UBParams())
         tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE1, 0)

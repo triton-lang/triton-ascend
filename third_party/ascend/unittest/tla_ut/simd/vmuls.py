@@ -21,8 +21,8 @@ SCALAR = 2.5
 
 @tla.jit
 def vmuls(X, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o = tla.alloc_buffer((4, N), tl.float32, space="ub")
+    x = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o = tla.alloc_buffer((4, N), tl.float32, space=tla.space.ub)
     tla.copy(tla.view(X, (N, )), x)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0])

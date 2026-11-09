@@ -19,10 +19,10 @@ N = 64
 
 @tla.jit
 def multi_vf(X_ptr, W_ptr, O1_ptr, O2_ptr, N: tl.constexpr):
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    w_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o1_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o2_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    x_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    w_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o1_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o2_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
     x_blk = tla.view(X_ptr, (N, ), strides=(1, ))
     w_blk = tla.view(W_ptr, (N, ), strides=(1, ))
     o1_blk = tla.view(O1_ptr, (N, ), strides=(1, ))

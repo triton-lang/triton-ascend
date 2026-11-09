@@ -1138,7 +1138,7 @@ def test_truncmod_invalid_operands():
         tl.tensor(_ScalarHandle("arg", "i1"), tl.int1),
         tl.tensor(_ScalarHandle("arg", "f32"), tl.float32),
         _vec(64, tl.int32),
-        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.int32, "ub"))
+        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.int32, tla_core.AddressSpace.ub))
     ]
     for value in values:
         with pytest.raises(TypeError, match="truncmod a"):
@@ -1210,7 +1210,7 @@ def test_sqrt_rejects_invalid_inputs_before_builder():
         tl.constexpr(1),
         tl.constexpr(True),
         tl.tensor("block", tl.block_type(tl.float32, [64])),
-        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, "ub"))
+        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, tla_core.AddressSpace.ub))
     ]
     values += [
         tl.tensor(_ScalarHandle("arg", "x"), dtype)
@@ -1323,7 +1323,7 @@ def test_where_invalid_inputs_never_reach_the_builder():
     block_cond = tl.tensor("block_cond", tl.block_type(tl.int1, [64]))
     int_cond = tl.tensor("int_cond", tl.int32)
     bool_cond = tl.tensor("bool_cond", tl.int1)
-    buf = tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, "ub"))
+    buf = tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, tla_core.AddressSpace.ub))
     sem = _NoBuilder()
     cases = [
         (TypeError, "condition must be", lambda: selection.where(1, 1.0, 2.0, _semantic=sem)),
@@ -1396,7 +1396,7 @@ def test_assume_invalid_inputs_never_reach_builder():
         tl.tensor("integer", tl.int32),
         tl.tensor("float", tl.float32),
         _vec(64, tl.int1),
-        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, "ub"))
+        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, tla_core.AddressSpace.ub))
     ]
     for cond in values:
         with pytest.raises(TypeError, match="assume requires"):
@@ -1421,10 +1421,15 @@ def test_every_python_builder_call_is_bound_and_whitelisted():
 
     builder_py = (_TLA_DIR / "builder.py").read_text()
     tree = ast.parse(builder_py)
-    whitelisted = set()
+    registered = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "ascend_methods":
-            whitelisted = {elt.value for elt in node.value.elts}
+        if not isinstance(node, ast.Assign):
+            continue
+        target = node.targets[0]
+        if isinstance(target, ast.Name) and target.id == "ascend_methods":
+            registered.update(elt.value for elt in node.value.elts)
+        elif isinstance(target, ast.Attribute) and getattr(target.value, "id", None) == "main_builder":
+            registered.add(target.attr)
 
     used = set()
     for py in _TLA_DIR.glob("*.py"):
@@ -1432,8 +1437,8 @@ def test_every_python_builder_call_is_bound_and_whitelisted():
 
     assert used, "expected builder.create_* calls in the tla python frontend"
     assert used <= bound | base_bound, f"used but not bound: {sorted(used - bound - base_bound)}"
-    assert used <= whitelisted | base_bound, (
-        f"used but missing from ascend_methods: {sorted(used - whitelisted - base_bound)}")
+    assert used <= registered | base_bound, (
+        f"used but missing from the unified builder: {sorted(used - registered - base_bound)}")
 
 
 def test_new_bindings_and_ave_ops_are_present():
@@ -1490,7 +1495,7 @@ def test_public_names_are_defined_and_documented():
         assert f'"{name}"' in src
 
 
-def _buffer(dtype=None, shape=(128, ), space="ub", strides=None, offset=0):
+def _buffer(dtype=None, shape=(128, ), space=simd.AddressSpace.ub, strides=None, offset=0):
     from tla_src.core import buffer_type
     return simd.buffer(_Handle("buffer"), buffer_type(shape, dtype or tl.uint8, space, strides, offset))
 
@@ -1516,7 +1521,7 @@ def test_predicate_memory_dispatch(width, dist, access):
 
 
 @pytest.mark.parametrize("buf", [
-    _buffer(space="gm"),
+    _buffer(space=simd.AddressSpace.gm),
     _buffer(dtype=tl.int1),
     _buffer(dtype=tl.int16),
     _buffer(shape=(16, 16)),
@@ -1585,7 +1590,7 @@ def test_indexed_load_dispatch(op, dtype, index_dtype, lanes, mode):
 
 @pytest.mark.parametrize("buf,index,mask", [
     (_buffer(tl.int64), _vec(64, tl.uint32), None),
-    (_buffer(tl.float32, space="gm"), _vec(64, tl.uint32), None),
+    (_buffer(tl.float32, space=simd.AddressSpace.gm), _vec(64, tl.uint32), None),
     (_buffer(tl.float32, shape=(16, 16)), _vec(64, tl.uint32), None),
     (_buffer(tl.float32, strides=(2, )), _vec(64, tl.uint32), None),
     (_buffer(tl.float32), _vec(32, tl.uint32), None),

@@ -10,7 +10,7 @@ from enum import Enum, IntEnum
 
 from triton.language.core import (builtin, dtype as triton_dtype, float32, float16, bfloat16, int8, int16, int32,
                                   _unwrap_if_constexpr)
-from .core import buffer
+from .core import AddressSpace, buffer
 
 
 class PadMode(Enum):
@@ -499,9 +499,9 @@ def _route(src, dst, spaces):
 def load_gm_to_ub(src, dst, params=None, _semantic=None):
     """Loads global memory into UB using ``hivm.hir.load``.
 
-    :param src: GM source with ``space="gm"``, typically created with ``tla.view``.
+    :param src: GM source with ``space=tla.space.gm``, typically created with ``tla.view``.
     :type src: tla.buffer
-    :param dst: UB destination with ``space="ub"`` and the same element type
+    :param dst: UB destination with ``space=tla.space.ub`` and the same element type
         as ``src``. Its shape must accommodate the requested data and padding.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
@@ -521,7 +521,7 @@ def load_gm_to_ub(src, dst, params=None, _semantic=None):
         tile = tla.alloc((16, 32), tl.float16)
         tla.load_gm_to_ub(tla.view(X, (16, 32)), tile)
     """
-    _route(src, dst, (("gm", "ub"), ))
+    _route(src, dst, ((AddressSpace.gm, AddressSpace.ub), ))
     p = _params(params, LoadGM2UBParams)
     attrs = {
         "pad_mode": _enum_attr(p.pad_mode, PadMode, "padmode", _semantic),
@@ -537,9 +537,9 @@ def load_gm_to_ub(src, dst, params=None, _semantic=None):
 def store_ub_to_gm(src, dst, params=None, _semantic=None):
     """Stores UB data to global memory using ``hivm.hir.store``.
 
-    :param src: UB source with ``space="ub"``.
+    :param src: UB source with ``space=tla.space.ub``.
     :type src: tla.buffer
-    :param dst: GM destination with ``space="gm"``, typically created with
+    :param dst: GM destination with ``space=tla.space.gm``, typically created with
         ``tla.view``. Its element type must match ``src``.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
@@ -553,7 +553,7 @@ def store_ub_to_gm(src, dst, params=None, _semantic=None):
         Atomic operation and dtype support depend on the target backend;
         ``atomic_kind=None`` leaves the atomic attribute unset.
     """
-    _route(src, dst, (("ub", "gm"), ))
+    _route(src, dst, ((AddressSpace.ub, AddressSpace.gm), ))
     p = _params(params, StoreUB2GMParams)
     attrs = {"atomic_kind": _enum_attr(p.atomic_kind, AtomicKind, "atomic_kind", _semantic)}
     _semantic.builder.create_tla_store(src.handle, dst.handle, attrs)
@@ -563,9 +563,9 @@ def store_ub_to_gm(src, dst, params=None, _semantic=None):
 def load_gm_to_l1(src, dst, params=None, _semantic=None):
     """Loads GM data into L1 with ND-to-NZ conversion using ``hivm.hir.nd2nz``.
 
-    :param src: GM source with ``space="gm"`` in ND layout.
+    :param src: GM source with ``space=tla.space.gm`` in ND layout.
     :type src: tla.buffer
-    :param dst: L1 destination with ``space="l1"`` in the corresponding NZ
+    :param dst: L1 destination with ``space=tla.space.l1`` in the corresponding NZ
         layout. For an aligned fp16 ``(M, N)`` tile, a physical NZ shape is
         ``(N // 16, M // 16, 16, 16)``.
     :type dst: tla.buffer
@@ -581,7 +581,7 @@ def load_gm_to_l1(src, dst, params=None, _semantic=None):
         backend checks dtype and layout alignment. Reverse-layout flags
         ``enable_nz2nd`` and ``enable_nz2dn`` must remain ``False``.
     """
-    _route(src, dst, (("gm", "l1"), ))
+    _route(src, dst, ((AddressSpace.gm, AddressSpace.l1), ))
     p = _params(params, LoadGM2L1Params)
     if _boolean(p.enable_nz2nd, "enable_nz2nd") or _boolean(p.enable_nz2dn, "enable_nz2dn"):
         raise NotImplementedError("GM->L1 ND2NZOp has no enable_nz2nd/enable_nz2dn fields; "
@@ -602,10 +602,10 @@ def load_gm_to_l1_mx_scale(src, dst, params=None, _semantic=None):
     Unlike :func:`load_gm_to_l1`, this route does not emit an ND-to-NZ
     conversion, which cannot express the scale fractal.
 
-    :param src: GM scale source with ``space="gm"`` and logical shape
+    :param src: GM scale source with ``space=tla.space.gm`` and logical shape
         ``(rows, K // 32)``, typically created with ``tla.view``.
     :type src: tla.buffer
-    :param dst: L1 destination with ``space="l1"`` and element type
+    :param dst: L1 destination with ``space=tla.space.l1`` and element type
         ``int8``/``uint8``. Its 4-D fractal shape is
         ``(rows // 16, (K // 32 + 1) // 2, 16, 2)``.
     :type dst: tla.buffer
@@ -619,7 +619,7 @@ def load_gm_to_l1_mx_scale(src, dst, params=None, _semantic=None):
         be contiguous along the ``K // 32`` axis. The backend checks the
         dtype, rank and alignment of both operands.
     """
-    _route(src, dst, (("gm", "l1"), ))
+    _route(src, dst, ((AddressSpace.gm, AddressSpace.l1), ))
     if _unwrap_if_constexpr(params) is not None:
         raise TypeError("tla.load_gm_to_l1_mx_scale takes no configuration")
     _semantic.builder.create_hivm_load_mx_scale(src.handle, dst.handle, is_transposed=False)
@@ -629,9 +629,9 @@ def load_gm_to_l1_mx_scale(src, dst, params=None, _semantic=None):
 def copy_ub_to_l1(src, dst, params=None, _semantic=None):
     """Copies UB data into L1 using ``hivm.hir.copy``.
 
-    :param src: UB source with ``space="ub"``.
+    :param src: UB source with ``space=tla.space.ub``.
     :type src: tla.buffer
-    :param dst: L1 destination with ``space="l1"`` and a backend-compatible
+    :param dst: L1 destination with ``space=tla.space.l1`` and a backend-compatible
         shape and element type.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
@@ -646,7 +646,7 @@ def copy_ub_to_l1(src, dst, params=None, _semantic=None):
         Prepare compatible physical layouts. When a Cube scope consumes data
         produced by a Vector scope, explicitly synchronize the handoff.
     """
-    _route(src, dst, (("ub", "l1"), ))
+    _route(src, dst, ((AddressSpace.ub, AddressSpace.l1), ))
     p = _params(params, CopyUB2L1Params)
     attrs = {"pad_mode": _enum_attr(p.pad_mode, PadMode, "padmode", _semantic)}
     groups = _unwrap_if_constexpr(p.collapse_reassociation)
@@ -663,9 +663,9 @@ def copy_ub_to_l1(src, dst, params=None, _semantic=None):
 def copy_l1_to_ub(src, dst, params=None, _semantic=None):
     """Copies L1 NZ data into UB ND layout using ``hivm.hir.l12ub``.
 
-    :param src: L1 source with ``space="l1"`` in NZ layout.
+    :param src: L1 source with ``space=tla.space.l1`` in NZ layout.
     :type src: tla.buffer
-    :param dst: UB destination with ``space="ub"`` in the corresponding ND layout.
+    :param dst: UB destination with ``space=tla.space.ub`` in the corresponding ND layout.
     :type dst: tla.buffer
     :param params: Empty configuration object. ``None`` (default) is equivalent
         to ``tla.CopyL12UBParams()``; this native operation has no options.
@@ -678,7 +678,7 @@ def copy_l1_to_ub(src, dst, params=None, _semantic=None):
         consumes the destination, synchronize the handoff and select the AIV
         sub-block that owns the written UB. The backend checks layout and dtype.
     """
-    _route(src, dst, (("l1", "ub"), ))
+    _route(src, dst, ((AddressSpace.l1, AddressSpace.ub), ))
     _params(params, CopyL12UBParams)
     _semantic.builder.create_tla_l12ub(src.handle, dst.handle)
 
@@ -687,9 +687,9 @@ def copy_l1_to_ub(src, dst, params=None, _semantic=None):
 def copy_l1_to_bt(src, dst, params=None, _semantic=None):
     """Copies L1 data into the bias buffer using ``hivm.hir.l12bt``.
 
-    :param src: L1 source with ``space="l1"``.
+    :param src: L1 source with ``space=tla.space.l1``.
     :type src: tla.buffer
-    :param dst: Bias-buffer destination with ``space="bt"``.
+    :param dst: Bias-buffer destination with ``space=tla.space.bt``.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
         ``tla.CopyL12BTParams()``. Its ``n`` operand defaults to ``src.shape[-1]``.
@@ -701,10 +701,10 @@ def copy_l1_to_bt(src, dst, params=None, _semantic=None):
     .. note::
         This frontend emits the native operation; standalone compilation
         requires L12BT lowering support in the selected backend. A recognized
-        ``"bt"`` address space does not imply support for allocating it with
+        ``tla.space.bt`` address space does not imply support for allocating it with
         ``tla.alloc``. Backend layout and dtype restrictions still apply.
     """
-    _route(src, dst, (("l1", "bt"), ))
+    _route(src, dst, ((AddressSpace.l1, AddressSpace.bt), ))
     p = _params(params, CopyL12BTParams)
     n = src.shape[-1] if _unwrap_if_constexpr(p.n) is None else p.n
     _semantic.builder.create_tla_l12bt(src.handle, dst.handle, _scalar(n, _semantic))
@@ -714,9 +714,9 @@ def copy_l1_to_bt(src, dst, params=None, _semantic=None):
 def copy_l1_to_fb(src, dst, params=None, _semantic=None):
     """Describes the reserved L1-to-FixBUF transfer interface.
 
-    :param src: L1 source with ``space="l1"``.
+    :param src: L1 source with ``space=tla.space.l1``.
     :type src: tla.buffer
-    :param dst: FixBUF destination with ``space="fb"``.
+    :param dst: FixBUF destination with ``space=tla.space.fb``.
     :type dst: tla.buffer
     :param params: Empty configuration object. ``None`` (default) is equivalent
         to ``tla.CopyL12FBParams()``.
@@ -728,7 +728,7 @@ def copy_l1_to_fb(src, dst, params=None, _semantic=None):
         This interface does not currently emit a copy or return a result.
         Constructing ``CopyL12FBParams`` does not make the route available.
     """
-    _route(src, dst, (("l1", "fb"), ))
+    _route(src, dst, ((AddressSpace.l1, AddressSpace.fb), ))
     _params(params, CopyL12FBParams)
     raise NotImplementedError("PR #4403 has no L1->FixBUF DMA op; mapping requires backend review")
 
@@ -737,9 +737,9 @@ def copy_l1_to_fb(src, dst, params=None, _semantic=None):
 def copy_l1_to_l0(src, dst, params=None, _semantic=None):
     """Copies L1 data into L0A/L0B using ``hivm.hir.l12l0``.
 
-    :param src: L1 source with ``space="l1"``.
+    :param src: L1 source with ``space=tla.space.l1``.
     :type src: tla.buffer
-    :param dst: L0A or L0B destination with ``space="l0a"`` or ``"l0b"``.
+    :param dst: L0A or L0B destination with ``space=tla.space.l0a`` or ``tla.space.l0b``.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
         ``tla.CopyL1ToL0Params()``, which is incomplete for this route. See
@@ -760,7 +760,7 @@ def copy_l1_to_l0(src, dst, params=None, _semantic=None):
         the native operation directly; backend layout, dtype and alignment
         restrictions still apply.
     """
-    _route(src, dst, (("l1", "l0a"), ("l1", "l0b")))
+    _route(src, dst, ((AddressSpace.l1, AddressSpace.l0a), (AddressSpace.l1, AddressSpace.l0b)))
     p = _params(params, CopyL1ToL0Params)
     if _unwrap_if_constexpr(p.actual_batch) is not None:
         raise NotImplementedError("actual_batch has no field in L12L0Op; use the native k_part_* and m fields "
@@ -801,10 +801,10 @@ def _fixpipe(src, dst, p, semantic):
 def store_l0c_to_gm(src, dst, params=None, _semantic=None):
     """Stores the L0C accumulator to GM using ``hivm.hir.fixpipe``.
 
-    :param src: L0C source with ``space="l0c"``, typically the fractal
+    :param src: L0C source with ``space=tla.space.l0c``, typically the fractal
         accumulator produced by ``tla.cube.mmad``.
     :type src: tla.buffer
-    :param dst: GM destination with ``space="gm"``. Its shape and element
+    :param dst: GM destination with ``space=tla.space.gm``. Its shape and element
         type must match the selected layout and quantization mode.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
@@ -820,7 +820,7 @@ def store_l0c_to_gm(src, dst, params=None, _semantic=None):
         the fractal layout. Dtype conversion is controlled by ``pre_quant``;
         the backend checks the destination layout, dtype and alignment.
     """
-    _route(src, dst, (("l0c", "gm"), ))
+    _route(src, dst, ((AddressSpace.l0c, AddressSpace.gm), ))
     _fixpipe(src, dst, _params(params, FixpipeL0C2GMParams), _semantic)
 
 
@@ -828,9 +828,9 @@ def store_l0c_to_gm(src, dst, params=None, _semantic=None):
 def copy_l0c_to_ub(src, dst, params=None, _semantic=None):
     """Copies the L0C accumulator to UB using ``hivm.hir.fixpipe``.
 
-    :param src: L0C source with ``space="l0c"`` in fractal layout.
+    :param src: L0C source with ``space=tla.space.l0c`` in fractal layout.
     :type src: tla.buffer
-    :param dst: UB destination with ``space="ub"``. Its shape and element
+    :param dst: UB destination with ``space=tla.space.ub``. Its shape and element
         type must match the selected layout and quantization mode.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
@@ -847,7 +847,7 @@ def copy_l0c_to_ub(src, dst, params=None, _semantic=None):
         back unconditionally from both sub-blocks can overwrite valid data.
         Mode, dtype and alignment restrictions are checked by the backend.
     """
-    _route(src, dst, (("l0c", "ub"), ))
+    _route(src, dst, ((AddressSpace.l0c, AddressSpace.ub), ))
     _fixpipe(src, dst, _params(params, FixpipeL0C2UBParams), _semantic)
 
 
@@ -855,9 +855,9 @@ def copy_l0c_to_ub(src, dst, params=None, _semantic=None):
 def copy_l0c_to_l1(src, dst, params=None, _semantic=None):
     """Copies the L0C accumulator to L1 using ``hivm.hir.fixpipe``.
 
-    :param src: L0C source with ``space="l0c"`` in fractal layout.
+    :param src: L0C source with ``space=tla.space.l0c`` in fractal layout.
     :type src: tla.buffer
-    :param dst: L1 destination with ``space="l1"``. Its shape and element
+    :param dst: L1 destination with ``space=tla.space.l1``. Its shape and element
         type must match the selected layout and quantization mode.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
@@ -872,7 +872,7 @@ def copy_l0c_to_l1(src, dst, params=None, _semantic=None):
         alignment. If the result is subsequently copied to UB, synchronize
         with the Vector consumer and respect UB sub-block ownership.
     """
-    _route(src, dst, (("l0c", "l1"), ))
+    _route(src, dst, ((AddressSpace.l0c, AddressSpace.l1), ))
     _fixpipe(src, dst, _params(params, FixpipeL0C2L1Params), _semantic)
 
 

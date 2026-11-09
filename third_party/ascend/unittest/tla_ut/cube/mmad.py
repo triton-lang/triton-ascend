@@ -76,9 +76,9 @@ def gemm_extents(A, B, C, M: tl.constexpr, K: tl.constexpr, N: tl.constexpr, TA:
     OUT_M: tl.constexpr = M if RM is None else RM
     OUT_N: tl.constexpr = N if RN is None else RN
     with tla.scope.cube():
-        a = tla.alloc((A_COLS // 16, A_ROWS // 16, 16, 16), A.dtype.element_ty, space="l1")
-        b = tla.alloc((B_COLS // 16, B_ROWS // 16, 16, 16), B.dtype.element_ty, space="l1")
-        acc = tla.alloc((OUT_N // 16, OUT_M // 16, 16, 16), tl.float32, space="l0c")
+        a = tla.alloc((A_COLS // 16, A_ROWS // 16, 16, 16), A.dtype.element_ty, space=tla.space.l1)
+        b = tla.alloc((B_COLS // 16, B_ROWS // 16, 16, 16), B.dtype.element_ty, space=tla.space.l1)
+        acc = tla.alloc((OUT_N // 16, OUT_M // 16, 16, 16), tl.float32, space=tla.space.l0c)
         tla.load_gm_to_l1(tla.view(A, (A_ROWS, A_COLS)), a)
         tla.load_gm_to_l1(tla.view(B, (B_ROWS, B_COLS)), b)
         tla.cube.mmad(a, b, acc, transpose_a=TA, transpose_b=TB, clear_accum=True, real_m=RM, real_k=RK, real_n=RN)
@@ -151,11 +151,11 @@ def test_run(case):
 @tla.jit
 def split_qk(Q, K, QR, KR, OUT, M: tl.constexpr):
     with tla.scope.cube():
-        q = tla.alloc((32, M // 16, 16, 16), tl.bfloat16, space="l1")
-        k = tla.alloc((32, 8, 16, 16), tl.bfloat16, space="l1")
-        qr = tla.alloc((4, M // 16, 16, 16), tl.bfloat16, space="l1")
-        kr = tla.alloc((4, 8, 16, 16), tl.bfloat16, space="l1")
-        acc = tla.alloc((8, M // 16, 16, 16), tl.float32, space="l0c")
+        q = tla.alloc((32, M // 16, 16, 16), tl.bfloat16, space=tla.space.l1)
+        k = tla.alloc((32, 8, 16, 16), tl.bfloat16, space=tla.space.l1)
+        qr = tla.alloc((4, M // 16, 16, 16), tl.bfloat16, space=tla.space.l1)
+        kr = tla.alloc((4, 8, 16, 16), tl.bfloat16, space=tla.space.l1)
+        acc = tla.alloc((8, M // 16, 16, 16), tl.float32, space=tla.space.l0c)
         tla.load_gm_to_l1(tla.view(Q, (M, 512)), q)
         tla.load_gm_to_l1(tla.view(K, (128, 512)), k)
         tla.load_gm_to_l1(tla.view(QR, (M, 64)), qr)

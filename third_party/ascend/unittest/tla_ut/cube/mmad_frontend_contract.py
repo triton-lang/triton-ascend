@@ -56,8 +56,8 @@ class Semantic:
         self.builder = Recorder()
 
 
-def buf(shape, space="l1", dtype=None):
-    dtype = dtype or (tl.float32 if space == "l0c" else tl.bfloat16)
+def buf(shape, space=core.AddressSpace.l1, dtype=None):
+    dtype = dtype or (tl.float32 if space is core.AddressSpace.l0c else tl.bfloat16)
     return core.buffer(object(), core.buffer_type(shape, dtype, space))
 
 
@@ -73,7 +73,7 @@ def test_transpose_uses_physical_shapes(ta, tb, a_nz, b_nz, c_nz):
     b_shape = (128, 64) if tb else (64, 128)
     a = buf(nz(*a_shape) if a_nz else a_shape)
     b = buf(nz(*b_shape) if b_nz else b_shape)
-    acc = buf(nz(32, 128) if c_nz else (32, 128), "l0c")
+    acc = buf(nz(32, 128) if c_nz else (32, 128), core.AddressSpace.l0c)
     sem = Semantic()
     cube.mmad(a, b, acc, transpose_a=ta, transpose_b=tb, clear_accum=True, _semantic=sem)
     assert sem.builder.calls == [((a.handle, b.handle, acc.handle),
@@ -83,8 +83,8 @@ def test_transpose_uses_physical_shapes(ta, tb, a_nz, b_nz, c_nz):
 
 def test_extents_are_checked_after_transpose_and_use_compact_l0c():
     sem = Semantic()
-    cube.mmad(buf((64, 128)), buf((256, 64)), buf((32, 48), "l0c"), transpose_a=True, transpose_b=True, real_m=32,
-              real_k=16, real_n=48, _semantic=sem)
+    cube.mmad(buf((64, 128)), buf((256, 64)), buf((32, 48), core.AddressSpace.l0c), transpose_a=True, transpose_b=True,
+              real_m=32, real_k=16, real_n=48, _semantic=sem)
     args = sem.builder.calls[0][1]
     assert (args["real_m"], args["real_k"], args["real_n"]) == (32, 16, 48)
     assert args["transpose_a"] and args["transpose_b"]
@@ -92,8 +92,8 @@ def test_extents_are_checked_after_transpose_and_use_compact_l0c():
 
 def test_positional_arguments_and_unit_flag_order():
     sem = Semantic()
-    cube.mmad(buf((64, 32)), buf((64, 128)), buf((32, 128), "l0c"), True, False, True, 2, unit_flag_group_id=3,
-              _semantic=sem)
+    cube.mmad(buf((64, 32)), buf((64, 128)), buf((32, 128), core.AddressSpace.l0c), True, False, True, 2,
+              unit_flag_group_id=3, _semantic=sem)
     args = sem.builder.calls[0][1]
     assert args["init_condition"] and args["transpose_a"] and not args["transpose_b"]
     assert (args["unit_flag_ctrl"], args["unit_flag_group_id"]) == (2, 3)
@@ -105,15 +105,15 @@ def test_invalid_extents_are_rejected_before_emission(axis, bound, invalid):
     sem = Semantic()
     extent = bound + 16 if invalid == "too_large" else invalid
     with pytest.raises(ValueError, match=axis):
-        cube.mmad(buf((32, 64)), buf((64, 128)), buf((32, 128), "l0c"), **{axis: extent}, _semantic=sem)
+        cube.mmad(buf((32, 64)), buf((64, 128)), buf((32, 128), core.AddressSpace.l0c), **{axis: extent}, _semantic=sem)
     assert not sem.builder.calls
 
 
 def test_runtime_extent_is_rejected():
     sem = Semantic()
     with pytest.raises(ValueError, match="real_k"):
-        cube.mmad(buf((32, 64)), buf((64, 128)), buf((32, 128), "l0c"), real_k=tl.tensor(object(), tl.int32),
-                  _semantic=sem)
+        cube.mmad(buf((32, 64)), buf((64, 128)), buf((32, 128), core.AddressSpace.l0c),
+                  real_k=tl.tensor(object(), tl.int32), _semantic=sem)
     assert not sem.builder.calls
 
 
@@ -122,22 +122,23 @@ def test_real_k_does_not_hide_incompatible_input_reductions(ta, tb):
     a = buf((64, 32) if ta else (32, 64))
     b = buf((128, 96) if tb else (96, 128))
     with pytest.raises(ValueError, match="reduction"):
-        cube.mmad(a, b, buf((32, 128), "l0c"), transpose_a=ta, transpose_b=tb, real_k=16, _semantic=Semantic())
+        cube.mmad(a, b, buf((32, 128), core.AddressSpace.l0c), transpose_a=ta, transpose_b=tb, real_k=16,
+                  _semantic=Semantic())
 
 
 @pytest.mark.parametrize("real", [{"real_m": 16}, {"real_n": 64}])
 def test_oversized_accumulator_is_rejected(real):
     with pytest.raises(ValueError, match="acc must"):
-        cube.mmad(buf((32, 64)), buf((64, 128)), buf((32, 128), "l0c"), **real, _semantic=Semantic())
+        cube.mmad(buf((32, 64)), buf((64, 128)), buf((32, 128), core.AddressSpace.l0c), **real, _semantic=Semantic())
 
 
 @pytest.mark.parametrize("a,b,acc,message", [
-    (object(), buf((64, 128)), buf((32, 128), "l0c"), "expects tla.buffer"),
-    (buf((32, 64), "ub"), buf((64, 128)), buf((32, 128), "l0c"), "L1 buffers"),
-    (buf((32, 64)), buf((64, 128), "ub"), buf((32, 128), "l0c"), "L1 buffers"),
-    (buf((32, 64)), buf((64, 128)), buf((32, 128), "ub"), "L0C buffer"),
-    (buf((32, 64), dtype=tl.float16), buf((64, 128)), buf((32, 128), "l0c"), "same element type"),
-    (buf((2, 16, 64)), buf((64, 128)), buf((32, 128), "l0c"), "2-D ND or 4-D zN"),
+    (object(), buf((64, 128)), buf((32, 128), core.AddressSpace.l0c), "expects tla.buffer"),
+    (buf((32, 64), core.AddressSpace.ub), buf((64, 128)), buf((32, 128), core.AddressSpace.l0c), "L1 buffers"),
+    (buf((32, 64)), buf((64, 128), core.AddressSpace.ub), buf((32, 128), core.AddressSpace.l0c), "L1 buffers"),
+    (buf((32, 64)), buf((64, 128)), buf((32, 128), core.AddressSpace.ub), "L0C buffer"),
+    (buf((32, 64), dtype=tl.float16), buf((64, 128)), buf((32, 128), core.AddressSpace.l0c), "same element type"),
+    (buf((2, 16, 64)), buf((64, 128)), buf((32, 128), core.AddressSpace.l0c), "2-D ND or 4-D zN"),
 ])
 def test_invalid_operand_contracts(a, b, acc, message):
     sem = Semantic()
@@ -151,7 +152,7 @@ def test_invalid_operand_contracts(a, b, acc, message):
 def test_transpose_b_split_reduction_accumulates_into_same_l0c(m, constexpr):
     """DSA QK: initialize with K=512, then add the K=64 RoPE product."""
     sem = Semantic()
-    acc = buf(nz(m, 128), "l0c")
+    acc = buf(nz(m, 128), core.AddressSpace.l0c)
     wrap = tl.constexpr if constexpr else lambda value: value
     for k, clear in ((512, True), (64, False)):
         a, b = buf(nz(m, k)), buf(nz(128, k))

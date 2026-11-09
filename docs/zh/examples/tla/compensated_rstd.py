@@ -7,8 +7,8 @@ import triton.language.extra.tla as tla
 def compensated_rstd_example(SQ_ptr, O_ptr, N: tl.constexpr, HIDDEN: tl.constexpr):
     sq = tla.view(SQ_ptr, (N, ), strides=(1, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ))
-    sq_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    sq_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
 
     tla.copy(sq, sq_ub)
 

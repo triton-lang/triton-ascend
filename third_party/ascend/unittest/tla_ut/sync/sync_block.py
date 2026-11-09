@@ -33,8 +33,8 @@ MODE_NAMES = {
 
 @tla.jit
 def sync_block(X_ptr, O_ptr, N: tl.constexpr, MODE_C: tl.constexpr):
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    x_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
     x = tla.view(X_ptr, (N, ), strides=(1, ), offsets=(0, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))
 
@@ -52,8 +52,8 @@ def sync_block(X_ptr, O_ptr, N: tl.constexpr, MODE_C: tl.constexpr):
 
 @tla.jit
 def sync_vector(X_ptr, O_ptr, N: tl.constexpr, MODE_C: tl.constexpr):
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    x_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
+    o_ub = tla.alloc_buffer((N, ), tl.float32, space=tla.space.ub)
     offset = tl.program_id(0) * N
     x = tla.view(X_ptr, (N, ), strides=(1, ), offsets=(offset, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(offset, ))

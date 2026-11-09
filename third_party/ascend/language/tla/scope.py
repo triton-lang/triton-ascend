@@ -109,7 +109,7 @@ class cube(scope):
     Example inside a ``@tla.jit`` kernel::
 
         with tla.scope.cube():
-            tile = tla.alloc((2, 1, 16, 16), tl.float16, scope=tla.AddressSpace.L1)
+            tile = tla.alloc((2, 1, 16, 16), tl.float16, space=tla.space.l1)
             tla.load_gm_to_l1(tla.view(X, (16, 32)), tile)
     """
 

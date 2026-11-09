@@ -91,7 +91,7 @@ from __future__ import annotations
 import enum
 
 import triton.language as tl
-from .core import buffer, buffer_access, vector, vector_type
+from .core import AddressSpace, buffer, buffer_access, vector, vector_type
 from triton.language.core import builtin, tensor, _unwrap_if_constexpr
 
 from . import simd_semantic as ss
@@ -803,7 +803,7 @@ def pld(ptr, offsets=None, *, width=8, dist="NORM", _semantic=None) -> vector:
     ss.check_dist(dist, ("NORM", "US", "DS"), "pld")
     if isinstance(ptr, buffer_access):
         ptr, offsets = ptr.buffer, list(ptr.indices)
-    if not isinstance(ptr, buffer) or ptr.space != "ub" or ptr.dtype not in (tl.int8, tl.uint8):
+    if not isinstance(ptr, buffer) or ptr.space is not AddressSpace.ub or ptr.dtype not in (tl.int8, tl.uint8):
         raise TypeError("pld requires an int8/uint8 UB buffer of packed bits")
     if len(ptr.shape) != 1 or ptr.strides != (1, ):
         raise ValueError("pld requires a contiguous one-dimensional buffer")
@@ -846,7 +846,7 @@ def pst(ptr, offsets_or_val, val=None, _semantic=None):
     _require_vector(val, "val")
     if val.dtype != tl.int1 or val.type.lanes not in (256, 128, 64):
         raise ValueError("pst requires a 256/128/64-lane predicate")
-    if not isinstance(ptr, buffer) or ptr.space != "ub" or ptr.dtype not in (tl.int8, tl.uint8):
+    if not isinstance(ptr, buffer) or ptr.space is not AddressSpace.ub or ptr.dtype not in (tl.int8, tl.uint8):
         raise TypeError("pst requires an int8/uint8 UB buffer of packed bits")
     if len(ptr.shape) != 1 or ptr.strides != (1, ):
         raise ValueError("pst requires a contiguous one-dimensional buffer")
@@ -875,7 +875,7 @@ def vgather(ptr, index, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
         ptr, offsets = ptr.buffer, list(ptr.indices)
     else:
         offsets = [0]
-    if not isinstance(ptr, buffer) or ptr.space != "ub":
+    if not isinstance(ptr, buffer) or ptr.space is not AddressSpace.ub:
         raise TypeError("vgather requires a UB buffer")
     if len(ptr.shape) != 1 or ptr.strides != (1, ) or len(offsets) != 1:
         raise ValueError("vgather requires a contiguous one-dimensional buffer")
@@ -2250,7 +2250,7 @@ def vsstb(src, dst, stride, mask=None, update=False, _semantic=None):
         offsets = [0] * len(dst.shape)
     else:
         raise TypeError("vsstb expects a tla.buffer or subscripted buffer")
-    if dst.space != "ub" or len(dst.shape) != 2 or len(offsets) != 2:
+    if dst.space is not AddressSpace.ub or len(dst.shape) != 2 or len(offsets) != 2:
         raise ValueError("vsstb requires a two-dimensional UB buffer and two indices")
     update = _unwrap_if_constexpr(update)
     if type(update) is not bool:

@@ -32,10 +32,10 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
     tl.static_assert(E % 64 == 0, "E must be a multiple of 64 until tail DMA is supported")
     tl.static_assert(TMAX > 0 and CORES > 0)
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
-    scores_ub = tla.alloc_buffer((((E + 63) // 64) * 64, ), tl.float32, space="ub", versions=6)
+    scores_ub = tla.alloc_buffer((((E + 63) // 64) * 64, ), tl.float32, space=tla.space.ub, versions=6)
     # int64 output (i32-equivalent): low word = index, high word = 0.
-    out_ub = tla.alloc_buffer((2 * K, ), tl.int32, space="ub", versions=6)
-    flag_ub = tla.alloc_buffer((1, ), tl.float32, space="ub")
+    out_ub = tla.alloc_buffer((2 * K, ), tl.int32, space=tla.space.ub, versions=6)
+    flag_ub = tla.alloc_buffer((1, ), tl.float32, space=tla.space.ub)
     for row in range(tl.program_id(0), num_tokens, CORES):
         if row < num_tokens:
             scr = tla.view(SCR_ptr, (((E + 63) // 64) * 64, ), strides=(1, ), offsets=(row * E, ))

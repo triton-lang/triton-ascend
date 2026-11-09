@@ -40,25 +40,25 @@ def reshape_fwd(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
         x_flat = tla.view(X_ptr, (H * D, ), strides=(1, ), offsets=(0, ))
 
         # A: (H, D) -> (H*D,)  flatten
-        ub_a = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
+        ub_a = tla.alloc_buffer((H, D), tl.bfloat16, space=tla.space.ub)
         tla.copy(x_tile, ub_a)
         a = tla.reshape(ub_a, (H * D, ))
         tla.copy(a, tla.view(O_ptr, (H * D, ), strides=(1, ), offsets=(0, )))
 
         # B: (H*D,) -> (H, D)  unflatten
-        ub_b = tla.alloc_buffer((H * D, ), tl.bfloat16, space="ub")
+        ub_b = tla.alloc_buffer((H * D, ), tl.bfloat16, space=tla.space.ub)
         tla.copy(x_flat, ub_b)
         b = tla.reshape(ub_b, (H, D))
         tla.copy(b, tla.view(O_ptr, (H, D), strides=(D, 1), offsets=(0, 0)))
 
         # C: (H, D) -> (H//2, 2*D)  split dim0 + merge dim1
-        ub_c = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
+        ub_c = tla.alloc_buffer((H, D), tl.bfloat16, space=tla.space.ub)
         tla.copy(x_tile, ub_c)
         c = tla.reshape(ub_c, (H // 2, 2 * D))
         tla.copy(c, tla.view(O_ptr, (H // 2, 2 * D), strides=(2 * D, 1), offsets=(0, 0)))
 
         # D: (H, D) -> (H//2, 2, D)  split dim0 into two
-        ub_d = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
+        ub_d = tla.alloc_buffer((H, D), tl.bfloat16, space=tla.space.ub)
         tla.copy(x_tile, ub_d)
         d = tla.reshape(ub_d, (H // 2, 2, D))
         tla.copy(d, tla.view(O_ptr, (H // 2, 2, D), strides=(2 * D, D, 1), offsets=(0, 0, 0)))
@@ -66,7 +66,7 @@ def reshape_fwd(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
 
 @tla.jit
 def reshape_strided(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
-    x_ub = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
+    x_ub = tla.alloc_buffer((H, D), tl.bfloat16, space=tla.space.ub)
     x = tla.view(X_ptr, (H, D), strides=(D, 1), offsets=(0, 0))
     tla.copy(x, x_ub)
     sub = tla.view(x_ub, (H, D // 2), strides=(1, 2), offsets=(0, 0))  # strided tile
@@ -75,7 +75,7 @@ def reshape_strided(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
 
 @tla.jit
 def reshape_count_mismatch(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
-    x_ub = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
+    x_ub = tla.alloc_buffer((H, D), tl.bfloat16, space=tla.space.ub)
     x = tla.view(X_ptr, (H, D), strides=(D, 1), offsets=(0, 0))
     tla.copy(x, x_ub)
     tla.reshape(x_ub, (H, 2 * D))  # 32 -> 64

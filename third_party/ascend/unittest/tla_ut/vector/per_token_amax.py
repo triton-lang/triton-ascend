@@ -30,8 +30,8 @@ SIGNATURE = {"X_ptr": "*fp32", "OUT_ptr": "*fp32"}
 
 @tla.jit
 def per_token_amax(X_ptr, OUT_ptr, M: tl.constexpr, N: tl.constexpr):
-    x_ub = tla.alloc_buffer((M, N), tl.float32, space="ub")
-    amax_ub = tla.alloc_buffer((M, ), tl.float32, space="ub")
+    x_ub = tla.alloc_buffer((M, N), tl.float32, space=tla.space.ub)
+    amax_ub = tla.alloc_buffer((M, ), tl.float32, space=tla.space.ub)
     x = tla.view(X_ptr, (M, N), strides=(N, 1))
     out = tla.view(OUT_ptr, (M, ), strides=(1, ), offsets=(0, ))
 

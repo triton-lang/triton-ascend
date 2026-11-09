@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """TLA memory and vector-register values, independent of Triton tensors."""
-from enum import Enum
+from enum import Enum, auto
 
 from triton.language import core as tl
 
@@ -41,73 +41,35 @@ def _row_major_strides(sizes):
 class AddressSpace(Enum):
     """Compile-time address spaces for TLA buffers.
 
-    ``GM`` and ``UB`` map directly to HIVM; ``L1``, ``L0A``, ``L0B`` and
-    ``L0C`` map to ``cbuf``, ``ca``, ``cb`` and ``cc``. ``SSBUF`` maps to
-    ``ssbuf``; ``BT`` and ``FB`` map to ``biasbuf`` and ``fixbuf``.
-    These are type mappings, not a guarantee that the backend can allocate
-    or access every space. See :func:`alloc` for allocation restrictions.
+    ``gm`` and ``ub`` map directly to HIVM. ``l1``, ``l0a``, ``l0b``, and
+    ``l0c`` map to ``cbuf``, ``ca``, ``cb``, and ``cc``. ``ssbuf`` maps to
+    ``ssbuf``, while ``bt`` and ``fb`` map to ``biasbuf`` and ``fixbuf``.
+    See :func:`alloc` for allocation restrictions.
 
-    ``L0A_SF`` and ``L0B_SF`` reserve the scale-factor buffer names. They
-    currently raise ``NotImplementedError`` when used to construct a buffer:
-    HIVM has no corresponding address-space mapping. They must not be treated
-    as ordinary L0A/L0B buffers without a backend-defined representation.
+    ``l0a_sf`` and ``l0b_sf`` are reserved and raise ``NotImplementedError``
+    until HIVM defines their representation.
     """
 
-    GM = "gm"
-    UB = "ub"
-    L1 = "l1"
-    L0A = "l0a"
-    L0B = "l0b"
-    L0C = "l0c"
-    SSBUF = "ssbuf"
-    BT = "bt"
-    FB = "fb"
-    L0A_SF = "l0a_sf"
-    L0B_SF = "l0b_sf"
+    gm = auto()
+    ub = auto()
+    l1 = auto()
+    l0a = auto()
+    l0b = auto()
+    l0c = auto()
+    ssbuf = auto()
+    bt = auto()
+    fb = auto()
+    l0a_sf = auto()
+    l0b_sf = auto()
 
 
-# Frontend space names; "gm"/"ub"/"ssbuf" map 1:1, the rest as in tla_builder.cc.
-SPACES = ("gm", "ub", "l1", "l0a", "l0b", "l0c", "ssbuf", "bt", "fb")
-_HIVM_SCOPE = {
-    "gm": "gm", "ub": "ub", "l1": "cbuf", "l0a": "ca", "l0b": "cb", "l0c": "cc", "ssbuf": "ssbuf", "bt": "biasbuf",
-    "fb": "fixbuf"
-}
-
-
-def _normalize_space(space):
+def _require_space(space) -> AddressSpace:
     space = tl._unwrap_if_constexpr(space)
-    if isinstance(space, AddressSpace):
-        space = space.value
-    if space in ("l0a_sf", "l0b_sf"):
-        raise NotImplementedError(f"{space} requires a backend-defined scale-factor buffer mapping")
-    if space not in SPACES:
-        raise ValueError(f"unsupported buffer space: {space}")
+    if not isinstance(space, AddressSpace):
+        raise TypeError(f"expected a tla.space member, got {type(space).__name__}")
+    if space in (AddressSpace.l0a_sf, AddressSpace.l0b_sf):
+        raise NotImplementedError(f"{space.name} requires a backend-defined scale-factor buffer mapping")
     return space
-
-
-def space_of(value):
-    """Frontend space of a TLA value, or None for scalars.
-
-    Resolves the enum on buffer/buffer_access and the printed
-    ``#hivm.address_space<...>`` type on IR values.
-    """
-    buf = getattr(value, "buffer", value)
-    space = getattr(buf, "space", None)
-    if space is not None:
-        return space
-    # IR values expose get_type(); host values carry .type.
-    ty = str(getattr(value, "type", None) or (value.get_type() if hasattr(value, "get_type") else None) or "")
-    return next((name for name, scope in _HIVM_SCOPE.items() if f"#hivm.address_space<{scope}>" in ty), None)
-
-
-def is_ub(value):
-    """True for scalars or UB-backed values."""
-    return space_of(value) in (None, "ub")
-
-
-def is_gm(value):
-    """True for scalars or GM-backed values."""
-    return space_of(value) in (None, "gm")
 
 
 class buffer_type(tl.base_type):
@@ -120,7 +82,7 @@ class buffer_type(tl.base_type):
     :type dtype: triton.language.dtype
     :param space: Compile-time address space name or :class:`AddressSpace`
         member. Defaults to ``"gm"``.
-    :type space: tla.AddressSpace, str
+    :type space: tla.space
     :param strides: Element strides. Defaults to ``None``, which selects
         row-major strides. Must have the same rank as ``shape``.
     :type strides: tuple[int, ...] or None
@@ -133,10 +95,10 @@ class buffer_type(tl.base_type):
     ``L0A_SF`` and ``L0B_SF`` are reserved and raise ``NotImplementedError``.
     """
 
-    def __init__(self, shape, dtype, space="gm", strides=None, offset=0):
+    def __init__(self, shape, dtype, space=AddressSpace.gm, strides=None, offset=0):
         self.shape = _shape(shape)
         self.element_ty = tl._unwrap_if_constexpr(dtype)
-        self.space = _normalize_space(space)
+        self.space = _require_space(space)
         if strides is None:
             strides = _row_major_strides(self.shape)
         self.strides = _shape(strides)
@@ -155,7 +117,7 @@ class buffer_type(tl.base_type):
         return buffer(handles[cursor], self), cursor + 1
 
     def mangle(self):
-        return f"TLA_{self.space}_{self.element_ty.mangle()}_{self.shape}_{self.strides}_{self.offset}"
+        return f"TLA_{self.space.name}_{self.element_ty.mangle()}_{self.shape}_{self.strides}_{self.offset}"
 
     def __eq__(self, other):
         return isinstance(other, buffer_type) and vars(self) == vars(other)

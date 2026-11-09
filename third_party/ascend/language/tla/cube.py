@@ -29,7 +29,7 @@ per-32-element E8M0 scale factors live in L1, and C is an L0C accumulator.
 from enum import Enum
 
 from triton.language.core import builtin, float8e4nv, float8e5, int8, uint8, _unwrap_if_constexpr
-from .core import buffer
+from .core import AddressSpace, buffer
 from .dma import _unit_flag_args
 
 __all__ = ["MxFormat", "mmad", "mmad_mx"]
@@ -183,9 +183,9 @@ def mmad(a, b, acc, transpose_a=False, transpose_b=False, clear_accum=False, uni
     """
     if not (isinstance(a, buffer) and isinstance(b, buffer) and isinstance(acc, buffer)):
         raise TypeError("tla.mmad expects tla.buffer operands for a, b, acc")
-    if a.space != "l1" or b.space != "l1":
+    if a.space is not AddressSpace.l1 or b.space is not AddressSpace.l1:
         raise ValueError("tla.mmad a/b must be L1 buffers (fill via tla.copy(gm->l1))")
-    if acc.space != "l0c":
+    if acc.space is not AddressSpace.l0c:
         raise ValueError("tla.mmad acc must be an L0C buffer")
     if a.dtype != b.dtype:
         raise ValueError("tla.mmad a and b must have the same element type")
@@ -229,7 +229,7 @@ def _mx_operand(operand, transpose, format, name):
     """
     if not isinstance(operand, buffer):
         raise TypeError(f"tla.mmad_mx expects tla.buffer operands for {name}")
-    if operand.space != "l1":
+    if operand.space is not AddressSpace.l1:
         raise ValueError(f"tla.mmad_mx {name} must be an L1 buffer")
     resolved, code = _mx_format(format, operand.dtype, name)
     rows, cols = _logical_shape(operand.shape)
@@ -241,7 +241,7 @@ def _mx_operand(operand, transpose, format, name):
 def _mx_scale(scale, rows, k32, name):
     if not isinstance(scale, buffer):
         raise TypeError(f"tla.mmad_mx expects tla.buffer operands for {name}")
-    if scale.space != "l1":
+    if scale.space is not AddressSpace.l1:
         raise ValueError(f"tla.mmad_mx {name} must be an L1 buffer")
     if scale.dtype not in (int8, uint8):
         raise ValueError(f"tla.mmad_mx {name} must be an int8/uint8 E8M0 buffer")
@@ -327,7 +327,7 @@ def mmad_mx(a, b, scale_a, scale_b, acc, *, format_a=None, format_b=None, transp
         raise ValueError("tla.mmad_mx reduction extent must be a multiple of 32")
     if not isinstance(acc, buffer):
         raise TypeError("tla.mmad_mx expects a tla.buffer for acc")
-    if acc.space != "l0c":
+    if acc.space is not AddressSpace.l0c:
         raise ValueError("tla.mmad_mx acc must be an L0C buffer")
     # Scales describe the full L1 tile, independent of any real_* sub-extent.
     full_m, full_n = m, n
@@ -346,7 +346,7 @@ def mmad_mx(a, b, scale_a, scale_b, acc, *, format_a=None, format_b=None, transp
     _mx_scale(scale_a, full_m, k32, "scale_a")
     _mx_scale(scale_b, full_n, k32, "scale_b")
     if bias is not None:
-        if not isinstance(bias, buffer) or bias.space != "l1":
+        if not isinstance(bias, buffer) or bias.space is not AddressSpace.l1:
             raise ValueError("tla.mmad_mx bias must be an L1 buffer")
         if bias.dtype != acc.dtype:
             raise ValueError("tla.mmad_mx bias must have the accumulator element type")

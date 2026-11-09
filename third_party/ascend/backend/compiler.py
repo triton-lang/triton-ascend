@@ -446,7 +446,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         # MergeConcatLoadBuffer is A5-only; A6 must not be enabled by its register-based flag.
         if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
             ascend.passes.ttir.add_merge_concat_load_buffer(pm)
-        if metadata["enable_dynamic_cv_pipeline"]:
+        target_arch = getattr(metadata.get("target"), "arch", None)
+        if metadata["enable_dynamic_cv_pipeline"] and _supports_dynamic_cv_pipeline(target_arch):
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
             metadata["disable_auto_inject_block_sync"] = True
@@ -868,7 +869,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 [f"--enable-mixed-cv={enable_mixed_cv}"]
 
         enable_dynamic_cv_pipeline = metadata["enable_dynamic_cv_pipeline"]
-        if enable_dynamic_cv_pipeline == True and not metadata.get("disable_vf_operand_substitution", False):
+        if (enable_dynamic_cv_pipeline == True
+                and _supports_dynamic_cv_pipeline(getattr(metadata.get("target"), "arch", None))
+                and not metadata.get("disable_vf_operand_substitution", False)):
             _compile_option_list += [f"--enable-vf-operand-substitution=True"]
 
         enable_flatten = metadata["enable_flatten"]
@@ -1213,6 +1216,11 @@ def _is_register_based_target_arch(arch: str) -> bool:
 
 def _is_a5_target_arch(arch: str) -> bool:
     return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
+
+
+def _supports_dynamic_cv_pipeline(arch: str) -> bool:
+    """DynamicCV currently targets the A5 register-based pipeline only."""
+    return _is_a5_target_arch(arch)
 
 
 def _get_libdevice_compile_state() -> bool:
@@ -1663,9 +1671,11 @@ class AscendBackend(BaseBackend):
             # Frontend identity comes from the source.
             # A launch keyword alone cannot select TLA.
             object.__setattr__(options, "enable_tla_mode", frontend_kind == "tla")
-            # Lazy init enable_dynamic_cv_pipeline if not provided.
-            # compile_on_910_95 is already resolved from the requested target.
-            if options.enable_dynamic_cv_pipeline is None:
+            # DynamicCV is A5-only. A6 remains register-based but must not
+            # enter the DynamicCV lowering or pass its compiler flags.
+            if not _supports_dynamic_cv_pipeline(self.target.arch):
+                object.__setattr__(options, "enable_dynamic_cv_pipeline", False)
+            elif options.enable_dynamic_cv_pipeline is None:
                 object.__setattr__(options, "enable_dynamic_cv_pipeline", options.compile_on_910_95)
             if not internal_options:
                 _normalize_bishengir_simt_optimization_for_context(options, normalized_opts)

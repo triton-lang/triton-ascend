@@ -186,6 +186,26 @@ def test_active_options_keep_explicit_values(backend):
     assert options.num_warps == 16
 
 
+@pytest.mark.parametrize(
+    "arch, requested, expected",
+    [
+        ("Ascend910_9581", None, True),
+        ("Ascend910_9581", False, False),
+        ("Ascend910_9691", None, False),
+        ("Ascend910_9691", True, False),
+        ("Ascend960", True, False),
+        ("Ascend910B1", None, False),
+    ],
+)
+def test_dynamic_cv_pipeline_is_enabled_only_on_a5(arch, requested, expected):
+    backend = compiler.AscendBackend(GPUTarget("npu", arch, 32))
+    raw = {} if requested is None else {"enable_dynamic_cv_pipeline": requested}
+
+    options = backend.parse_options(raw)
+
+    assert options.enable_dynamic_cv_pipeline is expected
+
+
 @pytest.mark.parametrize("dtype, deprecated", [
     (tl.float8e5, False),
     (tl.float8e4nv, False),

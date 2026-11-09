@@ -36,7 +36,7 @@ except ImportError:
 try:
     from setuptools.command.editable_wheel import editable_wheel
 except ImportError:
-    # create a dummy class, since there is no command to override
+    # Create a dummy class, since there is no command to override.
     class editable_wheel:
         pass
 

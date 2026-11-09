@@ -42,7 +42,7 @@ def make_ttir(kernel, signature, constants):
     backend = make_backend(target)
 
     options = backend.parse_options(
-        {   
+        {
             # num_warps=8 表示每个 CTA 使用 8 个 warp；num_stages 控制流水级数；multibuffer 关闭多缓冲；compile_mode 指定 simd 编译模式，上述选项共同决定生成 TTIR 的结果与预测耗时
             "num_warps": 8,
             "num_stages": 2,

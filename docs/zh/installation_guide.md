@@ -136,7 +136,7 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
 
 4.2 源码编译：
 
- [shmem项目](https://gitcode.com/cann/shmem) README.md中 "安装"->"方式三： 源码编译" 章节。
+ 请参考[shmem项目](https://gitcode.com/cann/shmem) README.md中 "安装"->"方式三： 源码编译" 章节。
 
 ## 镜像安装
 

@@ -436,7 +436,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 | 关注multi-buffer影响 | 编译器默认开启存算并行（`multiBuffer=True`），多缓冲使UB占用按buffer份数成倍增加；UB紧张时在Config中设置`multibuffer=False`（参见本文档「存算并行」章节） |
 | 长序列分批处理 | 当序列长度导致单tile估算占用接近或超过UB上限时，在核函数内用for循环按序列维度分块load/计算/store，避免单次整段搬运 |
 
-UB占用估算示例：65536个float32元素（4 Byte）、双缓冲（2份）时，仅该张量即需65536×4×2×8 = 4194304 bit，已超过Atlas A2系列产品可用的1572864 bit；按Atlas A2系列产品1572864 bit上限反推，单个float16张量、双缓冲下的理论上限约49152个元素（1572864÷8÷2÷2 = 49152）。
+UB占用估算示例：65536个float32元素（4Byte）、双缓冲（2份）时，仅该张量即需65536×4×2×8 = 4194304 bit，已超过Atlas A2系列产品可用的1572864 bit；按Atlas A2系列产品1572864 bit上限反推，单个float16张量、双缓冲下的理论上限约49152个元素（1572864÷8÷2÷2 = 49152）。
 
 【注意】Atlas A2系列产品UB大小为192KB（即1572864bit）。各产品系列片上内存规格如下：
 
@@ -648,7 +648,7 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K,
     accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
     for k in range(0, K, BLOCK_K):
         a = tl.load(a_ptrs, mask=(offs_am[:, None] < M) & (offs_k[None, :] < K), other=0.0)
-        b = tl.load(b_ptrs, mask=(offs_k[:, None] < K) & (offs_bn[None, :] < N), other=0.0) 
+        b = tl.load(b_ptrs, mask=(offs_k[:, None] < K) & (offs_bn[None, :] < N), other=0.0)
         accumulator += tl.dot(a, b)
 
         a_ptrs += BLOCK_K * stride_ak

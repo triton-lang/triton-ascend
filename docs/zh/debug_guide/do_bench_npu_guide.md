@@ -63,7 +63,7 @@ grid = (1, )    # 网格配置：启动1个program（block）
 # 待基准测试的可调用对象，仅负责下发kernel执行
 def fn():
     kernel[grid](x, out)
-    
+
 ms = do_bench_npu(fn)    # 测量kernel执行时间，单位：ms
 print(f"Kernel execution time: {ms} ms")
 ```

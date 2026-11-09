@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """
-Compiler-hint helper for the TLA namespace (annotate_buffer_versions).
+Compiler-hint helpers for the TLA namespace.
 
 Migrated from TLA ``cann/extension/aux_ops.py`` (SIMD VF related subset):
 ``annotate_buffer_versions`` is the frontend declaration consumed by the
@@ -33,7 +33,30 @@ from triton.language.core import (
 
 from triton._C.libtriton import ir
 
-__all__ = ["annotate_buffer_versions"]
+__all__ = ["annotate_buffer_versions", "assume"]
+
+
+@builtin
+def assume(cond, _semantic=None):
+    """
+    Tell the compiler that a scalar boolean condition is true.
+
+    Emits ``llvm.intr.assume`` as an optimization hint, not a runtime check.
+    Unlike TileLang's host-checkable ``T.assume`` constraints, no launch-time
+    assertion is generated. If the condition is false, behavior is undefined;
+    use ``tla.device_assert`` when a runtime diagnostic is required.
+
+    :param cond: Python/constexpr bool or scalar ``int1`` tensor; integer,
+        block tensor, and SIMD vector conditions are not supported
+    :return: None
+    """
+    cond = _unwrap_if_constexpr(cond)
+    if isinstance(cond, core.tensor):
+        if cond.type.is_block() or cond.dtype != core.int1:
+            raise TypeError("assume requires a scalar int1 condition")
+    elif not isinstance(cond, bool):
+        raise TypeError("assume requires a bool or scalar int1 condition")
+    _semantic.assume(_semantic.to_tensor(cond))
 
 
 def compile_hint_impl(ptr, hint_name: str, hint_val, builder: ir.builder):

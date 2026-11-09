@@ -618,53 +618,51 @@ def _is_valid_bishengir_path(path: str) -> bool:
     return True
 
 
+@functools.lru_cache(None)
+def _get_bishengir_compile_help(bishengir_path: str) -> str:
+    """Return bishengir-compile --help stdout, cached per compiler path.
+
+    All feature probes (api change, reg-based, full-row-copy inlining) parse the
+    same help text. Forking the compiler once per probe dominated per-kernel
+    compile latency, so the subprocess result is memoized by compiler path.
+    """
+    result = subprocess.run(
+        [bishengir_path, "--help"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def _probe_bishengir_compile_help() -> str:
+    """Validate the resolved compiler path and return its cached help text."""
+    bishengir_path, _ = _get_npucompiler_path()
+    if not _is_valid_bishengir_path(bishengir_path):
+        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
+        return ""
+    try:
+        return _get_bishengir_compile_help(bishengir_path)
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return ""
+
+
 # grep bishengir-compile's option limit-auto-multi-buffer-buffer to check
 # if bishengir-compile is a newer version which does not generate kernel_reloc.o
 # any more.
 def _check_bishengir_api_change() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'limit-auto-multi-buffer-buffer' in result.stdout:
-            # bishengir-compile is newer version
-            return True
-        else:
-            # bishengir-compile is older version
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    # newer version emits the option, older version does not.
+    return bool(help_text) and 'limit-auto-multi-buffer-buffer' in help_text
 
 
 def _check_bishengir_is_regbased() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'reg-based' in result.stdout:
-            # bishengir-compile is regbased version
-            return True
-        else:
-            # bishengir-compile is membased version
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    # regbased version emits 'reg-based', membased version does not.
+    return bool(help_text) and 'reg-based' in help_text
 
 
 def _get_ascend_path() -> Path:
@@ -781,6 +779,8 @@ def _npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_head
         "-lruntime",
         "-lascendcl",
     ]
+    if obj_name == "npu_utils":
+        cc_cmd.append("-ldl")
     if kernel_launcher == "torch":
         if obj_name == "npu_utils":
             cc_cmd += get_backend_func("get_cc_cmd_npu_utils")
@@ -798,6 +798,29 @@ def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_l
     if result.returncode != 0:
         raise RuntimeError(f"Failed to compile {header_or_src_path}, error: {result.stderr},cmd={cc_cmd}")
     return so_path
+
+
+def bin_cache_manager(key, bin_dir):
+    """Return a FileCacheManager rooted at a fixed directory (default: backend bin/).
+
+    Shared host artifacts (npu_utils.so, the launcher runtime) must not live
+    under TRITON_CACHE_DIR: PyTorch Inductor repoints that directory to a
+    fresh temporary root around every test case, stranding artifacts built
+    under earlier roots. This manager keeps the default file cache's exact
+    semantics (key sub-directory, flock coordination, atomic put) under an
+    installation-fixed directory, while custom managers configured via
+    knobs.cache.manager_class stay scoped to the per-kernel artifacts they
+    are meant to serve. Constructed via __new__ to keep the FileCacheManager
+    type (checked by build coordination) without triggering knob/env reads
+    or directory creation under a TRITON_CACHE_DIR that may be repointed.
+    """
+    from triton.runtime.cache import FileCacheManager, _base32
+    cache = FileCacheManager.__new__(FileCacheManager)
+    cache.key = _base32(key)
+    cache.cache_dir = os.path.join(str(bin_dir), cache.key)
+    cache.lock_path = os.path.join(cache.cache_dir, "lock")
+    os.makedirs(cache.cache_dir, exist_ok=True)
+    return cache
 
 
 def _npu_elf_info(path):
@@ -874,7 +897,7 @@ def _npu_compiler_identity(compiler):
             return None
         paths = {compiler, interpreter}
         for line in output.splitlines():
-            if re.fullmatch(r"\s*linux-vdso\.so\.\d+ \(0x[0-9a-f]+\)\s*", line):
+            if re.fullmatch(r"\s*(?:linux-vdso\.so\.\d+\s*)?\(0x[0-9a-f]+\)\s*", line):
                 continue
             match = re.fullmatch(r"\s*(?:\S+ => )?(/\S+) \(0x[0-9a-f]+\)\s*", line)
             if not match:
@@ -1078,24 +1101,8 @@ def convert_dtype_to_numpy(dtype):
 
 
 def _check_bishengir_able_save_ir() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'save-linked-ir' in result.stdout:
-            return True
-        else:
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    return bool(help_text) and 'save-linked-ir' in help_text
 
 
 def get_ascend_arch_from_env():
@@ -1112,6 +1119,25 @@ def ub_size_in_kbytes_for_arch(arch: str) -> int:
     """
     entry = _match_arch_entry(arch)
     return entry[1] if entry is not None else 0
+
+
+def l0_size_in_kbytes_for_arch(arch: str) -> tuple:
+    """Return the raw (L0A, L0B, L0C) cube-buffer capacities in KiB.
+
+    L0A holds the cube lhs tile, L0B the cube rhs tile, and L0C the
+    accumulator. Known targets: Ascend950/Ascend910_95 (A5) provide
+    64/64/256 KiB; the Ascend910 (A3) family provides 64/64/128 KiB.
+    Unknown and empty targets fail closed (zero capacities) so the
+    graph-optimization L0A/L0B/L0C checks stay disabled rather than
+    guessing a capacity.
+    """
+    if not isinstance(arch, str) or not arch:
+        return (0, 0, 0)
+    if arch.startswith(("Ascend910_95", "Ascend950")):
+        return (64, 64, 256)
+    if arch.startswith(("Ascend910A", "Ascend910B", "Ascend910D", "Ascend910_93", "Ascend310B")):
+        return (64, 64, 128)
+    return (0, 0, 0)
 
 
 def graph_ub_budget_bytes_for_arch(arch: str) -> int:

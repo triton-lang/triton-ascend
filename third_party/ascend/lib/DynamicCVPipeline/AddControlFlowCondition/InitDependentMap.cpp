@@ -115,13 +115,26 @@ collectDepsByGroup(Operation *rootOp, const char *attrName,
   return ret;
 }
 
+// depsByGroup is a DenseMap. Group ids are sorted once so each producer list
+// is created in group-id order.
+static llvm::SmallVector<int> sortedGroupIds(
+    llvm::DenseMap<int, llvm::SmallVector<std::pair<Operation *, int>>>
+        &depsByGroup) {
+  llvm::SmallVector<int> groupIds;
+  groupIds.reserve(depsByGroup.size());
+  for (auto &entry : depsByGroup)
+    groupIds.push_back(entry.first);
+  llvm::sort(groupIds);
+  return groupIds;
+}
+
 // Cross-core: consumer -> one producer list per group it consumes. An op may
 // be both roles and/or in several groups; each group keeps its own list.
 static int buildCrossCoreProducerConsumerMapping(
     llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>> &depsByGroup,
     ConsumerProducerMap &result) {
-  for (auto &groupEntry : depsByGroup) {
-    auto &ops = groupEntry.second;
+  for (int group : sortedGroupIds(depsByGroup)) {
+    auto &ops = depsByGroup[group];
 
     SmallVector<Operation *> producers;
     SmallVector<Operation *> consumers;
@@ -156,8 +169,8 @@ static int buildIntraCoreProducerConsumerMapping(
     llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>> &depsByGroup,
     llvm::DenseMap<Operation *, SmallVector<Operation *>> &result,
     Operation *mainLoop = nullptr) {
-  for (auto &groupEntry : depsByGroup) {
-    auto &ops = groupEntry.second;
+  for (int group : sortedGroupIds(depsByGroup)) {
+    auto &ops = depsByGroup[group];
 
     // Collect all producers and consumers in this group
     SmallVector<Operation *> producers;
@@ -611,34 +624,29 @@ static int detectCycle(ControlFlowConditionInfo *info) {
 // DFS helper function to find nodes at target distance from start node
 static int collectFlowOptIfOpPairs(ModuleOp module,
                                    ControlFlowConditionInfo *info) {
-  // Step 1: Collect every node appearing in the DAG (key or value).
+  // Step 1: Collect every node appearing in the DAG (key or value) and compute
+  // in-degree (every edge, cross or intra, contributes 1).
   llvm::DenseSet<scf::IfOp> allNodes;
+  llvm::DenseMap<scf::IfOp, int> inDegree;
   for (auto &entry : info->ifBlockDAG) {
     allNodes.insert(entry.first);
     for (auto &edge : entry.second) {
       allNodes.insert(edge.first);
-    }
-  }
-
-  // Step 2: Compute in-degree (every edge, cross or intra, contributes 1).
-  llvm::DenseMap<scf::IfOp, int> inDegree;
-  for (auto &entry : info->ifBlockDAG) {
-    for (auto &edge : entry.second) {
       inDegree[edge.first]++;
     }
   }
 
-  // Step 3: Identify start nodes (in-degree 0).
+  // Step 2: Identify start nodes (in-degree 0). startNodes is filled in module
+  // order.
   llvm::SmallVector<scf::IfOp> startNodes;
-  for (auto node : allNodes) {
-    if (inDegree.lookup(node) == 0) {
-      startNodes.push_back(node);
-    }
-  }
+  module.walk([&](scf::IfOp ifOp) {
+    if (allNodes.contains(ifOp) && inDegree.lookup(ifOp) == 0)
+      startNodes.push_back(ifOp);
+  });
 
   LDBG("Number of start nodes (depth=1): " << startNodes.size());
 
-  // Step 4: For each start node, run a per-source DFS to compute each
+  // Step 3: For each start node, run a per-source DFS to compute each
   // reachable node's depth (max over all paths from this start). Every node
   // with depth = 3 becomes a flowOpt pair keyed on this start.
   constexpr int targetDepth = 3;

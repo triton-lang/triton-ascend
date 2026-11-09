@@ -69,6 +69,13 @@ struct DependencyInfo {
   mlir::Operation *consumerYieldOp = nullptr;
 
   mlir::OpOperand *operand = nullptr;
+
+  int loopDepth = 0;
+  mlir::Operation *loopRegion = nullptr;
+
+  // A negative ID means this dependency does not require synchronization.
+  int flagId = 0;
+  bool reuseStartEnd = false;
 };
 
 class DataDependencyInfo {
@@ -154,7 +161,8 @@ private:
   void collectMemDepInfo(llvm::StringRef predCoreType, int producerBlockId,
                          int consumerBlockId, int predBlockId, int currBlockId,
                          llvm::SmallVector<DependencyInfo> &memoryDependencies,
-                         mlir::Operation *predOp, mlir::Operation *nextOp);
+                         mlir::Operation *predOp, mlir::Operation *nextOp,
+                         DataDependencyInfo &info);
   void analyzeExternalInputs(DataDependencyInfo &info);
   void analyzeExternalOutputs(DataDependencyInfo &info);
 
@@ -195,6 +203,8 @@ private:
   void updateCoreTypeAtIndex(Operation *op, int index,
                              llvm::StringRef newCoreType);
   void deduplicateDependencies(llvm::SmallVector<DependencyInfo> &dependencies);
+  void sortDependencies(llvm::SmallVector<DependencyInfo> &dependencies,
+                        mlir::ModuleOp module);
   mlir::ModuleOp module;
 };
 

@@ -739,7 +739,9 @@ def _cdiv_frontend(signature, constants, use_tla):
     except CompilationError as error:
         while error.__cause__ is not None:
             error = error.__cause__
-        return type(error), str(error)
+        # The two call sites have different locations and source excerpts.
+        message = error.error_message if isinstance(error, CompilationError) else str(error)
+        return type(error), message
     return "ok", module.str_nodebug()
 
 

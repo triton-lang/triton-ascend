@@ -41,7 +41,7 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
             scr = tla.view(SCR_ptr, (((E + 63) // 64) * 64, ), strides=(1, ), offsets=(row * E, ))
             idx = tla.view(IDX_ptr, (2 * K, ), strides=(1, ), offsets=(row * 2 * K, ))
             flag = tla.view(FLAG_ptr, (1, ), strides=(1, ), offsets=(row, ))
-            tla.copy(scr, scores_ub)
+            tla.load_gm_to_ub(scr, scores_ub)
             with tla.scope.simd():
                 neg_inf = tla.simd.vsplat(float("-inf"), tl.float32)
                 zero32 = tla.simd.vsplat(0.0, tl.float32)
@@ -82,8 +82,8 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
                         new_sc = new_sc + (tla.simd.vsel(tla.simd.vcmp(idx_lane[i], winner, op=tla.simd.CMP.EQ),
                                                          neg_inf, sc[i]), )
                     sc = new_sc
-            tla.copy(out_ub, idx)
-            tla.copy(flag_ub, flag)
+            tla.store_ub_to_gm(out_ub, idx)
+            tla.store_ub_to_gm(flag_ub, flag)
 
 
 def constexprs():

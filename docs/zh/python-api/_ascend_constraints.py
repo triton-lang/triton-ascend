@@ -1180,30 +1180,36 @@ CONSTRAINTS = {
         ],
         "example": "buffer",
     },
-    f"{_TLA_PREFIX}.copy": {
-        "constraints": [
-            "``src`` 和 ``dst`` 都必须是 ``tla.buffer``，不接受指针或 tensor。",
-            "源和目标元素类型必须一致。",
-            "支持的地址空间组合：``gm->ub``、``ub->gm``、``gm->l1``、``l0c->*``。",
-            "除 ``gm->l1`` 的 ND->NZ 和 ``l0c`` Fixpipe 的 fractal 关系外，源和目标形状必须一致。",
-            "其他地址空间组合会报错。",
-        ],
-        "example":
-        "copy",
+    f"{_TLA_PREFIX}.load_gm_to_ub": {
+        "constraints": ["源必须是 GM buffer，目标必须是 UB buffer。"],
+        "example": "copy",
+    },
+    f"{_TLA_PREFIX}.store_ub_to_gm": {
+        "constraints": ["源必须是 UB buffer，目标必须是 GM buffer。"],
+        "example": "copy",
     },
     f"{_TLA_PREFIX}.view": {
         "constraints": [
-            "指针入口：``src`` 必须是指针 tensor，``strides`` 为最终 memref 步长，默认行主序。",
-            "缓冲区切片：``src`` 必须是 ``tla.buffer``，``strides`` 相对于源视图，``space`` 必须保持默认值。",
+            "``src`` 必须是标量 GM 指针；已有 buffer（包括 GM buffer）请使用 ``tla.subview``。",
+            "``strides`` 为最终元素步长，默认行主序；不接受地址空间参数。",
             "``strides`` / ``offsets`` 的秩必须与结果形状一致。",
-            "静态 offset 必须位于源 buffer 范围内。",
+            "调用者负责保证视图位于指针指向的分配范围内。",
+        ],
+        "example":
+        "view",
+    },
+    f"{_TLA_PREFIX}.subview": {
+        "constraints": [
+            "``src`` 必须是已有 buffer，保留其 dtype 和地址空间。",
+            "``strides`` 为相对源视图的采样步长，默认全 1；切片保留源 pitch。",
+            "静态越界切片会报错；动态 offset 由调用者保证合法。",
         ],
         "example":
         "view",
     },
     f"{_TLA_PREFIX}.reshape": {
         "constraints": [
-            "只支持连续、行主序、无偏移的 buffer；带步长或偏移的切片请先使用 ``tla.view``。",
+            "只支持连续、行主序的 buffer，保留静态或动态偏移；使用 ``tla.subview`` 表达带步长的切片。",
             "元素总数必须保持不变。",
         ],
         "example": "reshape",
@@ -1222,7 +1228,7 @@ CONSTRAINTS = {
     },
     f"{_TLA_PREFIX}.scope.vector": {
         "constraints": [
-            "承载 ``tla.copy``、控制流等非 SIMD 操作。",
+            "承载显式 DMA、控制流等非 SIMD 操作。",
             "可以嵌套 ``tla.scope.simd()``。",
         ],
         "example": "scope",

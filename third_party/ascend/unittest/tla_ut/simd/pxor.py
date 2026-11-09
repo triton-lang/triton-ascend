@@ -26,9 +26,9 @@ def pxor(X, T1, T2, O, N: tl.constexpr, ACTIVE: tl.constexpr):
     t1 = tla.alloc_buffer((N, ), tl.uint32, space="ub")
     t2 = tla.alloc_buffer((N, ), tl.uint32, space="ub")
     o = tla.alloc_buffer((3, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(T1, (N, )), t1)
-    tla.copy(tla.view(T2, (N, )), t2)
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(T1, (N, )), t1)
+    tla.load_gm_to_ub(tla.view(T2, (N, )), t2)
     with tla.scope.simd():
         xv = tla.simd.vlds(x[0])
         a = tla.simd.vlds(t1[0])
@@ -43,7 +43,7 @@ def pxor(X, T1, T2, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(o[0, 0], tla.simd.vsel(tla.simd.pxor(p1, p2), ones, zeros))
         tla.simd.vsts(o[1, 0], tla.simd.vsel(tla.simd.pxor(p1, p2, prefix), ones, zeros))
         tla.simd.vsts(o[2, 0], tla.simd.vsel(tla.simd.pxor(p1, p2, none), ones, zeros))
-    tla.copy(o, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (3, N)))
 
 
 def constexprs():

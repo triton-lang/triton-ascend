@@ -38,9 +38,9 @@ def indexed_load(X, I, M, O, DT: tl.constexpr, W: tl.constexpr, BASE: tl.constex
     indices = tla.alloc_buffer((N, ), IT, space="ub")
     m = tla.alloc_buffer((N, ), MT, space="ub")
     o = tla.alloc_buffer((3, N), DT, space="ub")
-    tla.copy(tla.view(X, (1024, )), x)
-    tla.copy(tla.view(I, (N, )), indices)
-    tla.copy(tla.view(M, (N, )), m)
+    tla.load_gm_to_ub(tla.view(X, (1024, )), x)
+    tla.load_gm_to_ub(tla.view(I, (N, )), indices)
+    tla.load_gm_to_ub(tla.view(M, (N, )), m)
     with tla.scope.simd():
         mask = tla.simd.vcmps(tla.simd.vlds(m[0]), 0, op=tla.simd.CMP.NE)
         if not MASKED:
@@ -55,7 +55,7 @@ def indexed_load(X, I, M, O, DT: tl.constexpr, W: tl.constexpr, BASE: tl.constex
         tla.simd.vsts(o[0, 0], a, dist="NORM_B16" if W == 16 else "NORM_B32")
         tla.simd.vsts(o[1, 0], b, dist="NORM_B16" if W == 16 else "NORM_B32")
         tla.simd.vsts(o[2, 0], c, dist="NORM_B16" if W == 16 else "NORM_B32")
-    tla.copy(o, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (3, N)))
 
 
 TYPES = [("int16", "i16", 16), ("uint16", "u16", 16), ("int32", "i32", 32), ("uint32", "u32", 32),

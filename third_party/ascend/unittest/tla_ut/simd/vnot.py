@@ -34,8 +34,8 @@ def vnot_i32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
     xb = tla.alloc_buffer((TILES, N), tl.int32, space="ub")
     tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
     ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.int32, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), xb)
-    tla.copy(tla.view(T, (N, )), tb)
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), xb)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0, 0])
         t = tla.simd.vlds(tb[0])
@@ -57,7 +57,7 @@ def vnot_i32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vnot(v, mask=tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vnot(v))
-    tla.copy(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
 
 
 @tla.jit
@@ -65,8 +65,8 @@ def vnot_u32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
     xb = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
     tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
     ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), xb)
-    tla.copy(tla.view(T, (N, )), tb)
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), xb)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0, 0])
         t = tla.simd.vlds(tb[0])
@@ -88,7 +88,7 @@ def vnot_u32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vnot(v, mask=tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vnot(v))
-    tla.copy(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
 
 
 def constexprs():

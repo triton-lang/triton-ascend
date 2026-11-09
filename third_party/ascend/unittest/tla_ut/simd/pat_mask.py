@@ -36,10 +36,10 @@ def pat_mask(X, Y, A, P, O, F, N: tl.constexpr):
     p = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o = tla.alloc_buffer((2, N), tl.uint32, space="ub")
     f = tla.alloc_buffer((2, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(Y, (N, )), y)
-    tla.copy(tla.view(A, (N, )), a)
-    tla.copy(tla.view(P, (N, )), p)
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
+    tla.load_gm_to_ub(tla.view(A, (N, )), a)
+    tla.load_gm_to_ub(tla.view(P, (N, )), p)
     with tla.scope.simd():
         xv = tla.simd.vlds(x[0])
         yv = tla.simd.vlds(y[0])
@@ -51,8 +51,8 @@ def pat_mask(X, Y, A, P, O, F, N: tl.constexpr):
         two = tla.simd.vsplat(2.0, tl.float32)
         tla.simd.vsts(f[0, 0], tla.simd.vmula(acc, prod, two, m4))
         tla.simd.vsts(f[1, 0], tla.simd.vmula(acc, prod, two, mask=m4, mode=tla.simd.MODE.MERGING))
-    tla.copy(o, tla.view(O, (2, N)))
-    tla.copy(f, tla.view(F, (2, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (2, N)))
+    tla.store_ub_to_gm(f, tla.view(F, (2, N)))
 
 
 def constexprs():

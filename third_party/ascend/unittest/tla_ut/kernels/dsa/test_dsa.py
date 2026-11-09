@@ -1,4 +1,4 @@
-"""Pytest accuracy and performance tests for sparse MLA prefill.
+"""Pytest IR, accuracy and performance tests for sparse MLA prefill.
 
 All tests use B1, SQ=KV=8192, TopK=2048, QK=576/V=512, BF16.
 Profiling includes every device task in one invocation, including preprocessing.
@@ -173,6 +173,23 @@ def runtime(request):
     if not torch.npu.is_available():
         pytest.skip('DSA requires an NPU')
     return load_kernel(Path(__file__).with_name('dsa_kernel.py'))
+
+
+@pytest.mark.parametrize('heads', (16, 32, 64, 128))
+def test_ir(heads, output_dir=None):
+    from utils.tla_test_utils import compile_offline, lower_offline
+
+    kernel = load_kernel(Path(__file__).with_name('dsa_kernel.py'))
+    config = kernel.default_config(heads)
+    signature = dict(Q='*bf16', QR='*bf16', IDS='*i32', IDS64='*i64', OUT='*bf16', MAX='*fp32', SUM='*fp32',
+                     PACKED_KV='*bf16')
+    constants = dict(SQ=8192, H=heads, L=8192, TOPK=2048, BM=config.heads, GR=config.gather_rows, CORES=24)
+    module, ctx = compile_offline(kernel._sparse_mla, signature, constants, output_dir=output_dir)
+    text = str(lower_offline(module, ctx, output_dir=output_dir))
+    assert 'memref.subview' in text
+    assert text.count('hivm.hir.mmadL1 ') == 4
+    assert text.count('hivm.hir.fixpipe ') == 3
+    assert '!tt.ptr' not in text and 'tt.call' not in text
 
 
 @pytest.mark.parametrize('heads', HEADS)

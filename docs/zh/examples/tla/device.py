@@ -10,7 +10,7 @@ def device_example(X_ptr, O_ptr, N: tl.constexpr):
     x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
 
-    tla.copy(x, x_ub)
+    tla.load_gm_to_ub(x, x_ub)
 
     # device_print 只能在 tla.scope 外使用，且只支持 UB 值和标量。
     tla.device_print("x[0] =", x_ub[0])
@@ -21,4 +21,4 @@ def device_example(X_ptr, O_ptr, N: tl.constexpr):
 
     # cond 必须是标量 int1；仅在开启 debug 选项时生效。
     tla.device_assert(N > 0, "N must be positive")
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)

@@ -12,8 +12,8 @@ def simd_compare_example(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     b_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
 
-    tla.copy(a, a_ub)
-    tla.copy(b, b_ub)
+    tla.load_gm_to_ub(a, a_ub)
+    tla.load_gm_to_ub(b, b_ub)
 
     with tla.scope.simd():
         av = tla.simd.vlds(a_ub[0])
@@ -26,4 +26,4 @@ def simd_compare_example(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
         selected = tla.simd.vsel(mask, av, bv)
         tla.simd.vsts(o_ub[0], selected, dist="NORM_B32")
 
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)

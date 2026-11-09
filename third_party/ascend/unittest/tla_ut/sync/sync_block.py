@@ -43,11 +43,11 @@ def sync_block(X_ptr, O_ptr, N: tl.constexpr, MODE_C: tl.constexpr):
 
     with tla.scope.vector():
         tla.sync.block_wait_flag(MODE_C, tla.sync.PIPE.V, 0)
-        tla.copy(x, x_ub)
+        tla.load_gm_to_ub(x, x_ub)
         with tla.scope.simd():
             v = tla.simd.vlds(x_ub[0], dist="NORM")
             tla.simd.vsts(o_ub[0], v, dist="NORM_B32")
-        tla.copy(o_ub, o)
+        tla.store_ub_to_gm(o_ub, o)
 
 
 @tla.jit
@@ -59,13 +59,13 @@ def sync_vector(X_ptr, O_ptr, N: tl.constexpr, MODE_C: tl.constexpr):
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(offset, ))
 
     with tla.scope.vector():
-        tla.copy(x, x_ub)
+        tla.load_gm_to_ub(x, x_ub)
         tla.sync.block_set_flag(MODE_C, tla.sync.PIPE.MTE3, 0)
         tla.sync.block_wait_flag(MODE_C, tla.sync.PIPE.MTE3, 0)
         with tla.scope.simd():
             v = tla.simd.vlds(x_ub[0], dist="NORM")
             tla.simd.vsts(o_ub[0], v, dist="NORM_B32")
-        tla.copy(o_ub, o)
+        tla.store_ub_to_gm(o_ub, o)
 
 
 def constexprs(mode):

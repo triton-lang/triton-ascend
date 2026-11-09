@@ -31,7 +31,7 @@ SIGNATURE = {"X": "*fp32", "O": "*fp32"}
 def vdups(X, O, N: tl.constexpr, ACTIVE: tl.constexpr):
     xb = tla.alloc_buffer((N, ), tl.float32, space="ub")
     ob = tla.alloc_buffer((8, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (N, )), xb)
+    tla.load_gm_to_ub(tla.view(X, (N, )), xb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0])
         idx = tla.simd.vci(0)
@@ -45,7 +45,7 @@ def vdups(X, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[5, 0], tla.simd.vdup(1.5, tl.float32, mask=prefix))
         tla.simd.vsts(ob[6, 0], tla.simd.vdup(1.5, tl.float32, mask=none))
         tla.simd.vsts(ob[7, 0], tla.simd.vdup(1.5, tl.float32, mask=prefix, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (8, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (8, N)))
 
 
 def constexprs():

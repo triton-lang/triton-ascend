@@ -54,7 +54,7 @@ ALIAS_CASES = (
 def vdup(T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
     tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
     ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
-    tla.copy(tla.view(T, (N, )), tb)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
@@ -67,7 +67,7 @@ def vdup(T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vdup(1.5, tl.float32, mask=none, mode=tla.simd.MODE.ZEROING))
         tla.simd.vsts(ob[4, 0], tla.simd.vdup(1.5, tl.float32, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vdup(1.5, tl.float32, mask=arb, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 @tla.jit
@@ -80,7 +80,7 @@ def vdup_bf16(O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[0, 0], tla.simd.vdup(1.5, tl.bfloat16), dist="NORM_B16")
         tla.simd.vsts(ob[1, 0], tla.simd.vdup(1.5, tl.bfloat16, mask=prefix), dist="NORM_B16")
         tla.simd.vsts(ob[2, 0], tla.simd.vdup(1.5, tl.bfloat16, mask=none), dist="NORM_B16")
-    tla.copy(ob, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (3, N)))
 
 
 @tla.jit
@@ -91,7 +91,7 @@ def vdup_alias(O, DT: tl.constexpr):
         d = tla.simd.vdup(1, DT)
         bc = tla.simd.vbitcast(d, "uint32")
         tla.simd.vsts(ob[0], bc, dist="NORM_B32")
-    tla.copy(ob, tla.view(O, (64, )))
+    tla.store_ub_to_gm(ob, tla.view(O, (64, )))
 
 
 def constexprs(lanes=None, active=None):

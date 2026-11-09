@@ -30,7 +30,7 @@ SIGNATURE = {"X": "*u32", "O": "*u32", "limit": "u32"}
 def vmins(X, O, limit, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
     x = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
     o = tla.alloc_buffer((4 + TILES, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), x)
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), x)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0, 0])
         mask = tla.simd.pge(ACTIVE, N)
@@ -50,7 +50,7 @@ def vmins(X, O, limit, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexp
                 tla.simd.vsts(o[4 + t, 0], tla.simd.vmins(va, limit, tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(o[4 + t, 0], tla.simd.vmins(va, limit))
-    tla.copy(o, tla.view(O, (4 + TILES, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (4 + TILES, N)))
 
 
 def constexprs():

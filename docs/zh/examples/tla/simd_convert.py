@@ -11,7 +11,7 @@ def simd_convert_example(X_ptr, O_ptr, N: tl.constexpr):
     o_ub = tla.alloc_buffer((N, ), tl.bfloat16, space="ub")
     tmp_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
 
-    tla.copy(x, x_ub)
+    tla.load_gm_to_ub(x, x_ub)
 
     with tla.scope.simd():
         # bf16 -> f32 拓宽，结果为 64 lane 满寄存器。
@@ -26,4 +26,4 @@ def simd_convert_example(X_ptr, O_ptr, N: tl.constexpr):
         bf16_out = tla.simd.vtruncf(f32_v, tl.bfloat16, part="part_even")
         tla.simd.vsts(o_ub[0], bf16_out, dist="NORM_B16")
 
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)

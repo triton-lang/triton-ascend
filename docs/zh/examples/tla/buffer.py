@@ -13,10 +13,10 @@ def buffer_example(X_ptr, O_ptr, N: tl.constexpr):
     x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub", versions=2)
 
-    tla.copy(x, x_ub)
+    tla.load_gm_to_ub(x, x_ub)
 
     with tla.scope.simd():
         v = tla.simd.vlds(x_ub[0])
         tla.simd.vsts(o_ub[0], v)
 
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)

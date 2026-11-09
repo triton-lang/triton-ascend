@@ -43,11 +43,11 @@ def grad_w_reduce(P_ptr, WH_ptr, WE_ptr, GH_ptr, GE_ptr, H: tl.constexpr, HC: tl
         we = tla.view(WE_ptr, (1, BW), strides=(H, 1), offsets=(head, off))
         gh = tla.view(GH_ptr, (1, BW), strides=(H, 1), offsets=(head, off))
         ge = tla.view(GE_ptr, (1, BW), strides=(H, 1), offsets=(head, off))
-        tla.copy(p_blk, p_ub)
-        tla.copy(wh, wh_ub)
-        tla.copy(we, we_ub)
-        tla.copy(gh, gh_ub)
-        tla.copy(ge, ge_ub)
+        tla.load_gm_to_ub(p_blk, p_ub)
+        tla.load_gm_to_ub(wh, wh_ub)
+        tla.load_gm_to_ub(we, we_ub)
+        tla.load_gm_to_ub(gh, gh_ub)
+        tla.load_gm_to_ub(ge, ge_ub)
         with tla.scope.simd():
             # per register block: serially accumulate NP partials, fma back to gh/ge.
             for c in tl.static_range(BW // 64):
@@ -62,8 +62,8 @@ def grad_w_reduce(P_ptr, WH_ptr, WE_ptr, GH_ptr, GE_ptr, H: tl.constexpr, HC: tl
                 # simd.vfma(x, y, z) = x + y*z -> grad_new = grad_old + acc*w。
                 tla.simd.vsts(gh_ub[0, c * 64], tla.simd.vfma(a, acc, w_he), dist="NORM_B32")
                 tla.simd.vsts(ge_ub[0, c * 64], tla.simd.vfma(b, acc, w_hh), dist="NORM_B32")
-        tla.copy(gh_ub, gh)
-        tla.copy(ge_ub, ge)
+        tla.store_ub_to_gm(gh_ub, gh)
+        tla.store_ub_to_gm(ge_ub, ge)
 
 
 def constexprs():

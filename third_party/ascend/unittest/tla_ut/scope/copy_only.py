@@ -21,8 +21,8 @@ def copy_only(X_ptr, O_ptr, N: tl.constexpr):
     x_blk = tla.view(X_ptr, (N, ), strides=(1, ))
     o_blk = tla.view(O_ptr, (N, ), strides=(1, ))
     with tla.scope.vector():
-        tla.copy(x_blk, x_ub)  # hivm.hir.load
-        tla.copy(x_ub, o_blk)  # hivm.hir.store
+        tla.load_gm_to_ub(x_blk, x_ub)  # hivm.hir.load
+        tla.store_ub_to_gm(x_ub, o_blk)  # hivm.hir.store
 
 
 def constexprs():

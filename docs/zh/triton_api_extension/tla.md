@@ -35,33 +35,36 @@ TLA 的核心组成如下：
 TLA 使用显式的片上缓冲区（buffer）和向量寄存器（vector），数据流一般为：
 
 ```text
-GM --tla.view--> buffer --tla.copy--> UB buffer
+GM --tla.view--> buffer --tla.load_gm_to_ub--> UB buffer
                                   --tla.simd.vlds--> vector
                                   --tla.simd.*-----> vector
                                   --tla.simd.vsts--> UB buffer
-UB buffer --tla.copy--> GM
+UB buffer --tla.store_ub_to_gm--> GM
 ```
 
-- `tla.view`：把内核指针或已有缓冲区切片转换为 `tla.buffer`。
+- `tla.view`：只接受标量 GM 指针，建立 `tla.buffer` 视图。
+- `tla.subview`：对已有 buffer（包括 GM buffer）切片，保留源步长、元素类型和地址空间。
+- `tla.reshape`：改变连续 buffer 的形状，保留其偏移。
 - `tla.alloc_buffer`：在 UB / L1 / L0A / L0B / L0C 上分配缓冲区。
-- `tla.copy`：执行 buffer 之间的 DMA（GM↔UB、GM→L1、L0C→…）。
+- 显式 DMA：`tla.load_gm_to_ub`、`tla.store_ub_to_gm`、`tla.load_gm_to_l1`、`tla.copy_ub_to_l1` 等接口指定搬运路径。
+- L0C Fixpipe：使用 `tla.store_l0c_to_gm`、`tla.copy_l0c_to_ub` 或 `tla.copy_l0c_to_l1`，通过配置对象显式指定 `NZ2ND` / `NZ2NZ` 等布局模式。
 - `tla.scope.simd()`：标记 SIMD 向量函数区域；`tla.simd.*` 只能操作 `tla.vector`。
 - `tla.sync.*`：显式表达流水与核间依赖。
 
 一个最小示例：
 
 ```python
-@triton.jit
+@tla.jit
 def simd_only(X_ptr, O_ptr, N: tl.constexpr):
     x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     x_blk = tla.view(X_ptr, (N, ), strides=(1, ))
     o_blk = tla.view(O_ptr, (N, ), strides=(1, ))
-    tla.copy(x_blk, x_ub)
+    tla.load_gm_to_ub(x_blk, x_ub)
     with tla.scope.simd():
         v = tla.simd.vlds(x_ub[0])
         tla.simd.vsts(o_ub[0], tla.simd.vadd(v, v))
-    tla.copy(o_ub, o_blk)
+    tla.store_ub_to_gm(o_ub, o_blk)
 ```
 
 ## 3. 数据类型
@@ -90,9 +93,9 @@ TLA 通过上下文管理器标记核心作用域：
 
 | 接口 | 作用 |
 | --- | --- |
-| `with tla.scope.vector():` | Vector 核的普通区域，承载 `tla.copy`、控制流等非 SIMD 操作，可嵌套 `simd` |
+| `with tla.scope.vector():` | Vector 核的普通区域，承载显式 DMA、控制流等非 SIMD 操作，可嵌套 `simd` |
 | `with tla.scope.simd():` | SIMD 向量函数区域；编译器会 outline 为 `hivm.vector_function` |
-| `with tla.scope.cube():` | Cube 核区域（当前保留，Cube 算子尚未通过该作用域暴露） |
+| `with tla.scope.cube():` | Cube 核区域，承载 GM→L1、`tla.cube.mmad` 和 L0C Fixpipe 操作 |
 
 作用域在编译期确定核心类型，不需要运行时参数。SIMD 作用域可以独立使用，也可以嵌套在 `vector` 作用域中。
 
@@ -103,7 +106,7 @@ TLA 与 `al` / `bl` 是两套独立的编程接口：
 - `al` / `bl` 以 Triton tensor 和隐式内存模型为中心；TLA 使用显式 `tla.buffer` 和 `tla.vector`。
 - `tla.sync.sync_all` 使用编译期 `bool` 选择同步范围，而 `al.sync_block_all` 使用字符串 `mode` 和 `event_id`。
 - `tla.sync.block_set_flag(mode, pipe, flag)` 显式指定核间同步模式；`al.sync_block_set(sender, receiver, event_id, ...)` 由发送端/接收端推导。
-- TLA 的 NVIDIA 风格 tensor 运算和隐式类型转换不受支持；跨接口的数据需要使用 `tla.view` / `tla.copy` 显式搬运。
+- TLA 的 NVIDIA 风格 tensor 运算和隐式类型转换不受支持；跨接口的数据需要使用 `tla.view` 建立视图，再通过显式 DMA 接口搬运。
 
 ## 6. 完整示例
 
@@ -115,7 +118,7 @@ import triton.language as tl
 import triton.language.extra.tla as tla
 
 
-@triton.jit
+@tla.jit
 def sync_intra(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     a_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     b_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
@@ -125,28 +128,28 @@ def sync_intra(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     b = tla.view(B_ptr, (N, ), strides=(1, ), offsets=(0, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))
 
-    tla.copy(a, a_ub)
-    tla.copy(b, b_ub)
-    tla.sync.set_flag("MTE2", "V", 0)
-    tla.sync.wait_flag("MTE2", "V", 0)
+    tla.load_gm_to_ub(a, a_ub)
+    tla.load_gm_to_ub(b, b_ub)
+    tla.sync.set_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.V, 0)
+    tla.sync.wait_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.V, 0)
 
     with tla.scope.simd():
         av = tla.simd.vlds(a_ub[0], dist="NORM")
         bv = tla.simd.vlds(b_ub[0], dist="NORM")
         tla.simd.vsts(o_ub[0], tla.simd.vadd(av, bv), dist="NORM_B32")
 
-    tla.sync.barrier("ALL")
-    tla.sync.set_flag("V", "MTE3", 1)
-    tla.sync.wait_flag("V", "MTE3", 1)
-    tla.copy(o_ub, o)
+    tla.sync.barrier(tla.sync.PIPE.ALL)
+    tla.sync.set_flag(tla.sync.PIPE.V, tla.sync.PIPE.MTE3, 1)
+    tla.sync.wait_flag(tla.sync.PIPE.V, tla.sync.PIPE.MTE3, 1)
+    tla.store_ub_to_gm(o_ub, o)
 
     tla.sync.sync_all(False)
 ```
 
-启动时需要通过 TLA 模式编译：
+`@tla.jit` 自动选择 TLA 编译路径：
 
 ```python
-sync_intra[(1, )](A, B, O, N=64, enable_tla_mode=True)
+sync_intra[(1, )](A, B, O, N=64)
 ```
 
 ## 7. 约束与注意事项
@@ -154,6 +157,6 @@ sync_intra[(1, )](A, B, O, N=64, enable_tla_mode=True)
 1. `tla.simd` 的输入输出必须是 `tla.vector`，不能直接传入 Triton tensor。
 2. 二元运算要求两个操作数类型完全一致；掩码必须是与值向量同 lane 数的 `int1` 谓词向量。
 3. SIMD 寄存器宽度为 2048 位；`i64` / `u64` 使用 4096 位。不支持的元素类型会直接报错，不会做隐式位宽映射。
-4. `tla.copy` 只接受 `tla.buffer`，不支持指针或 tensor 直接拷贝。
+4. DMA 接口只接受 `tla.buffer`，不支持指针或 tensor 直接拷贝。
 5. `tla.device_print` 不能在 `tla.scope` 内使用，且只支持 UB 上的值。
 6. 各接口的具体约束和用例见 {doc}`../python-api/triton.language.extra.tla`。

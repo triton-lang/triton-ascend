@@ -37,8 +37,8 @@ def vmax(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
     xy = tla.alloc_buffer((2, N), tl.float32, space="ub")
     tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
     ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (2, N)), xy)
-    tla.copy(tla.view(T, (N, )), tb)
+    tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         a = tla.simd.vlds(xy[0, 0])
         b = tla.simd.vlds(xy[1, 0])
@@ -53,7 +53,7 @@ def vmax(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vmax(a, b, mask=none, mode=tla.simd.MODE.ZEROING))
         tla.simd.vsts(ob[4, 0], tla.simd.vmax(a, b, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vmax(a, b, mask=arb, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 @tla.jit
@@ -61,8 +61,8 @@ def vmax_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
     xy = tla.alloc_buffer((2, N), tl.uint32, space="ub")
     tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
     ob = tla.alloc_buffer((6, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (2, N)), xy)
-    tla.copy(tla.view(T, (N, )), tb)
+    tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         a = tla.simd.vlds(xy[0, 0])
         b = tla.simd.vlds(xy[1, 0])
@@ -77,7 +77,7 @@ def vmax_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vmax(a, b, mask=none, mode=tla.simd.MODE.ZEROING))
         tla.simd.vsts(ob[4, 0], tla.simd.vmax(a, b, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vmax(a, b, mask=arb, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 def constexprs():

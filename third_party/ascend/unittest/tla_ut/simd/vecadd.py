@@ -39,14 +39,14 @@ def vecadd(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     b = tla.view(B_ptr, (N, ), strides=(1, ), offsets=(0, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))
 
-    tla.copy(a, a_ub)
-    tla.copy(b, b_ub)
+    tla.load_gm_to_ub(a, a_ub)
+    tla.load_gm_to_ub(b, b_ub)
     with tla.scope.simd():
         for i in tl.static_range(N // 64):
             av = tla.simd.vlds(a_ub[i * 64], dist="NORM")
             bv = tla.simd.vlds(b_ub[i * 64], dist="NORM")
             tla.simd.vsts(o_ub[i * 64], tla.simd.vadd(av, bv), dist="NORM_B32")
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)
 
 
 def constexprs():

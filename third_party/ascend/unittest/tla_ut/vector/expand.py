@@ -43,7 +43,7 @@ def expand_to_mhc_fwd(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, H: tl.conste
         # row-major strides (H_BLK, 1) here would fold offsets with the
         # wrong coefficient (n*H_BLK + hb*H_BLK) and read wrong data.
         x_row = tla.view(X_ptr, (1, H_BLK), strides=(H, 1), offsets=(n, hb * H_BLK))
-        tla.copy(x_row, x_ub)
+        tla.load_gm_to_ub(x_row, x_ub)
         with tla.scope.simd():
             for v in tl.static_range(H_BLK // 128):
                 xb = tla.simd.vlds(x_ub[0, v * 128], dist="NORM")
@@ -54,9 +54,9 @@ def expand_to_mhc_fwd(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, H: tl.conste
         # folding coefficients AND the final memref strides, so the m-row
         # stride (H) would conflict with the n fold coefficient (MHC*H).
         for m in tl.static_range(MHC):
-            o_ub_row = tla.view(o_ub, (1, 1, H_BLK), strides=(1, 1, 1), offsets=(m, 0, 0))
+            o_ub_row = tla.subview(o_ub, offsets=(m, 0, 0), sizes=(1, 1, H_BLK), strides=(1, 1, 1))
             o_row = tla.view(O_ptr, (1, 1, H_BLK), strides=(MHC * H, H, 1), offsets=(n, m, hb * H_BLK))
-            tla.copy(o_ub_row, o_row)
+            tla.store_ub_to_gm(o_ub_row, o_row)
 
 
 def constexprs():

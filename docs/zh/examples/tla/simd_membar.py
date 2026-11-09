@@ -10,7 +10,7 @@ def simd_membar_example(X_ptr, O_ptr, N: tl.constexpr):
     x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
 
-    tla.copy(x, x_ub)
+    tla.load_gm_to_ub(x, x_ub)
 
     with tla.scope.simd():
         v = tla.simd.vlds(x_ub[0])
@@ -22,4 +22,4 @@ def simd_membar_example(X_ptr, O_ptr, N: tl.constexpr):
         reloaded = tla.simd.vlds(x_ub[0])
         tla.simd.vsts(o_ub[0], reloaded, dist="NORM_B32")
 
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)

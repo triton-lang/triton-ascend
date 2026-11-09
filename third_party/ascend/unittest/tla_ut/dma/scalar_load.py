@@ -40,7 +40,13 @@ def test_ir(masked, output_dir=None):
     text = str(lower_offline(mod, ctx, output_dir=output_dir))
     assert "tt.load" not in text and "tt.addptr" not in text
     assert text.count("memref.load ") == 1
-    assert "memref<1xi64, #hivm.address_space<gm>>" in text
+    # Scalar loads use the kernel argument's default-space GM memref ABI.
+    # The element offset belongs to a one-element reinterpret view, rather
+    # than a fresh HIVM pointer_cast with an explicit address-space attribute.
+    index_view = next(line for line in text.splitlines() if "memref.reinterpret_cast %IDS to offset:" in line)
+    assert "offset: [%" in index_view and "sizes: [1], strides: [1]" in index_view
+    scalar_load = next(line for line in text.splitlines() if "memref.load " in line)
+    assert ": memref<1xi64, strided<[1], offset: ?>>" in scalar_load
     assert "hivm.hir.load" in text and "hivm.hir.store" in text
     if masked:
         # The actual GM read must be inside the active branch.

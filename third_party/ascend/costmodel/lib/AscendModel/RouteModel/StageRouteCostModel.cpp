@@ -3140,6 +3140,34 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
             totalResidual},
            {"grid_stride_composition_evidence", compositionEvidence}});
       plan.totalCycles += totalResidual;
+      // Paired W4 calibration on Q=2,4; reuse the existing bounded
+      // indirect/dot composition domain. This is a loop-work correction,
+      // independent of operator names and without forcing a route choice.
+      if (plan.candidate == StageKernelRouteKind::AllSIMT &&
+          costTable.baseSimtWarpCount == 4 && bodyResidual && startupResidual) {
+        unsigned ordinaryTargets = 0;
+        for (size_t index = 0; index < costTable.stages.size(); ++index) {
+          const auto *selected = findImplementationCost(
+              costTable.stages[index], plan.implementations[index]);
+          if (selected && selected->ordinaryLoadSelectedUsed &&
+              costTable.stages[index].features.insideGridStrideLoopBody)
+            ++ordinaryTargets;
+        }
+        if (ordinaryTargets == 1) {
+          constexpr double baseCompletion = 108.98965137213645;
+          constexpr double factorCompletion = 444.35723304637395;
+          const double effectiveFactor = static_cast<double>(
+              std::min<int64_t>(factor, programsPerSchedulingSlot));
+          const double completion =
+              programsPerSchedulingSlot *
+              (baseCompletion + factorCompletion * std::log2(effectiveFactor));
+          plan.totalCycles += completion;
+          setDiagnostics(
+              plan,
+              {{"ordinary_load_loop_completion_calibrated", true},
+               {"ordinary_load_loop_completion_system_cycles", completion}});
+        }
+      }
       // Inclusion-exclusion residuals depend on their component basis.
       // Rebase only the factor-one SIMT contract with a single replaced
       // indirect component; retain the generic target and expose the offset.

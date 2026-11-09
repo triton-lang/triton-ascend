@@ -35,6 +35,7 @@ public:
 
   StandardizeOpPass() = default;
   void runOnOperation() override;
+  void getDependentDialects(DialectRegistry &registry) const override;
 
   llvm::StringRef getArgument() const final { return "ssbuf-standardize-op"; }
 };

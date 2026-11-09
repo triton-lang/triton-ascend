@@ -26,7 +26,6 @@ import builtins
 import copy
 import functools
 import ast
-import gc
 import inspect
 import math
 import os
@@ -48,7 +47,8 @@ from triton._C.libtriton import get_cache_invalidating_env_vars
 from triton.runtime.autotuner import Autotuner, Config
 from triton.runtime.jit import MockTensor, compute_cache_key
 from triton.backends.ascend.utils import (_InternalNPUOptionInt, _remove_deprecated_npu_options,
-                                          _RESERVED_NPU_OPTION_NAMES, is_compile_on_910_95, _multibuffer_mode_to_tuple)
+                                          _RESERVED_NPU_OPTION_NAMES, _multibuffer_mode_to_tuple,
+                                          is_register_based_arch)
 
 from .autoparser import (LowDimsAxesParser, PtrNumsParser, ReductionAxesParser, SplitAxesParser, TilingAxesParser)
 from .dsl_analysis.cv_param_parser import parse_cv_params
@@ -409,7 +409,7 @@ class AutoTilingTuner(Autotuner):
         self.user_specified_multibuffer_mode = None
         self.user_specified_multibuffer = None
         target_arch = triton.runtime.driver.active.get_current_target().arch
-        self.default_multibuffer = not is_compile_on_910_95(target_arch)
+        self.default_multibuffer = not is_register_based_arch(target_arch)
 
         # Mark the original function so ubtuner can detect autotune was applied
         ori_fn = get_origin_fn(fn)
@@ -2333,9 +2333,6 @@ class AutoTilingTuner(Autotuner):
             raise
         finally:
             self.nargs = None
-            if did_benchmark and not disk_cache_hit:
-                # workaround for memory leak when some configs fail to compile
-                gc.collect()
 
     def _try_ubtuner(self, *args, config, excp, run_fns, **kwargs):
         if not (self.enable_ubtuner and "ub overflow" in str(excp).lower()):
@@ -2539,7 +2536,7 @@ class AutoTilingTuner(Autotuner):
             try:
                 with (
                         ThreadPoolExecutor(max_workers=max_workers) as executor,
-                        triton.AsyncCompileMode(executor),
+                        triton.AsyncCompileMode(executor) as mode,
                 ):
                     for config, fn in kernels_call.items():
                         self._record_user_config(config, "compiling", "Compilation did not complete.")
@@ -2574,6 +2571,25 @@ class AutoTilingTuner(Autotuner):
                         # __exit__ can re-raise an earlier future's exception;
                         # it cannot identify a failure in this pending config.
                         self._record_user_config(pending, "not_evaluated", "Parallel compilation interrupted:", exc=e)
+            finally:
+                mode_obj = locals().get("mode") if "mode" in locals() else None
+                if mode_obj is not None:
+                    for raw in mode_obj.raw_futures:
+                        e2 = getattr(raw, "_exception", None)
+                        if e2 is not None:
+                            e2.__traceback__ = None
+                            e2.__context__ = None
+                            e2.__cause__ = None
+                    for fk in mode_obj.future_kernels.values():
+                        raw = getattr(fk, "_future", None) or getattr(fk, "future", None)
+                        if raw is not None:
+                            e2 = getattr(raw, "_exception", None)
+                            if e2 is not None:
+                                e2.__traceback__ = None
+                                e2.__context__ = None
+                                e2.__cause__ = None
+                    mode_obj.raw_futures.clear()
+                    mode_obj.future_kernels.clear()
         else:
             for config, fn in kernels_call.items():
                 self._record_user_config(config, "compiling", "Compilation or initial execution did not complete.")

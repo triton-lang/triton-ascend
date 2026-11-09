@@ -31,7 +31,7 @@ SHAPE = dict(tmax=8, hid=256, bm=1, bk=64, npc=32, cores=4, versions=2)
 SIGNATURE = {"X_ptr": "*fp8e4nv", "SF_ptr": "*fp32", "O_ptr": "*fp32", "num_tokens": "i32"}
 
 
-@triton.jit
+@tla.jit
 def cast_back(X_ptr, SF_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.constexpr, BM: tl.constexpr,
               BK: tl.constexpr, NPC: tl.constexpr, CORES: tl.constexpr, VERSIONS: tl.constexpr):
     tl.static_assert(HID > 0 and HID % 64 == 0, "HID must be a multiple of 64")

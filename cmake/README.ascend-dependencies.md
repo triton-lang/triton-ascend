@@ -2,13 +2,12 @@
 
 Preserve the current Triton baseline: LLVM stays in `llvm-hash.txt` until
 the upstream 3.8 migration; the nlohmann-json tag uses Intel-style
-`json-version.txt`. Each migrated source dependency
-has one authoritative pin; a single file format is not required.
+`json-version.txt`. Each source dependency has one authoritative pin; a single file format is not required.
 
 | File | Consumers |
 | --- | --- |
 | `llvm-hash.txt` | Full LLVM SHA; Ascend patches remain local files in sorted order. Packaging, the LLVM source-build workflow, wrapper and four installation sources read their own checkout. |
-| `json-version.txt` | JSON-library download URL in the Ascend setup hook, using `read().strip()` as upstream does. |
+| `json-version.txt` | JSON-library download URL in the Ascend setup hook, using `read_text().strip()` as Intel does. |
 | `bisheng-info.json` | Installer names and SHA-256 for both architectures; four CI installation steps read and verify these inputs. |
 
 The upstream `setup.py` and `python/build_helpers.py` definitions stay unchanged.
@@ -17,9 +16,11 @@ exception stay in `third_party/ascend/build/setup_patch.py`.
 Explicit toolchain paths and offline behavior retain their existing roles.
 CMake continues to discover installed LLVM/MLIR configs and JSON includes.
 No generic reader, generated mirror or metadata-only CMake module is required.
-Workflow shell steps use `jq -er` for metadata fields. The LLVM container
-installs jq before reading its pin. Python packaging and developer commands
-use the Python standard library, without adding a jq dependency there.
+Bisheng workflow steps use `jq -er` for metadata fields. LLVM shell steps
+read the text pin with `cat`; Python/pip remain build prerequisites.
+Packaging uses the Python standard library and does not require jq.
+The integration installer also retains main's `.tar.gz` payload support;
+the other three installers retain their existing `.run` paths.
 
 `third_party/ascend/build/check_bom_consistency.py` audits these declared inputs, local patch
 names, the four installation sources, the main release-policy LLVM/patch

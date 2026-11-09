@@ -22,6 +22,12 @@
 // RUN: triton-opt --split-input-file %t.no-target.mlir -canonicalize -cse -o %t.no-target.control
 // RUN: triton-opt --split-input-file --verify-each %t.no-target.mlir -graph-optimize='rule-mask=8' -canonicalize -cse -o %t.no-target
 // RUN: diff %t.no-target.control %t.no-target
+// The row-count policy keeps one full wave: a static 64-program grid may only
+// coalesce to 64/R >= 28, so R drops from 8 to 2.
+// RUN: triton-opt --split-input-file --verify-each %s -graph-optimize='rule-mask=8 core-num=28' -canonicalize -cse -o %t.corenum
+// RUN: FileCheck %s --check-prefix=CORENUM < %t.corenum
+// CORENUM-NOT: hacc.coalesce_factor = 8 : i32
+// CORENUM: hacc.coalesce_factor = 2 : i32
 
 // Merge independent dot rows while keeping the RHS shared; preserve per-row trip counts.
 // CHECK: module attributes {{.*}}hacc.coalesce_factor = 8 : i32

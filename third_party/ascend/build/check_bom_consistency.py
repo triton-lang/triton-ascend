@@ -80,8 +80,9 @@ def _load_bisheng_info():
         if not isinstance(entry, dict) or set(entry) != {"file", "sha256"}:
             raise ValueError(f"bisheng {arch} requires file and sha256")
         filename, checksum = entry["file"], entry["sha256"]
-        if not isinstance(filename, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*\.run", filename) is None:
-            raise ValueError(f"bisheng {arch} needs a safe .run basename")
+        if not isinstance(filename, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:run|tar\.gz)",
+                                                         filename) is None:
+            raise ValueError(f"bisheng {arch} needs a safe .run or .tar.gz basename")
         if not isinstance(checksum, str) or re.fullmatch(r"[0-9a-fA-F]{64}", checksum) is None:
             raise ValueError(f"bisheng {arch} needs a full SHA-256")
     return info

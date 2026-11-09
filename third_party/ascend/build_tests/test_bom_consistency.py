@@ -48,3 +48,13 @@ def test_duplicate_json_keys_are_rejected(checker):
     path.write_text('{"schema_version": 1, "schema_version": 1}')
     with pytest.raises(ValueError, match="duplicate"):
         checker._load_bisheng_info()
+
+
+@pytest.mark.parametrize("suffix", ["run", "tar.gz"])
+def test_bisheng_metadata_retains_supported_package_formats(checker, suffix):
+    path = checker.DEPS_DIR / "bisheng-info.json"
+    data = json.loads(path.read_text())
+    data["bisheng"]["x86_64"]["file"] = f"fixture.{suffix}"
+    path.write_text(json.dumps(data))
+    checker.check_toolchain()
+    assert not checker.errors

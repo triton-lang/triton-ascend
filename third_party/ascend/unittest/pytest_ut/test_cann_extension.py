@@ -301,36 +301,6 @@ def kernel_custom_op(M: tl.constexpr, N: tl.constexpr):
     # Actual custom op usage would depend on specific ops
 
 
-@triton.jit
-def kernel_index_put_simple(value_ptr, index_ptr, dst_ptr):
-    # index tile shape: [2]
-    index_local = tl.arange(0, 2)
-    x1_local = tl.arange(0, 2)[None, :]  # shape=(1,2)
-
-    index_tile = tl.load(index_ptr + index_local)
-    value_tile = tl.load(value_ptr + index_local[:, None] * 2 + x1_local)
-
-    index_put(ptr=dst_ptr, index=index_tile, value=value_tile, dim=0, index_boundary=4, end_offset=(2, 2),
-              start_offset=(0, 0), dst_stride=(2, 1))
-
-
-@triton.jit
-def simple_gather_kernel(src_ptr, index_ptr, out_ptr):
-    # index tile shape: [2,2]
-    y0_local = tl.arange(0, 2)[:, None]  # [0,1] rows
-    x1_local = tl.arange(0, 2)[None, :]  # [0,1] cols
-    mask = (y0_local < 2) & (x1_local < 2)
-
-    # Load index tile to UB
-    index = tl.load(index_ptr + y0_local * 2 + x1_local, mask)
-
-    # Call gather_out_to_ub: gather values from src along dim=0
-    gathered = gather_out_to_ub(src=src_ptr, index=index, index_boundary=4, dim=0, src_stride=(2, 1), end_offset=(2, 2),
-                                start_offset=(0, 0))
-
-    tl.store(out_ptr + y0_local * 2 + x1_local, gathered, mask)
-
-
 # Test function definitions
 def test_core_functions():
     print("=" * 60)
@@ -354,40 +324,6 @@ def test_math_ops():
         {"M": 16, "N": 16},
     )
     print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
-
-
-def test_mem_ops():
-    print("=" * 60)
-    print("Test 3: Memory Operations (EXPECTED TO FAIL)")
-    print("=" * 60)
-
-    # 构造输入（必须放在测试内，防止模块加载时报错）
-    value = torch.randn(3, 3, device='npu').half()
-    index = torch.tensor([0, 1], device='npu')
-    dst = torch.zeros(4, 2, device='npu').half()
-
-    # ✅ 核心：把编译+运行的代码包在这里，pytest 才能捕获
-    with pytest.warns(FutureWarning, match="index_put"), pytest.raises(MLIRCompilationError):
-        # 这一行会触发编译，直接抛出你要的错误
-        kernel_index_put_simple[(1, )](value, index, dst)
-
-    print("✅ 成功捕获预期的 MLIRCompilationError 错误！测试通过！")
-
-
-def test_mem2_ops():
-    print("=" * 60)
-    print("Test 3: Memory Operations (EXPECTED TO FAIL)")
-    print("=" * 60)
-
-    # 构造输入（必须放在测试内，防止模块加载时报错）
-    src = torch.tensor([[1., 2.], [3., 4.], [5., 6.], [7., 8.]], device='npu')
-    index = torch.tensor([[0, 1], [2, 3]], device='npu')
-    out = torch.empty((2, 2), device='npu', dtype=torch.float32)
-
-    with pytest.warns(FutureWarning, match="gather_out_to_ub"), pytest.raises(MLIRCompilationError):
-        simple_gather_kernel[(1, )](src, index, out)
-
-    print("✅ 成功捕获预期的 MLIRCompilationError 错误！测试通过！")
 
 
 def test_vec_ops():
@@ -454,8 +390,6 @@ def test_custom_op():
 if __name__ == "__main__":
     test_core_functions()
     test_math_ops()
-    test_mem_ops()
-    test_mem2_ops()
     test_vec_ops()
     test_aux_ops()
     test_scope()

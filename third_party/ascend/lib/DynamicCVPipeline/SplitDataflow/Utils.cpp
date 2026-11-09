@@ -24,6 +24,9 @@
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/StringRef.h"
 
@@ -36,6 +39,29 @@ void triton::setOpBlockId(mlir::Operation *op, int blockId) {
       CVPipeline::kBlockId,
       IntegerAttr::get(IntegerType::get(op->getContext(), kIntegerBitWidth),
                        blockId));
+}
+
+int triton::getOpLoopDepth(mlir::Operation *op) {
+  if (auto loopDepthAttr =
+          op->getAttrOfType<IntegerAttr>(CVPipeline::kLoopDepthAttr)) {
+    return loopDepthAttr.getInt();
+  }
+  return 0;
+}
+
+void triton::setOpLoopDepth(mlir::Operation *op) {
+  static constexpr int kIntegerBitWidth = 32;
+  int loopDepth = 1;
+  for (mlir::Operation *parent = op->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    if (isa<scf::ForOp, scf::WhileOp>(parent)) {
+      ++loopDepth;
+    }
+  }
+  op->setAttr(
+      CVPipeline::kLoopDepthAttr,
+      IntegerAttr::get(IntegerType::get(op->getContext(), kIntegerBitWidth),
+                       loopDepth));
 }
 
 void triton::setOpCoreType(mlir::Operation *op, llvm::StringRef coreType) {
@@ -54,4 +80,47 @@ bool triton::is1DTensorDependency(mlir::Value depValue) {
     return true;
   }
   return false;
+}
+
+bool triton::isOutlineReuseBlacklistKernel(ModuleOp module) {
+  std::vector<std::string> blacklist{
+      "kernel_da_fwd_u",
+      "chunk_kda_bwd_kernel_intra",
+      "flex_attention_kernel",
+  };
+
+  bool isBlacklistKernel = false;
+  for (auto func : module.getOps<func::FuncOp>()) {
+    if (llvm::is_contained(blacklist, func.getName().str())) {
+      isBlacklistKernel = true;
+      break;
+    }
+  }
+  return isBlacklistKernel;
+}
+
+// Helper: ssbuffer.core_type
+llvm::StringRef triton::getSsbufferCoreType(Operation *op) {
+  if (auto attr = op->getAttrOfType<mlir::StringAttr>(CVPipeline::kCoreType)) {
+    return attr.getValue();
+  }
+  return "";
+}
+
+// Helper: Get CoreType from op and index
+llvm::StringRef triton::getCoreTypeWithIndex(Operation *op, int index) {
+  llvm::StringRef typeStr = getSsbufferCoreType(op);
+  if (typeStr.contains(", ")) {
+    llvm::SmallVector<llvm::StringRef> types;
+    typeStr.split(types, ", ", -1, false);
+    if (index < types.size()) {
+      return types[index].trim();
+    }
+    // LOG_DEBUG("Warning: Core type string has multiple types but value is not
+    // "
+    //           "an OpResult or index out of range.\n");
+    return "";
+  }
+
+  return typeStr;
 }

@@ -16,7 +16,7 @@ def test_metadata_reader_bootstraps_tools_for_each_target(target, tmp_path):
     bash = str(git_bash) if git_bash.is_file() else shutil.which("bash")
     if bash is None:
         pytest.skip("Bash is required to execute the LLVM workflow steps")
-    workflow = (REPO / ".github/workflows/llvm-build.yml").read_text(encoding="utf-8")
+    workflow = (REPO / ".github/workflows/ascend-llvm-build.yml").read_text(encoding="utf-8")
 
     def step(name):
         start = workflow.index(f"    - name: {name}")
@@ -51,7 +51,7 @@ python3() {
 }
 '''
     output = tmp_path / "github-env"
-    script = harness + step("Config mirrors & install build tools") + "\n" + step("Fetch LLVM Commit Hash")
+    script = harness + step("Install build tools") + "\n" + step("Fetch LLVM Commit Hash")
     script += "\n" + step("Install Prerequisites").splitlines()[0]
     subprocess.run([bash, "-c", script], cwd=REPO, env={**os.environ, "GITHUB_ENV": output.as_posix()}, check=True,
                    capture_output=True, text=True)
@@ -65,7 +65,7 @@ def test_invalid_llvm_pin_does_not_publish_environment_values(tmp_path, value):
     bash = str(git_bash) if git_bash.is_file() else shutil.which("bash")
     if bash is None:
         pytest.skip("Bash is required")
-    workflow = (REPO / ".github/workflows/llvm-build.yml").read_text(encoding="utf-8")
+    workflow = (REPO / ".github/workflows/ascend-llvm-build.yml").read_text(encoding="utf-8")
     block = workflow.split("    - name: Fetch LLVM Commit Hash\n", 1)[1].split("\n    - name:", 1)[0]
     script = textwrap.dedent(block.split("      run: |\n", 1)[1])
     (tmp_path / "cmake").mkdir()
@@ -93,7 +93,7 @@ def test_patch_hash_retains_sorted_content_and_empty_identity(tmp_path, patches)
         (patch_dir / "llvm_patch_z.patch").write_bytes(b"last\n")
         (patch_dir / "llvm_patch_A.patch").write_bytes(b"first\n")
         (patch_dir / "other.patch").write_bytes(b"ignored\n")
-    workflow = (REPO / ".github/workflows/llvm-build.yml").read_text(encoding="utf-8")
+    workflow = (REPO / ".github/workflows/ascend-llvm-build.yml").read_text(encoding="utf-8")
     block = workflow.split("    - name: Compute Patch Hash\n", 1)[1].split("\n    - name:", 1)[0]
     script = textwrap.dedent(block.split("      run: |\n", 1)[1])
     for key, value in {

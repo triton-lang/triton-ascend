@@ -80,6 +80,9 @@ private:
   bool enableMaskFallbackConversion;
 };
 
+/// Shared helper for Structured linearization and ImplicitPermute:
+/// Linearization uses createNewPtr + generateOriginPermuteIds;
+/// ImplicitPermute uses createNewAddPtr/TensorPtr/AdvancePtr + analyzePermute.
 class MemOpTransformer {
 public:
   TritonToStructured::PtrState ptrState;
@@ -88,11 +91,18 @@ public:
   enum class MemType { load, store, deafaultType };
 
   bool optimizeDynamicOffset;
+  // Whether the ImplicitPermute path may treat a tt.load result (integer
+  // tensor) as an opaque data-dependent offset (dynamicOffsets). Only the
+  // createNewAddPtr path enables it; the linearization path keeps the legacy
+  // behavior. Also enables remapping broadcast masks when mask analysis fails.
+  bool enableDataTensorOffset = false;
 
   MemType currentType = MemType::deafaultType;
 
-  MemOpTransformer(MemType memType, bool optimizeDynamicOffset = false)
-      : currentType(memType), optimizeDynamicOffset(optimizeDynamicOffset) {}
+  MemOpTransformer(MemType memType, bool optimizeDynamicOffset = false,
+                   bool enableDataTensorOffset = false)
+      : currentType(memType), optimizeDynamicOffset(optimizeDynamicOffset),
+        enableDataTensorOffset(enableDataTensorOffset) {}
 
   Value materializeImplicitBroadcast(Value srcTensor, const Location loc,
                                      PatternRewriter &rewriter);
@@ -110,11 +120,23 @@ public:
   Value createNewPtr(Value oldPtr, const Location loc,
                      PatternRewriter &rewriter);
 
-  Value createNewMask(Value oldPtr, const Location loc,
+  Value createNewAddPtr(Value oldPtr, const Location loc,
+                        PatternRewriter &rewriter);
+
+  Value createNewAdvancePtr(Value oldPtr, const Location loc,
+                            PatternRewriter &rewriter);
+
+  Value createNewTensorPtr(Value oldPtr, const Location loc,
+                           PatternRewriter &rewriter);
+
+  Value createNewMask(Value oldMask, const Location loc,
                       PatternRewriter &rewriter);
 
   Value createNewOther(Value oldOther, const Location loc,
                        PatternRewriter &rewriter);
+
+  SmallVector<int32_t>
+  getBoundaryCheck(ArrayRef<int32_t> oldBoundaryCheck) const;
 
   bool applyPermuteOnMask();
 };

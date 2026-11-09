@@ -28,11 +28,15 @@
 #include "TritonToGraph/ProgramGridTransform.h"
 #include "TritonToGraph/ResourceCostModel.h"
 
+#include "bishengir/Dialect/HACC/Utils/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/IRMapping.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Interfaces/CallInterfaces.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/Passes.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -83,6 +87,8 @@ constexpr unsigned kDynamicSingleMomentBlockT = 4;
 enum class TensorizeForm : uint8_t {
   MergeSplit,
   NormRope,
+  GuardedBatch,
+  IntegerRowReduction,
 };
 
 enum class IATCandidateScope : uint8_t {
@@ -101,6 +107,7 @@ struct IATCandidate {
   bool usesMergeSplitSubCorePolicy = false;
   bool usesMergeSplitD192Tile = false;
   bool requiresPersistentChaining = false;
+  bool guardedBatch = false;
   ResourceSnapshot resources;
   CandidateEvaluation evaluation;
 };
@@ -236,6 +243,9 @@ int64_t getPreferredLaneAxis(Type originalType, const IATCandidate &candidate) {
   auto tensor = dyn_cast<RankedTensorType>(originalType);
   if (!tensor || candidate.form == TensorizeForm::NormRope)
     return 0;
+  if (candidate.form == TensorizeForm::GuardedBatch ||
+      candidate.form == TensorizeForm::IntegerRowReduction)
+    return 0;
   const int64_t rank = tensor.getRank();
   if (rank == 0)
     return 0;
@@ -302,7 +312,8 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
     return false;
   if (failed(addProgramGridHiddenExtentArguments(function)))
     return false;
-  Value originalExtent = function.getArgument(function.getNumArguments() - 1);
+  Value originalExtent =
+      function.getArgument(function.getNumArguments() - 2 + candidate.axis);
   auto originalExtentType = dyn_cast<IntegerType>(originalExtent.getType());
   if (!originalExtentType || originalExtentType.getWidth() != 32)
     return false;
@@ -523,6 +534,31 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
       operands.push_back(lifted);
     }
 
+    if (auto divide = dyn_cast<arith::DivSIOp>(operation)) {
+      APInt divisor;
+      if (matchPattern(divide.getRhs(), m_ConstantInt(&divisor)) &&
+          divisor.isStrictlyPositive() && divisor.isPowerOf2() &&
+          firstResultType->getElementType().isInteger(32)) {
+        auto constant = [&](int64_t value) -> Value {
+          auto attr =
+              rewriter.getIntegerAttr(firstResultType->getElementType(), value);
+          return rewriter.create<arith::ConstantOp>(
+              operation->getLoc(), *firstResultType,
+              DenseElementsAttr::get(*firstResultType, attr));
+        };
+        Value sign = rewriter.create<arith::ShRSIOp>(operation->getLoc(),
+                                                     operands[0], constant(31));
+        Value bias = rewriter.create<arith::AndIOp>(
+            operation->getLoc(), sign, constant(divisor.getSExtValue() - 1));
+        Value corrected = rewriter.create<arith::AddIOp>(operation->getLoc(),
+                                                         operands[0], bias);
+        Value quotient = rewriter.create<arith::ShRSIOp>(
+            operation->getLoc(), corrected, constant(divisor.logBase2()));
+        values[operation->getResult(0)] = {quotient, true, laneAxis};
+        return true;
+      }
+    }
+
     Operation *replacement = rewriter.create(
         operation->getLoc(), operation->getName().getIdentifier(), operands,
         resultTypes, operation->getAttrs());
@@ -579,6 +615,33 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
     bool tensorized = closure.contains(operation);
     for (Value operand : operation->getOperands())
       tensorized |= lookup(operand).tensorized;
+
+    if (auto assertion = dyn_cast<triton::AssertOp>(operation)) {
+      if (!tensorized) {
+        if (!createUnchanged(operation))
+          return false;
+        continue;
+      }
+      if (!assertion->hasAttr("tt.auto_overflow_assert"))
+        return false;
+      auto condition = lookup(assertion.getCondition());
+      auto type = dyn_cast<RankedTensorType>(condition.value.getType());
+      if (!type || !condition.tensorized)
+        return false;
+      Value mask =
+          maskForPointerType(operation->getLoc(), type, condition.laneAxis);
+      if (!mask)
+        return false;
+      Value inactive = rewriter.create<arith::CmpIOp>(
+          operation->getLoc(), arith::CmpIPredicate::eq, mask,
+          makeZero(rewriter, operation->getLoc(), mask.getType()));
+      Value guarded = rewriter.create<arith::OrIOp>(operation->getLoc(),
+                                                    condition.value, inactive);
+      auto replacement = rewriter.create<triton::AssertOp>(
+          operation->getLoc(), guarded, assertion.getMessage());
+      copyMissingAttrs(operation, replacement.getOperation());
+      continue;
+    }
 
     if (auto splat = dyn_cast<triton::SplatOp>(operation)) {
       if (!tensorized) {
@@ -689,9 +752,13 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
       const int64_t resultLaneAxis = laneAxis - (axis < laneAxis ? 1 : 0);
       auto replacement =
           rewriter.create<triton::ReduceOp>(operation->getLoc(), sources, axis);
-      rewriter.cloneRegionBefore(reduce.getCombineOp(),
-                                 replacement.getCombineOp(),
-                                 replacement.getCombineOp().end());
+      IRMapping regionMapping;
+      for (auto &entry : values)
+        if (!entry.second.tensorized)
+          regionMapping.map(entry.first, entry.second.value);
+      rewriter.cloneRegionBefore(
+          reduce.getCombineOp(), replacement.getCombineOp(),
+          replacement.getCombineOp().end(), regionMapping);
       copyMissingAttrs(operation, replacement.getOperation());
       for (auto [oldResult, newResult] :
            llvm::zip(reduce.getResults(), replacement.getResults())) {
@@ -1113,12 +1180,399 @@ analyzeDynamicMergeSplitCandidate(GraphOptimizationContext &context) {
                                        : std::nullopt;
 }
 
-bool sameDynamicMergeSplitCandidate(const IATCandidate &lhs,
-                                    const IATCandidate &rhs) {
+// This lower bound survives row lifting, even when masked loads produce zero.
+bool isKnownPositiveRowValue(Value value) {
+  APInt constant;
+  if (matchPattern(value, m_ConstantInt(&constant)))
+    return constant.isStrictlyPositive();
+  if (auto splat = value.getDefiningOp<triton::SplatOp>())
+    return isKnownPositiveRowValue(splat.getSrc());
+  if (auto maximum = value.getDefiningOp<arith::MaxSIOp>())
+    return isKnownPositiveRowValue(maximum.getLhs()) ||
+           isKnownPositiveRowValue(maximum.getRhs());
+  return false;
+}
+
+// Some MLIR versions mark remainder and floor division as always speculatable.
+// They still require a nonzero divisor, including on newly added inactive rows.
+bool isSafeRowArithmetic(Operation *operation) {
+  if (isa<arith::DivSIOp, arith::DivUIOp, arith::CeilDivSIOp,
+          arith::CeilDivUIOp, arith::FloorDivSIOp, arith::RemSIOp,
+          arith::RemUIOp>(operation) &&
+      isKnownPositiveRowValue(operation->getOperand(1)))
+    return true;
+  if (isa<arith::RemSIOp, arith::RemUIOp, arith::FloorDivSIOp>(operation)) {
+    APInt divisor;
+    if (!matchPattern(operation->getOperand(1), m_ConstantInt(&divisor)) ||
+        divisor.isZero() ||
+        (!isa<arith::RemUIOp>(operation) && divisor.isAllOnes()))
+      return false;
+  }
+  return isSpeculatable(operation);
+}
+
+// Match the reduction structure independently of program mapping and cost.
+std::optional<int64_t> matchIntegerRowReductions(triton::FuncOp function) {
+  int64_t maxRowExtent = 0;
+  for (Operation &operation : function.getBody().front()) {
+    auto reduce = dyn_cast<triton::ReduceOp>(operation);
+    if (!reduce)
+      continue;
+    if (reduce.getAxis() != 0)
+      return std::nullopt;
+    for (auto [source, result] :
+         llvm::zip(reduce.getSrcs(), reduce.getResults())) {
+      auto type = cast<RankedTensorType>(source.getType());
+      if (!type.hasStaticShape() || type.getRank() != 1 ||
+          type.getShape()[0] <= 0 || !isa<IntegerType>(type.getElementType()) ||
+          result.getType() != type.getElementType())
+        return std::nullopt;
+      maxRowExtent = std::max(maxRowExtent, type.getShape()[0]);
+    }
+    for (Operation &combine : reduce.getCombineOp().front()) {
+      const bool isOverflowCheck = isa<triton::AssertOp>(combine) &&
+                                   combine.hasAttr("tt.auto_overflow_assert");
+      if (!isOverflowCheck &&
+          !isa<triton::ReduceReturnOp, arith::ConstantOp>(combine) &&
+          (combine.getNumRegions() != 0 ||
+           !combine.hasTrait<OpTrait::Elementwise>() ||
+           !isMemoryEffectFree(&combine) || !isSafeRowArithmetic(&combine)))
+        return std::nullopt;
+      for (Value operand : combine.getOperands()) {
+        Operation *owner = operand.getDefiningOp();
+        if (auto argument = dyn_cast<BlockArgument>(operand))
+          owner = argument.getOwner()->getParentOp();
+        if (!owner ||
+            (owner != reduce.getOperation() && !reduce->isAncestor(owner) &&
+             !isa<arith::ConstantOp>(owner)))
+          return std::nullopt;
+      }
+    }
+  }
+  return maxRowExtent > 0 ? std::optional<int64_t>(maxRowExtent) : std::nullopt;
+}
+
+bool hasLiftableIntegerRowOperations(triton::FuncOp function) {
+  // The launch grid and hidden extent arguments belong to one public entry.
+  auto module = function->getParentOfType<ModuleOp>();
+  if (!module || !function.isPublic() ||
+      llvm::count_if(module.getOps<triton::FuncOp>(),
+                     [](triton::FuncOp entry) { return entry.isPublic(); }) !=
+          1 ||
+      !hasSupportedControlFlow(function))
+    return false;
+  for (Operation &operation : function.getBody().front()) {
+    if (auto load = dyn_cast<triton::LoadOp>(operation)) {
+      if (load.getIsVolatile())
+        return false;
+    }
+    if (isa<triton::GetProgramIdOp, triton::MakeRangeOp, triton::AddPtrOp,
+            triton::LoadOp, triton::StoreOp, triton::SplatOp,
+            triton::ExpandDimsOp, triton::BroadcastOp, triton::ReduceOp,
+            triton::ReturnOp, arith::ConstantOp>(operation))
+      continue;
+    if (isa<triton::AssertOp>(operation) &&
+        operation.hasAttr("tt.auto_overflow_assert"))
+      continue;
+    // Load/store masks do not guard arithmetic on newly added inactive rows.
+    if (operation.getNumRegions() == 0 && operation.getNumResults() != 0 &&
+        operation.hasTrait<OpTrait::Elementwise>() &&
+        isMemoryEffectFree(&operation) && isSafeRowArithmetic(&operation))
+      continue;
+    return false;
+  }
+  return true;
+}
+
+bool hasIndependentRowMemoryAccesses(
+    triton::FuncOp function, const ProgramAxisDependence &dependence,
+    const EntryArgPointerAliasAnalysis &aliases, bool allowInPlace) {
+  SmallVector<triton::LoadOp> loads;
+  SmallVector<triton::StoreOp> stores;
+  function.walk([&](triton::LoadOp load) { loads.push_back(load); });
+  function.walk([&](triton::StoreOp store) { stores.push_back(store); });
+  if (stores.size() != dependence.stores.size())
+    return false;
+  for (auto [index, store] : llvm::enumerate(stores)) {
+    for (triton::LoadOp load : loads) {
+      if (aliases.classify(store.getPtr(), load.getPtr()) ==
+          EntryArgPointerRelation::DistinctEntryRoots)
+        continue;
+      if (!allowInPlace || store.getPtr() != load.getPtr() ||
+          !load->isBeforeInBlock(store))
+        return false;
+    }
+    for (triton::StoreOp other : llvm::drop_begin(stores, index + 1)) {
+      if (store.getPtr() != other.getPtr() &&
+          aliases.classify(store.getPtr(), other.getPtr()) !=
+              EntryArgPointerRelation::DistinctEntryRoots)
+        return false;
+    }
+  }
+  return dependence.isProgramMappingTransformCandidate();
+}
+
+std::optional<uint64_t> estimateIntegerRowStorage(triton::FuncOp function) {
+  uint64_t baseBytes = 0;
+  for (Operation &operation : function.getBody().front()) {
+    for (Type type : operation.getResultTypes()) {
+      uint64_t elements = 1;
+      if (auto tensor = dyn_cast<RankedTensorType>(type)) {
+        if (!tensor.hasStaticShape())
+          return std::nullopt;
+        elements = tensor.getNumElements();
+        type = tensor.getElementType();
+      }
+      unsigned bytes = 0;
+      if (auto integer = dyn_cast<IntegerType>(type))
+        bytes = (integer.getWidth() + 7) / 8;
+      else if (isa<triton::PointerType>(type))
+        bytes = 8;
+      else
+        return std::nullopt;
+      uint64_t storage;
+      if (__builtin_mul_overflow(elements, uint64_t{bytes}, &storage) ||
+          __builtin_add_overflow(baseBytes, storage, &baseBytes))
+        return std::nullopt;
+    }
+  }
+  return baseBytes;
+}
+
+std::optional<IATCandidate>
+analyzeIntegerRowReductionCandidate(GraphOptimizationContext &context) {
+  triton::FuncOp function = context.getFunction();
+  ModuleOp module = function->getParentOfType<ModuleOp>();
+  if (!module || !hacc::utils::isAscend950(module) ||
+      hasConflictingLaunchContract(module) ||
+      !hasLiftableIntegerRowOperations(function))
+    return std::nullopt;
+  auto rowExtent = matchIntegerRowReductions(function);
+  auto baseBytes = estimateIntegerRowStorage(function);
+  if (!rowExtent || !baseBytes)
+    return std::nullopt;
+
+  const auto &aliases = context.getEntryArgPointerAliasAnalysis();
+  for (unsigned factor : {64u, 32u, 16u, 8u, 4u, 2u}) {
+    for (int32_t axis : {0, 1}) {
+      ProgramGridTransformContract contract;
+      contract.transforms.push_back(
+          ProgramGridTransform{0, axis, factor, false, false});
+      if (failed(parseProgramGridTransformContract(
+              serializeProgramGridTransformContract(module.getContext(),
+                                                    contract))))
+        continue;
+      auto pid = findOnlyProgramId(function, axis);
+      if (!pid)
+        continue;
+      const auto &dependence =
+          context.getProgramAxisDependenceAnalysis().get(axis);
+      if (!hasIndependentRowMemoryAccesses(function, dependence, aliases,
+                                           /*allowInPlace=*/true))
+        continue;
+      // Batching an unrelated program axis cannot amortize the row reduction.
+      if (!llvm::any_of(dependence.dependenceClosure, [](Operation *op) {
+            return isa<triton::ReduceOp>(op);
+          }))
+        continue;
+      uint64_t peak;
+      if (__builtin_mul_overflow(*baseBytes, uint64_t{factor}, &peak))
+        continue;
+      IATCandidate candidate;
+      candidate.function = function;
+      candidate.anchor = pid->getOperation();
+      candidate.form = TensorizeForm::IntegerRowReduction;
+      candidate.axis = axis;
+      candidate.dimExtent = *rowExtent;
+      candidate.factor = factor;
+      candidate.resources =
+          context.getResourceCostAnalysis().getResourceSnapshot();
+      CandidateCost cost;
+      cost.plan.tensorizeFactor = factor;
+      cost.plan.blockT = 1;
+      cost.plan.staticAxisFusionFactor = 1;
+      cost.plan.stableId = "iat.integer-row-reduction.dynamic";
+      cost.storeCountBefore = dependence.stores.size();
+      cost.storeCountAfter = dependence.stores.size();
+      cost.hasPeakLiveBytes = true;
+      cost.baselinePeakLiveBytes = *baseBytes;
+      cost.estimatedPeakLiveBytes = peak;
+      candidate.evaluation = context.getResourceCostAnalysis().evaluate(cost);
+      if (candidate.evaluation.accepted)
+        return candidate;
+    }
+  }
+  return std::nullopt;
+}
+
+struct GuardedRowBound {
+  Value count;
+  int64_t minimum;
+};
+
+std::optional<GuardedRowBound> matchGuardedRowBound(arith::CmpIOp cmp) {
+  if (!cmp)
+    return std::nullopt;
+  Value count = cmp.getLhs(), constant = cmp.getRhs();
+  auto predicate = cmp.getPredicate();
+  if (predicate == arith::CmpIPredicate::slt ||
+      predicate == arith::CmpIPredicate::sle) {
+    std::swap(count, constant);
+    predicate = predicate == arith::CmpIPredicate::slt
+                    ? arith::CmpIPredicate::sgt
+                    : arith::CmpIPredicate::sge;
+  }
+  if (predicate != arith::CmpIPredicate::sgt &&
+      predicate != arith::CmpIPredicate::sge)
+    return std::nullopt;
+  Type type = count.getType();
+  if (auto tensor = dyn_cast<RankedTensorType>(type)) {
+    if (tensor.getRank() != 1 || !tensor.hasStaticShape())
+      return std::nullopt;
+    type = tensor.getElementType();
+  }
+  APInt value;
+  if (!type.isInteger(32) || !matchPattern(constant, m_ConstantInt(&value)))
+    return std::nullopt;
+  int64_t minimum = value.getSExtValue();
+  if (predicate == arith::CmpIPredicate::sgt)
+    ++minimum;
+  // count > INT_MAX is never true; do not wrap it to INT_MIN.
+  if (minimum > std::numeric_limits<int32_t>::max())
+    return std::nullopt;
+  return GuardedRowBound{count, minimum};
+}
+
+bool hasContiguousGuardedScalarAddress(
+    Value pointer, const ProgramAxisDependence &dependence) {
+  auto dependsOnAxis = [&](Value value) {
+    Operation *definition = value.getDefiningOp();
+    if (auto pid = dyn_cast_or_null<triton::GetProgramIdOp>(definition))
+      return pid.getAxisAsInt() == dependence.axis;
+    return definition &&
+           llvm::is_contained(dependence.dependenceClosure, definition);
+  };
+  bool foundPid = false;
+  while (auto addPtr = pointer.getDefiningOp<triton::AddPtrOp>()) {
+    Value offset = addPtr.getOffset();
+    auto pid = offset.getDefiningOp<triton::GetProgramIdOp>();
+    if (pid && pid.getAxisAsInt() == dependence.axis) {
+      if (foundPid)
+        return false;
+      foundPid = true;
+    } else if (dependsOnAxis(offset)) {
+      return false;
+    }
+    pointer = addPtr.getPtr();
+  }
+  return foundPid && !dependsOnAxis(pointer);
+}
+
+// Find guarded scalar loads with proven forward-contiguous lane addresses.
+std::optional<IATCandidate>
+analyzeGeneralizedGuardedBatchCandidate(GraphOptimizationContext &context) {
+  auto function = context.getFunction();
+  auto module = function->getParentOfType<ModuleOp>();
+  if (!module || function.getFunctionType().getNumResults() != 0 ||
+      !hacc::utils::isAscend950(module) ||
+      hasConflictingLaunchContract(module) ||
+      !hasLiftableIntegerRowOperations(function))
+    return std::nullopt;
+
+  int64_t rowWidth = 1;
+  SmallVector<triton::LoadOp> loads;
+  for (Operation &op : function.getBody().front()) {
+    if (op.getNumRegions())
+      return std::nullopt;
+    for (Type type : op.getResultTypes()) {
+      if (auto tensor = dyn_cast<RankedTensorType>(type)) {
+        if (!tensor.hasStaticShape() || tensor.getRank() != 1)
+          return std::nullopt;
+        rowWidth = std::max(rowWidth, tensor.getNumElements());
+      }
+    }
+    if (auto load = dyn_cast<triton::LoadOp>(op))
+      loads.push_back(load);
+  }
+  const auto &aliases = context.getEntryArgPointerAliasAnalysis();
+  const auto &live = context.getResourceCostAnalysis().getLiveByteEstimate();
+  if (!live.known || !live.peakLiveBytes)
+    return std::nullopt;
+
+  for (int32_t axis : {0, 1}) {
+    auto pid = findOnlyProgramId(function, axis);
+    if (!pid)
+      continue;
+    const auto &dep = context.getProgramAxisDependenceAnalysis().get(axis);
+    if (!hasIndependentRowMemoryAccesses(function, dep, aliases,
+                                         /*allowInPlace=*/false))
+      continue;
+    bool hasGuardedLoad = false;
+    bool hasNonContiguousScalarLoad = false;
+    for (triton::LoadOp load : loads) {
+      if (isa<RankedTensorType>(load.getType()) ||
+          !llvm::is_contained(dep.dependenceClosure, load.getOperation()))
+        continue;
+      if (!hasContiguousGuardedScalarAddress(load.getPtr(), dep)) {
+        hasNonContiguousScalarLoad = true;
+        break;
+      }
+      if (!load.getMask())
+        continue;
+      auto bound =
+          matchGuardedRowBound(load.getMask().getDefiningOp<arith::CmpIOp>());
+      hasGuardedLoad |= bound && bound->count.getDefiningOp() &&
+                        (bound->count.getDefiningOp() == pid->getOperation() ||
+                         llvm::is_contained(dep.dependenceClosure,
+                                            bound->count.getDefiningOp()));
+    }
+    if (!hasGuardedLoad || hasNonContiguousScalarLoad)
+      continue;
+
+    for (unsigned factor : {32u, 16u, 8u, 4u, 2u}) {
+      if (rowWidth > 4096 / factor)
+        continue;
+      ProgramGridTransformContract contract;
+      contract.transforms.push_back(
+          ProgramGridTransform{0, axis, factor, false, false});
+      if (failed(parseProgramGridTransformContract(
+              serializeProgramGridTransformContract(module.getContext(),
+                                                    contract))))
+        continue;
+      uint64_t peak;
+      if (__builtin_mul_overflow(live.peakLiveBytes, uint64_t{2} * factor,
+                                 &peak))
+        continue;
+      IATCandidate candidate;
+      candidate.function = function;
+      candidate.anchor = pid->getOperation();
+      candidate.form = TensorizeForm::GuardedBatch;
+      candidate.axis = axis;
+      candidate.factor = factor;
+      candidate.dimExtent = rowWidth;
+      candidate.guardedBatch = true;
+      candidate.resources =
+          context.getResourceCostAnalysis().getResourceSnapshot();
+      CandidateCost cost;
+      cost.plan.tensorizeFactor = factor;
+      cost.plan.stableId =
+          "iat.guarded-batch.generalized.f" + std::to_string(factor);
+      cost.hasPeakLiveBytes = true;
+      cost.baselinePeakLiveBytes = live.peakLiveBytes;
+      cost.estimatedPeakLiveBytes = peak;
+      candidate.evaluation = context.getResourceCostAnalysis().evaluate(cost);
+      if (candidate.evaluation.accepted)
+        return candidate;
+    }
+  }
+  return std::nullopt;
+}
+
+bool sameDynamicRowCandidate(const IATCandidate &lhs, const IATCandidate &rhs) {
   return lhs.function == rhs.function && lhs.anchor == rhs.anchor &&
          lhs.form == rhs.form && lhs.axis == rhs.axis &&
          lhs.splitExtent == rhs.splitExtent && lhs.dimExtent == rhs.dimExtent &&
-         lhs.factor == rhs.factor;
+         lhs.factor == rhs.factor && lhs.guardedBatch == rhs.guardedBatch;
 }
 
 bool sameDynamicSingleMomentCandidate(const IATCandidate &lhs,
@@ -1129,9 +1583,161 @@ bool sameDynamicSingleMomentCandidate(const IATCandidate &lhs,
          lhs.requiresPersistentChaining == rhs.requiresPersistentChaining;
 }
 
-class DynamicMergeSplitIATPlan final : public RewritePlan {
+LogicalResult
+addGeneralizedGuardedFullInputRowsFastPath(triton::FuncOp function) {
+  if (!llvm::hasSingleElement(function.getBody()) ||
+      function.getFunctionType().getNumResults() != 0)
+    return failure();
+  Block &block = function.getBody().front();
+  arith::CmpIOp boundary;
+  for (Operation &op : block) {
+    if (op.hasAttr("IATRuntimeExtentUnsignedMask")) {
+      if (boundary || !isa<arith::CmpIOp>(op))
+        return failure();
+      boundary = cast<arith::CmpIOp>(op);
+    }
+  }
+  if (!boundary)
+    return failure();
+  auto boolType = dyn_cast<RankedTensorType>(boundary.getType());
+  if (!boolType || boolType.getRank() != 1)
+    return failure();
+
+  Value count;
+  for (Operation &op : block) {
+    auto load = dyn_cast<triton::LoadOp>(op);
+    if (!load || !load.getMask() || load.getMask().getType() != boolType)
+      continue;
+    SmallVector<Value> masks{load.getMask()};
+    while (!masks.empty()) {
+      Value mask = masks.pop_back_val();
+      if (auto conjunction = mask.getDefiningOp<arith::AndIOp>()) {
+        masks.push_back(conjunction.getLhs());
+        masks.push_back(conjunction.getRhs());
+        continue;
+      }
+      auto bound = matchGuardedRowBound(mask.getDefiningOp<arith::CmpIOp>());
+      if (!bound)
+        continue;
+      Operation *definition = bound->count.getDefiningOp();
+      if (definition && definition->getBlock() == &block) {
+        count = bound->count;
+        break;
+      }
+    }
+    if (count)
+      break;
+  }
+  if (!count)
+    return failure();
+  Operation *anchor = count.getDefiningOp();
+  if (anchor->isBeforeInBlock(boundary))
+    anchor = boundary;
+  auto type = cast<RankedTensorType>(count.getType());
+  if (type.getShape() != boolType.getShape())
+    return failure();
+  auto terminator = dyn_cast<triton::ReturnOp>(block.getTerminator());
+  if (!terminator || terminator->getNumOperands())
+    return failure();
+
+  SmallVector<Operation *> suffix;
+  DenseSet<Operation *> provenComparisons;
+  int64_t bound = std::numeric_limits<int32_t>::min();
+  for (Operation *op = anchor->getNextNode(); op != terminator.getOperation();
+       op = op->getNextNode()) {
+    if (!op || op->getNumRegions())
+      return failure();
+    suffix.push_back(op);
+    auto lowerBound = matchGuardedRowBound(dyn_cast<arith::CmpIOp>(op));
+    if (!lowerBound || lowerBound->count != count)
+      continue;
+    bound = std::max(bound, lowerBound->minimum);
+    provenComparisons.insert(op);
+  }
+  if (provenComparisons.empty())
+    return failure();
+
+  SmallVector<std::tuple<arith::CmpIOp, Value, int64_t>> columnGuards;
+  DenseSet<Operation *> provenColumnComparisons;
+  for (Operation *op : suffix) {
+    auto cmp = dyn_cast<arith::CmpIOp>(op);
+    if (!cmp || cmp.getPredicate() != arith::CmpIPredicate::slt)
+      continue;
+    auto range = cmp.getLhs().getDefiningOp<triton::MakeRangeOp>();
+    auto splat = cmp.getRhs().getDefiningOp<triton::SplatOp>();
+    if (!range || !splat || !splat.getSrc().getType().isInteger(32))
+      continue;
+    Value scalar = splat.getSrc();
+    Operation *definition = scalar.getDefiningOp();
+    if (definition && (definition->getBlock() != &block ||
+                       !definition->isBeforeInBlock(anchor)))
+      continue;
+    columnGuards.emplace_back(cmp, scalar, range.getEnd());
+    provenColumnComparisons.insert(op);
+  }
+
+  OpBuilder builder(anchor);
+  builder.setInsertionPointAfter(anchor);
+  Location loc = anchor->getLoc();
+  Value limit = builder.create<arith::ConstantOp>(
+      loc, type,
+      DenseIntElementsAttr::get(type, APInt(32, bound, /*isSigned=*/true)));
+  Value valid = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sge,
+                                              count, limit);
+  Value safe = builder.create<arith::AndIOp>(loc, valid, boundary.getResult());
+  Value integerMask = builder.create<arith::ExtUIOp>(loc, type, safe);
+  auto minimum =
+      builder.create<triton::ReduceOp>(loc, ValueRange{integerMask}, 0);
+  Block *combine = new Block;
+  minimum.getCombineOp().push_back(combine);
+  combine->addArguments({builder.getI32Type(), builder.getI32Type()},
+                        {loc, loc});
+  OpBuilder reduceBuilder = OpBuilder::atBlockBegin(combine);
+  Value result = reduceBuilder.create<arith::MinSIOp>(
+      loc, combine->getArgument(0), combine->getArgument(1));
+  reduceBuilder.create<triton::ReduceReturnOp>(loc, ValueRange{result});
+  Value one = builder.create<arith::ConstantIntOp>(loc, 1, 32);
+  Value condition = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
+                                                  minimum->getResult(0), one);
+  for (auto &[cmp, scalar, end] : columnGuards) {
+    Value upper = builder.create<arith::ConstantIntOp>(loc, end, 32);
+    Value fullColumns = builder.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::sge, scalar, upper);
+    condition = builder.create<arith::AndIOp>(loc, condition, fullColumns);
+  }
+  auto versioned = builder.create<scf::IfOp>(loc, condition, true);
+  OpBuilder fastBuilder = versioned.getThenBodyBuilder();
+  Value allTrue = fastBuilder.create<arith::ConstantOp>(
+      loc, boolType, DenseIntElementsAttr::get(boolType, true));
+  IRMapping fastMapping;
+  fastMapping.map(boundary.getResult(), allTrue);
+  for (auto &[cmp, scalar, end] : columnGuards) {
+    auto predicateType = cast<RankedTensorType>(cmp.getType());
+    Value trueColumns = fastBuilder.create<arith::ConstantOp>(
+        loc, predicateType, DenseIntElementsAttr::get(predicateType, true));
+    fastMapping.map(cmp.getResult(), trueColumns);
+  }
+  for (Operation *op : suffix) {
+    if (provenColumnComparisons.contains(op))
+      continue;
+    if (provenComparisons.contains(op)) {
+      fastMapping.map(op->getResult(0), allTrue);
+      continue;
+    }
+    fastBuilder.clone(*op, fastMapping);
+  }
+  OpBuilder slowBuilder = versioned.getElseBodyBuilder();
+  IRMapping slowMapping;
+  for (Operation *op : suffix)
+    slowBuilder.clone(*op, slowMapping);
+  for (Operation *op : llvm::reverse(suffix))
+    op->erase();
+  return success();
+}
+
+class DynamicRowIATPlan final : public RewritePlan {
 public:
-  DynamicMergeSplitIATPlan(IATCandidate candidate, unsigned epoch)
+  DynamicRowIATPlan(IATCandidate candidate, unsigned epoch)
       : candidate(std::move(candidate)), epoch(epoch) {}
 
   GraphOptimizationRuleId getRuleId() const override {
@@ -1144,11 +1750,11 @@ public:
   LogicalResult revalidate(GraphOptimizationContext &context) const override {
     if (context.getFunction() != candidate.function)
       return failure();
-    std::optional<IATCandidate> current =
-        analyzeDynamicMergeSplitCandidate(context);
-    return current && sameDynamicMergeSplitCandidate(candidate, *current)
-               ? success()
-               : failure();
+    auto current = candidate.form == TensorizeForm::IntegerRowReduction
+                       ? analyzeIntegerRowReductionCandidate(context)
+                       : analyzeDynamicMergeSplitCandidate(context);
+    return current && sameDynamicRowCandidate(candidate, *current) ? success()
+                                                                   : failure();
   }
 
   LogicalResult apply(IRRewriter &rewriter) override {
@@ -1169,6 +1775,82 @@ public:
         !hasProgramGridHiddenExtentArguments(clonedFunction))
       return failure();
 
+    if (failed(commitProgramGridFunctionFromSandbox(candidate.function,
+                                                    clonedFunction)))
+      return failure();
+    module->setAttr(kProgramGridTransformsAttr, transforms);
+    module->setAttr(kIndependentAxisTensorizeMarkerAttr,
+                    UnitAttr::get(module.getContext()));
+    return success();
+  }
+
+private:
+  IATCandidate candidate;
+  unsigned epoch;
+};
+
+LogicalResult materializeGuardedBatchCandidate(ModuleOp sandbox,
+                                               triton::FuncOp function,
+                                               const IATCandidate &candidate) {
+  if (!function ||
+      failed(materializeIATCandidateToSandbox(sandbox, function, candidate)) ||
+      failed(runProgramMappingStructuralCleanup(sandbox)) ||
+      failed(mlir::verify(sandbox.getOperation())))
+    return failure();
+  LogicalResult guarded = addGeneralizedGuardedFullInputRowsFastPath(function);
+  if (failed(guarded) || failed(runProgramMappingStructuralCleanup(sandbox)) ||
+      failed(mlir::verify(sandbox.getOperation())))
+    return failure();
+  Attribute transforms = sandbox->getAttr(kProgramGridTransformsAttr);
+  return transforms &&
+                 succeeded(parseProgramGridTransformContract(transforms)) &&
+                 hasProgramGridHiddenExtentArguments(function)
+             ? success()
+             : failure();
+}
+
+bool canMaterializeGuardedBatchCandidate(const IATCandidate &candidate) {
+  auto module = candidate.function->getParentOfType<ModuleOp>();
+  OwningOpRef<ModuleOp> sandbox(
+      createProgramMappingSandbox(module, candidate.function));
+  auto function = dyn_cast<triton::FuncOp>(&sandbox->getBody()->front());
+  return succeeded(
+      materializeGuardedBatchCandidate(*sandbox, function, candidate));
+}
+
+class GuardedBatchIATPlan final : public RewritePlan {
+public:
+  GuardedBatchIATPlan(IATCandidate candidate, unsigned epoch)
+      : candidate(std::move(candidate)), epoch(epoch) {}
+
+  GraphOptimizationRuleId getRuleId() const override {
+    return GraphOptimizationRuleId::IndependentAxisTensorize;
+  }
+  unsigned getBenefit() const override { return 1; }
+  Operation *getAnchor() const override { return candidate.anchor; }
+  unsigned getCreationEpoch() const override { return epoch; }
+
+  LogicalResult revalidate(GraphOptimizationContext &context) const override {
+    if (context.getFunction() != candidate.function)
+      return failure();
+    auto current = analyzeGeneralizedGuardedBatchCandidate(context);
+    return current && sameDynamicRowCandidate(candidate, *current) ? success()
+                                                                   : failure();
+  }
+
+  LogicalResult apply(IRRewriter &rewriter) override {
+    (void)rewriter;
+    ModuleOp module = candidate.function->getParentOfType<ModuleOp>();
+    if (!module || hasConflictingLaunchContract(module))
+      return failure();
+    OwningOpRef<ModuleOp> sandbox(
+        createProgramMappingSandbox(module, candidate.function));
+    auto clonedFunction =
+        dyn_cast<triton::FuncOp>(&sandbox->getBody()->front());
+    if (failed(materializeGuardedBatchCandidate(*sandbox, clonedFunction,
+                                                candidate)))
+      return failure();
+    Attribute transforms = (*sandbox)->getAttr(kProgramGridTransformsAttr);
     if (failed(commitProgramGridFunctionFromSandbox(candidate.function,
                                                     clonedFunction)))
       return failure();
@@ -1207,8 +1889,22 @@ public:
         analyzeDynamicMergeSplitCandidate(context);
     if (candidate) {
       emitCandidateRemark(candidate->anchor, candidate->evaluation);
-      plans.push_back(std::make_unique<DynamicMergeSplitIATPlan>(
+      plans.push_back(std::make_unique<DynamicRowIATPlan>(std::move(*candidate),
+                                                          context.getEpoch()));
+      return success();
+    }
+    candidate = analyzeGeneralizedGuardedBatchCandidate(context);
+    if (candidate && canMaterializeGuardedBatchCandidate(*candidate)) {
+      emitCandidateRemark(candidate->anchor, candidate->evaluation);
+      plans.push_back(std::make_unique<GuardedBatchIATPlan>(
           std::move(*candidate), context.getEpoch()));
+      return success();
+    }
+    candidate = analyzeIntegerRowReductionCandidate(context);
+    if (candidate) {
+      emitCandidateRemark(candidate->anchor, candidate->evaluation);
+      plans.push_back(std::make_unique<DynamicRowIATPlan>(std::move(*candidate),
+                                                          context.getEpoch()));
       return success();
     }
     if (!iatAndPtsmEnabled)

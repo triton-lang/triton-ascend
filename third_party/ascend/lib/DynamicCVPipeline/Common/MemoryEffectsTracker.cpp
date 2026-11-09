@@ -37,8 +37,16 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
+#include "llvm/Support/MathExtras.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -54,12 +62,15 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MathExtras.h"
 
-#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "DynamicCVPipeline/Common/SyncWall.h"
-#include "DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/SyncWall.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 using namespace mlir;
 static constexpr const char *DEBUG_TYPE = "memory-effects-tracker";
@@ -86,26 +97,6 @@ bool isDefinedInside(Value v, Operation *op) {
   }
 
   return op->isProperAncestor(defOp);
-}
-
-static Value getAliasSource(Value val) {
-  auto *op = val.getDefiningOp();
-  if (!op) {
-    return nullptr;
-  }
-  return llvm::TypeSwitch<Operation *, Value>(op)
-      .Case([](ViewLikeOpInterface viewOp) { return viewOp.getViewSource(); })
-      .Case([](bufferization::ToTensorOp totensorOp) {
-        return totensorOp.getBuffer();
-      })
-      .Default([](auto) { return nullptr; });
-}
-
-Value getViewSource(Value val) {
-  while (auto source = getAliasSource(val)) {
-    val = source;
-  }
-  return val;
 }
 
 MemoryEffects::EffectInstance
@@ -146,6 +137,63 @@ void collectLeafOps(Operation *op, SmallVectorImpl<Operation *> &leafOps) {
   }
 }
 
+using AddressRange = std::pair<int64_t, int64_t>;
+
+static std::optional<int64_t> getArithConstantInt(Value value) {
+  auto constantOp = value.getDefiningOp<arith::ConstantOp>();
+  if (!constantOp) {
+    return std::nullopt;
+  }
+  auto integerAttr = dyn_cast<IntegerAttr>(constantOp.getValue());
+  if (!integerAttr) {
+    return std::nullopt;
+  }
+  return integerAttr.getInt();
+}
+
+static std::optional<SmallVector<AddressRange>>
+getConstantAddressRanges(hivm::PointerCastOp pointerCast) {
+  auto memrefType = cast<MemRefType>(pointerCast.getResult().getType());
+  int64_t sizeInBits = memrefType.getElementTypeBitWidth();
+
+  // Dynamic shape should be predicted by the input constant value.
+  auto dynamicSize = pointerCast.getDynamicSizes().begin();
+  for (int64_t dim : memrefType.getShape()) {
+    int64_t dimSize = dim;
+    if (ShapedType::isDynamic(dim)) {
+      auto constantSize = getArithConstantInt(*dynamicSize++);
+      if (!constantSize) {
+        return std::nullopt;
+      }
+      dimSize = *constantSize;
+    }
+    int64_t newSizeInBits = -1;
+    if (llvm::MulOverflow(sizeInBits, dimSize, newSizeInBits)) {
+      return std::nullopt;
+    }
+    sizeInBits = newSizeInBits;
+  }
+
+  SmallVector<AddressRange> ranges;
+  ranges.reserve(pointerCast.getAddrs().size());
+  constexpr int64_t bitsPerByte = 8;
+  int64_t sizeInBytes =
+      sizeInBits / bitsPerByte + (sizeInBits % bitsPerByte != 0);
+  for (Value address : pointerCast.getAddrs()) {
+    auto constantAddress = getArithConstantInt(address);
+    if (!constantAddress) {
+      return std::nullopt;
+    }
+    int64_t begin = *constantAddress;
+    int64_t end;
+    if (llvm::AddOverflow(begin, sizeInBytes, end)) {
+      return std::nullopt;
+    }
+    ranges.emplace_back(begin, end);
+  }
+  return ranges;
+}
+
 } // namespace
 
 MemoryDependenceGraph::MemoryDependenceGraph(Operation *root, AliasAnalysis &aa)
@@ -168,24 +216,96 @@ ArrayRef<Operation *> MemoryDependenceGraph::getMemDefs(Operation *op) const {
 
 ArrayRef<Operation *> MemoryDependenceGraph::getMemUsers(Operation *op) const {
   auto it = memUsers.find(op);
-  if (it == memUsers.end())
+  if (it == memUsers.end()) {
     return {};
+  }
   return it->second;
 }
 
 ArrayRef<Operation *>
 MemoryDependenceGraph::getExecBefore(Operation *op) const {
   auto it = execBefore.find(op);
-  if (it == execBefore.end())
+  if (it == execBefore.end()) {
     return {};
+  }
   return it->second;
 }
 
 ArrayRef<Operation *> MemoryDependenceGraph::getExecAfter(Operation *op) const {
   auto it = execAfter.find(op);
-  if (it == execAfter.end())
+  if (it == execAfter.end()) {
     return {};
+  }
   return it->second;
+}
+
+using EffectsTy = SmallVector<MemoryEffects::EffectInstance>;
+
+/// Drop the effects on values defined inside `op`, then remap the rest to the
+/// root memref they alias.
+static EffectsTy filterOuterEffects(EffectsTy effects, Operation *op) {
+  EffectsTy filtered;
+  filtered.reserve(effects.size());
+  for (const auto &e : effects) {
+    Value value = e.getValue();
+    if (!value) {
+      filtered.push_back(e);
+      continue;
+    }
+
+    Value source = traceMemDef(value);
+    if (isDefinedInside(source, op)) {
+      continue;
+    }
+    filtered.push_back(source == value ? e : remapEffectValue(e, source));
+  }
+  return filtered;
+}
+
+/// Collect `op`'s own effects, without the per-op-kind cases of
+/// `collectOuterEffects`; set `unknown` when the op has no effect information.
+static EffectsTy collectOuterEffectsDefault(Operation *op, bool &unknown,
+                                            bool recursive) {
+  std::optional<SmallVector<MemoryEffects::EffectInstance>> raw;
+  if (recursive) {
+    raw = getEffectsRecursively(op);
+  } else if (auto effectInterface = dyn_cast<MemoryEffectOpInterface>(op)) {
+    raw.emplace();
+    effectInterface.getEffects(*raw);
+  }
+  if (!raw) {
+    if (!isKnownNoMemoryEffectCall(op)) {
+      unknown = true;
+    }
+    return {};
+  }
+
+  return filterOuterEffects(std::move(*raw), op);
+}
+
+/// Collect the memory effects `op` exposes to the surrounding block, i.e. the
+/// effects that may create a dependency with another op. Set `unknown` when
+/// they cannot be determined.
+static EffectsTy collectOuterEffects(Operation *op, bool &unknown,
+                                     bool recursive = true) {
+  unknown = false;
+
+  return llvm::TypeSwitch<Operation *, EffectsTy>(op)
+      .Case([](annotation::MarkOp markOp) -> EffectsTy {
+        if (markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr)) {
+          return {};
+        }
+        MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Write::get());
+        return {remapEffectValue(scopedWrite, markOp.getSrc())};
+      })
+      .Case([](bufferization::AllocTensorOp) { return EffectsTy{}; })
+      .Case([](bufferization::ToTensorOp toTensorOp) -> EffectsTy {
+        MemoryEffects::EffectInstance scopedRead(MemoryEffects::Read::get());
+        return {remapEffectValue(scopedRead, toTensorOp.getBuffer())};
+      })
+      .Default([&](Operation *op) {
+        return collectOuterEffectsDefault(op, unknown, recursive);
+      });
 }
 
 SmallVector<Operation *>
@@ -206,7 +326,7 @@ MemoryDependenceGraph::getRealDependency(Operation *frontOp,
   // Create slots for frontOps, using existing effects logic to process
   slots.clear();
   valueToSlot.clear();
-  llvm::SmallSetVector<Operation *, INIT_SIZE> dependencyOps;
+  llvm::SmallSetVector<Operation *, kInitSize> dependencyOps;
   for (Operation *leafOp : leafOps) {
     auto effects = collectOuterEffects(leafOp, unknown, false);
     if (unknown) {
@@ -217,7 +337,7 @@ MemoryDependenceGraph::getRealDependency(Operation *frontOp,
     }
     for (const auto &effect : effects) {
       if (Value v = effect.getValue()) {
-        getOrCreateSlot(getViewSource(v));
+        getOrCreateSlot(traceMemDef(v));
       }
     }
     applyEffects(leafOp, effects, unknown);
@@ -303,66 +423,16 @@ void MemoryDependenceGraph::analyzeRegionsOf(Operation *op) {
   }
 }
 
-SmallVector<MemoryEffects::EffectInstance>
-MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown,
-                                           bool recursive) {
-  unknown = false;
-
-  if (auto markOp = dyn_cast<annotation::MarkOp>(op)) {
-    if (markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr)) {
-      return {};
-    } else {
-      MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Write::get());
-      return {remapEffectValue(scopedWrite, markOp.getSrc())};
-    }
-  }
-
-  if (auto allocTensorOp = dyn_cast<bufferization::AllocTensorOp>(op)) {
-    return {};
-  }
-
-  std::optional<SmallVector<MemoryEffects::EffectInstance>> raw;
-  if (recursive) {
-    raw = getEffectsRecursively(op);
-  } else if (auto effectInterface = dyn_cast<MemoryEffectOpInterface>(op)) {
-    raw.emplace();
-    effectInterface.getEffects(*raw);
-  }
-  if (!raw) {
-    if (!isKnownNoMemoryEffectCall(op)) {
-      unknown = true;
-    }
-    return {};
-  }
-
-  SmallVector<MemoryEffects::EffectInstance> filtered;
-  filtered.reserve(raw->size());
-  for (const auto &e : *raw) {
-    Value value = e.getValue();
-    if (!value) {
-      filtered.push_back(e);
-      continue;
-    }
-
-    Value source = getViewSource(value);
-    if (isDefinedInside(source, op)) {
-      continue;
-    }
-    filtered.push_back(source == value ? e : remapEffectValue(e, source));
-  }
-  return filtered;
-}
-
 AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs) {
-  auto lhsSource = getViewSource(lhs);
-  auto rhsSource = getViewSource(rhs);
+  auto lhsSource = traceMemDef(lhs);
+  auto rhsSource = traceMemDef(rhs);
   if (!lhsSource) {
     lhsSource = lhs;
   }
   if (!rhsSource) {
     rhsSource = rhs;
   }
-
+  // Case 1: Entry args are considered with unique memory space.
   auto isFuncEntryArg = [](const Value &val) -> bool {
     auto arg = llvm::dyn_cast<BlockArgument>(val);
     if (!arg) {
@@ -374,6 +444,33 @@ AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs) {
   };
   if (isFuncEntryArg(lhsSource) && isFuncEntryArg(rhsSource)) {
     return lhs == rhs ? AliasResult::MustAlias : AliasResult::NoAlias;
+  }
+
+  // Case 2: Pointer casts with compile-time constant ranges are checked by
+  // their addresses. Unknown addresses/sizes conservatively may alias.
+  auto lhsPointerCast = lhs.getDefiningOp<hivm::PointerCastOp>();
+  auto rhsPointerCast = rhs.getDefiningOp<hivm::PointerCastOp>();
+  if (lhsPointerCast && rhsPointerCast) {
+    auto lhsType = cast<MemRefType>(lhsPointerCast.getResult().getType());
+    auto rhsType = cast<MemRefType>(rhsPointerCast.getResult().getType());
+    if (lhsType.getMemorySpace() != rhsType.getMemorySpace()) {
+      return AliasResult::NoAlias;
+    }
+
+    auto lhsRanges = getConstantAddressRanges(lhsPointerCast);
+    auto rhsRanges = getConstantAddressRanges(rhsPointerCast);
+    if (!lhsRanges || !rhsRanges) {
+      return AliasResult::MayAlias;
+    }
+
+    for (const auto &[lhsBegin, lhsEnd] : *lhsRanges) {
+      for (const auto &[rhsBegin, rhsEnd] : *rhsRanges) {
+        if (lhsBegin < rhsEnd && rhsBegin < lhsEnd) {
+          return AliasResult::MustAlias;
+        }
+      }
+    }
+    return AliasResult::NoAlias;
   }
   return aa.alias(lhsSource, rhsSource);
 }
@@ -390,7 +487,7 @@ MemoryDependenceGraph::findAliasSlots(Value v) {
     return result;
   }
 
-  SmallPtrSet<MemSlot *, INIT_SIZE> seen;
+  SmallPtrSet<MemSlot *, kInitSize> seen;
 
   auto it = valueToSlot.find(v);
   if (it != valueToSlot.end()) {
@@ -444,8 +541,8 @@ void MemoryDependenceGraph::collectPreds(
     ArrayRef<MemoryEffects::EffectInstance> effects, bool unknown,
     SmallVectorImpl<Operation *> &defsOut,
     SmallVectorImpl<Operation *> &predsOut) {
-  llvm::SmallSetVector<Operation *, INIT_SIZE> defs;
-  llvm::SmallSetVector<Operation *, INIT_SIZE> preds;
+  llvm::SmallSetVector<Operation *, kInitSize> defs;
+  llvm::SmallSetVector<Operation *, kInitSize> preds;
 
   // defs collects lastWriter only on reads (RAW); preds collects all ordering
   // deps (RAW/WAR/WAW).
@@ -544,7 +641,7 @@ void MemoryDependenceGraph::applyEffects(
         s->pendingReads.clear();
       }
     } else if (isa<MemoryEffects::Free>(e.getEffect())) {
-      SmallPtrSet<MemSlot *, INIT_SIZE> toRemove;
+      SmallPtrSet<MemSlot *, kInitSize> toRemove;
       if (!v) {
         LOG_DEBUG("Free of unknown value: conservatively drop all slots.");
         for (auto &slot : slots) {

@@ -19,8 +19,8 @@ class InstrumentationProfiler : public Profiler,
 public:
   InstrumentationProfiler() = default;
   virtual ~InstrumentationProfiler();
-  void recordDfxEvents(uint64_t functionId,
-                       const std::vector<std::array<uint64_t, 6>> &records);
+  void recordInstrumentationEvents(
+      uint64_t functionId, const std::vector<std::array<uint64_t, 6>> &records);
 
 protected:
   // Profiler

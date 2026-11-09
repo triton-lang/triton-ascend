@@ -1045,7 +1045,7 @@ def test_ttir_to_linalg_merge_concat_load_buffer_is_a5_only(
     assert events[-1] == "run_row"
     a5_instrumented = instrumented and expected_calls == 1
     assert instrumentation_calls == (["ttir_to_linalg"] if instrumented and not a5_instrumented else [])
-    assert metadata.get("proton_collection") == ("mspti_dfx" if a5_instrumented else None)
+    assert metadata.get("proton_collection") == ("mspti" if a5_instrumented else None)
     if a5_instrumented:
         assert metadata["profile_scratch_size"] == 0
 
@@ -1141,7 +1141,7 @@ def _capture_multibuffer_command(compiler, monkeypatch, is_a5, requested, derive
 @pytest.mark.parametrize("is_a5", [False, True])
 @pytest.mark.parametrize("instrumented", [False, True])
 def test_proton_metadata_export_is_a5_only(compiler_module, monkeypatch, is_a5, instrumented):
-    derived = {"proton_collection": "mspti_dfx"} if instrumented else {}
+    derived = {"proton_collection": "mspti"} if instrumented else {}
     command = _capture_multibuffer_command(compiler_module, monkeypatch, is_a5, {}, derived)
     exports = [arg for arg in command if arg.startswith("--proton-metadata-output=")]
     assert len(exports) == int(is_a5 and instrumented)

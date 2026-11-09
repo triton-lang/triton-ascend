@@ -209,9 +209,9 @@ void StreamChromeTraceWriter::writeKernel(json &object,
                 " CTA" + std::to_string(ctaId);
           tid = "warp " + std::to_string(warpId) + " (line " +
                 std::to_string(lineId) + ")";
-          if (metadata->dfxChannel) {
-            pid =
-                metadata->kernelName + " DFX channel " + std::to_string(ctaId);
+          if (metadata->channelTrace) {
+            pid = metadata->kernelName + " profiling channel " +
+                  std::to_string(ctaId);
             tid = "pipe " + std::to_string(warpId) + " (line " +
                   std::to_string(lineId) + ")";
           }
@@ -247,7 +247,7 @@ void StreamChromeTraceWriter::writeKernel(json &object,
           args["Frequency (MHz)"] = freq;
           element["args"] = args;
           element["args"]["call_stack"] = callStack;
-          if (metadata->dfxChannel) {
+          if (metadata->channelTrace) {
             element["args"]["clock_domain"] =
                 "channel-relative; not host synchronized";
             element["args"]["start_cycle"] = event.first->cycle;

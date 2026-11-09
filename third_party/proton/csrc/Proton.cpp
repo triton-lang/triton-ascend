@@ -84,11 +84,11 @@ static void initProton(pybind11::module &&m) {
         streamId, functionId, reinterpret_cast<uint8_t *>(buffer), size);
   });
 
-  m.def("record_dfx_events",
+  m.def("record_instrumentation_events",
         [](uint64_t functionId,
            const std::vector<std::array<uint64_t, 6>> &records) {
-          InstrumentationProfiler::instance().recordDfxEvents(functionId,
-                                                              records);
+          InstrumentationProfiler::instance().recordInstrumentationEvents(
+              functionId, records);
         });
 
   m.def("exit_instrumented_op", [](uint64_t streamId, uint64_t functionId,

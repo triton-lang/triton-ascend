@@ -1,4 +1,4 @@
-"""Run directly with the private TA, NPU-IR and MSPTI DFX PoC builds."""
+"""Run directly with the private TA, NPU-IR and MSPTI instrumentation PoC builds."""
 import argparse
 import json
 import os
@@ -51,7 +51,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.warmup_instrumented:
-        os.environ["TRITON_DFX_WARMUP_LAUNCHES"] = "1"
+        os.environ["PROTON_INSTRUMENTATION_WARMUP_LAUNCHES"] = "1"
     args.output.mkdir(parents=True, exist_ok=True)
     torch.npu.set_device(0)
     x = torch.arange(args.n, device="npu", dtype=torch.float32)
@@ -63,7 +63,7 @@ def main():
         return kernel
 
     launch()
-    path = args.output / "proton-dfx"
+    path = args.output / "proton-instrumentation"
     session = proton.start(str(path), backend="instrumentation", data="trace")
     try:
         if args.warmup_instrumented:
@@ -81,7 +81,7 @@ def main():
             with proton.scope("active_resumed"):
                 launch()
         metadata = compiled.metadata._asdict()
-        assert metadata["proton_collection"] == "mspti_dfx"
+        assert metadata["proton_collection"] == "mspti"
         assert metadata["proton_metadata"][0]["proton"]["format_version"] == 2
         assert metadata.get("profile_scratch_size", 0) == 0
         (args.output / "metadata.json").write_text(json.dumps(metadata, indent=2, default=str))
@@ -95,13 +95,13 @@ def main():
     assert events, "Empty trace"
     assert {e["name"] for e in events} == {"kernel", "load", "compute", "store"}
     assert all(e["dur"] > 0 and e["args"]["Frequency (MHz)"] > 0 for e in events)
-    assert all("DFX channel" in str(e["pid"]) and "pipe" in str(e["tid"]) for e in events)
-    capture_ids = {e["pid"].split(" DFX channel")[0] for e in events}
+    assert all("profiling channel" in str(e["pid"]) and "pipe" in str(e["tid"]) for e in events)
+    capture_ids = {e["pid"].split(" profiling channel")[0] for e in events}
     assert len(capture_ids) == (2 if args.lifecycle else 1), capture_ids
     validate_intervals(events)
     summary = {
         "status": "passed", "n": args.n, "events": len(events), "captures": len(capture_ids), "collector":
-        "MSPTI DFX API; no msprof op", "trace": str(trace_path), "durations_us":
+        "MSPTI instrumentation API; no msprof op", "trace": str(trace_path), "durations_us":
         {name: [e["dur"]
                 for e in events
                 if e["name"] == name]

@@ -298,7 +298,7 @@ public:
               uint64_t processorId, uint64_t unitId, uint64_t deviceId,
               uint64_t deviceType, uint64_t timeShiftCost, uint64_t initTime,
               uint64_t preFinalTime, uint64_t postFinalTime,
-              double cycleCounterFreqMhz = 1000.0, bool dfxChannel = false)
+              double cycleCounterFreqMhz = 1000.0, bool channelTrace = false)
       : CycleMetric() {
     this->values[StartCycle] = startCycle;
     this->values[EndCycle] = endCycle;
@@ -316,11 +316,11 @@ public:
     this->values[PreFinalTime] = preFinalTime;
     this->values[PostFinalTime] = postFinalTime;
     this->cycleCounterFreqMhz = cycleCounterFreqMhz;
-    this->dfxChannel = dfxChannel;
+    this->channelTrace = channelTrace;
   }
 
   double getCycleCounterFreqMhz() const { return cycleCounterFreqMhz; }
-  bool isDfxChannel() const { return dfxChannel; }
+  bool isChannelTrace() const { return channelTrace; }
 
   virtual const std::string getName() const { return "CycleMetric"; }
 
@@ -334,7 +334,7 @@ public:
 
 private:
   double cycleCounterFreqMhz{1000.0};
-  bool dfxChannel{false};
+  bool channelTrace{false};
   const static inline bool PROPERTY[CycleMetricKind::Count] = {
       false, false, false, false, true,  true,  true, true,
       true,  true,  true,  true,  false, false, false};

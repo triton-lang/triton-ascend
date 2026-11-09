@@ -32,16 +32,16 @@ thread_local std::map<Data *, size_t> InstrumentationProfiler::dataScopeIdMap =
 
 InstrumentationProfiler::~InstrumentationProfiler() {}
 
-void InstrumentationProfiler::recordDfxEvents(
+void InstrumentationProfiler::recordInstrumentationEvents(
     uint64_t functionId, const std::vector<std::array<uint64_t, 6>> &records) {
   if (!runtime || runtime->getDeviceType() != DeviceType::NPU)
     throw std::runtime_error(
-        "DFX events require an active NPU instrumentation session");
+        "Instrumentation events require an active NPU instrumentation session");
   auto &contexts = functionScopeIdContexts.at(functionId);
   for (const auto &r : records) {
     if (r[0] < 11 || r[0] > 28 || r[1] > 10 || r[4] < r[3] || r[5] == 0 ||
         !contexts.count(r[2]))
-      throw std::runtime_error("Invalid DFX scope event");
+      throw std::runtime_error("Invalid instrumentation scope event");
   }
   auto device = runtime->getDevice();
   const auto &name = functionNames.at(functionId);
@@ -51,14 +51,15 @@ void InstrumentationProfiler::recordDfxEvents(
     for (const auto &r : records) {
       auto scopeId = data->addOp(kernelId, contexts.at(r[2]));
       auto duration = r[4] - r[3];
-      data->addMetric(
-          scopeId,
-          std::make_shared<CycleMetric>(
-              r[3], r[4], duration, static_cast<double>(duration), kernelId,
-              name + " [DFX capture " + std::to_string(kernelId) + "]", r[0],
-              (r[0] - 11) / 3, r[1], device,
-              static_cast<uint64_t>(runtime->getDeviceType()), 0, 0, 0, 0,
-              static_cast<double>(r[5]), true));
+      data->addMetric(scopeId,
+                      std::make_shared<CycleMetric>(
+                          r[3], r[4], duration, static_cast<double>(duration),
+                          kernelId,
+                          name + " [instrumentation capture " +
+                              std::to_string(kernelId) + "]",
+                          r[0], (r[0] - 11) / 3, r[1], device,
+                          static_cast<uint64_t>(runtime->getDeviceType()), 0, 0,
+                          0, 0, static_cast<double>(r[5]), true));
     }
   }
 }

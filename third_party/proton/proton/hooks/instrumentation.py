@@ -184,10 +184,10 @@ class InstrumentationHook(Hook):
         self.allocator = NpuAllocator(self) if _get_backend_name() == "ascend" else CudaAllocator(self)
         self.buffer = None
         self.metadata_path: Dict[Any, Optional[str]] = {}
-        self.dfx_functions = set()
-        self.dfx_capture = None
-        self.dfx_warmup_remaining = {}
-        self.dfx_skipping_warmup = False
+        self._mspti_functions = set()
+        self._mspti_collector = None
+        self._mspti_warmup_remaining = {}
+        self._mspti_skipping_warmup = False
 
     def activate(self):
         if InstrumentationHook.active_count > 0:
@@ -265,8 +265,8 @@ class InstrumentationHook(Hook):
         if InstrumentationHook.active_count == 0:
             return
 
-        if self.dfx_capture is not None and self.dfx_capture.handle:
-            self.dfx_capture.finish()
+        if self._mspti_collector is not None and self._mspti_collector.handle:
+            self._mspti_collector.stop()
 
         InstrumentationHook.active_count -= 1
 
@@ -306,24 +306,26 @@ class InstrumentationHook(Hook):
             import json
             with open(metadata_path) as file:
                 compiled_metadata = json.load(file)
-            if compiled_metadata.get("proton_collection") == "mspti_dfx":
+            if compiled_metadata.get("proton_collection") == "mspti":
                 entries = compiled_metadata.get("proton_metadata", [])
                 if len(entries) != 1 or entries[0]["proton"]["format_version"] != 2:
-                    raise RuntimeError("A5 DFX capture requires NPU-IR DFX drain protocol version 2")
+                    raise RuntimeError(
+                        "A5 instrumentation capture requires NPU-IR instrumentation drain protocol version 2")
                 scopes = entries[0]["proton"]["scopes"]
                 names = [(s["start_region_id"] & 0x3ff, s["name"]) for s in scopes]
                 parents = [(s["start_region_id"] & 0x3ff, s["parent_id"]) for s in scopes if s["parent_id"] >= 0]
                 libproton.init_function_metadata(function, name, names, parents, metadata_path)
-                self.dfx_functions.add(function)
+                self._mspti_functions.add(function)
                 import os
                 import warnings
-                warmup = int(os.environ.get("TRITON_DFX_WARMUP_LAUNCHES", "0"))
+                warmup = int(os.environ.get("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES", "0"))
                 if not 0 <= warmup <= 100:
-                    raise ValueError("TRITON_DFX_WARMUP_LAUNCHES must be between 0 and 100")
-                self.dfx_warmup_remaining[function] = warmup
+                    raise ValueError("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES must be between 0 and 100")
+                self._mspti_warmup_remaining[function] = warmup
                 if warmup:
                     warnings.warn(
-                        f"A5 DFX PoC: the first {warmup} launch(es) of {name} are explicit warmup and not collected")
+                        f"A5 instrumentation PoC: the first {warmup} launch(es) of {name} are explicit warmup and not collected"
+                    )
                 return
 
         if ir_path:
@@ -357,15 +359,15 @@ class InstrumentationHook(Hook):
 
     def enter(self, metadata: LazyDict) -> None:
         func = metadata.data.get("function")
-        if func in self.dfx_functions:
-            if self.dfx_capture is None:
-                from triton.backends.ascend.proton_dfx import DfxCapture
-                self.dfx_capture = DfxCapture()
-            if self.dfx_warmup_remaining[func]:
-                self.dfx_warmup_remaining[func] -= 1
-                self.dfx_skipping_warmup = True
+        if func in self._mspti_functions:
+            if self._mspti_collector is None:
+                from ..mspti_instrumentation import MsptiInstrumentationCollector
+                self._mspti_collector = MsptiInstrumentationCollector()
+            if self._mspti_warmup_remaining[func]:
+                self._mspti_warmup_remaining[func] -= 1
+                self._mspti_skipping_warmup = True
                 return
-            self.dfx_capture.start()
+            self._mspti_collector.start()
             return
         stream = metadata.data.get("stream")
         alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
@@ -375,14 +377,14 @@ class InstrumentationHook(Hook):
 
     def exit(self, metadata: LazyDict) -> None:
         func = metadata.data.get("function")
-        if func in self.dfx_functions:
-            if self.dfx_skipping_warmup:
+        if func in self._mspti_functions:
+            if self._mspti_skipping_warmup:
                 import torch
                 torch.npu.synchronize()
-                self.dfx_skipping_warmup = False
+                self._mspti_skipping_warmup = False
                 return
-            records = self.dfx_capture.finish()
-            libproton.record_dfx_events(func, records)
+            records = self._mspti_collector.stop()
+            libproton.record_instrumentation_events(func, records)
             return
         stream = metadata.data.get("stream")
         alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()

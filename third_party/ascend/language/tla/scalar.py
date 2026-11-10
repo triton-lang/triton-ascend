@@ -22,8 +22,9 @@
 import math
 
 from triton.language import core as tl
+from triton.language.math import abs as _triton_abs
 
-__all__ = ["select", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "clamp"]
+__all__ = ["select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "clamp"]
 
 
 def _check_scalar(value, name):
@@ -52,6 +53,26 @@ def select(condition, true_value, false_value, _semantic=None):
     true_value = _check_scalar(true_value, "tla.select true_value")
     false_value = _check_scalar(false_value, "tla.select false_value")
     return tl.where(condition, true_value, false_value, _semantic=_semantic)
+
+
+@tl.builtin
+def abs(x, _semantic=None):
+    """Return the absolute value of a scalar, following ``tl.abs``.
+
+    Accepts Python and runtime boolean, integer, float16 and float32
+    scalars. Runtime inputs retain their dtype; unsigned integers and booleans
+    are unchanged. Signed integer minima retain their fixed-width value,
+    without saturation or widening. Floating-point absolute value clears the
+    sign of zero, infinity and NaN; NaN payload preservation is not guaranteed.
+
+    Bfloat16, float64 and float8 inputs are unsupported. Buffers, memory access
+    positions, SIMD registers and Blocks require their explicit interfaces.
+    This operation allocates no buffer and performs no SIMD broadcast.
+    """
+    x = _check_scalar(x, "tla.abs x")
+    if isinstance(x, tl.tensor) and x.dtype.is_floating() and x.dtype not in (tl.float16, tl.float32):
+        raise TypeError(f"tla.abs does not support dtype {x.dtype}")
+    return _triton_abs(x, _semantic=_semantic)
 
 
 @tl.builtin

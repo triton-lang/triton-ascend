@@ -21,12 +21,16 @@
  */
 
 #include "PtrAnalysisTestUtils.h"
-#include "TritonMemoryAccess/PtrAnalysisRules/CommonPtrRules.h"
+#include "TritonMemoryAccess/PtrAnalysis.h"
+#include "TritonMemoryAccess/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/Passes.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "gtest/gtest.h"
 
 using namespace mlir;
@@ -86,7 +90,7 @@ TEST(PtrAnalysisAddress, IndependentExtensionsSurviveShapeAndSelect) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   test::Environment env{
       {f.getArgument(1),
        {llvm::APInt(32, INT32_MAX), llvm::APInt(32, -5, true),
@@ -120,7 +124,7 @@ TEST(PtrAnalysisAddress, IndependentExtensionsSurviveShapeAndSelect) {
   });
   EXPECT_TRUE(succeeded(verify(*module)));
 }
-TEST(PtrAnalysisAddress, SelectNarrowNegativeAndFullOrAffineBoundaries) {
+TEST(PtrAnalysisAddress, SelectNarrowNegativeAndFullOffsetBindings) {
   MLIRContext context;
   load(context);
   auto module = parseSourceString<ModuleOp>(R"mlir(module {
@@ -136,7 +140,7 @@ TEST(PtrAnalysisAddress, SelectNarrowNegativeAndFullOrAffineBoundaries) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   test::Environment env{
       {f.getArgument(1), {llvm::APInt(8, -128, true)}},
       {f.getArgument(2), test::Lanes(4, llvm::APInt(8, -2, true))},
@@ -162,20 +166,23 @@ TEST(PtrAnalysisAddress, SelectNarrowNegativeAndFullOrAffineBoundaries) {
   left->offsets.fullOffsets = f.getArgument(4);
   left->offsets.scalarOffset = {};
   left->offsets.axes[0] = AxisInfo(AxisKind::Unknown, b.getIndexAttr(0));
-  ASSERT_TRUE(succeeded(analysis.bind(tagged(f, "left"), *left)));
+  ASSERT_TRUE(succeeded(analysis.reset({{tagged(f, "left"), *left}})));
   check(300);
-  // Affine-only, nonuniform branches explicitly fall back instead of losing
-  // their base displacement or materializing a new wide tensor for selection.
+  // Neither a linear nor a uniform description replaces complete offsets.
   left->offsets.fullOffsets = {};
   left->offsets.scalarOffset = b.getIndexAttr(17);
   left->offsets.axes[0] = AxisInfo(AxisKind::Structured, b.getIndexAttr(2));
-  ASSERT_TRUE(succeeded(analysis.bind(tagged(f, "left"), *left)));
-  auto unsupported = analysis.analyze(tagged(f, "selected"));
-  ASSERT_TRUE(succeeded(unsupported));
-  EXPECT_TRUE(unsupported->isEmpty());
-  // A uniform descriptor can be splatted into the complete offset tensor.
+  EXPECT_TRUE(failed(analysis.reset({{tagged(f, "left"), *left}})));
   left->offsets.axes[0] = AxisInfo(AxisKind::Invariant, b.getIndexAttr(0));
-  ASSERT_TRUE(succeeded(analysis.bind(tagged(f, "left"), *left)));
+  EXPECT_TRUE(failed(analysis.reset({{tagged(f, "left"), *left}})));
+  EXPECT_TRUE(failed(triton::ptr::detail::materializeFullOffset(
+      left->offsets, f.getArgument(4).getType(), b, f.getLoc())));
+  check(300);
+
+  // A complete constant tensor remains a valid uniform binding.
+  left->offsets.fullOffsets = DenseIntElementsAttr::get(
+      cast<RankedTensorType>(f.getArgument(4).getType()), int64_t(17));
+  ASSERT_TRUE(succeeded(analysis.reset({{tagged(f, "left"), *left}})));
   check(17);
   EXPECT_TRUE(succeeded(verify(*module)));
 }
@@ -253,14 +260,14 @@ TEST(PtrAnalysisAddress,
   OpBuilder b(f.getBody().front().getTerminator());
   auto add = *f.getBody().front().getOps<triton::AddPtrOp>().begin();
   auto block = *f.getBody().front().getOps<triton::MakeTensorPtrOp>().begin();
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   for (Value value : {Value(add.getResult()), Value(block.getResult())}) {
     auto original = test::getInfo(analysis.analyze(value));
     ASSERT_TRUE(succeeded(original));
     for (Value wrong : {f.getArgument(1), f.getArgument(2)}) {
       auto invalid = *original;
       invalid.base = wrong;
-      EXPECT_TRUE(failed(analysis.bind(value, invalid)));
+      EXPECT_TRUE(failed(analysis.setInfo(value, invalid)));
       ASSERT_TRUE(analysis.findCached(value));
       EXPECT_EQ(analysis.findCached(value)->base, f.getArgument(0));
     }
@@ -269,20 +276,42 @@ TEST(PtrAnalysisAddress,
   ASSERT_TRUE(succeeded(original));
   auto invalid = *original;
   invalid.offsets.fullOffsets = f.getArgument(0);
-  EXPECT_TRUE(failed(analysis.bind(add, invalid)));
+  EXPECT_TRUE(failed(analysis.setInfo(add, invalid)));
   invalid.offsets.fullOffsets = {};
   EXPECT_TRUE(
-      failed(analysis.bind(add, invalid))); // partial proof is not exact
-  ASSERT_TRUE(succeeded(analysis.bind(add, *analysis.findCached(add))));
+      failed(analysis.setInfo(add, invalid))); // partial proof is not exact
+  auto scalar = analysis.analyze(f.getArgument(0));
+  ASSERT_TRUE(succeeded(scalar));
+  ASSERT_TRUE(scalar->offsets.hasStructuredDecomposition());
+  scalar->offsets.fullOffsets = {};
+  EXPECT_TRUE(failed(analysis.setInfo(f.getArgument(0), *scalar)));
+  ASSERT_TRUE(succeeded(analysis.setInfo(add, *analysis.findCached(add))));
   ASSERT_TRUE(analysis.findCached(add));
   PtrInfo other{{}, *buildOffsetInfo(f.getArgument(4), b)};
-  ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(4), other)));
+  ASSERT_TRUE(succeeded(analysis.setInfo(f.getArgument(4), other)));
   EXPECT_TRUE(
       analysis.findCached(add)); // another boundary, not a computed entry
-  EXPECT_FALSE(analysis.findCached(block));
-  analysis.clear();
+  EXPECT_TRUE(analysis.findCached(block));
+  ASSERT_TRUE(succeeded(analysis.reset()));
   EXPECT_FALSE(analysis.findCached(add));
   EXPECT_FALSE(analysis.findCached(f.getArgument(4)));
+
+  // Block pointers still bind and reconstruct lanes from their decomposition.
+  auto blockInfo = analysis.analyze(block);
+  ASSERT_TRUE(succeeded(blockInfo));
+  EXPECT_FALSE(blockInfo->offsets.fullOffsets);
+  ASSERT_TRUE(blockInfo->offsets.hasStructuredDecomposition());
+  ASSERT_TRUE(succeeded(analysis.setInfo(block, *blockInfo)));
+  int64_t expectedOffsets[] = {0, 16, 32, 48};
+  for (auto [i, expected] : llvm::enumerate(expectedOffsets)) {
+    Value index = b.create<arith::ConstantIndexOp>(f.getLoc(), i);
+    auto offset =
+        materializeOffsetAt(blockInfo->offsets, {index}, b, f.getLoc());
+    ASSERT_TRUE(succeeded(offset));
+    auto actual = test::evaluate(*offset);
+    ASSERT_TRUE(actual);
+    EXPECT_EQ(actual->front().getSExtValue(), expected);
+  }
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 TEST(PtrAnalysisAddress, ScalarAddPtrSharesOneSumAfterWideningEachIncrement) {
@@ -303,7 +332,7 @@ TEST(PtrAnalysisAddress, ScalarAddPtrSharesOneSumAfterWideningEachIncrement) {
   f.walk([&](triton::AddPtrOp op) { adds.push_back(op); });
   OpBuilder b(f.getBody().front().getTerminator());
   auto ip = b.saveInsertionPoint();
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto once = test::getInfo(analysis.analyze(adds[0]));
   auto twice = test::getInfo(analysis.analyze(adds[2]));
   ASSERT_TRUE(succeeded(once));
@@ -351,13 +380,13 @@ TEST(PtrAnalysisAddress, ScalarExactBindingsFeedAddPtrAndBlockWithoutProof) {
                         {f.getArgument(3), {llvm::APInt(32, INT32_MAX)}},
                         {f.getArgument(4), {llvm::APInt(32, 1)}}};
   {
-    PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+    PtrAnalysis analysis(b);
     PtrInfo bound;
     bound.base = f.getArgument(0);
     bound.offsets.valueType = b.getIndexType();
     bound.offsets.fullOffsets = f.getArgument(2);
     ASSERT_FALSE(bound.offsets.scalarOffset);
-    ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(1), bound)));
+    ASSERT_TRUE(succeeded(analysis.setInfo(f.getArgument(1), bound)));
     auto next = test::getInfo(analysis.analyze(add));
     ASSERT_TRUE(succeeded(next));
     auto value = test::evaluate(next->offsets, env);
@@ -394,13 +423,13 @@ TEST(PtrAnalysisAddress, BlockAdvanceReplacesPreviouslyCompleteOffsets) {
   auto block = *f.getBody().front().getOps<triton::MakeTensorPtrOp>().begin();
   auto advance = *f.getBody().front().getOps<triton::AdvanceOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto bound = test::getInfo(analysis.analyze(block));
   ASSERT_TRUE(succeeded(bound));
   bound->offsets.fullOffsets =
       DenseIntElementsAttr::get(RankedTensorType::get({4}, b.getI32Type()),
                                 ArrayRef<int32_t>{0, 1, 2, 3});
-  ASSERT_TRUE(succeeded(analysis.bind(block, *bound)));
+  ASSERT_TRUE(succeeded(analysis.setInfo(block, *bound)));
   auto next = test::getInfo(analysis.analyze(advance));
   ASSERT_TRUE(succeeded(next));
   EXPECT_FALSE(next->offsets.fullOffsets);
@@ -414,6 +443,85 @@ TEST(PtrAnalysisAddress, BlockAdvanceReplacesPreviouslyCompleteOffsets) {
   }
   EXPECT_TRUE(succeeded(verify(*module)));
 }
+TEST(PtrAnalysisAddress, OpaqueTensorBasePreservesLanesAndOffsetUnits) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @opaque(%raw:tensor<4x!tt.ptr<i32,3>>) {
+      %base="tt.reshape"(%raw) {tag="base"}:(tensor<4x!tt.ptr<i32,3>>) -> tensor<2x2x!tt.ptr<i32,3>>
+      %r=tt.make_range {start=0:i32,end=4:i32}:tensor<4xi32>
+      %offset="tt.reshape"(%r):(tensor<4xi32>) -> tensor<2x2xi32>
+      %shift=tt.addptr %base,%offset {tag="shift"}:tensor<2x2x!tt.ptr<i32,3>>,tensor<2x2xi32>
+      %slice=tensor.extract_slice %shift[0,1][2,1][1,1]:tensor<2x2x!tt.ptr<i32,3>> to tensor<2x1x!tt.ptr<i32,3>>
+      %cast=tt.bitcast %slice {tag="cast"}:tensor<2x1x!tt.ptr<i32,3>> -> tensor<2x1x!tt.ptr<i16,3>>
+      tt.return
+    }})mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder b(f.getBody().front().getTerminator());
+  PtrAnalysis analysis(b);
+  auto base = analysis.analyze(tagged(f, "base"));
+  ASSERT_TRUE(succeeded(base));
+  EXPECT_EQ(base->base, tagged(f, "base"));
+  EXPECT_FALSE(base->hasScalarBase());
+  auto shift = analysis.analyze(tagged(f, "shift"));
+  ASSERT_TRUE(succeeded(shift));
+  EXPECT_EQ(shift->base, base->base);
+  expectLanes(shift->offsets, {0, 1, 2, 3}, b, f.getLoc(), test::Environment());
+
+  auto cast = analysis.analyze(tagged(f, "cast"));
+  ASSERT_TRUE(succeeded(cast));
+  EXPECT_FALSE(cast->hasScalarBase());
+  EXPECT_EQ(cast->getElementType(), b.getI16Type());
+  EXPECT_EQ(cast->getAddressSpace(), 3u);
+  auto baseCast = cast->base.getDefiningOp<triton::BitcastOp>();
+  ASSERT_TRUE(baseCast);
+  auto baseSlice = baseCast.getSrc().getDefiningOp<tensor::ExtractSliceOp>();
+  ASSERT_TRUE(baseSlice);
+  EXPECT_EQ(baseSlice.getSource(), base->base);
+  // The second column has offsets 1 and 3 in i32 elements: 2 and 6 in i16.
+  expectLanes(cast->offsets, {2, 6}, b, f.getLoc(), test::Environment());
+  unsigned before = count(*module);
+  ASSERT_TRUE(succeeded(analysis.analyze(tagged(f, "cast"))));
+  EXPECT_EQ(count(*module), before);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(PtrAnalysisAddress, DynamicOpaqueTensorHasAnExactZeroDisplacement) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @dynamic(%raw:tensor<?x!tt.ptr<i32>>) { tt.return }
+    })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder b(f.getBody().front().getTerminator());
+  PtrAnalysis analysis(b);
+  auto info = analysis.analyze(f.getArgument(0));
+  ASSERT_TRUE(succeeded(info));
+  EXPECT_EQ(info->base, f.getArgument(0));
+  EXPECT_FALSE(info->hasScalarBase());
+  EXPECT_TRUE(info->offsets.isUniform());
+  EXPECT_TRUE(succeeded(
+      mlir::triton::ptr::detail::validateInfo(f.getArgument(0), *info)));
+  Value full = dyn_cast<Value>(info->offsets.fullOffsets);
+  ASSERT_TRUE(full);
+  auto generated = full.getDefiningOp<tensor::GenerateOp>();
+  ASSERT_TRUE(generated);
+  EXPECT_EQ(generated.getType(),
+            RankedTensorType::get({ShapedType::kDynamic}, b.getI64Type()));
+  auto zero = test::evaluate(
+      generated.getBody().front().getTerminator()->getOperand(0));
+  ASSERT_TRUE(zero);
+  EXPECT_TRUE(zero->front().isZero());
+  unsigned before = count(*module);
+  ASSERT_TRUE(succeeded(analysis.analyze(f.getArgument(0))));
+  EXPECT_EQ(count(*module), before);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 TEST(PtrAnalysisAddress, DenseMapGrowthAndCSEAfterSession) {
   MLIRContext context;
   load(context);
@@ -431,7 +539,7 @@ TEST(PtrAnalysisAddress, DenseMapGrowthAndCSEAfterSession) {
   OpBuilder b(f.getBody().front().getTerminator());
   SmallVector<OpFoldResult> kept;
   {
-    PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+    PtrAnalysis analysis(b);
     auto first = test::getInfo(analysis.analyze(ptrs[0]));
     ASSERT_TRUE(succeeded(first));
     auto copy = *analysis.findCached(ptrs[0]);

@@ -35,6 +35,7 @@
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
@@ -1005,132 +1006,221 @@ void addReduceWithIndexAttr(ReduceWithIndexParams params,
   reduceOp->setAttr(unsignedSrcRef, rewriter.getStringAttr(unsignedSrcStr));
 }
 
+namespace {
+// Match the comparison that chooses the first value/index pair. Comparing
+// operands in the opposite order is equivalent to reversing min and max.
+FailureOr<ReduceWithIndexParams>
+matchReduceValueComparison(Value condition, Value lhs, Value rhs) {
+  ReduceWithIndexParams params;
+  Value cmpLhs, cmpRhs;
+  if (auto cmp = condition.getDefiningOp<arith::CmpIOp>()) {
+    cmpLhs = cmp.getLhs();
+    cmpRhs = cmp.getRhs();
+    switch (cmp.getPredicate()) {
+    case arith::CmpIPredicate::slt:
+    case arith::CmpIPredicate::ult:
+      params.withIndexType = ReduceWithIndexType::MIN;
+      break;
+    case arith::CmpIPredicate::sgt:
+    case arith::CmpIPredicate::ugt:
+      params.withIndexType = ReduceWithIndexType::MAX;
+      break;
+    default:
+      return failure();
+    }
+    params.isUnsignedSrc = cmp.getPredicate() == arith::CmpIPredicate::ult ||
+                           cmp.getPredicate() == arith::CmpIPredicate::ugt;
+  } else if (auto cmp = condition.getDefiningOp<arith::CmpFOp>()) {
+    cmpLhs = cmp.getLhs();
+    cmpRhs = cmp.getRhs();
+    switch (cmp.getPredicate()) {
+    case arith::CmpFPredicate::OLT:
+    case arith::CmpFPredicate::ULT:
+      params.withIndexType = ReduceWithIndexType::MIN;
+      break;
+    case arith::CmpFPredicate::OGT:
+    case arith::CmpFPredicate::UGT:
+      params.withIndexType = ReduceWithIndexType::MAX;
+      break;
+    default:
+      return failure();
+    }
+  } else {
+    return failure();
+  }
+
+  if (cmpLhs == lhs && cmpRhs == rhs)
+    return params;
+  if (cmpLhs != rhs || cmpRhs != lhs)
+    return failure();
+  params.withIndexType = params.withIndexType == ReduceWithIndexType::MIN
+                             ? ReduceWithIndexType::MAX
+                             : ReduceWithIndexType::MIN;
+  return params;
+}
+
+bool matchEqualReduceValues(Value condition, Value lhs, Value rhs) {
+  Value cmpLhs, cmpRhs;
+  if (auto cmp = condition.getDefiningOp<arith::CmpIOp>()) {
+    if (cmp.getPredicate() != arith::CmpIPredicate::eq)
+      return false;
+    cmpLhs = cmp.getLhs();
+    cmpRhs = cmp.getRhs();
+  } else if (auto cmp = condition.getDefiningOp<arith::CmpFOp>()) {
+    if (cmp.getPredicate() != arith::CmpFPredicate::OEQ &&
+        cmp.getPredicate() != arith::CmpFPredicate::UEQ)
+      return false;
+    cmpLhs = cmp.getLhs();
+    cmpRhs = cmp.getRhs();
+  } else {
+    return false;
+  }
+  return (cmpLhs == lhs && cmpRhs == rhs) || (cmpLhs == rhs && cmpRhs == lhs);
+}
+
+bool matchReduceIsNaN(Value condition, Value value, bool isNaN = true) {
+  if (auto cmp = condition.getDefiningOp<arith::CmpFOp>()) {
+    if (cmp.getLhs() != value || cmp.getRhs() != value)
+      return false;
+    auto pred = cmp.getPredicate();
+    return isNaN ? (pred == arith::CmpFPredicate::UNE ||
+                    pred == arith::CmpFPredicate::UNO)
+                 : (pred == arith::CmpFPredicate::OEQ ||
+                    pred == arith::CmpFPredicate::ORD);
+  }
+  if (!isNaN) {
+    if (auto negate = condition.getDefiningOp<arith::XOrIOp>()) {
+      if (matchPattern(negate.getRhs(), m_One()))
+        return matchReduceIsNaN(negate.getLhs(), value);
+      if (matchPattern(negate.getLhs(), m_One()))
+        return matchReduceIsNaN(negate.getRhs(), value);
+    }
+  }
+  return false;
+}
+
+bool matchReduceNaNPair(Value condition, Value lhs, Value rhs, bool rhsIsNaN) {
+  auto both = condition.getDefiningOp<arith::AndIOp>();
+  return both && ((matchReduceIsNaN(both.getLhs(), lhs) &&
+                   matchReduceIsNaN(both.getRhs(), rhs, rhsIsNaN)) ||
+                  (matchReduceIsNaN(both.getRhs(), lhs) &&
+                   matchReduceIsNaN(both.getLhs(), rhs, rhsIsNaN)));
+}
+
+bool matchEqualReduceValuesOrNaNs(Value condition, Value lhs, Value rhs) {
+  auto either = condition.getDefiningOp<arith::OrIOp>();
+  return either && ((matchEqualReduceValues(either.getLhs(), lhs, rhs) &&
+                     matchReduceNaNPair(either.getRhs(), lhs, rhs, true)) ||
+                    (matchEqualReduceValues(either.getRhs(), lhs, rhs) &&
+                     matchReduceNaNPair(either.getLhs(), lhs, rhs, true)));
+}
+
+FailureOr<TieBreakType> matchReduceIndexComparison(Value condition, Value lhs,
+                                                   Value rhs) {
+  auto cmp = condition.getDefiningOp<arith::CmpIOp>();
+  if (!cmp || (cmp.getPredicate() != arith::CmpIPredicate::slt &&
+               cmp.getPredicate() != arith::CmpIPredicate::sgt))
+    return failure();
+  bool preferLeft = cmp.getPredicate() == arith::CmpIPredicate::slt;
+  if (cmp.getLhs() == rhs && cmp.getRhs() == lhs)
+    preferLeft = !preferLeft;
+  else if (cmp.getLhs() != lhs || cmp.getRhs() != rhs)
+    return failure();
+  return preferLeft ? TieBreakType::LEFT : TieBreakType::RIGHT;
+}
+} // namespace
+
 llvm::FailureOr<ReduceWithIndexParams>
 getReduceWithIndexParams(triton::ReduceOp op) {
-  auto tritonReduceBlock = op.getBody();
-  auto *tritonYield = tritonReduceBlock->getTerminator();
-  auto yieldValues = tritonYield->getOperands();
-  constexpr int yieldValuesNum = 2;
-  if (yieldValues.empty()) {
-    return llvm::failure();
-  }
-  if (yieldValues.size() != yieldValuesNum) {
+  Block *block = op.getBody();
+  auto results = block->getTerminator()->getOperands();
+  if (results.empty())
+    return failure();
+  if (results.size() != 2)
     return ReduceWithIndexParams{};
-  }
+  if (block->getNumArguments() != 4 ||
+      !isa<IntegerType>(block->getArgument(1).getType()))
+    return failure();
 
-  // Unify signed/unsigned and int/float predicate
-  enum class Predicate { Undefined = 0, lt = 1, gt = 2, eq = 3 };
-  enum class Signedness { NotApplicable = 0, Signed = 1, Unsigned = 2 };
-  auto unifyPredicateI =
-      [](arith::CmpIPredicate p) -> std::pair<Predicate, Signedness> {
-    switch (p) {
-    case arith::CmpIPredicate::slt:
-      return {Predicate::lt, Signedness::Signed};
-    case arith::CmpIPredicate::ult:
-      return {Predicate::lt, Signedness::Unsigned};
-    case arith::CmpIPredicate::sgt:
-      return {Predicate::gt, Signedness::Signed};
-    case arith::CmpIPredicate::ugt:
-      return {Predicate::gt, Signedness::Unsigned};
-    case arith::CmpIPredicate::eq:
-      return {Predicate::eq, Signedness::NotApplicable};
-    default:
-      return {Predicate::Undefined, Signedness::NotApplicable};
-    }
-  };
-  auto unifyPredicateF =
-      [](arith::CmpFPredicate p) -> std::pair<Predicate, Signedness> {
-    switch (p) {
-    case arith::CmpFPredicate::OLT:
-      return {Predicate::lt, Signedness::Signed};
-    case arith::CmpFPredicate::ULT:
-      return {Predicate::lt, Signedness::Unsigned};
-    case arith::CmpFPredicate::OGT:
-      return {Predicate::gt, Signedness::Signed};
-    case arith::CmpFPredicate::UGT:
-      return {Predicate::gt, Signedness::Unsigned};
-    case arith::CmpFPredicate::OEQ:
-      return {Predicate::eq, Signedness::Signed};
-    case arith::CmpFPredicate::UEQ:
-      return {Predicate::eq, Signedness::Unsigned};
-    default:
-      return {Predicate::Undefined, Signedness::NotApplicable};
-    }
-  };
+  // Both outputs must select the same pair. Predicate sequences alone also
+  // match unrelated tuple reductions, e.g. (max(value), sum(count)).
+  auto valueSelect = results[0].getDefiningOp<arith::SelectOp>();
+  auto indexSelect = results[1].getDefiningOp<arith::SelectOp>();
+  if (!valueSelect || !indexSelect ||
+      valueSelect.getCondition() != indexSelect.getCondition())
+    return failure();
+  unsigned first = valueSelect.getTrueValue() == block->getArgument(0) ? 0 : 2;
+  unsigned second = 2 - first;
+  Value lhs = block->getArgument(first);
+  Value rhs = block->getArgument(second);
+  Value lhsIndex = block->getArgument(first + 1);
+  Value rhsIndex = block->getArgument(second + 1);
+  if (valueSelect.getTrueValue() != lhs || valueSelect.getFalseValue() != rhs ||
+      indexSelect.getTrueValue() != lhsIndex ||
+      indexSelect.getFalseValue() != rhsIndex)
+    return failure();
 
-  // Composite predicate to pick index of min (or max) element have to be
-  // written in following form: (v means value and i means index)
-  // For leftmost element:
-  //    (new_v == old_v and new_i < old_i) or new_v < old_v
-  //    new_v < old_v or (new_v == old_v and new_i < old_i)
-  //    new_v < old_v // python3.11 ttir
-  //    (new_v == old_v and new_i < old_i) or new_v > old_v
-  //    new_v > old_v or (new_v == old_v and new_i < old_i)
-  //    new_v > old_v // python3.11 ttir
-  // For rightmost element:
-  //    (new_v == old_v and new_i > old_i) or new_v < old_v
-  //    new_v < old_v or (new_v == old_v and new_i > old_i)
-  //    (new_v == old_v and new_i > old_i) or new_v > old_v
-  //    new_v > old_v or (new_v == old_v and new_i > old_i)
-
-  std::map<std::vector<Predicate>, std::pair<ReduceWithIndexType, TieBreakType>>
-      m{
-          // leftmost
-          {{Predicate::eq, Predicate::lt, Predicate::lt},
-           {ReduceWithIndexType::MIN, TieBreakType::LEFT}},
-          {{Predicate::lt, Predicate::eq, Predicate::lt},
-           {ReduceWithIndexType::MIN, TieBreakType::LEFT}},
-          {{Predicate::lt}, {ReduceWithIndexType::MIN, TieBreakType::LEFT}},
-          {{Predicate::eq, Predicate::lt, Predicate::gt},
-           {ReduceWithIndexType::MAX, TieBreakType::LEFT}},
-          {{Predicate::gt, Predicate::eq, Predicate::lt},
-           {ReduceWithIndexType::MAX, TieBreakType::LEFT}},
-          {{Predicate::gt}, {ReduceWithIndexType::MAX, TieBreakType::LEFT}},
-          // rightmost
-          {{Predicate::eq, Predicate::gt, Predicate::lt},
-           {ReduceWithIndexType::MIN, TieBreakType::RIGHT}},
-          {{Predicate::lt, Predicate::eq, Predicate::gt},
-           {ReduceWithIndexType::MIN, TieBreakType::RIGHT}},
-          {{Predicate::eq, Predicate::gt, Predicate::gt},
-           {ReduceWithIndexType::MAX, TieBreakType::RIGHT}},
-          {{Predicate::gt, Predicate::eq, Predicate::gt},
-           {ReduceWithIndexType::MAX, TieBreakType::RIGHT}},
-      };
-
-  std::vector<Predicate> preds;
-  std::vector<Signedness> signednesses;
-  // A better way is to trace the arith.select
-  // Checking the operations one by one is hacky :(
-  for (auto &op : tritonReduceBlock->without_terminator()) {
-    Predicate pred = Predicate::Undefined;
-    Signedness signedness = Signedness::NotApplicable;
-    if (auto cmpiOp = dyn_cast<arith::CmpIOp>(op)) {
-      auto predi = cmpiOp.getPredicate();
-      std::tie(pred, signedness) = unifyPredicateI(predi);
-    }
-    if (auto cmpfOp = dyn_cast<arith::CmpFOp>(op)) {
-      auto predf = cmpfOp.getPredicate();
-      std::tie(pred, signedness) = unifyPredicateF(predf);
-    }
-    if (pred != Predicate::Undefined) {
-      preds.push_back(pred);
-      signednesses.push_back(signedness);
+  // Flatten only the outer OR: value comparison, optional NaN preference,
+  // and optional equality/index tie-break. The NaN-aware form is used by
+  // Inductor's minimum_with_index and maximum_with_index combiners.
+  SmallVector<Value> worklist{valueSelect.getCondition()};
+  SmallVector<Value> conditions;
+  while (!worklist.empty()) {
+    Value condition = worklist.pop_back_val();
+    if (auto either = condition.getDefiningOp<arith::OrIOp>()) {
+      worklist.push_back(either.getLhs());
+      worklist.push_back(either.getRhs());
+    } else {
+      conditions.push_back(condition);
+      if (conditions.size() > 3)
+        return failure();
     }
   }
 
-  // check if sequence of predicates matches any sequence for min/max
-  // leftmost/rightmost
-  if (m.find(preds) == m.end()) {
-    return llvm::failure();
-  }
+  ReduceWithIndexParams params;
+  bool hasComparison = false;
+  bool preferNaN = false;
+  bool equalNaNs = false;
+  for (Value condition : conditions) {
+    auto comparison = matchReduceValueComparison(condition, lhs, rhs);
+    if (succeeded(comparison)) {
+      if (hasComparison)
+        return failure();
+      params.withIndexType = comparison->withIndexType;
+      params.isUnsignedSrc = comparison->isUnsignedSrc;
+      hasComparison = true;
+      continue;
+    }
+    if (matchReduceNaNPair(condition, lhs, rhs, false)) {
+      if (preferNaN)
+        return failure();
+      preferNaN = true;
+      continue;
+    }
 
-  assert(!signednesses.empty());
-  const bool isUnsignedSrc =
-      signednesses[0] == Signedness::Unsigned ||
-      signednesses[signednesses.size() - 1] == Signedness::Unsigned;
-  return ReduceWithIndexParams{.withIndexType = m.at(preds).first,
-                               .tieBreakType = m.at(preds).second,
-                               .isUnsignedSrc = isUnsignedSrc};
+    auto both = condition.getDefiningOp<arith::AndIOp>();
+    if (!both || params.tieBreakType != TieBreakType::None)
+      return failure();
+    Value equality = both.getRhs();
+    auto tieBreak =
+        matchReduceIndexComparison(both.getLhs(), lhsIndex, rhsIndex);
+    if (failed(tieBreak)) {
+      equality = both.getLhs();
+      tieBreak = matchReduceIndexComparison(both.getRhs(), lhsIndex, rhsIndex);
+    }
+    if (failed(tieBreak))
+      return failure();
+    if (!matchEqualReduceValues(equality, lhs, rhs)) {
+      if (!matchEqualReduceValuesOrNaNs(equality, lhs, rhs))
+        return failure();
+      equalNaNs = true;
+    }
+    params.tieBreakType = *tieBreak;
+  }
+  if (!hasComparison ||
+      (params.tieBreakType != TieBreakType::None && preferNaN != equalNaNs))
+    return failure();
+  return params;
 }
 
 // Specialize the Typeless Value (Zero, Min, Max) into a mlir TypedAttr

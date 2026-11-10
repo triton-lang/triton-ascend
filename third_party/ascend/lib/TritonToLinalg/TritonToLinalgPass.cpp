@@ -27,7 +27,6 @@
 #include "TritonToGraph/LayoutMemoryOptimization.h"
 #include "TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
-#include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
 #include "ascend/include/TritonToLinalg/CanonicalizeDebugLocationsPass.h"
 #include "ascend/include/TritonToLinalg/DeduplicateDebugNopsPass.h"
 #include "ascend/include/TritonToLinalg/DescriptorConverter.h"
@@ -1684,8 +1683,6 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::ClampFConverter>(patterns.getContext());
   patterns.add<TTOpConverters::PreciseDivConverter>(patterns.getContext());
   // reduce converters
-  patterns.add<TTOpConverters::ArgMinConverter>(patterns.getContext());
-  patterns.add<TTOpConverters::ArgMaxConverter>(patterns.getContext());
   patterns.add<TTOpConverters::ReduceConverter>(patterns.getContext());
   patterns.add<TTOpConverters::ScanConverter>(patterns.getContext());
   patterns.add<TTOpConverters::MapElementwiseDecomposeConverter>(

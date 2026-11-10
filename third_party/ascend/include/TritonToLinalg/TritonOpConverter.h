@@ -434,6 +434,9 @@ protected:
                             ConversionPatternRewriter &rewriter) const = 0;
 };
 
+void populatePostConversionCanonicalizationPatterns(
+    RewritePatternSet &patterns);
+
 class ReduceConverter : public ReductionOpBaseConverter<triton::ReduceOp> {
 public:
   explicit ReduceConverter(MLIRContext *context)

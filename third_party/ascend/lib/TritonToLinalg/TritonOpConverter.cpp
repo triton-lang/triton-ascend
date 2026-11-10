@@ -32,6 +32,7 @@
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 
+#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVectorExtras.h"
@@ -1552,6 +1553,44 @@ ReduceConverter::convertToTargetOp(triton::ReduceOp op,
   return success();
 }
 
+// Floating comparisons have no identity in the presence of NaNs. A comparison
+// without an index tie-break can also retain a synthetic index when all values
+// equal the extremum. Seed these idempotent reductions with an actual input
+// pair.
+static Value getFirstReduceElement(ConversionPatternRewriter &rewriter,
+                                   Location loc, Value input,
+                                   RankedTensorType resultType, int64_t axis) {
+  auto inputType = cast<RankedTensorType>(input.getType());
+  SmallVector<OpFoldResult> offsets(inputType.getRank(),
+                                    rewriter.getIndexAttr(0));
+  SmallVector<OpFoldResult> strides(inputType.getRank(),
+                                    rewriter.getIndexAttr(1));
+  auto sizes = tensor::getMixedSizes(rewriter, loc, input);
+  sizes[axis] = rewriter.getIndexAttr(1);
+  return rewriter.create<tensor::ExtractSliceOp>(loc, resultType, input,
+                                                 offsets, sizes, strides);
+}
+
+static TypedAttr getReduceWithIndexIdentity(OpBuilder &builder, Type type,
+                                            const ReduceWithIndexParams &params,
+                                            bool isIndex) {
+  if (isIndex) {
+    unsigned width = cast<IntegerType>(type).getWidth();
+    return builder.getIntegerAttr(type,
+                                  params.tieBreakType == TieBreakType::LEFT
+                                      ? llvm::APInt::getSignedMaxValue(width)
+                                      : llvm::APInt::getSignedMinValue(width));
+  }
+  bool isMax = params.withIndexType == ReduceWithIndexType::MAX;
+  unsigned width = cast<IntegerType>(type).getWidth();
+  llvm::APInt value = params.isUnsignedSrc
+                          ? (isMax ? llvm::APInt::getZero(width)
+                                   : llvm::APInt::getMaxValue(width))
+                          : (isMax ? llvm::APInt::getSignedMinValue(width)
+                                   : llvm::APInt::getSignedMaxValue(width));
+  return builder.getIntegerAttr(type, value);
+}
+
 LogicalResult ReduceConverter::convertToTargetOpExtended(
     triton::ReduceOp op, typename triton::ReduceOp::Adaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
@@ -1629,6 +1668,11 @@ LogicalResult ReduceConverter::convertToTargetOpExtended(
     return success();
   }
 
+  auto params = getReduceWithIndexParams(op);
+  if (failed(params))
+    return rewriter.notifyMatchFailure(
+        op, "unsupported reduce-with-index combiner");
+  bool withIndex = params->withIndexType != ReduceWithIndexType::None;
   auto elemTypes = op.getElementTypes();
 
   auto valueResultType = dyn_cast<RankedTensorType>(op.getType(0));
@@ -1640,8 +1684,23 @@ LogicalResult ReduceConverter::convertToTargetOpExtended(
     SmallVector<int64_t> resultShape{
         isScalarReduce ? SmallVector<int64_t>{}
                        : SmallVector<int64_t>(result.getShape())};
-    outputs.push_back(
-        rewriter.create<tensor::EmptyOp>(loc, resultShape, elemTypes[i]));
+    auto resultType = RankedTensorType::get(resultShape, elemTypes[i]);
+    if (withIndex && (params->tieBreakType == TieBreakType::None ||
+                      isa<FloatType>(elemTypes[0]))) {
+      outputs.push_back(getFirstReduceElement(rewriter, loc, operands[i],
+                                              resultType, op.getAxis()));
+      continue;
+    }
+    Value init =
+        rewriter.create<tensor::EmptyOp>(loc, resultShape, elemTypes[i]);
+    if (withIndex) {
+      auto identity =
+          getReduceWithIndexIdentity(rewriter, elemTypes[i], *params,
+                                     /*isIndex=*/i == 1);
+      Value constant = rewriter.create<arith::ConstantOp>(loc, identity);
+      init = rewriter.create<linalg::FillOp>(loc, constant, init).getResult(0);
+    }
+    outputs.push_back(init);
   }
 
   auto linalgOp = rewriter.create<linalg::ReduceOp>(
@@ -1663,12 +1722,8 @@ LogicalResult ReduceConverter::convertToTargetOpExtended(
         b.create<linalg::YieldOp>(loc, results);
       });
 
-  auto params = getReduceWithIndexParams(op);
-  if (failed(params)) {
-    return rewriter.notifyMatchFailure(op, "meaningless reduce operation");
-  } else if (params->withIndexType != ReduceWithIndexType::None) {
+  if (withIndex)
     addReduceWithIndexAttr(*params, rewriter, linalgOp);
-  }
 
   insertDebugNop(loc, rewriter);
   if (isScalarReduce) {

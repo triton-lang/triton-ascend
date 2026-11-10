@@ -17,7 +17,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-
 """End-to-end coverage for the bool pointer bitcast fix.
 
 The kernel builds an [BLOCK_M, 1, BLOCK_N] pointer tile where only the outer
@@ -101,8 +100,7 @@ def test_bool_middle_axis_store(compile_mode, M, N):
     out = torch.zeros((M, 1, N), dtype=torch.bool, device="npu")
 
     grid = (triton.cdiv(M, block_m), )
-    bool_middle_axis_store_kernel[grid](x, out, M, N, BLOCK_M=block_m, BLOCK_N=block_n,
-                                        compile_mode=compile_mode)
+    bool_middle_axis_store_kernel[grid](x, out, M, N, BLOCK_M=block_m, BLOCK_N=block_n, compile_mode=compile_mode)
     torch.npu.synchronize()
 
     expected = (x > 0).reshape(M, 1, N)

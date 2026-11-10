@@ -701,6 +701,12 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
       auto type = dyn_cast<RankedTensorType>(data.getType());
       if (!type || type.getRank() != sizes.size())
         return nullptr;
+      // Moving singleton axes preserves element order under reshape. Multiple
+      // non-singleton axes may require a transpose, which is not supported yet.
+      auto shape = type.getShape();
+      if (std::count_if(shape.begin(), shape.end(),
+                        [](int64_t dim) { return dim != 1; }) > 1)
+        return nullptr;
     }
   }
 
@@ -847,11 +853,10 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
           permutedSizes.push_back(dataType.getShape()[id]);
         }
 
-        // Keep the address expression in reshape form. TritonToLinalg
-        // decides whether reordering requires a transpose; moving singleton
-        // axes (e.g. 1x1x1x64) only requires a reshape.
+        // The check above guarantees that only singleton axes move or are
+        // removed, so the data's element order must be preserved.
         dataTile = builder.create<triton::ReshapeOp>(
-            loc, permutedSizes, dataTile, /*allowReorder=*/!identityPermute);
+            loc, permutedSizes, dataTile, /*allowReorder=*/false);
       }
       dataTile =
           builder.create<triton::BroadcastOp>(loc, broadCastType, dataTile);

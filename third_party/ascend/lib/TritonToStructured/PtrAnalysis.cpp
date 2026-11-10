@@ -281,6 +281,69 @@ LogicalResult PtrAnalysis::visitOperandAddptr(triton::AddPtrOp addptrOp,
   return state.addState(ptrState, offsetState, addptrOp, builder);
 }
 
+// i1 is stored as one byte in the Ascend ABI, so pointer arithmetic over
+// ptr<i1> uses byte units just like ptr<i8>.
+static std::optional<unsigned> getPointerStorageBits(Type pointeeType) {
+  if (auto intType = dyn_cast<IntegerType>(pointeeType))
+    return intType.getWidth() == 1 ? 8u : intType.getWidth();
+  if (auto floatType = dyn_cast<FloatType>(pointeeType))
+    return floatType.getWidth();
+  return std::nullopt;
+}
+
+// Continue the analysis through a pointer element-type cast when the pointee
+// storage width is unchanged. Such a cast is a pure reinterpretation: the
+// offsets before the cast stay valid after it, only the base pointer element
+// type changes. Recursing into the cast source keeps the broadcast/addptr
+// structure visible instead of treating the whole pointer tensor as an opaque
+// base. The frontend emits `ptr<i1> -> ptr<i8>` this way for bool load/store.
+LogicalResult PtrAnalysis::visitOperandBitcast(triton::BitcastOp bitcastOp,
+                                               PtrState &state,
+                                               const Location loc,
+                                               OpBuilder &builder) {
+  Type sourceType = bitcastOp.getSrc().getType();
+  Type resultType = bitcastOp.getType();
+
+  if (auto sourceTensor = dyn_cast<RankedTensorType>(sourceType)) {
+    auto resultTensor = dyn_cast<RankedTensorType>(resultType);
+    if (!resultTensor || sourceTensor.getShape() != resultTensor.getShape())
+      return failure();
+  } else if (!isa<triton::PointerType>(sourceType) ||
+             !isa<triton::PointerType>(resultType)) {
+    return failure();
+  }
+
+  auto scalarPointerType = [](Type type) -> Type {
+    if (auto tensorType = dyn_cast<RankedTensorType>(type))
+      return tensorType.getElementType();
+    return type;
+  };
+  auto sourcePtrType =
+      dyn_cast<triton::PointerType>(scalarPointerType(sourceType));
+  auto resultPtrType =
+      dyn_cast<triton::PointerType>(scalarPointerType(resultType));
+  if (!sourcePtrType || !resultPtrType ||
+      sourcePtrType.getAddressSpace() != resultPtrType.getAddressSpace())
+    return failure();
+
+  auto sourceBits = getPointerStorageBits(sourcePtrType.getPointeeType());
+  auto resultBits = getPointerStorageBits(resultPtrType.getPointeeType());
+  if (!sourceBits || !resultBits || *sourceBits != *resultBits)
+    return failure();
+
+  PtrState inner;
+  if (visitOperand(bitcastOp.getSrc(), inner, loc, builder).failed())
+    return failure();
+  if (!inner.source || !isa<triton::PointerType>(inner.source.getType()))
+    return failure();
+
+  if (inner.source.getType() != resultPtrType)
+    inner.source =
+        builder.create<triton::BitcastOp>(loc, resultPtrType, inner.source);
+  state = std::move(inner);
+  return success();
+}
+
 LogicalResult
 PtrAnalysis::visitOperandMakeTensorPtr(triton::MakeTensorPtrOp makeTPtrOp,
                                        PtrState &state, const Location loc,
@@ -385,6 +448,8 @@ LogicalResult PtrAnalysis::initStateByPointer(Value operand, PtrState &state,
       return visitOperandAddptr(cast<triton::AddPtrOp>(op), state, loc,
                                 builder);
     } else if (auto bitCastOp = dyn_cast<triton::BitcastOp>(op)) {
+      if (succeeded(visitOperandBitcast(bitCastOp, state, loc, builder)))
+        return success();
       newSource = operand;
     } else if (auto makeTensorOp = dyn_cast<triton::MakeTensorPtrOp>(op)) {
       LLVM_DEBUG({
@@ -1571,6 +1636,8 @@ LogicalResult PtrAnalysis::visitOperand(Value operand, PtrState &state,
     return visitOperandExpandDims(op, state, loc, builder);
   } else if (auto op = operand.getDefiningOp<triton::AddPtrOp>()) {
     return visitOperandAddptr(op, state, loc, builder);
+  } else if (auto op = operand.getDefiningOp<triton::BitcastOp>()) {
+    return visitOperandBitcast(op, state, loc, builder);
   } else if (auto op = operand.getDefiningOp<arith::ConstantOp>()) {
     return visitOperandConstSplat(op, state, loc, builder);
   } else if (auto op = operand.getDefiningOp<arith::RemSIOp>()) {

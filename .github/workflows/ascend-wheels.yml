@@ -489,6 +489,15 @@ jobs:
               print("contents:", sorted(os.listdir(backend_dir)))
               bin_dir = os.path.join(backend_dir, "bin")
               print("bin:", sorted(os.listdir(bin_dir)) if os.path.isdir(bin_dir) else "<no bin/>")
+
+          # Verify the TD build (wheels.Dockerfile TRITON_BUILD_TD=ON) bundled
+          # triton_dist next to triton. File-existence check only: importing
+          # triton_dist pulls runtime deps (torch/shmem) this pod may lack.
+          site_packages = os.path.dirname(os.path.dirname(triton.__file__))
+          libshmem = os.path.join(site_packages, "triton_dist", "language",
+                                  "extra", "libshmem_device.py")
+          print("triton_dist libshmem_device:", libshmem)
+          assert os.path.isfile(libshmem), f"missing {libshmem}"
           PYEOF
           python3 -m pip install pytest pytest-xdist 2>/dev/null || true
           python3 -m pytest -s -v -n 4 --dist=loadfile \

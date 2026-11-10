@@ -22,8 +22,9 @@
 
 #include "TritonMemoryAccess/PtrAnalysis.h"
 #include "PtrAnalysisTestUtils.h"
-#include "TritonMemoryAccess/PtrAnalysisRules/CommonPtrRules.h"
+#include "TritonMemoryAccess/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Parser/Parser.h"
@@ -69,7 +70,7 @@ TEST(PtrAnalysis, UnsupportedInputTypesEmitErrors) {
   ASSERT_TRUE(module);
   auto func = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   SmallVector<std::string> diagnostics;
   ScopedDiagnosticHandler handler(&context, [&](Diagnostic &diagnostic) {
     EXPECT_EQ(diagnostic.getSeverity(), DiagnosticSeverity::Error);
@@ -97,7 +98,7 @@ TEST(PtrAnalysis, UnsupportedInputTypesEmitErrors) {
   PtrInfo wideBinding;
   wideBinding.offsets.valueType = func.getArgument(3).getType();
   wideBinding.offsets.fullOffsets = func.getArgument(3);
-  EXPECT_TRUE(failed(analysis.bind(func.getArgument(3), wideBinding)));
+  EXPECT_TRUE(failed(analysis.setInfo(func.getArgument(3), wideBinding)));
 }
 
 TEST(PtrAnalysis, MakeRangeKeepsSignedOrigins) {
@@ -116,7 +117,7 @@ TEST(PtrAnalysis, MakeRangeKeepsSignedOrigins) {
   ASSERT_TRUE(module);
   auto func = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   SmallVector<int64_t> starts{-4, -4, -4, 2};
   unsigned index = 0;
   for (auto range : func.getBody().front().getOps<triton::MakeRangeOp>()) {
@@ -162,7 +163,7 @@ TEST(PtrAnalysis, SignedDeltaIsAppliedAtEveryAddPtr) {
   ASSERT_EQ(pointers.size(), 3u);
 
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto source = test::getOffsets(analysis.analyze(add.getResult()));
   ASSERT_TRUE(succeeded(source));
   auto delta = test::getOffsets(analysis.analyze(add.getResult()));
@@ -198,7 +199,7 @@ TEST(PtrAnalysis, NarrowWrapLosesAddressStrideButKeepsExactTensor) {
   auto func = *module->getOps<triton::FuncOp>().begin();
   auto narrow = *func.getBody().front().getOps<arith::TruncIOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto address = test::getOffsets(analysis.analyze(narrow));
   auto source = test::getOffsets(analysis.analyze(narrow));
   ASSERT_TRUE(succeeded(address));
@@ -242,7 +243,7 @@ TEST(PtrAnalysis, AKnownAxisSurvivesAnUnrelatedOpaqueAxis) {
   auto func = *module->getOps<triton::FuncOp>().begin();
   auto sum = *func.getBody().front().getOps<arith::AddIOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto result = test::getOffsets(analysis.analyze(sum));
   ASSERT_TRUE(succeeded(result));
   EXPECT_EQ(result->getShape(), ArrayRef<int64_t>({2, 4}));
@@ -277,7 +278,7 @@ TEST(PtrAnalysis, SupportedIntegerWidthsAndIndex) {
   ASSERT_TRUE(module);
   auto func = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   for (Value value : func.getArguments()) {
     auto info = test::getOffsets(analysis.analyze(value));
     ASSERT_TRUE(succeeded(info));
@@ -296,7 +297,7 @@ TEST(PtrAnalysis, SupportedIntegerWidthsAndIndex) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
-TEST(PtrAnalysis, BroadcastDoesNotInventAUniformPtrOffset) {
+TEST(PtrAnalysis, BroadcastRecoversUniformPtrOffsetFromSelectedLane) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, tensor::TensorDialect,
                       triton::TritonDialect>();
@@ -317,13 +318,25 @@ TEST(PtrAnalysis, BroadcastDoesNotInventAUniformPtrOffset) {
   auto func = *module->getOps<triton::FuncOp>().begin();
   auto repeated = *func.getBody().front().getOps<triton::BroadcastOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto ptrInfo = test::getInfo(analysis.analyze(repeated));
   ASSERT_TRUE(succeeded(ptrInfo));
   EXPECT_EQ(ptrInfo->base, func.getArgument(0));
   EXPECT_EQ(test::axisKinds(ptrInfo->offsets),
             SmallVector<AxisKind>({AxisKind::Invariant}));
-  EXPECT_FALSE(ptrInfo->offsets.scalarOffset);
+  EXPECT_TRUE(ptrInfo->offsets.isUniform());
+  for (bool condition : {false, true}) {
+    test::Environment env{{func.getArgument(1), {llvm::APInt(1, condition)}},
+                          {func.getArgument(2), {llvm::APInt(32, -7, true)}},
+                          {func.getArgument(3), {llvm::APInt(32, 11)}}};
+    auto origin = evaluate(ptrInfo->offsets.scalarOffset, env);
+    auto lanes = evaluate(ptrInfo->offsets, env);
+    ASSERT_TRUE(origin && lanes);
+    EXPECT_EQ(origin->front().getSExtValue(), condition ? -7 : 11);
+    ASSERT_EQ(lanes->size(), 4u);
+    for (const auto &lane : *lanes)
+      EXPECT_EQ(lane.getSExtValue(), condition ? -7 : 11);
+  }
   EXPECT_EQ(scalar(ptrInfo->offsets.axes[0].stride), 0);
   EXPECT_TRUE(succeeded(verify(*module)));
 }
@@ -349,7 +362,7 @@ TEST(PtrAnalysis, UniformAddressHelpersDominateUses) {
     auto func = *module->getOps<triton::FuncOp>().begin();
     Value sum = (*func.getBody().front().getOps<arith::AddIOp>().begin());
     OpBuilder builder(&context);
-    PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+    PtrAnalysis analysis(builder);
     if (order == 1) {
       ASSERT_TRUE(succeeded(test::getOffsets(analysis.analyze(sum))));
       ASSERT_TRUE(succeeded(verify(*module)));
@@ -385,7 +398,7 @@ TEST(PtrAnalysis, UniformConstantsHaveScalarOriginsWithoutHelpers) {
     values.push_back(op.getResult(0));
   auto operationCount = block.getOperations().size();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   for (Value value : values) {
     auto info = test::getOffsets(analysis.analyze(value));
     ASSERT_TRUE(succeeded(info));
@@ -417,7 +430,7 @@ TEST(PtrAnalysis, SameWidthUnsignedIndexCastRange) {
   auto func = *module->getOps<triton::FuncOp>().begin();
   Value y = *func.getBody().front().getOps<arith::IndexCastUIOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   ASSERT_TRUE(succeeded(test::getOffsets(analysis.analyze(y))));
   EXPECT_TRUE(succeeded(verify(*module)));
 }
@@ -437,7 +450,7 @@ TEST(PtrAnalysis, IndexConstantUses64BitAttributeStorage) {
   auto func = *module->getOps<triton::FuncOp>().begin();
   Value x = *func.getBody().front().getOps<arith::ConstantOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto result = test::getOffsets(analysis.analyze(x));
   ASSERT_TRUE(succeeded(result));
   auto attr = cast<IntegerAttr>(cast<Attribute>(result->scalarOffset));
@@ -469,7 +482,7 @@ TEST(PtrAnalysis, DenseSplatPtrLanes) {
       auto add =
           b.create<triton::AddPtrOp>(b.getUnknownLoc(), p.getType(), p, x);
       b.create<triton::ReturnOp>(b.getUnknownLoc());
-      PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+      PtrAnalysis analysis(b);
       auto delta = test::getOffsets(analysis.analyze(x));
       auto result = test::getInfo(analysis.analyze(add));
       ASSERT_TRUE(succeeded(delta));
@@ -516,7 +529,7 @@ TEST(PtrAnalysis, IndexCastWidthAndExactValueMatrix) {
                        : Value(b.create<arith::IndexCastOp>(b.getUnknownLoc(),
                                                             out, x));
           b.create<triton::ReturnOp>(b.getUnknownLoc());
-          PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+          PtrAnalysis analysis(b);
           auto result = test::getInfo(analysis.analyze(y));
           ASSERT_TRUE(succeeded(result));
           for (int64_t n : {-1LL, 0LL, 1LL, 2147483647LL, 2147483648LL}) {
@@ -576,7 +589,7 @@ TEST(PtrAnalysis, IndexConstantArithmeticMatrix) {
       values.push_back(op->getResult(0));
   });
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   for (Value v : values) {
     auto result = test::getOffsets(analysis.analyze(v));
     ASSERT_TRUE(succeeded(result));
@@ -612,7 +625,7 @@ TEST(PtrAnalysis, UnsignedWideningPreservesProvenShapeAndNegativeStride) {
                                             &context);
   ASSERT_TRUE(module);
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   SmallVector<arith::ExtUIOp> casts;
   module->walk([&](arith::ExtUIOp op) { casts.push_back(op); });
   for (unsigned k = 0; k < casts.size(); ++k) {
@@ -640,7 +653,7 @@ TEST(PtrAnalysis, UnsignedWideningPreservesProvenShapeAndNegativeStride) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
-TEST(PtrAnalysis, IntegerSelectUsesTheSameConditionForAffineFields) {
+TEST(PtrAnalysis, IntegerSelectKeepsExactValuesAndSimpleUniformFacts) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, tensor::TensorDialect,
                       triton::TritonDialect>();
@@ -652,6 +665,8 @@ TEST(PtrAnalysis, IntegerSelectUsesTheSameConditionForAffineFields) {
       %s = arith.select %cond, %r, %reverse : tensor<4xi32>
       %same = arith.select %mask, %r, %r : tensor<4xi1>, tensor<4xi32>
       %mixed = arith.select %mask, %r, %reverse : tensor<4xi1>, tensor<4xi32>
+      %seven = arith.constant dense<7> : tensor<4xi32>
+      %uniform = arith.select %cond, %three, %seven : tensor<4xi32>
       tt.return
     } }
   )mlir",
@@ -661,14 +676,19 @@ TEST(PtrAnalysis, IntegerSelectUsesTheSameConditionForAffineFields) {
   SmallVector<arith::SelectOp> selects;
   f.walk([&](arith::SelectOp op) { selects.push_back(op); });
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   for (unsigned k = 0; k < selects.size(); ++k) {
     auto result = test::getInfo(analysis.analyze(selects[k]));
     ASSERT_TRUE(succeeded(result));
     auto &state = result->offsets;
     EXPECT_EQ(cast<Value>(state.fullOffsets), selects[k].getResult());
-    EXPECT_EQ(state.axes[0].kind,
-              k == 2 ? AxisKind::Unknown : AxisKind::Structured);
+    EXPECT_EQ(state.axes[0].kind, k == 1   ? AxisKind::Structured
+                                  : k == 3 ? AxisKind::Invariant
+                                           : AxisKind::Unknown);
+    if (k == 0 || k == 2) {
+      EXPECT_FALSE(state.scalarOffset);
+      EXPECT_TRUE(state.axes[0].subAxes.empty());
+    }
     for (bool condition : {false, true}) {
       test::Environment env{{f.getArgument(0), {llvm::APInt(1, condition)}},
                             {f.getArgument(1),
@@ -677,7 +697,12 @@ TEST(PtrAnalysis, IntegerSelectUsesTheSameConditionForAffineFields) {
       auto actual = evaluate(state, env);
       ASSERT_TRUE(actual);
       for (unsigned lane = 0; lane < 4; ++lane) {
-        if (k != 2) {
+        int64_t expected = k == 0   ? (condition ? lane : 3 - lane)
+                           : k == 1 ? lane
+                           : k == 2 ? (lane % 2 ? lane : 3 - lane)
+                                    : (condition ? 3 : 7);
+        EXPECT_EQ((*actual)[lane], llvm::APInt(64, expected));
+        if (k == 1 || k == 3) {
           auto c = evaluate(state.scalarOffset, env),
                s = evaluate(state.axes[0].stride, env);
           ASSERT_TRUE(c);
@@ -689,6 +714,10 @@ TEST(PtrAnalysis, IntegerSelectUsesTheSameConditionForAffineFields) {
     }
     EXPECT_TRUE(succeeded(verify(*module)));
   }
+  // Analysis must not introduce selects for per-axis descriptor fields.
+  unsigned selectCount = 0;
+  f.walk([&](arith::SelectOp) { ++selectCount; });
+  EXPECT_EQ(selectCount, selects.size());
 }
 
 TEST(PtrAnalysis, OpaqueRowsKeepBroadcastColumnStrides) {
@@ -717,7 +746,7 @@ TEST(PtrAnalysis, OpaqueRowsKeepBroadcastColumnStrides) {
   triton::AddPtrOp ptr;
   f.walk([&](triton::AddPtrOp op) { ptr = op; });
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto offset = test::getOffsets(analysis.analyze(sum));
   auto ptrInfo = test::getInfo(analysis.analyze(ptr));
   ASSERT_TRUE(succeeded(offset));
@@ -767,7 +796,7 @@ TEST(PtrAnalysis, MixedAxisPtrBroadcastAndUniformDeltaRemainExact) {
   SmallVector<triton::AddPtrOp> pointers;
   f.walk([&](triton::AddPtrOp op) { pointers.push_back(op); });
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto result = test::getInfo(analysis.analyze(pointers.back()));
   ASSERT_TRUE(succeeded(result));
   EXPECT_EQ(test::axisKinds(result->offsets),
@@ -786,7 +815,7 @@ TEST(PtrAnalysis, MixedAxisPtrBroadcastAndUniformDeltaRemainExact) {
   Value offset = pointers.back().getOffset();
   auto before = test::getOffsets(analysis.analyze(offset));
   ASSERT_TRUE(succeeded(before));
-  analysis.clear();
+  ASSERT_TRUE(succeeded(analysis.reset()));
   b.setInsertionPoint(f.getBody().front().getTerminator());
   b.create<arith::AddIOp>(f.getLoc(), offset, offset);
   auto after = test::getOffsets(analysis.analyze(offset));
@@ -810,7 +839,7 @@ TEST(PtrAnalysis, BoundNonSplatConstantPreservesEveryLane) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   Value x = f.getArgument(0);
   auto binding = test::getOffsets(analysis.analyze(x));
   ASSERT_TRUE(succeeded(binding));
@@ -819,7 +848,7 @@ TEST(PtrAnalysis, BoundNonSplatConstantPreservesEveryLane) {
     lanes.push_back(llvm::APInt(8, n, true));
   binding->fullOffsets =
       DenseIntElementsAttr::get(cast<RankedTensorType>(x.getType()), lanes);
-  ASSERT_TRUE(succeeded(analysis.bind(x, PtrInfo{{}, *binding})));
+  ASSERT_TRUE(succeeded(analysis.setInfo(x, PtrInfo{{}, *binding})));
   auto address = test::getOffsets(analysis.analyze(x));
   ASSERT_TRUE(succeeded(address));
   auto actual = evaluate(*address);
@@ -852,10 +881,10 @@ TEST(PtrAnalysis, SplatOriginsReuseScalarAndBindings) {
   for (auto splat : block.getOps<triton::SplatOp>())
     values.push_back(splat.getResult());
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto bound = buildOffsetInfo(source, builder);
   ASSERT_TRUE(succeeded(bound));
-  ASSERT_TRUE(succeeded(analysis.bind(source, PtrInfo{{}, *bound})));
+  ASSERT_TRUE(succeeded(analysis.reset({{source, PtrInfo{{}, *bound}}})));
   test::Environment env{{source, {llvm::APInt(8, -7, true)}}};
   for (Value value : values) {
     auto info = test::getOffsets(analysis.analyze(value));
@@ -877,7 +906,7 @@ TEST(PtrAnalysis, SplatOriginsReuseScalarAndBindings) {
 
   // A supplied origin is reused by parseSplat without another cast.
   bound->scalarOffset = builder.getIndexAttr(23);
-  ASSERT_TRUE(succeeded(analysis.bind(source, PtrInfo{{}, *bound})));
+  ASSERT_TRUE(succeeded(analysis.reset({{source, PtrInfo{{}, *bound}}})));
   auto operationCount = block.getOperations().size();
   for (Value value : values) {
     auto info = test::getOffsets(analysis.analyze(value));
@@ -909,7 +938,7 @@ TEST(PtrAnalysis, RankZeroSplatAddressAndPtrHaveScalarUniform) {
         f.getLoc(), RankedTensorType::get({}, integer), f.getArgument(1));
     Value next = b.create<triton::AddPtrOp>(f.getLoc(), p.getType(), p, d);
     b.create<triton::ReturnOp>(f.getLoc());
-    PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+    PtrAnalysis analysis(b);
     auto source = test::getOffsets(analysis.analyze(d));
     ASSERT_TRUE(succeeded(source));
     auto origin =
@@ -924,7 +953,7 @@ TEST(PtrAnalysis, RankZeroSplatAddressAndPtrHaveScalarUniform) {
     auto ptrInfo = test::getInfo(analysis.analyze(next));
     ASSERT_TRUE(succeeded(ptrInfo));
     EXPECT_EQ(ptrInfo->base, f.getArgument(0));
-    ASSERT_TRUE(succeeded(analysis.bind(next, *ptrInfo)));
+    ASSERT_TRUE(succeeded(analysis.setInfo(next, *ptrInfo)));
     for (llvm::APInt n : {llvm::APInt::getSignedMinValue(width),
                           llvm::APInt::getSignedMaxValue(width),
                           llvm::APInt(width, -1, true)}) {
@@ -958,11 +987,11 @@ TEST(PtrAnalysis, RankZeroOpaqueLeafCanBeReboundAndConsumed) {
   Value x = f.getArgument(0);
   Value sum = *f.getBody().front().getOps<arith::AddIOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto state = test::getOffsets(analysis.analyze(x));
   ASSERT_TRUE(succeeded(state));
   ASSERT_TRUE(cast<Value>(state->scalarOffset).getType().isIndex());
-  ASSERT_TRUE(succeeded(analysis.bind(x, PtrInfo{{}, *state})));
+  ASSERT_TRUE(succeeded(analysis.setInfo(x, PtrInfo{{}, *state})));
   auto derived = test::getOffsets(analysis.analyze(sum));
   ASSERT_TRUE(succeeded(derived));
   ASSERT_TRUE(cast<Value>(derived->scalarOffset).getType().isIndex());
@@ -995,7 +1024,7 @@ TEST(PtrAnalysis, DynamicTensorIndexPreserves64BitValues) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto address = test::getOffsets(analysis.analyze(f.getArgument(0)));
   ASSERT_TRUE(succeeded(address));
   test::Lanes lanes{llvm::APInt::getSignedMinValue(64),
@@ -1029,12 +1058,12 @@ TEST(PtrAnalysis, TensorIndexConstantsAndBindingsPreserve64BitValues) {
     auto attr = DenseIntElementsAttr::get(type, stored);
     Value constant = b.create<arith::ConstantOp>(f.getLoc(), attr);
     b.create<triton::ReturnOp>(f.getLoc());
-    PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+    PtrAnalysis analysis(b);
     auto bound = test::getOffsets(analysis.analyze(f.getArgument(0)));
     ASSERT_TRUE(succeeded(bound));
     bound->fullOffsets = attr;
     ASSERT_TRUE(
-        succeeded(analysis.bind(f.getArgument(0), PtrInfo{{}, *bound})));
+        succeeded(analysis.setInfo(f.getArgument(0), PtrInfo{{}, *bound})));
     for (Value value : {constant, Value(f.getArgument(0))}) {
       auto offsets = test::getOffsets(analysis.analyze(value));
       ASSERT_TRUE(succeeded(offsets));
@@ -1069,11 +1098,11 @@ TEST(PtrAnalysis, RankZeroIndexAndEncodedTensorKeepTheirTypes) {
                                       b.getFunctionType({type}, {}));
     b.setInsertionPointToStart(f.addEntryBlock());
     b.create<triton::ReturnOp>(f.getLoc());
-    PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+    PtrAnalysis analysis(b);
     auto source = test::getOffsets(analysis.analyze(f.getArgument(0)));
     ASSERT_TRUE(succeeded(source));
     ASSERT_TRUE(
-        succeeded(analysis.bind(f.getArgument(0), PtrInfo{{}, *source})));
+        succeeded(analysis.setInfo(f.getArgument(0), PtrInfo{{}, *source})));
     auto offsets = test::getOffsets(analysis.analyze(f.getArgument(0)));
     ASSERT_TRUE(succeeded(offsets));
     EXPECT_EQ(offsets->valueType,
@@ -1131,7 +1160,7 @@ TEST(PtrAnalysis, OffsetInfoConstructionLeavesOriginsToAnalysis) {
   EXPECT_EQ(f.getBody().front().getOperations().size(), operationCount);
   EXPECT_EQ(builder.getInsertionPoint(), point);
 
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   for (unsigned i : {0u, 2u, 3u, 5u}) {
     Value value = f.getArgument(i);
     auto info = analysis.analyze(value);
@@ -1182,7 +1211,7 @@ TEST(PtrAnalysis, RangeProofSurvivesArithmeticCastsAndShapes) {
   f.walk([&](arith::ExtUIOp op) { casts.push_back(op); });
   ASSERT_EQ(casts.size(), 2u);
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto good = test::getOffsets(analysis.analyze(casts[0]));
   auto bad = test::getOffsets(analysis.analyze(casts[1]));
   ASSERT_TRUE(succeeded(good));

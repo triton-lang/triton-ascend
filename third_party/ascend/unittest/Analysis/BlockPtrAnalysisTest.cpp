@@ -22,10 +22,12 @@
 
 #include "PtrAnalysisTestUtils.h"
 #include "TritonMemoryAccess/PtrAnalysis.h"
-#include "TritonMemoryAccess/PtrAnalysisRules/CommonPtrRules.h"
+#include "TritonMemoryAccess/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Parser/Parser.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "gtest/gtest.h"
 
 using namespace mlir;
@@ -73,7 +75,7 @@ TEST(PtrAnalysis, EffectiveCoordinatesUseI64AcrossI32Boundary) {
   func.walk([&](triton::AdvanceOp op) { advances.push_back(op); });
   ASSERT_EQ(advances.size(), 2u);
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto first = test::getInfo(analysis.analyze(advances[0]));
   auto second = test::getInfo(analysis.analyze(advances[1]));
   ASSERT_TRUE(succeeded(first));
@@ -112,7 +114,7 @@ TEST(PtrAnalysis, AddressViewUsesCoordinatesAndElementStrides) {
   auto make = *func.getBody().front().getOps<triton::MakeTensorPtrOp>().begin();
   auto ret = *func.getBody().front().getOps<triton::ReturnOp>().begin();
   OpBuilder builder(ret);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto block = test::getInfo(analysis.analyze(make));
   ASSERT_TRUE(succeeded(block));
   EXPECT_TRUE(block->offsets.hasStructuredForm());
@@ -166,7 +168,7 @@ TEST(PtrAnalysis, PtrFormsShareAddressesAndBaseBindings) {
   f.walk([&](triton::AddPtrOp op) { adds.push_back(op); });
   auto advance = *f.getBody().front().getOps<triton::AdvanceOp>().begin();
   OpBuilder builder(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto tensorResultCount = [&]() {
     unsigned count = 0;
     f.walk([&](Operation *op) {
@@ -185,7 +187,7 @@ TEST(PtrAnalysis, PtrFormsShareAddressesAndBaseBindings) {
     if (baseOffset != 128) {
       scalar->offsets.fullOffsets = builder.getIndexAttr(baseOffset);
       scalar->offsets.scalarOffset = builder.getIndexAttr(baseOffset);
-      ASSERT_TRUE(succeeded(analysis.bind(adds[1], *scalar)));
+      ASSERT_TRUE(succeeded(analysis.reset({{adds[1], *scalar}})));
       EXPECT_FALSE(test::getInfo(analysis.findCached(advance)));
       EXPECT_FALSE(test::getInfo(analysis.findCached(adds.back())));
     }
@@ -227,7 +229,7 @@ TEST(PtrAnalysis, PtrFormsShareAddressesAndBaseBindings) {
 }
 
 TEST(PtrAnalysis,
-     BlockBindingsRequireMetadataAndOrdinaryBindingsNeedExactFacts) {
+     BlockBindingsRequireMetadataAndOrdinaryBindingsNeedFullOffsets) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, triton::TritonDialect>();
   auto module = parseSourceString<ModuleOp>(R"mlir(
@@ -247,35 +249,37 @@ TEST(PtrAnalysis,
   auto next = *f.getBody().front().getOps<triton::AdvanceOp>().begin();
   Value ordinary = *f.getBody().front().getOps<triton::SplatOp>().begin();
   OpBuilder builder(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto block = test::getInfo(analysis.analyze(next));
   ASSERT_TRUE(succeeded(block));
   EXPECT_EQ(test::axisKinds(block->offsets),
             SmallVector<AxisKind>({AxisKind::Invariant}));
   EXPECT_EQ(integerOf(block->block->coordinateOffsets[0]), -6);
   EXPECT_EQ(integerOf(block->offsets.scalarOffset), 0);
-  EXPECT_TRUE(failed(analysis.bind(ordinary, *block)));
+  EXPECT_TRUE(failed(analysis.setInfo(ordinary, *block)));
   auto noMetadata = *block;
   noMetadata.block.reset();
-  EXPECT_TRUE(failed(analysis.bind(next, noMetadata)));
-  EXPECT_TRUE(succeeded(analysis.bind(ordinary, noMetadata)));
+  EXPECT_TRUE(failed(analysis.setInfo(next, noMetadata)));
+  // Removing block metadata does not supply the ordinary pointer's full value.
+  ASSERT_FALSE(noMetadata.offsets.fullOffsets);
+  EXPECT_TRUE(failed(analysis.setInfo(ordinary, noMetadata)));
   auto invalidOrder = *block;
   invalidOrder.block->order[0] = 1;
-  EXPECT_TRUE(failed(analysis.bind(next, invalidOrder)));
+  EXPECT_TRUE(failed(analysis.setInfo(next, invalidOrder)));
   auto unknownAxis = *block;
   unknownAxis.offsets.axes[0].kind = AxisKind::Unknown;
-  EXPECT_TRUE(failed(analysis.bind(next, unknownAxis)));
+  EXPECT_TRUE(failed(analysis.setInfo(next, unknownAxis)));
   auto invalidStride = *block;
   invalidStride.offsets.axes[0].stride = builder.getI32IntegerAttr(0);
-  EXPECT_TRUE(failed(analysis.bind(next, invalidStride)));
+  EXPECT_TRUE(failed(analysis.setInfo(next, invalidStride)));
   invalidStride.offsets.axes[0].stride = {};
-  EXPECT_TRUE(failed(analysis.bind(next, invalidStride)));
+  EXPECT_TRUE(failed(analysis.setInfo(next, invalidStride)));
   auto view = buildAddressView(*block, builder, next.getLoc());
   ASSERT_TRUE(succeeded(view));
   block->offsets.fullOffsets = view->fullOffsets;
-  ASSERT_TRUE(succeeded(analysis.bind(next, *block)));
+  ASSERT_TRUE(succeeded(analysis.setInfo(next, *block)));
   noMetadata.offsets = block->offsets;
-  EXPECT_TRUE(succeeded(analysis.bind(ordinary, noMetadata)));
+  EXPECT_TRUE(succeeded(analysis.setInfo(ordinary, noMetadata)));
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -304,7 +308,7 @@ TEST(PtrAnalysis, FullAddressOracleAfterDynamicAndNegativeAdvances) {
       pointers.push_back(op->getResult(0));
   });
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   for (unsigned stage = 0; stage < pointers.size(); ++stage) {
     auto block = test::getInfo(analysis.analyze(pointers[stage]));
     ASSERT_TRUE(succeeded(block));
@@ -370,26 +374,26 @@ TEST(PtrAnalysis, RebindingInvalidatesDerivedCoordinates) {
   auto make = *f.getBody().front().getOps<triton::MakeTensorPtrOp>().begin();
   auto next = *f.getBody().front().getOps<triton::AdvanceOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   EXPECT_TRUE(failed(test::getInfo(analysis.analyze(f.getArgument(1)))));
   auto binding = test::getInfo(analysis.analyze(make));
   ASSERT_TRUE(succeeded(binding));
   for (int64_t coord : {10, -20}) {
     binding->block->coordinateOffsets[0] = b.getIndexAttr(coord);
     binding->offsets.scalarOffset = b.getIndexAttr(coord);
-    ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(1), *binding)));
+    ASSERT_TRUE(succeeded(analysis.reset({{f.getArgument(1), *binding}})));
     auto result = test::getInfo(analysis.analyze(next));
     ASSERT_TRUE(succeeded(result));
     EXPECT_EQ(integerOf(result->block->coordinateOffsets[0]), coord + 3);
     auto bad = *binding;
     bad.block->coordinateOffsets.clear();
-    EXPECT_TRUE(failed(analysis.bind(f.getArgument(1), bad)));
+    EXPECT_TRUE(failed(analysis.setInfo(f.getArgument(1), bad)));
     auto retained = test::getInfo(analysis.analyze(next));
     ASSERT_TRUE(succeeded(retained));
     EXPECT_EQ(retained->block->coordinateOffsets,
               result->block->coordinateOffsets);
   }
-  analysis.clear();
+  ASSERT_TRUE(succeeded(analysis.reset()));
   EXPECT_FALSE(test::getInfo(analysis.findCached(next)));
   EXPECT_TRUE(failed(test::getInfo(analysis.analyze(next))));
   EXPECT_TRUE(succeeded(verify(*module)));
@@ -431,10 +435,10 @@ TEST(PtrAnalysis, AddressViewRejectsUnsupportedFullShapeBeforeMutation) {
     auto f = *module->getOps<triton::FuncOp>().begin();
     auto make = *f.getBody().front().getOps<triton::MakeTensorPtrOp>().begin();
     OpBuilder builder(f.getBody().front().getTerminator());
-    PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+    PtrAnalysis analysis(builder);
     auto descriptor = test::getInfo(analysis.analyze(make));
     ASSERT_TRUE(succeeded(descriptor));
-    ASSERT_TRUE(succeeded(analysis.bind(make, *descriptor)));
+    ASSERT_TRUE(succeeded(analysis.setInfo(make, *descriptor)));
     size_t before = f.getBody().front().getOperations().size();
     auto view = buildAddressView(*descriptor, builder, make.getLoc());
     EXPECT_EQ(succeeded(view), supported);

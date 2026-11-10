@@ -27,8 +27,17 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include <optional>
+
+namespace mlir::arith {
+class SelectOp;
+}
+namespace mlir::triton {
+class MakeTensorPtrOp;
+class AdvanceOp;
+} // namespace mlir::triton
 
 namespace mlir::triton::ptr {
 
@@ -43,7 +52,8 @@ struct SubAxisInfo {
 };
 struct AxisInfo {
   AxisKind kind = AxisKind::Unknown;
-  /// Known axes require an index-typed stride; Unknown uses a zero placeholder.
+  /// Index-typed stride for known axes. For Unknown, this field is an unused
+  /// placeholder, normally zero.
   OpFoldResult stride;
   /// Empty when this axis has no mixed-radix decomposition.
   SmallVector<SubAxisInfo> subAxes;
@@ -63,6 +73,8 @@ struct AxisInfo {
 /// Completed results have a valid valueType and one axis per shape dimension.
 struct OffsetInfo {
   Type valueType;
+  /// Required for integer and ordinary pointer results, including bindings.
+  /// Block pointers may omit it when their decomposition is complete.
   OpFoldResult fullOffsets;
   /// Null when no uniform origin is known; an index zero is a known origin.
   OpFoldResult scalarOffset;
@@ -91,6 +103,10 @@ FailureOr<OffsetInfo> buildOffsetInfo(Value value, OpBuilder &builder);
 /// reconstruction. Coordinates are effective index values; make_tensor_ptr and
 /// advance source operands retain their original i32 arithmetic.
 struct BlockPtrInfo {
+  /// Base passed to make_tensor_ptr, including any earlier scalar addptr.
+  /// PtrInfo::base may instead be an earlier root whose offset is in the
+  /// address origin. Use this base with coordinates when rebuilding a block.
+  Value descriptorBase;
   /// Full parent tensor shape for boundary checks; offsets.getShape() is the
   /// block.
   SmallVector<OpFoldResult> parentShape;
@@ -102,17 +118,38 @@ struct BlockPtrInfo {
 };
 
 /// One result for integer offsets and scalar, tensor-of-pointer or
-/// block-pointer addresses. Integer results have no base or block metadata. A
-/// default result is unavailable; known offsets with Unknown axes are still
-/// available results.
+/// block-pointer addresses. Integer results have no base or block metadata.
+/// Successful analysis returns an initialized result; inability to form one is
+/// failure. Known offsets with Unknown axes are still valid results.
 struct PtrInfo {
+  /// Scalar pointer, or an exact tensor of per-lane bases with the same shape
+  /// as the result. Offset facts describe displacements relative to this base;
+  /// uniform offsets do not imply uniform addresses when the base is a tensor.
   Value base;
   OffsetInfo offsets;
   bool isEmpty() const { return !offsets.valueType; }
+  bool hasScalarBase() const {
+    return base && !isa<RankedTensorType>(base.getType());
+  }
   /// Pointer-only queries: base must be present.
   Type getElementType() const;
   unsigned getAddressSpace() const;
   std::optional<BlockPtrInfo> block;
+};
+
+/// Preservation of descriptor components relative to one fixed reference.
+/// False proves that the component can reuse the reference/initial field;
+/// true means it may change. These are not numeric values or a proof that
+/// different descriptor layouts/types can be joined.
+struct ChangeInfo {
+  bool base = true;
+  bool uniform = true;
+  bool residual = true;
+  SmallVector<bool> strides;
+  // Block-only fields. Ordinary pointers have empty coordinate/shape vectors.
+  SmallVector<bool> parentShape;
+  SmallVector<bool> coordinates;
+  bool order = true;
 };
 
 } // namespace mlir::triton::ptr
@@ -120,6 +157,80 @@ namespace mlir::triton::ptr::detail {
 bool isOrdinaryPtrType(Type type);
 bool isBlockPtrType(Type type);
 
+// Initial result construction.
+/// Build a known axis, classifying a zero stride as invariant.
+AxisInfo buildAxisInfo(OpFoldResult stride);
+/// Build an axis from a complete, valid sub-axis partition. Retain the
+/// partition even when its coefficients prove a single axis stride.
+AxisInfo buildAxisInfo(SmallVector<SubAxisInfo> subAxes, OpBuilder &builder);
+/// Build an invariant axis with an index-typed zero stride.
+AxisInfo makeInvariantAxisInfo(OpBuilder &builder);
+/// Build invariant axes for a known-uniform integer value and obtain an index
+/// origin from scalar/value. May create extraction and cast helpers.
+OffsetInfo buildUniformOffsetInfo(Value value, OpBuilder &builder,
+                                  OpFoldResult scalar = {});
+/// Build integer facts from the value itself, without analyzing its operands.
+/// May extract and cast an available uniform origin.
+FailureOr<PtrInfo> buildIntegerInfo(Value value, OpBuilder &builder);
+/// Use an ordinary scalar or opaque pointer tensor as the exact base, with
+/// zero displacements. Dynamic tensors may need pure shape/zero-fill helpers.
+FailureOr<PtrInfo> buildPointerInfo(Value value, OpBuilder &builder);
+
+// Integer offset combinations.
+/// These operations consume analyzed inputs at the caller-selected insertion
+/// point. They do not recursively query operands or change session state.
+FailureOr<PtrInfo> combineElementwise(Value value, const PtrInfo &lhs,
+                                      const PtrInfo &rhs, OpBuilder &builder);
+FailureOr<OffsetInfo> addOffsetInfo(OpFoldResult complete,
+                                    const OffsetInfo &lhs,
+                                    const OffsetInfo &rhs, bool subtract,
+                                    OpBuilder &builder, Location loc);
+FailureOr<OffsetInfo> scaleOffsetInfo(OpFoldResult complete,
+                                      const OffsetInfo &source,
+                                      OpFoldResult scale, OpBuilder &builder,
+                                      Location loc);
+PtrInfo refineDivRem(Value value, const PtrInfo &lhsInfo,
+                     const PtrInfo &rhsInfo, const PtrInfo &fallback,
+                     bool divide, OpBuilder &builder);
+
+// Offset shape transformations.
+/// Source facts must match the source value, and shape parameters must follow
+/// the verified operation. Reshape preserves uniformity and axes changed only
+/// by inserting or removing unit dimensions; other axis facts become unknown.
+OffsetInfo reshapeOffsetInfo(OpFoldResult complete, RankedTensorType targetType,
+                             const OffsetInfo &sourceInfo, OpBuilder &builder);
+/// Slice keeps complete offsets and known origin/stride facts for dynamic
+/// extents; sub-axis partitions require a proven unchanged extent.
+FailureOr<OffsetInfo>
+sliceOffsetInfo(OpFoldResult complete, RankedTensorType targetType,
+                const OffsetInfo &sourceInfo, ArrayRef<OpFoldResult> starts,
+                ArrayRef<OpFoldResult> steps, ArrayRef<bool> dropped,
+                OpBuilder &builder, Location loc);
+
+// Ordinary pointer offset accumulation.
+/// Widen the integer increment before adding it to the parent's address offset.
+FailureOr<PtrInfo> addPtrOffsets(Value value, const PtrInfo &parent,
+                                 const OffsetInfo &delta, OpBuilder &builder);
+
+// Selection and insertion of analyzed results.
+FailureOr<PtrInfo> combineSelectInfo(arith::SelectOp op, const PtrInfo &lhsInfo,
+                                     const PtrInfo &rhsInfo,
+                                     OpBuilder &builder);
+FailureOr<PtrInfo> insertPtrOffsets(
+    Value value, const PtrInfo &source, const PtrInfo &dest, Type sourceType,
+    llvm::function_ref<Value(Value, Value)> insert, OpBuilder &builder);
+
+// Block descriptor construction and coordinate updates.
+FailureOr<PtrInfo> makeBlockInfo(triton::MakeTensorPtrOp op,
+                                 const PtrInfo &base,
+                                 ArrayRef<OpFoldResult> coordinates,
+                                 OpBuilder &builder);
+FailureOr<PtrInfo> advanceBlockInfo(triton::AdvanceOp op, const PtrInfo &parent,
+                                    ArrayRef<OpFoldResult> delta,
+                                    OpBuilder &builder);
+
+// Binding validation and dependency collection.
+LogicalResult validateInfo(Value value, const PtrInfo &info);
 bool validOffsetBinding(Value boundary, const OffsetInfo &components);
 bool validBlockPtrBinding(Value value, const PtrInfo &components);
 bool validPtrBinding(Value boundary, const PtrInfo &components);

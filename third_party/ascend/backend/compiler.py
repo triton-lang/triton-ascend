@@ -447,7 +447,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
             ascend.passes.ttir.add_merge_concat_load_buffer(pm)
         target_arch = getattr(metadata.get("target"), "arch", None)
-        if metadata["enable_dynamic_cv_pipeline"] and _supports_dynamic_cv_pipeline(target_arch):
+        if metadata["enable_dynamic_cv_pipeline"] and _is_a5_target_arch(target_arch):
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
             metadata["disable_auto_inject_block_sync"] = True
@@ -869,8 +869,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 [f"--enable-mixed-cv={enable_mixed_cv}"]
 
         enable_dynamic_cv_pipeline = metadata["enable_dynamic_cv_pipeline"]
-        if (enable_dynamic_cv_pipeline == True
-                and _supports_dynamic_cv_pipeline(getattr(metadata.get("target"), "arch", None))
+        if (enable_dynamic_cv_pipeline == True and _is_a5_target_arch(getattr(metadata.get("target"), "arch", None))
                 and not metadata.get("disable_vf_operand_substitution", False)):
             _compile_option_list += [f"--enable-vf-operand-substitution=True"]
 
@@ -1216,11 +1215,6 @@ def _is_register_based_target_arch(arch: str) -> bool:
 
 def _is_a5_target_arch(arch: str) -> bool:
     return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
-
-
-def _supports_dynamic_cv_pipeline(arch: str) -> bool:
-    """DynamicCV currently targets the A5 register-based pipeline only."""
-    return _is_a5_target_arch(arch)
 
 
 def _get_libdevice_compile_state() -> bool:
@@ -1673,7 +1667,7 @@ class AscendBackend(BaseBackend):
             object.__setattr__(options, "enable_tla_mode", frontend_kind == "tla")
             # DynamicCV is A5-only. A6 remains register-based but must not
             # enter the DynamicCV lowering or pass its compiler flags.
-            if not _supports_dynamic_cv_pipeline(self.target.arch):
+            if not _is_a5_target_arch(self.target.arch):
                 object.__setattr__(options, "enable_dynamic_cv_pipeline", False)
             elif options.enable_dynamic_cv_pipeline is None:
                 object.__setattr__(options, "enable_dynamic_cv_pipeline", options.compile_on_910_95)

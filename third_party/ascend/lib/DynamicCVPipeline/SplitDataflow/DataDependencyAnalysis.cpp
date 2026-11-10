@@ -108,10 +108,17 @@ bool DataDependencyAnalysisPass::isControlFlowOp(mlir::Operation *op) {
 }
 
 bool DataDependencyAnalysisPass::isCubeAndVectorOp(mlir::Operation *op) {
-  if (isa<tensor::EmptyOp, linalg::FillOp>(op)) {
-    return true;
+  if (!isa<tensor::EmptyOp, linalg::FillOp>(op)) {
+    return false;
   }
-  return false;
+  // Matmul A/B must be computed on VECTOR and transferred to CUBE rather
+  // than rematerialized there. Keep these values as data dependencies.
+  return !llvm::any_of(op->getUses(), [](OpOperand &use) {
+    if (auto matmulOp = dyn_cast<linalg::MatmulOp>(use.getOwner())) {
+      return use.getOperandNumber() < matmulOp.getNumDpsInputs();
+    }
+    return false;
+  });
 }
 
 bool DataDependencyAnalysisPass::isValidShapeForDependency(mlir::Value value) {

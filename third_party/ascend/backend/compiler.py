@@ -746,7 +746,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     _finalize_program_launch_policy(metadata, opt)
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_file_name = "kernel.mlir"
+        tmp_file_name = "kernel.ttadapter.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
         Path(ttadapter_path).write_text(linalg)
         bin_file = os.path.join(tmpdir, "kernel")
@@ -984,7 +984,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     _finalize_program_launch_policy(metadata, opt)
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_file_name = "kernel.mlir"
+        tmp_file_name = "kernel.ttadapter.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
         Path(ttadapter_path).write_text(linalg)
         bin_file = os.path.join(tmpdir, "kernel")

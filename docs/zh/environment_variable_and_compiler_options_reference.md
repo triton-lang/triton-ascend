@@ -44,6 +44,7 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 编译 | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | 允许JIT前端引用非 `constexpr` 全局变量。 | 关闭 | 支持 | 支持 |
 | 编译 | `TRITON_ENABLE_LIBDEVICE` | 在A2/A3编译路径额外链接libdevice；非空字符串均视为开启，包括 `"0"`。 | 未设置 | 支持 | — |
 | 编译 | `TRITON_ENABLE_LIBDEVICE_SIMT` | 在950上为libdevice调用选择SIMT版本；非空字符串均视为开启，包括 `"0"`。 | 未设置 | — | 支持 |
+| 缓存与调优 | `TRITON_ASCEND_ENABLE_DYNAMIC_REUSE` | 控制符合条件的 `constexpr` 参数变化时的kernel自动复用：`0` 关闭，`1` 启用动态化，`2` 额外启用tile复用和后台编译。 | `0` | 支持 | 支持；`simt_only` 不支持tile复用 |
 | 缓存与调优 | `TRITON_HOME` | 设置Triton缓存、dump和override目录的根位置。 | 用户主目录 | 支持 | 支持 |
 | 缓存与调优 | `TRITON_CACHE_DIR` | 指定编译缓存目录。 | `$TRITON_HOME/.triton/cache` | 支持 | 支持 |
 | 缓存与调优 | `TRITON_CACHE_AUTOTUNING` | 缓存autotune的选择结果。 | 关闭 | 支持 | 支持 |

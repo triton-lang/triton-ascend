@@ -3,7 +3,7 @@
 Stages are driven by env ``TLA_TEST_STAGE`` (default ``all``):
 - ``ir``      : offline-compile the HIVM IR finally handed to npuir and
                 assert key structure (hivm.hir.load/store, multi_buffer,
-                pointer_cast, ...); no NPU needed.
+                descriptor views, ...); no NPU needed.
 - ``compile`` : on top of ``ir``, full compile and confirm .o/.npubin
                 artifacts; needs Ascend driver (device or op simulator).
 - ``run``     : on top of ``compile``, real-device launch + accuracy; needs NPU.
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from triton.language.extra.tla.compiler import ast_to_ttir, lower_ttir
+from triton.language.extra.tla.compiler import add_ttir_pipeline, ast_to_ttir, lower_ttir
 from triton._C.libtriton import ir, buffer_ir, passes
 from triton._C.libtriton.ascend import ir as ascend_ir
 
@@ -122,6 +122,12 @@ def lower_offline(module, ctx, output_dir=None):
     # Entry name must be read before lowering: the pass manager rewrites the
     # module in place (tt.func -> func.func at the ttadapter boundary).
     name = _entry_func_name(module)
+    pm = ir.pass_manager(ctx)
+    pm.enable_debug()
+    add_ttir_pipeline(pm)
+    pm.run(module, "module")
+    if not module.verify():
+        raise RuntimeError("TLA TTIR pipeline produced invalid IR")
     lowered = lower_ttir(module, ctx)
     dump = _dump_dir(name, output_dir)
     if dump:

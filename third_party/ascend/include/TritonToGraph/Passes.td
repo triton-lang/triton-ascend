@@ -74,7 +74,7 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
   let constructor = "mlir::triton::cfg::createGraphOptimizePass()";
   let options = [
     Option<"ruleMask", "rule-mask", "uint64_t", "3071",
-           "Bitmask of known 32-bit graph rule identities; default 3071 preserves the legacy native bundle and enables IAT/PTSM. RLF/IPBE/SCP/CBAF remain explicit opt-in">,
+           "Bitmask of known 32-bit graph rule identities; default 3071. The #2686 SelectedBlockScan (65536) and QueryRowBatching (131072) bits are known but fixed default-off, like RLF/IPBE/SCP/CBAF; SelectedBlockScan commits only when QueryRowBatching's materialize entry accepts">,
     Option<"maxRewritesPerFunction", "max-rewrites-per-function", "uint64_t",
            "64", "Maximum graph rewrites per function">,
     Option<"ubCapacityBytes", "ub-capacity-bytes", "uint64_t", "0",
@@ -95,6 +95,8 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
            "Physical L0C (cube accumulator) buffer capacity in bytes; zero disables L0C candidate checks">,
     Option<"l0SafetyPercent", "l0-safety-percent", "uint64_t", "80",
            "Percent of L0A/L0B/L0C capacity available to resource candidates">,
+    Option<"coreNum", "core-num", "uint64_t", "0",
+           "Physical AI-core blocks the launcher schedules (AIV for pure-SIMT kernels, AIC otherwise); zero disables the gridX/R >= coreNum row-count constraint">,
     Option<"compileMode", "compile-mode", "std::string", "\"simd_simt_template\"",
            "Compilation mode; legacy elementwise RowCoalescing is enabled only for simt_only">,
   ];

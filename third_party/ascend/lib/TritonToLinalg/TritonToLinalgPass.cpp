@@ -1652,8 +1652,7 @@ void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
   patterns.add<TTOpConverters::ReduceSingleCanonicalizer>(
       patterns.getContext());
   if (this->enableSelectAnalysis) {
-    patterns.add<TTOpConverters::SelectCanonicalizer>(patterns.getContext(),
-                                                      this->compileOn91095);
+    patterns.add<TTOpConverters::SelectCanonicalizer>(patterns.getContext());
   }
 }
 
@@ -2180,6 +2179,7 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
     signalPassFailure();
   }
 
+  optimizeDiscreteDeinterleavedLoads(moduleOp);
   specializeFullRowCopies(moduleOp);
 
   // Collapses call-site locations whose callee is an inlined Triton stdlib

@@ -913,7 +913,18 @@ static LogicalResult rewriteWhileOp(scf::WhileOp whileOp, OpBuilder &builder,
       continue;
     }
     newInits.push_back(env.remap(initArg));
-    newResultTypes.push_back(whileOp.getResult(idx).getType());
+    if (analysis->rewritesOwnSignature())
+      newResultTypes.push_back(whileOp.getResult(idx).getType());
+  }
+
+  if (!analysis->rewritesOwnSignature()) {
+    // Preserve both boundary signatures; no slot expansion needs remapping.
+    newResultTypes.assign(whileOp.getResultTypes().begin(),
+                          whileOp.getResultTypes().end());
+    if (oldToNewStart.size() < whileOp.getNumResults())
+      oldToNewStart.resize(whileOp.getNumResults());
+    for (auto [index, start] : llvm::enumerate(oldToNewStart))
+      start = index;
   }
 
   bool bodyOk = true;

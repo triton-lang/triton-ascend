@@ -23,10 +23,34 @@
 #ifndef TRITON_ASCEND_MEMORY_ACCESS_PTR_ANALYSIS_H
 #define TRITON_ASCEND_MEMORY_ACCESS_PTR_ANALYSIS_H
 
-#include "mlir/IR/Builders.h"
+#include "TritonMemoryAccess/PtrAnalysisInfo.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/ScopeExit.h"
+
+namespace mlir::arith {
+class FPToSIOp;
+}
+namespace mlir::scf {
+class ForOp;
+class WhileOp;
+class IfOp;
+} // namespace mlir::scf
+namespace mlir::tensor {
+class ExtractSliceOp;
+class InsertOp;
+class InsertSliceOp;
+class CastOp;
+} // namespace mlir::tensor
+namespace mlir::triton {
+class SplatOp;
+class BroadcastOp;
+class ExpandDimsOp;
+class ReshapeOp;
+class MakeRangeOp;
+class LoadOp;
+class ReduceOp;
+class AddPtrOp;
+class BitcastOp;
+} // namespace mlir::triton
 
 namespace mlir::triton::ptr {
 
@@ -34,70 +58,92 @@ namespace mlir::triton::ptr {
 LogicalResult checkInsertionPoint(OpBuilder &builder,
                                   ArrayRef<Value> dependencies);
 
-/// A session on stable source IR, with one result type and recursive entry.
-/// Rules provides parse(Value, context) and validateBinding(Value, Result).
-/// Parsers place helpers next to their source definitions so
-/// cached results dominate later uses. End the session before
-/// rewriting/deleting source IR or running CSE/canonicalization; appending pure
-/// helpers is allowed.
-template <typename Rules> class PtrAnalysis {
+/// Integer and pointer facts for one stable source-IR session. Queries may add
+/// pure numeric helpers next to their dependencies. End the session before
+/// rewriting source IR or running CSE/canonicalization.
+class PtrAnalysis {
 public:
-  using Result = typename Rules::Result;
-  PtrAnalysis(OpBuilder &builder, Rules rules)
-      : builder(builder), rules(std::move(rules)) {}
+  explicit PtrAnalysis(OpBuilder &builder) : builder(builder) {}
   PtrAnalysis(const PtrAnalysis &) = delete;
   PtrAnalysis &operator=(const PtrAnalysis &) = delete;
   OpBuilder &getBuilder() const { return builder; }
-  const Rules &getRules() const { return rules; }
 
-  FailureOr<Result> analyze(Value value) {
-    if (!value)
-      return failure();
-    if (const Result *info = findCached(value))
-      return *info;
-    if (!active.insert(value).second)
-      return failure();
-    auto restore = llvm::make_scope_exit([&] { active.erase(value); });
-    OpBuilder::InsertionGuard guard(builder);
-    auto info = rules.parse(value, *this);
-    if (failed(info))
-      return failure();
-    return cache.try_emplace(value, std::move(*info)).first->second;
-  }
-  /// Borrow only until the next analyze/bind/clear or session destruction.
-  /// Copy a result before recursive queries: DenseMap growth moves entries.
-  /// Result copies still reference the original SSA and require stable IR.
-  const Result *findCached(Value value) const {
-    auto bound = bindings.find(value);
-    if (bound != bindings.end())
-      return &bound->second;
-    auto found = cache.find(value);
-    return found == cache.end() ? nullptr : &found->second;
-  }
-  /// The caller proves equivalence; Rules checks the field contract. Every
-  /// successful bind clears computed results, preserving all other bindings.
-  /// Bound SSA fields must be available wherever the bound source is used;
-  /// parsers do not move helpers to accommodate fields defined later.
-  LogicalResult bind(Value value, const Result &info) {
-    if (!value || !active.empty() || failed(rules.validateBinding(value, info)))
-      return failure();
-    // info may itself be borrowed from cache or bindings.
-    Result boundInfo = info;
-    cache.clear();
-    bindings.insert_or_assign(value, std::move(boundInfo));
-    return success();
-  }
-  void clear() {
-    assert(active.empty() && "cannot clear during analysis");
-    cache.clear();
-    bindings.clear();
-  }
+  FailureOr<PtrInfo> analyze(Value value);
+
+  /// Borrow until the next query, setInfo/reset, or session destruction.
+  /// Copy before recursive queries: growing a DenseMap moves its entries.
+  const PtrInfo *findCached(Value value) const;
+
+  /// Import equivalent facts for the same live SSA between top-level queries.
+  /// Other valid cached facts remain available, without precision refresh.
+  /// Referenced SSA fields must dominate all uses of the analyzed value.
+  LogicalResult setInfo(Value value, const PtrInfo &info);
+
+  /// Validate and copy all inputs before replacing the cache. A repeated key
+  /// takes its last entry. Invalid input leaves the session unchanged.
+  /// Use reset when new facts should refine dependent results; reset() clears
+  /// everything. This does not erase helper IR or repair rewritten source IR.
+  LogicalResult reset(ArrayRef<std::pair<Value, PtrInfo>> known = {});
+
+  /// Compare components in a fixed descriptor layout. For a loop, reference
+  /// is its current argument and initial is the corresponding initial value;
+  /// forwarding either proves preservation. Without initial, compare against
+  /// reference itself (e.g. two branches). Each call has its own bool memo.
+  /// The initial value supplies the comparison layout, never unproved current
+  /// arg values. Other loop arguments reuse fields only after checking their
+  /// initial values and all backedges for invariance.
+  /// Numeric uniform/residual reconstruction and SCF rewriting are separate
+  /// from this preservation query. Unsupported relations conservatively change.
+  FailureOr<ChangeInfo> analyzeChanges(Value value, Value reference,
+                                       Value initial = {});
 
 private:
+  using CacheMap = llvm::DenseMap<Value, PtrInfo>;
+  Operation *getCacheOwner(Value value) const;
+  CacheMap &getCacheMap(Operation *owner);
+  void popLoopCache(Operation *loop);
+  ChangeInfo computeChanges(Value value, Value reference, Value initial,
+                            const PtrInfo &layout,
+                            llvm::DenseMap<Value, ChangeInfo> &cache);
+  void computeLoopChanges(Operation *loop, Value reference, Value initial,
+                          const PtrInfo &layout,
+                          llvm::DenseMap<Value, ChangeInfo> &cache);
+
+  FailureOr<PtrInfo> parseOperation(Value value);
+  static bool isControlFlowValue(Value value);
+  FailureOr<PtrInfo> parseControlFlow(Value value);
+  FailureOr<PtrInfo> parseFor(Value value, scf::ForOp loop);
+  FailureOr<PtrInfo> parseWhile(Value value, scf::WhileOp loop);
+  FailureOr<PtrInfo> parseIf(OpResult value, scf::IfOp branch);
+
+  FailureOr<PtrInfo> parseSplat(triton::SplatOp op);
+  FailureOr<PtrInfo> parseBroadcast(triton::BroadcastOp op);
+  FailureOr<PtrInfo> parseExpandDims(triton::ExpandDimsOp op);
+  FailureOr<PtrInfo> parseReshape(triton::ReshapeOp op);
+  FailureOr<PtrInfo> parseExtractSlice(tensor::ExtractSliceOp op);
+  FailureOr<PtrInfo> parseInsert(tensor::InsertOp op);
+  FailureOr<PtrInfo> parseInsertSlice(tensor::InsertSliceOp op);
+  FailureOr<PtrInfo> parseTensorCast(tensor::CastOp op);
+  FailureOr<PtrInfo> parseSelect(arith::SelectOp op);
+
+  PtrInfo parseMakeRange(triton::MakeRangeOp op);
+  FailureOr<PtrInfo> parseBinaryArithmetic(Value value);
+  FailureOr<PtrInfo> parseCast(Value value, Value input, bool unsignedCast);
+  FailureOr<PtrInfo> parseFloatToInt(arith::FPToSIOp op);
+  FailureOr<PtrInfo> parseLoad(triton::LoadOp op);
+  FailureOr<PtrInfo> parseReduce(Value value, triton::ReduceOp op);
+
+  FailureOr<PtrInfo> parseAddPtr(triton::AddPtrOp op);
+  FailureOr<PtrInfo> parseBitcast(triton::BitcastOp op);
+  FailureOr<PtrInfo> parseMakeTensorPtr(triton::MakeTensorPtrOp op);
+  FailureOr<PtrInfo> parseAdvance(triton::AdvanceOp op);
+
   OpBuilder &builder;
-  Rules rules;
-  llvm::DenseSet<Value> active;
-  llvm::DenseMap<Value, Result> cache, bindings;
+  CacheMap rootCache;
+  // Entering through an inner body can trigger outer-loop analysis, which
+  // solves the same inner loop again under the outer hypotheses. Only the
+  // newest map for a loop belongs to that invocation; older maps are suspended.
+  llvm::DenseMap<Operation *, SmallVector<CacheMap, 1>> loopCaches;
 };
 
 } // namespace mlir::triton::ptr

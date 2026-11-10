@@ -73,7 +73,8 @@ struct DependencyInfo {
   int loopDepth = 0;
   mlir::Operation *loopRegion = nullptr;
 
-  int flagId;
+  // A negative ID means this dependency does not require synchronization.
+  int flagId = 0;
   bool reuseStartEnd = false;
 };
 

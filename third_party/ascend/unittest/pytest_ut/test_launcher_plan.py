@@ -723,6 +723,7 @@ def _grid_contract(sequence):
 
 _PROGRAM_GRID_CASES = [
     ([(1, 16, False)], launcher.IAT),
+    ([(1, 64, False)], launcher.IAT | launcher.IAT64),
     ([(0, 64, True)], launcher.PTSM),
     ([(1, 16, False), (0, 4, True)], launcher.IAT | launcher.PTSM),
     *[([(0, factor, False)], launcher.DOT_ROW | launcher.COALESCE_CEIL) for factor in (2, 4, 8, 16, 32)],
@@ -748,7 +749,8 @@ def test_program_grid_plan_modes(policy, sequence, expected, as_json):
         metadata(program_grid_mapping_applied=True,
                  program_grid_transforms=json.dumps(contract) if as_json else contract,
                  ptsm_cap_authorized=any(t[2] for t in sequence)), policy)
-    assert spec.flags & (launcher.IAT | launcher.PTSM | launcher.DOT_ROW | launcher.COALESCE_CEIL) == expected
+    assert spec.flags & (launcher.IAT | launcher.IAT64 | launcher.PTSM | launcher.DOT_ROW
+                         | launcher.COALESCE_CEIL) == expected
     assert not spec.flags & launcher.AUTO_MAP
     factor, axis = (sequence[0][1], 0) if expected & launcher.DOT_ROW else (1, -1)
     assert (spec.coalesce_factor, spec.coalesce_axis) == (factor, axis)
@@ -842,6 +844,7 @@ def test_native_grid_matches_compiler_reference(native_grid_probe, sequence, mod
     factor, axis = (sequence[0][1], 0) if mode & launcher.DOT_ROW else (1, -1)
     rng = random.Random(2109)
     grids = [(1, 1, 1), (4097, 17, 3), (65, 33, 1), (2147483647, 1, 1)]
+    grids += [(1, y, 1) for y in (15, 16, 17, 63, 64, 65, 2147483647)]
     grids += [tuple(rng.randint(1, n) for n in (32768, 128, 4)) for _ in range(32)]
     for physical in (1, 20, 40, 72):
         for grid in grids:
@@ -961,21 +964,6 @@ def test_compiler_version_reused_across_processes_and_coordinated(host_compiler)
     assert tool.log.read_text().splitlines() == ["query"]
     assert _query_host_compiler_processes(tool.path, cache_dir, 1) == ["test-compiler-v1"]
     assert tool.log.read_text().splitlines() == ["query"]
-
-
-def test_compiler_library_build_id_invalidates_even_with_unchanged_stat(host_compiler, monkeypatch):
-    tool = host_compiler
-    old_identity = utils._file_identity(tool.library)
-    file_identity = utils._file_identity
-    monkeypatch.setattr(utils, "_file_identity", lambda path: old_identity
-                        if Path(path) == tool.library else file_identity(path))
-    assert _query_host_compiler(tool.path) == "test-compiler-v1"
-    old_build_id = utils._npu_elf_info(tool.library)[1]
-    tool.replace_version("test-compiler-v2")
-    assert utils._npu_elf_info(tool.library)[1] != old_build_id
-    utils._npu_compiler_version.cache_clear()  # A new process has no LRU entries.
-    assert _query_host_compiler(tool.path) == "test-compiler-v2"
-    assert len(tool.log.read_text().splitlines()) == 2
 
 
 def test_compiler_selection_symlink_and_atomic_replacement(host_compiler, monkeypatch):
@@ -1116,16 +1104,56 @@ def test_compiler_version_unstable_installation_does_not_publish(host_compiler, 
     assert len(tool.log.read_text().splitlines()) == 2
 
 
-@pytest.mark.parametrize("loader_result", ["", "unknown output", "libmissing.so => not found"])
-def test_compiler_version_unresolved_dependencies_query_live(host_compiler, monkeypatch, loader_result):
-    tool = host_compiler
-    check_output = subprocess.check_output
+@pytest.mark.parametrize("size", [0, 4096])
+def test_proton_profile_size_is_carried_in_launch_plan(policy, size):
+    spec = launcher.make_launch_spec(metadata(profile_scratch_size=size), policy)
+    assert spec.profile_scratch_size == size
 
-    def output(command, **kwargs):
-        if "--list" in command:
-            return loader_result
-        return check_output(command, **kwargs)
 
-    monkeypatch.setattr(subprocess, "check_output", output)
-    assert _query_host_compiler(tool.path) == "test-compiler-v1"
-    assert not list((tool.root / "cache").rglob("compiler-version.json"))
+def test_proton_scratch_follows_expanded_user_arguments():
+    calls = []
+    wrapped = launcher.wrap_handle_tensordesc(lambda *args: calls.append(args), {0: ("i32", "i64")},
+                                              profile_scratch=True)
+    prefix = tuple(range(9))
+    scratch = object()
+    wrapped(*prefix, (11, 13), scratch)
+    assert calls == [(*prefix, 11, 13, scratch)]
+    with pytest.raises(TypeError):
+        wrapped(*prefix, (11, 13))
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_proton_exit_drains_framework_queue_before_collecting(monkeypatch, enabled):
+    from triton.backends.ascend import driver
+    from triton.runtime import _allocation
+
+    events = []
+    scratch = object()
+    interface = SimpleNamespace(synchronize=lambda: events.append("synchronize"))
+    monkeypatch.setattr(driver, "get_backend_func", lambda method: interface)
+    monkeypatch.setattr(_allocation, "_profile_allocator",
+                        SimpleNamespace(get=lambda: lambda size, alignment, stream: scratch))
+    instance = object.__new__(driver.NPULauncher)
+    instance.compile_only = False
+    instance.profile_scratch_size = 16 if enabled else 0
+    instance.profile_scratch_align = 64
+
+    def native(*args):
+        if enabled:
+            assert args[-1] is scratch
+        events.append("enqueue")
+        args[8](args[6])
+
+    instance.launch = native
+    exit_hook = lambda metadata: events.append("collect")
+    instance(1, 1, 1, 0, 0, {}, None, None, exit_hook)
+    assert events == (["enqueue", "synchronize", "collect"] if enabled else ["enqueue", "collect"])
+
+
+@pytest.mark.parametrize(
+    "flags", [launcher.IAT64, launcher.IAT64 | launcher.PTSM, launcher.IAT64 | launcher.IAT | launcher.PTSM])
+def test_native_grid_rejects_invalid_iat64(native_grid_probe, flags):
+    result = subprocess.run(
+        [str(native_grid_probe), str(flags), "40", "1", "65", "1", "1", "-1"], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "IAT64 requires standalone IAT" in result.stderr

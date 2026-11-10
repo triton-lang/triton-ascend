@@ -1040,6 +1040,75 @@ def test_ttir_to_linalg_merge_concat_load_buffer_is_a5_only(
     assert events[-1] == "run_row"
 
 
+@pytest.mark.parametrize(
+    ("arch", "expected_calls"),
+    (
+        ("Ascend910_9581", 1),
+        ("Ascend910_9691", 0),
+        ("Ascend960", 0),
+        ("Ascend910B1", 0),
+    ),
+)
+def test_ttir_to_linalg_dynamic_cv_pipeline_is_a5_only(
+    compiler_module,
+    monkeypatch,
+    arch,
+    expected_calls,
+):
+    events = []
+    dynamic_cv_calls = []
+
+    def noop(*_args, **_kwargs):
+        return None
+
+    ttir_passes = SimpleNamespace(
+        add_triton_control_flow_opt=noop,
+        add_triton_to_structure=noop,
+        add_discrete_mask_access_conversion=noop,
+        add_triton_to_annotation=noop,
+        add_triton_to_unstructure=noop,
+        add_triton_to_hivm=noop,
+        add_triton_to_hfusion=noop,
+        add_triton_to_llvm=noop,
+        add_bubble_up_operation=noop,
+        add_triton_to_linalg=noop,
+        add_merge_concat_load_buffer=noop,
+        set_enable_buffer_insert_optimization=noop,
+        add_dynamic_cv_pipeline=lambda _pm, _compile_on_910_95: dynamic_cv_calls.append(arch),
+    )
+    monkeypatch.setattr(
+        compiler_module,
+        "ir",
+        SimpleNamespace(pass_manager=lambda _context: _FakePassManager(events)),
+    )
+    monkeypatch.setattr(
+        compiler_module,
+        "ascend",
+        SimpleNamespace(passes=SimpleNamespace(ttir=ttir_passes)),
+    )
+    monkeypatch.setattr(compiler_module, "distributed", None)
+    monkeypatch.setattr(compiler_module, "_serialize_module", lambda _mod, _opt: "module {}")
+    monkeypatch.setattr(compiler_module, "_is_auto_map_parallel_blocks_enabled", lambda: False)
+    monkeypatch.setattr(compiler_module, "_get_auto_blockify_blacklist_reasons", lambda _ttir: [])
+    monkeypatch.setattr(compiler_module, "_adjust_metadata_by_module_result", noop)
+    monkeypatch.setattr(compiler_module, "_export_program_grid_metadata", noop)
+
+    metadata = {
+        "compile_on_910_95": arch.startswith(("Ascend910_95", "Ascend950", "Ascend910_96", "Ascend960")),
+        "enable_dynamic_cv_pipeline": True,
+        "target": SimpleNamespace(arch=arch),
+    }
+    options = SimpleNamespace(
+        debug=False,
+        compile_mode="simd",
+        target_arch=arch,
+        enable_tla_mode=False,
+    )
+
+    assert compiler_module.ttir_to_linalg(_FakeModule(events), metadata, options) == "module {}"
+    assert dynamic_cv_calls == [arch] * expected_calls
+
+
 @pytest.mark.parametrize("arch", ["Ascend910B4", "Ascend910_9391", "Ascend950PR"])
 @pytest.mark.parametrize("mode", [
     {"gm": 4, "l1": 2, "l0c": 1, "ub": 2},

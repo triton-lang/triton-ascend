@@ -107,11 +107,57 @@ bool DataDependencyAnalysisPass::isControlFlowOp(mlir::Operation *op) {
          isa<scf::YieldOp, scf::ConditionOp>(op);
 }
 
+bool DataDependencyAnalysisPass::isUsedByMatmulAB(Operation *op) {
+  SmallVector<Value> worklist(op->getResults().begin(), op->getResults().end());
+  llvm::DenseSet<Value> visited;
+
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!visited.insert(value).second) {
+      continue;
+    }
+
+    for (OpOperand &use : value.getUses()) {
+      Operation *user = use.getOwner();
+
+      if (auto loopOp = dyn_cast<LoopLikeOpInterface>(user)) {
+        Value regionIterArg = loopOp.getTiedLoopRegionIterArg(&use);
+        if (regionIterArg) {
+          worklist.push_back(regionIterArg);
+        }
+        continue;
+      }
+
+      if (getSsbufferCoreType(user) == ssbufferCoreTypeVectorAttr) {
+        continue;
+      }
+
+      if (isa<linalg::MatmulOp>(user)) {
+        if (use.getOperandNumber() < 2) {
+          return true;
+        }
+      }
+
+      for (Value result : user->getResults()) {
+        worklist.push_back(result);
+      }
+    }
+  }
+
+  return false;
+}
+
 bool DataDependencyAnalysisPass::isCubeAndVectorOp(mlir::Operation *op) {
-  if (isa<tensor::EmptyOp, linalg::FillOp>(op)) {
+  if (!isa<tensor::EmptyOp, linalg::FillOp>(op)) {
+    return false;
+  }
+  if (getSsbufferCoreType(op) == ssbufferCoreTypeCubeAttr) {
     return true;
   }
-  return false;
+  if (isUsedByMatmulAB(op)) {
+    return false;
+  }
+  return true;
 }
 
 bool DataDependencyAnalysisPass::isValidShapeForDependency(mlir::Value value) {

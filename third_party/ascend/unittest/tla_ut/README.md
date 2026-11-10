@@ -12,7 +12,7 @@ The default `all` auto-degrades to `ir` when no NPU is available.
 
 ## Layout
 
-- `scalar/` — select/maximum/minimum/XOR/cast/max_value/cdiv/infinity/clamp cases.
+- `scalar/` — select/abs/maximum/minimum/XOR/cast/max_value/cdiv/infinity/clamp cases.
   Per-interface files own `test_ir/test_compile/test_run` for actual writeback
   kernels: buffer/VF structure, target objects, and device accuracy.
   `scalar_frontend_contract.py` owns host-side parameter validation, type

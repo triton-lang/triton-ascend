@@ -1,8 +1,8 @@
 # Roadmap指南
 
-使用 GitHub Issue 来跟踪和管理各组织的计划及中长期目标。本文档为社区项目编写路线图类 Issue 提供参考和规范，以帮助创建和维护高质量的路线图。
+使用GitHub Issue来跟踪和管理各组织的计划及中长期目标。本文档为社区项目编写路线图类Issue提供参考和规范，以帮助创建和维护高质量的路线图。
 
-下面是一个完整的路线图 Issue 示例，展示了所有推荐元素的实际应用。建议先查看此示例获得整体印象，再阅读后续的详细规范说明。
+下面是一个完整的路线图Issue示例，展示了所有推荐元素的实际应用。建议先查看此示例获得整体印象，再阅读后续的详细规范说明。
 
 ```markdown
 创建 Issue 标题：[Roadmap] Triton-Ascend Roadmap 2026 Q2
@@ -65,7 +65,7 @@ Issue: [Related Issue link]
 
 ## 1. 标题格式
 
-**格式：** `[Roadmap] <Project Name> Roadmap <Time Range>`，季度发布使用Q1/Q2/Q3/Q4标记，半年度发布使用H1/H2标记
+**格式：** `[Roadmap] <Project Name> Roadmap <Time Range>`，季度发布使用Q1/Q2/Q3/Q4标记，半年度发布使用H1/H2标记。
 
 **示例：**
 
@@ -80,7 +80,7 @@ Issue: [Related Issue link]
 
 ### 2.2 重点方向章节
 
-列出本周期最关键的 3-5 个重点方向，建议按项目的**功能领域**或**技术模块**分组，覆盖全局视角：
+列出本周期最关键的3-5个重点方向，建议按项目的**功能领域**或**技术模块**分组，覆盖全局视角：
 
 ```markdown
 ## Focus
@@ -147,14 +147,14 @@ PR: [Related PR link]         [optional]
 
 ### 4.3 Issue
 
-- **含义**：关联的 GitHub Issue
+- **含义**：关联的GitHub Issue
 - **格式**：`Issue：<Issue 链接>`
 - **用法**：跟踪详细设计和讨论
 - **示例**：`Issue：https://github.com/triton-lang/triton-ascend/issues`
 
 ### 4.4 PR（Pull Request）
 
-- **含义**：相关实现 PR
+- **含义**：相关实现PR
 - **格式**：`PR：<PR 链接>`
 - **用法**：关联实现工作
 - **示例**：`PR：https://github.com/triton-lang/triton-ascend/pulls`
@@ -172,14 +172,14 @@ Owner: TBD
 Issue: #123
 ```
 
-### 5.2 子 Issue
+### 5.2 子Issue
 
-在路线图 Issue 底部列出跨周期的相关路线图 Issue 或大工作项的分解 Issue。
+在路线图Issue底部列出跨周期的相关路线图Issue或大工作项的分解Issue。
 
-**与工作项中 Issue 字段的区别：**
+**与工作项中Issue字段的区别：**
 
-- **工作项中的 Issue 字段**：链接到该工作项的具体设计、讨论或跟踪 Issue
-- **子 Issue 章节**：用于关联其他周期的路线图 Issue（如上季度未完成的工作），或将大工作项分解为多个独立跟踪的子 Issue
+- **工作项中的Issue字段**：链接到该工作项的具体设计、讨论或跟踪Issue
+- **子Issue章节**：用于关联其他周期的路线图Issue（如上季度未完成的工作），或将大工作项分解为多个独立跟踪的子Issue
 
 ```markdown
 ## Sub-issues

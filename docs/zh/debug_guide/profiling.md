@@ -1,4 +1,6 @@
-# Triton-Ascend 性能分析方法
+# Triton-Ascend性能分析方法
+
+本文档介绍Triton-Ascend的性能分析方法，涵盖获取性能数据与基于理论参数、查找瓶颈分析性能数据，使用于需要对Triton算子的性能进行分析和优化的用户。
 
 ## 获取性能数据
 
@@ -10,7 +12,11 @@ msProf工具用于采集和分析运行在昇腾AI处理器上的算子的关键
 
 - 注：msProf工具的使用依赖CANN包中的msprof可执行文件，该文件中的接口功能和msprof op一致，该文件为CANN包自带，无需单独安装，msProf工具常用命令请参考[msProf常用命令](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html)。
 
-如下命令行是一个算子上板性能数据采集的示例，可以根据自身的需要灵活组合配置参数。示例中 --output为可选参数，用于指定收集到的性能数据的存放路径；--kernel-name为可选参数，用于指定需要收集的单个kernel的性能数据（如果不指定，则只对程序运行过程中调度的第一个算子进行采集）；$HOME/projects/test_op.py为算子可执行脚本。
+如下命令行是一个算子上板性能数据采集的示例，可以根据自身的需要灵活组合配置参数：
+
+- `--output`：可选参数，用于指定收集到的性能数据的存放路径。
+- `--kernel-name`：可选参数，用于指定需要收集的单个kernel的性能数据；如果不指定，则只对程序运行过程中调度的第一个算子进行采集。
+- `$HOME/projects/test_op.py`：算子可执行脚本。
 
 ```bash
 msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python3 $HOME/projects/test_op.py
@@ -22,7 +28,7 @@ msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python
 msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 ```
 
-- 注：以下所有采集项的结果数据含义可参考《CANN 性能调优工具用户指南》中的[op_summary（算子详细信息）](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/Profiling/atlasprofiling_16_0067.html)章节。
+- 注：以下所有采集项的结果数据含义可参考《CANN性能调优工具用户指南》中的[op_summary（算子详细信息）](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/Profiling/atlasprofiling_16_0067.html)章节。
 **图1** PipeUtilization.csv（计算单元和搬运单元耗时占比）文件示例
 ![alt text](../figures/time_consumed.png)
 
@@ -30,8 +36,8 @@ msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 
 ### 算子仿真流水图
 
-算子调优工具 msProf 支持仿真环境下的性能数据采集和自动解析。使用msProf工具获取仿真流水图的具体方式请参考[指令流水图](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/optool/atlasopdev_16_0087.html)。
-生成算子仿真流水图的命令与算子上板性能数据采集的命令类似。同样以上述```03-layer-norm.py```为例，```--soc-version```用于指定当前机器的硬件版本，可在终端中输入```npu-smi info```查看：
+算子调优工具msProf支持仿真环境下的性能数据采集和自动解析。使用msProf工具获取仿真流水图的具体方式请参考[指令流水图](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/optool/atlasopdev_16_0087.html)。
+生成算子仿真流水图的命令与算子上板性能数据采集的命令类似。同样以上述 `03-layer-norm.py` 为例， `--soc-version` 用于指定当前机器的硬件版本，可在终端中输入 `npu-smi info` 查看：
 
 ```bash
 # source simulator路径
@@ -40,7 +46,7 @@ export LD_LIBRARY_PATH=$HOME/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tool
 msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-version} python3 03-layer-norm.py
 ```
 
-- 注：上述示例`soc-version=Ascend910B3`。下面列表基于CANN 9.2.0 版本整理输出。
+- 注：上述示例`soc-version=Ascend910B3`。下面列表基于CANN 9.2.0版本整理输出。
 
 | Ascend 910系列 | Ascend 310/310P系列 | Ascend 310B系列 | Ascend 610系列 | Ascend 920系列 | Ascend 950系列 |
 | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -82,10 +88,10 @@ msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-versi
 - trace.json
 - visualize_data.bin
 
-trace.json 支持以下两种可视化呈现方式：
+trace.json支持以下两种可视化呈现方式：
 
 - Chrome浏览器
-  在Chrome浏览器中输入 ```chrome://tracing``` 地址，并将通过msprof op simulator 生成的指令流水图文件（trace.json）拖到空白处打开，键盘上输入快捷键（W：放大；S：缩小；A：左移；D：右移）可进行查看。
+  在Chrome浏览器中输入 `chrome://tracing` 地址，并将通过msprof op simulator生成的指令流水图文件（trace.json）拖到空白处打开，键盘上输入快捷键（W：放大；S：缩小；A：左移；D：右移）可进行查看。
   **图2** Chrome浏览器时间线界面
 ![alt text](../figures/trace_json_with_chrome.png)
 
@@ -97,15 +103,15 @@ MindStudio Insight工具以时序图方式为用户提供指令在昇腾AI处理
 visualize_data.bin支持在MindStudio Insight可视化呈现：
 
 - 除了与trace.json一样可以采集到性能数据之外，visualize_data.bin还提供了与源代码（如：03-layer-norm.py）对应的指令关联看板。
-  **图4** MindStudio Insight-visualize_data.bin指令关联\
-  - 注：以下采集项的结果数据含义可参考《MindStudio Insight 工具》的[算子调优](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0068.html)章节。
+  **图4** MindStudio Insight-visualize_data.bin指令关联
+  - 注：以下采集项的结果数据含义可参考《MindStudio Insight工具》的[算子调优](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0068.html)章节。
   ![alt text](../figures/visualize_data_with_insight.png)
 
 #### 仿真流水图采集Triton算子Debug版本
 
-仿真流水图（trace.json / visualize_data.bin）默认只包含指令地址与指令名。若希望在MindStudio Insight中使用指令关联看板、查看指令对应的Triton/Python源码行与调用栈（即[查找瓶颈](#locating-bottlenecks)中的方法四），需要将算子编译为带debug_line调试信息的版本。未开启时，msprof op simulator会输出如下提示，且代码关联文件为空：
+仿真流水图（trace.json / visualize_data.bin）默认只包含指令地址与指令名。若希望在MindStudio Insight中使用指令关联看板、查看指令对应的Triton/Python源码行与调用栈（见下文[查找瓶颈](#locating-bottlenecks)一节的方法四），需要将算子编译为带debug_line调试信息的版本。未开启时，msprof op simulator会输出如下提示，且代码关联文件为空：
 
-```text
+```output
 [WARN] Kernel missed debug_line information. If you need code call stack, please recompile kernel with -g option
 [WARN] Code call stack is empty
 [WARN] Lack of code info of files
@@ -117,7 +123,10 @@ Triton算子无需手动添加`-g`，triton-ascend后端通过环境变量`TRITO
 export TRITON_DISABLE_LINE_INFO=0
 ```
 
-验证是否生效：日志中`[DEBUG] cmd_list:`一行应包含`--enable-debug-info=true`，且`Kernel missed debug_line information`告警消失。随后将`visualize_data.bin`导入MindStudio Insight，即可在指令时序图中查看每条指令关联的源码行与调用栈。
+验证是否生效，可按以下步骤：
+
+1. 验证日志：日志中`[DEBUG] cmd_list:`一行应包含`--enable-debug-info=true`，且`Kernel missed debug_line information`告警消失。
+2. 导入并查看结果：将`visualize_data.bin`导入MindStudio Insight，即可在指令时序图中查看每条指令关联的源码行与调用栈。
 
 ## 分析性能数据
 
@@ -127,9 +136,9 @@ export TRITON_DISABLE_LINE_INFO=0
 
 理论性能为算子实际性能的理想目标。不同的硬件平台的硬件规格各异，理论性能可以帮助我们了解硬件的潜能，从而设定性能优化的目标。
 
-- 搬运相关流水（MTE1/MTE2/MTE3等）的理论耗时 = 搬运数据量（单位：Byte）/ 理论带宽。例如：某款AI处理器的GM峰值带宽约为1.8TB/s，想要进行一次float数据类型、4096 * 4096大小的矩阵搬运，搬运的理论耗时是`sizeof(float) * 4096 * 4096 / 1.8 TB/s = 37.28 μs`（按照1 TB = 10^12 Byte来计算）。
+- 搬运相关流水（MTE1/MTE2/MTE3等）的理论耗时 = 搬运数据量（单位：Byte）/ 理论带宽。例如：某款AI处理器的GM（Global Memory, 全局内存）峰值带宽约为1.8TB/s，想要进行一次float数据类型、4096 * 4096大小的矩阵搬运，搬运的理论耗时是`sizeof(float) * 4096 * 4096 / 1.8TB/s = 37.28μs`（按照1TB = 10^12Byte来计算）。
 
-> 说明:
+> 说明：
 >
 > - 搬运指令同时存在时，会存在共享带宽的情况，并不能每条都以接近理论带宽的速率搬运数据。比如，当MTE2/MTE3同时进行GM读写时，搬运流水线的耗时应该是（MTE2搬运量 + MTE3搬运量）/ GM带宽。
 > - 搬运不同大小的数据块时，对带宽的利用率（有效带宽/理论带宽）不一样。针对每次搬运数据量较小的情况，实测性能达不到理论带宽。
@@ -163,9 +172,9 @@ export TRITON_DISABLE_LINE_INFO=0
 ![analyse_data_code_mapping](../figures/performance_analysis_analyse_data_code_mapping.png) \
     上图示例中为某款AI处理器仿真器上获取的数据，可以看到左侧load接口对应到右侧的一组汇编指令中（已筛选仅显示代码行相关指令，并按运行周期数降序排序），标量指令占比高，不符合load作为访存接口应该是MTE占比高的情况。因此主要优化方向为标量计算。
 
-### 示例：i64/i32 的compare在NPU上无法启用vector导致向量计算转为标量计算
+### 示例：i64/i32 compare向量化加速
 
-【描述】i64/i32 的cmp在NPU上无法启用Vector，退化为scalar计算效率降低；通过转化为fp32来利用vec_cast和vec_cmp实现vector操作加速。
+【描述】i64/i32的cmp在NPU上无法启用Vector，退化为scalar计算效率降低；通过转化为fp32来利用vec_cast和vec_cmp实现vector操作加速。
 【注意】在tl.load和tl.store中的mask使用cmp功能，大部分情况下编译器可以自动优化为vec操作，本例中tl.where则需要手动转换。
 
 ```diff
@@ -228,6 +237,6 @@ def npu_vector_cmp_kernel(
 ```
 
 **示例图** 优化前后数据对比图
-![图2 optimization2](../figures/optimization.png)
+![optimization](../figures/optimization.png)
 通过分析图中的数据可以发现，优化前后的aiv_scalar_time(μs)和aiv_scalar_ratio差距较大，说明性能差的原因是有很多scalar运算，
 通过采集[算子仿真流水图](#operator-simulation-pipeline)可以得到visualize_data.bin，再用MindStudio Insight解析visualize_data.bin，可以发现xbar = tl.where(cols < N, x - mean, 0.0)有很多scalar运算，通过上面优化可以减少scalar运算。

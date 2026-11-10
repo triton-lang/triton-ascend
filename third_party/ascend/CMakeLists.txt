@@ -31,6 +31,16 @@ set_property(DIRECTORY PROPERTY RULE_LAUNCH_LINK ${_saved_launch_link})
 include_directories(${ASCENDNPU_IR_SRC_DIR}/bishengir/include)
 include_directories(${ASCENDNPU_IR_BINARY_DIR}/bishengir/include) # Tablegen'd files
 
+# The standalone NPU-IR build omits Regbase; TLA uses its existing register ops.
+if(NOT TARGET MLIRHIVMRegbaseIntrinsDialect)
+  add_subdirectory(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/Regbase
+    ${ASCENDNPU_IR_BINARY_DIR}/bishengir/include/bishengir/Dialect/HIVMRegbaseIntrins/IR)
+  add_subdirectory(
+    ${ASCENDNPU_IR_SRC_DIR}/bishengir/lib/Dialect/HIVMRegbaseIntrins/IR
+    ${ASCENDNPU_IR_BINARY_DIR}/bishengir/lib/Dialect/HIVMRegbaseIntrins/IR)
+endif()
+
 add_subdirectory(include)
 add_subdirectory(lib)
 
@@ -135,6 +145,7 @@ add_triton_plugin(TritonAscend
   BiShengIRScopeDialect
   BiShengIRHIVMDialect
   MLIRAVEDialect
+  MLIRHIVMRegbaseIntrinsDialect
 )
 
 option(TRITON_ENABLE_COVERAGE_LLVM_COV "Enable code llvm-cov coverage tool for Ascend plugin " OFF)

@@ -1149,3 +1149,125 @@ def test_infinity_reject_unsupported_dtype(dtype):
 def test_infinity_reject_non_scalar_dtype(value):
     with pytest.raises(TypeError, match="tla.infinity expects a compile-time dtype"):
         tla.infinity(tl.constexpr(value), _semantic=SimpleNamespace())
+
+
+# Execution-domain contracts shared by scalar APIs.
+
+SCALAR_SCOPE_CASES = [
+    (tla.select, (1, 2)),
+    (tla.abs, ()),
+    (tla.maximum, (3, )),
+    (tla.minimum, (3, )),
+    (tla.cast, (tl.int32, )),
+    (tla.cdiv, (3, )),
+    (tla.clamp, (1.0, 3.0)),
+]
+
+
+@tr.jit
+def _scalar_scope_helper(x, OP: tl.constexpr, EXTRA: tl.constexpr):
+    if len(EXTRA) == 0:
+        return OP(x)
+    elif len(EXTRA) == 1:
+        return OP(x, EXTRA[0])
+    else:
+        return OP(x, EXTRA[0], EXTRA[1])
+
+
+@tla.jit
+def _scalar_scope_caller(x, OP: tl.constexpr, EXTRA: tl.constexpr, LITERAL: tl.constexpr, HELPER: tl.constexpr,
+                         PRECALL: tl.constexpr):
+    if LITERAL:
+        x = 2
+    if PRECALL:
+        _scalar_scope_helper(x, OP, EXTRA)
+    with tla.scope.simd():
+        if HELPER:
+            _scalar_scope_helper(x, OP, EXTRA)
+        else:
+            if len(EXTRA) == 0:
+                OP(x)
+            elif len(EXTRA) == 1:
+                OP(x, EXTRA[0])
+            else:
+                OP(x, EXTRA[0], EXTRA[1])
+
+
+@pytest.mark.parametrize("operation,extra", SCALAR_SCOPE_CASES, ids=[op.__name__ for op, _ in SCALAR_SCOPE_CASES])
+@pytest.mark.parametrize("literal", [False, True], ids=["runtime", "literal"])
+@pytest.mark.parametrize("helper,precall", [(False, False), (True, False), (True, True)],
+                         ids=["direct", "helper", "helper_after_outside_call"])
+def test_scalar_operations_reject_simd_scope(operation, extra, literal, helper, precall):
+    with pytest.raises(CompilationError) as caught:
+        compile_offline(_scalar_scope_caller, {"x": "i32"},
+                        dict(OP=operation, EXTRA=extra, LITERAL=literal, HELPER=helper, PRECALL=precall))
+    error = caught.value
+    while error.__cause__ is not None:
+        error = error.__cause__
+    assert isinstance(error, ValueError)
+    assert str(error) == f"tla.{operation.__name__} cannot be used inside SIMD VF"
+
+
+@tla.jit
+def _scalar_in_simd_control_flow(x, LOOP: tl.constexpr):
+    with tla.scope.simd():
+        if LOOP:
+            for i in range(x):
+                tla.cast(i, tl.int32)
+        else:
+            if x > 0:
+                tla.cast(x, tl.int32)
+
+
+@pytest.mark.parametrize("loop", [False, True], ids=["if", "loop"])
+def test_scalar_operations_reject_simd_control_flow(loop):
+    with pytest.raises(CompilationError, match="tla.cast cannot be used inside SIMD VF"):
+        compile_offline(_scalar_in_simd_control_flow, {"x": "i32"}, {"LOOP": loop})
+
+
+@tla.jit
+def _constant_scope_helper(DTYPE: tl.constexpr, MAXIMUM: tl.constexpr):
+    if MAXIMUM:
+        return tla.max_value(DTYPE)
+    else:
+        return tla.infinity(DTYPE)
+
+
+@tla.jit
+def _constant_in_simd_scope(DTYPE: tl.constexpr, MAXIMUM: tl.constexpr, HELPER: tl.constexpr):
+    if HELPER:
+        _constant_scope_helper(DTYPE, MAXIMUM)
+    with tla.scope.simd():
+        if HELPER:
+            value = _constant_scope_helper(DTYPE, MAXIMUM)
+        elif MAXIMUM:
+            value = tla.max_value(DTYPE)
+        else:
+            value = tla.infinity(DTYPE)
+        tl.static_assert(value.dtype == DTYPE)
+        tl.static_assert(len(value.shape) == 0)
+
+
+@pytest.mark.parametrize("dtype", [case["dtype"] for case in MAX_VALUE_CASES])
+@pytest.mark.parametrize("helper", [False, True], ids=["direct", "helper"])
+def test_max_value_allowed_in_simd_scope(dtype, helper):
+    module, _ = compile_offline(_constant_in_simd_scope, {}, dict(DTYPE=dtype, MAXIMUM=True, HELPER=helper))
+    assert _ops(module, "arith.constant")
+
+
+@pytest.mark.parametrize("dtype", [tl.float16, tl.bfloat16, tl.float32])
+@pytest.mark.parametrize("helper", [False, True], ids=["direct", "helper"])
+def test_infinity_allowed_in_simd_scope(dtype, helper):
+    module, _ = compile_offline(_constant_in_simd_scope, {}, dict(DTYPE=dtype, MAXIMUM=False, HELPER=helper))
+    assert _ops(module, "arith.constant")
+
+
+@tla.jit
+def _scalar_after_simd_scope(x):
+    with tla.scope.simd():
+        tla.infinity(tl.float32)
+    tla.device_print("outside", _scalar_helper(x > 0, x, x))
+
+
+def test_scalar_scope_restored_after_simd():
+    _lower(_scalar_after_simd_scope, {"x": "i32"})

@@ -24,6 +24,8 @@ import math
 from triton.language import core as tl
 from triton.language.math import abs as _triton_abs
 
+from .scope import _check_not_in_simd
+
 __all__ = ["select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "clamp"]
 
 
@@ -49,6 +51,7 @@ def select(condition, true_value, false_value, _semantic=None):
     Both value expressions are evaluated before the selection. This operation
     cannot guard side effects or out-of-bounds accesses.
     """
+    _check_not_in_simd("tla.select", _semantic)
     condition = _check_scalar(condition, "tla.select condition")
     true_value = _check_scalar(true_value, "tla.select true_value")
     false_value = _check_scalar(false_value, "tla.select false_value")
@@ -69,6 +72,7 @@ def abs(x, _semantic=None):
     positions, SIMD registers and Blocks require their explicit interfaces.
     This operation allocates no buffer and performs no SIMD broadcast.
     """
+    _check_not_in_simd("tla.abs", _semantic)
     x = _check_scalar(x, "tla.abs x")
     if isinstance(x, tl.tensor) and x.dtype.is_floating() and x.dtype not in (tl.float16, tl.float32):
         raise TypeError(f"tla.abs does not support dtype {x.dtype}")
@@ -83,6 +87,7 @@ def maximum(a, b, propagate_nan: tl.constexpr = tl.PropagateNan.NONE, _semantic=
     ``tl.PropagateNan.NONE``; use ``ALL`` to propagate either input NaN.
     With ``NONE``, exactly one NaN input is temporarily unsupported on Ascend.
     """
+    _check_not_in_simd("tla.maximum", _semantic)
     a = _check_scalar(a, "tla.maximum a")
     b = _check_scalar(b, "tla.maximum b")
     for name, value in (("a", a), ("b", b)):
@@ -99,6 +104,7 @@ def minimum(a, b, propagate_nan: tl.constexpr = tl.PropagateNan.NONE, _semantic=
     ``tl.PropagateNan.NONE``.
     With ``NONE``, exactly one NaN input is temporarily unsupported on Ascend.
     """
+    _check_not_in_simd("tla.minimum", _semantic)
     a = _check_scalar(a, "tla.minimum a")
     b = _check_scalar(b, "tla.minimum b")
     for name, value in (("a", a), ("b", b)):
@@ -120,6 +126,7 @@ def cdiv(x, div, _semantic=None, _generator=None):
     this does not provide overflow-safe ceiling division. Bfloat16 inputs
     are unsupported.
     """
+    _check_not_in_simd("tla.cdiv", _semantic)
     from triton.language import cdiv as triton_cdiv
 
     x = _check_scalar(x, "tla.cdiv x")
@@ -138,6 +145,7 @@ def cast(input, dtype, fp_downcast_rounding=None, bitcast=False, _semantic=None)
     destination types are unsupported. Numeric fp64 conversions to narrower
     floating-point types are unsupported because they can require implicit buffers.
     """
+    _check_not_in_simd("tla.cast", _semantic)
     input = _check_scalar(input, "tla.cast input")
     dtype = tl._unwrap_if_constexpr(dtype)
     if dtype == tl.bfloat16:
@@ -167,6 +175,7 @@ def max_value(dtype, _semantic=None):
         upper = tla.max_value(tla.int32)
 
     This operation creates no buffer and performs no runtime conversion.
+    Constants may be constructed inside or outside SIMD VF.
     Pointer, block, buffer, SIMD vector and float8 types are unsupported.
     """
     dtype = tl._unwrap_if_constexpr(dtype)
@@ -189,6 +198,7 @@ def infinity(dtype, _semantic=None):
     dtype. The result is a scalar, with no buffer allocation or SIMD
     broadcast. Use ``-tla.infinity(dtype)`` for negative infinity and
     ``tla.simd.vdup`` to broadcast it explicitly.
+    Constants may be constructed inside or outside SIMD VF.
     """
     dtype = tl._unwrap_if_constexpr(dtype)
     if not isinstance(dtype, tl.dtype):
@@ -210,6 +220,7 @@ def clamp(x, min, max, propagate_nan: tl.constexpr = tl.PropagateNan.NONE, _sema
     No buffer allocation or SIMD broadcast is performed. Compute the scalar
     outside SIMD VF and broadcast it explicitly inside VF.
     """
+    _check_not_in_simd("tla.clamp", _semantic)
     x = _check_scalar(x, "tla.clamp x")
     min = _check_scalar(min, "tla.clamp min")
     max = _check_scalar(max, "tla.clamp max")

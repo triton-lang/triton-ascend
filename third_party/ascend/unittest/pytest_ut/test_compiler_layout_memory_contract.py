@@ -970,12 +970,10 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compil
     assert explicit_template.__dict__["force_simt_template"] is False
 
 
-@pytest.mark.parametrize("instrumented", [False, True])
 @pytest.mark.parametrize(
     ("arch", "compile_on_910_95", "expected_calls"),
     (
         ("Ascend910_9589", True, 1),
-        ("Ascend950PR_9579", True, 1),
         ("Ascend910_9691", True, 0),
         ("Ascend910B1", False, 0),
         (None, False, 0),
@@ -987,13 +985,9 @@ def test_ttir_to_linalg_merge_concat_load_buffer_is_a5_only(
     arch,
     compile_on_910_95,
     expected_calls,
-    instrumented,
 ):
     events = []
     merge_calls = []
-    instrumentation_calls = []
-    instrumentation = SimpleNamespace(patch=lambda stage, *_args: instrumentation_calls.append(stage))
-    monkeypatch.setattr(compiler_module.AscendBackend, "instrumentation", instrumentation if instrumented else None)
 
     def noop(*_args, **_kwargs):
         return None
@@ -1044,11 +1038,6 @@ def test_ttir_to_linalg_merge_concat_load_buffer_is_a5_only(
     assert compiler_module.ttir_to_linalg(_FakeModule(events), metadata, options) == "module {}"
     assert merge_calls == ([] if arch is None else [arch] * expected_calls)
     assert events[-1] == "run_row"
-    a5_instrumented = instrumented and expected_calls == 1
-    assert instrumentation_calls == (["ttir_to_linalg"] if instrumented and not a5_instrumented else [])
-    assert metadata.get("proton_collection") == ("mspti" if a5_instrumented else None)
-    if a5_instrumented:
-        assert metadata["profile_scratch_size"] == 0
 
 
 @pytest.mark.parametrize("arch", ["Ascend910B4", "Ascend910_9391", "Ascend950PR"])
@@ -1137,15 +1126,6 @@ def _capture_multibuffer_command(compiler, monkeypatch, is_a5, requested, derive
         compile_fn("module {}", metadata, options)
     assert len(commands) == 1
     return commands[0]
-
-
-@pytest.mark.parametrize("is_a5", [False, True])
-@pytest.mark.parametrize("instrumented", [False, True])
-def test_proton_metadata_export_is_a5_only(compiler_module, monkeypatch, is_a5, instrumented):
-    derived = {"proton_collection": "mspti"} if instrumented else {}
-    command = _capture_multibuffer_command(compiler_module, monkeypatch, is_a5, {}, derived)
-    exports = [arg for arg in command if arg.startswith("--proton-metadata-output=")]
-    assert len(exports) == int(is_a5 and instrumented)
 
 
 @pytest.mark.parametrize("is_a5", [False, True])

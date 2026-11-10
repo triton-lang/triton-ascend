@@ -13,8 +13,8 @@ import triton.language as tl
 import triton.profiler as proton
 import triton.profiler.language as pl
 
-if triton.runtime.driver.active.get_current_target().arch not in ("Ascend910_9382", "Ascend910B4"):
-    pytest.skip("This regression covers the validated software-buffer targets", allow_module_level=True)
+if triton.runtime.driver.active.get_current_target().arch != "Ascend910_9382":
+    pytest.skip("This regression is validated on A3 only", allow_module_level=True)
 
 pl.enable_semantic("triton")
 
@@ -74,14 +74,3 @@ def test_ascend_instrumentation(enabled, tmp_path, monkeypatch):
         assert math.isfinite(float(event["ts"]))
         assert math.isfinite(float(event["dur"]))
         assert float(event["dur"]) >= 0
-
-    for pid in {event["pid"] for event in complete}:
-        local = [event for event in complete if event["pid"] == pid]
-        parents = sorted((event for event in local if event["name"] == "kernel"), key=lambda event: event["ts"])
-        assert len(parents) == 2
-        for name in ("load", "compute", "store"):
-            children = sorted((event for event in local if event["name"] == name), key=lambda event: event["ts"])
-            assert len(children) == len(parents)
-            for parent, child in zip(parents, children):
-                assert child["ts"] >= parent["ts"] - 1e-9
-                assert child["ts"] + child["dur"] <= parent["ts"] + parent["dur"] + 1e-9

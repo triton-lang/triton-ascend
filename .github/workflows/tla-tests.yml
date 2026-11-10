@@ -11,7 +11,7 @@ on:
     paths:
       - 'third_party/ascend/language/tla/**'
       - 'third_party/ascend/unittest/tla_ut/**'
-      - 'third_party/ascend/backend/compiler.py'
+      - 'third_party/ascend/lib/TritonToLinalg/TLAToLinalgPass.cpp'
       - '.github/workflows/tla-tests.yml'
   workflow_dispatch:
 

@@ -42,7 +42,7 @@ RUN export PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local
 # Environment matching the original CIBW_ENVIRONMENT
 # ---------------------------------------------------------------------------
 ENV TRITON_BUILD_WITH_CLANG_LLD=true \
-    TRITON_BUILD_PROTON=OFF \
+    TRITON_BUILD_PROTON=ON \
     TRITON_WHEEL_NAME=triton-ascend \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
     TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX}${BUILD_DATE} \

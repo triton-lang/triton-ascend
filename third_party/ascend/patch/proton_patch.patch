@@ -1,8 +1,8 @@
 diff --git a/third_party/proton/CMakeLists.txt b/third_party/proton/CMakeLists.txt
-index abd90d689f4f4b808bfafc624f3764f8985cba36..1b542e5364848ffba01effdaf495ae3d9bc8fb71 100644
+index abd90d689f4f4b808bfafc624f3764f8985cba36..9eff31cfa56fe5401fd7fa338b2c5a6cd620a87d 100644
 --- a/third_party/proton/CMakeLists.txt
 +++ b/third_party/proton/CMakeLists.txt
-@@ -3,17 +3,52 @@ project(Proton LANGUAGES CXX)
+@@ -3,13 +3,38 @@ project(Proton LANGUAGES CXX)
  set(PROTON_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/csrc")
  set(PROTON_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
  
@@ -29,38 +29,24 @@ index abd90d689f4f4b808bfafc624f3764f8985cba36..1b542e5364848ffba01effdaf495ae3d
 +if(PROTON_BUILD_HIP)
 +  proton_require_header(ROCTRACER_INCLUDE_DIR roctracer/roctracer.h PROTON_BUILD_HIP)
 +  proton_require_header(ROCTRACER_INCLUDE_DIR hip/hip_runtime_api.h PROTON_BUILD_HIP)
-+endif()
+ endif()
+-if(NOT ROCTRACER_INCLUDE_DIR)
+-  message(FATAL_ERROR "ROCTRACER include directory not defined")
 +if(PROTON_BUILD_MSPTI)
 +  if(NOT PROTON_BUILD_CANN)
 +    message(FATAL_ERROR "PROTON_BUILD_MSPTI requires PROTON_BUILD_CANN")
 +  endif()
 +  proton_require_header(MSPTI_INCLUDE_DIR mspti.h PROTON_BUILD_MSPTI)
  endif()
--if(NOT ROCTRACER_INCLUDE_DIR)
--  message(FATAL_ERROR "ROCTRACER include directory not defined")
 +if(PROTON_BUILD_CANN)
 +  proton_require_header(CANN_INCLUDE_DIR acl/acl.h PROTON_BUILD_CANN)
- endif()
++endif()
 +message(STATUS "Proton backends: CUDA=${PROTON_BUILD_CUDA}; HIP=${PROTON_BUILD_HIP}; MSPTI=${PROTON_BUILD_MSPTI}; CANN=${PROTON_BUILD_CANN}")
 +
  if(NOT JSON_INCLUDE_DIR)
    message(FATAL_ERROR "JSON include directory not defined")
  endif()
- 
-+if(PROTON_BUILD_CANN)
-+  get_filename_component(PROTON_CANN_BASE_DIR "${CANN_INCLUDE_DIR}" DIRECTORY)
-+  find_library(CANN_CL_LIBRARY ascendcl
-+    HINTS "${PROTON_CANN_BASE_DIR}/lib64"
-+          "${PROTON_CANN_BASE_DIR}/lib"
-+          "${PROTON_CANN_BASE_DIR}/../lib64"
-+          "${PROTON_CANN_BASE_DIR}/../lib"
-+    REQUIRED)
-+endif()
-+
- # ============ Dependencies =============
- find_package(Python3 REQUIRED Interpreter Development.Module)
- find_package(pybind11 CONFIG REQUIRED HINTS "${Python3_SITELIB}")
-@@ -27,23 +62,33 @@ function(add_proton_library name)
+@@ -27,23 +52,33 @@ function(add_proton_library name)
  
    target_link_libraries(${name} PRIVATE Python3::Module pybind11::headers)
  
@@ -104,13 +90,13 @@ index abd90d689f4f4b808bfafc624f3764f8985cba36..1b542e5364848ffba01effdaf495ae3d
    # Append this library name to the GLOBAL property "PROTON_LIBS"
    set_property(GLOBAL APPEND PROPERTY PROTON_LIBS ${name})
  endfunction()
-@@ -78,6 +123,10 @@ endforeach()
+@@ -78,6 +113,10 @@ endforeach()
  add_library(proton SHARED ${_proton_obj_sources})
  
  target_link_libraries(proton PRIVATE Python3::Module)
 +
 +if(PROTON_BUILD_CANN)
-+  target_link_libraries(proton PRIVATE ${CANN_CL_LIBRARY})
++  target_link_libraries(proton PRIVATE ${CMAKE_DL_LIBS})
 +endif()
  # Apply any macOS linker flags or extra link options
  if(PROTON_PYTHON_LDFLAGS)
@@ -810,11 +796,12 @@ index 9ebee5d9131ec5da9fafeb4e150c54710b61b5cf..0211aaea3689e271d2188587f0946d92
 +add_proton_library(ProtonProfiler ${PROTON_PROFILER_SOURCES})
 diff --git a/third_party/proton/csrc/lib/Profiler/Instrumentation/AscendRuntime.cpp b/third_party/proton/csrc/lib/Profiler/Instrumentation/AscendRuntime.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f332d22b552
+index 0000000000000000000000000000000000000000..d990fcbde20ccf966c37f37b7ca2be41d6bd7a6b
 --- /dev/null
 +++ b/third_party/proton/csrc/lib/Profiler/Instrumentation/AscendRuntime.cpp
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,134 @@
 +#include "Profiler/Instrumentation/AscendRuntime.h"
++#include "Driver/Dispatch.h"
 +
 +#include <acl/acl.h>
 +#include <acl/acl_rt.h>
@@ -823,8 +810,19 @@ index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f33
 +
 +namespace proton {
 +
++namespace {
++struct ExternLibAcl : public ExternLibBase {
++  using RetType = aclError;
++  static constexpr const char *name = "libascendcl.so";
++  static constexpr RetType success = ACL_ERROR_NONE;
++  static inline void *lib = nullptr;
++};
++} // namespace
++
 +void AscendRuntime::allocateHostBuffer(uint8_t **buffer, size_t size) {
-+  aclError ret = aclrtMallocHost(reinterpret_cast<void **>(buffer), size);
++  static decltype(&aclrtMallocHost) mallocHost = nullptr;
++  aclError ret = Dispatch<ExternLibAcl>::exec<false>(
++      mallocHost, "aclrtMallocHost", reinterpret_cast<void **>(buffer), size);
 +  if (ret != ACL_ERROR_NONE) {
 +    throw std::runtime_error("Failed to allocate host buffer: " +
 +                             std::to_string(ret));
@@ -832,7 +830,9 @@ index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f33
 +}
 +
 +void AscendRuntime::freeHostBuffer(uint8_t *buffer) {
-+  aclError ret = aclrtFreeHost(buffer);
++  static decltype(&aclrtFreeHost) freeHost = nullptr;
++  aclError ret =
++      Dispatch<ExternLibAcl>::exec<false>(freeHost, "aclrtFreeHost", buffer);
 +  if (ret != ACL_ERROR_NONE) {
 +    throw std::runtime_error("Failed to free host buffer: " +
 +                             std::to_string(ret));
@@ -840,8 +840,10 @@ index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f33
 +}
 +
 +uint64_t AscendRuntime::getDevice() {
++  static decltype(&aclrtGetDevice) getDevice = nullptr;
 +  int32_t deviceId;
-+  aclError ret = aclrtGetDevice(&deviceId);
++  aclError ret = Dispatch<ExternLibAcl>::exec<false>(
++      getDevice, "aclrtGetDevice", &deviceId);
 +  if (ret != ACL_ERROR_NONE) {
 +    throw std::runtime_error("Failed to get device: " + std::to_string(ret));
 +  }
@@ -849,9 +851,11 @@ index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f33
 +}
 +
 +void *AscendRuntime::getPriorityStream() {
++  static decltype(&aclrtCreateStreamWithConfig) createStream = nullptr;
 +  aclrtStream stream;
-+  aclError ret =
-+      aclrtCreateStreamWithConfig(&stream, 0, ACL_STREAM_FAST_LAUNCH);
++  aclError ret = Dispatch<ExternLibAcl>::exec<false>(
++      createStream, "aclrtCreateStreamWithConfig", &stream, 0,
++      ACL_STREAM_FAST_LAUNCH);
 +  if (ret != ACL_ERROR_NONE) {
 +    throw std::runtime_error("Failed to create stream: " + std::to_string(ret));
 +  }
@@ -859,7 +863,10 @@ index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f33
 +}
 +
 +void AscendRuntime::synchronizeStream(void *stream) {
-+  aclError ret = aclrtSynchronizeStream(reinterpret_cast<aclrtStream>(stream));
++  static decltype(&aclrtSynchronizeStream) synchronizeStream = nullptr;
++  aclError ret = Dispatch<ExternLibAcl>::exec<false>(
++      synchronizeStream, "aclrtSynchronizeStream",
++      reinterpret_cast<aclrtStream>(stream));
 +  if (ret != ACL_ERROR_NONE) {
 +    throw std::runtime_error("Failed to synchronize stream: " +
 +                             std::to_string(ret));
@@ -867,7 +874,16 @@ index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f33
 +}
 +
 +std::optional<int64_t> AscendRuntime::getTimeShiftCost() const {
-+  const char *name = aclrtGetSocName();
++  static const auto getSocName = [] {
++    Dispatch<ExternLibAcl>::init(ExternLibAcl::name, &ExternLibAcl::lib);
++    auto function = reinterpret_cast<decltype(&aclrtGetSocName)>(
++        dlsym(ExternLibAcl::lib, "aclrtGetSocName"));
++    if (function == nullptr)
++      throw std::runtime_error(
++          "Failed to load aclrtGetSocName from libascendcl.so");
++    return function;
++  }();
++  const char *name = getSocName();
 +  const std::string socName = name ? name : "";
 +  if (socName.find("Ascend910_9382") != std::string::npos)
 +    return 0;
@@ -882,13 +898,15 @@ index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f33
 +    uint8_t *hostBuffer, size_t hostBufferSize, uint8_t *deviceBuffer,
 +    size_t deviceBufferSize, void *stream,
 +    std::function<void(uint8_t *, size_t)> callback) {
++  static decltype(&aclrtMemcpyAsync) memcpyAsync = nullptr;
++  static decltype(&aclrtSynchronizeStream) synchronizeStream = nullptr;
 +  int64_t chunkSize = std::min(hostBufferSize, deviceBufferSize);
 +  int64_t sizeLeftOnDevice = deviceBufferSize;
 +
 +  while (chunkSize > 0) {
-+    aclError ret = aclrtMemcpyAsync(
-+        reinterpret_cast<void *>(hostBuffer), chunkSize,
-+        reinterpret_cast<void *>(deviceBuffer), chunkSize,
++    aclError ret = Dispatch<ExternLibAcl>::exec<false>(
++        memcpyAsync, "aclrtMemcpyAsync", reinterpret_cast<void *>(hostBuffer),
++        chunkSize, reinterpret_cast<void *>(deviceBuffer), chunkSize,
 +        ACL_MEMCPY_DEVICE_TO_HOST, reinterpret_cast<aclrtStream>(stream));
 +
 +    if (ret != ACL_ERROR_NONE) {
@@ -897,7 +915,9 @@ index 0000000000000000000000000000000000000000..631b9dc7353d7f91a9a5cc274fff4f33
 +    }
 +
 +    // For simplicity, only copy the buffer after the kernel has finished.
-+    ret = aclrtSynchronizeStream(reinterpret_cast<aclrtStream>(stream));
++    ret = Dispatch<ExternLibAcl>::exec<false>(
++        synchronizeStream, "aclrtSynchronizeStream",
++        reinterpret_cast<aclrtStream>(stream));
 +    if (ret != ACL_ERROR_NONE) {
 +      throw std::runtime_error(
 +          "Failed to synchronize stream during buffer processing: " +

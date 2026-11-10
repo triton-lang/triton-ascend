@@ -21,10 +21,14 @@
  */
 
 #include "PtrAnalysisTestUtils.h"
-#include "TritonMemoryAccess/PtrAnalysisRules/CommonPtrRules.h"
+#include "TritonMemoryAccess/PtrAnalysis.h"
+#include "TritonMemoryAccess/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Parser/Parser.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "gtest/gtest.h"
 
@@ -163,9 +167,9 @@ TEST(PtrAnalysisBitcast,
       EXPECT_EQ(count(*module), n);
       expectAddresses(source, *result, builder, env);
     }
-    analysis.clear();
+    ASSERT_TRUE(succeeded(analysis.reset()));
   };
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   check(analysis);
   SmallVector<Operation *> helpers;
   f.walk([&](triton::BitcastOp op) {
@@ -214,7 +218,7 @@ TEST(PtrAnalysisBitcast, EncodingChangesCannotReuseSourceOffsets) {
   for (auto f : module->getOps<triton::FuncOp>()) {
     auto cast = *f.getBody().front().getOps<triton::BitcastOp>().begin();
     OpBuilder builder(f.getBody().front().getTerminator());
-    PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+    PtrAnalysis analysis(builder);
     ASSERT_TRUE(succeeded(analysis.analyze(cast.getSrc())));
     unsigned n = count(f);
     EXPECT_TRUE(failed(analysis.analyze(cast.getResult())));
@@ -247,7 +251,7 @@ TEST(PtrAnalysisBitcast, DynamicShapeKeepsSameWidthButRejectsRescaling) {
   ASSERT_TRUE(succeeded(verify(*module)));
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
 
   // Both sources are analyzable, with aligned offsets [0, 4, 8, 12].
   for (StringRef name : {"widen", "narrow"}) {
@@ -289,7 +293,7 @@ TEST(PtrAnalysisBitcast, StructuredHalfWidthCastPreservesSubAxes) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto before = test::getInfo(analysis.analyze(tagged(f, "before")));
   auto after = test::getInfo(analysis.analyze(tagged(f, "cast")));
   ASSERT_TRUE(succeeded(before));
@@ -326,7 +330,7 @@ TEST(PtrAnalysisBitcast, DifferentWidthScalarStartsANewBase) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   unsigned n = count(*module);
   auto root = test::getInfo(analysis.analyze(tagged(f, "root")));
   ASSERT_TRUE(succeeded(root));
@@ -389,13 +393,14 @@ TEST(PtrAnalysisBitcast, DifferentWidthsPreserveCombinedByteAddresses) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   for (StringRef tag : {"wide", "advanced", "half", "byte", "dynamic",
                         "subaxis", "separate", "wrapped"}) {
     Value value = tagged(f, tag);
     auto info = test::getInfo(analysis.analyze(value));
     ASSERT_TRUE(succeeded(info)) << tag.str();
-    EXPECT_TRUE(succeeded(analysis.getRules().validateBinding(value, *info)));
+    EXPECT_TRUE(
+        succeeded(mlir::triton::ptr::detail::validateInfo(value, *info)));
     EXPECT_EQ(info->offsets.getShape(), ArrayRef<int64_t>({8}));
     for (int64_t pid : {-2, 0, 7})
       expectAddresses(value, *info, builder,
@@ -447,7 +452,7 @@ TEST(PtrAnalysisBitcast, WideningKeepsProvenColumnsAndRejectsUnknownUnits) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   test::Environment env{
       {f.getArgument(0), {llvm::APInt(64, 4096)}},
       {f.getArgument(1), {llvm::APInt(32, -7, true), llvm::APInt(32, 19)}}};
@@ -500,7 +505,7 @@ TEST(PtrAnalysisBitcast,
     Value pointers = body.create<triton::AddPtrOp>(loc, source, splat, offset);
     auto cast = body.create<triton::BitcastOp>(loc, target, pointers);
     body.create<triton::ReturnOp>(loc);
-    PtrAnalysis<CommonPtrRules> analysis(body, CommonPtrRules{});
+    PtrAnalysis analysis(body);
     // Reject the cast's units, not an opaque input that analysis cannot visit.
     ASSERT_TRUE(succeeded(test::getInfo(analysis.analyze(pointers))));
     unsigned n = count(fn);
@@ -519,7 +524,7 @@ TEST(PtrAnalysisBitcast,
   ASSERT_TRUE(parsed);
   auto fn = *parsed->getOps<triton::FuncOp>().begin();
   OpBuilder body(fn.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(body, CommonPtrRules{});
+  PtrAnalysis analysis(body);
   auto value = tagged(fn, "numeric");
   auto result = analysis.analyze(value);
   ASSERT_TRUE(succeeded(result));

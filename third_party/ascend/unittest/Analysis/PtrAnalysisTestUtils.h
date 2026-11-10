@@ -23,7 +23,8 @@
 #ifndef TRITON_PTR_ANALYSIS_TEST_UTILS_H
 #define TRITON_PTR_ANALYSIS_TEST_UTILS_H
 
-#include "TritonMemoryAccess/PtrAnalysisRules/CommonPtrRules.h"
+#include "TritonMemoryAccess/PtrAnalysis.h"
+#include "TritonMemoryAccess/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"

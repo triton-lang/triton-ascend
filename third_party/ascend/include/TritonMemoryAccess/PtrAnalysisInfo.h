@@ -103,6 +103,10 @@ FailureOr<OffsetInfo> buildOffsetInfo(Value value, OpBuilder &builder);
 /// reconstruction. Coordinates are effective index values; make_tensor_ptr and
 /// advance source operands retain their original i32 arithmetic.
 struct BlockPtrInfo {
+  /// Base passed to make_tensor_ptr, including any earlier scalar addptr.
+  /// PtrInfo::base may instead be an earlier root whose offset is in the
+  /// address origin. Use this base with coordinates when rebuilding a block.
+  Value descriptorBase;
   /// Full parent tensor shape for boundary checks; offsets.getShape() is the
   /// block.
   SmallVector<OpFoldResult> parentShape;
@@ -118,13 +122,34 @@ struct BlockPtrInfo {
 /// Successful analysis returns an initialized result; inability to form one is
 /// failure. Known offsets with Unknown axes are still valid results.
 struct PtrInfo {
+  /// Scalar pointer, or an exact tensor of per-lane bases with the same shape
+  /// as the result. Offset facts describe displacements relative to this base;
+  /// uniform offsets do not imply uniform addresses when the base is a tensor.
   Value base;
   OffsetInfo offsets;
   bool isEmpty() const { return !offsets.valueType; }
+  bool hasScalarBase() const {
+    return base && !isa<RankedTensorType>(base.getType());
+  }
   /// Pointer-only queries: base must be present.
   Type getElementType() const;
   unsigned getAddressSpace() const;
   std::optional<BlockPtrInfo> block;
+};
+
+/// Preservation of descriptor components relative to one fixed reference.
+/// False proves that the component can reuse the reference/initial field;
+/// true means it may change. These are not numeric values or a proof that
+/// different descriptor layouts/types can be joined.
+struct ChangeInfo {
+  bool base = true;
+  bool uniform = true;
+  bool residual = true;
+  SmallVector<bool> strides;
+  // Block-only fields. Ordinary pointers have empty coordinate/shape vectors.
+  SmallVector<bool> parentShape;
+  SmallVector<bool> coordinates;
+  bool order = true;
 };
 
 } // namespace mlir::triton::ptr
@@ -147,8 +172,9 @@ OffsetInfo buildUniformOffsetInfo(Value value, OpBuilder &builder,
 /// Build integer facts from the value itself, without analyzing its operands.
 /// May extract and cast an available uniform origin.
 FailureOr<PtrInfo> buildIntegerInfo(Value value, OpBuilder &builder);
-/// Use an ordinary scalar pointer as the base, with known zero offsets.
-FailureOr<PtrInfo> buildScalarPtrInfo(Value value, OpBuilder &builder);
+/// Use an ordinary scalar or opaque pointer tensor as the exact base, with
+/// zero displacements. Dynamic tensors may need pure shape/zero-fill helpers.
+FailureOr<PtrInfo> buildPointerInfo(Value value, OpBuilder &builder);
 
 // Integer offset combinations.
 /// These operations consume analyzed inputs at the caller-selected insertion
@@ -204,6 +230,7 @@ FailureOr<PtrInfo> advanceBlockInfo(triton::AdvanceOp op, const PtrInfo &parent,
                                     OpBuilder &builder);
 
 // Binding validation and dependency collection.
+LogicalResult validateInfo(Value value, const PtrInfo &info);
 bool validOffsetBinding(Value boundary, const OffsetInfo &components);
 bool validBlockPtrBinding(Value value, const PtrInfo &components);
 bool validPtrBinding(Value boundary, const PtrInfo &components);

@@ -41,7 +41,7 @@ add_triton_ut(
     PtrAnalysisOpCoverageTest.cpp
     BlockPtrAnalysisTest.cpp
     PtrAnalysisLifecycleTest.cpp
-    PtrAnalysisExtensionTest.cpp
+    PtrAnalysisSubAxisTest.cpp
     PtrAnalysisControlFlowTest.cpp
     CommonPtrSCFTest.cpp
   LIBS

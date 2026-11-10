@@ -21,10 +21,14 @@
  */
 
 #include "PtrAnalysisTestUtils.h"
-#include "TritonMemoryAccess/PtrAnalysisRules/CommonPtrRules.h"
+#include "TritonMemoryAccess/PtrAnalysis.h"
+#include "TritonMemoryAccess/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Parser/Parser.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "gtest/gtest.h"
 
 using namespace mlir;
@@ -63,6 +67,22 @@ void expectNoWideTensors(Operation *scope) {
             << op->getName().getStringRef().str();
   });
 }
+void expectAffineLanes(const OffsetInfo &info, ArrayRef<int64_t> expected,
+                       const test::Environment &env = test::Environment()) {
+  ASSERT_TRUE(info.hasStructuredForm());
+  ASSERT_EQ(info.axes.size(), 1u);
+  ASSERT_EQ(info.getShape()[0], expected.size());
+  auto origin = test::evaluate(info.scalarOffset, env);
+  auto stride = test::evaluate(info.axes[0].stride, env);
+  ASSERT_TRUE(origin && stride);
+  ASSERT_EQ(origin->size(), 1u);
+  ASSERT_EQ(stride->size(), 1u);
+  for (unsigned i = 0; i < expected.size(); ++i)
+    EXPECT_EQ(origin->front().getSExtValue() +
+                  int64_t(i) * stride->front().getSExtValue(),
+              expected[i])
+        << "lane " << i;
+}
 
 TEST(PtrAnalysisOpCoverage, OptionalInvarianceFailureKeepsExactResults) {
   MLIRContext context;
@@ -89,7 +109,7 @@ TEST(PtrAnalysisOpCoverage, OptionalInvarianceFailureKeepsExactResults) {
   ASSERT_TRUE(succeeded(verify(*module)));
   auto func = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(func.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
 
   // Unranked sources cannot supply per-axis facts through these casts.
   EXPECT_TRUE(failed(analysis.analyze(tagged(func, "condition"))));
@@ -144,18 +164,21 @@ TEST(PtrAnalysisOpCoverage, SingletonLoadsAndAtomicsSupplyDynamicOrigins) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   for (StringRef tag :
-       {"loaded", "filled", "active_load", "atomic", "active_atomic"}) {
+       {"loaded", "filled", "active_load", "atomic", "active_atomic", "wide"}) {
     Value value = tagged(f, tag);
     auto info = analysis.analyze(value);
     ASSERT_TRUE(succeeded(info));
     ASSERT_TRUE(info->offsets.isUniform());
     EXPECT_EQ(info->offsets.fullOffsets, OpFoldResult(value));
-    test::Environment env{{value, {llvm::APInt(32, -17, true)}}};
+    test::Environment env{
+        {value,
+         test::Lanes(cast<RankedTensorType>(value.getType()).getNumElements(),
+                     llvm::APInt(32, -17, true))}};
     expectLanes(info->offsets.scalarOffset, {-17}, env);
   }
-  for (StringRef tag : {"poison", "masked_atomic", "wide"}) {
+  for (StringRef tag : {"poison", "masked_atomic"}) {
     auto info = analysis.analyze(tagged(f, tag));
     ASSERT_TRUE(succeeded(info));
     EXPECT_FALSE(info->offsets.hasStructuredForm());
@@ -171,6 +194,88 @@ TEST(PtrAnalysisOpCoverage, SingletonLoadsAndAtomicsSupplyDynamicOrigins) {
   EXPECT_EQ(std::distance(f.getBody().front().getOps<triton::LoadOp>().begin(),
                           f.getBody().front().getOps<triton::LoadOp>().end()),
             5);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(PtrAnalysisOpCoverage, LoadInvarianceKeepsDependentAddressesStructured) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @loads(%index: !tt.ptr<i32>, %data: !tt.ptr<f32>, %condition: i1,
+                   %mask: tensor<4xi1>, %other: tensor<4xi32>,
+                   %opaque: tensor<4x!tt.ptr<i32>>) {
+      %p = tt.splat %index : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+      %m = tt.splat %condition : i1 -> tensor<4xi1>
+      %true = arith.constant dense<true> : tensor<4xi1>
+      %zero = arith.constant dense<0> : tensor<4xi32>
+      %plain = tt.load %p {tag="plain"} : tensor<4x!tt.ptr<i32>>
+      %filled = tt.load %p, %m, %zero {tag="filled"} : tensor<4x!tt.ptr<i32>>
+      %active = tt.load %p, %true, %other {tag="active"} : tensor<4x!tt.ptr<i32>>
+      %missing = tt.load %p, %m {tag="missing"} : tensor<4x!tt.ptr<i32>>
+      %mixed_mask = tt.load %p, %mask, %zero {tag="mixed_mask"} : tensor<4x!tt.ptr<i32>>
+      %mixed_other = tt.load %p, %m, %other {tag="mixed_other"} : tensor<4x!tt.ptr<i32>>
+      %volatile = tt.load %p {isVolatile=true, tag="volatile"} : tensor<4x!tt.ptr<i32>>
+      %lanes = tt.load %opaque {tag="opaque"} : tensor<4x!tt.ptr<i32>>
+      %f = tt.splat %data : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
+      %fzero = arith.constant dense<0.0> : tensor<4xf32>
+      %float = tt.load %f, %m, %fzero : tensor<4x!tt.ptr<f32>>
+      %integer = arith.fptosi %float {tag="float"} : tensor<4xf32> to tensor<4xi32>
+      %fmixed = tt.load %f, %mask, %fzero : tensor<4x!tt.ptr<f32>>
+      %imixed = arith.fptosi %fmixed {tag="float_mixed"} : tensor<4xf32> to tensor<4xi32>
+      %range = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
+      %offset = arith.addi %plain, %range : tensor<4xi32>
+      %pointer = tt.addptr %f, %offset {tag="pointer"} : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
+      %expanded = tt.expand_dims %range {axis=0:i32} : tensor<4xi32> -> tensor<1x4xi32>
+      %rows = tt.broadcast %expanded : tensor<1x4xi32> -> tensor<2x4xi32>
+      %base = tt.splat %index : !tt.ptr<i32> -> tensor<2x4x!tt.ptr<i32>>
+      %row_ptrs = tt.addptr %base, %rows : tensor<2x4x!tt.ptr<i32>>, tensor<2x4xi32>
+      %partial = tt.load %row_ptrs {tag="partial"} : tensor<2x4x!tt.ptr<i32>>
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  ASSERT_TRUE(succeeded(verify(*module)));
+  auto func = *module->getOps<triton::FuncOp>().begin();
+  unsigned loadsBefore = 0;
+  func.walk([&](triton::LoadOp) { ++loadsBefore; });
+  OpBuilder builder(&context);
+  PtrAnalysis analysis(builder);
+  for (StringRef tag : {"plain", "filled", "active", "float"}) {
+    Value value = tagged(func, tag);
+    auto info = analysis.analyze(value);
+    ASSERT_TRUE(succeeded(info)) << tag.str();
+    EXPECT_TRUE(info->offsets.isUniform()) << tag.str();
+    EXPECT_EQ(info->offsets.fullOffsets, OpFoldResult(value));
+    test::Environment env{{value, test::Lanes(4, llvm::APInt(32, 5))}};
+    expectLanes(info->offsets.scalarOffset, {5}, env);
+  }
+  for (StringRef tag : {"missing", "mixed_mask", "mixed_other", "volatile",
+                        "opaque", "float_mixed"}) {
+    Value value = tagged(func, tag);
+    auto info = analysis.analyze(value);
+    ASSERT_TRUE(succeeded(info)) << tag.str();
+    EXPECT_FALSE(info->offsets.isUniform()) << tag.str();
+    EXPECT_FALSE(info->offsets.scalarOffset);
+    EXPECT_EQ(info->offsets.fullOffsets, OpFoldResult(value));
+  }
+  auto pointer = analysis.analyze(tagged(func, "pointer"));
+  ASSERT_TRUE(succeeded(pointer));
+  EXPECT_EQ(pointer->base, func.getArgument(1));
+  ASSERT_TRUE(pointer->offsets.hasStructuredForm());
+  test::Environment env{
+      {tagged(func, "plain"), test::Lanes(4, llvm::APInt(32, 5))}};
+  expectLanes(pointer->offsets.scalarOffset, {5}, env);
+  expectLanes(pointer->offsets.axes[0].stride, {1});
+  expectLanes(pointer->offsets, {5, 6, 7, 8}, env);
+  auto partial = analysis.analyze(tagged(func, "partial"));
+  ASSERT_TRUE(succeeded(partial));
+  EXPECT_EQ(test::axisKinds(partial->offsets),
+            (SmallVector<AxisKind>{AxisKind::Invariant, AxisKind::Unknown}));
+  EXPECT_FALSE(partial->offsets.scalarOffset);
+  unsigned loadsAfter = 0;
+  func.walk([&](triton::LoadOp) { ++loadsAfter; });
+  EXPECT_EQ(loadsBefore, loadsAfter);
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -208,7 +313,7 @@ TEST(PtrAnalysisOpCoverage, ScalarAndRankZeroMemoryOrigins) {
                                             &context);
   ASSERT_TRUE(module);
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   for (StringRef tag :
        {"masked_load", "inactive_load", "masked_atomic", "inactive_atomic"}) {
     Value value = tagged(*module, tag);
@@ -256,7 +361,7 @@ TEST(PtrAnalysisOpCoverage, FloatToIntKeepsUniformityWithoutInventingStrides) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto uniform = analysis.analyze(tagged(f, "uniform"));
   ASSERT_TRUE(succeeded(uniform));
   EXPECT_TRUE(uniform->offsets.isUniform());
@@ -276,8 +381,218 @@ TEST(PtrAnalysisOpCoverage, FloatToIntKeepsUniformityWithoutInventingStrides) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
+TEST(PtrAnalysisOpCoverage, FloatIfJoinsAxesWithoutExportingBranchValues) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @branches(%condition: i1, %a: f32, %b: f32,
+                     %varying: tensor<4xf32>, %rows: tensor<2xf32>) {
+      %chosen:2 = scf.if %condition -> (tensor<4xf32>, tensor<4xf32>) {
+        %x = tt.splat %a : f32 -> tensor<4xf32>
+        %nested = scf.if %condition -> tensor<4xf32> {
+          scf.yield %x : tensor<4xf32>
+        } else {
+          %y = tt.splat %b : f32 -> tensor<4xf32>
+          scf.yield %y : tensor<4xf32>
+        }
+        scf.yield %nested, %x : tensor<4xf32>, tensor<4xf32>
+      } else {
+        %y = tt.splat %b : f32 -> tensor<4xf32>
+        scf.yield %y, %varying : tensor<4xf32>, tensor<4xf32>
+      }
+      %uniform = arith.fptosi %chosen#0 {tag="uniform"} : tensor<4xf32> to tensor<4xi32>
+      %unknown = arith.fptosi %chosen#1 {tag="unknown"} : tensor<4xf32> to tensor<4xi32>
+      %partial = scf.if %condition -> tensor<2x4xf32> {
+        %e = tt.expand_dims %rows {axis=1:i32} : tensor<2xf32> -> tensor<2x1xf32>
+        %r = tt.broadcast %e : tensor<2x1xf32> -> tensor<2x4xf32>
+        scf.yield %r : tensor<2x4xf32>
+      } else {
+        %r = tt.splat %a : f32 -> tensor<2x4xf32>
+        scf.yield %r : tensor<2x4xf32>
+      }
+      %ints = arith.fptosi %partial {tag="partial"} : tensor<2x4xf32> to tensor<2x4xi32>
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  ASSERT_TRUE(succeeded(verify(*module)));
+  auto func = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder builder(&context);
+  PtrAnalysis analysis(builder);
+  Value uniformValue = tagged(func, "uniform");
+  auto uniform = analysis.analyze(uniformValue);
+  ASSERT_TRUE(succeeded(uniform));
+  ASSERT_TRUE(uniform->offsets.isUniform());
+  EXPECT_EQ(uniform->offsets.fullOffsets, OpFoldResult(uniformValue));
+  auto origin = cast<Value>(uniform->offsets.scalarOffset);
+  auto castOp = origin.getDefiningOp<arith::IndexCastOp>();
+  ASSERT_TRUE(castOp);
+  auto extract = castOp.getIn().getDefiningOp<tensor::ExtractOp>();
+  ASSERT_TRUE(extract);
+  EXPECT_EQ(extract.getTensor(), uniformValue);
+  test::Environment env{{uniformValue, test::Lanes(4, llvm::APInt(32, 9))}};
+  expectLanes(uniform->offsets.scalarOffset, {9}, env);
+  auto unknown = analysis.analyze(tagged(func, "unknown"));
+  ASSERT_TRUE(succeeded(unknown));
+  EXPECT_EQ(test::axisKinds(unknown->offsets),
+            (SmallVector<AxisKind>{AxisKind::Unknown}));
+  EXPECT_FALSE(unknown->offsets.scalarOffset);
+  auto partial = analysis.analyze(tagged(func, "partial"));
+  ASSERT_TRUE(succeeded(partial));
+  EXPECT_EQ(test::axisKinds(partial->offsets),
+            (SmallVector<AxisKind>{AxisKind::Unknown, AxisKind::Invariant}));
+  EXPECT_FALSE(partial->offsets.scalarOffset);
+  expectNoWideTensors(func);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(PtrAnalysisOpCoverage, IntegerSumScalesOnlyTheRemainingAxes) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @sums() {
+      %i = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
+      %j = tt.make_range {start=0:i32, end=2:i32} : tensor<2xi32>
+      %three = arith.constant dense<3> : tensor<4xi32>
+      %two = arith.constant dense<2> : tensor<2xi32>
+      %rows = arith.muli %i, %three : tensor<4xi32>
+      %cols = arith.muli %j, %two : tensor<2xi32>
+      %er = tt.expand_dims %rows {axis=1:i32} : tensor<4xi32> -> tensor<4x1xi32>
+      %ec = tt.expand_dims %cols {axis=0:i32} : tensor<2xi32> -> tensor<1x2xi32>
+      %br = tt.broadcast %er : tensor<4x1xi32> -> tensor<4x2xi32>
+      %bc = tt.broadcast %ec : tensor<1x2xi32> -> tensor<4x2xi32>
+      %ten = arith.constant dense<10> : tensor<4x2xi32>
+      %zero = arith.constant dense<0> : tensor<4x2xi32>
+      %terms = arith.addi %br, %bc : tensor<4x2xi32>
+      %x = arith.addi %terms, %ten {tag="source"} : tensor<4x2xi32>
+      %negative = arith.subi %zero, %x : tensor<4x2xi32>
+      %along_cols = "tt.reduce"(%x) ({
+      ^bb0(%a: i32, %b: i32):
+        %sum = arith.addi %a, %b : i32
+        tt.reduce.return %sum : i32
+      }) {axis=1:i32, tag="cols"} : (tensor<4x2xi32>) -> tensor<4xi32>
+      %along_rows = "tt.reduce"(%x) ({
+      ^bb0(%a: i32, %b: i32):
+        %sum = arith.addi %b, %a : i32
+        tt.reduce.return %sum : i32
+      }) {axis=0:i32, tag="rows"} : (tensor<4x2xi32>) -> tensor<2xi32>
+      %neg = "tt.reduce"(%negative) ({
+      ^bb0(%a: i32, %b: i32):
+        %sum = arith.addi %a, %b : i32
+        tt.reduce.return %sum : i32
+      }) {axis=1:i32, tag="negative"} : (tensor<4x2xi32>) -> tensor<4xi32>
+      %product = "tt.reduce"(%x) ({
+      ^bb0(%a: i32, %b: i32):
+        %mul = arith.muli %a, %b : i32
+        tt.reduce.return %mul : i32
+      }) {axis=1:i32, tag="product"} : (tensor<4x2xi32>) -> tensor<4xi32>
+      %pair:2 = "tt.reduce"(%x, %negative) ({
+      ^bb0(%a: i32, %b: i32, %c: i32, %d: i32):
+        %ac = arith.addi %a, %c : i32
+        %bd = arith.addi %b, %d : i32
+        tt.reduce.return %ac, %bd : i32, i32
+      }) {axis=1:i32, tag="pair"} : (tensor<4x2xi32>, tensor<4x2xi32>) -> (tensor<4xi32>, tensor<4xi32>)
+      %sixtythree = arith.constant dense<63> : tensor<4xi32>
+      %large = arith.addi %i, %sixtythree : tensor<4xi32>
+      %narrow = arith.trunci %large : tensor<4xi32> to tensor<4xi8>
+      %en = tt.expand_dims %narrow {axis=1:i32} : tensor<4xi8> -> tensor<4x1xi8>
+      %bn = tt.broadcast %en {tag="narrow_source"} : tensor<4x1xi8> -> tensor<4x2xi8>
+      %wrapped = "tt.reduce"(%bn) ({
+      ^bb0(%a: i8, %b: i8):
+        %sum = arith.addi %a, %b : i8
+        tt.reduce.return %sum : i8
+      }) {axis=1:i32, tag="wrapped"} : (tensor<4x2xi8>) -> tensor<4xi8>
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  ASSERT_TRUE(succeeded(verify(*module)));
+  auto func = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder builder(&context);
+  PtrAnalysis analysis(builder);
+  auto source = analysis.analyze(tagged(func, "source"));
+  ASSERT_TRUE(succeeded(source));
+  ASSERT_TRUE(source->offsets.hasStructuredForm());
+  expectLanes(source->offsets, {10, 12, 13, 15, 16, 18, 19, 21});
+  auto check = [&](StringRef tag, int64_t origin, int64_t stride,
+                   ArrayRef<int64_t> expected) {
+    Value value = tagged(func, tag);
+    auto info = analysis.analyze(value);
+    ASSERT_TRUE(succeeded(info));
+    ASSERT_TRUE(info->offsets.hasStructuredForm());
+    EXPECT_EQ(info->offsets.fullOffsets, OpFoldResult(value));
+    expectLanes(info->offsets.scalarOffset, {origin});
+    expectLanes(info->offsets.axes[0].stride, {stride});
+    // Compare the decomposition against hand-computed reductions rather than
+    // the implementation's reduction formula.
+    expectAffineLanes(info->offsets, expected);
+  };
+  check("cols", 22, 6, {22, 28, 34, 40});
+  check("rows", 58, 8, {58, 66});
+  check("negative", -22, -6, {-22, -28, -34, -40});
+  auto narrow = analysis.analyze(tagged(func, "narrow_source"));
+  ASSERT_TRUE(succeeded(narrow));
+  ASSERT_TRUE(narrow->offsets.hasStructuredForm());
+  expectLanes(narrow->offsets, {63, 63, 64, 64, 65, 65, 66, 66});
+  for (Value value : {tagged(func, "product"), tagged(func, "pair", 0),
+                      tagged(func, "pair", 1), tagged(func, "wrapped")}) {
+    auto info = analysis.analyze(value);
+    ASSERT_TRUE(succeeded(info));
+    EXPECT_EQ(info->offsets.fullOffsets, OpFoldResult(value));
+    EXPECT_FALSE(info->offsets.hasStructuredForm());
+  }
+  auto wrapped = analysis.analyze(tagged(func, "wrapped"));
+  ASSERT_TRUE(succeeded(wrapped));
+  test::Environment env{
+      {tagged(func, "wrapped"),
+       {llvm::APInt(8, 126), llvm::APInt(8, -128, true),
+        llvm::APInt(8, -126, true), llvm::APInt(8, -124, true)}}};
+  expectLanes(wrapped->offsets, {126, -128, -126, -124}, env);
+  expectNoWideTensors(func);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(PtrAnalysisOpCoverage, I64SumKeepsItsDynamicOrigin) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @dynamic(%bias: i64) {
+      %range = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
+      %wide = arith.extsi %range : tensor<4xi32> to tensor<4xi64>
+      %expanded = tt.expand_dims %wide {axis=1:i32} : tensor<4xi64> -> tensor<4x1xi64>
+      %varying = tt.broadcast %expanded : tensor<4x1xi64> -> tensor<4x2xi64>
+      %uniform = tt.splat %bias : i64 -> tensor<4x2xi64>
+      %source = arith.addi %uniform, %varying : tensor<4x2xi64>
+      %sum = "tt.reduce"(%source) ({
+      ^bb0(%a: i64, %b: i64):
+        %next = arith.addi %a, %b : i64
+        tt.reduce.return %next : i64
+      }) {axis=1:i32, tag="sum"} : (tensor<4x2xi64>) -> tensor<4xi64>
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  ASSERT_TRUE(succeeded(verify(*module)));
+  auto func = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder builder(&context);
+  PtrAnalysis analysis(builder);
+  Value value = tagged(func, "sum");
+  auto info = analysis.analyze(value);
+  ASSERT_TRUE(succeeded(info));
+  ASSERT_TRUE(info->offsets.hasStructuredForm());
+  EXPECT_EQ(info->offsets.fullOffsets, OpFoldResult(value));
+  test::Environment env{{func.getArgument(0), {llvm::APInt(64, 7)}}};
+  expectLanes(info->offsets.scalarOffset, {14}, env);
+  expectLanes(info->offsets.axes[0].stride, {2});
+  expectAffineLanes(info->offsets, {14, 16, 18, 20}, env);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 TEST(PtrAnalysisOpCoverage, ReduceRemovesTheReducedAxisAndKeepsExactResults) {
-  auto check = [](auto rules) {
+  auto check = []() {
     MLIRContext context;
     load(context);
     auto module = parseSourceString<ModuleOp>(R"mlir(module {
@@ -322,7 +637,7 @@ TEST(PtrAnalysisOpCoverage, ReduceRemovesTheReducedAxisAndKeepsExactResults) {
     ASSERT_TRUE(module);
     auto f = *module->getOps<triton::FuncOp>().begin();
     OpBuilder builder(&context);
-    PtrAnalysis<decltype(rules)> analysis(builder, rules);
+    PtrAnalysis analysis(builder);
     for (StringRef tag : {"uniform", "middle", "scalar"}) {
       Value value = tagged(f, tag);
       auto info = analysis.analyze(value);
@@ -344,7 +659,7 @@ TEST(PtrAnalysisOpCoverage, ReduceRemovesTheReducedAxisAndKeepsExactResults) {
     expectNoWideTensors(f);
     EXPECT_TRUE(succeeded(verify(*module)));
   };
-  check(CommonPtrRules{});
+  check();
 }
 
 TEST(PtrAnalysisOpCoverage, InsertUpdatesSameBaseCompletePointerOffsets) {
@@ -369,23 +684,25 @@ TEST(PtrAnalysisOpCoverage, InsertUpdatesSameBaseCompletePointerOffsets) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto same = analysis.analyze(tagged(f, "same"));
   ASSERT_TRUE(succeeded(same));
   ASSERT_FALSE(same->isEmpty());
   EXPECT_EQ(same->base, f.getArgument(0));
-  EXPECT_TRUE(
-      succeeded(analysis.getRules().validateBinding(tagged(f, "same"), *same)));
+  EXPECT_TRUE(succeeded(
+      mlir::triton::ptr::detail::validateInfo(tagged(f, "same"), *same)));
   test::Environment env{{f.getArgument(2), {llvm::APInt(32, -13, true)}},
                         {f.getArgument(3), {llvm::APInt(64, 2)}}};
   expectLanes(same->offsets, {0, 1, -13, 3, 4, 5, 6, 7}, env);
   auto other = analysis.analyze(tagged(f, "different"));
-  EXPECT_TRUE(failed(other));
+  ASSERT_TRUE(succeeded(other));
+  EXPECT_EQ(other->base, tagged(f, "different"));
+  EXPECT_FALSE(other->hasScalarBase());
   auto zero = analysis.analyze(tagged(f, "zero"));
   ASSERT_TRUE(succeeded(zero));
   EXPECT_TRUE(zero->offsets.isUniform());
-  EXPECT_TRUE(
-      succeeded(analysis.getRules().validateBinding(tagged(f, "zero"), *zero)));
+  EXPECT_TRUE(succeeded(
+      mlir::triton::ptr::detail::validateInfo(tagged(f, "zero"), *zero)));
   expectLanes(zero->offsets, {0, 0, 0, 0, 0, 0, 0, 0}, env);
   auto constant = analysis.analyze(tagged(f, "constant"));
   ASSERT_TRUE(succeeded(constant));
@@ -419,7 +736,7 @@ TEST(PtrAnalysisOpCoverage, InsertSupportsDynamicPointerTensors) {
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(f.getBody().front().getTerminator());
   auto insertion = builder.saveInsertionPoint();
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   // Both inputs already have valid facts before the insertion is analyzed.
   auto source = analysis.analyze(tagged(f, "src"));
   auto dest = analysis.analyze(tagged(f, "dest"));
@@ -440,8 +757,8 @@ TEST(PtrAnalysisOpCoverage, InsertSupportsDynamicPointerTensors) {
                                                   builder.getI64Type()));
   EXPECT_EQ(same->offsets.axes[0].kind, AxisKind::Unknown);
   EXPECT_FALSE(same->offsets.scalarOffset);
-  EXPECT_TRUE(
-      succeeded(analysis.getRules().validateBinding(tagged(f, "same"), *same)));
+  EXPECT_TRUE(succeeded(
+      mlir::triton::ptr::detail::validateInfo(tagged(f, "same"), *same)));
   test::Environment env{{f.getArgument(2), {llvm::APInt(32, -13, true)}},
                         {f.getArgument(3), {llvm::APInt(64, 5)}},
                         {f.getArgument(4), {llvm::APInt(64, 2)}}};
@@ -456,14 +773,16 @@ TEST(PtrAnalysisOpCoverage, InsertSupportsDynamicPointerTensors) {
   EXPECT_TRUE(zero->offsets.isUniform());
   expectLanes(zero->offsets, {0, 0, 0}, env);
   ASSERT_TRUE(succeeded(analysis.analyze(f.getArgument(1))));
-  EXPECT_TRUE(failed(analysis.analyze(tagged(f, "different"))));
+  auto opaque = analysis.analyze(tagged(f, "different"));
+  ASSERT_TRUE(succeeded(opaque));
+  EXPECT_EQ(opaque->base, tagged(f, "different"));
 
   // Reject a missing complete value at binding, before any later insertion.
   auto uniform = analysis.analyze(tagged(f, "uniform"));
   ASSERT_TRUE(succeeded(uniform));
   ASSERT_TRUE(uniform->offsets.isUniform());
   uniform->offsets.fullOffsets = {};
-  EXPECT_TRUE(failed(analysis.bind(tagged(f, "uniform"), *uniform)));
+  EXPECT_TRUE(failed(analysis.setInfo(tagged(f, "uniform"), *uniform)));
   EXPECT_TRUE(succeeded(analysis.analyze(tagged(f, "zero"))));
   EXPECT_EQ(builder.getInsertionBlock(), insertion.getBlock());
   EXPECT_EQ(builder.getInsertionPoint(), insertion.getPoint());
@@ -496,19 +815,20 @@ TEST(PtrAnalysisOpCoverage,
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto same = analysis.analyze(tagged(f, "same"));
   ASSERT_TRUE(succeeded(same));
   ASSERT_FALSE(same->isEmpty());
-  EXPECT_TRUE(
-      succeeded(analysis.getRules().validateBinding(tagged(f, "same"), *same)));
+  EXPECT_TRUE(succeeded(
+      mlir::triton::ptr::detail::validateInfo(tagged(f, "same"), *same)));
   test::Environment env{{f.getArgument(2), {llvm::APInt(64, 1)}}};
   expectLanes(same->offsets,
               {0, 1, 2, 3, 4, 5, 6, 7, 8, 2147483647, 10, 2147483648, 12,
                2147483649, 14, 2147483650},
               env);
   auto different = analysis.analyze(tagged(f, "different"));
-  EXPECT_TRUE(failed(different));
+  ASSERT_TRUE(succeeded(different));
+  EXPECT_FALSE(different->hasScalarBase());
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -546,7 +866,7 @@ TEST(PtrAnalysisOpCoverage, InsertSliceSupportsDynamicPointerTensors) {
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(f.getBody().front().getTerminator());
   auto insertion = builder.saveInsertionPoint();
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   test::Environment env{{f.getArgument(2), {llvm::APInt(64, 2)}},
                         {f.getArgument(3), {llvm::APInt(64, 3)}},
                         {f.getArgument(4), {llvm::APInt(64, 1)}},
@@ -577,8 +897,8 @@ TEST(PtrAnalysisOpCoverage, InsertSliceSupportsDynamicPointerTensors) {
     EXPECT_EQ(test::axisKinds(result->offsets),
               (SmallVector<AxisKind>{AxisKind::Unknown, AxisKind::Unknown}));
     EXPECT_FALSE(result->offsets.scalarOffset);
-    EXPECT_TRUE(succeeded(
-        analysis.getRules().validateBinding(original.getResult(), *result)));
+    EXPECT_TRUE(succeeded(mlir::triton::ptr::detail::validateInfo(
+        original.getResult(), *result)));
     SmallVector<int64_t> expected{0, 1,   2,  3,   4,  5,   6,  7,
                                   8, 100, 10, 101, 12, 102, 14, 15};
     if (name == "dest_only")
@@ -588,7 +908,9 @@ TEST(PtrAnalysisOpCoverage, InsertSliceSupportsDynamicPointerTensors) {
   auto different =
       tagged(f, "different").getDefiningOp<tensor::InsertSliceOp>();
   ASSERT_TRUE(succeeded(analysis.analyze(different.getSource())));
-  EXPECT_TRUE(failed(analysis.analyze(different.getResult())));
+  auto opaque = analysis.analyze(different.getResult());
+  ASSERT_TRUE(succeeded(opaque));
+  EXPECT_EQ(opaque->base, different.getResult());
   EXPECT_EQ(builder.getInsertionBlock(), insertion.getBlock());
   EXPECT_EQ(builder.getInsertionPoint(), insertion.getPoint());
   EXPECT_TRUE(succeeded(verify(*module)));
@@ -618,7 +940,7 @@ TEST(PtrAnalysisOpCoverage,
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   for (unsigned i = 0; i < 2; ++i) {
     Value result = tagged(f, "loop", i);
     auto info = analysis.analyze(result);
@@ -652,7 +974,7 @@ TEST(PtrAnalysisOpCoverage, ScalarLeavesKeepDynamicStridesWithoutRecursion) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   Value scale = tagged(f, "scale");
   auto scalar = analysis.analyze(scale);
   ASSERT_TRUE(succeeded(scalar));
@@ -666,8 +988,8 @@ TEST(PtrAnalysisOpCoverage, ScalarLeavesKeepDynamicStridesWithoutRecursion) {
   test::Environment env{{f.getArgument(0), {llvm::APInt(32, 5)}}};
   expectLanes(tensor->offsets.scalarOffset, {0}, env);
   expectLanes(tensor->offsets.axes[0].stride, {21}, env);
-  EXPECT_TRUE(succeeded(analysis.bind(scale, *scalar)));
-  EXPECT_FALSE(analysis.findCached(tagged(f, "offset")));
+  EXPECT_TRUE(succeeded(analysis.setInfo(scale, *scalar)));
+  EXPECT_TRUE(analysis.findCached(tagged(f, "offset")));
   ASSERT_TRUE(succeeded(analysis.analyze(tagged(f, "offset"))));
   EXPECT_FALSE(analysis.findCached(tagged(f, "product")));
   expectNoWideTensors(f);
@@ -693,7 +1015,7 @@ TEST(PtrAnalysisOpCoverage, ScalarConstantFoldingPrecedesSubAxisDiscovery) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto unfolded = analysis.analyze(tagged(f, "unfolded"));
   auto folded = analysis.analyze(tagged(f, "folded"));
   ASSERT_TRUE(succeeded(unfolded));
@@ -730,7 +1052,7 @@ TEST(PtrAnalysisOpCoverage, SingletonBoundariesKeepTheirCurrentRuntimeValue) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   test::Environment env{{f.getArgument(0), {llvm::APInt(32, 5)}},
                         {f.getArgument(2), {llvm::APInt(1, 0)}},
                         {tagged(f, "loop"), {llvm::APInt(32, 11)}}};
@@ -770,7 +1092,7 @@ TEST(PtrAnalysisOpCoverage, ClampPreservesCommonInvariantAxes) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto uniform = analysis.analyze(tagged(f, "uniform"));
   ASSERT_TRUE(succeeded(uniform));
   ASSERT_TRUE(uniform->offsets.isUniform());
@@ -809,7 +1131,7 @@ TEST(PtrAnalysisOpCoverage, TensorSelectIntersectsConditionAndBranchAxes) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto uniform = analysis.analyze(tagged(f, "uniform"));
   ASSERT_TRUE(succeeded(uniform));
   ASSERT_TRUE(uniform->offsets.isUniform());
@@ -852,7 +1174,7 @@ TEST(PtrAnalysisOpCoverage, LinearOffsetDoesNotDetermineBlockBounds) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto outside = analysis.analyze(tagged(f, "outside"));
   auto inside = analysis.analyze(tagged(f, "inside"));
   ASSERT_TRUE(succeeded(outside));

@@ -21,7 +21,7 @@
  */
 
 #include "TritonMemoryAccess/PtrAnalysisInfo.h"
-#include "TritonMemoryAccess/PtrInfoUtils.h"
+#include "TritonMemoryAccess/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
@@ -47,11 +47,17 @@ bool OffsetInfo::isUniform() const {
 }
 
 Type PtrInfo::getElementType() const {
-  return cast<triton::PointerType>(base.getType()).getPointeeType();
+  Type type = base.getType();
+  if (auto tensor = dyn_cast<RankedTensorType>(type))
+    type = tensor.getElementType();
+  return cast<triton::PointerType>(type).getPointeeType();
 }
 
 unsigned PtrInfo::getAddressSpace() const {
-  return cast<triton::PointerType>(base.getType()).getAddressSpace();
+  Type type = base.getType();
+  if (auto tensor = dyn_cast<RankedTensorType>(type))
+    type = tensor.getElementType();
+  return cast<triton::PointerType>(type).getAddressSpace();
 }
 
 FailureOr<OffsetInfo> buildOffsetInfo(Value value, OpBuilder &builder) {
@@ -71,13 +77,23 @@ FailureOr<OffsetInfo> buildOffsetInfo(Value value, OpBuilder &builder) {
 
 namespace {
 
-// Block descriptor calculations reuse the shared coordinate formulas.
+// Index-domain address contributions; source operations keep their widths.
 FailureOr<OpFoldResult> addScaledCoordinates(OpFoldResult origin,
                                              ArrayRef<OpFoldResult> coordinates,
                                              ArrayRef<OpFoldResult> strides,
                                              OpBuilder &builder, Location loc) {
   detail::ConcreteArithmetic arithmetic{builder.getIndexType(), builder, loc};
-  return addScaledCoordinateTerms(origin, coordinates, strides, arithmetic);
+  assert(coordinates.size() == strides.size());
+  for (auto [coordinate, stride] : llvm::zip_equal(coordinates, strides)) {
+    auto term = arithmetic.multiply(coordinate, stride);
+    if (failed(term))
+      return failure();
+    auto sum = arithmetic.add(origin, *term, false);
+    if (failed(sum))
+      return failure();
+    origin = *sum;
+  }
+  return origin;
 }
 
 // Local checks shared by binding validation.
@@ -192,6 +208,7 @@ AxisInfo buildAxisInfo(OpFoldResult stride) {
 }
 
 AxisInfo buildAxisInfo(SmallVector<SubAxisInfo> subAxes, OpBuilder &builder) {
+  normalizeSubAxes(subAxes, builder);
   auto stride = inferAxisStride(subAxes, builder);
   AxisInfo axis = stride ? buildAxisInfo(stride)
                          : AxisInfo(AxisKind::Unknown, builder.getIndexAttr(0));
@@ -253,15 +270,39 @@ FailureOr<PtrInfo> buildIntegerInfo(Value value, OpBuilder &builder) {
   return PtrInfo{{}, std::move(*info)};
 }
 
-FailureOr<PtrInfo> buildScalarPtrInfo(Value value, OpBuilder &builder) {
-  if (!isa<triton::PointerType>(value.getType()) ||
-      !isOrdinaryPtrType(value.getType()))
+FailureOr<PtrInfo> buildPointerInfo(Value value, OpBuilder &builder) {
+  if (!value || !isOrdinaryPtrType(value.getType()))
     return failure();
   PtrInfo info;
   info.base = value;
-  info.offsets.valueType = builder.getIndexType();
+  info.offsets.valueType = addressValueType(value.getType(), builder);
   info.offsets.fullOffsets = builder.getIndexAttr(0);
   info.offsets.scalarOffset = builder.getIndexAttr(0);
+  if (auto tensor = dyn_cast<RankedTensorType>(value.getType())) {
+    auto storage = tensor.clone(builder.getI64Type());
+    info.offsets.axes.assign(tensor.getRank(), makeInvariantAxisInfo(builder));
+    if (tensor.hasStaticShape()) {
+      info.offsets.fullOffsets = DenseIntElementsAttr::get(storage, int64_t(0));
+    } else {
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPointAfterValue(value);
+      SmallVector<Value> sizes;
+      for (int64_t dim = 0; dim < tensor.getRank(); ++dim)
+        if (tensor.isDynamicDim(dim))
+          sizes.push_back(
+              builder.create<tensor::DimOp>(value.getLoc(), value, dim));
+      info.offsets.fullOffsets =
+          builder
+              .create<tensor::GenerateOp>(
+                  value.getLoc(), storage, sizes,
+                  [&](OpBuilder &nested, Location loc, ValueRange) {
+                    Value zero =
+                        nested.create<arith::ConstantIntOp>(loc, 0, 64);
+                    nested.create<tensor::YieldOp>(loc, zero);
+                  })
+              .getResult();
+    }
+  }
   return PtrInfo(std::move(info));
 }
 
@@ -672,7 +713,7 @@ FailureOr<PtrInfo> combineSelectInfo(arith::SelectOp op, const PtrInfo &lhsInfo,
   // Pointer selections need a common base and select the complete offsets.
   const auto &lhs = lhsInfo, &rhs = rhsInfo;
   if (lhs.base != rhs.base)
-    return failure();
+    return buildPointerInfo(value, builder);
   auto target =
       cast<RankedTensorType>(addressValueType(value.getType(), builder));
   Type storage = addressStorageType(target, builder);
@@ -705,7 +746,7 @@ FailureOr<PtrInfo> insertPtrOffsets(
     llvm::function_ref<Value(Value, Value)> insert, OpBuilder &builder) {
   // Both inputs must describe ordinary pointers relative to the same base.
   if (!source.base || source.base != dest.base || source.block || dest.block)
-    return failure();
+    return buildPointerInfo(value, builder);
   // Materialize the source and destination in the pointer offset storage type.
   Type insertedType = builder.getI64Type();
   if (auto tensor = dyn_cast<RankedTensorType>(sourceType))
@@ -774,6 +815,7 @@ FailureOr<PtrInfo> makeBlockInfo(triton::MakeTensorPtrOp op,
   offsets.scalarOffset = *origin;
   // Keep the parent shape, coordinates and order for block boundary checks.
   ptr.block.emplace();
+  ptr.block->descriptorBase = op.getBase();
   for (Value shape : op.getShape()) {
     auto indexShape =
         foldOrCreateCast(shape, builder.getIndexType(),
@@ -797,10 +839,14 @@ FailureOr<PtrInfo> advanceBlockInfo(triton::AdvanceOp op, const PtrInfo &parent,
   PtrInfo ptr = parent;
   detail::ConcreteArithmetic arithmetic{builder.getIndexType(), builder,
                                         op.getLoc()};
-  auto updated = advanceCoordinateTerms<OpFoldResult>(
-      ptr.block->coordinateOffsets, delta, arithmetic);
-  if (failed(updated))
-    return failure();
+  SmallVector<OpFoldResult> updated;
+  for (auto [coordinate, increment] :
+       llvm::zip_equal(ptr.block->coordinateOffsets, delta)) {
+    auto next = arithmetic.add(coordinate, increment, false);
+    if (failed(next))
+      return failure();
+    updated.push_back(*next);
+  }
   // Add only this advance, retaining the existing scalar base contribution.
   auto origin = addScaledCoordinates(ptr.offsets.scalarOffset, delta,
                                      detail::axisStrides(ptr.offsets), builder,
@@ -810,13 +856,21 @@ FailureOr<PtrInfo> advanceBlockInfo(triton::AdvanceOp op, const PtrInfo &parent,
   // Keep the updated origin and coordinates as one validated descriptor.
   ptr.offsets.scalarOffset = *origin;
   ptr.offsets.fullOffsets = {};
-  ptr.block->coordinateOffsets = std::move(*updated);
+  ptr.block->coordinateOffsets = std::move(updated);
   if (!detail::validPtrBinding(op.getResult(), ptr))
     return failure();
   return PtrInfo(std::move(ptr));
 }
 
 // Binding validation and dependency collection.
+LogicalResult validateInfo(Value value, const PtrInfo &info) {
+  if (!value || info.isEmpty())
+    return failure();
+  if (info.base)
+    return success(validPtrBinding(value, info));
+  return success(!info.block && validOffsetBinding(value, info.offsets));
+}
+
 bool validOffsetBinding(Value boundary, const OffsetInfo &components) {
   return boundary && validOffset(boundary.getType(), components);
 }
@@ -826,6 +880,9 @@ bool validBlockPtrBinding(Value value, const PtrInfo &components) {
       !components.offsets.hasStructuredForm())
     return false;
   const auto &block = *components.block;
+  if (!block.descriptorBase ||
+      block.descriptorBase.getType() != components.base.getType())
+    return false;
   unsigned rank = components.offsets.getShape().size();
   if (block.parentShape.size() != rank ||
       block.coordinateOffsets.size() != rank || block.order.size() != rank)
@@ -843,14 +900,21 @@ bool validBlockPtrBinding(Value value, const PtrInfo &components) {
 }
 
 bool validPtrBinding(Value boundary, const PtrInfo &components) {
-  if (!boundary || !components.base ||
-      !isa<triton::PointerType>(components.base.getType()))
+  if (!boundary || !components.base)
     return false;
+  Type baseElement = components.base.getType();
+  if (auto tensor = dyn_cast<RankedTensorType>(baseElement)) {
+    auto target = dyn_cast<RankedTensorType>(boundary.getType());
+    if (!target || tensor.getShape() != target.getShape() ||
+        tensor.getEncoding() != target.getEncoding())
+      return false;
+    baseElement = tensor.getElementType();
+  }
   Type ptrElement = boundary.getType();
   if (auto tensor = dyn_cast<RankedTensorType>(ptrElement))
     ptrElement = tensor.getElementType();
   auto ptrType = dyn_cast<triton::PointerType>(ptrElement);
-  auto baseType = dyn_cast<triton::PointerType>(components.base.getType());
+  auto baseType = dyn_cast<triton::PointerType>(baseElement);
   if (!ptrType || !baseType)
     return false;
   auto blockType = dyn_cast<RankedTensorType>(ptrType.getPointeeType());

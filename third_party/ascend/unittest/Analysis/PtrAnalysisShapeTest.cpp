@@ -21,11 +21,15 @@
  */
 
 #include "PtrAnalysisTestUtils.h"
-#include "TritonMemoryAccess/PtrAnalysisRules/CommonPtrRules.h"
+#include "TritonMemoryAccess/PtrAnalysis.h"
+#include "TritonMemoryAccess/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Parser/Parser.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "gtest/gtest.h"
 
@@ -119,7 +123,7 @@ TEST(PtrAnalysisShape, OrderedReshapeKeepsAddressesWithoutRebuildingAxes) {
       auto f = *module->getOps<triton::FuncOp>().begin();
       OpBuilder b(f.getBody().front().getTerminator());
       auto ip = b.saveInsertionPoint();
-      PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+      PtrAnalysis analysis(b);
       auto offsets = buildOffsetInfo(f.getArgument(1), b);
       ASSERT_TRUE(succeeded(offsets));
       Type scalar = b.getIndexType();
@@ -129,7 +133,7 @@ TEST(PtrAnalysisShape, OrderedReshapeKeepsAddressesWithoutRebuildingAxes) {
             AxisInfo(strides[i] ? AxisKind::Structured : AxisKind::Invariant,
                      b.getIntegerAttr(scalar, strides[i]));
       ASSERT_TRUE(
-          succeeded(analysis.bind(f.getArgument(1), PtrInfo{{}, *offsets})));
+          succeeded(analysis.setInfo(f.getArgument(1), PtrInfo{{}, *offsets})));
       Value reshape = tagged(f, "reshape");
       auto result = test::getInfo(analysis.analyze(reshape));
       ASSERT_TRUE(succeeded(result));
@@ -166,13 +170,13 @@ TEST(PtrAnalysisShape, SliceRecoversUniformOriginAfterDroppingUnknownAxis) {
   MLIRContext context;
   load(context);
   auto module = parseSourceString<ModuleOp>(R"mlir(
-    module { tt.func @uniform_slice(%base: !tt.ptr<i32>, %x: tensor<3x4xi32>, %row: index) {
-      %s = tensor.extract_slice %x[%row, 0] [1, 4] [1, 1] {tag="slice"} : tensor<3x4xi32> to tensor<4xi32>
+    module { tt.func @uniform_slice(%base: !tt.ptr<i32>, %x: tensor<4x4xi32>, %row: index) {
+      %s = tensor.extract_slice %x[%row, 0] [1, 4] [1, 1] {tag="slice"} : tensor<4x4xi32> to tensor<4xi32>
       %r = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
       %m = arith.muli %s, %r {tag="multiply"} : tensor<4xi32>
-      %p = tt.splat %base : !tt.ptr<i32> -> tensor<3x4x!tt.ptr<i32>>
-      %a = tt.addptr %p, %x : tensor<3x4x!tt.ptr<i32>>, tensor<3x4xi32>
-      %ps = tensor.extract_slice %a[%row, 0] [1, 4] [1, 1] {tag="pointer"} : tensor<3x4x!tt.ptr<i32>> to tensor<4x!tt.ptr<i32>>
+      %p = tt.splat %base : !tt.ptr<i32> -> tensor<4x4x!tt.ptr<i32>>
+      %a = tt.addptr %p, %x : tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>
+      %ps = tensor.extract_slice %a[%row, 0] [1, 4] [1, 1] {tag="pointer"} : tensor<4x4x!tt.ptr<i32>> to tensor<4x!tt.ptr<i32>>
       tt.return
     } }
   )mlir",
@@ -180,13 +184,14 @@ TEST(PtrAnalysisShape, SliceRecoversUniformOriginAfterDroppingUnknownAxis) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto input = buildOffsetInfo(f.getArgument(1), b);
   ASSERT_TRUE(succeeded(input));
   input->axes[1] = mlir::triton::ptr::detail::makeInvariantAxisInfo(b);
-  ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(1), PtrInfo{{}, *input})));
+  ASSERT_TRUE(
+      succeeded(analysis.setInfo(f.getArgument(1), PtrInfo{{}, *input})));
   test::Environment env;
-  for (int64_t row : {7, 13, -5})
+  for (int64_t row : {7, 13, -5, 23})
     for (unsigned lane = 0; lane < 4; ++lane)
       env[f.getArgument(1)].emplace_back(32, row, true);
   env[f.getArgument(2)].emplace_back(64, 1);
@@ -219,13 +224,13 @@ TEST(PtrAnalysisShape, CastsCompleteUniformFactsFromExternalBindings) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   test::Environment env;
   for (Value input : f.getArguments()) {
     auto offsets = buildOffsetInfo(input, b);
     ASSERT_TRUE(succeeded(offsets));
     offsets->axes[0] = mlir::triton::ptr::detail::makeInvariantAxisInfo(b);
-    ASSERT_TRUE(succeeded(analysis.bind(input, PtrInfo{{}, *offsets})));
+    ASSERT_TRUE(succeeded(analysis.setInfo(input, PtrInfo{{}, *offsets})));
     env[input].assign(4, llvm::APInt(32, -7, true));
   }
   for (StringRef tag : {"shape", "wide"}) {
@@ -251,14 +256,14 @@ TEST(PtrAnalysisShape, SliceCombinesOriginStrideAndRankReduction) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto offsets = buildOffsetInfo(f.getArgument(1), b);
   offsets->scalarOffset = b.getIndexAttr(5);
   offsets->axes = {{AxisKind::Structured, b.getIndexAttr(16)},
                    {AxisKind::Invariant, b.getIndexAttr(0)},
                    {AxisKind::Structured, b.getIndexAttr(1)}};
   ASSERT_TRUE(
-      succeeded(analysis.bind(f.getArgument(1), PtrInfo{{}, *offsets})));
+      succeeded(analysis.setInfo(f.getArgument(1), PtrInfo{{}, *offsets})));
   auto result = test::getInfo(analysis.analyze(tagged(f, "slice")));
   ASSERT_TRUE(succeeded(result));
   expectLanes(result->offsets.scalarOffset, {22});
@@ -286,14 +291,14 @@ TEST(PtrAnalysisShape, UnitSliceAxesKeepOriginWithoutStrideScaling) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto sourceInfo = buildOffsetInfo(f.getArgument(0), builder);
   ASSERT_TRUE(succeeded(sourceInfo));
   sourceInfo->scalarOffset = builder.getIndexAttr(5);
   sourceInfo->axes = {{AxisKind::Structured, f.getArgument(1)},
                       {AxisKind::Structured, builder.getIndexAttr(1)}};
   ASSERT_TRUE(succeeded(
-      analysis.bind(f.getArgument(0), PtrInfo{{}, std::move(*sourceInfo)})));
+      analysis.setInfo(f.getArgument(0), PtrInfo{{}, std::move(*sourceInfo)})));
 
   auto result = test::getOffsets(analysis.analyze(tagged(f, "slice")));
   ASSERT_TRUE(succeeded(result));
@@ -332,13 +337,13 @@ TEST(PtrAnalysisShape, SliceChecksUnknownStartsBeforeBuildingOrigin) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto sourceInfo = buildOffsetInfo(f.getArgument(0), builder);
   ASSERT_TRUE(succeeded(sourceInfo));
   sourceInfo->scalarOffset = builder.getIndexAttr(5);
   sourceInfo->axes[0] = AxisInfo(AxisKind::Structured, f.getArgument(1));
   ASSERT_TRUE(succeeded(
-      analysis.bind(f.getArgument(0), PtrInfo{{}, std::move(*sourceInfo)})));
+      analysis.setInfo(f.getArgument(0), PtrInfo{{}, std::move(*sourceInfo)})));
   test::Environment env{{f.getArgument(1), {llvm::APInt(64, 16)}}};
   for (int64_t row = 0; row < 4; ++row)
     for (int64_t offset : {0, 3, 1, 7})
@@ -379,11 +384,11 @@ TEST(PtrAnalysisShape,
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto offsets = buildOffsetInfo(f.getArgument(0), b);
   offsets->axes[1] = AxisInfo(AxisKind::Structured, b.getIndexAttr(1));
   ASSERT_TRUE(
-      succeeded(analysis.bind(f.getArgument(0), PtrInfo{{}, *offsets})));
+      succeeded(analysis.setInfo(f.getArgument(0), PtrInfo{{}, *offsets})));
   auto result = test::getOffsets(analysis.analyze(tagged(f, "cast")));
   ASSERT_TRUE(succeeded(result));
   EXPECT_FALSE(result->scalarOffset);
@@ -430,13 +435,13 @@ TEST(PtrAnalysisShape, TensorCastPreservesPointerFactsAndOffsetStorage) {
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
   auto insertionPoint = b.saveInsertionPoint();
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   Value offsets = f.getArgument(1);
   auto offsetInfo = buildOffsetInfo(offsets, b);
   ASSERT_TRUE(succeeded(offsetInfo));
   offsetInfo->scalarOffset = b.getIndexAttr(7);
   offsetInfo->axes[0] = AxisInfo(AxisKind::Structured, b.getIndexAttr(2));
-  ASSERT_TRUE(succeeded(analysis.bind(offsets, PtrInfo{{}, *offsetInfo})));
+  ASSERT_TRUE(succeeded(analysis.setInfo(offsets, PtrInfo{{}, *offsetInfo})));
   Value source = tagged(f, "source");
   auto sourceInfo = analysis.analyze(source);
   ASSERT_TRUE(succeeded(sourceInfo));
@@ -452,7 +457,7 @@ TEST(PtrAnalysisShape, TensorCastPreservesPointerFactsAndOffsetStorage) {
   for (OpFoldResult complete : completeOffsets) {
     PtrInfo bound = *sourceInfo;
     bound.offsets.fullOffsets = complete;
-    ASSERT_TRUE(succeeded(analysis.bind(source, bound)));
+    ASSERT_TRUE(succeeded(analysis.reset({{source, bound}})));
     for (StringRef tag :
          {"identity", "dynamic", "dynamic_identity", "static"}) {
       Value value = tagged(f, tag);
@@ -489,7 +494,7 @@ TEST(PtrAnalysisShape, TensorCastPreservesPointerFactsAndOffsetStorage) {
   uniform.offsets.fullOffsets =
       DenseIntElementsAttr::get(cast<RankedTensorType>(offsets.getType()),
                                 ArrayRef<int32_t>{-9, -9, -9, -9});
-  ASSERT_TRUE(succeeded(analysis.bind(source, uniform)));
+  ASSERT_TRUE(succeeded(analysis.reset({{source, uniform}})));
   unsigned count = operations(*module);
   auto identity = analysis.analyze(tagged(f, "identity"));
   ASSERT_TRUE(succeeded(identity));
@@ -514,7 +519,7 @@ TEST(PtrAnalysisShape, TensorCastDropsOnlyDynamicAxisPartitions) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto offsets = buildOffsetInfo(f.getArgument(2), b);
   ASSERT_TRUE(succeeded(offsets));
   offsets->valueType =
@@ -524,7 +529,7 @@ TEST(PtrAnalysisShape, TensorCastDropsOnlyDynamicAxisPartitions) {
   offsets->axes[0].subAxes = {{2, b.getIndexAttr(4)}};
   offsets->axes[1].subAxes = {{2, b.getIndexAttr(0)}, {2, b.getIndexAttr(1)}};
   PtrInfo sourceInfo{f.getArgument(0), *offsets};
-  ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(1), sourceInfo)));
+  ASSERT_TRUE(succeeded(analysis.setInfo(f.getArgument(1), sourceInfo)));
   test::Environment env;
   for (int64_t value : {7, 8, 7, 8, 11, 12, 11, 12})
     env[f.getArgument(2)].emplace_back(32, value);
@@ -544,7 +549,7 @@ TEST(PtrAnalysisShape, TensorCastDropsOnlyDynamicAxisPartitions) {
   // Ordinary pointers require complete offsets even with complete sub-axes.
   sourceInfo.offsets.fullOffsets = {};
   ASSERT_TRUE(sourceInfo.offsets.hasStructuredDecomposition());
-  EXPECT_TRUE(failed(analysis.bind(f.getArgument(1), sourceInfo)));
+  EXPECT_TRUE(failed(analysis.setInfo(f.getArgument(1), sourceInfo)));
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -564,7 +569,7 @@ TEST(PtrAnalysisShape, DynamicSliceKeepsIntegerValuesAndLinearFacts) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   Value linear = tagged(f, "linear");
   ASSERT_TRUE(succeeded(analysis.analyze(
       linear.getDefiningOp<tensor::ExtractSliceOp>().getSource())));
@@ -575,7 +580,7 @@ TEST(PtrAnalysisShape, DynamicSliceKeepsIntegerValuesAndLinearFacts) {
   EXPECT_EQ(test::axisKinds(*result),
             (SmallVector<AxisKind>{AxisKind::Structured}));
   EXPECT_TRUE(succeeded(
-      CommonPtrRules{}.validateBinding(linear, PtrInfo{{}, *result})));
+      mlir::triton::ptr::detail::validateInfo(linear, PtrInfo{{}, *result})));
 
   // Unknown values still retain their exact SSA, including dynamic sources.
   auto opaque = test::getOffsets(analysis.analyze(tagged(f, "opaque")));
@@ -589,8 +594,8 @@ TEST(PtrAnalysisShape, DynamicSliceKeepsIntegerValuesAndLinearFacts) {
     EXPECT_EQ(test::axisKinds(*info),
               (SmallVector<AxisKind>{AxisKind::Unknown}));
     EXPECT_TRUE(info->axes[0].subAxes.empty());
-    EXPECT_TRUE(
-        succeeded(CommonPtrRules{}.validateBinding(value, PtrInfo{{}, *info})));
+    EXPECT_TRUE(succeeded(
+        mlir::triton::ptr::detail::validateInfo(value, PtrInfo{{}, *info})));
   }
   test::Environment env{{f.getArgument(2), {llvm::APInt(64, 1)}},
                         {f.getArgument(4), {llvm::APInt(64, 2)}}};
@@ -631,7 +636,7 @@ TEST(PtrAnalysisShape, DynamicPointerSliceKeepsBaseOffsetsAndRankReduction) {
     auto f = *module->getOps<triton::FuncOp>().begin();
     OpBuilder b(f.getBody().front().getTerminator());
     auto insertion = b.saveInsertionPoint();
-    PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+    PtrAnalysis analysis(b);
     if (structured) {
       auto input = buildOffsetInfo(f.getArgument(1), b);
       ASSERT_TRUE(succeeded(input));
@@ -640,7 +645,7 @@ TEST(PtrAnalysisShape, DynamicPointerSliceKeepsBaseOffsetsAndRankReduction) {
                      {AxisKind::Invariant, b.getIndexAttr(0)},
                      {AxisKind::Structured, b.getIndexAttr(1)}};
       ASSERT_TRUE(succeeded(
-          analysis.bind(f.getArgument(1), PtrInfo{{}, std::move(*input)})));
+          analysis.setInfo(f.getArgument(1), PtrInfo{{}, std::move(*input)})));
     }
     auto source = test::getInfo(analysis.analyze(tagged(f, "source")));
     ASSERT_TRUE(succeeded(source));
@@ -660,7 +665,8 @@ TEST(PtrAnalysisShape, DynamicPointerSliceKeepsBaseOffsetsAndRankReduction) {
     EXPECT_EQ(slice.getMixedOffsets(), original.getMixedOffsets());
     EXPECT_EQ(slice.getMixedSizes(), original.getMixedSizes());
     EXPECT_EQ(slice.getMixedStrides(), original.getMixedStrides());
-    EXPECT_TRUE(succeeded(CommonPtrRules{}.validateBinding(value, *result)));
+    EXPECT_TRUE(
+        succeeded(mlir::triton::ptr::detail::validateInfo(value, *result)));
     EXPECT_EQ(b.getInsertionBlock(), insertion.getBlock());
     EXPECT_EQ(b.getInsertionPoint(), insertion.getPoint());
 
@@ -701,14 +707,14 @@ TEST(PtrAnalysisShape, DynamicSliceDropsSubAxesButKeepsIndependentAxes) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto input = buildOffsetInfo(f.getArgument(0), b);
   ASSERT_TRUE(succeeded(input));
   input->scalarOffset = b.getIndexAttr(5);
   input->axes[0].subAxes = {{2, b.getIndexAttr(32)}, {2, b.getIndexAttr(8)}};
   input->axes[1] = AxisInfo(AxisKind::Structured, b.getIndexAttr(1));
   ASSERT_TRUE(succeeded(
-      analysis.bind(f.getArgument(0), PtrInfo{{}, std::move(*input)})));
+      analysis.setInfo(f.getArgument(0), PtrInfo{{}, std::move(*input)})));
   auto full = test::getOffsets(analysis.analyze(tagged(f, "full")));
   ASSERT_TRUE(succeeded(full));
   ASSERT_EQ(full->axes[0].subAxes.size(), 2u);
@@ -730,8 +736,8 @@ TEST(PtrAnalysisShape, DynamicSliceDropsSubAxesButKeepsIndependentAxes) {
   EXPECT_TRUE(slice->axes[0].subAxes.empty());
   expectLanes(slice->scalarOffset, {5});
   expectLanes(slice->axes[1].stride, {1});
-  EXPECT_TRUE(succeeded(CommonPtrRules{}.validateBinding(tagged(f, "slice"),
-                                                         PtrInfo{{}, *slice})));
+  EXPECT_TRUE(succeeded(mlir::triton::ptr::detail::validateInfo(
+      tagged(f, "slice"), PtrInfo{{}, *slice})));
   test::Environment env{{f.getArgument(1), {llvm::APInt(64, 3)}},
                         {f.getArgument(2), {llvm::APInt(64, 0)}}};
   for (int64_t row : {5, 13, 37, 45})
@@ -772,7 +778,7 @@ TEST(PtrAnalysisShape, ReorderingReshapeLeavesSourceAndUsersIntact) {
   auto attrs = r.getDefiningOp()->getAttrDictionary();
   auto count = operations(*module);
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto result = analysis.analyze(r);
   EXPECT_TRUE(failed(result));
   EXPECT_EQ(r.getDefiningOp()->getAttrDictionary(), attrs);
@@ -802,14 +808,14 @@ TEST(PtrAnalysisShape, ShapeHelpersArePureCollectedAndCleanableAfterSession) {
   });
   OpBuilder b(f.getBody().front().getTerminator());
   auto ip = b.saveInsertionPoint();
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto result = test::getInfo(analysis.analyze(tagged(f, "slice")));
   ASSERT_TRUE(succeeded(result));
   EXPECT_GT(operations(*module), originalCount);
   EXPECT_EQ(b.getInsertionPoint(), ip.getPoint());
   for (auto [op, attrs] : original)
     EXPECT_EQ(op->getAttrDictionary(), attrs);
-  analysis.clear();
+  ASSERT_TRUE(succeeded(analysis.reset()));
   IRRewriter rewriter(&context);
   eraseDeadPtrArithmetic(f, rewriter);
   EXPECT_EQ(operations(*module), originalCount);
@@ -836,7 +842,7 @@ TEST(PtrAnalysisShape, UnitAxesAndEncodedIdentityKeepTheirContracts) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto expanded = test::getOffsets(analysis.analyze(tagged(f, "expand")));
   ASSERT_TRUE(succeeded(expanded));
   EXPECT_EQ(test::axisKinds(*expanded),
@@ -872,21 +878,21 @@ TEST(PtrAnalysisShape, RegroupingReshapeKeepsExactOffsetsForAddPtr) {
   load(context);
   auto module = parseSourceString<ModuleOp>(
       R"mlir(module { tt.func @continuous(%base:!tt.ptr<i32>) {
-    %r=tt.make_range {start=0:i32,end=12:i32}:tensor<12xi32>
-    %a="tt.reshape"(%r):(tensor<12xi32>) -> tensor<2x6xi32>
-    %b="tt.reshape"(%a) {tag="reshape"}:(tensor<2x6xi32>) -> tensor<3x4xi32>
-    %p=tt.splat %base:!tt.ptr<i32> -> tensor<3x4x!tt.ptr<i32>>
-    %ptr=tt.addptr %p,%b {tag="ptr"}:tensor<3x4x!tt.ptr<i32>>,tensor<3x4xi32>
+    %r=tt.make_range {start=0:i32,end=16:i32}:tensor<16xi32>
+    %a="tt.reshape"(%r):(tensor<16xi32>) -> tensor<2x8xi32>
+    %b="tt.reshape"(%a) {tag="reshape"}:(tensor<2x8xi32>) -> tensor<4x4xi32>
+    %p=tt.splat %base:!tt.ptr<i32> -> tensor<4x4x!tt.ptr<i32>>
+    %ptr=tt.addptr %p,%b {tag="ptr"}:tensor<4x4x!tt.ptr<i32>>,tensor<4x4xi32>
     tt.return
   } })mlir",
       &context);
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto offsets = test::getOffsets(analysis.analyze(tagged(f, "reshape")));
   ASSERT_TRUE(succeeded(offsets));
-  expectLanes(*offsets, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11});
+  expectLanes(*offsets, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15});
   EXPECT_FALSE(offsets->hasStructuredDecomposition());
   EXPECT_EQ(test::axisKinds(*offsets),
             (SmallVector<AxisKind>{AxisKind::Unknown, AxisKind::Unknown}));
@@ -894,7 +900,8 @@ TEST(PtrAnalysisShape, RegroupingReshapeKeepsExactOffsetsForAddPtr) {
   auto ptr = test::getInfo(analysis.analyze(tagged(f, "ptr")));
   ASSERT_TRUE(succeeded(ptr));
   EXPECT_EQ(ptr->base, f.getArgument(0));
-  expectLanes(ptr->offsets, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11});
+  expectLanes(ptr->offsets,
+              {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15});
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -903,15 +910,15 @@ TEST(PtrAnalysisShape, UniformReshapeRemainsInvariant) {
   load(context);
   auto module =
       parseSourceString<ModuleOp>(R"mlir(module { tt.func @uniform(%x:i64) {
-    %s=tt.splat %x:i64 -> tensor<2x6xi64>
-    %r="tt.reshape"(%s) {tag="reshape"}:(tensor<2x6xi64>) -> tensor<3x4xi64>
+    %s=tt.splat %x:i64 -> tensor<2x8xi64>
+    %r="tt.reshape"(%s) {tag="reshape"}:(tensor<2x8xi64>) -> tensor<4x4xi64>
     tt.return
   } })mlir",
                                   &context);
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto offsets = test::getOffsets(analysis.analyze(tagged(f, "reshape")));
   ASSERT_TRUE(succeeded(offsets));
   ASSERT_TRUE(offsets->scalarOffset);
@@ -923,7 +930,7 @@ TEST(PtrAnalysisShape, UniformReshapeRemainsInvariant) {
   EXPECT_EQ(test::axisKinds(*offsets),
             (SmallVector<AxisKind>{AxisKind::Invariant, AxisKind::Invariant}));
   test::Environment env{{f.getArgument(0), {llvm::APInt(64, -7, true)}}};
-  expectLanes(*offsets, SmallVector<int64_t>(12, -7), env);
+  expectLanes(*offsets, SmallVector<int64_t>(16, -7), env);
   expectDecomposition(*offsets, env);
   EXPECT_TRUE(succeeded(verify(*module)));
 
@@ -934,7 +941,8 @@ TEST(PtrAnalysisShape, UniformReshapeRemainsInvariant) {
   ASSERT_TRUE(succeeded(bound));
   for (auto &axis : bound->axes)
     axis.kind = AxisKind::Invariant;
-  ASSERT_TRUE(succeeded(analysis.bind(source, PtrInfo{{}, std::move(*bound)})));
+  ASSERT_TRUE(
+      succeeded(analysis.reset({{source, PtrInfo{{}, std::move(*bound)}}})));
   auto withoutOrigin = test::getOffsets(analysis.analyze(tagged(f, "reshape")));
   ASSERT_TRUE(succeeded(withoutOrigin));
   EXPECT_TRUE(withoutOrigin->isUniform());
@@ -949,20 +957,21 @@ TEST(PtrAnalysisShape, RegroupingReshapeRetainsOnlyUnitAxes) {
   MLIRContext context;
   load(context);
   auto module = parseSourceString<ModuleOp>(
-      R"mlir(module { tt.func @partial(%x:tensor<2x6x4xi64>) {
-    %r="tt.reshape"(%x) {tag="reshape"}:(tensor<2x6x4xi64>) -> tensor<3x4x4xi64>
-    %unit="tt.reshape"(%x) {tag="with_unit"}:(tensor<2x6x4xi64>) -> tensor<1x3x4x4xi64>
+      R"mlir(module { tt.func @partial(%x:tensor<2x8x4xi64>) {
+    %r="tt.reshape"(%x) {tag="reshape"}:(tensor<2x8x4xi64>) -> tensor<4x4x4xi64>
+    %unit="tt.reshape"(%x) {tag="with_unit"}:(tensor<2x8x4xi64>) -> tensor<1x4x4x4xi64>
     tt.return
   } })mlir",
       &context);
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto input = buildOffsetInfo(f.getArgument(0), b);
   ASSERT_TRUE(succeeded(input));
   input->axes[2] = AxisInfo(AxisKind::Structured, b.getIndexAttr(1));
-  ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(0), PtrInfo{{}, *input})));
+  ASSERT_TRUE(
+      succeeded(analysis.setInfo(f.getArgument(0), PtrInfo{{}, *input})));
   auto offsets = test::getOffsets(analysis.analyze(tagged(f, "reshape")));
   ASSERT_TRUE(succeeded(offsets));
   EXPECT_FALSE(offsets->scalarOffset);
@@ -973,7 +982,7 @@ TEST(PtrAnalysisShape, RegroupingReshapeRetainsOnlyUnitAxes) {
     EXPECT_TRUE(axis.subAxes.empty());
   test::Environment env;
   SmallVector<int64_t> expected;
-  for (int group = 0; group < 12; ++group)
+  for (int group = 0; group < 16; ++group)
     for (int lane = 0; lane < 4; ++lane) {
       int64_t value = group * 10 + lane;
       env[f.getArgument(0)].emplace_back(64, value);
@@ -1002,7 +1011,7 @@ TEST(PtrAnalysisShape,
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   unsigned count = operations(*module);
   auto result = analysis.analyze(tagged(f, "reshape"));
   ASSERT_TRUE(succeeded(result));
@@ -1029,13 +1038,13 @@ TEST(PtrAnalysisShape, BoundIndexTensorConvertsForTritonShapeOperations) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto offsets = buildOffsetInfo(f.getArgument(2), b);
   ASSERT_TRUE(succeeded(offsets));
   PtrInfo bound;
   bound.base = f.getArgument(0);
   bound.offsets = *offsets;
-  ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(1), bound)));
+  ASSERT_TRUE(succeeded(analysis.setInfo(f.getArgument(1), bound)));
   for (StringRef name : {"reshape", "broadcast", "expand"}) {
     auto result = analysis.analyze(tagged(f, name));
     ASSERT_TRUE(succeeded(result));
@@ -1074,7 +1083,7 @@ TEST(PtrAnalysisShape, LinearAxisExpansionKeepsOnlyUsedCoefficients) {
   auto &block = func.getBody().front();
   Value sum = *block.getOps<arith::AddIOp>().begin();
   OpBuilder builder(block.getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto linear = buildOffsetInfo(func.getArgument(0), builder);
   auto partitioned = buildOffsetInfo(func.getArgument(1), builder);
   ASSERT_TRUE(succeeded(linear) && succeeded(partitioned));
@@ -1084,9 +1093,9 @@ TEST(PtrAnalysisShape, LinearAxisExpansionKeepsOnlyUsedCoefficients) {
   partitioned->axes[0].subAxes = {{2, builder.getIndexAttr(1)},
                                   {4, builder.getIndexAttr(0)}};
   ASSERT_TRUE(
-      succeeded(analysis.bind(func.getArgument(0), PtrInfo{{}, *linear})));
-  ASSERT_TRUE(
-      succeeded(analysis.bind(func.getArgument(1), PtrInfo{{}, *partitioned})));
+      succeeded(analysis.setInfo(func.getArgument(0), PtrInfo{{}, *linear})));
+  ASSERT_TRUE(succeeded(
+      analysis.setInfo(func.getArgument(1), PtrInfo{{}, *partitioned})));
   auto info = test::getOffsets(analysis.analyze(sum));
   ASSERT_TRUE(succeeded(info));
   test::Environment env{{func.getArgument(2), {llvm::APInt(64, 3)}}};

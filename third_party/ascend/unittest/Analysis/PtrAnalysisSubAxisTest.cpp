@@ -22,11 +22,13 @@
 
 #include "PtrAnalysisTestUtils.h"
 #include "TritonMemoryAccess/PtrAnalysis.h"
-#include "TritonMemoryAccess/PtrAnalysisRules.h"
+#include "TritonMemoryAccess/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Parser/Parser.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "gtest/gtest.h"
 using namespace mlir;
 using namespace mlir::triton;
@@ -46,228 +48,7 @@ unsigned operations(Operation *scope) {
   return n;
 }
 
-// This rule establishes that the session only requires its chosen Result and
-// the lifecycle contract; it does not depend on PtrInfo fields.
-struct TokenInfo {
-  Value source, helper;
-};
-struct TokenRules {
-  using Result = TokenInfo;
-  llvm::DenseMap<Value, unsigned> *counts = nullptr;
-  template <typename Context>
-  FailureOr<Result> parse(Value value, Context &context) const {
-    if (counts)
-      ++(*counts)[value];
-    if (auto *op = value.getDefiningOp())
-      if (op->hasAttr("cycle"))
-        return context.analyze(value);
-    if (auto add = value.getDefiningOp<arith::AddIOp>()) {
-      auto lhsInfo = context.analyze(add.getLhs()),
-           rhsInfo = context.analyze(add.getRhs());
-      if (failed(lhsInfo) || failed(rhsInfo))
-        return failure();
-      context.getBuilder().setInsertionPointAfterValue(value);
-      Value helper = context.getBuilder().template create<arith::AddIOp>(
-          value.getLoc(), lhsInfo->helper, rhsInfo->helper);
-      return Result{value, helper};
-    }
-    return Result{value, value};
-  }
-  LogicalResult validateBinding(Value value, const Result &info) const {
-    return success(info.source && info.helper &&
-                   info.source.getType() == value.getType() &&
-                   info.helper.getType() == value.getType());
-  }
-};
-TEST(PtrAnalysisExtension, DriverAcceptsAnIndependentResultAndSharesHelpers) {
-  MLIRContext context;
-  load(context);
-  auto module =
-      parseSourceString<ModuleOp>(R"mlir(module { tt.func @test(%x:i32,%y:i32) {
-    %zero=arith.constant 0:i32
-    %sum=arith.addi %x,%y:i32
-    %twice=arith.addi %sum,%sum:i32
-    %alias=arith.addi %sum,%zero:i32
-    tt.return
-  } })mlir",
-                                  &context);
-  ASSERT_TRUE(module);
-  auto f = *module->getOps<triton::FuncOp>().begin();
-  SmallVector<arith::AddIOp> adds;
-  f.walk([&](arith::AddIOp op) { adds.push_back(op); });
-  OpBuilder b(f.getBody().front().getTerminator());
-  auto ip = b.saveInsertionPoint();
-  llvm::DenseMap<Value, unsigned> counts;
-  PtrAnalysis<TokenRules> driver(b, TokenRules{&counts});
-  auto info = driver.analyze(adds[1]);
-  ASSERT_TRUE(succeeded(info));
-  unsigned n = operations(*module);
-  const auto *cached = driver.findCached(adds[1]);
-  for (unsigned i = 0; i < 3; ++i)
-    ASSERT_TRUE(succeeded(driver.analyze(adds[1])));
-  for (const auto &entry : counts)
-    EXPECT_EQ(entry.second, 1u);
-  EXPECT_EQ(operations(*module), n);
-  ASSERT_TRUE(succeeded(driver.bind(adds[2], *driver.findCached(adds[0]))));
-  EXPECT_FALSE(driver.findCached(adds[1]));
-  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), TokenInfo{})));
-  EXPECT_FALSE(driver.findCached(adds[1]));
-  ASSERT_TRUE(succeeded(driver.bind(
-      f.getArgument(0), TokenInfo{f.getArgument(1), f.getArgument(1)})));
-  EXPECT_FALSE(driver.findCached(adds[1]));
-  ASSERT_TRUE(succeeded(driver.analyze(adds[1])));
-  driver.clear();
-  EXPECT_FALSE(driver.findCached(f.getArgument(0)));
-  EXPECT_EQ(b.getInsertionBlock(), ip.getBlock());
-  EXPECT_EQ(b.getInsertionPoint(), ip.getPoint());
-  EXPECT_TRUE(succeeded(verify(*module)));
-}
-TEST(PtrAnalysisExtension, HypothesisQueriesIsolateBindingsAndComputedResults) {
-  MLIRContext context;
-  load(context);
-  auto module = parseSourceString<ModuleOp>(R"mlir(
-    module { tt.func @test(%x:i32, %y:i32) {
-      %sum = arith.addi %x, %y : i32
-      tt.return
-    } }
-  )mlir",
-                                            &context);
-  ASSERT_TRUE(module);
-  auto f = *module->getOps<triton::FuncOp>().begin();
-  auto sum = *f.getBody().front().getOps<arith::AddIOp>().begin();
-  Value x = f.getArgument(0), y = f.getArgument(1);
-  OpBuilder builder(f.getBody().front().getTerminator());
-  auto ip = builder.saveInsertionPoint();
-  PtrAnalysis<TokenRules> analysis(builder, TokenRules{});
-  auto parent = analysis.analyze(sum);
-  ASSERT_TRUE(succeeded(parent));
-  TokenInfo childResult, grandchildResult;
-  ASSERT_TRUE(succeeded(analysis.withBindings({{x, {y, y}}}, [&](auto &child) {
-    EXPECT_FALSE(child.findCached(sum));
-    auto info = child.analyze(sum);
-    if (failed(info))
-      return failure();
-    childResult = *info;
-    EXPECT_TRUE(
-        succeeded(child.withBindings({{y, {x, x}}}, [&](auto &grandchild) {
-          EXPECT_FALSE(grandchild.findCached(sum));
-          auto nested = grandchild.analyze(sum);
-          if (failed(nested))
-            return failure();
-          grandchildResult = *nested;
-          return success();
-        })));
-    EXPECT_EQ(child.findCached(sum)->helper, childResult.helper);
-    return success();
-  })));
-  EXPECT_EQ(analysis.findCached(sum)->helper, parent->helper);
-  EXPECT_FALSE(analysis.findCached(x)->helper == y);
-  test::Environment env{{x, {llvm::APInt(32, 2)}}, {y, {llvm::APInt(32, 5)}}};
-  auto before = test::evaluate(parent->helper, env);
-  auto local = test::evaluate(childResult.helper, env);
-  auto nested = test::evaluate(grandchildResult.helper, env);
-  ASSERT_TRUE(before && local && nested);
-  EXPECT_EQ(before->front().getSExtValue(), 7);
-  EXPECT_EQ(local->front().getSExtValue(), 10);
-  EXPECT_EQ(nested->front().getSExtValue(), 7);
-  bool called = false;
-  EXPECT_TRUE(failed(analysis.withBindings({{x, {}}}, [&](auto &) {
-    called = true;
-    return success();
-  })));
-  EXPECT_FALSE(called);
-  EXPECT_EQ(analysis.findCached(sum)->helper, parent->helper);
-  EXPECT_EQ(builder.getInsertionPoint(), ip.getPoint());
-  EXPECT_TRUE(succeeded(verify(*module)));
-}
-
-// An extension can recognize an exact identity that Common does not model.
-// Its configuration and recursive input queries must survive loop hypotheses.
-struct IdentityShiftRules : CommonPtrRules {
-  IdentityShiftRules(bool enabled, unsigned &queries)
-      : enabled(enabled), queries(queries) {}
-  bool enabled;
-  unsigned &queries;
-  template <typename Context>
-  FailureOr<Result> parse(Value value, Context &context) const {
-    if (auto shift = value.getDefiningOp<arith::ShLIOp>(); shift && enabled) {
-      auto amount =
-          mlir::triton::ptr::detail::getIntegerConstant(shift.getRhs(), 64);
-      if (succeeded(amount) && amount->isZero()) {
-        ++queries;
-        auto input = context.analyze(shift.getLhs());
-        if (failed(input))
-          return failure();
-        input->offsets.fullOffsets = value;
-        return input;
-      }
-    }
-    return CommonPtrRules::parse(value, context);
-  }
-};
-
-TEST(PtrAnalysisExtension, LoopProofKeepsConfiguredRulesAndExternalBindings) {
-  MLIRContext context;
-  load(context);
-  auto module = parseSourceString<ModuleOp>(R"mlir(
-    module { tt.func @loop(%seed: tensor<4xi32>, %n: index) {
-      %c0 = arith.constant 0 : index
-      %c1 = arith.constant 1 : index
-      %zero = arith.constant dense<0> : tensor<4xi32>
-      %out = scf.for %i = %c0 to %n step %c1 iter_args(%x = %seed) -> tensor<4xi32> {
-        %shift = arith.shli %x, %zero : tensor<4xi32>
-        %next = arith.addi %shift, %seed : tensor<4xi32>
-        scf.yield %next : tensor<4xi32>
-      }
-      tt.return
-    } }
-  )mlir",
-                                            &context);
-  ASSERT_TRUE(module);
-  auto f = *module->getOps<triton::FuncOp>().begin();
-  auto loop = *f.getBody().front().getOps<scf::ForOp>().begin();
-  OpBuilder builder(loop);
-  auto seed = buildOffsetInfo(f.getArgument(0), builder);
-  ASSERT_TRUE(succeeded(seed));
-  seed->scalarOffset = builder.getIndexAttr(7);
-  seed->axes[0] = AxisInfo(AxisKind::Structured, builder.getIndexAttr(3));
-  unsigned queries = 0;
-  for (bool enabled : {false, true}) {
-    PtrAnalysis<IdentityShiftRules> analysis(
-        builder, IdentityShiftRules(enabled, queries));
-    ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(0), PtrInfo{{}, *seed})));
-    auto result = analysis.analyze(loop.getResult(0));
-    ASSERT_TRUE(succeeded(result));
-    EXPECT_EQ(result->offsets.axes[0].kind,
-              enabled ? AxisKind::Structured : AxisKind::Unknown);
-    EXPECT_EQ(analysis.findCached(f.getArgument(0))->offsets.scalarOffset,
-              seed->scalarOffset);
-  }
-  EXPECT_GT(queries, 0u);
-  EXPECT_TRUE(succeeded(verify(*module)));
-}
-
-TEST(PtrAnalysisExtension, RecursiveCurrentNodeIsAnError) {
-  MLIRContext context;
-  load(context);
-  auto module =
-      parseSourceString<ModuleOp>(R"mlir(module {tt.func @test(%x:i32) {
-    %sum=arith.addi %x,%x {cycle}:i32
-    tt.return
-  }})mlir",
-                                  &context);
-  ASSERT_TRUE(module);
-  auto f = *module->getOps<triton::FuncOp>().begin();
-  auto op = *f.getBody().front().getOps<arith::AddIOp>().begin();
-  OpBuilder b(f.getBody().front().getTerminator());
-  auto ip = b.saveInsertionPoint();
-  PtrAnalysis<TokenRules> driver(b, TokenRules{});
-  EXPECT_TRUE(failed(driver.analyze(op)));
-  EXPECT_FALSE(driver.findCached(op));
-  EXPECT_EQ(b.getInsertionPoint(), ip.getPoint());
-}
-
-TEST(PtrAnalysisExtension, SubAxesAndOriginPropagateAndRecombine) {
+TEST(PtrAnalysisSubAxis, SubAxesAndOriginPropagateAndRecombine) {
   MLIRContext context;
   load(context);
   auto module = parseSourceString<ModuleOp>(
@@ -304,7 +85,7 @@ TEST(PtrAnalysisExtension, SubAxesAndOriginPropagateAndRecombine) {
   auto ptr = *f.getBody().front().getOps<triton::AddPtrOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
   auto ip = b.saveInsertionPoint();
-  PtrAnalysis<CommonPtrRules> driver(b, CommonPtrRules{});
+  PtrAnalysis driver(b);
   auto common = test::getOffsets(driver.analyze(rem));
   ASSERT_TRUE(succeeded(common));
   EXPECT_TRUE(common->hasStructuredDecomposition());
@@ -356,7 +137,7 @@ TEST(PtrAnalysisExtension, SubAxesAndOriginPropagateAndRecombine) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
-TEST(PtrAnalysisExtension,
+TEST(PtrAnalysisSubAxis,
      UnavailableSplitAndMaterializationPreserveExactResults) {
   MLIRContext context;
   load(context);
@@ -371,7 +152,7 @@ TEST(PtrAnalysisExtension,
   auto f = *module->getOps<triton::FuncOp>().begin();
   auto rem = *f.getBody().front().getOps<arith::RemUIOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> driver(b, CommonPtrRules{});
+  PtrAnalysis driver(b);
   auto info = test::getInfo(driver.analyze(rem));
   ASSERT_TRUE(succeeded(info));
   EXPECT_TRUE(info->offsets.axes[0].subAxes.empty());
@@ -385,7 +166,7 @@ TEST(PtrAnalysisExtension,
   EXPECT_EQ(operations(*module), count);
 }
 
-TEST(PtrAnalysisExtension, SubAxisStrideSSAControlsPlacementAndBindings) {
+TEST(PtrAnalysisSubAxis, SubAxisStrideSSAControlsPlacementAndBindings) {
   MLIRContext context;
   load(context);
   auto module = parseSourceString<ModuleOp>(
@@ -407,7 +188,7 @@ TEST(PtrAnalysisExtension, SubAxisStrideSSAControlsPlacementAndBindings) {
   auto advance = *f.getBody().front().getOps<triton::AdvanceOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
   auto ip = b.saveInsertionPoint();
-  PtrAnalysis<CommonPtrRules> driver(b, CommonPtrRules{});
+  PtrAnalysis driver(b);
   auto info = buildOffsetInfo(f.getArgument(3), b);
   ASSERT_TRUE(succeeded(info));
   info->scalarOffset = b.getIndexAttr(5);
@@ -418,8 +199,7 @@ TEST(PtrAnalysisExtension, SubAxisStrideSSAControlsPlacementAndBindings) {
   info->axes[0].subAxes =
       SmallVector<SubAxisInfo>{{4, b.getIndexAttr(0)}, {4, rootStride}};
   PtrInfo integer{{}, *info};
-  ASSERT_TRUE(succeeded(
-      driver.bind(f.getArgument(3), CommonPtrRules::Result(integer))));
+  ASSERT_TRUE(succeeded(driver.setInfo(f.getArgument(3), PtrInfo(integer))));
   ASSERT_TRUE(succeeded(driver.analyze(rows)));
   ASSERT_TRUE(succeeded(test::getOffsets(driver.analyze(f.getArgument(3)))));
   auto rowsInfo = test::getOffsets(driver.analyze(rows));
@@ -428,14 +208,14 @@ TEST(PtrAnalysisExtension, SubAxisStrideSSAControlsPlacementAndBindings) {
   EXPECT_EQ(rowsInfo->axes[1].subAxes.back().stride, OpFoldResult(rootStride));
   EXPECT_EQ(b.getInsertionBlock(), ip.getBlock());
   ASSERT_TRUE(succeeded(
-      driver.bind(f.getArgument(3), *driver.findCached(f.getArgument(3)))));
-  EXPECT_FALSE(driver.findCached(rows));
-  driver.clear();
+      driver.setInfo(f.getArgument(3), *driver.findCached(f.getArgument(3)))));
+  EXPECT_TRUE(driver.findCached(rows));
+  ASSERT_TRUE(succeeded(driver.reset()));
   EXPECT_FALSE(driver.findCached(f.getArgument(3)));
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
-TEST(PtrAnalysisExtension, SubAxisCastsKeepExactValuesAndRevokeInvalidProofs) {
+TEST(PtrAnalysisSubAxis, SubAxisCastsKeepExactValuesAndRevokeInvalidProofs) {
   MLIRContext context;
   load(context);
   auto module = parseSourceString<ModuleOp>(R"mlir(module {tt.func @test() {
@@ -462,7 +242,7 @@ TEST(PtrAnalysisExtension, SubAxisCastsKeepExactValuesAndRevokeInvalidProofs) {
   auto ext = *f.getBody().front().getOps<arith::ExtSIOp>().begin();
   auto extu = *f.getBody().front().getOps<arith::ExtUIOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> driver(b, CommonPtrRules{});
+  PtrAnalysis driver(b);
   auto incompatible = test::getInfo(driver.analyze(mixed));
   ASSERT_TRUE(succeeded(incompatible));
   EXPECT_TRUE(incompatible->offsets.axes[0].subAxes.empty());
@@ -496,7 +276,7 @@ TEST(PtrAnalysisExtension, SubAxisCastsKeepExactValuesAndRevokeInvalidProofs) {
   }
   EXPECT_TRUE(succeeded(verify(*module)));
 }
-TEST(PtrAnalysisExtension, SubAxisBindingsValidateIndexFieldsAndLengths) {
+TEST(PtrAnalysisSubAxis, SubAxisBindingsValidateIndexFieldsAndLengths) {
   MLIRContext context;
   load(context);
   auto module = parseSourceString<ModuleOp>(R"mlir(module {
@@ -510,23 +290,23 @@ TEST(PtrAnalysisExtension, SubAxisBindingsValidateIndexFieldsAndLengths) {
   auto f = *module->getOps<FuncOp>().begin();
   auto rows = *f.getBody().front().getOps<ExpandDimsOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> driver(b, CommonPtrRules{});
+  PtrAnalysis driver(b);
   auto offset = buildOffsetInfo(f.getArgument(0), b);
   ASSERT_TRUE(succeeded(offset));
   offset->scalarOffset = b.getIndexAttr(5);
   offset->axes[0].subAxes =
       SmallVector<SubAxisInfo>{{4, b.getIndexAttr(0)}, {4, f.getArgument(1)}};
   auto bound = PtrInfo{{}, *offset};
-  ASSERT_TRUE(succeeded(driver.bind(f.getArgument(0), bound)));
+  ASSERT_TRUE(succeeded(driver.setInfo(f.getArgument(0), bound)));
   auto *original = driver.findCached(f.getArgument(0));
   for (int64_t length : {0, -1, 3}) {
     auto bad = bound;
     bad.offsets.axes[0].subAxes.front().shape = length;
-    EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bad)));
+    EXPECT_TRUE(failed(driver.setInfo(f.getArgument(0), bad)));
   }
   auto bad = bound;
   bad.offsets.axes[0].subAxes.back().stride = b.getI32IntegerAttr(1);
-  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bad)));
+  EXPECT_TRUE(failed(driver.setInfo(f.getArgument(0), bad)));
   EXPECT_EQ(driver.findCached(f.getArgument(0)), original);
   auto derived = test::getOffsets(driver.analyze(rows));
   ASSERT_TRUE(succeeded(derived));
@@ -548,7 +328,7 @@ TEST(PtrAnalysisExtension, SubAxisBindingsValidateIndexFieldsAndLengths) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
-TEST(PtrAnalysisExtension, AxisBindingsRequireConsistentFacts) {
+TEST(PtrAnalysisSubAxis, AxisBindingsRequireConsistentFacts) {
   MLIRContext context;
   load(context);
   auto module = parseSourceString<ModuleOp>(R"mlir(module {
@@ -560,7 +340,7 @@ TEST(PtrAnalysisExtension, AxisBindingsRequireConsistentFacts) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<FuncOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> driver(b, CommonPtrRules{});
+  PtrAnalysis driver(b);
   auto offset = buildOffsetInfo(f.getArgument(0), b);
   ASSERT_TRUE(succeeded(offset));
   PtrInfo bound{{}, *offset};
@@ -569,51 +349,104 @@ TEST(PtrAnalysisExtension, AxisBindingsRequireConsistentFacts) {
 
   // Unknown stride fields are placeholders, not facts to upgrade or rewrite.
   axis.stride = b.getIndexAttr(7);
-  ASSERT_TRUE(succeeded(driver.bind(f.getArgument(0), bound)));
+  ASSERT_TRUE(succeeded(driver.setInfo(f.getArgument(0), bound)));
   EXPECT_EQ(driver.findCached(f.getArgument(0))->offsets.axes[0].stride,
             axis.stride);
   axis.kind = AxisKind::Invariant;
-  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+  EXPECT_TRUE(failed(driver.setInfo(f.getArgument(0), bound)));
   axis = AxisInfo(AxisKind::Structured, b.getIndexAttr(0));
-  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+  EXPECT_TRUE(failed(driver.setInfo(f.getArgument(0), bound)));
 
   // Nonlinear digits retain Unknown. Linear lanes 0..15 require stride one.
   axis = AxisInfo(AxisKind::Unknown, b.getIndexAttr(7));
   axis.subAxes = {{4, b.getIndexAttr(0)}, {4, b.getIndexAttr(1)}};
-  ASSERT_TRUE(succeeded(driver.bind(f.getArgument(0), bound)));
+  ASSERT_TRUE(succeeded(driver.setInfo(f.getArgument(0), bound)));
   axis.subAxes = {{4, b.getIndexAttr(4)}, {4, b.getIndexAttr(1)}};
-  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+  EXPECT_TRUE(failed(driver.setInfo(f.getArgument(0), bound)));
   axis.kind = AxisKind::Structured;
   axis.stride = b.getIndexAttr(1);
-  ASSERT_TRUE(succeeded(driver.bind(f.getArgument(0), bound)));
+  ASSERT_TRUE(succeeded(driver.setInfo(f.getArgument(0), bound)));
   axis.stride = b.getIndexAttr(2);
-  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+  EXPECT_TRUE(failed(driver.setInfo(f.getArgument(0), bound)));
   // The invalid length product would wrap back to 16 without overflow checks.
   axis.stride = b.getIndexAttr(1);
   axis.subAxes.front().shape = (int64_t{1} << 62) + 4;
-  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+  EXPECT_TRUE(failed(driver.setInfo(f.getArgument(0), bound)));
 
   // Unit digits have no coordinate contribution; the sole varying digit
   // can carry a dynamic stride directly.
   axis.stride = f.getArgument(2);
   axis.subAxes = {
       {1, b.getIndexAttr(9)}, {16, f.getArgument(2)}, {1, b.getIndexAttr(3)}};
-  ASSERT_TRUE(succeeded(driver.bind(f.getArgument(0), bound)));
+  ASSERT_TRUE(succeeded(driver.setInfo(f.getArgument(0), bound)));
   axis.kind = AxisKind::Unknown;
-  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+  EXPECT_TRUE(failed(driver.setInfo(f.getArgument(0), bound)));
   axis.kind = AxisKind::Structured;
   axis.stride = b.getIndexAttr(1);
-  EXPECT_TRUE(failed(driver.bind(f.getArgument(0), bound)));
+  EXPECT_TRUE(failed(driver.setInfo(f.getArgument(0), bound)));
 
   // A singleton partition is invariant even with arbitrary coefficients.
   auto unit = buildOffsetInfo(f.getArgument(1), b);
   ASSERT_TRUE(succeeded(unit));
   unit->axes[0] = AxisInfo(AxisKind::Invariant, b.getIndexAttr(0));
   unit->axes[0].subAxes = {{1, f.getArgument(2)}, {1, b.getIndexAttr(9)}};
-  ASSERT_TRUE(succeeded(driver.bind(f.getArgument(1), PtrInfo{{}, *unit})));
+  ASSERT_TRUE(succeeded(driver.setInfo(f.getArgument(1), PtrInfo{{}, *unit})));
   unit->axes[0].kind = AxisKind::Unknown;
-  EXPECT_TRUE(failed(driver.bind(f.getArgument(1), PtrInfo{{}, *unit})));
+  EXPECT_TRUE(failed(driver.setInfo(f.getArgument(1), PtrInfo{{}, *unit})));
   EXPECT_EQ(operations(*module), count);
   EXPECT_TRUE(succeeded(verify(*module)));
 }
+TEST(PtrAnalysisSubAxis, NormalizeAndAlignEquivalentPartitionsBeforeAddition) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(
+    module { tt.func @partitions() {
+      %r = tt.make_range {start=0:i32,end=128:i32} : tensor<128xi32>
+      %c2 = arith.constant dense<2> : tensor<128xi32>
+      %c16 = arith.constant dense<16> : tensor<128xi32>
+      %c32 = arith.constant dense<32> : tensor<128xi32>
+      %q16 = arith.divsi %r, %c16 : tensor<128xi32>
+      %nested = arith.divsi %q16, %c2 : tensor<128xi32>
+      %direct = arith.divsi %r, %c32 : tensor<128xi32>
+      %normalized = arith.addi %nested, %direct {tag="normalized"} : tensor<128xi32>
+      %rem = arith.remsi %r, %c16 : tensor<128xi32>
+      %bit = arith.remsi %q16, %c2 : tensor<128xi32>
+      %aligned = arith.addi %rem, %bit {tag="aligned"} : tensor<128xi32>
+      %reverse = arith.addi %bit, %rem {tag="reverse"} : tensor<128xi32>
+      tt.return
+    } }
+  )mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  OpBuilder builder(&context);
+  PtrAnalysis analysis(builder);
+  module->walk([&](arith::AddIOp op) {
+    auto tag = op->getAttrOfType<StringAttr>("tag");
+    if (!tag)
+      return;
+    auto result = analysis.analyze(op.getResult());
+    ASSERT_TRUE(succeeded(result));
+    ASSERT_TRUE(result->offsets.hasStructuredDecomposition());
+    auto &parts = result->offsets.axes[0].subAxes;
+    bool normalized = tag.getValue() == "normalized";
+    ASSERT_EQ(parts.size(), normalized ? 2u : 3u);
+    SmallVector<int64_t> shapes = normalized ? SmallVector<int64_t>{4, 32}
+                                             : SmallVector<int64_t>{4, 2, 16};
+    SmallVector<int64_t> strides =
+        normalized ? SmallVector<int64_t>{2, 0} : SmallVector<int64_t>{0, 1, 1};
+    for (unsigned i = 0; i < parts.size(); ++i) {
+      EXPECT_EQ(parts[i].shape, shapes[i]);
+      EXPECT_EQ(evaluate(parts[i].stride)->front().getSExtValue(), strides[i]);
+    }
+    auto lanes = evaluate(result->offsets);
+    ASSERT_TRUE(lanes);
+    for (unsigned lane = 0; lane < 128; ++lane) {
+      int64_t expected =
+          normalized ? 2 * (lane / 32) : lane % 16 + (lane / 16) % 2;
+      EXPECT_EQ((*lanes)[lane].getSExtValue(), expected);
+    }
+  });
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 } // namespace

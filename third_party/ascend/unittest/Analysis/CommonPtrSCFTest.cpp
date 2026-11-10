@@ -55,7 +55,7 @@ void expectScalar(OpFoldResult scalar, int64_t expected,
   EXPECT_EQ(value->front().getSExtValue(), expected);
 }
 
-void expectKinds(PtrAnalysis<CommonPtrRules> &analysis, Value value,
+void expectKinds(PtrAnalysis &analysis, Value value,
                  ArrayRef<AxisKind> expected) {
   auto info = analysis.analyze(value);
   ASSERT_TRUE(succeeded(info));
@@ -91,7 +91,7 @@ TEST(CommonPtrSCF, ForUsesCurrentFieldsAndPreservesUniformCarrier) {
   Value x = loop.getRegionIterArgs()[0], u = loop.getRegionIterArgs()[1];
   OpBuilder builder(loop);
   auto ip = builder.saveInsertionPoint();
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   // Enter through an expression that itself is on the backedge. Its active
   // recursion state must not suppress re-analysis under the local hypotheses.
   auto next = analysis.analyze(tagged(*module, "next")->getResult(0));
@@ -151,7 +151,7 @@ TEST(CommonPtrSCF, ForJoinsAllCarriersAndRejectsSecondIterationNonlinearity) {
   ASSERT_TRUE(module);
   auto loop = cast<scf::ForOp>(tagged(*module, "loop"));
   OpBuilder builder(loop);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   SmallVector<AxisKind> expected{AxisKind::Unknown, AxisKind::Structured,
                                  AxisKind::Structured, AxisKind::Invariant};
   for (unsigned i = 0; i < expected.size(); ++i) {
@@ -184,7 +184,7 @@ TEST(CommonPtrSCF, ForResultIncludesZeroTripInitialValue) {
   ASSERT_TRUE(module);
   auto loop = cast<scf::ForOp>(tagged(*module, "loop"));
   OpBuilder builder(loop);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   expectKinds(analysis, loop.getResult(0), {AxisKind::Unknown});
   EXPECT_TRUE(succeeded(verify(*module)));
 }
@@ -210,7 +210,7 @@ TEST(CommonPtrSCF, IfJoinsAxesAndMaterializesFieldsAfterTheBranches) {
   ASSERT_TRUE(module);
   auto branch = cast<scf::IfOp>(tagged(*module, "branch"));
   OpBuilder builder(branch);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   expectKinds(analysis, branch.getResult(0), {AxisKind::Structured});
   expectKinds(analysis, branch.getResult(1), {AxisKind::Invariant});
   test::Environment env;
@@ -248,7 +248,7 @@ TEST(CommonPtrSCF, WhileKeepsBeforeAndAfterEdgeMappingsSeparate) {
   ASSERT_TRUE(module);
   auto loop = cast<scf::WhileOp>(tagged(*module, "loop"));
   OpBuilder builder(loop);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   for (Value arg : loop.getBeforeArguments())
     expectKinds(analysis, arg, {AxisKind::Structured});
   expectKinds(analysis, loop.getAfterArguments()[0], {AxisKind::Structured});
@@ -285,7 +285,7 @@ TEST(CommonPtrSCF, WhileConditionAndBackedgeBothParticipateInClosure) {
   ASSERT_TRUE(module);
   auto loop = cast<scf::WhileOp>(tagged(*module, "loop"));
   OpBuilder builder(loop);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   expectKinds(analysis, loop.getBeforeArguments()[0], {AxisKind::Unknown});
   expectKinds(analysis, loop.getAfterArguments()[0], {AxisKind::Unknown});
   expectKinds(analysis, loop.getResult(0), {AxisKind::Unknown});
@@ -319,7 +319,7 @@ TEST(CommonPtrSCF, NestedLoopsAndBranchesUseCurrentOuterHypotheses) {
                                             &context);
   ASSERT_TRUE(module);
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   for (StringRef tag : {"outer", "inner"}) {
     auto loop = cast<scf::ForOp>(tagged(*module, tag));
     expectKinds(analysis, loop.getRegionIterArgs()[0], {AxisKind::Structured});
@@ -352,7 +352,7 @@ TEST(CommonPtrSCF, UnitAxesNeverNeedAnOutOfBoundsStrideSample) {
   auto loop = cast<scf::ForOp>(tagged(*module, "loop"));
   OpBuilder builder(loop);
   for (bool structured : {false, true}) {
-    PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+    PtrAnalysis analysis(builder);
     if (structured) {
       auto seed = buildOffsetInfo(f.getArgument(2), builder);
       ASSERT_TRUE(succeeded(seed));
@@ -361,7 +361,7 @@ TEST(CommonPtrSCF, UnitAxesNeverNeedAnOutOfBoundsStrideSample) {
       seed->axes[0] = AxisInfo(AxisKind::Structured, builder.getIndexAttr(99));
       seed->axes[1] = AxisInfo(AxisKind::Structured, builder.getIndexAttr(1));
       ASSERT_TRUE(
-          succeeded(analysis.bind(f.getArgument(2), PtrInfo{{}, *seed})));
+          succeeded(analysis.setInfo(f.getArgument(2), PtrInfo{{}, *seed})));
     }
     expectKinds(analysis, loop.getResult(0),
                 {AxisKind::Invariant,
@@ -399,12 +399,12 @@ TEST(CommonPtrSCF, PartialAxesAndUnsupportedTensorShapesKeepExactValues) {
   auto f = *module->getOps<triton::FuncOp>().begin();
   auto loop = cast<scf::ForOp>(tagged(*module, "loop"));
   OpBuilder builder(loop);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto partial = buildOffsetInfo(f.getArgument(1), builder);
   ASSERT_TRUE(succeeded(partial));
   partial->axes[1] = AxisInfo(AxisKind::Structured, builder.getIndexAttr(2));
   ASSERT_TRUE(
-      succeeded(analysis.bind(f.getArgument(1), PtrInfo{{}, *partial})));
+      succeeded(analysis.setInfo(f.getArgument(1), PtrInfo{{}, *partial})));
   expectKinds(analysis, loop.getRegionIterArgs()[0],
               {AxisKind::Unknown, AxisKind::Structured});
   expectKinds(analysis, loop.getResult(0),
@@ -424,4 +424,141 @@ TEST(CommonPtrSCF, PartialAxesAndUnsupportedTensorShapesKeepExactValues) {
   expectScalar(info->offsets.axes[1].stride, 2, env);
   EXPECT_TRUE(succeeded(verify(*module)));
 }
+TEST(CommonPtrSCF, InnerFirstQueryCanReenterTheSameLoopUnderOuterHypotheses) {
+  for (bool argumentFirst : {false, true}) {
+    MLIRContext context;
+    load(context);
+    auto module = parseSourceString<ModuleOp>(R"mlir(
+      module { tt.func @reentry(%n: index, %a: i32, %b: i32) {
+        %c0 = arith.constant 0 : index
+        %c1 = arith.constant 1 : index
+        %zero = arith.constant dense<0> : tensor<4xi32>
+        %range = tt.make_range {start=0:i32,end=4:i32} : tensor<4xi32>
+        %scale = arith.muli %a, %b {tag="scale"} : i32
+        %outer = scf.for %i = %c0 to %n step %c1 iter_args(%x = %zero) -> (tensor<4xi32>) {
+          %inner = scf.for %j = %c0 to %n step %c1 iter_args(%y = %zero) -> (tensor<4xi32>) {
+            %factor = tt.splat %scale : i32 -> tensor<4xi32>
+            %sum = arith.addi %y, %x : tensor<4xi32>
+            %next = arith.muli %sum, %factor {tag="next"} : tensor<4xi32>
+            scf.yield %next : tensor<4xi32>
+          } {tag="inner"}
+          %square = arith.muli %inner, %inner : tensor<4xi32>
+          %next = arith.addi %square, %range : tensor<4xi32>
+          scf.yield %next : tensor<4xi32>
+        } {tag="outer"}
+        tt.return
+      } }
+    )mlir",
+                                              &context);
+    ASSERT_TRUE(module);
+    ASSERT_TRUE(succeeded(verify(*module)));
+    auto inner = cast<scf::ForOp>(tagged(*module, "inner"));
+    auto outer = cast<scf::ForOp>(tagged(*module, "outer"));
+    Value next = tagged(*module, "next")->getResult(0);
+    Value scale = tagged(*module, "scale")->getResult(0);
+    OpBuilder builder(inner);
+    PtrAnalysis analysis(builder);
+    expectKinds(analysis,
+                argumentFirst ? Value(inner.getRegionIterArgs()[0]) : next,
+                {AxisKind::Unknown});
+    // Inner results computed under an outer candidate stay in that round.
+    EXPECT_FALSE(analysis.findCached(inner.getResult(0)));
+    expectKinds(analysis, outer.getResult(0), {AxisKind::Unknown});
+    expectKinds(analysis, inner.getResult(0), {AxisKind::Unknown});
+    ASSERT_TRUE(analysis.findCached(scale));
+    OpFoldResult origin = analysis.findCached(scale)->offsets.scalarOffset;
+    auto reused = analysis.analyze(scale);
+    ASSERT_TRUE(succeeded(reused));
+    EXPECT_EQ(reused->offsets.scalarOffset, origin);
+    unsigned casts = 0;
+    module->walk([&](arith::IndexCastOp op) { casts += op.getIn() == scale; });
+    EXPECT_EQ(casts, 1u);
+    EXPECT_TRUE(succeeded(verify(*module)));
+  }
+}
+
+TEST(CommonPtrSCF, InnerWhileBootstrapCanReenterUnderOuterHypotheses) {
+  for (bool afterFirst : {true, false}) {
+    MLIRContext context;
+    load(context);
+    auto module = parseSourceString<ModuleOp>(R"mlir(
+      module { tt.func @reentry(%n: index, %cond: i1) {
+        %c0 = arith.constant 0 : index
+        %c1 = arith.constant 1 : index
+        %zero = arith.constant dense<0> : tensor<4xi32>
+        %range = tt.make_range {start=0:i32,end=4:i32} : tensor<4xi32>
+        %outer = scf.for %i = %c0 to %n step %c1 iter_args(%x = %zero) -> (tensor<4xi32>) {
+          %inner = scf.while (%before = %zero) : (tensor<4xi32>) -> tensor<4xi32> {
+            %next = arith.addi %before, %x : tensor<4xi32>
+            scf.condition(%cond) %next : tensor<4xi32>
+          } do {
+          ^bb0(%after: tensor<4xi32>):
+            scf.yield %after : tensor<4xi32>
+          } attributes {tag="inner"}
+          %square = arith.muli %inner, %inner : tensor<4xi32>
+          %next = arith.addi %square, %range : tensor<4xi32>
+          scf.yield %next : tensor<4xi32>
+        } {tag="outer"}
+        tt.return
+      } }
+    )mlir",
+                                              &context);
+    ASSERT_TRUE(module);
+    ASSERT_TRUE(succeeded(verify(*module)));
+    auto inner = cast<scf::WhileOp>(tagged(*module, "inner"));
+    auto outer = cast<scf::ForOp>(tagged(*module, "outer"));
+    OpBuilder builder(inner);
+    PtrAnalysis analysis(builder);
+    Value first = afterFirst ? inner.getAfterArguments()[0]
+                             : inner.getBeforeArguments()[0];
+    expectKinds(analysis, first, {AxisKind::Unknown});
+    EXPECT_FALSE(analysis.findCached(inner.getResult(0)));
+    expectKinds(analysis, inner.getResult(0), {AxisKind::Unknown});
+    expectKinds(analysis, outer.getResult(0), {AxisKind::Unknown});
+    EXPECT_TRUE(succeeded(verify(*module)));
+  }
+}
+
+TEST(CommonPtrSCF, AProvidedBodyFactRemainsVisibleUnderLoopHypotheses) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(
+    module { tt.func @provided(%n: index) {
+      %c0 = arith.constant 0 : index
+      %c1 = arith.constant 1 : index
+      %range = tt.make_range {start=0:i32,end=4:i32} : tensor<4xi32>
+      %zero = arith.constant dense<0> : tensor<4xi32>
+      %one = arith.constant dense<1> : tensor<4xi32>
+      %out = scf.for %i = %c0 to %n step %c1 iter_args(%x = %range) -> (tensor<4xi32>) {
+        %opaque = arith.shli %x, %zero {tag="opaque"} : tensor<4xi32>
+        %next = arith.addi %opaque, %one : tensor<4xi32>
+        scf.yield %next : tensor<4xi32>
+      } {tag="loop"}
+      tt.return
+    } }
+  )mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  Value opaque = tagged(*module, "opaque")->getResult(0);
+  auto loop = cast<scf::ForOp>(tagged(*module, "loop"));
+  OpBuilder builder(&context);
+  builder.setInsertionPointAfterValue(opaque);
+  Value zero = builder.create<arith::ConstantIndexOp>(opaque.getLoc(), 0);
+  Value origin = builder.create<tensor::ExtractOp>(opaque.getLoc(), opaque,
+                                                   ValueRange{zero});
+  origin = builder.create<arith::IndexCastOp>(opaque.getLoc(),
+                                              builder.getIndexType(), origin);
+  auto offset = buildOffsetInfo(opaque, builder);
+  ASSERT_TRUE(succeeded(offset));
+  offset->scalarOffset = origin;
+  offset->axes[0] = AxisInfo(AxisKind::Structured, builder.getIndexAttr(1));
+  PtrAnalysis analysis(builder);
+  ASSERT_TRUE(succeeded(analysis.setInfo(opaque, PtrInfo{{}, *offset})));
+  expectKinds(analysis, loop.getResult(0), {AxisKind::Structured});
+  ASSERT_TRUE(analysis.findCached(opaque));
+  EXPECT_EQ(analysis.findCached(opaque)->offsets.fullOffsets,
+            OpFoldResult(opaque));
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 } // namespace

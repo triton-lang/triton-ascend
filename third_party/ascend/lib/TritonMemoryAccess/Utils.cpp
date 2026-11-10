@@ -20,13 +20,315 @@
  * THE SOFTWARE.
  */
 
-#include "TritonMemoryAccess/PtrInfoUtils.h"
+#include "TritonMemoryAccess/Utils.h"
 #include "TritonMemoryAccess/PtrAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Dialect/Triton/IR/Traits.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/Support/MathExtras.h"
+#include <limits>
 
 namespace mlir::triton::ptr::detail {
+
+// Integer types, constants, and source-width arithmetic.
+Type getElementTypeOrSelf(Type type) {
+  if (auto tensor = dyn_cast<RankedTensorType>(type))
+    return tensor.getElementType();
+  return type;
+}
+
+FailureOr<unsigned> getIntegerWidth(Type type) {
+  type = detail::getElementTypeOrSelf(type);
+  if (auto integer = dyn_cast<IntegerType>(type)) {
+    if (!integer.isSignless() || integer.getWidth() > 64)
+      return failure();
+    return integer.getWidth();
+  }
+  if (type.isIndex())
+    return 64;
+  return failure();
+}
+
+FailureOr<OpFoldResult> typedZero(Type scalarType, OpBuilder &builder) {
+  if (scalarType.isIndex())
+    return OpFoldResult(builder.getIndexAttr(0));
+  auto integer = dyn_cast<IntegerType>(scalarType);
+  if (!integer || failed(getIntegerWidth(integer)))
+    return failure();
+  return OpFoldResult(builder.getIntegerAttr(scalarType, 0));
+}
+
+FailureOr<llvm::APInt> getIntegerConstant(OpFoldResult value, unsigned width) {
+  Attribute attr = dyn_cast<Attribute>(value);
+  if (!attr) {
+    Value ssa = dyn_cast<Value>(value);
+    auto constant = ssa ? ssa.getDefiningOp<arith::ConstantOp>() : nullptr;
+    if (!constant)
+      return failure();
+    attr = constant.getValue();
+  }
+  if (auto integer = dyn_cast<IntegerAttr>(attr))
+    return integer.getValue().sextOrTrunc(width);
+  if (auto dense = dyn_cast<DenseIntElementsAttr>(attr)) {
+    if (dense.isSplat())
+      return dense.getSplatValue<llvm::APInt>().sextOrTrunc(width);
+  }
+  return failure();
+}
+
+// Inspect only local divisibility facts, without rebuilding scalar arithmetic
+// or adding a second analysis cache. Bound the local walk; expressions beyond
+// it simply need an explicit fact. Power-of-two factors survive integer wrap.
+bool isKnownMultiple(OpFoldResult operand, uint64_t divisor, unsigned depth) {
+  if (divisor == 1)
+    return true;
+  auto constant = getIntegerConstant(operand, 64);
+  if (succeeded(constant))
+    return constant->srem(llvm::APInt(64, divisor)).isZero();
+  auto value = dyn_cast<Value>(operand);
+  auto *op = value ? value.getDefiningOp() : nullptr;
+  if (!op || !depth)
+    return false;
+  if (!isa<ShapedType>(value.getType()))
+    if (auto hint = op->getAttrOfType<DenseIntElementsAttr>("tt.divisibility"))
+      if (hint.getNumElements() == 1) {
+        auto multiple = hint.getValues<llvm::APInt>()[0].getSExtValue();
+        if (multiple > 0 && uint64_t(multiple) % divisor == 0)
+          return true;
+      }
+  auto multiple = [&](Value input, uint64_t d) {
+    return isKnownMultiple(input, d, depth - 1);
+  };
+  if (isa<triton::SplatOp, triton::BroadcastOp, triton::ExpandDimsOp,
+          arith::ExtSIOp>(op))
+    return multiple(op->getOperand(0), divisor);
+  if (auto cast = dyn_cast<arith::IndexCastOp>(op)) {
+    auto from = getIntegerWidth(cast.getIn().getType());
+    auto to = getIntegerWidth(value.getType());
+    if (succeeded(from) && succeeded(to) && *from <= *to)
+      return multiple(cast.getIn(), divisor);
+  }
+  // For other integer arithmetic, a power-of-two modulus also divides the
+  // source width's wrap modulus. General factors need an explicit fact above.
+  auto width = getIntegerWidth(value.getType());
+  if (!llvm::isPowerOf2_64(divisor) || failed(width) ||
+      llvm::Log2_64(divisor) >= *width)
+    return false;
+  if (isa<arith::ExtUIOp, arith::TruncIOp, arith::IndexCastOp,
+          arith::IndexCastUIOp>(op)) {
+    auto from = getIntegerWidth(op->getOperand(0).getType());
+    return succeeded(from) && llvm::Log2_64(divisor) < *from &&
+           multiple(op->getOperand(0), divisor);
+  }
+  if (isa<arith::AddIOp, arith::SubIOp>(op))
+    return multiple(op->getOperand(0), divisor) &&
+           multiple(op->getOperand(1), divisor);
+  if (auto mul = dyn_cast<arith::MulIOp>(op)) {
+    for (unsigned i = 0; i < 2; ++i) {
+      auto factor = getIntegerConstant(mul->getOperand(i), 64);
+      uint64_t remaining = divisor;
+      if (succeeded(factor))
+        remaining >>=
+            std::min<unsigned>(factor->countr_zero(), llvm::Log2_64(divisor));
+      if (multiple(mul->getOperand(1 - i), remaining))
+        return true;
+    }
+  }
+  return false;
+}
+
+bool isKnownNonNegative(OpFoldResult operand, unsigned depth) {
+  auto constant = getIntegerConstant(operand, 64);
+  if (succeeded(constant))
+    return !constant->isNegative();
+  auto value = dyn_cast<Value>(operand);
+  auto *op = value ? value.getDefiningOp() : nullptr;
+  if (!op || !depth)
+    return false;
+  auto nonnegative = [&](Value input) {
+    return isKnownNonNegative(input, depth - 1);
+  };
+
+  // Program coordinates and zero-extended scalars supply nonnegative origins.
+  if (isa<triton::GetProgramIdOp, triton::GetNumProgramsOp>(op))
+    return true;
+  if (isa<arith::ExtSIOp, arith::ExtUIOp, arith::IndexCastOp,
+          arith::IndexCastUIOp>(op)) {
+    auto from = getIntegerWidth(op->getOperand(0).getType());
+    auto to = getIntegerWidth(value.getType());
+    if (failed(from) || failed(to) || *from > *to)
+      return false;
+    if (*from < *to && isa<arith::ExtUIOp, arith::IndexCastUIOp>(op))
+      return true;
+    return nonnegative(op->getOperand(0));
+  }
+
+  // Address arithmetic follows the same no-overflow contract as its axes.
+  if (isa<arith::AddIOp, arith::MulIOp>(op))
+    return nonnegative(op->getOperand(0)) && nonnegative(op->getOperand(1));
+  if (isa<arith::MaxSIOp>(op))
+    return nonnegative(op->getOperand(0)) || nonnegative(op->getOperand(1));
+  if (auto div = dyn_cast<arith::DivSIOp>(op)) {
+    auto divisor = getIntegerConstant(div.getRhs(), 64);
+    return succeeded(divisor) && divisor->isStrictlyPositive() &&
+           nonnegative(div.getLhs());
+  }
+  return false;
+}
+
+FailureOr<Value> materialize(OpFoldResult value, Type expectedType,
+                             OpBuilder &builder, Location loc) {
+  if (auto ssa = dyn_cast<Value>(value)) {
+    if (ssa.getType() != expectedType)
+      return failure();
+    return ssa;
+  }
+  auto attr = dyn_cast<Attribute>(value);
+  auto typed = dyn_cast_or_null<TypedAttr>(attr);
+  if (!typed || typed.getType() != expectedType)
+    return failure();
+  return builder.create<arith::ConstantOp>(loc, typed).getResult();
+}
+
+FailureOr<OpFoldResult> foldOrCreateBinary(BinaryKind kind, OpFoldResult lhs,
+                                           OpFoldResult rhs, Type resultType,
+                                           OpBuilder &builder, Location loc) {
+  if (!resultType ||
+      (isa<ShapedType>(resultType) && !isa<RankedTensorType>(resultType)))
+    return failure();
+  if (auto tensor = dyn_cast<RankedTensorType>(resultType))
+    if (!tensor.hasStaticShape())
+      return failure();
+  FailureOr<unsigned> width = getIntegerWidth(resultType);
+  if (failed(width))
+    return failure();
+  auto leftConstant = getIntegerConstant(lhs, *width);
+  auto rightConstant = getIntegerConstant(rhs, *width);
+  if (succeeded(leftConstant) && succeeded(rightConstant)) {
+    llvm::APInt result = *leftConstant;
+    switch (kind) {
+    case BinaryKind::Add:
+      result += *rightConstant;
+      break;
+    case BinaryKind::Subtract:
+      result -= *rightConstant;
+      break;
+    case BinaryKind::Multiply:
+      result *= *rightConstant;
+      break;
+    }
+    if (auto tensor = dyn_cast<RankedTensorType>(resultType))
+      return OpFoldResult(DenseIntElementsAttr::get(tensor, result));
+    return OpFoldResult(builder.getIntegerAttr(resultType, result));
+  }
+  if (auto value = dyn_cast<Value>(lhs)) {
+    if (value.getType() == resultType && succeeded(rightConstant)) {
+      if ((kind != BinaryKind::Multiply && rightConstant->isZero()) ||
+          (kind == BinaryKind::Multiply && rightConstant->isOne()))
+        return lhs;
+    }
+  }
+  if (auto value = dyn_cast<Value>(rhs)) {
+    if (value.getType() == resultType && succeeded(leftConstant)) {
+      if ((kind == BinaryKind::Add && leftConstant->isZero()) ||
+          (kind == BinaryKind::Multiply && leftConstant->isOne()))
+        return rhs;
+    }
+  }
+  if (kind == BinaryKind::Multiply &&
+      ((succeeded(leftConstant) && leftConstant->isZero()) ||
+       (succeeded(rightConstant) && rightConstant->isZero()))) {
+    if (auto tensor = dyn_cast<RankedTensorType>(resultType))
+      return OpFoldResult(
+          DenseIntElementsAttr::get(tensor, llvm::APInt(*width, 0)));
+    return typedZero(resultType, builder);
+  }
+  FailureOr<Value> left = materialize(lhs, resultType, builder, loc);
+  FailureOr<Value> right = materialize(rhs, resultType, builder, loc);
+  if (failed(left) || failed(right))
+    return failure();
+  switch (kind) {
+  case BinaryKind::Add:
+    return OpFoldResult(
+        builder.create<arith::AddIOp>(loc, *left, *right).getResult());
+  case BinaryKind::Subtract:
+    return OpFoldResult(
+        builder.create<arith::SubIOp>(loc, *left, *right).getResult());
+  case BinaryKind::Multiply:
+    return OpFoldResult(
+        builder.create<arith::MulIOp>(loc, *left, *right).getResult());
+  }
+  llvm_unreachable("exhaustive binary kind");
+}
+
+FailureOr<OpFoldResult> foldOrCreateCast(OpFoldResult source, Type targetType,
+                                         IntegerExtensionKind kind,
+                                         OpBuilder &builder, Location loc) {
+  auto sourceType = dyn_cast<Value>(source)
+                        ? cast<Value>(source).getType()
+                        : cast<TypedAttr>(cast<Attribute>(source)).getType();
+  FailureOr<unsigned> oldWidth = getIntegerWidth(sourceType);
+  FailureOr<unsigned> newWidth = getIntegerWidth(targetType);
+  if (failed(oldWidth) || failed(newWidth))
+    return failure();
+  if (sourceType == targetType)
+    return source;
+  FailureOr<llvm::APInt> constant = getIntegerConstant(source, *oldWidth);
+  if (succeeded(constant)) {
+    llvm::APInt converted = *constant;
+    if (*newWidth < *oldWidth)
+      converted = converted.trunc(*newWidth);
+    else if (kind == IntegerExtensionKind::Unsigned)
+      converted = converted.zextOrTrunc(*newWidth);
+    else
+      converted = converted.sextOrTrunc(*newWidth);
+    if (auto tensor = dyn_cast<RankedTensorType>(targetType))
+      return OpFoldResult(DenseIntElementsAttr::get(tensor, converted));
+    return OpFoldResult(builder.getIntegerAttr(targetType, converted));
+  }
+  // Non-splat attributes are legal complete offsets supplied by bindings.
+  // Materialize them before casting instead of assuming an SSA operand.
+  auto value = materialize(source, sourceType, builder, loc);
+  if (failed(value))
+    return failure();
+  // The shared integer helper handles scalar index, but only IntegerType
+  // elements for tensors. Preserve tensor shape/encoding for index casts here.
+  if (auto sourceTensor = dyn_cast<RankedTensorType>(sourceType)) {
+    auto targetTensor = dyn_cast<RankedTensorType>(targetType);
+    if (!targetTensor || sourceTensor.getShape() != targetTensor.getShape() ||
+        sourceTensor.getEncoding() != targetTensor.getEncoding())
+      return failure();
+    if (sourceTensor.getElementType().isIndex() ||
+        targetTensor.getElementType().isIndex()) {
+      if (kind == IntegerExtensionKind::Unsigned)
+        return OpFoldResult(
+            builder.create<arith::IndexCastUIOp>(loc, targetType, *value)
+                .getResult());
+      return OpFoldResult(
+          builder.create<arith::IndexCastOp>(loc, targetType, *value)
+              .getResult());
+    }
+  }
+  FailureOr<Value> result =
+      castIntegerLike(builder, loc, *value, targetType, kind);
+  if (failed(result))
+    return failure();
+  return OpFoldResult(*result);
+}
+
+FailureOr<Value> splatTo(Value scalar, RankedTensorType target,
+                         OpBuilder &builder, Location loc) {
+  if (!scalar || scalar.getType() != target.getElementType())
+    return failure();
+  return builder.create<triton::SplatOp>(loc, target, scalar).getResult();
+}
+
+// Address decompositions and axis proofs.
 // Comparisons of index-domain descriptor coefficients.
 bool equalConstant(OpFoldResult lhs, OpFoldResult rhs) {
   if (lhs == rhs)
@@ -159,11 +461,34 @@ FailureOr<Value> materializeFullOffset(const OffsetInfo &info, Type target,
 }
 
 // Axis alignment and stride queries.
-// Only proven equal partitions are merged. A linear axis can be expressed in
-// either partition. Incompatible decompositions lose that axis proof, while
-// the exact fullOffsets and independent origin remain available.
+void normalizeSubAxes(SmallVectorImpl<SubAxisInfo> &subAxes,
+                      OpBuilder &builder) {
+  if (subAxes.empty())
+    return;
+  SmallVector<SubAxisInfo> normalized;
+  for (const SubAxisInfo &sub : subAxes) {
+    if (sub.shape == 1)
+      continue;
+    if (!normalized.empty() && zero(normalized.back().stride) &&
+        zero(sub.stride)) {
+      // Valid partitions multiply to a representable original dimension.
+      normalized.back().shape *= sub.shape;
+    } else {
+      normalized.push_back(sub);
+    }
+  }
+  if (normalized.empty())
+    normalized.push_back({1, builder.getIndexAttr(0)});
+  subAxes.assign(normalized.begin(), normalized.end());
+}
+
+// A linear axis can use either partition. Two mixed-radix partitions can
+// additionally split a longer zero-stride digit into integral factors: the
+// split contributes zero in both digits and preserves every lane's value.
 LogicalResult alignAxes(AxisInfo &lhs, AxisInfo &rhs,
                         ConcreteArithmetic &arithmetic) {
+  normalizeSubAxes(lhs.subAxes, arithmetic.builder);
+  normalizeSubAxes(rhs.subAxes, arithmetic.builder);
   if (lhs.subAxes.empty() && rhs.subAxes.empty())
     return success();
   if (lhs.subAxes.empty()) {
@@ -178,11 +503,41 @@ LogicalResult alignAxes(AxisInfo &lhs, AxisInfo &rhs,
       return failure();
     rhs.subAxes = std::move(*expanded);
   }
-  if (lhs.subAxes.size() != rhs.subAxes.size())
-    return failure();
-  for (auto [l, r] : llvm::zip(lhs.subAxes, rhs.subAxes))
-    if (l.shape != r.shape)
+  SmallVector<SubAxisInfo> left, right;
+  unsigned i = 0, j = 0;
+  SubAxisInfo l = lhs.subAxes.front(), r = rhs.subAxes.front();
+  while (true) {
+    if (l.shape == r.shape) {
+      left.push_back(l);
+      right.push_back(r);
+      ++i;
+      ++j;
+      if (i == lhs.subAxes.size() || j == rhs.subAxes.size())
+        break;
+      l = lhs.subAxes[i];
+      r = rhs.subAxes[j];
+    } else if (l.shape > r.shape && l.shape % r.shape == 0 && zero(l.stride)) {
+      left.push_back({r.shape, l.stride});
+      right.push_back(r);
+      l.shape /= r.shape;
+      if (++j == rhs.subAxes.size())
+        return failure();
+      r = rhs.subAxes[j];
+    } else if (r.shape > l.shape && r.shape % l.shape == 0 && zero(r.stride)) {
+      left.push_back(l);
+      right.push_back({l.shape, r.stride});
+      r.shape /= l.shape;
+      if (++i == lhs.subAxes.size())
+        return failure();
+      l = lhs.subAxes[i];
+    } else {
       return failure();
+    }
+  }
+  if (i != lhs.subAxes.size() || j != rhs.subAxes.size())
+    return failure();
+  lhs.subAxes = std::move(left);
+  rhs.subAxes = std::move(right);
   return success();
 }
 
@@ -308,9 +663,24 @@ constantDecompositionRange(const OffsetInfo &info, unsigned width) {
       llvm::APInt(width, uint64_t(minimum), true),
       llvm::APInt(width, uint64_t(maximum), true) + 1);
 }
+
 } // namespace mlir::triton::ptr::detail
 
 namespace mlir::triton::ptr {
+
+void broadcastAxes(SmallVectorImpl<AxisInfo> &axes,
+                   ArrayRef<int64_t> sourceShape, ArrayRef<int64_t> targetShape,
+                   const AxisInfo &invariant) {
+  assert(axes.size() == sourceShape.size() &&
+         axes.size() == targetShape.size());
+  for (unsigned i = 0; i < axes.size(); ++i) {
+    if (sourceShape[i] == targetShape[i])
+      continue;
+    assert(sourceShape[i] == 1 && "only singleton dimensions can broadcast");
+    axes[i] = invariant;
+  }
+}
+
 FailureOr<OpFoldResult> materializeOffsetAt(const OffsetInfo &info,
                                             ValueRange indices,
                                             OpBuilder &builder, Location loc) {
@@ -407,4 +777,5 @@ FailureOr<OpFoldResult> materializeOffsetAt(const OffsetInfo &info,
   }
   return sum;
 }
+
 } // namespace mlir::triton::ptr

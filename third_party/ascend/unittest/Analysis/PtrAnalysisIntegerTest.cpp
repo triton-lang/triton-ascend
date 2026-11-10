@@ -21,11 +21,15 @@
  */
 
 #include "PtrAnalysisTestUtils.h"
-#include "TritonMemoryAccess/PtrAnalysisRules/CommonPtrRules.h"
+#include "TritonMemoryAccess/PtrAnalysis.h"
+#include "TritonMemoryAccess/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Parser/Parser.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "gtest/gtest.h"
 
 using namespace mlir;
@@ -126,7 +130,7 @@ TEST(PtrAnalysisInteger, PureIntegerOperationsKeepUniformAndPartialAxes) {
     auto f = *module->getOps<triton::FuncOp>().begin();
     OpBuilder b(f.getBody().front().getTerminator());
     auto ip = b.saveInsertionPoint();
-    PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+    PtrAnalysis analysis(b);
     Value v = tagged(f, "op");
     auto integer = test::getInfo(analysis.analyze(v));
     ASSERT_TRUE(succeeded(integer));
@@ -165,7 +169,7 @@ TEST(PtrAnalysisInteger, ElementwiseOnlyInheritsCommonInvariantAxes) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto info = test::getInfo(analysis.analyze(tagged(f, "and")));
   ASSERT_TRUE(succeeded(info));
   EXPECT_EQ(test::axisKinds(info->offsets),
@@ -196,7 +200,7 @@ TEST(PtrAnalysisInteger, ZeroAxisContributionsBecomeInvariant) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<FuncOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   for (StringRef name : {"cancel", "linear", "split"}) {
     Value value = tagged(f, name);
     auto info = analysis.analyze(value);
@@ -207,7 +211,8 @@ TEST(PtrAnalysisInteger, ZeroAxisContributionsBecomeInvariant) {
     expectLanes(info->offsets.axes[0].stride, {0});
     expectLanes(info->offsets, SmallVector<int64_t>(16, 0));
     expectDecomposition(info->offsets);
-    EXPECT_TRUE(succeeded(CommonPtrRules{}.validateBinding(value, *info)));
+    EXPECT_TRUE(
+        succeeded(mlir::triton::ptr::detail::validateInfo(value, *info)));
   }
   EXPECT_TRUE(succeeded(verify(*module)));
 }
@@ -234,7 +239,7 @@ TEST(PtrAnalysisInteger, LoadedOriginAndDynamicStrideKeepStructuredAddresses) {
   Value origin = *f.getBody().front().getOps<triton::LoadOp>().begin();
   Value offset = tagged(f, "offset");
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto integer = analysis.analyze(offset);
   auto pointer = analysis.analyze(tagged(f, "ptr"));
   ASSERT_TRUE(succeeded(integer) && succeeded(pointer));
@@ -255,13 +260,13 @@ TEST(PtrAnalysisInteger, LoadedOriginAndDynamicStrideKeepStructuredAddresses) {
     }
 
   // Unified results still reject empty or mismatched boundary bindings.
-  EXPECT_TRUE(failed(analysis.bind(offset, PtrInfo{})));
+  EXPECT_TRUE(failed(analysis.setInfo(offset, PtrInfo{})));
   PtrInfo wrong = *integer;
   wrong.base = f.getArgument(1);
-  EXPECT_TRUE(failed(analysis.bind(offset, wrong)));
+  EXPECT_TRUE(failed(analysis.setInfo(offset, wrong)));
   wrong = *integer;
   wrong.block = BlockPtrInfo{};
-  EXPECT_TRUE(failed(analysis.bind(offset, wrong)));
+  EXPECT_TRUE(failed(analysis.setInfo(offset, wrong)));
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -289,7 +294,7 @@ TEST(PtrAnalysisInteger, DynamicOriginsKeepLegacyStructureAndExactSources) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   for (StringRef tag :
        {"sum", "stride", "unknown", "wrap", "narrow", "unsigned", "signed"}) {
     Value value = tagged(f, tag);
@@ -342,7 +347,7 @@ TEST(PtrAnalysisInteger, ExactSourceWidthsAndIndexCoefficients) {
     ASSERT_TRUE(module);
     auto f = *module->getOps<triton::FuncOp>().begin();
     OpBuilder b(&context);
-    PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+    PtrAnalysis analysis(b);
     Value v = tagged(f, "sum");
     auto info = test::getOffsets(analysis.analyze(v));
     ASSERT_TRUE(succeeded(info));
@@ -371,7 +376,7 @@ TEST(PtrAnalysisInteger, ExactSourceWidthsAndIndexCoefficients) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   Value v = tagged(f, "sum");
   auto info = test::getOffsets(analysis.analyze(v));
   ASSERT_TRUE(succeeded(info));
@@ -411,7 +416,7 @@ TEST(PtrAnalysisInteger, StructuredNonzeroOriginStrideAndNestedDigits) {
       ASSERT_TRUE(module);
       auto f = *module->getOps<triton::FuncOp>().begin();
       OpBuilder b(&context);
-      PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+      PtrAnalysis analysis(b);
       for (StringRef tag : {"split", "again"}) {
         auto info = test::getOffsets(analysis.analyze(tagged(f, tag)));
         ASSERT_TRUE(succeeded(info));
@@ -459,7 +464,7 @@ TEST(PtrAnalysisInteger, DynamicAlignedOriginsSplitDivRemAxes) {
     ASSERT_TRUE(module);
     auto f = *module->getOps<triton::FuncOp>().begin();
     OpBuilder builder(&context);
-    PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+    PtrAnalysis analysis(builder);
     auto input = test::getOffsets(analysis.analyze(tagged(f, "input")));
     ASSERT_TRUE(succeeded(input));
     ASSERT_TRUE(input->hasStructuredForm());
@@ -513,7 +518,7 @@ TEST(PtrAnalysisInteger, NonnegativeScalarOriginsKeepDivRemSplits) {
     ASSERT_TRUE(module);
     auto f = *module->getOps<triton::FuncOp>().begin();
     OpBuilder builder(&context);
-    PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+    PtrAnalysis analysis(builder);
     auto info = test::getOffsets(analysis.analyze(tagged(f, "split")));
     ASSERT_TRUE(succeeded(info));
     ASSERT_TRUE(info->hasStructuredDecomposition());
@@ -565,7 +570,7 @@ TEST(PtrAnalysisInteger, DynamicSplitNeedsAlignedNonnegativeOrigins) {
       ASSERT_TRUE(module);
       auto f = *module->getOps<triton::FuncOp>().begin();
       OpBuilder builder(&context);
-      PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+      PtrAnalysis analysis(builder);
       auto input = test::getOffsets(analysis.analyze(tagged(f, "input")));
       ASSERT_TRUE(succeeded(input));
       ASSERT_TRUE(input->hasStructuredForm());
@@ -620,7 +625,7 @@ TEST(PtrAnalysisInteger, DynamicSplitRejectsNegativeStridesAndResidualCarries) {
     ASSERT_TRUE(module);
     auto f = *module->getOps<triton::FuncOp>().begin();
     OpBuilder builder(&context);
-    PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+    PtrAnalysis analysis(builder);
     for (StringRef tag : {"negative", "carry"}) {
       auto input =
           test::getOffsets(analysis.analyze(tagged(f, (tag + "_input").str())));
@@ -658,7 +663,7 @@ TEST(PtrAnalysisInteger, DynamicSplitRequiresCompleteAxisFacts) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   Value input = tagged(f, "input");
   auto bound = analysis.analyze(input);
   ASSERT_TRUE(succeeded(bound));
@@ -666,7 +671,7 @@ TEST(PtrAnalysisInteger, DynamicSplitRequiresCompleteAxisFacts) {
   // A known origin with an Unknown axis is a valid partial binding. Its zero
   // stride is only a placeholder and must not become an invariance proof.
   bound->offsets.axes[0] = AxisInfo(AxisKind::Unknown, builder.getIndexAttr(0));
-  ASSERT_TRUE(succeeded(analysis.bind(input, *bound)));
+  ASSERT_TRUE(succeeded(analysis.setInfo(input, *bound)));
   Value value = tagged(f, "split");
   auto info = test::getOffsets(analysis.analyze(value));
   ASSERT_TRUE(succeeded(info));
@@ -705,7 +710,7 @@ TEST(PtrAnalysisInteger,
     ASSERT_TRUE(module);
     auto f = *module->getOps<triton::FuncOp>().begin();
     OpBuilder b(&context);
-    PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+    PtrAnalysis analysis(b);
     Value v = tagged(f, "div");
     auto info = test::getOffsets(analysis.analyze(v));
     ASSERT_TRUE(succeeded(info));
@@ -760,7 +765,7 @@ TEST(PtrAnalysisInteger, ExactDivisionKeepsNegativeAndDynamicOrigins) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   for (StringRef tag :
        {"negative", "remainder", "dynamic", "dynamic_rem", "annotated"}) {
     Value value = tagged(f, tag);
@@ -785,7 +790,7 @@ TEST(PtrAnalysisInteger, ExactDivisionKeepsNegativeAndDynamicOrigins) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
-TEST(PtrAnalysisInteger, DynamicOriginsFollowEveryBindingAndClear) {
+TEST(PtrAnalysisInteger, DynamicOriginsSurviveResetAndReanalysis) {
   MLIRContext context;
   load(context);
   auto module = parseSourceString<ModuleOp>(
@@ -801,13 +806,14 @@ TEST(PtrAnalysisInteger, DynamicOriginsFollowEveryBindingAndClear) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   Value sum = tagged(f, "sum");
   auto address = test::getOffsets(analysis.analyze(sum));
   ASSERT_TRUE(succeeded(address));
   ASSERT_TRUE(address->hasStructuredForm());
   auto unseen = buildOffsetInfo(f.getArgument(1), b);
-  ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(1), PtrInfo{{}, *unseen})));
+  ASSERT_TRUE(
+      succeeded(analysis.reset({{f.getArgument(1), PtrInfo{{}, *unseen}}})));
   EXPECT_FALSE(analysis.findCached(sum));
   auto reproved = test::getOffsets(analysis.analyze(sum));
   ASSERT_TRUE(succeeded(reproved));
@@ -818,15 +824,15 @@ TEST(PtrAnalysisInteger, DynamicOriginsFollowEveryBindingAndClear) {
   auto info = test::getOffsets(analysis.analyze(extended));
   ASSERT_TRUE(succeeded(info));
   EXPECT_TRUE(info->hasStructuredForm());
-  // Rebind the scalar's analyzed origin and preserve it across invalidation.
+  // Preserve the scalar's actual origin while refreshing dependent results.
   auto bound = analysis.analyze(newOrigin);
   ASSERT_TRUE(succeeded(bound));
-  ASSERT_TRUE(succeeded(analysis.bind(newOrigin, *bound)));
+  ASSERT_TRUE(succeeded(analysis.reset({{newOrigin, *bound}})));
   EXPECT_FALSE(analysis.findCached(extended));
   info = test::getOffsets(analysis.analyze(extended));
   ASSERT_TRUE(succeeded(info));
   EXPECT_TRUE(info->hasStructuredDecomposition());
-  analysis.clear();
+  ASSERT_TRUE(succeeded(analysis.reset()));
   info = test::getOffsets(analysis.analyze(extended));
   ASSERT_TRUE(succeeded(info));
   EXPECT_TRUE(info->hasStructuredDecomposition());
@@ -851,7 +857,7 @@ TEST(PtrAnalysisInteger, DynamicTermsPropagateThroughSubAxisAlignment) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   for (StringRef name : {"sum", "scaled"}) {
     Value value = tagged(f, name);
     auto info = test::getOffsets(analysis.analyze(value));

@@ -20,65 +20,28 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ASCEND_MEMORY_ACCESS_PTR_INFO_UTILS_H
-#define TRITON_ASCEND_MEMORY_ACCESS_PTR_INFO_UTILS_H
-#include "TritonMemoryAccess/IntegerUtils.h"
+#ifndef TRITON_ASCEND_MEMORY_ACCESS_UTILS_H
+#define TRITON_ASCEND_MEMORY_ACCESS_UTILS_H
+
+#include "TritonMemoryAccess/OpFoldResultUtils.h"
+#include "TritonMemoryAccess/PtrAnalysisInfo.h"
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/ConstantRange.h"
 #include <cassert>
 #include <optional>
+
+namespace mlir {
+class RewriterBase;
+}
+
 namespace mlir::triton::ptr {
 
-/// Update concrete axes or symbolic coefficients for a verified broadcast.
-/// Expanded singleton dimensions take the supplied invariant fact; other axes
-/// are retained. There must be one fact per source dimension.
-template <typename Axis>
-void broadcastAxes(SmallVectorImpl<Axis> &axes, ArrayRef<int64_t> sourceShape,
-                   ArrayRef<int64_t> targetShape, const Axis &invariant) {
-  assert(axes.size() == sourceShape.size() &&
-         axes.size() == targetShape.size() && "broadcast ranks must match");
-  for (unsigned i = 0; i < axes.size(); ++i) {
-    if (sourceShape[i] == targetShape[i])
-      continue;
-    assert(sourceShape[i] == 1 && "only singleton dimensions can broadcast");
-    axes[i] = invariant;
-  }
-}
+/// Broadcast known axes across verified singleton dimensions.
+void broadcastAxes(SmallVectorImpl<AxisInfo> &axes,
+                   ArrayRef<int64_t> sourceShape, ArrayRef<int64_t> targetShape,
+                   const AxisInfo &invariant);
 
-template <typename Component, typename Arithmetic>
-FailureOr<SmallVector<Component>>
-advanceCoordinateTerms(ArrayRef<Component> coordinates,
-                       ArrayRef<Component> deltas, Arithmetic &arithmetic) {
-  if (coordinates.size() != deltas.size())
-    return failure();
-  SmallVector<Component> info;
-  for (unsigned i = 0; i < coordinates.size(); ++i) {
-    auto value = arithmetic.add(coordinates[i], deltas[i], false);
-    if (failed(value))
-      return failure();
-    info.push_back(std::move(*value));
-  }
-  return info;
-}
-
-template <typename Component, typename Arithmetic>
-FailureOr<Component>
-addScaledCoordinateTerms(Component origin, ArrayRef<Component> coordinates,
-                         ArrayRef<Component> strides, Arithmetic &arithmetic) {
-  if (coordinates.size() != strides.size())
-    return failure();
-  for (unsigned i = 0; i < coordinates.size(); ++i) {
-    auto term = arithmetic.multiply(coordinates[i], strides[i]);
-    if (failed(term))
-      return failure();
-    auto sum = arithmetic.add(origin, *term, false);
-    if (failed(sum))
-      return failure();
-    origin = std::move(*sum);
-  }
-  return origin;
-}
 /// Produce one exact index element offset at the caller's insertion point.
 /// Extract from fullOffsets and convert the scalar to index; if fullOffsets is
 /// absent, reconstruct it from a complete decomposition (e.g. a block pointer).
@@ -88,8 +51,36 @@ FailureOr<OpFoldResult> materializeOffsetAt(const OffsetInfo &offsets,
                                             ValueRange indices,
                                             OpBuilder &builder, Location loc);
 
-} // namespace mlir::triton::ptr
-namespace mlir::triton::ptr::detail {
+namespace detail {
+
+// Integer types, constants, and source-width arithmetic.
+enum class BinaryKind { Add, Subtract, Multiply };
+
+/// Accept signless integers up to 64 bits, or index (64 bits at this stage).
+/// Ranked tensors use their element type.
+FailureOr<unsigned> getIntegerWidth(Type type);
+/// Unwrap ranked tensors; leave all other types unchanged.
+Type getElementTypeOrSelf(Type type);
+FailureOr<OpFoldResult> typedZero(Type scalarType, OpBuilder &builder);
+FailureOr<llvm::APInt> getIntegerConstant(OpFoldResult value, unsigned width);
+/// Bounded divisibility proof from local integer expressions and hints.
+bool isKnownMultiple(OpFoldResult operand, uint64_t divisor,
+                     unsigned depth = 8);
+/// Local sign proof for address decompositions. Add/mul follow the analysis's
+/// no-overflow assumption; narrowing casts do not preserve the proof.
+bool isKnownNonNegative(OpFoldResult operand, unsigned depth = 8);
+FailureOr<OpFoldResult> foldOrCreateBinary(BinaryKind kind, OpFoldResult lhs,
+                                           OpFoldResult rhs, Type resultType,
+                                           OpBuilder &builder, Location loc);
+FailureOr<OpFoldResult> foldOrCreateCast(OpFoldResult source, Type targetType,
+                                         IntegerExtensionKind kind,
+                                         OpBuilder &builder, Location loc);
+FailureOr<Value> materialize(OpFoldResult value, Type expectedType,
+                             OpBuilder &builder, Location loc);
+FailureOr<Value> splatTo(Value scalar, RankedTensorType target,
+                         OpBuilder &builder, Location loc);
+
+// Address decompositions and axis proofs.
 struct ConcreteArithmetic {
   Type type;
   OpBuilder &builder;
@@ -125,6 +116,10 @@ FailureOr<Value> materializeFullOffset(const OffsetInfo &info, Type target,
                                        OpBuilder &builder, Location loc);
 
 // Axis alignment and stride queries.
+/// Remove unit digits and coalesce adjacent zero-stride digits within one
+/// original dimension. Keep a unit digit when the entire dimension is unit.
+void normalizeSubAxes(SmallVectorImpl<SubAxisInfo> &subAxes,
+                      OpBuilder &builder);
 /// Express compatible axes in the same sub-axis partition, if provable.
 LogicalResult alignAxes(AxisInfo &lhs, AxisInfo &rhs,
                         ConcreteArithmetic &arithmetic);
@@ -149,6 +144,8 @@ bool decompositionFitsSigned(const OffsetInfo &info, unsigned width);
 /// Bounds of the mathematical decomposition, not the wrapped fullOffsets.
 std::optional<llvm::ConstantRange>
 constantDecompositionRange(const OffsetInfo &info, unsigned width);
-} // namespace mlir::triton::ptr::detail
 
-#endif
+} // namespace detail
+} // namespace mlir::triton::ptr
+
+#endif // TRITON_ASCEND_MEMORY_ACCESS_UTILS_H

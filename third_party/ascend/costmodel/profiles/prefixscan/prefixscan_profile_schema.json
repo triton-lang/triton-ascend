@@ -637,6 +637,8 @@
                         "layout_any",
                         "layout_warp_local",
                         "layout_cross_warp",
+                        "layout_cross_warp_full_lane",
+                        "layout_cross_warp_subwarp",
                         "layout_multi_block"
                       ]
                     },

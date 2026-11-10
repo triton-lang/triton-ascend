@@ -44,6 +44,7 @@ const std::set<std::string> featureNames = {"one",
                                             "partial_values",
                                             "pressure24",
                                             "pressure48",
+                                            "pressure127",
                                             "pressure2_8",
                                             "pressure2_16",
                                             "pressure2_24",
@@ -52,6 +53,9 @@ const std::set<std::string> featureNames = {"one",
                                             "pressure2_96",
                                             "partial_pressure8",
                                             "partial_pressure16",
+                                            "partial_pressure2_cta",
+                                            "scan_spill_warp_work",
+                                            "scan_spill_subwarp_work",
                                             "direct_group_work",
                                             "direct_narrow_group_work",
                                             "direct_half_row_groups"};
@@ -71,6 +75,8 @@ const std::set<std::string> branches = {"short",
                                         "layout_any",
                                         "layout_warp_local",
                                         "layout_cross_warp",
+                                        "layout_cross_warp_full_lane",
+                                        "layout_cross_warp_subwarp",
                                         "layout_multi_block"};
 double ceilDiv(double a, double b) { return std::ceil(a / b); }
 } // namespace
@@ -344,6 +350,7 @@ std::optional<PrefixScanEstimate> mlir::ascend::estimatePrefixScanFormula(
       values["q"] = E / (32 * W);
       values["H"] = H;
       values["axisK"] = K;
+      values["axis_lanes"] = L;
       values["local"] = H * (A - 1);
       values["warp"] = H * std::log2(L);
       values["merge"] = P * Bp * (K * Ba - 1);
@@ -357,6 +364,21 @@ std::optional<PrefixScanEstimate> mlir::ascend::estimatePrefixScanFormula(
       const double words = std::ceil(double(bits) / 32);
       values["live_words"] = (H * A + P * Bp) * words;
       values["partial_values"] = H * K * words;
+      // Soft pressure proxy beyond one CTA-sized set of scan partials.
+      const double partialExcess =
+          std::max(0.0, values["partial_values"] - 32.0 * W);
+      values["partial_pressure2_cta"] = partialExcess * partialExcess;
+      values["pressure127"] = std::max(0.0, values["live_words"] - 127.0);
+      // Approximate live input/output words against the per-thread budget.
+      const double registerWords = 32 * W <= 256    ? 127
+                                   : 32 * W <= 512  ? 64
+                                   : 32 * W <= 1024 ? 32
+                                                    : 16;
+      const double valueExcess =
+          std::max(0.0, 2.0 * H * A * words - registerWords);
+      values["scan_spill_warp_work"] = valueExcess * std::log2(L);
+      values["scan_spill_subwarp_work"] =
+          valueExcess * std::max(0.0, 32.0 / L - 4.0);
       for (int threshold : {8, 16, 24, 32, 48, 64, 96}) {
         double excess = std::max(0.0, values["live_words"] - threshold);
         values["pressure" + std::to_string(threshold)] = excess;
@@ -370,6 +392,20 @@ std::optional<PrefixScanEstimate> mlir::ascend::estimatePrefixScanFormula(
         layoutBranch = K > 1    ? "layout_cross_warp"
                        : Ba > 1 ? "layout_multi_block"
                                 : "layout_warp_local";
+      // Full-lane pricing is enabled only by a matching calibrated domain.
+      if (rowMajor && K > 1 && L == 32) {
+        const bool fullLaneAsset =
+            llvm::any_of(formulas, [&](const auto &formula) {
+              return llvm::any_of(formula.domains, [&](const auto &d) {
+                return d.branch == "layout_cross_warp_full_lane" &&
+                       d.operation == operation && d.dataType == type &&
+                       d.rank == int64_t(shape.size()) && d.axis == axis &&
+                       (d.warps == 0 || d.warps == warps);
+              });
+            });
+        if (fullLaneAsset)
+          layoutBranch = "layout_cross_warp_full_lane";
+      }
     };
     dense = f;
     projectLayout(false, f);
@@ -395,6 +431,20 @@ std::optional<PrefixScanEstimate> mlir::ascend::estimatePrefixScanFormula(
                                     : "multi_element";
   } else
     branch = "multi";
+  // A lane-specific calibrated domain takes precedence over a coarse domain.
+  if (!simd && branch == "multi" && dense["axisK"] > 1 &&
+      dense["axis_lanes"] < 32) {
+    const bool subwarpAsset = llvm::any_of(formulas, [&](const auto &formula) {
+      return llvm::any_of(formula.domains, [&](const auto &d) {
+        return d.branch == "layout_cross_warp_subwarp" &&
+               d.operation == operation && d.dataType == type &&
+               d.rank == int64_t(shape.size()) && d.axis == axis &&
+               (d.warps == 0 || d.warps == warps);
+      });
+    });
+    if (subwarpAsset)
+      branch = layoutBranch = "layout_cross_warp_subwarp";
+  }
   // A qualified asset may refine the direct path with complete groups of
   // four rows. Preserve older assets and remainder-row
   // paths; the refined domain takes explicit priority, never JSON order.

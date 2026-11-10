@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "profile_version": "ascend-950pr-prefixscan-system-cycles-20261105",
+  "profile_version": "ascend-950pr-prefixscan-system-cycles-20261110",
   "target": "Ascend950PR",
   "source_commit": "700c0807fb985058c3d05508542aec5c149aa050",
   "scope": "Calibrated single-result product/min/max scan completion; higher ranks use canonical pre/extent/post geometry. Cumsum and unfitted pricing retain their existing paths.",
@@ -3299,14 +3299,6 @@
           {
             "operation": "cumprod",
             "data_type": "f32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
             "rank": 3,
             "axis": 0,
             "warps": 4,
@@ -3322,14 +3314,6 @@
         "id": "A200F0114",
         "projection": "row_major",
         "domains": [
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
           {
             "operation": "cumprod",
             "data_type": "integer32",
@@ -6059,6 +6043,81 @@
         "terms": {
           "warp": 604.0,
           "local": 16.482142857142858
+        }
+      },
+      {
+        "id": "simt_prod_i32_w4_full_lane",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 2,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp_full_lane"
+          }
+        ],
+        "terms": {
+          "warp": 18.554037886080902,
+          "local": 11.16664148693901,
+          "partial_pressure2_cta": 0.036713095462104633
+        }
+      },
+      {
+        "id": "simt_prod_f32_w4_full_lane",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp_full_lane"
+          }
+        ],
+        "terms": {
+          "warp": 19.834558038502404,
+          "pressure127": 1023.2182592934774
+        }
+      },
+      {
+        "id": "simt_w4_subwarp_scan",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "integer32",
+              "f32"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "layout_cross_warp_subwarp",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "one": 281.6939267593186,
+          "warp": 5.452329446833478,
+          "merge": 8.74613535980104,
+          "scan_spill_warp_work": 14.27738960004535,
+          "scan_spill_subwarp_work": 10.322176524666965
         }
       }
     ]

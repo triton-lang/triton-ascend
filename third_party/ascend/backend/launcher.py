@@ -337,17 +337,11 @@ def _python_link_flags():
     return tuple(flags)
 
 
-def _build_shared(name, sources, debug=False, bin_dir=None):
+def _build_shared(name, sources, debug=False):
     ldflags = _python_link_flags()
     fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=_LAUNCHER_CFLAGS, extra_ldflags=ldflags)
     key = _shared_key(json.dumps(fingerprint, sort_keys=True), tuple(sorted(sources.items())))
-    # bin_dir roots this shared artifact under a fixed installation directory
-    # instead of TRITON_CACHE_DIR (which PyTorch Inductor repoints per test
-    # case), keeping the artifact location tied to its content key.
-    if bin_dir is not None:
-        cache = utils.bin_cache_manager(key, bin_dir)
-    else:
-        cache = get_cache_manager(key)
+    cache = get_cache_manager(key)
     filename = name + sysconfig.get_config_var("EXT_SUFFIX")
     if debug:
         dump = get_dump_manager(key)
@@ -390,11 +384,7 @@ def get_runtime(npu_utils_path, debug=False):
         print_identity = (bisheng, utils._file_identity(bisheng), version_file,
                           utils._file_identity(version_file) if version_file else None)
     sources = {**_runtime_sources(), **_runtime_config(npu_utils_path, utils.backend_policy, print_identity)}
-    # The runtime lands under the backend's in-package bin/ directory (with the
-    # helper), so repointing TRITON_CACHE_DIR no longer strands or rebuilds
-    # the pair; the runtime key embeds the helper's stable location.
-    bin_dir = Path(__file__).with_name("bin")
-    path = _build_shared("__triton_launcher_runtime", sources, debug, bin_dir=bin_dir)
+    path = _build_shared("__triton_launcher_runtime", sources, debug)
     return _load_runtime(path), path
 
 

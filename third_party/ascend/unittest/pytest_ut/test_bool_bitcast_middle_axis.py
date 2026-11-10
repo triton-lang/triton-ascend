@@ -59,7 +59,7 @@ def bool_middle_axis_load_kernel(in_ptr, out_ptr, M, N, BLOCK_M: tl.constexpr, B
 def test_bool_middle_axis_load(compile_mode, M, N):
     torch.manual_seed(0)
     block_m = 16
-    block_n = 16
+    block_n = triton.next_power_of_2(N)
 
     host_in = torch.randint(0, 2, (M, 1, N), dtype=torch.int32).bool()
     in_tensor = host_in.npu()
@@ -94,7 +94,7 @@ def bool_middle_axis_store_kernel(x_ptr, out_ptr, M, N, BLOCK_M: tl.constexpr, B
 def test_bool_middle_axis_store(compile_mode, M, N):
     torch.manual_seed(0)
     block_m = 16
-    block_n = 16
+    block_n = triton.next_power_of_2(N)
 
     x = torch.randint(-8, 8, (M, N), dtype=torch.int32, device="npu")
     out = torch.zeros((M, 1, N), dtype=torch.bool, device="npu")

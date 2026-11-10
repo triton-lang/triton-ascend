@@ -1115,7 +1115,6 @@ FailureOr<PtrInfo> PtrAnalysis::parseAdvance(triton::AdvanceOp op) {
 
 namespace {
 using KnownInfo = std::pair<Value, PtrInfo>;
-using AxisKinds = SmallVector<AxisKind>;
 
 // Scalars and singleton tensors already have exact uniform facts. Dynamic or
 // empty tensors cannot supply the coordinates used by this representation.
@@ -1125,36 +1124,50 @@ bool isNumericCarrier(Value value) {
          succeeded(detail::getIntegerWidth(type));
 }
 
-AxisKinds unknownAxes(Value value) {
-  AxisKinds axes;
-  for (int64_t size : cast<RankedTensorType>(value.getType()).getShape())
-    axes.push_back(size == 1 ? AxisKind::Invariant : AxisKind::Unknown);
-  return axes;
-}
-
-AxisKinds analyzeAxes(Value value, PtrAnalysis &analysis) {
+// Across SCF edges retain only kinds and constant strides, never region-local
+// SSA fields. A null stride in this internal state means no known constant.
+SmallVector<AxisInfo> analyzeAxes(Value value, PtrAnalysis &analysis) {
   auto info = analysis.analyze(value);
-  if (failed(info))
-    return unknownAxes(value);
-  AxisKinds axes;
-  for (auto [size, axis] :
-       llvm::zip_equal(info->offsets.getShape(), info->offsets.axes))
-    axes.push_back(size == 1 ? AxisKind::Invariant : axis.kind);
+  OpBuilder &builder = analysis.getBuilder();
+  SmallVector<AxisInfo> axes;
+  for (auto [i, size] :
+       llvm::enumerate(cast<RankedTensorType>(value.getType()).getShape())) {
+    AxisKind kind =
+        succeeded(info) ? info->offsets.axes[i].kind : AxisKind::Unknown;
+    if (size == 1)
+      kind = AxisKind::Invariant;
+    OpFoldResult stride;
+    if (kind == AxisKind::Invariant) {
+      stride = builder.getIndexAttr(0);
+    } else if (kind == AxisKind::Structured) {
+      auto constant =
+          detail::getIntegerConstant(info->offsets.axes[i].stride, 64);
+      if (succeeded(constant))
+        stride = builder.getIndexAttr(constant->getSExtValue());
+    }
+    axes.emplace_back(kind, stride);
+  }
   return axes;
 }
 
-// Invariant is the zero-stride subset of Structured. Each axis can weaken at
-// most twice, independently of the other axes and other carried values.
-bool joinAxes(AxisKinds &current, ArrayRef<AxisKind> incoming) {
+// Invariant is the zero-stride subset of Structured. Kinds only weaken and a
+// constant can only be lost, so the combined state still has finite height.
+bool joinAxes(SmallVectorImpl<AxisInfo> &current, ArrayRef<AxisInfo> incoming) {
   bool changed = false;
   for (auto [axis, next] : llvm::zip_equal(current, incoming)) {
     AxisKind joined = AxisKind::Invariant;
-    if (axis == AxisKind::Unknown || next == AxisKind::Unknown)
+    if (axis.kind == AxisKind::Unknown || next.kind == AxisKind::Unknown)
       joined = AxisKind::Unknown;
-    else if (axis == AxisKind::Structured || next == AxisKind::Structured)
+    else if (axis.kind == AxisKind::Structured ||
+             next.kind == AxisKind::Structured)
       joined = AxisKind::Structured;
-    changed |= axis != joined;
-    axis = joined;
+    OpFoldResult stride;
+    if (joined != AxisKind::Unknown && axis.stride == next.stride)
+      stride = axis.stride;
+    // Other carriers and nested loops must be revisited when a constant is
+    // lost even if the axis remains Structured.
+    changed |= axis.kind != joined || axis.stride != stride;
+    axis = AxisInfo(joined, stride);
   }
   return changed;
 }
@@ -1162,14 +1175,16 @@ bool joinAxes(AxisKinds &current, ArrayRef<AxisKind> incoming) {
 // These samples represent an assumed or proved axis class; they never prove
 // that an arbitrary tensor is affine. Keep the current SSA as the exact value,
 // so origins and strides may change on every iteration.
-PtrInfo carrierInfo(Value value, ArrayRef<AxisKind> kinds, OpBuilder &builder) {
+PtrInfo carrierInfo(Value value, ArrayRef<AxisInfo> axes, OpBuilder &builder) {
   auto offsets = buildOffsetInfo(value, builder);
   assert(succeeded(offsets) && "expected a supported numeric carrier");
-  bool needsOrigin =
-      llvm::any_of(
-          kinds, [](AxisKind kind) { return kind == AxisKind::Structured; }) ||
-      llvm::all_of(kinds,
-                   [](AxisKind kind) { return kind == AxisKind::Invariant; });
+  bool needsOrigin = llvm::any_of(axes,
+                                  [](const AxisInfo &axis) {
+                                    return axis.kind == AxisKind::Structured;
+                                  }) ||
+                     llvm::all_of(axes, [](const AxisInfo &axis) {
+                       return axis.kind == AxisKind::Invariant;
+                     });
   OpBuilder::InsertionGuard guard(builder);
   builder.setInsertionPointAfterValue(value);
   Location loc = value.getLoc();
@@ -1184,20 +1199,22 @@ PtrInfo carrierInfo(Value value, ArrayRef<AxisKind> kinds, OpBuilder &builder) {
   };
   if (needsOrigin) {
     Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
-    indices.assign(kinds.size(), zero);
+    indices.assign(axes.size(), zero);
     origin = extract();
     offsets->scalarOffset = origin;
   }
-  for (auto [i, kind] : llvm::enumerate(kinds)) {
-    OpFoldResult stride = builder.getIndexAttr(0);
-    if (kind == AxisKind::Structured) {
+  for (auto [i, axis] : llvm::enumerate(axes)) {
+    OpFoldResult stride = axis.stride;
+    if (!stride && axis.kind == AxisKind::Structured) {
       Value saved = indices[i];
       indices[i] = builder.create<arith::ConstantIndexOp>(loc, 1);
       stride =
           builder.create<arith::SubIOp>(loc, extract(), origin).getResult();
       indices[i] = saved;
     }
-    offsets->axes[i] = AxisInfo(kind, stride);
+    if (!stride)
+      stride = builder.getIndexAttr(0);
+    offsets->axes[i] = AxisInfo(axis.kind, stride);
   }
   return PtrInfo{{}, std::move(*offsets)};
 }
@@ -1205,7 +1222,7 @@ PtrInfo carrierInfo(Value value, ArrayRef<AxisKind> kinds, OpBuilder &builder) {
 struct Carrier {
   Value argument;
   Value incoming;
-  AxisKinds axes;
+  SmallVector<AxisInfo> axes;
 };
 
 SmallVector<KnownInfo, 0> assumptions(ArrayRef<Carrier> first,
@@ -1301,7 +1318,7 @@ FailureOr<PtrInfo> PtrAnalysis::parseWhile(Value value, scf::WhileOp loop) {
 
 FailureOr<PtrInfo> PtrAnalysis::parseIf(OpResult value, scf::IfOp branch) {
   unsigned i = value.getResultNumber();
-  AxisKinds axes = analyzeAxes(branch.thenYield().getOperand(i), *this);
+  auto axes = analyzeAxes(branch.thenYield().getOperand(i), *this);
   joinAxes(axes, analyzeAxes(branch.elseYield().getOperand(i), *this));
   // A scalar condition chooses a whole tensor. Never export branch-local
   // numerical fields into the parent region.

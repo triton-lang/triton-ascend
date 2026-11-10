@@ -64,6 +64,226 @@ void expectKinds(PtrAnalysis &analysis, Value value,
   EXPECT_EQ(test::axisKinds(info->offsets), llvm::to_vector(expected));
 }
 
+void expectConstantStrides(PtrAnalysis &analysis, Value value,
+                           ArrayRef<int64_t> expected) {
+  auto info = analysis.analyze(value);
+  ASSERT_TRUE(succeeded(info));
+  EXPECT_EQ(info->offsets.fullOffsets, OpFoldResult(value));
+  ASSERT_EQ(info->offsets.axes.size(), expected.size());
+  for (auto [axis, stride] : llvm::zip_equal(info->offsets.axes, expected)) {
+    auto constant =
+        mlir::triton::ptr::detail::getIntegerConstant(axis.stride, 64);
+    ASSERT_TRUE(succeeded(constant));
+    EXPECT_EQ(constant->getSExtValue(), stride);
+  }
+}
+
+TEST(CommonPtrSCF, ForPreservesConstantStridesAcrossUniformUpdates) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(
+    module { tt.func @loop(%n: index) {
+      %c0 = arith.constant 0 : index
+      %c1 = arith.constant 1 : index
+      %range = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
+      %negative = arith.constant dense<-2> : tensor<4xi32>
+      %reverse = arith.muli %range, %negative : tensor<4xi32>
+      %step = arith.constant dense<8> : tensor<4xi32>
+      %out:3 = scf.for %i = %c0 to %n step %c1
+          iter_args(%x = %range, %y = %reverse, %u = %step)
+          -> (tensor<4xi32>, tensor<4xi32>, tensor<4xi32>) {
+        %next_x = arith.addi %x, %step : tensor<4xi32>
+        %next_y = arith.subi %y, %step : tensor<4xi32>
+        %next_u = arith.addi %u, %step : tensor<4xi32>
+        scf.yield %next_x, %next_y, %next_u : tensor<4xi32>, tensor<4xi32>, tensor<4xi32>
+      } {tag="loop"}
+      tt.return
+    } }
+  )mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto loop = cast<scf::ForOp>(tagged(*module, "loop"));
+  OpBuilder builder(loop);
+  PtrAnalysis analysis(builder);
+  const int64_t expectedStrides[] = {1, -2, 0};
+  for (auto [i, stride] : llvm::enumerate(expectedStrides)) {
+    expectConstantStrides(analysis, loop.getRegionIterArgs()[i], {stride});
+    expectConstantStrides(analysis, loop.getResult(i), {stride});
+  }
+  // A proved stride needs no unit-coordinate sample. Origins still refer to
+  // the current SSA, including the zero-trip loop result.
+  module->walk([&](tensor::ExtractOp extract) {
+    for (Value index : extract.getIndices()) {
+      auto constant = mlir::triton::ptr::detail::getIntegerConstant(index, 64);
+      ASSERT_TRUE(succeeded(constant));
+      EXPECT_TRUE(constant->isZero());
+    }
+  });
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(CommonPtrSCF, ConstantStrideLossPropagatesBetweenCarriers) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(
+    module { tt.func @loop(%n: index) {
+      %c0 = arith.constant 0 : index
+      %c1 = arith.constant 1 : index
+      %range = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
+      %two = arith.constant dense<2> : tensor<4xi32>
+      %out:2 = scf.for %i = %c0 to %n step %c1
+          iter_args(%x = %range, %y = %range) -> (tensor<4xi32>, tensor<4xi32>) {
+        %next_y = arith.muli %y, %two : tensor<4xi32>
+        scf.yield %y, %next_y : tensor<4xi32>, tensor<4xi32>
+      } {tag="loop"}
+      tt.return
+    } }
+  )mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto loop = cast<scf::ForOp>(tagged(*module, "loop"));
+  OpBuilder builder(loop);
+  PtrAnalysis analysis(builder);
+  // x still sees stride 1 during the first round, while y loses its constant.
+  // A second round is required although both axes remain Structured.
+  for (Value value :
+       {Value(loop.getRegionIterArgs()[0]), Value(loop.getRegionIterArgs()[1]),
+        loop.getResult(0), loop.getResult(1)}) {
+    auto info = analysis.analyze(value);
+    ASSERT_TRUE(succeeded(info));
+    EXPECT_EQ(info->offsets.axes[0].kind, AxisKind::Structured);
+    EXPECT_TRUE(failed(mlir::triton::ptr::detail::getIntegerConstant(
+        info->offsets.axes[0].stride, 64)));
+    test::Environment env;
+    for (int64_t lane : {3, 7, 11, 15})
+      env[value].emplace_back(32, lane);
+    expectScalar(info->offsets.axes[0].stride, 4, env);
+  }
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(CommonPtrSCF, WhilePreservesDistinctBeforeAndAfterConstantStrides) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(
+    module { tt.func @loop(%condition: i1) {
+      %zero = arith.constant dense<0> : tensor<4xi32>
+      %two = arith.constant dense<2> : tensor<4xi32>
+      %range = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
+      %out = scf.while (%x = %range, %u = %zero)
+          : (tensor<4xi32>, tensor<4xi32>) -> tensor<4xi32> {
+        %scaled = arith.muli %x, %two : tensor<4xi32>
+        scf.condition(%condition) %scaled : tensor<4xi32>
+      } do {
+      ^bb0(%y: tensor<4xi32>):
+        scf.yield %range, %zero : tensor<4xi32>, tensor<4xi32>
+      } attributes {tag="loop"}
+      tt.return
+    } }
+  )mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto loop = cast<scf::WhileOp>(tagged(*module, "loop"));
+  OpBuilder builder(loop);
+  PtrAnalysis analysis(builder);
+  expectConstantStrides(analysis, loop.getBeforeArguments()[0], {1});
+  expectConstantStrides(analysis, loop.getBeforeArguments()[1], {0});
+  expectConstantStrides(analysis, loop.getAfterArguments()[0], {2});
+  expectConstantStrides(analysis, loop.getResult(0), {2});
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(CommonPtrSCF, WhileConstantStrideLossOnEitherEdgePropagates) {
+  for (bool changeCondition : {false, true}) {
+    MLIRContext context;
+    load(context);
+    auto module = parseSourceString<ModuleOp>(R"mlir(
+      module { tt.func @loop(%condition: i1) {
+        %one = arith.constant dense<1> : tensor<4xi32>
+        %two = arith.constant dense<2> : tensor<4xi32>
+        %range = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
+        %out = scf.while (%x = %range) : (tensor<4xi32>) -> tensor<4xi32> {
+          %condition_value = arith.muli %x, %one {tag="condition_scale"} : tensor<4xi32>
+          scf.condition(%condition) %condition_value : tensor<4xi32>
+        } do {
+        ^bb0(%y: tensor<4xi32>):
+          %next = arith.muli %y, %one {tag="backedge_scale"} : tensor<4xi32>
+          scf.yield %next : tensor<4xi32>
+        } attributes {tag="loop"}
+        tt.return
+      } }
+    )mlir",
+                                              &context);
+    ASSERT_TRUE(module);
+    auto loop = cast<scf::WhileOp>(tagged(*module, "loop"));
+    auto constants = loop->getParentOfType<triton::FuncOp>()
+                         .getBody()
+                         .front()
+                         .getOps<arith::ConstantOp>();
+    arith::ConstantOp two = *std::next(constants.begin());
+    tagged(*module, changeCondition ? "condition_scale" : "backedge_scale")
+        ->setOperand(1, two.getResult());
+    ASSERT_TRUE(succeeded(verify(*module)));
+    OpBuilder builder(loop);
+    PtrAnalysis analysis(builder);
+    for (Value value :
+         {Value(loop.getBeforeArguments()[0]),
+          Value(loop.getAfterArguments()[0]), loop.getResult(0)}) {
+      auto info = analysis.analyze(value);
+      ASSERT_TRUE(succeeded(info));
+      EXPECT_EQ(info->offsets.axes[0].kind, AxisKind::Structured);
+      EXPECT_TRUE(failed(mlir::triton::ptr::detail::getIntegerConstant(
+          info->offsets.axes[0].stride, 64)));
+    }
+    EXPECT_TRUE(succeeded(verify(*module)));
+  }
+}
+
+TEST(CommonPtrSCF, NestedLoopsDiscardInvalidatedConstantStrideHypotheses) {
+  for (bool innerFirst : {false, true}) {
+    MLIRContext context;
+    load(context);
+    auto module = parseSourceString<ModuleOp>(R"mlir(
+      module { tt.func @loop(%n: index) {
+        %c0 = arith.constant 0 : index
+        %c1 = arith.constant 1 : index
+        %range = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
+        %one = arith.constant dense<1> : tensor<4xi32>
+        %two = arith.constant dense<2> : tensor<4xi32>
+        %outer = scf.for %i = %c0 to %n step %c1
+            iter_args(%x = %range) -> tensor<4xi32> {
+          %inner = scf.for %j = %c0 to %n step %c1
+              iter_args(%y = %x) -> tensor<4xi32> {
+            %next_y = arith.addi %y, %one : tensor<4xi32>
+            scf.yield %next_y : tensor<4xi32>
+          } {tag="inner"}
+          %next_x = arith.muli %inner, %two : tensor<4xi32>
+          scf.yield %next_x : tensor<4xi32>
+        } {tag="outer"}
+        tt.return
+      } }
+    )mlir",
+                                              &context);
+    ASSERT_TRUE(module);
+    auto outer = cast<scf::ForOp>(tagged(*module, "outer"));
+    auto inner = cast<scf::ForOp>(tagged(*module, "inner"));
+    OpBuilder builder(outer);
+    PtrAnalysis analysis(builder);
+    Value first = innerFirst ? inner.getResult(0) : outer.getResult(0);
+    ASSERT_TRUE(succeeded(analysis.analyze(first)));
+    for (Value value : {Value(outer.getRegionIterArgs()[0]),
+                        Value(inner.getRegionIterArgs()[0]), inner.getResult(0),
+                        outer.getResult(0)}) {
+      auto info = analysis.analyze(value);
+      ASSERT_TRUE(succeeded(info));
+      EXPECT_EQ(info->offsets.axes[0].kind, AxisKind::Structured);
+      EXPECT_TRUE(failed(mlir::triton::ptr::detail::getIntegerConstant(
+          info->offsets.axes[0].stride, 64)));
+    }
+    EXPECT_TRUE(succeeded(verify(*module)));
+  }
+}
+
 TEST(CommonPtrSCF, ForUsesCurrentFieldsAndPreservesUniformCarrier) {
   MLIRContext context;
   load(context);
@@ -194,14 +414,16 @@ TEST(CommonPtrSCF, IfJoinsAxesAndMaterializesFieldsAfterTheBranches) {
   load(context);
   auto module = parseSourceString<ModuleOp>(R"mlir(
     module { tt.func @branch(%condition: i1, %scalar: i32) {
-      %out:2 = scf.if %condition -> (tensor<4xi32>, tensor<4xi32>) {
+      %out:3 = scf.if %condition -> (tensor<4xi32>, tensor<4xi32>, tensor<4xi32>) {
         %r = tt.make_range {start=0:i32, end=4:i32} : tensor<4xi32>
         %u = tt.splat %scalar : i32 -> tensor<4xi32>
-        scf.yield %r, %u : tensor<4xi32>, tensor<4xi32>
+        scf.yield %r, %u, %r : tensor<4xi32>, tensor<4xi32>, tensor<4xi32>
       } else {
         %r = tt.make_range {start=4:i32, end=8:i32} : tensor<4xi32>
         %u = arith.constant dense<13> : tensor<4xi32>
-        scf.yield %r, %u : tensor<4xi32>, tensor<4xi32>
+        %two = arith.constant dense<2> : tensor<4xi32>
+        %scaled = arith.muli %r, %two : tensor<4xi32>
+        scf.yield %r, %u, %scaled : tensor<4xi32>, tensor<4xi32>, tensor<4xi32>
       } {tag="branch"}
       tt.return
     } }
@@ -223,6 +445,13 @@ TEST(CommonPtrSCF, IfJoinsAxesAndMaterializesFieldsAfterTheBranches) {
   expectScalar(affine->offsets.scalarOffset, 4, env);
   expectScalar(affine->offsets.axes[0].stride, 1, env);
   expectScalar(uniform->offsets.scalarOffset, 13, env);
+  expectConstantStrides(analysis, branch.getResult(0), {1});
+  expectConstantStrides(analysis, branch.getResult(1), {0});
+  auto varying = analysis.analyze(branch.getResult(2));
+  ASSERT_TRUE(succeeded(varying));
+  EXPECT_EQ(varying->offsets.axes[0].kind, AxisKind::Structured);
+  EXPECT_TRUE(failed(mlir::triton::ptr::detail::getIntegerConstant(
+      varying->offsets.axes[0].stride, 64)));
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -422,6 +651,12 @@ TEST(CommonPtrSCF, PartialAxesAndUnsupportedTensorShapesKeepExactValues) {
   ASSERT_TRUE(succeeded(info));
   expectScalar(info->offsets.scalarOffset, 9, env);
   expectScalar(info->offsets.axes[1].stride, 2, env);
+  auto knownStride = mlir::triton::ptr::detail::getIntegerConstant(
+      info->offsets.axes[1].stride, 64);
+  ASSERT_TRUE(succeeded(knownStride));
+  EXPECT_EQ(knownStride->getSExtValue(), 2);
+  // Unknown's placeholder zero must not become a constant-stride proof.
+  EXPECT_EQ(info->offsets.axes[0].kind, AxisKind::Unknown);
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 TEST(CommonPtrSCF, InnerFirstQueryCanReenterTheSameLoopUnderOuterHypotheses) {

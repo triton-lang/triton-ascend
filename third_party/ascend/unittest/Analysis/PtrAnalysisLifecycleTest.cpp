@@ -22,9 +22,10 @@
 
 #include "PtrAnalysisTestUtils.h"
 #include "TritonMemoryAccess/PtrAnalysis.h"
-#include "TritonMemoryAccess/PtrAnalysisRules/CommonPtrRules.h"
+#include "TritonMemoryAccess/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
@@ -46,6 +47,48 @@ unsigned countOperations(Operation *scope) {
   return count;
 }
 
+TEST(PtrAnalysisLifecycle, FailedBlockSourcesCanBeProvidedForRetry) {
+  MLIRContext context;
+  context.loadDialect<arith::ArithDialect, triton::TritonDialect>();
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @retry(%base: !tt.ptr<i32>, %unknown: !tt.ptr<tensor<4xi32>>) {
+      %size = arith.constant 16 : i64
+      %stride = arith.constant 1 : i64
+      %zero = arith.constant 0 : i32
+      %one = arith.constant 1 : i32
+      %known = tt.make_tensor_ptr %base, [%size], [%stride], [%zero]
+          {order = array<i32: 0>} : !tt.ptr<tensor<4xi32>>
+      %next = tt.advance %unknown, [%one] : !tt.ptr<tensor<4xi32>>
+      tt.return
+    }
+  })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto func = *module->getOps<triton::FuncOp>().begin();
+  auto known =
+      *func.getBody().front().getOps<triton::MakeTensorPtrOp>().begin();
+  auto next = *func.getBody().front().getOps<triton::AdvanceOp>().begin();
+  OpBuilder builder(func.getBody().front().getTerminator());
+  PtrAnalysis analysis(builder);
+  unsigned before = countOperations(func);
+  for (Value value :
+       SmallVector<Value>{func.getArgument(1), next.getResult()}) {
+    EXPECT_TRUE(failed(analysis.analyze(value)));
+    EXPECT_EQ(analysis.findCached(value), nullptr);
+  }
+  EXPECT_EQ(countOperations(func), before);
+  auto info = analysis.analyze(known.getResult());
+  ASSERT_TRUE(succeeded(info));
+  ASSERT_TRUE(succeeded(analysis.setInfo(func.getArgument(1), *info)));
+  auto result = analysis.analyze(next);
+  ASSERT_TRUE(succeeded(result));
+  EXPECT_EQ(result->base, func.getArgument(0));
+  auto coordinate = test::evaluate(result->block->coordinateOffsets[0]);
+  ASSERT_TRUE(coordinate);
+  EXPECT_EQ(coordinate->front().getSExtValue(), 1);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 TEST(PtrAnalysisLifecycle, NumericHelpersCanBeCleanedAfterSession) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, triton::TritonDialect>();
@@ -60,13 +103,13 @@ TEST(PtrAnalysisLifecycle, NumericHelpersCanBeCleanedAfterSession) {
   ASSERT_TRUE(module);
   auto func = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   ASSERT_TRUE(
       succeeded(test::getOffsets(analysis.analyze(func.getArgument(0)))));
   unsigned before = 0;
   func.walk([&](arith::IndexCastOp) { ++before; });
   EXPECT_EQ(before, 1u);
-  analysis.clear();
+  ASSERT_TRUE(succeeded(analysis.reset()));
   IRRewriter rewriter(&context);
   eraseDeadPtrArithmetic(func, rewriter);
   unsigned after = 0;
@@ -75,7 +118,7 @@ TEST(PtrAnalysisLifecycle, NumericHelpersCanBeCleanedAfterSession) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
-TEST(PtrAnalysisLifecycle, OffsetAndPtrRebindingRecomputesConsumers) {
+TEST(PtrAnalysisLifecycle, ResetFactsRecomputesIntegerAndPointerConsumers) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, triton::TritonDialect>();
   auto module = parseSourceString<ModuleOp>(R"mlir(
@@ -95,15 +138,16 @@ TEST(PtrAnalysisLifecycle, OffsetAndPtrRebindingRecomputesConsumers) {
   Value sum = *f.getBody().front().getOps<arith::AddIOp>().begin();
   auto next = *f.getBody().front().getOps<triton::AddPtrOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
-  EXPECT_TRUE(failed(test::getInfo(analysis.analyze(f.getArgument(1)))));
+  PtrAnalysis analysis(b);
+  auto opaquePointer = analysis.analyze(f.getArgument(1));
+  ASSERT_TRUE(succeeded(opaquePointer));
+  EXPECT_FALSE(opaquePointer->hasScalarBase());
   auto scalar = test::getOffsets(analysis.analyze(opaque));
   ASSERT_TRUE(succeeded(scalar));
   for (int64_t n : {5, -8}) {
     scalar->fullOffsets = b.getI32IntegerAttr(n);
     scalar->scalarOffset = b.getIndexAttr(n);
     PtrInfo boundary{{}, *scalar};
-    ASSERT_TRUE(succeeded(analysis.bind(opaque, boundary)));
     PtrInfo p;
     p.base = f.getArgument(0);
 
@@ -112,7 +156,8 @@ TEST(PtrAnalysisLifecycle, OffsetAndPtrRebindingRecomputesConsumers) {
         cast<RankedTensorType>(p.offsets.valueType), llvm::APInt(64, n, true));
     p.offsets.scalarOffset = b.getIndexAttr(n);
     p.offsets.axes = {AxisInfo(AxisKind::Invariant, b.getIndexAttr(0))};
-    ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(1), p)));
+    ASSERT_TRUE(
+        succeeded(analysis.reset({{opaque, boundary}, {f.getArgument(1), p}})));
     auto derived = test::getInfo(analysis.analyze(next));
     ASSERT_TRUE(succeeded(derived));
     auto values =
@@ -125,10 +170,10 @@ TEST(PtrAnalysisLifecycle, OffsetAndPtrRebindingRecomputesConsumers) {
     EXPECT_FALSE(test::getOffsets(analysis.findCached(f.getArgument(3))));
     auto bad = boundary;
     bad.offsets.scalarOffset = b.getI32IntegerAttr(n);
-    EXPECT_TRUE(failed(analysis.bind(opaque, bad)));
+    EXPECT_TRUE(failed(analysis.setInfo(opaque, bad)));
     auto badPtr = p;
     badPtr.base = f.getArgument(2);
-    EXPECT_TRUE(failed(analysis.bind(f.getArgument(1), badPtr)));
+    EXPECT_TRUE(failed(analysis.setInfo(f.getArgument(1), badPtr)));
     auto retained = test::getOffsets(analysis.analyze(sum));
     ASSERT_TRUE(succeeded(retained));
     auto actual =
@@ -138,9 +183,11 @@ TEST(PtrAnalysisLifecycle, OffsetAndPtrRebindingRecomputesConsumers) {
     EXPECT_EQ(actual->front(), llvm::APInt(64, n + 1, true));
     EXPECT_TRUE(succeeded(verify(*module)));
   }
-  analysis.clear();
+  ASSERT_TRUE(succeeded(analysis.reset()));
   EXPECT_FALSE(test::getOffsets(analysis.findCached(sum)));
-  EXPECT_TRUE(failed(test::getInfo(analysis.analyze(next))));
+  auto exact = analysis.analyze(next);
+  ASSERT_TRUE(succeeded(exact));
+  EXPECT_EQ(exact->base, f.getArgument(1));
   auto unbound = test::getOffsets(analysis.analyze(opaque));
   ASSERT_TRUE(succeeded(unbound));
   EXPECT_EQ(cast<Value>(unbound->fullOffsets), opaque);
@@ -181,7 +228,7 @@ TEST(PtrAnalysisLifecycle, SiblingConsumersReuseHelpersAndPreserveOriginalIR) {
     f.walk([&](triton::AddPtrOp op) { pointers.push_back(op); });
     Value twice = f.getBody().front().getTerminator()->getOperand(0);
     OpBuilder b(&context);
-    PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+    PtrAnalysis analysis(b);
     if (sourceFirst) {
       ASSERT_TRUE(succeeded(test::getOffsets(analysis.analyze(twice))));
       ASSERT_TRUE(succeeded(verify(*module)));
@@ -218,7 +265,7 @@ TEST(PtrAnalysisLifecycle, SiblingConsumersReuseHelpersAndPreserveOriginalIR) {
     auto store = b.create<triton::StoreOp>(
         f.getLoc(), f.getArgument(0), narrowed, Value(),
         triton::CacheModifier::NONE, triton::EvictionPolicy::NORMAL);
-    analysis.clear();
+    ASSERT_TRUE(succeeded(analysis.reset()));
     IRRewriter rewriter(&context);
     eraseDeadPtrArithmetic(f, rewriter);
     EXPECT_EQ(store.getValue(), narrowed);
@@ -228,7 +275,7 @@ TEST(PtrAnalysisLifecycle, SiblingConsumersReuseHelpersAndPreserveOriginalIR) {
   }
 }
 
-TEST(PtrAnalysisLifecycle, FailedAnalysisLeavesOnlyCleanablePureHelpers) {
+TEST(PtrAnalysisLifecycle, OpaqueFallbackLeavesOnlyCleanablePureHelpers) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, triton::TritonDialect>();
   auto module = parseSourceString<ModuleOp>(R"mlir(
@@ -250,9 +297,12 @@ TEST(PtrAnalysisLifecycle, FailedAnalysisLeavesOnlyCleanablePureHelpers) {
     original.emplace_back(op, llvm::to_vector(op->getOperands()));
   });
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
-  EXPECT_TRUE(failed(test::getInfo(
-      analysis.analyze(f.getBody().front().getTerminator()->getOperand(0)))));
+  PtrAnalysis analysis(b);
+  Value selected = f.getBody().front().getTerminator()->getOperand(0);
+  auto opaque = analysis.analyze(selected);
+  ASSERT_TRUE(succeeded(opaque));
+  EXPECT_EQ(opaque->base, selected);
+  EXPECT_FALSE(opaque->hasScalarBase());
   unsigned helpers = 0;
   f.walk([&](Operation *op) {
     if (llvm::any_of(original, [&](auto &entry) { return entry.first == op; }))
@@ -264,7 +314,7 @@ TEST(PtrAnalysisLifecycle, FailedAnalysisLeavesOnlyCleanablePureHelpers) {
   for (auto &[op, operands] : original)
     EXPECT_EQ(llvm::to_vector(op->getOperands()), operands);
   EXPECT_TRUE(succeeded(verify(*module)));
-  analysis.clear();
+  ASSERT_TRUE(succeeded(analysis.reset()));
   IRRewriter rewriter(&context);
   eraseDeadPtrArithmetic(f, rewriter);
   for (auto &[op, operands] : original)
@@ -297,7 +347,7 @@ TEST(PtrAnalysisLifecycle, ChangingIntegerIterArgKeepsCurrentValue) {
   auto loop = *f.getBody().front().getOps<scf::ForOp>().begin();
   Value current = loop.getRegionIterArgs()[0];
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   auto state = test::getOffsets(analysis.analyze(current));
   ASSERT_TRUE(succeeded(state));
   EXPECT_EQ(cast<Value>(state->fullOffsets), current);
@@ -329,7 +379,7 @@ TEST(PtrAnalysisLifecycle, RankZeroExtractionIsPureAndCleanable) {
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   ASSERT_TRUE(succeeded(test::getOffsets(analysis.analyze(f.getArgument(1)))));
   auto live = test::getOffsets(analysis.analyze(f.getArgument(2)));
   ASSERT_TRUE(succeeded(live));
@@ -341,7 +391,7 @@ TEST(PtrAnalysisLifecycle, RankZeroExtractionIsPureAndCleanable) {
                                          Value(), triton::CacheModifier::NONE,
                                          triton::EvictionPolicy::NORMAL);
   EXPECT_TRUE(succeeded(verify(*module)));
-  analysis.clear();
+  ASSERT_TRUE(succeeded(analysis.reset()));
   IRRewriter rewriter(&context);
   eraseDeadPtrArithmetic(f, rewriter);
   EXPECT_TRUE(f.getArgument(1).use_empty());
@@ -377,62 +427,80 @@ TEST(PtrAnalysisLifecycle, BindIntegerAndPointerResults) {
   auto make = *f.getBody().front().getOps<triton::MakeTensorPtrOp>().begin();
   auto advance = *f.getBody().front().getOps<triton::AdvanceOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> reference(builder, CommonPtrRules{});
+  PtrAnalysis reference(builder);
   auto ptr = test::getInfo(reference.analyze(base));
   ASSERT_TRUE(succeeded(ptr));
   auto block = test::getInfo(reference.analyze(make));
   ASSERT_TRUE(succeeded(block));
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
+  PtrAnalysis analysis(builder);
   auto integer = test::getOffsets(analysis.analyze(x));
   ASSERT_TRUE(succeeded(integer));
-  ASSERT_TRUE(succeeded(analysis.bind(x, PtrInfo{{}, *integer})));
+  ASSERT_TRUE(succeeded(analysis.setInfo(x, PtrInfo{{}, *integer})));
   ASSERT_TRUE(succeeded(test::getOffsets(analysis.analyze(f.getArgument(2)))));
   for (Value p : {base, splat, add})
     EXPECT_TRUE(succeeded(test::getInfo(analysis.analyze(p))));
-  EXPECT_TRUE(succeeded(analysis.bind(base, *ptr)));
+  EXPECT_TRUE(succeeded(analysis.setInfo(base, *ptr)));
   EXPECT_TRUE(succeeded(test::getInfo(analysis.analyze(base))));
   EXPECT_TRUE(succeeded(test::getOffsets(analysis.analyze(x))));
   EXPECT_TRUE(succeeded(test::getInfo(analysis.analyze(make))));
-  EXPECT_TRUE(succeeded(analysis.bind(make, *block)));
+  EXPECT_TRUE(succeeded(analysis.setInfo(make, *block)));
   EXPECT_TRUE(succeeded(test::getInfo(analysis.analyze(make))));
   EXPECT_TRUE(succeeded(test::getInfo(analysis.analyze(advance))));
   EXPECT_NE(test::getInfo(analysis.findCached(make)), nullptr);
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
-TEST(PtrAnalysisLifecycle, EveryBindingInvalidatesComputedResults) {
+TEST(PtrAnalysisLifecycle, SetInfoPreservesDerivedFactsAndResetRefreshesThem) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, triton::TritonDialect>();
   auto module = parseSourceString<ModuleOp>(R"mlir(
-    module { tt.func @bindings(%x: i64, %unseen: i64) {
-      %sum = arith.addi %x, %x : i64
+    module { tt.func @facts(%x: tensor<4xi32>, %other: tensor<4xi32>) {
+      %one = arith.constant dense<1> : tensor<4xi32>
+      %sum = arith.addi %x, %one : tensor<4xi32>
       tt.return
     } }
   )mlir",
                                             &context);
   ASSERT_TRUE(module);
   auto f = *module->getOps<triton::FuncOp>().begin();
+  Value x = f.getArgument(0);
   auto sum = *f.getBody().front().getOps<arith::AddIOp>().begin();
   OpBuilder builder(&context);
-  PtrAnalysis<CommonPtrRules> analysis(builder, CommonPtrRules{});
-  ASSERT_TRUE(succeeded(test::getOffsets(analysis.analyze(sum))));
-  const auto *cached = test::getOffsets(analysis.findCached(sum));
-  ASSERT_NE(cached, nullptr);
-  auto unseen = buildOffsetInfo(f.getArgument(1), builder);
-  ASSERT_TRUE(succeeded(unseen));
-  ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(1), PtrInfo{{}, *unseen})));
-  EXPECT_FALSE(analysis.findCached(sum));
-  // An observed leaf can already contribute to derived results even without an
-  // explicit old binding. Installing its first binding must invalidate them.
-  auto observed = buildOffsetInfo(f.getArgument(0), builder);
-  ASSERT_TRUE(succeeded(observed));
+  PtrAnalysis analysis(builder);
+  auto derived = analysis.analyze(sum);
+  ASSERT_TRUE(succeeded(derived));
+  EXPECT_EQ(derived->offsets.axes[0].kind, AxisKind::Unknown);
+  auto generic = analysis.analyze(x);
+  ASSERT_TRUE(succeeded(generic));
+  PtrInfo precise = *generic;
+  precise.offsets.scalarOffset = builder.getIndexAttr(0);
+  precise.offsets.axes[0] =
+      mlir::triton::ptr::detail::makeInvariantAxisInfo(builder);
+  ASSERT_TRUE(succeeded(analysis.setInfo(x, precise)));
+  // Existing conservative results stay valid until the caller requests refresh.
+  ASSERT_TRUE(analysis.findCached(sum));
+  EXPECT_EQ(analysis.findCached(sum)->offsets.axes[0].kind, AxisKind::Unknown);
   ASSERT_TRUE(
-      succeeded(analysis.bind(f.getArgument(0), PtrInfo{{}, *observed})));
-  EXPECT_EQ(test::getOffsets(analysis.findCached(sum)), nullptr);
-  ASSERT_TRUE(succeeded(test::getOffsets(analysis.analyze(sum))));
-  // Replacing an existing binding retains the conservative invalidation rule.
-  ASSERT_TRUE(succeeded(analysis.bind(f.getArgument(1), PtrInfo{{}, *unseen})));
-  EXPECT_EQ(test::getOffsets(analysis.findCached(sum)), nullptr);
+      succeeded(analysis.setInfo(f.getArgument(1), *analysis.findCached(x))));
+  ASSERT_TRUE(analysis.findCached(sum));
+  // Invalid batches are atomic, including after one otherwise valid entry.
+  PtrInfo invalid = precise;
+  invalid.offsets.scalarOffset = builder.getI32IntegerAttr(0);
+  EXPECT_TRUE(
+      failed(analysis.reset({{x, precise}, {f.getArgument(1), invalid}})));
+  ASSERT_TRUE(analysis.findCached(sum));
+  EXPECT_TRUE(analysis.findCached(f.getArgument(1)));
+  // Last duplicate wins; borrowed cached input is copied before replacement.
+  ASSERT_TRUE(
+      succeeded(analysis.reset({{x, *generic}, {x, *analysis.findCached(x)}})));
+  EXPECT_FALSE(analysis.findCached(sum));
+  EXPECT_FALSE(analysis.findCached(f.getArgument(1)));
+  auto refined = analysis.analyze(sum);
+  ASSERT_TRUE(succeeded(refined));
+  EXPECT_TRUE(refined->offsets.isUniform());
+  ASSERT_TRUE(succeeded(analysis.reset()));
+  EXPECT_FALSE(analysis.findCached(x));
+  EXPECT_FALSE(analysis.findCached(sum));
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -450,7 +518,7 @@ TEST(PtrAnalysisLifecycle, FailedMaterializationPreservesSourceAndPeers) {
   auto f = *module->getOps<triton::FuncOp>().begin();
   auto sum = *f.getBody().front().getOps<arith::AddIOp>().begin();
   OpBuilder b(f.getBody().front().getTerminator());
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   ASSERT_TRUE(succeeded(test::getOffsets(analysis.analyze(f.getArgument(0)))));
   auto peer = *analysis.findCached(f.getArgument(0));
   ASSERT_TRUE(succeeded(test::getOffsets(analysis.analyze(sum))));
@@ -493,7 +561,7 @@ TEST(PtrAnalysisLifecycle, OpaqueLeavesDoNotAnalyzeUnneededOperands) {
   auto load = *f.getBody().front().getOps<triton::LoadOp>().begin();
   auto select = *f.getBody().front().getOps<arith::SelectOp>().begin();
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   unsigned before = countOperations(*module);
   ASSERT_TRUE(succeeded(test::getOffsets(analysis.analyze(shift))));
   ASSERT_TRUE(succeeded(test::getOffsets(analysis.analyze(load))));
@@ -536,7 +604,7 @@ TEST(PtrAnalysisLifecycle, SiblingPointerConsumersUseOuterIndexHelpers) {
   SmallVector<triton::AddPtrOp> pointers;
   f.walk([&](triton::AddPtrOp op) { pointers.push_back(op); });
   OpBuilder b(&context);
-  PtrAnalysis<CommonPtrRules> analysis(b, CommonPtrRules{});
+  PtrAnalysis analysis(b);
   Value sharedOrigin;
   for (auto ptr : pointers) {
     b.setInsertionPoint(ptr);

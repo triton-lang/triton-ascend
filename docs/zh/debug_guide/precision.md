@@ -1,6 +1,6 @@
 # 精度对比与误差分析
 
-本文档介绍如何在昇腾 NPU 上进行 Triton 算子的精度对比与误差分析，包括对比方法、评判标准及注意事项。
+本文档介绍如何在昇腾NPU上进行Triton算子的精度对比与误差分析，包括对比方法、评判标准及注意事项。
 
 ## 1. 精度对比流程
 
@@ -8,13 +8,13 @@
 
 1. **获取参考结果**（Golden）：使用等价Torch算子在CPU/GPU/NPU上计算结果或者相同Triton算子在CPU/GPU上的计算结果
 
-2. **获取 Triton 结果**：在昇腾NPU上运行Triton kernel得到计算结果
+2. **获取Triton结果**：在昇腾NPU上运行Triton kernel得到计算结果
 
 3. **对比判断**：使用`torch.testing.assert_close`判断是否满足精度要求
 
 ### 示例：向量加法（Vector Add）
 
-```python
+```text
 import torch
 import triton
 import triton.language as tl
@@ -59,13 +59,13 @@ def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
     """
     精度对比函数：根据数据类型选择合适的比对策略。
 
-    参数:
+    参数：
         cal: 计算结果
         ref: 参考结果
         rtol: 相对误差容限
         atol: 绝对误差容限
 
-    异常:
+    异常：
         AssertionError: 精度不达标时抛出
     """
     assert cal.dtype == ref.dtype, f"dtype mismatch: {cal.dtype} vs {ref.dtype}"
@@ -98,9 +98,9 @@ def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
 
 `torch.testing.assert_close`/`torch.equal` 不抛出异常 → **通过**，否则 **不通过**。
 
-* `torch.testing.assert_close`：如果张量在指定的容差范围内近似相等，则通过（不抛出异常）；否则不通过（抛出 AssertionError）。
+* `torch.testing.assert_close`：如果张量在指定的容差范围内近似相等，则通过（不抛出异常）；否则不通过（抛出AssertionError）。
 
-* `torch.equal`：要求两个张量具有完全相同的形状，且所有元素在二进制级别上绝对相等，才返回 True，否则返回 False。
+* `torch.equal`：要求两个张量具有完全相同的形状，且所有元素在二进制位级别上绝对相等，才返回True，否则返回False。
 
 `torch.testing.assert_close` 的内部逻辑：
 
@@ -108,7 +108,7 @@ def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
 |cal - ref| <= atol + rtol * |ref|
 ```
 
-即：绝对误差 `|cal - ref|` 需要满足相对误差容限和绝对误差容限相加共同构成一个动态的误差边界。
+即：绝对误差 `|cal - ref|` 需要满足由相对误差容限和绝对误差容限相加共同构成的动态误差边界。
 
 ### 按数据类型推荐容限
 
@@ -122,10 +122,10 @@ def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
 
 ## 4. 注意事项
 
-### NaN / Inf 处理
+### NaN / Inf处理
 
-`equal_nan=True` 将 NaN 视为相等。若需要严格检测 NaN 差异，设为 `False`。
+`equal_nan=True` 将NaN视为相等。若需要严格检测NaN差异，设为 `False`。
 
 ### 整数类型
 
-整数和布尔类型不允许任何误差，需严格一致。在跨设备比对时，务必确保数据已移至同一设备（如 CPU），以避免底层表示差异带来的误判。
+整数和布尔类型不允许任何误差，需严格一致。在跨设备比对时，务必确保数据已移至同一设备（如CPU），以避免底层表示差异带来的误判。

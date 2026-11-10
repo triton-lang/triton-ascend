@@ -2,10 +2,10 @@
 
 ## 文档定位
 
-本文面向已经会写Triton kernel、也了解社区版 `triton.autotune` 基本概念的用户，重点说明Triton-Ascend的推荐用法：
+本文面向已经会写Triton kernel，也了解社区版 `triton.autotune` 基本概念的用户，重点说明Triton-Ascend的推荐用法：
 
 - Triton-Ascend上的推荐autotune写法；
-- `configs=[]` 在Ascend后端中的含义；
+- `configs=[]` 在Ascend backend中的含义；
 - 自动Tiling模式的适用边界，以及何时回到手写 `triton.Config`。
 
 ## 快速上手
@@ -165,7 +165,7 @@ def kernel(
     ...
 ```
 
-那么这个参数也不会参与自动调优。对于希望交给框架自动生成和寻优的参数，应该把它保留为“未在launch时显式传值、且在kernel定义中也没有默认值”的 `tl.constexpr`。
+那么这个参数也不会参与自动调优。对于希望交给框架自动生成和寻优的参数，应该把它保留为“未在launch时显式传值，且在kernel定义中也没有默认值”的 `tl.constexpr`。
 
 ### 5. 如果Tiling参数会影响grid，grid必须写成lambda形式
 
@@ -252,7 +252,7 @@ def kernel(...):
 
 设置 `TRITON_PRINT_AUTOTUNING=1`，可查看调优日志。实际完成测速后，会打印调优耗时、最佳配置和各个成功配置的测速结果。以下为示意输出（`...` 表示省略的配置参数）：
 
-```text
+```output
 Triton autotuning for function kernel finished after 0.12s; best config selected: BLOCK_M: 128, BLOCK_N: 128, ...;
 Triton autotuning benchmark results for function kernel:
   config=BLOCK_M: 128, BLOCK_N: 128, ...; p50=0.0100 ms, p20=0.0090 ms, p80=0.0110 ms [selected]
@@ -263,7 +263,7 @@ Triton autotuning benchmark results for function kernel:
 
 用户配置（`configs`，包括通过 `hints` 展开的配置）发生失败，或调优因异常中断时，会打印相应配置的状态和原因。以下分别为编译失败和调优中断的示意输出：
 
-```text
+```output
 Triton autotuning: config=BLOCK_M: 128, BLOCK_N: 128, ...; compile_failed; reason=CompileTimeAssertionFailure: <错误信息>
 Triton autotuning: config=BLOCK_M: 64, BLOCK_N: 256, ...; not_evaluated; reason=No benchmark result was produced. Autotuning interrupted: RuntimeError: <错误信息>
 ```

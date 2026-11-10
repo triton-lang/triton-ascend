@@ -9,11 +9,11 @@
 // CHECK: memref.reinterpret_cast {{.*}} {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : memref<?xf32> to memref<128xf32, strided<[1], offset: ?>>
 // CHECK: memref.alloc() {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : memref<128xf32>
 // CHECK: memref.copy {{.*}} {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : memref<128xf32, strided<[1], offset: ?>> to memref<128xf32>
-// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : memref<128xf32> to tensor<128xf32>
+// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : memref<128xf32>
 // CHECK: memref.reinterpret_cast {{.*}} {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : memref<?xf32> to memref<128xf32, strided<[1], offset: ?>>
 // CHECK: memref.alloc() {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : memref<128xf32>
 // CHECK: memref.copy {{.*}} {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : memref<128xf32, strided<[1], offset: ?>> to memref<128xf32>
-// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : memref<128xf32> to tensor<128xf32>
+// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : memref<128xf32>
 
 module {
   func.func @test_merge_small_block(

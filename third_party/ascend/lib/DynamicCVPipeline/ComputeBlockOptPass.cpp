@@ -51,44 +51,32 @@ void ComputeBlockOptPass::runOnOperation() {
      location and divide the computation blocks.
    */
   pm.addPass(createUnifyAllocBlockPass());
-  // pm.addPass(createReorderOpsByBlockIdPass());
-
-  // pm.addPass(createMergeVectorIfBlockPass());
-  // pm.addPass(createReorderOpsByBlockIdPass());
-  // pm.addPass(createReorderOpsByBlockIdPass());
-
   pm.addPass(createExpLoadPatternPass());
   pm.addPass(createUBUsageOptPass());
   pm.addPass(createBroadcastUBOptPass());
   pm.addPass(createPosMaskPatternPass());
   pm.addPass(createMergeSameSourceAxisPass());
   pm.addPass(createMergeSmallBlockPass());
-  // pm.addPass(createReorderOpsByBlockIdPass());
-
   pm.addPass(createSinkI1ProducersIntoUsersPass());
-  // pm.addPass(createReorderOpsByBlockIdPass());
-
   pm.addPass(createFixpipeOptPass());
   pm.addPass(createMoveLoadIntoUserPass());
   pm.addPass(createUnifyStoreBlockPass());
   pm.addPass(createExpSubfPatternPass());
   pm.addPass(createMergeSmallBlockPass());
-  // pm.addPass(createReorderOpsByBlockIdPass());
-  
+
+  pm.addPass(createReorderOpsByBlockIdPass());
   pm.addPass(createMergeComputeBlockPass());
-  // pm.addPass(createReorderOpsByBlockIdPass());
-  
+
   pm.addPass(createMergeCubeBlockPass());
   pm.addPass(createMergeInputInitSharedCubeBlockPass());
-  
-  pm.addPass(createReorderOpsByBlockIdPass());
 
+  pm.addPass(createReorderOpsByBlockIdPass());
   pm.addPass(createCloneCubeDepInIfPass());
   pm.addPass(createSplitIfByBlockIdPass());
   if (CVPipeline::hasOuterMainLoop(module))
     pm.addPass(createMergeOuterVectorBlockPass());
-  pm.addPass(createRelocateMemrefDeclPass());
 
+  pm.addPass(createRelocateMemrefDeclPass());
   pm.addPass(createUnpackScopePass());
   pm.addPass(createReorderOpsByBlockIdPass());
 

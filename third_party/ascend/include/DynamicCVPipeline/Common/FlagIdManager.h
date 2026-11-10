@@ -30,7 +30,7 @@ namespace mlir {
 namespace triton {
 
 // Flag ID Manager for synchronization between cores
-// Purpose: Globally scan and allocate unique flag_id for synchronization
+// Purpose: Globally scan and allocate unique flag_id for synchronization ///
 class FlagIdManager {
 public:
   // Hardware provides flag ids 0..15; 15 is reserved for pipe sync, so the

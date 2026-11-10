@@ -1,11 +1,11 @@
 // RUN: triton-opt --triton-to-linalg %s | FileCheck %s
 
 // CHECK-LABEL: func.func @test_while_loop_index_tensor
-// CHECK: %[[C8:.*]] = arith.constant 8 : index
-// CHECK: %[[C0_I32:.*]] = arith.constant 0 : i32
-// CHECK: %[[C1_I32:.*]] = arith.constant 1 : i32
-// CHECK: %[[C4_I32:.*]] = arith.constant 4 : i32
-// CHECK: %[[C0:.*]] = arith.constant 0 : index
+// CHECK-DAG: %[[C8:.*]] = arith.constant 8 : index
+// CHECK-DAG: %[[C0_I32:.*]] = arith.constant 0 : i32
+// CHECK-DAG: %[[C1_I32:.*]] = arith.constant 1 : i32
+// CHECK-DAG: %[[C4_I32:.*]] = arith.constant 4 : i32
+// CHECK-DAG: %[[C0:.*]] = arith.constant 0 : index
 // CHECK: scf.while (%[[ARG9:.*]] = %[[C0_I32]], %[[ARG10:.*]] = %[[C0]])
 // CHECK: arith.cmpi slt, %[[ARG9]], %[[C4_I32]]
 // CHECK: scf.condition

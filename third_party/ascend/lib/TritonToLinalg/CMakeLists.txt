@@ -1,6 +1,8 @@
 add_triton_library(TritonToLinalg
         TritonToLinalgPass.cpp
         TLAToLinalgPass.cpp
+        OffsetLoopRewrite.cpp
+        MemoryPointer.cpp
         LoadStoreConverter.cpp
         FunctionConverter.cpp
         ArgMinMaxConverter.cpp
@@ -31,6 +33,7 @@ add_triton_library(TritonToLinalg
   TritonIR
   TritonTransforms
   TritonAnalysis
+  TritonPtrAnalysis
   TritonMemoryAccessAnalysis
   TritonToGraph
   MLIRTritonNPUUtils

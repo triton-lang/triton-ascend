@@ -24,9 +24,9 @@
 #ifndef TRITON_ADAPTER_TRITONOPCONVERTER_H
 #define TRITON_ADAPTER_TRITONOPCONVERTER_H
 
+#include "TritonToLinalg/MemoryPointer.h"
 #include "TritonToLinalg/TritonToLinalgPass.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
-#include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -632,11 +632,18 @@ public:
 //   %base = hivm.pointer_cast %selected_addr : i64 to memref<?xf32>
 class PointerSelectConverter : public OpConversionPattern<arith::SelectOp> {
 public:
-  using OpConversionPattern<arith::SelectOp>::OpConversionPattern;
+  PointerSelectConverter(const TypeConverter &converter, MLIRContext *context,
+                         const MemoryPointerInfos &infos,
+                         PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<arith::SelectOp>(converter, context, benefit),
+        pointerInfos(infos) {}
 
   LogicalResult
   matchAndRewrite(arith::SelectOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
+private:
+  const MemoryPointerInfos &pointerInfos;
 };
 
 // Convert the yields of an IfConverter-created scf.if to its carrier result
@@ -645,55 +652,19 @@ public:
 // their owning conversions.
 class YieldConverter : public OpConversionPattern<scf::YieldOp> {
 public:
-  using OpConversionPattern<scf::YieldOp>::OpConversionPattern;
+  YieldConverter(MLIRContext *context, const MemoryPointerInfos &infos,
+                 PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<scf::YieldOp>(context, benefit),
+        pointerInfos(infos) {}
 
   LogicalResult
   matchAndRewrite(scf::YieldOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
+private:
+  const MemoryPointerInfos &pointerInfos;
 };
 
-template <typename LoopOpTy,
-          typename = std::enable_if_t<std::is_same_v<LoopOpTy, scf::ForOp> ||
-                                      std::is_same_v<LoopOpTy, scf::WhileOp>>>
-class LoopConverter : public OpConversionPattern<LoopOpTy> {
-public:
-  using OpConversionPattern<LoopOpTy>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(LoopOpTy op,
-                  typename OpConversionPattern<LoopOpTy>::OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    // CFO-expanded descriptor loops already carry pointer-free policy values
-    // and remain structurally unchanged. This legacy BlockData rewrite is only
-    // valid for explicitly marked legacy loops.
-    if (!op->hasAttr("UnhandledLoopOp"))
-      return failure();
-    llvm::SmallDenseMap<Value, BlockData> known;
-
-    rewriter.modifyOpInPlace(op, [&]() { op->removeAttr("UnhandledLoopOp"); });
-    return BlockDataParser::rewriteLoopOp(op, rewriter, known, {});
-  }
-};
-
-class AdvanceConverter : public OpConversionPattern<triton::AdvanceOp> {
-public:
-  using OpConversionPattern<triton::AdvanceOp>::OpConversionPattern;
-  LogicalResult
-  matchAndRewrite(triton::AdvanceOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override;
-};
-
-class MakeTensorPtrConverter
-    : public OpConversionPattern<triton::MakeTensorPtrOp> {
-public:
-  using OpConversionPattern<triton::MakeTensorPtrOp>::OpConversionPattern;
-  explicit MakeTensorPtrConverter(MLIRContext *context)
-      : OpConversionPattern<triton::MakeTensorPtrOp>(context) {}
-
-  LogicalResult
-  matchAndRewrite(triton::MakeTensorPtrOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override;
-};
 
 class TransposeConverter : public OpConversionPattern<triton::TransOp> {
 public:
@@ -706,11 +677,17 @@ public:
 
 class BitcastConverter : public OpConversionPattern<triton::BitcastOp> {
 public:
-  using OpConversionPattern<triton::BitcastOp>::OpConversionPattern;
+  BitcastConverter(MLIRContext *context, const MemoryPointerInfos &infos,
+                   PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<triton::BitcastOp>(context, benefit),
+        pointerInfos(infos) {}
 
   LogicalResult
   matchAndRewrite(triton::BitcastOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
+private:
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class TritonMulhiuiConverter : public OpConversionPattern<triton::MulhiUIOp> {
@@ -801,10 +778,17 @@ struct DotScaledConverter : public OpConversionPattern<triton::DotScaledOp> {
 
 class PtrToIntConverter : public OpConversionPattern<triton::PtrToIntOp> {
 public:
-  using OpConversionPattern<triton::PtrToIntOp>::OpConversionPattern;
+  PtrToIntConverter(MLIRContext *context, const MemoryPointerInfos &infos,
+                    PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<triton::PtrToIntOp>(context, benefit),
+        pointerInfos(infos) {}
+
   LogicalResult
   matchAndRewrite(triton::PtrToIntOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
+private:
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class IntToPtrConverter : public OpConversionPattern<triton::IntToPtrOp> {
@@ -818,101 +802,138 @@ public:
 class IndexPutConverter
     : public OpConversionPattern<triton::ascend::IndexPutOp> {
 public:
-  using OpConversionPattern::OpConversionPattern;
+  IndexPutConverter(MLIRContext *context, const MemoryPointerInfos &infos,
+                    PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<triton::ascend::IndexPutOp>(context, benefit),
+        pointerInfos(infos) {}
+
   LogicalResult
   matchAndRewrite(triton::ascend::IndexPutOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_index_put";
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class GatherOutToUbConverter
     : public OpConversionPattern<triton::ascend::GatherOutToUbOp> {
 public:
-  using OpConversionPattern<
-      triton::ascend::GatherOutToUbOp>::OpConversionPattern;
+  GatherOutToUbConverter(MLIRContext *context, const MemoryPointerInfos &infos,
+                         PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<triton::ascend::GatherOutToUbOp>(context, benefit),
+        pointerInfos(infos) {}
+
   LogicalResult
   matchAndRewrite(triton::ascend::GatherOutToUbOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
   static constexpr llvm::StringRef funcNameBase = "triton__gather_out_to_ub";
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class ScatterUbToOutConverter
     : public OpConversionPattern<triton::ascend::ScatterUbToOutOp> {
 public:
-  using OpConversionPattern<
-      triton::ascend::ScatterUbToOutOp>::OpConversionPattern;
+  ScatterUbToOutConverter(MLIRContext *context, const MemoryPointerInfos &infos,
+                          PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<triton::ascend::ScatterUbToOutOp>(context, benefit),
+        pointerInfos(infos) {}
+
   LogicalResult
   matchAndRewrite(triton::ascend::ScatterUbToOutOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_scatter_ub_to_out";
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class IndirectLoadConverter
     : public OpConversionPattern<triton::ascend::IndirectLoadOp> {
 public:
-  using OpConversionPattern<
-      triton::ascend::IndirectLoadOp>::OpConversionPattern;
+  IndirectLoadConverter(MLIRContext *context, const MemoryPointerInfos &infos,
+                        PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<triton::ascend::IndirectLoadOp>(context, benefit),
+        pointerInfos(infos) {}
+
   LogicalResult
   matchAndRewrite(triton::ascend::IndirectLoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_indirect_load";
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class StrideLoadConverter
     : public OpConversionPattern<triton::ascend::StrideLoadOp> {
 public:
-  using OpConversionPattern<triton::ascend::StrideLoadOp>::OpConversionPattern;
+  StrideLoadConverter(MLIRContext *context, const MemoryPointerInfos &infos,
+                      PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<triton::ascend::StrideLoadOp>(context, benefit),
+        pointerInfos(infos) {}
+
   LogicalResult
   matchAndRewrite(triton::ascend::StrideLoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_stride_load";
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class StrideStoreConverter
     : public OpConversionPattern<triton::ascend::StrideStoreOp> {
 public:
-  using OpConversionPattern<triton::ascend::StrideStoreOp>::OpConversionPattern;
+  StrideStoreConverter(MLIRContext *context, const MemoryPointerInfos &infos,
+                       PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<triton::ascend::StrideStoreOp>(context, benefit),
+        pointerInfos(infos) {}
+
   LogicalResult
   matchAndRewrite(triton::ascend::StrideStoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_stride_store";
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class IndirectStoreConverter
     : public OpConversionPattern<triton::ascend::IndirectStoreOp> {
 public:
-  using OpConversionPattern<
-      triton::ascend::IndirectStoreOp>::OpConversionPattern;
+  IndirectStoreConverter(MLIRContext *context, const MemoryPointerInfos &infos,
+                         PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<triton::ascend::IndirectStoreOp>(context, benefit),
+        pointerInfos(infos) {}
+
   LogicalResult
   matchAndRewrite(triton::ascend::IndirectStoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_indirect_store";
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class IndexSelectSimdConverter
     : public OpConversionPattern<triton::ascend::IndexSelectSimdOp> {
 public:
-  explicit IndexSelectSimdConverter(MLIRContext *context);
-  using OpConversionPattern<
-      triton::ascend::IndexSelectSimdOp>::OpConversionPattern;
+  IndexSelectSimdConverter(MLIRContext *context,
+                           const MemoryPointerInfos &infos,
+                           PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<triton::ascend::IndexSelectSimdOp>(context,
+                                                               benefit),
+        pointerInfos(infos) {}
 
   LogicalResult
   matchAndRewrite(triton::ascend::IndexSelectSimdOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
+private:
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class HistogramConverter : public OpConversionPattern<triton::HistogramOp> {

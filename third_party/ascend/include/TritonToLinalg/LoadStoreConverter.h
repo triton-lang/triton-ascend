@@ -37,66 +37,15 @@
 #include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 
-#include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
+#include "TritonToLinalg/MemoryPointer.h"
 
 namespace LoadStoreConverter {
 
 using namespace mlir;
 using namespace triton;
 
-class AddPtrConverter : public OpConversionPattern<triton::AddPtrOp> {
-public:
-  using OpConversionPattern<triton::AddPtrOp>::OpConversionPattern;
-  LogicalResult
-  matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override;
-};
-
-/// Materialize scalar and tensor pointer expressions directly instead of
-/// routing them through a synthetic AddPtrOp with a zero offset. A higher
-/// benefit than the generic value converters ensures pointer layout is handled
-/// by BlockDataParser.
-template <typename OpTy>
-class MemoryPointerConverter : public OpConversionPattern<OpTy> {
-public:
-  explicit MemoryPointerConverter(MLIRContext *context)
-      : OpConversionPattern<OpTy>(context, PatternBenefit(2)) {}
-
-  LogicalResult
-  matchAndRewrite(OpTy op, typename OpTy::Adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    Type resultType = op->getResult(0).getType();
-    auto tensorType = dyn_cast<RankedTensorType>(resultType);
-    bool isPointerExpression =
-        isa<triton::PointerType>(resultType) ||
-        (tensorType && isa<triton::PointerType>(tensorType.getElementType()));
-    if (!isPointerExpression)
-      return failure();
-
-    // Preserve the dedicated scalar ptr<i1> -> ptr<i8> forwarding path. Both
-    // pointer types normalize to the same memref<?xi8>, so materializing a new
-    // reinterpret cast here would discard that canonical identity conversion.
-    if (auto bitcast = dyn_cast<triton::BitcastOp>(op.getOperation())) {
-      auto sourceType =
-          dyn_cast<triton::PointerType>(bitcast.getSrc().getType());
-      auto destinationType = dyn_cast<triton::PointerType>(bitcast.getType());
-      if (sourceType && destinationType &&
-          sourceType.getPointeeType().isInteger(1) &&
-          destinationType.getPointeeType().isInteger(8))
-        return failure();
-    }
-
-    llvm::SmallDenseMap<Value, BlockData> known;
-    FailureOr<Value> memref =
-        BlockDataParser::materializePointer(op->getResult(0), rewriter, known);
-    if (failed(memref))
-      return rewriter.notifyMatchFailure(
-          op, "unsupported pointer expression for direct materialization");
-
-    rewriter.replaceOp(op, *memref);
-    return success();
-  }
-};
+LogicalResult rewriteOffsetLoops(ModuleOp module);
+LogicalResult scalarizeIndirectAccesses(ModuleOp module);
 
 class LoadConverter : public OpConversionPattern<triton::LoadOp> {
 private:
@@ -109,12 +58,6 @@ private:
                                    const Location &loc,
                                    ConversionPatternRewriter &rewriter) const;
 
-  LogicalResult checkModifiedByAddPtrConverter(triton::LoadOp &op) const;
-
-  LogicalResult
-  continueModifyFromAddPtrConverter(triton::LoadOp &op, OpAdaptor adaptor,
-                                    ConversionPatternRewriter &rewriter) const;
-
   void
   fillTensorWithOtherForMaskScenario(Value other, Value localMem,
                                      ArrayRef<OpFoldResult> maskDim,
@@ -126,11 +69,15 @@ private:
                                    ConversionPatternRewriter &rewriter) const;
 
 public:
-  explicit LoadConverter(MLIRContext *context);
-  using OpConversionPattern<triton::LoadOp>::OpConversionPattern;
+  LoadConverter(MLIRContext *context, const MemoryPointerInfos &infos)
+      : OpConversionPattern<triton::LoadOp>(context), pointerInfos(infos) {}
+
   LogicalResult
   matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
+private:
+  const MemoryPointerInfos &pointerInfos;
 };
 
 // tempate class's impl must in header file
@@ -168,8 +115,7 @@ public:
     //   addptr(splat(base), splat(offset))
     // into
     //   splat(addptr(base, offset)).
-    // Recover the former shape at the memory boundary so AddPtrConverter can
-    // keep using the real (non-synthetic) offset as its lowering anchor.
+    // Recover the scalar base and numerical offset at the memory boundary.
     auto splatOp = ptrVal.getDefiningOp<triton::SplatOp>();
     if (!splatOp)
       return failure();
@@ -203,13 +149,15 @@ public:
 
 class StoreConverter : public OpConversionPattern<triton::StoreOp> {
 public:
-  explicit StoreConverter(MLIRContext *context);
-
-  using OpConversionPattern<triton::StoreOp>::OpConversionPattern;
+  StoreConverter(MLIRContext *context, const MemoryPointerInfos &infos)
+      : OpConversionPattern<triton::StoreOp>(context), pointerInfos(infos) {}
 
   LogicalResult
   matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
+private:
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class ScalarAtomicRMWCanonicalizer
@@ -228,13 +176,16 @@ class ScalarAtomicCASCanonicalizer
 
 class AtomicCASConverter : public OpConversionPattern<triton::AtomicCASOp> {
 public:
-  explicit AtomicCASConverter(MLIRContext *context)
-      : OpConversionPattern<triton::AtomicCASOp>(context) {}
-  using OpConversionPattern<triton::AtomicCASOp>::OpConversionPattern;
+  AtomicCASConverter(MLIRContext *context, const MemoryPointerInfos &infos)
+      : OpConversionPattern<triton::AtomicCASOp>(context), pointerInfos(infos) {
+  }
 
   LogicalResult
   matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
+private:
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class AtomicRMWConverter : public OpConversionPattern<triton::AtomicRMWOp> {
@@ -304,12 +255,16 @@ private:
       triton::RMWOp::AND, triton::RMWOp::OR, triton::RMWOp::XOR};
 
 public:
-  explicit AtomicRMWConverter(MLIRContext *context);
-  using OpConversionPattern<triton::AtomicRMWOp>::OpConversionPattern;
+  AtomicRMWConverter(MLIRContext *context, const MemoryPointerInfos &infos)
+      : OpConversionPattern<triton::AtomicRMWOp>(context), pointerInfos(infos) {
+  }
 
   LogicalResult
   matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
+private:
+  const MemoryPointerInfos &pointerInfos;
 };
 
 class AtomicMaxMinCanonicalizer : public OpRewritePattern<triton::AtomicRMWOp> {

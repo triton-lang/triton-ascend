@@ -21,12 +21,15 @@
  */
 
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
-#include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
+#include "TritonMemoryAccess/PtrAnalysis.h"
+#include "TritonMemoryAccess/Utils.h"
+#include "Utils/PtrAnalysisUtils.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
 #include "ascend/include/Utils/DebugUtils.h"
 #include "ascend/include/Utils/InterleaveOptimization.h"
 #include "ascend/include/Utils/Utils.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
@@ -113,46 +116,135 @@ unwrapCanonicalI8ScalarPointerMaterialization(Value originalPointer,
   return memref;
 }
 
-static bool shouldMaterializeCustomPointer(Value ptr) {
-  auto result = dyn_cast<OpResult>(ptr);
-  if (!result)
-    return false;
+namespace {
+// Expand the memory operation, rather than a shared addptr producer. Multiple
+// users retain their original ordering, predicates, and atomic attributes.
+template <typename OpTy>
+LogicalResult scalarizeIndirectAccess(OpTy op, IRRewriter &rewriter) {
+  auto type = dyn_cast<RankedTensorType>(op.getPtr().getType());
+  if (!type)
+    return success();
+  rewriter.setInsertionPoint(op);
+  FailureOr<mlir::triton::ptr::PtrInfo> info = failure();
+  {
+    mlir::triton::ptr::PtrAnalysis analysis(rewriter);
+    if (failed(importPointerDescriptorFacts(
+            op->template getParentOfType<triton::FuncOp>(), analysis)))
+      return failure();
+    info = analysis.analyze(op.getPtr());
+  }
+  if (failed(info))
+    return op.emitError("cannot analyze the indirect access pointer");
+  if (info->hasScalarBase() && info->offsets.hasStructuredForm())
+    return success();
+  if (!info->hasScalarBase())
+    return op.emitError("per-lane pointer bases require Unstructure lowering");
+  if (!type.hasStaticShape())
+    return op.emitError("indirect access requires a static tile shape");
 
-  Operation *defOp = result.getOwner();
-  if (!defOp || !isDistributedTypeCustomOp(defOp))
-    return false;
-
-  auto srcIndices = defOp->getAttrOfType<DenseI32ArrayAttr>(
-      ConverterUtils::customSrcPtrIndexAttrName);
-  if (!srcIndices)
-    return false;
-
-  auto values = srcIndices.asArrayRef();
-  unsigned resultIdx = result.getResultNumber();
-  return resultIdx < values.size() && values[resultIdx] >= 0;
+  auto loc = op.getLoc();
+  bool hasResult = op->getNumResults() != 0;
+  auto element =
+      cast<triton::PointerType>(type.getElementType()).getPointeeType();
+  Value accumulator;
+  if (hasResult)
+    accumulator =
+        rewriter.create<tensor::EmptyOp>(loc, type.getShape(), element);
+  Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+  Value one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+  SmallVector<Value> indices;
+  std::function<Value(unsigned, Value)> emit = [&](unsigned dimension,
+                                                   Value carried) -> Value {
+    if (dimension != type.getRank()) {
+      Value upper = rewriter.create<arith::ConstantIndexOp>(
+          loc, type.getDimSize(dimension));
+      auto loop = rewriter.create<scf::ForOp>(
+          loc, zero, upper, one, carried ? ValueRange{carried} : ValueRange{});
+      {
+        // Attach the loop before materializing offsets. The dominance check
+        // must see both its induction variable and the enclosing source SSA.
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPointToStart(loop.getBody());
+        indices.push_back(loop.getInductionVar());
+        Value result =
+            emit(dimension + 1,
+                 carried ? loop.getRegionIterArgs().front() : Value());
+        indices.pop_back();
+        if (!loop.getBody()->empty() &&
+            isa<scf::YieldOp>(loop.getBody()->back()))
+          rewriter.eraseOp(&loop.getBody()->back());
+        rewriter.setInsertionPointToEnd(loop.getBody());
+        rewriter.create<scf::YieldOp>(loc, result ? ValueRange{result}
+                                                  : ValueRange{});
+      }
+      loop->setAttr("ExtractedLoadOrStore", rewriter.getUnitAttr());
+      return carried ? loop.getResult(0) : Value();
+    }
+    auto offset = mlir::triton::ptr::materializeOffsetAt(info->offsets, indices,
+                                                         rewriter, loc);
+    assert(succeeded(offset) && "complete offset and dominating indices");
+    Value scalarOffset =
+        getValueOrCreateConstantIndexOp(rewriter, loc, *offset);
+    scalarOffset =
+        *castIntegerLike(rewriter, loc, scalarOffset, rewriter.getI64Type());
+    Value pointer = rewriter.create<triton::AddPtrOp>(loc, info->base.getType(),
+                                                      info->base, scalarOffset);
+    auto extract = [&](Value value) -> Value {
+      if (!value || !isa<RankedTensorType>(value.getType()))
+        return value;
+      return rewriter.create<tensor::ExtractOp>(loc, value, indices);
+    };
+    Operation *access;
+    if constexpr (std::is_same_v<OpTy, triton::LoadOp>)
+      access = rewriter.create<triton::LoadOp>(
+          loc, pointer, extract(op.getMask()), extract(op.getOther()),
+          op.getCache(), op.getEvict(), op.getIsVolatile());
+    else if constexpr (std::is_same_v<OpTy, triton::StoreOp>)
+      access = rewriter.create<triton::StoreOp>(
+          loc, pointer, extract(op.getValue()), extract(op.getMask()),
+          op.getCache(), op.getEvict());
+    else if constexpr (std::is_same_v<OpTy, triton::AtomicRMWOp>)
+      access = rewriter.create<triton::AtomicRMWOp>(
+          loc, element, op.getAtomicRmwOp(), pointer, extract(op.getVal()),
+          extract(op.getMask()), op.getSem(), op.getScope());
+    else
+      access = rewriter.create<triton::AtomicCASOp>(
+          loc, element, pointer, extract(op.getCmp()), extract(op.getVal()),
+          op.getSem(), op.getScope());
+    access->setAttr(ConverterUtils::discreteAttrName, rewriter.getUnitAttr());
+    if (hasResult)
+      return rewriter.create<tensor::InsertOp>(loc, access->getResult(0),
+                                               carried, indices);
+    return {};
+  };
+  Value result = emit(0, accumulator);
+  if (hasResult)
+    rewriter.replaceOp(op, result);
+  else
+    rewriter.eraseOp(op);
+  return success();
 }
+} // namespace
 
-static FailureOr<Value>
-resolveMemoryPointer(Value originalPtr, Value convertedPtr,
-                     ConversionPatternRewriter &rewriter) {
-  llvm::SmallDenseMap<Value, BlockData> known;
-
-  if (shouldMaterializeCustomPointer(originalPtr))
-    return BlockDataParser::materializePointer(originalPtr, rewriter, known);
-
-  if (isa<MemRefType>(convertedPtr.getType()))
-    return convertedPtr;
-
-  return BlockDataParser::materializePointer(originalPtr, rewriter, known);
-}
-
-LogicalResult
-AddPtrConverter::matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
-                                 ConversionPatternRewriter &rewriter) const {
-  Location loc = op.getLoc();
-  insertDebugNop(loc, rewriter);
-  llvm::SmallDenseMap<Value, BlockData> known;
-  return BlockDataParser::rewriteAddPtr(op, adaptor, rewriter, known);
+LogicalResult scalarizeIndirectAccesses(ModuleOp module) {
+  SmallVector<Operation *> accesses;
+  module.walk([&](Operation *op) {
+    if (isa<triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp,
+            triton::AtomicCASOp>(op))
+      accesses.push_back(op);
+  });
+  IRRewriter rewriter(module.getContext());
+  for (Operation *op : accesses) {
+    LogicalResult result =
+        llvm::TypeSwitch<Operation *, LogicalResult>(op)
+            .Case<triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp,
+                  triton::AtomicCASOp>([&](auto access) {
+              return scalarizeIndirectAccess(access, rewriter);
+            });
+    if (failed(result))
+      return failure();
+  }
+  return success();
 }
 
 LogicalResult LoadConverter::toTensorAndReplace(
@@ -173,29 +265,6 @@ LogicalResult LoadConverter::toTensorAndReplace(
   return success();
 }
 
-/// @brief Check whether the triton::LoadOp has been modified to the specified
-/// state by the AddPtrConverter.
-/// @param op The triton::LoadOp operation to be checked.
-/// @return Return success if the operation conforms to the specified state;
-/// otherwise, return failure.
-LogicalResult
-LoadConverter::checkModifiedByAddPtrConverter(triton::LoadOp &op) const {
-  if (!isa<scf::ForOp>(op->getParentOp())) {
-    return failure();
-  }
-  if (!op->hasAttr("IndirectLoad")) {
-    return failure();
-  }
-  auto ptrOp = op.getPtr().getDefiningOp();
-  auto ptrBlock = ptrOp->getBlock();
-  auto opBlock = op->getBlock();
-  if (ptrBlock == opBlock) {
-    return failure();
-  }
-
-  return success();
-}
-
 void LoadConverter::propagateWasBoolToInt8Attr(
     Operation *srcLoadOp, Operation *dstOp, PatternRewriter &rewriter) const {
   const std::string WasBoolToInt8TAG = "was_bool_to_int8";
@@ -204,53 +273,6 @@ void LoadConverter::propagateWasBoolToInt8Attr(
   if (srcLoadOp->hasAttr(WasBoolToInt8TAG)) {
     dstOp->setAttr(WasBoolToInt8TAG, rewriter.getBoolAttr(true));
   }
-}
-
-/// @brief Continue to modify the triton::LoadOp from the state modified by the
-/// AddPtrConverter.
-/// @param op The triton::LoadOp operation to be processed.
-/// @param adaptor The adaptor for the operation, used to obtain operands.
-/// @param rewriter The pattern rewriter used to rewrite the operation.
-/// @return Return success if the operation is successful; otherwise, return
-/// failure.
-LogicalResult LoadConverter::continueModifyFromAddPtrConverter(
-    triton::LoadOp &op, OpAdaptor adaptor,
-    ConversionPatternRewriter &rewriter) const {
-  auto loc = op.getLoc();
-  auto forOp = op->getParentOfType<scf::ForOp>();
-  Operation *firstOp = &forOp.getBody()->front();
-  auto extractOp = cast<tensor::ExtractOp>(firstOp);
-  auto ivs = extractOp.getIndices();
-  // Single iterArg which is inserted by AddPtrConverter.
-  auto iterArg = forOp.getRegionIterArg(0);
-  auto ptr = adaptor.getPtr();
-
-  rewriter.setInsertionPointAfter(op);
-  Value castVal = ptr.getDefiningOp<memref::ReinterpretCastOp>();
-  Value idxZero =
-      rewriter.create<arith::ConstantOp>(loc, rewriter.getIndexAttr(0));
-  Value loadVal =
-      rewriter.create<memref::LoadOp>(loc, castVal, ValueRange{idxZero});
-  propagateWasBoolToInt8Attr(op.getOperation(), loadVal.getDefiningOp(),
-                             rewriter);
-  Value insertedVal =
-      rewriter.create<tensor::InsertOp>(loc, loadVal, iterArg, ValueRange{ivs});
-  // a yield op is already created by AddPtrConverter.
-  // so we need to replace it with a new yield op.
-  Operation *terminator = forOp.getBody()->getTerminator();
-  scf::YieldOp oldYieldOp = cast<scf::YieldOp>(terminator);
-  auto yieldOp = rewriter.create<scf::YieldOp>(loc, ValueRange{insertedVal});
-  rewriter.replaceOp(oldYieldOp, yieldOp);
-  // Now the scf.for is complete, we can replace tt.load with it.
-  auto rank = cast<ShapedType>(op.getResult().getType()).getShape().size();
-  Operation *rootForOp = op;
-  while (rank != 0) {
-    rank--;
-    rootForOp = rootForOp->getParentOfType<scf::ForOp>();
-  }
-  rewriter.replaceOp(op, rootForOp);
-  LLVM_DEBUG({ llvm::dbgs() << *getModuleOpFromOperation(rootForOp) << "\n"; });
-  return success();
 }
 
 void LoadConverter::fillTensorWithOtherForMaskScenario(
@@ -295,8 +317,6 @@ void LoadConverter::fillTensorWithOtherForMaskScenario(
                 UnitAttr::get(rewriter.getContext()));
 }
 
-LoadConverter::LoadConverter(MLIRContext *context)
-    : OpConversionPattern<triton::LoadOp>(context) {}
 
 // Masked load whose `other` is a non-scalar tensor.
 // ---------------------------------------------------------------------------
@@ -433,11 +453,6 @@ LogicalResult
 LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                                ConversionPatternRewriter &rewriter) const {
 
-  // Check if tt.load is modified by AddPtrConverter to a specified state.
-  if (checkModifiedByAddPtrConverter(op).succeeded()) {
-    return continueModifyFromAddPtrConverter(op, adaptor, rewriter);
-  }
-
   auto ptr = adaptor.getPtr();
   auto mask = op.getMask();
   auto other = op.getOther();
@@ -454,7 +469,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     ptr = normalizedScalarMemref;
   } else {
     FailureOr<Value> resolvedPtr =
-        resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+        materializeMemoryPointer(op.getPtr(), ptr, pointerInfos, rewriter);
     if (failed(resolvedPtr))
       return rewriter.notifyMatchFailure(
           op, "unable to materialize the load pointer as a memref");
@@ -462,15 +477,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   }
   // handling scalar
   if (isScalarLoad) {
-    Value scalarMemref = normalizedScalarMemref;
-    if (!scalarMemref) {
-      FailureOr<Value> resolvedScalarMemref =
-          BlockDataParser::getScalarMemRef(op.getPtr(), ptr, loc, rewriter);
-      if (failed(resolvedScalarMemref))
-        return rewriter.notifyMatchFailure(
-            op, "scalar pointer operand has not been converted to a memref");
-      scalarMemref = *resolvedScalarMemref;
-    }
+    Value scalarMemref = ptr;
 
     auto resTy = op.getResult().getType();
     auto idxZero =
@@ -616,42 +623,12 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   // boundary check
   auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {
-    auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
-    auto boundarySizes = mlir::ConverterUtils::getBoundarySizes(
-        boundaryCheck, /*remapped*/ ptr, loc, rewriter);
-    // handle the padding
+    SmallVector<OpFoldResult> srcOffsets, boundarySizes;
+    if (failed(getMemoryBoundary(op.getPtr(), boundaryCheck, pointerInfos,
+                                 rewriter, srcOffsets, boundarySizes)))
+      return rewriter.notifyMatchFailure(op, "missing block boundary facts");
+    SmallVector<OpFoldResult> dstOffsets = srcOffsets;
     auto padding = op.getPadding();
-    SmallVector<OpFoldResult> srcOffsets(boundarySizes.size(),
-                                         rewriter.getIndexAttr(0));
-    SmallVector<OpFoldResult> dstOffsets;
-    if (makeTensorPtrOp) {
-      auto zeroVal = rewriter.createOrFold<arith::ConstantOp>(
-          loc, rewriter.getI32IntegerAttr(0));
-      for (auto [idx, offVal] : llvm::enumerate(makeTensorPtrOp.getOffsets())) {
-        if (llvm::find(boundaryCheck, idx) == boundaryCheck.end()) {
-          dstOffsets.push_back(srcOffsets[idx]);
-          continue;
-        }
-        Value offset =
-            rewriter.createOrFold<arith::SubIOp>(loc, zeroVal, offVal);
-        Value size =
-            getValueOrCreateConstantIndexOp(rewriter, loc, boundarySizes[idx]);
-        offset = rewriter.createOrFold<arith::MaxSIOp>(loc, offset, zeroVal);
-        offset = rewriter.createOrFold<arith::IndexCastOp>(
-            loc, rewriter.getIndexType(), offset);
-        OpFoldResult ofr;
-        if (auto constOp = offset.getDefiningOp<arith::ConstantOp>()) {
-          ofr = constOp.getValue();
-        } else {
-          ofr = offset;
-        }
-        ofr = minOpFoldResult(ofr, size, loc, rewriter);
-        boundarySizes[idx] = subOpFoldResult(size, ofr, loc, rewriter);
-        dstOffsets.push_back(ofr);
-      }
-    } else {
-      dstOffsets = srcOffsets;
-    }
     if (padding.has_value()) {
       TypedAttr padAttr = rewriter.getZeroAttr(memRefElementType);
       // triton already ensure only NAN and ZERO are passed in
@@ -809,8 +786,6 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
       op, allocOp, mayImplicitTransposeWithLastAxis, rewriter);
 }
 
-AtomicRMWConverter::AtomicRMWConverter(MLIRContext *context)
-    : OpConversionPattern<triton::AtomicRMWOp>(context) {}
 
 // lowering tt.atomicRMW to linalg.generic
 // If atomic op's return value is used by other op as it's the old value stored
@@ -849,7 +824,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
   insertDebugNopForMask(mask, rewriter);
 
   FailureOr<Value> resolvedPtr =
-      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+      materializeMemoryPointer(op.getPtr(), ptr, pointerInfos, rewriter);
   if (failed(resolvedPtr))
     return rewriter.notifyMatchFailure(
         op, "unable to materialize the atomic RMW pointer as a memref");
@@ -1044,7 +1019,7 @@ AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
   auto loc = op.getLoc();
 
   FailureOr<Value> resolvedPtr =
-      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+      materializeMemoryPointer(op.getPtr(), ptr, pointerInfos, rewriter);
   if (failed(resolvedPtr))
     return rewriter.notifyMatchFailure(
         op, "unable to materialize the atomic CAS pointer as a memref");
@@ -1222,9 +1197,11 @@ ScalarAtomicRMWCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
   auto valTy = RankedTensorType::get({(int64_t)1}, op.getVal().getType());
   auto valSplat =
       rewriter.create<triton::SplatOp>(op.getLoc(), valTy, op.getVal());
-  auto maskTy = RankedTensorType::get({(int64_t)1}, op.getMask().getType());
-  auto maskSplat =
-      rewriter.create<triton::SplatOp>(op.getLoc(), maskTy, op.getMask());
+  Value maskSplat;
+  if (Value mask = op.getMask()) {
+    auto maskTy = RankedTensorType::get({1}, mask.getType());
+    maskSplat = rewriter.create<triton::SplatOp>(op.getLoc(), maskTy, mask);
+  }
 
   auto newAtomicOp = rewriter.create<triton::AtomicRMWOp>(
       op.getLoc(), valTy, op.getAtomicRmwOp(), ptrSplat, valSplat, maskSplat,
@@ -1479,8 +1456,6 @@ AtomicMaxMinCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
   return success();
 }
 
-StoreConverter::StoreConverter(MLIRContext *context)
-    : OpConversionPattern<triton::StoreOp>(context) {}
 
 LogicalResult
 StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
@@ -1494,7 +1469,7 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
   auto val = adaptor.getValue();
 
   FailureOr<Value> resolvedPtr =
-      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+      materializeMemoryPointer(op.getPtr(), ptr, pointerInfos, rewriter);
   if (failed(resolvedPtr))
     return rewriter.notifyMatchFailure(
         op, "unable to materialize the store pointer as a memref");
@@ -1502,40 +1477,11 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
   // 1. boundary size check
   auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {
-    auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
-    auto boundarySizes = mlir::ConverterUtils::getBoundarySizes(
-        boundaryCheck, /*remapped*/ ptr, loc, rewriter);
-    SmallVector<OpFoldResult> srcOffsets;
-    SmallVector<OpFoldResult> dstOffsets(boundarySizes.size(),
-                                         rewriter.getIndexAttr(0));
-    if (makeTensorPtrOp) {
-      auto zeroVal = rewriter.createOrFold<arith::ConstantOp>(
-          loc, rewriter.getI32IntegerAttr(0));
-      for (auto [idx, offVal] : llvm::enumerate(makeTensorPtrOp.getOffsets())) {
-        if (llvm::find(boundaryCheck, idx) == boundaryCheck.end()) {
-          srcOffsets.push_back(dstOffsets[idx]);
-          continue;
-        }
-        Value offset =
-            rewriter.createOrFold<arith::SubIOp>(loc, zeroVal, offVal);
-        Value size =
-            getValueOrCreateConstantIndexOp(rewriter, loc, boundarySizes[idx]);
-        offset = rewriter.createOrFold<arith::MaxSIOp>(loc, offset, zeroVal);
-        offset = rewriter.createOrFold<arith::IndexCastOp>(
-            loc, rewriter.getIndexType(), offset);
-        OpFoldResult ofr;
-        if (auto constOp = offset.getDefiningOp<arith::ConstantOp>()) {
-          ofr = constOp.getValue();
-        } else {
-          ofr = offset;
-        }
-        ofr = minOpFoldResult(ofr, size, loc, rewriter);
-        boundarySizes[idx] = subOpFoldResult(size, ofr, loc, rewriter);
-        srcOffsets.push_back(ofr);
-      }
-    } else {
-      srcOffsets = dstOffsets;
-    }
+    SmallVector<OpFoldResult> srcOffsets, boundarySizes;
+    if (failed(getMemoryBoundary(op.getPtr(), boundaryCheck, pointerInfos,
+                                 rewriter, srcOffsets, boundarySizes)))
+      return rewriter.notifyMatchFailure(op, "missing block boundary facts");
+    SmallVector<OpFoldResult> dstOffsets = srcOffsets;
     auto srcSlice = mlir::ConverterUtils::makeExtractSliceOp(
         val, srcOffsets, boundarySizes, loc, rewriter);
     auto dstSubview = mlir::ConverterUtils::makeSubViewOp(

@@ -38,11 +38,10 @@ module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
 // CHECK-LABEL: func.func @masked_store_value_after_pointer
 // CHECK: scf.if
 // CHECK: %[[VALUE:.*]] = arith.addi
-// CHECK: %[[VALUES:.*]] = tensor.insert %[[VALUE]]
 // CHECK: %[[MASK:.*]] = arith.cmpi
-// CHECK: %[[SIZE:.*]] = arith.index_castui %[[MASK]]
-// CHECK: %[[SLICE:.*]] = tensor.extract_slice %[[VALUES]][0] [%[[SIZE]]]
-// CHECK: bufferization.materialize_in_destination %[[SLICE]]
+// CHECK: scf.if %[[MASK]]
+// CHECK: %[[VALUES:.*]] = tensor.insert %[[VALUE]]
+// CHECK: bufferization.materialize_in_destination %[[VALUES]]
 module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
   tt.func public @masked_store_value_after_pointer(%indices: !tt.ptr<i32>, %output: !tt.ptr<i32>, %value: i32, %limit: i32, %condition: i1) {
     %c0 = arith.constant 0 : i32

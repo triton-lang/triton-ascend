@@ -100,6 +100,99 @@ def _extremum_frontend(operation, operands, propagate_nan):
     return _scalar_frontend(operation, operands, propagate_nan=propagate_nan)
 
 
+@pytest.mark.parametrize("dtype", SCALAR_TYPES)
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_abs_matches_triton_frontend(dtype, wrapped):
+    dtype = tl.str_to_ty(dtype, None)
+    operation = (lambda x, _semantic: tla.abs(tl.constexpr(x), _semantic=_semantic)) if wrapped else tla.abs
+    if dtype in (tl.bfloat16, tl.float64):
+        outcome, _ = _scalar_frontend(operation, (dtype, ))
+        assert outcome[0] is TypeError and ("bfloat16" if dtype == tl.bfloat16 else "fp64") in outcome[1]
+    else:
+        assert _scalar_frontend(operation, (dtype, )) == _scalar_frontend(tl.abs, (dtype, ))
+
+
+@pytest.mark.parametrize("value", [
+    False, True, 0, -3, -(1 << 31), -(1 << 63), (1 << 64) - 1, -2.5, -0.0, -float("inf"), -float("nan"),
+    tl.constexpr(-3)
+])
+def test_abs_literals_match_triton(value):
+    assert _scalar_frontend(tla.abs, (value, )) == _scalar_frontend(tl.abs, (value, ))
+
+
+@pytest.mark.parametrize("dtype", [tl.float8e5, tl.float8e4nv, tl.float8e4b15, tl.float64])
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_abs_rejects_unsupported_floats(dtype, wrapped):
+    value = tl.tensor(None, dtype)
+    with pytest.raises(TypeError, match="tla.abs does not support dtype"):
+        tla.abs(tl.constexpr(value) if wrapped else value, _semantic=object())
+
+
+@tr.jit
+def _abs_expression(x):
+    tla.device_print("absolute", tla.abs(x))
+
+
+@pytest.mark.parametrize("dtype", SCALAR_TYPES)
+def test_abs_scalar_ir(dtype):
+    if dtype in ("bf16", "fp64"):
+        message = "does not support bfloat16" if dtype == "bf16" else "does not support dtype fp64"
+        with pytest.raises(CompilationError, match=message):
+            _lower(_abs_expression, {"x": dtype})
+        return
+    module = _lower(_abs_expression, {"x": dtype})
+    if dtype.startswith("u") or dtype == "i1":
+        assert not _ops(module, "math.absi") and not _ops(module, "math.absf")
+    else:
+        opcode = "math.absf" if dtype.startswith("fp") else "math.absi"
+        op, = _ops(module, opcode)
+        assert op.get_operand(0).get_type() == op.get_result(0).get_type()
+    debug, = _ops(module, "hivm.hir.debug")
+    expected = {"fp16": "f16", "fp32": "f32", "fp64": "f64"}.get(dtype, "i" + dtype[1:])
+    assert str(debug.get_operand(0).get_type()) == expected
+    assert "tensor<" not in str(module) and not _ops(module, "memref.alloc")
+
+
+@tr.jit
+def _constant_abs(X: tl.constexpr, DTYPE: tl.constexpr):
+    tla.device_print("absolute", tla.abs(tl.full((), X, DTYPE)))
+
+
+@pytest.mark.parametrize("value,dtype,expected", [
+    (-127, tl.int8, "127"),
+    (-128, tl.int8, "-128"),
+    (-32768, tl.int16, "-32768"),
+    (-(1 << 31), tl.int32, str(-(1 << 31))),
+    (-(1 << 63), tl.int64, str(-(1 << 63))),
+    ((1 << 64) - 1, tl.uint64, "-1"),
+    (True, tl.int1, "true"),
+    (-0.0, tl.float32, "0.000000e+00"),
+    (-1.5, tl.float32, "1.500000e+00"),
+    (-float("inf"), tl.float32, "0x7F800000"),
+    (-float("nan"), tl.float32, "0x7FC00000"),
+])
+def test_abs_constant_boundaries(value, dtype, expected):
+    module = _lower(_constant_abs, {}, {"X": value, "DTYPE": dtype})
+    assert re.search(rf"arith.constant {re.escape(expected)}(?:\s|$)", str(module))
+    assert not _ops(module, "math.absi") and not _ops(module, "math.absf")
+
+
+@tr.jit
+def _abs_select_helper(condition, x, y):
+    return tla.select(condition, tla.abs(x), y)
+
+
+@tr.jit
+def _abs_helper_caller(condition, x, y):
+    tla.device_print("absolute", _abs_select_helper(condition, x, y))
+
+
+def test_abs_composes_in_jit_helper():
+    module = _lower(_abs_helper_caller, {"condition": "i1", "x": "i32", "y": "i32"})
+    assert len(_ops(module, "math.absi")) == len(_ops(module, "arith.select")) == 1
+    assert not _ops(module, "tt.call")
+
+
 @pytest.mark.parametrize("condition", SCALAR_TYPES)
 @pytest.mark.parametrize("left", SCALAR_TYPES + ("fp8e5", ))
 @pytest.mark.parametrize("right", SCALAR_TYPES + ("fp8e5", ))
@@ -307,6 +400,8 @@ def test_rejects_non_scalar_values(value):
     # must be rejected before any IR emission or implicit memory access.
     scalar = tl.tensor(None, tl.int32)
     cond = tl.tensor(None, tl.int1)
+    with pytest.raises(TypeError, match="tla.abs x.*scalar"):
+        tla.abs(value, _semantic=object())
     for operation in (tla.maximum, tla.minimum):
         for operands in ((value, scalar), (scalar, value)):
             with pytest.raises(TypeError, match="scalar"):
@@ -644,7 +739,9 @@ def _cdiv_frontend(signature, constants, use_tla):
     except CompilationError as error:
         while error.__cause__ is not None:
             error = error.__cause__
-        return type(error), str(error)
+        # The two call sites have different locations and source excerpts.
+        message = error.error_message if isinstance(error, CompilationError) else str(error)
+        return type(error), message
     return "ok", module.str_nodebug()
 
 

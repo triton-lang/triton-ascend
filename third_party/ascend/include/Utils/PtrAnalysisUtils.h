@@ -49,11 +49,11 @@ inline LogicalResult importPointerDescriptorFacts(Operation *root,
     auto axes = rebuild->getAttrOfType<DenseI32ArrayAttr>(
         controlflow::kPointerDescriptorStructuredAxesAttr);
     auto type = dyn_cast<RankedTensorType>(rebuild.getOffset().getType());
-    auto splat = rebuild.getPtr().getDefiningOp<triton::SplatOp>();
+    // These proofs describe the offset independently of the pointer base.
+    // CFO also rebuilds pointers with a different base in each lane.
     if (!rebuild->hasAttr(controlflow::kPointerDescriptorRebuildAttr) ||
         !axes || !type || !type.hasStaticShape() ||
-        axes.size() != type.getRank() || !splat ||
-        !isa<triton::PointerType>(splat.getSrc().getType()) ||
+        axes.size() != type.getRank() ||
         llvm::any_of(axes.asArrayRef(),
                      [](int32_t axis) { return axis != 0 && axis != 1; }))
       return rebuild.emitError("invalid pointer descriptor axis handoff");

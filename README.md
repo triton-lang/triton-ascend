@@ -44,6 +44,10 @@ Triton-Ascend
 
 ---
 
+## Introduction
+
+**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It is used for efficient automatic kernel tuning, operator compilation, and deployment. By remaining compatible with Triton's core syntax while being deeply optimized for Huawei Ascend NPU features, it helps users quickly develop and deploy high-performance computing tasks on the Huawei Ascend platform.
+
 ## 📖 Quick Installation
 
 ### Environment Preparation
@@ -76,6 +80,19 @@ If you need to access Huawei Ascend NPU computing resources for development or t
 # Taking the installation of triton-ascend 3.6.0 as an example
 pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
+
+### Nightly Build Installation
+
+A nightly package updated every day is available. Install it with the following command:
+
+```bash
+# Version format: <version>+devYYYYMMDD, example for nightly build on 2026/11/10
+pip install triton-ascend==3.6.0+dev20261110 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly
+```
+
+All nightly packages are also listed in the [history](https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly/triton-ascend/).
+
+> Note: Nightly packages are test builds and are not recommended for production use.
 
 ### Source Installation
 

@@ -70,6 +70,23 @@ struct TensorIterArgIfOpVars {
 // Kind of dependency edge between two ifOps in ifBlockDAG.
 enum class IfBlockDepKind : uint8_t { CrossCore = 0, IntraCore = 1 };
 
+// Slot of the SSBuffer counter owned by one ssbuffer.if computation block.
+// A vector block keeps one copy per vector core (byteOffset for core0 and
+// byteOffset + 1024 for core1); a cube block keeps a single copy.
+struct BlockCounterSlot {
+  int slot = -1;         // slot index, 0 based
+  int byteOffset = 0;    // byte offset of the counter in the ssbuf area
+  bool isVector = false; // true when the block runs on the vector side
+  int blockId = -1;      // block id of the owning ssbuffer.if
+};
+
+// Cross-core dependency edge between two ssbuffer.if computation blocks.
+struct CrossCoreBlockEdge {
+  scf::IfOp producer;
+  scf::IfOp consumer;
+  int bufferNum = 1; // buffer depth of this edge
+};
+
 // Per scf.while block-arg map: whileOp -> block_id -> (new_arg_idx ->
 // old_arg_idx).
 using WhileBlockArgMap =
@@ -103,6 +120,22 @@ struct ControlFlowConditionInfo {
                  llvm::SmallVector<std::pair<scf::IfOp, IfBlockDepKind>>>
       ifBlockDAG;
   llvm::DenseMap<scf::IfOp, scf::IfOp> flowOptIfOpPairs;
+
+  // SSBuffer counter slot owned by a computation block. Only blocks taking
+  // part in a cross-core dependency get a slot.
+  llvm::DenseMap<scf::IfOp, BlockCounterSlot> blockCounterSlots;
+  // Cross-core edges at computation-block granularity. Keyed by the if op;
+  // the value holds every edge the block takes part in, in both directions.
+  llvm::DenseMap<scf::IfOp, llvm::SmallVector<CrossCoreBlockEdge>>
+      crossCoreBlockEdges;
+  // The computation blocks of the vector core and of the cube core that take
+  // part in a cross-core dependency, with the level they are on. The blocks
+  // are ordered by level: the blocks that open a dependency chain are on the
+  // first level of their core, the blocks of the same level are next to each
+  // other. The preload conditions compare every block with the blocks of the
+  // higher levels of the same core.
+  llvm::SmallVector<std::pair<scf::IfOp, int>> preloadVectorBlocks;
+  llvm::SmallVector<std::pair<scf::IfOp, int>> preloadCubeBlocks;
 
   // Buffer counts for flowOpt condition
   int intraCoreBufferCount = 0;

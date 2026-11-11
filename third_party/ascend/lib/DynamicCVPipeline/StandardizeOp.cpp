@@ -47,6 +47,7 @@ namespace mlir::triton {
 void StandardizeOpPass::getDependentDialects(DialectRegistry &registry) const {
   createPatternMatchRewritePass()->getDependentDialects(registry);
   createSplitMatmulPass()->getDependentDialects(registry);
+  createPackMemrefPass()->getDependentDialects(registry);
 }
 
 void StandardizeOpPass::runOnOperation() {

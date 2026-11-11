@@ -18,9 +18,10 @@ import torch
 
 import triton
 import triton.language as tl
+from triton.compiler.errors import MLIRCompilationError
 
 
-@pytest.mark.xfail(strict=False,
+@pytest.mark.xfail(strict=False, raises=MLIRCompilationError,
                    reason="triton-ascend#3029: ub overflow on 910B2 (needs 1839104 bits, 1572864 available)")
 def test_flex_attention_workspace_mask_compact_ub_overflow(device):
 
@@ -115,8 +116,10 @@ def test_flex_attention_workspace_mask_compact_ub_overflow(device):
             mask_offsets = offs_m_local[:, None] * SPARSE_MASK_STRIDE_M + offs_n_local[None, :]
             tl.store(mask_base + mask_offsets, mask_mod_output.to(tl.int8))
 
-    # Synthetic inputs sized for the max offsets baked into the kernel
-    # (SPARSE_MASK_STRIDE_BLK=16384, sparse_q_count=64).
+    # Synthetic inputs. With Q_OFFSETS[63]=0 and KV_NUM_BLKS[63]=1 the kernel
+    # iterates a single entry (flat_blk=0), so only SPARSE_MASK[0:16384] is
+    # touched; the sizes below are the static maxima, kept safe if the block
+    # count is raised.
     SPARSE_MASK = torch.zeros(64 * 16384, dtype=torch.int8, device=device)
     FLAT_TO_ROW = torch.zeros(64, dtype=torch.int32, device=device)
     FLAT_TO_BLK = torch.zeros(64, dtype=torch.int32, device=device)
@@ -139,4 +142,9 @@ def test_flex_attention_workspace_mask_compact_ub_overflow(device):
         KV_NUM_BLKS,
         in_ptr8,
         in_ptr9,
+        # the dumped kernel was compiled with num_stages=1 / num_warps=4;
+        # num_stages=1 is the only path that disables auto multi-buffer, which
+        # is what produced the reported UB figure.
+        num_warps=4,
+        num_stages=1,
     )

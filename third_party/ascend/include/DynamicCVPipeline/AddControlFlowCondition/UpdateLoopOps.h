@@ -49,8 +49,6 @@ private:
   LogicalResult deriveBlockCountersFromIfOps(ModuleOp module,
                                              ControlFlowConditionInfo *info);
 
-  LogicalResult insertInterCorePipeS(ModuleOp module);
-
   // Analyze tensor type iter_args dependencies in main_loop with ssbuffer.if
   // ops
   LogicalResult

@@ -382,6 +382,7 @@ void registerAddControlFlowConditionPasses() {
   registerPass(createCreateIfOpsPass);
   registerPass(createProcessArgsPass);
   registerPass(createUpdateLoopOpsPass);
+  registerPass(createUpdateLoopIterTimesPass);
   registerPass(createAddControlFlowConditionPass);
 }
 } // namespace triton

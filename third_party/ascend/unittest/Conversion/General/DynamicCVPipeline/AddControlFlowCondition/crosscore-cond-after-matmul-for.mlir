@@ -1,27 +1,29 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
 
-// scf.for, cube. Two linalg.matmul ops use different ssbuffer.block_id, so
-// they land in different ssbuffer.if ops. Only block 1 reads the group2
-// consumer (convert_layout). Its decrement is inserted immediately after
-// that matmul. Block 0's matmul does not read the consumer, so fixpipe stays
-// on the next line.
+// Every block owns a counter that tells the other core how many rounds the
+// block has already processed. The counter of the consumer is bumped at the
+// end of its then block: the bump publishes "this round is consumed", so it
+// has to stay after the matmul that reads the data. A producer that saw the
+// bump earlier could overwrite the buffer while the matmul is still reading
+// it.
+//
+// Two linalg.matmul ops use different ssbuffer.block_id, so they land in
+// different ssbuffer.if ops. Block 1 reads the group2 consumer
+// (convert_layout), block 0 does not. The bump of both blocks stays at the
+// end of its then block, after the fixpipe.
 
 // CHECK-LABEL: func.func @for_crosscore_matmul_different_block
 
 // CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 0 : i32{{.*}}tensor<128x128xf16>, tensor<128x128xf16>
 // CHECK-NEXT: hivm.hir.fixpipe {{.*}}ssbuffer.block_id = 0 : i32
+// CHECK-NEXT: arith.addi {{.*}}, %c1_i32{{[0-9_]*}} : i32
+// CHECK-NEXT: memref.store {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: } {{.*}}ssbuffer.if = 0 : i32}
 
 // CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 1 : i32{{.*}}tensor<128x128xf16>, tensor<128x128xf16>
-// CHECK-NEXT: memref.load {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
-// CHECK-NEXT: annotation.mark {{.*}} {memref_ext.volatile}
-// CHECK-NEXT: arith.subi
-// CHECK-NEXT: memref.store {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
-// CHECK-NEXT: memref.load {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
-// CHECK-NEXT: annotation.mark {{.*}} {memref_ext.volatile}
-// CHECK-NEXT: arith.subi
-// CHECK-NEXT: memref.store {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK-NEXT: hivm.hir.fixpipe {{.*}}ssbuffer.block_id = 1 : i32
+// CHECK-NEXT: arith.addi {{.*}}, %c1_i32{{[0-9_]*}} : i32
+// CHECK-NEXT: memref.store {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: } {{.*}}ssbuffer.if = 1 : i32}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {

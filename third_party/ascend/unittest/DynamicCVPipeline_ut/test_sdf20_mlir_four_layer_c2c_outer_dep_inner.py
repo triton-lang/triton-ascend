@@ -18,6 +18,7 @@ import os
 import subprocess
 import triton
 import triton.language as tl
+from triton.backends.compiler import GPUTarget
 from triton.compiler.compiler import ASTSource
 from triton.compiler.code_generator import ast_to_ttir
 from triton._C.libtriton import ir
@@ -41,7 +42,11 @@ def compile_kernel(kernel, signature, constants):
         options = NPUOptions(arch="Ascend910_9589", enable_dynamic_cv_pipeline=True)
         codegen_fns = {"min_dot_size": min_dot_size(None)}
         ttir = ast_to_ttir(kernel, src, context, options, codegen_fns, {})
-        metadata = {**options.__dict__}
+        metadata = {
+            **options.__dict__,
+            "target": GPUTarget("npu", options.arch, 0),
+            "target_arch": options.arch,
+        }
         ttir = make_ttir(ttir, metadata, options)
         linalg = ttir_to_linalg(ttir, metadata, options, named_ops=True)
         return str(linalg)

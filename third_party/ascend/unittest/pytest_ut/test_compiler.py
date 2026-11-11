@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import sys
@@ -185,43 +186,56 @@ def test_active_options_keep_explicit_values(backend):
     assert options.num_warps == 16
 
 
-@pytest.mark.parametrize("dtype, ir_dtype", [(tl.float8e5, "f8E5M2"), (tl.float8e4nv, "f8E4M3FN")])
-def test_fp8_dot_frontend_options(backend, dtype, ir_dtype):
+@pytest.mark.parametrize(
+    "arch, requested, expected",
+    [
+        ("Ascend910_9581", None, True),
+        ("Ascend910_9581", False, False),
+        ("Ascend910_9691", None, False),
+        ("Ascend910_9691", True, False),
+        ("Ascend960", True, False),
+        ("Ascend910B1", None, False),
+    ],
+)
+def test_dynamic_cv_pipeline_is_enabled_only_on_a5(arch, requested, expected):
+    backend = compiler.AscendBackend(GPUTarget("npu", arch, 32))
+    raw = {} if requested is None else {"enable_dynamic_cv_pipeline": requested}
+
+    options = backend.parse_options(raw)
+
+    assert options.enable_dynamic_cv_pipeline is expected
+
+
+@pytest.mark.parametrize("dtype, deprecated", [
+    (tl.float8e5, False),
+    (tl.float8e4nv, False),
+    (tl.float8e4b8, False),
+    (tl.float8e5b16, False),
+    (tl.float8e4b8, True),
+    (tl.float8e5b16, True),
+])
+def test_fp8_dot_frontend_options(backend, dtype, deprecated):
 
     @triton.jit
     def kernel(dtype: tl.constexpr):
         a = tl.full((64, 64), 0.0, dtype)
         tl.dot(a, a)
 
-    options = backend.parse_options({})
+    raw = {"deprecated_fp8_dot_operand_dtypes": (str(dtype), )} if deprecated else {}
+    options = backend.parse_options(raw)
     source = triton.compiler.ASTSource(kernel, {"dtype": "constexpr"}, {"dtype": dtype})
     context = ir.context()
     ir.load_dialects(context)
     backend.load_dialects(context)
-    module = source.make_ir(backend.target, options, backend.get_codegen_implementation(options),
-                            backend.get_module_map(), context)
+    warning = pytest.warns(UserWarning, match="upcasted to fp16") if deprecated else contextlib.nullcontext()
+    with warning:
+        module = source.make_ir(backend.target, options, backend.get_codegen_implementation(options),
+                                backend.get_module_map(), context)
 
     assert module.verify()
     dot = next(line for line in str(module).splitlines() if "tt.dot " in line)
-    assert f"tensor<64x64x{ir_dtype}>" in dot
-
-
-@pytest.mark.parametrize("dtype", [tl.float8e4b15, tl.float8e4b8, tl.float8e5b16])
-def test_fp8_frontend_rejects_unsupported_formats(backend, dtype):
-
-    @triton.jit
-    def kernel(dtype: tl.constexpr):
-        a = tl.full((64, 64), 0.0, dtype)
-        tl.dot(a, a)
-
-    options = backend.parse_options({})
-    source = triton.compiler.ASTSource(kernel, {"dtype": "constexpr"}, {"dtype": dtype})
-    context = ir.context()
-    ir.load_dialects(context)
-    backend.load_dialects(context)
-    with pytest.raises(triton.CompilationError, match="not supported in this architecture"):
-        source.make_ir(backend.target, options, backend.get_codegen_implementation(options), backend.get_module_map(),
-                       context)
+    software_fp8 = str(dtype) in getattr(options, "software_fp8_dtypes", ())
+    assert ("tensor<64x64xf16>" in dot) == (deprecated or software_fp8)
 
 
 def test_text_pipeline_uses_ttadapter_directly(backend, monkeypatch):

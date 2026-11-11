@@ -27,6 +27,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import sysconfig
 import tempfile
 from types import MappingProxyType
@@ -98,6 +99,8 @@ class LaunchSpec:
     task_type: int
     mix_ratio: int
     shared_mem_dynamic_size: int
+
+    profile_scratch_size: int = 0
 
     def as_dict(self):
         return asdict(self)
@@ -197,6 +200,7 @@ def make_launch_spec(metadata, npu_utils):
             task_type = candidate
     physical = npu_utils.get_aivector_core_num() if metadata.mix_mode == "aiv" else npu_utils.get_aicore_num()
     return LaunchSpec(
+        profile_scratch_size=int(getattr(metadata, "profile_scratch_size", 0) or 0),
         flags=flags,
         workspace_size=max(int(getattr(metadata, "workspace_size", 0)), 0),
         ordered_locks=ordered,
@@ -251,7 +255,7 @@ def make_tensordesc_arg(arg):
     return [arg.base, *arg.shape, *arg.strides, arg.padding == "nan", *arg.shape, *arg.strides]
 
 
-def wrap_handle_tensordesc(launcher, signature):
+def wrap_handle_tensordesc(launcher, signature, profile_scratch=False):
     signatures = tuple(signature.values())
     if not any(isinstance(sig, tuple) or sig.startswith("tensordesc") for sig in signatures):
         return launcher
@@ -266,10 +270,12 @@ def wrap_handle_tensordesc(launcher, signature):
         return [arg]
 
     def wrapped(*args):
-        if len(args) != 9 + len(signatures):
-            raise TypeError(f"launch expects {9 + len(signatures)} arguments, got {len(args)}")
-        flattened = [item for sig, value in zip(signatures, args[9:]) for item in expand(sig, value)]
-        return launcher(*args[:9], *flattened)
+        expected = 9 + len(signatures) + int(profile_scratch)
+        if len(args) != expected:
+            raise TypeError(f"launch expects {expected} arguments, got {len(args)}")
+        flattened = [item for sig, value in zip(signatures, args[9:9 + len(signatures)]) for item in expand(sig, value)]
+        scratch_args = args[-1:] if profile_scratch else ()
+        return launcher(*args[:9], *flattened, *scratch_args)
 
     return wrapped
 
@@ -314,8 +320,26 @@ def _shared_key(fingerprint, sources):
     return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
 
+def _python_link_flags():
+    """Link libpython into the launcher artifacts.
+
+    The exported C ABI is consumed from plain C processes (AOT), where the
+    artifacts are dlopened without a Python interpreter on the stack. Python
+    data symbols (e.g. PyExc_RuntimeError) must resolve eagerly at dlopen
+    time, so the artifacts link libpython themselves instead of relying on
+    the host process to provide it.
+    """
+    flags = []
+    libdir = sysconfig.get_config_var("LIBDIR")
+    if libdir:
+        flags += [f"-L{libdir}", f"-Wl,-rpath,{libdir}"]
+    flags += [f"-lpython{sys.version_info.major}.{sys.version_info.minor}"]
+    return tuple(flags)
+
+
 def _build_shared(name, sources, debug=False, bin_dir=None):
-    fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=_LAUNCHER_CFLAGS)
+    ldflags = _python_link_flags()
+    fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=_LAUNCHER_CFLAGS, extra_ldflags=ldflags)
     key = _shared_key(json.dumps(fingerprint, sort_keys=True), tuple(sorted(sources.items())))
     # bin_dir roots this shared artifact under a fixed installation directory
     # instead of TRITON_CACHE_DIR (which PyTorch Inductor repoints per test
@@ -336,7 +360,7 @@ def _build_shared(name, sources, debug=False, bin_dir=None):
                 Path(temp, source_name).write_text(content)
             source_path = Path(temp,
                                "launcher_runtime.cpp" if name == "__triton_launcher_runtime" else "launcher_export.cpp")
-            built = utils._build_npu_ext(name, str(source_path), extra_cflags=_LAUNCHER_CFLAGS)
+            built = utils._build_npu_ext(name, str(source_path), extra_cflags=_LAUNCHER_CFLAGS, extra_ldflags=ldflags)
             return Path(built).read_bytes()
 
     return utils._get_or_build_npu_artifact(cache, filename, build)

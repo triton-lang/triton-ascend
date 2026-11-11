@@ -95,15 +95,9 @@ public:
 
 class SelectCanonicalizer : public OpRewritePattern<arith::SelectOp> {
 public:
-  SelectCanonicalizer(MLIRContext *context, bool useDirectSelectSlices)
-      : OpRewritePattern<arith::SelectOp>(context),
-        useDirectSelectSlices(useDirectSelectSlices) {}
-
+  using OpRewritePattern<arith::SelectOp>::OpRewritePattern;
   LogicalResult matchAndRewrite(arith::SelectOp op,
                                 PatternRewriter &rewriter) const override;
-
-private:
-  const bool useDirectSelectSlices;
 };
 
 /*

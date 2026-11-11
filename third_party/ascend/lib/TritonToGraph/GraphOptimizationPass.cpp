@@ -62,9 +62,10 @@ namespace triton {
 namespace cfg {
 namespace {
 
-constexpr std::array<GraphOptimizationRulePhase, 11> kRulePhases = {
+constexpr std::array<GraphOptimizationRulePhase, 12> kRulePhases = {
     GraphOptimizationRulePhase::DiagonalMaskRemoval,
     GraphOptimizationRulePhase::ConvertModuloToMask,
+    GraphOptimizationRulePhase::SelectedBlockScan,
     GraphOptimizationRulePhase::ProgramMapping,
     GraphOptimizationRulePhase::PersistentTaskMapping,
     GraphOptimizationRulePhase::LoadStoreTranspose,
@@ -103,9 +104,11 @@ bool isRuleEnabled(GraphOptimizationRuleMask ruleMask,
   return (ruleMask & getGraphOptimizationRuleMask(ruleId)) != 0;
 }
 
-constexpr bool requiresProgramMappingCleanup(GraphOptimizationRuleId ruleId) {
+constexpr bool requiresPostRewriteCleanup(GraphOptimizationRuleId ruleId) {
   return ruleId == GraphOptimizationRuleId::IndependentAxisTensorize ||
-         ruleId == GraphOptimizationRuleId::PersistentTaskStripMining;
+         ruleId == GraphOptimizationRuleId::PersistentTaskStripMining ||
+         ruleId == GraphOptimizationRuleId::SelectedBlockScan ||
+         ruleId == GraphOptimizationRuleId::QueryRowBatching;
 }
 
 // Keep the pre-graph canonicalization limited to operations that its two
@@ -157,6 +160,7 @@ public:
     this->mappingL0BCapacityBytes = options.mappingL0BCapacityBytes;
     this->mappingL0CCapacityBytes = options.mappingL0CCapacityBytes;
     this->l0SafetyPercent = options.l0SafetyPercent;
+    this->coreNum = options.coreNum;
     this->compileMode = options.compileMode;
     this->compileOn91095 = options.compileOn91095;
   }
@@ -197,6 +201,7 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   const uint64_t cliMappingL0BCapacityBytes = this->mappingL0BCapacityBytes;
   const uint64_t cliMappingL0CCapacityBytes = this->mappingL0CCapacityBytes;
   const uint64_t cliL0SafetyPercent = this->l0SafetyPercent;
+  const uint64_t cliCoreNum = this->coreNum;
 
   if (cliRuleMask > std::numeric_limits<GraphOptimizationRuleMask>::max() ||
       !isValidGraphOptimizationRuleMask(
@@ -258,6 +263,12 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
     return failure();
   }
 
+  if (cliCoreNum > std::numeric_limits<unsigned>::max()) {
+    getOperation().emitError()
+        << "graph-optimize core-num is out of range: " << cliCoreNum;
+    return failure();
+  }
+
   const auto compileMode = triton::ascend::parseCompileMode(this->compileMode);
   if (!compileMode) {
     getOperation().emitError()
@@ -282,6 +293,7 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   options.mappingL0CCapacityBytes =
       static_cast<unsigned>(cliMappingL0CCapacityBytes);
   options.l0SafetyPercent = static_cast<unsigned>(cliL0SafetyPercent);
+  options.coreNum = static_cast<unsigned>(cliCoreNum);
   options.compileMode = this->compileMode;
   options.compileOn91095 = this->compileOn91095;
   options.independentAxisTensorize.enabledForCompileMode =
@@ -361,11 +373,19 @@ void GraphOptimizePass::runOnOperation() {
   }
 
   for (triton::FuncOp function : module.getOps<triton::FuncOp>()) {
-    const ResourceSnapshot resources = ResourceSnapshot::fromExplicit(
+    ResourceSnapshot resources = ResourceSnapshot::fromExplicit(
         options.mappingUBCapacityBytes, options.ubSafetyPercent,
         options.reservedUBBytes, options.mappingL0ACapacityBytes,
         options.mappingL0BCapacityBytes, options.mappingL0CCapacityBytes,
         options.l0SafetyPercent);
+    // The physical core count comes only from the pass option (the backend
+    // injects it per kernel execution mode).  The snapshot stores it so the
+    // row-count policy reads it from there and the rules need no separate
+    // query interface.
+    // The physical core count comes from the pass option (the backend injects
+    // it per kernel execution mode); the snapshot carries it so the row-count
+    // policy reads one resource interface instead of a rule-private query.
+    resources.coreNum = options.coreNum;
     GraphOptimizationContext context(function, resources);
     unsigned rewriteCount = 0;
 
@@ -444,7 +464,7 @@ void GraphOptimizePass::runOnOperation() {
           signalPassFailure();
           return;
         }
-        if (requiresProgramMappingCleanup(appliedRuleId) &&
+        if (requiresPostRewriteCleanup(appliedRuleId) &&
             failed(runStructuralCleanup())) {
           selectedPlan.reset();
           plans.clear();
@@ -634,6 +654,14 @@ void populateBuiltinGraphOptimizationRules(
                     GraphOptimizationRuleId::ContiguousBlockAccessFormation)) {
     rules.push_back(createContiguousBlockAccessFormationRule(
         options.contiguousBlockAccessFormation));
+  }
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::SelectedBlockScan)) {
+    rules.push_back(createSelectedBlockScanRule());
+  }
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::QueryRowBatching)) {
+    rules.push_back(createQueryRowBatchingRule());
   }
   const auto compileMode =
       triton::ascend::parseCompileMode(options.compileMode);

@@ -88,6 +88,7 @@ struct ArgLayout {
   std::vector<ArgSlot> args;
   size_t inputCount = 0;
   size_t ffts = absent, lock = absent, workspace = absent;
+  size_t profile = absent;
   size_t originalGrid = absent, grid = absent, debug = absent, total = 0;
 
   size_t reserve(size_t size, size_t alignment) {
@@ -145,12 +146,14 @@ struct ArgLayout {
       args.push_back(
           {i, kind, types[i].dtype, reserve(size, size == 8 ? 8 : 4), size});
     }
+    if (spec.profile_scratch_size && !(spec.flags & TRITON_NPU_PURE_SIMT))
+      profile = reserve(8, 8);
     if (spec.flags & (TRITON_NPU_IAT | TRITON_NPU_PTSM | TRITON_NPU_DOT_ROW))
       originalGrid = reserve(2 * sizeof(uint32_t), 4);
     grid = reserve(3 * sizeof(int32_t), 4);
     if (spec.flags & TRITON_NPU_PURE_SIMT) {
-      reserve(8, 8); // global scratch
-      reserve(8, 8); // profile scratch
+      reserve(8, 8);           // global scratch
+      profile = reserve(8, 8); // profile scratch
     }
     debug = reserve(8, 8); // present even when device print is disabled
   }

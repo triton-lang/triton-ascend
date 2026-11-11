@@ -18,6 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """TLA memory and vector-register values, independent of Triton tensors."""
+from enum import Enum
+
 from triton.language import core as tl
 
 
@@ -36,11 +38,51 @@ def _row_major_strides(sizes):
     return tuple(strides)
 
 
-# Frontend space names; "gm"/"ub" map 1:1, the rest as in tla_builder.cc.
-SPACES = ("gm", "ub", "l1", "l0a", "l0b", "l0c", "bt", "fb")
+class AddressSpace(Enum):
+    """Compile-time address spaces for TLA buffers.
+
+    ``GM`` and ``UB`` map directly to HIVM; ``L1``, ``L0A``, ``L0B`` and
+    ``L0C`` map to ``cbuf``, ``ca``, ``cb`` and ``cc``. ``SSBUF`` maps to
+    ``ssbuf``; ``BT`` and ``FB`` map to ``biasbuf`` and ``fixbuf``.
+    These are type mappings, not a guarantee that the backend can allocate
+    or access every space. See :func:`alloc` for allocation restrictions.
+
+    ``L0A_SF`` and ``L0B_SF`` reserve the scale-factor buffer names. They
+    currently raise ``NotImplementedError`` when used to construct a buffer:
+    HIVM has no corresponding address-space mapping. They must not be treated
+    as ordinary L0A/L0B buffers without a backend-defined representation.
+    """
+
+    GM = "gm"
+    UB = "ub"
+    L1 = "l1"
+    L0A = "l0a"
+    L0B = "l0b"
+    L0C = "l0c"
+    SSBUF = "ssbuf"
+    BT = "bt"
+    FB = "fb"
+    L0A_SF = "l0a_sf"
+    L0B_SF = "l0b_sf"
+
+
+# Frontend space names; "gm"/"ub"/"ssbuf" map 1:1, the rest as in tla_builder.cc.
+SPACES = ("gm", "ub", "l1", "l0a", "l0b", "l0c", "ssbuf", "bt", "fb")
 _HIVM_SCOPE = {
-    "gm": "gm", "ub": "ub", "l1": "cbuf", "l0a": "ca", "l0b": "cb", "l0c": "cc", "bt": "biasbuf", "fb": "fixbuf"
+    "gm": "gm", "ub": "ub", "l1": "cbuf", "l0a": "ca", "l0b": "cb", "l0c": "cc", "ssbuf": "ssbuf", "bt": "biasbuf",
+    "fb": "fixbuf"
 }
+
+
+def _normalize_space(space):
+    space = tl._unwrap_if_constexpr(space)
+    if isinstance(space, AddressSpace):
+        space = space.value
+    if space in ("l0a_sf", "l0b_sf"):
+        raise NotImplementedError(f"{space} requires a backend-defined scale-factor buffer mapping")
+    if space not in SPACES:
+        raise ValueError(f"unsupported buffer space: {space}")
+    return space
 
 
 def space_of(value):
@@ -69,13 +111,32 @@ def is_gm(value):
 
 
 class buffer_type(tl.base_type):
+    """Structural type of a TLA buffer.
+
+    :param shape: Non-empty sequence of positive compile-time extents in
+        elements.
+    :type shape: tuple[int, ...] or list[int]
+    :param dtype: Compile-time element type, for example ``tl.float16``.
+    :type dtype: triton.language.dtype
+    :param space: Compile-time address space name or :class:`AddressSpace`
+        member. Defaults to ``"gm"``.
+    :type space: tla.AddressSpace, str
+    :param strides: Element strides. Defaults to ``None``, which selects
+        row-major strides. Must have the same rank as ``shape``.
+    :type strides: tuple[int, ...] or None
+    :param offset: Linear offset in elements. Defaults to ``0``; ``None``
+        denotes a dynamic subview offset.
+    :type offset: int or None
+
+    The type is structural: register-width, layout and operation-specific
+    restrictions belong to the DMA and SIMD ops that consume the buffer.
+    ``L0A_SF`` and ``L0B_SF`` are reserved and raise ``NotImplementedError``.
+    """
 
     def __init__(self, shape, dtype, space="gm", strides=None, offset=0):
         self.shape = _shape(shape)
         self.element_ty = tl._unwrap_if_constexpr(dtype)
-        self.space = tl._unwrap_if_constexpr(space)
-        if self.space not in SPACES:
-            raise ValueError(f"unsupported buffer space: {self.space}")
+        self.space = _normalize_space(space)
         if strides is None:
             strides = _row_major_strides(self.shape)
         self.strides = _shape(strides)
@@ -118,6 +179,17 @@ class buffer_access:
 
 
 class buffer(tl.base_value):
+    """A typed TLA buffer value.
+
+    A buffer aliases global memory obtained from a kernel pointer via
+    :func:`view`, or on-chip storage obtained via :func:`alloc`, and is
+    consumed by the DMA, cube and SIMD memory interfaces. ``buf[i0, i1, ...]``
+    returns a :class:`buffer_access` carrying the indices for ``simd.vlds`` /
+    ``simd.vsts``.
+
+    GM buffers must be supplied as kernel arguments and wrapped with
+    :func:`view`; they cannot be produced by :func:`alloc`.
+    """
 
     def __init__(self, handle, ty):
         self.handle, self.type = handle, ty

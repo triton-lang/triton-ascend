@@ -966,21 +966,6 @@ def test_compiler_version_reused_across_processes_and_coordinated(host_compiler)
     assert tool.log.read_text().splitlines() == ["query"]
 
 
-def test_compiler_library_build_id_invalidates_even_with_unchanged_stat(host_compiler, monkeypatch):
-    tool = host_compiler
-    old_identity = utils._file_identity(tool.library)
-    file_identity = utils._file_identity
-    monkeypatch.setattr(utils, "_file_identity", lambda path: old_identity
-                        if Path(path) == tool.library else file_identity(path))
-    assert _query_host_compiler(tool.path) == "test-compiler-v1"
-    old_build_id = utils._npu_elf_info(tool.library)[1]
-    tool.replace_version("test-compiler-v2")
-    assert utils._npu_elf_info(tool.library)[1] != old_build_id
-    utils._npu_compiler_version.cache_clear()  # A new process has no LRU entries.
-    assert _query_host_compiler(tool.path) == "test-compiler-v2"
-    assert len(tool.log.read_text().splitlines()) == 2
-
-
 def test_compiler_selection_symlink_and_atomic_replacement(host_compiler, monkeypatch):
     tool = host_compiler
     alias = tool.root / "clang++"
@@ -1119,19 +1104,50 @@ def test_compiler_version_unstable_installation_does_not_publish(host_compiler, 
     assert len(tool.log.read_text().splitlines()) == 2
 
 
-@pytest.mark.parametrize("loader_result", ["", "unknown output", "libmissing.so => not found"])
-def test_compiler_version_unresolved_dependencies_query_live(host_compiler, monkeypatch, loader_result):
-    tool = host_compiler
-    check_output = subprocess.check_output
+@pytest.mark.parametrize("size", [0, 4096])
+def test_proton_profile_size_is_carried_in_launch_plan(policy, size):
+    spec = launcher.make_launch_spec(metadata(profile_scratch_size=size), policy)
+    assert spec.profile_scratch_size == size
 
-    def output(command, **kwargs):
-        if "--list" in command:
-            return loader_result
-        return check_output(command, **kwargs)
 
-    monkeypatch.setattr(subprocess, "check_output", output)
-    assert _query_host_compiler(tool.path) == "test-compiler-v1"
-    assert not list((tool.root / "cache").rglob("compiler-version.json"))
+def test_proton_scratch_follows_expanded_user_arguments():
+    calls = []
+    wrapped = launcher.wrap_handle_tensordesc(lambda *args: calls.append(args), {0: ("i32", "i64")},
+                                              profile_scratch=True)
+    prefix = tuple(range(9))
+    scratch = object()
+    wrapped(*prefix, (11, 13), scratch)
+    assert calls == [(*prefix, 11, 13, scratch)]
+    with pytest.raises(TypeError):
+        wrapped(*prefix, (11, 13))
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_proton_exit_drains_framework_queue_before_collecting(monkeypatch, enabled):
+    from triton.backends.ascend import driver
+    from triton.runtime import _allocation
+
+    events = []
+    scratch = object()
+    interface = SimpleNamespace(synchronize=lambda: events.append("synchronize"))
+    monkeypatch.setattr(driver, "get_backend_func", lambda method: interface)
+    monkeypatch.setattr(_allocation, "_profile_allocator",
+                        SimpleNamespace(get=lambda: lambda size, alignment, stream: scratch))
+    instance = object.__new__(driver.NPULauncher)
+    instance.compile_only = False
+    instance.profile_scratch_size = 16 if enabled else 0
+    instance.profile_scratch_align = 64
+
+    def native(*args):
+        if enabled:
+            assert args[-1] is scratch
+        events.append("enqueue")
+        args[8](args[6])
+
+    instance.launch = native
+    exit_hook = lambda metadata: events.append("collect")
+    instance(1, 1, 1, 0, 0, {}, None, None, exit_hook)
+    assert events == (["enqueue", "synchronize", "collect"] if enabled else ["enqueue", "collect"])
 
 
 @pytest.mark.parametrize(

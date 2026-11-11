@@ -56,9 +56,9 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, hacc.grid_num
 
 // -----
 
-// overflow_bound_fallback
+// unsafe_divisor_bound_fallback
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, hacc.grid_num_tiles = 64 : i32} {
-  tt.func @overflow_bound_fallback(%A: !tt.ptr<f16>, %B: !tt.ptr<f16>, %C: !tt.ptr<f32>, %count: i32) {
+  tt.func @unsafe_divisor_bound_fallback(%A: !tt.ptr<f16>, %B: !tt.ptr<f16>, %C: !tt.ptr<f32>, %count: i32) {
     %pid = tt.get_program_id x : i32
     %c0 = arith.constant 0 : i32
     %c1 = arith.constant 1 : i32
@@ -88,7 +88,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, hacc.grid_num
     %bp = tt.splat %B : !tt.ptr<f16> -> tensor<16x16x!tt.ptr<f16>>
     %pb = tt.addptr %bp, %boff : tensor<16x16x!tt.ptr<f16>>, tensor<16x16xi32>
     %large = arith.constant 2147483647 : i32
-    %upper = arith.addi %pid, %large : i32
+    %upper = arith.divsi %pid, %count : i32
     %zero0 = arith.constant dense<0.0> : tensor<16x16xf32>
     %loop = scf.for %iv = %c0 to %upper step %c1 iter_args(%acc0 = %zero0) -> (tensor<16x16xf32>) : i32 {
       %b = tt.load %pb : tensor<16x16x!tt.ptr<f16>>

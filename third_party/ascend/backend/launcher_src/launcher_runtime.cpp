@@ -25,7 +25,9 @@
 #include "launcher_profiler.h"
 #include <Python.h>
 #include <cstdio>
+#include <map>
 #include <mutex>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -65,9 +67,12 @@ struct Invocation {
         function(request.function),
         stream(static_cast<cann_stream>(request.stream)),
         grid(prepareGrid(plan->spec, request.grid)) {
+    if (plan->spec.profile_scratch_size && !request.profile_scratch)
+      throw std::invalid_argument("missing Proton profile scratch buffer");
     if (plan->layout.total > small.size())
       large.resize(plan->layout.total);
     std::memset(data(), 0, plan->layout.total);
+    put(plan->layout.profile, request.profile_scratch);
     if (plan->layout.originalGrid != ArgLayout::absent) {
       const std::array<uint32_t, 2> originalGrid{
           static_cast<uint32_t>(request.grid[0]),
@@ -100,6 +105,38 @@ inline cann_error getFfts(cann_stream stream, void **out) {
     previousAddress = *out;
   }
   return ret;
+}
+
+static cann_error initializeLocks(const TritonNpuLaunchSpecV1 &spec,
+                                  const LockLayout &locks, void *dst,
+                                  cann_stream stream) {
+  using Key = std::tuple<uint64_t, uint64_t, uint64_t, int64_t>;
+  static std::mutex mutex;
+  // Keep immutable pinned templates for process lifetime: queued copies and
+  // captured graphs can outlive the launch plan that first used them.
+  static std::map<Key, void *> templates;
+  const void *src;
+  {
+    std::lock_guard<std::mutex> guard(mutex);
+    auto &cached = templates[{spec.ordered_locks, spec.unordered_locks,
+                              locks.participants, spec.lock_init_value}];
+    if (!cached) {
+      void *data = nullptr;
+      auto ret = cann_malloc_host(&data, locks.bytes);
+      if (ret != CANN_SUCCESS)
+        return ret;
+      auto *init = static_cast<int64_t *>(data);
+      std::fill_n(init, locks.elements,
+                  spec.unordered_locks ? 0 : spec.lock_init_value);
+      for (uint64_t i = 0; i < spec.unordered_locks; ++i)
+        init[locks.orderedElements + i * locks.unorderedStride] =
+            locks.participants;
+      cached = data;
+    }
+    src = cached;
+  }
+  return cann_memcpy_async(dst, locks.bytes, src, locks.bytes,
+                           CANN_MEMCPY_HOST_TO_DEVICE, stream);
 }
 
 static cann_error execute(Invocation &call) {
@@ -136,26 +173,26 @@ static cann_error execute(Invocation &call) {
     auto locks = prepareLocks(spec, blocks);
     lock = allocate(locks.bytes, call.stream, true);
     cann_error ret;
-    if (spec.unordered_locks) {
-      std::vector<int64_t> init(locks.elements, 0);
-      for (uint64_t i = 0; i < spec.unordered_locks; ++i)
-        init[locks.orderedElements + i * locks.unorderedStride] =
-            locks.participants;
-      ret = cann_memcpy(lock.data, locks.bytes, init.data(), locks.bytes,
-                        CANN_MEMCPY_HOST_TO_DEVICE);
-    } else if (!spec.lock_init_value) {
+    if (!spec.unordered_locks && !spec.lock_init_value) {
       ret = cann_memset_async(lock.data, locks.bytes, 0, locks.bytes,
                               call.stream);
     } else {
-      std::vector<int64_t> init(locks.elements, spec.lock_init_value);
-      ret = cann_memcpy(lock.data, locks.bytes, init.data(), locks.bytes,
-                        CANN_MEMCPY_HOST_TO_DEVICE);
+      ret = initializeLocks(spec, locks, lock.data, call.stream);
     }
     if (ret != CANN_SUCCESS)
       return ret;
     call.put(layout.lock, lock.data);
   }
   call.put(layout.workspace, workspace.data);
+  if (spec.profile_scratch_size) {
+    void *profile = nullptr;
+    std::memcpy(&profile, call.data() + layout.profile, sizeof(profile));
+    const auto bytes =
+        checkedMultiply(spec.profile_scratch_size, call.grid.logicalBlocks);
+    auto ret = cann_memset_async(profile, bytes, 0, bytes, call.stream);
+    if (ret != CANN_SUCCESS)
+      return ret;
+  }
   std::memcpy(call.data() + layout.grid, call.grid.grid.data(),
               3 * sizeof(int32_t));
 
@@ -476,9 +513,10 @@ PyObject *launch(PyObject *self, PyObject *const *args, Py_ssize_t count) {
     if (!handle)
       return nullptr;
     const auto &layout = handle->impl->layout;
-    if (count < 9 || size_t(count - 9) != layout.inputCount) {
+    const size_t extra = handle->impl->spec.profile_scratch_size ? 1 : 0;
+    if (count < 9 || size_t(count - 9) != layout.inputCount + extra) {
       PyErr_Format(PyExc_TypeError, "launch expects %zu arguments, got %zd",
-                   layout.inputCount + 9, count);
+                   layout.inputCount + 9 + extra, count);
       return nullptr;
     }
     TritonNpuLaunchRequestV1 request{};
@@ -518,6 +556,8 @@ PyObject *launch(PyObject *self, PyObject *const *args, Py_ssize_t count) {
     }
     request.kernel_name = PyUnicode_AsUTF8(name);
     if (!request.kernel_name)
+      return nullptr;
+    if (extra && !pointerValue(args[count - 1], &request.profile_scratch))
       return nullptr;
     auto call = std::make_shared<Invocation>(handle->impl, request);
     bool profile = profileL1.load(std::memory_order_relaxed);
@@ -629,6 +669,9 @@ PyObject *createLauncher(PyObject *, PyObject *args) {
     READ_FIELD(task_type);
     READ_FIELD(mix_ratio);
     READ_FIELD(shared_mem_dynamic_size);
+    if (PyDict_GetItemString(config, "profile_scratch_size")) {
+      READ_FIELD(profile_scratch_size);
+    }
 #undef READ_FIELD
     std::vector<TritonNpuArgTypeV1> types;
     auto count = PyList_GET_SIZE(inputTypes);

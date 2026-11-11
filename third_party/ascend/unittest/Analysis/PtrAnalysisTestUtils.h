@@ -23,7 +23,8 @@
 #ifndef TRITON_PTR_ANALYSIS_TEST_UTILS_H
 #define TRITON_PTR_ANALYSIS_TEST_UTILS_H
 
-#include "TritonMemoryAccess/PtrAnalysisRules/CommonPtrRules.h"
+#include "TritonMemoryAccess/PtrAnalysis.h"
+#include "TritonMemoryAccess/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -190,10 +191,24 @@ inline std::optional<Lanes> evaluate(OpFoldResult ofr,
   }
   if (auto slice = dyn_cast<tensor::ExtractSliceOp>(op)) {
     auto from = slice.getSourceType(), to = slice.getType();
+    if (!from.hasStaticShape())
+      return std::nullopt;
     auto dropped = slice.getDroppedDims();
     auto starts = slice.getMixedOffsets(), steps = slice.getMixedStrides();
+    // Resolve result extents from the slice sizes, including runtime values.
+    SmallVector<int64_t> shape;
+    int64_t count = 1;
+    for (auto [dim, size] : llvm::enumerate(slice.getMixedSizes())) {
+      if (dropped.test(dim))
+        continue;
+      auto extent = evaluate(size, env);
+      if (!extent || extent->size() != 1)
+        return std::nullopt;
+      shape.push_back(extent->front().getSExtValue());
+      count *= shape.back();
+    }
     Lanes lanes;
-    for (int64_t i = 0; i < to.getNumElements(); ++i) {
+    for (int64_t i = 0; i < count; ++i) {
       int64_t rest = i, offset = 0, stride = 1;
       int out = to.getRank() - 1;
       for (int d = from.getRank() - 1; d >= 0; --d) {
@@ -202,8 +217,8 @@ inline std::optional<Lanes> evaluate(OpFoldResult ofr,
           return std::nullopt;
         int64_t coord = 0;
         if (!dropped.test(d)) {
-          coord = rest % to.getDimSize(out);
-          rest /= to.getDimSize(out--);
+          coord = rest % shape[out];
+          rest /= shape[out--];
         }
         coord = (*start)[0].getSExtValue() + coord * (*step)[0].getSExtValue();
         offset += coord * stride;
@@ -226,13 +241,13 @@ inline std::optional<Lanes> evaluate(OpFoldResult ofr,
     return operands[1];
   }
   if (auto insert = dyn_cast<tensor::InsertSliceOp>(op)) {
-    auto from = insert.getSourceType(), to = insert.getType();
+    auto to = insert.getType();
     auto dropped = insert.getDroppedDims();
     auto starts = insert.getMixedOffsets(), steps = insert.getMixedStrides();
+    auto sizes = insert.getMixedSizes();
     Lanes lanes = operands[1];
-    for (int64_t i = 0; i < from.getNumElements(); ++i) {
+    for (int64_t i = 0; i < int64_t(operands[0].size()); ++i) {
       int64_t rest = i, offset = 0, stride = 1;
-      int in = from.getRank() - 1;
       for (int d = to.getRank() - 1; d >= 0; --d) {
         auto start = evaluate(starts[d], env);
         auto step = evaluate(steps[d], env);
@@ -240,13 +255,21 @@ inline std::optional<Lanes> evaluate(OpFoldResult ofr,
           return std::nullopt;
         int64_t coord = 0;
         if (!dropped.test(d)) {
-          coord = rest % from.getDimSize(in);
-          rest /= from.getDimSize(in--);
+          auto size = evaluate(sizes[d], env);
+          if (!size || size->size() != 1 || size->front().getSExtValue() <= 0)
+            return std::nullopt;
+          coord = rest % size->front().getSExtValue();
+          rest /= size->front().getSExtValue();
         }
         offset +=
             ((*start)[0].getSExtValue() + coord * (*step)[0].getSExtValue()) *
             stride;
-        stride *= to.getDimSize(d);
+        // Row-major addressing needs inner extents, not the outermost extent.
+        if (d > 0) {
+          if (to.isDynamicDim(d))
+            return std::nullopt;
+          stride *= to.getDimSize(d);
+        }
       }
       if (offset < 0 || offset >= int64_t(lanes.size()))
         return std::nullopt;
@@ -315,12 +338,14 @@ inline SmallVector<OpFoldResult> axisStrides(const OffsetInfo &info) {
 }
 
 inline const PtrInfo *getInfo(const PtrInfo *result) {
-  return result && !result->isEmpty() ? result : nullptr;
+  assert((!result || !result->isEmpty()) &&
+         "successful analysis must return an initialized PtrInfo");
+  return result;
 }
 inline FailureOr<PtrInfo> getInfo(FailureOr<PtrInfo> result) {
-  if (failed(result) || result->isEmpty())
-    return failure();
-  return *result;
+  assert((failed(result) || !result->isEmpty()) &&
+         "successful analysis must return an initialized PtrInfo");
+  return result;
 }
 inline const OffsetInfo *getOffsets(const PtrInfo *result) {
   return getInfo(result) ? &result->offsets : nullptr;

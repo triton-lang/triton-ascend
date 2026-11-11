@@ -17,8 +17,8 @@ from utils.tla_test_utils import compile_offline, lower_offline, get_stages, che
 def offset_copy(X, Y, first, second):
     with tla.scope.vector():
         ub = tla.alloc((64, ), tl.float32)
-        # The two addptr operations must each scale by sizeof(f32), while
-        # view's own offset remains an element offset on the GM memref.
+        # Pointer arithmetic and view offsets compose as element offsets
+        # on a descriptor rooted at the original GM argument.
         src = tla.view((X + first) + second, (64, ), offsets=(3, ))
         dst = tla.view(Y + second, (64, ), offsets=(5, ))
         tla.load_gm_to_ub(src, ub)
@@ -28,13 +28,17 @@ def offset_copy(X, Y, first, second):
 def test_ir():
     mod, ctx = compile_offline(offset_copy, {"X": "*fp32", "Y": "*fp32", "first": "i32", "second": "i32"}, {})
     source = str(mod)
-    assert source.count("tt.addptr") == 3
+    # Three authored pointer additions plus one displacement per GM view.
+    assert source.count("tt.addptr") == 5
+    assert source.count("tt.make_tensor_ptr") == 2
+    assert source.count("tla.gm_view") == 2
     lowered = str(lower_offline(mod, ctx))
     assert "tt.addptr" not in lowered and "tt.ptr_to_int" not in lowered
     assert "hivm.hir.load" in lowered and "hivm.hir.store" in lowered
-    # Both source offsets are dynamic and must be scaled independently.
-    assert lowered.count("arith.muli") == 3
-    assert lowered.count("memref.extract_aligned_pointer_as_index") == 2
+    # Descriptor lowering preserves provenance instead of extracting integer
+    # addresses. Arithmetic op counts are not stable under canonicalization;
+    # test_run checks composed positive and negative offsets numerically.
+    assert "memref.reinterpret_cast" in lowered
 
 
 def test_run():

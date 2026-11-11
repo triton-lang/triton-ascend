@@ -10,6 +10,9 @@
 #include "mlir/Transforms/Passes.h" // createInlinerPass
 
 #include "ascend/include/AutoBlockify/Passes.h"
+#ifdef TRITON_ASCEND_ENABLE_PROTON
+#include "ascend/include/ProtonToHIVM/Passes.h"
+#endif
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
@@ -61,6 +64,17 @@ namespace py = pybind11;
 using namespace mlir;
 
 void init_triton_ascend_passes_ttir(py::module &&m) {
+#ifdef TRITON_ASCEND_ENABLE_PROTON
+  m.def("add_assign_ascend_proton_scope_ids", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::proton::createAssignAscendProtonScopeIdsPass());
+  });
+  m.def("add_lower_ascend_proton_to_hivm",
+        [](mlir::PassManager &pm, int32_t bufferSize) {
+          pm.addPass(mlir::triton::proton::createLowerAscendProtonToHIVMPass(
+              bufferSize));
+        });
+#endif
+
   m.def("add_auto_blockify", [](mlir::PassManager &pm, int autoBlockifySize) {
     AutoBlockifyOptions opts;
     opts.autoBlockifySize = autoBlockifySize;
@@ -160,7 +174,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
          std::uint64_t reservedUBBytes, std::uint64_t mappingL0ACapacityBytes,
          std::uint64_t mappingL0BCapacityBytes,
          std::uint64_t mappingL0CCapacityBytes, std::uint64_t l0SafetyPercent,
-         bool compileOn91095) {
+         std::uint64_t coreNum, bool compileOn91095) {
         if (ruleMask > std::numeric_limits<std::uint32_t>::max())
           throw py::value_error("rule_mask must fit in uint32_t");
         const auto graphRuleMask =
@@ -198,6 +212,8 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
             l0SafetyPercent > std::numeric_limits<unsigned>::max())
           throw py::value_error(
               "l0_safety_percent must be an unsigned value in [1, 100]");
+        if (coreNum > std::numeric_limits<unsigned>::max())
+          throw py::value_error("core_num must fit in unsigned");
 
         mlir::triton::cfg::GraphOptimizationOptions options;
         options.enabledRuleMask = graphRuleMask;
@@ -217,6 +233,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         options.mappingL0CCapacityBytes =
             static_cast<unsigned>(mappingL0CCapacityBytes);
         options.l0SafetyPercent = static_cast<unsigned>(l0SafetyPercent);
+        options.coreNum = static_cast<unsigned>(coreNum);
         options.compileMode = compileMode;
         options.compileOn91095 = compileOn91095;
         pm.addPass(mlir::triton::cfg::createGraphOptimizePass(options));
@@ -233,7 +250,8 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       py::arg("mapping_l0a_capacity_bytes") = 0,
       py::arg("mapping_l0b_capacity_bytes") = 0,
       py::arg("mapping_l0c_capacity_bytes") = 0,
-      py::arg("l0_safety_percent") = 80, py::arg("compile_on_910_95") = false);
+      py::arg("l0_safety_percent") = 80, py::arg("core_num") = 0,
+      py::arg("compile_on_910_95") = false);
 
   m.def("set_buffer_count", [](mlir::ModuleOp &module, const std::string &type,
                                int count) {

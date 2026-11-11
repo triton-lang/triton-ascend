@@ -465,43 +465,6 @@ static MaskDecomposition decomposeAndMask(Operation *op, Value mask,
   return {contMask, discMask};
 }
 
-static bool isAxisDiscreteMask(Value mask, PatternRewriter &rewriter) {
-  if (auto andOp = mask.getDefiningOp<arith::AndIOp>()) {
-    auto isContinuousMask = [&](Value operand) {
-      MaskState mstate;
-      bool isContinuous =
-          succeeded(mstate.parse(operand, andOp.getLoc(), rewriter));
-      // Analysis can insert temporary ops even when parsing fails.
-      if (!isContinuous)
-        mstate.eraseInsertedOps(andOp, rewriter);
-      return isContinuous;
-    };
-    bool lhsIsContinuous = isContinuousMask(andOp.getLhs());
-    bool rhsIsContinuous = isContinuousMask(andOp.getRhs());
-    if (lhsIsContinuous == rhsIsContinuous)
-      return false;
-    mask = lhsIsContinuous ? andOp.getRhs() : andOp.getLhs();
-  }
-  return isa_and_nonnull<triton::BroadcastOp>(mask.getDefiningOp());
-}
-
-static bool isAxisDiscreteMaskLoad(triton::LoadOp op,
-                                   PatternRewriter &rewriter) {
-  auto ptrType = dyn_cast<RankedTensorType>(op.getPtr().getType());
-  auto maskType = dyn_cast<RankedTensorType>(op.getMask().getType());
-
-  // FIXME: Only 2D pointers and masks are currently supported. The
-  // axis-discrete mask optimization needs generalizing to other ranks.
-  if (!ptrType || !maskType || ptrType.getRank() != 2)
-    return false;
-  auto shape = ptrType.getShape();
-  if (shape[0] <= 0 || shape[1] <= 0)
-    return false;
-  if (maskType.getShape() != shape)
-    return false;
-  return isAxisDiscreteMask(op.getMask(), rewriter);
-}
-
 struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
   using OpRewritePattern<triton::StoreOp>::OpRewritePattern;
 
@@ -611,8 +574,7 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
         ptrType && ptrType.getShape().size() <= 5;
     if (compileOn91095Flag &&
         triton::ascend::isSimtTemplateMode(compileModeFlag) &&
-        rankWithinIndirectFastPathLimit &&
-        !isAxisDiscreteMaskLoad(op, rewriter)) {
+        rankWithinIndirectFastPathLimit) {
       op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
                   rewriter.getUnitAttr());
       return failure();
@@ -733,7 +695,7 @@ struct DiscreteMaskAtomicConversion
     }
 
     auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
-    FailureOr<Value> fill = specializeTypelessValueToConstant(
+    FailureOr<mlir::Value> fill = specializeTypelessValueToConstant(
         typelessVal, src.getType(), loc, rewriter);
     if (failed(fill)) {
       LLVM_DEBUG({

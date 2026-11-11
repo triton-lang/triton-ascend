@@ -133,7 +133,7 @@ class _Recorder:
     def create_simd_vpack(self, src, part, out_elem_tag, out_lanes):
         return self._record("vpack", src, part, out_elem_tag, out_lanes)
 
-    def create_simd_unary(self, kind, src, mask, mode):
+    def create_simd_unary(self, kind, src, mask, mode="zeroing"):
         return self._record("unary", kind, src, mask, mode)
 
     def create_simd_vfma(self, acc, lhs, rhs, mask, mode):
@@ -160,11 +160,26 @@ class _Recorder:
     def create_simd_scalar_int(self, elem_tag, value):
         return self._record("scalar_int", elem_tag, value)
 
+    def create_simd_pld(self, *args):
+        return self._record("pld", *args)
+
+    def create_simd_pst(self, *args):
+        return self._record("pst", *args)
+
+    def create_simd_vgather(self, *args):
+        return self._record("vgather", *args)
+
+    def create_simd_vunpack(self, *args):
+        return self._record("vunpack", *args)
+
 
 class _Semantic:
 
     def __init__(self):
         self.builder = _Recorder()
+
+    def to_tensor(self, value):
+        return tl.tensor(_Handle(value), tl.int32)
 
 
 class _ScalarHandle:
@@ -200,6 +215,15 @@ class _ScalarBuilder:
 
     def get_fp32(self, value):
         return self._make("get_fp32", value)
+
+    def get_float_ty(self):
+        return self._make("get_float_ty", None)
+
+    def get_fp64(self, value):
+        return self._make("get_fp64", value)
+
+    def create_sqrt(self, value):
+        return self._make("create_sqrt", value)
 
     def get_null_value(self, _ty):
         return self._make("get_null_value", None)
@@ -749,7 +773,6 @@ def test_mode_zeroing_and_merging_reach_the_builder_distinctly():
         (simd.vdiv, (_vec(64, tl.float32), _vec(64, tl.float32))),
         (simd.vmax, (_vec(64, tl.float32), _vec(64, tl.float32))),
         (simd.vmin, (_vec(64, tl.float32), _vec(64, tl.float32))),
-        (simd.vmaxs, (_vec(64, tl.float32), 1.0)),
         (simd.vexp, (_vec(64, tl.float32), )),
     )
     for op, args in cases:
@@ -798,19 +821,55 @@ def test_mode_zeroing_and_merging_reach_the_builder_distinctly():
         simd.vdup(1.0, tl.float32, mode="MODE_WHATEVER", _semantic=_Semantic())
 
 
+@pytest.mark.parametrize("dtype", [tl.int64, tl.uint64])
+def test_vmaxs_i64_zeroing_masked_selects_zero(dtype):
+    src = _vec(64, dtype)
+    mask = _mask(64)
+    sem = _Semantic()
+    simd.vmaxs(src, 7, mask=mask, mode=simd.MODE.ZEROING, _semantic=sem)
+    op_call = next(args for name, args in sem.builder.calls if name == "binary_scalar")
+    assert op_call[3] is mask.handle and op_call[4] == "zeroing"
+    select = next(args for name, args in sem.builder.calls if name == "vsel")
+    assert select[0] is mask.handle and select[2] is not src.handle
+
+    sem = _Semantic()
+    simd.vmaxs(src, 7, mode=simd.MODE.ZEROING, _semantic=sem)
+    assert all(name != "vsel" for name, _ in sem.builder.calls)
+
+    with pytest.raises(ValueError, match="invalid mode"):
+        simd.vmaxs(src, 7, mode="MODE_WHATEVER", _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("dtype,scalar", [
+    (tl.float16, 1.0),
+    (tl.float32, 1.0),
+    (tl.int8, 7),
+    (tl.int16, 7),
+    (tl.int32, 7),
+    (tl.uint8, 7),
+    (tl.uint16, 7),
+    (tl.uint32, 7),
+])
+def test_vmaxs_non64_zeroing_masked_has_no_extra_select(dtype, scalar):
+    sem = _Semantic()
+    simd.vmaxs(_vec(64, dtype), scalar, mask=_mask(64), mode=simd.MODE.ZEROING, _semantic=sem)
+    assert all(name != "vsel" for name, _ in sem.builder.calls)
+
+
 def test_merging_composes_vsel_against_the_first_operand():
-    """MODE.MERGING on the accumulate/predicate family selects src0/acc.
+    """MODE.MERGING on the accumulate/vector-scalar family selects src0/acc.
 
     The op itself is always built under ZEROING; MERGING appends a vsel
     against the op's first vector operand (acc for the accumulate ops),
-    mirroring CANN's V920 software-merge lowering.  The legacy register ops
-    keep forwarding "merging" to the C++ builder (covered above).
+    mirroring CANN's V920 software-merge lowering.  The remaining register
+    ops keep forwarding "merging" to the C++ builder (covered above).
     """
     mask = _mask(64)
     a = _vec(64, tl.float32)
     b = _vec(64, tl.float32)
     for op, args, merge in (
         (simd.vand, (a, b), a.handle),
+        (simd.vmaxs, (a, 2.0), a.handle),
         (simd.vmuls, (a, 2.0), a.handle),
         (simd.vmula, (a, b, b), a.handle),
         (simd.vaxpy, (a, b, 1.5), a.handle),
@@ -1089,6 +1148,81 @@ def test_truncmod_invalid_operands():
 
 
 # --------------------------------------------------------------------------
+# tla.sqrt (math.py)
+# --------------------------------------------------------------------------
+
+
+def test_sqrt_export_and_builtin():
+    assert "sqrt" in math_src.__all__
+    assert _triton_is_builtin(math_src.sqrt)
+    with pytest.raises(ValueError, match="Did you forget to add @triton.jit"):
+        math_src.sqrt(4.0)
+    name = "tla_sqrt_export"
+    spec = importlib.util.spec_from_file_location(name, _TLA_DIR / "__init__.py",
+                                                  submodule_search_locations=[str(_TLA_DIR)])
+    pkg = importlib.util.module_from_spec(spec)
+    sys.modules[name] = pkg
+    try:
+        spec.loader.exec_module(pkg)
+        assert "sqrt" in pkg.__all__
+        assert pkg.sqrt is pkg.math.sqrt
+    finally:
+        for mod in [m for m in sys.modules if m == name or m.startswith(name + ".")]:
+            del sys.modules[mod]
+
+
+@pytest.mark.parametrize("value", [4.0, tl.constexpr(4.0), -1.0, 0.0, float("inf"), float("nan")])
+def test_sqrt_scalar_emits_expression(value):
+    sem, builder = _scalar_semantic()
+    result = math_src.sqrt(value, _semantic=sem)
+    assert isinstance(result, tl.tensor) and result.type == tl.float32
+    assert builder.calls[-1][0] == "create_sqrt"
+
+
+def test_sqrt_runtime_scalar_and_large_literal():
+    sem, builder = _scalar_semantic()
+    value = tl.tensor(_ScalarHandle("arg", "x"), tl.float32)
+    result = math_src.sqrt(value, _semantic=sem)
+    assert result.type == value.type
+    assert builder.calls[-1] == ("create_sqrt", value.handle)
+    sem, builder = _scalar_semantic()
+    with pytest.raises(TypeError, match="float32 scalars"):
+        math_src.sqrt(1e300, _semantic=sem)
+    assert not any(call[0] == "create_sqrt" for call in builder.calls)
+
+
+@pytest.mark.parametrize("dtype,lanes", [(tl.float16, 128), (tl.float32, 64)])
+def test_sqrt_vector_preserves_type(dtype, lanes):
+    sem = _Semantic()
+    value = _vec(lanes, dtype)
+    result = math_src.sqrt(value, _semantic=sem)
+    assert isinstance(result, simd.vector) and result.type == value.type
+    assert sem.builder.calls[0] == ("pge", ("ALL", lanes))
+    name, args = _last(sem)
+    assert name == "unary" and args[0] == "sqrt"
+    assert args[1] is value.handle and args[2].ty == "pge"
+    assert args[3] == "zeroing"
+
+
+def test_sqrt_rejects_invalid_inputs_before_builder():
+    values = [
+        1, True, 1 + 2j,
+        tl.constexpr(1),
+        tl.constexpr(True),
+        tl.tensor("block", tl.block_type(tl.float32, [64])),
+        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, "ub"))
+    ]
+    values += [
+        tl.tensor(_ScalarHandle("arg", "x"), dtype)
+        for dtype in (tl.float16, tl.bfloat16, tl.float64, tl.int32, tl.int1)
+    ]
+    values += [_vec(64, dtype) for dtype in (tl.int32, tl.uint32, tl.bfloat16, tl.float64, tl.int1)]
+    for value in values:
+        with pytest.raises(TypeError, match="sqrt"):
+            math_src.sqrt(value, _semantic=_NoBuilder())
+
+
+# --------------------------------------------------------------------------
 # tla.where (selection.py)
 # --------------------------------------------------------------------------
 
@@ -1280,6 +1414,10 @@ def test_every_python_builder_call_is_bound_and_whitelisted():
     cpp = (_TLA_DIR / "cpp" / "tla_builder.cc").read_text()
     shared_cpp = (_TLA_DIR.parents[1] / "ascend_ir.cc").read_text()
     bound = set(re.findall(r'\.def\(\s*"(create_[a-z0-9_]+)"', cpp + shared_cpp))
+    # Scalar expressions also use the underlying Triton builder directly;
+    # those methods already exist and must not be rebound through Ascend.
+    base_cpp = (_TLA_DIR.parents[3] / "python" / "src" / "ir.cc").read_text()
+    base_bound = set(re.findall(r'\.def\(\s*"(create_[a-z0-9_]+)"', base_cpp))
 
     builder_py = (_TLA_DIR / "builder.py").read_text()
     tree = ast.parse(builder_py)
@@ -1293,15 +1431,17 @@ def test_every_python_builder_call_is_bound_and_whitelisted():
         used |= set(re.findall(r"builder\.(create_[a-z0-9_]+)\(", py.read_text()))
 
     assert used, "expected builder.create_* calls in the tla python frontend"
-    assert used <= bound, f"used but not bound in tla_builder.cc: {sorted(used - bound)}"
-    assert used <= whitelisted, f"used but missing from ascend_methods: {sorted(used - whitelisted)}"
+    assert used <= bound | base_bound, f"used but not bound: {sorted(used - bound - base_bound)}"
+    assert used <= whitelisted | base_bound, (
+        f"used but missing from ascend_methods: {sorted(used - whitelisted - base_bound)}")
 
 
 def test_new_bindings_and_ave_ops_are_present():
     cpp = (_TLA_DIR / "cpp" / "tla_builder.cc").read_text()
     builder_py = (_TLA_DIR / "builder.py").read_text()
     for name in ("create_simd_binary_scalar", "create_simd_vdup", "create_simd_scalar_int", "create_simd_shift",
-                 "create_simd_shift_scalar", "create_simd_vpack"):
+                 "create_simd_shift_scalar", "create_simd_vpack", "create_simd_pld", "create_simd_pst",
+                 "create_simd_vgather", "create_simd_vunpack"):
         assert f'"{name}"' in cpp, f"{name} not bound"
         assert f"'{name}'" in builder_py, f"{name} not whitelisted"
     # each API must map to its own AVE op, not to a reduce/splat stand-in
@@ -1310,7 +1450,8 @@ def test_new_bindings_and_ave_ops_are_present():
                    "hivmave::VFMaxsOp", "hivmave::VMaxsUIOp", "hivmave::VFAbsOp", "hivmave::VFNegOp",
                    "hivmave::VFNotOp", "hivmave::VFReluOp", "hivmave::VFAbsDiffOp", "hivmave::VFExpdifOp",
                    "hivmave::VFVpackOp", "hivmave::VFShlOp", "hivmave::VFShrOp", "hivmave::VFShlsOp",
-                   "hivmave::VFLRelusOp", "hivmave::VFPReluOp"):
+                   "hivmave::VFLRelusOp", "hivmave::VFPReluOp", "hivmave::VFGatherOp", "hivmave::VFExtSIOp",
+                   "hivmave::VFExtUIOp"):
         assert ave_op in cpp, f"{ave_op} missing from tla_builder.cc"
     assert '"divfhp"' in cpp, "VFDivFHPOp builder kind is not dispatched"
     # vdup must not be routed through the unmasked scalar_broadcast
@@ -1340,9 +1481,184 @@ def test_public_names_are_defined_and_documented():
     src = (_TLA_DIR / "simd.py").read_text()
     tree = ast.parse(src)
     defined = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
-    for name in ("vdiv", "vmax", "vmin", "vmaxs", "vexp", "vdup", "vdups", "vdupv"):
+    for name in ("vdiv", "vmax", "vmin", "vmaxs", "vexp", "vdup", "vdups", "vdupv", "pld", "pst", "vgather", "vld",
+                 "vunpack"):
         assert name in defined, f"{name} not defined in simd.py"
         node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
         assert ast.get_docstring(node), f"{name} has no docstring"
     for name in ("membar", "pge", "vci"):
         assert f'"{name}"' in src
+
+
+def _buffer(dtype=None, shape=(128, ), space="ub", strides=None, offset=0):
+    from tla_src.core import buffer_type
+    return simd.buffer(_Handle("buffer"), buffer_type(shape, dtype or tl.uint8, space, strides, offset))
+
+
+@pytest.mark.parametrize("width", (8, 16, 32))
+@pytest.mark.parametrize("dist", ("NORM", "US", "DS"))
+@pytest.mark.parametrize("access", (False, True))
+def test_predicate_memory_dispatch(width, dist, access):
+    buf, sem = _buffer(), _Semantic()
+    pred = simd.pld(buf[32] if access else buf, None if access else [32], width=tl.constexpr(width), dist=dist,
+                    _semantic=sem)
+    name, args = _last(sem)
+    assert pred.type == simd.vector_type(2048 // width, tl.int1)
+    assert name == "pld" and args[0] is buf.handle and args[1][0].ty == 32
+    assert args[2:] == (2048 // width, dist, f"pb{width}")
+    if access:
+        simd.pst(buf[32], pred, _semantic=sem)
+    else:
+        simd.pst(buf, [32], pred, _semantic=sem)
+    name, args = _last(sem)
+    assert name == "pst" and args[0] is buf.handle and args[1][0].ty == 32
+    assert args[2:] == (pred.handle, f"pb{width}")
+
+
+@pytest.mark.parametrize("buf", [
+    _buffer(space="gm"),
+    _buffer(dtype=tl.int1),
+    _buffer(dtype=tl.int16),
+    _buffer(shape=(16, 16)),
+    _buffer(strides=(2, )),
+    _buffer(offset=1),
+])
+@pytest.mark.parametrize("op", ("pld", "pst"))
+def test_predicate_memory_rejects_invalid_buffers(buf, op):
+    with pytest.raises((TypeError, ValueError)):
+        if op == "pld":
+            simd.pld(buf[0], _semantic=_Semantic())
+        else:
+            simd.pst(buf[0], _mask(64), _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("offset", (-32, 1, 128, 0.5, True))
+@pytest.mark.parametrize("op", ("pld", "pst"))
+def test_predicate_memory_rejects_invalid_offsets(offset, op):
+    with pytest.raises((TypeError, ValueError)):
+        if op == "pld":
+            simd.pld(_buffer()[offset], _semantic=_Semantic())
+        else:
+            simd.pst(_buffer()[offset], _mask(64), _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("width", (1, 64, True, "8"))
+def test_pld_rejects_invalid_density(width):
+    with pytest.raises(ValueError, match="width"):
+        simd.pld(_buffer()[0], width=width, _semantic=_Semantic())
+
+
+def test_predicate_memory_bounds_and_layout_controls():
+    with pytest.raises(ValueError):
+        simd.pld(_buffer()[0], dist="NORM_B8", _semantic=_Semantic())
+    with pytest.raises(ValueError, match="outside"):
+        simd.pld(_buffer(shape=(32, ))[0], dist="DS", _semantic=_Semantic())
+    for lanes in (64, 128, 256):
+        # Exact-sized stores are valid; one byte less must be rejected.
+        simd.pst(_buffer(shape=(lanes // 8, ))[0], _mask(lanes), _semantic=_Semantic())
+        with pytest.raises(ValueError, match="outside"):
+            simd.pst(_buffer(shape=(lanes // 8 - 1, ))[0], _mask(lanes), _semantic=_Semantic())
+    for pred in (_mask(32), _mask(64, tl.int32)):
+        with pytest.raises(ValueError, match="predicate"):
+            simd.pst(_buffer()[0], pred, _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("op", (simd.vgather, simd.vld))
+@pytest.mark.parametrize("dtype,index_dtype,lanes", [
+    (tl.float32, tl.uint32, 64),
+    (tl.float16, tl.uint16, 128),
+    (tl.bfloat16, tl.uint16, 128),
+    (tl.int32, tl.uint32, 64),
+])
+@pytest.mark.parametrize("mode", (simd.MODE.ZEROING, simd.MODE.MERGING))
+def test_indexed_load_dispatch(op, dtype, index_dtype, lanes, mode):
+    buf, index, mask, sem = _buffer(dtype), _vec(lanes, index_dtype), _mask(lanes), _Semantic()
+    result = op(buf[3], index, mask, mode=mode, _semantic=sem)
+    assert result.type == simd.vector_type(lanes, dtype)
+    calls = [args for name, args in sem.builder.calls if name == "vgather"]
+    assert len(calls) == 1
+    assert calls[0][0] is buf.handle and calls[0][1][0].ty == 3
+    assert calls[0][2] is index.handle and calls[0][3] is mask.handle
+    assert calls[0][-1] == lanes
+    assert all(name != "vsel" for name, _ in sem.builder.calls)
+
+
+@pytest.mark.parametrize("buf,index,mask", [
+    (_buffer(tl.int64), _vec(64, tl.uint32), None),
+    (_buffer(tl.float32, space="gm"), _vec(64, tl.uint32), None),
+    (_buffer(tl.float32, shape=(16, 16)), _vec(64, tl.uint32), None),
+    (_buffer(tl.float32, strides=(2, )), _vec(64, tl.uint32), None),
+    (_buffer(tl.float32), _vec(32, tl.uint32), None),
+    (_buffer(tl.float32), _vec(64, tl.int32), None),
+    (_buffer(tl.float16), _vec(128, tl.uint32), None),
+    (_buffer(tl.float32), _vec(64, tl.uint32), _mask(128)),
+    (_buffer(tl.uint8), (_vec(128, tl.uint16), _vec(128, tl.uint16)), None),
+    (_buffer(tl.uint8), (_vec(128, tl.uint16), ), None),
+    (_buffer(tl.uint8), (_vec(128, tl.uint16), _vec(64, tl.uint32)), None),
+])
+def test_indexed_load_rejects_invalid_operands(buf, index, mask):
+    with pytest.raises((TypeError, ValueError)):
+        simd.vld(buf, index, mask, _semantic=_Semantic())
+
+
+def test_indexed_load_rejects_bad_base_and_mode():
+    for offset in (-1, 128, 0.5):
+        with pytest.raises((TypeError, ValueError)):
+            simd.vgather(_buffer(tl.float32)[offset], _vec(64, tl.uint32), _semantic=_Semantic())
+    with pytest.raises(ValueError, match="invalid mode"):
+        simd.vld(_buffer(tl.float32), _vec(64, tl.uint32), mode="unknown", _semantic=_Semantic())
+
+
+def test_vunpack_rejects_ignored_selectors_and_partial_registers():
+    for src, dst, kwargs in [(_vec(256, tl.int8), tl.int16, dict(pp="pp1")),
+                             (_vec(256, tl.int8), tl.int32, dict(part=simd.PART.ODD)), (_vec(128,
+                                                                                             tl.int8), tl.int16, {})]:
+        with pytest.raises(ValueError):
+            simd.vunpack(src, dst, _semantic=_Semantic(), **kwargs)
+
+
+@pytest.mark.parametrize("signed", (False, True))
+@pytest.mark.parametrize("mode", (simd.MODE.ZEROING, simd.MODE.MERGING))
+@pytest.mark.parametrize("masked", (False, True))
+def test_vunpack_result_mask_and_selectors(signed, mode, masked):
+    sem = _Semantic()
+    mask = _mask(64) if masked else None
+    src = _vec(256, tl.int8)
+    result = simd.vunpack(src, tl.int32, mask, pp="pp3", signed=signed, mode=mode, _semantic=sem)
+    assert result.type == simd.vector_type(64, tl.int32)
+    assert sem.builder.calls[0] == ("vunpack", (src.handle, "i32", simd.PART.EVEN, "pp3", signed))
+    selects = [args for name, args in sem.builder.calls if name == "vsel"]
+    assert len(selects) == int(masked)
+    if masked:
+        assert selects[0][0] is mask.handle
+        assert ("scalar", ("i32", 0.0)) in sem.builder.calls
+        assert sem.builder.calls[-2][0] == "vsplat"
+
+
+@pytest.mark.parametrize("kwargs", [
+    dict(pp="pp4"),
+    dict(part="unknown"),
+    dict(part="lower"),
+    dict(part="higher"),
+    dict(signed=1),
+    dict(mode="unknown"),
+    dict(mask=_mask(256)),
+    dict(mask=_mask(64, tl.int32))
+])
+def test_vunpack_rejects_invalid_controls(kwargs):
+    with pytest.raises(ValueError):
+        simd.vunpack(_vec(256, tl.int8), tl.int32, _semantic=_Semantic(), **kwargs)
+
+
+@pytest.mark.parametrize("src,dst", [(tl.float16, tl.int32), (tl.int8, tl.float16), (tl.int16, tl.int8),
+                                     (tl.int32, tl.int64)])
+def test_vunpack_rejects_unsupported_widths(src, dst):
+    with pytest.raises(ValueError, match="supports integer"):
+        simd.vunpack(_vec(64, src), dst, _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("dtype", (tl.int8, tl.uint8, tl.float8e4nv, tl.float8e5))
+@pytest.mark.parametrize("mask", (None, _mask(256)))
+def test_byte_gather_is_explicitly_unsupported(dtype, mask):
+    with pytest.raises(ValueError, match="only 16/32-bit"):
+        simd.vgather(_buffer(dtype), (_vec(128, tl.uint16), _vec(128, tl.uint16)), mask, _semantic=_Semantic())

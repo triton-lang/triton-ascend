@@ -45,6 +45,7 @@ static constexpr const char *DEBUG_TYPE = "StandardizeOp";
 namespace mlir::triton {
 
 void StandardizeOpPass::getDependentDialects(DialectRegistry &registry) const {
+  createPackMemrefPass()->getDependentDialects(registry);
   createPatternMatchRewritePass()->getDependentDialects(registry);
   createSplitMatmulPass()->getDependentDialects(registry);
   createFuseNZSoftmaxPass()->getDependentDialects(registry);

@@ -86,6 +86,7 @@ def setup_unified_builder(main_builder, ascend_builder):
         # Shared helpers the TLA frontend calls directly.
         'create_annotation_mark',
         'create_scope_op',
+        'create_tla_pipeline',
         # TLA-only helpers; the cann extension does not mount parse_attr.
         'get_scope_entry_block',
         'parse_attr',

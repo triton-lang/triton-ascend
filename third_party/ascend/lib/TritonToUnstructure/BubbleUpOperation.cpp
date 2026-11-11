@@ -31,6 +31,50 @@
 
 #define DEBUG_TYPE "triton-bubble-up-operation"
 
+// ImplicitPermute moves the singleton axes of a data-dependent offset. Keep
+// extracting the original token rather than materializing the reshaped offset
+// tensor. Existing arithmetic/expand_dims patterns can then scalarize the row
+// address inside the discrete loop.
+static LogicalResult bubbleUpSingletonOffsetReshape(
+    tensor::ExtractOp op, triton::ReshapeOp reshape,
+    PatternRewriter &rewriter) {
+  auto srcType = cast<RankedTensorType>(reshape.getSrc().getType());
+  auto dstType = cast<RankedTensorType>(reshape.getType());
+  if (!op->hasAttr(ConverterUtils::discreteAttrName) ||
+      !srcType.getElementType().isIntOrIndex() ||
+      !srcType.hasStaticShape() || !dstType.hasStaticShape())
+    return failure();
+
+  SmallVector<unsigned> srcAxes, dstAxes;
+  for (auto [axis, size] : llvm::enumerate(srcType.getShape())) {
+    if (size <= 0)
+      return failure();
+    if (size != 1)
+      srcAxes.push_back(axis);
+  }
+  for (auto [axis, size] : llvm::enumerate(dstType.getShape())) {
+    if (size <= 0)
+      return failure();
+    if (size != 1)
+      dstAxes.push_back(axis);
+  }
+  // Do not flatten, split, or permute multiple data axes. Such reshapes need
+  // a general coordinate conversion and may represent a real data transpose.
+  if (srcAxes.size() > 1 || srcAxes.size() != dstAxes.size() ||
+      (!srcAxes.empty() && srcType.getDimSize(srcAxes.front()) !=
+                               dstType.getDimSize(dstAxes.front())))
+    return failure();
+
+  Value zero = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), 0);
+  SmallVector<Value> indices(srcType.getRank(), zero);
+  if (!srcAxes.empty())
+    indices[srcAxes.front()] = op.getIndices()[dstAxes.front()];
+  auto extracted = rewriter.replaceOpWithNewOp<tensor::ExtractOp>(
+      op, reshape.getSrc(), indices);
+  extracted->setAttr(ConverterUtils::discreteAttrName, rewriter.getUnitAttr());
+  return success();
+}
+
 template <typename ExtractOpTy>
 BubbleUpExtract<ExtractOpTy>::BubbleUpExtract(MLIRContext *context,
                                               bool enableAggressiveMode,
@@ -144,6 +188,13 @@ BubbleUpExtract<ExtractOpTy>::matchAndRewrite(ExtractOpTy op,
     bubbleUpOperation(op, broadCastOp, loc, rewriter);
   } else if (auto expandDimsOp = dyn_cast<triton::ExpandDimsOp>(parentOp)) {
     bubbleUpOperation(op, expandDimsOp, loc, rewriter);
+  } else if (auto reshapeOp = dyn_cast<triton::ReshapeOp>(parentOp)) {
+    if constexpr (std::is_same_v<ExtractOpTy, tensor::ExtractOp>) {
+      if (failed(bubbleUpSingletonOffsetReshape(op, reshapeOp, rewriter)))
+        return failure();
+    } else {
+      return failure();
+    }
   } else if (auto splatOp = dyn_cast<triton::SplatOp>(parentOp)) {
     bubbleUpOperation(op, splatOp, loc, rewriter);
   } else if (auto makeRangeOp = dyn_cast<triton::MakeRangeOp>(parentOp)) {

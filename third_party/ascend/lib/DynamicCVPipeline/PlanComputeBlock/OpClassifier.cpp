@@ -587,7 +587,10 @@ int OpClassifierPass::patternMatchCUBE() {
     LLVM_DEBUG(DBGS() << "CUBE (matmul): " << *op << "\n");
 
     // ---- Upstream pattern matching ----
-    for (Value operand : op->getOperands()) {
+    unsigned numDpsInputs = cast<linalg::MatmulOp>(op).getNumDpsInputs();
+    for (OpOperand &operandRef : op->getOpOperands()) {
+      Value operand = operandRef.get();
+      bool isDpsInit = operandRef.getOperandNumber() >= numDpsInputs;
       Operation *def = operand.getDefiningOp();
       // A null defining op means `operand` is a loop iter_arg block argument.
       // Walk back to its init operand (repeating to also cross nested loops).
@@ -610,8 +613,13 @@ int OpClassifierPass::patternMatchCUBE() {
 
       matchToTensorPattern(def);
       matchTransposePattern(def);
-      matchFillPattern(def);
-      matchEmptyPattern(def);
+      // A fill/empty on the ins side carries real data (e.g. a constant matmul
+      // operand). The CUBE block cannot materialize it, so keep it on VECTOR
+      // and let the inter-core transfer move it to L1.
+      if (isDpsInit) {
+        matchFillPattern(def);
+        matchEmptyPattern(def);
+      }
       matchBroadcastPattern(def);
     }
 

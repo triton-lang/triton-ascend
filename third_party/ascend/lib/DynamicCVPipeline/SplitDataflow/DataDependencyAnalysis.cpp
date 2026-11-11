@@ -108,10 +108,38 @@ bool DataDependencyAnalysisPass::isControlFlowOp(mlir::Operation *op) {
 }
 
 bool DataDependencyAnalysisPass::isCubeAndVectorOp(mlir::Operation *op) {
-  if (isa<tensor::EmptyOp, linalg::FillOp>(op)) {
+  if (isa<tensor::EmptyOp>(op)) {
     return true;
   }
-  return false;
+  auto fillOp = dyn_cast<linalg::FillOp>(op);
+  if (!fillOp) {
+    return false;
+  }
+  if (fillOp->getNumResults() == 0) {
+    return true;
+  }
+  // A fill can be materialized by either core only when its result is consumed
+  // as a DPS init (e.g. a matmul accumulator). When the filled tensor is used
+  // as a real input operand it carries real data that the consumer cannot
+  // rematerialize, so it has to be transferred across cores.
+  mlir::Value fillResult = fillOp->getResult(0);
+  for (mlir::Operation *user : fillResult.getUsers()) {
+    auto linalgUser = dyn_cast<linalg::LinalgOp>(user);
+    if (!linalgUser) {
+      continue;
+    }
+    bool usedAsInit = false;
+    for (mlir::Value init : linalgUser.getDpsInits()) {
+      if (init == fillResult) {
+        usedAsInit = true;
+        break;
+      }
+    }
+    if (!usedAsInit) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool DataDependencyAnalysisPass::isValidShapeForDependency(mlir::Value value) {

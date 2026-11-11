@@ -19,6 +19,18 @@ from triton.backends.compiler import GPUTarget
 pytestmark = pytest.mark.backend("native")
 
 
+@pytest.mark.parametrize("optimized", [None, False, True])
+@pytest.mark.parametrize("manual_sync", [False, True])
+def test_explicit_metaop_and_sync_options(optimized, manual_sync):
+    options = compiler.NPUOptions(arch="Ascend950PR_9579", enable_optimized_metaop=optimized,
+                                  disable_auto_inject_sync=manual_sync)
+    assert options.enable_optimized_metaop is optimized
+    assert options.disable_auto_inject_sync is manual_sync
+    different = compiler.NPUOptions(arch="Ascend950PR_9579", enable_optimized_metaop=optimized,
+                                    disable_auto_inject_sync=not manual_sync)
+    assert options.hash() != different.hash()
+
+
 @pytest.fixture(autouse=True)
 def reset_option_warnings(monkeypatch):
     monkeypatch.setattr(utils, "_WARNED_DEPRECATED_NPU_OPTIONS", set())

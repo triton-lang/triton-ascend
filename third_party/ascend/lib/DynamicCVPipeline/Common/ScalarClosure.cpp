@@ -71,9 +71,12 @@ void ScalarClosure::collectScalarClosure(Value val) {
     return;
   }
 
-  // hard to determine - if scf ops have scalar/memref result, should we clone
-  // the op as well? Perhaps walk into the subregions and clone the
-  // corresponding ops would be better. But for now let's just clone them
+  // A scalar result does not make its whole defining op a scalar operation.
+  // Keep multi-result producers outside the closure and capture their values.
+  if (defOp->getNumResults() != 1) {
+    return;
+  }
+
   collectOuterDependency(defOp);
   scalarOps.insert(defOp);
 }

@@ -2,7 +2,7 @@
   "reduction_profile": "../reduction/david_v100_reduction_v1.json",
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 19,
-  "profile_version": "ascend-950pr-simd-simt-20261027-v152-indirect-memory-loop-dependency-prefixscan-v1",
+  "profile_version": "ascend-950pr-simd-simt-20261027-v152-indirect-memory-loop-dependency-prefixscan-v1-fp16-segmented-load",
   "simt_indirect_store_model": "prefix_mask_rank_factor_20261017",
   "simd_indirect_store_model": "simd_mask_envelope_20261019",
   "simt_indirect_load_model": "prefix_mask_rank_factor_20261017",
@@ -509,6 +509,12 @@
           "startup_intercept_system_cycles": -1343.37436694356,
           "startup_sqrt_program_system_cycles": 670.69078195544,
           "evidence": "data_provider/950pr_simd_single_result_row_reduction_recurrence_20261009.json; endpoint fit uses P=8/32 and T=4/16 only. P=16,T=8 and reduction extents 64/256 are untouched structural holdouts, all within 3.5%. The matcher uses recurrence/reduction geometry and bounded source program count; no operator or kernel name is consumed."
+        },
+        "measured_reduction_geometry": {
+          "independent_rows": 16,
+          "extent": 16,
+          "element_bits": 32,
+          "maximum_lane_steps": 4096
         }
       },
       "continuous_memory": {
@@ -562,6 +568,19 @@
           "8": "simd.indirect_store.fp32.segments_8.incremental_cost",
           "32": "simd.indirect_store.fp32.segments_32.incremental_cost",
           "128": "simd.indirect_store.fp32.segments_128.incremental_cost"
+        },
+        "segmented_load_group_system_cycle_measurements": {
+          "1": {
+            "16": {
+              "64": "simd.segmented_indirect_load.fp16.segments_16.contiguous_64.factor_1.incremental_cost"
+            },
+            "32": {
+              "64": "simd.segmented_indirect_load.fp16.segments_32.contiguous_64.factor_1.incremental_cost"
+            },
+            "128": {
+              "64": "simd.segmented_indirect_load.fp16.segments_128.contiguous_64.factor_1.incremental_cost"
+            }
+          }
         }
       },
       "source": "Ascend950PR versioned microbenchmark evidence. The loaded-index slope is measured independently by probe_indirect_gather_rate.py. data_provider/950pr_simd_indirect_startup_ownership_20261006.json shows why the raw one-wave count-fit intercept is not added: it already contains the separately modeled 56-program kernel boundary and final-store/control stages. Its transaction-count parameter is shared by scalarized FP16/FP32 SIMD accesses; uncovered transfers retain explicit analytical fallback.",

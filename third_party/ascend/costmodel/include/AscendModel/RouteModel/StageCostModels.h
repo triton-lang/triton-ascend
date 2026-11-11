@@ -557,6 +557,12 @@ struct StageModeProfile {
   std::string gridStrideIndirectDotCompositionEvidence;
   /// Measured cost of one physical SuperBlock group's recurrence iteration.
   int64_t recurrenceGroupBaseWarpCount = 0;
+  /// Optional validity domain for the recurrence reduction group curve.
+  /// Zero keeps legacy profiles unrestricted.
+  int64_t recurrenceGroupMeasuredIndependentRows = 0;
+  int64_t recurrenceGroupMeasuredExtent = 0;
+  int64_t recurrenceGroupMeasuredElementBits = 0;
+  int64_t recurrenceGroupMeasuredMaximumLaneSteps = 0;
   std::map<int64_t, std::map<int64_t, double>>
       recurrenceReductionGroupCyclesByFactorAndLaneSteps;
   /// One-time startup of the same measured recurrence group.

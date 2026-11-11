@@ -47,6 +47,17 @@ using namespace triton;
 LogicalResult rewriteOffsetLoops(ModuleOp module);
 LogicalResult scalarizeIndirectAccesses(ModuleOp module);
 
+// Compatibility entry for consumers that still lower pointer producers first.
+// The main TritonToLinalg pass does not register this pattern.
+class AddPtrConverter : public OpConversionPattern<triton::AddPtrOp> {
+public:
+  using OpConversionPattern<triton::AddPtrOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
 class LoadConverter : public OpConversionPattern<triton::LoadOp> {
 private:
   void propagateWasBoolToInt8Attr(Operation *srcLoadOp, Operation *dstOp,
@@ -69,15 +80,32 @@ private:
                                    ConversionPatternRewriter &rewriter) const;
 
 public:
+  // The context-only entry consumes descriptors produced by legacy patterns.
+  explicit LoadConverter(MLIRContext *context)
+      : OpConversionPattern<triton::LoadOp>(context) {}
+
+  // Supplying facts selects public analysis, with no legacy fallback.
   LoadConverter(MLIRContext *context, const MemoryPointerInfos &infos)
-      : OpConversionPattern<triton::LoadOp>(context), pointerInfos(infos) {}
+      : OpConversionPattern<triton::LoadOp>(context), pointerInfos(&infos) {}
 
   LogicalResult
   matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
-  const MemoryPointerInfos &pointerInfos;
+  FailureOr<Value>
+  materializeLegacyPointer(triton::LoadOp op, Value convertedPtr,
+                           ConversionPatternRewriter &rewriter) const;
+  LogicalResult
+  rewriteLegacyIndirectLoad(triton::LoadOp op, OpAdaptor adaptor,
+                            ConversionPatternRewriter &rewriter) const;
+  void getLegacyBoundary(triton::LoadOp op, Value ptr,
+                         ConversionPatternRewriter &rewriter,
+                         SmallVectorImpl<OpFoldResult> &srcOffsets,
+                         SmallVectorImpl<OpFoldResult> &dstOffsets,
+                         SmallVectorImpl<OpFoldResult> &sizes) const;
+
+  const MemoryPointerInfos *pointerInfos = nullptr;
 };
 
 // tempate class's impl must in header file

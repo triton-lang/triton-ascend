@@ -4,6 +4,7 @@ add_triton_library(TritonToLinalg
         OffsetLoopRewrite.cpp
         MemoryPointer.cpp
         LoadStoreConverter.cpp
+        LegacyPointerConverters.cpp
         FunctionConverter.cpp
         ArgMinMaxConverter.cpp
         TritonOpConverter.cpp

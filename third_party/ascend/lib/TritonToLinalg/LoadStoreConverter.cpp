@@ -317,7 +317,6 @@ void LoadConverter::fillTensorWithOtherForMaskScenario(
                 UnitAttr::get(rewriter.getContext()));
 }
 
-
 // Masked load whose `other` is a non-scalar tensor.
 // ---------------------------------------------------------------------------
 // Case 1: other = mask   (Python: tl.load(ptr, mask=mask, other=mask))
@@ -452,6 +451,9 @@ static bool skipNonComplementaryStaticDeinterleave(triton::LoadOp lhs) {
 LogicalResult
 LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                                ConversionPatternRewriter &rewriter) const {
+  if (!pointerInfos &&
+      succeeded(rewriteLegacyIndirectLoad(op, adaptor, rewriter)))
+    return success();
 
   auto ptr = adaptor.getPtr();
   auto mask = op.getMask();
@@ -469,7 +471,9 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     ptr = normalizedScalarMemref;
   } else {
     FailureOr<Value> resolvedPtr =
-        materializeMemoryPointer(op.getPtr(), ptr, pointerInfos, rewriter);
+        pointerInfos ? materializeMemoryPointer(op.getPtr(), ptr, *pointerInfos,
+                                                rewriter)
+                     : materializeLegacyPointer(op, ptr, rewriter);
     if (failed(resolvedPtr))
       return rewriter.notifyMatchFailure(
           op, "unable to materialize the load pointer as a memref");
@@ -623,11 +627,16 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   // boundary check
   auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {
-    SmallVector<OpFoldResult> srcOffsets, boundarySizes;
-    if (failed(getMemoryBoundary(op.getPtr(), boundaryCheck, pointerInfos,
-                                 rewriter, srcOffsets, boundarySizes)))
-      return rewriter.notifyMatchFailure(op, "missing block boundary facts");
-    SmallVector<OpFoldResult> dstOffsets = srcOffsets;
+    SmallVector<OpFoldResult> srcOffsets, dstOffsets, boundarySizes;
+    if (pointerInfos) {
+      if (failed(getMemoryBoundary(op.getPtr(), boundaryCheck, *pointerInfos,
+                                   rewriter, srcOffsets, boundarySizes)))
+        return rewriter.notifyMatchFailure(op, "missing block boundary facts");
+      dstOffsets = srcOffsets;
+    } else {
+      getLegacyBoundary(op, ptr, rewriter, srcOffsets, dstOffsets,
+                        boundarySizes);
+    }
     auto padding = op.getPadding();
     if (padding.has_value()) {
       TypedAttr padAttr = rewriter.getZeroAttr(memRefElementType);
@@ -785,7 +794,6 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   return replaceMaskedLoadWithTensorOther(
       op, allocOp, mayImplicitTransposeWithLastAxis, rewriter);
 }
-
 
 // lowering tt.atomicRMW to linalg.generic
 // If atomic op's return value is used by other op as it's the old value stored
@@ -1455,7 +1463,6 @@ AtomicMaxMinCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
 
   return success();
 }
-
 
 LogicalResult
 StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,

@@ -665,6 +665,17 @@ private:
   const MemoryPointerInfos &pointerInfos;
 };
 
+// Compatibility entry for consumers that still lower pointer producers first.
+// The main TritonToLinalg pass materializes views at memory operations instead.
+class MakeTensorPtrConverter
+    : public OpConversionPattern<triton::MakeTensorPtrOp> {
+public:
+  using OpConversionPattern<triton::MakeTensorPtrOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::MakeTensorPtrOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
 
 class TransposeConverter : public OpConversionPattern<triton::TransOp> {
 public:
@@ -778,17 +789,22 @@ struct DotScaledConverter : public OpConversionPattern<triton::DotScaledOp> {
 
 class PtrToIntConverter : public OpConversionPattern<triton::PtrToIntOp> {
 public:
+  // The context-only entry consumes a previously converted descriptor.
+  explicit PtrToIntConverter(MLIRContext *context,
+                             PatternBenefit benefit = PatternBenefit(1))
+      : OpConversionPattern<triton::PtrToIntOp>(context, benefit) {}
+
   PtrToIntConverter(MLIRContext *context, const MemoryPointerInfos &infos,
                     PatternBenefit benefit = PatternBenefit(1))
       : OpConversionPattern<triton::PtrToIntOp>(context, benefit),
-        pointerInfos(infos) {}
+        pointerInfos(&infos) {}
 
   LogicalResult
   matchAndRewrite(triton::PtrToIntOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
-  const MemoryPointerInfos &pointerInfos;
+  const MemoryPointerInfos *pointerInfos = nullptr;
 };
 
 class IntToPtrConverter : public OpConversionPattern<triton::IntToPtrOp> {

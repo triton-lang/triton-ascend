@@ -3611,12 +3611,16 @@ IntToPtrConverter::matchAndRewrite(triton::IntToPtrOp op, OpAdaptor adaptor,
 LogicalResult
 PtrToIntConverter::matchAndRewrite(triton::PtrToIntOp op, OpAdaptor adaptor,
                                    ConversionPatternRewriter &rewriter) const {
-  auto pointer = materializeMemoryPointer(op.getSrc(), adaptor.getSrc(),
-                                          pointerInfos, rewriter);
-  if (failed(pointer))
-    return failure();
+  Value pointer = adaptor.getSrc();
+  if (pointerInfos) {
+    auto materialized =
+        materializeMemoryPointer(op.getSrc(), pointer, *pointerInfos, rewriter);
+    if (failed(materialized))
+      return failure();
+    pointer = *materialized;
+  }
   FailureOr<Value> address =
-      materializePointerAddress(*pointer, op.getLoc(), rewriter);
+      materializePointerAddress(pointer, op.getLoc(), rewriter);
   if (failed(address)) {
     return rewriter.notifyMatchFailure(op, "input is not a memref type");
   }
@@ -4017,7 +4021,6 @@ LogicalResult IndirectStoreConverter::matchAndRewrite(
   rewriter.eraseOp(op);
   return success();
 }
-
 
 LogicalResult IndexSelectSimdConverter::matchAndRewrite(
     triton::ascend::IndexSelectSimdOp op, OpAdaptor adaptor,

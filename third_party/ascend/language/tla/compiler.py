@@ -45,32 +45,39 @@ def _stamp_tla_mode(module):
     module.set_attr("hacc.mode", builder.parse_attr('"tla"'))
 
 
-def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_template", output_dir=None,
-               named_ops=True):
-    """Run the default non-distributed lowering prefix on a TLA TTIR module.
+def lower_ttir(module, context, output_dir=None):
+    """Run the TLA-specific lowering prefix on a TLA TTIR module.
 
-    A standard inliner prefix (mirroring ``make_ttir``) first resolves JIT
+    A standard inliner prefix in the caller first resolves JIT
     helpers (``tt.func``/``tt.call``) via the Triton inliner interface; TLA
     SIMD VFs are inline ``scope.scope`` ops at this stage, which the inliner
     does not touch (outline-scope in bishengir extracts them later).
+    Callers run ``add_ttir_pipeline`` (Inliner and SymbolDCE) before
+    this entry point: ``make_tla_ttir`` at runtime and ``lower_offline`` in
+    offline tests. The remaining kernel must be a single public,
+    single-block, void ``tt.func``.
 
     The TLA frontend already emits HIVM-HIR-level IR directly (``hivm.hir.*``
     ops, ``annotation.mark``, ``memref`` ops, ``scf.for``, SIMD VF bodies
     inside inline ``scope.scope`` regions with ``ave.hir.*`` ops), so the
     TTIR-oriented stages of the generic runtime
-    chain are no-ops on TLA IR. Stage dumps confirm: ``triton_control_flow_opt``,
+    chain are skipped: ``triton_control_flow_opt``,
     ``triton_to_structure``, ``discrete_mask_access_conversion``,
     ``triton_to_annotation``, ``triton_to_unstructure``, ``triton_to_hivm``,
     ``triton_to_hfusion``, ``triton_to_llvm``, ``bubble_up_operation`` and
-    ``merge_concat_load_buffer`` leave the module byte-identical (the first
-    ``triton_to_structure`` run only performs CSE/cleanup that the final
-    ``triton_to_linalg`` pass already reproduces via its own CSE+canonicalizer
-    sub-pipeline). They are therefore removed; only ``triton_to_linalg`` runs,
-    producing the ttadapter boundary (``func.func`` entry plus kernel ABI
-    attributes), so no ``tt.func``/TTIR reaches npuir (bishengir). The only
-    stage dumps written are ``00_inline.mlir`` and ``01_linalg.mlir``.
-    Distributed and dynamic CV pipelines, later adapter/backend stages and
-    launcher ABI are outside this offline entry point.
+    ``merge_concat_load_buffer``. Only ``tla_to_linalg`` and local
+    canonicalization run here, producing the ttadapter boundary
+    (``func.func`` entry plus kernel ABI attributes). Scalar GM loads are
+    temporarily lowered using the generic scalar-load conversion. This pass
+    converts its owned operations rather than rejecting the entire Triton
+    dialect; remaining operations still require downstream support. Core/VF
+    attributes are then inferred from
+    explicit scopes and the ttadapter boundary is checked.
+    The only stage dumps written are ``00_inline.mlir`` and ``01_linalg.mlir``
+    when ``output_dir`` is provided; the former records the caller-inlined
+    input after TLA mode stamping.
+    Distributed and dynamic CV pipelines, later backend stages and kernel
+    launch are outside this entry point.
     """
     from triton._C.libtriton import ir
     from triton._C.libtriton import passes
@@ -82,14 +89,6 @@ def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_
     # Mark as TLA for the backend pipeline; unconditional (TLA-only entry).
     _stamp_tla_mode(module)
 
-    # Inline JIT helpers before conversion. The MLIR inliner handles both
-    # tt.call (Triton dialect interface) and func.call (registered interface).
-    pm = ir.pass_manager(context)
-    pm.enable_debug()
-    passes.common.add_inliner(pm)
-    pm.run(module, "module")
-    if not module.verify():
-        raise RuntimeError("inlining produced invalid IR")
     if output_dir is not None:
         (output_dir / "00_inline.mlir").write_text(str(module))
 
@@ -100,19 +99,28 @@ def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_
     if calls:
         raise ValueError("unresolved tt.call after inlining; noinline JIT helpers cannot "
                          "cross the ttadapter boundary")
-    # Only triton_to_linalg runs on TLA IR (see docstring): the TTIR-oriented
-    # stages of the runtime chain are no-ops on TLA IR and are removed.
     pm = ir.pass_manager(context)
     pm.enable_debug()
-    ascend_binding.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, True, compile_on_910_95, compile_mode)
+    ascend_binding.passes.ttir.add_tla_to_linalg(pm)
+    passes.common.add_canonicalizer(pm)
     pm.run(module, "module")
     if not module.verify():
-        raise RuntimeError("triton_to_linalg produced invalid IR")
+        raise RuntimeError("tla_to_linalg produced invalid IR")
     _infer_tla_kernel_mode(module, context)
+    from triton._C.libtriton.ascend import ir as ascend_ir
+    ascend_ir.lower_tla_sync_all(module)
     if output_dir is not None:
         (output_dir / "01_linalg.mlir").write_text(str(module))
     check_ttadapter(module)
     return module
+
+
+def add_ttir_pipeline(pm):
+    """Resolve JIT helpers without applying generic Triton optimization."""
+    from triton._C.libtriton import passes
+
+    passes.common.add_inliner(pm)
+    passes.common.add_symbol_dce(pm)
 
 
 def _kernel_entries(module):
@@ -181,9 +189,17 @@ def check_ttadapter(module):
         raise ValueError("invalid ttadapter module")
     operations = []
     module.walk(operations.append)
-    forbidden = [op.get_name() for op in operations if op.get_name().startswith("tt.")]
+    # Check the entry ABI and operations owned by the adapter, not the whole
+    # Triton dialect. This does not enable SIMT scopes or a Tile lowering path.
+    converted_ops = {
+        "tt.func", "tt.call", "tt.return", "tt.addptr", "tt.ptr_to_int", "tt.get_program_id", "tt.get_num_programs",
+        "tt.assert", "tt.load", "tt.clampf"
+    }
+    forbidden = [op.get_name() for op in operations if op.get_name() in converted_ops]
     if forbidden:
-        raise ValueError(f"TTIR operations must not reach npuir: {forbidden}")
+        raise ValueError(f"unconverted TLA adapter operations: {forbidden}")
+    if any(op.get_name() == "hivm.hir.sync_block" for op in operations):
+        raise ValueError("TLA global barriers must be expanded before npuir")
     entries = _kernel_entries(module)
     if len(entries) != 1:
         raise ValueError("expected exactly one public func.func kernel entry")

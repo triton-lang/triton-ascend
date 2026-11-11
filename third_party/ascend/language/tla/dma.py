@@ -8,23 +8,53 @@ Shape, dtype and hardware restrictions are checked by the backend verifier.
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 
-from triton.language.core import builtin, float32, _unwrap_if_constexpr
+from triton.language.core import (builtin, dtype as triton_dtype, float32, float16, bfloat16, int8, int16, int32,
+                                  _unwrap_if_constexpr)
 from .core import buffer
 
 
 class PadMode(Enum):
+    """Padding mode for GM->UB loads and UB->L1 copies.
+
+    - ``PadNull``: no padding.
+    - ``PadFirstElem``: pad using the first element.
+    - ``PadValue``: pad using the configured pad value.
+
+    Whether a mode is valid with the supplied pad value or padding counts is
+    checked by the backend.
+    """
+
     PadNull = "PadNull"
     PadFirstElem = "PadFirstElem"
     PadValue = "PadValue"
 
 
 class EvictionPolicy(Enum):
+    """L2 eviction hint for GM loads.
+
+    - ``EvictNormal``: default eviction behavior.
+    - ``EvictFirst``: mark the data as likely to be evicted first.
+    - ``EvictLast``: mark the data as likely to be evicted last.
+
+    The hint does not change correctness; the backend decides whether a target
+    honors it.
+    """
+
     EvictNormal = "EvictNormal"
     EvictFirst = "EvictFirst"
     EvictLast = "EvictLast"
 
 
 class AtomicKind(Enum):
+    """Atomic operation kind for ``UB->GM`` stores.
+
+    ``ADD``, ``MAX`` and ``MIN`` are the native StoreOp atomic operations
+    documented by the backend. ``NONE`` omits the atomic attribute. The
+    remaining members are enumerated here but do not imply support for a
+    particular route, dtype or target; unsupported combinations are rejected
+    by the backend.
+    """
+
     NONE = "none"
     ADD = "add"
     MAX = "max"
@@ -37,6 +67,17 @@ class AtomicKind(Enum):
 
 
 class UnitFlagMode(IntEnum):
+    """UnitFlag synchronization mode for Cube transfers.
+
+    - ``DISABLED`` (0): UnitFlag disabled.
+    - ``RESERVED`` (1): reserved value.
+    - ``ENABLED_WITHOUT_UPDATE`` (2): enabled without updating the flag.
+    - ``ENABLED_WITH_UPDATE`` (3): enabled and updating the flag.
+
+    An unset ``unit_flag_ctrl`` differs from explicitly disabling UnitFlag;
+    see :class:`FixpipeL0C2GMParams` for the manual-mode launch option.
+    """
+
     DISABLED = 0
     RESERVED = 1
     ENABLED_WITHOUT_UPDATE = 2
@@ -44,23 +85,63 @@ class UnitFlagMode(IntEnum):
 
 
 class FixpipeDMAMode(Enum):
+    """Layout conversion performed by an L0C Fixpipe transfer.
+
+    - ``NZ2ND``: convert the fractal NZ layout to row-major ND.
+    - ``NZ2DN``: convert to transposed ND.
+    - ``NZ2NZ``: keep the fractal layout.
+
+    Which modes a destination supports is checked by the backend.
+    """
+
     NZ2ND = "nz2nd"
     NZ2DN = "nz2dn"
     NZ2NZ = "normal"
 
 
 class FixpipeDualDstMode(Enum):
+    """UB destination split for an L0C->UB Fixpipe transfer.
+
+    For an ``M x N`` matrix in L0C:
+
+    - ``NO_DUAL``: write the whole matrix to the UB indicated by the selected
+      AIV sub-block.
+    - ``ROW_SPLIT``: write ``M/2 x N`` to each UB; ``M`` must be a multiple of
+      2.
+    - ``COLUMN_SPLIT``: write ``M x N/2`` to each UB; ``N`` must be a multiple
+      of 32.
+    """
+
     NO_DUAL = "NO_DUAL"
     ROW_SPLIT = "ROW_SPLIT"
     COLUMN_SPLIT = "COLUMN_SPLIT"
 
 
 class FixpipeSubBlock(Enum):
+    """Target AIV sub-block for a single-destination Fixpipe transfer.
+
+    ``SUB_BLOCK_0`` and ``SUB_BLOCK_1`` select the first or second sub-block.
+    In a dual split, omit this attribute so the split mode determines both
+    destinations.
+    """
+
     SUB_BLOCK_0 = "sub_block_0"
     SUB_BLOCK_1 = "sub_block_1"
 
 
 class FixpipePreQuantMode(Enum):
+    """Pre-quantization conversion applied by an L0C Fixpipe transfer.
+
+    - ``NO_QUANT``: no conversion.
+    - ``F322F16``: ``float32`` to ``float16``.
+    - ``S322I8``: ``int32`` to ``int8``.
+    - ``QF322F32_PRE``: quantized ``float32`` to ``float32``.
+    - ``F322BF16``: ``float32`` to ``bfloat16``.
+
+    The source and destination dtypes must match the selected conversion; the
+    backend validates the combination.
+    """
+
     NO_QUANT = "NO_QUANT"
     F322F16 = "F322F16"
     S322I8 = "S322I8"
@@ -69,6 +150,16 @@ class FixpipePreQuantMode(Enum):
 
 
 class FixpipePreReluMode(Enum):
+    """Pre-activation applied by an L0C Fixpipe transfer.
+
+    - ``NO_RELU``: no activation.
+    - ``NORMAL_RELU``: standard ReLU.
+    - ``LEAKY_RELU``: leaky ReLU.
+    - ``P_RELU``: PReLU.
+
+    Activation support depends on the backend and target.
+    """
+
     NO_RELU = "NO_RELU"
     NORMAL_RELU = "NORMAL_RELU"
     LEAKY_RELU = "LEAKY_RELU"
@@ -132,6 +223,28 @@ def _unit_flag_args(control, group_id):
 
 @dataclass(frozen=True)
 class LoadGM2UBParams:
+    """Configuration for :func:`load_gm_to_ub`.
+
+    :param pad_mode: Compile-time ``PadNull``, ``PadFirstElem`` or ``PadValue``
+        from ``tla.PadMode``. ``None`` leaves the attribute unset.
+    :type pad_mode: tla.PadMode or None
+    :param pad_value: Scalar fill value, converted to the source element type.
+        A runtime tensor must have scalar shape. ``None`` omits the operand.
+    :type pad_value: int, float, scalar tl.tensor or None
+    :param left_padding_num: Number of left padding elements, passed as an
+        index operand. ``None`` omits the operand.
+    :type left_padding_num: int, scalar integer tl.tensor or None
+    :param right_padding_num: Number of right padding elements, passed as an
+        index operand. ``None`` omits the operand.
+    :type right_padding_num: int, scalar integer tl.tensor or None
+    :param eviction_policy: Compile-time L2 eviction policy: ``EvictNormal``,
+        ``EvictFirst`` or ``EvictLast``. ``None`` leaves the attribute unset.
+    :type eviction_policy: tla.EvictionPolicy or None
+
+    All fields default to ``None``. Padding values/counts may be runtime
+    scalars; enum fields must be compile-time values. The backend checks
+    the padding-mode/operand combination and alignment.
+    """
     pad_mode: PadMode = None
     pad_value: object = None
     left_padding_num: object = None
@@ -141,13 +254,32 @@ class LoadGM2UBParams:
 
 @dataclass(frozen=True)
 class StoreUB2GMParams:
-    """Native StoreOp configuration; named for the UB -> GM direction."""
+    """Configuration for :func:`store_ub_to_gm`.
+
+    :param atomic_kind: Compile-time atomic operation. Defaults to ``None``,
+        which omits the attribute. ``ADD``, ``MAX`` and ``MIN`` are the native
+        StoreOp atomic operations documented by the backend. Other enum
+        members do not imply support for this route, dtype or target.
+    :type atomic_kind: tla.AtomicKind or None
+    """
     atomic_kind: AtomicKind = None
 
 
 @dataclass(frozen=True)
 class LoadGM2L1Params:
-    """GM ND -> L1 NZ. The two reverse-layout flags await specification review."""
+    """Configuration for :func:`load_gm_to_l1`.
+
+    :param l2_cache_ctrl: Raw compile-time MTE2 cache-control field, encoded as
+        a signed 32-bit ``l2_cache_mode`` attribute. ``None`` (default) omits
+        it, selecting the backend default. This is not an eviction-policy enum.
+    :type l2_cache_ctrl: int or None
+    :param enable_nz2nd: Reserved reverse-layout flag. Must be ``False``
+        (default); ``True`` raises ``NotImplementedError``.
+    :type enable_nz2nd: bool
+    :param enable_nz2dn: Reserved reverse-layout flag. Must be ``False``
+        (default); ``True`` raises ``NotImplementedError``.
+    :type enable_nz2dn: bool
+    """
     l2_cache_ctrl: int = None
     enable_nz2nd: bool = False
     enable_nz2dn: bool = False
@@ -155,6 +287,22 @@ class LoadGM2L1Params:
 
 @dataclass(frozen=True)
 class CopyUB2L1Params:
+    """Configuration for :func:`copy_ub_to_l1`.
+
+    :param pad_mode: Compile-time ``tla.PadMode`` member. ``None`` omits the
+        padding-mode attribute.
+    :type pad_mode: tla.PadMode or None
+    :param pad_value: Scalar padding value converted to the source element
+        type. ``None`` omits the operand.
+    :type pad_value: int, float, scalar tl.tensor or None
+    :param collapse_reassociation: Compile-time groups of source dimension
+        indices to collapse, for example ``((0, 1), (2, 3))`` for a rank-four
+        source. Each group contains integer axis indices; the backend checks
+        validity. ``None`` omits the attribute.
+    :type collapse_reassociation: tuple[tuple[int, ...], ...] or None
+
+    All fields default to ``None``.
+    """
     pad_mode: PadMode = None
     pad_value: object = None
     collapse_reassociation: tuple = None
@@ -162,18 +310,32 @@ class CopyUB2L1Params:
 
 @dataclass(frozen=True)
 class CopyL12UBParams:
-    """L12UBOp has no configuration operands or attributes."""
+    """Configuration for :func:`copy_l1_to_ub`.
+
+    This immutable configuration has no fields. Pass ``tla.CopyL12UBParams()``
+    or omit the operation's ``params`` argument.
+    """
 
 
 @dataclass(frozen=True)
 class CopyL12BTParams:
-    """n is the native index operand; None uses the last source extent."""
+    """Configuration for :func:`copy_l1_to_bt`.
+
+    :param n: Native L12BT ``n`` index operand. ``None`` (default) uses
+        ``src.shape[-1]``. A runtime tensor must be a scalar integer;
+        backend layout and extent restrictions still apply.
+    :type n: int, scalar integer tl.tensor or None
+    """
     n: object = None
 
 
 @dataclass(frozen=True)
 class CopyL12FBParams:
-    """Reserved pending a backend L1 -> FixBUF operation."""
+    """Reserved configuration for :func:`copy_l1_to_fb`.
+
+    This immutable configuration has no fields. Constructing it is supported,
+    but the copy operation itself always raises ``NotImplementedError``.
+    """
 
 
 @dataclass(frozen=True)
@@ -191,6 +353,38 @@ class CopyL1ToL0Params:
 
 @dataclass(frozen=True)
 class FixpipeL0C2GMParams:
+    """Configuration for :func:`store_l0c_to_gm`.
+
+    :param dma_mode: Compile-time layout conversion. ``NZ2NZ`` (default)
+        preserves NZ, ``NZ2ND`` produces ND, and ``NZ2DN`` produces transposed ND.
+    :type dma_mode: tla.FixpipeDMAMode
+    :param pre_quant: Compile-time conversion mode. Defaults to ``NO_QUANT``.
+        Members include ``F322F16``, ``F322BF16``, ``S322I8`` and
+        ``QF322F32_PRE``. The backend validates the dtype/mode combination.
+    :type pre_quant: tla.FixpipePreQuantMode
+    :param pre_relu: Compile-time activation mode. Defaults to ``NO_RELU``.
+        Other enum members are ``NORMAL_RELU``, ``LEAKY_RELU`` and ``P_RELU``;
+        support depends on the backend and target.
+    :type pre_relu: tla.FixpipePreReluMode
+    :param quant_scale: Optional scalar scale, converted to ``tl.float32``.
+        Required combinations with ``pre_quant`` are backend-dependent.
+        ``None`` (default) omits the operand.
+    :type quant_scale: int, float, scalar tl.tensor or None
+    :param unit_flag_ctrl: Compile-time UnitFlag mode. ``None`` (default)
+        leaves it unset. ``DISABLED`` (0), ``ENABLED_WITHOUT_UPDATE`` (2) and
+        ``ENABLED_WITH_UPDATE`` (3) encode explicit modes. Value 1 is reserved.
+    :type unit_flag_ctrl: tla.UnitFlagMode, int or None
+    :param unit_flag_group_id: Compile-time signed 64-bit group ID, or ``None``
+        (default) to omit it. Match the corresponding MMAD protocol;
+        valid hardware IDs are backend-dependent.
+    :type unit_flag_group_id: int or None
+
+    .. note::
+        ``None`` is different from explicitly disabling UnitFlag. To preserve
+        manual modes, launch with ``unit_flag=False`` to disable automatic
+        UnitFlag inference. Enum membership alone does not guarantee support
+        for every dtype or target.
+    """
     dma_mode: FixpipeDMAMode = FixpipeDMAMode.NZ2NZ
     pre_quant: FixpipePreQuantMode = FixpipePreQuantMode.NO_QUANT
     pre_relu: FixpipePreReluMode = FixpipePreReluMode.NO_RELU
@@ -201,6 +395,36 @@ class FixpipeL0C2GMParams:
 
 @dataclass(frozen=True)
 class FixpipeL0C2L1Params:
+    """Configuration for :func:`copy_l0c_to_l1`.
+
+    :param dma_mode: Compile-time layout mode. Defaults to ``NZ2NZ``.
+        The backend checks which modes are supported for an L1 destination.
+    :type dma_mode: tla.FixpipeDMAMode
+    :param pre_quant: Compile-time conversion mode. Defaults to ``NO_QUANT``.
+        The destination dtype must match the selected conversion.
+    :type pre_quant: tla.FixpipePreQuantMode
+    :param pre_relu: Compile-time activation mode. Defaults to ``NO_RELU``.
+    :type pre_relu: tla.FixpipePreReluMode
+    :param channel_split: Compile-time native channel-split flag for the L1
+        destination. Defaults to ``False``.
+    :type channel_split: bool
+    :param c0_pad_en: Compile-time native C0-padding flag. Defaults to ``True``.
+    :type c0_pad_en: bool
+    :param unit_flag_ctrl: Compile-time UnitFlag mode. ``None`` (default)
+        omits it. Modes 0, 2 and 3 mean disabled, enabled without update and
+        enabled with update, respectively. Value 1 is reserved.
+    :type unit_flag_ctrl: tla.UnitFlagMode, int or None
+    :param unit_flag_group_id: Compile-time signed 64-bit group ID, or ``None``
+        (default) to omit it. Match the corresponding MMAD protocol.
+    :type unit_flag_group_id: int or None
+    :param quant_scale: Optional scalar scale, converted to ``tl.float32``.
+        ``None`` (default) omits the operand.
+    :type quant_scale: int, float, scalar tl.tensor or None
+
+    See :class:`FixpipeL0C2GMParams` for enum meanings and the manual UnitFlag
+    launch option. Supported mode/dtype combinations and group IDs depend
+    on the backend's L1-destination implementation.
+    """
     dma_mode: FixpipeDMAMode = FixpipeDMAMode.NZ2NZ
     pre_quant: FixpipePreQuantMode = FixpipePreQuantMode.NO_QUANT
     pre_relu: FixpipePreReluMode = FixpipePreReluMode.NO_RELU
@@ -213,6 +437,39 @@ class FixpipeL0C2L1Params:
 
 @dataclass(frozen=True)
 class FixpipeL0C2UBParams:
+    """Configuration for :func:`copy_l0c_to_ub`.
+
+    :param dma_mode: Compile-time layout mode. Defaults to ``NZ2NZ``.
+        ``NZ2ND`` produces ND; ``NZ2DN`` produces transposed ND.
+    :type dma_mode: tla.FixpipeDMAMode
+    :param dual_dst_mode: Compile-time UB destination selection: ``NO_DUAL``
+        (default), ``ROW_SPLIT`` or ``COLUMN_SPLIT`` across two AIV sub-blocks.
+    :type dual_dst_mode: tla.FixpipeDualDstMode
+    :param sub_block_idx: AIV sub-block selected in single-destination mode.
+        Defaults to ``SUB_BLOCK_0``; ``SUB_BLOCK_1`` selects the other sub-block.
+        For a dual split, pass ``None`` to omit this attribute and let the split
+        mode determine the two destinations.
+    :type sub_block_idx: tla.FixpipeSubBlock or None
+    :param pre_quant: Compile-time conversion mode. Defaults to ``NO_QUANT``.
+        The destination dtype must match the selected conversion.
+    :type pre_quant: tla.FixpipePreQuantMode
+    :param pre_relu: Compile-time activation mode. Defaults to ``NO_RELU``.
+    :type pre_relu: tla.FixpipePreReluMode
+    :param quant_scale: Optional scalar scale, converted to ``tl.float32``.
+        ``None`` (default) omits the operand.
+    :type quant_scale: int, float, scalar tl.tensor or None
+    :param unit_flag_ctrl: Compile-time UnitFlag mode. ``None`` (default)
+        omits it. Modes 0, 2 and 3 mean disabled, enabled without update and
+        enabled with update, respectively. Value 1 is reserved.
+    :type unit_flag_ctrl: tla.UnitFlagMode, int or None
+    :param unit_flag_group_id: Compile-time signed 64-bit group ID, or ``None``
+        (default) to omit it. Match the corresponding MMAD protocol.
+    :type unit_flag_group_id: int or None
+
+    See :class:`FixpipeL0C2GMParams` for enum meanings and the manual UnitFlag
+    launch option. Supported mode/dtype combinations and group IDs depend
+    on the backend's UB-destination implementation.
+    """
     dma_mode: FixpipeDMAMode = FixpipeDMAMode.NZ2NZ
     dual_dst_mode: FixpipeDualDstMode = FixpipeDualDstMode.NO_DUAL
     sub_block_idx: FixpipeSubBlock = FixpipeSubBlock.SUB_BLOCK_0
@@ -240,7 +497,30 @@ def _route(src, dst, spaces):
 
 @builtin
 def load_gm_to_ub(src, dst, params=None, _semantic=None):
-    """GM -> UB; params scalars become LoadOp operands, enums become attributes."""
+    """Loads global memory into UB using ``hivm.hir.load``.
+
+    :param src: GM source with ``space="gm"``, typically created with ``tla.view``.
+    :type src: tla.buffer
+    :param dst: UB destination with ``space="ub"`` and the same element type
+        as ``src``. Its shape must accommodate the requested data and padding.
+    :type dst: tla.buffer
+    :param params: Configuration object. ``None`` (default) constructs
+        ``tla.LoadGM2UBParams()``. See :class:`LoadGM2UBParams` for field formats.
+    :type params: tla.LoadGM2UBParams or None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+
+    .. note::
+        Pass buffer views, not raw pointers or buffer element accesses.
+        Padding counts are scalar operands; the backend checks supported
+        padding, alignment and dtype combinations. This interface does not
+        take the per-element mask of ``tl.load``.
+
+    Example inside a ``@tla.jit`` kernel::
+
+        tile = tla.alloc((16, 32), tl.float16)
+        tla.load_gm_to_ub(tla.view(X, (16, 32)), tile)
+    """
     _route(src, dst, (("gm", "ub"), ))
     p = _params(params, LoadGM2UBParams)
     attrs = {
@@ -255,6 +535,24 @@ def load_gm_to_ub(src, dst, params=None, _semantic=None):
 
 @builtin
 def store_ub_to_gm(src, dst, params=None, _semantic=None):
+    """Stores UB data to global memory using ``hivm.hir.store``.
+
+    :param src: UB source with ``space="ub"``.
+    :type src: tla.buffer
+    :param dst: GM destination with ``space="gm"``, typically created with
+        ``tla.view``. Its element type must match ``src``.
+    :type dst: tla.buffer
+    :param params: Configuration object. ``None`` (default) constructs
+        ``tla.StoreUB2GMParams()``. See :class:`StoreUB2GMParams` for atomic modes.
+    :type params: tla.StoreUB2GMParams or None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+
+    .. note::
+        Source and destination views must describe a backend-compatible tile.
+        Atomic operation and dtype support depend on the target backend;
+        ``atomic_kind=None`` leaves the atomic attribute unset.
+    """
     _route(src, dst, (("ub", "gm"), ))
     p = _params(params, StoreUB2GMParams)
     attrs = {"atomic_kind": _enum_attr(p.atomic_kind, AtomicKind, "atomic_kind", _semantic)}
@@ -263,7 +561,26 @@ def store_ub_to_gm(src, dst, params=None, _semantic=None):
 
 @builtin
 def load_gm_to_l1(src, dst, params=None, _semantic=None):
-    """GM ND -> L1 NZ via ND2NZOp, including its raw i32 L2 cache field."""
+    """Loads GM data into L1 with ND-to-NZ conversion using ``hivm.hir.nd2nz``.
+
+    :param src: GM source with ``space="gm"`` in ND layout.
+    :type src: tla.buffer
+    :param dst: L1 destination with ``space="l1"`` in the corresponding NZ
+        layout. For an aligned fp16 ``(M, N)`` tile, a physical NZ shape is
+        ``(N // 16, M // 16, 16, 16)``.
+    :type dst: tla.buffer
+    :param params: Configuration object. ``None`` (default) constructs
+        ``tla.LoadGM2L1Params()``. See :class:`LoadGM2L1Params` for cache control.
+    :type params: tla.LoadGM2L1Params or None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+
+    .. note::
+        Emit this Cube transfer in ``tla.scope.cube()``. The two views must
+        describe the same logical tile in their respective layouts. The
+        backend checks dtype and layout alignment. Reverse-layout flags
+        ``enable_nz2nd`` and ``enable_nz2dn`` must remain ``False``.
+    """
     _route(src, dst, (("gm", "l1"), ))
     p = _params(params, LoadGM2L1Params)
     if _boolean(p.enable_nz2nd, "enable_nz2nd") or _boolean(p.enable_nz2dn, "enable_nz2dn"):
@@ -277,7 +594,58 @@ def load_gm_to_l1(src, dst, params=None, _semantic=None):
 
 
 @builtin
+def load_gm_to_l1_mx_scale(src, dst, params=None, _semantic=None):
+    """Loads an MX E8M0 scale tensor into L1 using ``hivm.hir.load_scale``.
+
+    The native MX scale DMA converts the GM row-major scale layout into the
+    zZ (A) / nN (B) fractal layout consumed by :func:`tla.cube.mmad_mx`.
+    Unlike :func:`load_gm_to_l1`, this route does not emit an ND-to-NZ
+    conversion, which cannot express the scale fractal.
+
+    :param src: GM scale source with ``space="gm"`` and logical shape
+        ``(rows, K // 32)``, typically created with ``tla.view``.
+    :type src: tla.buffer
+    :param dst: L1 destination with ``space="l1"`` and element type
+        ``int8``/``uint8``. Its 4-D fractal shape is
+        ``(rows // 16, (K // 32 + 1) // 2, 16, 2)``.
+    :type dst: tla.buffer
+    :param params: Reserved configuration object; must be ``None``.
+    :type params: None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+
+    .. note::
+        Emit this Cube transfer in ``tla.scope.cube()``. The scale tile must
+        be contiguous along the ``K // 32`` axis. The backend checks the
+        dtype, rank and alignment of both operands.
+    """
+    _route(src, dst, (("gm", "l1"), ))
+    if _unwrap_if_constexpr(params) is not None:
+        raise TypeError("tla.load_gm_to_l1_mx_scale takes no configuration")
+    _semantic.builder.create_hivm_load_mx_scale(src.handle, dst.handle, is_transposed=False)
+
+
+@builtin
 def copy_ub_to_l1(src, dst, params=None, _semantic=None):
+    """Copies UB data into L1 using ``hivm.hir.copy``.
+
+    :param src: UB source with ``space="ub"``.
+    :type src: tla.buffer
+    :param dst: L1 destination with ``space="l1"`` and a backend-compatible
+        shape and element type.
+    :type dst: tla.buffer
+    :param params: Configuration object. ``None`` (default) constructs
+        ``tla.CopyUB2L1Params()``. See :class:`CopyUB2L1Params` for padding
+        and dimension-reassociation formats.
+    :type params: tla.CopyUB2L1Params or None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+
+    .. note::
+        This route does not implicitly perform the GM-to-L1 ND2NZ conversion.
+        Prepare compatible physical layouts. When a Cube scope consumes data
+        produced by a Vector scope, explicitly synchronize the handoff.
+    """
     _route(src, dst, (("ub", "l1"), ))
     p = _params(params, CopyUB2L1Params)
     attrs = {"pad_mode": _enum_attr(p.pad_mode, PadMode, "padmode", _semantic)}
@@ -293,7 +661,23 @@ def copy_ub_to_l1(src, dst, params=None, _semantic=None):
 
 @builtin
 def copy_l1_to_ub(src, dst, params=None, _semantic=None):
-    """L1 NZ -> UB ND; L12UBOp includes the layout conversion."""
+    """Copies L1 NZ data into UB ND layout using ``hivm.hir.l12ub``.
+
+    :param src: L1 source with ``space="l1"`` in NZ layout.
+    :type src: tla.buffer
+    :param dst: UB destination with ``space="ub"`` in the corresponding ND layout.
+    :type dst: tla.buffer
+    :param params: Empty configuration object. ``None`` (default) is equivalent
+        to ``tla.CopyL12UBParams()``; this native operation has no options.
+    :type params: tla.CopyL12UBParams or None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+
+    .. note::
+        Emit this Cube transfer in ``tla.scope.cube()``. Before a Vector scope
+        consumes the destination, synchronize the handoff and select the AIV
+        sub-block that owns the written UB. The backend checks layout and dtype.
+    """
     _route(src, dst, (("l1", "ub"), ))
     _params(params, CopyL12UBParams)
     _semantic.builder.create_tla_l12ub(src.handle, dst.handle)
@@ -301,7 +685,25 @@ def copy_l1_to_ub(src, dst, params=None, _semantic=None):
 
 @builtin
 def copy_l1_to_bt(src, dst, params=None, _semantic=None):
-    """Emit L12BTOp; standalone backend lowering remains a separate capability."""
+    """Copies L1 data into the bias buffer using ``hivm.hir.l12bt``.
+
+    :param src: L1 source with ``space="l1"``.
+    :type src: tla.buffer
+    :param dst: Bias-buffer destination with ``space="bt"``.
+    :type dst: tla.buffer
+    :param params: Configuration object. ``None`` (default) constructs
+        ``tla.CopyL12BTParams()``. Its ``n`` operand defaults to ``src.shape[-1]``.
+        See :class:`CopyL12BTParams` for the scalar format.
+    :type params: tla.CopyL12BTParams or None
+    :return: None. The emitted operation writes to ``dst``.
+    :rtype: None
+
+    .. note::
+        This frontend emits the native operation; standalone compilation
+        requires L12BT lowering support in the selected backend. A recognized
+        ``"bt"`` address space does not imply support for allocating it with
+        ``tla.alloc``. Backend layout and dtype restrictions still apply.
+    """
     _route(src, dst, (("l1", "bt"), ))
     p = _params(params, CopyL12BTParams)
     n = src.shape[-1] if _unwrap_if_constexpr(p.n) is None else p.n
@@ -310,6 +712,22 @@ def copy_l1_to_bt(src, dst, params=None, _semantic=None):
 
 @builtin
 def copy_l1_to_fb(src, dst, params=None, _semantic=None):
+    """Describes the reserved L1-to-FixBUF transfer interface.
+
+    :param src: L1 source with ``space="l1"``.
+    :type src: tla.buffer
+    :param dst: FixBUF destination with ``space="fb"``.
+    :type dst: tla.buffer
+    :param params: Empty configuration object. ``None`` (default) is equivalent
+        to ``tla.CopyL12FBParams()``.
+    :type params: tla.CopyL12FBParams or None
+    :raises NotImplementedError: After validating the inputs, because no
+        backend operation has been mapped to this route.
+
+    .. note::
+        This interface does not currently emit a copy or return a result.
+        Constructing ``CopyL12FBParams`` does not make the route available.
+    """
     _route(src, dst, (("l1", "fb"), ))
     _params(params, CopyL12FBParams)
     raise NotImplementedError("PR #4403 has no L1->FixBUF DMA op; mapping requires backend review")
@@ -317,6 +735,31 @@ def copy_l1_to_fb(src, dst, params=None, _semantic=None):
 
 @builtin
 def copy_l1_to_l0(src, dst, params=None, _semantic=None):
+    """Copies L1 data into L0A/L0B using ``hivm.hir.l12l0``.
+
+    :param src: L1 source with ``space="l1"``.
+    :type src: tla.buffer
+    :param dst: L0A or L0B destination with ``space="l0a"`` or ``"l0b"``.
+    :type dst: tla.buffer
+    :param params: Configuration object. ``None`` (default) constructs
+        ``tla.CopyL1ToL0Params()``, which is incomplete for this route. See
+        :class:`CopyL1ToL0Params` for the native K-partition fields.
+    :type params: tla.CopyL1ToL0Params or None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+    :raises ValueError: If a required K-partition field or ``m`` is ``None``.
+    :raises NotImplementedError: If ``actual_batch`` is set, because the native
+        ``L12L0Op`` has no corresponding field.
+
+    ``k_part_idx``, ``k_part``, ``k_part_ceil``, ``k_part_loop``,
+    ``k_part_actual`` and ``m`` must all be compile-time integers. Set
+    ``is_transpose`` to request the native transposed form.
+
+    .. note::
+        Emit this Cube transfer in ``tla.scope.cube()``. This interface emits
+        the native operation directly; backend layout, dtype and alignment
+        restrictions still apply.
+    """
     _route(src, dst, (("l1", "l0a"), ("l1", "l0b")))
     p = _params(params, CopyL1ToL0Params)
     if _unwrap_if_constexpr(p.actual_batch) is not None:
@@ -356,23 +799,111 @@ def _fixpipe(src, dst, p, semantic):
 
 @builtin
 def store_l0c_to_gm(src, dst, params=None, _semantic=None):
+    """Stores the L0C accumulator to GM using ``hivm.hir.fixpipe``.
+
+    :param src: L0C source with ``space="l0c"``, typically the fractal
+        accumulator produced by ``tla.cube.mmad``.
+    :type src: tla.buffer
+    :param dst: GM destination with ``space="gm"``. Its shape and element
+        type must match the selected layout and quantization mode.
+    :type dst: tla.buffer
+    :param params: Configuration object. ``None`` (default) constructs
+        ``tla.FixpipeL0C2GMParams()``. See :class:`FixpipeL0C2GMParams` for
+        conversion, activation, scale and UnitFlag fields.
+    :type params: tla.FixpipeL0C2GMParams or None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+
+    .. note::
+        Emit in ``tla.scope.cube()``. Select ``NZ2ND`` for a logical row-major
+        GM output, or ``NZ2DN`` for transposed ND. The default ``NZ2NZ`` keeps
+        the fractal layout. Dtype conversion is controlled by ``pre_quant``;
+        the backend checks the destination layout, dtype and alignment.
+    """
     _route(src, dst, (("l0c", "gm"), ))
     _fixpipe(src, dst, _params(params, FixpipeL0C2GMParams), _semantic)
 
 
 @builtin
 def copy_l0c_to_ub(src, dst, params=None, _semantic=None):
+    """Copies the L0C accumulator to UB using ``hivm.hir.fixpipe``.
+
+    :param src: L0C source with ``space="l0c"`` in fractal layout.
+    :type src: tla.buffer
+    :param dst: UB destination with ``space="ub"``. Its shape and element
+        type must match the selected layout and quantization mode.
+    :type dst: tla.buffer
+    :param params: Configuration object. ``None`` (default) constructs
+        ``tla.FixpipeL0C2UBParams()``. See :class:`FixpipeL0C2UBParams` for
+        conversion and AIV destination-selection fields.
+    :type params: tla.FixpipeL0C2UBParams or None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+
+    .. note::
+        Emit in ``tla.scope.cube()`` and synchronize before a Vector consumer.
+        With ``NO_DUAL``, only the selected AIV sub-block owns the output;
+        with a split mode, each AIV must use its own output portion. Writing
+        back unconditionally from both sub-blocks can overwrite valid data.
+        Mode, dtype and alignment restrictions are checked by the backend.
+    """
     _route(src, dst, (("l0c", "ub"), ))
     _fixpipe(src, dst, _params(params, FixpipeL0C2UBParams), _semantic)
 
 
 @builtin
 def copy_l0c_to_l1(src, dst, params=None, _semantic=None):
+    """Copies the L0C accumulator to L1 using ``hivm.hir.fixpipe``.
+
+    :param src: L0C source with ``space="l0c"`` in fractal layout.
+    :type src: tla.buffer
+    :param dst: L1 destination with ``space="l1"``. Its shape and element
+        type must match the selected layout and quantization mode.
+    :type dst: tla.buffer
+    :param params: Configuration object. ``None`` (default) constructs
+        ``tla.FixpipeL0C2L1Params()``. See :class:`FixpipeL0C2L1Params` for
+        conversion, channel-split and C0-padding fields.
+    :type params: tla.FixpipeL0C2L1Params or None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+
+    .. note::
+        Emit in ``tla.scope.cube()``. The backend checks mode, dtype and
+        alignment. If the result is subsequently copied to UB, synchronize
+        with the Vector consumer and respect UB sub-block ownership.
+    """
     _route(src, dst, (("l0c", "l1"), ))
     _fixpipe(src, dst, _params(params, FixpipeL0C2L1Params), _semantic)
 
 
 @builtin
 def set_ctrl(enable, idx, _semantic=None):
-    """Native SetCtrlOp; argument order remains (enable, idx)."""
+    """Sets or clears a hardware CTRL bit using ``hivm.hir.set_ctrl``.
+
+    :param enable: Compile-time ``True`` to set the bit or ``False`` to clear it.
+    :type enable: bool
+    :param idx: Compile-time bit index, representable as a signed 64-bit integer.
+        The bit must be supported by the target hardware and backend.
+    :type idx: int
+    :return: None.
+    :rtype: None
+
+    .. note::
+        The argument order is ``(enable, idx)``. Pass a numeric bit index,
+        not a named mode enum. The previous state is not automatically restored.
+        For example, ``tla.set_ctrl(False, 48)`` emits a clear of CTRL bit 48.
+    """
     _semantic.builder.create_tla_set_ctrl(_boolean(enable, "enable"), _integer(idx, "idx"))
+
+
+@builtin
+def set_atomic(kind, dtype, _semantic=None):
+    """Set the atomic mode for following GM stores; use NONE to reset it."""
+    kind = _unwrap_if_constexpr(kind)
+    dtype = _unwrap_if_constexpr(dtype)
+    if not isinstance(kind, AtomicKind) or kind not in (AtomicKind.NONE, AtomicKind.ADD, AtomicKind.MAX,
+                                                        AtomicKind.MIN):
+        raise ValueError("set_atomic kind must be AtomicKind.NONE, ADD, MAX, or MIN")
+    if not isinstance(dtype, triton_dtype) or dtype not in (float32, float16, bfloat16, int8, int16, int32):
+        raise ValueError("set_atomic dtype must be tl.float32, float16, bfloat16, int8, int16, or int32")
+    _semantic.builder.create_tla_set_atomic(kind.value, dtype.to_ir(_semantic.builder))

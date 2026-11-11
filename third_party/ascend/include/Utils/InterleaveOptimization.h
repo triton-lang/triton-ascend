@@ -66,14 +66,17 @@ namespace triton {
 
 enum class IndexMode : int { EVEN_MODE = 0, ODD_MODE = 1 };
 
-LogicalResult
-DeinterleaveStatusOptimization(triton::LoadOp op,
-                               triton::LoadOp::Adaptor adaptor,
-                               ConversionPatternRewriter &rewriter);
+// Gather complete interleaved tiles before extracting their even/odd lanes.
+void optimizeDiscreteDeinterleavedLoads(ModuleOp moduleOp);
+
+LogicalResult DeinterleaveStatusOptimization(
+    triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
+    ConversionPatternRewriter &rewriter, Value writebackDest);
 
 LogicalResult DeinterleaveStatusWithMaskOptimization(
     triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
-    ConversionPatternRewriter &rewriter, MaskState &mstate, Value localMem);
+    ConversionPatternRewriter &rewriter, MaskState &mstate, Value localMem,
+    Value writebackDest);
 
 LogicalResult
 InterleaveStatusOptimization(SmallVector<Operation *> materializeVec);

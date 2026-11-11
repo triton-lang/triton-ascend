@@ -86,11 +86,13 @@ pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/asce
 我们为用户提供了每日更新的Nightly包，可以使用以下命令来安装：
 
 ```bash
-# 版本号的日期后缀随构建日期变化，以安装2026/11/10为例
+# 版本格式为：<版本号>+devYYYYMMDD，以2026/11/10的日构建为例
 pip install triton-ascend==3.6.0+dev20261110 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly
 ```
-同时用户也能在[历史列表](https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly/triton-ascend/)中找到所有的nightly包。
->注意：Nightly 包为测试版本，不建议生产环境使用。
+
+同时用户也能在[历史列表](https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly/triton-ascend/)中找到所有的Nightly包。
+
+> 注意：Nightly包为测试版本，不建议生产环境使用。
 
 ### 源码安装
 

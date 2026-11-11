@@ -693,7 +693,6 @@ def _check_bishengir_supports_optimized_metaop() -> bool:
         return False
 
 
-@functools.lru_cache(None)
 def _get_ascend_path() -> Path:
     path = os.getenv("ASCEND_HOME_PATH", "")
     if path == "":

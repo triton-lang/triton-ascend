@@ -2829,7 +2829,6 @@ def ttir_to_npubin(mod, metadata, opt):
             _compile_option_list += ["--enable-hivm-compile=false"]
             _compile_option_list += ["--enable-triton-ir-compile"]
             _compile_option_list += ["--pure-simt"]
-            _compile_option_list += _custom_core_count_options(metadata)
             _compile_option_list += [f"--num-warps={opt.num_warps}"]
             _compile_option_list += [f"--threads-per-warp={opt.warp_size}"]
             if opt.simt_optimization_mode != 0000000:

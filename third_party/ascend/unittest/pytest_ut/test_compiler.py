@@ -220,6 +220,18 @@ def test_compile_mode_env_keeps_runtime_scalar_binding_consistent(monkeypatch):
         {"N": 17}, [("i32", )], {"compile_mode": "simd"}) == {"auto_simt_runtime_scalar_values": ((0, 17), )}
 
 
+@pytest.mark.parametrize("env_mode", [None, "simt_only"])
+def test_runtime_scalar_binding_defers_target_validation(monkeypatch, env_mode):
+    monkeypatch.delenv("TRITON_ASCEND_COMPILE_MODE", raising=False)
+    if env_mode is not None:
+        monkeypatch.setenv("TRITON_ASCEND_COMPILE_MODE", env_mode)
+    backend = compiler.AscendBackend(GPUTarget("npu", "Ascend910B1", 32))
+
+    assert backend.get_runtime_compile_options({"N": 17}, [("i32", )], {"compile_mode": "simt_only"}) == {}
+    with pytest.raises(ValueError, match="supported only on Ascend 950"):
+        backend.parse_options({"compile_mode": "simt_only"})
+
+
 _IGNORED_OPTIONS = sorted(utils._DEPRECATED_NPU_OPTIONS - utils._DEPRECATED_NPU_OPTION_ROUTES.keys() -
                           utils._DEPRECATED_NPU_OPTION_ALIASES.keys() - {"stream"})
 

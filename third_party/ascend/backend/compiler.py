@@ -3079,7 +3079,9 @@ class AscendBackend(BaseBackend):
         fact: it does not inspect a kernel name, argument name, source path, or
         tensor shape.
         """
-        compile_mode = _normalize_compile_mode(options.get("compile_mode"), self.target.arch)
+        # Binding runs before option parsing, including cache-key-only callers.
+        # Resolve precedence here; leave mode/target validation to NPUOptions.
+        compile_mode = os.environ.get("TRITON_ASCEND_COMPILE_MODE") or options.get("compile_mode")
         if compile_mode != "simd_simt":
             return {}
         explicit = options.get("auto_simt_runtime_scalar_values")

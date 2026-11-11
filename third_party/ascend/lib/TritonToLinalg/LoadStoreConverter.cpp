@@ -683,7 +683,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
       auto [ptrStrides, ptrOffsets] = memRefType.getStridesAndOffset();
       if (ptrStrides.back() == 2 && (memRefShape.back() % 2 == 0) &&
           !skipNonComplementaryStaticDeinterleave(op) &&
-          mlir::triton::DeinterleaveStatusOptimization(op, adaptor, rewriter,
+          mlir::triton::DeinterleaveStatusOptimization(op, ptr, rewriter,
                                                        writebackDest)
               .succeeded()) {
         return success();
@@ -743,7 +743,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
       isConstantIntValue(mstate.dims.back(), memRefType.getShape().back())) {
     auto [ptrStrides, ptrOffsets] = memRefType.getStridesAndOffset();
     if (ptrStrides.back() == 2 && (memRefType.getShape().back() % 2 == 0) &&
-        DeinterleaveStatusWithMaskOptimization(op, adaptor, rewriter, mstate,
+        DeinterleaveStatusWithMaskOptimization(op, ptr, rewriter, mstate,
                                                allocOp, writebackDest)
             .succeeded()) {
       return success();

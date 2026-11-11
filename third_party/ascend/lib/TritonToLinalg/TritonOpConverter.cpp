@@ -1255,6 +1255,51 @@ ReshapeConverter::matchAndRewrite(triton::ReshapeOp op, OpAdaptor adaptor,
   Value src = op.getSrc();
   auto dst = op.getResult();
 
+  if (op.getAllowReorder()) {
+    auto srcShape = cast<ShapedType>(src.getType()).getShape();
+    auto dstShape = cast<ShapedType>(dst.getType()).getShape();
+
+    SmallVector<std::pair<int64_t, size_t>> srcCore;
+    SmallVector<int64_t> dstCore;
+    for (auto [i, extent] : llvm::enumerate(srcShape))
+      if (extent != 1)
+        srcCore.emplace_back(extent, i);
+    for (int64_t extent : dstShape)
+      if (extent != 1)
+        dstCore.push_back(extent);
+
+    if (srcCore.size() == dstCore.size() &&
+        !std::equal(srcCore.begin(), srcCore.end(), dstCore.begin(),
+                    [](const auto &core, int64_t extent) {
+                      return core.first == extent;
+                    })) {
+
+      SmallVector<bool> used(srcCore.size(), false);
+      SmallVector<bool> placed(srcShape.size(), false);
+      SmallVector<int> order;
+      for (int64_t extent : dstCore) {
+        size_t match = srcCore.size();
+        for (size_t j = 0; j < srcCore.size() && match == srcCore.size(); ++j)
+          if (!used[j] && srcCore[j].first == extent)
+            match = j;
+        if (match == srcCore.size()) {
+          return rewriter.notifyMatchFailure(
+              loc,
+              "allow_reorder reshape: destination non-singleton extent has no "
+              "matching source non-singleton extent");
+        }
+        used[match] = true;
+        order.push_back(static_cast<int>(srcCore[match].second));
+        placed[srcCore[match].second] = true;
+      }
+
+      for (size_t i = 0; i < srcShape.size(); ++i)
+        if (!placed[i])
+          order.push_back(static_cast<int>(i));
+      src = ConverterUtils::getTransposedValue(src, loc, rewriter, order);
+    }
+  }
+
   Value shape = rewriter.create<arith::ConstantOp>(
       loc,
       rewriter.getI64TensorAttr(cast<ShapedType>(dst.getType()).getShape()));

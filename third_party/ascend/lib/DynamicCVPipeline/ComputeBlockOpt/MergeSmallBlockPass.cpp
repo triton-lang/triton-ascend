@@ -20,8 +20,9 @@
  * THE SOFTWARE.
  */
 
-#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/BlockDependencyGraph.h"
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
@@ -45,6 +46,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
 #include <optional>
+#include <set>
 #include <utility>
 
 static constexpr const char *DEBUG_TYPE = "merge-small-block";
@@ -76,118 +78,10 @@ private:
   const int MIN_VF_SIZE = 3;
 };
 
-inline bool isTensorComputeOpLegacy(Operation *op) {
-  if (llvm::isa<tensor::CollapseShapeOp, tensor::ExpandShapeOp,
-                tensor::EmptyOp>(op)) {
-    return false;
-  }
-  bool allOperandsTensor = llvm::all_of(op->getOperands(), [](Value operand) {
-    return llvm::isa<RankedTensorType>(operand.getType());
-  });
-  bool allResultsTensor = llvm::all_of(op->getResults(), [](Value result) {
-    return llvm::isa<RankedTensorType>(result.getType());
-  });
-  return allOperandsTensor && allResultsTensor;
-}
-
-// Keep this whitelist aligned with NPUIR ArithToHFusion and InlineBrc.
-// The dynamic CV pipeline targets regbase; do not look through casts here.
-static bool isDirectInlineBrcArithUser(Operation *op) {
-  if (!llvm::all_of(op->getOperandTypes(),
-                    [](Type type) { return isa<RankedTensorType>(type); }) ||
-      op->getNumResults() != 1) {
-    return false;
-  }
-  auto resultType = dyn_cast<RankedTensorType>(op->getResult(0).getType());
-  // Static shapes guarantee a fresh tensor.empty destination during lowering.
-  if (!resultType || !resultType.hasStaticShape()) {
-    return false;
-  }
-
-  if (auto cmp = dyn_cast<arith::CmpFOp>(op)) {
-    switch (cmp.getPredicate()) {
-    case arith::CmpFPredicate::ORD:
-    case arith::CmpFPredicate::UNO:
-    case arith::CmpFPredicate::AlwaysTrue:
-    case arith::CmpFPredicate::AlwaysFalse:
-      return false;
-    default:
-      return true;
-    }
-  }
-  if (auto cmp = dyn_cast<arith::CmpIOp>(op)) {
-    // Ordered i1 comparisons introduce casts; only accept direct lowering.
-    // Since we disscuss about fill's user, operands in op are allways
-    // RankedTensorType, so we can safely use getElementTypeOrSelf to get the
-    // element type.
-    return !getElementTypeOrSelf(cmp.getLhs().getType()).isInteger(1) ||
-           cmp.getPredicate() == arith::CmpIPredicate::eq ||
-           cmp.getPredicate() == arith::CmpIPredicate::ne;
-  }
-  return isa<arith::AddFOp, arith::AddIOp, arith::SubFOp, arith::SubIOp,
-             arith::MulFOp, arith::MulIOp, arith::DivFOp, arith::DivSIOp,
-             arith::DivUIOp, arith::MaxSIOp, arith::MaxUIOp, arith::MinSIOp,
-             arith::MinUIOp, arith::NegFOp, arith::AndIOp, arith::OrIOp,
-             arith::XOrIOp, arith::MinNumFOp, arith::MinimumFOp,
-             arith::MaxNumFOp, arith::MaximumFOp, arith::RemFOp, arith::RemSIOp,
-             arith::RemUIOp, arith::ShLIOp, arith::ShRSIOp, arith::ShRUIOp,
-             arith::FloorDivSIOp, arith::CeilDivSIOp, arith::CeilDivUIOp,
-             arith::SelectOp>(op);
-}
-
-static bool isFillEliminableByInlineBrc(linalg::FillOp fillOp) {
-  if (fillOp->getNumResults() != 1 || fillOp.getInputs().size() != 1 ||
-      !fillOp.getInputs().front().getType().isIntOrFloat() ||
-      !isa<RankedTensorType>(fillOp->getResult(0).getType())) {
-    return false;
-  }
-
-  // Every use must disappear before the fill can be excluded from the count.
-  // Arith users have no DPS inits and lower to fresh destinations above.
-  return llvm::all_of(fillOp->getResult(0).getUsers(),
-                      isDirectInlineBrcArithUser);
-}
-
-inline bool isTensorComputeOp(Operation *op) {
-  auto funcOp = op->getParentOfType<func::FuncOp>();
-  if (funcOp) {
-    constexpr llvm::StringLiteral legacyFuncNames[]{"pcb10_tc01_kernel"};
-    if (llvm::is_contained(legacyFuncNames, funcOp.getSymName())) {
-      return isTensorComputeOpLegacy(op);
-    }
-  }
-  if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
-    if (linalg::isaCopyOpInterface(linalgOp)) {
-      return false;
-    }
-    auto genericOp = dyn_cast<linalg::GenericOp>(op);
-    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value()) {
-      return false;
-    }
-    if (auto fillOp = dyn_cast<linalg::FillOp>(op)) {
-      auto input = fillOp.getInputs()[0];
-      auto constantOp = input.getDefiningOp<arith::ConstantOp>();
-      if (constantOp) {
-        return false;
-      }
-      if (isFillEliminableByInlineBrc(fillOp)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  if (op->hasTrait<mlir::OpTrait::Elementwise>()) {
-    return llvm::any_of(op->getResultTypes(),
-                        [](Type t) { return isa<RankedTensorType>(t); });
-  }
-  return false;
-}
-
 static int cntComputeOps(const llvm::ArrayRef<Operation *> ops) {
   int count = 0;
   for (Operation *op : ops) {
-    if (isTensorComputeOp(op)) {
+    if (CVPipeline::isTensorComputeOp(op)) {
       count++;
     }
   }
@@ -767,20 +661,61 @@ selectMergeTarget(SmallVector<int> &candidates,
   return std::nullopt;
 }
 
-static void getBlockIdsInProgramOrder(Block *block,
-                                      CVPipeline::ComputeBlockIdManager &bm,
-                                      SmallVector<int> &ordered,
-                                      DenseMap<int, int> &id2order) {
+/// Returns failure if a cycle is detected in the dependency graph.
+static LogicalResult getBlockIdsInTopoOrder(
+    Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
+    CVPipeline::ComputeBlockIdManager &bm, SmallVector<int> &ordered,
+    DenseMap<int, int> &id2order) {
   ordered.clear();
   id2order.clear();
-  llvm::SmallDenseSet<int, 4> seen;
-  for (Operation &op : *block) {
-    int bid = bm.getBlockIdByOp(&op);
-    if (bid != -1 && seen.insert(bid).second) {
-      id2order[bid] = ordered.size();
-      ordered.push_back(bid);
+
+  CVPipeline::BlockDependencyGraph graph(block, memGraph, bm);
+  if (failed(graph.buildGraph())) {
+    return failure();
+  }
+
+  // In-degree of every block, keyed by block id.
+  llvm::DenseMap<int, int> indegree;
+  for (auto &entry : graph.blockNodes) {
+    indegree[entry.first] = entry.second->predecessors.size();
+  }
+
+  std::set<int> ready;
+  for (auto &entry : indegree) {
+    if (entry.second == 0) {
+      ready.insert(entry.first);
     }
   }
+
+  while (!ready.empty()) {
+    int nowBlockId = *ready.begin();
+    ready.erase(ready.begin());
+
+    id2order[nowBlockId] = ordered.size();
+    ordered.push_back(nowBlockId);
+
+    CVPipeline::BlockNode *node = graph.getBlockNode(nowBlockId);
+    if (!node) {
+      continue;
+    }
+
+    for (CVPipeline::BlockNode *succ : node->successors) {
+      if (--indegree[succ->blockId] == 0) {
+        ready.insert(succ->blockId);
+      }
+    }
+  }
+
+  // Blocks still carrying a non-zero in-degree belong to a cycle, which should
+  // not occur for a valid dependency graph, create cycle.
+  for (auto &entry : indegree) {
+    if (entry.second > 0) {
+      LOG_DEBUG("Block " << entry.first
+                         << " has non-zero in-degree, create cycle!");
+      return failure();
+    }
+  }
+  return success();
 }
 
 /// Match the pattern inside a small VECTOR block:
@@ -851,9 +786,13 @@ void MergeSmallBlockPass::runOnOperation() {
   SmallVector<int> orderedBlockIds;
   DenseMap<int, int> id2order;
   module.walk([&](Block *block) {
-    getBlockIdsInProgramOrder(block, bm, orderedBlockIds, id2order);
+    if (failed(getBlockIdsInTopoOrder(block, memGraph, bm, orderedBlockIds,
+                                      id2order))) {
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+      return WalkResult::interrupt();
+    }
     if (orderedBlockIds.size() < 2) {
-      return;
+      return WalkResult::advance();
     }
 
     for (int nowBlockId : orderedBlockIds) {
@@ -907,6 +846,7 @@ void MergeSmallBlockPass::runOnOperation() {
         }
       }
     }
+    return WalkResult::advance();
   });
 }
 

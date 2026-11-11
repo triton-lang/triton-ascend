@@ -35,10 +35,10 @@ module {
   // Same for a pre-classified VECTOR scope: it stays VECTOR; the CUBE matmul
   // and the VECTOR addf both read the single VECTOR scope.
   // CHECK-LABEL: func.func @shared_load_scope_pre_classified_vector
-  // CHECK: %[[VEC:.*]] = scope.scope : () -> tensor<4x4xf16> {
+  // CHECK: %[[VEC:[a-zA-Z0-9_]+]] = scope.scope : () -> tensor<4x4xf16> {
   // CHECK: } {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR", ssbuffer.load}
-  // CHECK: %[[ADD:.*]] = arith.addf %[[VEC]], %[[VEC]] {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR"}
-  // CHECK: %[[MM:.*]] = linalg.matmul {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE"} ins(%[[VEC]],
+  // CHECK: %[[MM:[a-zA-Z0-9_]+]] = linalg.matmul {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE"} ins(%[[VEC]],
+  // CHECK: %[[ADD:[a-zA-Z0-9_]+]] = arith.addf %[[VEC]], %[[VEC]] {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR"}
   // CHECK: return %[[MM]], %[[ADD]]
   // CHECK-NOT: scope.scope
   func.func @shared_load_scope_pre_classified_vector(%gm: memref<4x4xf16>, %arg0: tensor<4x4xf16>, %arg1: tensor<4x4xf32>, %rare: i1) -> (tensor<4x4xf32>, tensor<4x4xf16>) {
@@ -62,12 +62,14 @@ module {
   // An op already stamped CUBE_AND_VECTOR must still run on both cores, so
   // OpClassifier splits it into a CUBE copy and a VECTOR copy.
   // CHECK-LABEL: func.func @pre_classified_cube_and_vector_is_split
-  // CHECK: %[[VEC:.*]] = scope.scope : () -> tensor<4x4xf16> {
-  // CHECK: } {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR", ssbuffer.load}
-  // CHECK: %[[ADD:.*]] = arith.addf %[[VEC]], %[[VEC]] {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR"}
-  // CHECK: %[[CUBE:.*]] = scope.scope : () -> tensor<4x4xf16> {
-  // CHECK: } {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
-  // CHECK: linalg.matmul {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE"} ins(%[[CUBE]],
+  // CHECK: %[[CUBE:[a-zA-Z0-9_]+]] = scope.scope : () -> tensor<4x4xf16> {
+  // CHECK: } {ssbuffer.block_id = [[CUBE_BLOCK:[0-9]+]] : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
+  // CHECK: %[[MM:[a-zA-Z0-9_]+]] = linalg.matmul {ssbuffer.block_id = [[CUBE_BLOCK]] : i32, ssbuffer.core_type = "CUBE"} ins(%[[CUBE]],
+  // CHECK: %[[VEC:[a-zA-Z0-9_]+]] = scope.scope : () -> tensor<4x4xf16> {
+  // CHECK: } {ssbuffer.block_id = [[VECTOR_BLOCK:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR", ssbuffer.load}
+  // CHECK: %[[ADD:[a-zA-Z0-9_]+]] = arith.addf %[[VEC]], %[[VEC]] {ssbuffer.block_id = [[VECTOR_BLOCK]] : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK: return %[[MM]], %[[ADD]]
+  // CHECK-NOT: scope.scope
   func.func @pre_classified_cube_and_vector_is_split(%gm: memref<4x4xf16>, %arg0: tensor<4x4xf16>, %arg1: tensor<4x4xf32>) -> (tensor<4x4xf32>, tensor<4x4xf16>) {
     %0 = scope.scope : () -> tensor<4x4xf16> {
       %alloc = memref.alloc() : memref<4x4xf16>

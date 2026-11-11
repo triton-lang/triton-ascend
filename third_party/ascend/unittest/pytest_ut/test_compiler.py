@@ -216,9 +216,8 @@ def test_compile_mode_env_keeps_runtime_scalar_binding_consistent(monkeypatch):
     monkeypatch.setenv("TRITON_ASCEND_COMPILE_MODE", "simd_simt")
     backend = compiler.AscendBackend(GPUTarget("npu", "Ascend950PR_9579", 32))
 
-    assert backend.get_runtime_compile_options({"N": 17}, [("i32",)], {"compile_mode": "simd"}) == {
-        "auto_simt_runtime_scalar_values": ((0, 17), )
-    }
+    assert backend.get_runtime_compile_options(
+        {"N": 17}, [("i32", )], {"compile_mode": "simd"}) == {"auto_simt_runtime_scalar_values": ((0, 17), )}
 
 
 _IGNORED_OPTIONS = sorted(utils._DEPRECATED_NPU_OPTIONS - utils._DEPRECATED_NPU_OPTION_ROUTES.keys() -

@@ -247,12 +247,13 @@ class OpBuilder;
 bool haveSameTypes(TypeRange lhs, TypeRange rhs);
 
 enum class ReduceWithIndexType { MAX, MIN, None };
+// None means that the combiner does not compare indices on equal values.
 enum class TieBreakType { LEFT, RIGHT, None };
 
 struct ReduceWithIndexParams {
   ReduceWithIndexType withIndexType = ReduceWithIndexType::None;
   TieBreakType tieBreakType = TieBreakType::None;
-  bool isUnsignedSrc;
+  bool isUnsignedSrc = false;
 };
 
 llvm::FailureOr<ReduceWithIndexParams>

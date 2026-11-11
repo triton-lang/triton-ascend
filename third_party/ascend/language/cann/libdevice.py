@@ -469,11 +469,9 @@ def pow(arg0, arg1, _semantic=None):
 
     if arg0.dtype == core.dtype("fp32") and (_is_a5_target(_semantic) or _is_a3_target(_semantic)
                                              or _is_a6_target(_semantic)):
-        return _libdevice_elementwise(
-            "", "", [arg0, arg1], {
-                (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_pow_fp32", core.dtype("fp32")),
-                (core.dtype("fp32"), core.dtype("int32")): ("__hmf_powi_fp32", core.dtype("fp32")),
-            }, is_pure=True, workspace={"__hmf_pow_fp32": (8, core.float32, False)}, _semantic=_semantic)
+        return _libdevice_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_pow_fp32", core.dtype("fp32")),
+        }, is_pure=True, workspace={"__hmf_pow_fp32": (8, core.float32, False)}, _semantic=_semantic)
     return core.extern_elementwise(
         "", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_powf", core.dtype("fp32")),

@@ -319,7 +319,7 @@ def _shared_key(fingerprint, sources):
     return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
 
-def _build_shared(name, sources, debug=False, bin_dir=None):
+def _build_shared(name, sources, debug=False):
     fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=_LAUNCHER_CFLAGS)
     key = _shared_key(json.dumps(fingerprint, sort_keys=True), tuple(sorted(sources.items())))
     cache = get_cache_manager(key)

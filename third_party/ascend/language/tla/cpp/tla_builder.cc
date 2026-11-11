@@ -1526,13 +1526,52 @@ void init_tla_builder(py::module &&m) {
           py::arg("src"), py::arg("dst"), py::arg("attrs"))
       .def(
           "create_tla_nd2nz",
-          [](TLABuilder &self, Value src, Value dst, const py::dict &attrs) {
+          [](TLABuilder &self, Value src, Value dst, const py::dict &attrs,
+             std::optional<Value> rowCount, std::optional<Value> sourceRow,
+             std::optional<Value> destinationRow) {
             checkDmaBuffers(src, dst);
+            if (rowCount) {
+              auto srcType = cast<MemRefType>(src.getType());
+              auto dstType = cast<MemRefType>(dst.getType());
+              if (!sourceRow || !destinationRow || !srcType.hasStaticShape() ||
+                  !dstType.hasStaticShape() || srcType.getRank() != 2 ||
+                  dstType.getRank() != 4 || dstType.getDimSize(2) != 16 ||
+                  srcType.getDimSize(1) !=
+                      dstType.getDimSize(0) * dstType.getDimSize(3) ||
+                  srcType.getElementType() != dstType.getElementType())
+                throw std::invalid_argument(
+                    "ND2NZ row windows require compatible static ND and NZ "
+                    "parent views");
+              auto &builder = self.getBuilder();
+              auto zero = builder.getIndexAttr(0);
+              auto one = builder.getIndexAttr(1);
+              Value blockRows = self.create<arith::ConstantIndexOp>(16);
+              Value rows = dmaIndexOperand(self, *rowCount);
+              Value srcRow = dmaIndexOperand(self, *sourceRow);
+              Value dstRow = dmaIndexOperand(self, *destinationRow);
+              Value blocks = self.create<arith::DivUIOp>(rows, blockRows);
+              Value dstBlock = self.create<arith::DivUIOp>(dstRow, blockRows);
+              src = self.create<memref::SubViewOp>(
+                  src, SmallVector<OpFoldResult>{srcRow, zero},
+                  SmallVector<OpFoldResult>{
+                      rows, builder.getIndexAttr(srcType.getDimSize(1))},
+                  SmallVector<OpFoldResult>{one, one});
+              dst = self.create<memref::SubViewOp>(
+                  dst, SmallVector<OpFoldResult>{zero, dstBlock, zero, zero},
+                  SmallVector<OpFoldResult>{
+                      builder.getIndexAttr(dstType.getDimSize(0)), blocks,
+                      builder.getIndexAttr(16),
+                      builder.getIndexAttr(dstType.getDimSize(3))},
+                  SmallVector<OpFoldResult>{one, one, one, one});
+            }
             auto op = self.create<hivm::ND2NZOp>(
                 TypeRange{}, src, dst, self.getBuilder().getUnitAttr());
             setDmaAttrs(op, attrs);
           },
-          py::arg("src"), py::arg("dst"), py::arg("attrs"))
+          py::arg("src"), py::arg("dst"), py::arg("attrs"),
+          py::arg("row_count") = std::nullopt,
+          py::arg("source_row") = std::nullopt,
+          py::arg("destination_row") = std::nullopt)
       .def(
           "create_tla_copy",
           [](TLABuilder &self, Value src, Value dst, const py::dict &attrs,

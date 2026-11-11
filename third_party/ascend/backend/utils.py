@@ -25,7 +25,6 @@ import os
 import re
 import shutil
 import subprocess
-import struct
 import sysconfig
 import warnings
 from pathlib import Path
@@ -723,7 +722,7 @@ def _get_cxx():
 
 
 def _npu_ext_build_command(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch",
-                           precompile=False, extra_cflags=()):
+                           precompile=False, extra_cflags=(), extra_ldflags=()):
     header_path = None
     if src_path is None:
         src_path = header_or_src_path
@@ -742,9 +741,24 @@ def _npu_ext_build_command(obj_name: str, header_or_src_path, src_path=None, *, 
         # Preserve the position of this optional include in the original command.
         cc_cmd.insert(5, f"-I{os.path.dirname(header_path)}")
     cc_cmd += list(extra_cflags)
+    cc_cmd += list(extra_ldflags)
     cc_cmd += cann_version_compile_args()
     cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", so_path]
     return cc_cmd, so_path
+
+
+@functools.lru_cache(maxsize=1)
+def _torch_library_dirs():
+    from torch.utils.cpp_extension import library_paths
+
+    return tuple(library_paths())
+
+
+@functools.lru_cache(maxsize=1)
+def _torch_npu_library_dir():
+    import torch_npu
+
+    return os.path.join(os.path.dirname(torch_npu.__file__), "lib")
 
 
 @functools.lru_cache(maxsize=32)
@@ -787,13 +801,18 @@ def _npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_head
         else:
             cc_cmd += get_backend_func("get_cc_cmd")
 
+    for lib_dir in _torch_library_dirs():
+        cc_cmd.append(f"-Wl,-rpath,{lib_dir}")
+    cc_cmd.append(f"-Wl,-rpath,{_torch_npu_library_dir()}")
+
     return tuple(cc_cmd)
 
 
 def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch", precompile=False,
-                   extra_cflags=()) -> str:
+                   extra_cflags=(), extra_ldflags=()) -> str:
     cc_cmd, so_path = _npu_ext_build_command(obj_name, header_or_src_path, src_path, kernel_launcher=kernel_launcher,
-                                             precompile=precompile, extra_cflags=extra_cflags)
+                                             precompile=precompile, extra_cflags=extra_cflags,
+                                             extra_ldflags=extra_ldflags)
     result = subprocess.run(cc_cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"Failed to compile {header_or_src_path}, error: {result.stderr},cmd={cc_cmd}")
@@ -823,45 +842,14 @@ def bin_cache_manager(key, bin_dir):
     return cache
 
 
-def _npu_elf_info(path):
-    """Read installation identifiers without hashing large LLVM shared libraries."""
+def _is_elf_file(path):
+    """Distinguish a real ELF compiler from a shell wrapper using only the magic.
+
+    No program-header or note parsing, so this works across glibc/musl and other
+    ELF loaders without invoking the dynamic linker.
+    """
     with open(path, "rb") as stream:
-        header = stream.read(64)
-        if header[:6] != b"\x7fELF\x02\x01":
-            raise ValueError("not a little-endian ELF64 file")
-        offset, = struct.unpack_from("<Q", header, 32)
-        entry_size, count = struct.unpack_from("<HH", header, 54)
-        if entry_size != 56 or count > 128:
-            raise ValueError("unsupported ELF program headers")
-        stream.seek(offset)
-        headers = stream.read(entry_size * count)
-        interpreter, build_id = None, None
-        for offset in range(0, len(headers), entry_size):
-            kind, _, start, _, _, size, _, _ = struct.unpack_from("<IIQQQQQQ", headers, offset)
-            if kind not in (3, 4):  # PT_INTERP, PT_NOTE
-                continue
-            if size > 65536:
-                raise ValueError("unsupported ELF note/interpreter size")
-            stream.seek(start)
-            data = stream.read(size)
-            if len(data) != size:
-                raise ValueError("truncated ELF segment")
-            if kind == 3:
-                interpreter = os.fsdecode(data.rstrip(b"\0"))
-                continue
-            pos = 0
-            while pos < len(data):
-                name_size, desc_size, note_type = struct.unpack_from("<III", data, pos)
-                name_start = pos + 12
-                desc_start = name_start + ((name_size + 3) & ~3)
-                pos = desc_start + ((desc_size + 3) & ~3)
-                if pos > len(data):
-                    raise ValueError("truncated ELF note")
-                if note_type == 3 and data[name_start:name_start + name_size] == b"GNU\0":
-                    build_id = data[desc_start:desc_start + desc_size].hex()
-        if not build_id:
-            raise ValueError("missing GNU build ID")
-        return interpreter, build_id
+        return stream.read(4) == b"\x7fELF"
 
 
 def _npu_compiler_environment():
@@ -870,12 +858,13 @@ def _npu_compiler_environment():
 
 
 def _npu_compiler_identity(compiler):
-    """Identify a normally installed GNU/Linux compiler; unknown setups query live.
+    """Identify a normally installed ELF compiler; unknown setups query live.
 
-    Installation updates must change file attributes or GNU build IDs. These are
-    not content hashes: manually patched binaries preserving both are unsupported.
-    Compiler configuration is part of the fixed installation, not a live wrapper.
-    Source files continue to use content hashes in the extension cache keys.
+    A portable, loader-independent identity: the resolved compiler path plus its
+    stat identity, sampled twice to reject a binary that is replaced mid-flight.
+    Normal package updates change the realpath inode or mtime; manually patched
+    binaries that preserve every stat attribute are unsupported. Source files
+    continue to use content hashes in the extension cache keys.
     """
     if not re.fullmatch(r"(?:.*-)?(?:clang(?:\+\+)?|gcc|g\+\+)(?:-\d+(?:\.\d+)*)?", os.path.basename(compiler)):
         return None
@@ -887,32 +876,14 @@ def _npu_compiler_identity(compiler):
         if (name == "LANG" or name.startswith("LC_")) and value not in ("", "C", "POSIX", "C.UTF-8", "C.utf8"):
             return None
     try:
-        interpreter, _ = _npu_elf_info(compiler)
-        if not interpreter or not os.path.basename(interpreter).startswith("ld-linux-"):
+        resolved = os.path.realpath(compiler)
+        if not _is_elf_file(resolved):
             return None
-        # Resolve dependencies again in every new process, including changes to
-        # LD_LIBRARY_PATH and ld.so.cache, without running compiler initialization.
-        output = subprocess.check_output([interpreter, "--list", compiler], text=True, stderr=subprocess.PIPE)
-        if not output.strip():
+        identity = _file_identity(resolved)
+        if identity != _file_identity(resolved):
             return None
-        paths = {compiler, interpreter}
-        for line in output.splitlines():
-            if re.fullmatch(r"\s*(?:linux-vdso\.so\.\d+\s*)?\(0x[0-9a-f]+\)\s*", line):
-                continue
-            match = re.fullmatch(r"\s*(?:\S+ => )?(/\S+) \(0x[0-9a-f]+\)\s*", line)
-            if not match:
-                return None
-            paths.add(match[1])
-        files = []
-        for path in sorted(paths):
-            resolved = os.path.realpath(path)
-            before = _file_identity(resolved)
-            _, build_id = _npu_elf_info(resolved)
-            if before != _file_identity(resolved):
-                return None
-            files.append((path, resolved, before, build_id))
-        return {"schema": 1, "environment": environment, "files": files}
-    except (OSError, ValueError, struct.error, subprocess.SubprocessError):
+        return {"schema": 2, "path": resolved, "stat": identity, "environment": environment}
+    except OSError:
         return None
 
 
@@ -945,7 +916,7 @@ def _npu_compiler_version(compiler, identity):
     installation = _npu_compiler_identity(compiler)
     if installation is None:
         return query()
-    key = hashlib.sha256(json.dumps(["host-compiler-version-v1", installation], sort_keys=True).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps(["host-compiler-version-v2", installation], sort_keys=True).encode()).hexdigest()
     version = None
     try:
         cache = get_cache_manager(key)
@@ -998,13 +969,14 @@ def _npu_fingerprint(command, compiler, identity, cann, policy):
     }
 
 
-def npu_extension_fingerprint(obj_name, *, extra_cflags=()):
+def npu_extension_fingerprint(obj_name, *, extra_cflags=(), extra_ldflags=()):
     """Fingerprint the command actually used to build a host extension.
 
     Temporary source/output paths use deterministic placeholders. Runtime source
     and generated configuration are hashed separately by the cache owner.
     """
-    command, _ = _npu_ext_build_command(obj_name, "/__triton_build__/source.cpp", extra_cflags=extra_cflags)
+    command, _ = _npu_ext_build_command(obj_name, "/__triton_build__/source.cpp", extra_cflags=extra_cflags,
+                                        extra_ldflags=extra_ldflags)
     compiler = os.path.realpath(shutil.which(command[0]) or command[0])
     info = _npu_fingerprint(tuple(command), compiler, _file_identity(compiler), get_cann_version(), backend_policy
                             or "torch_npu")

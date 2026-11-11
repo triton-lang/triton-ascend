@@ -16,7 +16,7 @@
 
 **软件依赖**
 
-确定CANN、Python和TorchNPU软件版本并安装。如需具体安装步骤，请参考华为昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。
+确定CANN、Python和TorchNPU软件版本并安装。如需具体安装步骤，请参考华为昇腾社区官网[《CANN快速安装》](https://www.hiascend.com/cann/download)完成驱动与固件安装。
 
 - CANN版本：9.2.0
 - Python版本：3.11
@@ -136,7 +136,11 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
 
 4.2 源码编译：
 
+<<<<<<< HEAD
 参见 [shmem项目](https://gitcode.com/cann/shmem) README.md中“安装”->“方式三：源码编译”章节。
+=======
+参见[shmem项目](https://gitcode.com/cann/shmem) README.md中“安装”->“方式三：源码编译”章节。
+>>>>>>> f1f594f66
 
 ## 镜像安装
 
@@ -217,7 +221,7 @@ python3 ./triton-ascend/third_party/ascend/tutorials/01-vector-add.py
 
 观察到类似的输出即说明环境配置正确：
 
-```text
+``` output
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
@@ -238,7 +242,7 @@ python -m pytest third_party/ascend/unittest/pytest_ut/test_add.py
 
 执行完成后输出示例如下：
 
-```text
+``` output
 collected 6 items
 third_party/ascend/unittest/pytest_ut/test_add.py ......
 ```
@@ -273,7 +277,7 @@ pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu
 **解决措施**
 
 一般是链接器无法找到stdc++fs库引起的报错。该库用于支持GCC 9之前版本的文件系统特性。此时需要手动把CMake文件中以下相关代码片段的注释打开。
-文件路径：triton-ascend/CMakeLists.txt
+文件路径：`triton-ascend/CMakeLists.txt`
 
 ```cmake
 if (NOT WIN32 AND NOT APPLE)

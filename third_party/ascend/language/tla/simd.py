@@ -34,7 +34,7 @@ API                           AVE op
 ``vextf``                     ``ave.hir.vextf``
 ``vintlv``                    ``ave.hir.vintlv``
 ``vbitcast``                  ``vector.bitcast``
-``vmul``                      ``ave.hir.vmul`` (mask = ``ave.hir.pge <ALL>``)
+``vmul``                      ``ave.hir.vmul`` (optional mask/mode)
 ``vdiv``                      ``ave.hir.vdiv`` (``cast`` selects signedness)
 ``vmax`` / ``vmin``           ``ave.hir.vmax``/``vmin``, ``vumax``/``vumin`` if unsigned
 ``vmaxs``                     ``ave.hir.vmaxs`` / ``ave.hir.vumaxs``
@@ -119,6 +119,7 @@ __all__ = [
     "vadd",
     "vadds",
     "vaddc",
+    "vsubc",
     "vshl",
     "vshls",
     "vshr",
@@ -998,7 +999,7 @@ def vextf(src, target_dtype, mask=None, part="part_even", _semantic=None) -> vec
     if mask is None:
         mask = _all_mask(out_lanes, _semantic)
     _check_mask(mask, out_lanes)
-    handle = _semantic.builder.create_simd_vcvt("vextf", src.handle, mask.handle, out_tag, part)
+    handle = _semantic.builder.create_simd_vcvt("extf", src.handle, mask.handle, out_tag, part)
     return vector(handle, vector_type(out_lanes, target_dtype))
 
 
@@ -1083,12 +1084,38 @@ def _binary_op(op, kind, lhs, rhs, _semantic, mask=None, mode=MODE.ZEROING):
 
 
 @builtin
-def vmul(lhs, rhs, _semantic=None) -> vector:
+def vmul(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     """
-    Elementwise vector multiply (``ave.hir.vmul``) under an all-true
-    ``ave.hir.pge <ALL>`` mask.
+    Elementwise vector multiply (``ave.hir.vmul``).
+
+    Each active lane computes ``lhs * rhs``.  Both operands must have the same
+    dtype and lane count.  No broadcasting or implicit dtype conversion is
+    performed.
+
+    :param lhs: First vector register.
+    :type lhs: tla.vector
+    :param rhs: Second vector register with the same dtype and lane count as
+        ``lhs``.
+    :type rhs: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: Product vector with the same dtype and lane count as the inputs.
+    :rtype: tla.vector
+
+    Supported element types in the current AVE regbase lowering are
+    f16/bf16/f32, i8/i16/i32 and u8/u16/u32.  Integer results wrap modulo the
+    element width.  The i64/u64 vector forms are not wired into this lowering
+    path.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve the
+        previous destination lanes.
     """
-    return _binary("mul", lhs, rhs, _semantic)
+    return _masked_binary("mul", lhs, rhs, mask, mode, _semantic)
 
 
 @builtin
@@ -1391,6 +1418,48 @@ def vaddc(src0: vector, src1: vector, mask: vector = None, _semantic=None) -> tu
 
 
 @builtin
+def vsubc(src0: vector, src1: vector, mask: vector = None, _semantic=None) -> tuple[vector, vector]:
+    """
+    Vector subtract with borrow-out (``vsubc``) for i32/u32 registers.
+
+    Returns ``(diff, borrow)`` where ``diff = src0 - src1`` (modulo 2**32) and
+    ``borrow`` is an i1 mask holding the two's-complement borrow-out of each
+    lane, derived as ``src0 <u src1``.  The AVE dialect has no dedicated
+    ``vsubc`` op, so this is composed from a masked ``ave.hir.vsub`` and an
+    unsigned ``ave.hir.vcmp``; the result is always zeroing.
+
+    Both operands must be full 64-lane ``int32`` or ``uint32`` registers with
+    the same dtype.  Inactive lanes produce a zero difference and a false
+    borrow.
+
+    :param src0: Minuend vector register.
+    :type src0: tla.vector
+    :param src1: Subtrahend vector register with the same dtype.
+    :type src1: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane.
+        ``None`` means an all-true mask.
+    :type mask: tla.vector or None
+    :return: ``(diff, borrow)`` vector pair; ``borrow`` is an i1 mask.
+    :rtype: tuple[tla.vector, tla.vector]
+    """
+    _require_vector(src0, "src0")
+    _require_vector(src1, "src1")
+    dtype = str(src0.dtype)
+    if dtype not in ("int32", "uint32"):
+        raise ValueError(f"vsubc only supports int32/uint32, got {dtype}")
+    if src1.dtype != src0.dtype:
+        raise TypeError(f"vsubc operands must have the same dtype, "
+                        f"got {src0.dtype} and {src1.dtype}")
+    lanes = src0.type.lanes
+    if lanes != 64:
+        raise ValueError(f"vsubc requires a full 64-lane register, got {lanes}")
+    mask = _mask_for(mask, lanes, _semantic)
+    diff = _masked_binary("sub", src0, src1, mask, MODE.ZEROING, _semantic)
+    borrow = vcmp(src0, src1, mask=mask, op=CMP.ULT, _semantic=_semantic)
+    return diff, borrow
+
+
+@builtin
 def vdiv(src0, src1, mask=None, mode=MODE.ZEROING, precision=None, _semantic=None) -> vector:
     """
     Elementwise vector divide (``ave.hir.vdiv``).
@@ -1689,14 +1758,70 @@ def vdupv(src, mask=None, pos=POS.LOWEST, mode=MODE.ZEROING, _semantic=None) -> 
 @builtin
 def vxor(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     """
-    Elementwise bitwise XOR (``ave.hir.vxor``) under an all-true mask.
+    Elementwise bitwise XOR (``ave.hir.vxor``).
+
+    Each active lane computes ``lhs ^ rhs`` on the raw element bit pattern.
+    Both operands must have the same dtype and lane count.  No broadcasting
+    or implicit dtype conversion is performed.
+
+    :param lhs: First vector register.
+    :type lhs: tla.vector
+    :param rhs: Second vector register with the same dtype and lane count as
+        ``lhs``.
+    :type rhs: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: XOR result with the same dtype and lane count as the inputs.
+    :rtype: tla.vector
+
+    Supported element types in the current AVE regbase lowering are
+    f16/bf16/f32, i8/i16/i32 and u8/u16/u32.  Floating-point operands are
+    XORed as bit patterns, not as floating-point logical values.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve the
+        previous destination lanes.
     """
     return _masked_binary("xor", lhs, rhs, mask, mode, _semantic)
 
 
 @builtin
 def vsub(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
-    """Elementwise vector subtract under an optional predicate."""
+    """
+    Elementwise vector subtract (``ave.hir.vsub``).
+
+    Each active lane computes ``lhs - rhs``.  Both operands must have the same
+    dtype and lane count.  No broadcasting or implicit dtype conversion is
+    performed.
+
+    :param lhs: Minuend vector register.
+    :type lhs: tla.vector
+    :param rhs: Subtrahend vector register with the same dtype and lane count
+        as ``lhs``.
+    :type rhs: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: Difference vector with the same dtype and lane count as the
+        inputs.
+    :rtype: tla.vector
+
+    Supported element types in the current AVE regbase lowering are
+    f16/bf16/f32, i8/i16/i32 and u8/u16/u32.  Integer results wrap modulo the
+    element width; unsigned operands use their raw two's-complement bit
+    pattern.  The i64/u64 vector forms are not wired into this lowering path.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve the
+        previous destination lanes or ``lhs`` on inactive lanes.
+    """
     return _masked_binary("sub", lhs, rhs, mask, mode, _semantic)
 
 
@@ -1768,7 +1893,35 @@ def vexpdif(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
 
 @builtin
 def vor(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
-    """Elementwise bitwise OR under an optional predicate."""
+    """
+    Elementwise bitwise OR (``ave.hir.vor``).
+
+    Each active lane computes ``lhs | rhs`` on the raw element bit pattern.
+    Both operands must have the same dtype and lane count.  No broadcasting
+    or implicit dtype conversion is performed.
+
+    :param lhs: First vector register.
+    :type lhs: tla.vector
+    :param rhs: Second vector register with the same dtype and lane count as
+        ``lhs``.
+    :type rhs: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: OR result with the same dtype and lane count as the inputs.
+    :rtype: tla.vector
+
+    Supported element types in the current AVE regbase lowering are
+    f16/bf16/f32, i8/i16/i32 and u8/u16/u32.  Floating-point operands are
+    ORed as bit patterns, not as floating-point logical values.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve the
+        previous destination lanes.
+    """
     return _masked_binary("or", lhs, rhs, mask, mode, _semantic)
 
 
@@ -2228,7 +2381,35 @@ def vcvt(src: vector, target_dtype, mask: vector = None, round: tl.constexpr = R
 
 @builtin
 def vmins(src, scalar, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
-    """Vector-scalar minimum, preserving src on inactive MERGING lanes."""
+    """
+    Vector-scalar minimum (``ave.hir.vmins`` / ``ave.hir.vumins``).
+
+    Each active lane computes ``min(src_lane, scalar)``.  Unsigned integer
+    inputs select the unsigned AVE form; signed and floating-point inputs use
+    the signed form.  No vector broadcasting or implicit dtype conversion is
+    performed.
+
+    :param src: Source vector register.
+    :type src: tla.vector
+    :param scalar: Scalar bound as a Python/``tl.constexpr`` number or a
+        scalar tensor.  It is materialized at the vector element type.
+    :type scalar: int, float, tl.constexpr, or scalar tl.tensor
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: Minimum vector with the same dtype and lane count as ``src``.
+    :rtype: tla.vector
+
+    Supported element types are f16/f32, i8/i16/i32 and u8/u16/u32.  bf16,
+    fp8, i64 and u64 are not supported by this vector-scalar path.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve
+        ``src`` or the previous destination lanes.
+    """
     _require_vector(src, "src")
     tag = _elem_tag(src.dtype)
     if tag not in ("i8", "i16", "i32", "f16", "f32"):
@@ -2243,7 +2424,38 @@ def vmins(src, scalar, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
 
 @builtin
 def vsstb(src, dst, stride, mask=None, update=False, _semantic=None):
-    """Store a vector to a 2-D UB buffer in 32-byte blocks at element stride."""
+    """
+    Masked strided store of a vector to a 2-D UB buffer
+    (``ave.hir.store_with_stride``).
+
+    The source vector is written as consecutive 32-byte blocks.  Block ``k``
+    starts ``k * stride`` elements after the destination start offset in
+    row-major order.  The destination start is supplied by the two indices of
+    a ``tla.buffer`` or a subscripted buffer access such as ``dst[row, col]``.
+    This op has no return value.
+
+    :param src: Source vector register.
+    :type src: tla.vector
+    :param dst: Two-dimensional UB buffer, or a subscripted buffer access
+        carrying two indices.  Its element dtype must match ``src``.
+    :type dst: tla.buffer or tla.buffer_access
+    :param stride: Positive compile-time element stride between consecutive
+        32-byte blocks.  It must be a multiple of ``32 / element_bytes``
+        elements, and ``stride // (32 / element_bytes)`` must fit in 16 bits.
+    :type stride: int or tl.constexpr
+    :param mask: Optional predicate with one ``i1`` lane per source lane;
+        ``None`` selects an all-true mask.  Inactive lanes are not written.
+    :type mask: tla.vector or None
+    :param update: Compile-time bool.  Only ``False`` is supported; ``True``
+        raises ``NotImplementedError``.
+    :type update: bool or tl.constexpr
+    :return: This function has no return value.
+    :rtype: None
+
+    Supported element types are i8/i16/i32, u8/u16/u32, bf16/f16/f32,
+    fp8e4nv and fp8e5.  The source and destination element dtypes must match.
+    There is no predication ``mode`` parameter for this store.
+    """
     if isinstance(dst, buffer_access):
         dst, offsets = dst.buffer, list(dst.indices)
     elif isinstance(dst, buffer):

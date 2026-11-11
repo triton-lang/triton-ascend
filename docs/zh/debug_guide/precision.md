@@ -16,6 +16,7 @@
 
 ```text
 import torch
+import torch_npu
 import triton
 import triton.language as tl
 
@@ -104,7 +105,7 @@ def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
 
 `torch.testing.assert_close` 的内部逻辑：
 
-```python
+```text
 |cal - ref| <= atol + rtol * |ref|
 ```
 

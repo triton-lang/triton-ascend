@@ -46,10 +46,9 @@ def alloc(shape, dtype, space=None, versions=1, _semantic=None, *, scope=None):
     :rtype: tla.buffer
 
     .. note::
-        Every independent allocation carries ``annotation.mark {mem_unique}``
-        so the HIVM memory planner cannot reuse its storage for another buffer,
-        including during planning retries. Use views to explicitly share storage.
-        The TLA backend pipeline also disables tightly-coupled buffer reuse.
+        Allocations do not impose unique physical storage. Backend memory
+        planning decides whether storage can be reused; use views to express
+        explicit sharing of a logical buffer.
 
         GM memory must be supplied as a kernel argument and wrapped with
         ``tla.view``. Current backend allocation support covers UB, L1 and L0C.
@@ -76,7 +75,6 @@ def alloc(shape, dtype, space=None, versions=1, _semantic=None, *, scope=None):
         raise ValueError("buffer versions must be a positive integer")
     ty = buffer_type(shape, dtype, space)
     buf = buffer(_semantic.builder.create_tla_alloc(ty.to_ir(_semantic.builder)), ty)
-    _semantic.builder.create_annotation_mark(buf.handle, "mem_unique", _semantic.builder.get_unit_attr())
     annotate_buffer_versions(buf, versions, _semantic=_semantic)
     return buf
 

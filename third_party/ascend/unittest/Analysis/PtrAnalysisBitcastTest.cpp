@@ -57,10 +57,8 @@ unsigned count(Operation *scope) {
 unsigned elementBytes(Type type) {
   if (auto tensor = dyn_cast<RankedTensorType>(type))
     type = tensor.getElementType();
-  return cast<triton::PointerType>(type)
-             .getPointeeType()
-             .getIntOrFloatBitWidth() /
-         8;
+  Type element = cast<triton::PointerType>(type).getPointeeType();
+  return element.isInteger(1) ? 1 : element.getIntOrFloatBitWidth() / 8;
 }
 // Interpret original pointer operations in bytes, independently of PtrInfo.
 // Each addptr uses its own input pointee unit; bitcast keeps the address.
@@ -190,6 +188,42 @@ TEST(PtrAnalysisBitcast,
   SmallVector<Operation *> remaining;
   f.walk([&](triton::BitcastOp op) { remaining.push_back(op); });
   EXPECT_EQ(remaining, originalCasts);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
+TEST(PtrAnalysisBitcast, BooleanPointerCastsPreserveByteOffsets) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(module {
+    tt.func @bool_bytes(%base:!tt.ptr<i1>) {
+      %r = tt.make_range {start=0:i32,end=4:i32} : tensor<4xi32>
+      %neg = arith.constant dense<-3> : tensor<4xi32>
+      %offset = arith.addi %r,%neg : tensor<4xi32>
+      %p = tt.splat %base : !tt.ptr<i1> -> tensor<4x!tt.ptr<i1>>
+      %before = tt.addptr %p,%offset {tag="before"} : tensor<4x!tt.ptr<i1>>,tensor<4xi32>
+      %same = tt.bitcast %before {tag="same"} : tensor<4x!tt.ptr<i1>> -> tensor<4x!tt.ptr<i1>>
+      %bytes = tt.bitcast %before {tag="bytes"} : tensor<4x!tt.ptr<i1>> -> tensor<4x!tt.ptr<i8>>
+      %back = tt.bitcast %bytes {tag="back"} : tensor<4x!tt.ptr<i8>> -> tensor<4x!tt.ptr<i1>>
+      tt.return
+    }})mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder builder(f.getBody().front().getTerminator());
+  PtrAnalysis analysis(builder);
+  auto before = analysis.analyze(tagged(f, "before"));
+  ASSERT_TRUE(succeeded(before));
+  for (StringRef tag : {"same", "bytes", "back"}) {
+    auto info = analysis.analyze(tagged(f, tag));
+    ASSERT_TRUE(succeeded(info));
+    EXPECT_EQ(info->offsets.fullOffsets, before->offsets.fullOffsets);
+    EXPECT_EQ(getConstantIntValue(info->offsets.scalarOffset), -3);
+    ASSERT_EQ(info->offsets.axes.size(), 1u);
+    EXPECT_EQ(info->offsets.axes[0].kind, AxisKind::Structured);
+    EXPECT_EQ(getConstantIntValue(info->offsets.axes[0].stride), 1);
+    expectAddresses(tagged(f, tag), *info, builder,
+                    {{f.getArgument(0), {llvm::APInt(64, 4096)}}});
+  }
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -487,7 +521,7 @@ TEST(PtrAnalysisBitcast,
   };
   SmallVector<std::pair<Type, Type>> types{
       {ptr(builder.getI8Type()), ptr(builder.getF32Type())},
-      {ptr(builder.getI1Type()), ptr(builder.getI1Type())},
+      {ptr(builder.getIntegerType(4)), ptr(builder.getIntegerType(4))},
       {ptr(builder.getIntegerType(24)), ptr(builder.getIntegerType(24))},
       {ptr(ptr(builder.getI8Type())), ptr(ptr(builder.getI8Type()))}};
   for (auto [from, to] : types) {

@@ -24,8 +24,10 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+TLA_TEST_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(TLA_TEST_DIR))
 
+from blacklist import BLACKLIST
 from utils.tla_test_utils import get_stages, npu_available
 
 
@@ -51,10 +53,12 @@ def output_dir():
 def pytest_collect_file(file_path, parent):
     """Extend normal collection to op-named files without collecting modules twice."""
     collectors = yield
-    # Composite kernels load device code lazily; only collect their test modules.
-    if Path(__file__).parent / "kernels" in file_path.parents and not file_path.name.startswith("test_"):
+    if file_path.relative_to(TLA_TEST_DIR).as_posix() in BLACKLIST:
         return []
-    if file_path.suffix == ".py" and file_path.name != "conftest.py":
+    # Composite kernels load device code lazily; only collect their test modules.
+    if TLA_TEST_DIR / "kernels" in file_path.parents and not file_path.name.startswith("test_"):
+        return []
+    if file_path.suffix == ".py" and file_path.name not in ("blacklist.py", "conftest.py"):
         if not any(isinstance(collector, pytest.Module) for collector in collectors):
             collectors.append(pytest.Module.from_parent(parent, path=file_path))
     return collectors

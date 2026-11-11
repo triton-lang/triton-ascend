@@ -119,10 +119,9 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
     });
     return success();
   }
-
-  // FIXME: Limit data-offset permutations on A5 to at least 64 contiguous bytes,
-  // aligned to 32 bytes as required by TritonToUnstructure. Unify this gate with 
-  // the SIMT classification in TritonToUnstructure.
+  // FIXME: Limit data-offset permutations on A5 to at least 64 contiguous
+  // bytes, aligned to 32 bytes as required by TritonToUnstructure. Unify this
+  // gate with the SIMT classification in TritonToUnstructure.
   int64_t contiguousElements = 1;
   for (auto id : llvm::reverse(tf.ptrState.permuteIds)) {
     const auto &info = tf.ptrState.stateInfo[id];

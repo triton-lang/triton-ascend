@@ -1,5 +1,7 @@
 # Triton-Ascend max_autotune 使用指南
 
+本文档介绍Triton-Ascend max_autotune装饰器的使用方法，包括其与@triton.autotune的区别、不同kernel_type调优参数的选取、笛卡尔积展开逻辑及使用注意事项，适用于已熟悉Triton-Ascend自动调优机制、希望减少手工枚举配置的用户。
+
 ## 文档定位
 
 本文面向已经熟悉 Triton-Ascend 自动调优机制的用户，介绍 `max_autotune` 装饰器的高级用法：
@@ -49,7 +51,7 @@ def kernel(
 
 - 基础配置：2 个
 - 用户提供的调优参数：`enable_hivm_auto_cv_balance`（2 种）、`tile_mix_vector_loop`（2 种）
-- 使用默认值的参数：`set_workspace_multibuffer`（2 种）、`tile_mix_cube_loop`（2 种）、其他参数各 1 种
+- 使用默认值的参数：`set_workspace_multibuffer`（2 种）、`tile_mix_cube_loop`（2 种）、其他参数各 1 种。
 
 总配置数量：`2 × 2 × 2 × 2 × 2 = 32` 个配置。
 
@@ -83,7 +85,7 @@ from triton.backends.ascend.runtime import max_autotune
 | `unit_flag` | ✅ | ✅ | ❌ | `[False]` | 布尔列表 | Cube 搬出相关同步优化项 |
 | `limit_auto_multi_buffer_of_local_buffer` | ✅ | ✅ | ❌ | `["no-l0c"]` | `["no-limit", "no-l0c"]` | 配置 local buffer 自动 multi-buffer 的 scope |
 | `limit_auto_multi_buffer_only_for_local_buffer` | ❌ | ✅ | ❌ | `[False]` | 布尔列表 | 限制自动 multi-buffer 只作用于 local buffer |
-| `set_workspace_multibuffer` | ❌ | ✅ | ❌ | `[2, 4]` | `[2, 4]` | 配置 workspace multi-buffer 档位 |
+| `set_workspace_multibuffer` | ❌ | ✅ | ❌ | `[2, 4]` | `[2, 4]` | 配置 Workspace multi-buffer 档位 |
 | `enable_hivm_auto_cv_balance` | ❌ | ✅ | ❌ | `[True]` | 布尔列表 | 启用或禁用自动 CV balance |
 | `tile_mix_vector_loop` | ❌ | ✅ | ❌ | `[2, 4]` | `[2, 4, 8]` | 配置 Vector loop 的切分份数 |
 | `tile_mix_cube_loop` | ❌ | ✅ | ❌ | `[2, 4]` | `[2, 4, 8]` | 配置 Cube loop 的切分份数 |
@@ -190,7 +192,7 @@ enable_hivm_auto_cv_balance=True  # 将导致验证错误
 ### 3. 配置数量增长
 
 展开后的配置数量等于：
-基础配置数量 × Π(每个 tuning_param 的列表长度)
+基础配置数量 × Π（每个 tuning_param 的列表长度）
 
 例如，2 个基础配置 × 3 个参数（列表长度分别为 2、3、2）= 24 个展开配置。
 

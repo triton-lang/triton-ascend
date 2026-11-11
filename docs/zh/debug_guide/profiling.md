@@ -117,7 +117,7 @@ visualize_data.bin支持在MindStudio Insight可视化呈现：
 [WARN] Lack of code info of files
 ```
 
-Triton算子无需手动添加`-g`，triton-ascend后端通过环境变量`TRITON_DISABLE_LINE_INFO`控制是否在`bishengir-compile`命令中追加`--enable-debug-info=true`。注意triton-ascend默认值为`true`（即默认**关闭**行号信息，与社区Triton默认开启相反），需显式置为`False`：
+Triton算子无需手动添加`-g`，Triton-Ascend后端通过环境变量`TRITON_DISABLE_LINE_INFO`控制是否在`bishengir-compile`命令中追加`--enable-debug-info=true`。注意triton-ascend默认值为`true`（即默认**关闭**行号信息，与社区Triton默认开启相反），需显式置为`False`：
 
 ```bash
 export TRITON_DISABLE_LINE_INFO=0
@@ -140,7 +140,7 @@ export TRITON_DISABLE_LINE_INFO=0
 
 > 说明：
 >
-> - 搬运指令同时存在时，会存在共享带宽的情况，并不能每条都以接近理论带宽的速率搬运数据。比如，当MTE2/MTE3同时进行GM读写时，搬运流水线的耗时应该是（MTE2搬运量 + MTE3搬运量）/ GM带宽。
+> - 多条搬运指令同时存在时，会存在共享带宽的情况，并不能每条都以接近理论带宽的速率搬运数据。比如，当MTE2/MTE3同时进行GM读写时，搬运流水线的耗时应该是（MTE2搬运量 + MTE3搬运量）/ GM带宽。
 > - 搬运不同大小的数据块时，对带宽的利用率（有效带宽/理论带宽）不一样。针对每次搬运数据量较小的情况，实测性能达不到理论带宽。
 >
 - 计算相关流水（Cube/Vector/Scalar等）的理论耗时 = 计算数据量（单位：Element）/ 理论算力。例如：某款AI处理器对float数据类型的Vector理论峰值算力为11.06 TOPS，想要进行一次32k float类型的Element单指令计算，计算的理论耗时是32k / 11.06TOPS = 3ns（按照1k = 1000来计算）。
@@ -159,7 +159,7 @@ export TRITON_DISABLE_LINE_INFO=0
 
     当Scalar是最长的流水时：需要分析算子源码中是否对标量值进行复杂的运算，昇腾的SIMD微架构更适合多数据并行计算；另一种可能性是，由于一部分指令在硬件上不支持特定的数据类型，Triton栈将向量计算退化为标量计算。需要结合流水和标量优化手段进行优化，可参考方法三、查看仿真流水图，以及方法四、查看代码热点的情况进一步分析。
 
-    对于更一般的情况，例如MTE2搬运的实际场景：三个输入矩阵的shape分别为(128,128)、(128,1)、(128,1)，数据类型为float16。当前算法为Two-pass方法，因此有三次X的搬入，以及W、B的各一次搬入，由此可以计算出总共需要搬运的数据量，继而通过[理论参数](#theoretical-parameters)中介绍的搬运流水理论耗时计算方法计算出理论值为 `sizeof(float16) * (128 * 128 * 3 + 128 + 128) / 1.8 TB/s ≈ 55ns`（按照1 TB = $10^{12}$ Byte来计算），与实际性能数据aiv_mte2_time存在比较大的差距。经分析，输入数据的总大小小于UB的空间（A2型号为192KB）。因此MTE2时间过长可能是Tiling计算得到的基本块太小，导致发射冗余的搬运指令。需要结合流水优化和Tiling优化手段进行优化。可参考方法三，查看仿真流水图，进一步分析各条流水的情况。
+    对于更一般的情况，例如MTE2搬运的实际场景：三个输入矩阵的shape分别为(128,128)、(128,1)、(128,1)，数据类型为float16。当前算法为Two-pass方法，因此有三次X的搬入，以及W、B的各一次搬入，由此可以计算出总共需要搬运的数据量，继而通过[理论参数](#theoretical-parameters)中介绍的搬运流水理论耗时计算方法计算出理论值为 `sizeof(float16) * (128 * 128 * 3 + 128 + 128) / 1.8 TB/s ≈ 55ns`（按照1 TB = $10^{12}$ Byte来计算），与实际性能数据aiv_mte2_time存在比较大的差距。经分析，输入数据的总大小小于UB空间的大小（A2型号为192KB）。因此MTE2时间过长可能是Tiling计算得到的基本块太小，导致发射冗余的搬运指令。需要结合流水优化和Tiling优化手段进行优化。可参考方法三，查看仿真流水图，进一步分析各条流水的情况。
 
 - 方法二：通过上板Profiling分析Tiling情况 \
 先前示例中使用的AI处理器，可以通过硬件平台查看到有48个Vector核，_layer_norm_fwd_fused算子是一个纯Vector算子，但是有些场景下发了过多的Block（Block Dim > 48），造成Host调度开销过大。那么下一步的主要优化方向为Tiling优化。

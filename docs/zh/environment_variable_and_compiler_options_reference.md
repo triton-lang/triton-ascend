@@ -44,7 +44,6 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 编译 | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | 允许JIT前端引用非 `constexpr` 全局变量。 | 关闭 | 支持 | 支持 |
 | 编译 | `TRITON_ENABLE_LIBDEVICE` | 在A2/A3编译路径额外链接libdevice；非空字符串均视为开启，包括 `"0"`。 | 未设置 | 支持 | — |
 | 编译 | `TRITON_ENABLE_LIBDEVICE_SIMT` | 在950上为libdevice调用选择SIMT版本；非空字符串均视为开启，包括 `"0"`。 | 未设置 | — | 支持 |
-| 缓存与调优 | `TRITON_ASCEND_ENABLE_DYNAMIC_REUSE` | 控制符合条件的 `constexpr` 参数变化时的kernel自动复用：`0` 关闭，`1` 启用动态化，`2` 额外启用tile复用和后台编译。 | `0` | 支持 | 支持；`simt_only` 不支持tile复用 |
 | 缓存与调优 | `TRITON_HOME` | 设置Triton缓存、dump和override目录的根位置。 | 用户主目录 | 支持 | 支持 |
 | 缓存与调优 | `TRITON_CACHE_DIR` | 指定编译缓存目录。 | `$TRITON_HOME/.triton/cache` | 支持 | 支持 |
 | 缓存与调优 | `TRITON_CACHE_AUTOTUNING` | 缓存autotune的选择结果。 | 关闭 | 支持 | 支持 |
@@ -305,7 +304,7 @@ configs = [
 | 算子优化 | `auto_vectorize_v2_max_fused_ops_num` | 设置AutoVectorizeV2最大融合op数。 | `None`；整数 | — | 常规路径 |
 | 算子优化 | `prevec_max_fused_ops_num` | 设置预向量化最大融合op数。 | `None`；整数 | — | 常规路径 |
 | 纯SIMT | `simt_optimization_mode` | 设置纯SIMT的多位优化模式；在A2/A3或950常规路径显式传入时，会发出 `UserWarning` 并忽略。 | `0`；整数，位语义由NPU编译器定义 | — | 仅纯SIMT |
-| 纯SIMT | `shared_mem_dynamic_size` | 设置纯SIMT动态共享内存大小。 | `122880` 字节；可显式设整数字节数 | — | 仅纯SIMT |
+| 纯SIMT | `shared_mem_dynamic_size` | 设置纯SIMT动态共享内存大小。 | `120` KB（即122880字节）；可显式设整数字节数 | — | 仅纯SIMT |
 | 纯SIMT | `disable_fma` | 在纯SIMT编译路径禁用FMA优化。 | `False`；布尔值 | — | 仅纯SIMT |
 | 纯SIMT | `superblock_factor` | 在自动block mapping生效且未做row coalescing时，设置纯SIMT superblock因子。 | `1`；大于 `1` 时传给编译器 | — | 仅纯SIMT |
 

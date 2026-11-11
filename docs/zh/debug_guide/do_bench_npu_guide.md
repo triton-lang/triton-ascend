@@ -2,11 +2,11 @@
 
 ## 文档定位
 
-本指南面向已经掌握如何编写Triton算子，并已了解社区 `triton.testing.do_bench` 基本概念的用户。主要介绍在昇腾NPU上进行性能基准测试的推荐用法：
+本指南面向已经掌握如何编写Triton算子，并已了解社区`triton.testing.do_bench`基本概念的用户。主要介绍在昇腾NPU上进行性能基准测试的推荐用法：
 
-- Triton-Ascend上 `do_bench_npu` 的推荐用法；
+- Triton-Ascend上`do_bench_npu`的推荐用法；
 - 在Ascend后端中“纯Device侧执行时间”的含义；
-- 何时使用默认的 `mspti` 路径，以及何时需要回退到 `torch_npu.profiler` 路径。
+- 何时使用默认的`mspti`路径，以及何时需要回退到`torch_npu.profiler`路径。
 
 ## 前提条件
 
@@ -70,12 +70,12 @@ print(f"Kernel execution time: {ms} ms")
 
 这表示：
 
-- `fn` 的语义与社区 `do_bench` 相同，代表要进行基准测试的可调用函数；
-- `do_bench_npu` 在Triton-Ascend上的意思是“让NPU性能分析工具捕获纯Device侧kernel执行时间”，从而有效消除Host侧开销对测量的影响。
+- `fn`的语义与社区`do_bench`相同，代表要进行基准测试的可调用函数；
+- `do_bench_npu`在Triton-Ascend上的意思是“让NPU性能分析工具捕获纯Device侧kernel执行时间”，从而有效消除Host侧开销对测量的影响。
 
 ## 参数说明
 
-`do_bench_npu` 的完整参数列表如下（基于源码 `third_party/ascend/backend/testing.py`）：
+`do_bench_npu`的完整参数列表如下（基于源码 `third_party/ascend/backend/testing.py`）：
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |:---|:---|:---|:---|
@@ -149,7 +149,7 @@ ms = do_bench_npu(fn, warmup=1, active=1)
 
 ## 计时收集的范围与行为
 
-`do_bench_npu` 相对于社区 `do_bench` 的核心扩展集中在准确性和硬件亲和性上。
+`do_bench_npu`相对于社区`do_bench`的核心扩展集中在准确性和硬件亲和性上。
 
 ### 1. 纯Device侧时间收集
 

@@ -58,7 +58,7 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
 
 ### 自定义LLVM构建（可选）
 
-如需自定义构建LLVM，可执行以下步骤编译Triton-Ascend。
+如需自定义构建LLVM，可执行以下步骤编译Triton-Ascend：
 
 1. **代码准备**：通过`git checkout`检出指定版本的LLVM源码并应用补丁。
 
@@ -124,7 +124,7 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
     | `TRITON_PARALLEL_LINK_JOBS`   | None          | 并行链接任务数。链接阶段占用内存较大，内存不足时可设为 `1`。 |
     | `IS_MANYLINUX`                | OFF           | 设为 `ON` 后构建生成的 wheel 包为 manylinux 兼容格式，用于在不同 Linux 发行版上安装。 |
 
-4. **(可选)Triton-distributed-ascend**：若使用[Triton-distributed-ascend](https://gitcode.com/Ascend/Triton-distributed-ascend)的功能，需源码编译shmem v1.7.0组件。
+4. **（可选）Triton-distributed-ascend**：若使用[Triton-distributed-ascend](https://gitcode.com/Ascend/Triton-distributed-ascend)的功能，需源码编译shmem v1.7.0组件。
 
 4.1 获取源码：
 
@@ -136,7 +136,7 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
 
 4.2 源码编译：
 
- 请参考[shmem项目](https://gitcode.com/cann/shmem) README.md中 "安装"->"方式三： 源码编译" 章节。
+参见[shmem项目](https://gitcode.com/cann/shmem) README.md中“安装”->“方式三：源码编译”章节。
 
 ## 镜像安装
 
@@ -225,7 +225,7 @@ The maximum difference between torch and triton is 0.0
 
 ### 运行单元测试（可选）
 
-源码仓中提供了单op测试用例，位于`third_party/ascend/unittest/pytest_ut`目录下。
+源码仓中提供了单OP测试用例，位于`third_party/ascend/unittest/pytest_ut`目录下。
 
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
@@ -299,14 +299,14 @@ pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.c
 **问题四：Triton-Ascend 3.2.1版本为何新增依赖triton？**
 
 答复：Triton-Ascend是基于Triton进行的二次开发，与Triton安装目录同名。若用户安装Triton-Ascend之后，再次安装Triton或依赖Triton的三方件，会覆盖Triton目录，导致Triton-Ascend功能受损。
-因此通过增加Triton依赖，当Triton被覆盖安装时会有如下提醒。
+因此通过增加Triton依赖，当Triton被覆盖安装时会有如下提醒：
 
 ```text
 ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
 triton-ascend 3.2.1 requires triton==3.5.0, but you have triton 3.5.1 which is incompatible.
 ```
 
-若用户遇到且想恢复Triton-Ascend功能，可根据问题三的解决措施进行命令修复。
+若用户遇到该问题且想恢复Triton-Ascend功能，可根据问题三的解决措施进行命令修复。
 
 **问题五：Triton-Ascend 3.2.1版本依赖的Triton版本为何不一致？**
 

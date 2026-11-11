@@ -5,7 +5,7 @@
 下面是一个完整的路线图Issue示例，展示了所有推荐元素的实际应用。建议先查看此示例获得整体印象，再阅读后续的详细规范说明。
 
 ```markdown
-创建 Issue 标题：[Roadmap] Triton-Ascend Roadmap 2026 Q2
+创建Issue标题：[Roadmap] Triton-Ascend Roadmap 2026 Q2
 
 ---
 # Triton-Ascend Roadmap 2026 Q2
@@ -74,22 +74,22 @@ Issue: [Related Issue link]
 
 ## 2. 顶层内容
 
-### 2.1 开篇描述（可选）
+### 2.1开篇描述（可选）
 
 提供项目概述、愿景或整体方向的简要总结。例如，简要描述Triton-Ascend本季度在上游对齐、后端性能和算子覆盖方面的目标。
 
-### 2.2 重点方向章节
+### 2.2重点方向章节
 
 列出本周期最关键的3-5个重点方向，建议按项目的**功能领域**或**技术模块**分组，覆盖全局视角：
 
 ```markdown
 ## Focus
 
-• Upstream Compatibility: Align with upstream Triton compiler frontend and IR changes, reduce fork divergence
-• Backend Performance: Optimize Ascend NPU kernel generation and memory scheduling strategy
-• Operator Coverage: Expand supported Triton ops and data types, improve end-to-end model coverage
-• Usability: Improve debugging tools and error reporting for Ascend backend
-• Ecosystem Integration: Enhance integration with PyTorch, vLLM, and MindSpeed on Ascend backend
+- Upstream Compatibility: Align with upstream Triton compiler frontend and IR changes, reduce fork divergence
+- Backend Performance: Optimize Ascend NPU kernel generation and memory scheduling strategy
+- Operator Coverage: Expand supported Triton ops and data types, improve end-to-end model coverage
+- Usability: Improve debugging tools and error reporting for Ascend backend
+- Ecosystem Integration: Enhance integration with PyTorch, vLLM, and MindSpeed on Ascend backend
 ```
 
 **特征：**
@@ -98,7 +98,7 @@ Issue: [Related Issue link]
 
 ## 3. 主要功能模块章节
 
-### 3.1 章节划分原则
+### 3.1章节划分原则
 
 按项目的**功能领域**或**技术模块**分组，例如：
 
@@ -108,7 +108,7 @@ Issue: [Related Issue link]
 - **Usability** - Debugging tools and error reporting
 - **Ecosystem Integration** - Integration with training/inference frameworks
 
-### 3.2 各模块结构
+### 3.2各模块结构
 
 每个模块包含多个**具体工作项**，格式如下：
 
@@ -132,32 +132,32 @@ PR: [Related PR link]         [optional]
 
 每个工作项应包含以下关键信息：
 
-### 4.1 目标（Goal）
+### 4.1目标（Goal）
 
 - **含义**：工作目标或简要描述
 - **用法**：说明该工作项的目标
-- **示例**：`目标：在昇腾后端 tl.dot 中支持 FP8（E4M3/E5M2）数据类型`
+- **示例**：`目标：在昇腾后端tl.dot中支持FP8（E4M3/E5M2）数据类型`
 
-### 4.2 负责人（Owner）
+### 4.2负责人（Owner）
 
 - **含义**：责任人
-- **格式**：`负责人：@GitHubID`
+- **格式**：`Owner:@GitHubID`
 - **用法**：明确谁负责或主导该工作项
-- **示例**：`负责人：@contributor-a`
+- **示例**：`Owner:@contributor-a`
 
 ### 4.3 Issue
 
 - **含义**：关联的GitHub Issue
-- **格式**：`Issue：<Issue 链接>`
+- **格式**：`Issue：<Issue链接>`
 - **用法**：跟踪详细设计和讨论
-- **示例**：`Issue：https://github.com/triton-lang/triton-ascend/issues`
+- **示例**：`[Triton-Ascend Issues](https://github.com/triton-lang/triton-ascend/issues)`
 
 ### 4.4 PR（Pull Request）
 
 - **含义**：相关实现PR
-- **格式**：`PR：<PR 链接>`
+- **格式**：`PR：<PR链接>`
 - **用法**：关联实现工作
-- **示例**：`PR：https://github.com/triton-lang/triton-ascend/pulls`
+- **示例**：`[Triton-Ascend Pull Requests](https://github.com/triton-lang/triton-ascend/pulls)`
 
 ## 5. 可选补充内容
 
@@ -178,8 +178,8 @@ Issue: #123
 
 **与工作项中Issue字段的区别：**
 
-- **工作项中的Issue字段**：链接到该工作项的具体设计、讨论或跟踪Issue
-- **子Issue章节**：用于关联其他周期的路线图Issue（如上季度未完成的工作），或将大工作项分解为多个独立跟踪的子Issue
+- **工作项中的Issue字段**：链接到该工作项的具体设计、讨论或跟踪Issue。
+- **子Issue章节**：用于关联其他周期的路线图Issue（如上季度未完成的工作），或将大工作项分解为多个独立跟踪的子Issue。
 
 ```markdown
 ## Sub-issues

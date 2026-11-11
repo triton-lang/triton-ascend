@@ -1,5 +1,7 @@
 # 安全声明
 
+本文档介绍Triton-Ascend的安全声明，涵盖系统安全加固、运行用户建议、文件权限控制、构建安全声明与公网地址声明，适用于安装和使用Triton-Ascend的用户。
+
 ## 系统安全加固
 
 建议用户在系统中配置开启ASLR（Address Space Layout Randomization，地址空间布局随机化），推荐使用级别2（完全随机化模式），可参考以下方式进行配置：
@@ -44,7 +46,7 @@ echo 2 > /proc/sys/kernel/randomize_va_space
 
 ## 构建安全声明
 
-Triton-Ascend支持源码编译安装，在编译时会下载依赖的第三方库并执行构建shell脚本，在编译过程中会产生临时程序文件和编译目录。用户可根据需要自行对源代码目录内的文件进行权限管控降低安全风险。
+Triton-Ascend支持源码编译安装，在编译时会下载依赖的第三方库并执行构建shell脚本，在编译过程中会产生临时程序文件和编译目录。用户可根据需要自行对源代码目录内的文件进行权限管控，降低安全风险。
 
 ## 公网地址声明
 
@@ -61,7 +63,7 @@ Triton-Ascend支持源码编译安装，在编译时会下载依赖的第三方�
 | 自主创新 | 不涉及                                                                                         | docker/devdocker/setup_triton-ascend_dev.sh | <https://github.com/triton-lang/triton-ascend.git>                                                          | Triton-Ascend源码仓地址                 |
 | 自主创新 | 不涉及                                                                                         | ascend/examples/generalization_cases/run_daily.sh & scripts/prepare_build.sh | <https://gitee.com/shijingchang/triton.git>                                                           | 构建依赖代码仓                 |
 | 自主创新 | 不涉及                                                                                         | setup.py                                   | <https://github.com/triton-lang/triton-ascend.git/>                                                             | Triton-Ascend源码仓地址 |
-| 开源引入 | <https://gitclone.com>                                                            | scripts/prepare_build.sh                   | <https://github.com/llvm/llvm-project.git>                                               | 依赖的llvm源码仓    |
+| 开源引入 | <https://gitclone.com>                                                            | scripts/prepare_build.sh                   | <https://github.com/llvm/llvm-project.git>                                               | 依赖的LLVM源码仓    |
 | 开源引入 | <https://repo.huaweicloud.com>                                            | scripts/prepare_build.sh                           | <https://repo.huaweicloud.com/repository/pypi/simple>                                                | 用于配置pybind11下载链接 |
 | 开源引入 | <https://pypi.tuna.tsinghua.edu.cn>                                                                                         | docker/devdocker/triton-ascend_dev.dockerfile | <https://pypi.tuna.tsinghua.edu.cn/simple>                                                             | Python pip源配置         |
 | 开源引入 | <https://triton-ascend-artifacts.obs.myhuaweicloud.com> | setup.py |`https://triton-ascend-artifacts.obs.myhuaweicloud.com/llvm-builds/{name}.tar.gz` | 用于下载预编译的LLVM工具 |

@@ -5,10 +5,10 @@
 ## 文档组织
 
 - [调试指南](./debugging.md) — Triton-Ascend算子调试方法
-- [性能分析](./profiling.md) — 使用性能分析工具定位性能瓶颈
+- [性能调优](./profiling.md) — 使用性能调优工具定位性能瓶颈
 - [精度分析](./precision.md) — 算子精度问题分析与解决
 - [msDebug使用指南](./triton_msdebug_user_guide.md) — 使用 msDebug调试Triton Kernel
-- [do_bench_npu使用指南](./do_bench_npu_guide.md) — 在昇腾NPU上测量kernel的纯Device侧执行时间
+- [do_bench_npu使用指南](./do_bench_npu_guide.md) — 在昇腾NPU上测量Kernel的纯Device侧执行时间
 - [Warmup使用指南](./warmup_guide.md) — 在服务启动或CI阶段提前编译普通JIT和Autotune算子
 
 ```{toctree}

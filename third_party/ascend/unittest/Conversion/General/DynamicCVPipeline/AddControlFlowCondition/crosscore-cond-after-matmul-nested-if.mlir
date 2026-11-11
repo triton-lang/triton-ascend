@@ -1,14 +1,17 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
 
-// The group2 consumer's matmul sits in an scf.if inside the ssbuffer.if.
-// That if may not run, so the consumer decrement stays after the inner if,
-// before the ssbuffer.if yield, and is not placed after the matmul.
+// The counter of a block is bumped at the end of its then block. The group2
+// consumer's matmul sits in an scf.if inside the ssbuffer.if. That if may not
+// run, so the bump stays after the inner if, before the ssbuffer.if yield,
+// and not inside the inner if.
 
 // CHECK-LABEL: func.func @for_crosscore_matmul_nested_if
+// CHECK: scf.if
 // CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 1 : i32{{.*}}tensor<128x128xf16>, tensor<128x128xf16>
-// CHECK-NOT: arith.subi
+// CHECK-NOT: memref.store {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: hivm.hir.fixpipe {{.*}}ssbuffer.block_id = 1 : i32
-// CHECK: arith.subi
+// CHECK-NEXT: arith.addi {{.*}}, %c1_i32{{[0-9_]*}} : i32
+// CHECK-NEXT: memref.store {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: } {{.*}}ssbuffer.if = 1 : i32}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {

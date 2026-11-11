@@ -4,7 +4,7 @@
 // write wins, so the sge uses block 1's counter (second iter arg). The slt
 // stays on block 4's own counter.
 // CHECK-LABEL: func.func @flow_opt_earliest_start
-// CHECK: iter_args(%[[CNT_A:.*]] = %{{[^,]+}}, %[[CNT_B:.*]] = %{{[^,]+}}, %[[CNT_MIDA:.*]] = %{{[^,]+}}, %[[CNT_MIDB:.*]] = %{{[^,]+}}, %[[CNT_TGT:.*]] = %{{[^,]+}}, %[[DEP:.*]] = %{{[^,)]+}})
+// CHECK: scf.while (%{{[^ ]+}} = %{{[^ ,]+}}, %[[CNT_A:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT_B:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT_MIDA:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT_MIDB:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT_TGT:[^ ,]+]] = %{{[^ ,]+}}, %[[DEP:[^ ,]+]] = %{{[^ ,]+}})
 // CHECK: arith.cmpi sge, %[[CNT_B]], %{{.*}}
 // CHECK: arith.cmpi slt, %[[CNT_TGT]], %{{.*}}
 

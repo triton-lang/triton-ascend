@@ -179,6 +179,8 @@ def get_triton_ascend_patch_file():
         "python/triton/runtime/interpreter.py",
         "python/triton/runtime/autotuner.py",
         "python/triton/runtime/jit.py",
+        "python/triton/tools/compile.py",
+        "python/triton/tools/link.py",
         "bin/RegisterTritonDialects.h",
         "bin/triton-opt.cpp",
         "bin/CMakeLists.txt",

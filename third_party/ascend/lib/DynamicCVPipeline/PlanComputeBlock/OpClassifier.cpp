@@ -351,6 +351,15 @@ void OpClassifierPass::matchFillPattern(Operation *def) {
   if (!fillOp) {
     return;
   }
+  // FillOp must be used in INIT
+  if (llvm::any_of(fillOp->getUses(), [&](OpOperand &use) {
+        if (auto matmulOp = dyn_cast<linalg::MatmulOp>(use.getOwner())) {
+          return use.getOperandNumber() < matmulOp.getNumDpsInputs();
+        }
+        return false;
+      })) {
+    return;
+  }
 
   markCube(fillOp);
   cubeSeeds.push_back(fillOp);

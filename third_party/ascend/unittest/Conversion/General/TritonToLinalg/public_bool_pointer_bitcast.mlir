@@ -28,4 +28,34 @@ module {
     tt.store %db, %bytes : tensor<8x!tt.ptr<i8>>
     tt.return
   }
+
+  // index_select retains a dynamic source dimension even with a constant
+  // size operand. Its scalar bool cast must describe all 64 * 128 bytes.
+  // CHECK-LABEL: func.func @bool_index_select
+  // CHECK: %[[CAPACITY:.*]] = arith.constant 8192 : index
+  // CHECK: %[[BASE:.*]] = hivm.hir.pointer_cast({{.*}}) [%[[CAPACITY]]] : memref<?xi8>
+  // CHECK: %[[VIEW:.*]] = memref.reinterpret_cast %[[BASE]] to offset: [0], sizes: [%{{.*}}, 128], strides: [128, 1]
+  // CHECK: memref.subview %[[VIEW]]
+  // CHECK: memref.copy {{.*}} {was_bool_to_int8 = true}
+  // CHECK: bufferization.materialize_in_destination
+  // CHECK: return
+  tt.func public @bool_index_select(%src: !tt.ptr<i1>, %indices: !tt.ptr<i32>, %dst: !tt.ptr<i1>) {
+    %zero = arith.constant 0 : index
+    %minus_one = arith.constant -1 : index
+    %rows = arith.constant 64 : index
+    %cols = arith.constant 128 : index
+    %ir = tt.make_range {start = 0 : i32, end = 4 : i32} : tensor<4xi32>
+    %ib = tt.splat %indices : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+    %ip = tt.addptr %ib, %ir : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+    %index = tt.load %ip : tensor<4x!tt.ptr<i32>>
+    %bytes = tt.bitcast %src : !tt.ptr<i1> -> !tt.ptr<i8>
+    %value = ascend.index_select_simd %bytes, %index, 0, [%rows, %cols], [%minus_one, %zero], [-1, 128] {was_bool_to_int8 = true} : !tt.ptr<i8>, tensor<4xi32> -> tensor<4x128xi8>
+    %range = tt.make_range {start = 0 : i32, end = 512 : i32} : tensor<512xi32>
+    %offset = tt.reshape %range : tensor<512xi32> -> tensor<4x128xi32>
+    %out = tt.splat %dst : !tt.ptr<i1> -> tensor<4x128x!tt.ptr<i1>>
+    %ptr = tt.addptr %out, %offset : tensor<4x128x!tt.ptr<i1>>, tensor<4x128xi32>
+    %byte_ptr = tt.bitcast %ptr : tensor<4x128x!tt.ptr<i1>> -> tensor<4x128x!tt.ptr<i8>>
+    tt.store %byte_ptr, %value : tensor<4x128x!tt.ptr<i8>>
+    tt.return
+  }
 }

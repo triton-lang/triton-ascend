@@ -115,3 +115,29 @@ module {
     return %value : i32
   }
 }
+
+// -----
+
+// A runtime-sized view must derive its byte-address carrier's capacity from
+// the size SSA value while preserving the view's size and stride.
+// CHECK-LABEL: func.func @dynamic_size_carrier(
+// CHECK-SAME: %[[ADDRESS:[a-zA-Z0-9_]+]]: i64, %[[SIZE:[a-zA-Z0-9_]+]]: index, %[[INDEX:[a-zA-Z0-9_]+]]: index
+// CHECK: %[[LAST:.*]] = arith.subi %[[SIZE]], %{{.*}} : index
+// CHECK: %[[EXTENT:.*]] = arith.muli %[[LAST]], %{{.*}} : index
+// CHECK: %[[MIN:.*]] = arith.minsi %{{.*}}, %[[EXTENT]] : index
+// CHECK: %[[MAX:.*]] = arith.maxsi %{{.*}}, %[[EXTENT]] : index
+// CHECK: %[[SPAN:.*]] = arith.subi %[[MAX]], %[[MIN]] : index
+// CHECK: %[[CAPACITY:.*]] = arith.addi %[[SPAN]], %{{.*}} : index
+// CHECK: %[[CAST:.*]] = hivm.hir.pointer_cast({{.*}}) [%[[CAPACITY]]] : memref<?xi32>
+// CHECK: %[[VIEW:.*]] = memref.reinterpret_cast %[[CAST]] to offset: [%{{.*}}], sizes: [%[[SIZE]]], strides: [2]
+// CHECK: memref.load %[[VIEW]][%[[INDEX]]]
+// CHECK: return
+module {
+  func.func @dynamic_size_carrier(%address: i64, %size: index, %index: index) -> i32 {
+    %placeholder = arith.constant 1 : index
+    %base = hivm.hir.pointer_cast(%address) [%placeholder] {ScalarPointerCarrier} : memref<?xi32>
+    %view = memref.reinterpret_cast %base to offset: [5], sizes: [%size], strides: [2] : memref<?xi32> to memref<?xi32, strided<[2], offset: 5>>
+    %value = memref.load %view[%index] : memref<?xi32, strided<[2], offset: 5>>
+    return %value : i32
+  }
+}

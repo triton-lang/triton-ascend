@@ -2343,12 +2343,13 @@ LogicalResult TritonToLinalgPass::finalizePointerCasts(ModuleOp moduleOp) {
         // A view reaches sum(min(0, (size - 1) * stride)) through
         // sum(max(0, (size - 1) * stride)), inclusive. Summing each axis
         // preserves multidimensional, zero and negative stride layouts.
+        // Custom memory operations can keep source dimensions dynamic.
         for (auto [size, stride] :
-             llvm::zip_equal(sizes, reinterpretCastOp.getMixedStrides())) {
-          assert(!ShapedType::isDynamic(size));
-          OpFoldResult extent =
-              mulOpFoldResult(rewriter.getIndexAttr(size - 1), stride, loc,
-                              rewriter, rewriter.getIndexType());
+             llvm::zip_equal(reinterpretCastOp.getConstifiedMixedSizes(),
+                             reinterpretCastOp.getMixedStrides())) {
+          OpFoldResult lastIndex = subOpFoldResult(size, one, loc, rewriter);
+          OpFoldResult extent = mulOpFoldResult(
+              lastIndex, stride, loc, rewriter, rewriter.getIndexType());
           if (!keepLayout)
             minimumReach = addOpFoldResult(
                 minimumReach, minOpFoldResult(zero, extent, loc, rewriter), loc,

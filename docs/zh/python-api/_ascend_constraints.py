@@ -1025,6 +1025,10 @@ CONSTRAINTS = {
         "constraints": [
             "core_mode: must be 'vector', 'cube'.",
             "Each kernel supports one cube scope and one vector scope; they execute in parallel.",
+            "``scope.scope`` operations must not be nested.",
+            "A scope with ``core_mode=\"cube\"`` must not contain vector instructions; "
+            "a scope with ``core_mode=\"vector\"`` must not contain cube operations.",
+            "Tensor values defined inside a scope must not be used outside that scope.",
             "Explicit synchronization (sync_block_set/sync_block_wait) required for cross-scope data dependencies.",
         ],
         "example":

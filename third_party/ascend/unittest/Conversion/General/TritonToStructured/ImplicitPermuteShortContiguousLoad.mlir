@@ -34,4 +34,3 @@ module {
     tt.return %value : tensor<8x1x2048xf32>
   }
 }
-

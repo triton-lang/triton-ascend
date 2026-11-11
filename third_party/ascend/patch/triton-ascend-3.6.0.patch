@@ -846,6 +846,29 @@ index 39e6c4dfb..c72ca65c2 100644
 +
 +    def format_line_delim(self, keyword):
 +        return f"///------------------{keyword}------------------\n"
+diff --git a/python/triton/language/core.py b/python/triton/language/core.py
+index 29f6a367f..dd6acce6a 100644
+--- a/python/triton/language/core.py
++++ b/python/triton/language/core.py
+@@ -1583,8 +1583,16 @@ def _aggregate(cls):
+ 
+     for (name, member) in inspect.getmembers(cls):
+         if inspect.isfunction(member) or inspect.ismethod(member) or isinstance(member, JITCallable):
+-            if name != "__init__":
+-                setattr(aggregate_value, name, member)
++            if name == "__init__":
++                continue
++            # __annotate__ is a Python 3.14+ internal; exclude from hash and
++            # don't copy it onto the aggregate value type.
++            if name == "__annotate__":
++                continue
++            setattr(aggregate_value, name, member)
++
++            # Exclude __annotate_func__ from hash — isn't user facing (Python 3.14+).
++            if name != "__annotate_func__":
+                 hash_attrs.append(member)
+ 
+     aggregate_value.hash_attrs = hash_attrs
 diff --git a/python/triton/language/math.py b/python/triton/language/math.py
 index 582cd876c..034fe0f87 100644
 --- a/python/triton/language/math.py

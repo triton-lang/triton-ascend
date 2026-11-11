@@ -29,6 +29,8 @@
 
 namespace mlir::triton {
 
+std::unique_ptr<OperationPass<ModuleOp>> createVectorAddressLookaheadPass();
+
 #define GEN_PASS_REGISTRATION
 #include "ascend/include/TritonToLinalg/Passes.h.inc"
 

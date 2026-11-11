@@ -992,6 +992,24 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compil
     assert explicit_template.__dict__["force_simt_template"] is False
 
 
+def test_parse_options_vector_address_lookahead_defaults_to_enabled(compiler_module):
+    option = "enable_vector_address_lookahead"
+    default = _parse_options(compiler_module, "Ascend910B1", {})
+    enabled = _parse_options(compiler_module, "Ascend910B1", {option: True})
+    disabled = _parse_options(compiler_module, "Ascend910B1", {option: False})
+
+    assert default.enable_vector_address_lookahead is True
+    assert enabled.enable_vector_address_lookahead is True
+    assert disabled.enable_vector_address_lookahead is False
+    assert default.hash() == enabled.hash()
+    assert default.hash() != disabled.hash()
+
+
+@pytest.mark.parametrize("lookahead", [
+    pytest.param(_UNSET, id="missing"),
+    pytest.param(True, id="enabled"),
+    pytest.param(False, id="disabled"),
+])
 @pytest.mark.parametrize(
     ("arch", "compile_on_910_95", "expected_calls"),
     (
@@ -1007,9 +1025,11 @@ def test_ttir_to_linalg_merge_concat_load_buffer_is_a5_only(
     arch,
     compile_on_910_95,
     expected_calls,
+    lookahead,
 ):
     events = []
     merge_calls = []
+    lookahead_calls = []
 
     def noop(*_args, **_kwargs):
         return None
@@ -1026,6 +1046,7 @@ def test_ttir_to_linalg_merge_concat_load_buffer_is_a5_only(
         add_bubble_up_operation=noop,
         add_triton_to_linalg=noop,
         add_merge_concat_load_buffer=lambda _pm: merge_calls.append(arch),
+        add_vector_address_lookahead=lambda _pm: lookahead_calls.append(arch),
     )
     monkeypatch.setattr(
         compiler_module,
@@ -1057,8 +1078,12 @@ def test_ttir_to_linalg_merge_concat_load_buffer_is_a5_only(
         enable_tla_mode=False,
     )
 
+    if lookahead is not _UNSET:
+        options.enable_vector_address_lookahead = lookahead
+
     assert compiler_module.ttir_to_linalg(_FakeModule(events), metadata, options) == "module {}"
     assert merge_calls == ([] if arch is None else [arch] * expected_calls)
+    assert lookahead_calls == ([] if lookahead is False else [arch])
     assert events[-1] == "run_row"
 
 
@@ -1097,6 +1122,7 @@ def test_ttir_to_linalg_dynamic_cv_pipeline_is_a5_only(
         add_bubble_up_operation=noop,
         add_triton_to_linalg=noop,
         add_merge_concat_load_buffer=noop,
+        add_vector_address_lookahead=noop,
         set_enable_buffer_insert_optimization=noop,
         add_dynamic_cv_pipeline=lambda _pm, _compile_on_910_95: dynamic_cv_calls.append(arch),
     )

@@ -447,6 +447,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         # MergeConcatLoadBuffer is A5-only; A6 must not be enabled by its register-based flag.
         if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
             ascend.passes.ttir.add_merge_concat_load_buffer(pm)
+        if getattr(opt, "enable_vector_address_lookahead", True):
+            ascend.passes.ttir.add_vector_address_lookahead(pm)
         target_arch = metadata.get("target_arch", metadata.get("arch", ""))
         if metadata["enable_dynamic_cv_pipeline"] and _is_a5_target_arch(target_arch):
             metadata["set_workspace_multibuffer"] = 0
@@ -1315,6 +1317,8 @@ class NPUOptions:
     enable_ubuf_saving: bool = None
     disable_size_align_for_cast: bool = None
     enable_preload: bool = None
+    # Address computation lookahead is independent of backend CV preload.
+    enable_vector_address_lookahead: bool = True
     enable_auto_bind_sub_block: bool = None
     disable_tightly_coupled_buffer_reuse: bool = False
     enable_hivm_auto_cv_balance: bool = None

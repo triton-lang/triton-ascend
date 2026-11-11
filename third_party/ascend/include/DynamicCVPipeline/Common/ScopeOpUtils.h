@@ -50,14 +50,17 @@ inline bool isLoadScope(Operation *op) {
   return isa_and_nonnull<scope::ScopeOp>(op) && op->hasAttr(kScopeLoadAttr);
 }
 
-/// Packs `ops` into a fresh `scope::ScopeOp` created at the position of the
-/// last op. Values produced inside `ops` but consumed outside are routed
-/// through `scope::ReturnOp`, and their external users are redirected.
+/// Packs `ops` into a fresh `scope::ScopeOp` created before `insertPosition`,
+/// defaulting to `ops.back()`. Values produced inside `ops` but consumed
+/// outside are routed through `scope::ReturnOp`, and their external users are
+/// redirected.
 ///
-/// PRECONDITIONS: `ops` must already follow dominance order, and the packed
-/// scope must dominate its remaining users.
+/// PRECONDITIONS: `ops` must already follow dominance order. Captured values
+/// must dominate the insertion position, and the packed scope must dominate
+/// its remaining users.
 /// Returns nullptr on failure; the caller is responsible for any restoration.
-scope::ScopeOp packScopeOp(llvm::ArrayRef<Operation *> ops);
+scope::ScopeOp packScopeOp(llvm::ArrayRef<Operation *> ops,
+                           Operation *insertPosition = nullptr);
 
 /// Moves the ops inside `scopeOp` into the parent block and erases `scopeOp`.
 ///

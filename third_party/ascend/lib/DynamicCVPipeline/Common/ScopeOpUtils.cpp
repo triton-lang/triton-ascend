@@ -42,11 +42,14 @@ static constexpr const char *DEBUG_TYPE = "scope-op-utils";
 
 namespace mlir::CVPipeline {
 
-scope::ScopeOp packScopeOp(llvm::ArrayRef<Operation *> ops) {
+scope::ScopeOp packScopeOp(llvm::ArrayRef<Operation *> ops,
+                           Operation *insertPosition) {
   if (ops.empty()) {
     return nullptr;
   }
-  Operation *insertionPoint = ops.back();
+  if (!insertPosition) {
+    insertPosition = ops.back();
+  }
 
   DenseSet<Operation *> allOps;
   for (auto *op : ops) {
@@ -67,9 +70,9 @@ scope::ScopeOp packScopeOp(llvm::ArrayRef<Operation *> ops) {
     }
   }
 
-  OpBuilder builder(insertionPoint);
-  builder.setInsertionPoint(insertionPoint);
-  Location loc = insertionPoint->getLoc();
+  OpBuilder builder(insertPosition);
+  builder.setInsertionPoint(insertPosition);
+  Location loc = insertPosition->getLoc();
   ValueRange redirectValues(escapedValues.getArrayRef());
   TypeRange types = redirectValues.getTypes();
   auto scopeOp = builder.create<scope::ScopeOp>(loc, types);

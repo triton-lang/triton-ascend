@@ -574,8 +574,8 @@ TEST(SimdSimtCostModelTest, LoopCarriedRecurrenceAppliesScanDependencyFactor) {
     // Mixed shuffle pool: 320 scan-class steps (tt.scan) + 320 reduce-class
     // steps (tt.reduce).
     stage.workload.shuffleLaneSteps = 640.0;
-    stage.workload.prefixScanCounts[{32, 10, 1, 1, false, "add", "", 0, 0, 0}] =
-        1.0;
+    stage.workload.prefixScanCounts[{
+        32, 10, 1, 1, false, "add", "", 0, 0, 0, {}, "", false}] = 1.0;
     return stage;
   };
 
@@ -2296,7 +2296,7 @@ TEST(SimdSimtCostModelTest, PerReductionMixedAxesAndPartialFallback) {
         static_cast<int64_t>(elements / work.shape[work.axis]),
         work.shape[work.axis], 32}] = work.instances;
     stage.reductionContributions.push_back(contribution);
-    mlir::ascend::mergeReductionResidualWorkload(stage.workload, contribution);
+    stage.workload.merge(contribution);
     auto estimate = takeReductionResult(mlir::ascend::estimateReductionCycles(
         work, *profile.reductionProfile, mlir::ascend::ReductionMode::SIMD,
         profile.baseSimtWarpCount));

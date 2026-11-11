@@ -15,6 +15,7 @@ add_mlir_library(AscendModelRouteModel
   Reduction/ReductionProfile.cpp
   Reduction/ReductionCostModel.cpp
   Reduction/ReductionLayoutModel.cpp
+  PrefixScan/PrefixScanFormulaModel.cpp
   StageCostModels.cpp
   SpecializedMemoryCostModel.cpp
   SpecializedMemoryMain.cpp

@@ -10,7 +10,7 @@
   "indirect_memory_profile": "../indirect_memory/ascend_950pr_v1.json",
   "target": "Ascend950PR/dav-c310",
   "description": "Generic Stage Route Model hardware profile. Every kernel is derived from transformed TTIR resource workloads; absolute time adds measured kernel-boundary and global-load completion envelopes selected only by structural route facts. No operator identity, exact function DAG signature, shape whitelist, or kernel-specific elapsed intercept participates in scoring or prediction. SIMD f16 MMAD resource work uses the qualified Cube/TinyCube MAC/MTE1 formula within its calibrated domain.",
-  "prefixscan_profile": "../prefixscan/ascend_950pr_prefixscan_v1.json",
+  "prefixscan_profile": "../prefixscan/ascend_950pr_prefixscan.json",
   "microbenchmark_profile": "../microbench/ascend_950pr_v1.json",
   "compatible_targets": [
     "Ascend950PR_*",

@@ -5,10 +5,10 @@ msgid ""
 msgstr ""
 "Project-Id-Version: triton-ascend-docs\n"
 
-"POT-Creation-Date: 2026-10-26 23:40+0800\n"
-"PO-Revision-Date: 2026-10-26 23:40+0800\n"
+"POT-Creation-Date: 2026-11-11 15:43+0800\n"
+"PO-Revision-Date: 2026-11-11 15:43+0800\n"
 
-"X-Source-Commit: bdb5c7a8772161b139a126138030139bee0de546\n"
+"X-Source-Commit: 032fbdf629fd628a46d9e9e5b1fb3e6002775ed7\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -23,8 +23,8 @@ msgstr ""
 msgid "典型算子样例"
 msgstr "Typical operator samples"
 
-msgid "Triton 示例列表"
-msgstr "Triton sample list"
+msgid "Triton示例列表"
+msgstr "Triton Sample List"
 
 msgid "示例"
 msgstr "Example"
@@ -41,20 +41,20 @@ msgstr "Simple Addition Sample"
 msgid "[02_fused_softmax_example](./02_fused_softmax_example.md)"
 msgstr "[02_fused_softmax_example](./02_fused_softmax_example.md)"
 
-msgid "Softmax 融合算子示例"
-msgstr "Fused Softmax operator sample"
+msgid "Softmax融合算子示例"
+msgstr "Softmax fused operator sample"
 
 msgid "[03_layer_norm_example](./03_layer_norm_example.md)"
 msgstr "[03_layer_norm_example](./03_layer_norm_example.md)"
 
-msgid "Layer Normalization 示例"
+msgid "Layer Normalization示例"
 msgstr "Layer Normalization sample"
 
 msgid "[04_fused_attention_example](./04_fused_attention_example.md)"
 msgstr "[04_fused_attention_example](./04_fused_attention_example.md)"
 
-msgid "Flash Attention v2 融合注意力算法示例"
-msgstr "Flash Attention v2 fused attention algorithm sample"
+msgid "Flash Attention v2融合注意力算法示例"
+msgstr "Flash Attention v2 Fused Attention Algorithm Sample"
 
 msgid "[05_matrix_multiplication_example](./05_matrix_multiplication_example.md)"
 msgstr "[05_matrix_multiplication_example](./05_matrix_multiplication_example.md)"
@@ -65,8 +65,8 @@ msgstr "Efficient Matrix Multiplication Implementation Sample"
 msgid "[06_autotune_example](./06_autotune_example.md)"
 msgstr "[06_autotune_example](./06_autotune_example.md)"
 
-msgid "使用 Autotune 进行内核自动调优示例"
-msgstr "Kernel autotuning sample using Autotune"
+msgid "使用Autotune进行内核自动调优示例"
+msgstr "Sample of using Autotune for kernel autotuning"
 
 msgid "[07_accuracy_comparison_example](./07_accuracy_comparison_example.md)"
 msgstr "[07_accuracy_comparison_example](./07_accuracy_comparison_example.md)"
@@ -77,11 +77,11 @@ msgstr "Accuracy comparison sample"
 msgid "[08_max_autotune_example](./08_max_autotune_example.md)"
 msgstr "[08_max_autotune_example](./08_max_autotune_example.md)"
 
-msgid "使用 max_autotune 进行内核自动调优示例"
-msgstr "Kernel autotuning sample using max_autotune"
+msgid "使用max_autotune进行内核自动调优示例"
+msgstr "Kernel autotune sample using max_autotune"
 
 msgid "[09_costmodel_example](./09_costmodel_example.md)"
 msgstr "[09_costmodel_example](./09_costmodel_example.md)"
 
-msgid "Costmodel 端到端预测示例"
-msgstr "Costmodel end-to-end prediction example"
+msgid "Costmodel端到端预测示例"
+msgstr "Costmodel end-to-end prediction sample"

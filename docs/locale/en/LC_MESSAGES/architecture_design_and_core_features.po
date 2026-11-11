@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-27 11:12+0800\n"
-"PO-Revision-Date: 2026-10-27 11:12+0800\n"
+"POT-Creation-Date: 2026-11-11 14:53+0800\n"
+"PO-Revision-Date: 2026-11-11 14:53+0800\n"
 
-"X-Source-Commit: bd37ce9101ee36ba27f8da81fa4cfb7d370ef5df\n"
+"X-Source-Commit: cf945eb1b587b0cd861d2609ab69319caec3f01c\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -75,8 +75,8 @@ msgstr "2.1 Code Structure Principles"
 msgid "本项目在标准 Triton 基础上，扩展支持华为 Ascend NPU（通过 CANN 软件栈）。整体设计遵循以下**代码原则**："
 msgstr "This project extends support for the Huawei Ascend NPU (through the CANN software stack) based on standard Triton. The overall design follows the following **code principles**:"
 
-msgid "**（1）归属判断：按是否与硬件相关决定落点**"
-msgstr "**(1) Ownership determination: Determine the placement based on whether it is hardware-related**"
+msgid "（1）归属判断：按是否与硬件相关决定落点"
+msgstr "（1）Attribution determination: Determine the target based on whether it is hardware-related."
 
 msgid "**若修改与目标硬件无关**（target independent），应保留在 **Triton core** 部分（如 language、runtime 的通用修改）；"
 msgstr "**If the modification is unrelated to the target hardware** (target independent), keep it in the **Triton core** section (such as general modifications to language and runtime);"
@@ -84,8 +84,8 @@ msgstr "**If the modification is unrelated to the target hardware** (target inde
 msgid "**若修改与 Ascend 硬件强相关**（target affinitive），应放在 **Triton-Ascend** 中。"
 msgstr "**If the modification is strongly related to Ascend hardware** (target affinitive), place it in **Triton-Ascend**."
 
-msgid "**（2）落地方式：非侵入社区代码，统一以 patch 承载**"
-msgstr "**（2）Implementation approach: non-invasive to community code, uniformly delivered through patches**"
+msgid "（2）落地方式：非侵入社区代码，统一以 patch 承载"
+msgstr "(2) Implementation approach: Non-invasive to community code, uniformly delivered through patches"
 
 msgid "为保持与上游 Triton / LLVM 的同步能力、降低版本升级时的合并冲突，默认**不直接修改社区源码**："
 msgstr "To maintain synchronization with upstream Triton / LLVM and reduce merge conflicts during version upgrades, the community source code is **not directly modified by default**:"
@@ -300,8 +300,8 @@ msgstr "`sync_solver`、`unit_flag`、`inject_barrier_all`、`inject_block_all`"
 msgid "多缓冲与 Workspace"
 msgstr "Multi-buffering and Workspace"
 
-msgid "各存储层级的缓冲槽数与 workspace 多缓冲级别"
-msgstr "Number of buffer slots and workspace multi-buffer levels at each storage level"
+msgid "各内存层级的缓冲槽数与 workspace 多缓冲级别"
+msgstr "Number of buffer slots at each memory hierarchy level and workspace multi-buffer levels"
 
 msgid "`multibuffer_mode`、`set_workspace_multibuffer`"
 msgstr "`multibuffer_mode`、`set_workspace_multibuffer`"
@@ -876,8 +876,8 @@ msgstr "Converts inline assembly operations (`extension.inline_assembly`) in Tri
 msgid "ElementwiseInlineAsmOpConversion"
 msgstr "ElementwiseInlineAsmOpConversion"
 
-msgid "将 `triton::ElementwiseInlineAsmOp` 转换为 `LLVM::InlineAsmOp` 。"
-msgstr "Convert `triton::ElementwiseInlineAsmOp` to `LLVM::InlineAsmOp`."
+msgid "将 `triton::ElementwiseInlineAsmOp` 转换为 `LLVM::InlineAsmOp`。"
+msgstr "Converts `triton::ElementwiseInlineAsmOp` to `LLVM::InlineAsmOp`."
 
 msgid "<a id=\"dynamic-cv-pipeline\"></a>"
 msgstr "<a id=\"dynamic-cv-pipeline\"></a>"
@@ -900,8 +900,8 @@ msgstr "After you set `enable_dynamic_cv_pipeline=True`, the compiler attempts t
 msgid "3.2.3 SIMT 编译器（Ascend 950PR&950DT系列产品）"
 msgstr "3.2.3 SIMT Compiler (Ascend 950PR&950DT products)"
 
-msgid "Ascend 950PR&950DT系列产品 在 SIMD 路径之外增加 SIMT 能力，用于加速**非结构化 / 离散**访存（如间接索引的 load/store）。 开发者通过 `compile_mode` 选择编译路径。"
-msgstr "Ascend 950PR&950DT products add SIMT capability in addition to the SIMD path to accelerate **unstructured / discrete** memory access (such as indirect indexed load/store). Developers select the compilation path through `compile_mode`."
+msgid "Ascend 950PR&950DT系列产品在 SIMD 路径之外增加 SIMT 能力，用于加速**非结构化 / 离散**访存（如间接索引的 load/store）。 开发者通过 `compile_mode` 选择编译路径。"
+msgstr "Ascend 950PR&950DT products add SIMT capabilities in addition to the SIMD path to accelerate **unstructured / discrete** memory access (such as indirect indexed load/store). Developers select the compilation path using `compile_mode`."
 
 msgid "3.2.3.1 `compile_mode` 说明"
 msgstr "3.2.3.1 `compile_mode` Description"
@@ -1055,8 +1055,8 @@ msgstr "Discrete mask handling"
 msgid "拆成连续/离散边界，用 load + select / store 处理"
 msgstr "Split into continuous/discrete boundaries, and handle them using load + select / store."
 
-msgid "Ascend 950PR&950DT系列产品 且张量维数 ≤ 5：标记后交给下游；否则同左"
-msgstr "Ascend 950PR&950DT products and tensor dimensionality ≤ 5: marked and passed to the downstream; otherwise, same as left"
+msgid "Ascend 950PR&950DT系列产品且张量维数 ≤ 5：标记后交给下游；否则同左"
+msgstr "Ascend 950PR&950DT products and tensor dimensions ≤ 5: mark it and pass it to the downstream; otherwise, same as the left"
 
 msgid "不运行"
 msgstr "Do not run"
@@ -1094,8 +1094,8 @@ msgstr "Otherwise (pure SIMD or conditions are not met): split the mask into con
 msgid "**非结构化访存处理**"
 msgstr "**Unstructured memory access handling**"
 
-msgid "在 Ascend 950PR&950DT系列产品 混合模式下，对非结构化访存或已标记的离散访存走 SIMT 快速通道："
-msgstr "In the hybrid mode of Ascend 950PR&950DT products, unstructured memory access or marked scattered memory access uses the SIMT fast path:"
+msgid "在 Ascend 950PR&950DT系列产品混合模式下，对非结构化访存或已标记的离散访存走 SIMT 快速通道："
+msgstr "In the hybrid mode of the Ascend 950PR&950DT products, unstructured memory access or marked discrete memory access takes the SIMT fast path:"
 
 msgid "`load` / `store` → `indirect_load` / `indirect_store`（维数 ≤ 5）"
 msgstr "`load` / `store` → `indirect_load` / `indirect_store` (dimensions ≤ 5)"

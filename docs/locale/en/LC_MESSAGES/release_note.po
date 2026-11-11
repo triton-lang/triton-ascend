@@ -1,7 +1,7 @@
-"POT-Creation-Date: 2026-10-27 00:22+0800\n"
-"PO-Revision-Date: 2026-10-27 00:22+0800\n"
+"POT-Creation-Date: 2026-11-11 15:56+0800\n"
+"PO-Revision-Date: 2026-11-11 15:56+0800\n"
 
-"X-Source-Commit: 2cfe44234161da7ce86a3f7521b2987317d4405f\n"
+"X-Source-Commit: a2bda8e22581572987096fc2e560aba406e12a73\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -37,23 +37,29 @@ msgstr "Release date"
 msgid "版本性质"
 msgstr "Version nature"
 
+msgid "3.6.0.post2"
+msgstr "3.6.0.post2"
+
+msgid "2026年10月15日"
+msgstr "October 15, 2026"
+
+msgid "2026年10月29日"
+msgstr "October 29, 2026"
+
+msgid "补丁版本"
+msgstr "Patch Version"
+
 msgid "3.6.0"
 msgstr "3.6.0"
 
 msgid "2026年9月30日"
 msgstr "September 30, 2026"
 
-msgid "2026年10月15日"
-msgstr "October 15, 2026"
-
 msgid "正式版本"
 msgstr "Release version"
 
 msgid "3.2.2.post2"
 msgstr "3.2.2.post2"
-
-msgid "补丁版本"
-msgstr "Patch Version"
 
 msgid "3.2.2"
 msgstr "3.2.2"
@@ -163,6 +169,9 @@ msgstr "/"
 msgid "`release/3.6.0`"
 msgstr "`release/3.6.0`"
 
+msgid "`3.6.0.post2`，`3.6.0`"
+msgstr "`3.6.0.post2`，`3.6.0`"
+
 msgid "`release/3.2.2`"
 msgstr "`release/3.2.2`"
 
@@ -172,8 +181,8 @@ msgstr "`Maintenance`"
 msgid "`3.2.0`"
 msgstr "`3.2.0`"
 
-msgid "`3.2.2`"
-msgstr "`3.2.2`"
+msgid "`3.2.2.post2`，`3.2.2`"
+msgstr "`3.2.2.post2`，`3.2.2`"
 
 msgid "`release/3.2.1`"
 msgstr "`release/3.2.1`"
@@ -277,6 +286,9 @@ msgstr "`b5cc222`"
 msgid "`3.9`(x86), `3.10-3.13`"
 msgstr "`3.9`(x86), `3.10-3.13`"
 
+msgid "`3.2.2`"
+msgstr "`3.2.2`"
+
 msgid "`2.7.1.post8`"
 msgstr "`2.7.1.post8`"
 
@@ -326,6 +338,7 @@ msgid ""
 "    <tr><td>3.2.2</td><td>/</td><td>2.7.1.post8</td><td>/</td><td>2.9.0.post6</td><td>2.10.0.post4</td><td>/</td></tr>\n"
 "    <tr><td>3.2.2.post2</td><td>/</td><td>2.7.1.post11</td><td>/</td><td>2.9.0.post9</td><td>2.10.0.post7</td><td>/</td></tr>\n"
 "    <tr><td>3.6.0</td><td>/</td><td>/</td><td>/</td><td>/</td><td>2.10.0.post7</td><td>2.13.0</td></tr>\n"
+"    <tr><td>3.6.0.post2</td><td>/</td><td>/</td><td>/</td><td>/</td><td>2.10.0.post7</td><td>2.13.0</td></tr>\n"
 "  </tbody>\n"
 "</table>\n"
 msgstr ""
@@ -350,6 +363,7 @@ msgstr ""
 "    <tr><td>3.2.2</td><td>/</td><td>2.7.1.post8</td><td>/</td><td>2.9.0.post6</td><td>2.10.0.post4</td><td>/</td></tr>\n"
 "    <tr><td>3.2.2.post2</td><td>/</td><td>2.7.1.post11</td><td>/</td><td>2.9.0.post9</td><td>2.10.0.post7</td><td>/</td></tr>\n"
 "    <tr><td>3.6.0</td><td>/</td><td>/</td><td>/</td><td>/</td><td>2.10.0.post7</td><td>2.13.0</td></tr>\n"
+"    <tr><td>3.6.0.post2</td><td>/</td><td>/</td><td>/</td><td>/</td><td>2.10.0.post7</td><td>2.13.0</td></tr>\n"
 "  </tbody>\n"
 "</table>\n"
 
@@ -384,6 +398,7 @@ msgid ""
 "    <tr><td>3.2.2</td><td>/</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td><td>/</td></tr>\n"
 "    <tr><td>3.2.2.post2</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>\n"
 "    <tr><td>3.6.0</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>\n"
+"    <tr><td>3.6.0.post2</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>\n"
 "  </tbody>\n"
 "</table>\n"
 msgstr ""
@@ -391,7 +406,7 @@ msgstr ""
 "  <thead>\n"
 "    <tr>\n"
 "      <th rowspan=\"3\">Triton-Ascend</th>\n"
-"      <th colspan=\"8\" style=\"text-align:left\">CANN Version</th>\n"
+"      <th colspan=\"8\" style=\"text-align:left\">CANN version</th>\n"
 "    </tr>\n"
 "    <tr>\n"
 "      <th colspan=\"4\" style=\"text-align:left\">Atlas A2 products, Atlas A3 products</th>\n"
@@ -414,5 +429,6 @@ msgstr ""
 "    <tr><td>3.2.2</td><td>/</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td><td>/</td></tr>\n"
 "    <tr><td>3.2.2.post2</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>\n"
 "    <tr><td>3.6.0</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>\n"
+"    <tr><td>3.6.0.post2</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>\n"
 "  </tbody>\n"
 "</table>\n"

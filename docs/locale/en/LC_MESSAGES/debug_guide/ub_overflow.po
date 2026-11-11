@@ -5,10 +5,10 @@ msgid ""
 msgstr ""
 "Project-Id-Version: triton-ascend-docs\n"
 
-"POT-Creation-Date: 2026-10-26 23:13+0800\n"
-"PO-Revision-Date: 2026-10-26 23:13+0800\n"
+"POT-Creation-Date: 2026-11-11 15:23+0800\n"
+"PO-Revision-Date: 2026-11-11 15:23+0800\n"
 
-"X-Source-Commit: 2e8b9c27428eceea851e8fa4a32cf62e9b6ed420\n"
+"X-Source-Commit: 6c0aa241a072d96340f8cb8aaffa3f345f2a20ac\n"
 
 "X-Skill-Version: 2.0.0\\n"
 
@@ -26,29 +26,29 @@ msgstr "UB Overflow Troubleshooting Guide"
 msgid "概述"
 msgstr "Overview"
 
-msgid "UB Overflow 是 Triton-Ascend 开发中常见的问题。本文档详细介绍 UB Overflow 的常见原因、解决方案和调试方法。"
-msgstr "UB Overflow is a common issue in Triton-Ascend development. This document describes the common causes, solutions, and debugging methods for UB Overflow."
+msgid "UB Overflow（统一缓冲区溢出）是Triton-Ascend开发中常见的问题。本文档详细介绍UB Overflow的常见原因、解决方案和调试方法。"
+msgstr "UB Overflow (Unified Buffer overflow) is a common issue in Triton-Ascend development. This document details the common causes, solutions, and debugging methods for UB Overflow."
 
 msgid "常见原因及解决方案"
 msgstr "Common causes and solutions"
 
-msgid "1. 使用了会增加 UB 开销的接口参数"
-msgstr "1\\. You used API parameters that increase UB overhead."
+msgid "1. 增加UB开销的接口参数"
+msgstr "1\\. API parameters that increase UB overhead"
 
-msgid "某些接口在特定参数配置下会自动添加额外的处理逻辑，导致 UB 空间使用增加："
-msgstr "Certain interfaces automatically add extra processing logic under specific parameter configurations, increasing UB space usage:"
+msgid "某些接口在特定参数配置下会自动添加额外的处理逻辑，导致UB空间使用增加："
+msgstr "Certain APIs automatically add extra processing logic under specific parameter configurations, resulting in increased UB space usage:"
 
 msgid "`tl.maximum`、`tl.minimum`、`tl.clamp` 接口的 `propagate_nan` 参数"
 msgstr "The `propagate_nan` parameter of the `tl.maximum`, `tl.minimum`, and `tl.clamp` APIs"
 
-msgid "**问题描述：** 当设置 `propagate_nan=tl.PropagateNan.NONE` 时，系统会自动添加 NaN 值检测和处理逻辑。"
-msgstr "**Problem description:** When you set `propagate_nan=tl.PropagateNan.NONE`, the system automatically adds NaN value detection and handling logic."
+msgid "**问题描述：** 当设置 `propagate_nan=tl.PropagateNan.NONE` 时，系统会自动添加NaN值检测和处理逻辑。"
+msgstr "**Problem description:** When you set `propagate_nan=tl.PropagateNan.NONE`, the system automatically adds NaN value detection and processing logic."
 
 msgid "**影响：**"
 msgstr "**Impact:**"
 
-msgid "显著增加 UB 空间使用"
-msgstr "Significantly increases UB space usage"
+msgid "显著增加UB空间使用"
+msgstr "Significantly increases UB space usage."
 
 msgid "可能导致性能下降"
 msgstr "This may cause performance degradation."
@@ -56,17 +56,17 @@ msgstr "This may cause performance degradation."
 msgid "**解决方案：**"
 msgstr "**Solution:**"
 
-msgid "如果输入数据不包含 NaN 值或不需要严格的 NaN 处理语义，考虑调整 `propagate_nan` 参数值"
+msgid "如果输入数据不包含NaN值或不需要严格的NaN处理语义，考虑调整 `propagate_nan` 参数值"
 msgstr "If the input data does not contain NaN values or does not require strict NaN handling semantics, consider adjusting the `propagate_nan` parameter value."
 
-msgid "在 UB 空间紧张的场景下，优先选择不会触发额外 NaN 处理的参数配置"
-msgstr "In scenarios where UB space is limited, prioritize parameter configurations that do not trigger additional NaN processing."
+msgid "在UB空间紧张的场景下，优先选择不会触发额外NaN处理的参数配置"
+msgstr "In scenarios where UB space is constrained, prioritize parameter configurations that do not trigger additional NaN processing."
 
 msgid "2. 中间变量过多"
 msgstr "2\\. Too many intermediate variables"
 
-msgid "**问题：** kernel 中定义了大量临时张量或中间计算结果"
-msgstr "**Problem:** The kernel defines a large number of temporary tensors or intermediate computation results."
+msgid "**问题：** Kernel中定义了大量临时张量或中间计算结果。"
+msgstr "**Problem:** The kernel defines a large number of temporary tensors or intermediate calculation results."
 
 msgid "减少不必要的中间变量"
 msgstr "Reduce unnecessary intermediate variables"
@@ -74,17 +74,17 @@ msgstr "Reduce unnecessary intermediate variables"
 msgid "复用已分配的缓冲区"
 msgstr "Reuse the allocated buffer"
 
-msgid "将大计算拆分为多个小 kernel"
-msgstr "Split large computations into multiple small kernels."
+msgid "将大计算拆分为多个小kernel"
+msgstr "Split large computations into multiple small kernels"
 
-msgid "3. shape 过大"
+msgid "3. shape过大"
 msgstr "3\\. The shape is too large"
 
-msgid "**问题：** 处理高维/大 shape 张量"
-msgstr "**Problem:** Handling high-dimensional/large shape tensors"
+msgid "**问题：** 处理高维/大shape张量。"
+msgstr "**Problem:** Processing high-dimensional/large-shape tensors."
 
-msgid "考虑将大 tensor 分块处理"
-msgstr "Consider tiling large tensors"
+msgid "考虑将大Tensor分块处理"
+msgstr "Consider processing large tensors by tiling."
 
 msgid "修改分块策略，减小每块的大小"
 msgstr "Modify the tiling strategy to reduce the size of each block."
@@ -95,11 +95,11 @@ msgstr "Debugging Recommendations"
 msgid "**开启详细日志**"
 msgstr "**Enable detailed logs**"
 
-msgid "使用 `TRITON_DEBUG=1` 查看详细的编译信息"
+msgid "使用`TRITON_DEBUG=1`查看详细的编译信息"
 msgstr "Use `TRITON_DEBUG=1` to view detailed compilation information."
 
-msgid "定位具体哪个算子导致 UB 溢出"
-msgstr "Identify the specific operator that causes a UB overflow"
+msgid "定位具体哪个算子导致UB溢出"
+msgstr "Identify the specific operator that causes UB overflow"
 
 msgid "**逐步排查**"
 msgstr "**Step-by-step troubleshooting**"
@@ -110,17 +110,17 @@ msgstr "Locate the specific operation that causes the problem by commenting out 
 msgid "**参考文档**"
 msgstr "**Reference documents**"
 
-msgid "查看各接口文档中的\"特殊限制说明\"部分"
-msgstr "View the \"Special Limitations\" section in each API document."
+msgid "查看各接口文档中的“特殊限制说明”部分"
+msgstr "Refer to the \"Special Restrictions\" section in the documentation for each API."
 
-msgid "了解可能增加 UB 开销的参数配置"
+msgid "了解可能增加UB开销的参数配置"
 msgstr "Understand parameter configurations that may increase UB overhead"
 
 msgid "**优化策略**"
 msgstr "**Optimization Strategy**"
 
-msgid "优先处理占用 UB 空间较大的算子"
-msgstr "Prioritize operators that occupy a large amount of UB space."
+msgid "优先优化占用UB空间较大的算子"
+msgstr "Prioritize optimizing operators that consume a large amount of UB space."
 
 msgid "考虑重新设计算法以减少中间变量"
 msgstr "Consider redesigning the algorithm to reduce intermediate variables."

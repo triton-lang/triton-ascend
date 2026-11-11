@@ -22,6 +22,7 @@
 
 #include "TritonToStructured/ImplicitPermute.h"
 
+#include "TritonMemoryAccess/OpFoldResultUtils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Location.h"
@@ -117,6 +118,33 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
       llvm::dbgs() << "----------------------------------------------\n";
     });
     return success();
+  }
+  // FIXME: Limit data-offset permutations on A5 to at least 64 contiguous
+  // bytes, aligned to 32 bytes as required by TritonToUnstructure. Unify this
+  // gate with the SIMT classification in TritonToUnstructure.
+  int64_t contiguousElements = 1;
+  for (auto id : llvm::reverse(tf.ptrState.permuteIds)) {
+    const auto &info = tf.ptrState.stateInfo[id];
+    // Zero-stride axes are removed when rebuilding the pointer.
+    if (isZero(info.stride) || isOne(info.shape))
+      continue;
+    auto stride = getIntAttr(info.stride);
+    auto size = getIntAttr(info.shape);
+    if (!stride || !size || *stride != contiguousElements)
+      break;
+    contiguousElements *= *size;
+  }
+  auto elementType = cast<RankedTensorType>(op.getType()).getElementType();
+  int64_t contiguousBytes =
+      contiguousElements * (elementType.getIntOrFloatBitWidth() / 8);
+
+  if (!tf.ptrState.dynamicOffsets.empty()) {
+    if (compileOn91095Flag && contiguousBytes < 64)
+      return rewriter.notifyMatchFailure(
+          op, "permuted load has fewer than 64 contiguous bytes");
+    if (contiguousBytes % 32 != 0)
+      return rewriter.notifyMatchFailure(
+          op, "permuted load contiguous bytes are not a multiple of 32");
   }
 
   auto resultType = triton::getPointeeType(newPtr.getType());

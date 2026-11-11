@@ -659,7 +659,10 @@ Value MemOpTransformer::createNewAddPtr(Value oldPtr, const Location loc,
   }
 
   ptrState.analyzePermute();
-  return ptrState.createAddPtrOp(rewriter, loc);
+  auto op = ptrState.createAddPtrOp(rewriter, loc);
+  if (!op)
+    return nullptr;
+  return op.getResult();
 }
 
 Value MemOpTransformer::createNewTensorPtr(Value oldPtr, const Location loc,

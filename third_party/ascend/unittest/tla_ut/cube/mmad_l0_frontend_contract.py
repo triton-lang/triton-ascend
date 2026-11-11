@@ -38,16 +38,17 @@ def buf(shape, space, dtype, strides=None, offset=0):
     return core.buffer(object(), core.buffer_type(shape, dtype, space, strides, offset))
 
 
-def operands(m=32, n=64, k=48):
-    return dict(a=buf((k // 16, m // 16, 16, 16), "l0a", tl.float16), b=buf(
-        (k // 16, n // 16, 16, 16), "l0b", tl.float16), acc=buf((n // 16, m // 16, 16, 16), "l0c", tl.float32), m=m,
+def operands(m=32, n=64, k=48, dtype=tl.float16):
+    return dict(a=buf((k // 16, m // 16, 16, 16), "l0a", dtype), b=buf(
+        (k // 16, n // 16, 16, 16), "l0b", dtype), acc=buf((n // 16, m // 16, 16, 16), "l0c", tl.float32), m=m,
                 n=n, k=k)
 
 
 @pytest.mark.parametrize("clear", [False, True])
 @pytest.mark.parametrize("unit", [None, 0, dma.UnitFlagMode.DISABLED])
-def test_native_order_and_defaults(clear, unit):
-    args = operands()
+@pytest.mark.parametrize("dtype", [tl.float16, tl.bfloat16])
+def test_native_order_and_defaults(clear, unit, dtype):
+    args = operands(dtype=dtype)
     sem = Semantic()
     result = cube.mmad_l0(**args, clear_accum=tl.constexpr(clear), unit_flag_ctrl=tl.constexpr(unit), _semantic=sem)
     assert result is None
@@ -93,7 +94,7 @@ def test_invalid_buffers_fail_before_emission(name, fault):
         if fault == "space":
             space = "l1"
         elif fault == "dtype":
-            dtype = tl.bfloat16
+            dtype = tl.int8
         elif fault == "shape":
             shape = (shape[0] * 2, ) + shape[1:]
         else:
@@ -101,6 +102,17 @@ def test_invalid_buffers_fail_before_emission(name, fault):
         args[name] = buf(shape, space, dtype, strides)
     sem = Semantic()
     with pytest.raises((TypeError, ValueError), match=name):
+        cube.mmad_l0(**args, _semantic=sem)
+    assert not sem.builder.calls
+
+
+@pytest.mark.parametrize("dtype", [tl.float16, tl.bfloat16])
+def test_mixed_operand_dtypes_are_rejected(dtype):
+    args = operands(dtype=dtype)
+    other = tl.bfloat16 if dtype == tl.float16 else tl.float16
+    args["b"] = buf(args["b"].shape, "l0b", other)
+    sem = Semantic()
+    with pytest.raises((TypeError, ValueError), match="b"):
         cube.mmad_l0(**args, _semantic=sem)
     assert not sem.builder.calls
 

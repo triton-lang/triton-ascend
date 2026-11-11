@@ -30,7 +30,7 @@ per-32-element E8M0 scale factors live in L1, and C is an L0C accumulator.
 """
 from enum import Enum
 
-from triton.language.core import builtin, float8e4nv, float8e5, int8, uint8, float16, float32, tensor, _unwrap_if_constexpr
+from triton.language.core import bfloat16, builtin, float8e4nv, float8e5, int8, uint8, float16, float32, tensor, _unwrap_if_constexpr
 from .core import buffer, _row_major_strides
 from .dma import _boolean, _unit_flag_args
 
@@ -254,9 +254,9 @@ def mmad_l0(a, b, acc, *, m, n, k, bias=None, clear_accum=False, disable_gemv=Tr
             _semantic=None):
     """Multiplies physical L0 tiles into L0C using A5 ``hivm.hir.mmadL0``.
 
-    :param a: FP16 L0A zN buffer with shape ``(k//16, m//16, 16, 16)``.
+    :param a: FP16 or BF16 L0A zN buffer with shape ``(k//16, m//16, 16, 16)``.
     :type a: tla.buffer
-    :param b: FP16 L0B nZ buffer with shape ``(k//16, n//16, 16, 16)``.
+    :param b: Same-type FP16 or BF16 L0B nZ buffer with shape ``(k//16, n//16, 16, 16)``.
         This differs from the physical L1 B layout used by :func:`mmad`.
     :type b: tla.buffer
     :param acc: FP32 L0C buffer with shape ``(n//16, m//16, 16, 16)``.
@@ -304,8 +304,9 @@ def mmad_l0(a, b, acc, *, m, n, k, bias=None, clear_accum=False, disable_gemv=Tr
     for name, extent in (("m", m), ("n", n), ("k", k)):
         if type(extent) is not int or not 16 <= extent <= 2048 or extent % 16:
             raise ValueError(f"tla.cube.mmad_l0 {name} must be a compile-time multiple of 16 in [16, 2048]")
-    _check_mmad_l0_buffer(a, "a", "l0a", float16, (k // 16, m // 16, 16, 16), 64 * 1024, 512)
-    _check_mmad_l0_buffer(b, "b", "l0b", float16, (k // 16, n // 16, 16, 16), 64 * 1024, 512)
+    dtype = bfloat16 if isinstance(a, buffer) and a.dtype == bfloat16 else float16
+    _check_mmad_l0_buffer(a, "a", "l0a", dtype, (k // 16, m // 16, 16, 16), 64 * 1024, 512)
+    _check_mmad_l0_buffer(b, "b", "l0b", dtype, (k // 16, n // 16, 16, 16), 64 * 1024, 512)
     _check_mmad_l0_buffer(acc, "acc", "l0c", float32, (n // 16, m // 16, 16, 16), 256 * 1024, 1024)
     bias = _unwrap_if_constexpr(bias)
     if bias is not None:

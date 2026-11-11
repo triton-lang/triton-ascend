@@ -37,6 +37,7 @@
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/MarkTensorKindPass.h"
+#include "ascend/include/TritonToLinalg/TritonAscendOpConverter.h"
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
 #include "ascend/include/TritonToStructured/CannonicalizerConverter.h"
@@ -1789,31 +1790,33 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::DeviceAssertConverter>(patterns.getContext());
   patterns.add<TTOpConverters::DevicePrintConverter>(patterns.getContext());
   patterns.add<TTOpConverters::MatmulConverter>(patterns.getContext());
-  patterns.add<TTOpConverters::DotConverter>(patterns.getContext());
+  patterns.add<TritonAscendOpConverters::DotConverter>(patterns.getContext());
   patterns.add<TTOpConverters::DotScaledConverter>(patterns.getContext());
   patterns.add<TTOpConverters::PtrToIntConverter>(patterns.getContext(),
                                                   pointerInfos);
   patterns.add<TTOpConverters::IntToPtrConverter>(typeConverter,
                                                   patterns.getContext());
 
-  patterns.add<TTOpConverters::IndirectLoadConverter>(patterns.getContext(),
-                                                      pointerInfos);
-  patterns.add<TTOpConverters::StrideLoadConverter>(patterns.getContext(),
-                                                    pointerInfos);
-  patterns.add<TTOpConverters::StrideStoreConverter>(patterns.getContext(),
-                                                     pointerInfos);
-  patterns.add<TTOpConverters::IndirectStoreConverter>(patterns.getContext(),
-                                                       pointerInfos);
-  patterns.add<TTOpConverters::GatherOutToUbConverter>(patterns.getContext(),
-                                                       pointerInfos);
-  patterns.add<TTOpConverters::ScatterUbToOutConverter>(patterns.getContext(),
-                                                        pointerInfos);
-  patterns.add<TTOpConverters::IndexSelectSimdConverter>(patterns.getContext(),
-                                                         pointerInfos);
-  patterns.add<TTOpConverters::IndexPutConverter>(patterns.getContext(),
-                                                  pointerInfos);
-  patterns.add<TTOpConverters::SortOpConverter>(patterns.getContext());
-  patterns.add<TTOpConverters::FlipOpConverter>(patterns.getContext());
+  patterns.add<TritonAscendOpConverters::IndirectLoadConverter>(
+      patterns.getContext(), pointerInfos);
+  patterns.add<TritonAscendOpConverters::StrideLoadConverter>(
+      patterns.getContext(), pointerInfos);
+  patterns.add<TritonAscendOpConverters::StrideStoreConverter>(
+      patterns.getContext(), pointerInfos);
+  patterns.add<TritonAscendOpConverters::IndirectStoreConverter>(
+      patterns.getContext(), pointerInfos);
+  patterns.add<TritonAscendOpConverters::GatherOutToUbConverter>(
+      patterns.getContext(), pointerInfos);
+  patterns.add<TritonAscendOpConverters::ScatterUbToOutConverter>(
+      patterns.getContext(), pointerInfos);
+  patterns.add<TritonAscendOpConverters::IndexSelectSimdConverter>(
+      patterns.getContext(), pointerInfos);
+  patterns.add<TritonAscendOpConverters::IndexPutConverter>(
+      patterns.getContext(), pointerInfos);
+  patterns.add<TritonAscendOpConverters::SortOpConverter>(
+      patterns.getContext());
+  patterns.add<TritonAscendOpConverters::FlipOpConverter>(
+      patterns.getContext());
   patterns.add<TTOpConverters::GatherConverter>(patterns.getContext());
   // On 950 (910B4/91095), histogram is lowered via hivm.custom builtin
   // template. On other targets, histogram is handled by TritonToHFusion pass

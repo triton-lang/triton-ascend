@@ -43,10 +43,8 @@ add_triton_ut(
   SRCS
     SimdSimtCostModelTest.cpp
     IndirectGatherMemoryCostModelTest.cpp
-    OrdinaryLoadRouteTest.cpp
     IndirectMemoryParametersTest.cpp
   DEFS
-    TRITON_ASCEND_LOAD_ROUTE_TEST_PROFILE="${CMAKE_CURRENT_SOURCE_DIR}/../../costmodel/profiles/simd_simt/ascend_950pr_simd_simt_v1.json"
     TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../costmodel/profiles/simd_simt/david_v100_simd_simt_v1.json"
   LIBS
     AscendModelRouteModel

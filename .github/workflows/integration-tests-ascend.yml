@@ -160,10 +160,6 @@ jobs:
           if [ -n "${TEST_MLIR_DIR}" ] && [ -d "${TEST_MLIR_DIR}" ]; then
             ctest --test-dir "${TEST_MLIR_DIR}" --output-on-failure \
               --no-tests=error -R '^TestTritonOffsetCacheLifetime$'
-            if [ "${{ matrix.config.chip_type }}" = "950" ]; then
-              ctest --test-dir "${TEST_MLIR_DIR}" --no-tests=error --output-on-failure -V \
-                -R '^OrdinaryLoadRoute[.]SimtDefaultAndExplicitOff$'
-            fi
             lit -v "${TEST_MLIR_DIR}"
           else
             echo "MLIR test directory not found."

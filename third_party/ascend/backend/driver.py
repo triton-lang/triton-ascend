@@ -184,11 +184,11 @@ class NPUUtils(object):
         return cube_core_num, vector_core_num
 
     def get_device_limit(self):
+        num_aic, num_aiv = self.get_device_core()
         try:
             limited_aic, limited_aiv = self._get_npu_device_limit_form_env()
         except ValueError:
-            return False, None, None
-        num_aic, num_aiv = self.get_device_core()
+            return False, num_aic, num_aiv
         return num_aic != limited_aic or num_aiv != limited_aiv, limited_aic, limited_aiv
 
     def get_device_properties(self, device):

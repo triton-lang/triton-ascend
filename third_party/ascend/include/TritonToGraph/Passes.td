@@ -73,6 +73,8 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
   let summary = "Optimize Triton IR with graph analyses";
   let constructor = "mlir::triton::cfg::createGraphOptimizePass()";
   let options = [
+    Option<"compileOn91095", "compile-on-910-95", "bool", "false",
+           "Enable A5-only pre-graph rewrites relying on Ascend 910_95 templates">,
     Option<"ruleMask", "rule-mask", "uint64_t", "3071",
            "Bitmask of known 32-bit graph rule identities; default 3071. The #2686 SelectedBlockScan (65536) and QueryRowBatching (131072) bits are known but fixed default-off, like RLF/IPBE/SCP/CBAF; SelectedBlockScan commits only when QueryRowBatching's materialize entry accepts">,
     Option<"maxRewritesPerFunction", "max-rewrites-per-function", "uint64_t",

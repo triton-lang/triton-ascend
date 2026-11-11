@@ -1,0 +1,6127 @@
+{
+  "schema_version": 1,
+  "profile_version": "ascend-950pr-prefixscan-system-cycles-20261110",
+  "target": "Ascend950PR",
+  "source_commit": "700c0807fb985058c3d05508542aec5c149aa050",
+  "scope": "Calibrated single-result product/min/max scan completion; higher ranks use canonical pre/extent/post geometry. Cumsum and unfitted pricing retain their existing paths.",
+  "simd": {
+    "dependency_factor": 573.6,
+    "dependency_factor_multi_tail": 1347.7,
+    "startup_system_cycles": 202.5,
+    "dependency_factor_1d_small": 227.3,
+    "dependency_factor_1d_work": 4.6015,
+    "dependency_factor_1d_tiled_work": 5.5717,
+    "startup_system_cycles_1d": 252.4,
+    "startup_system_cycles_1d_small": 26.4,
+    "transpose_dim01_bytes_per_system_cycle": 46.7,
+    "transpose_ar2ra_fixed_system_cycles": 323,
+    "transpose_ar2ra_bytes_per_system_cycle": 4.2,
+    "description": "SIMD tt.scan pricing. Multi-dim scans are piecewise linear in the column-parallel step count S = extent * ceil(columns/BpE): dependency_factor is the base slope, dependency_factor_multi_tail the extra slope above the hinge, startup_system_cycles charged once. 1D scans follow the CumsumSimtSklansky.cpp template, dispatching on element count: dependency_factor_1d_small (extent <= 64) and the Sklansky element-round factors dependency_factor_1d_work / dependency_factor_1d_tiled_work above it, with startup_system_cycles_1d / startup_system_cycles_1d_small charged once. A non-leading-axis multi-dim scan also pays a transpose: transpose_dim01_bytes_per_system_cycle for rank >= 3, transpose_ar2ra_bytes_per_system_cycle plus transpose_ar2ra_fixed_system_cycles for rank 2. dependency_factor_1d is only the SIMT legacy / fallback factor.",
+    "formulas": [
+      {
+        "id": "A200F0001",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f16",
+              "f32"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "long",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": -232.19526030025034,
+          "chain": 9.496480725908366
+        }
+      },
+      {
+        "id": "A200F0002",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f16",
+              "f32"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "short",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 2.5219755105689807,
+          "treework": 2.756505185230347,
+          "logE": 41.721519304200676,
+          "f16": 71.35001315000001
+        }
+      },
+      {
+        "id": "A200F0003",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f16",
+              "f32"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "branch": "chain",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 32.999999999999794,
+          "chain": -0.16666666666666657,
+          "vecwork": 14.999999999999993,
+          "f16": 65.99999999999999,
+          "logE": 12.500000000000114
+        }
+      },
+      {
+        "id": "A200F0004",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 0,
+            "branch": "tree",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "branch": "tree",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "branch": "chain",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 213.400013225,
+          "vecwork": 15.085712396428573
+        }
+      },
+      {
+        "id": "A200F0005",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 0,
+            "branch": "tree",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 0,
+            "branch": "tree",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 0,
+            "branch": "chain",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 199.68283642503525,
+          "vecwork": 11.61204038709617
+        }
+      },
+      {
+        "id": "A200F0006",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f16",
+              "f32",
+              "i32"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "branch": "chain",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f16",
+              "f32",
+              "i32"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "branch": "tree",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "C": 20.780292520813532,
+          "one": 182.2428234985495,
+          "tileR": 4.8813475034683815,
+          "vecwork": 28.711793417392343
+        }
+      },
+      {
+        "id": "A200F0007",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 1,
+            "branch": "direct",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 1,
+            "branch": "transpose",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 305.3431916583713,
+          "E": -32.51132163009799,
+          "C": -2.8541666666666585,
+          "tileR": 47.83364140599085
+        }
+      },
+      {
+        "id": "A200F0008",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "direct",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "transpose",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": -187.16203235889802,
+          "treework": -2.1389953987730017,
+          "B": 272.3639435809814,
+          "tileR": 14.567484662576693,
+          "C": 0.15208861875002364
+        }
+      },
+      {
+        "id": "A200F0009",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "long",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": -338.5684783292726,
+          "chain": 7.056408436529257
+        }
+      },
+      {
+        "id": "A200F0010",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "short",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 33.55829652499997,
+          "treework": 1.5166846500000286,
+          "tileR": -0.5083900750000924,
+          "logE": 9.433408900000114
+        }
+      },
+      {
+        "id": "A200F0011",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cummax",
+            "data_type": "i32",
+            "rank": 2,
+            "axis": 0,
+            "branch": "chain",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 78.53398845127751,
+          "chain": -0.014537684661214599
+        }
+      },
+      {
+        "id": "A200F0012",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 2,
+            "axis": 0,
+            "branch": "tree",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 3,
+            "axis": 0,
+            "branch": "tree",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 3,
+            "axis": 0,
+            "branch": "chain",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 159.94135095639328,
+          "C": 1.1633957356211795,
+          "tileR": 8.469763464216664
+        }
+      },
+      {
+        "id": "A200F0013",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "transpose",
+            "warps": 0
+          },
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "product_multi",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "B": -1406.334782608693,
+          "doubling": 107.26521739130379,
+          "one": 1703.3782608695635,
+          "tileR": 13.086956521739152,
+          "logE": -73.08695652173944
+        }
+      },
+      {
+        "id": "A200F0014",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u32",
+              "u64"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u32",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 69.11268874474337,
+          "E": 0.5099237040433002,
+          "chain": 13.393971996651787,
+          "logE": -24.947359409029982
+        }
+      },
+      {
+        "id": "A200F0015",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u32",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 30.188521174855023,
+          "E": 1.0410671496320096,
+          "chain": 14.167380823244404,
+          "logE": -27.346752937687373
+        }
+      },
+      {
+        "id": "A200F0016",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "u64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 243.13499747015894,
+          "E": 18.76875441874997,
+          "logE": -35.075025674999736,
+          "B": -226.45996139515933
+        }
+      },
+      {
+        "id": "A200F0017",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 0,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 0,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 29.210375498583314,
+          "chain": 13.77591854248803,
+          "vecwork": 2.5538710532566506,
+          "logE": -29.889371387234156,
+          "C": 3.349206292906373
+        }
+      },
+      {
+        "id": "A200F0018",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 1,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 216.66878485359828,
+          "E": 1.8605461172354578,
+          "chain": 14.800236749761906,
+          "logE": -58.76116665555575
+        }
+      },
+      {
+        "id": "A200F0019",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "u64",
+            "rank": 3,
+            "axis": 2,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": -27.759118634359176,
+          "E": 11.093864412919586,
+          "chain": 17.945191210161717,
+          "tileR": -16.48982453572378,
+          "C": 5.293784177016426
+        }
+      },
+      {
+        "id": "A200F0020",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i64",
+            "rank": 3,
+            "axis": 2,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 420.0331441967476,
+          "chain": 11.20673847877225
+        }
+      },
+      {
+        "id": "A200F0021",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "u32",
+            "rank": 2,
+            "axis": 1,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 41.13683473389163,
+          "E": -0.6930812324929667,
+          "chain": 14.946463585434193,
+          "tileR": 1.6724789915965441,
+          "B": -36.36450980391887
+        }
+      },
+      {
+        "id": "A200F0022",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "u32",
+            "rank": 3,
+            "axis": 2,
+            "branch": "scalar_or_generic",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 539.5425796441832,
+          "chain": 11.18554336917388
+        }
+      },
+      {
+        "id": "A200F0023",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f16",
+              "f32"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "long",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 329.13044577000056,
+          "treework": 0.4118357440234374,
+          "f16": 237.7998622000002
+        }
+      },
+      {
+        "id": "A200F0024",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 0,
+            "branch": "product_multi",
+            "warps": 0
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 0,
+            "branch": "product_multi",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 71.29998170000002,
+          "C": -0.2194529547656252,
+          "tileR": 2.5483338349999998
+        }
+      },
+      {
+        "id": "A200F0025",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "long",
+            "warps": 0
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 2,
+            "axis": 0,
+            "branch": "product_multi",
+            "warps": 0
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 0,
+            "branch": "product_multi",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 71.49039981624068,
+          "C": -0.18495783840521007,
+          "tileR": 2.6371525595669287,
+          "logE": -1.3322808685040228
+        }
+      },
+      {
+        "id": "A200F0026",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f16",
+              "f32"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "short",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 215.14457861641816,
+          "treework": 2.256715907462687,
+          "logE": -11.27014322238806,
+          "f16": 89.49999549999997,
+          "B": -161.13115130149276
+        }
+      },
+      {
+        "id": "A200F0027",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 0,
+            "branch": "product_multi",
+            "warps": 0
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "branch": "product_multi",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 108.50004676666674,
+          "treework": 1.4140625,
+          "B": 22.99995323333336
+        }
+      },
+      {
+        "id": "A200F0028",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f16",
+              "f32",
+              "integer32"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "branch": "product_multi",
+            "warps": 0
+          },
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f16",
+              "f32",
+              "integer32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "branch": "product_multi",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "C": 21.342393019281904,
+          "one": 145.15058081895967,
+          "paddedwork": 20.36633952644164,
+          "tileR": 4.3872472701956005
+        }
+      },
+      {
+        "id": "A200F0029",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 1,
+            "branch": "product_multi",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 692.2144199204868,
+          "payload": -0.027239273908148887,
+          "tileR": 44.73440795376346,
+          "paddedwork": -22.15281739994401,
+          "B": -594.8662418000007
+        }
+      },
+      {
+        "id": "simd_minmax_dim1_full_groups",
+        "projection": "legacy",
+        "terms": {
+          "one": 67.95607209924357,
+          "direct_group_work": 8.474329731284362,
+          "direct_narrow_group_work": 37.827652148592485,
+          "direct_half_row_groups": 29.81774228056309
+        },
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "direct_full_groups",
+            "warps": 0
+          }
+        ]
+      }
+    ]
+  },
+  "simt": {
+    "dependency_factor": 21.2,
+    "dependency_factor_1d": 5.2,
+    "dependency_factor_1d_small": 25.4,
+    "startup_system_cycles": 0,
+    "startup_system_cycles_1d": 135.4,
+    "startup_system_cycles_1d_small": 72.7,
+    "simt_1d_warp_segments": {
+      "4": {
+        "c_local": 96.8,
+        "c_fixed": 144.8,
+        "c_round": 25.5,
+        "c_gen": 181.427,
+        "serial_rate": 0.1425
+      },
+      "8": {
+        "c_local": 86.8,
+        "c_fixed": 149.0492,
+        "c_round": 30.9855,
+        "c_gen": 34.854,
+        "serial_rate": 0.2279
+      },
+      "16": {
+        "c_local": 92.5,
+        "c_fixed": 160.8892,
+        "c_round": 53.047,
+        "c_gen": 89.707,
+        "serial_rate": 0.2413
+      },
+      "32": {
+        "c_local": 169.1,
+        "c_fixed": 364.1852,
+        "c_round": 36.7119,
+        "c_gen": 1269.748,
+        "serial_rate": 0.0534
+      },
+      "64": {
+        "c_local": 314.1,
+        "c_fixed": 648.84,
+        "c_round": 105.83,
+        "c_gen": 13294.4,
+        "serial_rate": 0.2204
+      }
+    },
+    "simt_2d_warp_segments": {
+      "4": {
+        "a": 412.9181,
+        "b": 0,
+        "c": 10.4793,
+        "d": 40.6469,
+        "r0": 64,
+        "a_subwarp": 190.4707,
+        "b_subwarp": 0.04753
+      },
+      "8": {
+        "a": 220.2847,
+        "b": 0.316416,
+        "c": 3.6899,
+        "d": 0,
+        "r0": 0,
+        "a_subwarp": 42.9957,
+        "b_subwarp": 0.306092
+      },
+      "16": {
+        "a": 0,
+        "b": 0.693772,
+        "c": 9.0219,
+        "d": 443.6812,
+        "r0": 6.75,
+        "a_subwarp": 74.8124,
+        "b_subwarp": 0.650225
+      },
+      "32": {
+        "a": 234.7568,
+        "b": 0.835238,
+        "c": 2.9625,
+        "d": 4571.3513,
+        "r0": 1,
+        "a_subwarp": 206.7097,
+        "b_subwarp": 0.716093
+      }
+    },
+    "description": "SIMT tt.scan pricing. Multi-dim scans use the warp-shape-aware additive table simt_2d_warp_segments (cost = a + b*N + c*(N*k)/T + d*max(0, N/T - r0), with a_subwarp / b_subwarp for extent < 32); 1D scans use the three-segment table simt_1d_warp_segments. dependency_factor and dependency_factor_1d remain the fallback when a table is absent and for the LoopCarriedRecurrence scan path.",
+    "formulas": [
+      {
+        "id": "A200F0030",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 32
+          }
+        ],
+        "terms": {
+          "one": -8942.792301829422,
+          "combined": 266.07698170731527,
+          "logE": 208.69092987806673
+        }
+      },
+      {
+        "id": "A200F0031",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cummax",
+            "data_type": "f16",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 64
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 1,
+            "axis": 0,
+            "branch": "warp_local",
+            "warps": 1
+          },
+          {
+            "operation": "cummin",
+            "data_type": "f16",
+            "rank": 1,
+            "axis": 0,
+            "branch": "warp_local",
+            "warps": [
+              4,
+              8
+            ]
+          }
+        ],
+        "terms": {
+          "one": 4.037469150000212,
+          "combined": 299.2171151410748,
+          "warp": -225.79052883326244
+        }
+      },
+      {
+        "id": "A200F0032",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin",
+              "cumprod"
+            ],
+            "data_type": "f32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "cross_warp",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 2818.532499675851,
+          "axisK": 257.1306350184045,
+          "logE": -524.0600749521586,
+          "logW": 18.1118249782203,
+          "invW": -89.8090399558444
+        }
+      },
+      {
+        "id": "A200F0033",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "cross_warp",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 3008.8633799704517,
+          "merge": 255.9480833061289,
+          "logE": -514.966425245071,
+          "logW": 19.07175231148983,
+          "invW": -65.29432823528684
+        }
+      },
+      {
+        "id": "A200F0034",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "u32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "cross_warp",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 2814.8310801314824,
+          "axisK": 257.3303763553186,
+          "logE": -525.4247918059496,
+          "logW": 21.214085744270907,
+          "invW": -69.56617421110549
+        }
+      },
+      {
+        "id": "A200F0035",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "cross_warp",
+            "warps": [
+              0,
+              64
+            ]
+          }
+        ],
+        "terms": {
+          "one": 2894.978380926691,
+          "axisK": 259.4536301185336,
+          "logE": -533.5023572198235,
+          "logW": 17.623114224139602,
+          "invW": -125.05172413792755
+        }
+      },
+      {
+        "id": "A200F0036",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 1
+          }
+        ],
+        "terms": {
+          "one": 632.5216396808516,
+          "local": 53.723013794503565,
+          "logE": -99.46920443776605
+        }
+      },
+      {
+        "id": "A200F0037",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": [
+              16,
+              2
+            ]
+          }
+        ],
+        "terms": {
+          "one": 746.7859029423123,
+          "local": 47.841824644549355,
+          "merge": 36.61926095971595,
+          "logE": -94.83989928909567,
+          "logW": 3.8041814770890228
+        }
+      },
+      {
+        "id": "ordinary_w4_A200F0038",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "one": 227.5482162162162,
+          "local": 21.287675675675676,
+          "pressure2_48": 7.548496030749528
+        }
+      },
+      {
+        "id": "A200F0039",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 8
+          }
+        ],
+        "terms": {
+          "one": 134.21189397267588,
+          "q": 40.80306318226432
+        }
+      },
+      {
+        "id": "A200F0040",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "warp_local",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 6.212567177464125,
+          "warp": 12.471452517127315,
+          "logW": -0.006521498587734515
+        }
+      },
+      {
+        "id": "ordinary_w4_A200F0041",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "one": 227.5482162162162,
+          "local": 21.287675675675676,
+          "pressure2_48": 7.548496030749528
+        }
+      },
+      {
+        "id": "A200F0041",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 8
+          }
+        ],
+        "terms": {
+          "one": 132.33018346749995,
+          "local": 33.18312882,
+          "merge": 8.656819574166668
+        }
+      },
+      {
+        "id": "A200F0042",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "warp_local",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 5.421425991517871,
+          "warp": 12.83398951367187,
+          "invW": 0.12231719910713826
+        }
+      },
+      {
+        "id": "A200F0043",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "u32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": [
+              4,
+              8
+            ]
+          }
+        ],
+        "terms": {
+          "one": 146.23011578039814,
+          "local": 34.93692301903412,
+          "logE": -0.7941109771307275,
+          "merge": 7.5395478563920255
+        }
+      },
+      {
+        "id": "A200F0044",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "u32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "warp_local",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 5.5075590067702835,
+          "warp": 12.85064931080743,
+          "logW": -0.026692708333183837
+        }
+      },
+      {
+        "id": "ordinary_w4_A200F0045",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "one": 185.9054054054054,
+          "local": 17.39189189189189,
+          "pressure2_48": 6.167071920547
+        }
+      },
+      {
+        "id": "A200F0045",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 8
+          }
+        ],
+        "terms": {
+          "one": 24.029880744976982,
+          "local": 27.745535714285655,
+          "logE": 13.071463493303606,
+          "merge": 10.918518055245578,
+          "invW": -0.9107142857127069
+        }
+      },
+      {
+        "id": "A200F0046",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "warp_local",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 4.107692958723933,
+          "warp": 14.341272529817719
+        }
+      },
+      {
+        "id": "ordinary_w4_A200F0047",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "one": 185.9054054054054,
+          "local": 17.39189189189189,
+          "pressure2_48": 6.167071920547
+        }
+      },
+      {
+        "id": "A200F0047",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 8
+          }
+        ],
+        "terms": {
+          "one": 162.29951731465158,
+          "local": 36.30446418046885,
+          "logE": -2.3776284359378916,
+          "merge": 9.639529845898458
+        }
+      },
+      {
+        "id": "A200F0048",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 1,
+            "axis": 0,
+            "branch": "warp_local",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 4.886324437890098,
+          "warp": 14.13150480125542,
+          "invW": 0.27723217366715636
+        }
+      },
+      {
+        "id": "A200F0049",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": [
+              32,
+              64
+            ]
+          }
+        ],
+        "terms": {
+          "one": 2316.3267271013788,
+          "warp": -2636.4458602859354,
+          "axisK": -203.5085584842281,
+          "merge": 602.2380506717285
+        }
+      },
+      {
+        "id": "A200F0050",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "cross_warp",
+            "warps": 32
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 1
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 32
+          },
+          {
+            "operation": "cummax",
+            "data_type": "u64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 32
+          }
+        ],
+        "terms": {
+          "one": 1585.8988105807098,
+          "axisK": -180.95463682992943,
+          "merge": 420.1729872917968,
+          "logE": -191.61048729179677,
+          "logW": -9.2467950923734
+        }
+      },
+      {
+        "id": "A200F0051",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "cross_warp",
+            "warps": 64
+          }
+        ],
+        "terms": {
+          "one": 9341.318829699789,
+          "q": 70447.12137919944,
+          "logE": -1816.988666299962
+        }
+      },
+      {
+        "id": "A200F0052",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 0,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -6.336853512862815,
+          "rounds": -1817.5343913844827,
+          "shared": 1171.6742017181034,
+          "invW": 242.46185351286286
+        }
+      },
+      {
+        "id": "A200F0053",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": [
+              16,
+              2
+            ]
+          }
+        ],
+        "terms": {
+          "one": -651.9489512501996,
+          "q": -158.33595786168684,
+          "combined": 84.45065166428472,
+          "invW": 931.0925269195952,
+          "logE": 33.12920240911175
+        }
+      },
+      {
+        "id": "A200F0054",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "warp_local",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 2.0864523302083504,
+          "warp": 39.9994851697917
+        }
+      },
+      {
+        "id": "A200F0055",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 0.10502253312886349,
+          "E": 5.518247015031559,
+          "combined": 32.2751057325218,
+          "warp": -3.6503700638263084,
+          "logE": 10.970641425568608
+        }
+      },
+      {
+        "id": "A200F0056",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 4
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 8
+          }
+        ],
+        "terms": {
+          "one": 2585.1283635550003,
+          "logE": -311.9398989142915,
+          "merge": 87.17327151685453,
+          "q": 85.74800660438335
+        }
+      },
+      {
+        "id": "A200F0057",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "u64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "cross_warp",
+            "warps": 32
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "u64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 8
+          }
+        ],
+        "terms": {
+          "one": 3262.628769432706,
+          "combined": -196.48298980062017,
+          "logE": -328.40647837500444,
+          "merge": 452.439652224002,
+          "invW": -2441.778297740911
+        }
+      },
+      {
+        "id": "A200F0058",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": [
+              16,
+              64
+            ]
+          }
+        ],
+        "terms": {
+          "one": 41990.38964843757,
+          "H": -10316.48437499999,
+          "merge": 851.514648437501,
+          "logE": 185.79687499999923,
+          "logW": -11295.898437500027
+        }
+      },
+      {
+        "id": "A200F0059",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 32
+          }
+        ],
+        "terms": {
+          "one": -6666.69218750001,
+          "combined": 298.25468749999993,
+          "logE": -98.20624999999895
+        }
+      },
+      {
+        "id": "A200F0060",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 1,
+            "axis": 0,
+            "branch": "warp_local",
+            "warps": 0
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "cross_warp",
+            "warps": 32
+          }
+        ],
+        "terms": {
+          "one": 4.324219230468802,
+          "warp": 74.32032075781248,
+          "merge": 131.3784520976041,
+          "logW": -0.3304687867187212
+        }
+      },
+      {
+        "id": "A200F0061",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": [
+              1,
+              2
+            ]
+          }
+        ],
+        "terms": {
+          "one": 618.6777341333053,
+          "local": 55.80176349875858,
+          "logE": -96.90804127201065,
+          "logW": 184.37679127201054
+        }
+      },
+      {
+        "id": "A200F0062",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": [
+              2,
+              8
+            ]
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": [
+              2,
+              8
+            ]
+          }
+        ],
+        "terms": {
+          "one": 174.3320833333335,
+          "invW": 61.87083333333179,
+          "merge": 10.177890625000027,
+          "warp": 18.941718750000003
+        }
+      },
+      {
+        "id": "A200F0063",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin",
+              "cumprod"
+            ],
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 4
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 4
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "one": 773.2695189187502,
+          "warp": 64.0145806172853,
+          "merge": 34.161353264453126,
+          "updates": -239.72627574365285
+        }
+      },
+      {
+        "id": "A200F0064",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 2
+          }
+        ],
+        "terms": {
+          "one": 33.07132076152104,
+          "warp": 15.143432157487686,
+          "shared": 17.24437336701454,
+          "logW": -7.330168817500187
+        }
+      },
+      {
+        "id": "A200F0065",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 8
+          }
+        ],
+        "terms": {
+          "one": -10.689286940859823,
+          "shared": 5.9400036586834055,
+          "updates": 95.12208815341435
+        }
+      },
+      {
+        "id": "A200F0066",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": [
+              16,
+              32
+            ]
+          }
+        ],
+        "terms": {
+          "one": 4406.517201089257,
+          "H": -4871.3660667114555,
+          "axisK": -289.3698843777993,
+          "merge": 343.76050937779934,
+          "logE": 34.26562499999954
+        }
+      },
+      {
+        "id": "A200F0067",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 64
+          },
+          {
+            "operation": "cummin",
+            "data_type": "i64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 64
+          }
+        ],
+        "terms": {
+          "one": -20694.227301183888,
+          "C": 251.07905355262903,
+          "partial_values": 535.4998749629885
+        }
+      },
+      {
+        "id": "A200F0068",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "cross_warp",
+            "warps": 64
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 64
+          }
+        ],
+        "terms": {
+          "one": 5458.4238714328485,
+          "merge": 997.3174155234389,
+          "logE": -969.8370894927147
+        }
+      },
+      {
+        "id": "A200F0069",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cummax",
+            "data_type": "i64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 64
+          }
+        ],
+        "terms": {
+          "one": -4877.132457551803,
+          "warp": -1053.668555137785,
+          "merge": 1017.1164294101595,
+          "C": 41.84001495970925
+        }
+      },
+      {
+        "id": "A200F0070",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": [
+              1,
+              2
+            ]
+          }
+        ],
+        "terms": {
+          "one": 1074.999061567132,
+          "combined": 53.568788360826986,
+          "logW": 242.9536549361684,
+          "logE": -186.87852778868194
+        }
+      },
+      {
+        "id": "A200F0071",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": [
+              4,
+              8
+            ]
+          }
+        ],
+        "terms": {
+          "one": 141.32830931160726,
+          "q": 89.2617987832589,
+          "merge": 47.610839843750014
+        }
+      },
+      {
+        "id": "A200F0072",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "warp_local",
+            "warps": 0
+          }
+        ],
+        "terms": {
+          "one": 8.6156259572924,
+          "warp": 41.95664528684886
+        }
+      },
+      {
+        "id": "A200F0073",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": [
+              2,
+              8
+            ]
+          }
+        ],
+        "terms": {
+          "one": 98.10924758304907,
+          "combined": 53.34140057283202,
+          "merge": -19.52213060611325,
+          "logW": -31.009280177423975
+        }
+      },
+      {
+        "id": "A200F0074",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "one": 3.528711728359473,
+          "local": 50.532993919826254,
+          "warp": 42.07142534461916,
+          "shared": 27.555617073235588
+        }
+      },
+      {
+        "id": "A200F0075",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": [
+              16,
+              32
+            ]
+          }
+        ],
+        "terms": {
+          "one": 11232.594018752174,
+          "q": -5073.784901294539,
+          "combined": 577.278440914844,
+          "logE": -1197.493397537482
+        }
+      },
+      {
+        "id": "A200F0076",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "combined": 587.7161458333334,
+          "logE": -1439.046874999999,
+          "one": 5742.541666666662,
+          "q": 28662.166666666642
+        }
+      },
+      {
+        "id": "A200F0077",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 8
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 1,
+            "warps": 0,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin",
+              "cumprod"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 0,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -29523.69018133952,
+          "invW": 128331.61224946451,
+          "logW": 4757.10785237026,
+          "warp": 493.3999162527644,
+          "logE": 146.77902450312627
+        }
+      },
+      {
+        "id": "A200F0078",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cummin",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 64
+          }
+        ],
+        "terms": {
+          "one": 2000.531249999999,
+          "warp": 1012.4374999999897,
+          "shared": -4762.568359374998,
+          "merge": 5295.296874999999
+        }
+      },
+      {
+        "id": "A200F0079",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 32
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 1
+          }
+        ],
+        "terms": {
+          "one": 59.88395150468306,
+          "invW": -1298.5955248504947,
+          "merge": 43.19846135260551,
+          "warp": 19.99539811615624
+        }
+      },
+      {
+        "id": "A200F0080",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": [
+              1,
+              32
+            ]
+          }
+        ],
+        "terms": {
+          "one": 32.80479846913789,
+          "invW": -1481.628194098378,
+          "merge": 44.627679004568726,
+          "warp": 23.216206633118606
+        }
+      },
+      {
+        "id": "A200F0081",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 16
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "i32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 32
+          }
+        ],
+        "terms": {
+          "one": 267.05935072187583,
+          "merge": 474.2621727675359,
+          "shared": -419.577128471225,
+          "warp": 111.28962412361135
+        }
+      },
+      {
+        "id": "A200F0082",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 2
+          },
+          {
+            "operation": "cummax",
+            "data_type": "u64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 64
+          }
+        ],
+        "terms": {
+          "merge": -163.5312261484373,
+          "one": -1818.7996190124984,
+          "shared": 1114.3269608422152,
+          "updates": -1729.963362236384
+        }
+      },
+      {
+        "id": "A200F0083",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": [
+              4,
+              8
+            ]
+          }
+        ],
+        "terms": {
+          "one": 221.0091104250002,
+          "warp": 60.49389570468752,
+          "merge": 37.98225651562498,
+          "updates": -96.80793231249997
+        }
+      },
+      {
+        "id": "A200F0084",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 16
+          }
+        ],
+        "terms": {
+          "one": -105.20760495459699,
+          "local": -207.8597180072033,
+          "merge": 36.38886088996385,
+          "updates": 256.09561822206933
+        }
+      },
+      {
+        "id": "A200F0085",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cummax",
+            "data_type": "i64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 32
+          },
+          {
+            "operation": "cummin",
+            "data_type": "u64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 32
+          }
+        ],
+        "terms": {
+          "one": -1109.1693313953547,
+          "warp": 54.50472383720896,
+          "merge": 165.1769622093023,
+          "logE": 209.1689680232577
+        }
+      },
+      {
+        "id": "A200F0086",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cummin",
+            "data_type": "u64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 64
+          }
+        ],
+        "terms": {
+          "one": -470.7187499999978,
+          "warp": -488.99999999999915,
+          "shared": 1150.3300781250002,
+          "updates": -5175.921875000004
+        }
+      },
+      {
+        "id": "A200F0087",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 16
+          }
+        ],
+        "terms": {
+          "one": 4402.999999999999,
+          "warp": 1273.546875,
+          "merge": 296.76953124999994,
+          "updates": -5209.48828125
+        }
+      },
+      {
+        "id": "A200F0088",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 32
+          }
+        ],
+        "terms": {
+          "one": -219.91105769230748,
+          "warp": 386.09735576923094,
+          "merge": 68.5180288461538
+        }
+      },
+      {
+        "id": "A200F0089",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 64
+          }
+        ],
+        "terms": {
+          "one": 77.02648934277643,
+          "warp": 614.869444662499,
+          "merge": 344.0721923771482
+        }
+      },
+      {
+        "id": "A200F0090",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 1,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 21.775669642857327,
+          "local": 52.97209821428578,
+          "warp": 43.55022321428575,
+          "H": -46.69754464285735,
+          "logE": 5.512276785714242
+        }
+      },
+      {
+        "id": "A200F0091",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 8,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -108.99293261640625,
+          "warp": 55.099860144460216,
+          "logE": 19.69465906100853
+        }
+      },
+      {
+        "id": "A200F0092",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 16,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -83.80893676388018,
+          "warp": 40.6679528437842,
+          "N": 0.10396770126685813,
+          "logE": 25.48788178381621
+        }
+      },
+      {
+        "id": "A200F0093",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 64
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 109.25144695551377,
+          "shared": 567.6210252192982,
+          "C": -2.4044394124079895,
+          "rounds": -1213.1168971104705,
+          "logE": 207.40609667187462
+        }
+      },
+      {
+        "id": "A200F0094",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 16
+          }
+        ],
+        "terms": {
+          "one": -41.26482820472491,
+          "warp": 32.592218399855376,
+          "merge": 22.509872105065853
+        }
+      },
+      {
+        "id": "A200F0095",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 16
+          }
+        ],
+        "terms": {
+          "one": -38.70353231790694,
+          "warp": 27.209811278247926,
+          "shared": 20.62607647919317
+        }
+      },
+      {
+        "id": "A200F0096",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 16
+          }
+        ],
+        "terms": {
+          "one": 32.36717102794072,
+          "warp": 57.78396290238971,
+          "merge": 53.44325201194853
+        }
+      },
+      {
+        "id": "A200F0097",
+        "projection": "legacy",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 64
+          }
+        ],
+        "terms": {
+          "one": -6305.820320721905,
+          "warp": -1414.2838088233964,
+          "shared": 1062.0921269988469,
+          "C": 60.090940993747495
+        }
+      },
+      {
+        "id": "A200F0098",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 0,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 0,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 2734.4860931224134,
+          "merge": 1210.3524281166679,
+          "logE": -847.2935909655664,
+          "rounds": -938.411265267775,
+          "C": 1.4629396156737529
+        }
+      },
+      {
+        "id": "A200F0099",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 1,
+            "branch": "multi",
+            "warps": 32
+          }
+        ],
+        "terms": {
+          "one": -7055.562499998461,
+          "merge": 2057.2499999995025,
+          "partial_values": -928.6425781247559,
+          "logE": 2159.968749999514
+        }
+      },
+      {
+        "id": "A200F0100",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 16,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -41.454454448701775,
+          "merge": 93.08913082106315,
+          "partial_values": 33.67407431558452,
+          "logE": 16.40295102662344
+        }
+      },
+      {
+        "id": "A200F0101",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": [
+              2,
+              4
+            ],
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 0,
+            "warps": 1,
+            "branch": "layout_multi_block"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 1,
+            "branch": "layout_multi_block"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 0,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 17.235527197479342,
+          "warp": 91.52721730882257,
+          "shared": 24.820888598739614,
+          "invW": -36.41445605041464
+        }
+      },
+      {
+        "id": "A200F0102",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 87.16682330827074,
+          "warp": 84.7828947368421,
+          "C": 0.7853765272556397
+        }
+      },
+      {
+        "id": "A200F0103",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 1,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -64.90098668515624,
+          "warp": 80.33398858138024,
+          "logE": 34.74810265169265
+        }
+      },
+      {
+        "id": "A200F0104",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 16,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 1336.2293396493294,
+          "shared": 382.30240706420926,
+          "axisK": -800.4992716621135
+        }
+      },
+      {
+        "id": "A200F0105",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 81.04778056057347,
+          "warp": 89.29818998758223,
+          "C": 1.8253431170171526
+        }
+      },
+      {
+        "id": "A200F0106",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -44.35589297927638,
+          "local": 5.470641295604802,
+          "warp": 75.73712128661346,
+          "logE": 30.416918066895317
+        }
+      },
+      {
+        "id": "A200F0107",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 16,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 629.5714285714289,
+          "axisK": -772.5926339285712,
+          "shared": 321.68973214285694,
+          "warp": 17.234375000000107,
+          "logE": 112.40624999999982
+        }
+      },
+      {
+        "id": "A200F0108",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin",
+              "cumprod"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 8,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 1,
+            "warps": 8,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "C": 2.9443939495485987,
+          "E": 0.2163624367575958,
+          "one": -190.40113690098354,
+          "pressure48": 649.6618695806307,
+          "warp": 111.74850911114686,
+          "logE": 23.362769492364485
+        }
+      },
+      {
+        "id": "A200F0109",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 16,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 157.70073033700558,
+          "local": -1045.037627639539,
+          "C": -12.663041713007097,
+          "N": 2.1038204090756643,
+          "logE": 14.955115728736205
+        }
+      },
+      {
+        "id": "A200F0110",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 1,
+            "warps": 64,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 64,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 5985.224598430342,
+          "updates": -6761.269104793855,
+          "C": 31.704656045340396,
+          "E": 221.48751445096931,
+          "logE": -652.0708995536795
+        }
+      },
+      {
+        "id": "A200F0111",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 7.733265502152241,
+          "E": 5.627609978376803,
+          "H": 58.754944072152604,
+          "C": -1.3165670101258458
+        }
+      },
+      {
+        "id": "A200F0112",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 0,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -5.462520224999997,
+          "warp": 15.421566175312497,
+          "C": 1.9381261962500054
+        }
+      },
+      {
+        "id": "A200F0113",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 93.10465227552086,
+          "warp": 38.03594742239584
+        }
+      },
+      {
+        "id": "A200F0114",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -39.32116474442933,
+          "E": 4.800033358943488,
+          "live_words": 44.74828749274474,
+          "pressure2_24": 13.427955874634016
+        }
+      },
+      {
+        "id": "A200F0115",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "E": 3.231302139472068,
+          "live_words": 54.266468632031376,
+          "one": -42.92548341577688,
+          "pressure2_24": 14.41912091323488,
+          "C": -1.2685608662109749
+        }
+      },
+      {
+        "id": "A200F0116",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 0,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 0,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 236.04495702032744,
+          "E": 2.9903726522042415,
+          "rounds": -1026.2988898029473,
+          "shared": 518.0770336278637,
+          "C": -0.46831545333488755
+        }
+      },
+      {
+        "id": "A200F0117",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 0,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 212.8688516134872,
+          "E": 2.82795258303663,
+          "rounds": -1002.3765894587717,
+          "shared": 512.5251738346881,
+          "C": 0.6100805639516488
+        }
+      },
+      {
+        "id": "A200F0118",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 224.3982804444818,
+          "E": 2.7941914629571105,
+          "rounds": -983.5774708014961,
+          "shared": 503.23790104315145,
+          "C": -1.4477426928191366
+        }
+      },
+      {
+        "id": "A200F0119",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "merge": 101.63316076445314,
+          "one": 193.02985694218717,
+          "pressure2_24": 0.1186778695556642
+        }
+      },
+      {
+        "id": "A200F0120",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "warps": 1,
+            "branch": "layout_multi_block"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 1,
+            "branch": "layout_multi_block"
+          }
+        ],
+        "terms": {
+          "merge": -31.677083333333595,
+          "one": 813.5850694444456,
+          "pressure2_24": 0.3586033950617286
+        }
+      },
+      {
+        "id": "A200F0121",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 154.0178571428571,
+          "pressure2_64": 3.0883178710937464,
+          "updates": 27.70089285714286
+        }
+      },
+      {
+        "id": "A200F0122",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 123.45992658697878,
+          "local": 37.142095568836815,
+          "pressure2_64": 1.0647010867289257
+        }
+      },
+      {
+        "id": "A200F0123",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 16,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -83.29148952321425,
+          "warp": 61.28424036308037
+        }
+      },
+      {
+        "id": "A200F0124",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 175.17633928571487,
+          "C": 32.42717633928571,
+          "logE": -43.32812500000011,
+          "merge": 69.40625000000013
+        }
+      },
+      {
+        "id": "A200F0125",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 16,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -282.28335711607065,
+          "warp": 54.097947678839304,
+          "logE": 36.067165620312366
+        }
+      },
+      {
+        "id": "A200F0126",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 177.0203064759686,
+          "shared": 321.61852613825687,
+          "axisK": -285.83778269514926
+        }
+      },
+      {
+        "id": "A200F0127",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 1,
+            "warps": [
+              1,
+              32
+            ],
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 2,
+            "warps": [
+              1,
+              32
+            ],
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 33.932918233082724,
+          "local": -1.6328124999999936,
+          "warp": 15.971422697368416,
+          "C": 0.31338110902255684
+        }
+      },
+      {
+        "id": "A200F0128",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 18.450547893206664,
+          "local": 2.3394697933423907,
+          "warp": 13.28253855339673,
+          "logE": 1.6960604133151935
+        }
+      },
+      {
+        "id": "A200F0129",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 35.40476426860123,
+          "local": 9.988277113281258,
+          "warp": 8.649090610026047,
+          "C": -0.691057256068644
+        }
+      },
+      {
+        "id": "A200F0130",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 8,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -78.68128731875007,
+          "warp": 13.482622257907181,
+          "logE": 19.047074571780342
+        }
+      },
+      {
+        "id": "A200F0131",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 64,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 64,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "N": 0.13929671522858375,
+          "local": -458.01873745378896,
+          "one": 36.64948225190214
+        }
+      },
+      {
+        "id": "A200F0132",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 35.743106150144584,
+          "logW": -9.732869150200449,
+          "merge": 64.9305504772451,
+          "warp": 15.4670171957406
+        }
+      },
+      {
+        "id": "A200F0133",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 55.05580357142828,
+          "warp": 15.550223214285694,
+          "logE": -5.148437499999905
+        }
+      },
+      {
+        "id": "A200F0134",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 26.097861085023077,
+          "warp": 15.156502016129028,
+          "C": 0.1720470294174818
+        }
+      },
+      {
+        "id": "A200F0135",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -51.386718750000185,
+          "warp": 14.073242187499986,
+          "logE": 13.671875000000037,
+          "C": 0.47070312500000305
+        }
+      },
+      {
+        "id": "A200F0136",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 8,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -83.42187499999946,
+          "warp": 15.062500000000004,
+          "logE": 17.859374999999904
+        }
+      },
+      {
+        "id": "A200F0137",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -1035.4880696818748,
+          "local": 138.13714770911562
+        }
+      },
+      {
+        "id": "A200F0138",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 1,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 265.2070880319575,
+          "warp": 84.90966812097292,
+          "E": -26.47215622287363,
+          "C": -8.823977002883357
+        }
+      },
+      {
+        "id": "A200F0139",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 32,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 32,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 32,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 0,
+            "branch": "layout_multi_block"
+          }
+        ],
+        "terms": {
+          "one": -7.223075930216463,
+          "C": 2.8319276734284733,
+          "N": -0.10349346329986833,
+          "live_words": 94.44485721320068,
+          "logE": -34.48317579413551
+        }
+      },
+      {
+        "id": "A200F0140",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 0,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 0,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 0,
+            "warps": 0,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -23.568977011132784,
+          "warp": 47.547954501855465,
+          "merge": 36.468302591992185,
+          "logW": 56.2266586623047
+        }
+      },
+      {
+        "id": "A200F0141",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 106.54111187650969,
+          "warp": 43.47382266569796,
+          "C": -3.3935085251736,
+          "N": 0.9913150061185623,
+          "logE": -15.865783132701612
+        }
+      },
+      {
+        "id": "A200F0142",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 0,
+            "warps": 16,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 348.68762194072684,
+          "merge": 180.83085110739145,
+          "axisK": -142.63033027405802,
+          "logE": 14.414062499999337
+        }
+      },
+      {
+        "id": "A200F0143",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 1,
+            "warps": [
+              2,
+              4
+            ],
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": [
+              2,
+              4
+            ],
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 32,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -137.50915784129583,
+          "warp": 69.40234375000016,
+          "C": 3.313644730161848,
+          "logE": 7.332031250000007
+        }
+      },
+      {
+        "id": "A200F0144",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 16,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 16,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 708.6969841718725,
+          "E": 1.1347656249999944,
+          "axisK": -668.9626091718726,
+          "shared": 674.5891443789061
+        }
+      },
+      {
+        "id": "A200F0145",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 1,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 564.0502571004432,
+          "pressure2_8": 1.9510107962692758,
+          "rounds": -2203.539662435192,
+          "shared": 1410.192282035751,
+          "C": 24.79873111489057
+        }
+      },
+      {
+        "id": "A200F0146",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 1,
+            "warps": 1,
+            "branch": "layout_multi_block"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 1,
+            "branch": "layout_multi_block"
+          }
+        ],
+        "terms": {
+          "one": 1366.1851021939647,
+          "pressure2_8": 0.8176598123105814
+        }
+      },
+      {
+        "id": "A200F0147",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 1,
+            "warps": 64,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 64,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -285.23001780423857,
+          "local": -1556.769493026567,
+          "C": 7.542131696428586,
+          "E": 22.00426362070327,
+          "logE": 46.1144100890611
+        }
+      },
+      {
+        "id": "A200F0148",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 8.314732142857208,
+          "warp": 103.77734374999996,
+          "C": 2.8210100446428763
+        }
+      },
+      {
+        "id": "A200F0149",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 0,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 0,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 133.928875821096,
+          "merge": 70.66011449609418,
+          "partial_pressure16": 185.11471457408575,
+          "warp": 155.20690598828264,
+          "logE": -109.94364243125177
+        }
+      },
+      {
+        "id": "A200F0150",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 2,
+            "axis": 0,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 0,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 128.53590672968713,
+          "warp": 177.69670513125013,
+          "shared": 72.87963422968753,
+          "partial_pressure16": 181.36882301321143,
+          "logE": -136.1389101890625
+        }
+      },
+      {
+        "id": "A200F0151",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 542.1325945827728,
+          "merge": 71.95690912268687,
+          "C": -6.045743021715194,
+          "partial_pressure8": 225.29601825191457,
+          "logE": -120.69176001732296
+        }
+      },
+      {
+        "id": "A200F0152",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "E": -1.4392085768638394,
+          "P": 145.7398305186149,
+          "blocks": 23404.84244945329,
+          "one": -23506.1653350557,
+          "warp": 91.44593295497938,
+          "logE": 37.811672726696514
+        }
+      },
+      {
+        "id": "A200F0153",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "E": -2.5427517361109304,
+          "P": 111.02343749999883,
+          "blocks": 23774.737847222204,
+          "one": -23714.31770833331,
+          "warp": 111.01953124999932,
+          "logE": 10.661458333331037
+        }
+      },
+      {
+        "id": "A200F0154",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cummax",
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 0,
+            "warps": 0,
+            "branch": "layout_multi_block"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 0,
+            "branch": "layout_multi_block"
+          }
+        ],
+        "terms": {
+          "one": -26259.137974846028,
+          "warp": 2176.9713952469533,
+          "merge": -3263.0281257578467,
+          "E": -1796.9925405167176
+        }
+      },
+      {
+        "id": "A200F0155",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cummax",
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 0,
+            "warps": 0,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 0,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -3013.3991070668453,
+          "warp": 80.72946217837871,
+          "C": 381.4341254620538
+        }
+      },
+      {
+        "id": "A200F0156",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -569.8347271846437,
+          "warp": 123.49730763250008,
+          "C": 6.772030829955366,
+          "logE": 91.99934375375011,
+          "local": -22.02873660875004
+        }
+      },
+      {
+        "id": "A200F0157",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 1,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -221.18246287223968,
+          "warp": 96.90215039877708,
+          "C": 3.0476256955534966,
+          "logE": 48.7243770371602,
+          "local": -10.733427170085987
+        }
+      },
+      {
+        "id": "A200F0158",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "warps": [
+              16,
+              2
+            ],
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": [
+              16,
+              2
+            ],
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 35.61902815634168,
+          "partial_values": 24.11862991005221,
+          "warp": 11.56761289454439,
+          "C": -1.6232208573989888
+        }
+      },
+      {
+        "id": "A200F0159",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 0,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -40.94061727405457,
+          "updates": 69.16042709320948
+        }
+      },
+      {
+        "id": "A200F0160",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 0,
+            "branch": "layout_multi_block"
+          },
+          {
+            "operation": "cummax",
+            "data_type": "u32",
+            "rank": 3,
+            "axis": 2,
+            "warps": 0,
+            "branch": "layout_multi_block"
+          }
+        ],
+        "terms": {
+          "one": 1259.1708215646368
+        }
+      },
+      {
+        "id": "A200F0161",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 27.741709183673475,
+          "warp": 13.908482142857142,
+          "C": 0.18602519132653034
+        }
+      },
+      {
+        "id": "A200F0162",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 21.50218065712163,
+          "local": 1.989670013801496,
+          "shared": 20.054832810277283,
+          "warp": 12.772247964393673
+        }
+      },
+      {
+        "id": "A200F0163",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 21.50218065712163,
+          "local": 1.989670013801496,
+          "shared": 20.054832810277283,
+          "warp": 12.772247964393673
+        }
+      },
+      {
+        "id": "A200F0164",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 8,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 8,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -51.96306818181826,
+          "warp": 12.58948863636362,
+          "logE": 13.28125000000004
+        }
+      },
+      {
+        "id": "A200F0165",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 1057.203535555525
+        }
+      },
+      {
+        "id": "A200F0166",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -448.00829256458326,
+          "warp": 127.6900864307291,
+          "merge": 31.681267334375057,
+          "C": 3.316605384570337
+        }
+      },
+      {
+        "id": "A200F0167",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": [
+              16,
+              4
+            ],
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 170.36666666666662,
+          "updates": 76.24825122748327,
+          "q": -408.91934315319946
+        }
+      },
+      {
+        "id": "A200F0168",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 1,
+            "warps": 16,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 16,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -14.130469550371686,
+          "local": 4.6465013021577715,
+          "merge": 124.23821686443455,
+          "logE": 16.75410056063982
+        }
+      },
+      {
+        "id": "A200F0169",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 64,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -1410.7589523809547,
+          "N": -0.32046601861143026,
+          "logE": 479.0107001801418
+        }
+      },
+      {
+        "id": "A200F0170",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -960.7621710171866,
+          "merge": 120.87470308359396,
+          "H": 1611.255157164843
+        }
+      },
+      {
+        "id": "A200F0171",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cummin",
+            "data_type": "u64",
+            "rank": 2,
+            "axis": 0,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "N": 1.5003296493614044,
+          "one": -180.28619250810195,
+          "rounds": -1371.4501585603152,
+          "shared": 374.4796906394779,
+          "warp": -182.8825576849266,
+          "logE": 469.9497042000617
+        }
+      },
+      {
+        "id": "A200F0172",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 0,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 0,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "N": 3.041335828851325,
+          "one": -449.6581264687546,
+          "rounds": -1564.97361389533,
+          "shared": 335.6010991939457,
+          "warp": -178.5829656507957,
+          "logE": 615.5927017437664
+        }
+      },
+      {
+        "id": "A200F0173",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 0,
+            "branch": "layout_multi_block"
+          }
+        ],
+        "terms": {
+          "one": 877.9187779553561,
+          "C": -4.545806303664423,
+          "E": 53.071943156575514,
+          "logE": -295.8906982578124
+        }
+      },
+      {
+        "id": "A200F0174",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 2,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 1,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 437.0651799962312,
+          "logE": -149.58869095112934,
+          "warp": 83.3502977377837,
+          "C": -2.734337827303254
+        }
+      },
+      {
+        "id": "A200F0175",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 16,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -215.20394568715886,
+          "C": 1.2234092110213148,
+          "E": 5.815542611594232,
+          "H": 215.0278537845067,
+          "logE": 16.835034107242613
+        }
+      },
+      {
+        "id": "A200F0176",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 199.03717754087828,
+          "local": 103.99890971144518,
+          "warp": 35.07187500000021,
+          "logE": -60.639534711447034,
+          "C": -0.40114980081752855
+        }
+      },
+      {
+        "id": "A200F0177",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 8,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -312.2417162572483,
+          "local": -554.5644961548728,
+          "updates": 440.31231873716007,
+          "E": 6.690943163010613,
+          "logE": -22.448656739250875
+        }
+      },
+      {
+        "id": "A200F0178",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 32,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -89.23599837662361,
+          "warp": 100.85227272727265,
+          "C": 3.1411830357142807,
+          "logE": -43.91051136363612
+        }
+      },
+      {
+        "id": "A200F0179",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 64,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 943.7638064741102,
+          "updates": -992.1636768046889,
+          "C": 7.17550223214286,
+          "E": 29.513261965234445,
+          "logE": -47.19820608281327
+        }
+      },
+      {
+        "id": "A200F0180",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 16,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -4340.508871589643,
+          "warp": 2378.356730173501,
+          "E": -127.026757542709,
+          "axisK": 519.3795436623984,
+          "C": -13.017193982325944,
+          "logE": 18.488687039374867
+        }
+      },
+      {
+        "id": "A200F0181",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 0,
+            "warps": 1,
+            "branch": "layout_multi_block"
+          }
+        ],
+        "terms": {
+          "one": 3213.76735840436,
+          "warp": 26.560093049269906,
+          "merge": 34.675999791062104,
+          "C": -25.79383223983575,
+          "logE": -693.5743604453119
+        }
+      },
+      {
+        "id": "A200F0182",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 0,
+            "warps": 1,
+            "branch": "layout_multi_block"
+          }
+        ],
+        "terms": {
+          "one": 2309.204769563456,
+          "warp": 64.81467555372038,
+          "C": -18.76734502129444,
+          "E": -36.113170018495836,
+          "logE": -509.98096230405713
+        }
+      },
+      {
+        "id": "A200F0183",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 1,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 2,
+            "warps": 2,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 483.02679159467255,
+          "updates": 170.81250588038884,
+          "C": -13.792411449334358,
+          "logE": -129.17187499999923,
+          "H": -43.57812499999926,
+          "E": 2.044921139951306
+        }
+      },
+      {
+        "id": "A200F0184",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 16,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 3107.429930882142,
+          "warp": 1685.5533291359388,
+          "N": 14.417632149289664,
+          "E": -111.33890967042412,
+          "updates": -5688.475758072916,
+          "C": -57.427127826283474
+        }
+      },
+      {
+        "id": "A200F0185",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 32,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -11770.376562500529,
+          "N": 0.6401855468750421,
+          "E": 20.440624999998352,
+          "H": 12199.742187500386,
+          "rounds": -124.2453124999832,
+          "logE": -27.36718749997312
+        }
+      },
+      {
+        "id": "A200F0186",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 64,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 7338.1406250000255,
+          "warp": 1305.5546875000007,
+          "merge": 563.8281250000002,
+          "logE": -969.8593749999992,
+          "updates": -7002.500000000029
+        }
+      },
+      {
+        "id": "A200F0187",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 32,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -4956.462869769152,
+          "C": 0.3660447955077874,
+          "logE": 105.38100047611577,
+          "H": 5665.715342575885,
+          "updates": -841.3709206636528,
+          "N": 0.8493685635079531
+        }
+      },
+      {
+        "id": "A200F0188",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 1,
+            "warps": 64,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 64,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 16150.916726860803,
+          "warp": -2433.347968075018,
+          "updates": -11254.93500070719,
+          "E": 320.1534195803586,
+          "C": 10.481854374553585,
+          "N": 0.593437288002232
+        }
+      },
+      {
+        "id": "A200F0189",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 1,
+            "branch": "layout_multi_block"
+          }
+        ],
+        "terms": {
+          "one": 2786.187573314345,
+          "warp": 76.2622732541333,
+          "C": -23.040451353129267,
+          "E": -44.250800463637454,
+          "logE": -625.8774683570356
+        }
+      },
+      {
+        "id": "A200F0190",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 411.8419422096404,
+          "warp": 31.862637893558283,
+          "shared": 47.52263804352424,
+          "C": -5.629672257803398,
+          "logE": -76.02338046829851,
+          "Ba": -130.95809961648268
+        }
+      },
+      {
+        "id": "A200F0191",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 2,
+            "axis": 1,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 2,
+            "warps": 4,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": 79.30834287842741,
+          "warp": 83.8428516765999,
+          "updates": -160.37140670639812,
+          "C": -1.7770486906536131,
+          "E": -5.697153334575007,
+          "local": 302.6352350595983
+        }
+      },
+      {
+        "id": "A200F0192",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 3,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -17.89475468281097,
+          "warp": 15.5789865539064,
+          "updates": 96.2640208140624,
+          "pressure2_16": 56.89948667875388,
+          "logE": 13.374835343749663
+        }
+      },
+      {
+        "id": "A200F0193",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 2,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 3,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -10.490136603126656,
+          "H": 92.00621693125004,
+          "warp": 16.571165249218566,
+          "pressure2_16": 57.137631093890626,
+          "logE": 13.59047775312555
+        }
+      },
+      {
+        "id": "A200F0194",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 112.10819890207173,
+          "C": -3.751494635872196,
+          "live_words": 95.25883018385312,
+          "pressure2_16": 57.8137904891016,
+          "logE": -20.978089209372243
+        }
+      },
+      {
+        "id": "A200F0195",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 119.7249037117192,
+          "warp": 46.972313637747185,
+          "merge": 28.424219012786452,
+          "pressure2_16": 9.007647824349306
+        }
+      },
+      {
+        "id": "A200F0196",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
+            "rank": 3,
+            "axis": 0,
+            "warps": 8,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": 66.64597581929557,
+          "pressure2_16": 9.848396464364265,
+          "shared": 31.40784801064487,
+          "warp": 33.84078222752282,
+          "C": 1.0457701923430338
+        }
+      },
+      {
+        "id": "A200F0197",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 2,
+            "axis": 0,
+            "warps": 1,
+            "branch": "layout_multi_block"
+          },
+          {
+            "operation": "cumprod",
+            "data_type": "integer64",
+            "rank": 3,
+            "axis": 0,
+            "warps": 1,
+            "branch": "layout_multi_block"
+          }
+        ],
+        "terms": {
+          "one": -237.9836512154334,
+          "warp": 42.756941012778974,
+          "E": 16.82656642734378,
+          "pressure2_96": 0.14726375781040857,
+          "C": 3.9301151530731677
+        }
+      },
+      {
+        "id": "A200F0198",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cummax",
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          }
+        ],
+        "terms": {
+          "one": -18.613692434210606,
+          "warp": 92.20219983552637,
+          "shared": 22.47111430921051,
+          "pressure24": 1314.4409308182564,
+          "logE": 7.9640213815789425
+        }
+      },
+      {
+        "id": "A200F0199",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 2,
+            "axis": 1,
+            "warps": 16,
+            "branch": "layout_warp_local"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 3,
+            "axis": 2,
+            "warps": 16,
+            "branch": "layout_warp_local"
+          }
+        ],
+        "terms": {
+          "one": -356.58437683892015,
+          "warp": 155.25174019931157,
+          "C": 4.4175272191562325,
+          "E": 6.421504810789228,
+          "logE": 6.215067491058508
+        }
+      },
+      {
+        "id": "ordinary_f16_w4_rank1",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": [
+              "cumprod",
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 1,
+            "axis": 0,
+            "branch": "cross_warp",
+            "warps": 4
+          },
+          {
+            "operation": [
+              "cumprod",
+              "cummax",
+              "cummin"
+            ],
+            "data_type": "f16",
+            "rank": 1,
+            "axis": 0,
+            "branch": "multi_element",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "warp": 604.0,
+          "local": 16.482142857142858
+        }
+      },
+      {
+        "id": "simt_prod_i32_w4_full_lane",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "integer32",
+            "rank": 2,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp_full_lane"
+          }
+        ],
+        "terms": {
+          "warp": 18.554037886080902,
+          "local": 11.16664148693901,
+          "partial_pressure2_cta": 0.036713095462104633
+        }
+      },
+      {
+        "id": "simt_prod_f32_w4_full_lane",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": "f32",
+            "rank": 2,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp_full_lane"
+          }
+        ],
+        "terms": {
+          "warp": 19.834558038502404,
+          "pressure127": 1023.2182592934774
+        }
+      },
+      {
+        "id": "simt_w4_subwarp_scan",
+        "projection": "row_major",
+        "domains": [
+          {
+            "operation": "cumprod",
+            "data_type": [
+              "integer32",
+              "f32"
+            ],
+            "rank": 2,
+            "axis": 0,
+            "warps": 4,
+            "branch": "layout_cross_warp"
+          },
+          {
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32"
+            ],
+            "rank": 3,
+            "axis": 1,
+            "branch": "layout_cross_warp_subwarp",
+            "warps": 4
+          }
+        ],
+        "terms": {
+          "one": 281.6939267593186,
+          "warp": 5.452329446833478,
+          "merge": 8.74613535980104,
+          "scan_spill_warp_work": 14.27738960004535,
+          "scan_spill_subwarp_work": 10.322176524666965
+        }
+      }
+    ]
+  },
+  "unit": "system_cycle",
+  "source_sha256": "2c5b6e932f8a5217d48e7b4f03d372daf92fb7a6eaf9e66ee495a8ff348eddb7"
+}

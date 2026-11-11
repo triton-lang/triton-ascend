@@ -391,10 +391,17 @@ struct StageWorkload {
   std::map<std::tuple<int64_t, int64_t, int64_t>, double>
       segmentedIndirectStoreCounts;
   std::map<int64_t, double> predicateCounts;
-  std::map<std::tuple<int64_t, int64_t, int64_t, int64_t, bool, std::string,
-                      std::string, int64_t, int64_t, int64_t>,
-           double>
-      prefixScanCounts;
+  // Geometry, direction, combine class/type, rank/axis/bits, complete shape,
+  // exact returned combine op, and simple binary-region proof. The value is
+  // the sole dynamic occurrence count; no parallel fact list is maintained.
+  using PrefixScanKey =
+      std::tuple<int64_t, int64_t, int64_t, int64_t, bool, std::string,
+                 std::string, int64_t, int64_t, int64_t, std::vector<int64_t>,
+                 std::string, bool>;
+  std::map<PrefixScanKey, double> prefixScanCounts;
+  /// Mean combine-region work per occurrence; prefixScanCounts owns
+  /// multiplicity.
+  std::map<PrefixScanKey, StageWorkload> prefixScanCombineWorkloads;
   /// Dynamic row-reduction operations per Stage iteration.
   double reductionOperations = 0.0;
   double shuffleLaneSteps = 0.0;
@@ -434,6 +441,13 @@ struct StageWorkload {
   double scalarLoadCount = 0.0;
   double scalarStoreCount = 0.0;
   bool paysKernelSetup = false;
+
+  /// Compose work using the existing per-operation counting rules.
+  void merge(StageWorkload from);
+  /// Scale dynamic multiplicities; per-occurrence scan regions stay unchanged.
+  void scale(double factor);
+  /// Refresh the derived issue total after direct workload updates.
+  void recomputeIssueElements();
 
   bool isFiniteAndNonNegative() const;
   llvm::json::Object toJSON() const;
@@ -512,6 +526,9 @@ struct StageResourceCycles {
   /// issue across all sequences and the longest dependent scan chain.
   double prefixScanIssue = 0.0;
   double prefixScanCriticalPath = 0.0;
+  /// Sum of scan completion costs per Stage iteration.
+  double scanCompletionCycles = 0.0;
+  std::map<std::string, double> scanFormulaCounts;
   /// Completion-inclusive body cost from an isolated dynamic grid-stride
   /// prefix-scan sweep. It replaces the decomposed scan/load/store estimate.
   double gridStridePrefixScanBody = 0.0;
@@ -545,7 +562,7 @@ struct StageResourceCycles {
   double criticalPath = 0.0;
   bool indirectMemoryAnalyticalFallback = false;
 
-  std::array<std::pair<llvm::StringRef, double>, 53> keyedValues() const;
+  std::array<std::pair<llvm::StringRef, double>, 54> keyedValues() const;
   bool isFiniteAndNonNegative() const;
   llvm::json::Object toJSON() const;
   /// Preserve every non-zero resource while omitting default-valued

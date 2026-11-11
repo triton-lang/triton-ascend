@@ -194,6 +194,159 @@
         "description": {
           "type": "string",
           "minLength": 1
+        },
+        "formulas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "terms",
+              "domains"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "terms": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "domains": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "operation",
+                    "data_type",
+                    "rank",
+                    "axis",
+                    "branch",
+                    "warps"
+                  ],
+                  "properties": {
+                    "operation": {
+                      "oneOf": [
+                        {
+                          "enum": [
+                            "cumprod",
+                            "cummax",
+                            "cummin"
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "minItems": 1,
+                          "uniqueItems": true,
+                          "items": {
+                            "enum": [
+                              "cumprod",
+                              "cummax",
+                              "cummin"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    "data_type": {
+                      "oneOf": [
+                        {
+                          "enum": [
+                            "f16",
+                            "f32",
+                            "i32",
+                            "u32",
+                            "i64",
+                            "u64",
+                            "integer32",
+                            "integer64"
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "minItems": 1,
+                          "uniqueItems": true,
+                          "items": {
+                            "enum": [
+                              "f16",
+                              "f32",
+                              "i32",
+                              "u32",
+                              "i64",
+                              "u64",
+                              "integer32",
+                              "integer64"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    "rank": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "axis": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "branch": {
+                      "enum": [
+                        "short",
+                        "long",
+                        "tree",
+                        "chain",
+                        "direct",
+                        "direct_full_groups",
+                        "transpose",
+                        "product_multi",
+                        "scalar_or_generic",
+                        "warp_local",
+                        "cross_warp",
+                        "multi_element",
+                        "multi",
+                        "layout_any",
+                        "layout_warp_local",
+                        "layout_cross_warp",
+                        "layout_multi_block"
+                      ]
+                    },
+                    "warps": {
+                      "oneOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 64
+                        },
+                        {
+                          "type": "array",
+                          "minItems": 1,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 64
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "projection": {
+                "type": "string",
+                "enum": [
+                  "legacy"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
@@ -366,9 +519,171 @@
         "description": {
           "type": "string",
           "minLength": 1
+        },
+        "formulas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "terms",
+              "domains"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "terms": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "domains": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "operation",
+                    "data_type",
+                    "rank",
+                    "axis",
+                    "branch",
+                    "warps"
+                  ],
+                  "properties": {
+                    "operation": {
+                      "oneOf": [
+                        {
+                          "enum": [
+                            "cumprod",
+                            "cummax",
+                            "cummin"
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "minItems": 1,
+                          "uniqueItems": true,
+                          "items": {
+                            "enum": [
+                              "cumprod",
+                              "cummax",
+                              "cummin"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    "data_type": {
+                      "oneOf": [
+                        {
+                          "enum": [
+                            "f16",
+                            "f32",
+                            "i32",
+                            "u32",
+                            "i64",
+                            "u64",
+                            "integer32",
+                            "integer64"
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "minItems": 1,
+                          "uniqueItems": true,
+                          "items": {
+                            "enum": [
+                              "f16",
+                              "f32",
+                              "i32",
+                              "u32",
+                              "i64",
+                              "u64",
+                              "integer32",
+                              "integer64"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    "rank": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "axis": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "branch": {
+                      "enum": [
+                        "short",
+                        "long",
+                        "tree",
+                        "chain",
+                        "direct",
+                        "direct_full_groups",
+                        "transpose",
+                        "product_multi",
+                        "scalar_or_generic",
+                        "warp_local",
+                        "cross_warp",
+                        "multi_element",
+                        "multi",
+                        "layout_any",
+                        "layout_warp_local",
+                        "layout_cross_warp",
+                        "layout_cross_warp_full_lane",
+                        "layout_cross_warp_subwarp",
+                        "layout_multi_block"
+                      ]
+                    },
+                    "warps": {
+                      "oneOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 64
+                        },
+                        {
+                          "type": "array",
+                          "minItems": 1,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 64
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "projection": {
+                "type": "string",
+                "enum": [
+                  "legacy",
+                  "row_major"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
+    },
+    "unit": {
+      "const": "system_cycle"
+    },
+    "source_sha256": {
+      "type": "string"
     }
   },
   "additionalProperties": false

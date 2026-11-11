@@ -62,7 +62,6 @@ class CompilerCostmodelContractTest(unittest.TestCase):
                 "_get_mlir_path",
                 "_get_npucompiler_path",
                 "_get_triton_adapter_opt_path",
-                "_get_triton_mlir_opt_path",
                 "_get_triton_opt_path",
                 "_get_bishengir_opt_path",
                 "_is_ascend_sanitizer_enabled",

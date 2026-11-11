@@ -58,7 +58,6 @@ from triton.backends.ascend.utils import (
     _get_npucompiler_path,
     _get_triton_adapter_opt_path,
     _get_triton_opt_path,
-    _get_triton_mlir_opt_path,
     _is_ascend_sanitizer_enabled,
     _is_debug_line_info_disabled,
     _is_auto_map_parallel_blocks_enabled,
@@ -1632,93 +1631,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         return _serialize_module(mod, opt)
 
 
-def linalg_to_bc_by_triton_mlir_opt(linalg: str, metadata, opt):
-    """
-    Convert Linalg IR to MLIR Bytecode format using triton-mlir-opt.
-    This function supports both MLIR and BishengIR ops.
-    Args:
-        linalg: Linalg IR in text format
-        metadata: Compilation metadata
-        opt: Compilation options
-    Returns:
-        Bytecode data as bytes (not file path, to avoid temp directory cleanup issues)
-    """
-    # The Stage graph is fixed before the C++ Route Model runs. When auto
-    # selects all-SIMT, ttadapter deliberately carries TTIR forward to the
-    # pure-SIMT compiler; the optional Linalg bytecode round-trip must become
-    # an identity stage rather than trying to parse TTIR as Linalg/BishengIR.
-    if metadata.get("force_simt_only", False):
-        return linalg
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ttadapter_path = os.path.join(tmpdir, "kernel.ttadapter.mlir")
-        bc_path = os.path.join(tmpdir, "kernel.mlirbc")
-        Path(ttadapter_path).write_text(linalg)
-
-        triton_mlir_opt_path = _get_triton_mlir_opt_path()
-
-        # The --emit-bytecode flag ensures output is in BC format
-        subprocess.run([
-            triton_mlir_opt_path,
-            ttadapter_path,
-            "--emit-bytecode",
-            "-o",
-            bc_path,
-        ], check=True, capture_output=True, text=True)
-
-        # Read bytecode as binary before temp directory is cleaned up
-        with open(bc_path, "rb") as f:
-            bc_data = f.read()
-
-        if opt.debug:
-            dump_manager = get_dump_manager(metadata["hash"])
-            dump_manager.put(bc_data, "kernel.mlirbc", binary=True)
-
-        return bc_data
-
-
-def bc_to_linalg_by_bishengir_opt(bc_data: bytes, metadata, opt):
-    """
-    Convert MLIR Bytecode to MLIR text format using bishengir-opt.
-    Args:
-        bc_data: Bytecode data as bytes
-        metadata: Compilation metadata
-        opt: Compilation options
-    Returns:
-        MLIR text as string
-    """
-    if metadata.get("force_simt_only", False):
-        return bc_data
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        bc_path = os.path.join(tmpdir, "kernel.mlirbc")
-        mlir_path = os.path.join(tmpdir, "kernel.mlir")
-
-        # Write bytecode data to temporary file
-        with open(bc_path, "wb") as f:
-            f.write(bc_data)
-
-        bishengir_opt_path, env = _get_bishengir_opt_path()
-
-        cmd = [
-            bishengir_opt_path,
-            bc_path,
-        ]
-        if opt.debug:
-            cmd += ["--mlir-print-debuginfo"]
-        cmd += ["-o", mlir_path]
-        subprocess.run(cmd, env=env, capture_output=True, check=True, text=True)
-
-        # Read the generated MLIR text
-        linalg_text = Path(mlir_path).read_text()
-
-        if opt.debug:
-            dump_manager = get_dump_manager(metadata["hash"])
-            dump_manager.put(linalg_text, "kernel.mlir", binary=False)
-
-        return linalg_text
-
-
 def __get_metadata_attr_by_callback(lib, postfix: str, metadata, meta_key: str):
     func_symbol = metadata["kernel_name"] + postfix
     if hasattr(lib, func_symbol):
@@ -3053,9 +2965,6 @@ def ttir_to_npubin(mod, metadata, opt):
                                        f"{post_backend_candidate!r}, but route materialization produced "
                                        f"{materialized_candidate!r}")
                 rerouted_compile_input = rerouted_linalg
-                if opt.use_bytecode:
-                    rerouted_bytecode = linalg_to_bc_by_triton_mlir_opt(rerouted_linalg, reroute_metadata, opt)
-                    rerouted_compile_input = bc_to_linalg_by_bishengir_opt(rerouted_bytecode, reroute_metadata, opt)
                 rerouted_binary = linalg_to_bin_enable_npu_compile_910_95(rerouted_compile_input, reroute_metadata, opt)
                 reroute_metadata["backend_superblock_factor_resources"] = {
                     str(factor): resource
@@ -3256,9 +3165,6 @@ class AscendBackend(BaseBackend):
                 stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
                 return
             stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
-            # Normal kernels always convert Linalg IR to bytecode and back to MLIR text.
-            stages["mlirbc"] = lambda src, metadata: linalg_to_bc_by_triton_mlir_opt(src, metadata, options)
-            stages["bcmlir"] = lambda src, metadata: bc_to_linalg_by_bishengir_opt(src, metadata, options)
             # The native Route Model may select all-SIMT during the ttadapter
             # stage, in which case ttadapter carries TTIR forward and the npubin
             # stage must dispatch to the pure-SIMT compiler at run time.

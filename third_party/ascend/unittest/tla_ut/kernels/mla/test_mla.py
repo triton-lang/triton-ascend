@@ -47,7 +47,10 @@ def runtime():
         pytest.skip('Requires an Ascend 950 NPU')
     torch = pytest.importorskip('torch')
     pytest.importorskip('torch_npu')
-    if triton.runtime.driver.active.get_current_target().arch not in dict(TARGETS):
+    from triton.backends.ascend.utils import AscendArchGen, arch_generation
+
+    target = triton.runtime.driver.active.get_current_target()
+    if arch_generation(target.arch) != AscendArchGen.GEN5:
         pytest.skip('Requires an Ascend 950 NPU')
 
     benchmark = load_kernel(HERE / 'benchmark.py')

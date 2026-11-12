@@ -416,7 +416,9 @@ def test_typeconvert_downcast_clamping(src_dtype, dst_dtype, mode, device, round
         BLOCK_SIZE
     )
 
+    # Check in CPU float32: some devices lack FP8 isnan/full_like kernels.
+    actual = dst.cpu().to(torch.float32)
     if mode == 'nan':
-        assert(torch.all(torch.isnan(dst)))
+        assert torch.all(torch.isnan(actual))
     else:
-        torch.testing.assert_close(dst, torch.full_like(dst, expected_result))
+        torch.testing.assert_close(actual, torch.full_like(actual, expected_result), rtol=0, atol=0)

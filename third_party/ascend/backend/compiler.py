@@ -373,11 +373,12 @@ def make_ttir(mod, metadata, opt):
     return mod
 
 
-def _export_profile_scratch(mod, metadata):
-    attrs = ascend.ir.get_kernel_profile_metadata(mod) if AscendBackend.instrumentation else {}
-    metadata["profile_scratch_size"] = attrs.get("profile_scratch_size", 0)
-    metadata["profile_scratch_align"] = attrs.get("profile_scratch_align", 1)
-    return attrs
+def _export_profile_metadata(mod, metadata):
+    # Unlike TTGIR, TTAdapter carries Proton's launch contract on the kernel function.
+    metadata["profile_scratch_size"] = 0
+    metadata["profile_scratch_align"] = 1
+    if AscendBackend.instrumentation:
+        metadata.update(ascend.ir.get_kernel_profile_metadata(mod))
 
 
 def tla_to_ttadapter(mod, metadata, opt):
@@ -385,7 +386,7 @@ def tla_to_ttadapter(mod, metadata, opt):
 
     metadata["has_auto_blockify_blacklist_op"] = False
     lower_ttir(mod, mod.context)
-    _export_profile_scratch(mod, metadata)
+    _export_profile_metadata(mod, metadata)
     _export_program_grid_metadata(mod, metadata)
     text = _serialize_module(mod, opt)
     if opt.debug:
@@ -509,11 +510,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
                                           set_workspace_multibuffer=set_workspace_multibuffer)
         _export_program_grid_metadata(mod, metadata)
 
-        profile = _export_profile_scratch(mod, metadata)
-        # Software trace layout is separate from the launcher's scratch allocation.
-        for key in ("profile_num_units", "profile_sections_per_block", "profile_sample_every_n"):
-            if key in profile:
-                metadata[key] = profile[key]
+        _export_profile_metadata(mod, metadata)
         linalg_text = _serialize_module(mod, opt)
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])

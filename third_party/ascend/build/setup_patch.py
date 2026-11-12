@@ -166,6 +166,7 @@ def get_triton_ascend_patch_file():
         "CMakeLists.txt",
         "include/triton/Dialect/Triton/IR/TritonAttrDefs.td",
         "lib/Dialect/Triton/IR/Traits.cpp",
+        "lib/Dialect/Triton/Transforms/Combine.cpp",
         "python/src/ir.cc",
         "python/triton/_utils.py",
         "python/triton/compiler/code_generator.py",

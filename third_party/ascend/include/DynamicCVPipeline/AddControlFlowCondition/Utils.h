@@ -123,5 +123,9 @@ Operation *createMainLoopOpWithExtras(Operation *oldOp,
 void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
                           llvm::StringRef header);
 
+// Find the ssbuffer.if computation block that owns `op`. Returns nullptr when
+// op is null or is not nested in any scf.if carrying the ssbuffer.if attr.
+scf::IfOp findIfOpContainingOp(Operation *op);
+
 } // namespace mlir
 #endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_UTILS_H

@@ -260,6 +260,21 @@ static bool isValidC2CMatmulDependency(Value value, int consumerBlockId) {
   return hasAnyMatmulABInputUser(value, consumerBlockId);
 }
 
+bool hasStartEndSyncWhitelistKernel(ModuleOp module) {
+  std::vector<std::string> whitelist{
+      "_swa_bwd_dq_kernel",
+  };
+
+  bool isWhitelistKernel = false;
+  for (auto func : module.getOps<func::FuncOp>()) {
+    if (llvm::is_contained(whitelist, func.getName().str())) {
+      isWhitelistKernel = true;
+      break;
+    }
+  }
+  return isWhitelistKernel;
+}
+
 // Block Start/End Operation Retrieval
 std::pair<mlir::Operation *, mlir::Operation *>
 InterCoreTransferAndSyncPass::getBlockStartEnd(int targetId,

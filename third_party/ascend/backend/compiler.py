@@ -373,9 +373,11 @@ def make_ttir(mod, metadata, opt):
     return mod
 
 
-def _export_profile_scratch(metadata, attrs):
+def _export_profile_scratch(mod, metadata):
+    attrs = ascend.ir.get_kernel_profile_metadata(mod) if AscendBackend.instrumentation else {}
     metadata["profile_scratch_size"] = attrs.get("profile_scratch_size", 0)
     metadata["profile_scratch_align"] = attrs.get("profile_scratch_align", 1)
+    return attrs
 
 
 def tla_to_ttadapter(mod, metadata, opt):
@@ -383,7 +385,7 @@ def tla_to_ttadapter(mod, metadata, opt):
 
     metadata["has_auto_blockify_blacklist_op"] = False
     lower_ttir(mod, mod.context)
-    _export_profile_scratch(metadata, {})
+    _export_profile_scratch(mod, metadata)
     _export_program_grid_metadata(mod, metadata)
     text = _serialize_module(mod, opt)
     if opt.debug:
@@ -507,8 +509,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
                                           set_workspace_multibuffer=set_workspace_multibuffer)
         _export_program_grid_metadata(mod, metadata)
 
-        profile = ascend.ir.get_kernel_profile_metadata(mod) if AscendBackend.instrumentation else {}
-        _export_profile_scratch(metadata, profile)
+        profile = _export_profile_scratch(mod, metadata)
         # Software trace layout is separate from the launcher's scratch allocation.
         for key in ("profile_num_units", "profile_sections_per_block", "profile_sample_every_n"):
             if key in profile:

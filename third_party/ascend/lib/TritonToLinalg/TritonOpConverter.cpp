@@ -59,6 +59,8 @@
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Interfaces/CallInterfaces.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
@@ -2196,6 +2198,43 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
   return success();
 }
 
+static bool isInvariantInLoop(Value value, LoopLikeOpInterface loop) {
+  if (auto arg = dyn_cast<BlockArgument>(value)) {
+    Operation *owner = arg.getOwner()->getParentOp();
+    return !owner ||
+           (owner != loop.getOperation() && !loop->isProperAncestor(owner));
+  }
+  if (loop.isDefinedOutsideOfLoop(value))
+    return true;
+  Operation *def = value.getDefiningOp();
+  if (!def || def->getNumRegions() != 0 || !isMemoryEffectFree(def))
+    return false;
+  return llvm::all_of(def->getOperands(), [&](Value operand) {
+    return isInvariantInLoop(operand, loop);
+  });
+}
+
+static bool isInvariantInEnclosingLoop(Operation *op, Value value) {
+  for (Operation *parent = op->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    if (auto loop = dyn_cast<LoopLikeOpInterface>(parent))
+      if (isInvariantInLoop(value, loop))
+        return true;
+  }
+  return false;
+}
+
+static bool canReuseLibdeviceInput(Operation *op, Value input) {
+  // Memory-based targets do not guarantee that libdevice implementations can
+  // read an input after writing an aliased output.
+  if (!compileOn91095Flag)
+    return false;
+  auto tensorTy = dyn_cast<RankedTensorType>(input.getType());
+  return tensorTy && tensorTy.hasStaticShape() &&
+         tensorTy.getNumElements() > 1 && input.getDefiningOp() &&
+         input.hasOneUse() && !isInvariantInEnclosingLoop(op, input);
+}
+
 LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
     triton::ExternElementwiseOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
@@ -2230,6 +2269,15 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
           return op.getSymbol().ends_with(suffix);
         });
     if (isLibdeviceOp) {
+      // Collect reusable input buffers
+      SmallVector<unsigned> reuseCandidates;
+      if (!isDstScalar) {
+        for (auto [index, src] : llvm::enumerate(op.getSrcs())) {
+          if (canReuseLibdeviceInput(op, src))
+            reuseCandidates.push_back(index);
+        }
+      }
+
       auto originalTensorType = isDstScalar
                                     ? RankedTensorType::get({1}, dstElemTy)
                                     : cast<RankedTensorType>(dstTy);
@@ -2302,12 +2350,29 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
                   "libdevice output");
       }
 
-      auto outputMemRefType =
-          MemRefType::get(customOutputType.getShape(), customElemType);
-      Value outputMemRef = rewriter.create<memref::AllocOp>(
-          op.getLoc(), outputMemRefType, dynamicSizes);
-      Value outputTensor = rewriter.create<bufferization::ToTensorOp>(
-          op.getLoc(), customOutputType, outputMemRef, true, true);
+      // Reuse a suitable input buffer as the output buffer
+      bool reuseInput = !isDstScalar && !reuseCandidates.empty();
+      unsigned reuseInputIndex = collapsedInputs.size();
+      if (reuseInput) {
+        for (unsigned index : reuseCandidates) {
+          if (collapsedInputs[index].getType() == customOutputType) {
+            reuseInputIndex = index;
+            break;
+          }
+        }
+        reuseInput = reuseInputIndex != collapsedInputs.size();
+      }
+      Value outputTensor;
+      if (reuseInput) {
+        outputTensor = collapsedInputs[reuseInputIndex];
+      } else {
+        auto outputMemRefType =
+            MemRefType::get(customOutputType.getShape(), customElemType);
+        Value outputMemRef = rewriter.create<memref::AllocOp>(
+            op.getLoc(), outputMemRefType, dynamicSizes);
+        outputTensor = rewriter.create<bufferization::ToTensorOp>(
+            op.getLoc(), customOutputType, outputMemRef, true, true);
+      }
 
       ReassociationIndices outputReassociation;
       if (needsExpand) {
@@ -2322,6 +2387,17 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
           ValueRange{outputTensor});
 
       auto argAttrsArray = mlir::ArrayAttr::get(customOp->getContext(), {});
+      if (reuseInput) {
+        // inplace_outs records which input argument shares its buffer with the
+        // custom op output.
+        auto inplaceAttr =
+            rewriter.getNamedAttr(hivm::CustomOp::kInplaceOutsAttrName,
+                                  rewriter.getI32IntegerAttr(0));
+        SmallVector<Attribute> argAttrs(collapsedInputs.size(),
+                                        rewriter.getDictionaryAttr({}));
+        argAttrs[reuseInputIndex] = rewriter.getDictionaryAttr({inplaceAttr});
+        argAttrsArray = rewriter.getArrayAttr(argAttrs);
+      }
       auto pipeAttr =
           hivm::PipeAttr::get(customOp->getContext(), hivm::PIPE::PIPE_V);
       auto tcoreTypeAttr = hivm::TCoreTypeAttr::get(customOp->getContext(),

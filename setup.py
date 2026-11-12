@@ -37,6 +37,7 @@ try:
     from setuptools.command.editable_wheel import editable_wheel
 except ImportError:
     # create a dummy class, since there is no command to override
+    # test
     class editable_wheel:
         pass
 

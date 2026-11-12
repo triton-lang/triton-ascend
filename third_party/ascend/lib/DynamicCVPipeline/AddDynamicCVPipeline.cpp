@@ -104,15 +104,9 @@ AddDynamicCVPipelinePass::AddDynamicCVPipelinePass(
 void AddDynamicCVPipelinePass::runOnOperation() {
   auto moduleOp = getOperation();
   OpBuilder builder(moduleOp.getContext());
-  compileOn91095Flag = this->compileOn91095;
 
   LDBG("Enter pass");
   moduleOp->removeAttr(CVPipeline::ERRCODE_ATTR);
-
-  if (!compileOn91095Flag) {
-    llvm::errs() << "Add-dynamic-cv-pipeline is only supported on 91095 now.\n";
-    return;
-  }
 
   ScopedDiagnosticHandler handler(&getContext(), [&](Diagnostic &diag) {
     LLVM_DEBUG({

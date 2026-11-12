@@ -83,16 +83,15 @@ pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/asce
 
 ### Nightly Build Installation
 
-A nightly package updated every day is available. Install it with the following command:
+We provide weekly-updated nightly test packages. Use the command below to install:
 
 ```bash
-# Version format: <version>+devYYYYMMDD, example for nightly build on 2026/11/10
-pip install triton-ascend==3.6.0+dev20261110 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly
+pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly
 ```
 
-All nightly packages are also listed in the [history](https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly/triton-ascend/).
+All nightly packages can be found in the [package list](https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly/triton-ascend/).
 
-> Note: Nightly packages are test builds and are not recommended for production use.
+> Note: Nightly builds are for testing only and not intended for production.
 
 ### Source Installation
 

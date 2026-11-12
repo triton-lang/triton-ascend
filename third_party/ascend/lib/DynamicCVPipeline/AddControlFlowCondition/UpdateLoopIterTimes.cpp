@@ -22,6 +22,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -1227,6 +1228,17 @@ int UpdateLoopIterTimesPass::UpdateForLoopIteration(
     if (ret != 0)
       return -1;
 
+    // A proven event schedule has one firing per sweep. Otherwise retain the
+    // existing readiness-based iteration bound.
+    if (info && !sameIdForOps.empty()) {
+      auto schedule = info->outerSweepPlans.find(sameIdForOps.front());
+      if (schedule != info->outerSweepPlans.end()) {
+        maxRequiredBuffers = 1;
+        maxX = 1;
+        maxIfCount = schedule->second.drain;
+      }
+    }
+
     // Update all loops with this id using the same max values
     for (Operation *loopOp : sameIdForOps) {
       if (maxIfCount == 0) {
@@ -1249,6 +1261,9 @@ int UpdateLoopIterTimesPass::UpdateForLoopIteration(
         LDBG("extendForOpIterationCount failed!");
         return -1;
       }
+      if (info && info->outerSweepPlans.lookup(loopOp).groupGrants &&
+          failed(groupOuterEventSweepGrants(newForOp)))
+        return -1;
       updateMainLoopMaps(loopOp, newForOp.getOperation(), cmap, vmap, infoMap);
       allForOps.push_back(loopOp);
     }

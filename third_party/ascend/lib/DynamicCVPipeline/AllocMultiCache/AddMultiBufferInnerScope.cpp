@@ -22,6 +22,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -1058,23 +1059,28 @@ insertProducerLogic(OpBuilder &builder, Value depVal,
   return newOps;
 }
 
-// Handle consumer when N==1 (directly return buffer)
-static Operation *handleSingleBufferConsumer(OpBuilder &builder, Location loc,
-                                             SmallVector<BufferPair> &buffers) {
-  auto memrefType = mlir::cast<mlir::MemRefType>(buffers[0].second.getType());
-  auto tensorType = mlir::RankedTensorType::get(memrefType.getShape(),
-                                                memrefType.getElementType());
-  return builder.create<mlir::bufferization::ToTensorOp>(
-      loc, tensorType, buffers[0].second,
-      mlir::UnitAttr::get(builder.getContext()),
-      mlir::UnitAttr::get(builder.getContext()));
-}
-
-// Helper function to create ToTensorOp
-static mlir::bufferization::ToTensorOp createToTensorOp(OpBuilder &builder,
-                                                        Location loc,
-                                                        mlir::Type tensorType,
-                                                        Value buffer) {
+// A shared ring buffer is still needed by other compute blocks. Exposing it
+// through independent `to_tensor restrict writable` operations both violates
+// the restrict contract and lets bufferization overwrite a later consumer's
+// input (for example, m0 can become exp(-inf - m0) before alpha1 reads m0).
+// For explicitly selected outer loops, give each consumer a private snapshot.
+// The allocation/copy belong to the consumer block, so they run only after its
+// readiness test and the ring credit is returned after the whole block runs.
+static mlir::bufferization::ToTensorOp
+createToTensorOp(OpBuilder &builder, Location loc, mlir::Type tensorType,
+                 Value buffer, const MainLoop &loop, int blockId) {
+  if (loop->hasAttr(kOuterEventControlCount)) {
+    auto memrefType = cast<MemRefType>(buffer.getType());
+    auto snapshot = builder.create<memref::AllocOp>(loc, memrefType);
+    auto copy = builder.create<hivm::CopyOp>(loc, TypeRange{}, buffer,
+                                             snapshot.getResult());
+    if (blockId >= 0) {
+      auto attr = builder.getI32IntegerAttr(blockId);
+      snapshot->setAttr(kBlockId, attr);
+      copy->setAttr(kBlockId, attr);
+    }
+    buffer = snapshot.getResult();
+  }
   return builder.create<mlir::bufferization::ToTensorOp>(
       loc, tensorType, buffer, mlir::UnitAttr::get(builder.getContext()),
       mlir::UnitAttr::get(builder.getContext()));
@@ -1090,7 +1096,11 @@ static int insertConsumerLogic(OpBuilder &builder, Value depVal,
   Location loc = builder.getInsertionPoint()->getLoc();
 
   if (N == kBufferCountOne) {
-    Operation *consumerOp = handleSingleBufferConsumer(builder, loc, buffers);
+    auto memrefType = cast<MemRefType>(buffers[0].second.getType());
+    auto tensorType = RankedTensorType::get(memrefType.getShape(),
+                                            memrefType.getElementType());
+    Operation *consumerOp = createToTensorOp(builder, loc, tensorType,
+                                             buffers[0].second, loop, blockId);
     outIfOps.push_back(consumerOp);
     if (groupId >= 0) {
       consumerOp->setAttr(kIntraDeps, builder.getI32ArrayAttr({groupId, 0}));
@@ -1106,7 +1116,7 @@ static int insertConsumerLogic(OpBuilder &builder, Value depVal,
   int ret = buildIfChain(
       builder, loc, readIdx, buffers, newOps, outIfOps,
       [&](OpBuilder &b, Location l, Value buffer) -> Operation * {
-        return createToTensorOp(b, l, tensorType, buffer);
+        return createToTensorOp(b, l, tensorType, buffer, loop, blockId);
       },
       [&](OpBuilder &b, Location l, Operation *op) -> Value {
         return cast<mlir::bufferization::ToTensorOp>(op).getResult();
@@ -1195,7 +1205,7 @@ insertBufferSelectionInRegion(OpBuilder &builder, Region &region, Location loc,
   int ret = buildIfChain(
       builder, loc, readIdx, buffers, newIfOps, outIfOps,
       [&](OpBuilder &b, Location l, Value buffer) -> Operation * {
-        return createToTensorOp(b, l, tensorType, buffer);
+        return createToTensorOp(b, l, tensorType, buffer, loop, blockId);
       },
       [&](OpBuilder &b, Location l, Operation *op) -> Value {
         return cast<mlir::bufferization::ToTensorOp>(op).getResult();

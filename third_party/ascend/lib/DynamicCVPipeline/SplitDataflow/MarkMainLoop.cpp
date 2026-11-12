@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/MarkMainLoop.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/IR/Operation.h"
@@ -46,6 +47,48 @@ void MarkMainLoopPass::runOnOperation() {
   int mainLoopIdCounter = 0;
   SmallVector<Operation *> mainLoops;
 
+  const bool outerMainLoop = CVPipeline::hasOuterMainLoop(module);
+  if (outerMainLoop) {
+    // Explicit selection is valid only after outer-loop normalization succeeds.
+    // Do not silently replace an unfulfilled request with the innermost loop.
+    auto requestCheck = module.walk([&](Operation *op) -> WalkResult {
+      if (op != module.getOperation() &&
+          op->hasAttr(CVPipeline::kOuterMainLoopHint)) {
+        op->emitError("outer main-loop request was not normalized before "
+                      "main-loop selection");
+        return WalkResult::interrupt();
+      }
+      if (op->hasAttr(CVPipeline::kExplicitMainLoop)) {
+        if (!isa<scf::ForOp, scf::WhileOp>(op)) {
+          op->emitError("explicit main-loop selection requires a loop");
+          return WalkResult::interrupt();
+        }
+        for (Operation *parent = op->getParentOp(); parent;
+             parent = parent->getParentOp()) {
+          if (parent->hasAttr(CVPipeline::kExplicitMainLoop)) {
+            op->emitError(
+                "nested explicit main-loop selections are unsupported");
+            return WalkResult::interrupt();
+          }
+        }
+        mainLoops.push_back(op);
+      }
+      return WalkResult::advance();
+    });
+    if (requestCheck.wasInterrupted()) {
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+      signalPassFailure();
+      return;
+    }
+
+    for (Operation *loop : mainLoops) {
+      loop->walk([&](Operation *nested) {
+        if (nested != loop)
+          nested->removeAttr(CVPipeline::kMainLoop);
+      });
+    }
+  }
+
   // Find all candidate main loops (ForOp + WhileOp)
   auto isL1Fixpipe = [](Operation *op) -> bool {
     auto fixpipeOp = dyn_cast<hivm::FixpipeOp>(op);
@@ -66,6 +109,15 @@ void MarkMainLoopPass::runOnOperation() {
 
     if (isL1Fixpipe(op))
       return;
+
+    if (outerMainLoop) {
+      for (Operation *parent = op->getParentOp(); parent;
+           parent = parent->getParentOp()) {
+        if (parent->hasAttr(CVPipeline::kExplicitMainLoop) ||
+            parent->hasAttr(CVPipeline::kOuterEventFallback))
+          return;
+      }
+    }
 
     if (auto forOp = op->getParentOfType<scf::ForOp>())
       mainLoops.push_back(forOp);

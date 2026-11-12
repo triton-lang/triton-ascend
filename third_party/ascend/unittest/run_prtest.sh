@@ -48,8 +48,10 @@ function run_case_by_multi_card() {
 
     # run tests and capture exit status
     set +e
+    set -o pipefail
     python -m pytest ${test_dir} -n auto --dist=loadfile -v --junitxml=logs/results.xml | tee logs/raw_output.log
     pytest_exit=$?
+    set +o pipefail
     set -e
 
     # process logs (add device tags)
@@ -162,9 +164,14 @@ echo "========================================" >> ${SUMMARY_FILE}
 zip_file="test_generalization_case_$(date +%Y%m%d).zip"
 TEST_generalization="${WORKSPACE}/${UNITTEST_DIR}/generalization_cases"
 clean_cache
+set +e
 run_case_by_multi_card ${TEST_generalization} ${zip_file}
+prtest_exit=$?
+set -e
 
 echo "========================================" >> ${SUMMARY_FILE}
 
 # copy summary.txt to /home/pr_test_log
 cp ${SUMMARY_FILE} /home/pr_test_log
+
+exit $prtest_exit

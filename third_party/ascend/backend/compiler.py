@@ -870,7 +870,24 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         variant_count = _get_env_int("TRITON_ASCEND_CV_VARIANTS") or 1
         orig_cv_variants = os.environ.get("TRITON_ASCEND_CV_VARIANTS")
 
-        if variant_count > 1 and metadata.get("enable_dynamic_cv_pipeline"):
+        # Hand the search to the C++ pass instead of running it here.
+        #
+        # The two searches are alternatives, not layers: this one drives
+        # one triton-opt subprocess per candidate, the one in
+        # AddDynamicCVPipeline clones the module in-process and fans out
+        # over its own threads. Without this switch the C++ one is
+        # unreachable from a normal compile -- the branch below claims the
+        # search, and the assignment further down forces the count the C++
+        # pass reads to 1 whether or not that branch ran.
+        cpp_variant_search = os.environ.get("TRITON_ASCEND_CV_CPP_SEARCH") == "1"
+        if cpp_variant_search and variant_count > 1:
+            print(f"[AddDynamicCVPipeline] TRITON_ASCEND_CV_CPP_SEARCH=1: leaving the "
+                  f"search to the pass, which will score {variant_count} ordering(s) "
+                  f"in this process")
+            sys.stdout.flush()
+
+        if variant_count > 1 and metadata.get("enable_dynamic_cv_pipeline") \
+                and not cpp_variant_search:
             best_seed = _run_dynamic_cv_variant_search(
                 src_path=src_path,
                 pipeline_str=pm.get_pipeline_str(),
@@ -896,8 +913,11 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             ]
             print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
 
-        # Ensure C++ dynamic CV pipeline pass only compiles the selected single seed in this process
-        os.environ["TRITON_ASCEND_CV_VARIANTS"] = "1"
+        # Ensure C++ dynamic CV pipeline pass only compiles the selected single seed in this process.
+        # Unless the search was handed to it, in which case the count is what
+        # tells it how many candidates to score.
+        if not cpp_variant_search:
+            os.environ["TRITON_ASCEND_CV_VARIANTS"] = "1"
         try:
             pm.run(mod, 'ttir_to_linalg')
         finally:

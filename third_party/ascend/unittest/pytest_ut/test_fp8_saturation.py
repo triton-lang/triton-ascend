@@ -28,7 +28,7 @@ from triton.backends.ascend.utils import AscendArchGen, arch_generation
 
 @triton.jit
 def _downcast_fp8(X, Y, BLOCK: tl.constexpr):
-    offsets = tl.arange(0, BLOCK)
+    offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
     value = tl.load(X + offsets)
     result = value.to(Y.dtype.element_ty, fp_downcast_rounding="rtne")
     tl.store(Y + offsets, result)
@@ -64,3 +64,38 @@ def test_fp8_downcast_saturation(src_dtype, dst_dtype):
     nan_mask = torch.isnan(source_cpu)
     assert torch.isnan(actual_bits.view(torch_dst_dtype).float()[nan_mask]).all()
     torch.testing.assert_close(actual_bits[~nan_mask], expected_bits[~nan_mask], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("mode", ["max", "min", "inf", "-inf", "nan"])
+@pytest.mark.parametrize("dst_dtype,torch_dst_dtype", [(tl.float8e4nv, torch.float8_e4m3fn),
+                                                       (tl.float8e5, torch.float8_e5m2)])
+@pytest.mark.parametrize("src_dtype", [torch.float32, torch.float16, torch.bfloat16])
+def test_fp8_downcast_clamping(src_dtype, dst_dtype, torch_dst_dtype, mode):
+    arch = triton.runtime.driver.active.get_current_target().arch
+    if arch_generation(arch) != AscendArchGen.GEN5:
+        pytest.skip("FP8 conversion requires A5")
+
+    # Match the community clamping test's values, shapes and RTNE conversion.
+    limit = torch.finfo(torch_dst_dtype).max
+    if mode in ("max", "min"):
+        test_value = limit + 100.0
+    elif mode in ("inf", "-inf"):
+        test_value = float("inf")
+    else:
+        test_value = float("nan")
+    expected = limit
+    if mode in ("min", "-inf"):
+        test_value *= -1
+        expected *= -1
+
+    block = 1024
+    source = torch.full((2 * block, ), test_value, dtype=src_dtype, device="npu")
+    output = torch.empty(source.shape, dtype=torch.uint8, device="npu")
+    _downcast_fp8[(2, )](source, triton.reinterpret(output, dst_dtype), block)
+
+    # CPU float32 checks do not require device FP8 isnan/full_like support.
+    actual = output.cpu().view(torch_dst_dtype).float()
+    if mode == "nan":
+        assert torch.isnan(actual).all()
+    else:
+        torch.testing.assert_close(actual, torch.full_like(actual, expected), rtol=0, atol=0)

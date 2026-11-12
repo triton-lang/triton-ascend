@@ -13,6 +13,8 @@ repos:
         files: ^third_party/ascend/costmodel/profiles/indirect_memory/.*\.json$
       - id: check-ast
       - id: check-added-large-files
+        # Generated, frozen Load formula programs; reviewed numeric artifacts.
+        exclude: ^third_party/ascend/costmodel/include/AscendModel/RouteModel/OrdinaryLoadProgram\.inc$
       - id: check-merge-conflict
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
@@ -41,7 +43,7 @@ repos:
     hooks:
       - id: clang-format
         # Frozen numeric data keeps one coefficient vector/tree per row.
-        exclude: ^third_party/ascend/costmodel/profiles/indirect_memory/.*\.json$
+        exclude: ^third_party/ascend/costmodel/(profiles/indirect_memory/.*\.json|include/AscendModel/RouteModel/OrdinaryLoadProgram\.inc)$
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: "v1.15.0"

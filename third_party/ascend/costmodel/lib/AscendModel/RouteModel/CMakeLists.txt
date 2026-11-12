@@ -17,9 +17,13 @@ add_mlir_library(AscendModelRouteModel
   Reduction/ReductionLayoutModel.cpp
   PrefixScan/PrefixScanFormulaModel.cpp
   StageCostModels.cpp
+  SpecializedMemoryCostModel.cpp
+  SpecializedMemoryMain.cpp
   Models/IndirectGatherMemoryCostModel.cpp
   Models/IndirectMemoryChainCostModel.cpp
   Models/StridedShortCostModel.cpp
+  OrdinaryStoreRound4Main.cpp
+  OrdinaryLoadMain.cpp
   StageRouteCostModel.cpp
   SimdSimtCostModel.cpp
   ../Transforms/SelectSimdSimtCostModel.cpp

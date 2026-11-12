@@ -198,6 +198,11 @@ struct SelectSimdSimtCostModelPass
       analysisModule = *parsedAnalysisModule;
     }
 
+    // Never reuse a prior native-analysis carrier from the source IR.
+    analysisModule->removeAttr(
+        "ascend.costmodel.ordinary_store.main_route_capability_json");
+    analysisModule->removeAttr(
+        "ascend.costmodel.ordinary_load.route_capability_json");
     SimdSimtCostModelOptions options;
     options.loopWorkloadModule = module;
     options.profilePath = profilePath.getValue();
@@ -234,6 +239,18 @@ struct SelectSimdSimtCostModelPass
           signalPassFailure();
           return;
         }
+        // Explicit native-analysis contract only. The main Python backend
+        // does not produce it, and no JIT/cache-hit safety is asserted here.
+        // Reserved transport attrs do not participate in the IR fingerprint.
+        if (!autoMode)
+          analysisModule->setAttr(
+              "ascend.costmodel.ordinary_store.main_route_capability_json",
+              StringAttr::get(analysisModule.getContext(),
+                              routeTransformCapabilityJSON.getValue()));
+        analysisModule->setAttr(
+            "ascend.costmodel.ordinary_load.route_capability_json",
+            StringAttr::get(analysisModule.getContext(),
+                            routeTransformCapabilityJSON.getValue()));
         if (failed(attachRuntimeScalarValues(analysisModule, *object))) {
           module.emitError("invalid runtime scalar values in route capability");
           signalPassFailure();

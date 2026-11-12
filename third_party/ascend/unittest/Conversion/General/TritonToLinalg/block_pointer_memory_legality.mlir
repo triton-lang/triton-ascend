@@ -6,8 +6,7 @@
 // attempting to convert their tensor pointee into a memref element type.
 // The advance chain must preserve the accumulated offset of the loaded tile.
 // CHECK-LABEL: func.func @block_pointer_advance_chain
-// CHECK: %[[OFFSET:.*]] = arith.constant 128 : index
-// CHECK: %[[TILE:.*]] = memref.reinterpret_cast {{.*}} to offset: [%[[OFFSET]]], sizes: [64], strides: [1]
+// CHECK: %[[TILE:.*]] = memref.reinterpret_cast {{.*}} to offset: [128], sizes: [64], strides: [1]
 // CHECK: memref.copy %[[TILE]],
 // CHECK: linalg.reduce
 // CHECK: bufferization.materialize_in_destination

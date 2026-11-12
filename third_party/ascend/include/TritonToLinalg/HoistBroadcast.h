@@ -24,7 +24,6 @@
 #ifndef TRITON_ADAPTER_TRITONTOLINALG_HOISTBROADCAST_H
 #define TRITON_ADAPTER_TRITONTOLINALG_HOISTBROADCAST_H
 
-#include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "mlir/Dialect/Linalg/IR/Linalg.h"

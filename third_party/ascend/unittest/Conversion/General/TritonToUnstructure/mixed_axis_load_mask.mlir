@@ -14,13 +14,13 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   // T2U: %[[FULLMASK:.*]] = arith.andi
   // T2U: scf.for
   // T2U: %[[MASK:.*]] = tensor.extract_slice %[[COLMASK]][%{{.*}}, 0] [1, 32] [1, 1] {DiscreteMemAccess} : tensor<3x32xi1> to tensor<1x32xi1>
-  // T2U: tt.load %{{[^,]+}}, %[[MASK]] {DiscreteMemAccess} : tensor<1x32x!tt.ptr<f32>>
+  // T2U: tt.load %{{[^,]+}}, %[[MASK]], %{{.*}} {DiscreteMemAccess} : tensor<1x32x!tt.ptr<f32>>
   // T2U: arith.select %[[FULLMASK]],
   // KEEP-LABEL: tt.func public @mixed_axis_load_mask(
   // KEEP: %[[FULLMASK:.*]] = arith.andi %{{.*}}, %{{.*}} : tensor<3x32xi1>
   // KEEP: scf.for
   // KEEP: %[[MASK:.*]] = tensor.extract_slice %[[FULLMASK]][%{{.*}}, 0] [1, 32] [1, 1] {DiscreteMemAccess} : tensor<3x32xi1> to tensor<1x32xi1>
-  // KEEP: tt.load %{{[^,]+}}, %[[MASK]] {DiscreteMemAccess} : tensor<1x32x!tt.ptr<f32>>
+  // KEEP: tt.load %{{[^,]+}}, %[[MASK]], %{{.*}} {DiscreteMemAccess} : tensor<1x32x!tt.ptr<f32>>
   // LOWER-LABEL: func.func @mixed_axis_load_mask(
   // LOWER: scf.for
   // LOWER: %[[BASE:.*]] = memref.reinterpret_cast

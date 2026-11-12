@@ -5,6 +5,8 @@
 // memory location. The converter rewrites to store only the first index
 // along each broadcast axis via tensor.extract_slice, using the broadcast
 // source pointer.
+// Linalg materializes size-one axes with stride 1. For a [1, 64] view,
+// [1, 1] and [64, 1] address the same elements because axis 0 is always 0.
 
 // -----
 
@@ -38,8 +40,8 @@ module {
 }
 // CHECK-LABEL: func.func @kernel_store_same_axis_broadcast
 // CHECK:      %[[VAL1:.*]] = tensor.extract_slice %{{.*}}[0, 0] [1, %{{.*}}] [1, 1] : tensor<1x64xf32> to tensor<1x?xf32>
-// CHECK:      %[[VAL2:.*]]= memref.subview %{{.*}}[0, 0] [1, %{{.*}}] [1, 1] : memref<1x64xf32, strided<[64, 1], offset: ?>> to memref<1x?xf32, strided<[64, 1], offset: ?>>
-// CHECK:      bufferization.materialize_in_destination %[[VAL1]] in writable %[[VAL2]]: (tensor<1x?xf32>, memref<1x?xf32, strided<[64, 1], offset: ?>>) -> ()
+// CHECK:      %[[VAL2:.*]]= memref.subview %{{.*}}[0, 0] [1, %{{.*}}] [1, 1] : memref<1x64xf32, strided<[1, 1], offset: ?>> to memref<1x?xf32, strided<[1, 1], offset: ?>>
+// CHECK:      bufferization.materialize_in_destination %[[VAL1]] in writable %[[VAL2]]: (tensor<1x?xf32>, memref<1x?xf32, strided<[1, 1], offset: ?>>) -> ()
 
 // -----
 
@@ -67,9 +69,9 @@ module {
   }
 }
 // CHECK-LABEL: func.func @kernel_store_no_mask_broadcast
-// CHECK:      %[[VAL1:.*]]= memref.reinterpret_cast %{{.*}}to offset: [%{{.*}}], sizes: [1, 64], strides: [64, 1] : memref<?xf32> to memref<1x64xf32, strided<[64, 1], offset: ?>>
-// CHECK:      %[[VAL2:.*]]= memref.reinterpret_cast %{{.*}}to offset: [%{{.*}}], sizes: [1, 64], strides: [64, 1] : memref<?xf32> to memref<1x64xf32, strided<[64, 1], offset: ?>>
-// CHECK:      bufferization.materialize_in_destination %{{.*}} in writable %[[VAL2]]: (tensor<1x64xf32>, memref<1x64xf32, strided<[64, 1], offset: ?>>)
+// CHECK:      %[[VAL1:.*]]= memref.reinterpret_cast %{{.*}}to offset: [%{{.*}}], sizes: [1, 64], strides: [1, 1] : memref<?xf32> to memref<1x64xf32, strided<[1, 1], offset: ?>>
+// CHECK:      %[[VAL2:.*]]= memref.reinterpret_cast %{{.*}}to offset: [%{{.*}}], sizes: [1, 64], strides: [1, 1] : memref<?xf32> to memref<1x64xf32, strided<[1, 1], offset: ?>>
+// CHECK:      bufferization.materialize_in_destination %{{.*}} in writable %[[VAL2]]: (tensor<1x64xf32>, memref<1x64xf32, strided<[1, 1], offset: ?>>)
 
 
 // -----
@@ -95,4 +97,4 @@ module {
 }
 
 // CHECK-LABEL: func.func @zero_stride_store_broadcast
-// CHECK: bufferization.materialize_in_destination %{{.*}} in writable %{{.*}} : (tensor<1x64xf32>, memref<1x64xf32, strided<[64, 1]>>) -> ()
+// CHECK: bufferization.materialize_in_destination %{{.*}} in writable %{{.*}} : (tensor<1x64xf32>, memref<1x64xf32, strided<[1, 1]>>) -> ()

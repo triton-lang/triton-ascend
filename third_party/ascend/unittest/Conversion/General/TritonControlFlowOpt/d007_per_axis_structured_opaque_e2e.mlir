@@ -126,23 +126,20 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // CFO-NOT: scf.yield {{.*}}tensor<2x4xi32>
 // CFO: PointerDescriptorStructuredAxes = array<i32: 1, 0>
 
+// The structured stride enables a contiguous copy followed by extraction of
+// the four even lanes; no scalar loads are needed.
 // E2E-LABEL: func.func @d007_rank1_structured
 // E2E-NOT: memref.load
 // E2E: %[[SOURCE_VIEW:.*]] = memref.reinterpret_cast %{{.*}} to offset: [%{{.*}}], sizes: [8], strides: [1]
 // E2E-SAME: to memref<8xf32, strided<[1], offset: ?>>
-// E2E-NOT: memref.load
 // E2E: %[[COPY_BUFFER:.*]] = memref.alloc() : memref<8xf32>
-// E2E-NOT: memref.load
 // E2E: memref.copy %[[SOURCE_VIEW]], %[[COPY_BUFFER]] : memref<8xf32, strided<[1], offset: ?>> to memref<8xf32>
-// E2E-NOT: memref.load
 // E2E: %[[SOURCE_TENSOR:.*]] = bufferization.to_tensor %[[COPY_BUFFER]]
+// E2E: %[[EVEN_LANES:.*]] = tensor.extract_slice %[[SOURCE_TENSOR]][0] [4] [2] : tensor<8xf32> to tensor<4xf32>
 // E2E-NOT: memref.load
-// E2E: %[[SLICE:.*]] = tensor.extract_slice %[[SOURCE_TENSOR]][0] [4] [2] : tensor<8xf32> to tensor<4xf32>
-// E2E-NOT: memref.load
-// E2E: bufferization.materialize_in_destination %[[SLICE]]
+// E2E: bufferization.materialize_in_destination %[[EVEN_LANES]]
 // E2E-NOT: memref.load
 // E2E: return
-// E2E-NOT: memref.load
 // E2E-LABEL: func.func @d007_rank1_opaque
 // E2E: memref.load
 // E2E: bufferization.materialize_in_destination

@@ -1552,3 +1552,26 @@ index 75a1157a52f9..a86605bfaf6a 100644
 +            out = aot.rewrite_types(out)
          fp.write(out)
 
+
+diff --git a/lib/Dialect/Triton/Transforms/Combine.cpp b/lib/Dialect/Triton/Transforms/Combine.cpp
+index 1e9830c06..ddf1531da 100644
+--- a/lib/Dialect/Triton/Transforms/Combine.cpp
++++ b/lib/Dialect/Triton/Transforms/Combine.cpp
+@@ -160,7 +160,7 @@ public:
+     auto broadcastLhsShape =
+         cast<ShapedType>(broadcastLhsOp.getType()).getShape();
+     auto broadcastRhsShape =
+-        cast<ShapedType>(broadcastLhsOp.getType()).getShape();
++        cast<ShapedType>(broadcastRhsOp.getType()).getShape();
+     if (broadcastLhsShape[2] < 16 || broadcastRhsShape[0] < 16)
+       return failure();
+     Type newAccType = RankedTensorType::get(
+@@ -173,7 +173,7 @@ public:
+                                                   rewriter.getF32FloatAttr(0)));
+     rewriter.replaceOpWithNewOp<DotOp>(op, expandLhsOp.getSrc(),
+                                        expandRhsOp.getSrc(), newAcc,
+-                                       InputPrecision::TF32, 0);
++                                       InputPrecision::IEEE, 0);
+     return success();
+   }
+ };

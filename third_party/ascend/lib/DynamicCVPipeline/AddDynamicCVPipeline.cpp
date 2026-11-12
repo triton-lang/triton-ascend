@@ -46,7 +46,6 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 #include "ascend/include/DynamicCVPipeline/PreCheckAvailable.h"
-#include "ascend/include/DynamicCVPipeline/ProtectTcbReuse.h"
 #include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflowPass.h"
@@ -81,7 +80,6 @@ static inline void addPasses(OpPassManager &pm) {
   pm.addPass(createComputeBlockOptPass());
   pm.addPass(createSplitDataflowPass());
   pm.addPass(createAnalyzeDataFlowPass());
-  pm.addPass(createProtectTcbReusePass());
   pm.addPass(createAllocMultiCachePass());
   pm.addPass(createAddControlFlowConditionPass());
   pm.addPass(createSeparateMemoryFromComputePass());

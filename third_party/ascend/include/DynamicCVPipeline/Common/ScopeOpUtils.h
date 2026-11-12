@@ -42,14 +42,25 @@ namespace mlir::CVPipeline {
 // by PackMemref carries the same tag.
 constexpr llvm::StringLiteral kScopeLoadAttr = "ssbuffer.load";
 
-/// Packs `ops` into a fresh `scope::ScopeOp` created at the position of the
-/// last op. Values produced inside `ops` but consumed outside are routed
-/// through `scope::ReturnOp`, and their external users are redirected.
+/// True when `op` is the atomic load unit produced by PackMemref: a
+/// `scope::ScopeOp` tagged `kScopeLoadAttr`. Callers use it to keep treating a
+/// packed unit as one op instead of matching the `alloc -> copy -> to_tensor`
+/// chain that now lives in its body.
+inline bool isLoadScope(Operation *op) {
+  return isa_and_nonnull<scope::ScopeOp>(op) && op->hasAttr(kScopeLoadAttr);
+}
+
+/// Packs `ops` into a fresh `scope::ScopeOp` created before `insertPosition`,
+/// defaulting to `ops.back()`. Values produced inside `ops` but consumed
+/// outside are routed through `scope::ReturnOp`, and their external users are
+/// redirected.
 ///
-/// PRECONDITIONS: `ops` must already follow dominance order, and the packed
-/// scope must dominate its remaining users.
+/// PRECONDITIONS: `ops` must already follow dominance order. Captured values
+/// must dominate the insertion position, and the packed scope must dominate
+/// its remaining users.
 /// Returns nullptr on failure; the caller is responsible for any restoration.
-scope::ScopeOp packScopeOp(llvm::ArrayRef<Operation *> ops);
+scope::ScopeOp packScopeOp(llvm::ArrayRef<Operation *> ops,
+                           Operation *insertPosition = nullptr);
 
 /// Moves the ops inside `scopeOp` into the parent block and erases `scopeOp`.
 ///

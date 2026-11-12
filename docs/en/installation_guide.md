@@ -285,11 +285,16 @@ Triton uses LLVM 22 to generate code for GPU and CPU. Similarly, Ascend's BiShen
 ##### Code Preparation
 Check out the specified version of LLVM source code using `git checkout` and apply the patch:
 ```bash
+TRITON_ROOT="$(pwd)"
+LLVM_COMMIT=$(cat "$TRITON_ROOT/cmake/llvm-hash.txt") || exit 1
 git clone --no-checkout https://github.com/llvm/llvm-project.git
 cd llvm-project
-git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-wget https://raw.githubusercontent.com/triton-lang/triton-ascend/refs/heads/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
-git apply llvm_patch_f6ded0b.patch
+git checkout "$LLVM_COMMIT"
+export LC_ALL=C
+for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
+  [ -f "$patch" ] || continue
+  git apply "$patch" || exit 1
+done
 ```
 
 ##### Build and Install LLVM
@@ -300,7 +305,7 @@ git apply llvm_patch_f6ded0b.patch
     ```
 -   Step 2: Execute the following commands to build and install LLVM
     ```bash
-    cd {PATH_TO}/llvm_project # The path is where the user pulled the LLVM code, adjust according to actual situation
+    cd "$TRITON_ROOT/llvm-project"
     mkdir build
     cd build
     cmake ../llvm \

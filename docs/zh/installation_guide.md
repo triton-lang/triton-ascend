@@ -284,11 +284,16 @@ Triton 使用 LLVM 22 为 GPU 和 CPU 生成代码。同样，昇腾的毕昇编
 ##### 代码准备
 通过 `git checkout` 检出指定版本的 LLVM 源码并应用补丁：
 ```bash
+TRITON_ROOT="$(pwd)"
+LLVM_COMMIT=$(cat "$TRITON_ROOT/cmake/llvm-hash.txt") || exit 1
 git clone --no-checkout https://github.com/llvm/llvm-project.git
 cd llvm-project
-git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-wget https://raw.githubusercontent.com/triton-lang/triton-ascend/refs/heads/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
-git apply llvm_patch_f6ded0b.patch
+git checkout "$LLVM_COMMIT"
+export LC_ALL=C
+for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
+  [ -f "$patch" ] || continue
+  git apply "$patch" || exit 1
+done
 ```
 
 ##### 构建安装LLVM
@@ -299,7 +304,7 @@ git apply llvm_patch_f6ded0b.patch
     ```
 -   步骤2：执行以下命令进行构建和安装 LLVM
     ```bash
-    cd {PATH_TO}/llvm_project # 路径为用户拉取LLVM代码的路径,需根据实际调整
+    cd "$TRITON_ROOT/llvm-project"
     mkdir build
     cd build
     cmake ../llvm \

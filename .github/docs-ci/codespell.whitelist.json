@@ -234,5 +234,8 @@
   "atol",
   "ffts",
   "ctypes",
-  "xdist"
+  "xdist",
+  "Bisheng",
+  "BiSheng",
+  "nlohmann"
 ]

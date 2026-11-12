@@ -494,5 +494,5 @@ jobs:
           done
           echo "Published to ${OBS_DIR}:"
           sha256sum dist/*.tar.gz
-          echo "Pin the filename + sha256 in cmake/bisheng-version.txt to make"
+          echo "Pin the filename + sha256 in cmake/bisheng-info.json to make"
           echo "integration-tests-ascend.yml install this payload instead of the .run."

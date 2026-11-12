@@ -38,6 +38,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Region.h"
 #include "mlir/IR/Types.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/StringMap.h"
 
@@ -477,10 +478,89 @@ Value applySimdMode(TLABuilder &self, Value result, Value mask,
       .getResult();
 }
 
+static void clearPreloadTaskAttrs(scope::ScopeOp task) {
+  task->removeAttr(hivm::PreloadNumAttr::name);
+  task->removeAttr(hivm::MaxPreloadNumAttr::name);
+  task.setNoInline(false);
+}
+
+static LogicalResult groupPreloadStages(scf::ForOp loop) {
+  SmallVector<SmallVector<scope::ScopeOp>> stages;
+  IntegerAttr lastStage;
+  for (auto task : loop.getBody()->getOps<scope::ScopeOp>()) {
+    auto stage = task->getAttrOfType<IntegerAttr>(hivm::PreloadNumAttr::name);
+    if (!stage)
+      continue;
+    if (stage != lastStage) {
+      stages.emplace_back();
+      lastStage = stage;
+    }
+    stages.back().push_back(task);
+  }
+
+  for (const auto &tasks : stages) {
+    if (tasks.size() == 1)
+      continue;
+    SmallVector<Operation *> betweenTasks;
+    for (size_t i = 1; i < tasks.size(); ++i) {
+      for (Operation *op = tasks[i - 1]->getNextNode(); op != tasks[i];
+           op = op->getNextNode()) {
+        if (!isPure(op) && !isa<memref::AllocOp>(op))
+          return op->emitOpError(
+              "place operations with memory effects inside a TLA task");
+        betweenTasks.push_back(op);
+      }
+    }
+
+    auto first = tasks.front();
+    // Tasks are resultless. Move pure definitions and fresh scratch
+    // allocations before the stage in source order. Keep allocations in the
+    // loop body so MarkPreloadBuffers can version them when needed.
+    for (auto *op : betweenTasks)
+      op->moveBefore(first);
+    OpBuilder builder(first);
+    auto stage = builder.create<scope::ScopeOp>(first.getLoc(), TypeRange{});
+    stage.setNoInline(true);
+    for (auto attr :
+         {hivm::PreloadNumAttr::name, hivm::MaxPreloadNumAttr::name})
+      stage->setAttr(attr, first->getAttr(attr));
+
+    Block &body = stage.getRegion().emplaceBlock();
+    for (auto task : tasks) {
+      clearPreloadTaskAttrs(task);
+      task->moveBefore(&body, body.end());
+    }
+    builder.setInsertionPointToEnd(&body);
+    builder.create<scope::ReturnOp>(stage.getLoc(), ValueRange{});
+  }
+  return success();
+}
+
+static bool finalizeTlaPreload(ModuleOp module) {
+  SmallVector<scf::ForOp> loops;
+  module.walk([&](Operation *op) {
+    if (auto loop = dyn_cast<scf::ForOp>(op)) {
+      if (loop->hasAttr(hivm::CVPipelinedLoopAttr::name))
+        loops.push_back(loop);
+      return;
+    }
+    auto task = dyn_cast<scope::ScopeOp>(op);
+    if (task && task->hasAttr(hivm::PreloadNumAttr::name) &&
+        !task->getParentOp()->hasAttr(hivm::CVPipelinedLoopAttr::name))
+      // Canonicalization can inline a single-iteration pipeline loop.
+      clearPreloadTaskAttrs(task);
+  });
+  for (auto loop : loops)
+    if (failed(groupPreloadStages(loop)))
+      throw py::value_error("failed to group tasks in the same TLA stage");
+  return !loops.empty();
+}
+
 } // namespace
 
 void init_tla_builder(py::module &&m) {
   m.def("lower_tla_sync_all", &lowerTlaSyncAll, py::arg("module"));
+  m.def("finalize_tla_preload", &finalizeTlaPreload, py::arg("module"));
   py::class_<TLABuilder, AscendNPUIROpBuilder>(
       m, "tla_builder", py::module_local(), py::dynamic_attr())
       .def(py::init<MLIRContext *, std::string, std::string>(),
@@ -1826,12 +1906,7 @@ void init_tla_builder(py::module &&m) {
              Value ub =
                  self.create<arith::IndexCastOp>(builder.getIndexType(), stop);
              Value step = self.create<arith::ConstantIndexOp>(1);
-             auto domain = self.create<scope::ScopeOp>(TypeRange{});
-             domain->setAttr("hivm.pipeline", builder.getUnitAttr());
-             Block *body = builder.createBlock(&domain.getRegion());
              auto loop = self.create<scf::ForOp>(lb, ub, step);
-             builder.setInsertionPointToEnd(body);
-             self.create<scope::ReturnOp>(ValueRange{});
              // Python emits the body and its yield after scope/carry checks.
              loop.getBody()->getTerminator()->erase();
              builder.setInsertionPointToStart(loop.getBody());

@@ -34,13 +34,14 @@ class defines ``mlir_attrs``, the attribute set stamped on the emitted
 from dataclasses import dataclass
 from triton.language.core import _unwrap_if_constexpr
 
-__all__ = ["scope", "vector", "simd", "cube"]
+__all__ = ["scope", "vector", "simd", "cube", "pipeline"]
 
 
 @dataclass(frozen=True)
 class _TaskScope:
     kind: type
     name: str
+    stage: int | None
 
     def mlir_attrs(self, builder):
         return self.kind.mlir_attrs(builder)
@@ -68,12 +69,15 @@ class scope:
 class _TaskScopeKind(scope):
 
     @classmethod
-    def task(cls, name):
-        """Create a named execution scope for this core."""
+    def task(cls, name, *, stage=None):
+        """Create a named execution scope, with a stage inside a pipeline."""
         name = _unwrap_if_constexpr(name)
         if not isinstance(name, str) or not name:
             raise ValueError("task name must be a nonempty compile-time string")
-        return _TaskScope(cls, name)
+        stage = _unwrap_if_constexpr(stage)
+        if stage is not None and (type(stage) is not int or not 0 <= stage < 64):
+            raise ValueError("task stage must be a compile-time integer in [0, 64)")
+        return _TaskScope(cls, name, stage)
 
 
 class vector(_TaskScopeKind):
@@ -147,3 +151,18 @@ class cube(_TaskScopeKind):
 scope.vector = vector
 scope.simd = simd
 scope.cube = cube
+
+
+class pipeline:
+    """Iterate from zero with unit step, scheduling direct tasks by stage.
+
+    Tasks must specify nondecreasing stages. Stage s runs logical iteration
+    n-s at tick n. Scratch allocated directly in the loop is versioned across
+    stages. The caller must ensure valid memory dependencies across iterations.
+    """
+
+    def __init__(self, num_iters):
+        self.num_iters = num_iters
+
+    def __iter__(self):
+        raise RuntimeError("tla.pipeline can only be used in a @tla.jit for loop")

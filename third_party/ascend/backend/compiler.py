@@ -1346,6 +1346,7 @@ class NPUOptions:
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
     enable_outer_main_loop: bool = False
+    enable_tla_cv_pipelining: Optional[bool] = None
     enable_tla_mode: bool = field(default=False, init=False)
     enable_cube_block_merge: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = None

@@ -135,12 +135,18 @@ def cast(input, dtype, fp_downcast_rounding=None, bitcast=False, _semantic=None)
     Accepts Python and runtime scalars. ``bitcast=True``
     reinterprets equal-width scalar bit patterns. Buffers and SIMD registers
     require their explicit memory and SIMD interfaces. Bfloat16 source or
-    destination types are unsupported.
+    destination types are unsupported. Numeric fp64 conversions to narrower
+    floating-point types are unsupported because they can require implicit buffers.
     """
     input = _check_scalar(input, "tla.cast input")
     dtype = tl._unwrap_if_constexpr(dtype)
     if dtype == tl.bfloat16:
         raise TypeError("tla.cast does not support bfloat16")
+    input = _semantic.to_tensor(input)
+    bitcast = tl._unwrap_if_constexpr(bitcast)
+    if input.dtype == tl.float64 and not bitcast:
+        if dtype.is_floating() and dtype.primitive_bitwidth < 64:
+            raise TypeError("tla.cast does not support fp64 narrowing")
     return tl.cast(input, dtype, fp_downcast_rounding=fp_downcast_rounding, bitcast=bitcast, _semantic=_semantic)
 
 

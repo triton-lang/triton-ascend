@@ -571,6 +571,11 @@ def test_scalar_cast_matches_triton_frontend(source, destination, bitcast):
         assert outcome[0] is TypeError
         assert "does not support bfloat16" in outcome[1]
         return
+    if source == "fp64" and destination in ("fp16", "fp32") and not bitcast:
+        outcome, _ = _scalar_frontend(tla.cast, operands, **kwargs)
+        assert outcome[0] is TypeError
+        assert "tla.cast does not support fp64 narrowing" in outcome[1]
+        return
     assert _scalar_frontend(tla.cast, operands, **kwargs) == _scalar_frontend(tl.cast, operands, **kwargs)
 
 
@@ -600,11 +605,24 @@ def test_scalar_cast_rejects_bfloat16_literals(value):
     assert "does not support bfloat16" in outcome[1]
 
 
+@pytest.mark.parametrize("value", [1e100, 1e-100, tl.constexpr(1e100), tl.constexpr(1e-100)])
+@pytest.mark.parametrize("destination", [tl.float16, tl.float32])
+def test_scalar_cast_rejects_fp64_narrowing_literals(value, destination):
+    outcome, _ = _scalar_frontend(tla.cast, (value, ), dtype=destination)
+    assert outcome[0] is TypeError
+    assert "tla.cast does not support fp64 narrowing" in outcome[1]
+
+
 @pytest.mark.parametrize("source", SCALAR_TYPES)
 @pytest.mark.parametrize("destination", SCALAR_TYPES)
 def test_scalar_cast_numeric_ir(source, destination):
     if "bf16" in (source, destination):
         with pytest.raises(Exception, match="does not support bfloat16"):
+            _lower(_cast_expression, {"x": source},
+                   {"DTYPE": tl.str_to_ty(destination, None), "BITCAST": False, "ROUND": None})
+        return
+    if source == "fp64" and destination in ("fp16", "fp32"):
+        with pytest.raises(CompilationError, match="tla.cast does not support fp64 narrowing"):
             _lower(_cast_expression, {"x": source},
                    {"DTYPE": tl.str_to_ty(destination, None), "BITCAST": False, "ROUND": None})
         return
@@ -615,6 +633,35 @@ def test_scalar_cast_numeric_ir(source, destination):
     assert str(debug.get_operand(0).get_type()) == expected
     assert "tensor<" not in str(module) and "tt." not in str(module)
     assert not _ops(module, "memref.alloc")
+
+
+@pytest.mark.parametrize("destination",
+                         [tl.float16, tl.float32, tl.float8e5, tl.float8e4nv, tl.float8e4b8, tl.float8e5b16])
+@pytest.mark.parametrize("rounding", [None, "rtne", "rtz"])
+def test_scalar_fp64_narrowing_rejected(destination, rounding):
+    outcome, _ = _scalar_frontend(tla.cast, (tl.float64, ), dtype=destination, fp_downcast_rounding=rounding)
+    assert outcome[0] is TypeError
+    assert "tla.cast does not support fp64 narrowing" in outcome[1]
+
+
+@tr.jit
+def _fp64_cast_helper(x):
+    return tla.cast(x, tl.float32)
+
+
+@tr.jit
+def _fp64_cast_caller(x):
+    tla.device_print("result", _fp64_cast_helper(x))
+
+
+def test_scalar_fp64_narrowing_in_jit_helper_rejected():
+    with pytest.raises(CompilationError) as caught:
+        compile_offline(_fp64_cast_caller, {"x": "fp64"}, {})
+    error = caught.value
+    while error.__cause__ is not None:
+        error = error.__cause__
+    assert isinstance(error, TypeError)
+    assert "tla.cast does not support fp64 narrowing" in str(error)
 
 
 @pytest.mark.parametrize("source,destination", [

@@ -1,5 +1,7 @@
 # 贡献指南
 
+本文档介绍Triton-Ascend项目的贡献流程与开发规范，涵盖开发者来源认证、编码与单元测试风格、Fork-Pull开发模式、代码门禁异常处理、ISSUE提交与Pull Request合入要求，适用于需要向Triton-Ascend项目提交代码的贡献者。
+
 ## 入门
 
 - 在[GitHub](https://github.com/triton-lang/triton-ascend)上fork Triton-Ascend代码库。
@@ -19,15 +21,15 @@ git commit -s -m "your commit message"
 
 ### 代码风格
 
-请遵循以下编码风格，以使得Triton-Ascend易于开发、维护和审查。
+请遵循以下编码风格，以使得Triton-Ascend易于开发、维护和审查：
 
 - 编码指南
 
-  请使用Triton-Ascend社区统一的编码风格，Python建议的编码风格是[PEP 8编码样式](https://pep8.org/)，C++编码所建议的风格是[LLVM 编码规范](https://llvm.org/docs/CodingStandards.html)。可以使用[clang-tidy](https://github.com/llvm/llvm-project/blob/main/.clang-tidy)，[CppLint](https://github.com/cpplint/cpplint)，[CppCheck](http://cppcheck.sourceforge.net/)，[CMakeLint](https://github.com/cmake-lint/cmake-lint)，[CodeSpell](https://github.com/codespell-project/codespell)，[ShellCheck](https://github.com/koalaman/shellcheck)和[pylint](https://pylint.org/)检查代码的格式，建议在您的IDE中安装这些插件。
+  请使用Triton-Ascend社区统一的编码风格，Python建议的编码风格是[PEP 8编码样式](https://pep8.org/)，C++编码所建议的风格是[LLVM编码规范](https://llvm.org/docs/CodingStandards.html)。可以使用[clang-tidy](https://github.com/llvm/llvm-project/blob/main/.clang-tidy)，[CppLint](https://github.com/cpplint/cpplint)、[CppCheck](http://cppcheck.sourceforge.net/)、[CMakeLint](https://github.com/cmake-lint/cmake-lint)、[CodeSpell](https://github.com/codespell-project/codespell)、[ShellCheck](https://github.com/koalaman/shellcheck)和[pylint](https://pylint.org/)检查代码的格式，建议在您的IDE中安装这些插件。
 
 - 单元测试指南
 
-  请使用Triton-Ascend社区统一的单元测试风格，python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](https://github.com/google/googletest/blob/main/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。Python 侧测试用例设计可参考[gather测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/pytest_ut/test_gather.py)、[layer_norm测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/05-layer-norm.py)；编译器/MLIR 转换（C++ 后端）的测试用例可参考 [lit MLIR 测试目录](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/unittest/Conversion) 下的示例。
+  请使用Triton-Ascend社区统一的单元测试风格，Python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](https://github.com/google/googletest/blob/main/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。Python侧测试用例设计可参考[gather测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/pytest_ut/test_gather.py)、[layer_norm测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/05-layer-norm.py)；编译器/MLIR转换（C++ 后端）的测试用例可参考 [lit MLIR测试目录](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/unittest/Conversion) 下的示例。
 
 - 重构指南
 
@@ -83,11 +85,11 @@ git push origin {your_new_branch_name}
 
 6、向Triton-Ascend主仓创建Pull Request
 
-代码推送至您的远程仓库后，您需要在您的新分支和Triton-Ascend main分支之间新建Pull Request。完成新建合并请求后，“Jenkins CI”将自动设置为您构建流水线测试。您的Pull Request请尽快合并到上游main分支，以降低合并风险。
+代码推送至您的远程仓库后，你需要在你的新分支和Triton-Ascend main分支之间新建Pull Request。完成新建Pull Request后，“Jenkins CI”将自动为你设置构建流水线测试。你的Pull Request请尽快合并到上游main分支，以降低合并风险。
 
 ### 代码门禁异常处理
 
-代码门禁异常主要包含以下几种情况，请根据相关提示信息解决门禁异常问题。
+代码门禁异常主要包含以下几种情况：请根据相关提示信息解决门禁异常问题。
 
 - 编译失败
 
@@ -107,7 +109,7 @@ git push origin {your_new_branch_name}
 
 在报告问题时，请参考以下格式：
 
-- 您环境里使用的软件版本（Triton-Ascend、python、OS等）？
+- 您环境里使用的软件版本（Triton-Ascend、Python、OS等）？
 - 这是一个错误报告还是功能请求？
 - 您报告的是什么样的问题，添加对应的标签以便在问题仪表盘上突出显示？
 - 发生了什么？
@@ -127,7 +129,7 @@ git push origin {your_new_branch_name}
 - 在[GitHub](https://github.com/triton-lang/triton-ascend)上提出您的想法作为问题。
 - 如果要开发的新功能需要大量设计细节，您还应提交设计方案。
 - 在问题讨论和设计方案审查达成共识后，再进行fork开发并提交PR。
-- 在从Approver那里收到2+LGTM（Looks Good To Me）前不允许合并任何PR。请注意审批人不允许在自己的PR上添加LGTM。
+- 在从审批人那里收到2+LGTM（Looks Good To Me）前不允许合并任何PR。请注意审批人不允许在自己的PR上添加LGTM。
 - 在PR被充分讨论后，将根据讨论结果对PR进行合并、拒绝或放弃。
 
 ## 注意事项
@@ -135,4 +137,4 @@ git push origin {your_new_branch_name}
 - 应避免任何不相关的更改。
 - 确保您的提交历史是简洁有序的。
 - 创建PR前请rebase上游仓库最新代码。
-- 对于错误修复PR，请确保链接所有相关Issue和PR。
+- 对于错误修复PR，请确保关联所有相关Issue和PR。

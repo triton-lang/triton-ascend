@@ -14,7 +14,7 @@
 
 ### 示例：向量加法（Vector Add）
 
-```python
+```text
 import torch
 import torch_npu
 import triton
@@ -60,13 +60,13 @@ def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
     """
     精度对比函数：根据数据类型选择合适的比对策略。
 
-    参数:
+    参数：
         cal: 计算结果
         ref: 参考结果
         rtol: 相对误差容限
         atol: 绝对误差容限
 
-    异常:
+    异常：
         AssertionError: 精度不达标时抛出
     """
     assert cal.dtype == ref.dtype, f"dtype mismatch: {cal.dtype} vs {ref.dtype}"
@@ -101,7 +101,7 @@ def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
 
 * `torch.testing.assert_close`：如果张量在指定的容差范围内近似相等，则通过（不抛出异常）；否则不通过（抛出AssertionError）。
 
-* `torch.equal`：要求两个张量具有完全相同的形状，且所有元素在二进制级别上绝对相等，才返回True，否则返回False。
+* `torch.equal`：要求两个张量具有完全相同的形状，且所有元素在二进制位级别上绝对相等，才返回True，否则返回False。
 
 `torch.testing.assert_close` 的内部逻辑：
 
@@ -109,7 +109,7 @@ def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
 |cal - ref| <= atol + rtol * |ref|
 ```
 
-即：绝对误差 `|cal - ref|` 需要满足相对误差容限和绝对误差容限相加共同构成一个动态的误差边界。
+即：绝对误差 `|cal - ref|` 需要满足由相对误差容限和绝对误差容限相加共同构成的动态误差边界。
 
 ### 按数据类型推荐容限
 

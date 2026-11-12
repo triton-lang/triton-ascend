@@ -1,6 +1,6 @@
-# 技术例会
+# 社区技术会议
 
-Triton-Ascend定期召开社区技术会议，作为项目治理的核心决策机制。技术方向、重大提案评审和版本发布等重大事项在社区技术会议中讨论和决定，由全体 `Maintainer` 投票。会议对所有社区成员开放，任何人均可参与讨论，但决策和投票仅由 `Maintainer` 进行。
+Triton-Ascend定期召开社区技术会议，作为项目治理的核心决策机制。技术方向、重大提案评审和版本发布等重大事项在技术会议中讨论和决定，由全体 `Maintainer` 投票。会议对所有社区成员开放，任何人均可参与讨论，但决策和投票仅由 `Maintainer` 进行。
 
 ## 会议内容
 
@@ -15,7 +15,7 @@ Triton-Ascend定期召开社区技术会议，作为项目治理的核心决策�
 - **会议频率**：每两周一次
 - **会议时间**：周四14:15（UTC+8）
 - **会议起始日期**：2026年9月3日
-- **会议链接**：[Zoom会议](https://us06web.zoom.us/j/86540192059?pwd=X2N3pl5bnZH5CgiuX1zjyZoELItmjP.1)
+- **会议链接**：[Zoom会议链接](https://us06web.zoom.us/j/86540192059?pwd=X2N3pl5bnZH5CgiuX1zjyZoELItmjP.1)
 - **会议室号**：865 4019 2059
 - **会议室密码**：123456
 - **会议议程与纪要**：[议程&纪要](https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0)

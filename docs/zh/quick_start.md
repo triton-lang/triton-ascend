@@ -4,7 +4,7 @@
 
 **Triton-Ascend**是适配华为昇腾处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对华为昇腾NPU特性进行深度优化，能够帮助用户在华为昇腾平台上快速开发和部署高性能计算任务。
 
-本文以**Ubuntu**环境下通过软件包部署方式在线安装并运行向量加法示例为例，指导用户快速上手使用**Triton-Ascend**。如需体验更多安装方式请阅读[安装指南](./installation_guide.md)文档。
+本文以**Ubuntu**环境下通过软件包部署方式在线安装并运行向量加法示例为例，指导用户快速上手使用**Triton-Ascend**。如需了解更多安装方式请阅读[安装指南](./installation_guide.md)文档。
 
 ## 环境准备
 
@@ -36,7 +36,7 @@ pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/asce
 
 **运行tutorials中的向量加法示例验证结果**
 
-向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
+向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)。
 通过对比Triton算子与PyTorch原生计算的输出结果，证明华为昇腾NPU设备可正确调用Triton算子并保证计算精度。
 > ⚠️ 下述命令需在bash环境下执行。若使用POSIX sh，请将 `source` 替换为 `.`。
 
@@ -51,7 +51,7 @@ python3 ./triton-ascend/third_party/ascend/tutorials/01-vector-add.py
 
 观察到类似的输出即说明环境配置正确。
 
-```text
+```output
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0

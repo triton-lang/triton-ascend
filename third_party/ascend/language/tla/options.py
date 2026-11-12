@@ -46,8 +46,8 @@ def infer_kernel_options(module):
 
 
 def get_tla_flags(metadata):
-    """Return the BiShengIR flags specific to TLA kernels."""
-    flags = ["--enable-tla-mode=true", *metadata.get(_SYNC_FLAGS_KEY, ())]
+    """Build TLA flags and consume the temporary synchronization metadata."""
+    flags = ["--enable-tla-mode=true", *metadata.pop(_SYNC_FLAGS_KEY, ())]
     if (pipelining := metadata.get("enable_tla_cv_pipelining")) is not None:
         flags.append(f"--enable-tla-cv-pipelining={pipelining}")
     return flags

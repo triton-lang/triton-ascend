@@ -38,3 +38,4 @@ def test_inferred_sync_options(kernel, signature, constexprs, sync_flags):
     make_tla_ttir(module, metadata, options)
     tla_to_ttadapter(module, metadata, options)
     assert get_tla_flags(metadata) == ["--enable-tla-mode=true", *sync_flags]
+    assert not any(name.startswith("_") for name in metadata)

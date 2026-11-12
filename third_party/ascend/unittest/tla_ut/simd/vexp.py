@@ -33,9 +33,9 @@ F16_SIGNATURE = {"X": "*fp16", "I": "*i16", "T": "*i16", "O": "*fp16"}
 
 @tla.jit
 def vexp(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
+    xb = tla.alloc((N, ), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), xb)
     tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
@@ -56,10 +56,10 @@ def vexp(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vexp_f16(X, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float16, space="ub")
-    ib = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float16, space="ub")
+    xb = tla.alloc((N, ), tl.float16, space="ub")
+    ib = tla.alloc((N, ), tl.int16, space="ub")
+    tb = tla.alloc((N, ), tl.int16, space="ub")
+    ob = tla.alloc((6, N), tl.float16, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), xb)
     tla.load_gm_to_ub(tla.view(I, (N, )), ib)
     tla.load_gm_to_ub(tla.view(T, (N, )), tb)

@@ -33,8 +33,8 @@ from utils.tla_test_utils import compile_offline, get_stages, check_kernel_binar
 def store_predicate(X, INIT, O, W: tl.constexpr, OFFSET: tl.constexpr):
     D: tl.constexpr = 2048 // W
     DT: tl.constexpr = tl.int8 if W == 8 else (tl.int16 if W == 16 else tl.int32)
-    x = tla.alloc_buffer((D, ), DT, space="ub")
-    o = tla.alloc_buffer((128, ), tl.uint8, space="ub")
+    x = tla.alloc((D, ), DT, space="ub")
+    o = tla.alloc((128, ), tl.uint8, space="ub")
     tla.load_gm_to_ub(tla.view(X, (D, )), x)
     tla.load_gm_to_ub(tla.view(INIT, (128, )), o)
     with tla.scope.simd():

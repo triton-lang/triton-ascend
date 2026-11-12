@@ -20,10 +20,10 @@ SIGS = {
 
 @tla.jit
 def vshift_i8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int8, space="ub")
-    r = tla.alloc_buffer((N, ), tl.int8, space="ub")
-    y = tla.alloc_buffer((N, ), tl.int8, space="ub")
-    o = tla.alloc_buffer((9, N), tl.int8, space="ub")
+    x = tla.alloc((N, ), tl.int8, space="ub")
+    r = tla.alloc((N, ), tl.int8, space="ub")
+    y = tla.alloc((N, ), tl.int8, space="ub")
+    o = tla.alloc((9, N), tl.int8, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     tla.load_gm_to_ub(tla.view(R, (N, )), r)
     tla.load_gm_to_ub(tla.view(Y, (N, )), y)
@@ -47,10 +47,10 @@ def vshift_i8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vshift_u8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint8, space="ub")
-    r = tla.alloc_buffer((N, ), tl.uint8, space="ub")
-    y = tla.alloc_buffer((N, ), tl.uint8, space="ub")
-    o = tla.alloc_buffer((9, N), tl.uint8, space="ub")
+    x = tla.alloc((N, ), tl.uint8, space="ub")
+    r = tla.alloc((N, ), tl.uint8, space="ub")
+    y = tla.alloc((N, ), tl.uint8, space="ub")
+    o = tla.alloc((9, N), tl.uint8, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     tla.load_gm_to_ub(tla.view(R, (N, )), r)
     tla.load_gm_to_ub(tla.view(Y, (N, )), y)
@@ -74,10 +74,10 @@ def vshift_u8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vshift_i16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    r = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    y = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    o = tla.alloc_buffer((9, N), tl.int16, space="ub")
+    x = tla.alloc((N, ), tl.int16, space="ub")
+    r = tla.alloc((N, ), tl.int16, space="ub")
+    y = tla.alloc((N, ), tl.int16, space="ub")
+    o = tla.alloc((9, N), tl.int16, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     tla.load_gm_to_ub(tla.view(R, (N, )), r)
     tla.load_gm_to_ub(tla.view(Y, (N, )), y)
@@ -101,10 +101,10 @@ def vshift_i16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vshift_u16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint16, space="ub")
-    r = tla.alloc_buffer((N, ), tl.uint16, space="ub")
-    y = tla.alloc_buffer((N, ), tl.uint16, space="ub")
-    o = tla.alloc_buffer((9, N), tl.uint16, space="ub")
+    x = tla.alloc((N, ), tl.uint16, space="ub")
+    r = tla.alloc((N, ), tl.uint16, space="ub")
+    y = tla.alloc((N, ), tl.uint16, space="ub")
+    o = tla.alloc((9, N), tl.uint16, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     tla.load_gm_to_ub(tla.view(R, (N, )), r)
     tla.load_gm_to_ub(tla.view(Y, (N, )), y)

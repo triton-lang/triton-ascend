@@ -31,8 +31,8 @@ from utils.tla_test_utils import compile_offline, get_stages
 
 @tla.jit
 def predicate_views(X, O, LOAD_OFFSET, STORE_OFFSET, W: tl.constexpr, DIST: tl.constexpr, VIEW: tl.constexpr):
-    x = tla.alloc_buffer((512, ), tl.uint8, space="ub")
-    out = tla.alloc_buffer((512, ), tl.uint8, space="ub")
+    x = tla.alloc((512, ), tl.uint8, space="ub")
+    out = tla.alloc((512, ), tl.uint8, space="ub")
     tla.load_gm_to_ub(tla.view(X, (512, )), x)
     tla.load_gm_to_ub(tla.view(X, (512, )), out)
     if VIEW == "static":

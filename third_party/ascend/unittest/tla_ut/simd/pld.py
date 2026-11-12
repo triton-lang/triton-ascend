@@ -33,8 +33,8 @@ from utils.tla_test_utils import compile_offline, get_stages, check_kernel_binar
 def load_predicate(X, O, W: tl.constexpr, DIST: tl.constexpr, OFFSET: tl.constexpr):
     D: tl.constexpr = 2048 // W
     DT: tl.constexpr = tl.int8 if W == 8 else (tl.int16 if W == 16 else tl.int32)
-    x = tla.alloc_buffer((256, ), tl.uint8, space="ub")
-    o = tla.alloc_buffer((D, ), DT, space="ub")
+    x = tla.alloc((256, ), tl.uint8, space="ub")
+    o = tla.alloc((D, ), DT, space="ub")
     tla.load_gm_to_ub(tla.view(X, (256, )), x)
     with tla.scope.simd():
         p = tla.simd.pld(x[OFFSET], width=W, dist=DIST)

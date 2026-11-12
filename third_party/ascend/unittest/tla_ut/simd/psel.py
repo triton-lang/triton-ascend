@@ -22,10 +22,10 @@ SIGNATURE = {"X": "*u32", "T1": "*u32", "T2": "*u32", "O": "*u32"}
 
 @tla.jit
 def psel(X, T1, T2, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    t1 = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    t2 = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    o = tla.alloc_buffer((2, N), tl.uint32, space="ub")
+    x = tla.alloc((N, ), tl.uint32, space="ub")
+    t1 = tla.alloc((N, ), tl.uint32, space="ub")
+    t2 = tla.alloc((N, ), tl.uint32, space="ub")
+    o = tla.alloc((2, N), tl.uint32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     tla.load_gm_to_ub(tla.view(T1, (N, )), t1)
     tla.load_gm_to_ub(tla.view(T2, (N, )), t2)

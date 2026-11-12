@@ -26,9 +26,9 @@ SIGNATURE = {name: "*u32" for name in ("X", "Y", "O")}
 
 @tla.jit
 def vsub(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    x = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    y = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    o = tla.alloc_buffer((4 + TILES, N), tl.uint32, space="ub")
+    x = tla.alloc((TILES, N), tl.uint32, space="ub")
+    y = tla.alloc((TILES, N), tl.uint32, space="ub")
+    o = tla.alloc((4 + TILES, N), tl.uint32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (TILES, N)), x)
     tla.load_gm_to_ub(tla.view(Y, (TILES, N)), y)
     with tla.scope.simd():

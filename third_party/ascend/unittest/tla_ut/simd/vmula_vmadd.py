@@ -21,9 +21,9 @@ SCALAR = 2.0
 
 @tla.jit
 def vmula(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o = tla.alloc_buffer((4, N), tl.float32, space="ub")
+    x = tla.alloc((N, ), tl.float32, space="ub")
+    y = tla.alloc((N, ), tl.float32, space="ub")
+    o = tla.alloc((4, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
@@ -42,9 +42,9 @@ def vmula(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vmadd(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o = tla.alloc_buffer((4, N), tl.float32, space="ub")
+    x = tla.alloc((N, ), tl.float32, space="ub")
+    y = tla.alloc((N, ), tl.float32, space="ub")
+    o = tla.alloc((4, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():

@@ -36,9 +36,9 @@ SIGNATURE = {"A_ptr": "*fp32", "B_ptr": "*fp32", "O_ptr": "*fp32"}
 
 @tla.jit
 def sync_pipe(A_ptr, B_ptr, O_ptr, N: tl.constexpr, SYNC_ALL: tl.constexpr):
-    a_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    b_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    a_ub = tla.alloc((N, ), tl.float32, space="ub")
+    b_ub = tla.alloc((N, ), tl.float32, space="ub")
+    o_ub = tla.alloc((N, ), tl.float32, space="ub")
     a = tla.view(A_ptr, (N, ), strides=(1, ), offsets=(0, ))
     b = tla.view(B_ptr, (N, ), strides=(1, ), offsets=(0, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))
@@ -67,9 +67,9 @@ def sync_pipe(A_ptr, B_ptr, O_ptr, N: tl.constexpr, SYNC_ALL: tl.constexpr):
 
 @tla.jit
 def sync_all_mix(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
-    a_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    b_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    a_ub = tla.alloc((N, ), tl.float32, space="ub")
+    b_ub = tla.alloc((N, ), tl.float32, space="ub")
+    o_ub = tla.alloc((N, ), tl.float32, space="ub")
     a = tla.view(A_ptr, (N, ), strides=(1, ), offsets=(0, ))
     b = tla.view(B_ptr, (N, ), strides=(1, ), offsets=(0, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))

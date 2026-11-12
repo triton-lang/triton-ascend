@@ -27,8 +27,8 @@ SIGNATURE_F2I = {"XF": "*fp32", "OI": "*i32"}
 
 @tla.jit
 def vcvt_i2f(X, OF, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((2, N), tl.float32, space="ub")
+    x = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((2, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         xv = tla.simd.vlds(x[0])
@@ -40,8 +40,8 @@ def vcvt_i2f(X, OF, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vcvt_f2i(XF, OI, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xf = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    oi = tla.alloc_buffer((4, N), tl.int32, space="ub")
+    xf = tla.alloc((N, ), tl.float32, space="ub")
+    oi = tla.alloc((4, N), tl.int32, space="ub")
     tla.load_gm_to_ub(tla.view(XF, (N, )), xf)
     with tla.scope.simd():
         f = tla.simd.vlds(xf[0])

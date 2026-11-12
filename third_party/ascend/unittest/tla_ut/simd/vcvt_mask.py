@@ -36,8 +36,8 @@ SIGNATURE_N = {"X": "*fp32", "O": "*fp16"}
 
 @tla.jit
 def widen(X, O, N: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.float16, space="ub")
-    o = tla.alloc_buffer((4, N // 2), tl.float32, space="ub")
+    x = tla.alloc((N, ), tl.float16, space="ub")
+    o = tla.alloc((4, N // 2), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         h = tla.simd.vlds(x[0])
@@ -51,8 +51,8 @@ def widen(X, O, N: tl.constexpr):
 
 @tla.jit
 def narrow(X, O, N: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o = tla.alloc_buffer((4, N * 2), tl.float16, space="ub")
+    x = tla.alloc((N, ), tl.float32, space="ub")
+    o = tla.alloc((4, N * 2), tl.float16, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         f = tla.simd.vlds(x[0])

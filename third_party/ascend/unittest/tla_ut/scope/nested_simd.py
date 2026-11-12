@@ -19,8 +19,8 @@ N = 64
 
 @tla.jit
 def nested_simd(X_ptr, O_ptr, N: tl.constexpr):
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    x_ub = tla.alloc((N, ), tl.float32, space="ub")
+    o_ub = tla.alloc((N, ), tl.float32, space="ub")
     x_blk = tla.view(X_ptr, (N, ), strides=(1, ))
     o_blk = tla.view(O_ptr, (N, ), strides=(1, ))
     with tla.scope.vector():

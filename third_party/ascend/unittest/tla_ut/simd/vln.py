@@ -21,8 +21,8 @@ SIGNATURE = {"X": "*fp32", "O": "*fp32"}
 
 @tla.jit
 def vln(X, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o = tla.alloc_buffer((4, N), tl.float32, space="ub")
+    x = tla.alloc((N, ), tl.float32, space="ub")
+    o = tla.alloc((4, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0])

@@ -52,8 +52,8 @@ ALIAS_CASES = (
 
 @tla.jit
 def vdup(T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         t = tla.simd.vlds(tb[0])
@@ -72,7 +72,7 @@ def vdup(T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vdup_bf16(O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    ob = tla.alloc_buffer((3, N), tl.bfloat16, space="ub")
+    ob = tla.alloc((3, N), tl.bfloat16, space="ub")
     with tla.scope.simd():
         prefix = tla.simd.pge(ACTIVE, N)
         zero = tla.simd.vsplat(0.0, tl.bfloat16)
@@ -86,7 +86,7 @@ def vdup_bf16(O, N: tl.constexpr, ACTIVE: tl.constexpr):
 @tla.jit
 def vdup_alias(O, DT: tl.constexpr):
     """IR-only: dtype spelling -> canonical element type, still ``broadcast``."""
-    ob = tla.alloc_buffer((64, ), tl.uint32, space="ub")
+    ob = tla.alloc((64, ), tl.uint32, space="ub")
     with tla.scope.simd():
         d = tla.simd.vdup(1, DT)
         bc = tla.simd.vbitcast(d, "uint32")

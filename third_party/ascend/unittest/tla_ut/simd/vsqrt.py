@@ -32,9 +32,9 @@ SIGNATURE_H = {"X": "*fp16", "I": "*i16", "T": "*i16", "O": "*fp16"}
 
 @tla.jit
 def vsqrt_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    xb = tla.alloc_buffer((TILES, N), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float32, space="ub")
+    xb = tla.alloc((TILES, N), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((MASK_ROWS_C + TILES, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (TILES, N)), xb)
     tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
@@ -63,10 +63,10 @@ def vsqrt_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexp
 
 @tla.jit
 def vsqrt_f16(X, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    xb = tla.alloc_buffer((TILES, N), tl.float16, space="ub")
-    ib = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float16, space="ub")
+    xb = tla.alloc((TILES, N), tl.float16, space="ub")
+    ib = tla.alloc((N, ), tl.int16, space="ub")
+    tb = tla.alloc((N, ), tl.int16, space="ub")
+    ob = tla.alloc((MASK_ROWS_C + TILES, N), tl.float16, space="ub")
     tla.load_gm_to_ub(tla.view(X, (TILES, N)), xb)
     tla.load_gm_to_ub(tla.view(I, (N, )), ib)
     tla.load_gm_to_ub(tla.view(T, (N, )), tb)

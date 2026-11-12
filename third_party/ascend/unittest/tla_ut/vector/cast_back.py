@@ -40,9 +40,9 @@ def cast_back(X_ptr, SF_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.cons
     tl.static_assert(TMAX > 0 and CORES > 0)
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
     # plan B: copy block = full row HID(256), one MTE2 move per row.
-    x_ub = tla.alloc_buffer((BM, HID), tl.float8e4nv, space="ub", versions=VERSIONS)
-    sf_ub = tla.alloc_buffer((BM, HID // NPC), tl.float32, space="ub", versions=VERSIONS)
-    out_ub = tla.alloc_buffer((BM, HID), tl.float32, space="ub", versions=VERSIONS)
+    x_ub = tla.alloc((BM, HID), tl.float8e4nv, space="ub", versions=VERSIONS)
+    sf_ub = tla.alloc((BM, HID // NPC), tl.float32, space="ub", versions=VERSIONS)
+    out_ub = tla.alloc((BM, HID), tl.float32, space="ub", versions=VERSIONS)
     for pt in range(tl.program_id(0), tl.cdiv(num_tokens, BM), CORES):
         x_blk = tla.view(X_ptr, (BM, HID), strides=(HID, 1), offsets=(pt * BM, 0))
         sf_blk = tla.view(SF_ptr, (BM, HID // NPC), strides=(HID // NPC, 1), offsets=(pt * BM, 0))

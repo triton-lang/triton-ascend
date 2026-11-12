@@ -22,7 +22,7 @@ SIGNATURE = {"O": "*u32"}
 
 @tla.jit
 def pset(O, N: tl.constexpr):
-    o = tla.alloc_buffer((4, N), tl.uint32, space="ub")
+    o = tla.alloc((4, N), tl.uint32, space="ub")
     with tla.scope.simd():
         ones = tla.simd.vsplat(1, tl.uint32)
         zeros = tla.simd.vsplat(0, tl.uint32)

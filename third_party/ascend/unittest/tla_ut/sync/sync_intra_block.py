@@ -46,8 +46,8 @@ def intra_block_dynamic(flagid):
 
 @tla.jit
 def intra_block_data(X_ptr, O_ptr, N: tl.constexpr):
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    x_ub = tla.alloc((N, ), tl.float32, space="ub")
+    o_ub = tla.alloc((N, ), tl.float32, space="ub")
     x = tla.view(X_ptr, (N, ), strides=(1, ), offsets=(0, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))
 

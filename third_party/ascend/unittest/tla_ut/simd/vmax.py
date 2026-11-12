@@ -34,9 +34,9 @@ U32_SIGNATURE = {"X": "*u32", "Y": "*u32", "T": "*i32", "O": "*u32"}
 
 @tla.jit
 def vmax(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
+    xy = tla.alloc((2, N), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
     tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
@@ -58,9 +58,9 @@ def vmax(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vmax_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.uint32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.uint32, space="ub")
+    xy = tla.alloc((2, N), tl.uint32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.uint32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
     tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():

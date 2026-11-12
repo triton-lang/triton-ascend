@@ -71,10 +71,10 @@ def constexprs(cap=F32_CAP, chunk=F32_CHUNK):
 @tla.jit
 def simd_tail_f32(A, B, C, O, N, ROW0, CAP: tl.constexpr, CHUNK: tl.constexpr, CORES: tl.constexpr, GIN: tl.constexpr,
                   GOUT: tl.constexpr):
-    a_ub = tla.alloc_buffer((CHUNK, ), tl.float32, space="ub")
-    b_ub = tla.alloc_buffer((CHUNK, ), tl.float32, space="ub")
-    c_ub = tla.alloc_buffer((CHUNK, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((13, CHUNK), tl.float32, space="ub")
+    a_ub = tla.alloc((CHUNK, ), tl.float32, space="ub")
+    b_ub = tla.alloc((CHUNK, ), tl.float32, space="ub")
+    c_ub = tla.alloc((CHUNK, ), tl.float32, space="ub")
+    o_ub = tla.alloc((13, CHUNK), tl.float32, space="ub")
     NBLK: tl.constexpr = (CAP + CHUNK - 1) // CHUNK
     for p in range(tl.program_id(0), NBLK, CORES):
         off = p * CHUNK
@@ -117,11 +117,11 @@ def simd_tail_f32(A, B, C, O, N, ROW0, CAP: tl.constexpr, CHUNK: tl.constexpr, C
 @tla.jit
 def simd_tail_f16(A, B, C, I, O, N, ROW0, CAP: tl.constexpr, CHUNK: tl.constexpr, CORES: tl.constexpr,
                   GIN: tl.constexpr, GOUT: tl.constexpr):
-    a_ub = tla.alloc_buffer((CHUNK, ), tl.float16, space="ub")
-    b_ub = tla.alloc_buffer((CHUNK, ), tl.float16, space="ub")
-    c_ub = tla.alloc_buffer((CHUNK, ), tl.float16, space="ub")
-    i_ub = tla.alloc_buffer((CHUNK, ), tl.int16, space="ub")
-    o_ub = tla.alloc_buffer((13, CHUNK), tl.float16, space="ub")
+    a_ub = tla.alloc((CHUNK, ), tl.float16, space="ub")
+    b_ub = tla.alloc((CHUNK, ), tl.float16, space="ub")
+    c_ub = tla.alloc((CHUNK, ), tl.float16, space="ub")
+    i_ub = tla.alloc((CHUNK, ), tl.int16, space="ub")
+    o_ub = tla.alloc((13, CHUNK), tl.float16, space="ub")
     NBLK: tl.constexpr = (CAP + CHUNK - 1) // CHUNK
     for p in range(tl.program_id(0), NBLK, CORES):
         off = p * CHUNK

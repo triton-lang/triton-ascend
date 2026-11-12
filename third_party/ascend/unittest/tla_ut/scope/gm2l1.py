@@ -21,7 +21,7 @@ K = 64
 @tla.jit
 def gm2l1(A_ptr, M: tl.constexpr, K: tl.constexpr):
     # 4-D NZ physical shape for the L1 tile (fractal of the 2-D ND view).
-    a_l1 = tla.alloc_buffer((K // 16, M // 16, 16, 16), tl.float16, space="l1")
+    a_l1 = tla.alloc((K // 16, M // 16, 16, 16), tl.float16, space="l1")
     a_blk = tla.view(A_ptr, (M, K), strides=(K, 1))
     with tla.scope.vector():
         tla.load_gm_to_l1(a_blk, a_l1)  # hivm.hir.nd2nz (GM->L1) in a vector scope

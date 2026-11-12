@@ -31,9 +31,9 @@ SIGNATURE_U = {"X": "*u32", "T": "*i32", "O": "*u32"}
 
 @tla.jit
 def vnot_i32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    xb = tla.alloc_buffer((TILES, N), tl.int32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.int32, space="ub")
+    xb = tla.alloc((TILES, N), tl.int32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((MASK_ROWS_C + TILES, N), tl.int32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (TILES, N)), xb)
     tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
@@ -62,9 +62,9 @@ def vnot_i32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
 
 @tla.jit
 def vnot_u32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    xb = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.uint32, space="ub")
+    xb = tla.alloc((TILES, N), tl.uint32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((MASK_ROWS_C + TILES, N), tl.uint32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (TILES, N)), xb)
     tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():

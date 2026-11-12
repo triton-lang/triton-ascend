@@ -17,9 +17,9 @@ SHIFT = 3
 
 @tla.jit
 def vshl_i32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((3, N), tl.int32, space="ub")
+    x = tla.alloc((N, ), tl.int32, space="ub")
+    y = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((3, N), tl.int32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
@@ -36,9 +36,9 @@ def vshl_i32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vshr_i32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((3, N), tl.int32, space="ub")
+    x = tla.alloc((N, ), tl.int32, space="ub")
+    y = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((3, N), tl.int32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
@@ -55,9 +55,9 @@ def vshr_i32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vshr_u32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    o = tla.alloc_buffer((3, N), tl.uint32, space="ub")
+    x = tla.alloc((N, ), tl.uint32, space="ub")
+    y = tla.alloc((N, ), tl.uint32, space="ub")
+    o = tla.alloc((3, N), tl.uint32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
@@ -74,8 +74,8 @@ def vshr_u32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vshls_i32(X, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((3, N), tl.int32, space="ub")
+    x = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((3, N), tl.int32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0])
@@ -90,8 +90,8 @@ def vshls_i32(X, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vshls_tensor_i32(X, O, N: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((N, ), tl.int32, space="ub")
+    x = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((N, ), tl.int32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0])

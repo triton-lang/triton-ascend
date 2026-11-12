@@ -39,9 +39,9 @@ W_SCALARS = (0x80000000, 0x80000001, 0xFFFFFFFF)
 
 @tla.jit
 def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
+    xb = tla.alloc((N, ), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), xb)
     tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
@@ -62,12 +62,12 @@ def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 @tla.jit
 def vmaxs_bounds(I, U, W, OI, OU, OW, N: tl.constexpr, ACTIVE: tl.constexpr):
-    ib = tla.alloc_buffer((N, ), tl.int64, space="ub")
-    ub = tla.alloc_buffer((N, ), tl.uint64, space="ub")
-    wb = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    oi = tla.alloc_buffer((3, N), tl.int64, space="ub")
-    ou = tla.alloc_buffer((3, N), tl.uint64, space="ub")
-    ow = tla.alloc_buffer((3, N), tl.uint32, space="ub")
+    ib = tla.alloc((N, ), tl.int64, space="ub")
+    ub = tla.alloc((N, ), tl.uint64, space="ub")
+    wb = tla.alloc((N, ), tl.uint32, space="ub")
+    oi = tla.alloc((3, N), tl.int64, space="ub")
+    ou = tla.alloc((3, N), tl.uint64, space="ub")
+    ow = tla.alloc((3, N), tl.uint32, space="ub")
     tla.load_gm_to_ub(tla.view(I, (N, )), ib)
     tla.load_gm_to_ub(tla.view(U, (N, )), ub)
     tla.load_gm_to_ub(tla.view(W, (N, )), wb)

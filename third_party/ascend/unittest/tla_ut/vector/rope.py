@@ -28,8 +28,8 @@ def rope(X_ptr, CS_ptr, B: tl.constexpr, S: tl.constexpr, NH: tl.constexpr, RD: 
     tl.static_assert(S % BT == 0, "main config has no tail block")
     tl.static_assert(CORES > 0 and OFF == 0, "OFF must be zero for the current (S, RD) CS buffer")
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
-    x_ub = tla.alloc_buffer((1, BT, NH, RD), tl.float32, space="ub", versions=VERSIONS)
-    cs_ub = tla.alloc_buffer((BT, RD), tl.float32, space="ub", versions=VERSIONS)
+    x_ub = tla.alloc((1, BT, NH, RD), tl.float32, space="ub", versions=VERSIONS)
+    cs_ub = tla.alloc((BT, RD), tl.float32, space="ub", versions=VERSIONS)
     n_seq_blk = S // BT
     for task in range(tl.program_id(0), B * n_seq_blk, CORES):
         b = task // n_seq_blk

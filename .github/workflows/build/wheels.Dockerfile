@@ -21,6 +21,7 @@ ARG ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.2.0-beta.2
 # regular PR wheels) or an exact 40-hex commit SHA (the Build-Pinned-Wheels
 # job passes the submodule gitlink so the wheel matches what local users get).
 ARG NPUIR_REF=stable
+ARG NPUIR_REPO_URL=https://gitcode.com/Ascend/AscendNPU-IR.git
 
 # ---------------------------------------------------------------------------
 # Build dependencies (matching CIBW_BEFORE_ALL)

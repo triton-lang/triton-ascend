@@ -365,6 +365,8 @@ jobs:
             echo "::error::could not resolve the AscendNPU-IR gitlink SHA (got '${PINNED_SHA}')"
             exit 1
           fi
+          NPUIR_URL=$(git config -f .gitmodules --get submodule.third_party/ascend/AscendNPU-IR.url)
+          echo "url=${NPUIR_URL}" >> "$GITHUB_OUTPUT"
           echo "Pinned AscendNPU-IR SHA: ${PINNED_SHA}"
           echo "sha=${PINNED_SHA}" >> "$GITHUB_OUTPUT"
 
@@ -382,10 +384,28 @@ jobs:
             # sees the existing tree, compiles it and bundles the payload.
             TRITON_BUILD_NPUIR=ON
             NPUIR_REF=${{ steps.npuir-sha.outputs.sha }}
+            NPUIR_REPO_URL=${{ steps.npuir-sha.outputs.url }}
             TRITON_WHEEL_VERSION_SUFFIX=+pinned
             BUILD_DATE=
           cache-from: type=registry,ref=swr.cn-north-12.myhuaweicloud.com/modelfoundry/triton-wheel-buildcache:${{ matrix.config.arch }}
           outputs: type=local,dest=./wheelhouse
+
+      - name: Run Paged MLA IR tests with the pinned wheel
+        if: steps.pin.outputs.build == 'true'
+        shell: bash
+        env:
+          TLA_TEST_STAGE: ir
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
+          PIP_INDEX_URL: http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple
+          PIP_TRUSTED_HOST: cache-service.nginx-pypi-cache.svc.cluster.local
+        run: |
+          set -euo pipefail
+          test_env="$RUNNER_TEMP/pinned-wheel-test"
+          python3.12 -m pip install --target "$test_env" pytest pybind11
+          python3.12 -m pip install --no-deps --target "$test_env" wheelhouse/*.whl
+          export PYTHONPATH="$test_env"
+          tests=third_party/ascend/unittest/tla_ut
+          python3.12 -m pytest -q --confcutdir="$tests" "$tests/kernels/mla/test_mla.py::test_ir"
 
       - name: Upload pinned wheel
         id: upload
@@ -405,6 +425,7 @@ jobs:
         run: |
           set -eu
           WHL=$(basename "$(ls wheelhouse/*.whl | head -1)")
+          NPUIR_URL=$(git config -f .gitmodules --get submodule.third_party/ascend/AscendNPU-IR.url)
           {
             echo "## Pinned-submodule verification wheel"
             echo ""
@@ -413,7 +434,7 @@ jobs:
             echo "| Wheel | \`${WHL}\` |"
             echo "| Arch / Python | ${{ matrix.config.arch }} / cp312 |"
             echo "| triton-ascend | \`${GITHUB_SHA}\` |"
-            echo "| AscendNPU-IR (submodule pin) | [\`${{ steps.npuir-sha.outputs.sha }}\`](https://gitcode.com/Ascend/AscendNPU-IR/commit/${{ steps.npuir-sha.outputs.sha }}) |"
+            echo "| AscendNPU-IR (submodule pin) | [\`${{ steps.npuir-sha.outputs.sha }}\`](${NPUIR_URL%.git}/commit/${{ steps.npuir-sha.outputs.sha }}) |"
             echo "| Download | [pinned-wheel-manylinux_2_34_${{ matrix.config.arch }}-cp312](${{ steps.upload.outputs.artifact-url }}) |"
           } >> "$GITHUB_STEP_SUMMARY"
 

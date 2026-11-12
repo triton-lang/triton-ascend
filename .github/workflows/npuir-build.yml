@@ -272,7 +272,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Download npuir payload artifact
-        uses: dawidd6/action-download-artifact@v9
+        uses: dawidd6/action-download-artifact@v28
         with:
           # Empty input -> the artifacts this run's build job just uploaded;
           # a run id -> republish that earlier run's payload.

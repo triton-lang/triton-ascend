@@ -413,7 +413,7 @@ def is_compile_on_910_95(arch: str = None) -> bool:
 
 
 AUTO_BLOCKIFY_BLACKLIST_RULES = (
-    (re.compile(r"\btt\.atomic_(?:rmw|cas)\b"), "atomic operations"),
+    # (re.compile(r"\btt\.atomic_(?:rmw|cas)\b"), "atomic operations"),
     (re.compile(r"\btt\.elementwise_inline_asm\b"), "inline elementwise assembly"),
     (
         re.compile(r"\btt\.load\b[^\n]*\bisVolatile\s*=\s*true\b"),

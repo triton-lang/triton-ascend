@@ -14,14 +14,22 @@
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: %[[E4_TO_F32:.*]] = arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E4M3FN to f32
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: %[[F32_TO_E5:.*]] = arith.truncf %[[E4_TO_F32]] {round_mode = #hfusion.round_mode<rint>} : f32 to f8E5M2
+// CHECK: %[[E5_ABOVE:.*]] = arith.cmpf ogt, %[[E4_TO_F32]], %[[E5_UPPER:.*]] : f32
+// CHECK: %[[E5_HIGH:.*]] = arith.select %[[E5_ABOVE]], %[[E5_UPPER]], %[[E4_TO_F32]] : f32
+// CHECK: %[[E5_BELOW:.*]] = arith.cmpf olt, %[[E5_HIGH]], %[[E5_LOWER:.*]] : f32
+// CHECK: %[[E5_CLAMPED:.*]] = arith.select %[[E5_BELOW]], %[[E5_LOWER]], %[[E5_HIGH]] : f32
+// CHECK: %[[F32_TO_E5:.*]] = arith.truncf %[[E5_CLAMPED]] {round_mode = #hfusion.round_mode<rint>} : f32 to f8E5M2
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return %[[F32_TO_E5]] : f8E5M2
 // CHECK-LABEL: func.func @scalar_f8e5m2_to_f8e4m3fn_default
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: %[[E5_TO_F32:.*]] = arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E5M2 to f32
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: %[[F32_TO_E4:.*]] = arith.truncf %[[E5_TO_F32]] {round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: %[[E4_ABOVE:.*]] = arith.cmpf ogt, %[[E5_TO_F32]], %[[E4_UPPER:.*]] : f32
+// CHECK: %[[E4_HIGH:.*]] = arith.select %[[E4_ABOVE]], %[[E4_UPPER]], %[[E5_TO_F32]] : f32
+// CHECK: %[[E4_BELOW:.*]] = arith.cmpf olt, %[[E4_HIGH]], %[[E4_LOWER:.*]] : f32
+// CHECK: %[[E4_CLAMPED:.*]] = arith.select %[[E4_BELOW]], %[[E4_LOWER]], %[[E4_HIGH]] : f32
+// CHECK: %[[F32_TO_E4:.*]] = arith.truncf %[[E4_CLAMPED]] {round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return %[[F32_TO_E4]] : f8E4M3FN
 // CHECK-LABEL: func.func @scalar_fp16_to_bf16_rtne

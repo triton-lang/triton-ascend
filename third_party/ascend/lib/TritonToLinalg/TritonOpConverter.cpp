@@ -32,6 +32,7 @@
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 
+#include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVectorExtras.h"
@@ -811,6 +812,39 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
   return failure();
 }
 
+static Value clampToFiniteFp8Range(Value input, Type dstElemType, Location loc,
+                                   PatternRewriter &rewriter) {
+  if (!isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType))
+    return input;
+
+  auto srcElemType = cast<FloatType>(getElementTypeOrSelf(input.getType()));
+  auto dstFloatType = cast<FloatType>(dstElemType);
+  auto limit = llvm::APFloat::getLargest(dstFloatType.getFloatSemantics());
+  bool losesInfo;
+  limit.convert(srcElemType.getFloatSemantics(),
+                llvm::APFloat::rmNearestTiesToEven, &losesInfo);
+
+  auto createBound = [&](const llvm::APFloat &value) -> Value {
+    auto boundAttr = rewriter.getFloatAttr(srcElemType, value);
+    TypedAttr attr = boundAttr;
+    if (auto tensorType = dyn_cast<RankedTensorType>(input.getType()))
+      attr = DenseElementsAttr::get(tensorType, ArrayRef<Attribute>{boundAttr});
+    return rewriter.create<arith::ConstantOp>(loc, attr);
+  };
+  Value upper = createBound(limit);
+  limit.changeSign();
+  Value lower = createBound(limit);
+
+  // Triton FP8 downcasts saturate finite overflows and infinities. Ordered
+  // comparisons keep NaNs and signed zeros unchanged before rounding.
+  Value above = rewriter.create<arith::CmpFOp>(loc, arith::CmpFPredicate::OGT,
+                                               input, upper);
+  Value clamped = rewriter.create<arith::SelectOp>(loc, above, upper, input);
+  Value below = rewriter.create<arith::CmpFOp>(loc, arith::CmpFPredicate::OLT,
+                                               clamped, lower);
+  return rewriter.create<arith::SelectOp>(loc, below, lower, clamped);
+}
+
 LogicalResult
 FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
                                      PatternRewriter &rewriter) const {
@@ -873,12 +907,15 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
 
     auto extOp = rewriter.create<arith::ExtFOp>(loc, f32Type, input);
     extOp->setAttr("round_mode", roundModeAttr);
+    Value truncInput =
+        clampToFiniteFp8Range(extOp.getResult(), dstElemType, loc, rewriter);
     auto truncOp =
-        rewriter.create<arith::TruncFOp>(loc, resultType, extOp.getResult());
+        rewriter.create<arith::TruncFOp>(loc, resultType, truncInput);
     truncOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, truncOp.getResult());
   } else if (srcBitwidth > dstBitwidth) {
     // Downcast: use arith.truncf with round_mode=rint
+    input = clampToFiniteFp8Range(input, dstElemType, loc, rewriter);
     auto truncOp = rewriter.create<arith::TruncFOp>(loc, resultType, input);
     truncOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, truncOp.getResult());

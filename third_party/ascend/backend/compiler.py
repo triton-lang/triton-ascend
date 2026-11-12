@@ -373,11 +373,20 @@ def make_ttir(mod, metadata, opt):
     return mod
 
 
+def _export_profile_metadata(mod, metadata):
+    # Unlike TTGIR, TTAdapter carries Proton's launch contract on the kernel function.
+    metadata["profile_scratch_size"] = 0
+    metadata["profile_scratch_align"] = 1
+    if AscendBackend.instrumentation:
+        metadata.update(ascend.ir.get_kernel_profile_metadata(mod))
+
+
 def tla_to_ttadapter(mod, metadata, opt):
     from triton.language.extra.tla.compiler import lower_ttir
 
     metadata["has_auto_blockify_blacklist_op"] = False
     lower_ttir(mod, mod.context)
+    _export_profile_metadata(mod, metadata)
     _export_program_grid_metadata(mod, metadata)
     text = _serialize_module(mod, opt)
     if opt.debug:
@@ -463,7 +472,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
                 # NPU-IR emits A5 DFX regions; MSPTI collects them at runtime.
                 metadata["proton_collection"] = "mspti"
-                metadata["profile_scratch_size"] = 0
             else:
                 AscendBackend.instrumentation.patch("ttir_to_linalg", pm, mod.context)
 
@@ -502,13 +510,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
                                           set_workspace_multibuffer=set_workspace_multibuffer)
         _export_program_grid_metadata(mod, metadata)
 
+        _export_profile_metadata(mod, metadata)
         linalg_text = _serialize_module(mod, opt)
-        if AscendBackend.instrumentation:
-            for key in ("profile_scratch_size", "profile_scratch_align", "profile_num_units",
-                        "profile_sections_per_block", "profile_sample_every_n"):
-                match = re.search(rf"\b{key}\s*=\s*(\d+)", linalg_text)
-                if match:
-                    metadata[key] = int(match.group(1))
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
             dump_manager.put(linalg_text, "kernel.ttadapter.mlir", binary=False)
@@ -584,8 +587,6 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     # Note: Compiled Kernel requires to estimate size of shared memory to occupy
     # Currently, NPU backend does not limit on shared memory
     metadata["shared"] = 1
-    metadata["profile_scratch_size"] = 0
-    metadata["profile_scratch_align"] = 1
     module_attrs = re.search(r'\bmodule(?:\s+@\w+)?\s+attributes\s*\{([^}]*)\}', linalg)
     metadata["has_full_row_copy"] = bool(module_attrs and re.search(r'\btt\.full_row_copy\b', module_attrs.group(1)))
     # Force disable auto tile and bind subblock if attribute is present in module

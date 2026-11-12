@@ -479,6 +479,100 @@ static void mapStridedShortMemoryCompletion(
   }
 }
 
+/// Closed-form completion for unmasked StridedWide direct accesses
+/// (rank-2, one unit-stride axis, run 32..2048 B, inner orientation).
+/// Calibration: profiles/microbench/data_provider/strided_ldst/swide_phys/.
+/// Claims run BEFORE the layout-memory curves: a profile that carries an
+/// unmasked strided_wide fingerprint must not price bytes this pass already
+/// owns.  A slot outside the swept domain keeps the fallback mechanisms, so
+/// every admission bound below mirrors the swept grid, never a guess.
+static void mapStridedWideMemoryCompletion(
+    const LogicalStage &stage, const StageWorkload &work,
+    const StageModeProfile &profile, StageResourceCycles &resources, bool simd,
+    int64_t superblockFactor, LayoutCoverage &layout,
+    std::vector<const StageMemoryAccess *> &claimed) {
+  if (profile.swideCompletionFits.empty())
+    return;
+  if (stage.features.synchronizationCount != 0)
+    return;
+  // A factor-F SuperBlock groups F independent logical programs; each one
+  // still runs with the base warp count.  The calibrated W is the per-program
+  // warp count (the probe's factor=1 axis), not the block total, so divide
+  // factor out before slot selection.  The fitted factorScale then captures
+  // the measured overlap, while applySuperBlock multiplies the body by F once.
+  const int64_t programWarps =
+      simd ? profile.activeWarpCount
+           : std::max<int64_t>(1, profile.activeWarpCount /
+                                      std::max<int64_t>(1, superblockFactor));
+  for (const StageMemoryAccess &access : work.memoryAccesses) {
+    if (access.count <= 0.0)
+      continue;
+    if (access.layoutClass() != StageMemoryAccess::LayoutClass::StridedWide)
+      continue;
+    // The fit prices ONE execution of one access.  A replicated access
+    // (count > 1, e.g. unittest's permute_reshape executing the same 64x8
+    // stream twice per iteration) is aggregated by the hardware and costs less
+    // than count x the standalone price (measured 2x148 vs the aggregate
+    // bandwidth fallback; the fallback matched the kernel), so its bytes stay
+    // with the bandwidth fallback.
+    if (std::abs(access.count - 1.0) > 1.0e-9)
+      continue;
+    // Masked admission is decided by selectSwideFormula (SIMD, all-true only).
+    if (access.addressDependsOnLoadedIndex ||
+        access.addressHasNonAffineTensorComputation ||
+        access.addressHasTensorControlFlowSelection)
+      continue;
+    if (access.effectiveRank() != 2 || !access.hasStaticLayout() ||
+        access.elementBits % 8 != 0)
+      continue;
+    // Static storage: binding an ArrayRef to a braced temporary is -Wdangling
+    // and the tree builds with -Werror.
+    static constexpr int64_t swideWindowSizes[] = {32,  64,   128,  256,
+                                                   512, 1024, 2048, 4096};
+    const llvm::ArrayRef<int64_t> windows = swideWindowSizes;
+    const auto stats = describeStridedShortAddresses(access, windows);
+    const auto formula = selectSwideFormula(access, stats, simd, programWarps);
+    if (!formula)
+      continue;
+    auto found =
+        profile.swideCompletionFits.find(stringifySwideFormula(*formula).str());
+    // Missing coefficients are missing data, not a reason to price the access
+    // with a different formula: skip it and let the fallback own the bytes.
+    if (found == profile.swideCompletionFits.end())
+      continue;
+    auto cycles =
+        evaluateSwideFormula(*formula, found->second, stats, programWarps);
+    if (!cycles || *cycles <= 0.0)
+      continue;
+    // The per-program F1 cost is scaled by the measured factor overlap; the
+    // route then applies its own factor multiplication exactly once.
+    const double scaledCycles =
+        *cycles * found->second.factorScale(superblockFactor);
+    // The calibration reports SYS_CNT nanoseconds and every Stage resource
+    // pool here is system cycles at 1 GHz, so one calibrated nanosecond is
+    // exactly one system cycle.
+    const double total = scaledCycles * access.count;
+    const auto shape = accessShape(access);
+    if (!shape)
+      continue;
+    claimed.push_back(&access);
+    const double warpInstructions =
+        access.count * llvm::divideCeil(shape->second, int64_t(32));
+    if (access.store) {
+      resources.store += total;
+      resources.swideStoreCompletion += total;
+      layout.storeBytes += access.count * shape->first;
+      layout.storeOperations += access.count;
+      layout.storeWarpInstructions += warpInstructions;
+    } else {
+      resources.load += total;
+      resources.swideLoadCompletion += total;
+      layout.loadBytes += access.count * shape->first;
+      layout.loadOperations += access.count;
+      layout.loadWarpInstructions += warpInstructions;
+    }
+  }
+}
 /// The single string form of a slot: the profile JSON key.
 
 } // namespace
@@ -700,9 +794,10 @@ dotStoreSharedCurve(const StageMemoryAccess &access,
                                                           : &found->second;
 }
 
-static double storeLayoutService(const StageWorkload &work,
-                                 const StageModeProfile &profile,
-                                 int64_t factor) {
+static double
+storeLayoutService(const StageWorkload &work, const StageModeProfile &profile,
+                   int64_t factor,
+                   llvm::ArrayRef<const StageMemoryAccess *> claimed) {
   const int64_t unit = profile.storeFootprintUnitBytes;
   auto floor = profile.storeIssueFloorByWarpCount.find(profile.activeWarpCount);
   if (unit <= 0 || factor <= 0 ||
@@ -710,6 +805,12 @@ static double storeLayoutService(const StageWorkload &work,
     return 0.0;
   double groupService = 0.0;
   for (const auto &access : work.memoryAccesses) {
+    // This floor's admission (non-flat with a unit inner stride) is exactly
+    // the StridedWide domain.  An access already priced by that closed form
+    // owns its bytes: raising the analytical store with a second mechanism's
+    // floor would silently override the calibrated number.
+    if (llvm::is_contained(claimed, &access))
+      continue;
     auto shape = accessShape(access);
     if (!access.store || !shape || access.effectiveRank() > 2 ||
         access.isFlatContiguous() || !access.hasUnitInnerStride() ||
@@ -1237,7 +1338,7 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
   StageResourceCycles resources;
   // Accesses priced by the closed-form strided-direct mechanism.  The masked
   // strided copy floor yields on them and stays in force for everything else.
-  std::vector<const StageMemoryAccess *> stridedShortAlreadyClaimed;
+  std::vector<const StageMemoryAccess *> stridedAlreadyClaimed;
   StageWorkload work = stage.workload;
   const bool simd = mode == StageMode::SIMD;
   const bool independentScan =
@@ -1718,10 +1819,19 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
     // Runs before the load-group curve below, and before the masked-copy curve
     // further down, so both can see which accesses this pass already priced.
     mapStridedShortMemoryCompletion(stage, work, profile, resources, simd,
-                                    layout, stridedShortAlreadyClaimed);
+                                    layout, stridedAlreadyClaimed);
+    // Unmasked StridedWide accesses are claimed by their own calibrated
+    // closed form, BEFORE the layout-memory curves: a profile that carries an
+    // unmasked strided_wide fingerprint would otherwise price the same bytes
+    // twice.  Masked StridedWide keeps the masked layout-memory curves.
+    // Claims share the strided receipts so the masked-copy floor and
+    // the layout curves below yield on them.
+    mapStridedWideMemoryCompletion(stage, work, profile, resources, simd,
+                                   superblockFactor, layout,
+                                   stridedAlreadyClaimed);
     // The store-group curve below must not price a store this pass already did.
     const bool storesClaimedByClosedForm = std::any_of(
-        stridedShortAlreadyClaimed.begin(), stridedShortAlreadyClaimed.end(),
+        stridedAlreadyClaimed.begin(), stridedAlreadyClaimed.end(),
         [](const StageMemoryAccess *access) { return access->store; });
     if (pipelinedSimd && profile.independentLoadGroupBytesPerCycle > 0.0) {
       std::vector<const StageMemoryAccess *> flatPrefix;
@@ -1865,16 +1975,31 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
              curve->evaluate(exchanges.at(curve)).has_value();
     };
     // A count curve describes one uninterrupted sequence.
+    // Parallel flag: the group was already priced by a closed-form model
+    // (strided-direct or strided-wide).  Claiming follows the identity of the
+    // original access, never a numeric comparison, so two mechanisms cannot
+    // both charge the same bytes.  Groups never merge across claim state: a
+    // partially claimed group would let this curve price bytes a closed form
+    // already owns.
     std::vector<StageMemoryAccess> accessGroups;
+    std::vector<bool> groupClaimed;
     for (const StageMemoryAccess &access : work.memoryAccesses) {
+      const bool claimed = llvm::is_contained(stridedAlreadyClaimed, &access);
       if (!accessGroups.empty() && accessGroups.back().store == access.store &&
           accessGroups.back().layoutKey() == access.layoutKey() &&
-          !hasExchange(access) && !hasExchange(accessGroups.back()))
+          groupClaimed.back() == claimed && !hasExchange(access) &&
+          !hasExchange(accessGroups.back()))
         accessGroups.back().count += access.count;
-      else
+      else {
         accessGroups.push_back(access);
+        groupClaimed.push_back(claimed);
+      }
     }
-    for (const auto &access : accessGroups) {
+    for (size_t groupIndex = 0; groupIndex < accessGroups.size();
+         ++groupIndex) {
+      const auto &access = accessGroups[groupIndex];
+      if (groupClaimed[groupIndex])
+        continue;
       if (!isContinuousMemoryStage(stage.costModelKind) ||
           stage.features.synchronizationCount != 0 || stage.features.hasLoop ||
           stage.features.conditionalBranchCount != 0)
@@ -2566,14 +2691,14 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
                              resources.reduction + resources.shuffle;
   if (!simd && isContinuousMemoryStage(stage.costModelKind) &&
       resources.continuousStoreGroup == 0.0) {
-    resources.storeLayoutService =
-        storeLayoutService(work, profile, superblockFactor);
+    resources.storeLayoutService = storeLayoutService(
+        work, profile, superblockFactor, stridedAlreadyClaimed);
     // Both terms price the SAME transfers. Taking their max strengthens the
     // old flat-throughput bound without charging those bytes a second time.
     resources.store = std::max(resources.store, resources.storeLayoutService);
   }
   mapMaskedStridedCopyCompletion(stage, work, profile, resources,
-                                 stridedShortAlreadyClaimed);
+                                 stridedAlreadyClaimed);
   return materializeControlFlow(stage, mode, resources, profile.controlFlow);
 }
 
@@ -4234,6 +4359,9 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       if (resources->maskedLoadStoreReadModifyWrite > 0.0)
         cost.formulaEvidence +=
             "+simd_masked_load_store_read_modify_write_completion";
+      if (resources->swideLoadCompletion > 0.0 ||
+          resources->swideStoreCompletion > 0.0)
+        cost.formulaEvidence += "+strided_wide_completion";
       if (!stage.workload.segmentedIndirectLoadCounts.empty())
         cost.formulaEvidence +=
             resources->indirectMemoryAnalyticalFallback

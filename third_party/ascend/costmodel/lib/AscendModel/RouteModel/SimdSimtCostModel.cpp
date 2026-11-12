@@ -1273,6 +1273,78 @@ static void readStridedShortCompletionFits(
   }
 }
 
+static void readSwideCompletionFits(
+    ProfileJSONReader &reader, const llvm::json::Object &memory,
+    llvm::StringRef context, std::map<std::string, SwideCompletionFit> &out) {
+  const auto *object = memory.getObject("strided_wide_completion");
+  if (!object)
+    return;
+  std::map<std::string, std::array<double, 2>> factorScales;
+  if (const auto *scaleObject = object->getObject("factor_scale")) {
+    for (const auto &entry : *scaleObject) {
+      const auto *values = entry.second.getAsArray();
+      if (!values)
+        continue;
+      std::array<double, 2> coefficients{};
+      for (size_t index = 0; index < values->size() && index < 2; ++index)
+        coefficients[index] = (*values)[index].getAsNumber().value_or(0.0);
+      factorScales[entry.first.str()] = coefficients;
+    }
+  }
+  for (const auto &entry : *object) {
+    const llvm::StringRef slot = entry.first;
+    if (slot == "description" || slot == "evidence" || slot == "factor_scale")
+      continue;
+    const std::string path =
+        (context + ".strided_wide_completion." + slot).str();
+    const auto *value = entry.second.getAsObject();
+    if (!value) {
+      reader.setError(path + " must be an object");
+      continue;
+    }
+    SwideCompletionFit fit;
+    fit.intercept = value->getNumber("intercept_system_cycles").value_or(0.0);
+    if (const auto *coefficients =
+            value->getArray("coefficient_system_cycles")) {
+      if (coefficients->size() > fit.coefficient.size()) {
+        reader.setError(path + " has more coefficients than the formula holds");
+        continue;
+      }
+      for (size_t index = 0; index < coefficients->size(); ++index)
+        fit.coefficient[index] =
+            (*coefficients)[index].getAsNumber().value_or(0.0);
+    }
+    // Optional SIMT factor correction: [a, b] for 1/(1+a*x+b*x^2),
+    // x = 1/F - 1.  Absent means the slot is factor-independent (SIMD slots).
+    if (const auto *scale = value->getArray("factor_scale_coefficients")) {
+      if (scale->size() > fit.factorScaleCoefficient.size()) {
+        reader.setError(
+            path + " has more factor coefficients than the correction holds");
+        continue;
+      }
+      for (size_t index = 0; index < scale->size(); ++index)
+        fit.factorScaleCoefficient[index] =
+            (*scale)[index].getAsNumber().value_or(0.0);
+    }
+    for (llvm::StringRef group :
+         {llvm::StringRef("rows2"), llvm::StringRef("rows8"),
+          llvm::StringRef("rows16"), llvm::StringRef("rows64")}) {
+      if (!slot.contains(group))
+        continue;
+      if (auto scale = factorScales.find(group.str());
+          scale != factorScales.end())
+        fit.factorScaleCoefficient = scale->second;
+      break;
+    }
+    fit.evidence = reader.string(*value, "evidence", path);
+    if (!fit.isValid()) {
+      reader.setError(path + " requires finite coefficients and evidence");
+      continue;
+    }
+    out[slot.str()] = fit;
+  }
+}
+
 static void
 readLayoutCostMap(ProfileJSONReader &reader,
                   const llvm::json::Object &resources, llvm::StringRef key,
@@ -3094,6 +3166,9 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
     if (const auto *simdMemory = simd->getObject("memory"))
       readStridedShortCompletionFits(reader, *simdMemory, "simd.memory",
                                      simdProfile.stridedShortCompletionFits);
+    if (const auto *simdMemory = simd->getObject("memory"))
+      readSwideCompletionFits(reader, *simdMemory, "simd.memory",
+                              simdProfile.swideCompletionFits);
     readStageResources(reader, *simd, "simd", microbench, simdProfile);
     const auto predicate = simdProfile.operationRates.lookup("predicate.cmp");
     simdProfile.predicateOperationsPerCycle =
@@ -3242,6 +3317,8 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
           reader, simtProfile.maskedStridedStoreCopyCompletionByStrideBytes);
       readStridedShortCompletionFits(reader, *memory, "simt.memory",
                                      simtProfile.stridedShortCompletionFits);
+      readSwideCompletionFits(reader, *memory, "simt.memory",
+                              simtProfile.swideCompletionFits);
     }
     readStageResources(reader, *simt, "simt", microbench, simtProfile);
     if (const auto *resources = simt->getObject("stage_resources")) {

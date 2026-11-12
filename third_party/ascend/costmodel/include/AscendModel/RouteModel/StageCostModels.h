@@ -13,6 +13,7 @@
 #include "AscendModel/RouteModel/StageRouteCostModel.h"
 
 #include "AscendModel/RouteModel/Models/StridedShortCostModel.h"
+#include "AscendModel/RouteModel/Models/StridedWideCostModel.h"
 
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/StringMap.h"
@@ -354,6 +355,8 @@ struct StageModeProfile {
       pipelinedStridedStoreGroupsByRowStrideBytes;
   std::map<std::string, StridedShortCompletionFit>
       stridedShortCompletionFits; // key: stringifyStridedShortFormula(slot)
+  std::map<std::string, SwideCompletionFit>
+      swideCompletionFits; // key: stringifySwideFormula(slot)
   /// Directional completion floors for masked FP32 strided copies.  The key
   /// is the physical byte stride of the strided side.
   std::map<int64_t, MaskedStridedCopyCompletionCost>

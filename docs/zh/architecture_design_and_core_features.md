@@ -2,7 +2,7 @@
 
 本文档介绍Triton-Ascend的架构设计与核心特性，涵盖逻辑架构、代码结构与目录划分，以及Triton core语言扩展、编译选项、SIMD/SIMT编译器与Ascend亲和算子等内容，适用于需要了解Triton-Ascend整体设计与实现原理的开发者。
 
-## 1.逻辑架构
+## 1 逻辑架构
 
 ![图像](./figures/architectural_diagram.png)
 **Triton-Ascend架构说明**
@@ -33,9 +33,9 @@
 - **`driver`**
   提供Triton运行时与Ascend软件栈（CANN）之间的对接能力，加载由BiSheng Compiler生成的设备侧可执行内核 `kernel*.o`。
 
-## 2.代码结构
+## 2 代码结构
 
-### 2.1代码结构原则
+### 2.1 代码结构原则
 
 本项目在标准Triton基础上，扩展支持华为Ascend NPU（通过CANN软件栈）。整体设计遵循以下**代码原则**：
 
@@ -52,7 +52,7 @@
 > - 确需改动社区代码（Triton core或LLVM/MLIR）时，不直接修改源文件，而是沉淀为独立 `.patch`，统一放在 `third_party/ascend/patch/`，在构建准备阶段通过 `git apply` 打入；
 > - 补丁需与明确的社区基线版本 / 提交对应（文件名体现版本号或commit）；硬件无关的通用改进优先向上游社区贡献，从源头减少本地补丁存量。
 
-### 2.2目录结构与功能说明
+### 2.2 目录结构与功能说明
 
 | 目录或文件 | 对应架构层级 | 功能说明 |
 | --- | --- | --- |
@@ -68,11 +68,11 @@
 | `third_party/ascend/AscendNPU-IR/` | compiler | Ascend NPU相关IR与BiSheng编译链适配内容，是从Triton-Ascend编译流程继续下沉到硬件侧代码生成的重要组成部分。 |
 | `third_party/ascend/tutorials/` 和 `third_party/ascend/unittest/` | 示例与测试 | 提供Ascend平台上的Triton示例、迁移样例、Python单元测试和MLIR转换测试，用于验证Ascend后端能力。 |
 
-## 3. 模块
+## 3 模块
 
 ### 3.1 Triton core增强
 
-#### 3.1.1语言扩展
+#### 3.1.1 语言扩展
 
 为支持更灵活的张量子区域操作与单元素访问，语言层扩展了以下算子：
 
@@ -86,7 +86,7 @@
 
 ### 3.2 Triton-Ascend
 
-#### 3.2.1编译选项
+#### 3.2.1 编译选项
 
 NPUOptions是控制**单个kernel编译策略**的参数，可通过 `triton.Config`、Autotune参数或kernel launch meta-parameter传入，在编译期作用于TTIR → Linalg IR → AscendNPU IR的各阶段。按用途可分为以下几类：
 
@@ -117,14 +117,14 @@ NPUOptions是控制**单个kernel编译策略**的参数，可通过 `triton.Con
 
 | Converter                | 功能  | 局限性 |
 | ------------------------ | -------------------------- | ------------------------- |
-| RewriteAddPtrOp          | 分析 `tl.load`、 `tl.store`等操作中的指针表达式 (`AddPtrOp`)。将原始的指针偏移计算分解并建模为包含各维度（轴）具体偏移信息的 `PtrState` 对象。例如，对于形如 `ptr + x // 1024 * 4096 + x % 1024 * 4 + y` 的表达式，分析出 `x` 和 `y` 轴的贡献与关系。                   | 1. 所涉及的原始迭代轴（如`x`）必须能被分裂轴（如`1024`）整除；2. 外部的 `XBLOCK` 大小必须是分裂轴`divisor`的整数倍或其约数。                               |
+| RewriteAddPtrOp          | 分析 `tl.load`、`tl.store`等操作中的指针表达式 (`AddPtrOp`)。将原始的指针偏移计算分解并建模为包含各维度（轴）具体偏移信息的 `PtrState` 对象。例如，对于形如 `ptr + x // 1024 * 4096 + x % 1024 * 4 + y` 的表达式，分析出 `x` 和 `y` 轴的贡献与关系。                   | 1. 所涉及的原始迭代轴（如`x`）必须能被分裂轴（如`1024`）整除；2. 外部的 `XBLOCK` 大小必须是分裂轴`divisor`的整数倍或其约数。                               |
 | CreateAddPtr              | 根据分析得到的 `PtrState` 对象，重新构造一个新的 `AddPtrOp` 指针计算操作。新生成的指针表达式将消除原表达式中的整数除法 (`//`) 和取模 (`%`) 操作。                                                                       | 依赖于 `RewriteAddPtrOp` 成功生成的、合法的 `PtrState`。                                                                                                        |
 | RewriteLoadOp            | 分析 `tl.load` 操作中的掩码 (`mask`) 表达式。将包含整除/取余的复杂掩码条件分解并建模为包含各维度边界信息的 `MaskState` 对象。例如，对于 `mask = x // 1024 < 8 and x % 1024 < 1024 and y < 4`，分析出各维度的独立约束条件。                                                                     | 1. 所涉及的原始迭代轴（如`x`）必须能被分裂轴（如`1024`）整除；2. 外部的 `XBLOCK` 大小必须是分裂轴`divisor`的整数倍或其约数。                               |
 | BuildMask                | 根据分析得到的 `MaskState` 对象，重新构造一个新的掩码 (`mask`) 表达式。新掩码将消除原表达式中的整数除法 (`//`) 和取模 (`%`) 操作。                                                                                            | 仅处理由 `RewriteLoadOp` 或 `RewriteStoreOp` 生成的 `MaskState`。无法处理任意复杂的、非规范化的掩码表达式。                                                   |
 | CreateLoad               | 使用由 `CreateAddPtr` 生成的新指针表达式和由 `BuildMask` 生成的新掩码表达式，重新创建（替换）原始的 `tl.load` 操作，完成指令重写。                                                                                                                                                               | 依赖于 `RewriteAddPtrOp`, `CreateAddPtr`, `RewriteLoadOp`, `BuildMask` 等前置步骤均成功执行。                                                                |
 | RewriteStoreOp           | 分析 `tl.store` 操作中的掩码 (`mask`) 表达式。其功能与 `RewriteLoadOp` 类似，将包含整除/取余的复杂掩码条件分解并建模为 `MaskState` 对象。                                                                                                                                                       | 与 `RewriteLoadOp` 相同。                                                                                                                                    |
 | CreateStore              | 使用由 `CreateAddPtr` 生成的新指针表达式和由 `BuildMask` 生成的新掩码表达式，重新创建（替换）原始的 `tl.store` 操作，完成指令重写。                                                                                                                                                              | 依赖于 `RewriteAddPtrOp`, `CreateAddPtr`, `RewriteStoreOp`, `BuildMask` 等前置步骤均成功执行。                                                               |
-| RewriteAtomicRWMOp       | 处理原子读写修改操作（如 `atomic.add`、`atomic.max` 等）中的指针问题。                                                                                                                | 通常通常与 `RewriteAddPtrOp` 具有相同的局限性。对于某些特殊的、非连续或条件性的原子操作模式可能不支持。                                                           |
+| RewriteAtomicRWMOp       | 处理原子读写修改操作（如 `atomic.add`、`atomic.max` 等）中的指针问题。                                                                                                                | 通常与 `RewriteAddPtrOp` 具有相同的局限性。对于某些特殊的、非连续或条件性的原子操作模式可能不支持。                                                           |
 | RewriteAtomicCASOp       | 处理原子比较并交换操作 (`atomic.cas`) 中的指针线性化问题。分析其指针表达式，通过升维方法消除整除和取余操作，以匹配硬件原子指令的寻址要求。                                                                                                                                                      |                         |
 | RewriteWhile             | 处理 `while` 循环体内的指针叠加操作。                                                          | 不支持循环体内包含条件分支 (`if`) 的复杂指针路径变换。                                         |
 | RewriteFor               | 处理 `for` 循环体内的指针叠加操作。                        |                                              |
@@ -209,7 +209,7 @@ TritonToLinalg用于将TTIR转换为Linalg IR。
 | PtrToIntConverter                          | triton::PtrToIntOp to memref::ExtractAlignedPointerAsIndexOp, arith::IndexCastOp |
 | MakeTensorPtrConverter                     | triton::MakeTensorPtrOp to memref::ReinterpretCastOp         |
 
-##### 3.2.2.4其他Pass
+##### 3.2.2.4 其他Pass
 
 | Pass名称 | 功能描述 | 核心转换器 | 转换器描述 |
 |---|---|---|---|
@@ -252,7 +252,7 @@ kernel[grid](..., compile_mode="simd_simt_template")
 kernel[grid](..., compile_mode="simt_only", num_warps=32)
 ```
 
-##### 3.2.3.2三种模式的编译分流
+##### 3.2.3.2 三种模式的编译分流
 
 ```mermaid
 flowchart TD
@@ -301,7 +301,7 @@ flowchart TD
 | 非结构化访存 | 展开为标量循环 | 尽量转为SIMT间接访存（维数 ≤ 5）；失败则回退标量循环 | 不运行 |
 | TritonToLinalg | 常规Linalg IR降级 | 常规Linalg IR降级 | 不运行 |
 
-##### 3.2.3.3混合模式：只对离散访存走SIMT
+##### 3.2.3.3 混合模式：只对离散访存走SIMT
 
 混合模式**不会**把整个kernel切到SIMT，只对离散 / 非结构化访存点走SIMT，其余仍走SIMD：
 
@@ -318,7 +318,7 @@ flowchart TD
 3. **TritonToLinalg**
    - 常规Linalg IR降级。
 
-##### 3.2.3.4纯SIMT（`simt_only`）
+##### 3.2.3.4 纯SIMT（`simt_only`）
 
 `simt_only` 直接下发Triton IR交给AscendNPU IR做纯SIMT编译。
 

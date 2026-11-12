@@ -63,7 +63,7 @@ Issue: [Related Issue link]
 [FP8 Support Phase 2 #xxx](link)
 ```
 
-## 1. 标题格式
+## 1 标题格式
 
 **格式：** `[Roadmap] <Project Name> Roadmap <Time Range>`，季度发布使用Q1/Q2/Q3/Q4标记，半年度发布使用H1/H2标记。
 
@@ -72,13 +72,13 @@ Issue: [Related Issue link]
 - `[Roadmap] Triton-Ascend Roadmap 2026 Q2`
 - `[Roadmap] Triton-Ascend Roadmap 2026 H1`
 
-## 2. 顶层内容
+## 2 顶层内容
 
-### 2.1开篇描述（可选）
+### 2.1 开篇描述（可选）
 
 提供项目概述、愿景或整体方向的简要总结。例如，简要描述Triton-Ascend本季度在上游对齐、后端性能和算子覆盖方面的目标。
 
-### 2.2重点方向章节
+### 2.2 重点方向章节
 
 列出本周期最关键的3-5个重点方向，建议按项目的**功能领域**或**技术模块**分组，覆盖全局视角：
 
@@ -96,9 +96,9 @@ Issue: [Related Issue link]
 
 - 高层次概括和描述当前周期项目的主要开发方向，无需详细展开
 
-## 3. 主要功能模块章节
+## 3 主要功能模块章节
 
-### 3.1章节划分原则
+### 3.1 章节划分原则
 
 按项目的**功能领域**或**技术模块**分组，例如：
 
@@ -108,7 +108,7 @@ Issue: [Related Issue link]
 - **Usability** - Debugging tools and error reporting
 - **Ecosystem Integration** - Integration with training/inference frameworks
 
-### 3.2各模块结构
+### 3.2 各模块结构
 
 每个模块包含多个**具体工作项**，格式如下：
 
@@ -128,17 +128,17 @@ Issue: [Related Issue link]   [optional]
 PR: [Related PR link]         [optional]
 ```
 
-## 4. 关键元数据字段
+## 4 关键元数据字段
 
 每个工作项应包含以下关键信息：
 
-### 4.1目标（Goal）
+### 4.1 目标（Goal）
 
 - **含义**：工作目标或简要描述
 - **用法**：说明该工作项的目标
 - **示例**：`目标：在昇腾后端tl.dot中支持FP8（E4M3/E5M2）数据类型`
 
-### 4.2负责人（Owner）
+### 4.2 负责人（Owner）
 
 - **含义**：责任人
 - **格式**：`Owner:@GitHubID`
@@ -159,7 +159,7 @@ PR: [Related PR link]         [optional]
 - **用法**：关联实现工作
 - **示例**：`[Triton-Ascend Pull Requests](https://github.com/triton-lang/triton-ascend/pulls)`
 
-## 5. 可选补充内容
+## 5 可选补充内容
 
 ### 5.1 🙋 欢迎贡献标记
 
@@ -172,7 +172,7 @@ Owner: TBD
 Issue: #123
 ```
 
-### 5.2子Issue
+### 5.2 子Issue
 
 在路线图Issue底部列出跨周期的相关路线图Issue或大工作项的分解Issue。
 

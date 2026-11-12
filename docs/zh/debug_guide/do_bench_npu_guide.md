@@ -65,7 +65,7 @@ print(f"Kernel execution time: {ms} ms")
 
 社区`triton.testing.do_bench`使用`Event`来测量时间，记录的开始和结束时间会包含Host侧启动开销。
 
-`do_bench_npu`利用NPU性能分析工具（`MSPTI`或`torch_npu.profiler`），保证返回的时间严格是Device侧执行时间。
+`do_bench_npu`利用NPU性能分析工具（`mspti`或`torch_npu.profiler`），保证返回的时间严格是Device侧执行时间。
 
 **为什么这很重要**：对于执行时间很短的kernel，Host侧的启动开销可能远大于kernel本身的执行时间，此时Host侧计时会被开销主导，难以准确比较不同kernel的真实性能差异。使用Device侧计时可以消除这一干扰，获得反映kernel真实计算效率的测量结果。
 
@@ -116,7 +116,7 @@ ms = do_bench_npu(fn, clear_l2_cache=True)
 
 ### 3. 按名称对特定kernel进行基准测试
 
-如果你的`fn`包含多个kernel，但您只想测量其中一个的执行时间，请使用`target_kernel_name`参数：
+如果你的`fn`包含多个kernel，但你只想测量其中一个的执行时间，请使用`target_kernel_name`参数：
 
 ```python
 ms = do_bench_npu(fn, target_kernel_name="triton_matmul_kernel")
@@ -169,7 +169,7 @@ Triton-Ascend的Autotune扩展支持切换autotune基准测试期间使用的性
 export TRITON_BENCH_METHOD="npu"
 ```
 
-对于执行时间短的kernel，建议使用此方法，否则Host侧启动延迟将主导社区`do_bench`的测量结果，从而导致选择配置非Device侧最优。
+对于执行时间短的kernel，建议使用此方法，否则Host侧启动延迟将主导社区`do_bench`的测量结果，从而导致选择的配置非Device侧最优。
 
 ## 总结
 

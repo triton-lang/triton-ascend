@@ -80,6 +80,6 @@
 
 本行为准则改编自贡献者公约3.0版，该公约永久可在此查阅：[https://www.contributor-covenant.org/version/3/0/](https://www.contributor-covenant.org/version/3/0/)。
 
-贡献者公约 由Organization for Ethical Source负责维护，并以CC BY-SA 4.0许可协议发布。查看该许可协议请访问：[https://creativecommons.org/licenses/by-sa/4.0/](https://creativecommons.org/licenses/by-sa/4.0/)。
+贡献者公约由Organization for Ethical Source负责维护，并以CC BY-SA 4.0许可协议发布。查看该许可协议请访问：[https://creativecommons.org/licenses/by-sa/4.0/](https://creativecommons.org/licenses/by-sa/4.0/)。
 
-关于 贡献者公约 的常见问题解答，请参阅：[https://www.contributor-covenant.org/faq](https://www.contributor-covenant.org/faq)。各语言版本译文请见：[https://www.contributor-covenant.org/translations](https://www.contributor-covenant.org/translations)。更多执行与社区指南资源请见：[https://www.contributor-covenant.org/resources](https://www.contributor-covenant.org/resources)。本分级措施的灵感来源于 [Mozilla行为准则团队](https://github.com/mozilla/inclusion) 的工作。
+关于贡献者公约的常见问题解答，请参阅：[https://www.contributor-covenant.org/faq](https://www.contributor-covenant.org/faq)。各语言版本译文请见：[https://www.contributor-covenant.org/translations](https://www.contributor-covenant.org/translations)。更多执行与社区指南资源请见：[https://www.contributor-covenant.org/resources](https://www.contributor-covenant.org/resources)。本分级措施的灵感来源于 [Mozilla行为准则团队](https://github.com/mozilla/inclusion) 的工作。

@@ -10,7 +10,11 @@ msProf工具用于采集和分析运行在昇腾AI处理器上的算子的关键
 
 - 注：msProf工具的使用依赖CANN包中的msprof可执行文件，该文件中的接口功能和msprof op一致，该文件为CANN包自带，无需单独安装，msProf工具常用命令请参考[msProf常用命令](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html)。
 
-如下命令行是一个算子上板性能数据采集的示例，可以根据自身的需要灵活组合配置参数。示例中 --output为可选参数，用于指定收集到的性能数据的存放路径；--kernel-name为可选参数，用于指定需要收集的单个kernel的性能数据（如果不指定，则只对程序运行过程中调度的第一个算子进行采集）；$HOME/projects/test_op.py为算子可执行脚本。
+如下命令行是一个算子上板性能数据采集的示例，可以根据自身的需要灵活组合配置参数。示例中：
+
+- `--output`：可选参数，用于指定收集到的性能数据的存放路径。
+- `--kernel-name`：可选参数，用于指定需要收集的单个kernel的性能数据；如果不指定，则只对程序运行过程中调度的第一个算子进行采集。
+- `$HOME/projects/test_op.py`：算子可执行脚本。
 
 ```bash
 msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python3 $HOME/projects/test_op.py
@@ -31,7 +35,7 @@ msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 ### 算子仿真流水图
 
 算子调优工具msProf支持仿真环境下的性能数据采集和自动解析。使用msProf工具获取仿真流水图的具体方式请参考[指令流水图](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/optool/atlasopdev_16_0087.html)。
-生成算子仿真流水图的命令与算子上板性能数据采集的命令类似。同样以上述```03-layer-norm.py```为例，```--soc-version```用于指定当前机器的硬件版本，可在终端中输入```npu-smi info```查看：
+生成算子仿真流水图的命令与算子上板性能数据采集的命令类似。同样以上述`03-layer-norm.py`为例，`--soc-version`用于指定当前机器的硬件版本，可在终端中输入`npu-smi info`查看：
 
 ```bash
 # source simulator路径
@@ -85,7 +89,7 @@ msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-versi
 trace.json支持以下两种可视化呈现方式：
 
 - Chrome浏览器
-  在Chrome浏览器中输入 ```chrome://tracing``` 地址，并将通过msprof op simulator生成的指令流水图文件（trace.json）拖到空白处打开，键盘上输入快捷键（W：放大；S：缩小；A：左移；D：右移）可进行查看。
+  在Chrome浏览器中输入 `chrome://tracing` 地址，并将通过msprof op simulator生成的指令流水图文件（trace.json）拖到空白处打开，键盘上输入快捷键（W：放大；S：缩小；A：左移；D：右移）可进行查看。
   **图2** Chrome浏览器时间线界面
 ![alt text](../figures/trace_json_with_chrome.png)
 
@@ -228,6 +232,6 @@ def npu_vector_cmp_kernel(
 ```
 
 **示例图** 优化前后数据对比图
-![图2 optimization2](../figures/optimization.png)
+![优化前后数据对比图](../figures/optimization.png)
 通过分析图中的数据可以发现，优化前后的aiv_scalar_time(μs)和aiv_scalar_ratio差距较大，说明性能差的原因是有很多scalar运算。
 通过采集[算子仿真流水图](#operator-simulation-pipeline)可以得到visualize_data.bin，再用MindStudio Insight解析visualize_data.bin，可以发现xbar = tl.where(cols < N, x - mean, 0.0)有很多scalar运算，通过上面优化可以减少scalar运算。

@@ -85,7 +85,7 @@ git push origin {your_new_branch_name}
 
 6、向Triton-Ascend主仓创建Pull Request
 
-代码推送至您的远程仓库后，您需要在您的新分支和Triton-Ascend main分支之间新建Pull Request。完成新建Pull Request后，“Jenkins CI”将自动为你设置构建流水线测试。你的Pull Request请尽快合并到上游main分支，以降低合并风险。
+代码推送至您的远程仓库后，你需要在你的新分支和Triton-Ascend main分支之间新建Pull Request。完成新建Pull Request后，“Jenkins CI”将自动为你设置构建流水线测试。你的Pull Request请尽快合并到上游main分支，以降低合并风险。
 
 ### 代码门禁异常处理
 

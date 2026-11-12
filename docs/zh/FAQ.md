@@ -17,7 +17,7 @@ A: `triton-ascend 3.2.0` 及以下不可以。需要先卸载社区Triton，再�
 安装Triton-Ascend时会先安装社区Triton，再由Triton-Ascend覆盖同名目录，从而避免后续安装其他依赖Triton的软件包时再次安装Triton而覆盖Triton-Ascend。
 x86与ARM使用不同版本的社区Triton安装包的原因是社区从3.5版本开始才提供ARM版本安装包：x86依赖 `triton==3.2.0`，ARM依赖 `triton==3.5.0`。
 
-- 注：若安装Triton-Ascend后，再安装依赖Triton的三方件或者Triton本身，将覆盖掉已安装的Triton-Ascend目录。此时需要先卸载社区Triton和Triton-Ascend，再安装Triton-Ascend。
+- 注：若安装Triton-Ascend后，再安装依赖Triton的第三方软件包或者Triton本身，将覆盖掉已安装的Triton-Ascend目录。此时需要先卸载社区Triton和Triton-Ascend，再安装Triton-Ascend。
 
 ```bash
 pip uninstall triton
@@ -72,7 +72,7 @@ A: 有集成性能分析工具（profiler），请参考 [算子性能调优方�
 **Q: 编译时报 "UB Overflow" 错误，如何解决？**
 
 A: UB Overflow是Triton-Ascend开发中常见的问题，请参考 [UB Overflow问题排查指南](./debug_guide/ub_overflow.md) 排查问题。如果不知道如何减小Tiling来减少UB占用，可以使用Autotune来自动选择最优配置，Autotune的使用请参考[Triton-Ascend autotune使用指南](./autotune_guide.md)。
-此外，Ascend 950PR&950DT系列产品上可运行的算子迁移到Atlas A2系列产品、Atlas A3系列产品时，由于UB大小的差异可能导致UB Overflow，如果手动排查不出问题，也可采用Autotune自动选择最优配置。
+此外，Ascend 950PR&950DT系列产品上可运行的算子迁移到Atlas A2系列产品、Atlas A3系列产品时，由于UB大小的差异可能导致UB Overflow。如果手动排查不出问题，也可采用Autotune自动选择最优配置。
 
 ## 8. Triton使用限制
 

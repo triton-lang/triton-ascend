@@ -1,6 +1,6 @@
 # Triton-Ascend调试指南
 
-## 1引言
+## 1 引言
 
 本文档为 **Triton-Ascend调试指南**，面向参与Triton与昇腾（Ascend）NPU适配开发的工程师，系统性地介绍在Triton-Ascend编译与运行过程中常用的调试方法与工具。
 
@@ -23,8 +23,8 @@
 
 | 问题类型 | 典型表现/描述 | 推荐的首要调试方法 |
 | :--- | :--- | :--- |
-| **精度问题** | NPU运行结果与标杆参考结果（如PyTorch或Triton CPU解释器）存在差异。 | 4. 解释器模式；5.1打印调试方法 |
-| **编译错误 (MLIRCompilationError)** | 在编译转换阶段失败，通常在Python端抛出 `MLIRCompilationError`。 | 5.2编译错误调试方法 |
+| **精度问题** | NPU运行结果与标杆参考结果（如PyTorch或Triton CPU解释器）存在差异。 | [4. 解释器模式](#debug-interpreter-mode)；[5.1打印调试方法](#debug-printing) |
+| **编译错误 (MLIRCompilationError)** | 在编译转换阶段失败，通常在Python端抛出 `MLIRCompilationError`。 | [5.2 编译错误调试方法](#debug-compilation-error) |
 
 ## 2 Triton-Ascend编译流程概览
 
@@ -53,7 +53,7 @@
 
 在Triton-Ascend的编译过程中，系统会生成多种临时文件用于缓存和调试。理解这些文件的位置和用途对于高效调试至关重要。
 
-### 3.1缓存文件（Cache）
+### 3.1 缓存文件（Cache）
 
 Triton使用缓存机制来加速重复编译过程。编译过程中生成的中间文件会被缓存在用户目录下，避免重复编译相同的kernel。
 
@@ -76,7 +76,7 @@ Triton使用缓存机制来加速重复编译过程。编译过程中生成的�
 
 定期清理：缓存可能占用较多磁盘空间，可定期清理。
 
-```output
+```bash
 rm -rf ~/.triton/cache
 ```
 
@@ -90,7 +90,7 @@ export TRITON_ALWAYS_COMPILE=1
 
 <a id="debug-dump-files"></a>
 
-### 3.2调试转储文件（Dump Files）
+### 3.2 调试转储文件（Dump Files）
 
 通过设置环境变量TRITON_DEBUG=1，可以在编译过程中将中间表示文件转储到磁盘，这些文件是调试编译问题的关键资源。
 
@@ -118,7 +118,7 @@ export TRITON_ALWAYS_COMPILE=1
 python your_triton_program.py
 ```
 
-### 3.3文件生命周期管理
+### 3.3 文件生命周期管理
 
 了解这些临时文件的生成时机和清理策略有助于更好地管理调试环境：
 
@@ -191,7 +191,7 @@ module {
 TTIR是Triton编译器前端生成的中间表示（Intermediate Representation），它以MLIR（Multi-Level IR）格式表达，保留了原始Triton Python内核的语义结构。在 `kernel.ttir.mlir` 中：
 
 - 函数 `@add_kernel` 接收三个指针参数（分别对应输入A、B和输出C的设备内存地址）以及一个整型参数 `n` 表示向量长度。
-- 每个Triton program（向量化执行单元） 处理1024个元素（由 `%c1024_i32` 常量体现），通过 `tt.get_program_id x` 获取当前block的ID，并计算其全局偏移。
+- 每个Triton program（向量化执行单元）处理1024个元素（由 `%c1024_i32` 常量体现），通过 `tt.get_program_id x` 获取当前block的ID，并计算其全局偏移。
 - 使用 `tt.make_range` 与 `tt.splat` 构造SIMD风格的索引张量，配合 `arith.addi` 生成每个线程处理的全局地址偏移。
 - 通过 `tt.addptr` 和 `tt.load` 实现向量化加载，使用掩码 `%6`（由 `arith.cmpi slt` 生成）防止越界访问。
 - 执行逐元素浮点加法 `arith.addf`，再通过 `tt.store` 将结果写回全局内存。
@@ -259,7 +259,7 @@ TTAdapter IR已完成从Triton抽象到适配昇腾NPU的格式转换。
 
 <a id="debug-interpreter-mode"></a>
 
-## 4解释器模式
+## 4 解释器模式
 
 解释器的核心价值在于**隔离硬件差异**。通过环境变量 `TRITON_INTERPRET=1` 强制Triton在CPU上执行kernel计算，其结果可作为判断NPU计算精度的基准。
 
@@ -288,13 +288,13 @@ unset TRITON_INTERPRET
 export TRITON_INTERPRET=0
 ```
 
-## 5调试方法
+## 5 调试方法
 
 <a id="debug-printing"></a>
 
-### 5.1打印调试方法
+### 5.1 打印调试方法
 
-### 5.1.1静态打印调试方法
+### 5.1.1 静态打印调试方法
 
 此方法使用 `tl.static_print` 在编译时打印常量表达式的值，适用于调试编译时已知的配置参数和常量。
 
@@ -350,7 +350,7 @@ export TRITON_DEVICE_PRINT=1
 python your_program.py
 ```
 
-### 5.1.2运行时调试方法
+### 5.1.2 运行时调试方法
 
 此方法使用`tl.device_print`时可以灵活打印需要观察的变量的值。
 设置环境变量`TRITON_DEVICE_PRINT=1`可启用`tl.device_print`功能。此函数允许在kernel内部打印张量值，是分阶段验证计算精度的高效方法。
@@ -396,7 +396,7 @@ python your_program.py
 - 注：打印长度限制：
 tl.device_print在张量打印时有长度限制，具体表现为：当张量长度超过一定阈值时，输出会被截断。
 
-### 5.1.3对比两种打印方法
+### 5.1.3 对比两种打印方法
 
 | 特性 | `tl.device_print` | `tl.static_print` |
 |------|-------------------|-------------------|
@@ -414,7 +414,7 @@ TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）
 
 <a id="debug-compilation-error"></a>
 
-### 5.2编译错误调试方法
+### 5.2 编译错误调试方法
 
 当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompilationError`。
 需要进入Triton-Ascend代码层面定位问题。Triton-Ascend包含Python和C++ 代码层，需根据报错日志中的调用栈信息，定位到具体的报错代码片段，并采用相应的调试方法。
@@ -458,7 +458,7 @@ python
 (Pdb) p result  # 查看结果
 ```
 
-### 5.2.2环境变量调试方法
+### 5.2.2 环境变量调试方法
 
 在开发或调试Triton算子时，可通过设置以下环境变量启用不同阶段的中间表示（IR）打印，帮助定位问题。以下是两个关键调试开关的详细说明。
 

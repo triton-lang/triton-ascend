@@ -1,6 +1,6 @@
 # Triton-Ascend max_autotune 使用指南
 
-本文档介绍Triton-Ascend max_autotune装饰器的使用方法，包括其与@triton.autotune的区别、不同kernel_type调优参数的选取、笛卡尔积展开逻辑及使用注意事项，适用于已熟悉Triton-Ascend自动调优机制、希望减少手工枚举配置的用户。
+本文档介绍Triton-Ascend max_autotune装饰器的使用方法，包括其与 `@triton.autotune` 的区别、不同kernel_type调优参数的选取、笛卡尔积展开逻辑及使用注意事项，适用于已熟悉Triton-Ascend自动调优机制、希望减少手工枚举配置的用户。
 
 ## 文档定位
 
@@ -49,8 +49,8 @@ def kernel(
 
 上述配置展开后的等效配置数量为：
 
-- 基础配置：2 个
-- 用户提供的调优参数：`enable_hivm_auto_cv_balance`（2 种）、`tile_mix_vector_loop`（2 种）
+- 基础配置：2 个；
+- 用户提供的调优参数：`enable_hivm_auto_cv_balance`（2 种）、`tile_mix_vector_loop`（2 种）；
 - 使用默认值的参数：`set_workspace_multibuffer`（2 种）、`tile_mix_cube_loop`（2 种）、其他参数各 1 种。
 
 总配置数量：`2 × 2 × 2 × 2 × 2 = 32` 个配置。

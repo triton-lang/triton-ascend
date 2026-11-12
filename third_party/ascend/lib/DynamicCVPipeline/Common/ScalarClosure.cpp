@@ -1,13 +1,42 @@
+/*
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/IRMapping.h"
+#include "mlir/IR/Visitors.h"
 
-#include "Common.h"
+#include "ascend/include/DynamicCVPipeline/Common/IROrder.h"
 
-static constexpr const char *DEBUG_TYPE = "SplitIfByBlockIdScalarClosure";
+#include "DynamicCVPipeline/Common/ScalarClosure.h"
+#include "DynamicCVPipeline/Common/Utils.h"
+
+static constexpr const char *DEBUG_TYPE = "ScalarClosure";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
   LLVM_DEBUG({                                                                 \
@@ -17,7 +46,6 @@ static constexpr const char *DEBUG_TYPE = "SplitIfByBlockIdScalarClosure";
 
 using namespace mlir;
 using namespace CVPipeline;
-using namespace SplitIf;
 
 void ScalarClosure::collectOuterDependency(Operation *op) {
   op->walk([this](Operation *nestedOp) {
@@ -43,9 +71,12 @@ void ScalarClosure::collectScalarClosure(Value val) {
     return;
   }
 
-  // hard to determine - if scf ops have scalar/memref result, should we clone
-  // the op as well? Perhaps walk into the subregions and clone the
-  // corresponding ops would be better. But for now let's just clone them
+  // A scalar result does not make its whole defining op a scalar operation.
+  // Keep multi-result producers outside the closure and capture their values.
+  if (defOp->getNumResults() != 1) {
+    return;
+  }
+
   collectOuterDependency(defOp);
   scalarOps.insert(defOp);
 }
@@ -59,24 +90,12 @@ void ScalarClosure::collect() {
   }
 }
 
-ScalarClosure::ScalarClosure(BlockGroup &group, ArrayRef<Operation *> ops)
-    : ops(ops) {
-  if (group.ops.empty()) {
-    return;
-  }
-  block = group.ops.front()->getBlock();
-  Operation *parentOp = block->getParentOp();
-  if (!parentOp) {
-    return;
-  }
-  parentBlock = parentOp->getBlock();
-}
-
 ScalarClosure::ScalarClosure(Block *block, ArrayRef<Operation *> ops,
                              bool includeParent)
     : block(block), ops(ops), includeParent(includeParent) {
-  if (!block)
+  if (!block) {
     return;
+  }
   Operation *parentOp = block->getParentOp();
   if (!parentOp) {
     return;
@@ -85,11 +104,11 @@ ScalarClosure::ScalarClosure(Block *block, ArrayRef<Operation *> ops,
 }
 
 bool ScalarClosure::isBefore(Operation *a, Operation *b) {
-  if (a->getBlock() == parentBlock || b->getBlock() == parentBlock) {
-    a = parentBlock->findAncestorOpInBlock(*a);
-    b = parentBlock->findAncestorOpInBlock(*b);
-  }
-  return a->isBeforeInBlock(b);
+  return CVPipeline::isBeforeInIr(a, b);
+}
+
+llvm::ArrayRef<Operation *> ScalarClosure::getScalars() const {
+  return scalarOps.getArrayRef();
 }
 
 std::pair<SmallVector<Operation *>, IRMapping>
@@ -99,12 +118,11 @@ ScalarClosure::capture(int blockId) {
   }
 
   IRMapping mapper;
+  // Emit clones in dominance order: a clone that reads an earlier clone must be
+  // created after it, otherwise it would reference an original that may sit
+  // after the insertion point.
   SmallVector<Operation *> opsToClone(scalarOps.begin(), scalarOps.end());
-
-  // sort the collected ops so that they are in the same dominance order as in
-  // mlir
-  llvm::sort(opsToClone,
-             [this](Operation *a, Operation *b) { return isBefore(a, b); });
+  sortByDomOrder(opsToClone);
 
   Operation *firstOp = nullptr;
   for (auto *op : ops) {

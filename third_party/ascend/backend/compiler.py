@@ -884,6 +884,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 and not metadata.get("disable_vf_operand_substitution", False)):
             _compile_option_list += [f"--enable-vf-operand-substitution=True"]
 
+        decoupled_memory_compute_scheduling = metadata["decoupled_memory_compute_scheduling"]
+        if decoupled_memory_compute_scheduling is not None:
+            _compile_option_list += [f"--decoupled-memory-compute-scheduling={decoupled_memory_compute_scheduling}"]
+
         enable_flatten = metadata["enable_flatten"]
         if enable_flatten is not None:
             _compile_option_list += \
@@ -1339,6 +1343,7 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
+    decoupled_memory_compute_scheduling: bool = None
     enable_tla_mode: bool = field(default=False, init=False)
     enable_cube_block_merge: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = None

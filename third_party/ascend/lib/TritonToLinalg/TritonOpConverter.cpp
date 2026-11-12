@@ -878,6 +878,27 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
     truncOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, truncOp.getResult());
   } else if (srcBitwidth > dstBitwidth) {
+    if (isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType)) {
+      // FP8 downcasts saturate finite values and infinities. Ordered
+      // comparisons leave NaNs unchanged instead of replacing them with a
+      // finite bound.
+      double limit = isa<Float8E4M3FNType>(dstElemType) ? 448.0 : 57344.0;
+      auto bound = [&](double value) -> Value {
+        auto attr = rewriter.getFloatAttr(srcElemType, value);
+        if (auto tensorType = dyn_cast<RankedTensorType>(input.getType()))
+          return rewriter.create<arith::ConstantOp>(
+              loc, DenseElementsAttr::get(tensorType, attr));
+        return rewriter.create<arith::ConstantOp>(loc, attr);
+      };
+      Value upper = bound(limit);
+      Value lower = bound(-limit);
+      Value above = rewriter.create<arith::CmpFOp>(
+          loc, arith::CmpFPredicate::OGT, input, upper);
+      input = rewriter.create<arith::SelectOp>(loc, above, upper, input);
+      Value below = rewriter.create<arith::CmpFOp>(
+          loc, arith::CmpFPredicate::OLT, input, lower);
+      input = rewriter.create<arith::SelectOp>(loc, below, lower, input);
+    }
     // Downcast: use arith.truncf with round_mode=rint
     auto truncOp = rewriter.create<arith::TruncFOp>(loc, resultType, input);
     truncOp->setAttr("round_mode", roundModeAttr);

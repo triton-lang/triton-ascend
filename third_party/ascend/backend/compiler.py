@@ -483,6 +483,10 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         if _load_val is not None:
             ascend.passes.ttir.set_buffer_count(mod, "LOAD", _load_val)
 
+        enable_outer_main_loop = metadata.get("enable_outer_main_loop", False)
+        if enable_outer_main_loop:
+            ascend.passes.ttir.set_enable_outer_main_loop(mod)
+
         if opt.debug:
             # Print the equivalent triton-opt command line so the pass
             # pipeline can be reproduced and debugged outside of Python.
@@ -1339,6 +1343,7 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
+    enable_outer_main_loop: bool = False
     enable_tla_mode: bool = field(default=False, init=False)
     enable_cube_block_merge: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = None

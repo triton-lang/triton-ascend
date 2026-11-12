@@ -22,6 +22,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/SplittedIfWrapSsbufIf.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -469,6 +470,11 @@ static bool checkCanWrap(
     if (!isMainLoopOp(loopOp)) {
       return WalkResult::advance();
     }
+    // An inactive phase is still one logical event. Every block must execute
+    // its normal ready/credit protocol and advance its private state once;
+    // hoisting the payload guard would bypass that protocol for empty phases.
+    if (loopOp->hasAttr(kOuterEventControlCount))
+      return WalkResult::skip();
     // ssbuffer.if sits directly in the main loop body. for uses getBody();
     // while uses the after body. Nested ifs are not ops of this block.
     Block *body = MainLoop(loopOp).getBody();

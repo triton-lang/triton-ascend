@@ -229,6 +229,19 @@ private:
                             OpBuilder &builder);
 };
 
+struct MaskDecomposition {
+  // AND of all leaves that MaskState::parse() can analyze as a rectangle mask.
+  // nullptr when no such leaves exist.
+  Value contMask;
+  // AND of all leaves that MaskState::parse() cannot analyze
+  // (discrete/runtime). nullptr when no such leaves exist.
+  Value discMask;
+};
+
+MaskDecomposition decomposeAndMask(Operation *op, Value mask,
+                                   const Location &loc,
+                                   PatternRewriter &rewriter);
+
 std::optional<MaskState> runMaskAnalysis(Operation *op, OpBuilder &builder);
 
 } // namespace triton

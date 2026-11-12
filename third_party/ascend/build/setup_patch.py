@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from contextlib import contextmanager
 
 try:
     from setuptools.command.bdist_wheel import bdist_wheel
@@ -51,6 +52,10 @@ def _is_git_repo():
     return (_REPO_ROOT / ".git").is_dir()
 
 
+def check_env_flag(name: str, default: str = "") -> bool:
+    return os.getenv(name, default).upper() in ["ON", "1", "YES", "TRUE", "Y"]
+
+
 def _is_linux_os(os_id):
     if os.path.exists("/etc/os-release"):
         with open("/etc/os-release", "r") as f:
@@ -58,58 +63,45 @@ def _is_linux_os(os_id):
     return False
 
 
+def _get_llvm_system_suffix():
+    if env_system_suffix := os.environ.get("TRITON_LLVM_SYSTEM_SUFFIX"):
+        return env_system_suffix
+    system = platform.system()
+    machine = platform.machine()
+    arch = {"x86_64": "x64", "aarch64": "arm64"}.get(machine, machine)
+    if system == "Darwin":
+        return f"macos-{arch}"
+    if system == "Linux":
+        if arch == "arm64":
+            return "almalinux-arm64" if _is_linux_os("almalinux") else "ubuntu-arm64"
+        if arch == "x64":
+            # Ascend manylinux must keep its AlmaLinux artifact even when
+            # glibc > 2.28 would select Ubuntu in the upstream heuristic.
+            if _is_linux_os("almalinux"):
+                return "almalinux-x64"
+            major, minor, *_ = map(int, platform.libc_ver()[1].split("."))
+            return "ubuntu-x64" if major * 100 + minor > 228 else "almalinux-x64"
+    return None
+
+
 def _get_llvm_patch_hash():
     patch_dir = _REPO_ROOT / "third_party" / "ascend" / "patch"
-    if patch_dir.is_dir():
-        patch_files = sorted(f for f in os.listdir(patch_dir)
-                             if f.startswith("llvm_patch_") and f.endswith(".patch") and (patch_dir / f).is_file())
-    else:
-        patch_files = []
+    patch_files = sorted(path for path in patch_dir.glob("llvm_patch_*.patch") if path.is_file())
     if not patch_files:
         return "00000000"
     import hashlib
     h = hashlib.sha256()
-    for pf in patch_files:
-        h.update((patch_dir / pf).read_bytes())
+    for patch in patch_files:
+        h.update(patch.read_bytes())
     return h.hexdigest()[:8]
 
 
 def _get_ascend_llvm_package_info(base_dir):
-    system = platform.system()
-    try:
-        arch = {"x86_64": "x64", "arm64": "arm64", "aarch64": "arm64"}[platform.machine()]
-    except KeyError:
-        arch = platform.machine()
-
-    env_system_suffix = os.environ.get("TRITON_LLVM_SYSTEM_SUFFIX")
-    if env_system_suffix:
-        system_suffix = env_system_suffix
-    elif system == "Darwin":
-        system_suffix = f"macos-{arch}"
-    elif system == "Linux":
-        if arch == "arm64" and _is_linux_os("almalinux"):
-            system_suffix = "almalinux-arm64"
-        elif arch == "arm64":
-            system_suffix = "ubuntu-arm64"
-        elif arch == "x64":
-            # AlmaLinux (manylinux) images always take the almalinux build,
-            # which is compiled against glibc 2.28 and therefore runs on any
-            # >= 2.28 image. The glibc-version heuristic below picked
-            # ubuntu-x64 on manylinux_2_34 (glibc 2.34 > 2.28), whose
-            # Ubuntu 22.04 binaries need glibc 2.35 and fail to run there.
-            if _is_linux_os("almalinux"):
-                system_suffix = "almalinux-x64"
-            else:
-                vglibc = tuple(map(int, platform.libc_ver()[1].split(".")))
-                vglibc = vglibc[0] * 100 + vglibc[1]
-                system_suffix = "ubuntu-x64" if vglibc > 228 else "almalinux-x64"
-        else:
-            return None
-    else:
+    system_suffix = _get_llvm_system_suffix()
+    if system_suffix is None:
         return None
 
-    llvm_hash_path = Path(base_dir) / "cmake" / "llvm-hash.txt"
-    rev = llvm_hash_path.read_text()[:8]
+    rev = (Path(base_dir) / "cmake/llvm-hash.txt").read_text(encoding="utf-8")[:8]
     patch_hash = _get_llvm_patch_hash()
     name = f"llvm-{rev}-{patch_hash}-{system_suffix}"
     sym_name = f"llvm-{system_suffix}"
@@ -152,7 +144,7 @@ def checkout_file(files):
 
 
 def _is_dev_mode():
-    if os.getenv("IS_MANYLINUX", "FALSE").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
+    if not check_env_flag("IS_MANYLINUX", "FALSE"):
         return True
     if os.environ.get("TRITON_WHEEL_VERSION_SUFFIX", ""):
         return True
@@ -340,7 +332,7 @@ def _git_check_call_with_retry(cmd, cwd=None, retries=3, interval=5):
 
 
 def _npuir_build_enabled():
-    return os.getenv("TRITON_BUILD_NPUIR", "OFF").upper() in ["ON", "1", "YES", "TRUE", "Y"]
+    return check_env_flag("TRITON_BUILD_NPUIR", "OFF")
 
 
 def _ensure_npuir_payload():
@@ -353,18 +345,28 @@ def _ensure_npuir_payload():
 
 
 def _ensure_distributed_submodule():
+    import json
+    import re
+
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
     distributed_dir = _REPO_ROOT / "third_party" / "ascend" / "Triton-distributed-ascend"
-    commit_id = "64e4e09ebf7899514aa7d4e8968db4198c7f0608"
+    with open(_REPO_ROOT / "cmake" / "triton-distributed-info.json", encoding="utf-8") as metadata:
+        info = json.load(metadata)
+    commit_id = info["revision"]
+    if (not isinstance(info["repository"], str)
+            or re.fullmatch(r"https://[^/\s]+/[A-Za-z0-9_./-]+\.git", info["repository"]) is None):
+        raise ValueError("Triton-Distributed requires an HTTPS repository URL")
+    if not isinstance(commit_id, str) or re.fullmatch(r"[0-9a-f]{40}", commit_id) is None:
+        raise ValueError("Triton-Distributed revision must be a full commit SHA")
     if not distributed_dir.is_dir():
         try:
             _git_check_call_with_retry([
                 "git",
                 "clone",
-                "https://gitcode.com/Ascend/Triton-distributed-ascend.git",
-                "-b",
-                "master",
+                "--no-checkout",
+                info["repository"],
+                str(distributed_dir),
             ], cwd=_REPO_ROOT / "third_party" / "ascend")
         except Exception:
             # A clone interrupted by a network failure leaves a partially
@@ -372,27 +374,13 @@ def _ensure_distributed_submodule():
             if distributed_dir.is_dir():
                 shutil.rmtree(distributed_dir, ignore_errors=True)
             raise
-    if _is_git_repo():
-        _add_git_safe_dir(str(distributed_dir))
-        _git_check_call_with_retry([
-            "git",
-            "fetch",
-            "origin",
-        ], cwd=distributed_dir)
-        subprocess.check_call([
-            "git",
-            "checkout",
-            commit_id,
-        ], cwd=distributed_dir)
-
-        result = subprocess.run([
-            "git",
-            "rev-parse",
-            "HEAD",
-        ], capture_output=True, text=True, cwd=distributed_dir)
-        current_id = result.stdout.strip()
-        if current_id != commit_id:
-            raise RuntimeError(f"Triton-Distributed submodule is not {commit_id}")
+    _add_git_safe_dir(str(distributed_dir))
+    _git_check_call_with_retry(["git", "fetch", "origin", commit_id], cwd=distributed_dir)
+    subprocess.check_call(["git", "checkout", commit_id], cwd=distributed_dir)
+    result = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True,
+                            cwd=distributed_dir)
+    if result.stdout.strip() != commit_id:
+        raise RuntimeError(f"Triton-Distributed checkout is not {commit_id}")
 
 
 def _copy_ascend_tools(extdir, cmake_dir):
@@ -539,6 +527,14 @@ def patch_module(mod):
         return _orig_get_llvm_package_info()
 
     mod.get_llvm_package_info = get_llvm_package_info
+
+    # Keep the upstream setup.py definitions intact; only Ascend reads this tag.
+    def get_json_package_info():
+        version = (Path(mod.get_base_dir()) / "cmake/json-version.txt").read_text(encoding="utf-8").strip()
+        url = f"https://github.com/nlohmann/json/releases/download/{version}/include.zip"
+        return mod.Package("json", "", url, "JSON_INCLUDE_DIR", "", "JSON_SYSPATH")
+
+    mod.get_json_package_info = get_json_package_info
 
     # 3. Skip downloading NVIDIA proprietary toolchain dependencies
     #    (ptxas/cuobjdump/...); they are irrelevant for the Ascend wheel.
@@ -693,36 +689,36 @@ def patch_module(mod):
     mod._ascend_is_manylinux = is_manylinux
 
 
+@contextmanager
 def _robust_open_url(url, retries=5):
-    """Download ``url`` fully to a temp file with resumable retries.
+    """Yield a downloaded stream, cleaning its temporary archive on exit.
 
-    The prebuilt LLVM tarballs are ~1.2 GB. The upstream setup.py streams
-    them via urllib with a 300 s timeout and no retry: OBS serves large
-    objects at ~2.5 MB/s per connection, so every download exceeds the
-    timeout (or gets cut) and the build dies — systematically, on every
-    job. Use curl with `-C -` so each attempt resumes from the bytes
-    already on disk instead of restarting.
+    Keep resumable curl retries for Ascend artifacts. Both setup.py callers
+    use the response as a context manager; archive ownership lasts until
+    that context exits, including extraction failures.
     """
-    import subprocess
     import tempfile
 
-    tmp = tempfile.NamedTemporaryFile(delete=False)
-    tmp.close()
-    last_error = None
-    for attempt in range(1, retries + 1):
-        proc = subprocess.run(
-            [
-                "curl", "-fsSL", "-C", "-", "--retry", "2", "--retry-all-errors", "--connect-timeout", "30",
-                "--max-time", "1000", "-o", tmp.name, url
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        if proc.returncode == 0:
-            return open(tmp.name, "rb")
-        last_error = proc.stderr.decode(errors="replace")[-300:]
-        print(f"[setup_patch] download of {url} attempt {attempt}/{retries} failed: {last_error}")
-    raise RuntimeError(f"download failed after {retries} attempts: {last_error}")
+    with tempfile.TemporaryDirectory(prefix="triton-ascend-download-") as directory:
+        archive = Path(directory) / "archive"
+        last_error = None
+        for attempt in range(1, retries + 1):
+            proc = subprocess.run(
+                [
+                    "curl", "-fsSL", "-C", "-", "--retry", "2", "--retry-all-errors", "--connect-timeout", "30",
+                    "--max-time", "1000", "-o",
+                    str(archive), url
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if proc.returncode == 0:
+                with archive.open("rb") as response:
+                    yield response
+                return
+            last_error = proc.stderr.decode(errors="replace")[-300:]
+            print(f"[setup_patch] download of {url} attempt {attempt}/{retries} failed: {last_error}")
+        raise RuntimeError(f"download failed after {retries} attempts: {last_error}")
 
 
 def _build_setup_kwargs(mod, kwargs):

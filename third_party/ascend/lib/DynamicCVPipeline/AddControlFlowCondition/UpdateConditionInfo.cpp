@@ -21,6 +21,7 @@
  */
 
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -44,6 +45,8 @@
 #include "mlir/IR/ValueRange.h"
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
@@ -1880,6 +1883,31 @@ int UpdateConditionInfoPass::updateIfConds(
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
+  DenseMap<Operation *, int> staticOffsets;
+  if (CVPipeline::hasOuterMainLoop(module)) {
+    // Plan each normalized domain independently. An ordinary loop elsewhere in
+    // the module must neither enable outer scheduling nor disable a valid pair.
+    std::map<int64_t, SmallVector<Operation *>> eventPairs;
+    for (Operation *loop : mainLoopOps)
+      if (loop->hasAttr(CVPipeline::kOuterEventControlCount) &&
+          loop->hasAttr(CVPipeline::kExplicitMainLoop))
+        eventPairs[loop->getAttrOfType<IntegerAttr>(kMainLoop).getInt()]
+            .push_back(loop);
+    for (const auto &[id, loops] : eventPairs) {
+      auto schedule = inferOuterEventStaticSchedule(loops, *info);
+      if (failed(schedule))
+        continue;
+      staticOffsets.insert(schedule->offsets.begin(), schedule->offsets.end());
+      for (Operation *loop : loops)
+        info->outerSweepPlans[loop] = {schedule->drain,
+                                       schedule->groupSweepGrants};
+    }
+    if (ssbufferPtrs.empty() && llvm::any_of(mainLoopOps, [&](Operation *loop) {
+          return !info->outerSweepPlans.contains(loop);
+        }))
+      ssbufferPtrs = allocSSBuffer(module);
+  }
+
   // Step0: Collect dependency buffers once outside the loop
   DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
       crossCoreBuffers;
@@ -1924,6 +1952,32 @@ int UpdateConditionInfoPass::updateIfConds(
     if (validateBlockCounters(loopOp, ifOps.size()) ==
         UPDATE_CONDITION_INFO_FAILED) {
       return UPDATE_CONDITION_INFO_FAILED;
+    }
+
+    if (info->outerSweepPlans.contains(loopOp)) {
+      auto loop = cast<scf::ForOp>(loopOp);
+      for (scf::IfOp ifOp : ifOps) {
+        auto entry = staticOffsets.find(ifOp);
+        if (entry == staticOffsets.end())
+          return UPDATE_CONDITION_INFO_FAILED;
+        OpBuilder builder(ifOp);
+        Location loc = ifOp.getLoc();
+        Value ordinal = loop.getInductionVar();
+        if (entry->second != 0) {
+          Value offset =
+              builder.create<arith::ConstantIntOp>(loc, entry->second, 64);
+          ordinal = builder.create<arith::SubIOp>(loc, ordinal, offset);
+        }
+        // Each stage fires at sweep = offset + ordinal. An unsigned
+        // comparison excludes both the negative prologue ordinals and the
+        // ordinals beyond the event count. Native slot selection uses this
+        // same ordinal, with no loop-carried readiness or ordinal counters.
+        Value ready = builder.create<arith::CmpIOp>(
+            loc, arith::CmpIPredicate::ult, ordinal, loop.getUpperBound());
+        ifOp.getConditionMutable().assign(ready);
+        info->cntArgs[ifOp] = ordinal;
+      }
+      continue;
     }
 
     // Update the conditions of ifOp in this loop op.
@@ -1990,12 +2044,10 @@ void UpdateConditionInfoPass::runOnOperation() {
   }
 
   LDBG("Enter UpdateConditionInfo pass." << "\n");
-  // Step1:Init the ssbufferPtrs
-  SmallVector<SmallVector<Value>> ssbufferPtrs = allocSSBuffer(module);
-
-  // Step2:Update the conditions of ifOp based on the intraCoreDependentMap and
-  // crossCoreDependentMap
-  int updateResult = updateIfConds(module, ssbufferPtrs);
+  SmallVector<SmallVector<Value>> ssbufferPtrs;
+  if (!CVPipeline::hasOuterMainLoop(module))
+    ssbufferPtrs = allocSSBuffer(module);
+  int updateResult = updateIfConds(module, std::move(ssbufferPtrs));
 
   if (updateResult != UPDATE_CONDITION_INFO_SUCCESS) {
     LDBG("updateIfConds failed!");

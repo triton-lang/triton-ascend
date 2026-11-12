@@ -56,6 +56,7 @@
 #include "mlir/Support/WalkResult.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
@@ -1051,6 +1052,16 @@ static llvm::FailureOr<Value> createMatmulPlaceHolderValue(
         auto sourceEmpty = llvm::dyn_cast_if_present<tensor::EmptyOp>(sourceOp);
         if (!sourceEmpty) {
           return llvm::failure();
+        }
+
+        // Share the matmul output storage across the active and inactive
+        // branches. A separate unwritten L0C placeholder has no buffer life.
+        auto loop = ifOp->getParentOfType<scf::ForOp>();
+        if (loop && loop->hasAttr(CVPipeline::kOuterEventControlCount) &&
+            sourceEmpty->getBlock() == ifOp.thenBlock() &&
+            sourceEmpty.getDynamicSizes().empty()) {
+          sourceEmpty->moveBefore(ifOp);
+          return sourceEmpty.getResult();
         }
 
         auto emptyOp = builder.create<tensor::EmptyOp>(

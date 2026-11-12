@@ -21,6 +21,7 @@
  */
 
 #include "DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/AddBlockIdForControlOps.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
@@ -55,6 +56,12 @@ void SplitDataflowPass::runOnOperation() {
 
   // Step 1: Add block_id for control flow operations
   pm.addPass(createAddBlockIdForControlOpsPass());
+
+  // Order event carry readers before their writers while the tensor dataflow
+  // is still explicit. InterCoreTransferAndSync introduces synchronization
+  // that must not be crossed later; AnalyzeDataFlow checks the order again.
+  if (CVPipeline::hasOuterMainLoop(module))
+    pm.addPass(createReorderOuterEventCarryPass());
 
   // Step 2: Analyze data dependencies between Vector and Cube blocks
   pm.addPass(createDataDependencyAnalysisPass());

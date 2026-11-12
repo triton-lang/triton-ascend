@@ -1682,17 +1682,16 @@ class AscendBackend(BaseBackend):
             # DynamicCV is A5-only. A6 remains register-based but must not
             # enter the DynamicCV lowering or pass its compiler flags.
             if not _is_a5_target_arch(self.target.arch):
+                if options.enable_dynamic_cv_pipeline:
+                    warnings.warn(
+                        "enable_dynamic_cv_pipeline only takes effect for Ascend 950 "
+                        "compilation; ignoring the explicit value.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
                 object.__setattr__(options, "enable_dynamic_cv_pipeline", False)
             elif options.enable_dynamic_cv_pipeline is None:
                 object.__setattr__(options, "enable_dynamic_cv_pipeline", options.compile_on_910_95)
-            elif options.enable_dynamic_cv_pipeline and not options.compile_on_910_95:
-                warnings.warn(
-                    "enable_dynamic_cv_pipeline only takes effect for Ascend 950 "
-                    "compilation; ignoring the explicit value.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                object.__setattr__(options, "enable_dynamic_cv_pipeline", False)
             if not internal_options:
                 _normalize_bishengir_simt_optimization_for_context(options, normalized_opts)
                 # Community JIT rejects the legacy launch keyword "stream"

@@ -19,6 +19,14 @@ from triton.backends.compiler import GPUTarget
 pytestmark = pytest.mark.backend("native")
 
 
+@pytest.mark.parametrize("optimized", [None, False, True])
+def test_explicit_metaop_option(optimized):
+    options = compiler.NPUOptions(arch="Ascend950PR_9579", enable_optimized_metaop=optimized)
+    default = compiler.NPUOptions(arch="Ascend950PR_9579")
+    assert options.enable_optimized_metaop is optimized
+    assert (options.hash() == default.hash()) is (optimized is None)
+
+
 @pytest.fixture(autouse=True)
 def reset_option_warnings(monkeypatch):
     monkeypatch.setattr(utils, "_WARNED_DEPRECATED_NPU_OPTIONS", set())

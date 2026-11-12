@@ -810,7 +810,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
 
-        _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
+        optimized_metaop = metadata.get("enable_optimized_metaop")
+        if optimized_metaop is None:
+            optimized_metaop = is_cann_version_at_least(9, 2, 0)
+        _compile_option_list += [f"--enable-optimized-metaop={optimized_metaop}"]
 
         has_limit, aic, aiv = NPUUtils().get_device_limit()
         if _is_a5_target_arch(metadata["target"].arch) or has_limit:
@@ -1328,6 +1331,7 @@ class NPUOptions:
     enable_hivm_batch_matmul: bool = False
     # Only takes effect on the Ascend 950 non-pure-SIMT BiShengIR compilation path.
     enable_vf_stack_limit: bool = False
+    enable_optimized_metaop: Optional[bool] = None
     sync_solver: bool = None
     unit_flag: bool = None
     enable_flatten: bool = None

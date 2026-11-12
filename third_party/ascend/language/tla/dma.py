@@ -279,10 +279,18 @@ class LoadGM2L1Params:
     :param enable_nz2dn: Reserved reverse-layout flag. Must be ``False``
         (default); ``True`` raises ``NotImplementedError``.
     :type enable_nz2dn: bool
+    :param row_count: Optional scalar integer selecting a runtime ND row window.
+        The source and destination views describe the full parent tiles.
+        The count and both row offsets must be 16-row aligned and in bounds.
+    :param source_row: First row in the GM parent for a row window.
+    :param destination_row: First row in the L1 parent for a row window.
     """
     l2_cache_ctrl: int = None
     enable_nz2nd: bool = False
     enable_nz2dn: bool = False
+    row_count: object = None
+    source_row: object = 0
+    destination_row: object = 0
 
 
 @dataclass(frozen=True)
@@ -590,7 +598,25 @@ def load_gm_to_l1(src, dst, params=None, _semantic=None):
     attrs = {}
     if cache is not None:
         attrs["l2_cache_mode"] = _semantic.builder.get_int32_attr(_integer(cache, "l2_cache_ctrl", bits=32))
-    _semantic.builder.create_tla_nd2nz(src.handle, dst.handle, attrs)
+    row_count = _unwrap_if_constexpr(p.row_count)
+    source_row = _unwrap_if_constexpr(p.source_row)
+    destination_row = _unwrap_if_constexpr(p.destination_row)
+    if row_count is None:
+        if type(source_row) is not int or source_row != 0 or type(destination_row) is not int or destination_row != 0:
+            raise ValueError("ND2NZ row offsets require row_count")
+        _semantic.builder.create_tla_nd2nz(src.handle, dst.handle, attrs)
+    else:
+        for name, value in (("row_count", row_count), ("source_row", source_row), ("destination_row", destination_row)):
+            if type(value) is int and (value < 0 or value % 16 or (name == "row_count" and value == 0)):
+                raise ValueError(f"ND2NZ {name} must be nonnegative and 16-row aligned, with positive row_count")
+        if type(row_count) is int:
+            if type(source_row) is int and source_row + row_count > src.shape[0]:
+                raise ValueError("ND2NZ source row window exceeds the parent view")
+            if type(destination_row) is int and destination_row + row_count > dst.shape[1] * 16:
+                raise ValueError("ND2NZ destination row window exceeds the parent view")
+        _semantic.builder.create_tla_nd2nz(src.handle, dst.handle, attrs, row_count=_scalar(p.row_count, _semantic),
+                                           source_row=_scalar(p.source_row, _semantic),
+                                           destination_row=_scalar(p.destination_row, _semantic))
 
 
 @builtin

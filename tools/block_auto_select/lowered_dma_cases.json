@@ -1,0 +1,534 @@
+{
+  "command": [
+    "/usr/local/Ascend/cann-9.1.0/tools/bisheng_compiler/bin/bisheng",
+    "-x",
+    "cce",
+    "-std=c++17",
+    "--cce-aicore-only",
+    "--cce-aicore-arch=dav-c310-vec",
+    "-O2",
+    "-emit-llvm",
+    "-c",
+    "-I${ASCEND_NPUIR}/bishengir/lib/Template/include",
+    "descriptors.cpp",
+    "-o",
+    "descriptors.bc"
+  ],
+  "device_executed": false,
+  "compiler_sha256": "647f5772aab1b93dd59f088721c94c3edae1212c92b6dc4117b3c5742548252a",
+  "header": {
+    "path": "/usr/local/Ascend/cann-9.1.0/tools/bisheng_compiler/lib/clang/15.0.5/include/__clang_cce_aicore_functions.h",
+    "sha256": "ce5227860fc2aa419043f396782f605df5797a9f33e3ce9e243a227a0c91346a"
+  },
+  "source_sha256": "e312b2ee778dfa46ea449ae75ae36e8033f4354ffa5db23729839762f0d2050f",
+  "llvm_sha256": "55224a8a656c1b60ba1ef2d11fd508394d3d622f4aa392b3ac5ad26a0b92fe1a",
+  "rows": [
+    {
+      "name": "read_float_1_32",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.f32.DV",
+      "words": [
+        288230377225453584,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 32
+    },
+    {
+      "name": "write_float_1_32",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        1073741840,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 32
+    },
+    {
+      "name": "read_float_7_96",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.f32.DV",
+      "words": [
+        288230379372937328,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 672
+    },
+    {
+      "name": "write_float_7_96",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        3221225584,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 672
+    },
+    {
+      "name": "read_float_13_123",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.f32.DV",
+      "words": [
+        288230380278907088,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 1599
+    },
+    {
+      "name": "write_float_13_123",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        4127195344,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 1599
+    },
+    {
+      "name": "nd_float_NEAREST_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b32",
+      "words": [
+        87960980553760,
+        11534343
+      ],
+      "direction": "load",
+      "bytes": 9240
+    },
+    {
+      "name": "nd_float_CONSTANT_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b32",
+      "words": [
+        87960980553760,
+        72057594049462279
+      ],
+      "direction": "load",
+      "bytes": 9240
+    },
+    {
+      "name": "read_half_1_32",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.f16.DV",
+      "words": [
+        288230377225453584,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 32
+    },
+    {
+      "name": "write_half_1_32",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        1073741840,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 32
+    },
+    {
+      "name": "read_half_7_96",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.f16.DV",
+      "words": [
+        288230379372937328,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 672
+    },
+    {
+      "name": "write_half_7_96",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        3221225584,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 672
+    },
+    {
+      "name": "read_half_13_123",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.f16.DV",
+      "words": [
+        288230380278907088,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 1599
+    },
+    {
+      "name": "write_half_13_123",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        4127195344,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 1599
+    },
+    {
+      "name": "nd_half_NEAREST_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b16",
+      "words": [
+        87960980553760,
+        11534343
+      ],
+      "direction": "load",
+      "bytes": 4620
+    },
+    {
+      "name": "nd_half_CONSTANT_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b16",
+      "words": [
+        87960980553760,
+        72057594049462279
+      ],
+      "direction": "load",
+      "bytes": 4620
+    },
+    {
+      "name": "read_bfloat16_t_1_32",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.bf16.DV",
+      "words": [
+        288230377225453584,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 32
+    },
+    {
+      "name": "write_bfloat16_t_1_32",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        1073741840,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 32
+    },
+    {
+      "name": "read_bfloat16_t_7_96",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.bf16.DV",
+      "words": [
+        288230379372937328,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 672
+    },
+    {
+      "name": "write_bfloat16_t_7_96",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        3221225584,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 672
+    },
+    {
+      "name": "read_bfloat16_t_13_123",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.bf16.DV",
+      "words": [
+        288230380278907088,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 1599
+    },
+    {
+      "name": "write_bfloat16_t_13_123",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        4127195344,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 1599
+    },
+    {
+      "name": "nd_bfloat16_t_NEAREST_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b16",
+      "words": [
+        87960980553760,
+        11534343
+      ],
+      "direction": "load",
+      "bytes": 4620
+    },
+    {
+      "name": "nd_bfloat16_t_CONSTANT_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b16",
+      "words": [
+        87960980553760,
+        72057594049462279
+      ],
+      "direction": "load",
+      "bytes": 4620
+    },
+    {
+      "name": "read_uint8_t_1_32",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.u8.DV",
+      "words": [
+        288230377225453584,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 32
+    },
+    {
+      "name": "write_uint8_t_1_32",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        1073741840,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 32
+    },
+    {
+      "name": "read_uint8_t_7_96",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.u8.DV",
+      "words": [
+        288230379372937328,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 672
+    },
+    {
+      "name": "write_uint8_t_7_96",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        3221225584,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 672
+    },
+    {
+      "name": "read_uint8_t_13_123",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.u8.DV",
+      "words": [
+        288230380278907088,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 1599
+    },
+    {
+      "name": "write_uint8_t_13_123",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        4127195344,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 1599
+    },
+    {
+      "name": "nd_uint8_t_NEAREST_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b8",
+      "words": [
+        87960980553760,
+        11534343
+      ],
+      "direction": "load",
+      "bytes": 2310
+    },
+    {
+      "name": "nd_uint8_t_CONSTANT_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b8",
+      "words": [
+        87960980553760,
+        72057594049462279
+      ],
+      "direction": "load",
+      "bytes": 2310
+    },
+    {
+      "name": "read_int8_t_1_32",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.s8.DV",
+      "words": [
+        288230377225453584,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 32
+    },
+    {
+      "name": "write_int8_t_1_32",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        1073741840,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 32
+    },
+    {
+      "name": "read_int8_t_7_96",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.s8.DV",
+      "words": [
+        288230379372937328,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 672
+    },
+    {
+      "name": "write_int8_t_7_96",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        3221225584,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 672
+    },
+    {
+      "name": "read_int8_t_13_123",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.s8.DV",
+      "words": [
+        288230380278907088,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 1599
+    },
+    {
+      "name": "write_int8_t_13_123",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        4127195344,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 1599
+    },
+    {
+      "name": "nd_int8_t_NEAREST_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b8",
+      "words": [
+        87960980553760,
+        11534343
+      ],
+      "direction": "load",
+      "bytes": 2310
+    },
+    {
+      "name": "nd_int8_t_CONSTANT_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b8",
+      "words": [
+        87960980553760,
+        72057594049462279
+      ],
+      "direction": "load",
+      "bytes": 2310
+    },
+    {
+      "name": "read_uint32_t_1_32",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.u32.DV",
+      "words": [
+        288230377225453584,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 32
+    },
+    {
+      "name": "write_uint32_t_1_32",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        1073741840,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 32
+    },
+    {
+      "name": "read_uint32_t_7_96",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.u32.DV",
+      "words": [
+        288230379372937328,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 672
+    },
+    {
+      "name": "write_uint32_t_7_96",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        3221225584,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 672
+    },
+    {
+      "name": "read_uint32_t_13_123",
+      "intrinsic": "llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.u32.DV",
+      "words": [
+        288230380278907088,
+        281474976711168
+      ],
+      "direction": "load",
+      "bytes": 1599
+    },
+    {
+      "name": "write_uint32_t_13_123",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV",
+      "words": [
+        4127195344,
+        281474976711168
+      ],
+      "direction": "store",
+      "bytes": 1599
+    },
+    {
+      "name": "nd_uint32_t_NEAREST_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b32",
+      "words": [
+        87960980553760,
+        11534343
+      ],
+      "direction": "load",
+      "bytes": 9240
+    },
+    {
+      "name": "nd_uint32_t_CONSTANT_PADDING",
+      "intrinsic": "llvm.hivm.ND.DMA.OUT.TO.UB.b32",
+      "words": [
+        87960980553760,
+        72057594049462279
+      ],
+      "direction": "load",
+      "bytes": 9240
+    },
+    {
+      "name": "ub_1_1",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.UB.v310",
+      "words": [
+        2533296265297921
+      ],
+      "direction": "ub_copy",
+      "bytes": 32
+    },
+    {
+      "name": "ub_7_3",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.UB.v310",
+      "words": [
+        2533296265428999
+      ],
+      "direction": "ub_copy",
+      "bytes": 672
+    },
+    {
+      "name": "ub_13_127",
+      "intrinsic": "llvm.hivm.MOV.UB.TO.UB.v310",
+      "words": [
+        2533296273555469
+      ],
+      "direction": "ub_copy",
+      "bytes": 52832
+    }
+  ]
+}

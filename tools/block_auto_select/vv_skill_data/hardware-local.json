@@ -1,0 +1,289 @@
+{
+  "schema_version": 1,
+  "name": "Ascend950",
+  "soc_version": "ASCEND950",
+  "npu_arch": "DAV_3510",
+  "npu_arch_macro": 3510,
+  "arch_dir": "arch35",
+  "scope": "A5 pure-vector theoretical performance evaluation",
+  "default_variant": "ascend950pr_9579_local_ini",
+  "common": {
+    "core_topology": {
+      "core_type_list": [
+        "CubeCore",
+        "VectorCore"
+      ],
+      "cube_vector_combine": "split",
+      "cube_to_vector_core_ratio": "1:2"
+    },
+    "memory_capacity_bytes_per_core": {
+      "l0a": 65536,
+      "l0b": 65536,
+      "l0c": 262144,
+      "l1": 524288,
+      "ub": 253952,
+      "bt": 4096,
+      "fb0": 4096,
+      "fb1": 2048
+    },
+    "vector_core_spec": {
+      "vec_calc_size": 128,
+      "vector_reg_width_bits": 256,
+      "predicate_reg_width_bits": 32,
+      "wide_reg_width_bits": 768,
+      "regbase_ooo_dual_issue_factor": 2
+    },
+    "alignment": {
+      "ub_block_bytes": 32,
+      "ub_bank_bytes": 4096,
+      "ub_bank_num": 16,
+      "ub_subbank_num": 64,
+      "ub_burst_in_one_block": 32,
+      "ub_bank_group_num": 8
+    },
+    "capabilities": {
+      "support_bf16": true,
+      "support_inf_nan": true,
+      "support_fixpipe": true,
+      "sparsity_4_to_2": false
+    },
+    "overheads": {
+      "min_launch_floor_us": 1.6,
+      "min_launch_floor_source": "950PR_9579 add tiny-shape sweep (TTK dyn_perf_us, 2026-06-10): N=1024..1M, measured-minus-body intercept ≈1.5-1.77us, min measured 1.669us; 1.6 ≤ min so max(body,1.6) stays a valid lower bound. Used as a FLOOR (max), not additive."
+    },
+    "gm_bandwidth_measured": {
+      "source": "membw-bench (pure DataCopyPad GM<->UB, 64 cores, fp32, min over 50 reps) on 950PR_9589, 2026-06-08. See tests/onboard/kernels/membw/",
+      "hbm_sustained_read_bytes_per_s": 1500000000000,
+      "hbm_sustained_write_bytes_per_s": 1500000000000,
+      "hbm_sustained_note": "working set >> L2 (>=256MB): read 1.51, write 1.50 TB/s. The variant peak gm_bandwidth_bytes_per_s (1.4-1.6e12) is this HBM-sustained value; it is NOT too low.",
+      "l2_assisted_peak_read_bytes_per_s": 3260000000000,
+      "l2_assisted_peak_write_bytes_per_s": 3040000000000,
+      "l2_assisted_peak_copy_bytes_per_s": 3670000000000,
+      "l2_assisted_note": "working set within L2 → effective GM BW 3.0-3.7 TB/s (data L2-resident). 单流(纯读/纯写)驻留拐点 ~128MB(=9589 L2 容量); copy(R+W 两份)per-tensor 拐点 ~56-64MB(=容量/2)。",
+      "l2_read_bandwidth_bytes_per_s": 4500000000000,
+      "l2_write_bandwidth_bytes_per_s": 4950000000000,
+      "l2_residency_knee_bytes": 134217728,
+      "l2_capacity_note": "L2 容量模型地基(membw 单流扫描 2026-06-29, 读写对称证实 9589 L2=128MiB): 单流访问量 ≤128MB → L2 裸带宽(read ~4.5 / write ~4.95 TB/s, 数据驻 L2 不刷 HBM); 160MB 拐点(read 2.05 / write 1.77)、溢出退 HBM(~1.6)。模型: eff_bw = L2_read/L2_write if 单流访问量 ≤ l2_residency_knee else HBM。copy 等多份并存时有效容量 = 128MB/同时份数。",
+      "rw_contention_alpha": 0.3,
+      "rw_contention_note": "read and write contend on HBM: copy(32MB each way)=18.28us vs max(read,write)=14.19us => combined GM time ~= max(mte2,mte3) + 0.3*min(mte2,mte3). max_pipe (mte2||mte3 fully overlapped) over-optimistic for read+write streaming; this drives the softmax under-prediction, not a low peak BW.",
+      "fixed_overhead_us_host": 6.5,
+      "fixed_overhead_note": "host wall-time floor (<8MB are launch/sync bound, not BW bound)"
+    },
+    "gm_bandwidth_l2_aware": {
+      "source": "2026-06-11 bench-device-03 <<<>>> mem_copy sweep (tests/calibration/bench_results/membw_copy_sweep.csv). copy_bw=combined(read+write)有效带宽 vs HBM流量工作集；已含读写争用。",
+      "note": "curve: 工作集(HBM-streamed bytes)→ 有效 copy 带宽。≤128MB 驻 L2(~2.84TB/s)，≥256MB 落 HBM(~1.45TB/s，取快侧以保证理论是有效下界)，中间线性插值。重复 copy_in 的张量(gm_reread_bytes)按 L2 读、与 HBM 流重叠，不计入。",
+      "l2_reread_bandwidth_bytes_per_s": 3000000000000.0,
+      "curve_combined_bytes_to_copy_bps": [
+        [
+          134217728,
+          2840000000000.0
+        ],
+        [
+          268435456,
+          1450000000000.0
+        ]
+      ]
+    }
+  },
+  "variants": {
+    "ascend950pr_957b": {
+      "label": "Ascend950 PCIE",
+      "source_ini": "Ascend/cann-9.1.0/aarch64-linux/data/platform_config/Ascend950PR_957b.ini",
+      "ini_soc_version": "Ascend950PR_957b",
+      "die_info": {
+        "io_die_num": 2
+      },
+      "core_counts": {
+        "ai_core": 28,
+        "cube_core": 28,
+        "vector_core": 56,
+        "ai_cpu": 7
+      },
+      "frequency": {
+        "cube_freq_mhz": 1650,
+        "vector_freq_mhz": 1650
+      },
+      "memory_capacity_bytes": {
+        "global_memory": 120259084288,
+        "l2": 117440512
+      },
+      "peak": {
+        "gm_bandwidth_bytes_per_s": 1400000000000,
+        "gm_bandwidth_source": "npu-arch public/experience value",
+        "l2_bandwidth_bytes_per_s": 5600000000000,
+        "l2_bandwidth_source": "derived from VectorCoreMemoryRates.l2_rate * vector_core_cnt; rate unit treated as GB/s",
+        "vector_fp16_ops_per_s": 47000000000000,
+        "vector_fp16_ops_source": "npu-arch public/experience value with regbase dual issue",
+        "vector_fp16_ops_per_s_without_dual_issue": 23654400000000
+      },
+      "ini_memory_rates_gb_per_s_per_core": {
+        "aicore": {
+          "ddr_rate": 27,
+          "ddr_read_rate": 27,
+          "ddr_write_rate": 27,
+          "l2_rate": 100,
+          "l2_read_rate": 100,
+          "l2_write_rate": 100,
+          "l1_to_l0_a_rate": 256,
+          "l1_to_l0_b_rate": 256,
+          "l1_to_ub_rate": 128,
+          "l0_c_to_ub_rate": 128,
+          "ub_to_l2_rate": 128,
+          "ub_to_ddr_rate": 128,
+          "ub_to_l1_rate": 128
+        },
+        "vector_core": {
+          "ddr_rate": 14,
+          "ddr_read_rate": 14,
+          "ddr_write_rate": 14,
+          "l2_rate": 100,
+          "l2_read_rate": 100,
+          "l2_write_rate": 100,
+          "ub_to_l2_rate": 42,
+          "ub_to_ddr_rate": 40
+        }
+      },
+      "derived_from_ini": {
+        "vector_core_l2_bandwidth_bytes_per_s": 5600000000000,
+        "vector_core_ddr_bandwidth_bytes_per_s": 784000000000,
+        "aicore_l2_bandwidth_bytes_per_s": 2800000000000,
+        "aicore_ddr_bandwidth_bytes_per_s": 756000000000
+      }
+    },
+    "ascend950pr_9589": {
+      "label": "Ascend950 Server",
+      "source_ini": "Ascend/cann-9.1.0/aarch64-linux/data/platform_config/Ascend950PR_9589.ini",
+      "ini_soc_version": "Ascend950PR_9589",
+      "die_info": {
+        "io_die_num": 2
+      },
+      "core_counts": {
+        "ai_core": 32,
+        "cube_core": 32,
+        "vector_core": 64,
+        "ai_cpu": 6
+      },
+      "frequency": {
+        "cube_freq_mhz": 1650,
+        "vector_freq_mhz": 1650
+      },
+      "memory_capacity_bytes": {
+        "global_memory": 137438953472,
+        "l2": 134217728,
+        "l2_source": "9589 L2 = 128MiB (134217728). 上板实测(kernels/membw --mode write, 2026-06-29 bench-device-03): 纯写 ≤128MB 满速 ~4.95-4.98 TB/s(L2 速)、160MB 骤降 1.77、≥192MB HBM 1.57 → 写有效 L2 驻留拐点在 (128,160]MB,9589 L2≥128MB。注:957b variant 记 112MiB,可能是不同 SKU；曾据'112MB'误改 112,被纯写实测证伪、已回退。copy(R+W 两份)per-tensor 拐点 ~56-64MB 是占两份所致,与 128MB 单流容量不矛盾。"
+      },
+      "peak": {
+        "gm_bandwidth_bytes_per_s": 1600000000000,
+        "gm_bandwidth_source": "npu-arch public/experience value",
+        "l2_bandwidth_bytes_per_s": 6400000000000,
+        "l2_bandwidth_source": "derived from VectorCoreMemoryRates.l2_rate * vector_core_cnt; rate unit treated as GB/s",
+        "vector_fp16_ops_per_s": 54000000000000,
+        "vector_fp16_ops_source": "npu-arch public/experience value with regbase dual issue",
+        "vector_fp16_ops_per_s_without_dual_issue": 27033600000000
+      },
+      "ini_memory_rates_gb_per_s_per_core": {
+        "aicore": {
+          "ddr_rate": 31,
+          "ddr_read_rate": 31,
+          "ddr_write_rate": 31,
+          "l2_rate": 100,
+          "l2_read_rate": 100,
+          "l2_write_rate": 100,
+          "l1_to_l0_a_rate": 256,
+          "l1_to_l0_b_rate": 256,
+          "l1_to_ub_rate": 128,
+          "l0_c_to_ub_rate": 128,
+          "ub_to_l2_rate": 128,
+          "ub_to_ddr_rate": 128,
+          "ub_to_l1_rate": 128
+        },
+        "vector_core": {
+          "ddr_rate": 16,
+          "ddr_read_rate": 16,
+          "ddr_write_rate": 16,
+          "l2_rate": 100,
+          "l2_read_rate": 100,
+          "l2_write_rate": 100,
+          "ub_to_l2_rate": 42,
+          "ub_to_ddr_rate": 40
+        }
+      },
+      "derived_from_ini": {
+        "vector_core_l2_bandwidth_bytes_per_s": 6400000000000,
+        "vector_core_ddr_bandwidth_bytes_per_s": 1024000000000,
+        "aicore_l2_bandwidth_bytes_per_s": 3200000000000,
+        "aicore_ddr_bandwidth_bytes_per_s": 992000000000
+      }
+    },
+    "ascend950pr_9579_local_ini": {
+      "label": "9579 local INI binding; INI rate interpreted as GB/s following skill; not measured bandwidth",
+      "source_ini": "Ascend950PR_9579.ini",
+      "ini_soc_version": "Ascend950PR_9579",
+      "die_info": {
+        "io_die_num": 2
+      },
+      "core_counts": {
+        "ai_core": 28,
+        "cube_core": 28,
+        "vector_core": 56,
+        "ai_cpu": 7
+      },
+      "frequency": {
+        "cube_freq_mhz": 1650,
+        "vector_freq_mhz": 1650.0
+      },
+      "memory_capacity_bytes": {
+        "global_memory": 120259084288,
+        "l2": 134217728
+      },
+      "peak": {
+        "gm_bandwidth_bytes_per_s": 1400000000000,
+        "gm_bandwidth_source": "npu-arch public/experience value",
+        "l2_bandwidth_bytes_per_s": 5600000000000.0,
+        "l2_bandwidth_source": "derived from VectorCoreMemoryRates.l2_rate * vector_core_cnt; rate unit treated as GB/s",
+        "vector_fp16_ops_per_s": 47000000000000,
+        "vector_fp16_ops_source": "npu-arch public/experience value with regbase dual issue",
+        "vector_fp16_ops_per_s_without_dual_issue": 23654400000000
+      },
+      "ini_memory_rates_gb_per_s_per_core": {
+        "aicore": {
+          "ddr_rate": 27,
+          "ddr_read_rate": 27,
+          "ddr_write_rate": 27,
+          "l2_rate": 100,
+          "l2_read_rate": 100,
+          "l2_write_rate": 100,
+          "l1_to_l0_a_rate": 256,
+          "l1_to_l0_b_rate": 256,
+          "l1_to_ub_rate": 128,
+          "l0_c_to_ub_rate": 128,
+          "ub_to_l2_rate": 128,
+          "ub_to_ddr_rate": 128,
+          "ub_to_l1_rate": 128
+        },
+        "vector_core": {
+          "ddr_rate": 14,
+          "ddr_read_rate": 14,
+          "ddr_write_rate": 14,
+          "l2_rate": 100,
+          "l2_read_rate": 100,
+          "l2_write_rate": 100,
+          "ub_to_l2_rate": 42,
+          "ub_to_ddr_rate": 40
+        }
+      },
+      "derived_from_ini": {
+        "vector_core_l2_bandwidth_bytes_per_s": 5600000000000,
+        "vector_core_ddr_bandwidth_bytes_per_s": 896000000000.0,
+        "aicore_l2_bandwidth_bytes_per_s": 2800000000000,
+        "aicore_ddr_bandwidth_bytes_per_s": 756000000000
+      }
+    }
+  },
+  "usage_notes": {
+    "pure_vector_active_cores": "Use variants.*.core_counts.vector_core as max blockDim for pure Vector kernels.",
+    "gm_bandwidth_choice": "Use variants.*.peak.gm_bandwidth_bytes_per_s for chip-level roofline; use derived_from_ini.vector_core_ddr_bandwidth_bytes_per_s for conservative vector-core-only MTE modeling.",
+    "l2_bandwidth_choice": "Use variants.*.peak.l2_bandwidth_bytes_per_s when the generated evaluator models L2 hits; this is derived from INI rate fields and should be treated as a modeling default, not an externally guaranteed spec.",
+    "vector_ops_choice": "Use variants.*.peak.vector_fp16_ops_per_s for FP16 vector FMA-like operations under RegBase dual issue. For instructions that cannot dual issue or are not FP16 FMA-like, the evaluator should apply an instruction-specific efficiency factor."
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "global_bytes_per_cycle": 512.0,
+  "dma_issue_interval": 8.0,
+  "block_dispatch_interval": 32.0
+}

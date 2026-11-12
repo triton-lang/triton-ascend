@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "calibration": "uncalibrated",
+  "description": "Initial shared profile: existing prototype assumptions, without fitting to the six CV cases. Estimated cycles are not measured hardware time. Vector arithmetic costs additionally use AVECostModelInfo.def.",
+  "parameters": {
+    "cube_flops_per_cycle": 2048.0,
+    "cube_startup_cycles": 16.0,
+    "dma_bytes_per_cycle": 32.0,
+    "global_bytes_per_cycle": 512.0,
+    "dma_startup_cycles": 32.0,
+    "l1_l0_bytes_per_cycle": 64.0,
+    "l1_l0_startup_cycles": 8.0,
+    "fixpipe_bytes_per_cycle": 64.0,
+    "fixpipe_startup_cycles": 16.0,
+    "vector_cycle_scale": 1.0,
+    "vf_call_cycles": 8.0,
+    "scalar_instruction_cycles": 1.0,
+    "flag_cycles": 1.0,
+    "cross_flag_cycles": 4.0,
+    "vector_load_latency": 4.0,
+    "vector_store_latency": 4.0,
+    "issue_queue_length": 64
+  }
+}

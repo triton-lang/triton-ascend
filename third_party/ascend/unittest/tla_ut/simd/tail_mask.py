@@ -29,7 +29,7 @@ def tail_mask(O, N: tl.constexpr):
         tla.simd.vsts(o[0, 0], tla.simd.vsel(tla.simd.tail_mask(20), ones, zeros))
         tla.simd.vsts(o[1, 0], tla.simd.vsel(tla.simd.tail_mask(0), ones, zeros))
         tla.simd.vsts(o[2, 0], tla.simd.vsel(tla.simd.tail_mask(64), ones, zeros))
-    tla.copy(o, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (3, N)))
 
 
 def constexprs():

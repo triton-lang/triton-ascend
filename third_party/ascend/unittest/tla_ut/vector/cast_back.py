@@ -47,8 +47,8 @@ def cast_back(X_ptr, SF_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.cons
         x_blk = tla.view(X_ptr, (BM, HID), strides=(HID, 1), offsets=(pt * BM, 0))
         sf_blk = tla.view(SF_ptr, (BM, HID // NPC), strides=(HID // NPC, 1), offsets=(pt * BM, 0))
         o_blk = tla.view(O_ptr, (BM, HID), strides=(HID, 1), offsets=(pt * BM, 0))
-        tla.copy(x_blk, x_ub)
-        tla.copy(sf_blk, sf_ub)
+        tla.load_gm_to_ub(x_blk, x_ub)
+        tla.load_gm_to_ub(sf_blk, sf_ub)
         with tla.scope.simd():
             # group mask: first 32 lanes use s0, last 32 use s1.
             low_half = tla.simd.pge(32, 64)
@@ -59,7 +59,7 @@ def cast_back(X_ptr, SF_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.cons
                 v = tla.simd.vlds(x_ub[0, c * 64], dist="UNPK4_B8")
                 vf = tla.simd.vextf(v, tl.float32)
                 tla.simd.vsts(out_ub[0, c * 64], tla.simd.vmul(vf, scale), dist="NORM_B32")
-        tla.copy(out_ub, o_blk)
+        tla.store_ub_to_gm(out_ub, o_blk)
 
 
 def constexprs():

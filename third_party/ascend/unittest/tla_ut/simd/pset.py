@@ -30,7 +30,7 @@ def pset(O, N: tl.constexpr):
         tla.simd.vsts(o[1, 0], tla.simd.vsel(tla.simd.pset(32, tla.simd.PAT.VL32), ones, zeros))
         tla.simd.vsts(o[2, 0], tla.simd.vsel(tla.simd.pset(32, tla.simd.PAT.M4), ones, zeros))
         tla.simd.vsts(o[3, 0], tla.simd.vsel(tla.simd.pset(32, tla.simd.PAT.ALLF), ones, zeros))
-    tla.copy(o, tla.view(O, (4, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (4, N)))
 
 
 def constexprs():

@@ -57,7 +57,7 @@ class vector(scope):
     """``with tla.scope.vector():`` -- vector-core region for non-SIMD ops.
 
     A vector scope is the vector core's inline region: it hosts non-SIMD
-    vector-core ops (``tla.copy`` GM<->UB, control flow) and can nest
+    vector-core ops (``tla.load_gm_to_ub``, ``tla.store_ub_to_gm``, control flow) and can nest
     :class:`simd` scopes for the register work. Only ``hivm.tcore_type<VECTOR>``
     is stamped (no VF markers), so ``outline-scope`` never extracts it;
     ``InlineScope(forceInline=true)`` folds it back at the end of the HIVM

@@ -36,8 +36,8 @@ def rope(X_ptr, CS_ptr, B: tl.constexpr, S: tl.constexpr, NH: tl.constexpr, RD: 
         tb = task % n_seq_blk
         x_blk = tla.view(X_ptr, (1, BT, NH, RD), strides=(S * NH * RD, NH * RD, RD, 1), offsets=(b, tb * BT, 0, 0))
         cs_blk = tla.view(CS_ptr, (BT, RD), strides=(RD, 1), offsets=(tb * BT + OFF, 0))
-        tla.copy(x_blk, x_ub)  # in-place alias: write back to same x_blk
-        tla.copy(cs_blk, cs_ub)
+        tla.load_gm_to_ub(x_blk, x_ub)  # in-place alias: write back to same x_blk
+        tla.load_gm_to_ub(cs_blk, cs_ub)
         with tla.scope.simd():  # x_ub: read_write, cs_ub: read
             for row in tl.static_range(BT):
                 c = tla.simd.vlds(cs_ub[row, 0], dist="NORM")  # cos
@@ -49,7 +49,7 @@ def rope(X_ptr, CS_ptr, B: tl.constexpr, S: tl.constexpr, NH: tl.constexpr, RD: 
                     y1 = tla.simd.vfma(tla.simd.vmul(x1, c), x0, s)
                     tla.simd.vsts(x_ub[0, row, head, 0], y0, dist="NORM_B32")
                     tla.simd.vsts(x_ub[0, row, head, 64], y1, dist="NORM_B32")
-        tla.copy(x_ub, x_blk)  # in-place write-back
+        tla.store_ub_to_gm(x_ub, x_blk)  # in-place write-back
 
 
 def constexprs():

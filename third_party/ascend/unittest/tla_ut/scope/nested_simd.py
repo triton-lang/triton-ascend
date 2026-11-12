@@ -24,11 +24,11 @@ def nested_simd(X_ptr, O_ptr, N: tl.constexpr):
     x_blk = tla.view(X_ptr, (N, ), strides=(1, ))
     o_blk = tla.view(O_ptr, (N, ), strides=(1, ))
     with tla.scope.vector():
-        tla.copy(x_blk, x_ub)  # non-SIMD DMA in the vector scope
+        tla.load_gm_to_ub(x_blk, x_ub)  # non-SIMD DMA in the vector scope
         with tla.scope.simd():  # nested SIMD VF
             v = tla.simd.vlds(x_ub[0])
             tla.simd.vsts(o_ub[0], tla.simd.vadd(v, v))
-        tla.copy(o_ub, o_blk)  # non-SIMD DMA in the vector scope
+        tla.store_ub_to_gm(o_ub, o_blk)  # non-SIMD DMA in the vector scope
 
 
 def constexprs():

@@ -35,12 +35,12 @@ def store_predicate(X, INIT, O, W: tl.constexpr, OFFSET: tl.constexpr):
     DT: tl.constexpr = tl.int8 if W == 8 else (tl.int16 if W == 16 else tl.int32)
     x = tla.alloc_buffer((D, ), DT, space="ub")
     o = tla.alloc_buffer((128, ), tl.uint8, space="ub")
-    tla.copy(tla.view(X, (D, )), x)
-    tla.copy(tla.view(INIT, (128, )), o)
+    tla.load_gm_to_ub(tla.view(X, (D, )), x)
+    tla.load_gm_to_ub(tla.view(INIT, (128, )), o)
     with tla.scope.simd():
         p = tla.simd.vcmps(tla.simd.vlds(x[0]), 0, op=tla.simd.CMP.NE)
         tla.simd.pst(o[OFFSET], p)
-    tla.copy(o, tla.view(O, (128, )))
+    tla.store_ub_to_gm(o, tla.view(O, (128, )))
 
 
 CASES = [(w, off) for w in (8, 16, 32) for off in (0, 64)]

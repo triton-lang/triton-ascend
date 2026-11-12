@@ -36,9 +36,9 @@ def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.con
     yb = tla.alloc_buffer((TILES, N), tl.float32, space="ub")
     tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
     ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), xb)
-    tla.copy(tla.view(Y, (TILES, N)), yb)
-    tla.copy(tla.view(T, (N, )), tb)
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), xb)
+    tla.load_gm_to_ub(tla.view(Y, (TILES, N)), yb)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0, 0])
         y = tla.simd.vlds(yb[0, 0])
@@ -62,7 +62,7 @@ def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.con
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vabsdif(vx, vy, mask=tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vabsdif(vx, vy))
-    tla.copy(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
 
 
 @tla.jit
@@ -72,10 +72,10 @@ def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.
     ib = tla.alloc_buffer((N, ), tl.int16, space="ub")
     tb = tla.alloc_buffer((N, ), tl.int16, space="ub")
     ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float16, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), xb)
-    tla.copy(tla.view(Y, (TILES, N)), yb)
-    tla.copy(tla.view(I, (N, )), ib)
-    tla.copy(tla.view(T, (N, )), tb)
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), xb)
+    tla.load_gm_to_ub(tla.view(Y, (TILES, N)), yb)
+    tla.load_gm_to_ub(tla.view(I, (N, )), ib)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0, 0])
         y = tla.simd.vlds(yb[0, 0])
@@ -100,7 +100,7 @@ def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.
                               dist="NORM_B16")
             else:
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vabsdif(vx, vy), dist="NORM_B16")
-    tla.copy(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
 
 
 def constexprs(shape=None):

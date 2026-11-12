@@ -39,9 +39,8 @@ def buf(shape, space, dtype, strides=None, offset=0):
 
 
 def operands(m=32, n=64, k=48, dtype=tl.float16):
-    return dict(a=buf((k // 16, m // 16, 16, 16), "l0a", dtype), b=buf(
-        (k // 16, n // 16, 16, 16), "l0b", dtype), acc=buf((n // 16, m // 16, 16, 16), "l0c", tl.float32), m=m,
-                n=n, k=k)
+    return dict(a=buf((k // 16, m // 16, 16, 16), "l0a", dtype), b=buf((k // 16, n // 16, 16, 16), "l0b", dtype),
+                acc=buf((n // 16, m // 16, 16, 16), "l0c", tl.float32), m=m, n=n, k=k)
 
 
 @pytest.mark.parametrize("clear", [False, True])

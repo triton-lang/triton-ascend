@@ -23,7 +23,7 @@ import torch_npu
 
 HERE = Path(__file__).resolve().parent
 FAMILIES = (('normal', 1103), ('normal', 1104), ('uniform', 1103), ('peaked', 1103))
-CASES = {'full': (143360,) * 8, 'ragged': (4, 129, 260, 1031)}
+CASES = {'full': (143360, ) * 8, 'ragged': (4, 129, 260, 1031)}
 NATIVE_COMMIT = '897efb917ea657c759c4f7ce79a162e4729ebdd4'
 DSL_COMMIT = '6e5bef20c29aad8bc74c66ae995aeeb01a4789f4'
 
@@ -45,7 +45,7 @@ def make_inputs(lengths, family, seed):
     ids = torch.randperm(sum(page_counts), generator=generator, dtype=torch.int32)
     table = torch.full((len(lengths), max(page_counts)), -1, dtype=torch.int32)
     for row, pages in enumerate(ids.split(page_counts)):
-        table[row, : pages.numel()] = pages
+        table[row, :pages.numel()] = pages
     device = torch.device('npu', torch.npu.current_device())
 
     def random(shape, query=False):
@@ -73,7 +73,7 @@ def reference(inputs):
     table_cpu, lengths_cpu = table.cpu(), lengths.cpu().tolist()
     outputs, lses = [], []
     for request, length in enumerate(lengths_cpu):
-        pages = table_cpu[request, : (length + 127) // 128].to(q.device, torch.int64)
+        pages = table_cpu[request, :(length + 127) // 128].to(q.device, torch.int64)
         keys = kv.index_select(0, pages).reshape(-1, 576)[:length].float()
         query = q[request].reshape(-1, 576).float()
         positions = torch.arange(length, device=q.device)
@@ -95,9 +95,8 @@ def precision(call, expected):
     torch.npu.synchronize()
     assert isinstance(actual, tuple) and len(actual) == 2, 'Expected both output and LSE'
     result = {}
-    for name, output, target, dtype, tolerance in zip(
-        ('output', 'lse'), actual, expected, (torch.bfloat16, torch.float32), (0.005, 0.0001)
-    ):
+    for name, output, target, dtype, tolerance in zip(('output', 'lse'), actual, expected,
+                                                      (torch.bfloat16, torch.float32), (0.005, 0.0001)):
         assert output.shape == target.shape and output.dtype == dtype, name
         assert torch.isfinite(output).all(), name
         error = output.float() - target
@@ -176,7 +175,8 @@ def install_dsl_sample(source, destination):
         h24_allowlist_extended=True,
         checker_original_sha256=hashlib.sha256(original.encode()).hexdigest(),
         checker_adapted_sha256=hashlib.sha256(checker.read_bytes()).hexdigest(),
-        file_sha256={p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in source.glob('*.py')},
+        file_sha256={p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                     for p in source.glob('*.py')},
     )
 
 
@@ -238,9 +238,8 @@ def snapshot():
     logical = torch.npu.current_device()
     visible = os.environ.get('ASCEND_RT_VISIBLE_DEVICES')
     physical = visible.split(',')[logical].strip() if visible else str(logical)
-    proc = subprocess.run(
-        ['npu-smi', 'info', '-t', 'proc-mem', '-i', physical], capture_output=True, text=True, timeout=20
-    )
+    proc = subprocess.run(['npu-smi', 'info', '-t', 'proc-mem', '-i', physical], capture_output=True, text=True,
+                          timeout=20)
     return dict(
         returncode=proc.returncode,
         pids=re.findall(r'Process id:(\d+)', proc.stdout),
@@ -268,8 +267,8 @@ def profile(call, path, samples):
     )
     snapshots = [snapshot()]
     with torch_npu.profiler.profile(
-        activities=[torch_npu.profiler.ProfilerActivity.CPU, torch_npu.profiler.ProfilerActivity.NPU],
-        experimental_config=config,
+            activities=[torch_npu.profiler.ProfilerActivity.CPU, torch_npu.profiler.ProfilerActivity.NPU],
+            experimental_config=config,
     ) as profiler:
         for _ in range(samples):
             call()
@@ -280,14 +279,9 @@ def profile(call, path, samples):
     if isinstance(events, dict):
         events = events['traceEvents']
     tasks = sorted(
-        (
-            e
-            for e in events
-            if e.get('ph') == 'X'
-            and str(e.get('args', {}).get('Task Type', '')).startswith(
-                ('AI_CORE', 'AI_VECTOR', 'MIX_', 'KERNEL')
-            )
-        ),
+        (e for e in events
+         if e.get('ph') == 'X' and str(e.get('args', {}).get('Task Type', '')).startswith(('AI_CORE', 'AI_VECTOR',
+                                                                                           'MIX_', 'KERNEL'))),
         key=lambda e: e['ts'],
     )
     assert tasks and len(tasks) % samples == 0, 'Missing or incomplete device events'
@@ -295,7 +289,7 @@ def profile(call, path, samples):
     names = [e['name'] for e in tasks[:tasks_per_call]]
     durations = []
     for start in range(0, len(tasks), tasks_per_call):
-        group = tasks[start : start + tasks_per_call]
+        group = tasks[start:start + tasks_per_call]
         assert [e['name'] for e in group] == names
         durations.append(sum(float(e['dur']) for e in group))
     wall = []
@@ -412,9 +406,8 @@ def main():
                     calls['cannbot'] = prepare_cannbot(inputs)
             for name, call in calls.items():
                 wait_exclusive()
-                report['precision'].setdefault(name, {})[f'{case}/{family}/{seed}'] = [
-                    precision(call, expected) for _ in range(3)
-                ]
+                report['precision'].setdefault(
+                    name, {})[f'{case}/{family}/{seed}'] = [precision(call, expected) for _ in range(3)]
                 save()
                 print('PRECISION_PASS', name, case, family, seed, flush=True)
             del calls, inputs, expected
@@ -439,16 +432,22 @@ def main():
                 report['formal'].setdefault(name, []).append(result)
                 save()
         report['medians'] = {
-            name: dict(
-                device_us=statistics.median([v for r in runs for v in r['samples_us']]),
-                wall_us=statistics.median([v for r in runs for v in r['wall_samples_us']]),
+            name:
+            dict(
+                device_us=statistics.median([v
+                                             for r in runs
+                                             for v in r['samples_us']]),
+                wall_us=statistics.median([v
+                                           for r in runs
+                                           for v in r['wall_samples_us']]),
             )
             for name, runs in report['formal'].items()
         }
         if 'ascendc' in calls:
             baseline = report['medians']['ascendc']['device_us']
             report['pct_of_ascendc'] = {
-                name: 100 * baseline / value['device_us'] for name, value in report['medians'].items()
+                name: 100 * baseline / value['device_us']
+                for name, value in report['medians'].items()
             }
     report['phase'] = 'complete'
     save()

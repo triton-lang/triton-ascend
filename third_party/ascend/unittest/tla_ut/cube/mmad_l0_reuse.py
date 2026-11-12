@@ -25,17 +25,19 @@ def resident_q(Q, KEYS, OUT, DTYPE: tl.constexpr):
         tla.load_gm_to_l1(tla.view(Q, (M, K)), query_l1)
         tla.sync.set_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.MTE1, 0)
         tla.sync.wait_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.MTE1, 0)
-        tla.copy_l1_to_l0(query_l1, query_l0a, tla.CopyL1ToL0Params(
-            k_part_idx=0, k_part=K, k_part_ceil=K, k_part_loop=1, k_part_actual=K, m=M))
+        tla.copy_l1_to_l0(
+            query_l1, query_l0a,
+            tla.CopyL1ToL0Params(k_part_idx=0, k_part=K, k_part_ceil=K, k_part_loop=1, k_part_actual=K, m=M))
 
         # Two different K tiles consume the same resident Q tile.
         for page in tl.range(2):
             tla.load_gm_to_l1(tla.view(KEYS + page * N * K, (N, K)), key_l1)
             tla.sync.set_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.MTE1, 0)
             tla.sync.wait_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.MTE1, 0)
-            tla.copy_l1_to_l0(key_l1, key_l0b, tla.CopyL1ToL0Params(
-                is_transpose=True, k_part_idx=0, k_part=K, k_part_ceil=K,
-                k_part_loop=1, k_part_actual=K, m=N))
+            tla.copy_l1_to_l0(
+                key_l1, key_l0b,
+                tla.CopyL1ToL0Params(is_transpose=True, k_part_idx=0, k_part=K, k_part_ceil=K, k_part_loop=1,
+                                     k_part_actual=K, m=N))
             tla.sync.set_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
             tla.sync.wait_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
             tla.cube.mmad_l0(query_l0a, key_l0b, score, m=M, n=N, k=K, clear_accum=True)
@@ -75,7 +77,7 @@ def test_run(dtype):
     q = torch.randn((96, 96), generator=generator).to(torch_dtype)
     keys = torch.randn((2, 128, 96), generator=generator).to(torch_dtype)
     out = torch.full((2, 96, 128), float('nan'), dtype=torch.float32, device='npu')
-    kernel = resident_q[(1,)](q.npu(), keys.npu(), out, element, unit_flag=False, sync_solver=False)
+    kernel = resident_q[(1, )](q.npu(), keys.npu(), out, element, unit_flag=False, sync_solver=False)
     torch.npu.synchronize()
     check_kernel_binary(kernel)
     expected = q.float() @ keys.float().transpose(-2, -1)

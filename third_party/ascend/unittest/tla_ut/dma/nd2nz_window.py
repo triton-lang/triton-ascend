@@ -19,11 +19,10 @@ def concatenate(A, B, COUNT, OUT, DTYPE: tl.constexpr):
     with tla.scope.cube():
         tile = tla.alloc((4, 7, 16, 16), DTYPE, space='l1')
         first = tl.load(COUNT)
-        tla.load_gm_to_l1(tla.view(A, (128, 64)), tile,
-                          tla.LoadGM2L1Params(row_count=first, source_row=128-first))
+        tla.load_gm_to_l1(tla.view(A, (128, 64)), tile, tla.LoadGM2L1Params(row_count=first, source_row=128 - first))
         if first < 112:
             tla.load_gm_to_l1(tla.view(B, (128, 64)), tile,
-                              tla.LoadGM2L1Params(row_count=112-first, destination_row=first))
+                              tla.LoadGM2L1Params(row_count=112 - first, destination_row=first))
         tla.copy_l1_to_ub(tile, result)
         tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE1, 0)
     with tla.scope.vector():
@@ -35,7 +34,7 @@ def concatenate(A, B, COUNT, OUT, DTYPE: tl.constexpr):
 @pytest.mark.parametrize('dtype', ('fp16', 'bf16'))
 def test_ir(dtype):
     element = tl.float16 if dtype == 'fp16' else tl.bfloat16
-    signature = dict(A='*'+dtype, B='*'+dtype, COUNT='*i32', OUT='*'+dtype)
+    signature = dict(A='*' + dtype, B='*' + dtype, COUNT='*i32', OUT='*' + dtype)
     module, context = compile_offline(concatenate, signature, dict(DTYPE=element))
     text = str(lower_offline(module, context))
     assert text.count('hivm.hir.nd2nz ') == 2
@@ -61,8 +60,8 @@ def test_run(dtype):
     for first in (16, 64, 112):
         count.fill_(first)
         out.fill_(float('nan'))
-        binary = concatenate[(1,)](a_device, b_device, count, out, element)
+        binary = concatenate[(1, )](a_device, b_device, count, out, element)
         torch.npu.synchronize()
         check_kernel_binary(binary)
-        expected = torch.cat((a[128-first:], b[:112-first]))
+        expected = torch.cat((a[128 - first:], b[:112 - first]))
         torch.testing.assert_close(out.cpu(), expected, atol=0, rtol=0)

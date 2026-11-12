@@ -16,6 +16,7 @@ core = importlib.import_module(package.__name__ + '.core')
 
 
 class Recorder:
+
     def __init__(self):
         self.calls = []
 
@@ -24,6 +25,7 @@ class Recorder:
 
 
 class Semantic:
+
     def __init__(self):
         self.builder = Recorder()
 
@@ -48,15 +50,20 @@ def test_legacy_load_keeps_its_three_argument_builder_call():
 def test_valid_static_window_is_forwarded():
     src, dst = buffers()
     sem = Semantic()
-    dma.load_gm_to_l1(src, dst, dma.LoadGM2L1Params(row_count=48, source_row=80, destination_row=64),
-                      _semantic=sem)
+    dma.load_gm_to_l1(src, dst, dma.LoadGM2L1Params(row_count=48, source_row=80, destination_row=64), _semantic=sem)
     assert sem.builder.calls[0][1] == dict(row_count=48, source_row=80, destination_row=64)
 
 
 @pytest.mark.parametrize('fields', (
-    dict(source_row=16), dict(destination_row=16), dict(row_count=0), dict(row_count=-16),
-    dict(row_count=17), dict(row_count=16, source_row=1), dict(row_count=16, destination_row=-16),
-    dict(row_count=48, source_row=96), dict(row_count=48, destination_row=80),
+    dict(source_row=16),
+    dict(destination_row=16),
+    dict(row_count=0),
+    dict(row_count=-16),
+    dict(row_count=17),
+    dict(row_count=16, source_row=1),
+    dict(row_count=16, destination_row=-16),
+    dict(row_count=48, source_row=96),
+    dict(row_count=48, destination_row=80),
 ))
 def test_invalid_static_window_is_rejected_before_emission(fields):
     sem = Semantic()

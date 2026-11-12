@@ -606,8 +606,7 @@ def load_gm_to_l1(src, dst, params=None, _semantic=None):
             raise ValueError("ND2NZ row offsets require row_count")
         _semantic.builder.create_tla_nd2nz(src.handle, dst.handle, attrs)
     else:
-        for name, value in (("row_count", row_count), ("source_row", source_row),
-                            ("destination_row", destination_row)):
+        for name, value in (("row_count", row_count), ("source_row", source_row), ("destination_row", destination_row)):
             if type(value) is int and (value < 0 or value % 16 or (name == "row_count" and value == 0)):
                 raise ValueError(f"ND2NZ {name} must be nonnegative and 16-row aligned, with positive row_count")
         if type(row_count) is int:
@@ -615,11 +614,9 @@ def load_gm_to_l1(src, dst, params=None, _semantic=None):
                 raise ValueError("ND2NZ source row window exceeds the parent view")
             if type(destination_row) is int and destination_row + row_count > dst.shape[1] * 16:
                 raise ValueError("ND2NZ destination row window exceeds the parent view")
-        _semantic.builder.create_tla_nd2nz(
-            src.handle, dst.handle, attrs,
-            row_count=_scalar(p.row_count, _semantic),
-            source_row=_scalar(p.source_row, _semantic),
-            destination_row=_scalar(p.destination_row, _semantic))
+        _semantic.builder.create_tla_nd2nz(src.handle, dst.handle, attrs, row_count=_scalar(p.row_count, _semantic),
+                                           source_row=_scalar(p.source_row, _semantic),
+                                           destination_row=_scalar(p.destination_row, _semantic))
 
 
 @builtin

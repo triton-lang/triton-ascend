@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/SyncAnalysis.h"
@@ -367,6 +368,44 @@ void DataDependencyAnalysisPass::createBlockInfoMap(DataDependencyInfo &info) {
   if (!currentOps.empty()) {
     collectBlockInfo(info, currentId, currentOps);
   }
+
+  if (!hasOuterMainLoop(module))
+    return;
+
+  // An event guard can contain rematerialized scalar operations tagged for
+  // another stage. A postorder walk then sees several runs of the same ID;
+  // retaining only the last run loses its matmul and cross-core edges.
+  module.walk([&](scf::ForOp loop) {
+    if (!loop->hasAttr(kOuterEventControlCount))
+      return;
+    llvm::DenseMap<int, SmallVector<Operation *>> stages;
+    for (Operation &root : loop.getBody()->without_terminator()) {
+      if (auto id = getOpBlockId(&root))
+        stages.try_emplace(*id);
+    }
+    for (Operation &root : loop.getBody()->without_terminator()) {
+      root.walk<WalkOrder::PreOrder>([&](Operation *op) {
+        auto id = getOpBlockId(op);
+        auto it = id ? stages.find(*id) : stages.end();
+        if (it != stages.end())
+          it->second.push_back(op);
+      });
+    }
+    for (auto &[id, ops] : stages) {
+      // A direct root represents the stage's region for sync placement.
+      auto root = llvm::find_if(
+          ops, [&](Operation *op) { return op->getBlock() == loop.getBody(); });
+      assert(root != ops.end());
+      std::iter_swap(ops.begin(), root);
+      collectBlockInfo(info, id, ops);
+      BlockInfo &stage = info.getBlockInfoMap()[id];
+      stage.isCube = llvm::any_of(ops, [](Operation *op) {
+        return getSsbufferCoreType(op).contains(ssbufferCoreTypeCubeAttr);
+      });
+      stage.isControl = llvm::all_of(
+          ops, [this](Operation *op) { return isControlFlowOp(op); });
+    }
+  });
 }
 
 mlir::Operation *DataDependencyAnalysisPass::createBlockInfoConstOp(

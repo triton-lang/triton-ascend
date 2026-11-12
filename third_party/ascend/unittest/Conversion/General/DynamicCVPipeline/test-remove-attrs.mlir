@@ -1,6 +1,17 @@
 // RUN: triton-opt --remove-ssbuf-attr %s | FileCheck %s
 
-module {
+module attributes {ssbuffer.outer_main_loop} {
+  // CHECK-LABEL: func.func @remove_explicit_main_loop
+  func.func @remove_explicit_main_loop(%lb: index, %ub: index, %step: index) {
+    // CHECK: scf.for
+    // CHECK-NOT: ssbuffer.explicit_main_loop
+    // CHECK-NOT: ssbuffer.main_loop
+    // CHECK: return
+    scf.for %i = %lb to %ub step %step {
+    } {ssbuffer.explicit_main_loop, ssbuffer.main_loop = 0 : i32}
+    return
+  }
+
   // CHECK-LABEL: func.func @test_remove_core_type_and_block_id
   func.func @test_remove_core_type_and_block_id(%arg0: memref<1024x1024xf32>) {
     // CHECK: memref.alloc() : memref<1024x1024xf32>

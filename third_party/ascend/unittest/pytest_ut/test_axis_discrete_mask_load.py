@@ -25,22 +25,6 @@ import triton
 import triton.language as tl
 from triton.backends.ascend.testing import do_bench_npu
 
-params = [
-    (16, 16),
-    (16, 32),
-    (16, 64),
-    (16, 128),
-    (16, 256),
-    (16, 512),
-    (16, 1024),
-    (32, 16),
-    (64, 16),
-    (128, 16),
-    (256, 16),
-    (512, 16),
-    (1024, 16),
-]
-
 
 @triton.jit
 def _axis_discrete_mask_load_kernel(
@@ -61,32 +45,6 @@ def _axis_discrete_mask_load_kernel(
     # Axis-discrete 2D load: ptr structured, mask constant along g.
     kv0 = tl.load(
         kv_ptr + k_offs[:, None] * G + g[None, :],
-        mask=valid[:, None],
-        other=0.0,
-    )
-
-    tl.store(out_ptr + k_offs[:, None] * G + g[None, :], kv0)
-
-
-@triton.jit
-def _axis_discrete_mask_load_kernel_ptr_broadcast(
-    kv_ptr,
-    idx_ptr,
-    out_ptr,
-    topk,  # runtime scalar row bound
-    BLOCK_K: tl.constexpr,
-    G: tl.constexpr,
-):
-    g = tl.arange(0, G)
-    k_offs = tl.arange(0, BLOCK_K)
-
-    valid = k_offs < topk
-    slot = tl.load(idx_ptr + k_offs, mask=valid, other=0)
-    valid = valid & (slot >= 0)
-
-    # Axis-discrete 2D load: ptr structured along g, mask constant along g.
-    kv0 = tl.load(
-        kv_ptr + g[None, :],
         mask=valid[:, None],
         other=0.0,
     )

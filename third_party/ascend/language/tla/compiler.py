@@ -45,7 +45,7 @@ def _stamp_tla_mode(module):
     module.set_attr("hacc.mode", builder.parse_attr('"tla"'))
 
 
-def lower_ttir(module, context, output_dir=None):
+def lower_ttir(module, context, output_dir=None, *, metadata=None):
     """Run the TLA-specific lowering prefix on a TLA TTIR module.
 
     A standard inliner prefix in the caller first resolves JIT
@@ -108,6 +108,10 @@ def lower_ttir(module, context, output_dir=None):
         raise RuntimeError("tla_to_linalg produced invalid IR")
     _infer_tla_kernel_mode(module, context)
     from triton._C.libtriton.ascend import ir as ascend_ir
+    if metadata is not None:
+        from .options import infer_kernel_options
+
+        metadata.update(infer_kernel_options(module))
     ascend_ir.lower_tla_sync_all(module)
     if output_dir is not None:
         (output_dir / "01_linalg.mlir").write_text(str(module))

@@ -145,18 +145,10 @@ def test_cross_dot_alias_precedence(cv, role, reverse):
     generator = cv.generator.CVTileGenerator(_parsed(cv, [_site(cv, 0, names0, 256), _site(cv, 1, names1, 256)]))
     for param in generator.params:
         param.values = [16, 256]
-    _assert_matches(cv, generator)
-
-
-def test_later_alias_can_rescue_a_prefix(cv):
-    sites = [_site(cv, 0, ("standard_block_m", "N0", "K0"), 256), _site(cv, 1, ("BLOCK_M", "N1", "K1"), 256)]
-    generator = cv.generator.CVTileGenerator(_parsed(cv, sites))
-    values = [256, 16, 256, 16, 16, 16]
-    for param, value in zip(generator.params, values):
-        param.values = [value]
     result = _assert_matches(cv, generator)
-    assert len(result) == 1
-    assert list(result[0].kwargs.values()) == values
+    if role == 0 and not reverse:
+        # A later BLOCK_M=16 rescues the first site's otherwise invalid prefix.
+        assert any(list(config.kwargs.values()) == [256, 16, 256, 16, 16, 16] for config in result)
 
 
 @pytest.mark.parametrize("kind", ["fixed", "fallback", "inferred", "runtime", "shared_upper", "all_fixed", "no_dot"])

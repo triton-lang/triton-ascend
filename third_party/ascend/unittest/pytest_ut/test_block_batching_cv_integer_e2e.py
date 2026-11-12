@@ -51,8 +51,8 @@ def test_integer_cv_device(mode, tail, factor):
     count = expected.numel()
     storage = torch.full((count + 128, ), 0x13572468, device='npu', dtype=torch.int32)
     c = storage[64:-64].view(cshape)
-    compiled = integer_dot[(4, )](a, b, c, m, n, k, mode, block_batching_cv=True, block_batching_factor=factor,
-                                  block_batching_axis=0, enable_hivm_batch_matmul=True)
+    compiled = integer_dot[(4, )](a, b, c, m, n, k, mode, block_batching_factor=factor, block_batching_axis=0,
+                                  enable_hivm_batch_matmul=True)
     torch.npu.synchronize()
     assert compiled.last_launch['runtime_status'] == 'APPLIED', compiled.last_launch
     assert compiled.block_batching['cv_lowering'] == ['spatial_m_v1', 'spatial_n_v1', 'static_integer_lanes_v1'][mode]
@@ -90,8 +90,8 @@ def test_packed_integer_nested_loop_device(factor):
     a, b = acpu.npu(), packed.npu()
     storage = torch.full((128 * 32 + 128, ), 0x13572468, device='npu', dtype=torch.int32)
     c = storage[64:-64].view(128, 32)
-    compiled = packed_integer_loop[(4, )](a, b, c, block_batching_cv=True, block_batching_factor=factor,
-                                          block_batching_axis=0, enable_hivm_batch_matmul=True)
+    compiled = packed_integer_loop[(4, )](a, b, c, block_batching_factor=factor, block_batching_axis=0,
+                                          enable_hivm_batch_matmul=True)
     torch.npu.synchronize()
     assert compiled.last_launch['runtime_status'] == 'APPLIED', compiled.last_launch
     assert compiled.block_batching['cv_lowering'] == 'spatial_m_uniform_control_v1'

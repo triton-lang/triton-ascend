@@ -1,12 +1,12 @@
 # Manual CV block batching: independent lanes and spatial concatenation
 
-This opt-in extension integrates with the unified block-batching effect plan.
-CV does not choose a factor automatically.
+Dot-containing kernels automatically use CV batching when block batching is
+requested. CV integrates with the unified effect plan and does not choose a
+factor automatically; no separate CV compilation option is required.
 
 ```python
 compiled = kernel[original_grid](
     *args,
-    block_batching_cv=True,
     block_batching_axis=1,  # a proven M-tile axis; use the kernel's actual axis
     block_batching_factor=4,
 )

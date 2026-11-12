@@ -121,7 +121,6 @@ def test_static_and_callable_share_cache_identity(frontend):
 @pytest.mark.parametrize("options", [
     {"block_batching_factor": 1},
     {"block_batching_axis": 0},
-    {"block_batching_cv": True},
     {"block_batching_grid": (1, 16, 1)},
 ])
 def test_explicit_and_unmerged_callable_keep_late_resolution(frontend, options):

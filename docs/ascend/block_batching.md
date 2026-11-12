@@ -20,13 +20,13 @@ print(compiled.last_launch)    # variant actually submitted for this call
 Always pass the original grid. The launcher owns grouping and preserves the
 original `tl.program_id` and `tl.num_programs` semantics. Factor 1 uses the normal
 compiler path. Positive factors up to 64 are candidates, subject to proof and
-backend resource limits. CV requires powers of two and an explicit axis.
+backend resource limits. Dot-containing kernels automatically use CV batching,
+which requires powers of two. An explicit axis can override automatic selection.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `block_batching_factor` | `1` | Requested grouping factor; no automatic factor search. |
 | `block_batching_axis` | `-1` | Original program axis, or compiler-selected axis for VV. |
-| `block_batching_cv` | `False` | Opt into supported dot-containing kernels. |
 | `block_batching_layout` | `"auto"` | Try proved memory-view folding; `"semantic_only"` retains lane grouping. |
 | `enable_hivm_batch_matmul` | Backend default | Allow independent CV pairs to use the backend batch-MMA path. |
 

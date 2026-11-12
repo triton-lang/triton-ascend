@@ -420,9 +420,12 @@ def make_ttir(mod, metadata, opt):
             _extents = ", ".join(f"{extent} : i32" for extent in opt.block_batching_grid)
             mod.set_attr("hacc.block_batching_grid", _builder.parse_attr(f"[{_extents}]"))
         batch_source = str(mod)
+        from .block_batching import _has_dot
+        cv = _has_dot(mod)
+        layout_policy = "semantic_only" if cv else opt.block_batching_layout
         report = dict(
-            rewrite(mod, opt.block_batching_factor, opt.block_batching_axis, opt.block_batching_layout,
-                    opt.block_batching_cv, opt.block_batching_cv and opt.enable_hivm_batch_matmul))
+            rewrite(mod, opt.block_batching_factor, opt.block_batching_axis, layout_policy, cv, cv
+                    and opt.enable_hivm_batch_matmul))
         # Selection is done; hivmc rejects hacc.* module attrs it does not know.
         _remove_attr = getattr(ascend.ir, "remove_attr", None)
         if _remove_attr is not None:
@@ -435,7 +438,7 @@ def make_ttir(mod, metadata, opt):
             raise BatchingRejected(report["reason"])
         report["layout"] = json.loads(report.pop("layout_json"))
         report["layout"]["requested_policy"] = opt.block_batching_layout
-        report["layout"]["selected_policy"] = opt.block_batching_layout
+        report["layout"]["selected_policy"] = layout_policy
         report["guard"] = json.loads(report.pop("guard_json"))
         report["guard"]["axis"] = report["selected_axis"]
         if report.get("cv_lowering") in CV_MASKED_BATCH_LOWERINGS:
@@ -1121,8 +1124,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             diagnostic = e.stderr.decode(errors="replace") if isinstance(e.stderr, bytes) else str(e.stderr or "")
             layout = metadata.get("block_batching", {}).get("layout", {})
             applied = any(row.get("rewritten") for row in layout.get("accesses", ()))
-            from .block_batching import LayoutTargetRejected, _layout_resource_refusal, CVTargetRejected, _cv_resource_refusal
-            if opt.block_batching_cv and _cv_resource_refusal(e.returncode, diagnostic):
+            from .block_batching import LayoutTargetRejected, _layout_resource_refusal, CVTargetRejected, _cv_resource_refusal, _is_cv_report
+            if _is_cv_report(metadata.get("block_batching", {})) and _cv_resource_refusal(e.returncode, diagnostic):
                 raise CVTargetRejected(diagnostic[-16000:]) from e
             if (opt.block_batching_layout == "auto" and applied and _layout_resource_refusal(e.returncode, diagnostic)):
                 raise LayoutTargetRejected(opt.block_batching_factor, opt.block_batching_axis,
@@ -1478,10 +1481,9 @@ class NPUOptions:
     profile_scratch_size: int = 0
     enable_graph_optimize: bool = True
     block_batching_factor: int = 1
-    block_batching_cv: bool = False
     block_batching_axis: int = -1
-    # Original launch extents, including resolved callable grids for auto VV
-    # selection. This compile option distinguishes cached axis choices when
+    # Original launch extents, including resolved callable grids for automatic
+    # axis selection. This compile option distinguishes cached axis choices when
     # runtime grid dimensions change. VV permits partial final groups.
     block_batching_grid: Tuple[int] = None
     block_batching_layout: str = "auto"
@@ -1610,7 +1612,7 @@ class NPUOptions:
     use_bytecode: bool = field(default=False, init=False)
 
     def __post_init__(self, arch, rule_mask):
-        BatchRequest(self.block_batching_factor, self.block_batching_axis, self.block_batching_cv)
+        BatchRequest(self.block_batching_factor, self.block_batching_axis)
         if self.block_batching_grid is not None:
             grid = tuple(self.block_batching_grid)
             if len(grid) != 3 or any(type(x) is not int or x < 1 for x in grid):
@@ -1618,7 +1620,7 @@ class NPUOptions:
             object.__setattr__(self, "block_batching_grid", grid)
         if self.block_batching_layout not in ("auto", "semantic_only"):
             raise ValueError("block_batching_layout must be auto or semantic_only")
-        if self.block_batching_factor == 1 or self.block_batching_cv:
+        if self.block_batching_factor == 1:
             object.__setattr__(self, "block_batching_layout", "semantic_only")
         if self.block_batching_factor > 1:
             compiler_path, _ = _get_npucompiler_path()

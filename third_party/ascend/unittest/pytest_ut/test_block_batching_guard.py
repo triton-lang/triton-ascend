@@ -263,7 +263,7 @@ def bundle_environment(monkeypatch):
     report = {
         'compile_status': 'COMPILED_GUARDED', 'selected_axis': 0, 'owner': 'block_batching', 'guard':
         rows_guard(4, None), 'candidate_factor': 3, 'implementation_version': batching.IMPLEMENTATION_VERSION,
-        'lane_width': 3
+        'lane_width': 3, 'cv_mode': 'disabled'
     }
     base, candidate = Kernel('baseline'), Kernel('candidate', report)
     wrapper = batching.BatchKernel(base, candidate, batching.BatchRequest(3, 0), report, [0, 1, 2, 3])
@@ -289,7 +289,8 @@ def test_bundle_selects_complete_variant_and_rechecks_alias(bundle_environment):
 
 def test_cv_partial_group_selects_complete_baseline(bundle_environment):
     env = bundle_environment
-    env.wrapper.request = batching.BatchRequest(2, 0, True)
+    env.wrapper.request = batching.BatchRequest(2, 0)
+    env.report['cv_mode'] = 'independent_batch_v1'
     env.wrapper.run(*env.launch)
     assert env.wrapper.last_launch['runtime_status'] == 'APPLIED'
     partial = list(env.launch)

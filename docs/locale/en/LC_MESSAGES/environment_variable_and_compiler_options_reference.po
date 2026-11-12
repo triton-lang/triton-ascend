@@ -1,0 +1,1728 @@
+"POT-Creation-Date: 2026-11-11 15:29+0800\n"
+"PO-Revision-Date: 2026-11-11 15:29+0800\n"
+
+"X-Source-Commit: 72780973a48a95228a37547498567737a53e5145\n"
+
+"X-Skill-Version: 2.0.0\\n"
+
+"Last-Translator: Auto Translation (glm-5.2)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "环境变量与编译选项"
+msgstr "Environment Variables and Compilation Options"
+
+msgid "本文面向Triton-Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及A2/A3、950支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel；环境变量也可以不经启动脚本，直接通过 `triton.knobs`（含Ascend专用的 `triton.knobs.ascend` 分组）在进程内读写。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。"
+msgstr "This document targets Triton-Ascend operator developers. It provides a reference for compilation, running, debugging, and autotuning configurations. It explains the purpose, default values, and support status for A2/A3 and 950 for each configuration option. Environment variables set the compilation and running behaviors within a process. Compilation options configure a single kernel. You can also read and write environment variables directly within a process by using `triton.knobs` (including the Ascend-specific `triton.knobs.ascend` group) without using a startup script. The migration methods for old configurations are detailed in [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility) at the end of this document."
+
+msgid "环境变量"
+msgstr "Environment Variables"
+
+msgid "环境变量用法示例"
+msgstr "Environment variable usage examples"
+
+msgid "在启动Python程序前，使用 `export` 设置环境变量。例如，设置 `TRITON_DEBUG=1` 开启调试功能："
+msgstr "Before starting a Python program, use `export` to set environment variables. For example, set `TRITON_DEBUG=1` to enable debugging:"
+
+msgid ""
+"export TRITON_DEBUG=1\n"
+"python3 run_kernel.py\n"
+msgstr ""
+"export TRITON_DEBUG=1\n"
+"python3 run_kernel.py\n"
+
+msgid "`export` 设置的变量会被当前终端后续启动的程序继承。若只需为一次运行设置变量，可将赋值写在命令前："
+msgstr "Variables set using `export` are inherited by programs started later in the current terminal. If you only need to set the variable for a single run, write the assignment before the command:"
+
+msgid ""
+"TRITON_DEBUG=1 python3 run_kernel.py\n"
+msgstr ""
+"TRITON_DEBUG=1 python3 run_kernel.py\n"
+
+msgid "环境变量参考表"
+msgstr "Environment Variable Reference Table"
+
+msgid "950列包含Ascend 950PR/950DT；“—”表示不适用，编译模式限制见[编译选项参考表](#compiler-options-reference)。布尔环境变量除特别注明外可用 `1` 启用。"
+msgstr "The 950 column includes Ascend 950PR/950DT; \"—\" indicates not applicable. For compilation mode restrictions, refer to the [compiler options reference table](#compiler-options-reference). You can enable Boolean environment variables using `1` unless otherwise specified."
+
+msgid "类别"
+msgstr "Category"
+
+msgid "功能说明"
+msgstr "Function Description"
+
+msgid "默认值"
+msgstr "Default value"
+
+msgid "A2/A3"
+msgstr "A2/A3"
+
+msgid "950"
+msgstr "950"
+
+msgid "调试"
+msgstr "Debugging"
+
+msgid "`TRITON_DEBUG`"
+msgstr "`TRITON_DEBUG`"
+
+msgid "开启JIT调试及设备断言，保存TTIR；常规路径还输出编译日志并保存后端IR与二进制。"
+msgstr "Enables JIT debugging and device assertions, and saves TTIR. The regular path also outputs compilation logs and saves the backend IR and binaries."
+
+msgid "关闭"
+msgstr "Disable"
+
+msgid "支持"
+msgstr "Support"
+
+msgid "`USE_IR_LOC`"
+msgstr "`USE_IR_LOC`"
+
+msgid "以指定阶段的IR文件行号重建位置信息；当前AST编译可用 `ttir`，IR输入还可使用源文件位置快照。"
+msgstr "Reconstruct position information using the IR file line numbers at a specified stage; currently, AST compilation can use `ttir`, and IR input can also use source file position snapshots."
+
+msgid "未设置"
+msgstr "Not set"
+
+msgid "`TRITON_FRONT_END_DEBUGGING`"
+msgstr "`TRITON_FRONT_END_DEBUGGING`"
+
+msgid "前端错误发生时保留原始Python异常堆栈。"
+msgstr "Retains the original Python exception stack trace when a frontend error occurs."
+
+msgid "`TRITON_KERNEL_DUMP`"
+msgstr "`TRITON_KERNEL_DUMP`"
+
+msgid "保存编译阶段产物及最终 `npubin`；只对实际发生的编译生效。"
+msgstr "Save the compilation phase artifacts and the final `npubin`; this takes effect only for actual compilations."
+
+msgid "`TRITON_DUMP_DIR`"
+msgstr "`TRITON_DUMP_DIR`"
+
+msgid "指定 `TRITON_KERNEL_DUMP` 的输出目录。"
+msgstr "Specifies the output directory for `TRITON_KERNEL_DUMP`."
+
+msgid "`$TRITON_HOME/.triton/dump`"
+msgstr "`$TRITON_HOME/.triton/dump`"
+
+msgid "`TRITON_DISABLE_LINE_INFO`"
+msgstr "`TRITON_DISABLE_LINE_INFO`"
+
+msgid "`true/1` 禁止向毕昇编译器请求行号信息；`false/0` 启用。"
+msgstr "`true/1` prohibits requesting line number information from the BiSheng compiler; `false/0` enables it."
+
+msgid "`true`"
+msgstr "`true`"
+
+msgid "常规路径"
+msgstr "Standard path"
+
+msgid "`LLVM_EXTRACT_DI_LOCAL_VARIABLES`"
+msgstr "`LLVM_EXTRACT_DI_LOCAL_VARIABLES`"
+
+msgid "请求毕昇编译器生成调试变量信息。"
+msgstr "Requests the BiSheng compiler to generate debug variable information."
+
+msgid "`TRITON_DEVICE_PRINT`"
+msgstr "`TRITON_DEVICE_PRINT`"
+
+msgid "启用 `tl.device_print` 的设备端GM打印缓冲区。"
+msgstr "Enables the device-side GM print buffer for `tl.device_print`."
+
+msgid "`TRITON_MEMORY_DISPLAY`"
+msgstr "`TRITON_MEMORY_DISPLAY`"
+
+msgid "请求编译器输出内存使用信息。"
+msgstr "Requests the compiler to output memory usage information."
+
+msgid "—"
+msgstr "—"
+
+msgid "`ENABLE_PRINT_UB_BITS`"
+msgstr "`ENABLE_PRINT_UB_BITS`"
+
+msgid "请求编译器打印UB占用位数。"
+msgstr "Requests the compiler to print the UB occupancy bits."
+
+msgid "`TRITON_INTERPRET`"
+msgstr "`TRITON_INTERPRET`"
+
+msgid "在CPU解释器中执行其支持的Triton操作，便于Python断点调试。"
+msgstr "Executes supported Triton operations in the CPU interpreter to facilitate Python breakpoint debugging."
+
+msgid "`TRITON_ENABLE_SANITIZER`"
+msgstr "`TRITON_ENABLE_SANITIZER`"
+
+msgid "向Ascend NPU编译器传入sanitizer开关。"
+msgstr "Pass the sanitizer flag to the Ascend NPU compiler."
+
+msgid "编译"
+msgstr "Compilation"
+
+msgid "`TRITON_ALWAYS_COMPILE`"
+msgstr "`TRITON_ALWAYS_COMPILE`"
+
+msgid "忽略命中的编译缓存，强制重新编译。"
+msgstr "Ignore the matched compilation cache and force recompilation."
+
+msgid "`TRITON_KERNEL_OVERRIDE`"
+msgstr "`TRITON_KERNEL_OVERRIDE`"
+
+msgid "从覆盖目录读取与编译阶段同名的外部IR/二进制文件。"
+msgstr "Read external IR/binary files with the same name as the compilation phase from the override directory."
+
+msgid "`TRITON_OVERRIDE_DIR`"
+msgstr "`TRITON_OVERRIDE_DIR`"
+
+msgid "指定覆盖文件目录。"
+msgstr "Specifies the override file directory."
+
+msgid "`$TRITON_HOME/.triton/override`"
+msgstr "`$TRITON_HOME/.triton/override`"
+
+msgid "`TRITON_F32_DEFAULT`"
+msgstr "`TRITON_F32_DEFAULT`"
+
+msgid "设置 `tl.dot` 的默认F32输入精度；Ascend使用 `ieee`、`hf32`，兼容输入 `tf32` 会映射为 `hf32`。"
+msgstr "Sets the default F32 input precision for `tl.dot`; Ascend uses `ieee` and `hf32`, and the compatible input `tf32` is mapped to `hf32`."
+
+msgid "未设置，使用后端的 `ieee`"
+msgstr "If not set, uses the backend `ieee`"
+
+msgid "`TRITON_ALLOW_NON_CONSTEXPR_GLOBALS`"
+msgstr "`TRITON_ALLOW_NON_CONSTEXPR_GLOBALS`"
+
+msgid "允许JIT前端引用非 `constexpr` 全局变量。"
+msgstr "Allows the JIT frontend to reference non-`constexpr` global variables."
+
+msgid "`TRITON_ENABLE_LIBDEVICE`"
+msgstr "`TRITON_ENABLE_LIBDEVICE`"
+
+msgid "在A2/A3编译路径额外链接libdevice；非空字符串均视为开启，包括 `\"0\"`。"
+msgstr "Additionally links libdevice in the A2/A3 compilation path; any non-empty string is treated as enabled, including `\"0\"`."
+
+msgid "`TRITON_ENABLE_LIBDEVICE_SIMT`"
+msgstr "`TRITON_ENABLE_LIBDEVICE_SIMT`"
+
+msgid "在950上为libdevice调用选择SIMT版本；非空字符串均视为开启，包括 `\"0\"`。"
+msgstr "Select the SIMT version for libdevice calls on 950; any non-empty string is considered enabled, including `\"0\"`."
+
+msgid "缓存与调优"
+msgstr "Cache and Tuning"
+
+msgid "`TRITON_ASCEND_ENABLE_DYNAMIC_REUSE`"
+msgstr "`TRITON_ASCEND_ENABLE_DYNAMIC_REUSE`"
+
+msgid "控制符合条件的 `constexpr` 参数变化时的kernel自动复用：`0` 关闭，`1` 启用动态化，`2` 额外启用tile复用和后台编译。"
+msgstr "Controls the automatic reuse of kernels when qualified `constexpr` parameters change: `0` disables it, `1` enables dynamization, and `2` additionally enables tile reuse and background compilation."
+
+msgid "`0`"
+msgstr "`0`"
+
+msgid "支持；`simt_only` 不支持tile复用"
+msgstr "Supported; `simt_only` does not support tile reuse"
+
+msgid "`TRITON_HOME`"
+msgstr "`TRITON_HOME`"
+
+msgid "设置Triton缓存、dump和override目录的根位置。"
+msgstr "Set the root location for the Triton cache, dump, and override directories."
+
+msgid "用户主目录"
+msgstr "user home directory"
+
+msgid "`TRITON_CACHE_DIR`"
+msgstr "`TRITON_CACHE_DIR`"
+
+msgid "指定编译缓存目录。"
+msgstr "Specifies the compilation cache directory."
+
+msgid "`$TRITON_HOME/.triton/cache`"
+msgstr "`$TRITON_HOME/.triton/cache`"
+
+msgid "`TRITON_CACHE_AUTOTUNING`"
+msgstr "`TRITON_CACHE_AUTOTUNING`"
+
+msgid "缓存autotune的选择结果。"
+msgstr "Cache the autotune selection results."
+
+msgid "`TRITON_PRINT_AUTOTUNING`"
+msgstr "`TRITON_PRINT_AUTOTUNING`"
+
+msgid "设为 `1` 时打印autotune结果及常规路径的编译命令。"
+msgstr "If you set this to `1`, it prints the autotune results and the compilation commands for the normal path."
+
+msgid "`TRITON_CACHE_MANAGER`"
+msgstr "`TRITON_CACHE_MANAGER`"
+
+msgid "用 `MODULE:CLASS` 指定编译缓存管理器；远程缓存设为 `triton.runtime.cache:RemoteCacheManager`。"
+msgstr "Use `MODULE:CLASS` to specify the compilation cache manager; set the remote cache to `triton.runtime.cache:RemoteCacheManager`."
+
+msgid "本地缓存管理器"
+msgstr "Local Cache Manager"
+
+msgid "`TRITON_REMOTE_CACHE_BACKEND`"
+msgstr "`TRITON_REMOTE_CACHE_BACKEND`"
+
+msgid "用 `MODULE:CLASS` 指定远程缓存的存储后端，需配合远程缓存管理器使用。"
+msgstr "Use `MODULE:CLASS` to specify the storage backend for the remote cache. It must be used together with the remote cache manager."
+
+msgid "`TRITON_ENABLE_UBTUNER`"
+msgstr "`TRITON_ENABLE_UBTUNER`"
+
+msgid "选择UB调优模式：`compile` 或 `run`。"
+msgstr "Select a UB tuning mode: `compile` or `run`."
+
+msgid "`TRITON_AUTOTUNE_PARALLEL_COMPILE`"
+msgstr "`TRITON_AUTOTUNE_PARALLEL_COMPILE`"
+
+msgid "控制Ascend autotune的并行编译，`0` 关闭。"
+msgstr "Controls the parallel compilation of Ascend autotune. `0` disables this feature."
+
+msgid "`1`"
+msgstr "`1`"
+
+msgid "`TRITON_BENCH_METHOD`"
+msgstr "`TRITON_BENCH_METHOD`"
+
+msgid "设为 `npu` 时选择Ascend的 `do_bench_npu`；`default` 使用通用测量方法。"
+msgstr "When set to `npu`, Ascend's `do_bench_npu` is selected; when set to `default`, the general measurement method is used."
+
+msgid "`default`"
+msgstr "`default`"
+
+msgid "运行"
+msgstr "Run"
+
+msgid "`TRITON_COMPILE_ONLY`"
+msgstr "`TRITON_COMPILE_ONLY`"
+
+msgid "设为 `1/true` 时不启动kernel；编译及launcher扩展加载仍会执行。"
+msgstr "When set to `1/true`, the kernel is not launched; compilation and launcher extension loading still execute."
+
+msgid "`TRITON_ENABLE_TASKQUEUE`"
+msgstr "`TRITON_ENABLE_TASKQUEUE`"
+
+msgid "控制Ascend launcher的task queue。"
+msgstr "Controls the task queue of the Ascend launcher."
+
+msgid "开启"
+msgstr "Enable"
+
+msgid "`TRITON_GRID_WARN_PRINT`"
+msgstr "`TRITON_GRID_WARN_PRINT`"
+
+msgid "打印Ascend launcher的grid大小警告。"
+msgstr "Print the Ascend launcher grid size warning."
+
+msgid "`NPU_DEVICE_LIMIT`"
+msgstr "`NPU_DEVICE_LIMIT`"
+
+msgid "按 `AI Core数,Vector Core数` 限制可用核心数，例如 `14,28`；需符合设备比例。"
+msgstr "Limit the number of available cores based on `AI Core count, Vector Core count`, for example `14,28`; the ratio must match the device ratio."
+
+msgid "未设置，使用设备值"
+msgstr "If not set, the device value is used."
+
+msgid "工具链选择"
+msgstr "Toolchain selection"
+
+msgid "`CC`"
+msgstr "`CC`"
+
+msgid "设置CPU launcher扩展的C/C++编译器。"
+msgstr "Set the C/C++ compiler for the CPU launcher extension."
+
+msgid "未设置，使用系统默认编译器"
+msgstr "If not set, the system default compiler is used."
+
+msgid "`TRITON_NPU_COMPILER_PATH`"
+msgstr "`TRITON_NPU_COMPILER_PATH`"
+
+msgid "仅当随包工具与 `PATH` 查找均失败时，作为Ascend编译器工具目录的后备路径。"
+msgstr "This serves as the fallback path for the Ascend compiler tool directory only when both the bundled tool and `PATH` lookup fail."
+
+msgid "`TRITON_BUILD_DIR`"
+msgstr "`TRITON_BUILD_DIR`"
+
+msgid "查找 `triton-opt`、`triton-mlir-opt` 时，在随包工具之后、`PATH` 之前查找该目录的 `bin/`。"
+msgstr "When searching for `triton-opt` and `triton-mlir-opt`, search the `bin/` directory of this directory after the bundled tools and before `PATH`."
+
+msgid "triton.knobs接口"
+msgstr "triton.knobs interface"
+
+msgid "`triton.knobs` 是社区Triton 3.4引入的类型化配置接口：描述符字段对应一个环境变量，少数条目是Python对象（如回调函数），不对应环境变量，只能在进程内设置。如果只需要在启动前配置一次，直接设置环境变量即可；需要在进程内读取当前取值、临时修改或按作用域恢复时，使用 `triton.knobs`。上游分组由 `triton.knobs` 直接提供；Triton-Ascend在Triton 3.6增加了 `triton.knobs.ascend` 分组，导入Ascend后端后即可使用。"
+msgstr "`triton.knobs` is a typed configuration interface introduced in community Triton 3.4. Descriptor fields correspond to an environment variable. A few entries are Python objects (for example, callback functions) that do not correspond to environment variables and can only be set within the process. If you only need to configure once before startup, set the environment variable directly; if you need to read the current value within the process, temporarily modify it, or restore it by scope, use `triton.knobs`. Upstream groups are provided directly by `triton.knobs`; Triton-Ascend added the `triton.knobs.ascend` group in Triton 3.6, which is available after importing the Ascend backend."
+
+msgid "快速上手"
+msgstr "Quick Start"
+
+msgid ""
+"import triton\n"
+"import triton.backends.ascend.runtime  # 触发Ascend后端注册，安装triton.knobs.ascend\n"
+"\n"
+"# 查看一个分组的全部字段和当前取值\n"
+"print(triton.knobs.ascend.knobs)\n"
+"\n"
+"# 读取、修改某个字段\n"
+"print(triton.knobs.compilation.dump_ir)\n"
+"triton.knobs.ascend.device_print = True\n"
+msgstr ""
+"import triton\n"
+"import triton.backends.ascend.runtime  # Trigger Ascend backend registration and install triton.knobs.ascend\n"
+"\n"
+"# View all fields and current values of a group\n"
+"print(triton.knobs.ascend.knobs)\n"
+"\n"
+"# Read and modify a field\n"
+"print(triton.knobs.compilation.dump_ir)\n"
+"triton.knobs.ascend.device_print = True\n"
+
+msgid "赋值对之后的读取生效，并默认同步写回环境变量，详见下文的读写规则。"
+msgstr "The assignment takes effect for subsequent reads and synchronously writes back to the environment variable by default. For details, refer to the read/write rules below."
+
+msgid "读写规则"
+msgstr "Read and Write Rules"
+
+msgid "读取：优先返回进程内值，其次环境变量，最后默认值。"
+msgstr "Read: Returns the in-process value first, then the environment variable, and finally the default value."
+
+msgid "赋值：写入进程内值，并默认同步写回环境变量。"
+msgstr "Assignment: writes an in-process value and synchronously writes it back to the environment variable by default."
+
+msgid "`scope()`：记录进入时的进程内值和环境变量，退出时（包括异常）完整恢复，推荐用于临时切换。"
+msgstr "`scope()`: Records the in-process values and environment variables upon entry, and fully restores them upon exit (including exceptions). Use this for temporary switching."
+
+msgid "`reset()` / `knobs.env`：只清除进程内覆盖，不撤销已经写入的环境变量。"
+msgstr "`reset()` / `knobs.env`: Clears only in-process overrides and does not undo the environment variables that have already been written."
+
+msgid "`copy()`：复制当前进程内覆盖，返回独立的分组对象。"
+msgstr "`copy()`: Copies the current in-process override and returns an independent group object."
+
+msgid "`propagate_env = False`：赋值只影响当前Python进程；子进程和直接读取 `os.getenv` 的工具看不到，确认没有外部读取方时再使用。"
+msgstr "`propagate_env = False`: The assignment only affects the current Python process; child processes and tools that directly read `os.getenv` cannot see it. Use this only after confirming that there are no external readers."
+
+msgid "例如临时打开 `device_print`，退出 `with` 块后自动恢复："
+msgstr "For example, temporarily enable `device_print`; it automatically restores after you exit the `with` block:"
+
+msgid ""
+"with triton.knobs.ascend.scope():\n"
+"    triton.knobs.ascend.device_print = True\n"
+"    kernel[grid](x, y, out)\n"
+"# 退出with块后恢复\n"
+msgstr ""
+"with triton.knobs.ascend.scope():\n"
+"    triton.knobs.ascend.device_print = True\n"
+"    kernel[grid](x, y, out)\n"
+"# Restored after exiting the with block\n"
+
+msgid "模块级字段"
+msgstr "Module-level fields"
+
+msgid "`propagate_env` 作用于 `triton.knobs` 整体，不属于任何分组，也没有对应环境变量，只能通过Python赋值："
+msgstr "`propagate_env` applies to `triton.knobs` as a whole. It does not belong to any group and has no corresponding environment variable. It can only be set through Python assignment:"
+
+msgid ""
+"triton.knobs.propagate_env = False  # 之后的赋值不再写回os.environ\n"
+msgstr ""
+"triton.knobs.propagate_env = False  # Subsequent assignments are no longer written back to os.environ\n"
+
+msgid "字段"
+msgstr "Field"
+
+msgid "取值范围"
+msgstr "Value range"
+
+msgid "说明"
+msgstr "Description"
+
+msgid "`propagate_env`"
+msgstr "`propagate_env`"
+
+msgid "`True`"
+msgstr "`True`"
+
+msgid "`True` / `False`"
+msgstr "`True` / `False`"
+
+msgid "控制knob赋值是否同步写回 `os.environ`；为 `False` 时只影响当前进程。"
+msgstr "Controls whether knob assignments are synchronously written back to `os.environ`; when set to `False`, only the current process is affected."
+
+msgid "分组一览"
+msgstr "Group overview"
+
+msgid "下表按用途列出各配置分组，各分组的字段说明见后续章节；如需仅关注Ascend专用开关，请直接查阅 `triton.knobs.ascend` 分组。"
+msgstr "The following table lists the configuration groups by purpose. For field descriptions of each group, refer to the subsequent sections. If you need to focus only on Ascend-specific switches, refer directly to the `triton.knobs.ascend` group."
+
+msgid "分组"
+msgstr "Grouping"
+
+msgid "用途"
+msgstr "Purpose"
+
+msgid "Ascend适用"
+msgstr "Ascend supported"
+
+msgid "[`triton.knobs.ascend`](#knobs-ascend)"
+msgstr "[`triton.knobs.ascend`](#knobs-ascend)"
+
+msgid "Ascend专用的编译、autotune、launcher开关"
+msgstr "Ascend-specific compilation, autotune, and launcher switches"
+
+msgid "[`triton.knobs.compilation`](#knobs-compilation)"
+msgstr "[`triton.knobs.compilation`](#knobs-compilation)"
+
+msgid "缓存覆盖、IR dump、调试信息等编译行为"
+msgstr "Cache override, IR dump, debugging information, and other compilation behaviors"
+
+msgid "部分字段适用"
+msgstr "Some fields are applicable."
+
+msgid "[`triton.knobs.runtime`](#knobs-runtime)"
+msgstr "[`triton.knobs.runtime`](#knobs-runtime)"
+
+msgid "解释器模式与运行时开关"
+msgstr "Interpreter Mode and Runtime Switches"
+
+msgid "[`triton.knobs.cache`](#knobs-cache)"
+msgstr "[`triton.knobs.cache`](#knobs-cache)"
+
+msgid "缓存目录与缓存管理器"
+msgstr "Cache Directory and Cache Manager"
+
+msgid "[`triton.knobs.autotuning`](#knobs-autotuning)"
+msgstr "[`triton.knobs.autotuning`](#knobs-autotuning)"
+
+msgid "autotune结果缓存与打印"
+msgstr "Autotune result caching and printing"
+
+msgid "[`triton.knobs.language`](#knobs-language)"
+msgstr "[`triton.knobs.language`](#knobs-language)"
+
+msgid "语言级默认值（FP32精度等）"
+msgstr "Language-level defaults (such as FP32 precision)"
+
+msgid "[`triton.knobs.build`](#knobs-build)"
+msgstr "[`triton.knobs.build`](#knobs-build)"
+
+msgid "CPU launcher扩展的编译工具与自定义构建入口"
+msgstr "Compilation tools and custom build entry for the CPU launcher extension"
+
+msgid "仅 `cc`、`impl` 适用"
+msgstr "Only `cc` and `impl` are applicable."
+
+msgid "[`triton.knobs.redis`](#knobs-redis)"
+msgstr "[`triton.knobs.redis`](#knobs-redis)"
+
+msgid "远程缓存的Redis存储后端"
+msgstr "Redis storage backend for remote cache"
+
+msgid "`triton.knobs.nvidia` / `.amd` / `.proton`"
+msgstr "`triton.knobs.nvidia` / `.amd` / `.proton`"
+
+msgid "其他后端专用"
+msgstr "Specific to Other Backends"
+
+msgid "不使用"
+msgstr "Do not use"
+
+msgid "<a id=\"knobs-ascend\"></a>"
+msgstr "<a id=\"knobs-ascend\"></a>"
+
+msgid "<a id=\"knobs-ascend\">"
+msgstr "<a id=\"knobs-ascend\">"
+
+msgid "</a>"
+msgstr "</a>"
+
+msgid "**`triton.knobs.ascend`**"
+msgstr "**`triton.knobs.ascend`**"
+
+msgid "`enable_sanitizer`"
+msgstr "`enable_sanitizer`"
+
+msgid "`False`"
+msgstr "`False`"
+
+msgid "`print_ub_bits`"
+msgstr "`print_ub_bits`"
+
+msgid "`memory_display`"
+msgstr "`memory_display`"
+
+msgid "`npu_compiler_path`"
+msgstr "`npu_compiler_path`"
+
+msgid "`None`"
+msgstr "`None`"
+
+msgid "目录路径 / `None`"
+msgstr "Directory path / `None`"
+
+msgid "`enable_ubtuner`"
+msgstr "`enable_ubtuner`"
+
+msgid "`\"\"`"
+msgstr "`\"\"`"
+
+msgid "`\"\"`（关闭）、`\"compile\"`、`\"run\"`"
+msgstr "`\"\"` (disabled), `\"compile\"`, `\"run\"`"
+
+msgid "选择UB调优模式。"
+msgstr "Select the UB tuning mode."
+
+msgid "`autotune_parallel_compile`"
+msgstr "`autotune_parallel_compile`"
+
+msgid "控制Ascend autotune的并行编译。"
+msgstr "Controls the parallel compilation of Ascend autotune."
+
+msgid "`bench_method`"
+msgstr "`bench_method`"
+
+msgid "`\"default\"`"
+msgstr "`\"default\"`"
+
+msgid "`\"default\"`、`\"npu\"`"
+msgstr "`\"default\"`、`\"npu\"`"
+
+msgid "`\"npu\"` 时使用Ascend的 `do_bench_npu`，`\"default\"` 使用通用测量方法。"
+msgstr "When set to `\"npu\"`, it uses the Ascend `do_bench_npu`; when set to `\"default\"`, it uses the general measurement method."
+
+msgid "`compile_only`"
+msgstr "`compile_only`"
+
+msgid "不启动kernel；编译及launcher扩展加载仍会执行。"
+msgstr "The kernel does not start; compilation and launcher extension loading still execute."
+
+msgid "`enable_taskqueue`"
+msgstr "`enable_taskqueue`"
+
+msgid "`device_print`"
+msgstr "`device_print`"
+
+msgid "`grid_warn_print`"
+msgstr "`grid_warn_print`"
+
+msgid "<a id=\"knobs-compilation\"></a>"
+msgstr "<a id=\"knobs-compilation\"></a>"
+
+msgid "<a id=\"knobs-compilation\">"
+msgstr "<a id=\"knobs-compilation\">"
+
+msgid "**`triton.knobs.compilation`**"
+msgstr "**`triton.knobs.compilation`**"
+
+msgid "`override`"
+msgstr "`override`"
+
+msgid "从覆盖目录读取与编译阶段同名的外部IR/二进制。"
+msgstr "Read external IR/binary with the same name as the compilation phase from the override directory."
+
+msgid "`dump_ir`"
+msgstr "`dump_ir`"
+
+msgid "`dump_ir_extract_di_local_variables`"
+msgstr "`dump_ir_extract_di_local_variables`"
+
+msgid "`store_binary_only`"
+msgstr "`store_binary_only`"
+
+msgid "`TRITON_STORE_BINARY_ONLY`"
+msgstr "`TRITON_STORE_BINARY_ONLY`"
+
+msgid "只写入 `cubin`/`hsaco`/`json` 产物，不写中间IR；Ascend二进制扩展名为 `npubin`，不在该列表内。"
+msgstr "Only write `cubin`/`hsaco`/`json` artifacts, and do not write intermediate IR. The Ascend binary extension is `npubin`, which is not in this list."
+
+msgid "`always_compile`"
+msgstr "`always_compile`"
+
+msgid "`use_ir_loc`"
+msgstr "`use_ir_loc`"
+
+msgid "`None`、阶段名（如 `\"ttir\"`）、源文件位置快照"
+msgstr "`None`, stage name (for example, `\"ttir\"`), source file location snapshot"
+
+msgid "以指定阶段的IR文件行号重建位置信息。"
+msgstr "Rebuild location information using the line numbers of the IR file at the specified stage."
+
+msgid "`enable_asan`"
+msgstr "`enable_asan`"
+
+msgid "`TRITON_ENABLE_ASAN`"
+msgstr "`TRITON_ENABLE_ASAN`"
+
+msgid "Ascend不支持。"
+msgstr "Ascend does not support this."
+
+msgid "`disable_line_info`"
+msgstr "`disable_line_info`"
+
+msgid "禁止向毕昇编译器请求行号信息。Ascend后端直接读取该环境变量，未设置时按 `True` 处理。"
+msgstr "Do not request line number information from the BiSheng compiler. The Ascend backend directly reads this environment variable. If it is not set, it is treated as `True`."
+
+msgid "`front_end_debugging`"
+msgstr "`front_end_debugging`"
+
+msgid "`allow_non_constexpr_globals`"
+msgstr "`allow_non_constexpr_globals`"
+
+msgid "`instrumentation_mode`"
+msgstr "`instrumentation_mode`"
+
+msgid "`TRITON_INSTRUMENTATION_MODE`"
+msgstr "`TRITON_INSTRUMENTATION_MODE`"
+
+msgid "`\"\"`（关闭）、`\"consan\"`"
+msgstr "`\"\"` (disabled), `\"consan\"`"
+
+msgid "`listener`"
+msgstr "`listener`"
+
+msgid "`CompilationListener` / `None`"
+msgstr "`CompilationListener` / `None`"
+
+msgid "编译完成（含缓存命中）后调用，接收 `src`、`metadata`、`metadata_group`、`times`、`cache_hit`，可用于统计编译耗时。"
+msgstr "Called after compilation is complete (including cache hits), it receives `src`, `metadata`, `metadata_group`, `times`, and `cache_hit`, which can be used to track compilation time."
+
+msgid "<a id=\"knobs-runtime\"></a>"
+msgstr "<a id=\"knobs-runtime\"></a>"
+
+msgid "<a id=\"knobs-runtime\">"
+msgstr "<a id=\"knobs-runtime\">"
+
+msgid "**`triton.knobs.runtime`**"
+msgstr "**`triton.knobs.runtime`**"
+
+msgid "`interpret`"
+msgstr "`interpret`"
+
+msgid "在CPU解释器中执行其支持的Triton操作。"
+msgstr "Executes supported Triton operations in the CPU interpreter."
+
+msgid "`override_arch`"
+msgstr "`override_arch`"
+
+msgid "`TRITON_OVERRIDE_ARCH`"
+msgstr "`TRITON_OVERRIDE_ARCH`"
+
+msgid "架构字符串 / `None`"
+msgstr "Architecture string / `None`"
+
+msgid "`debug`"
+msgstr "`debug`"
+
+msgid "开启JIT调试及设备断言；环境变量在模块导入时读取一次。"
+msgstr "Enables JIT debugging and device assertions; the environment variable is read once when the module is imported."
+
+msgid "`launch_enter_hook`"
+msgstr "`launch_enter_hook`"
+
+msgid "`HookChain()`"
+msgstr "`HookChain()`"
+
+msgid "`HookChain[LaunchHook]`"
+msgstr "`HookChain[LaunchHook]`"
+
+msgid "kernel启动前调用，参数为launch metadata；用 `.add(func)` / `.remove(func)` 增删回调。"
+msgstr "Called before kernel launch with launch metadata as the parameter; use `.add(func)` / `.remove(func)` to add or remove callbacks."
+
+msgid "`launch_exit_hook`"
+msgstr "`launch_exit_hook`"
+
+msgid "`HookChain(reversed=True)`"
+msgstr "`HookChain(reversed=True)`"
+
+msgid "kernel启动后调用；链按注册顺序的逆序执行。"
+msgstr "This is called after the kernel starts; the chain executes in the reverse order of registration."
+
+msgid "`kernel_load_start_hook`"
+msgstr "`kernel_load_start_hook`"
+
+msgid "`HookChain[InitHandleHook]`"
+msgstr "`HookChain[InitHandleHook]`"
+
+msgid "kernel二进制/模块加载前调用，此时 `module`、`function` 可能为 `None`。"
+msgstr "This is called before the kernel binary or module is loaded, at which point `module` and `function` may be `None`."
+
+msgid "`kernel_load_end_hook`"
+msgstr "`kernel_load_end_hook`"
+
+msgid "加载完成后调用；链按注册顺序的逆序执行。"
+msgstr "It is called after loading is complete; the chain executes in the reverse order of registration."
+
+msgid "`jit_cache_hook`"
+msgstr "`jit_cache_hook`"
+
+msgid "`JITHook` / `None`"
+msgstr "`JITHook` / `None`"
+
+msgid "每次JIT编译前调用，可检查key、签名和编译选项；返回真值时跳过本次编译。"
+msgstr "This is called before each JIT compilation. It can check the key, signature, and compilation options. When a truthy value is returned, the current compilation is skipped."
+
+msgid "`jit_post_compile_hook`"
+msgstr "`jit_post_compile_hook`"
+
+msgid "JIT编译调用结束后调用；同一kernel的 `jit_cache_hook` 总在它之前。"
+msgstr "Called after the JIT compilation call is complete; the `jit_cache_hook` of the same kernel is always called before it."
+
+msgid "`add_stages_inspection_hook`"
+msgstr "`add_stages_inspection_hook`"
+
+msgid "`PipelineStagesHook` / `None`"
+msgstr "`PipelineStagesHook` / `None`"
+
+msgid "<a id=\"knobs-cache\"></a>"
+msgstr "<a id=\"knobs-cache\"></a>"
+
+msgid "<a id=\"knobs-cache\">"
+msgstr "<a id=\"knobs-cache\">"
+
+msgid "**`triton.knobs.cache`**"
+msgstr "**`triton.knobs.cache`**"
+
+msgid "`home_dir`"
+msgstr "`home_dir`"
+
+msgid "目录路径"
+msgstr "Directory path"
+
+msgid "Triton缓存、dump和override目录的根位置。"
+msgstr "The root location of the Triton cache, dump, and override directories."
+
+msgid "`dump_dir`"
+msgstr "`dump_dir`"
+
+msgid "IR dump的输出目录。"
+msgstr "The output directory for the IR dump."
+
+msgid "`override_dir`"
+msgstr "`override_dir`"
+
+msgid "覆盖文件目录。"
+msgstr "Overrides the file directory."
+
+msgid "`dir`"
+msgstr "`dir`"
+
+msgid "编译缓存目录。"
+msgstr "Compilation cache directory."
+
+msgid "`manager_class`"
+msgstr "`manager_class`"
+
+msgid "`MODULE:CLASS` / `None`"
+msgstr "`MODULE:CLASS` / `None`"
+
+msgid "编译缓存管理器；远程缓存设为 `triton.runtime.cache:RemoteCacheManager`。"
+msgstr "Compilation cache manager; the remote cache is set to `triton.runtime.cache:RemoteCacheManager`."
+
+msgid "`remote_manager_class`"
+msgstr "`remote_manager_class`"
+
+msgid "远程缓存的存储后端，需配合远程缓存管理器使用。"
+msgstr "The remote cache storage backend must be used with the remote cache manager."
+
+msgid "<a id=\"knobs-autotuning\"></a>"
+msgstr "<a id=\"knobs-autotuning\"></a>"
+
+msgid "<a id=\"knobs-autotuning\">"
+msgstr "<a id=\"knobs-autotuning\">"
+
+msgid "**`triton.knobs.autotuning`**"
+msgstr "**`triton.knobs.autotuning`**"
+
+msgid "`cache`"
+msgstr "`cache`"
+
+msgid "`print`"
+msgstr "`print`"
+
+msgid "打印autotune结果及常规路径的编译命令。"
+msgstr "Print the autotune results and the compilation commands for the regular path."
+
+msgid "<a id=\"knobs-language\"></a>"
+msgstr "<a id=\"knobs-language\"></a>"
+
+msgid "<a id=\"knobs-language\">"
+msgstr "<a id=\"knobs-language\">"
+
+msgid "**`triton.knobs.language`**"
+msgstr "**`triton.knobs.language`**"
+
+msgid "`fp32_default`"
+msgstr "`fp32_default`"
+
+msgid "`None`、`\"ieee\"`、`\"hf32\"`、`\"tf32\"`（映射为 `hf32`）"
+msgstr "`None`, `\"ieee\"`, `\"hf32\"`, `\"tf32\"` (mapped to `hf32`)"
+
+msgid "`tl.dot` 的默认FP32输入精度；`None` 时使用后端默认值 `ieee`。"
+msgstr "The default FP32 input precision of `tl.dot`; when `None`, the backend default value `ieee` is used."
+
+msgid "`default_fp_fusion`"
+msgstr "`default_fp_fusion`"
+
+msgid "`TRITON_DEFAULT_FP_FUSION`"
+msgstr "`TRITON_DEFAULT_FP_FUSION`"
+
+msgid "默认是否允许浮点运算融合。"
+msgstr "Specifies whether floating-point operation fusion is allowed by default."
+
+msgid "<a id=\"knobs-build\"></a>"
+msgstr "<a id=\"knobs-build\"></a>"
+
+msgid "<a id=\"knobs-build\">"
+msgstr "<a id=\"knobs-build\">"
+
+msgid "**`triton.knobs.build`**"
+msgstr "**`triton.knobs.build`**"
+
+msgid "`cc`"
+msgstr "`cc`"
+
+msgid "编译器路径或名称 / `None`"
+msgstr "Compiler path or name / `None`"
+
+msgid "CPU launcher扩展的C/C++ 编译器。"
+msgstr "The C/C++ compiler extended by the CPU launcher."
+
+msgid "`cudacrt_path`"
+msgstr "`cudacrt_path`"
+
+msgid "`TRITON_CUDACRT_PATH`"
+msgstr "`TRITON_CUDACRT_PATH`"
+
+msgid "`cudart_path`"
+msgstr "`cudart_path`"
+
+msgid "`TRITON_CUDART_PATH`"
+msgstr "`TRITON_CUDART_PATH`"
+
+msgid "`impl`"
+msgstr "`impl`"
+
+msgid "`BuildImpl` / `None`"
+msgstr "`BuildImpl` / `None`"
+
+msgid "替代默认的本地编译流程，用于生成CPU launcher扩展；签名为 `(name, src, srcdir, library_dirs, include_dirs, libraries)`。"
+msgstr "Replaces the default local compilation process to generate the CPU launcher extension. The signature is `(name, src, srcdir, library_dirs, include_dirs, libraries)`."
+
+msgid "<a id=\"knobs-redis\"></a>"
+msgstr "<a id=\"knobs-redis\"></a>"
+
+msgid "<a id=\"knobs-redis\">"
+msgstr "<a id=\"knobs-redis\">"
+
+msgid "**`triton.knobs.redis`**"
+msgstr "**`triton.knobs.redis`**"
+
+msgid "`key_format`"
+msgstr "`key_format`"
+
+msgid "`TRITON_REDIS_KEY_FORMAT`"
+msgstr "`TRITON_REDIS_KEY_FORMAT`"
+
+msgid "`\"triton:{key}:{filename}\"`"
+msgstr "`\"triton:{key}:{filename}\"`"
+
+msgid "含 `{key}`、`{filename}` 的格式串"
+msgstr "Format string containing `{key}` and `{filename}`"
+
+msgid "远程缓存键格式。"
+msgstr "Remote cache key format."
+
+msgid "`host`"
+msgstr "`host`"
+
+msgid "`TRITON_REDIS_HOST`"
+msgstr "`TRITON_REDIS_HOST`"
+
+msgid "`\"localhost\"`"
+msgstr "`\"localhost\"`"
+
+msgid "主机名或IP"
+msgstr "Hostname or IP"
+
+msgid "Redis地址。"
+msgstr "Redis address."
+
+msgid "`port`"
+msgstr "`port`"
+
+msgid "`TRITON_REDIS_PORT`"
+msgstr "`TRITON_REDIS_PORT`"
+
+msgid "`6379`"
+msgstr "`6379`"
+
+msgid "整数，有效端口 `1`–`65535`"
+msgstr "An integer. Valid ports: `1`–`65535`"
+
+msgid "Redis端口。"
+msgstr "Redis port."
+
+msgid "编译选项"
+msgstr "Compilation Options"
+
+msgid "编译选项用法示例"
+msgstr "Compilation Option Usage Samples"
+
+msgid "编译选项可以直接传入 `kernel[grid](...)`，也可以通过 `triton.Config` 设置自动调优的候选配置。`triton.Config` 的 `num_warps`、`num_stages` 和 `ir_override` 使用独立构造参数，其余受支持的编译选项放在 `kwargs` 中。"
+msgstr "You can pass compilation options directly to `kernel[grid](...)` or set them through `triton.Config` for autotuning candidate configurations. In `triton.Config`, `num_warps`, `num_stages`, and `ir_override` use independent constructor parameters, and the remaining supported compilation options are placed in `kwargs`."
+
+msgid "示例中，`BLOCK_SIZE` 是kernel自定义的 `tl.constexpr` 参数，`compile_mode` 和 `num_stages` 是编译选项："
+msgstr "In this example, `BLOCK_SIZE` is a custom `tl.constexpr` parameter defined by the kernel, and `compile_mode` and `num_stages` are compilation options:"
+
+msgid ""
+"import triton\n"
+"\n"
+"kernel[grid](*args, BLOCK_SIZE=1024, compile_mode=\"simd\", num_stages=1)\n"
+"\n"
+"configs = [\n"
+"    triton.Config({\"BLOCK_SIZE\": 1024, \"compile_mode\": \"simd\"}, num_stages=1),\n"
+"    triton.Config({\"BLOCK_SIZE\": 1024, \"compile_mode\": \"simd\"}, num_stages=2),\n"
+"]\n"
+msgstr ""
+"import triton\n"
+"\n"
+"kernel[grid](*args, BLOCK_SIZE=1024, compile_mode=\"simd\", num_stages=1)\n"
+"\n"
+"configs = [\n"
+"    triton.Config({\"BLOCK_SIZE\": 1024, \"compile_mode\": \"simd\"}, num_stages=1),\n"
+"    triton.Config({\"BLOCK_SIZE\": 1024, \"compile_mode\": \"simd\"}, num_stages=2),\n"
+"]\n"
+
+msgid "候选配置的使用方法见 [Autotune使用指南](./autotune_guide.md)。"
+msgstr "For the usage of candidate configurations, refer to the [Autotune Usage Guide](./autotune_guide.md)."
+
+msgid "<a id=\"compiler-options-reference\"></a>"
+msgstr "<a id=\"compiler-options-reference\"></a>"
+
+msgid "<a id=\"compiler-options-reference\">"
+msgstr "<a id=\"compiler-options-reference\">"
+
+msgid "编译选项参考表"
+msgstr "Compilation Option Reference Table"
+
+msgid "表中默认值以Ascend后端为准，`triton.Config` 的差异单独注明；`None` 通常表示由后端或工具链决定。"
+msgstr "The default values in the table are based on the Ascend backend, and differences in `triton.Config` are noted separately; `None` usually indicates that the backend or toolchain determines the value."
+
+msgid "**常规路径**：`compile_mode=\"simd\"` 或 `\"simd_simt_template\"`。"
+msgstr "**Standard path**: `compile_mode=\"simd\"` or `\"simd_simt_template\"`."
+
+msgid "**仅纯SIMT**：`compile_mode=\"simt_only\"`，仅950支持。"
+msgstr "**SIMT only**: `compile_mode=\"simt_only\"`, supported only on 950."
+
+msgid "**需DynamicCV生效**：编译器成功应用了 [DynamicCV流水优化](./architecture_design_and_core_features.md#dynamic-cv-pipeline)，即950常规路径中启用 `enable_dynamic_cv_pipeline=True`，且未发生回退。"
+msgstr "**Requires DynamicCV to take effect**: The compiler successfully applied the [DynamicCV pipeline optimization](./architecture_design_and_core_features.md#dynamic-cv-pipeline), that is, `enable_dynamic_cv_pipeline=True` is enabled in the 950 regular path, and no fallback occurred."
+
+msgid "默认值/可选值"
+msgstr "Default value/Optional value"
+
+msgid "Triton通用"
+msgstr "Triton General"
+
+msgid "开启设备断言与编译调试；JIT下与环境变量 `TRITON_DEBUG` 任一开启即生效。"
+msgstr "Enables device assertion and compilation debugging. This takes effect when either JIT or the environment variable `TRITON_DEBUG` is enabled."
+
+msgid "`False`；布尔值"
+msgstr "`False`; boolean value"
+
+msgid "`sanitize_overflow`"
+msgstr "`sanitize_overflow`"
+
+msgid "启用整数溢出检查；检查通过设备断言执行，还需启用 `debug`。"
+msgstr "Enable integer overflow checking; the check is performed using device assertions, and you must also enable `debug`."
+
+msgid "`True`；布尔值"
+msgstr "`True`; Boolean value"
+
+msgid "`num_stages`"
+msgstr "`num_stages`"
+
+msgid "设为 `1` 时关闭自动多缓冲；其他值使用自动模式，不指定各层缓冲数量。"
+msgstr "When set to `1`, automatic multi-buffering is disabled; other values use automatic mode without specifying the number of buffers for each level."
+
+msgid "未设置 `multibuffer_mode` 时：后端 `2`，`triton.Config` 为 `3`；整数"
+msgstr "When `multibuffer_mode` is not set: the backend is `2`, and `triton.Config` is `3`; integer"
+
+msgid "`num_warps`"
+msgstr "`num_warps`"
+
+msgid "设置纯SIMT编译器的warp数。"
+msgstr "Set the number of warps for the pure SIMT compiler."
+
+msgid "后端 `32`；`triton.Config` 为 `4`；正整数"
+msgstr "Backend `32`; `triton.Config` is `4`; a positive integer"
+
+msgid "仅纯SIMT"
+msgstr "Only pure SIMT"
+
+msgid "`ir_override`"
+msgstr "`ir_override`"
+
+msgid "用给定文件覆盖同扩展名的编译阶段产物。"
+msgstr "Overwrite the compilation phase artifacts with the same extension using the specified file."
+
+msgid "`None`；文件路径"
+msgstr "`None`; file path"
+
+msgid "编译模式与图优化"
+msgstr "Compilation Modes and Graph Optimization"
+
+msgid "`compile_mode`"
+msgstr "`compile_mode`"
+
+msgid "`simd` 使用SIMD；`simd_simt_template` 在A2/A3使用SIMD，在950启用模板SIMT子路径；`simt_only` 使用纯SIMT。"
+msgstr "`simd` uses SIMD; `simd_simt_template` uses SIMD on A2/A3 and enables a template SIMT sub-path on 950; `simt_only` uses pure SIMT."
+
+msgid "`\"simd_simt_template\"`；另可选 `\"simd\"`、`\"simt_only\"`"
+msgstr "`\"simd_simt_template\"`; alternatively, you can select `\"simd\"` or `\"simt_only\"`"
+
+msgid "支持前两项"
+msgstr "Supports the first two items"
+
+msgid "支持全部"
+msgstr "Supports all"
+
+msgid "`enable_graph_optimize`"
+msgstr "`enable_graph_optimize`"
+
+msgid "控制TTIR Graph Optimization。"
+msgstr "Controls TTIR Graph Optimization."
+
+msgid "多缓冲"
+msgstr "Multi-buffer"
+
+msgid "`multibuffer`"
+msgstr "`multibuffer`"
+
+msgid "控制自动多缓冲总开关；`num_stages=1` 也会将其关闭。"
+msgstr "Controls the master switch for automatic multi-buffering; `num_stages=1` also disables it."
+
+msgid "`multibuffer_mode`"
+msgstr "`multibuffer_mode`"
+
+msgid "按 `gm`、`l1`、`l0c`、`ub` 设置多缓冲槽数；`1` 关闭该层多缓冲，大于 `1` 指定槽数。受 `multibuffer` 总开关控制，不能与 `num_stages` 同时显式设置。"
+msgstr "Set the number of multi-buffer slots for `gm`, `l1`, `l0c`, and `ub`; `1` disables multi-buffer for the layer, and a value greater than `1` specifies the number of slots. The `multibuffer` master switch controls this option, and you cannot explicitly set it together with `num_stages`."
+
+msgid "`None`；必须包含四个层级的字典，值为正的32位有符号整数"
+msgstr "`None`; must contain a four-level dictionary with positive 32-bit signed integer values"
+
+msgid "`set_workspace_multibuffer`"
+msgstr "`set_workspace_multibuffer`"
+
+msgid "设置workspace多缓冲级别；显式设置 `multibuffer_mode` 且 `gm>1` 时，NPU IR使用该GM槽数覆盖本值。"
+msgstr "Sets the workspace multi-buffer level. When `multibuffer_mode` is explicitly set and `gm>1`, the NPU IR uses the GM slot count to override this value."
+
+msgid "`None`；整数，具体范围由NPU编译器决定"
+msgstr "`None`; an integer, with the specific range determined by the NPU compiler"
+
+msgid "同步"
+msgstr "Synchronization"
+
+msgid "`sync_solver`"
+msgstr "`sync_solver`"
+
+msgid "控制HIVM graph sync solver。"
+msgstr "Controls the HIVM graph sync solver."
+
+msgid "`None`；布尔值"
+msgstr "`None`; boolean value"
+
+msgid "`unit_flag`"
+msgstr "`unit_flag`"
+
+msgid "控制HIVM unit-flag同步。"
+msgstr "Controls HIVM unit-flag synchronization."
+
+msgid "`inject_barrier_all`"
+msgstr "`inject_barrier_all`"
+
+msgid "控制自动注入barrier同步。"
+msgstr "Controls the automatic injection of barrier synchronization."
+
+msgid "`inject_block_all`"
+msgstr "`inject_block_all`"
+
+msgid "控制自动注入block同步。"
+msgstr "Controls the automatic injection of block synchronization."
+
+msgid "`disable_auto_inject_block_sync`"
+msgstr "`disable_auto_inject_block_sync`"
+
+msgid "禁用编译器自动插入核间同步。使用Ascend亲和接口 `sync_block_all`、`sync_block_set` 或 `sync_block_wait` 时，必须设置 `disable_auto_inject_block_sync=True`。"
+msgstr "Disable automatic insertion of inter-core synchronization by the compiler. When using the Ascend affinity interfaces `sync_block_all`, `sync_block_set`, or `sync_block_wait`, you must set `disable_auto_inject_block_sync=True`."
+
+msgid "调度与流水"
+msgstr "Scheduling and Pipelining"
+
+msgid "`enable_auto_bind_sub_block`"
+msgstr "`enable_auto_bind_sub_block`"
+
+msgid "覆盖后端推导的sub-block自动绑定策略。"
+msgstr "Overrides the backend-derived sub-block automatic binding strategy."
+
+msgid "`enable_hivm_auto_cv_balance`"
+msgstr "`enable_hivm_auto_cv_balance`"
+
+msgid "控制HIVM的自动CV balance。"
+msgstr "Controls the automatic CV balance of HIVM."
+
+msgid "`tile_mix_vector_loop`"
+msgstr "`tile_mix_vector_loop`"
+
+msgid "设置Vector循环的切分份数。"
+msgstr "Sets the number of splits for the Vector loop."
+
+msgid "`None`；整数"
+msgstr "`None`; integer"
+
+msgid "`tile_mix_cube_loop`"
+msgstr "`tile_mix_cube_loop`"
+
+msgid "设置Cube循环的切分份数。"
+msgstr "Sets the number of split parts for the Cube loop."
+
+msgid "`enable_mixed_cv`"
+msgstr "`enable_mixed_cv`"
+
+msgid "控制NPU编译器的mixed CV路径。"
+msgstr "Controls the mixed CV path of the NPU compiler."
+
+msgid "`enable_dynamic_cv_pipeline`"
+msgstr "`enable_dynamic_cv_pipeline`"
+
+msgid "启用950的 [DynamicCV流水优化](./architecture_design_and_core_features.md#dynamic-cv-pipeline)。优化生效时设置 `set_workspace_multibuffer=0`、`enable_mixed_cv=True`、`disable_auto_inject_block_sync=True`；若无法应用该优化，则恢复这些选项的原值并继续编译。"
+msgstr "Enable the [DynamicCV pipeline optimization](./architecture_design_and_core_features.md#dynamic-cv-pipeline) for 950. When the optimization takes effect, set `set_workspace_multibuffer=0`, `enable_mixed_cv=True`, and `disable_auto_inject_block_sync=True`. If the optimization cannot be applied, restore the original values of these options and continue compilation."
+
+msgid "`None`，按目标解析：A2/A3 `False`、950 `True`；布尔值"
+msgstr "`None`, resolved by target: A2/A3 `False`, 950 `True`; boolean value"
+
+msgid "`buf_slot_num_of_veccore`"
+msgstr "`buf_slot_num_of_veccore`"
+
+msgid "设置Vector Core本地缓冲槽数量。"
+msgstr "Sets the number of Vector Core local buffer slots."
+
+msgid "需DynamicCV生效"
+msgstr "Requires DynamicCV to take effect."
+
+msgid "`buf_slot_num_of_crosscore`"
+msgstr "`buf_slot_num_of_crosscore`"
+
+msgid "设置跨核缓冲槽数量。"
+msgstr "Sets the number of cross-core buffer slots."
+
+msgid "`buf_slot_num_of_gm`"
+msgstr "`buf_slot_num_of_gm`"
+
+msgid "设置GM加载缓冲槽数量。"
+msgstr "Set the number of GM load buffer slots."
+
+msgid "内存优化"
+msgstr "Memory Optimization"
+
+msgid "`enable_ubuf_saving`"
+msgstr "`enable_ubuf_saving`"
+
+msgid "控制UB saving。"
+msgstr "Controls UB saving."
+
+msgid "`disable_size_align_for_cast`"
+msgstr "`disable_size_align_for_cast`"
+
+msgid "控制cast的size-align优化。"
+msgstr "Controls the size-align optimization for cast."
+
+msgid "`disable_tightly_coupled_buffer_reuse`"
+msgstr "`disable_tightly_coupled_buffer_reuse`"
+
+msgid "禁止NPU编译器复用tightly coupled buffer。"
+msgstr "Prevent the NPU compiler from reusing the tightly coupled buffer."
+
+msgid "`plan_memory_strategy`"
+msgstr "`plan_memory_strategy`"
+
+msgid "选择内存规划策略。"
+msgstr "Select a memory planning strategy."
+
+msgid "`None`；`\"default\"`、`\"largest-first\"`"
+msgstr "`None`；`\"default\"`、`\"largest-first\"`"
+
+msgid "算子优化"
+msgstr "Operator Optimization"
+
+msgid "`enable_preload`"
+msgstr "`enable_preload`"
+
+msgid "控制NPU编译器的preload优化。"
+msgstr "Controls the preload optimization of the NPU compiler."
+
+msgid "`enable_flatten`"
+msgstr "`enable_flatten`"
+
+msgid "控制NPU编译器的flatten pass。"
+msgstr "Controls the flatten pass of the NPU compiler."
+
+msgid "`enable_auto_vectorize_v2`"
+msgstr "`enable_auto_vectorize_v2`"
+
+msgid "控制NPU编译器的AutoVectorizeV2。"
+msgstr "Controls the AutoVectorizeV2 of the NPU compiler."
+
+msgid "`vf_fusion_mode`"
+msgstr "`vf_fusion_mode`"
+
+msgid "选择VF fusion策略。"
+msgstr "Select the VF fusion strategy."
+
+msgid "`None`，不传开关；`\"max-parallel\"`、`\"all-op\"`、`\"ub-aware-op\"`"
+msgstr "`None`, no switch is passed; `\"max-parallel\"`, `\"all-op\"`, `\"ub-aware-op\"`"
+
+msgid "`enable_vf_stack_limit`"
+msgstr "`enable_vf_stack_limit`"
+
+msgid "在BiShengIR编译中根据向量函数（VF）的栈占用估算限制融合，降低栈溢出风险。"
+msgstr "During BiShengIR compilation, fusion is limited based on the estimated stack usage of vector functions (VF) to reduce the risk of stack overflow."
+
+msgid "`hfusion_enable_multiple_consumer_fusion`"
+msgstr "`hfusion_enable_multiple_consumer_fusion`"
+
+msgid "控制多个消费者的HFusion。"
+msgstr "Control the HFusion of multiple consumers."
+
+msgid "`enable_hivm_batch_matmul`"
+msgstr "`enable_hivm_batch_matmul`"
+
+msgid "为BiShengIR编译启用batch matmul。"
+msgstr "Enable batch matmul for BiShengIR compilation."
+
+msgid "`auto_vectorize_v2_max_fused_ops_num`"
+msgstr "`auto_vectorize_v2_max_fused_ops_num`"
+
+msgid "设置AutoVectorizeV2最大融合op数。"
+msgstr "Set the maximum number of fused operators for AutoVectorizeV2."
+
+msgid "`prevec_max_fused_ops_num`"
+msgstr "`prevec_max_fused_ops_num`"
+
+msgid "设置预向量化最大融合op数。"
+msgstr "Sets the maximum number of fused operators for pre-vectorization."
+
+msgid "纯SIMT"
+msgstr "Pure SIMT"
+
+msgid "`simt_optimization_mode`"
+msgstr "`simt_optimization_mode`"
+
+msgid "设置纯SIMT的多位优化模式；在A2/A3或950常规路径显式传入时，会发出 `UserWarning` 并忽略。"
+msgstr "Sets the pure SIMT multi-bit optimization mode. When explicitly passed on the A2/A3 or 950 regular path, a `UserWarning` is emitted and the option is ignored."
+
+msgid "`0`；整数，位语义由NPU编译器定义"
+msgstr "`0`; an integer whose bit semantics are defined by the NPU compiler"
+
+msgid "`shared_mem_dynamic_size`"
+msgstr "`shared_mem_dynamic_size`"
+
+msgid "设置纯SIMT动态共享内存大小。"
+msgstr "Set the pure SIMT dynamic shared memory size."
+
+msgid "`122880` 字节；可显式设整数字节数"
+msgstr "`122880` bytes; you can explicitly set an integer number of bytes."
+
+msgid "`disable_fma`"
+msgstr "`disable_fma`"
+
+msgid "在纯SIMT编译路径禁用FMA优化。"
+msgstr "Disable FMA optimization in the pure SIMT compilation path."
+
+msgid "`superblock_factor`"
+msgstr "`superblock_factor`"
+
+msgid "在自动block mapping生效且未做row coalescing时，设置纯SIMT superblock因子。"
+msgstr "Set the pure SIMT superblock factor when automatic block mapping takes effect and row coalescing is not performed."
+
+msgid "`1`；大于 `1` 时传给编译器"
+msgstr "`1`; passed to the compiler when greater than `1`"
+
+msgid "<a id=\"compiler-option-cleanup-and-compatibility\"></a>"
+msgstr "<a id=\"compiler-option-cleanup-and-compatibility\"></a>"
+
+msgid "<a id=\"compiler-option-cleanup-and-compatibility\">"
+msgstr "<a id=\"compiler-option-cleanup-and-compatibility\">"
+
+msgid "编译选项清理与兼容性"
+msgstr "Compilation Option Cleanup and Compatibility"
+
+msgid "本节列出的旧编译选项仅在兼容期内接受。**未来版本彻底移除这些选项后，继续通过kernel启动参数或 `triton.Config` 传入它们将导致报错。** 请在升级前按下表迁移或删除旧选项。"
+msgstr "The legacy compilation options listed in this section are accepted only during the compatibility period. **Once future versions completely remove these options, passing them using kernel launch parameters or `triton.Config` will result in an error.** Migrate or delete the legacy options according to the following table before upgrading."
+
+msgid "由Triton-Ascend处理的更名和废弃项会发出 `FutureWarning`，同一名称在进程内只告警一次。旧多缓冲选项由NPU IR输出废弃提示。"
+msgstr "Renaming and deprecation items handled by Triton-Ascend emit a `FutureWarning`, and the same name triggers a warning only once within a process. The NPU IR outputs a deprecation message for the old multi-buffer option."
+
+msgid "旧多缓冲选项迁移"
+msgstr "Legacy Multi-buffer Option Migration"
+
+msgid "以下三个选项由NPU IR标记为废弃。兼容期内仍按旧语义生效；同时设置 `multibuffer_mode` 时，旧选项的取值被忽略。可按编译器提示的等效配置迁移，并在字典中完整指定四个层级："
+msgstr "The NPU IR marks the following three options as deprecated. During the compatibility period, they still take effect with the old semantics. When you set `multibuffer_mode` at the same time, the system ignores the values of the old options. You can migrate to the equivalent configuration suggested by the compiler and fully specify the four levels in the dictionary:"
+
+msgid "旧选项"
+msgstr "Legacy option"
+
+msgid "`multibuffer_mode` 中的对应设置"
+msgstr "the corresponding settings in `multibuffer_mode`"
+
+msgid "`limit_auto_multi_buffer_only_for_local_buffer`"
+msgstr "`limit_auto_multi_buffer_only_for_local_buffer`"
+
+msgid "`True` 对应 `gm=1`，关闭GM多缓冲。"
+msgstr "`True` corresponds to `gm=1` and disables GM multi-buffering."
+
+msgid "`limit_auto_multi_buffer_of_local_buffer`"
+msgstr "`limit_auto_multi_buffer_of_local_buffer`"
+
+msgid "`\"no-l0c\"` 对应 `l0c=1`；`\"no-limit\"` 对应 `l0c>1`。"
+msgstr "`\"no-l0c\"` corresponds to `l0c=1`; `\"no-limit\"` corresponds to `l0c>1`."
+
+msgid "`limit_auto_multi_buffer_buffer`"
+msgstr "`limit_auto_multi_buffer_buffer`"
+
+msgid "950常规路径：`\"only-cube\"` 对应 `ub=1`；`\"only-vector\"` 对应 `l1=1`、`l0c=1`；`\"no-limit\"` 对应 `l1>1`、`ub>1`。"
+msgstr "950 regular path: `\"only-cube\"` corresponds to `ub=1`; `\"only-vector\"` corresponds to `l1=1` and `l0c=1`; `\"no-limit\"` corresponds to `l1>1` and `ub>1`."
+
+msgid "例如，仅为L1配置双缓冲："
+msgstr "For example, configure double buffering only for L1:"
+
+msgid ""
+"triton.Config({\"multibuffer_mode\": {\"gm\": 1, \"l1\": 2, \"l0c\": 1, \"ub\": 1}})\n"
+msgstr ""
+"triton.Config({\"multibuffer_mode\": {\"gm\": 1, \"l1\": 2, \"l0c\": 1, \"ub\": 1}})\n"
+
+msgid "已更名的编译选项"
+msgstr "Renamed Compilation Options"
+
+msgid "将以下旧名称替换为对应的名称或取值："
+msgstr "Replace the following old names with the corresponding names or values:"
+
+msgid "废弃名称"
+msgstr "Deprecated name"
+
+msgid "当前名称或取值"
+msgstr "Current name or value"
+
+msgid "兼容行为"
+msgstr "Compatibility Behavior"
+
+msgid "`force_simt_only`"
+msgstr "`force_simt_only`"
+
+msgid "`compile_mode=\"simt_only\"`"
+msgstr "`compile_mode=\"simt_only\"`"
+
+msgid "旧值为 `True` 时覆盖已传入的 `compile_mode`，为 `False` 时不改变模式。两个旧force开关都为 `True` 时，本项优先。"
+msgstr "When the old value is `True`, it overrides the passed-in `compile_mode`. When it is `False`, the mode remains unchanged. When both old force switches are `True`, this option takes precedence."
+
+msgid "`force_simt_template`"
+msgstr "`force_simt_template`"
+
+msgid "`compile_mode=\"simd_simt_template\"`"
+msgstr "`compile_mode=\"simd_simt_template\"`"
+
+msgid "旧值为 `True` 时覆盖已传入的 `compile_mode`，为 `False` 时不改变模式。"
+msgstr "If the old value is `True`, it overrides the passed-in `compile_mode`. If the old value is `False`, it does not change the mode."
+
+msgid "`intra_cache_num`"
+msgstr "`intra_cache_num`"
+
+msgid "沿用原值；同时传入新旧名称时使用新名称。"
+msgstr "Keep the original value; if both the new and old names are passed, the new name is used."
+
+msgid "`inter_cache_num`"
+msgstr "`inter_cache_num`"
+
+msgid "`load_cache_num`"
+msgstr "`load_cache_num`"
+
+msgid "`enable_bishengir_simt_optimization`"
+msgstr "`enable_bishengir_simt_optimization`"
+
+msgid "沿用原值；同时传入新旧名称时使用新名称。仅在950纯SIMT路径生效。"
+msgstr "Keep the original value; if both new and old names are passed, use the new name. This applies only to the 950 pure SIMT path."
+
+msgid "兼容取值 `compile_mode=\"unstructured_in_simt\"` 等同于 `compile_mode=\"simd_simt_template\"`，仍可使用且不触发 `FutureWarning`。新代码使用 `simd_simt_template`。"
+msgstr "The compatible value `compile_mode=\"unstructured_in_simt\"` is equivalent to `compile_mode=\"simd_simt_template\"`, and you can still use it without triggering `FutureWarning`. Use `simd_simt_template` in new code."
+
+msgid "已废弃的编译选项"
+msgstr "Deprecated compilation options"
+
+msgid "从kernel启动参数和 `triton.Config` 中删除以下选项；编译器会忽略其取值。"
+msgstr "Remove the following options from the kernel launch parameters and `triton.Config`; the compiler ignores their values."
+
+msgid "废弃选项"
+msgstr "Deprecated options"
+
+msgid "替代方式或当前行为"
+msgstr "Alternative method or current behavior"
+
+msgid "`add_auto_scheduling`"
+msgstr "`add_auto_scheduling`"
+
+msgid "DAG自动调度开关已移除，无替代项。"
+msgstr "The DAG automatic scheduling switch has been removed, with no replacement."
+
+msgid "`allow_fp8e4nv`"
+msgstr "`allow_fp8e4nv`"
+
+msgid "无替代项。"
+msgstr "No alternative."
+
+msgid "`arch`"
+msgstr "`arch`"
+
+msgid "目标架构由编译目标的 `GPUTarget.arch` 提供。"
+msgstr "The `GPUTarget.arch` of the compilation target provides the target architecture."
+
+msgid "`auto_blockify_size`"
+msgstr "`auto_blockify_size`"
+
+msgid "`auto_tile_and_bind_subblock`"
+msgstr "`auto_tile_and_bind_subblock`"
+
+msgid "切分与sub-block绑定由编译器自动决定。"
+msgstr "The compiler automatically determines the tiling and sub-block binding."
+
+msgid "`bisheng_options`"
+msgstr "`bisheng_options`"
+
+msgid "用户值被忽略。"
+msgstr "The user value is ignored."
+
+msgid "`code_motion`"
+msgstr "`code_motion`"
+
+msgid "`compile_on_910_95`"
+msgstr "`compile_on_910_95`"
+
+msgid "目标产品由编译目标自动识别。"
+msgstr "The compilation target automatically identifies the target product."
+
+msgid "`enable_auto_blockify`"
+msgstr "`enable_auto_blockify`"
+
+msgid "自动block映射及安全分析由编译器管理。"
+msgstr "The compiler manages automatic block mapping and safety analysis."
+
+msgid "`enable_buffer_insert_optimization`"
+msgstr "`enable_buffer_insert_optimization`"
+
+msgid "DynamicCV流水自动启用缓冲插入优化。"
+msgstr "The DynamicCV pipeline automatically enables buffer insertion optimization."
+
+msgid "`enable_cce_vf_auto_sync`"
+msgstr "`enable_cce_vf_auto_sync`"
+
+msgid "`enable_cce_vf_remove_membar`"
+msgstr "`enable_cce_vf_remove_membar`"
+
+msgid "`enable_cross_if_fusion`"
+msgstr "`enable_cross_if_fusion`"
+
+msgid "`enable_drop_unit_dims`"
+msgstr "`enable_drop_unit_dims`"
+
+msgid "如果目的是启用flatten，改用 `enable_flatten`。"
+msgstr "If the purpose is to enable flatten, use `enable_flatten` instead."
+
+msgid "`enable_linearize`"
+msgstr "`enable_linearize`"
+
+msgid "`enable_simt_reorder_instruction`"
+msgstr "`enable_simt_reorder_instruction`"
+
+msgid "改用 `simt_optimization_mode`。"
+msgstr "Use `simt_optimization_mode` instead."
+
+msgid "`enable_vf_fusion`"
+msgstr "`enable_vf_fusion`"
+
+msgid "不再向NPU编译器透传。"
+msgstr "It is no longer passed through to the NPU compiler."
+
+msgid "`enable_mask_fallback_conversion`"
+msgstr "`enable_mask_fallback_conversion`"
+
+msgid "后端将mask fallback conversion固定为关闭。"
+msgstr "The backend hardcodes mask fallback conversion as disabled."
+
+msgid "`enable_nd2nz_on_vector`"
+msgstr "`enable_nd2nz_on_vector`"
+
+msgid "后端将Vector ND2NZ conversion固定为关闭。"
+msgstr "The backend permanently disables Vector ND2NZ conversion."
+
+msgid "`enable_select_analysis`"
+msgstr "`enable_select_analysis`"
+
+msgid "后端将select analysis固定为开启。"
+msgstr "The backend hardcodes select analysis as enabled."
+
+msgid "`enable_sync_block_lock`"
+msgstr "`enable_sync_block_lock`"
+
+msgid "`enable_ub_refine_opt`"
+msgstr "`enable_ub_refine_opt`"
+
+msgid "后端将UB refine optimization固定为关闭。"
+msgstr "The backend fixes the UB refine optimization to off."
+
+msgid "`graph_optimize_emit_remarks`"
+msgstr "`graph_optimize_emit_remarks`"
+
+msgid "Graph Optimization remarks由后端固定为关闭。"
+msgstr "The backend permanently disables Graph Optimization remarks."
+
+msgid "`graph_optimize_max_rewrites_per_function`"
+msgstr "`graph_optimize_max_rewrites_per_function`"
+
+msgid "每个函数的最大重写次数由后端固定为64。"
+msgstr "The backend fixes the maximum number of rewrites for each function at 64."
+
+msgid "`graph_optimize_rule_mask`"
+msgstr "`graph_optimize_rule_mask`"
+
+msgid "旧字段的取值被忽略。"
+msgstr "The value of the old field is ignored."
+
+msgid "`graph_optimize_ub_capacity_bytes`"
+msgstr "`graph_optimize_ub_capacity_bytes`"
+
+msgid "Graph Optimization UB预算由后端根据目标产品推导。"
+msgstr "Graph Optimization The UB budget is derived by the backend based on the target product."
+
+msgid "`grid_num_tiles`"
+msgstr "`grid_num_tiles`"
+
+msgid "该值由后端根据静态grid自动注入。"
+msgstr "The backend automatically injects this value based on the static grid."
+
+msgid "`has_auto_blockify_blacklist_op`"
+msgstr "`has_auto_blockify_blacklist_op`"
+
+msgid "安全标记由编译器扫描TTIR生成。"
+msgstr "The compiler generates the safety marker by scanning TTIR."
+
+msgid "`kernel_name`"
+msgstr "`kernel_name`"
+
+msgid "kernel名称由TTIR推导。"
+msgstr "The kernel name is derived from TTIR."
+
+msgid "`llvm_version`"
+msgstr "`llvm_version`"
+
+msgid "`mix_mode`"
+msgstr "`mix_mode`"
+
+msgid "由编译器自动推导。"
+msgstr "Inferred automatically by the compiler."
+
+msgid "`ops_reorder`"
+msgstr "`ops_reorder`"
+
+msgid "`optimize_dynamic_offset`"
+msgstr "`optimize_dynamic_offset`"
+
+msgid "后端将dynamic-offset optimization固定为关闭。"
+msgstr "The backend hardcodes dynamic-offset optimization as disabled."
+
+msgid "`parallel_mode`"
+msgstr "`parallel_mode`"
+
+msgid "parallel mode由 `compile_mode` 和Linalg IR推导。"
+msgstr "The parallel mode is derived from `compile_mode` and Linalg IR."
+
+msgid "`storage_align`"
+msgstr "`storage_align`"
+
+msgid "`stream`"
+msgstr "`stream`"
+
+msgid "执行流由运行时和驱动管理。"
+msgstr "The runtime and driver manage the execution stream."
+
+msgid "`use_bytecode`"
+msgstr "`use_bytecode`"
+
+msgid "bytecode pipeline由后端固定启用。"
+msgstr "The backend permanently enables the bytecode pipeline."
+
+msgid "`vf_merge_level`"
+msgstr "`vf_merge_level`"
+
+msgid "VF merge level使用后端默认值。"
+msgstr "The VF merge level uses the backend default value."
+
+msgid "`warp_size`"
+msgstr "`warp_size`"
+
+msgid "Ascend后端将warp size固定为32。"
+msgstr "The Ascend backend fixes the warp size to 32."
+
+msgid "已废弃的环境变量"
+msgstr "Deprecated environment variables"
+
+msgid "从启动脚本或运行环境中移除以下变量；编译器会忽略其取值。"
+msgstr "Remove the following variables from the startup script or runtime environment; the compiler ignores their values."
+
+msgid "废弃环境变量"
+msgstr "Deprecated environment variables"
+
+msgid "`LLVM_ROOT`"
+msgstr "`LLVM_ROOT`"
+
+msgid "如需选择CPU launcher编译器，设置 `CC`。"
+msgstr "If you need to select a CPU launcher compiler, set `CC`."
+
+msgid "`MLIR_ROOT`"
+msgstr "`MLIR_ROOT`"
+
+msgid "使用随包提供或可从 `PATH` 发现的MLIR工具。"
+msgstr "Use the MLIR tools provided with the package or discoverable from `PATH`."
+
+msgid "`TRITON_ALL_BLOCKS_PARALLEL`"
+msgstr "`TRITON_ALL_BLOCKS_PARALLEL`"
+
+msgid "自动block mapping由后端策略管理。"
+msgstr "The backend strategy manages the automatic block mapping."
+
+msgid "`TRITON_ASCEND_ARCH`"
+msgstr "`TRITON_ASCEND_ARCH`"
+
+msgid "目标架构由显式编译目标的 `GPUTarget.arch` 提供。"
+msgstr "The `GPUTarget.arch` of the explicit compilation target provides the target architecture."
+
+msgid "`TRITON_ASCEND_COMPILE_SPEED_OPT`"
+msgstr "`TRITON_ASCEND_COMPILE_SPEED_OPT`"
+
+msgid "`TRITON_BACKEND`"
+msgstr "`TRITON_BACKEND`"
+
+msgid "该变量不再用于选择Ascend后端策略。"
+msgstr "This variable is no longer used to select the Ascend backend strategy."
+
+msgid "`TRITON_DISABLE_FFTS`"
+msgstr "`TRITON_DISABLE_FFTS`"
+
+msgid "FFTS策略由编译目标决定。"
+msgstr "The FFTS strategy is determined by the compilation target."
+
+msgid "`TRITON_REGISTER_TENSOR_MSPROF`"
+msgstr "`TRITON_REGISTER_TENSOR_MSPROF`"
+
+msgid "不再通过环境变量控制msprof的张量形状注册。"
+msgstr "Environment variables no longer control the tensor shape registration of msprof."

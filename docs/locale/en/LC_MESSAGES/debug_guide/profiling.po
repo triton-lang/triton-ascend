@@ -1,0 +1,594 @@
+"POT-Creation-Date: 2026-11-11 15:08+0800\n"
+"PO-Revision-Date: 2026-11-11 15:08+0800\n"
+
+"X-Source-Commit: 04fa4b13610396957eadecf2a396763d08b3f7f6\n"
+
+"X-Skill-Version: 2.0.0\\n"
+
+"Last-Translator: Auto Translation (glm-5.2)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Triton-Ascend性能分析方法"
+msgstr "Triton-Ascend Performance Analysis Methods"
+
+msgid "本文档介绍Triton-Ascend的性能分析方法，涵盖获取性能数据与基于理论参数、查找瓶颈分析性能数据，使用于需要对Triton算子的性能进行分析和优化的用户。"
+msgstr "This document describes the performance analysis methods for Triton-Ascend. It covers obtaining performance data and analyzing the data based on theoretical parameters and identifying bottlenecks. This document is intended for you if you need to analyze and optimize the performance of Triton operators."
+
+msgid "获取性能数据"
+msgstr "Collect performance data"
+
+msgid "在进行性能优化之前，需要获取准确的性能数据，了解性能现状，并根据性能现状分析下一步的优化方向。MindStudio提供了多种针对Triton算子的性能测试方法，包括上板Profiling、单算子性能仿真流水图等手段。"
+msgstr "Before optimizing performance, obtain accurate performance data, understand the current performance status, and analyze the next optimization direction based on this status. MindStudio provides various performance testing methods for Triton operators, including on-board profiling and single-operator performance simulation pipeline graphs."
+
+msgid "上板Profiling"
+msgstr "On-Board Profiling"
+
+msgid "msProf工具用于采集和分析运行在昇腾AI处理器上的算子的关键性能指标，用户可根据输出的性能数据，快速定位算子的软、硬件性能瓶颈，提升算子性能的分析效率。"
+msgstr "The msProf tool collects and analyzes the key performance metrics of operators running on Ascend AI processors. Based on the output performance data, you can quickly locate software and hardware performance bottlenecks of operators and improve the efficiency of operator performance analysis."
+
+msgid "注：msProf工具的使用依赖CANN包中的msprof可执行文件，该文件中的接口功能和msprof op一致，该文件为CANN包自带，无需单独安装，msProf工具常用命令请参考[msProf常用命令](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html)。"
+msgstr "Note: The msProf tool depends on the msprof executable file in the CANN package. The interface functions in this file are consistent with those of msprof op. This file is included with the CANN package and does not need to be installed separately. For common commands of the msProf tool, refer to [msProf Common Commands](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html)."
+
+msgid "如下命令行是一个算子上板性能数据采集的示例，可以根据自身的需要灵活组合配置参数："
+msgstr "The following command line is a sample of on-board performance data collection for an operator. You can flexibly combine configuration parameters according to your needs:"
+
+msgid "`--output`：可选参数，用于指定收集到的性能数据的存放路径。"
+msgstr "`--output`: An optional parameter that specifies the storage path for the collected performance data."
+
+msgid "`--kernel-name`：可选参数，用于指定需要收集的单个kernel的性能数据；如果不指定，则只对程序运行过程中调度的第一个算子进行采集。"
+msgstr "`--kernel-name`: An optional parameter that specifies the performance data of a single kernel to collect; if this parameter is not specified, only the first operator scheduled during program execution is collected."
+
+msgid "`$HOME/projects/test_op.py`：算子可执行脚本。"
+msgstr "`$HOME/projects/test_op.py`: The executable script for the operator."
+
+msgid ""
+"msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python3 $HOME/projects/test_op.py\n"
+msgstr ""
+"msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python3 $HOME/projects/test_op.py\n"
+
+msgid "以示范测试用例[03-layer-norm.py](../../../third_party/ascend/unittest/autotune_ut/03-layer-norm.py)为例（不指定--output时生成的数据文件保存在当前路径下）："
+msgstr "Take the sample test case [03-layer-norm.py](../../../third_party/ascend/unittest/autotune_ut/03-layer-norm.py) as an example (when --output is not specified, the generated data file is saved in the current directory):"
+
+msgid ""
+"msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py\n"
+msgstr ""
+"msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py\n"
+
+msgid "注：以下所有采集项的结果数据含义可参考《CANN性能调优工具用户指南》中的[op_summary（算子详细信息）](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/Profiling/atlasprofiling_16_0067.html)章节。 **图1** PipeUtilization.csv（计算单元和搬运单元耗时占比）文件示例 ![alt text](../figures/time_consumed.png)"
+msgstr "Note: For the meaning of the result data of all the following collection items, refer to the [op_summary (Operator Details)](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/Profiling/atlasprofiling_16_0067.html) section in the CANN Performance Tuning Tool User Guide. **Figure 1** Example of the PipeUtilization.csv file (time consumption ratio of compute units and data movement units) ![alt text](../figures/time_consumed.png)"
+
+msgid "alt text"
+msgstr "alt text"
+
+msgid ".. image:: ../figures/time_consumed.png"
+msgstr ".. image:: ../figures/time_consumed.png"
+
+msgid "<a id=\"operator-simulation-pipeline\"></a>"
+msgstr "<a id=\"operator-simulation-pipeline\"></a>"
+
+msgid "<a id=\"operator-simulation-pipeline\">"
+msgstr "<a id=\"operator-simulation-pipeline\">"
+
+msgid "</a>"
+msgstr "</a>"
+
+msgid "算子仿真流水图"
+msgstr "Operator simulation pipeline diagram"
+
+msgid "算子调优工具msProf支持仿真环境下的性能数据采集和自动解析。使用msProf工具获取仿真流水图的具体方式请参考[指令流水图](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/optool/atlasopdev_16_0087.html)。 生成算子仿真流水图的命令与算子上板性能数据采集的命令类似。同样以上述 `03-layer-norm.py` 为例， `--soc-version` 用于指定当前机器的硬件版本，可在终端中输入 `npu-smi info` 查看："
+msgstr "The operator tuning tool msProf supports performance data collection and automatic parsing in the simulation environment. For details about how to use the msProf tool to obtain the simulation pipeline graph, refer to [Instruction Pipeline Graph](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/optool/atlasopdev_16_0087.html). The command for generating the operator simulation pipeline graph is similar to the command for on-board operator performance data collection. Taking the above `03-layer-norm.py` as an example again, `--soc-version` specifies the hardware version of the current machine. Enter `npu-smi info` in the terminal to view the hardware version:"
+
+msgid ""
+"# source simulator路径\n"
+"export LD_LIBRARY_PATH=$HOME/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tools/simulator/{soc-version}/lib:$LD_LIBRARY_PATH\n"
+"# 执行算子仿真流水图采集\n"
+"msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-version} python3 03-layer-norm.py\n"
+msgstr ""
+"# Source simulator path\n"
+"export LD_LIBRARY_PATH=$HOME/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tools/simulator/{soc-version}/lib:$LD_LIBRARY_PATH\n"
+"# Collect the operator simulation pipeline\n"
+"msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-version} python3 03-layer-norm.py\n"
+
+msgid "注：上述示例`soc-version=Ascend910B3`。下面列表基于CANN 9.2.0版本整理输出。"
+msgstr "Note: The preceding example uses `soc-version=Ascend910B3`. The following list is compiled based on CANN version 9.2.0."
+
+msgid "Ascend 910系列"
+msgstr "Ascend 910 series"
+
+msgid "Ascend 310/310P系列"
+msgstr "Ascend 310/310P series"
+
+msgid "Ascend 310B系列"
+msgstr "Ascend 310B series"
+
+msgid "Ascend 610系列"
+msgstr "Ascend 610 series"
+
+msgid "Ascend 920系列"
+msgstr "Ascend 920 series"
+
+msgid "Ascend 950系列"
+msgstr "Ascend 950 series"
+
+msgid "Ascend910A"
+msgstr "Ascend910A"
+
+msgid "Ascend310"
+msgstr "Ascend310"
+
+msgid "Ascend310B1"
+msgstr "Ascend310B1"
+
+msgid "Ascend610"
+msgstr "Ascend610"
+
+msgid "Ascend920A"
+msgstr "Ascend920A"
+
+msgid "Ascend950PR_950x"
+msgstr "Ascend950PR_950x"
+
+msgid "Ascend910B"
+msgstr "Ascend910B"
+
+msgid "Ascend310P1"
+msgstr "Ascend310P1"
+
+msgid "Ascend310B2"
+msgstr "Ascend310B2"
+
+msgid "Ascend610Lite"
+msgstr "Ascend610Lite"
+
+msgid "-"
+msgstr "-"
+
+msgid "Ascend950PR_950y"
+msgstr "Ascend950PR_950y"
+
+msgid "Ascend910B1"
+msgstr "Ascend910B1"
+
+msgid "Ascend310P2"
+msgstr "Ascend310P2"
+
+msgid "Ascend310B3"
+msgstr "Ascend310B3"
+
+msgid "Ascend950PR_950z"
+msgstr "Ascend950PR_950z"
+
+msgid "Ascend910B2"
+msgstr "Ascend910B2"
+
+msgid "Ascend310P3"
+msgstr "Ascend310P3"
+
+msgid "Ascend310B4"
+msgstr "Ascend310B4"
+
+msgid "Ascend950PR_9571"
+msgstr "Ascend950PR_9571"
+
+msgid "Ascend910B2C"
+msgstr "Ascend910B2C"
+
+msgid "Ascend310P4"
+msgstr "Ascend310P4"
+
+msgid "Ascend950PR_9572"
+msgstr "Ascend950PR_9572"
+
+msgid "Ascend910B3"
+msgstr "Ascend910B3"
+
+msgid "Ascend310P5"
+msgstr "Ascend310P5"
+
+msgid "Ascend950PR_9573"
+msgstr "Ascend950PR_9573"
+
+msgid "Ascend910B4"
+msgstr "Ascend910B4"
+
+msgid "Ascend310P7"
+msgstr "Ascend310P7"
+
+msgid "Ascend950PR_9574"
+msgstr "Ascend950PR_9574"
+
+msgid "Ascend910PremiumA"
+msgstr "Ascend910PremiumA"
+
+msgid "Ascend950PR_9575"
+msgstr "Ascend950PR_9575"
+
+msgid "Ascend910ProA"
+msgstr "Ascend910ProA"
+
+msgid "Ascend950PR_9576"
+msgstr "Ascend950PR_9576"
+
+msgid "Ascend910ProB"
+msgstr "Ascend910ProB"
+
+msgid "Ascend950PR_9577"
+msgstr "Ascend950PR_9577"
+
+msgid "Ascend910_9362"
+msgstr "Ascend910_9362"
+
+msgid "Ascend950PR_9578"
+msgstr "Ascend950PR_9578"
+
+msgid "Ascend910_9372"
+msgstr "Ascend910_9372"
+
+msgid "Ascend950PR_957b"
+msgstr "Ascend950PR_957b"
+
+msgid "Ascend910_9381"
+msgstr "Ascend910_9381"
+
+msgid "Ascend950PR_957c"
+msgstr "Ascend950PR_957c"
+
+msgid "Ascend910_9382"
+msgstr "Ascend910_9382"
+
+msgid "Ascend950PR_957d"
+msgstr "Ascend950PR_957d"
+
+msgid "Ascend910_9391"
+msgstr "Ascend910_9391"
+
+msgid "Ascend950PR_9581"
+msgstr "Ascend950PR_9581"
+
+msgid "Ascend910_9392"
+msgstr "Ascend910_9392"
+
+msgid "Ascend950PR_9582"
+msgstr "Ascend950PR_9582"
+
+msgid "Ascend950PR_9583"
+msgstr "Ascend950PR_9583"
+
+msgid "Ascend950PR_9584"
+msgstr "Ascend950PR_9584"
+
+msgid "Ascend950PR_9585"
+msgstr "Ascend950PR_9585"
+
+msgid "Ascend950PR_9586"
+msgstr "Ascend950PR_9586"
+
+msgid "Ascend950PR_9587"
+msgstr "Ascend950PR_9587"
+
+msgid "Ascend950PR_9588"
+msgstr "Ascend950PR_9588"
+
+msgid "Ascend950PR_9589"
+msgstr "Ascend950PR_9589"
+
+msgid "Ascend950PR_958a"
+msgstr "Ascend950PR_958a"
+
+msgid "Ascend950PR_958b"
+msgstr "Ascend950PR_958b"
+
+msgid "Ascend950PR_9591"
+msgstr "Ascend950PR_9591"
+
+msgid "Ascend950PR_9592"
+msgstr "Ascend950PR_9592"
+
+msgid "Ascend950PR_9595"
+msgstr "Ascend950PR_9595"
+
+msgid "Ascend950PR_9596"
+msgstr "Ascend950PR_9596"
+
+msgid "Ascend950PR_9599"
+msgstr "Ascend950PR_9599"
+
+msgid "Ascend950PR_95A1"
+msgstr "Ascend950PR_95A1"
+
+msgid "Ascend950PR_95A2"
+msgstr "Ascend950PR_95A2"
+
+msgid "以下两个文件中保存了获取的性能数据："
+msgstr "The following two files store the collected performance data:"
+
+msgid "trace.json"
+msgstr "trace.json"
+
+msgid "visualize_data.bin"
+msgstr "visualize_data.bin"
+
+msgid "trace.json支持以下两种可视化呈现方式："
+msgstr "trace.json supports the following two visualization methods:"
+
+msgid "Chrome浏览器 在Chrome浏览器中输入 `chrome://tracing` 地址，并将通过msprof op simulator生成的指令流水图文件（trace.json）拖到空白处打开，键盘上输入快捷键（W：放大；S：缩小；A：左移；D：右移）可进行查看。 **图2** Chrome浏览器时间线界面 ![alt text](../figures/trace_json_with_chrome.png)"
+msgstr "Chrome browser Enter the `chrome://tracing` address in the Chrome browser, and drag the instruction pipeline graph file (trace.json) generated by msprof op simulator to the blank area to open it. Use the keyboard shortcuts (W: zoom in; S: zoom out; A: move left; D: move right) to view the file. **Figure 2** Chrome browser timeline interface ![alt text](../figures/trace_json_with_chrome.png)"
+
+msgid ".. image:: ../figures/trace_json_with_chrome.png"
+msgstr ".. image:: ../figures/trace_json_with_chrome.png"
+
+msgid "[MindStudio Insight](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0005.html)可视化呈现 MindStudio Insight工具以时序图方式为用户提供指令在昇腾AI处理器上的运行情况，用户可通过分析时序图中的指令详情、指令执行时间、指令关联代码的调用栈及指令/流水间同步连线等信息，识别微观指令的时序优化点。 **图3** MindStudio Insight时间线界面 ![alt text](../figures/trace_json_with_insight.png)"
+msgstr "[MindStudio Insight](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0005.html) visualized presentation The MindStudio Insight tool provides the execution status of instructions on the Ascend AI processor by using a timeline diagram. By analyzing information in the timeline diagram, such as instruction details, instruction execution time, call stacks of code associated with instructions, and synchronization lines between instructions and pipelines, you can identify timing optimization points for micro-instructions. **Figure 3** MindStudio Insight timeline interface ![alt text](../figures/trace_json_with_insight.png)"
+
+msgid ".. image:: ../figures/trace_json_with_insight.png"
+msgstr ".. image:: ../figures/trace_json_with_insight.png"
+
+msgid "visualize_data.bin支持在MindStudio Insight可视化呈现："
+msgstr "visualize_data.bin supports visualization in MindStudio Insight:"
+
+msgid "除了与trace.json一样可以采集到性能数据之外，visualize_data.bin还提供了与源代码（如：03-layer-norm.py）对应的指令关联看板。 **图4** MindStudio Insight-visualize_data.bin指令关联"
+msgstr "In addition to collecting performance data like trace.json, visualize_data.bin also provides an instruction association dashboard corresponding to the source code (for example, 03-layer-norm.py). **Figure 4** MindStudio Insight-visualize_data.bin instruction association"
+
+msgid "注：以下采集项的结果数据含义可参考《MindStudio Insight工具》的[算子调优](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0068.html)章节。 ![alt text](../figures/visualize_data_with_insight.png)"
+msgstr "Note: For the meaning of the result data of the following collection items, refer to the [Operator Tuning](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0068.html) chapter in the MindStudio Insight tool. ![alt text](../figures/visualize_data_with_insight.png)"
+
+msgid ".. image:: ../figures/visualize_data_with_insight.png"
+msgstr ".. image:: ../figures/visualize_data_with_insight.png"
+
+msgid "仿真流水图采集Triton算子Debug版本"
+msgstr "Collecting simulation pipeline graphs for the Triton operator debug version"
+
+msgid "仿真流水图（trace.json / visualize_data.bin）默认只包含指令地址与指令名。若希望在MindStudio Insight中使用指令关联看板、查看指令对应的Triton/Python源码行与调用栈（见下文[查找瓶颈](#locating-bottlenecks)一节的方法四），需要将算子编译为带debug_line调试信息的版本。未开启时，msprof op simulator会输出如下提示，且代码关联文件为空："
+msgstr "The simulation pipeline graph (trace.json / visualize_data.bin) contains only instruction addresses and instruction names by default. If you want to use the instruction association dashboard in MindStudio Insight and view the Triton/Python source code lines and call stacks corresponding to the instructions (see Method 4 in the [Locating Bottlenecks](#locating-bottlenecks) section below), you need to compile the operator into a version with debug_line debugging information. When this is not enabled, msprof op simulator outputs the following prompt, and the code association file is empty:"
+
+msgid ""
+"[WARN] Kernel missed debug_line information. If you need code call stack, please recompile kernel with -g option\n"
+"[WARN] Code call stack is empty\n"
+"[WARN] Lack of code info of files\n"
+msgstr ""
+"[WARN] Kernel missed debug_line information. If you need code call stack, please recompile kernel with -g option\n"
+"[WARN] Code call stack is empty\n"
+"[WARN] Lack of code info of files\n"
+
+msgid "Triton算子无需手动添加`-g`，triton-ascend后端通过环境变量`TRITON_DISABLE_LINE_INFO`控制是否在`bishengir-compile`命令中追加`--enable-debug-info=true`。注意triton-ascend默认值为`true`（即默认**关闭**行号信息，与社区Triton默认开启相反），需显式置为`False`："
+msgstr "You do not need to manually add `-g` for Triton operators. The triton-ascend backend controls whether to append `--enable-debug-info=true` to the `bishengir-compile` command through the environment variable `TRITON_DISABLE_LINE_INFO`. Note that the default value in triton-ascend is `true` (that is, line number information is **disabled** by default, which is the opposite of the community Triton default). You must explicitly set it to `False`:"
+
+msgid ""
+"export TRITON_DISABLE_LINE_INFO=0\n"
+msgstr ""
+"export TRITON_DISABLE_LINE_INFO=0\n"
+
+msgid "验证是否生效，可按以下步骤："
+msgstr "To verify whether it takes effect, follow these steps:"
+
+msgid "验证日志：日志中`[DEBUG] cmd_list:`一行应包含`--enable-debug-info=true`，且`Kernel missed debug_line information`告警消失。"
+msgstr "Verify the logs: The `[DEBUG] cmd_list:` line should include `--enable-debug-info=true`, and the `Kernel missed debug_line information` warning disappears."
+
+msgid "导入并查看结果：将`visualize_data.bin`导入MindStudio Insight，即可在指令时序图中查看每条指令关联的源码行与调用栈。"
+msgstr "Import and view the results: Import `visualize_data.bin` into MindStudio Insight to view the source code line and call stack associated with each instruction in the instruction timing diagram."
+
+msgid "分析性能数据"
+msgstr "Analyze performance data"
+
+msgid "<a id=\"theoretical-parameters\"></a>"
+msgstr "<a id=\"theoretical-parameters\"></a>"
+
+msgid "<a id=\"theoretical-parameters\">"
+msgstr "<a id=\"theoretical-parameters\">"
+
+msgid "理论参数"
+msgstr "Theoretical parameters"
+
+msgid "理论性能为算子实际性能的理想目标。不同的硬件平台的硬件规格各异，理论性能可以帮助我们了解硬件的潜能，从而设定性能优化的目标。"
+msgstr "Theoretical performance is the ideal target for the actual performance of an operator. Different hardware platforms have varying hardware specifications. Theoretical performance helps you understand the potential of the hardware and set the target for performance tuning."
+
+msgid "搬运相关流水（MTE1/MTE2/MTE3等）的理论耗时 = 搬运数据量（单位：Byte）/ 理论带宽。例如：某款AI处理器的GM（Global Memory, 全局内存）峰值带宽约为1.8TB/s，想要进行一次float数据类型、4096 * 4096大小的矩阵搬运，搬运的理论耗时是`sizeof(float) * 4096 * 4096 / 1.8TB/s = 37.28μs`（按照1TB = 10^12Byte来计算）。"
+msgstr "The theoretical duration of data movement pipelines (such as MTE1, MTE2, and MTE3) = Data movement volume (in bytes) / Theoretical bandwidth. For example, the peak bandwidth of the GM (Global Memory) of an AI processor is about 1.8 TB/s. To move a 4096 * 4096 float matrix, the theoretical duration is `sizeof(float) * 4096 * 4096 / 1.8TB/s = 37.28μs` (calculated based on 1 TB = 10^12 bytes)."
+
+msgid "说明："
+msgstr "Description:"
+
+msgid "搬运指令同时存在时，会存在共享带宽的情况，并不能每条都以接近理论带宽的速率搬运数据。比如，当MTE2/MTE3同时进行GM读写时，搬运流水线的耗时应该是（MTE2搬运量 + MTE3搬运量）/ GM带宽。"
+msgstr "When data movement instructions run simultaneously, they share the bandwidth. Therefore, no single instruction can move data at a rate close to the theoretical bandwidth. For example, when MTE2 and MTE3 read from and write to the GM simultaneously, the data movement pipeline latency should be (MTE2 data volume + MTE3 data volume) / GM bandwidth."
+
+msgid "搬运不同大小的数据块时，对带宽的利用率（有效带宽/理论带宽）不一样。针对每次搬运数据量较小的情况，实测性能达不到理论带宽。"
+msgstr "When moving data blocks of different sizes, the bandwidth utilization (effective bandwidth/theoretical bandwidth) varies. When the amount of data moved each time is small, the measured performance cannot reach the theoretical bandwidth."
+
+msgid "计算相关流水（Cube/Vector/Scalar等）的理论耗时 = 计算数据量（单位：Element）/ 理论算力。例如：某款AI处理器对float数据类型的Vector理论峰值算力为11.06 TOPS，想要进行一次32k float类型的Element单指令计算，计算的理论耗时是32k / 11.06TOPS = 3ns（按照1k = 1000来计算）。"
+msgstr "The theoretical execution time of computation-related pipelines (Cube/Vector/Scalar, and so on) = computation data volume (unit: Element) / theoretical computing power. For example: an AI processor has a theoretical peak Vector computing power of 11.06 TOPS for the float data type. To perform a single-instruction computation on 32k float Elements, the theoretical computation time is 32k / 11.06 TOPS = 3 ns (calculated as 1k = 1000)."
+
+msgid "<a id=\"locating-bottlenecks\"></a>"
+msgstr "<a id=\"locating-bottlenecks\"></a>"
+
+msgid "<a id=\"locating-bottlenecks\">"
+msgstr "<a id=\"locating-bottlenecks\">"
+
+msgid "查找瓶颈"
+msgstr "Identify bottlenecks"
+
+msgid "获取性能数据后，和理论数值差异较大的地方、耗时较长的流程被认为是“瓶颈点”。下文将介绍如何通过性能数据找到瓶颈点和对应的优化方向。"
+msgstr "After you obtain the performance data, areas with significant differences from theoretical values and time-consuming processes are considered bottleneck points. The following section describes how to identify bottleneck points and the corresponding optimization directions using the performance data."
+
+msgid "方法一：通过上板Profiling分析流水情况 查看上板Profiling解析后的op_summary_\\*.csv文件分析流水情况。注：“\\*”表示时间戳。 ![analyse_data_op_summary](../figures/performance_analysis_analyse_data_op_summary.png)"
+msgstr "Method 1: Analyze the pipeline status through on-board Profiling View the op_summary_\\*.csv file parsed from on-board Profiling to analyze the pipeline status. Note: \"\\*\" indicates a timestamp. ![analyse_data_op_summary](../figures/performance_analysis_analyse_data_op_summary.png)"
+
+msgid ""
+"<br />\n"
+msgstr ""
+"<br />\n"
+
+msgid ""
+"\\\\\n"
+msgstr ""
+"\\\\\n"
+
+msgid "analyse_data_op_summary"
+msgstr "analyse_data_op_summary"
+
+msgid ".. image:: ../figures/performance_analysis_analyse_data_op_summary.png"
+msgstr ".. image:: ../figures/performance_analysis_analyse_data_op_summary.png"
+
+msgid "每条流水线的利用率理想情况下应为100%，没有达到100%的流水就可能有提升空间。上图示例中为某款AI处理器上获取的数据，可以看到Vector算子_layer_norm_fwd_fused的第一个场景中，Vector流水的利用率aiv_vec_ratio小于10%，判断未充分发挥算力；Scalar流水的利用率aiv_scalar_ratio已经在60%左右，判断Scalar是最长的流水。"
+msgstr "Ideally, the utilization of each pipeline should be 100%. Pipelines that do not reach 100% may have room for improvement. The example above shows data obtained from an AI processor. You can see that in the first scenario of the Vector operator _layer_norm_fwd_fused, the utilization of the Vector pipeline, aiv_vec_ratio, is less than 10%. This indicates that the computing power is not fully utilized. The utilization of the Scalar pipeline, aiv_scalar_ratio, is around 60%, indicating that Scalar is the longest pipeline."
+
+msgid "当Scalar是最长的流水时：需要分析算子源码中是否对标量值进行复杂的运算，昇腾的SIMD微架构更适合多数据并行计算；另一种可能性是，由于一部分指令在硬件上不支持特定的数据类型，Triton栈将向量计算退化为标量计算。需要结合流水和标量优化手段进行优化，可参考方法三、查看仿真流水图，以及方法四、查看代码热点的情况进一步分析。"
+msgstr "When Scalar is the longest pipeline: Analyze whether the operator source code performs complex operations on scalar values. The Ascend SIMD microarchitecture is more suitable for multi-data parallel computing. Another possibility is that the Triton stack degrades vector computation to scalar computation because some instructions do not support specific data types on the hardware. To optimize this, combine pipeline and scalar optimization methods. For further analysis, refer to Method 3: Viewing the Simulation Pipeline Diagram, and Method 4: Viewing Code Hotspots."
+
+msgid "对于更一般的情况，例如MTE2搬运的实际场景：三个输入矩阵的shape分别为(128,128)、(128,1)、(128,1)，数据类型为float16。当前算法为Two-pass方法，因此有三次X的搬入，以及W、B的各一次搬入，由此可以计算出总共需要搬运的数据量，继而通过[理论参数](#theoretical-parameters)中介绍的搬运流水理论耗时计算方法计算出理论值为 `sizeof(float16) * (128 * 128 * 3 + 128 + 128) / 1.8 TB/s ≈ 55ns`（按照1 TB = $10^{12}$ Byte来计算），与实际性能数据aiv_mte2_time存在比较大的差距。经分析，输入数据的总大小小于UB的空间（A2型号为192KB）。因此MTE2时间过长可能是Tiling计算得到的基本块太小，导致发射冗余的搬运指令。需要结合流水优化和Tiling优化手段进行优化。可参考方法三，查看仿真流水图，进一步分析各条流水的情况。"
+msgstr "For a more general case, such as the actual MTE2 data movement scenario: the shapes of the three input matrices are (128,128), (128,1), and (128,1) respectively, with the data type float16. The current algorithm is the Two-pass method, so there are three data movements of X and one data movement each for W and B. From this, you can calculate the total amount of data to be moved. Then, using the method for calculating the theoretical data movement pipeline time introduced in [theoretical parameters](#theoretical-parameters), the theoretical value is calculated as `sizeof(float16) * (128 * 128 * 3 + 128 + 128) / 1.8 TB/s ≈ 55ns` (calculated based on 1 TB = $10^{12}$ Byte). This shows a significant gap compared with the actual performance data aiv_mte2_time. Based on analysis, the total size of the input data is smaller than the UB space (192KB for the A2 model). Therefore, the excessively long MTE2 time may be caused by the basic blocks calculated by Tiling being too small, resulting in redundant data movement instructions being issued. You need to combine pipeline optimization and Tiling optimization methods to optimize this. Refer to Method 3 to view the simulation pipeline diagram and further analyze the status of each pipeline."
+
+msgid "方法二：通过上板Profiling分析Tiling情况 先前示例中使用的AI处理器，可以通过硬件平台查看到有48个Vector核，_layer_norm_fwd_fused算子是一个纯Vector算子，但是有些场景下发了过多的Block（Block Dim > 48），造成Host调度开销过大。那么下一步的主要优化方向为Tiling优化。"
+msgstr "Method 2: Analyze tiling through on-board profiling. The AI processor used in the previous sample has 48 Vector cores, which can be viewed on the hardware platform. The `_layer_norm_fwd_fused` operator is a pure Vector operator. However, in some scenarios, the system dispatches too many blocks (Block Dim > 48), causing excessive host scheduling overhead. Therefore, the main optimization direction for the next step is tiling optimization."
+
+msgid "方法三：通过仿真流水图分析流水情况 ![analyse_data_waveform](../figures/performance_analysis_analyse_data_waveform.png)   上图示例中为某款AI处理器仿真器上获取的数据，可以看到Vector核的SCALAR以及FLOWCTRL的指令饱和，可以结合算子逻辑分析，是否存在过多标量计算以及不支持的向量化操作。下一步的主要优化方向为标量计算优化。另一方面，可以看到Vector核的相关流水（veccore0的MTE2、VECTOR等）有规律性的断流现象，即大量无操作的空白段。可以结合算子逻辑分析，是否存在基本块切分过小等因素导致断流。主要优化方向为流水优化，其次结合Tiling优化和内存优化等手段进一步提升Vector流水利用率。"
+msgstr "Method 3: Analyze the pipeline status using the simulation pipeline diagram ![analyse_data_waveform](../figures/performance_analysis_analyse_data_waveform.png)   The preceding figure shows data obtained from an AI processor simulator. You can see that the SCALAR and FLOWCTRL instructions on the Vector core are saturated. You can analyze the operator logic to determine whether there are excessive scalar calculations or unsupported vectorization operations. The main optimization direction for the next step is scalar calculation optimization. On the other hand, you can see that the related pipelines of the Vector core (such as MTE2 and VECTOR of veccore0) have periodic stalls. That is, there are a large number of idle blank segments. You can analyze the operator logic to determine whether factors such as overly small basic block tiling cause pipeline stalls. The main optimization direction is pipeline optimization, followed by combining methods such as Tiling optimization and memory optimization to further improve the Vector pipeline utilization."
+
+msgid "analyse_data_waveform"
+msgstr "analyse_data_waveform"
+
+msgid ".. image:: ../figures/performance_analysis_analyse_data_waveform.png"
+msgstr ".. image:: ../figures/performance_analysis_analyse_data_waveform.png"
+
+msgid "方法四：通过代码热点分析情况 ![analyse_data_code_mapping](../figures/performance_analysis_analyse_data_code_mapping.png)   上图示例中为某款AI处理器仿真器上获取的数据，可以看到左侧load接口对应到右侧的一组汇编指令中（已筛选仅显示代码行相关指令，并按运行周期数降序排序），标量指令占比高，不符合load作为访存接口应该是MTE占比高的情况。因此主要优化方向为标量计算。"
+msgstr "Method 4: Analyze code hotspots ![analyse_data_code_mapping](../figures/performance_analysis_analyse_data_code_mapping.png)   The example in the figure above shows data obtained from an AI processor simulator. You can see that the load interface on the left corresponds to a set of assembly instructions on the right (filtered to show only code line-related instructions, sorted in descending order by the number of execution cycles). Scalar instructions account for a high proportion, which does not match the expectation that load, as a memory access interface, should have a high MTE proportion. Therefore, the main optimization direction is scalar computation."
+
+msgid "analyse_data_code_mapping"
+msgstr "analyse_data_code_mapping"
+
+msgid ".. image:: ../figures/performance_analysis_analyse_data_code_mapping.png"
+msgstr ".. image:: ../figures/performance_analysis_analyse_data_code_mapping.png"
+
+msgid "示例：i64/i32 compare向量化加速"
+msgstr "Example: i64/i32 compare vectorization acceleration"
+
+msgid "【描述】i64/i32的cmp在NPU上无法启用Vector，退化为scalar计算效率降低；通过转化为fp32来利用vec_cast和vec_cmp实现vector操作加速。 【注意】在tl.load和tl.store中的mask使用cmp功能，大部分情况下编译器可以自动优化为vec操作，本例中tl.where则需要手动转换。"
+msgstr "[Description] The cmp operation of i64/i32 cannot enable Vector on the NPU and degrades to scalar computation, reducing efficiency; by converting to fp32, you can use vec_cast and vec_cmp to accelerate vector operations. [Note] The mask in tl.load and tl.store uses the cmp function. In most cases, the compiler can automatically optimize it to vec operations. In this example, tl.where requires manual conversion."
+
+msgid ""
+"import triton\n"
+"import triton.language as tl\n"
+"\n"
+"@triton.jit\n"
+"def npu_vector_cmp_kernel(\n"
+"    X,                 # [Tensor] input tensor (row x col)\n"
+"    Out,               # [Tensor] output tensor (row x col)\n"
+"    Mean,              # [Vector] mean tensor (row, ) of X\n"
+"    Rstd,              # [Vector] std tensor (row, ) of X\n"
+"    stride_x_row,      # [Scalar] stride of row in X\n"
+"    stride_out_row,    # [Scalar] stride of row in Out, normally equals to stride_x_row\n"
+"    M,                 # [Scalar] row number\n"
+"    N,                 # [Scalar] col number\n"
+"    eps,               # [Scalar] epsilon to avoid division by zeros\n"
+"    BLOCK_M: tl.constexpr,\n"
+"    BLOCK_N: tl.constexpr\n"
+"):\n"
+"    \"\"\"\n"
+"    an example of layernorm to checkout Vector Cmp\n"
+"    Out = ((X - E[X]) / sqrt(V[X] + eps)) on dim -1\n"
+"\n"
+"    just for easy case, we assume that:\n"
+"    1. BLOCK_N >= X.shape(-1), group_n = 0 only\n"
+"    2. BLOCK_M = 1, group_m = range(0, row, 1)\n"
+"    \"\"\"\n"
+"    group_m = tl.program_id(0)\n"
+"    group_n = tl.program_id(1)\n"
+"    row = group_m\n"
+"\n"
+"    # calculate index & offset\n"
+"    Mean = Mean + group_n * M\n"
+"    Rstd = Rstd + group_n * M\n"
+"    X = X + row * stride_x_row + group_n * N\n"
+"    Out = Out + row * stride_out_row + group_n * N\n"
+"\n"
+"    cols = tl.arange(0, BLOCK_N)  # cols is int64\n"
+"    x = tl.load(X + cols, mask=cols < N, other=0.0).to(tl.float32)\n"
+"\n"
+"    # calculate mean & rstd\n"
+"    mean = tl.sum(x, axis=0) / N\n"
+"    tl.store(Mean + row, mean)\n"
+"\n"
+"-   xbar = tl.where(cols < N, x - mean, 0.0) # N为列数\n"
+"\n"
+"+   # change cols(i64) into cols_cmp(f32) to enable vector processing\n"
+"+   cols_cmp = cols.to(tl.float32)\n"
+"+   xbar = tl.where(cols_cmp < N, x - mean, 0.0)\n"
+"\n"
+"    var = tl.sum(xbar * xbar, axis=0) / N\n"
+"    rstd = 1 / tl.sqrt(var + eps)\n"
+"    tl.store(Rstd + row, rstd)\n"
+"\n"
+"    # calculate Out\n"
+"    mask = cols < N\n"
+"    out = (x - mean) * rstd\n"
+"    tl.store(Out + cols, out, mask=mask)\n"
+msgstr ""
+"import triton\n"
+"import triton.language as tl\n"
+"\n"
+"@triton.jit\n"
+"def npu_vector_cmp_kernel(\n"
+"    X,                 # [Tensor] input tensor (row x col)\n"
+"    Out,               # [Tensor] output tensor (row x col)\n"
+"    Mean,              # [Vector] mean tensor (row, ) of X\n"
+"    Rstd,              # [Vector] std tensor (row, ) of X\n"
+"    stride_x_row,      # [Scalar] stride of row in X\n"
+"    stride_out_row,    # [Scalar] stride of row in Out, normally equals to stride_x_row\n"
+"    M,                 # [Scalar] row number\n"
+"    N,                 # [Scalar] col number\n"
+"    eps,               # [Scalar] epsilon to avoid division by zeros\n"
+"    BLOCK_M: tl.constexpr,\n"
+"    BLOCK_N: tl.constexpr\n"
+"):\n"
+"    \"\"\"\n"
+"    an example of layernorm to checkout Vector Cmp\n"
+"    Out = ((X - E[X]) / sqrt(V[X] + eps)) on dim -1\n"
+"\n"
+"    just for easy case, we assume that:\n"
+"    1. BLOCK_N >= X.shape(-1), group_n = 0 only\n"
+"    2. BLOCK_M = 1, group_m = range(0, row, 1)\n"
+"    \"\"\"\n"
+"    group_m = tl.program_id(0)\n"
+"    group_n = tl.program_id(1)\n"
+"    row = group_m\n"
+"\n"
+"    # calculate index & offset\n"
+"    Mean = Mean + group_n * M\n"
+"    Rstd = Rstd + group_n * M\n"
+"    X = X + row * stride_x_row + group_n * N\n"
+"    Out = Out + row * stride_out_row + group_n * N\n"
+"\n"
+"    cols = tl.arange(0, BLOCK_N)  # cols is int64\n"
+"    x = tl.load(X + cols, mask=cols < N, other=0.0).to(tl.float32)\n"
+"\n"
+"    # calculate mean & rstd\n"
+"    mean = tl.sum(x, axis=0) / N\n"
+"    tl.store(Mean + row, mean)\n"
+"\n"
+"-   xbar = tl.where(cols < N, x - mean, 0.0) # N is the number of columns\n"
+"\n"
+"+   # change cols(i64) into cols_cmp(f32) to enable vector processing\n"
+"+   cols_cmp = cols.to(tl.float32)\n"
+"+   xbar = tl.where(cols_cmp < N, x - mean, 0.0)\n"
+"\n"
+"    var = tl.sum(xbar * xbar, axis=0) / N\n"
+"    rstd = 1 / tl.sqrt(var + eps)\n"
+"    tl.store(Rstd + row, rstd)\n"
+"\n"
+"    # calculate Out\n"
+"    mask = cols < N\n"
+"    out = (x - mean) * rstd\n"
+"    tl.store(Out + cols, out, mask=mask)\n"
+
+msgid "**示例图** 优化前后数据对比图 ![optimization](../figures/optimization.png) 通过分析图中的数据可以发现，优化前后的aiv_scalar_time(μs)和aiv_scalar_ratio差距较大，说明性能差的原因是有很多scalar运算， 通过采集[算子仿真流水图](#operator-simulation-pipeline)可以得到visualize_data.bin，再用MindStudio Insight解析visualize_data.bin，可以发现xbar = tl.where(cols < N, x - mean, 0.0)有很多scalar运算，通过上面优化可以减少scalar运算。"
+msgstr "**Example figure** Data comparison before and after optimization ![optimization](../figures/optimization.png) By analyzing the data in the figure, you can find that aiv_scalar_time(μs) and aiv_scalar_ratio differ significantly before and after optimization. This indicates that the poor performance is caused by many scalar operations. By collecting the [operator simulation pipeline](#operator-simulation-pipeline), you can obtain visualize_data.bin. Then, parse visualize_data.bin using MindStudio Insight to find that xbar = tl.where(cols < N, x - mean, 0.0) contains many scalar operations. The preceding optimization reduces scalar operations."
+
+msgid "optimization"
+msgstr "optimization"
+
+msgid ".. image:: ../figures/optimization.png"
+msgstr ".. image:: ../figures/optimization.png"

@@ -6,6 +6,27 @@ add_triton_library(TritonToGraph
   EntryArgPointerAliasAnalysis.cpp
   GraphOptimizationContext.cpp
   ResourceCostModel.cpp
+  BlockBatching/BatchOpRegistry.cpp
+  BlockBatching/ElementwiseModels.cpp
+  BlockBatching/ShapeModels.cpp
+  BlockBatching/BatchAccessAnalysis.cpp
+  BlockBatching/BatchExpr.cpp
+  BlockBatching/BatchFactsJSON.cpp
+  BlockBatching/BatchRangeAnalysis.cpp
+  BlockBatching/BatchAffine.cpp
+  BlockBatching/BatchLoopSchedule.cpp
+  BlockBatching/BatchLoopForm.cpp
+  BlockBatching/BatchLoopLegality.cpp
+  BlockBatching/BatchLoopTransform.cpp
+  BlockBatching/BatchLayoutAnalysis.cpp
+  BlockBatching/BatchMemoryView.cpp
+  BlockBatching/MemoryModels.cpp
+  BlockBatching/MemoryPolicyNormalization.cpp
+  BlockBatching/ReductionModels.cpp
+  BlockBatching/ControlFlowModels.cpp
+  BlockBatching/BatchAnalysis.cpp
+  BlockBatching/BatchRewrite.cpp
+  BlockBatching/CVSpatial.cpp
   GraphOptimizationPass.cpp
   LayoutMemoryCompatibilityPass.cpp
   MemorySsaBuilder.cpp

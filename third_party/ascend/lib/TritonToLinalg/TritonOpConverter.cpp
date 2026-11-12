@@ -22,6 +22,7 @@
  */
 
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
+#include "ascend/include/TritonToGraph/BlockBatching/ElementwiseModels.h"
 #include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
@@ -550,6 +551,13 @@ LogicalResult PreciseDivConverter::matchAndRewrite(
 LogicalResult
 SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
                                      PatternRewriter &rewriter) const {
+  // A batch safety select sanitizes inputs before a potentially undefined
+  // operation. Keep that ordering while allowing elementwise fusion; the
+  // slice/insert form materializes a filled tensor and a UB-to-UB copy even
+  // for a fully active group. Ordinary structured selects are unchanged.
+  if (op->hasAttr(mlir::triton::cfg::kBatchSafeInputAttr))
+    return failure();
+
   auto loc = op.getLoc();
 
   // 0. Shortcut for scalars and bool type
@@ -2706,8 +2714,41 @@ MatmulConverter::matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
       inputPrec = InputPrecision::IEEE;
     }
   }
+  // The batching rewrite has already preserved each lane's complete dot
+  // tensor, including its masked-load padding. Pass those logical M/K/N
+  // extents explicitly: the packaged consumer cannot infer them through a
+  // buffer initialized once and populated by masked per-lane subview copies.
+  // Its failed inference otherwise leaves the placeholder M/K/N at zero.
+  // This is not a proof that memory masks are true; all masked loads/stores
+  // and the launch guard's reduction/footprint checks remain unchanged.
+  bool explicitBatchMKN = op->hasAttr("tt.cv_batch_full_mkn");
+  if (explicitBatchMKN && (dstType.getRank() != 3 || !dstType.hasStaticShape()))
+    return op.emitError(
+        "explicit CV batch dimensions require a static rank-3 dot");
   auto createOp = [&](auto &&rewriter, ValueRange operands,
                       ValueRange results) -> Operation * {
+    if (explicitBatchMKN) {
+      auto aType = cast<RankedTensorType>(operands[0].getType());
+      auto bType = cast<RankedTensorType>(operands[1].getType());
+      auto loc = op.getLoc();
+      Value m = rewriter.template create<arith::ConstantIndexOp>(
+          loc, aType.getDimSize(1));
+      Value k = rewriter.template create<arith::ConstantIndexOp>(
+          loc, aType.getDimSize(2));
+      Value n = rewriter.template create<arith::ConstantIndexOp>(
+          loc, bType.getDimSize(2));
+      Value init = rewriter.template create<arith::ConstantIntOp>(loc, 0, 1);
+      auto batch = rewriter.template create<hivm::BatchMmadL1Op>(
+          loc, TypeRange{results[0].getType()}, operands[0], operands[1], init,
+          m, k, n, results[0]);
+      // The extents describe the padded mathematical tensors, not the valid
+      // DMA subviews. Layout/transpose folding must not re-infer them from
+      // those subviews or shrink the zero-padded dot.
+      batch->setAttr("already_set_real_mkn", rewriter.getUnitAttr());
+      if (inputPrec == InputPrecision::HF32)
+        batch->setAttr("enable_HF32", rewriter.getUnitAttr());
+      return batch;
+    }
     if (dstType.getRank() == 2)
       return rewriter.template create<linalg::MatmulOp>(op.getLoc(), operands,
                                                         results);
@@ -2719,6 +2760,11 @@ MatmulConverter::matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
 
   auto replaceOp = [&](auto &&rewriter, ValueRange operands,
                        ValueRange results) -> Operation * {
+    if (explicitBatchMKN) {
+      Operation *batch = createOp(rewriter, operands, results);
+      rewriter.replaceOp(op, batch->getResults());
+      return batch;
+    }
     if (dstType.getRank() == 2)
       return rewriter.template replaceOpWithNewOp<linalg::MatmulOp>(
           op, operands, results);

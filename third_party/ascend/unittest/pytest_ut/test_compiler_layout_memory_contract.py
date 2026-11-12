@@ -223,6 +223,8 @@ def compiler_module():
             sys.modules.pop(cache_name, None)
         else:
             sys.modules[cache_name] = previous_cache
+    # Command-construction tests use fake compiler paths. Capability discovery
+    # is tested independently; keep these cases focused on emitted options.
     return module
 
 
@@ -709,6 +711,7 @@ def _run_make_ttir_with_recorded_graph_options(compiler, monkeypatch, options):
 def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_module, monkeypatch):
     options = SimpleNamespace(
         enable_graph_optimize=True,
+        block_batching_factor=1,
         target_arch="Ascend910B1",
         compile_on_910_95=False,
         compile_mode="simt_only",

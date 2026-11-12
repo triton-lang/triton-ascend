@@ -39,12 +39,11 @@
 namespace triton::ascend {
 
 struct Plan {
-  TritonNpuLaunchSpecV1 spec;
+  LaunchSpec spec;
   ArgLayout layout;
   std::atomic<bool> warned{false};
 
-  Plan(const TritonNpuLaunchSpecV1 &s, const TritonNpuArgTypeV1 *types,
-       size_t count)
+  Plan(const LaunchSpec &s, const TritonNpuArgTypeV1 *types, size_t count)
       : spec(s), layout(s, types, count) {}
 };
 
@@ -74,10 +73,13 @@ struct Invocation {
     std::memset(data(), 0, plan->layout.total);
     put(plan->layout.profile, request.profile_scratch);
     if (plan->layout.originalGrid != ArgLayout::absent) {
-      const std::array<uint32_t, 2> originalGrid{
+      const std::array<uint32_t, 3> originalGrid{
           static_cast<uint32_t>(request.grid[0]),
-          static_cast<uint32_t>(request.grid[1])};
-      put(plan->layout.originalGrid, originalGrid);
+          static_cast<uint32_t>(request.grid[1]),
+          static_cast<uint32_t>(request.grid[2])};
+      std::memcpy(data() + plan->layout.originalGrid, originalGrid.data(),
+                  (plan->spec.gridContractVersion == 3 ? 3 : 2) *
+                      sizeof(uint32_t));
     }
   }
   char *data() { return large.empty() ? small.data() : large.data(); }
@@ -253,7 +255,7 @@ static int enqueue(std::shared_ptr<Invocation> call) {
     return 0;
   }
   auto ret = execute(*call);
-  if (ret == CANN_SUCCESS)
+  if (ret == CANN_SUCCESS && !cann_stream_is_capturing(call->stream))
     ret = cann_synchronize_stream(call->stream);
   return static_cast<int>(ret);
 }
@@ -304,15 +306,41 @@ triton_npu_create_plan_v1(const TritonNpuLaunchSpecV1 *spec,
   return nullptr;
 }
 
+extern "C" uint32_t triton_npu_program_grid_contract_version(void) { return 3; }
+
+extern "C" TritonNpuLaunchPlan *
+triton_npu_create_plan_v2(const TritonNpuLaunchSpecV2 *spec,
+                          const TritonNpuArgTypeV1 *types, size_t count,
+                          char *error, size_t errorSize) {
+  setError(error, errorSize, "");
+  try {
+    if (!spec)
+      throw std::invalid_argument("missing V2 launcher spec");
+    auto decoded = decodeSpecV2(*spec);
+#ifndef TRITON_LAUNCHER_DEVICE_PRINT
+    if (decoded.flags & TRITON_NPU_DEVICE_PRINT)
+      throw std::invalid_argument(
+          "launcher runtime was built without device print");
+#endif
+    initializeProfiler();
+    return new TritonNpuLaunchPlan{
+        std::make_shared<Plan>(decoded, types, count)};
+  } catch (const std::exception &e) {
+    setError(error, errorSize, e.what());
+  } catch (...) {
+    setError(error, errorSize, "unknown V2 launcher plan creation error");
+  }
+  return nullptr;
+}
+
 extern "C" void triton_npu_destroy_plan_v1(TritonNpuLaunchPlan *plan) {
   delete plan;
 }
 
-extern "C" int triton_npu_launch_v1(const TritonNpuLaunchPlan *plan,
-                                    const TritonNpuLaunchRequestV1 *request,
-                                    const void *const *args,
-                                    const size_t *sizes, size_t count,
-                                    char *error, size_t errorSize) {
+static int launchPlan(const TritonNpuLaunchPlan *plan,
+                      const TritonNpuLaunchRequestV1 *request,
+                      const void *const *args, const size_t *sizes,
+                      size_t count, char *error, size_t errorSize) {
   setError(error, errorSize, "");
   try {
     if (!plan)
@@ -350,6 +378,29 @@ extern "C" int triton_npu_launch_v1(const TritonNpuLaunchPlan *plan,
     setError(error, errorSize, "unknown launcher submission error");
   }
   return -1;
+}
+
+extern "C" int triton_npu_launch_v1(const TritonNpuLaunchPlan *plan,
+                                    const TritonNpuLaunchRequestV1 *request,
+                                    const void *const *args,
+                                    const size_t *sizes, size_t count,
+                                    char *error, size_t errorSize) {
+  if (plan && plan->impl->spec.gridContractVersion != 0) {
+    setError(error, errorSize, "V1 launch cannot consume a V2 plan");
+    return -1;
+  }
+  return launchPlan(plan, request, args, sizes, count, error, errorSize);
+}
+extern "C" int triton_npu_launch_v2(const TritonNpuLaunchPlan *plan,
+                                    const TritonNpuLaunchRequestV1 *request,
+                                    const void *const *args,
+                                    const size_t *sizes, size_t count,
+                                    char *error, size_t errorSize) {
+  if (plan && plan->impl->spec.gridContractVersion != 3) {
+    setError(error, errorSize, "V2 launch requires a v3 grid plan");
+    return -1;
+  }
+  return launchPlan(plan, request, args, sizes, count, error, errorSize);
 }
 
 namespace {
@@ -645,7 +696,7 @@ template <typename T> bool readField(PyObject *dict, const char *key, T &out) {
   return true;
 }
 
-PyObject *createLauncher(PyObject *, PyObject *args) {
+PyObject *createLauncherImpl(PyObject *args, bool batch) {
   try {
     PyObject *config, *inputTypes;
     if (!PyArg_ParseTuple(args, "O!O!", &PyDict_Type, &config, &PyList_Type,
@@ -685,8 +736,23 @@ PyObject *createLauncher(PyObject *, PyObject *args) {
       types.push_back({kind, dtype});
     }
     char error[512];
-    auto *plan = triton_npu_create_plan_v1(&spec, types.data(), types.size(),
-                                           error, sizeof(error));
+    TritonNpuLaunchPlan *plan;
+    if (batch) {
+      TritonNpuLaunchSpecV2 envelope{};
+      envelope.version = 2;
+      envelope.struct_size = sizeof(envelope);
+      envelope.base = spec;
+      if (!readField(config, "grid_contract_version",
+                     envelope.grid_contract_version) ||
+          !readField(config, "batch_axis", envelope.batch_axis) ||
+          !readField(config, "batch_factor", envelope.batch_factor))
+        return nullptr;
+      plan = triton_npu_create_plan_v2(&envelope, types.data(), types.size(),
+                                       error, sizeof(error));
+    } else {
+      plan = triton_npu_create_plan_v1(&spec, types.data(), types.size(), error,
+                                       sizeof(error));
+    }
     if (!plan) {
       PyErr_SetString(PyExc_ValueError, error);
       return nullptr;
@@ -698,7 +764,21 @@ PyObject *createLauncher(PyObject *, PyObject *args) {
   }
 }
 
-PyMethodDef methods[] = {{"create_launcher", createLauncher, METH_VARARGS,
+PyObject *createLauncher(PyObject *, PyObject *args) {
+  return createLauncherImpl(args, false);
+}
+PyObject *createLauncherV2(PyObject *, PyObject *args) {
+  return createLauncherImpl(args, true);
+}
+PyObject *capabilities(PyObject *, PyObject *) {
+  return Py_BuildValue("{s:i,s:i}", "program_grid_contract", 3, "launch_spec",
+                       2);
+}
+PyMethodDef methods[] = {{"create_launcher_v2", createLauncherV2, METH_VARARGS,
+                          "Create a v3 grid/V2 launch plan."},
+                         {"capabilities", capabilities, METH_NOARGS,
+                          "Return supported launch contracts."},
+                         {"create_launcher", createLauncher, METH_VARARGS,
                           "Create a signature-specific data plan."},
                          {nullptr, nullptr, 0, nullptr}};
 PyModuleDef module = {PyModuleDef_HEAD_INIT, "__triton_launcher_runtime",

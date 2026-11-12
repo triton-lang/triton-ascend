@@ -53,6 +53,7 @@
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 
 #include "DynamicCVPipeline/Common/FallbackHelper.h"
+#include "DynamicCVPipeline/Common/TcbPoolUtils.h"
 
 static constexpr const char *DEBUG_TYPE = "add-dynamic-cv-pipeline";
 static constexpr unsigned MAX_RETRY_TIMES = 2;
@@ -148,6 +149,8 @@ void AddDynamicCVPipelinePass::runOnOperation() {
         CVPipeline::setFallbackAttr(moduleOp,
                                     CVPipeline::ERRCODE_TUPLE_PRELOAD_FAILED);
       }
+      if (CVPipeline::canEnableDynamicPlan(moduleOp))
+        moduleOp->setAttr("hivm.dynamic_plan", builder.getBoolAttr(true));
       LDBG("Process successfully");
       return;
     }

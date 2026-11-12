@@ -454,3 +454,22 @@ def test_launcher_has_no_available_kernel():
         # It should fail since the launcher requires all the strides be 1 while they are not.
         assert result.returncode == -6
         assert "kernel launch failed" in result.stderr
+
+
+def test_npu_extension_fingerprint_contract(monkeypatch, tmp_path):
+    launcher = pytest.importorskip("triton.backends.ascend.launcher")
+    utils = pytest.importorskip("triton.backends.ascend.utils")
+
+    fingerprint_calls = []
+
+    def fake_fingerprint(name, *, extra_cflags=()):
+        fingerprint_calls.append(extra_cflags)
+        return {"name": name, "cflags": list(extra_cflags)}
+
+    marker = tmp_path / "built.so"
+    marker.write_bytes(b"dummy")
+    monkeypatch.setattr(utils, "npu_extension_fingerprint", fake_fingerprint)
+    monkeypatch.setattr(utils, "_build_npu_ext", lambda *args, **kwargs: str(marker))
+
+    launcher._build_shared("__triton_launcher_runtime", {}, False)
+    assert fingerprint_calls == [launcher._LAUNCHER_CFLAGS]

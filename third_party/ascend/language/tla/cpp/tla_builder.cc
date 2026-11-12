@@ -1719,6 +1719,41 @@ void init_tla_builder(py::module &&m) {
           py::arg("transpose_a") = false, py::arg("transpose_b") = false,
           py::arg("unit_flag_ctrl") = std::nullopt,
           py::arg("unit_flag_group_id") = std::nullopt)
+      .def(
+          "create_hivm_mmadl0",
+          [](TLABuilder &self, Value a, Value b, Value c,
+             const py::object &initCondition, int64_t real_m, int64_t real_k,
+             int64_t real_n, std::optional<Value> bias, bool disableGemv,
+             std::optional<int32_t> unitFlagCtrl) {
+            auto &builder = self.getBuilder();
+            auto loc = self.getLastLoc();
+            auto boolConstant = [&](bool value) -> Value {
+              return builder.create<arith::ConstantOp>(
+                  loc, builder.getI1Type(), builder.getBoolAttr(value));
+            };
+            Value init;
+            if (py::isinstance<py::bool_>(initCondition))
+              init = boolConstant(initCondition.cast<bool>());
+            else
+              init = initCondition.cast<Value>();
+            if (!init || !init.getType().isInteger(1))
+              throw std::invalid_argument(
+                  "mmad_l0 init_condition must be a bool or scalar i1 value");
+            auto m = builder.create<arith::ConstantIndexOp>(loc, real_m);
+            auto k = builder.create<arith::ConstantIndexOp>(loc, real_k);
+            auto n = builder.create<arith::ConstantIndexOp>(loc, real_n);
+            auto op = self.create<hivm::MmadL0Op>(
+                TypeRange{}, a, b, m, k, n, c,
+                /*k_direction_align=*/boolConstant(false),
+                /*is_with_bias=*/boolConstant(bias.has_value()), init,
+                /*enable_HF32=*/UnitAttr{}, /*enable_I4=*/UnitAttr{},
+                bias.value_or(Value{}), builder.getBoolAttr(disableGemv));
+            setUnitFlagAttrs(builder, op, unitFlagCtrl, std::nullopt);
+          },
+          py::arg("a"), py::arg("b"), py::arg("c"), py::arg("init_condition"),
+          py::arg("real_m"), py::arg("real_k"), py::arg("real_n"),
+          py::arg("bias") = std::nullopt, py::arg("disable_gemv") = true,
+          py::arg("unit_flag_ctrl") = std::nullopt)
       // C = MX(A, ScaleA) x MX(B, ScaleB) (+bias): A/B and the E8M0 scales are
       // in L1, C is an L0C accumulator. lhs_format/rhs_format are the native
       // HIVMMatmulDataformat codes (1=E5M2, 2=E4M3, 3=E2M1) and are only set

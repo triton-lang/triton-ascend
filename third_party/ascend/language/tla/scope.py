@@ -31,7 +31,19 @@ class defines ``mlir_attrs``, the attribute set stamped on the emitted
 ``scope.scope``.
 """
 
+from dataclasses import dataclass
+from triton.language.core import _unwrap_if_constexpr
+
 __all__ = ["scope", "vector", "simd", "cube"]
+
+
+@dataclass(frozen=True)
+class _TaskScope:
+    kind: type
+    name: str
+
+    def mlir_attrs(self, builder):
+        return self.kind.mlir_attrs(builder)
 
 
 class scope:
@@ -53,7 +65,18 @@ class scope:
         return {"hivm.tcore_type": builder.parse_attr("#hivm.tcore_type<VECTOR>")}
 
 
-class vector(scope):
+class _TaskScopeKind(scope):
+
+    @classmethod
+    def task(cls, name):
+        """Create a named execution scope for this core."""
+        name = _unwrap_if_constexpr(name)
+        if not isinstance(name, str) or not name:
+            raise ValueError("task name must be a nonempty compile-time string")
+        return _TaskScope(cls, name)
+
+
+class vector(_TaskScopeKind):
     """``with tla.scope.vector():`` -- vector-core region for non-SIMD ops.
 
     A vector scope is the vector core's inline region: it hosts non-SIMD
@@ -91,7 +114,7 @@ class simd(scope):
         return attrs
 
 
-class cube(scope):
+class cube(_TaskScopeKind):
     """Selects the Cube core (AIC) for a region in a ``@tla.jit`` kernel.
 
     Use ``with tla.scope.cube():`` without arguments or an ``as`` binding.

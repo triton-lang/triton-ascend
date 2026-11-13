@@ -270,6 +270,7 @@ def test_ubtuner_uses_ttadapter_without_bridge_stage(monkeypatch):
     assert tuner._find_best_config() is expected
     assert consumed == [text]
 
+
 @pytest.mark.parametrize("raw", [{}, {"compile_mode": None}, {"compile_mode": "simd"}])
 def test_compile_mode_env_enables_costmodel_without_launch_options(monkeypatch, raw):
     monkeypatch.setenv("TRITON_ASCEND_COMPILE_MODE", "simd_simt")

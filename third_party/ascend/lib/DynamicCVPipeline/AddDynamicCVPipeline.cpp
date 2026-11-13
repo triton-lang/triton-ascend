@@ -155,8 +155,10 @@ void AddDynamicCVPipelinePass::runOnOperation() {
         CVPipeline::setFallbackAttr(moduleOp,
                                     CVPipeline::ERRCODE_TUPLE_PRELOAD_FAILED);
       }
-      if (CVPipeline::canEnableDynamicPlan(moduleOp))
+      if (CVPipeline::canEnableDynamicPlan(moduleOp)) {
         moduleOp->setAttr("hivm.dynamic_plan", builder.getBoolAttr(true));
+        moduleOp->setAttr("hivm.load_buffer_pool", builder.getBoolAttr(true));
+      }
       LDBG("Process successfully");
       return;
     }

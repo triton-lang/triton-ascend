@@ -2571,8 +2571,7 @@ int UpdateConditionInfoPass::combineConditions(
     ModuleOp module, Value crossCoreCond, Value preloadCond,
     Value intraCoreCond, Value flowOptCond, scf::IfOp ifOp, Operation *loopOp,
     size_t &usedCounterNum, DenseMap<Value, VarUpdateType> &varUpdateTypes,
-    Value &blockFlag, bool isLastBlock, bool isFirstBlock,
-    bool isPureScalar) {
+    Value &blockFlag, bool isLastBlock, bool isFirstBlock, bool isPureScalar) {
   Location loc = ifOp.getLoc();
   SmallVector<Value> validConditions;
   Value counter;
@@ -2887,7 +2886,8 @@ int UpdateConditionInfoPass::updateIfConds(
       // constant zero: its check is always true.
       bool isFirstBlock = (!isPureScalar && chainIdx[ifIdx] == 0);
       SmallVector<int> &intraCoreInputValues = intraCoreInputValuesList[ifIdx];
-      SmallVector<int> &intraCoreOutputValues = intraCoreOutputValuesList[ifIdx];
+      SmallVector<int> &intraCoreOutputValues =
+          intraCoreOutputValuesList[ifIdx];
 
       // Step3:Set the crossCore condition
       Value crossCoreCond;
@@ -2918,8 +2918,8 @@ int UpdateConditionInfoPass::updateIfConds(
       if (combineConditions(module, crossCoreCond, preloadCond, intraCoreCond,
                             flowOptCond, ifOp, loopOp, usedCounterNum,
                             varUpdateTypes, blockFlag, isLastBlock,
-                            isFirstBlock, isPureScalar) ==
-          UPDATE_CONDITION_INFO_FAILED) {
+                            isFirstBlock,
+                            isPureScalar) == UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }
     }

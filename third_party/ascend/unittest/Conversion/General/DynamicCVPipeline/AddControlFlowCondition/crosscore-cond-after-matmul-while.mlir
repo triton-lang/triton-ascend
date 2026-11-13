@@ -1,25 +1,17 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
 
-// Cube cross-core consumer decrement is inserted immediately after the last
-// linalg.matmul that reads the consumer. Both matmuls read the
-// convert_layout result (group 2, role 0). The earlier matmul stays adjacent
-// to the later one, so the load/subi/store does not follow the earlier
-// matmul. Cube updates both vector subblocks, so the pair appears twice,
-// then the producer fixpipe.
+// The counter of a block is bumped at the end of its then block. Both matmuls
+// read the convert_layout result (group 2, role 0). The bump follows the last
+// matmul, so the earlier matmul stays adjacent to the later one. The cube
+// block owns a single counter, so the bump appears once.
 
 // CHECK-LABEL: func.func @while_update_condition_crosscore_matmul
 
 // CHECK: linalg.matmul {{.*}}ins(%{{[^ ]+}}, %{{[^ ]+}} : tensor<128x128xf16>, tensor<128x128xf16>)
 // CHECK-NEXT: linalg.matmul {{.*}}ins(%{{[^ ]+}}, %{{[^ ]+}} : tensor<128x128xf16>, tensor<128x128xf16>)
-// CHECK-NEXT: memref.load {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
-// CHECK-NEXT: annotation.mark {{.*}} {memref_ext.volatile}
-// CHECK-NEXT: arith.subi
-// CHECK-NEXT: memref.store {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
-// CHECK-NEXT: memref.load {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
-// CHECK-NEXT: annotation.mark {{.*}} {memref_ext.volatile}
-// CHECK-NEXT: arith.subi
-// CHECK-NEXT: memref.store {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK-NEXT: hivm.hir.fixpipe
+// CHECK: arith.addi {{.*}}, %c1_i32{{[0-9_]*}} : i32
+// CHECK-NEXT: memref.store {{.*}} : memref<i32, #hivm.address_space<ssbuf>>
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @while_update_condition_crosscore_matmul(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {

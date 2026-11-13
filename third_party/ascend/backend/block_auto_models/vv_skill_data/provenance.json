@@ -1,0 +1,18 @@
+{
+  "skill": "ops-theoretical-performance-estimation",
+  "revision": "55b286e9113551634e9bcda1bb552cefc6c8a772",
+  "source": "ops-theoretical-performance-estimation snapshot",
+  "note": "Frozen model and instruction parameters; formatting and descriptive source paths normalized for repository publication. INI rates are assumptions for 9579; calibration on 9589 is not 9579 validation.",
+  "sha256": {
+    "engine.py": "6fe4d07b66b53e9fd9c540924b60f6bc8abf4b4373a7f8df46f15e873abfa17a",
+    "vector_instruction_types.json": "35b171e3ded9d1141135d9c4066c7e724984913f2f94f8d4274ba47894d03829",
+    "Ascend950PR_9579.ini": "0cfc57e811361cbec13e95efda1c4989b429069ded1bef345bd1c1e149f82177",
+    "hardware-local.json": "4f1d19add23c7ac7f1d5e183181adc1b39a34d5bae8285847b6a92801e161bfb"
+  },
+  "original_sha256": {
+    "engine.py": "dcbb29c64c27dbd89ba8265e278b55e137c7bc78912c4226faa4d651c1db4221",
+    "vector_instruction_types.json": "35b171e3ded9d1141135d9c4066c7e724984913f2f94f8d4274ba47894d03829",
+    "Ascend950PR_9579.ini": "04be65315f6f9ec295081a03ba441328bf711f16b2703c779a206784bbd5d2fe",
+    "hardware-local.json": "6e5535b47ce7374fd896c5ef50f6312326aaff6511b6db4b73e1b31bf846d4ca"
+  }
+}

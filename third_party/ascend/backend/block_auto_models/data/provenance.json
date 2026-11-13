@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "component": "BiShengIR AVE target cost model",
+  "source_revision": "8d9e482cca493c36413c7984d2237db5d1a7becc",
+  "source_file": "AVECostModelInfo.def",
+  "target_arch": "Ascend950PR_9579",
+  "sha256": "55a80be1df3e5dc965c991e23eeb212e6c4f98df11fa639a79eaeb2510f67c40",
+  "status": "compiler instruction assumptions; not calibrated operator latency"
+}

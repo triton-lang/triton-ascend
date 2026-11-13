@@ -1,0 +1,3790 @@
+{
+  "schema_version": 2,
+  "name": "ascend950_vector_instruction_types",
+  "scope": "A5 DAV_3510 pure-vector theoretical performance evaluation",
+  "source_documents": {
+    "asc_devkit_reg_performance": {
+      "repository": "https://gitcode.com/cann/asc-devkit",
+      "revision": "f082387dd12ce3a6edeffafcca4e74d89527e758",
+      "path": "docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md",
+      "url": "https://asc.gitcode.com/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.html"
+    },
+    "asc_devkit_reg_issue": {
+      "repository": "https://gitcode.com/cann/asc-devkit",
+      "revision": "f082387dd12ce3a6edeffafcca4e74d89527e758",
+      "path": "docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md",
+      "url": "https://asc.gitcode.com/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.html"
+    },
+    "microbench": {
+      "raw_instructions": "tests/calibration/instruments/regbase-microbench/data/task5_raw.jsonl",
+      "raw_overlap": "tests/calibration/instruments/regbase-microbench/data/overlap_raw.jsonl",
+      "method": "tests/calibration/README.md"
+    }
+  },
+  "provenance_notes": [
+    "Instruction performance is sourced from asc-devkit for the explicitly listed documented_performance_dtypes or documented_performance_pairs only. supported_dtypes_source describes API type support, not guaranteed native throughput for every supported type.",
+    "The asc-devkit performance table gives single-instruction elements/cycle. throughput_cycles = 256 / dtype_width_bytes / documented_elements_per_cycle; conversion width uses max(src,dst). issue_slots is taken separately from the instruction single/dual-issue table.",
+    "Execution-unit grouping, mixed-instruction overlap, unlisted dtypes and special modes are modeling assumptions or microbenchmark calibrations, not additional asc-devkit hardware guarantees.",
+    "The independently transcribed 300 documented combinations are checked by tests/offline/test_public_instruction_rates.py using fixtures/asc_devkit_instruction_rates.csv."
+  ],
+  "bytes_per_instruction": 256,
+  "units": {
+    "bytes_per_instruction": "B/instruction",
+    "issue_slots": "issue resources per cycle: 2 for VALU-only (dual-issue) instructions, 1 for instructions needing the single non-replicated VECTOR engine",
+    "throughput_cycles": "cycles/instruction per issue resource group",
+    "issue_per_cycle": "instructions/cycle = issue_slots / throughput_cycles",
+    "parallel_elements_per_cycle": "elements/cycle/core"
+  },
+  "dtype_bytes": {
+    "bool": 1,
+    "int8": 1,
+    "uint8": 1,
+    "fp16": 2,
+    "float16": 2,
+    "bf16": 2,
+    "bfloat16": 2,
+    "hi8": 1,
+    "hifloat8": 1,
+    "fp8": 1,
+    "float8": 1,
+    "fp4": 0.5,
+    "float4": 0.5,
+    "int16": 2,
+    "uint16": 2,
+    "fp32": 4,
+    "float32": 4,
+    "int32": 4,
+    "uint32": 4,
+    "int64": 8,
+    "uint64": 8,
+    "int8_t": 1,
+    "uint8_t": 1,
+    "int16_t": 2,
+    "uint16_t": 2,
+    "int32_t": 4,
+    "uint32_t": 4,
+    "int64_t": 8,
+    "uint64_t": 8,
+    "half": 2,
+    "float": 4,
+    "bfloat16_t": 2,
+    "complex32": 4,
+    "complex64": 8,
+    "hifloat8_t": 1,
+    "fp8_e4m3fn_t": 1,
+    "fp8_e5m2_t": 1,
+    "fp8_e8m0_t": 1,
+    "fp4x2_e2m1_t": 0.5,
+    "fp4x2_e1m2_t": 0.5,
+    "int4x2_t": 0.5,
+    "int4b_t": 0.5
+  },
+  "instruction_defaults": {
+    "default_execution_model": "alu_2slot_t1",
+    "source": "Model fallback. asc-devkit provenance applies only to each instruction entry's explicit documented performance scope."
+  },
+  "execution_model_defaults": {
+    "alu_2slot_t1": {
+      "unit": "vector_alu",
+      "issue_slots": 2,
+      "throughput_cycles": 1,
+      "dtype_byte_rule": "dtype_bytes",
+      "source": "Derived model class using source_documents.asc_devkit_reg_performance and asc_devkit_reg_issue where documented by an instruction entry. Execution-unit/pipe grouping and unlisted cases are model assumptions."
+    },
+    "alu_2slot_t2": {
+      "unit": "vector_alu",
+      "issue_slots": 2,
+      "throughput_cycles": 2,
+      "dtype_byte_rule": "dtype_bytes",
+      "source": "Derived model class using source_documents.asc_devkit_reg_performance and asc_devkit_reg_issue where documented by an instruction entry. Execution-unit/pipe grouping and unlisted cases are model assumptions."
+    },
+    "conversion_2slot_t1": {
+      "unit": "vector_alu",
+      "issue_slots": 2,
+      "throughput_cycles": 1,
+      "dtype_byte_rule": "max(src_dtype_bytes, dst_dtype_bytes)",
+      "source": "Derived model class using source_documents.asc_devkit_reg_performance and asc_devkit_reg_issue where documented by an instruction entry. Execution-unit/pipe grouping and unlisted cases are model assumptions."
+    },
+    "conversion_2slot_t2": {
+      "unit": "vector_alu",
+      "issue_slots": 2,
+      "throughput_cycles": 2,
+      "dtype_byte_rule": "max(src_dtype_bytes, dst_dtype_bytes)",
+      "source": "Derived model class using source_documents.asc_devkit_reg_performance and asc_devkit_reg_issue where documented by an instruction entry. Execution-unit/pipe grouping and unlisted cases are model assumptions."
+    },
+    "reduce_1slot_t1": {
+      "unit": "vector",
+      "issue_slots": 1,
+      "throughput_cycles": 1,
+      "dtype_byte_rule": "dtype_bytes",
+      "source": "Derived model class using source_documents.asc_devkit_reg_performance and asc_devkit_reg_issue where documented by an instruction entry. Execution-unit/pipe grouping and unlisted cases are model assumptions."
+    },
+    "model_required": {
+      "unit": "model_required",
+      "issue_slots": null,
+      "throughput_cycles": null,
+      "dtype_byte_rule": "dtype_bytes",
+      "requires_operator_specific_model": true,
+      "source": "no default model"
+    },
+    "vector_1slot_t1": {
+      "unit": "vector",
+      "issue_slots": 1,
+      "throughput_cycles": 1,
+      "dtype_byte_rule": "dtype_bytes",
+      "source": "Derived model class using source_documents.asc_devkit_reg_performance and asc_devkit_reg_issue where documented by an instruction entry. Execution-unit/pipe grouping and unlisted cases are model assumptions."
+    },
+    "pack_unpack_1slot_t1": {
+      "unit": "vector",
+      "issue_slots": 1,
+      "throughput_cycles": 1,
+      "dtype_byte_rule": "max(src_dtype_bytes, dst_dtype_bytes)",
+      "source": "Derived model class using source_documents.asc_devkit_reg_performance and asc_devkit_reg_issue where documented by an instruction entry. Execution-unit/pipe grouping and unlisted cases are model assumptions."
+    },
+    "valu_2slot_t4": {
+      "unit": "vector_alu",
+      "pipe": "vector_transcendental",
+      "issue_slots": 2,
+      "throughput_cycles": 4,
+      "dtype_byte_rule": "dtype_bytes",
+      "source": "Derived model class using source_documents.asc_devkit_reg_performance and asc_devkit_reg_issue where documented by an instruction entry. Execution-unit/pipe grouping and unlisted cases are model assumptions. Mixed transcendental/ALU overlap is calibrated by source_documents.microbench.raw_overlap."
+    },
+    "valu_2slot_t8": {
+      "unit": "vector_alu",
+      "pipe": "vector_transcendental",
+      "issue_slots": 2,
+      "throughput_cycles": 8,
+      "dtype_byte_rule": "dtype_bytes",
+      "source": "Derived model class using source_documents.asc_devkit_reg_performance and asc_devkit_reg_issue where documented by an instruction entry. Execution-unit/pipe grouping and unlisted cases are model assumptions. Mixed transcendental/ALU overlap is calibrated by source_documents.microbench.raw_overlap."
+    }
+  },
+  "instructions": {
+    "Add": {
+      "regbase_api_names": [
+        "Add"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vadd"
+      ],
+      "supported_dtypes": [
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t",
+        "complex32",
+        "complex64"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Add-20.md",
+      "default_execution_model": "alu_2slot_t1",
+      "dtype_execution_models": {
+        "fp16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "float16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "half": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "fp32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "bf16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "bfloat16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "bfloat16_t": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/uint32; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/uint32; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint8": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/uint8; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint8_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/uint8; derive cycles from the documented single-instruction parallelism."
+        },
+        "int8": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/int8; derive cycles from the documented single-instruction parallelism."
+        },
+        "int8_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/int8; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/uint16; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/uint16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Add/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "uint64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "int64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "int64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        }
+      },
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = src0 + src1",
+      "semantic_description": "vector-vector add",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ],
+      "calibration_source": {
+        "document": "microbench",
+        "case_name": "add_fp32_independent",
+        "dtype": "fp32",
+        "purpose": "corroboration of documented instruction throughput; not a source for other dtypes"
+      }
+    },
+    "Sub": {
+      "regbase_api_names": [
+        "Sub"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vsub"
+      ],
+      "supported_dtypes": [
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t",
+        "complex32",
+        "complex64"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Sub-21.md",
+      "default_execution_model": "alu_2slot_t1",
+      "dtype_execution_models": {
+        "fp16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "float16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "half": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "fp32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "bf16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "bfloat16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "bfloat16_t": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint8": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/uint8; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint8_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/uint8; derive cycles from the documented single-instruction parallelism."
+        },
+        "int8": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/int8; derive cycles from the documented single-instruction parallelism."
+        },
+        "int8_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/int8; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/uint16; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/uint16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/uint32; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/uint32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sub/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "uint64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "int64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "int64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        }
+      },
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = src0 - src1",
+      "semantic_description": "vector-vector subtract",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Mul": {
+      "regbase_api_names": [
+        "Mul"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vmul"
+      ],
+      "supported_dtypes": [
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t",
+        "complex32",
+        "complex64"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Mul-22.md",
+      "default_execution_model": "alu_2slot_t1",
+      "dtype_execution_models": {
+        "uint16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Mul/uint16; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Mul/uint16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Mul/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Mul/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Mul/uint32; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Mul/uint32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Mul/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Mul/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "uint64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "int64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "int64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        }
+      },
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = src0 * src1",
+      "semantic_description": "vector-vector multiply",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "uint16",
+        "uint32"
+      ]
+    },
+    "Max": {
+      "regbase_api_names": [
+        "Max"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vmax"
+      ],
+      "supported_dtypes": [
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Max-24.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = max(src0, src1)",
+      "semantic_description": "vector-vector maximum",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Min": {
+      "regbase_api_names": [
+        "Min"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vmin"
+      ],
+      "supported_dtypes": [
+        "int8",
+        "int8_t",
+        "uint8",
+        "uint8_t",
+        "int16",
+        "int16_t",
+        "uint16",
+        "uint16_t",
+        "fp16",
+        "float16",
+        "half",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "int32",
+        "int32_t",
+        "uint32",
+        "uint32_t",
+        "fp32",
+        "float32",
+        "float",
+        "int64",
+        "int64_t",
+        "uint64",
+        "uint64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Min-25.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = min(src0, src1)",
+      "semantic_description": "vector-vector minimum",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Abs": {
+      "regbase_api_names": [
+        "Abs"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vabs"
+      ],
+      "supported_dtypes": [
+        "int8",
+        "int8_t",
+        "int16",
+        "int16_t",
+        "int32",
+        "int32_t",
+        "int64",
+        "int64_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "complex32",
+        "complex64"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Abs-15.md",
+      "default_execution_model": "alu_2slot_t1",
+      "dtype_execution_models": {
+        "int8": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Abs/int8; derive cycles from the documented single-instruction parallelism."
+        },
+        "int8_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Abs/int8; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Abs/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Abs/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Abs/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Abs/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "int64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        }
+      },
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = abs(src)",
+      "semantic_description": "absolute value",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8"
+      ]
+    },
+    "Relu": {
+      "regbase_api_names": [
+        "Relu"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vrelu"
+      ],
+      "supported_dtypes": [
+        "int32",
+        "int32_t",
+        "int64",
+        "int64_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Relu-16.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = max(src, 0)",
+      "semantic_description": "relu",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int32"
+      ]
+    },
+    "LeakyRelu": {
+      "regbase_api_names": [
+        "LeakyRelu"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vleakyrelu"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/LeakyRelu-30.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "unary_vector_scalar",
+      "operand_pattern": "dst, src, alpha",
+      "semantic_expr": "dst = src >= 0 ? src : alpha * src",
+      "semantic_description": "leaky relu",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32"
+      ],
+      "calibration_source": {
+        "document": "microbench",
+        "case_name": "leakyrelu_fp32",
+        "dtype": "fp32",
+        "purpose": "corroboration of documented instruction throughput; not a source for other dtypes"
+      }
+    },
+    "Prelu": {
+      "regbase_api_names": [
+        "Prelu"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vprelu"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Prelu.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = src0 >= 0 ? src0 : src0 * src1",
+      "semantic_description": "prelu",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32"
+      ],
+      "calibration_source": {
+        "document": "microbench",
+        "case_name": "prelu_fp32",
+        "dtype": "fp32",
+        "purpose": "corroboration of documented instruction throughput; not a source for other dtypes"
+      }
+    },
+    "Neg": {
+      "regbase_api_names": [
+        "Neg"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vneg"
+      ],
+      "supported_dtypes": [
+        "int8",
+        "int8_t",
+        "int16",
+        "int16_t",
+        "int32",
+        "int32_t",
+        "int64",
+        "int64_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Neg.md",
+      "default_execution_model": "alu_2slot_t1",
+      "dtype_execution_models": {
+        "int8": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Neg/int8; derive cycles from the documented single-instruction parallelism."
+        },
+        "int8_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Neg/int8; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Neg/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Neg/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Neg/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Neg/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "int64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        }
+      },
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = -src",
+      "semantic_description": "negation",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8"
+      ]
+    },
+    "Adds": {
+      "regbase_api_names": [
+        "Adds"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vadds"
+      ],
+      "supported_dtypes": [
+        "int8",
+        "int8_t",
+        "uint8",
+        "uint8_t",
+        "int16",
+        "int16_t",
+        "uint16",
+        "uint16_t",
+        "fp16",
+        "float16",
+        "half",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "int32",
+        "int32_t",
+        "uint32",
+        "uint32_t",
+        "fp32",
+        "float32",
+        "float",
+        "complex32",
+        "int64",
+        "int64_t",
+        "uint64",
+        "uint64_t",
+        "complex64"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Adds-26.md",
+      "default_execution_model": "alu_2slot_t1",
+      "dtype_execution_models": {
+        "fp16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "float16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "half": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "fp32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "bf16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "bfloat16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "bfloat16_t": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int8": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/int8; derive cycles from the documented single-instruction parallelism."
+        },
+        "int8_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/int8; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint8": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/uint8; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint8_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/uint8; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/uint16; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/uint16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/uint32; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Adds/uint32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "int64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "uint64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "uint64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        }
+      },
+      "operation_kind": "binary_vector_scalar",
+      "operand_pattern": "dst, src, scalar",
+      "semantic_expr": "dst = src + scalar",
+      "semantic_description": "vector-scalar add",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Muls": {
+      "regbase_api_names": [
+        "Muls"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vmuls"
+      ],
+      "supported_dtypes": [
+        "int16",
+        "int16_t",
+        "uint16",
+        "uint16_t",
+        "fp16",
+        "float16",
+        "half",
+        "int32",
+        "int32_t",
+        "uint32",
+        "uint32_t",
+        "fp32",
+        "float32",
+        "float",
+        "complex32",
+        "int64",
+        "int64_t",
+        "uint64",
+        "uint64_t",
+        "complex64"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Muls-27.md",
+      "default_execution_model": "alu_2slot_t1",
+      "dtype_execution_models": {
+        "fp16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "float16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "half": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "fp32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/int16; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint16": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/uint16; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint16_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/uint16; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/int32; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint32": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/uint32; derive cycles from the documented single-instruction parallelism."
+        },
+        "uint32_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Muls/uint32; derive cycles from the documented single-instruction parallelism."
+        },
+        "int64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "int64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "uint64": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        },
+        "uint64_t": {
+          "default_execution_model": "alu_2slot_t2",
+          "source": "Model assumption for a dtype not covered by the cited asc-devkit performance rows; not a documented throughput guarantee."
+        }
+      },
+      "operation_kind": "binary_vector_scalar",
+      "operand_pattern": "dst, src, scalar",
+      "semantic_expr": "dst = src * scalar",
+      "semantic_description": "vector-scalar multiply",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "uint16",
+        "uint32"
+      ]
+    },
+    "Maxs": {
+      "regbase_api_names": [
+        "Maxs"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vmaxs"
+      ],
+      "supported_dtypes": [
+        "int8",
+        "int8_t",
+        "uint8",
+        "uint8_t",
+        "int16",
+        "int16_t",
+        "uint16",
+        "uint16_t",
+        "fp16",
+        "float16",
+        "half",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "int32",
+        "int32_t",
+        "uint32",
+        "uint32_t",
+        "fp32",
+        "float32",
+        "float",
+        "int64",
+        "int64_t",
+        "uint64",
+        "uint64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Maxs-28.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector_scalar",
+      "operand_pattern": "dst, src, scalar",
+      "semantic_expr": "dst = max(src, scalar)",
+      "semantic_description": "vector-scalar maximum",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Mins": {
+      "regbase_api_names": [
+        "Mins"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vmins"
+      ],
+      "supported_dtypes": [
+        "int8",
+        "int8_t",
+        "uint8",
+        "uint8_t",
+        "int16",
+        "int16_t",
+        "uint16",
+        "uint16_t",
+        "fp16",
+        "float16",
+        "half",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "int32",
+        "int32_t",
+        "uint32",
+        "uint32_t",
+        "fp32",
+        "float32",
+        "float",
+        "int64",
+        "int64_t",
+        "uint64",
+        "uint64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Mins-29.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector_scalar",
+      "operand_pattern": "dst, src, scalar",
+      "semantic_expr": "dst = min(src, scalar)",
+      "semantic_description": "vector-scalar minimum",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Not": {
+      "regbase_api_names": [
+        "Not"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vnot"
+      ],
+      "supported_dtypes": [
+        "int8",
+        "int8_t",
+        "uint8",
+        "uint8_t",
+        "int16",
+        "int16_t",
+        "uint16",
+        "uint16_t",
+        "int32",
+        "int32_t",
+        "uint32",
+        "uint32_t",
+        "int64",
+        "int64_t",
+        "uint64",
+        "uint64_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表7  逻辑计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/逻辑计算/Not-32.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = ~src",
+      "semantic_description": "bitwise not",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表7  逻辑计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "And": {
+      "regbase_api_names": [
+        "And"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vand"
+      ],
+      "supported_dtypes": [
+        "bool",
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表7  逻辑计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/逻辑计算/And-33.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = src0 & src1",
+      "semantic_description": "vector-vector bitwise and",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表7  逻辑计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Or": {
+      "regbase_api_names": [
+        "Or"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vor"
+      ],
+      "supported_dtypes": [
+        "bool",
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表7  逻辑计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/逻辑计算/Or-34.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = src0 | src1",
+      "semantic_description": "vector-vector bitwise or",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表7  逻辑计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Xor": {
+      "regbase_api_names": [
+        "Xor"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vxor"
+      ],
+      "supported_dtypes": [
+        "bool",
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表7  逻辑计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/逻辑计算/Xor.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = src0 ^ src1",
+      "semantic_description": "vector-vector bitwise xor",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表7  逻辑计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "ShiftLeft": {
+      "regbase_api_names": [
+        "ShiftLeft"
+      ],
+      "legacy_intrinsic_aliases": [
+        "Shl",
+        "vshl"
+      ],
+      "supported_dtypes": [
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表7  逻辑计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/逻辑计算/ShiftLeft-35.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = src0 << src1",
+      "semantic_description": "vector-vector shift left",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表7  逻辑计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "ShiftRight": {
+      "regbase_api_names": [
+        "ShiftRight"
+      ],
+      "legacy_intrinsic_aliases": [
+        "Shr",
+        "vshr"
+      ],
+      "supported_dtypes": [
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表7  逻辑计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/逻辑计算/ShiftRight-36.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = src0 >> src1",
+      "semantic_description": "vector-vector shift right",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表7  逻辑计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "ShiftLefts": {
+      "regbase_api_names": [
+        "ShiftLefts"
+      ],
+      "legacy_intrinsic_aliases": [
+        "Shls",
+        "vshls"
+      ],
+      "supported_dtypes": [
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表7  逻辑计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/逻辑计算/ShiftLefts.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector_scalar",
+      "operand_pattern": "dst, src, scalar",
+      "semantic_expr": "dst = src << scalar",
+      "semantic_description": "vector-scalar shift left",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表7  逻辑计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "ShiftRights": {
+      "regbase_api_names": [
+        "ShiftRights"
+      ],
+      "legacy_intrinsic_aliases": [
+        "Shrs",
+        "vshrs"
+      ],
+      "supported_dtypes": [
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表7  逻辑计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/逻辑计算/ShiftRights.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector_scalar",
+      "operand_pattern": "dst, src, scalar",
+      "semantic_expr": "dst = src >> scalar",
+      "semantic_description": "vector-scalar shift right",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表7  逻辑计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Axpy": {
+      "regbase_api_names": [
+        "Axpy"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vaxpy"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表8  复合计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/复合计算/Axpy-38.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "ternary_vector_scalar",
+      "operand_pattern": "dst, src0, scalar, src1",
+      "semantic_expr": "dst = src0 * scalar + src1",
+      "semantic_description": "axpy fused multiply-add",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表8  复合计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32"
+      ]
+    },
+    "Compare": {
+      "regbase_api_names": [
+        "Compare"
+      ],
+      "legacy_intrinsic_aliases": [
+        "Cmp",
+        "vcmp",
+        "vcmpv_ne",
+        "vcmpv_eq",
+        "vcmpv_gt",
+        "vcmpv_ge",
+        "vcmpv_lt",
+        "vcmpv_le"
+      ],
+      "supported_dtypes": [
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表9  比较与选择; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/比较与选择/Compare-41.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "compare_vector",
+      "operand_pattern": "dst_mask, src0, src1, cmp_mode",
+      "semantic_expr": "dst_mask = compare(src0, src1, cmp_mode)",
+      "semantic_description": "vector-vector compare",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表9  比较与选择",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Compares": {
+      "regbase_api_names": [
+        "Compares"
+      ],
+      "legacy_intrinsic_aliases": [
+        "Cmps",
+        "vcmpvs_ne",
+        "vcmpvs_eq",
+        "vcmpvs_gt",
+        "vcmpvs_ge",
+        "vcmpvs_lt",
+        "vcmpvs_le"
+      ],
+      "supported_dtypes": [
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表9  比较与选择; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/比较与选择/Compares-42.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "compare_vector_scalar",
+      "operand_pattern": "dst_mask, src, scalar, cmp_mode",
+      "semantic_expr": "dst_mask = compare(src, scalar, cmp_mode)",
+      "semantic_description": "vector-scalar compare",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表9  比较与选择",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Select": {
+      "regbase_api_names": [
+        "Select"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vsel"
+      ],
+      "supported_dtypes": [
+        "bool",
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表9  比较与选择; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/比较与选择/Select-43.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "ternary_select",
+      "operand_pattern": "dst, mask, src0, src1",
+      "semantic_expr": "dst = mask ? src0 : src1",
+      "semantic_description": "mask select",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表9  比较与选择",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Cast": {
+      "regbase_api_names": [
+        "Cast"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vconv"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表10  类型转换; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "int4x2_t",
+        "int4b_t",
+        "fp32",
+        "float32",
+        "float",
+        "int16",
+        "int16_t",
+        "int8",
+        "int8_t",
+        "uint8",
+        "uint8_t",
+        "int64",
+        "int64_t",
+        "int32",
+        "int32_t",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "hi8",
+        "hifloat8",
+        "hifloat8_t",
+        "fp8_e5m2_t",
+        "fp8",
+        "float8",
+        "fp8_e4m3fn_t",
+        "fp4",
+        "float4",
+        "fp4x2_e2m1_t",
+        "fp4x2_e1m2_t",
+        "fp8_e8m0_t",
+        "uint32",
+        "uint32_t",
+        "uint16",
+        "uint16_t"
+      ],
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/类型转换/Cast-45.md",
+      "supported_dtype_pairs": [
+        {
+          "src_dtype": "half",
+          "dst_dtype": "int4x2_t"
+        },
+        {
+          "src_dtype": "float",
+          "dst_dtype": "int16_t"
+        },
+        {
+          "src_dtype": "half",
+          "dst_dtype": "int8_t"
+        },
+        {
+          "src_dtype": "half",
+          "dst_dtype": "uint8_t"
+        },
+        {
+          "src_dtype": "float",
+          "dst_dtype": "int64_t"
+        },
+        {
+          "src_dtype": "float",
+          "dst_dtype": "int32_t"
+        },
+        {
+          "src_dtype": "half",
+          "dst_dtype": "int16_t"
+        },
+        {
+          "src_dtype": "half",
+          "dst_dtype": "int32_t"
+        },
+        {
+          "src_dtype": "half",
+          "dst_dtype": "float"
+        },
+        {
+          "src_dtype": "bfloat16_t",
+          "dst_dtype": "float"
+        },
+        {
+          "src_dtype": "hifloat8_t",
+          "dst_dtype": "half"
+        },
+        {
+          "src_dtype": "float",
+          "dst_dtype": "bfloat16_t"
+        },
+        {
+          "src_dtype": "float",
+          "dst_dtype": "half"
+        },
+        {
+          "src_dtype": "half",
+          "dst_dtype": "hifloat8_t"
+        },
+        {
+          "src_dtype": "float",
+          "dst_dtype": "hifloat8_t"
+        },
+        {
+          "src_dtype": "float",
+          "dst_dtype": "fp8_e5m2_t"
+        },
+        {
+          "src_dtype": "float",
+          "dst_dtype": "fp8_e4m3fn_t"
+        },
+        {
+          "src_dtype": "hifloat8_t",
+          "dst_dtype": "float"
+        },
+        {
+          "src_dtype": "fp8_e4m3fn_t",
+          "dst_dtype": "float"
+        },
+        {
+          "src_dtype": "fp8_e5m2_t",
+          "dst_dtype": "float"
+        },
+        {
+          "src_dtype": "bfloat16_t",
+          "dst_dtype": "fp4x2_e2m1_t"
+        },
+        {
+          "src_dtype": "bfloat16_t",
+          "dst_dtype": "fp4x2_e1m2_t"
+        },
+        {
+          "src_dtype": "fp4x2_e2m1_t",
+          "dst_dtype": "bfloat16_t"
+        },
+        {
+          "src_dtype": "fp4x2_e1m2_t",
+          "dst_dtype": "bfloat16_t"
+        },
+        {
+          "src_dtype": "bfloat16_t",
+          "dst_dtype": "half"
+        },
+        {
+          "src_dtype": "half",
+          "dst_dtype": "bfloat16_t"
+        },
+        {
+          "src_dtype": "bfloat16_t",
+          "dst_dtype": "fp8_e8m0_t"
+        },
+        {
+          "src_dtype": "fp8_e8m0_t",
+          "dst_dtype": "bfloat16_t"
+        },
+        {
+          "src_dtype": "int4x2_t",
+          "dst_dtype": "half"
+        },
+        {
+          "src_dtype": "int4x2_t",
+          "dst_dtype": "bfloat16_t"
+        },
+        {
+          "src_dtype": "uint8_t",
+          "dst_dtype": "half"
+        },
+        {
+          "src_dtype": "int8_t",
+          "dst_dtype": "half"
+        },
+        {
+          "src_dtype": "int16_t",
+          "dst_dtype": "float"
+        },
+        {
+          "src_dtype": "int64_t",
+          "dst_dtype": "float"
+        },
+        {
+          "src_dtype": "int16_t",
+          "dst_dtype": "half"
+        },
+        {
+          "src_dtype": "int32_t",
+          "dst_dtype": "float"
+        },
+        {
+          "src_dtype": "uint32_t",
+          "dst_dtype": "uint8_t"
+        },
+        {
+          "src_dtype": "int32_t",
+          "dst_dtype": "uint8_t"
+        },
+        {
+          "src_dtype": "uint16_t",
+          "dst_dtype": "uint8_t"
+        },
+        {
+          "src_dtype": "int16_t",
+          "dst_dtype": "uint8_t"
+        },
+        {
+          "src_dtype": "uint32_t",
+          "dst_dtype": "uint16_t"
+        },
+        {
+          "src_dtype": "uint32_t",
+          "dst_dtype": "int16_t"
+        },
+        {
+          "src_dtype": "int32_t",
+          "dst_dtype": "uint16_t"
+        },
+        {
+          "src_dtype": "int32_t",
+          "dst_dtype": "int16_t"
+        },
+        {
+          "src_dtype": "uint8_t",
+          "dst_dtype": "uint16_t"
+        },
+        {
+          "src_dtype": "int8_t",
+          "dst_dtype": "int16_t"
+        },
+        {
+          "src_dtype": "uint16_t",
+          "dst_dtype": "uint32_t"
+        },
+        {
+          "src_dtype": "int16_t",
+          "dst_dtype": "uint32_t"
+        },
+        {
+          "src_dtype": "int16_t",
+          "dst_dtype": "int32_t"
+        },
+        {
+          "src_dtype": "int32_t",
+          "dst_dtype": "int64_t"
+        },
+        {
+          "src_dtype": "uint8_t",
+          "dst_dtype": "uint32_t"
+        },
+        {
+          "src_dtype": "int8_t",
+          "dst_dtype": "int32_t"
+        },
+        {
+          "src_dtype": "int16_t",
+          "dst_dtype": "int4x2_t"
+        },
+        {
+          "src_dtype": "int4x2_t",
+          "dst_dtype": "int16_t"
+        },
+        {
+          "src_dtype": "int64_t",
+          "dst_dtype": "int32_t"
+        }
+      ],
+      "default_execution_model": "conversion_2slot_t2",
+      "conditional_execution_models": [
+        {
+          "when_field_equals": {
+            "src_dtype": [
+              "fp32",
+              "float32",
+              "float"
+            ],
+            "dst_dtype": [
+              "fp16",
+              "float16",
+              "half",
+              "bf16",
+              "bfloat16",
+              "bfloat16_t"
+            ]
+          },
+          "default_execution_model": "conversion_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance and asc_devkit_reg_issue for listed conversion pairs; special modes not represented by those rows remain model assumptions."
+        },
+        {
+          "when_field_equals": {
+            "src_dtype": [
+              "fp16",
+              "float16",
+              "half",
+              "bf16",
+              "bfloat16",
+              "bfloat16_t"
+            ],
+            "dst_dtype": [
+              "fp32",
+              "float32",
+              "float"
+            ]
+          },
+          "default_execution_model": "conversion_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance and asc_devkit_reg_issue for listed conversion pairs; special modes not represented by those rows remain model assumptions."
+        }
+      ],
+      "operation_kind": "conversion",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = cast<src_dtype,dst_dtype>(src)",
+      "semantic_description": "type conversion",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表10  类型转换",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_pairs": [
+        "fp32->int64",
+        "fp32->int32",
+        "fp32->int16",
+        "fp16->int32",
+        "fp16->int16",
+        "fp16->int8",
+        "fp32->fp16",
+        "fp32->bf16",
+        "fp16->fp32",
+        "bf16->fp32",
+        "fp32->hifloat8",
+        "hifloat8->fp32",
+        "fp16->hifloat8",
+        "hifloat8->fp16",
+        "fp32->fp8_e4m3fn_t",
+        "fp32->fp8_e5m2_t",
+        "fp4x2_e1m2_t->bf16",
+        "fp4x2_e2m1_t->bf16",
+        "bf16->fp4x2_e1m2_t",
+        "bf16->fp4x2_e2m1_t",
+        "uint8->fp16",
+        "int8->fp16",
+        "int16->fp16",
+        "int16->fp32",
+        "int32->fp32",
+        "int4x2_t->fp16",
+        "int4x2_t->int16",
+        "uint8->uint16",
+        "uint8->uint32",
+        "int8->int16",
+        "int8->int32",
+        "uint16->uint8"
+      ]
+    },
+    "Mull": {
+      "regbase_api_names": [
+        "Mull"
+      ],
+      "supported_dtypes": [
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Mull.md",
+      "default_execution_model": "alu_2slot_t2",
+      "operation_kind": "binary_vector_widen",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = widen(src0 * src1)",
+      "semantic_description": "widening multiply",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "int32",
+        "uint32"
+      ]
+    },
+    "MulDstAdd": {
+      "regbase_api_names": [
+        "MulDstAdd"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表8  复合计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/复合计算/MulDstAdd.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "fused_update",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = dst + src0 * src1",
+      "semantic_description": "multiply then add into destination",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表8  复合计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32"
+      ]
+    },
+    "MulAddDst": {
+      "regbase_api_names": [
+        "MulAddDst"
+      ],
+      "supported_dtypes": [
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表8  复合计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/复合计算/MulAddDst-39.md",
+      "default_execution_model": "alu_2slot_t2",
+      "operation_kind": "fused_update",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = src0 * src1 + dst",
+      "semantic_description": "multiply then add destination",
+      "dtype_execution_models": {
+        "fp16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表8  复合计算, MulAddDst/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "float16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表8  复合计算, MulAddDst/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "half": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表8  复合计算, MulAddDst/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "bf16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表8  复合计算, MulAddDst/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "bfloat16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表8  复合计算, MulAddDst/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "bfloat16_t": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表8  复合计算, MulAddDst/bf16; derive cycles from the documented single-instruction parallelism."
+        },
+        "fp32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表8  复合计算, MulAddDst/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表8  复合计算, MulAddDst/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表8  复合计算, MulAddDst/fp32; derive cycles from the documented single-instruction parallelism."
+        }
+      },
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表8  复合计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "uint16",
+        "uint32"
+      ]
+    },
+    "Mula": {
+      "regbase_api_names": [
+        "Mula",
+        "FusedMulDstAdd"
+      ],
+      "supported_dtypes": [
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "Compatibility alias modeled after MulAddDst: floating-point aliases use its asc-devkit-derived one-cycle model; documented integers use two cycles. Mula is not a standalone asc-devkit performance-table entry; remaining types retain model assumptions.",
+      "supported_dtypes_source": "No standalone public RegBase Mula API page found in asc-devkit; kept as compatibility alias and modeled with MulAddDst/MulDstAdd-style fused multiply-add destination update dtypes.",
+      "default_execution_model": "alu_2slot_t2",
+      "operation_kind": "fused_update",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = dst + src0 * src1",
+      "semantic_description": "multiply accumulate alias",
+      "dtype_execution_models": {
+        "fp16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "Compatibility model inherited from MulAddDst; not an independent asc-devkit Mula timing claim."
+        },
+        "float16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "Compatibility model inherited from MulAddDst; not an independent asc-devkit Mula timing claim."
+        },
+        "half": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "Compatibility model inherited from MulAddDst; not an independent asc-devkit Mula timing claim."
+        },
+        "bf16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "Compatibility model inherited from MulAddDst; not an independent asc-devkit Mula timing claim."
+        },
+        "bfloat16": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "Compatibility model inherited from MulAddDst; not an independent asc-devkit Mula timing claim."
+        },
+        "bfloat16_t": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "Compatibility model inherited from MulAddDst; not an independent asc-devkit Mula timing claim."
+        },
+        "fp32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "Compatibility model inherited from MulAddDst; not an independent asc-devkit Mula timing claim."
+        },
+        "float32": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "Compatibility model inherited from MulAddDst; not an independent asc-devkit Mula timing claim."
+        },
+        "float": {
+          "default_execution_model": "alu_2slot_t1",
+          "source": "Compatibility model inherited from MulAddDst; not an independent asc-devkit Mula timing claim."
+        }
+      },
+      "performance_source": {
+        "kind": "compatibility_alias",
+        "target": "MulAddDst"
+      }
+    },
+    "AbsSub": {
+      "regbase_api_names": [
+        "AbsSub"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表8  复合计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/复合计算/AbsSub.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = abs(src0 - src1)",
+      "semantic_description": "absolute difference",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表8  复合计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32"
+      ],
+      "calibration_source": {
+        "document": "microbench",
+        "case_name": "abssub_fp32",
+        "dtype": "fp32",
+        "purpose": "corroboration of documented instruction throughput; not a source for other dtypes"
+      }
+    },
+    "Truncate": {
+      "regbase_api_names": [
+        "Truncate"
+      ],
+      "supported_conversions": [
+        "fp32_to_fp32",
+        "fp16_to_fp16",
+        "bf16_to_bf16"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表10  类型转换; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t"
+      ],
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/类型转换/Truncate.md",
+      "default_execution_model": "alu_2slot_t2",
+      "operation_kind": "conversion",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = truncate(src)",
+      "semantic_description": "truncate conversion",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表10  类型转换",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_pairs": [
+        "fp16->fp16",
+        "bf16->bf16",
+        "fp32->fp32"
+      ]
+    },
+    "ReduceMax": {
+      "regbase_api_names": [
+        "Reduce",
+        "Reduce<ReduceType::MAX>"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vcmax",
+        "vcgmax"
+      ],
+      "supported_dtypes": [
+        "int16",
+        "int16_t",
+        "fp16",
+        "float16",
+        "half",
+        "int32",
+        "int32_t",
+        "fp32",
+        "float32",
+        "float",
+        "uint16",
+        "uint16_t",
+        "uint32",
+        "uint32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表11  归约计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/归约计算/Reduce.md",
+      "default_execution_model": "reduce_1slot_t1",
+      "operation_kind": "reduction",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = reduce_max(src)",
+      "semantic_description": "reduce max",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表11  归约计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "uint16",
+        "uint32"
+      ]
+    },
+    "ReduceMin": {
+      "regbase_api_names": [
+        "Reduce",
+        "Reduce<ReduceType::MIN>"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vcmin",
+        "vcgmin"
+      ],
+      "supported_dtypes": [
+        "int16",
+        "int16_t",
+        "fp16",
+        "float16",
+        "half",
+        "int32",
+        "int32_t",
+        "fp32",
+        "float32",
+        "float",
+        "uint16",
+        "uint16_t",
+        "uint32",
+        "uint32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表11  归约计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/归约计算/Reduce.md",
+      "default_execution_model": "reduce_1slot_t1",
+      "operation_kind": "reduction",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = reduce_min(src)",
+      "semantic_description": "reduce min",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表11  归约计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "uint16",
+        "uint32"
+      ]
+    },
+    "ReduceSum": {
+      "regbase_api_names": [
+        "Reduce",
+        "Reduce<ReduceType::SUM>"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vcadd",
+        "vcgadd"
+      ],
+      "supported_dtypes": [
+        "int16",
+        "int16_t",
+        "int32",
+        "int32_t",
+        "fp16",
+        "float16",
+        "half",
+        "uint16",
+        "uint16_t",
+        "uint32",
+        "uint32_t",
+        "fp32",
+        "float32",
+        "float",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表11  归约计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/归约计算/Reduce.md",
+      "supported_dtype_pairs": [
+        {
+          "src_dtype": "int16_t",
+          "dst_dtype": "int32_t"
+        },
+        {
+          "src_dtype": "int32_t",
+          "dst_dtype": "int32_t"
+        },
+        {
+          "src_dtype": "half",
+          "dst_dtype": "half"
+        },
+        {
+          "src_dtype": "uint16_t",
+          "dst_dtype": "uint32_t"
+        },
+        {
+          "src_dtype": "uint32_t",
+          "dst_dtype": "uint32_t"
+        },
+        {
+          "src_dtype": "float",
+          "dst_dtype": "float"
+        },
+        {
+          "src_dtype": "uint64_t",
+          "dst_dtype": "uint64_t"
+        },
+        {
+          "src_dtype": "int64_t",
+          "dst_dtype": "int64_t"
+        }
+      ],
+      "default_execution_model": "reduce_1slot_t1",
+      "operation_kind": "reduction",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = reduce_sum(src)",
+      "semantic_description": "reduce sum",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表11  归约计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int32",
+        "uint32"
+      ],
+      "calibration_source": {
+        "document": "microbench",
+        "case_name": "reducesum_fp32",
+        "dtype": "fp32",
+        "purpose": "corroboration of documented instruction throughput; not a source for other dtypes"
+      }
+    },
+    "BlockReduceMax": {
+      "regbase_api_names": [
+        "ReduceDataBlock",
+        "ReduceDataBlock<ReduceType::MAX>"
+      ],
+      "supported_dtypes": [
+        "int16",
+        "int16_t",
+        "uint16",
+        "uint16_t",
+        "fp16",
+        "float16",
+        "half",
+        "int32",
+        "int32_t",
+        "uint32",
+        "uint32_t",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表11  归约计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/归约计算/ReduceDataBlock.md",
+      "default_execution_model": "reduce_1slot_t1",
+      "operation_kind": "reduction",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = block_reduce_max(src)",
+      "semantic_description": "block reduce max",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表11  归约计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "uint16",
+        "uint32"
+      ]
+    },
+    "BlockReduceMin": {
+      "regbase_api_names": [
+        "ReduceDataBlock",
+        "ReduceDataBlock<ReduceType::MIN>"
+      ],
+      "supported_dtypes": [
+        "int16",
+        "int16_t",
+        "uint16",
+        "uint16_t",
+        "fp16",
+        "float16",
+        "half",
+        "int32",
+        "int32_t",
+        "uint32",
+        "uint32_t",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表11  归约计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/归约计算/ReduceDataBlock.md",
+      "default_execution_model": "reduce_1slot_t1",
+      "operation_kind": "reduction",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = block_reduce_min(src)",
+      "semantic_description": "block reduce min",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表11  归约计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "uint16",
+        "uint32"
+      ]
+    },
+    "BlockReduceSum": {
+      "regbase_api_names": [
+        "ReduceDataBlock",
+        "ReduceDataBlock<ReduceType::SUM>"
+      ],
+      "supported_dtypes": [
+        "int16",
+        "int16_t",
+        "uint16",
+        "uint16_t",
+        "fp16",
+        "float16",
+        "half",
+        "int32",
+        "int32_t",
+        "uint32",
+        "uint32_t",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表11  归约计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/归约计算/ReduceDataBlock.md",
+      "default_execution_model": "reduce_1slot_t1",
+      "operation_kind": "reduction",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = block_reduce_sum(src)",
+      "semantic_description": "block reduce sum",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表11  归约计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32",
+        "int32",
+        "uint32"
+      ]
+    },
+    "PairReduceSum": {
+      "regbase_api_names": [
+        "PairReduceElem",
+        "PairReduceElem<PairReduce::SUM>"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表11  归约计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/归约计算/PairReduceElem.md",
+      "default_execution_model": "reduce_1slot_t1",
+      "operation_kind": "reduction",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = pair_reduce_sum(src0, src1)",
+      "semantic_description": "pair reduce sum",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表11  归约计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32"
+      ]
+    },
+    "CompareScalar": {
+      "regbase_api_names": [
+        "CompareScalar"
+      ],
+      "supported_dtypes": [
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t"
+      ],
+      "source": "Compatibility alias of Compares; use its asc-devkit performance rows and documented dtype scope. CompareScalar is not a separate performance-table entry.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/比较与选择/Compares-42.md",
+      "default_execution_model": "alu_2slot_t1",
+      "operation_kind": "compare_vector_scalar",
+      "operand_pattern": "dst_mask, src, scalar, cmp_mode",
+      "semantic_expr": "dst_mask = compare(src, scalar, cmp_mode)",
+      "semantic_description": "vector-scalar compare alias",
+      "performance_source": {
+        "kind": "compatibility_alias",
+        "target": "Compares"
+      }
+    },
+    "Duplicate": {
+      "regbase_api_names": [
+        "Duplicate",
+        "asc_duplicate_scalar",
+        "asc_duplicate"
+      ],
+      "supported_dtypes": [
+        "bool",
+        "int8",
+        "int8_t",
+        "uint8",
+        "uint8_t",
+        "fp4",
+        "float4",
+        "fp4x2_e2m1_t",
+        "fp4x2_e1m2_t",
+        "hi8",
+        "hifloat8",
+        "hifloat8_t",
+        "fp8_e5m2_t",
+        "fp8",
+        "float8",
+        "fp8_e4m3fn_t",
+        "fp8_e8m0_t",
+        "int16",
+        "int16_t",
+        "uint16",
+        "uint16_t",
+        "fp16",
+        "float16",
+        "half",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t",
+        "int32",
+        "int32_t",
+        "uint32",
+        "uint32_t",
+        "fp32",
+        "float32",
+        "float",
+        "complex32",
+        "int64",
+        "int64_t",
+        "uint64",
+        "uint64_t",
+        "complex64"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表12  数据填充; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions. Scalar/default Duplicate follows the VBR row; the tensor-mode single-issue override remains an unverified model assumption.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/数据填充/Duplicate-48.md",
+      "default_execution_model": "alu_2slot_t1",
+      "duplicate_modes": {
+        "scalar": {
+          "description": "broadcast scalarValue to dstReg",
+          "regbase_form": "Reg::Duplicate(dstReg, scalarValue, mask)",
+          "c_api": "asc_duplicate_scalar",
+          "default_execution_model": "alu_2slot_t1",
+          "source": "asc-devkit: default/scalar Duplicate performance and VBR issue classification."
+        },
+        "tensor": {
+          "description": "broadcast the lowest element of srcReg to dstReg",
+          "regbase_form": "Reg::Duplicate(dstReg, srcReg, mask)",
+          "c_api": "asc_duplicate",
+          "default_execution_model": "vector_1slot_t1",
+          "source": "Model assumption: tensor Duplicate is not independently covered by the cited VBR row; no peak-throughput claim."
+        }
+      },
+      "conditional_execution_models": [
+        {
+          "when_field_equals": {
+            "mode": "tensor"
+          },
+          "default_execution_model": "vector_1slot_t1",
+          "source": "Model assumption for tensor Duplicate; not independently verified by the cited asc-devkit VBR row."
+        },
+        {
+          "when_field_equals": {
+            "duplicate_mode": "tensor"
+          },
+          "default_execution_model": "vector_1slot_t1",
+          "source": "Model assumption for tensor Duplicate; not independently verified by the cited asc-devkit VBR row."
+        }
+      ],
+      "operation_kind": "fill",
+      "operand_pattern": "dst, scalar | dst, src",
+      "semantic_expr": "scalar mode: dst = scalar; tensor mode: dst = src[0]",
+      "semantic_description": "register duplicate",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表12  数据填充",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Interleave": {
+      "regbase_api_names": [
+        "Interleave"
+      ],
+      "supported_dtypes": [
+        "bool",
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表14  数据重排; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/数据重排/Interleave-51.md",
+      "default_execution_model": "vector_1slot_t1",
+      "operation_kind": "data_reorder",
+      "operand_pattern": "dst0, dst1, src0, src1",
+      "semantic_expr": "dst0, dst1 = interleave(src0, src1)",
+      "semantic_description": "interleave",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表14  数据重排",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "DeInterleave": {
+      "regbase_api_names": [
+        "DeInterleave"
+      ],
+      "supported_dtypes": [
+        "bool",
+        "uint8",
+        "uint8_t",
+        "int8",
+        "int8_t",
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "uint64",
+        "uint64_t",
+        "int64",
+        "int64_t",
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float",
+        "bf16",
+        "bfloat16",
+        "bfloat16_t"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表14  数据重排; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/数据重排/DeInterleave-52.md",
+      "default_execution_model": "vector_1slot_t1",
+      "operation_kind": "data_reorder",
+      "operand_pattern": "dst0, dst1, src",
+      "semantic_expr": "dst0, dst1 = deinterleave(src)",
+      "semantic_description": "deinterleave",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表14  数据重排",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "bf16",
+        "fp16",
+        "fp32",
+        "int16",
+        "int32",
+        "int8",
+        "uint16",
+        "uint32",
+        "uint8"
+      ]
+    },
+    "Pack": {
+      "regbase_api_names": [
+        "Pack"
+      ],
+      "supported_dtype_pairs": [
+        {
+          "src_dtype": "int16_t",
+          "dst_dtype": "uint8_t"
+        },
+        {
+          "src_dtype": "uint16_t",
+          "dst_dtype": "uint8_t"
+        },
+        {
+          "src_dtype": "int32_t",
+          "dst_dtype": "uint16_t"
+        },
+        {
+          "src_dtype": "uint32_t",
+          "dst_dtype": "uint16_t"
+        },
+        {
+          "src_dtype": "int64_t",
+          "dst_dtype": "uint32_t"
+        },
+        {
+          "src_dtype": "uint64_t",
+          "dst_dtype": "uint32_t"
+        }
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表15  数据压缩; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/数据压缩/Pack-53.md",
+      "default_execution_model": "pack_unpack_1slot_t1",
+      "operation_kind": "conversion_pack",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = pack(src)",
+      "semantic_description": "pack narrower data",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表15  数据压缩",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_pairs": [
+        "int16->uint8",
+        "uint16->uint8",
+        "int32->uint16",
+        "uint32->uint16"
+      ]
+    },
+    "UnPack": {
+      "regbase_api_names": [
+        "UnPack"
+      ],
+      "supported_dtype_pairs": [
+        {
+          "src_dtype": "int8_t",
+          "dst_dtype": "int16_t"
+        },
+        {
+          "src_dtype": "uint8_t",
+          "dst_dtype": "uint16_t"
+        },
+        {
+          "src_dtype": "int16_t",
+          "dst_dtype": "int32_t"
+        },
+        {
+          "src_dtype": "uint16_t",
+          "dst_dtype": "uint32_t"
+        },
+        {
+          "src_dtype": "uint32_t",
+          "dst_dtype": "uint64_t"
+        },
+        {
+          "src_dtype": "int32_t",
+          "dst_dtype": "int64_t"
+        }
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表15  数据压缩; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/数据压缩/UnPack-54.md",
+      "default_execution_model": "pack_unpack_1slot_t1",
+      "operation_kind": "conversion_unpack",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = unpack(src)",
+      "semantic_description": "unpack wider data",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表15  数据压缩",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_pairs": [
+        "int8->int16",
+        "uint8->uint16",
+        "int16->int32",
+        "uint16->uint32"
+      ]
+    },
+    "Exp": {
+      "regbase_api_names": [
+        "Exp"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vexp"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Exp-17.md",
+      "default_execution_model": "valu_2slot_t4",
+      "dtype_execution_models": {
+        "fp32": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Exp/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float32": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Exp/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Exp/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "fp16": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Exp/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "float16": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Exp/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "half": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Exp/fp16; derive cycles from the documented single-instruction parallelism."
+        }
+      },
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = exp(src)",
+      "semantic_description": "exponential",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32"
+      ],
+      "calibration_source": {
+        "document": "microbench",
+        "case_name": "exp_fp32",
+        "dtype": "fp32",
+        "purpose": "corroboration of documented instruction throughput; not a source for other dtypes"
+      }
+    },
+    "ExpSub": {
+      "regbase_api_names": [
+        "ExpSub"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表8  复合计算; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/复合计算/ExpSub.md",
+      "default_execution_model": "valu_2slot_t4",
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = exp(src0) - src1",
+      "semantic_description": "exp-sub compound",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表8  复合计算",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp32"
+      ]
+    },
+    "Ln": {
+      "regbase_api_names": [
+        "Ln"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vln"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Ln-19.md",
+      "default_execution_model": "valu_2slot_t4",
+      "dtype_execution_models": {
+        "fp16": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Ln/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "float16": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Ln/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "half": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Ln/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "fp32": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Ln/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float32": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Ln/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Ln/fp32; derive cycles from the documented single-instruction parallelism."
+        }
+      },
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = ln(src)",
+      "semantic_description": "natural logarithm",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32"
+      ]
+    },
+    "Log": {
+      "regbase_api_names": [
+        "Log"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vlog"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Log.md",
+      "default_execution_model": "valu_2slot_t4",
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = log(src)",
+      "semantic_description": "logarithm",
+      "dtype_execution_models": {
+        "fp16": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Log/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "float16": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Log/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "half": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Log/fp16; derive cycles from the documented single-instruction parallelism."
+        }
+      },
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32"
+      ],
+      "calibration_source": {
+        "document": "microbench",
+        "case_name": "log_fp32",
+        "dtype": "fp32",
+        "purpose": "corroboration of documented instruction throughput; not a source for other dtypes"
+      }
+    },
+    "Log2": {
+      "regbase_api_names": [
+        "Log2"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vlog2"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "Microbenchmark calibration for fp32: source_documents.microbench.raw_instructions, log2_fp32. The fp16 cost is an uncalibrated model assumption; asc-devkit has no corresponding row in the cited performance summary.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Log2.md",
+      "default_execution_model": "valu_2slot_t4",
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = log2(src)",
+      "semantic_description": "base-2 logarithm",
+      "performance_source": {
+        "kind": "microbenchmark_fp32_and_model_assumption",
+        "document": "microbench",
+        "case_name": "log2_fp32"
+      }
+    },
+    "Log10": {
+      "regbase_api_names": [
+        "Log10"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vlog10"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "Microbenchmark calibration for fp32: source_documents.microbench.raw_instructions, log10_fp32. The fp16 cost is an uncalibrated model assumption; asc-devkit has no corresponding row in the cited performance summary.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Log10.md",
+      "default_execution_model": "valu_2slot_t4",
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = log10(src)",
+      "semantic_description": "base-10 logarithm",
+      "performance_source": {
+        "kind": "microbenchmark_fp32_and_model_assumption",
+        "document": "microbench",
+        "case_name": "log10_fp32"
+      }
+    },
+    "Div": {
+      "regbase_api_names": [
+        "Div"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vdiv"
+      ],
+      "supported_dtypes": [
+        "uint16",
+        "uint16_t",
+        "int16",
+        "int16_t",
+        "fp16",
+        "float16",
+        "half",
+        "uint32",
+        "uint32_t",
+        "int32",
+        "int32_t",
+        "fp32",
+        "float32",
+        "float",
+        "complex32",
+        "int64",
+        "int64_t",
+        "uint64",
+        "uint64_t",
+        "complex64"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Div-23.md",
+      "default_execution_model": "valu_2slot_t4",
+      "dtype_execution_models": {
+        "fp16": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Div/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "float16": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Div/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "half": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Div/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "fp32": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Div/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float32": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Div/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Div/fp32; derive cycles from the documented single-instruction parallelism."
+        }
+      },
+      "operation_kind": "binary_vector",
+      "operand_pattern": "dst, src0, src1",
+      "semantic_expr": "dst = src0 / src1",
+      "semantic_description": "vector-vector divide",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32"
+      ]
+    },
+    "Sqrt": {
+      "regbase_api_names": [
+        "Sqrt"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vsqrt"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "asc-devkit: docs/zh/api/appendix/reg_vector_compute_interface_theoretical_perf_summary.md, 表6  基础算术; instruction issue classification: docs/zh/api/appendix/reg_vector_compute_interface_instruction_single_dual_issue_summary.md. Coverage is restricted to the documented_performance fields; unlisted dtype/mode costs remain model assumptions.",
+      "supported_dtypes_source": "asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Sqrt-18.md",
+      "default_execution_model": "valu_2slot_t4",
+      "dtype_execution_models": {
+        "fp16": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sqrt/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "float16": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sqrt/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "half": {
+          "default_execution_model": "valu_2slot_t8",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sqrt/fp16; derive cycles from the documented single-instruction parallelism."
+        },
+        "fp32": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sqrt/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float32": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sqrt/fp32; derive cycles from the documented single-instruction parallelism."
+        },
+        "float": {
+          "default_execution_model": "valu_2slot_t4",
+          "source": "asc-devkit: asc_devkit_reg_performance, 表6  基础算术, Sqrt/fp32; derive cycles from the documented single-instruction parallelism."
+        }
+      },
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = sqrt(src)",
+      "semantic_description": "square root",
+      "performance_source": {
+        "document": "asc_devkit_reg_performance",
+        "section": "表6  基础算术",
+        "issue_document": "asc_devkit_reg_issue"
+      },
+      "documented_performance_dtypes": [
+        "fp16",
+        "fp32"
+      ],
+      "calibration_source": {
+        "document": "microbench",
+        "case_name": "sqrt_fp32",
+        "dtype": "fp32",
+        "purpose": "corroboration of documented instruction throughput; not a source for other dtypes"
+      }
+    },
+    "Rsqrt": {
+      "regbase_api_names": [
+        "Rsqrt"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vrsqrt"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "Model approximation for a composite API, not an asc-devkit single-instruction throughput. API implementation reference: asc-devkit/include/basic_api/kernel_operator_vec_unary_intf.h and asc-devkit/impl/basic_api/dav_3510/kernel_operator_vec_unary_impl.h. The single Sqrt-class cost can underestimate the composite Rsqrt cost; independent calibration is pending.",
+      "supported_dtypes_source": "asc-devkit/include/basic_api/kernel_operator_vec_unary_intf.h and asc-devkit/impl/basic_api/dav_3510/kernel_operator_vec_unary_impl.h",
+      "default_execution_model": "valu_2slot_t4",
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = rsqrt(src)",
+      "semantic_description": "reciprocal square root",
+      "performance_source": {
+        "kind": "composite_model_assumption",
+        "implementation_source": "asc-devkit/include/basic_api/kernel_operator_vec_unary_intf.h and asc-devkit/impl/basic_api/dav_3510/kernel_operator_vec_unary_impl.h"
+      }
+    },
+    "Reciprocal": {
+      "regbase_api_names": [
+        "Reciprocal"
+      ],
+      "legacy_intrinsic_aliases": [
+        "vrec"
+      ],
+      "supported_dtypes": [
+        "fp16",
+        "float16",
+        "half",
+        "fp32",
+        "float32",
+        "float"
+      ],
+      "source": "Model approximation for a composite API, not an asc-devkit single-instruction throughput. API implementation reference: asc-devkit/include/basic_api/kernel_operator_vec_unary_intf.h and asc-devkit/impl/basic_api/dav_3510/kernel_operator_vec_unary_impl.h. The Div-class cost approximates 1/x; independent composite calibration is pending.",
+      "supported_dtypes_source": "asc-devkit/include/basic_api/kernel_operator_vec_unary_intf.h and asc-devkit/impl/basic_api/dav_3510/kernel_operator_vec_unary_impl.h",
+      "default_execution_model": "valu_2slot_t4",
+      "operation_kind": "unary_vector",
+      "operand_pattern": "dst, src",
+      "semantic_expr": "dst = 1 / src",
+      "semantic_description": "reciprocal",
+      "performance_source": {
+        "kind": "composite_model_assumption",
+        "implementation_source": "asc-devkit/include/basic_api/kernel_operator_vec_unary_intf.h and asc-devkit/impl/basic_api/dav_3510/kernel_operator_vec_unary_impl.h"
+      }
+    }
+  }
+}

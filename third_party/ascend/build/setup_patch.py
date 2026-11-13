@@ -661,6 +661,7 @@ def patch_module(mod):
         yield from _orig_get_packages()
         yield "triton.backends.ascend.reuse"
         yield "triton.backends.ascend.reuse.dsl"
+        yield "triton.backends.ascend.block_auto_models"
         if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
             distributed_pkg_root = os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python",
                                                 "triton_dist")
@@ -742,6 +743,16 @@ def _build_setup_kwargs(mod, kwargs):
 
     # package_data for distributed
     package_data = dict(kwargs.get("package_data") or {})
+    # The runtime selector must work from an installed wheel, without tools/
+    # or a source checkout. Keep its pinned model inputs with the backend.
+    auto_package = "triton.backends.ascend.block_auto_models"
+    package_data[auto_package] = list(package_data.get(auto_package, ())) + [
+        "data/*",
+        "configs/*.json",
+        "vv_skill_data/*",
+        "vv_library_data/*",
+        "vv_mixed_data/*",
+    ]
     if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
         package_data["triton_dist"] = ["*.py", "*.pyi"]
     if package_data:

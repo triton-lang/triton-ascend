@@ -1,0 +1,10 @@
+{
+  "libdevice_path": "triton/backends/ascend/lib/libdevice.10.bc",
+  "libdevice_sha256": "29f83ad4c9fad8f8278bc7ba00a8d653455cf6bd96d99486472c177860054b0d",
+  "toolchain_manifest_sha256": "b8cdfb9c62c2358750778e25b377efc34993286d4f337e2554f57f4bdcd29ce0",
+  "llvm_sha256": "d775fb8795386e5e48650f55020a73d861dd82dbff99d26da41ec058139a3126",
+  "descriptor_scalar_steps": 25,
+  "body": "original libdevice SIMD VF; shape-derived full vectors and remainder",
+  "wrapper": "straight-line descriptor operations counted as scalar upper estimate",
+  "scope": "equal contiguous fp32 1D buffers; no operator timing inputs"
+}

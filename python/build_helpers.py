@@ -326,17 +326,27 @@ def get_llvm_package_info(helper_args: BuildHelperArgs):
         elif arch == "arm64":
             system_suffix = "ubuntu-arm64"
         elif arch == "x64":
-            vglibc = tuple(map(int, platform.libc_ver()[1].split(".")))
-            vglibc = vglibc[0] * 100 + vglibc[1]
-            if vglibc > 228:
-                # Ubuntu 24 LTS (v2.39)
-                # Ubuntu 22 LTS (v2.35)
-                # Ubuntu 20 LTS (v2.31)
-                system_suffix = "ubuntu-x64"
-            else:
-                # Manylinux_2.28 (v2.28)
-                # AlmaLinux 8 (v2.28)
+            # Check the EL family first, mirroring the arm64 branch: the
+            # glibc-version heuristic below misclassifies manylinux_2_34
+            # (AlmaLinux 9, glibc 2.34) as Ubuntu and would pick the
+            # ubuntu-x64 tarball, whose binaries are built on Ubuntu 22.04
+            # and need GLIBCXX_3.4.30 — newer than the EL9 libstdc++
+            # provides (3.4.29). The almalinux-x64 tarball (EL8, glibc
+            # 2.28) runs on both EL8 and EL9.
+            if is_linux_os("almalinux"):
                 system_suffix = "almalinux-x64"
+            else:
+                vglibc = tuple(map(int, platform.libc_ver()[1].split(".")))
+                vglibc = vglibc[0] * 100 + vglibc[1]
+                if vglibc > 228:
+                    # Ubuntu 24 LTS (v2.39)
+                    # Ubuntu 22 LTS (v2.35)
+                    # Ubuntu 20 LTS (v2.31)
+                    system_suffix = "ubuntu-x64"
+                else:
+                    # Manylinux_2.28 (v2.28)
+                    # AlmaLinux 8 (v2.28)
+                    system_suffix = "almalinux-x64"
         else:
             print(
                 f"LLVM pre-compiled image is not available for {system}-{arch}. Proceeding with user-configured LLVM from source build."

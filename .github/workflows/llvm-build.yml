@@ -62,14 +62,32 @@ jobs:
         sed -i 's|http://security.ubuntu.com|http://cache-service.nginx-pypi-cache.svc.cluster.local:8081|g' /etc/apt/sources.list 2>/dev/null || true
         apt-get update
         # The jammy archive only ships clang up to 15; clang 20 comes from the
-        # official LLVM apt repository.
-        apt-get install -y --no-install-recommends ca-certificates curl
+        # official LLVM apt repository. python3 must be installed explicitly:
+        # it used to come in transitively with the jammy clang packages, but
+        # the apt.llvm.org clang-20 install no longer pulls it.
+        apt-get install -y --no-install-recommends ca-certificates curl python3 python3-pip
         curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o /etc/apt/trusted.gpg.d/apt.llvm.org.asc
         echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" > /etc/apt/sources.list.d/llvm-toolchain.list
         apt-get update
         apt-get install -y --no-install-recommends clang-20 lld-20
         update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
         update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
+
+    # Must run before Fetch LLVM Commit Hash (which parses llvm-info.json with
+    # python3). Safety net for the almalinux matrix entries, which skip the
+    # ubuntu-only mirror/toolchain step above.
+    - name: Set up Python
+      shell: bash
+      run: |
+        if command -v python3 2>/dev/null; then
+          python3 --version
+        elif command -v apt-get 2>/dev/null; then
+          apt-get update && apt-get install -y python3 python3-pip
+          python3 --version
+        else
+          echo "ERROR: cannot find or install python3"
+          exit 1
+        fi
 
     - name: Fetch LLVM Commit Hash
       shell: bash
@@ -126,19 +144,6 @@ jobs:
             fi
           done
           cd ..
-        fi
-
-    - name: Set up Python
-      shell: bash
-      run: |
-        if command -v python3 2>/dev/null; then
-          python3 --version
-        elif command -v apt-get 2>/dev/null; then
-          apt-get update && apt-get install -y python3 python3-pip
-          python3 --version
-        else
-          echo "ERROR: cannot find or install python3"
-          exit 1
         fi
 
     - name: Install Prerequisites

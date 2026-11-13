@@ -563,6 +563,73 @@ void init_tla_builder(py::module &&m) {
           py::arg("buf_id"), py::arg("pipe"), py::arg("nonblocking") = false)
       // SIMD vector-register ops (AVE dialect, ave.hir.*).
       .def(
+          "create_simd_vgatherb",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             Value index, Value mask, py::object elem) -> Value {
+            auto type = VectorType::get(
+                {64},
+                resolveSimdElementType(self.getBuilder().getContext(), elem));
+            auto offsets = toIndexValues(self, indices);
+            return self
+                .create<hivmave::VFBlockGatherOp>(
+                    type, ptr, ValueRange(offsets), index, mask)
+                .getRes();
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("index"), py::arg("mask"),
+          py::arg("elem"))
+      .def(
+          "create_simd_vscatter",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             Value index, Value mask, Value value) {
+            auto offsets = toIndexValues(self, indices);
+            self.create<hivmave::VFScatterOp>(ptr, ValueRange(offsets), index,
+                                              mask, value);
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("index"), py::arg("mask"),
+          py::arg("value"))
+      .def(
+          "create_simd_pred_pack",
+          [](TLABuilder &self, Value src, bool unpack, int32_t part) -> Value {
+            if (unpack)
+              return self.create<hivmave::PregUnpackOp>(src, part).getRes();
+            return self.create<hivmave::PregPackOp>(src, part).getRes();
+          },
+          py::arg("src"), py::arg("unpack"), py::arg("part"))
+      .def(
+          "create_simd_pred_interleave",
+          [](TLABuilder &self, Value a, Value b,
+             bool inverse) -> std::pair<Value, Value> {
+            if (inverse) {
+              auto op = self.create<hivmave::PregDeinterleaveOp>(a, b);
+              return {op.getRes0(), op.getRes1()};
+            }
+            auto op = self.create<hivmave::PregInterleaveOp>(a, b);
+            return {op.getRes0(), op.getRes1()};
+          },
+          py::arg("a"), py::arg("b"), py::arg("inverse"))
+      .def(
+          "create_simd_vselr",
+          [](TLABuilder &self, Value src, Value index, Value mask) -> Value {
+            return self.create<hivmave::VFRegisterGatherOp>(src, index, mask)
+                .getRes();
+          },
+          py::arg("src"), py::arg("index"), py::arg("mask"))
+      .def(
+          "create_simd_group_reduce",
+          [](TLABuilder &self, const std::string &kind, Value src, Value mask,
+             bool isUnsigned) -> Value {
+            auto combiningKind = hivmave::symbolizeCombiningKind(kind);
+            if (!combiningKind)
+              throw std::invalid_argument("unknown group reduction kind");
+            return self
+                .create<hivmave::GroupReductionOp>(
+                    *combiningKind, src, mask,
+                    isUnsigned ? hivm::TypeFn::cast_unsigned
+                               : hivm::TypeFn::cast_signed)
+                .getRes();
+          },
+          py::arg("kind"), py::arg("src"), py::arg("mask"), py::arg("unsigned"))
+      .def(
           "create_simd_vgather",
           [](TLABuilder &self, Value ptr, std::vector<Value> indices,
              Value index, Value mask, py::object elem, int32_t lanes) -> Value {
@@ -774,9 +841,7 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("kind"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"),
           py::arg("sign"), py::arg("mode") = "zeroing")
-      // Elementwise vector-scalar left shift (``ave.hir.vshls``).  The scalar
-      // must already have the vector element type; ``mode`` is consumed by
-      // applySimdMode.
+      // Vector-scalar shifts. The scalar must have the vector element type.
       .def(
           "create_simd_shift_scalar",
           [](TLABuilder &self, std::string &kind, Value &vec, Value &scalar,
@@ -786,13 +851,18 @@ void init_tla_builder(py::module &&m) {
             auto signVal = builder.create<arith::ConstantOp>(
                 loc, builder.getBoolAttr(sign));
             auto resTy = vec.getType();
-            if (kind != "shls") {
+            Value result;
+            if (kind == "shls") {
+              result = self.create<hivmave::VFShlsOp>(resTy, vec, scalar, mask,
+                                                    signVal)
+                           .getResult();
+            } else if (kind == "shrs") {
+              result = self.create<hivmave::VFShrsOp>(resTy, vec, scalar, mask,
+                                                    signVal)
+                           .getResult();
+            } else {
               throw std::invalid_argument("unknown scalar shift kind: " + kind);
             }
-            auto result = self
-                              .create<hivmave::VFShlsOp>(resTy, vec, scalar,
-                                                         mask, signVal)
-                              .getResult();
             return applySimdMode(self, result, mask, mode);
           },
           py::arg("kind"), py::arg("vec"), py::arg("scalar"),
@@ -972,6 +1042,81 @@ void init_tla_builder(py::module &&m) {
             return op.getResult();
           },
           py::arg("vector"), py::arg("mask"), py::arg("kind"))
+      .def(
+          "create_simd_ave_vcpadd",
+          [](TLABuilder &self, Value src, Value mask) -> Value {
+            auto resTy = src.getType();
+            return self.create<hivmave::VcpaddOp>(resTy, src, mask).getResult();
+          },
+          py::arg("src"), py::arg("mask"))
+      .def(
+          "create_simd_ave_vsqz",
+          [](TLABuilder &self, Value src, Value mask, bool stored) -> Value {
+            auto *ctx = self.getBuilder().getContext();
+            auto resTy = src.getType();
+            auto mode = stored ? hivmave::SqueezeStoreMode::STORED
+                               : hivmave::SqueezeStoreMode::NO_STORED;
+            return self
+                .create<hivmave::VsqzOp>(
+                    resTy, src, mask,
+                    hivmave::SqueezeStoreModeAttr::get(ctx, mode))
+                .getResult();
+          },
+          py::arg("src"), py::arg("mask"), py::arg("stored"))
+      .def(
+          "create_simd_ave_carry",
+          [](TLABuilder &self, const std::string &kind, Value src0, Value src1,
+             py::object carry_in, Value mask,
+             bool is_unsigned) -> std::pair<Value, Value> {
+            auto srcTy = dyn_cast<VectorType>(src0.getType());
+            auto maskTy = dyn_cast<VectorType>(mask.getType());
+            if (!srcTy || srcTy.getRank() != 1 ||
+                !srcTy.getElementType().isInteger(32) ||
+                srcTy.getNumElements() != 64 ||
+                src0.getType() != src1.getType())
+              throw std::invalid_argument(
+                  "AVE carry requires matching 64-lane i32/u32 registers");
+            if (!maskTy || maskTy.getRank() != 1 ||
+                !maskTy.getElementType().isInteger(1) ||
+                maskTy.getNumElements() != 64)
+              throw std::invalid_argument(
+                  "AVE carry mask must be vector<64xi1>");
+            if (kind != "vaddcs" && kind != "vsubcs")
+              throw std::invalid_argument("unknown AVE carry kind: " + kind);
+            if (carry_in.is_none())
+              throw std::invalid_argument(
+                  "carry operand is required for vaddcs/vsubcs");
+            auto *ctx = self.getBuilder().getContext();
+            auto castAttr = hivm::TypeFnAttr::get(
+                ctx, is_unsigned ? hivm::TypeFn::cast_unsigned
+                                 : hivm::TypeFn::cast_signed);
+            auto carryValue = py::cast<Value>(carry_in);
+            if (carryValue.getType() != maskTy)
+              throw std::invalid_argument(
+                  "AVE carry-in must match the carry mask type");
+            if (kind == "vaddcs") {
+              auto op = self.create<hivmave::VaddcsOp>(
+                  TypeRange{srcTy, maskTy}, src0, src1, carryValue, mask,
+                  castAttr);
+              return {op.getRes(), op.getCarry()};
+            }
+            auto op = self.create<hivmave::VsubcsOp>(
+                TypeRange{srcTy, maskTy}, src0, src1, carryValue, mask,
+                castAttr);
+            return {op.getRes(), op.getCarry()};
+          },
+          py::arg("kind"), py::arg("src0"), py::arg("src1"),
+          py::arg("carry"), py::arg("mask"), py::arg("unsigned"))
+      .def(
+          "create_simd_ave_vusqz",
+          [](TLABuilder &self, Value mask, py::object elem_tag,
+             int32_t lanes) -> Value {
+            auto *ctx = self.getBuilder().getContext();
+            auto resTy =
+                VectorType::get({lanes}, resolveSimdElementType(ctx, elem_tag));
+            return self.create<hivmave::VusqzOp>(resTy, mask).getResult();
+          },
+          py::arg("mask"), py::arg("elem_tag"), py::arg("lanes"))
       .def(
           "create_simd_vci",
           [](TLABuilder &self, Value &index, py::object elem_tag, int32_t lanes,

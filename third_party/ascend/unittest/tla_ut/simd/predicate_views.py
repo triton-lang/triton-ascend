@@ -31,10 +31,10 @@ from utils.tla_test_utils import compile_offline, get_stages
 
 @tla.jit
 def predicate_views(X, O, LOAD_OFFSET, STORE_OFFSET, W: tl.constexpr, DIST: tl.constexpr, VIEW: tl.constexpr):
-    x = tla.alloc_buffer((512, ), tl.uint8, space="ub")
-    out = tla.alloc_buffer((512, ), tl.uint8, space="ub")
-    tla.copy(tla.view(X, (512, )), x)
-    tla.copy(tla.view(X, (512, )), out)
+    x = tla.alloc((512, ), tl.uint8, space="ub")
+    out = tla.alloc((512, ), tl.uint8, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (512, )), x)
+    tla.load_gm_to_ub(tla.view(X, (512, )), out)
     if VIEW == "static":
         src = tla.subview(x, offsets=(64, ), sizes=(256, ))
         dst = tla.subview(out, offsets=(128, ), sizes=(256, ))
@@ -49,7 +49,7 @@ def predicate_views(X, O, LOAD_OFFSET, STORE_OFFSET, W: tl.constexpr, DIST: tl.c
     with tla.scope.simd():
         pred = tla.simd.pld(src[32], width=W, dist=DIST)
         tla.simd.pst(dst[64], pred)
-    tla.copy(out, tla.view(O, (512, )))
+    tla.store_ub_to_gm(out, tla.view(O, (512, )))
 
 
 PREDICATE_CASES = [(width, dist, view)

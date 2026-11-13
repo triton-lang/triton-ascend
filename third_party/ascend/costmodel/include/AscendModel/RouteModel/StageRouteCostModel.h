@@ -36,6 +36,22 @@ enum class StageScheduleKind {
   PartiallyDependent,
 };
 
+/// Completion-inclusive device-task envelope for one physical launch domain.
+/// The incremental term describes physical-program distribution in the same
+/// kernel task. Distribution and Stage body work overlap and are combined by
+/// a calibrated p-norm; Stage, scope, memory, and Cube work remain separate.
+struct KernelLaunchCost {
+  double baseSystemCycles = 0.0;
+  double incrementalSystemCyclesPerPhysicalProgram = 0.0;
+  double overlapNormExponent = 1.0;
+  std::string evidence;
+
+  bool isValid() const;
+  double estimate(int64_t physicalProgramCount) const;
+  double combineWithBody(int64_t physicalProgramCount,
+                         double bodySystemCycles) const;
+};
+
 /// Completion-inclusive correction for a structurally matched whole-SIMT dot
 /// schedule.
 struct WholeSimtCompletionCurve {
@@ -798,6 +814,9 @@ struct StageRouteCompletionProfile {
     int64_t minimumRows = 0, maximumRows = 0;
     int64_t minimumExtent = 0, maximumExtent = 0;
     double sharedCompletionSystemCycles = 0.0;
+    int64_t largeMinimumRows = 0, largeMaximumRows = 0;
+    int64_t largeMinimumExtent = 0, largeMaximumExtent = 0;
+    double largeAdditionalCompletionSystemCycles = 0.0;
     std::string evidence;
     bool isValid() const;
   } straightLineAddReduction;
@@ -835,8 +854,14 @@ struct StageCostTable {
   /// One-time kernel establishment cost for a group of independent SIMD load
   /// streams.
   double simdIndependentLoadGroupKernelStartupCycles = 0.0;
+  double simdIndependentLoopExpDivPairCyclesPerElement = 0.0;
+  double simdIndependentLoopPredicateSelectCyclesPerElement = 0.0;
+  /// One-time SIMT MTE3 establishment for a masked strided-store loop.
+  double simtMaskedStridedStoreKernelStartupCycles = 0.0;
   /// Completion-inclusive backend-helper rate for a straight-line SIMT scan.
   double simtStraightLinePrefixScanElementsPerCycle = 0.0;
+  double simtStraightLinePrefixScanKernelCompletionCycles = 0.0;
+  double simdNonUnitPrefixScanKernelCompletionCycles = 0.0;
   std::string simtStraightLinePrefixScanCompletionEvidence;
   std::vector<WholeSimdCompletionCurve> wholeSimdCompletionCurves;
   std::vector<WholeSimtCompletionCurve> wholeSimtCompletionCurves;
@@ -988,6 +1013,9 @@ struct StageCostModelSummary {
   /// Auditable pure-SIMT plans for each legal whole-kernel factor.
   std::map<int64_t, StageRoutePlan> allSimtFactorPlans;
   StageRoutePlan mixed;
+  /// Auditable Mixed plans before the complete kernel launch envelope selects
+  /// the execution domain and factor.
+  std::vector<StageRoutePlan> mixedFactorPlans;
   /// Fixed parent context for comparing individual SIMT Stage bodies. This
   /// does not describe an all-SIMT executable (which may have a different Q).
   int64_t calibrationLogicalPrograms = 0;

@@ -32,9 +32,10 @@ from collections import namedtuple
 from triton.language import constexpr, str_to_ty
 from triton.compiler.code_generator import (
     ASTFunction,
-    CodeGenerator,
     get_jit_fn_file_line,
 )
+
+from .pipeline_codegen import PipelineCodeGenerator
 
 
 def _stamp_tla_mode(module):
@@ -45,7 +46,7 @@ def _stamp_tla_mode(module):
     module.set_attr("hacc.mode", builder.parse_attr('"tla"'))
 
 
-def lower_ttir(module, context, output_dir=None):
+def lower_ttir(module, context, output_dir=None, *, metadata=None):
     """Run the TLA-specific lowering prefix on a TLA TTIR module.
 
     A standard inliner prefix in the caller first resolves JIT
@@ -108,6 +109,13 @@ def lower_ttir(module, context, output_dir=None):
         raise RuntimeError("tla_to_linalg produced invalid IR")
     _infer_tla_kernel_mode(module, context)
     from triton._C.libtriton.ascend import ir as ascend_ir
+    has_pipeline = ascend_ir.finalize_tla_preload(module)
+    if metadata is not None:
+        from .options import infer_kernel_options
+
+        metadata.update(infer_kernel_options(module))
+        if has_pipeline and metadata.get("enable_tla_cv_pipelining") is None:
+            metadata["enable_tla_cv_pipelining"] = True
     ascend_ir.lower_tla_sync_all(module)
     if output_dir is not None:
         (output_dir / "01_linalg.mlir").write_text(str(module))
@@ -238,9 +246,21 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
     prototype = ASTFunction([], types, constants, {})
     file_name, begin_line = get_jit_fn_file_line(fn)
     proxy = namedtuple("SpecializationProxy", "constants signature")(constexprs, signature)
-    generator = CodeGenerator(context, prototype, gscope=fn.get_capture_scope(), function_name=fn.repr(proxy),
-                              jit_fn=fn, is_kernel=True, file_name=file_name, begin_line=begin_line, options=options,
-                              codegen_fns={}, module_map={}, module=module, is_gluon=False)
+    generator = PipelineCodeGenerator(
+        context,
+        prototype,
+        gscope=fn.get_capture_scope(),
+        function_name=fn.repr(proxy),
+        jit_fn=fn,
+        is_kernel=True,
+        file_name=file_name,
+        begin_line=begin_line,
+        options=options,
+        codegen_fns={},
+        module_map={},
+        module=module,
+        is_gluon=False,
+    )
     arch = getattr(options, "arch", None)
     # Mount the TLA builder on the code generator before visiting the AST.
     from triton.language.extra.tla.builder import setup_unified_builder

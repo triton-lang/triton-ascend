@@ -80,11 +80,13 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_hivm_nd2nz',
         'create_hivm_fixpipe',
         'create_hivm_mmadl1',
+        'create_hivm_mmadl0',
         'create_hivm_mmadmx',
         'create_hivm_load_mx_scale',
         # Shared helpers the TLA frontend calls directly.
         'create_annotation_mark',
         'create_scope_op',
+        'create_tla_pipeline',
         # TLA-only helpers; the cann extension does not mount parse_attr.
         'get_scope_entry_block',
         'parse_attr',

@@ -378,7 +378,7 @@ def tla_to_ttadapter(mod, metadata, opt):
     from triton.language.extra.tla.compiler import lower_ttir
 
     metadata["has_auto_blockify_blacklist_op"] = False
-    lower_ttir(mod, mod.context)
+    lower_ttir(mod, mod.context, metadata=metadata)
     _export_program_grid_metadata(mod, metadata)
     text = _serialize_module(mod, opt)
     if opt.debug:
@@ -810,7 +810,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
 
-        _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
+        optimized_metaop = metadata.get("enable_optimized_metaop")
+        if optimized_metaop is None:
+            optimized_metaop = is_cann_version_at_least(9, 2, 0)
+        _compile_option_list += [f"--enable-optimized-metaop={optimized_metaop}"]
 
         has_limit, aic, aiv = NPUUtils().get_device_limit()
         if _is_a5_target_arch(metadata["target"].arch) or has_limit:
@@ -907,7 +910,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 [f"--hfusion-max-fused-elementwise-ops={prevec_max_fused_ops_num}"]
 
         disable_auto_inject_block_sync = metadata["disable_auto_inject_block_sync"]
-        if disable_auto_inject_block_sync is not None:
+        if disable_auto_inject_block_sync is not None and not getattr(opt, "enable_tla_mode", False):
             _compile_option_list += \
                 [f"--disable-auto-inject-block-sync={disable_auto_inject_block_sync}"]
 
@@ -926,7 +929,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-triton-kernel-compile=true",
             ]
             if getattr(opt, "enable_tla_mode", False):
-                _compile_option_list += ["--enable-tla-mode=true"]
+                from triton.language.extra.tla.options import get_tla_flags
+
+                _compile_option_list += get_tla_flags(metadata)
             _compile_option_list += _full_row_copy_compile_options(metadata, npu_compiler_path)
             # Temporary until the NPU compiler enables batch matmul by default in Q4.
             if metadata.get("enable_hivm_batch_matmul"):
@@ -1326,6 +1331,7 @@ class NPUOptions:
     enable_hivm_batch_matmul: bool = False
     # Only takes effect on the Ascend 950 non-pure-SIMT BiShengIR compilation path.
     enable_vf_stack_limit: bool = False
+    enable_optimized_metaop: Optional[bool] = None
     sync_solver: bool = None
     unit_flag: bool = None
     enable_flatten: bool = None
@@ -1344,6 +1350,7 @@ class NPUOptions:
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
     enable_outer_main_loop: bool = False
+    enable_tla_cv_pipelining: Optional[bool] = None
     enable_tla_mode: bool = field(default=False, init=False)
     enable_cube_block_merge: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = None

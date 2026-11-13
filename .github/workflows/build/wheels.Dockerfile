@@ -86,7 +86,10 @@ WORKDIR /project
 # `git submodule update` skip it; the product code's own guards never issue
 # a submodule command when the tree already exists, so nothing else changes.
 # ---------------------------------------------------------------------------
-RUN NPUIR_REPO_BRANCH=${NPUIR_REF} bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR \
+RUN if [ "${NPUIR_REF}" != stable ]; then \
+      export NPUIR_REPO_URL="$(git config -f .gitmodules --get submodule.third_party/ascend/AscendNPU-IR.url)"; \
+    fi \
+ && NPUIR_REPO_BRANCH=${NPUIR_REF} bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR \
  && git config submodule.third_party/ascend/AscendNPU-IR.update none
 
 # ---------------------------------------------------------------------------

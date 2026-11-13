@@ -20,18 +20,23 @@ RUN sed -i "s|http://archive.ubuntu.com|${APTMIRROR}|g" /etc/apt/sources.list 2>
     sed -i "s|http://security.ubuntu.com|${APTMIRROR}|g" /etc/apt/sources.list 2>/dev/null || true && \
     echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::http::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries && \
+    apt update && apt install --yes --no-install-recommends ca-certificates curl && \
+    # Ubuntu 22.04 (jammy) archives only ship clang up to 15; clang 20 comes
+    # from the official LLVM apt repository.
+    curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
+    echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" > /etc/apt/sources.list.d/llvm-toolchain.list && \
     for i in 1 2 3; do \
       apt update && apt install --yes --no-install-recommends --no-install-suggests \
       bash \
       ca-certificates \
-      clang-15 \
-      clang-format \
+      clang-20 \
+      clang-format-20 \
       cmake \
       ccache \
       curl \
       git \
       gnupg \
-      lld-15 \
+      lld-20 \
       make \
       ninja-build \
       sudo \
@@ -44,9 +49,10 @@ RUN sed -i "s|http://archive.ubuntu.com|${APTMIRROR}|g" /etc/apt/sources.list 2>
       || { echo "apt attempt $i failed, retrying..."; sleep 10; [ $i -eq 3 ] && exit 1; }; \
     done && \
     apt clean && rm -rf /var/lib/apt/lists/* && \
-    update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100 && \
-    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100 && \
-    update-alternatives --install /usr/bin/lld lld /usr/bin/lld-15 100 && \
+    update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100 && \
+    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100 && \
+    update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-20 100 && \
+    update-alternatives --install /usr/bin/lld lld /usr/bin/lld-20 100 && \
     update-ca-certificates
 
 RUN mkdir -p /root/.config/pip && \

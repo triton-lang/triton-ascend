@@ -61,7 +61,15 @@ jobs:
         sed -i 's|http://ports.ubuntu.com|http://cache-service.nginx-pypi-cache.svc.cluster.local:8081|g' /etc/apt/sources.list 2>/dev/null || true
         sed -i 's|http://security.ubuntu.com|http://cache-service.nginx-pypi-cache.svc.cluster.local:8081|g' /etc/apt/sources.list 2>/dev/null || true
         apt-get update
-        apt-get install -y --no-install-recommends clang lld
+        # The jammy archive only ships clang up to 15; clang 20 comes from the
+        # official LLVM apt repository.
+        apt-get install -y --no-install-recommends ca-certificates curl
+        curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+        echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" > /etc/apt/sources.list.d/llvm-toolchain.list
+        apt-get update
+        apt-get install -y --no-install-recommends clang-20 lld-20
+        update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
+        update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
 
     - name: Fetch LLVM Commit Hash
       shell: bash
@@ -147,8 +155,8 @@ jobs:
       if: matrix.config.target-os == 'ubuntu'
       shell: bash
       run: |
-        apt-get install -y lld-15
-        update-alternatives --install /usr/bin/lld lld /usr/bin/lld-15 100
+        apt-get install -y lld-20
+        update-alternatives --install /usr/bin/lld lld /usr/bin/lld-20 100
 
     - name: Enable Cache
       uses: actions/cache@v4

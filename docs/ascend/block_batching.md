@@ -104,12 +104,22 @@ toolchains with adjacent, interleaved baseline/candidate measurements.
 
 ## Regression tests
 
-The implementation includes Python tests for analysis, rewriting, guard
-contracts, cache identity and launcher planning under
-`third_party/ascend/unittest/pytest_ut/test_block_batching*.py`, plus MLIR
-lowering tests under `third_party/ascend/unittest/Conversion/General`.
-Files ending in `_e2e.py` require an NPU and test the actual selected variant;
-other native IR tests require a matching built Ascend extension. The standalone
-C++ grid and loop-arithmetic fixtures validate launch layout and overflow rules.
-Use the repository's normal test environment and select an available device
-before running device tests.
+Two device test files under `third_party/ascend/unittest/pytest_ut` cover the
+feature's observable behavior:
+
+- `test_block_batching_e2e.py`: explicit factors and the unbatched default,
+  partial groups, original callable grids, empty launches, cached alias fallback,
+  graph capture, reductions/scans and sequential iteration grouping.
+- `test_block_batching_cv_e2e.py`: shared M/N and independent matrix grouping,
+  structured matrix tails, loop accumulators and the supported INT8 paths.
+
+Positive cases require an actually applied merge and check numerical results;
+fallback cases check the selected baseline and its output. These correctness
+tests explicitly disable the occupancy heuristic and do not measure speedup.
+Use the normal test runner with an available supported NPU.
+
+MLIR tests under `Conversion/General/BlockBatching` check tensor dimensions,
+preserved reductions, loop fusion, overflow admission and transactional
+rejection through the production binding. The adjacent TritonToLinalg and
+TritonToUnstructure tests cover masked-load and safe-select lowering. They need
+a matching built Ascend extension and FileCheck, but no device.

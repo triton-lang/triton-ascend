@@ -20,22 +20,24 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/FlagIdReuse.h"
-
 #include <algorithm>
 #include <cstddef>
 #include <limits>
 #include <optional>
 
-#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "mlir/IR/BuiltinAttributes.h"
-#include "mlir/IR/Operation.h"
-#include "mlir/Support/LLVM.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
+
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/Operation.h"
+#include "mlir/Support/LLVM.h"
+
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/FlagIdReuse.h"
+
+#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 
 static constexpr const char *DEBUG_TYPE = "flag-id-reuse";
 #define LOG_DEBUG(...)                                                         \
@@ -125,7 +127,7 @@ bool FlagIdReuseManager::opPrecedes(Operation *p, Operation *q) {
   }
   // Cross block: only the real happens-before edges (E1 per-pipe FIFO, E2
   // set->wait, E3 data, E4 read-wait->consumed data) may prove ordering.
-  llvm::SmallSet<Operation *, CVPipeline::INIT_SIZE> visited;
+  llvm::SmallSet<Operation *, CVPipeline::kInitSize> visited;
   return hasPath(visited, p, q);
 }
 
@@ -217,7 +219,7 @@ DenseMap<int, int> FlagIdReuseManager::colorInterferenceGraph() {
 
   DenseMap<int, int> rawColor;
   for (int flagId : order) {
-    llvm::SmallSet<int, CVPipeline::INIT_SIZE> usedByNeighbours;
+    llvm::SmallSet<int, CVPipeline::kInitSize> usedByNeighbours;
     for (int nb : adj[flagId]) {
       auto it = rawColor.find(nb);
       if (it != rawColor.end()) {
@@ -247,7 +249,7 @@ DenseMap<int, int> FlagIdReuseManager::colorInterferenceGraph() {
 }
 
 bool FlagIdReuseManager::hasPath(
-    llvm::SmallSet<Operation *, CVPipeline::INIT_SIZE> &visited,
+    llvm::SmallSet<Operation *, CVPipeline::kInitSize> &visited,
     Operation *from, Operation *to) {
   if (from == to) {
     return true;

@@ -190,6 +190,10 @@ def test_to_buffer_operations():
         {},
         {"M": 16, "N": 16},
     )
+    # The buffer builder must emit the same compatible op as TA's lowering.
+    assert mlir.count("bufferization.to_memref ") == 2
+    assert "bufferization.to_buffer " not in mlir
+    assert 'keys = ["bind_buffer"]' in mlir
     print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
 
 

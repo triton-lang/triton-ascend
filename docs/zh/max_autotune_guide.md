@@ -91,7 +91,7 @@ from triton.backends.ascend.runtime import max_autotune
 
 ### Kernel 类型说明
 
-- **cube**：纯 cube（矩阵乘法类）算子，支持最少的调优参数；
+- **cube**：纯 cube（矩阵乘法类）算子，支持 `num_stages`、`unit_flag` 和 `limit_auto_multi_buffer_of_local_buffer`；
 - **vector**：纯向量算子，仅支持 `num_stages` 和 `enable_ubuf_saving`；
 - **mix**：混合 cube+vector 算子（默认类型），支持最完整的调优参数集合。
 
@@ -192,7 +192,7 @@ enable_hivm_auto_cv_balance=True  # 将导致验证错误
 展开后的配置数量等于：
 基础配置数量 × Π(每个 tuning_param 的列表长度)
 
-例如，2 个基础配置 × 3 个参数（列表长度分别为 2、3、2）= 12 个展开配置。
+例如，2 个基础配置 × 3 个参数（列表长度分别为 2、3、2）= 24 个展开配置。
 
 过多的配置会增加首次调优时间，建议根据实际需要合理控制参数空间。
 

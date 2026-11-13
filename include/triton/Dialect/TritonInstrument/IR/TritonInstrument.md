@@ -1,18 +1,18 @@
 # Triton Instrument Dialect and Concurrency Sanitizer (ConSan)
 
-### Overview
+## Overview
 
 ConSan instruments Triton IR to detect illegal concurrent accesses to shared and Tensor Core memory under warp specialization. It tracks per-buffer visibility of reads and writes across threads, models barrier-based synchronization, and models commit-count–based synchronization (cp.async, wgmma).
 
 Auxiliary state is kept in distributed tensors and global scratch memory, with types created on-demand per warp-specialization partition.
 
-### Thread model
+## Thread model
 
 - Base threads: 16 warp-specialization (WS) threads (allowing for up to 16 partitions).
 - Peer classes: +16 Tensor Core (TC) threads and +16 TMA threads to model lack of ordering with base threads.
 - Total logical threads: 48. Bitmasks are sized to the next power of two: 64.
 
-Indexing uses a logical thread id in [0, 48), with column vectors sized to 64 for layout convenience.
+Indexing uses a logical thread id in [0, 48], with column vectors sized to 64 for layout convenience.
 
 ## Auxiliary data structures
 
@@ -25,15 +25,16 @@ All types are generated on-demand (per partition) based on:
 
 “tensor” means a distributed Triton tensor; “scratch” means a pointer into global scratch memory. Shapes below are logical; actual encodings are partition-local blocked layouts.
 
-- buffers (tensor, <B x i64>): Base pointers of all (sub)buffers per memory space
-- barriers (tensor, <K x i64>): Pointers of all mbarriers
-- writeVisibility (scratch, <B x i64>): Per-buffer bitmask. Bit i set ⇒ thread i can see latest completed write to that buffer
-- readVisibility (scratch, <B x 64 x i64>): Per-buffer, per-thread lanes. Each lane stores a 64-bit mask of other threads whose reads are visible to that lane’s thread
-- writeTracking (scratch, <B x K x i8>): Map buffers → barriers tracking writes (boolean stored in i8)
-- readTracking (scratch, <B x K x i64>): Map buffers → barriers tracking reads (bitmask of threads)
-- barrierStates (scratch, <K x i32>): Packed barrier metadata. Bit 0 stores the current phase, bits [1..8] the initial arrival count, bits [9..16] the current arrival count. The verifier checks underflow before updating, and flips the phase when the current count reaches zero.
-- waiting (scratch, <K x i32>): Per-barrier bitfield describing waiting threads. Each base thread gets two bits: bit (2 * thread + 0) is the waiting flag, bit (2 * thread + 1) stores the phase the thread is waiting on.
-- outstandingCommits (scratch, <B x 16 x i8>): Per-buffer, per-base-thread commit counters for cp.async and wgmma
+- buffers (tensor, <B,x,i64>): Base pointers of all (sub)buffers per memory space
+- barriers (tensor, <K,x,i64>): Pointers of all mbarriers
+- writeVisibility (scratch, <B,x,i64>): Per-buffer bitmask. Bit i set ⇒ thread i can see latest completed write to that buffer
+- readVisibility (scratch, <B,x,64,x,i64>): Per-buffer, per-thread lanes. Each lane stores a 64-bit mask of other threads whose reads are visible to that lane’s thread
+- writeTracking (scratch, <B,x,K,x,i8>): Map buffers → barriers tracking writes (boolean stored in i8)
+- readTracking (scratch, <B,x,K,x,i64>): Map buffers → barriers tracking reads (bitmask of threads)
+- barrierStates (scratch, <K,x,i32>): Packed barrier metadata. Bit 0 stores the current phase, bits [1~8] the initial arrival count, bits [9~16] the current arrival count. The verifier checks underflow before updating, and flips the phase when the current count reaches zero.
+- waiting (scratch, <K,x,i32>): Per-barrier bitfield describing waiting threads.Each base thread gets two bits:bit (2*thread + 0) is the waiting flag,bit (2*thread + 1) stores the phase the thread is waiting on.
+
+- outstandingCommits (scratch, <B,x,16,x,i8>): Per-buffer, per-base-thread commit counters for cp.async and wgmma
 
 ## Visibility and legality rules
 
@@ -55,13 +56,13 @@ ConSan separates “tracking” from “visibility transfer”:
 - At arrive/commit sites (e.g., tc commit, arrive on mbarrier): ConSan emits the track ops for both reads and writes.
 - At waits: experimental_transfer_visible_reads / experimental_transfer_visible_writes propagates tracked visibility from the barrier back into the waiting thread’s visibility, and this transfer is repeated to peer threads (base, TMA, TC) to keep the three classes consistent.
 
-### Barrier phase/count tracking
+## Barrier phase/count tracking
 
 - experimental_init_barrier_state(barrier, count, barrierStates) initializes the per-barrier state with phase = 0 and both initial/current arrival counts = `count`.
 - experimental_verify_barrier_arrive(barrier, count, barrierStates) checks that subtracting `count` from the current arrival count would not underflow. The codegen emits an assert if it would.
 - experimental_update_barrier_state(barrier, count, barrierStates) applies the arrive: subtracts `count`, flips the phase when the count reaches zero, and reloads the current count from the initial count.
 
-### Deadlock detection
+## Deadlock detection
 
 ConSan records which phase each thread is waiting on:
 

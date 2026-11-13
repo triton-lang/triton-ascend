@@ -1,6 +1,6 @@
-# 层标准化 （Layer Normalization）
+# 层标准化（Layer Normalization）
 
-在本节中，我们将使用 Triton 编写一个高性能层标准化 (Layer Normalization) 内核。通过将均值、方差计算和归一化融合到单个 kernel 中，减少了全局内存的读写次数，相比 PyTorch 的逐操作实现可以获得更好的性能。
+在本节中，我们将使用 Triton 编写一个高性能层标准化 (Layer Normalization) 内核。通过将均值、方差计算和归一化融合到单个 Kernel 中，减少了全局内存的读写次数，相比 PyTorch 的逐操作实现可以获得更好的性能。
 
 ## 计算内核
 

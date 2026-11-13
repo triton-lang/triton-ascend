@@ -89,6 +89,108 @@ module {
   }
 }
 
+// -----
+
+// CHECK-LABEL: "func.func"() <{{.*}}sym_name = "different_block_ids_keep_adjacent_ifs_separate"
+// CHECK: "scf.if"
+// CHECK: }) {hivm.unlikely_condition, ssbuffer.block_id = 7 : i32} : (i1) -> ()
+// CHECK: "scf.if"
+// CHECK: }) {hivm.unlikely_condition, ssbuffer.block_id = 8 : i32} : (i1) -> ()
+
+module {
+  func.func @different_block_ids_keep_adjacent_ifs_separate(%cond: i1, %lhs: memref<1xi32>, %rhs: memref<1xi32>) {
+    %c0 = arith.constant 0 : index
+    %c1_i32 = arith.constant 1 : i32
+    %c2_i32 = arith.constant 2 : i32
+    scf.if %cond {
+      memref.store %c1_i32, %lhs[%c0] : memref<1xi32>
+    } {hivm.unlikely_condition, ssbuffer.block_id = 7 : i32}
+    scf.if %cond {
+      memref.store %c2_i32, %rhs[%c0] : memref<1xi32>
+    } {hivm.unlikely_condition, ssbuffer.block_id = 8 : i32}
+    return
+  }
+}
+
+// -----
+
+// CHECK-LABEL: "func.func"() <{{.*}}sym_name = "different_block_ids_keep_nested_ifs_separate"
+// CHECK: "scf.if"
+// CHECK: "scf.if"
+// CHECK: }) {hivm.unlikely_condition, ssbuffer.block_id = 8 : i32} : (i1) -> ()
+// CHECK: }) {hivm.unlikely_condition, ssbuffer.block_id = 7 : i32} : (i1) -> ()
+
+module {
+  func.func @different_block_ids_keep_nested_ifs_separate(%outerCond: i1, %innerCond: i1, %buf: memref<1xi32>) {
+    %c0 = arith.constant 0 : index
+    %c1_i32 = arith.constant 1 : i32
+    scf.if %outerCond {
+      scf.if %innerCond {
+        memref.store %c1_i32, %buf[%c0] : memref<1xi32>
+      } {hivm.unlikely_condition, ssbuffer.block_id = 8 : i32}
+    } {hivm.unlikely_condition, ssbuffer.block_id = 7 : i32}
+    return
+  }
+}
+
+// -----
+
+// CHECK-LABEL: "func.func"() <{{.*}}sym_name = "mixed_block_ids_only_merge_compatible_nested_ifs"
+// CHECK: "arith.andi"
+// CHECK-NEXT: "scf.if"
+// CHECK-NOT: "scf.if"
+// CHECK: "memref.store"
+// CHECK: }) {hivm.unlikely_condition, ssbuffer.block_id = 20 : i32} : (i1) -> ()
+// CHECK: "scf.if"
+// CHECK: "scf.if"
+// CHECK: }) {hivm.unlikely_condition, ssbuffer.block_id = 22 : i32} : (i1) -> ()
+// CHECK: }) {hivm.unlikely_condition, ssbuffer.block_id = 21 : i32} : (i1) -> ()
+// CHECK: "func.return"
+
+module {
+  func.func @mixed_block_ids_only_merge_compatible_nested_ifs(%sameOuterCond: i1, %sameInnerCond: i1, %differentOuterCond: i1, %differentInnerCond: i1, %sameBuf: memref<1xi32>, %differentBuf: memref<1xi32>) {
+    %c0 = arith.constant 0 : index
+    %c1_i32 = arith.constant 1 : i32
+    %c2_i32 = arith.constant 2 : i32
+    scf.if %sameOuterCond {
+      scf.if %sameInnerCond {
+        memref.store %c1_i32, %sameBuf[%c0] : memref<1xi32>
+      } {hivm.unlikely_condition, ssbuffer.block_id = 20 : i32}
+    } {hivm.unlikely_condition, ssbuffer.block_id = 20 : i32}
+    scf.if %differentOuterCond {
+      scf.if %differentInnerCond {
+        memref.store %c2_i32, %differentBuf[%c0] : memref<1xi32>
+      } {hivm.unlikely_condition, ssbuffer.block_id = 22 : i32}
+    } {hivm.unlikely_condition, ssbuffer.block_id = 21 : i32}
+    return
+  }
+}
+
+// -----
+
+// Condition propagation may simplify a nested if even across block IDs.
+// CHECK-LABEL: "func.func"() <{{.*}}sym_name = "different_block_ids_allow_condition_propagation"
+// CHECK: "scf.if"
+// CHECK-NOT: "scf.if"
+// CHECK: "memref.store"
+// CHECK-NOT: "scf.if"
+// CHECK: }) {ssbuffer.block_id = 7 : i32} : (i1) -> ()
+// CHECK-NOT: "scf.if"
+// CHECK: "func.return"
+
+module {
+  func.func @different_block_ids_allow_condition_propagation(%cond: i1, %buf: memref<1xi32>) {
+    %c0 = arith.constant 0 : index
+    %c1_i32 = arith.constant 1 : i32
+    scf.if %cond {
+      scf.if %cond {
+        memref.store %c1_i32, %buf[%c0] : memref<1xi32>
+      } {ssbuffer.block_id = 8 : i32}
+    } {ssbuffer.block_id = 7 : i32}
+    return
+  }
+}
+
 
 // -----
 

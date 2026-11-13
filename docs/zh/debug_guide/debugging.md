@@ -28,7 +28,7 @@
 
 ## 2 Triton-Ascend 编译流程概览
 
-理解完整的编译链是进行有效调试的基础。Triton-Ascend 的编译过程遵循以下主要阶段：
+理解完整的编译链是进行有效调试的基础。Triton-Ascend 的编译过程包括以下主要阶段：
 
 | 阶段 | 输入 | 输出 | 工具/组件 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -98,7 +98,7 @@ export TRITON_ALWAYS_COMPILE=1
 
 - 默认路径: ~/.triton/dump/
 
-目录命名: 每个编译会话会生成一个以时间戳或唯一ID命名的子目录
+目录命名: 每个编译会话会生成一个以时间戳或唯一ID命名的子目录。
 
 主要转储文件:
 
@@ -129,9 +129,9 @@ python your_triton_program.py
 | 缓存文件 | 每次编译执行时 | 缓存未命中时生成 | 定期清理或问题排查时清除 |
 | 转储文件 | 设置 TRITON_DEBUG=1 后 | 每次编译都会生成 | 调试结束后手动清理 |
 
-- 生产环境中应禁用调试转储（不设置 TRITON_DEBUG=1）
+- 生产环境中应禁用调试转储（不设置 TRITON_DEBUG=1）。
 
-- 缓存机制可以显著提升性能，不应轻易禁用
+- 缓存机制可以显著提升性能，不应轻易禁用。
 
 通过合理利用这些临时文件，开发者可以更高效地定位和解决 Triton-Ascend 在编译过程中遇到的问题。
 
@@ -139,7 +139,7 @@ python your_triton_program.py
 
 以示范测试用例  [01-vector-add.py](../../../third_party/ascend/tutorials/01-vector-add.py#) 举例说明编译流程：
 这是一个简单的两个tensor的加法计算，计算逻辑请参考示范用例中的注解。
-通过TRITON_DEBUG=1开启dump文件输出，TRITON_ALWAYS_COMPILE=1禁用缓存确保重新编译，可以获取到 kernel.ttir.mlir 和 kernel.ttadapter.mlir
+通过TRITON_DEBUG=1开启dump文件输出，TRITON_ALWAYS_COMPILE=1禁用缓存确保重新编译，可以获取到 kernel.ttir.mlir 和 kernel.ttadapter.mlir。
 
 - 运行用例
 
@@ -154,7 +154,7 @@ Dumping intermediate results to ~/.triton/dump/xxx
 # xxx是一串hash的唯一标识符
 ```
 
-进入该dump路径，查看 kernel.ttir.mlir 和 kernel.ttadapter.mlir
+进入该dump路径，查看 kernel.ttir.mlir 和 kernel.ttadapter.mlir。
 
 #### 3.4.1 TTIR（Triton Intermediate Representation）
 
@@ -255,7 +255,7 @@ TTAdapter IR 是 Triton-Ascend 编译流程中将 TTIR 转换为适配昇腾 NPU
 - 使用 `memref.alloc` 分配本地暂存 buffer，通过 `memref.copy` 将全局内存数据安全拷贝至本地，再经 `bufferization.to_tensor` 转为 tensor 供算子使用。
 - 加法操作由 `arith.addf` 在 tensor 上执行，结果通过 `tensor.extract_slice` 截取有效部分，并用 `bufferization.materialize_in_destination` 写回目标 memref。
 
-TTAdapter IR 已完成从 Triton 抽象到适配昇腾 NPU 的格式。
+TTAdapter IR 已完成从 Triton 抽象到适配昇腾NPU的格式转换。
 
 <a id="debug-interpreter-mode"></a>
 
@@ -302,7 +302,7 @@ export TRITON_INTERPRET=0
 
 特性说明：
 
-- tl.static_print 在 编译时 执行，而不是运行时
+- tl.static_print 在编译时执行，而不是运行时
 
 - 只能打印编译时常量（tl.constexpr 参数、常量表达式）
 
@@ -313,6 +313,7 @@ export TRITON_INTERPRET=0
 1.在 Triton kernel 中，为需要调试的常量参数添加 tl.static_print 语句
 
 ```python
+import triton
 import triton.language as tl
 
 @triton.jit
@@ -351,13 +352,14 @@ python your_program.py
 
 ### 5.1.2 运行时调试方法
 
-此方法使用 `tl.device_print` 可以灵活打印需要观察的变量的值。
+此方法使用 `tl.device_print` 时可以灵活打印需要观察的变量的值。
 设置环境变量 `TRITON_DEVICE_PRINT=1` 可启用 `tl.device_print` 功能。此函数允许在kernel内部打印张量值，是分阶段验证计算精度的高效方法。
 **使用方法：**
 
 1. 在Triton kernel中，为需要打印的变量增加 `tl.device_print` 的语句。
 
 ```python
+import triton
 import triton.language as tl
 
 @triton.jit
@@ -376,7 +378,7 @@ def triton_kernel(out_ptr0, in_ptr0, in_ptr1, XBLOCK: tl.constexpr):
 # 启用 Triton 调试输出（包含 device_print）
 export TRITON_DEVICE_PRINT=1
 
-# 运行 Python 程序，会在编译阶段看到打印输出
+# 运行 Python 程序，会在运行阶段看到打印输出
 python your_program.py
 ```
 
@@ -392,7 +394,7 @@ python your_program.py
 ```
 
 - 注：打印长度限制：
-tl.device_print 在张量打印有长度限制，具体表现为：当张量长度超过一定阈值时，输出会被截断
+tl.device_print 在张量打印时有长度限制，具体表现为：当张量长度超过一定阈值时，输出会被截断
 
 ### 5.1.3 对比两种打印方法
 
@@ -406,15 +408,15 @@ tl.device_print 在张量打印有长度限制，具体表现为：当张量长�
 
 环境变量说明：
 
-TRITON_DEVICE_PRINT=1：启用运行时打印，同时也会启用编译时打印
+TRITON_DEVICE_PRINT=1：启用运行时打印，同时也会启用编译时打印。
 
-TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）
+TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）。
 
 <a id="debug-compilation-error"></a>
 
 ### 5.2 编译错误调试方法
 
-当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompilationError`.
+当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompilationError`。
 需要进入 Triton-Ascend 代码层面定位问题。Triton-Ascend 包含 Python 和 C++ 代码层，需根据报错日志中的调用栈信息，定位到具体的报错代码片段，并采用相应的调试方法。
 
 ### 5.2.1 Python 代码调试方法
@@ -466,12 +468,12 @@ python
 启用 **MLIR 高层 IR 的自动 dump**。在每个 MLIR Pass 执行前后，将当前函数的 IR 以可读文本形式输出到 `stderr`。
 
 **特点**
-日志量小：通常几十至几百行，易于阅读
-聚焦高层逻辑：适用于调试算子转换、内存布局、并行策略等
+日志量小：通常几十至几百行，易于阅读。
+聚焦高层逻辑：适用于调试算子转换、内存布局、并行策略等。
 
 **使用建议**
-日常调试首选：90% 的 Triton 算子问题可通过此日志定位
-配合 `TRITON_DEBUG=1` 可进一步增强信息
+日常调试首选：90% 的 Triton 算子问题可通过此日志定位。
+配合 `TRITON_DEBUG=1` 可进一步增强信息。
 
 **启用方式**
 
@@ -487,13 +489,13 @@ python your_triton_script.py
 启用 LLVM 后端 CodeGen 阶段的全量调试日志，包括指令选择、寄存器分配、指令调度、机器码生成等底层过程。
 
 **特点**
-日志量极大：单个 kernel 可产生数万行输出
-极底层细节：包含寄存器名、物理/虚拟寄存器映射、栈帧布局等
-仅限 LLVM 专家：对普通 Triton 开发者通常为“噪声”
+日志量极大：单个 kernel 可产生数万行输出。
+极底层细节：包含寄存器名、物理/虚拟寄存器映射、栈帧布局等。
+仅限 LLVM 专家：对普通 Triton 开发者通常为“噪声”。
 
 **使用建议**
-仅在怀疑 LLVM 后端 bug 时启用（如生成非法指令、性能异常）
-配合 TRITON_LLVM_DEBUG_ONLY 限制输出范围
+仅在怀疑 LLVM 后端 bug 时启用（如生成非法指令、性能异常）。
+配合 TRITON_LLVM_DEBUG_ONLY 限制输出范围。
 
 在启用 `TRITON_ENABLE_LLVM_DEBUG=1` 时，可通过 `TRITON_LLVM_DEBUG_ONLY` 环境变量指定仅输出特定模块的调试日志。以下是常用 `DEBUG_TYPE` 的简要解释：
 
@@ -525,7 +527,7 @@ python your_triton_script.py
 ```
 
 **启用方式**
-以指定仅输出`isel`为例
+以指定仅输出`isel`为例。
 
 ```bash
 export TRITON_ENABLE_LLVM_DEBUG=1

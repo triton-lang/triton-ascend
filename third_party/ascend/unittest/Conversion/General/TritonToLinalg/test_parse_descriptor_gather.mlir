@@ -5,14 +5,14 @@
 // CHECK: %[[IDX_VIEW:.*]] = memref.reinterpret_cast %{{.*}} to offset: [0], sizes: [32], strides: [1]
 // CHECK: %[[IDX_ALLOC:.*]] = memref.alloc() : memref<32xi32>
 // CHECK: memref.copy %[[IDX_VIEW]], %[[IDX_ALLOC]]
-// CHECK: %[[XOFFSETS:.*]] = bufferization.to_tensor %[[IDX_ALLOC]] restrict writable : memref<32xi32> to tensor<32xi32>
+// CHECK: %[[XOFFSETS:.*]] = bufferization.to_tensor %[[IDX_ALLOC]] restrict writable : memref<32xi32>
 // CHECK: %[[OUT_ALLOC:.*]] = memref.alloc() : memref<32x32xf32>
 // CHECK: scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}}
 // CHECK: %[[XOFFSET:.*]] = tensor.extract %[[XOFFSETS]][%{{.*}}] : tensor<32xi32>
 // CHECK: %[[DESC_VIEW:.*]] = memref.reinterpret_cast %{{.*}} to offset: [%{{.*}}], sizes: [1, 32], strides: [128, 1]
 // CHECK: %[[OUT_SUBVIEW:.*]] = memref.subview %[[OUT_ALLOC]][%{{.*}}, 0] [1, 32] [1, 1]
 // CHECK: memref.copy %{{.*}}, %{{.*}}
-// CHECK: %[[OUT_TENSOR:.*]] = bufferization.to_tensor %[[OUT_ALLOC]] restrict writable : memref<32x32xf32> to tensor<32x32xf32>
+// CHECK: %[[OUT_TENSOR:.*]] = bufferization.to_tensor %[[OUT_ALLOC]] restrict writable : memref<32x32xf32>
 // CHECK: bufferization.materialize_in_destination %[[OUT_TENSOR]] in writable %{{.*}} : (tensor<32x32xf32>, memref<32x32xf32, strided<[32, 1]>>) -> ()
 
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {

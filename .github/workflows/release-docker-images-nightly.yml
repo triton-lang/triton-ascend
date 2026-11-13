@@ -1,0 +1,193 @@
+name: Release Docker Images Nightly
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_suffix:
+        description: "附加到标准镜像 tag 后的可选后缀，例如 nightly、B021"
+        required: false
+        type: string
+        default: nightly
+      push_images:
+        description: "是否登录 registry 并推送镜像；在 fork 中无凭据时可关闭"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-docker-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # 华为云 SWR 镜像仓库。
+  REGISTRY: swr.cn-north-4.myhuaweicloud.com
+  IMAGE_REPOSITORY: swr.cn-north-4.myhuaweicloud.com/opentile/triton
+
+  TRITON_ASCEND_VERSION: "3.6.0"
+  CANN_VERSION: "9.2.0"
+  PYTORCH_VERSION: "2.10.0"
+  TORCH_NPU_VERSION: "2.10.0.post7"
+  PYTHON_VERSION: "3.11.15"
+  PYTHON_SERIES: "3.11"
+
+jobs:
+  build:
+    name: Build ${{ matrix.device_type }}-${{ matrix.os.name }}-${{ matrix.platform.arch }}
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    env:
+      PUSH_IMAGE: ${{ inputs.push_images && 'true' || 'false' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        device_type: ["910b", "950", "a3"]
+        os:
+          - name: debian12
+            base_image: debian:12
+          - name: ubuntu24.04
+            base_image: ubuntu:24.04
+          - name: openeuler24.03
+            base_image: openeuler/openeuler:24.03-lts
+        platform:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: true
+          docker-images: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Huawei Cloud SWR
+        if: ${{ env.PUSH_IMAGE == 'true' }}
+        uses: huaweicloud/swr-login@v2.1.0
+        with:
+          region: cn-north-4
+          access-key-id: ${{ secrets.HUAWEI_CLOUD_AK }}
+          access-key-secret: ${{ secrets.HUAWEI_CLOUD_SK }}
+
+      - name: Generate image tags
+        id: tags
+        run: |
+          base_tag="${TRITON_ASCEND_VERSION}-cann${CANN_VERSION}-torch_npu${TORCH_NPU_VERSION}-${{ matrix.device_type }}-${{ matrix.os.name }}-py${PYTHON_SERIES}"
+          arch_tag="${base_tag}-${{ matrix.platform.arch }}"
+          echo "base_tag=${base_tag}" >> "${GITHUB_OUTPUT}"
+          echo "arch_tag=${arch_tag}" >> "${GITHUB_OUTPUT}"
+          echo "Architecture image: ${IMAGE_REPOSITORY}:${arch_tag}"
+          echo "Final image:        ${IMAGE_REPOSITORY}:${base_tag}"
+
+      - name: Build and push platform image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/cann9.2.0_npu.Dockerfile
+          platforms: linux/${{ matrix.platform.arch }}
+          load: false
+          no-cache: true
+          outputs: ${{ env.PUSH_IMAGE == 'true' && 'type=registry,oci-mediatypes=false' || '' }}
+          provenance: false
+          sbom: false
+          tags: ${{ env.IMAGE_REPOSITORY }}:${{ steps.tags.outputs.arch_tag }}
+          labels: |
+            org.opencontainers.image.title=Triton-Ascend
+            org.opencontainers.image.description=Triton-Ascend ${{ env.TRITON_ASCEND_VERSION }} for ${{ matrix.device_type }} on ${{ matrix.os.name }} (${{ matrix.platform.arch }})
+            org.opencontainers.image.version=${{ steps.tags.outputs.arch_tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: |
+            BASE_IMAGE=${{ matrix.os.base_image }}
+            DEVICE_TYPE=${{ matrix.device_type }}
+            TRITON_ASCEND_VERSION=${{ env.TRITON_ASCEND_VERSION }}
+            CANN_VERSION=${{ env.CANN_VERSION }}
+            PYTORCH_VERSION=${{ env.PYTORCH_VERSION }}
+            TORCH_NPU_VERSION=${{ env.TORCH_NPU_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            PYTHON_SERIES=${{ env.PYTHON_SERIES }}
+
+  merge:
+    name: Merge ${{ matrix.device_type }}-${{ matrix.os.name }}
+    needs: build
+    if: ${{ inputs.push_images }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TAG_SUFFIX: ${{ inputs.tag_suffix }}
+    strategy:
+      fail-fast: false
+      matrix:
+        device_type: ["910b", "950", "a3"]
+        os:
+          - name: debian12
+          - name: ubuntu24.04
+          - name: openeuler24.03
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Huawei Cloud SWR
+        uses: huaweicloud/swr-login@v2.1.0
+        with:
+          region: cn-north-4
+          access-key-id: ${{ secrets.HUAWEI_CLOUD_AK }}
+          access-key-secret: ${{ secrets.HUAWEI_CLOUD_SK }}
+
+      - name: Generate image tag
+        id: tags
+        run: |
+          base_tag="${TRITON_ASCEND_VERSION}-cann${CANN_VERSION}-torch_npu${TORCH_NPU_VERSION}-${{ matrix.device_type }}-${{ matrix.os.name }}-py${PYTHON_SERIES}"
+          echo "base_tag=${base_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create multi-arch manifest
+        shell: bash
+        env:
+          BASE_TAG: ${{ steps.tags.outputs.base_tag }}
+        run: |
+          set -euo pipefail
+
+          amd64_image="${IMAGE_REPOSITORY}:${BASE_TAG}-amd64"
+          arm64_image="${IMAGE_REPOSITORY}:${BASE_TAG}-arm64"
+          final_image="${IMAGE_REPOSITORY}:${BASE_TAG}"
+
+          docker buildx imagetools inspect "${amd64_image}" >/dev/null
+          docker buildx imagetools inspect "${arm64_image}" >/dev/null
+
+          destinations=("${final_image}")
+          if [[ -n "${TAG_SUFFIX}" ]]; then
+            destinations+=("${final_image}-${TAG_SUFFIX}")
+          fi
+
+          tags=()
+          for destination in "${destinations[@]}"; do
+            tags+=(-t "${destination}")
+          done
+
+          if ! docker buildx imagetools create \
+            "${tags[@]}" \
+            "${amd64_image}" \
+            "${arm64_image}"; then
+            echo "imagetools failed; falling back to docker manifest"
+            for destination in "${destinations[@]}"; do
+              docker manifest create --amend "${destination}" "${amd64_image}" "${arm64_image}"
+              docker manifest push "${destination}"
+            done
+          fi
+
+          echo "Published multi-arch tags:"
+          printf '  %s\n' "${destinations[@]}"

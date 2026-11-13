@@ -276,7 +276,6 @@ configs = [
 | 多缓冲 | `multibuffer` | 控制自动多缓冲总开关；`num_stages=1` 也会将其关闭。 | `True`；布尔值 | 支持 | 常规路径 |
 | 多缓冲 | `multibuffer_mode` | 按 `gm`、`l1`、`l0c`、`ub` 设置多缓冲槽数；`1` 关闭该层多缓冲，大于 `1` 指定槽数。受 `multibuffer` 总开关控制，不能与 `num_stages` 同时显式设置。 | `None`；必须包含四个层级的字典，值为正的32位有符号整数 | 支持 | 常规路径 |
 | 多缓冲 | `set_workspace_multibuffer` | 设置workspace多缓冲级别；显式设置 `multibuffer_mode` 且 `gm>1` 时，NPU IR使用该GM槽数覆盖本值。 | `None`；整数，具体范围由NPU编译器决定 | 支持 | 常规路径 |
-| 同步 | `sync_solver` | 控制HIVM graph sync solver。 | `None`；布尔值 | 支持 | 常规路径 |
 | 同步 | `unit_flag` | 控制HIVM unit-flag同步。 | `None`；布尔值 | 支持 | 常规路径 |
 | 同步 | `inject_barrier_all` | 控制自动注入barrier同步。 | `None`；布尔值 | 支持 | 常规路径 |
 | 同步 | `inject_block_all` | 控制自动注入block同步。 | `None`；布尔值 | 支持 | 常规路径 |
@@ -389,6 +388,7 @@ triton.Config({"multibuffer_mode": {"gm": 1, "l1": 2, "l0c": 1, "ub": 1}})
 | `parallel_mode` | parallel mode由 `compile_mode` 和Linalg IR推导。 |
 | `storage_align` | 无替代项。 |
 | `stream` | 执行流由运行时和驱动管理。 |
+| `sync_solver` | A2/A3和Ascend 950使用NPU编译器默认的同步策略。 |
 | `use_bytecode` | bytecode pipeline由后端固定启用。 |
 | `vf_merge_level` | VF merge level使用后端默认值。 |
 | `warp_size` | Ascend后端将warp size固定为32。 |

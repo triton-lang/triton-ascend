@@ -277,7 +277,6 @@ The table lists Ascend backend defaults and notes any different `triton.Config` 
 | Multibuffering | `multibuffer` | Controls the automatic multi-buffering master switch; `num_stages=1` also turns it off. | `True`; boolean | Yes | Normal path |
 | Multibuffering | `multibuffer_mode` | Sets multi-buffer slot counts for `gm`, `l1`, `l0c`, and `ub`; `1` disables multi-buffering at that level, and values greater than `1` specify the slot count. Controlled by `multibuffer`; cannot be explicitly combined with `num_stages`. | `None`; a dictionary containing all four levels, with positive signed 32-bit integer values | Yes | Normal path |
 | Multibuffering | `set_workspace_multibuffer` | Sets workspace multi-buffering level. With explicit `multibuffer_mode` and `gm>1`, NPU IR overrides this value with the GM slot count. | `None`; compiler-defined integer | Yes | Normal path |
-| Synchronization | `sync_solver` | Controls the HIVM graph sync solver. | `None`; boolean | Yes | Normal path |
 | Synchronization | `unit_flag` | Controls HIVM unit-flag synchronization. | `None`; boolean | Yes | Normal path |
 | Synchronization | `inject_barrier_all` | Controls automatic barrier injection. | `None`; boolean | Yes | Normal path |
 | Synchronization | `inject_block_all` | Controls automatic block synchronization injection. | `None`; boolean | Yes | Normal path |
@@ -390,6 +389,7 @@ Remove the following options from kernel launch arguments and `triton.Config`; t
 | `parallel_mode` | Parallel mode is derived from `compile_mode` and Linalg IR. |
 | `storage_align` | No replacement. |
 | `stream` | Execution streams are managed by the runtime and driver. |
+| `sync_solver` | Synchronization uses the NPU compiler defaults on A2/A3 and Ascend 950. |
 | `use_bytecode` | The bytecode pipeline is always enabled by the backend. |
 | `vf_merge_level` | The backend default VF merge level is used. |
 | `warp_size` | The Ascend backend fixes the warp size to 32. |

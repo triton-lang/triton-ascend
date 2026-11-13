@@ -47,6 +47,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeRange.h"
@@ -102,6 +103,36 @@ int nd2nzFlag = 0;
 bool compileOn91095Flag = false;
 bool existDotFlag = false;
 triton::ascend::CompileMode compileModeFlag = triton::ascend::CompileMode::Simd;
+
+namespace {
+// A predicate can have both integer output users and boolean consumers. Keep
+// the former's extui, but do not route the latter through the integer value.
+struct FoldExtendedBoolNonzero : OpRewritePattern<arith::CmpIOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(arith::CmpIOp op,
+                                PatternRewriter &rewriter) const override {
+    if (op.getPredicate() != arith::CmpIPredicate::ne)
+      return failure();
+    auto isZero = [](Value value) {
+      if (auto fill = value.getDefiningOp<linalg::FillOp>())
+        value = fill.getInputs().front();
+      return matchPattern(value, m_Zero());
+    };
+    Value extended = op.getLhs();
+    Value zero = op.getRhs();
+    if (!isZero(zero))
+      std::swap(extended, zero);
+    if (!isZero(zero))
+      return failure();
+    auto ext = extended.getDefiningOp<arith::ExtUIOp>();
+    if (!ext || !getElementTypeOrSelf(ext.getIn().getType()).isInteger(1))
+      return failure();
+    rewriter.replaceOp(op, ext.getIn());
+    return success();
+  }
+};
+} // namespace
 
 static bool containsTritonPointer(Type type) {
   if (isa<triton::PointerType>(type))
@@ -2149,11 +2180,12 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
   // linalg::ReduceOp.
   {
     RewritePatternSet foldPatterns(&getContext());
+    foldPatterns.add<FoldExtendedBoolNonzero>(&getContext());
     TTOpConverters::populatePostConversionCanonicalizationPatterns(
         foldPatterns);
 
     if (failed(applyPatternsGreedily(moduleOp, std::move(foldPatterns)))) {
-      moduleOp->emitError("failed to fold one-hot gather after max_with_index");
+      moduleOp->emitError("failed to apply post-conversion canonicalization");
       return failure();
     }
   }

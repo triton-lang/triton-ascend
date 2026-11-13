@@ -995,6 +995,9 @@ FailureOr<PtrInfo> PtrAnalysis::parseBitcast(triton::BitcastOp op) {
   auto storageWidth = [](Type type) -> unsigned {
     if (!isa<IntegerType, FloatType>(type))
       return 0;
+    // Boolean pointers address bytes, including before bool-to-i8 lowering.
+    if (type.isInteger(1))
+      return 8;
     unsigned width = type.getIntOrFloatBitWidth();
     return width == 8 || width == 16 || width == 32 || width == 64 ? width : 0;
   };

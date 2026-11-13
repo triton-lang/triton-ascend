@@ -39,6 +39,9 @@ file(GLOB PRE_CHECK_AVAILABLE_SRC_FILES CONFIGURE_DEPENDS
 add_triton_library(DynamicCVPipeline
   AddDynamicCVPipeline.cpp
   PreCheckAvailable.cpp
+  NormalizeOuterLoop.cpp
+  OuterEventLoop.cpp
+  JointOuterInnerLoops.cpp
 
   StandardizeOp.cpp
   ${STANDARDIZE_OP_PASS_SRC}
@@ -46,10 +49,6 @@ add_triton_library(DynamicCVPipeline
   PlanComputeBlock.cpp
   ComputeBlockOptPass.cpp
   AnalyzeDataFlow.cpp
-  ProtectTcbReuse.cpp
-  ProtectTcbReuse/ProtectVFtcbResuse.cpp
-  ProtectTcbReuse/ProtectSTtcbResuse.cpp
-  ProtectTcbReuse/Utils.cpp
   ${PLAN_COMPUTE_BLOCK_PASS_SRC}
   ${COMMON_SRC}
   ${Compute_BLOCK_OPT_SRC_FILES}

@@ -36,6 +36,7 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/LogicalResult.h"
@@ -49,13 +50,19 @@ namespace ConverterUtils {
 
 const std::string GeneratedByMakeTensorPtrTAG = "GeneratedByMakeTensorPtr";
 const std::string discreteMaskAttrName = "DiscreteMask";
+const std::string axisDiscreteMaskAttrName = "AxisDiscreteMask";
 const std::string mixCompileDiscreteMaskAttrName = "MixCompileDiscreteMask";
+const std::string simdDiscreteMaskAttrName = "SimdDiscreteMask";
 const std::string explicitRouteToSIMDAttrName = "ExplicitRouteToSIMD";
 // The access must consume the actual loop mask; full-load/select is unsafe.
 const std::string runtimeLoopMaskAttrName = "RuntimeLoopMask";
 const std::string discreteAttrName = "DiscreteMemAccess";
 const std::string continuousAttrName = "ContinuousMemAccess";
 const std::string customSrcPtrIndexAttrName = "SrcPtrIndex";
+
+/// Pick an unused module-level name for a generated runtime function.
+llvm::SmallString<128> generateUniqueFuncName(ModuleOp moduleOp,
+                                              llvm::StringRef funcNameBase);
 
 bool isaPermutedMemRefType(MemRefType);
 

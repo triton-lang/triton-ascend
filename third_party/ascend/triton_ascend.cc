@@ -34,6 +34,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Passes.h"
 
@@ -407,6 +408,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     }
   });
 
+  m.def("set_enable_outer_main_loop", [](mlir::ModuleOp &module) {
+    module->setAttr(CVPipeline::kEnableOuterMainLoop,
+                    UnitAttr::get(module.getContext()));
+  });
   m.def("set_enable_ub_refine_opt",
         [](mlir::ModuleOp &moduleop, bool enable) { return; });
   m.def("set_enable_buffer_insert_optimization", [](mlir::ModuleOp &moduleop) {

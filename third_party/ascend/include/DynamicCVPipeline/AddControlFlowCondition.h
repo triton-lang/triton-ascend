@@ -26,6 +26,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Linalg/TransformOps/DialectExtension.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -97,6 +98,11 @@ struct ControlFlowConditionInfo {
 
   // unique counter value for each ifblock scf.for only.
   llvm::DenseMap<scf::IfOp, Value> cntArgs;
+  struct OuterSweepPlan {
+    int drain = 0;
+    bool groupGrants = false;
+  };
+  llvm::DenseMap<Operation *, OuterSweepPlan> outerSweepPlans;
 
   // DAG for if block dependencies.
   llvm::DenseMap<scf::IfOp,
@@ -122,7 +128,7 @@ public:
   void runOnOperation() override;
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<LLVM::LLVMDialect>();
+    registry.insert<LLVM::LLVMDialect, tensor::TensorDialect>();
   }
 
   llvm::StringRef getArgument() const override {

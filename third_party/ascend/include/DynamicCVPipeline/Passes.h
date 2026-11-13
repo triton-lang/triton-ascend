@@ -23,8 +23,9 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PASSES_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PASSES_H
 
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
+#include "ascend/include/DynamicCVPipeline/NormalizeOuterLoop.h"
 #include "ascend/include/DynamicCVPipeline/PreCheckAvailable.h"
-#include "ascend/include/DynamicCVPipeline/ProtectTcbReuse.h"
 #include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/AddBlockIdForControlOps.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"

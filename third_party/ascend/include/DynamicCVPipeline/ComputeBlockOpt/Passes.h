@@ -35,6 +35,7 @@ void registerMergeSameSourceAxisPass();
 std::unique_ptr<OperationPass<ModuleOp>> createUnifyAllocBlockPass();
 void registerUnifyAllocBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createMergeVectorIfBlockPass();
+std::unique_ptr<OperationPass<ModuleOp>> createMergeOuterVectorBlockPass();
 void registerMergeVectorIfBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createUnifyStoreBlockPass();
 void registerUnifyStoreBlockPass();

@@ -19,25 +19,24 @@ def AddDynamicCVPipeline : Pass<"add_dynamic_cv_pipeline", "mlir::ModuleOp"> {
     let dependentDialects = ["hivm::HIVMDialect", "bufferization::BufferizationDialect", "scope::ScopeDialect", "annotation::AnnotationDialect", "LLVM::LLVMDialect"];
 }
 
-def ProtectTcbReusePass : Pass<"protect-tcb-reuse", "mlir::ModuleOp"> {
-  let summary = "Protect TCB reuse after Vector computation and output stores";
-  let constructor = "triton::createProtectTcbReusePass()";
-}
-
-def ProtectVFtcbResusePass : Pass<"protect-vf-tcb-reuse", "mlir::ModuleOp"> {
-  let summary = "Protect TCB reuse after Vector computation";
-  let constructor = "triton::createProtectVFtcbResusePass()";
-}
-
-def ProtectSTtcbResusePass : Pass<"protect-st-tcb-reuse", "mlir::ModuleOp"> {
-  let summary = "Protect TCB reuse after output stores";
-  let constructor = "triton::createProtectSTtcbResusePass()";
-}
-
 def PreCheckAvailablePass : Pass<"pre-check-dynamic-cv-pipeline-available", "mlir::ModuleOp"> {
   let summary = "Check whether dynamic cv pipeline can process the input module";
   let constructor = "triton::createPreCheckAvailablePass()";
   let dependentDialects = ["scope::ScopeDialect"];
+}
+
+def NormalizeOuterLoopPass : Pass<"normalize-outer-main-loop", "mlir::ModuleOp"> {
+  let summary = "Normalize explicitly selected outer loops for dynamic CV scheduling";
+  let constructor = "triton::createNormalizeOuterLoopPass()";
+  let options = [
+    Option<"discoverMainLoop", "discover-main-loop", "bool", "false",
+           "Classify operations to find the original main loop before normalization">
+  ];
+}
+
+def MergeOuterVectorBlockPass : Pass<"merge-outer-vector-block", "mlir::ModuleOp"> {
+  let summary = "Merge acyclic VECTOR tensor dependencies in explicit outer loops";
+  let constructor = "triton::createMergeOuterVectorBlockPass()";
 }
 
 def OpClassifierPass : Pass<"op-classifier", "mlir::ModuleOp"> {

@@ -171,6 +171,34 @@ Operation *getValueDefiningOperation(Value value) {
   return nullptr;
 }
 
+static bool hasLoopAncestor(Operation *operation) {
+  for (Operation *parent = operation->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    const StringRef name = parent->getName().getStringRef();
+    if (name == "scf.for" || name == "scf.while")
+      return true;
+  }
+  return false;
+}
+
+bool isPipelinedBuffer(Value value) {
+  Operation *owner = getValueDefiningOperation(value);
+  if (owner) {
+    const StringRef name = owner->getName().getStringRef();
+    if ((name == "tt.load" || name == "tt.descriptor_load") &&
+        hasLoopAncestor(owner))
+      return true;
+  }
+  for (Operation *user : value.getUsers()) {
+    if (user->getName().getStringRef() != "tt.store" ||
+        user->getNumOperands() < 2 || user->getOperand(1) != value)
+      continue;
+    if (hasLoopAncestor(user))
+      return true;
+  }
+  return false;
+}
+
 struct ConditionalRegion {
   Operation *conditional = nullptr;
   unsigned region = 0;
@@ -443,6 +471,7 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
     uint64_t begin = 0;
     uint64_t end = 0;
     uint64_t bytes = 0;
+    bool pipelined = false;
   };
   llvm::DenseMap<Value, IntervalState> intervals;
 
@@ -469,7 +498,8 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
     }
     const uint64_t begin = getDefinitionOrder(canonical, order);
     intervals.try_emplace(canonical,
-                          IntervalState{canonical, begin, begin, *bytes});
+                          IntervalState{canonical, begin, begin, *bytes,
+                                        isPipelinedBuffer(canonical)});
   };
 
   for (Operation *operation : operations) {
@@ -518,8 +548,8 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
   positions.reserve(intervals.size() * 2);
   for (const auto &entry : intervals) {
     const IntervalState &state = entry.second;
-    estimate.intervals.push_back(
-        LiveTensorInterval{state.value, state.begin, state.end, state.bytes});
+    estimate.intervals.push_back(LiveTensorInterval{
+        state.value, state.begin, state.end, state.bytes, state.pipelined});
     positions.push_back(state.begin);
     if (state.end == std::numeric_limits<uint64_t>::max()) {
       estimate.overflow = true;
@@ -546,6 +576,7 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
       return lhs->begin < rhs->begin;
     });
     uint64_t liveBytes = 0;
+    uint64_t pipelinedBytes = 0;
     llvm::SmallVector<const IntervalState *, 16> selected;
     for (const IntervalState *state : live) {
       bool exclusive = false;
@@ -562,9 +593,20 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
         estimate.reason = ResourceCostRejectReason::Overflow;
         return estimate;
       }
+      uint64_t demand = 0;
+      if (!checkedMul(state->bytes,
+                      state->pipelined ? kUBMultiBufferReplication : 1,
+                      demand) ||
+          !checkedAdd(pipelinedBytes, demand, pipelinedBytes)) {
+        estimate.overflow = true;
+        estimate.reason = ResourceCostRejectReason::Overflow;
+        return estimate;
+      }
       selected.push_back(state);
     }
     estimate.peakLiveBytes = std::max(estimate.peakLiveBytes, liveBytes);
+    estimate.peakPipelinedLiveBytes =
+        std::max(estimate.peakPipelinedLiveBytes, pipelinedBytes);
     if (liveBytes >= estimate.peakLiveBytes)
       bestPosition = position;
   }

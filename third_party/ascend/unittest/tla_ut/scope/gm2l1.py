@@ -1,4 +1,4 @@
-"""TLA scope: GM->L1 ``tla.copy`` (hivm.hir.nd2nz) inside ``tla.scope.vector()``.
+"""TLA scope: GM->L1 ``tla.load_gm_to_l1`` (hivm.hir.nd2nz) inside ``tla.scope.vector()``.
 
 Motivating case: a non-SIMD DMA whose destination is L1 sits in the vector
 scope.  IR: no load/store, one ``hivm.hir.nd2nz``, one multi-buffer (L1).
@@ -21,10 +21,10 @@ K = 64
 @tla.jit
 def gm2l1(A_ptr, M: tl.constexpr, K: tl.constexpr):
     # 4-D NZ physical shape for the L1 tile (fractal of the 2-D ND view).
-    a_l1 = tla.alloc_buffer((K // 16, M // 16, 16, 16), tl.float16, space="l1")
+    a_l1 = tla.alloc((K // 16, M // 16, 16, 16), tl.float16, space="l1")
     a_blk = tla.view(A_ptr, (M, K), strides=(K, 1))
     with tla.scope.vector():
-        tla.copy(a_blk, a_l1)  # hivm.hir.nd2nz (GM->L1) in a vector scope
+        tla.load_gm_to_l1(a_blk, a_l1)  # hivm.hir.nd2nz (GM->L1) in a vector scope
 
 
 def constexprs():

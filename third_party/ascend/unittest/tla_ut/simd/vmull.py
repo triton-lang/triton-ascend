@@ -23,11 +23,11 @@ SIGNATURE = {"X": "*i32", "Y": "*i32", "O": "*i32"}
 
 @tla.jit
 def vmull(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((4, N), tl.int32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(Y, (N, )), y)
+    x = tla.alloc((N, ), tl.int32, space="ub")
+    y = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((4, N), tl.int32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0])
         b = tla.simd.vlds(y[0])
@@ -38,7 +38,7 @@ def vmull(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         lo_m, hi_m = tla.simd.vmull(a, b, prefix)
         tla.simd.vsts(o[2, 0], lo_m)
         tla.simd.vsts(o[3, 0], hi_m)
-    tla.copy(o, tla.view(O, (4, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (4, N)))
 
 
 def constexprs():

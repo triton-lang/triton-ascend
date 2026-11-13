@@ -1742,9 +1742,9 @@
             "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line, 128 to 4096 elements per program. Slope of the measured minimum against the route work, startup from the linear intercept.",
             "confidence": "medium",
             "body_system_cycles_by_logical_elements": {
-              "1024": 4360.092,
-              "2048": 11778.915,
-              "4096": 24682.227
+              "1024": 4450.356,
+              "2048": 11995.443,
+              "4096": 24961.116
             }
           },
           "fadd.f32.contiguous": {
@@ -1763,9 +1763,9 @@
             "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line, 128 to 4096 elements per program. Slope of the measured minimum against the route work, startup from the linear intercept.",
             "confidence": "medium",
             "body_system_cycles_by_logical_elements": {
-              "1024": 4390.356,
-              "2048": 10965.109,
-              "4096": 24985.783
+              "1024": 4341.856,
+              "2048": 11034.943,
+              "4096": 24980.616
             }
           },
           "add.i32.contiguous": {
@@ -1784,9 +1784,9 @@
             "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Includes the two-backend factor of two removed by the float min/max pair fusion.",
             "confidence": "medium",
             "body_system_cycles_by_logical_elements": {
-              "1024": 4360.092,
-              "2048": 11778.915,
-              "4096": 24682.227
+              "1024": 4314.96,
+              "2048": 11670.651,
+              "4096": 24542.782
             }
           },
           "max.f32.contiguous": {
@@ -1805,9 +1805,9 @@
             "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Slope of the measured minimum against the route work, startup from the linear intercept.",
             "confidence": "medium",
             "body_system_cycles_by_logical_elements": {
-              "1024": 4390.356,
-              "2048": 10965.109,
-              "4096": 24985.783
+              "1024": 4414.606,
+              "2048": 10930.193,
+              "4096": 24988.366
             }
           },
           "max.i32.contiguous": {
@@ -1826,9 +1826,9 @@
             "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Includes the two-backend factor of two removed by the float min/max pair fusion.",
             "confidence": "medium",
             "body_system_cycles_by_logical_elements": {
-              "1024": 4360.092,
-              "2048": 11778.915,
-              "4096": 24682.227
+              "1024": 4314.96,
+              "2048": 11670.651,
+              "4096": 24542.782
             }
           },
           "min.f32.contiguous": {
@@ -1847,9 +1847,9 @@
             "source": "End-to-end scatter-atomic sweep on Ascend950PR, 56 AIV, one element per 128 B line. Slope of the measured minimum against the route work, startup from the linear intercept.",
             "confidence": "medium",
             "body_system_cycles_by_logical_elements": {
-              "1024": 4390.356,
-              "2048": 10965.109,
-              "4096": 24985.783
+              "1024": 4414.606,
+              "2048": 10930.193,
+              "4096": 24988.366
             }
           },
           "min.i32.contiguous": {

@@ -23,7 +23,7 @@ def test_real_setup_hook_installs_complete_model_payload(tmp_path, monkeypatch):
     pytest.importorskip("pybind11")
     from setuptools.command.build_py import build_py
 
-    root = Path(__file__).resolve().parents[4]
+    root = Path(__file__).resolve().parents[5]
     backend = root / "third_party/ascend/backend"
     setup_sha256 = hashlib.sha256((root / "setup.py").read_bytes()).hexdigest()
     captured, commands = {}, []
@@ -116,6 +116,11 @@ def test_real_setup_hook_installs_complete_model_payload(tmp_path, monkeypatch):
 
     # Loading under an isolated backend namespace bypasses only the backend's
     # unrelated native-extension initializer, never a model import/data lookup.
+    # Sibling selector tests may have imported CLI runners during collection.
+    # Remove them temporarily so the installed payload must load independently.
+    for module_name in tuple(sys.modules):
+        if module_name.startswith(("run_vv_", "run_cv_")):
+            monkeypatch.delitem(sys.modules, module_name)
     name = "_installed_ascend_block_auto"
     namespace = ModuleType(name)
     namespace.__path__ = [str(installed)]

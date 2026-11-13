@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import tempfile
 import unittest
 
-BACKEND = Path(__file__).resolve().parents[2] / "backend"
+BACKEND = Path(__file__).resolve().parents[3] / "backend"
 SPEC = importlib.util.spec_from_file_location("block_auto_test_artifacts", BACKEND / "block_auto_artifacts.py")
 artifacts = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(artifacts)

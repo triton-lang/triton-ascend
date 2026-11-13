@@ -96,8 +96,15 @@ enumeration remain available for diagnostics, separately from the shortlist.
 ## Validation and limits
 
 ```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tools/block_auto_select
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q \
+  --confcutdir=third_party/ascend/unittest/pytest_ut/block_auto \
+  third_party/ascend/unittest/pytest_ut/block_auto/selectors
 ```
+
+Run from the repository root. These CPU tests and their fixtures live under
+`third_party/ascend/unittest/pytest_ut/block_auto/selectors`; `--confcutdir`
+excludes the parent Ascend device fixtures. The standalone tools and model
+assets remain here.
 
 The imported VV implementation was exercised on 14 A5 cases with F1/F2/F4 CPU
 selection, unchanged shapes, correctness checks, 5 warmups and the arithmetic

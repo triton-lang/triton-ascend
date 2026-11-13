@@ -30,4 +30,16 @@ warmup 和图捕获保留基线路径。普通 JIT 的内存缓存及磁盘缓�
 
 所有新增实现、模型数据、打包适配和测试均位于 `third_party/ascend`。集成复用仓库现有的 JIT continuation 和 `compile_bundle` 钩子，未增加公共 JIT 补丁。
 
-主要入口：`backend/block_auto_dispatch.py`；CPU 模型适配：`backend/block_auto_model.py`、`backend/block_auto_cv.py`；编译证据：`backend/block_auto_artifacts.py`。测试位于 `unittest/BlockAuto`，其中设备集成测试需显式设置 `TRITON_BLOCK_AUTO_DEVICE_TEST=1`。
+主要入口：`backend/block_auto_dispatch.py`；CPU 模型适配：`backend/block_auto_model.py`、`backend/block_auto_cv.py`；编译证据：`backend/block_auto_artifacts.py`。
+
+CPU 回归位于 `unittest/pytest_ut/block_auto`，其中 `selectors` 保存离线选参工具的测试及专用数据。从仓库根目录运行：
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q \
+  --confcutdir=third_party/ascend/unittest/pytest_ut/block_auto \
+  third_party/ascend/unittest/pytest_ut/block_auto
+```
+
+`--confcutdir` 排除父目录的设备 fixture，无需安装 Torch/Triton 或初始化 NPU。需要 `pytest`；打包回归还需要 `setuptools`、`pybind11` 和 `wheel`。
+
+设备集成测试位于 `unittest/pytest_ut/test_block_auto_jit_device.py`，仍需已安装的 Ascend 后端和显式设置 `TRITON_BLOCK_AUTO_DEVICE_TEST=1`，不属于上述 CPU 检查。

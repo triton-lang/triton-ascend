@@ -30,7 +30,7 @@ else:
         """These tests must never initialize a device."""
 
 
-BACKEND = Path(__file__).resolve().parents[2] / "backend"
+BACKEND = Path(__file__).resolve().parents[3] / "backend"
 PACKAGE = "_block_auto_host_test"
 
 

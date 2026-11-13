@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import run_vv_contention_experiment
 from evaluate_vv_contention import metric, verified_times
 from cpu_resource_gate import sha256
 
@@ -101,4 +102,4 @@ s = DependencySchedule(ASSUMPTIONS)
 s.dma('load', 256)
 assert schedule([s.result()], 1)['score'] > 0
 '''
-    subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).parent, check=True)
+    subprocess.run([sys.executable, "-c", code], cwd=Path(run_vv_contention_experiment.__file__).parent, check=True)

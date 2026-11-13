@@ -7,6 +7,7 @@ import sys
 import pytest
 
 import backend_cost_model as backend
+import run_vv_skill_selector
 from cpu_resource_gate import sha256
 from run_vv_contention_experiment import verify_artifacts
 from run_vv_skill_selector import select
@@ -184,8 +185,8 @@ for operation in (lambda: Path(FORBIDDEN).read_text(), lambda: __import__('torch
         raise AssertionError('prohibited access succeeded')
 assert len(events['denied']) == 2
 '''.replace("OUT", repr(str(output))).replace("FORBIDDEN", repr(str(forbidden)))
-    process = subprocess.run([sys.executable, "-B", "-c", script], cwd=Path(__file__).parent, capture_output=True,
-                             text=True)
+    process = subprocess.run([sys.executable, "-B", "-c", script], cwd=Path(run_vv_skill_selector.__file__).parent,
+                             capture_output=True, text=True)
     assert process.returncode == 0, process.stderr
 
 

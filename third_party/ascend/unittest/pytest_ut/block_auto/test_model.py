@@ -10,7 +10,7 @@ from types import ModuleType
 
 import pytest
 
-BACKEND = Path(__file__).resolve().parents[2] / "backend"
+BACKEND = Path(__file__).resolve().parents[3] / "backend"
 PACKAGE = "_ascend_block_auto_model_test"
 
 

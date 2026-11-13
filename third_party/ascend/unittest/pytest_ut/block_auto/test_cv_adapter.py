@@ -7,7 +7,7 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-BACKEND = Path(__file__).resolve().parents[2] / "backend"
+BACKEND = Path(__file__).resolve().parents[3] / "backend"
 PACKAGE = "_block_auto_cv_test_backend"
 package = ModuleType(PACKAGE)
 package.__path__ = [str(BACKEND)]

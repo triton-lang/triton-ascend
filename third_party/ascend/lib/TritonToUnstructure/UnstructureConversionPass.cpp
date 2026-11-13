@@ -1013,7 +1013,10 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     if (isLoadLike && op.getMask() && op.getOther() && mstate &&
         mstate->isMask() && mstate->dims.size() == resultShape.size() &&
         mstate->offsets.size() == resultShape.size() &&
-        !ptrOffsetInfo.isUnstructuredOrScalarlike() &&
+        llvm::any_of(llvm::zip_equal(structuredAxes, resultShape), [](auto axis) {
+          auto [structured, size] = axis;
+          return structured && size > 1;
+        }) &&
         llvm::all_of(mstate->offsets, [](OpFoldResult offset) {
           return isConstantIntValue(offset, 0);
         })) {

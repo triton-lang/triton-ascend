@@ -4,9 +4,9 @@
 // CHECK: selected_axis: 2
 // CHECK: hacc.block_mapping_owner = "block_batching"
 // CHECK: tt.func public @arbitrary_name
-// CHECK-SAME: originalGridX
-// CHECK-SAME: originalGridY
-// CHECK-SAME: originalGridZ
+// CHECK-SAME: %__hacc_original_grid_x: i32
+// CHECK-SAME: %__hacc_original_grid_y: i32
+// CHECK-SAME: %__hacc_original_grid_z: i32
 // CHECK: tensor<3x4xf32>
 // CHECK-NOT: tt.get_num_programs
 // CHECK: tt.return

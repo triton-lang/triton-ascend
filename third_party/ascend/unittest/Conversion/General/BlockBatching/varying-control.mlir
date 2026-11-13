@@ -1,7 +1,7 @@
 // RUN: %PYTHON %S/Inputs/rewrite.py %s --cv | FileCheck %s
 
 // CHECK: compile_status: REJECTED
-// CHECK: reason: {{(VARYING_CONTROL_CONDITION|CV_SPATIAL_PROGRAM_USE_NOT_PROVEN)}}
+// CHECK: reason: VARYING_CONTROL_CONDITION
 // CHECK: unchanged: true
 
 module {

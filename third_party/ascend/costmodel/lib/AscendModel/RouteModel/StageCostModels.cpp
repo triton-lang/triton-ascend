@@ -1,6 +1,7 @@
 //===- StageCostModels.cpp - Per-stage analytical models -----------------===//
 
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/RouteModel/AtomicMemoryCostModel.h"
 #include "AscendModel/RouteModel/Models/IndirectGatherMemoryCostModel.h"
 #include "mlir/IR/BuiltinTypes.h"
 
@@ -1377,46 +1378,7 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
   if (work.scalarStoreCount > 0.0)
     resources.store +=
         simd ? mte3ScalarStoreCycles(profile) : simtUniformStoreCycles(profile);
-  for (const AtomicWorkload &atomic : work.atomicWorkloads) {
-    const llvm::StringRef addressClass =
-        atomic.addressDependsOnLoadedIndex
-            ? "loaded_index"
-            : (atomic.provenContiguousRunWidth > 1.0 ? "contiguous"
-                                                     : "unknown_address");
-    auto rate = profile.atomicRates.find(atomic.profileKey() + "." +
-                                         addressClass.str());
-    if (rate == profile.atomicRates.end())
-      rate = profile.atomicRates.find(addressClass);
-    if (rate == profile.atomicRates.end())
-      rate = profile.atomicRates.find(atomic.profileKey());
-    if (rate == profile.atomicRates.end())
-      rate = profile.atomicRates.find("default");
-    if (rate == profile.atomicRates.end())
-      continue;
-    const StageAtomicRate &atomicRate = rate->second;
-    const double base =
-        atomic.logicalOperationInstances * atomicRate.operationStartupCycles +
-        atomic.logicalElements / atomicRate.logicalElementsPerCycle;
-    const double singleProgramRate =
-        atomicRate.singlePhysicalProgramLogicalElementsPerCycle > 0.0
-            ? atomicRate.singlePhysicalProgramLogicalElementsPerCycle
-            : atomicRate.logicalElementsPerCycle;
-    const double singleProgramBase =
-        atomic.logicalOperationInstances * atomicRate.operationStartupCycles +
-        atomic.logicalElements / singleProgramRate;
-    const double contention =
-        atomic.contentionUnknown ? atomicRate.unknownContentionMultiplier : 1.0;
-    resources.atomic += base * contention;
-    resources.singlePhysicalProgramAtomic += singleProgramBase * contention;
-    resources.hasSinglePhysicalProgramAtomicRate |=
-        atomicRate.singlePhysicalProgramLogicalElementsPerCycle > 0.0;
-    if (atomic.resultUsed) {
-      resources.atomic +=
-          atomic.logicalOperationInstances * atomicRate.resultDependencyCycles;
-      resources.singlePhysicalProgramAtomic +=
-          atomic.logicalOperationInstances * atomicRate.resultDependencyCycles;
-    }
-  }
+  accumulateAtomicWorkloads(resources, work.atomicWorkloads, profile);
   const SegmentedSimdInstructionSummary segmented =
       summarizeSegmentedSimdInstructions(work, profile.vectorWidthBits);
   for (const auto &[name, counts] : work.operationCounts) {
@@ -3318,7 +3280,11 @@ bool StageAtomicRate::isValid() const {
          std::isfinite(resultDependencyCycles) &&
          resultDependencyCycles >= 0.0 &&
          std::isfinite(unknownContentionMultiplier) &&
-         unknownContentionMultiplier >= 1.0;
+         unknownContentionMultiplier >= 1.0 &&
+         llvm::all_of(bodySystemCyclesByLogicalElements, [](const auto &entry) {
+           return entry.first > 0 && std::isfinite(entry.second) &&
+                  entry.second > 0.0;
+         });
 }
 
 bool StraightLinePrefixScanCost::isValid() const {

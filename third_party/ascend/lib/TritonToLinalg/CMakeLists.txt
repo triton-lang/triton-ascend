@@ -12,6 +12,7 @@ add_triton_library(TritonToLinalg
         DevicePrintOffsetRewrite.cpp
         DeduplicateDebugNopsPass.cpp
         CanonicalizeDebugLocationsPass.cpp
+        ProvenOverflowAssert.cpp
 
   DEPENDS
   TritonToLinalgConversionPassIncGen

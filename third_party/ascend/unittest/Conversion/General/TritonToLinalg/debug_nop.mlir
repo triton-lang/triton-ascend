@@ -45,7 +45,7 @@ tt.func public @test_kernel(
 } loc(#loc)
 
 // DEBUG-LABEL: func.func @test_kernel
-// DEBUG-COUNT-3: llvm.inline_asm has_side_effects asm_dialect = att "nop"
+// DEBUG-COUNT-5: llvm.inline_asm has_side_effects asm_dialect = att "nop"
 // DEBUG-DAG: loc("pid"
 // DEBUG-DAG: loc("num_progs"
 // DEBUG-DAG: loc("offsets"

@@ -168,14 +168,15 @@ void CustomOpAnalysis::determineLoadOrUnknown() {
   }
 }
 
-FailureOr<CustomOpAnalysis> CustomOpAnalysis::get(hivm::CustomOp customOp) {
+std::variant<CustomOpAnalysis, CoreType>
+CustomOpAnalysis::get(hivm::CustomOp customOp) {
   LOG_DEBUG("Analysing: " << customOp << "\n");
   CustomOpAnalysis result(customOp);
 
   result.determineCoreType();
   if (result.collectBuffers().failed()) {
     LOG_DEBUG("Failed to analyze: " << customOp << "\n");
-    return llvm::failure();
+    return result.coreType;
   }
   result.collectRelevantOps();
   result.determineLoadOrUnknown();

@@ -200,8 +200,8 @@ private:
                         Value intraCoreCond, Value flowOptCond, scf::IfOp ifOp,
                         Operation *loopOp, size_t &usedCounterNum,
                         DenseMap<Value, VarUpdateType> &varUpdateTypes,
-                        Value &blockFlag, bool isLastBlock,
-                        bool isFirstBlock, bool isPureScalar);
+                        Value &blockFlag, bool isLastBlock, bool isFirstBlock,
+                        bool isPureScalar);
 
   int setCrossCoreCondition(scf::IfOp ifOp, Operation *loopOp,
                             SmallVector<SmallVector<Value>> ssbufferPtrs,

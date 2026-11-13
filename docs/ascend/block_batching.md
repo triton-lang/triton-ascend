@@ -1,13 +1,17 @@
 # Block batching
 
 Block batching groups independent Triton programs, or supported iterations of
-a uniform loop, without changing the kernel's input interface. It is opt-in and
-implemented in the Ascend frontend, compiler and launcher. It does not require
-changes to the packaged BishengIR compiler.
+a uniform loop, without changing the kernel's input interface. Supported eager
+JIT calls select a factor automatically through the Ascend frontend, compiler
+and launcher. The packaged backend compiler is unchanged.
 
 ## Configuration
 
 ```python
+compiled = kernel[original_grid](*args)  # automatic selection on supported targets
+print(compiled.block_auto_selection)    # CPU model decision and exclusions
+
+# An explicit factor keeps the manual path; factor 1 disables block batching.
 compiled = kernel[original_grid](
     *args,
     block_batching_factor=4,
@@ -19,20 +23,28 @@ print(compiled.last_launch)    # variant actually submitted for this call
 
 Always pass the original grid. The launcher owns grouping and preserves the
 original `tl.program_id` and `tl.num_programs` semantics. Factor 1 uses the normal
-compiler path. Positive factors up to 64 are candidates, subject to proof and
+compiler path. Positive manual factors up to 64 are candidates, subject to proof and
 backend resource limits. Dot-containing kernels automatically use CV batching,
 which requires powers of two. An explicit axis can override automatic selection.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `block_batching_factor` | `1` | Requested grouping factor; no automatic factor search. |
+| `block_batching_factor` | Automatic for supported eager JIT calls | Omit or use `"auto"` for CPU selection; `1` disables it; an integer greater than 1 requests a manual factor. |
 | `block_batching_axis` | `-1` | Original program axis, or compiler-selected axis for VV. |
 | `block_batching_layout` | `"auto"` | Try proved memory-view folding; `"semantic_only"` retains lane grouping. |
 | `enable_hivm_batch_matmul` | Backend default | Allow independent CV pairs to use the backend batch-MMA path. |
 
+Automatic selection compiles F1 and at most two merged candidates from the same
+frozen frontend IR. VV considers F2/F4; CV uses proved M/N or independent batch
+axes to form its shortlist. The CPU model checks resource and artifact evidence
+before ranking; it does not execute or benchmark kernels. Unknown model coverage
+retains F1. Warmup, graph capture and unsupported targets keep the baseline path.
+The internal compiler option still defaults to 1 when constructing F1 variants;
+the JIT launch hook supplies the automatic request.
+
 `TA_BLOCK_BATCHING_CORE_FLOOR` overrides the minimum grouped task count; zero
-disables that scheduling policy. By default the policy uses the available vector
-core count after the normal device-limit validation. A request that cannot
+disables that scheduling policy. VV defaults to the available vector core count;
+CV defaults to zero. Both preserve the normal device-limit validation. A request that cannot
 reduce the program count, or would fall below this floor, selects the baseline.
 Supported iteration grouping retains its original program grid. These are
 scheduling heuristics, not guarantees of a speedup.
@@ -72,7 +84,7 @@ iteration grouping; known overflow cannot be treated as an unknown dynamic
 bound. Dynamic obligations remain guarded at launch.
 
 Unknown address roots, unsupported scatter, atomics, cross-program
-synchronization, unmodeled calls/assembly and unsupported varying control flow
+synchronization, calls/assembly without a model and unsupported varying control flow
 are not admitted. A limited terminal-store proof permits some opaque device
 reads in VV, without inspecting device indices on the host; it does not authorize
 a CV matrix transformation. Volatile loads are not shared or broadcast and must
@@ -113,3 +125,19 @@ other native IR tests require a matching built Ascend extension. The standalone
 C++ grid and loop-arithmetic fixtures validate launch layout and overflow rules.
 Use the repository's normal test environment and select an available device
 before running device tests.
+
+Automatic selection has CPU-only regressions under
+`third_party/ascend/unittest/pytest_ut/block_auto`, including model ranking,
+resource rejection, JIT/cache integration and installed model packaging. Run
+them from the repository root with:
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q \
+  --confcutdir=third_party/ascend/unittest/pytest_ut/block_auto \
+  third_party/ascend/unittest/pytest_ut/block_auto
+```
+
+This command excludes parent device fixtures. It requires pytest; packaging
+checks also require setuptools, pybind11 and wheel. The separate
+`test_block_auto_jit_device.py` exercises ordinary VV, CV and BF16 RMSNorm JIT
+calls on a device and requires `TRITON_BLOCK_AUTO_DEVICE_TEST=1`.

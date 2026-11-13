@@ -23,8 +23,11 @@ TARGET = re.compile(r'hacc\.target\s*=\s*#hacc\.target<"([^"\n]+)">')
 
 
 def sha256(path):
+    digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def inspect_final_ub(ir, target, *, allow_i1=False, alignment_bits=8):

@@ -36,9 +36,9 @@ SIGNATURE_N = {"X": "*fp32", "O": "*fp16"}
 
 @tla.jit
 def widen(X, O, N: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.float16, space="ub")
-    o = tla.alloc_buffer((4, N // 2), tl.float32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
+    x = tla.alloc((N, ), tl.float16, space="ub")
+    o = tla.alloc((4, N // 2), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         h = tla.simd.vlds(x[0])
         m4 = tla.simd.pset(16, tla.simd.PAT.M4)
@@ -46,14 +46,14 @@ def widen(X, O, N: tl.constexpr):
         tla.simd.vsts(o[1, 0], tla.simd.vcvt(h, tl.float32, m4))
         tla.simd.vsts(o[2, 0], tla.simd.vcvt(h, tl.float32, part=tla.simd.PART.ODD))
         tla.simd.vsts(o[3, 0], tla.simd.vcvt(h, tl.float32, m4, part=tla.simd.PART.ODD))
-    tla.copy(o, tla.view(O, (4, N // 2)))
+    tla.store_ub_to_gm(o, tla.view(O, (4, N // 2)))
 
 
 @tla.jit
 def narrow(X, O, N: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o = tla.alloc_buffer((4, N * 2), tl.float16, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
+    x = tla.alloc((N, ), tl.float32, space="ub")
+    o = tla.alloc((4, N * 2), tl.float16, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         f = tla.simd.vlds(x[0])
         m4 = tla.simd.pset(32, tla.simd.PAT.M4)
@@ -61,7 +61,7 @@ def narrow(X, O, N: tl.constexpr):
         tla.simd.vsts(o[1, 0], tla.simd.vcvt(f, tl.float16, m4), dist="NORM_B16")
         tla.simd.vsts(o[2, 0], tla.simd.vcvt(f, tl.float16, part=tla.simd.PART.ODD), dist="NORM_B16")
         tla.simd.vsts(o[3, 0], tla.simd.vcvt(f, tl.float16, m4, part=tla.simd.PART.ODD), dist="NORM_B16")
-    tla.copy(o, tla.view(O, (4, N * 2)))
+    tla.store_ub_to_gm(o, tla.view(O, (4, N * 2)))
 
 
 def test_ir(output_dir=None):

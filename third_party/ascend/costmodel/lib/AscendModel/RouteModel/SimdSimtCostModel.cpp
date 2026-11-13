@@ -1273,6 +1273,78 @@ static void readStridedShortCompletionFits(
   }
 }
 
+static void readSwideCompletionFits(
+    ProfileJSONReader &reader, const llvm::json::Object &memory,
+    llvm::StringRef context, std::map<std::string, SwideCompletionFit> &out) {
+  const auto *object = memory.getObject("strided_wide_completion");
+  if (!object)
+    return;
+  std::map<std::string, std::array<double, 2>> factorScales;
+  if (const auto *scaleObject = object->getObject("factor_scale")) {
+    for (const auto &entry : *scaleObject) {
+      const auto *values = entry.second.getAsArray();
+      if (!values)
+        continue;
+      std::array<double, 2> coefficients{};
+      for (size_t index = 0; index < values->size() && index < 2; ++index)
+        coefficients[index] = (*values)[index].getAsNumber().value_or(0.0);
+      factorScales[entry.first.str()] = coefficients;
+    }
+  }
+  for (const auto &entry : *object) {
+    const llvm::StringRef slot = entry.first;
+    if (slot == "description" || slot == "evidence" || slot == "factor_scale")
+      continue;
+    const std::string path =
+        (context + ".strided_wide_completion." + slot).str();
+    const auto *value = entry.second.getAsObject();
+    if (!value) {
+      reader.setError(path + " must be an object");
+      continue;
+    }
+    SwideCompletionFit fit;
+    fit.intercept = value->getNumber("intercept_system_cycles").value_or(0.0);
+    if (const auto *coefficients =
+            value->getArray("coefficient_system_cycles")) {
+      if (coefficients->size() > fit.coefficient.size()) {
+        reader.setError(path + " has more coefficients than the formula holds");
+        continue;
+      }
+      for (size_t index = 0; index < coefficients->size(); ++index)
+        fit.coefficient[index] =
+            (*coefficients)[index].getAsNumber().value_or(0.0);
+    }
+    // Optional SIMT factor correction: [a, b] for 1/(1+a*x+b*x^2),
+    // x = 1/F - 1.  Absent means the slot is factor-independent (SIMD slots).
+    if (const auto *scale = value->getArray("factor_scale_coefficients")) {
+      if (scale->size() > fit.factorScaleCoefficient.size()) {
+        reader.setError(
+            path + " has more factor coefficients than the correction holds");
+        continue;
+      }
+      for (size_t index = 0; index < scale->size(); ++index)
+        fit.factorScaleCoefficient[index] =
+            (*scale)[index].getAsNumber().value_or(0.0);
+    }
+    for (llvm::StringRef group :
+         {llvm::StringRef("rows2"), llvm::StringRef("rows8"),
+          llvm::StringRef("rows16"), llvm::StringRef("rows64")}) {
+      if (!slot.contains(group))
+        continue;
+      if (auto scale = factorScales.find(group.str());
+          scale != factorScales.end())
+        fit.factorScaleCoefficient = scale->second;
+      break;
+    }
+    fit.evidence = reader.string(*value, "evidence", path);
+    if (!fit.isValid()) {
+      reader.setError(path + " requires finite coefficients and evidence");
+      continue;
+    }
+    out[slot.str()] = fit;
+  }
+}
+
 static void
 readLayoutCostMap(ProfileJSONReader &reader,
                   const llvm::json::Object &resources, llvm::StringRef key,
@@ -1667,6 +1739,45 @@ static void readStageResources(ProfileJSONReader &reader,
   if (const auto *scan = resources->getObject("calibrated_prefix_scan")) {
     auto &calibration = profile.calibratedPrefixScan;
     calibration.enabled = true;
+    if (const auto *formulas = scan->getArray("formulas")) {
+      auto parsed = parsePrefixScanFormulas(*formulas);
+      if (!parsed)
+        reader.setError(llvm::toString(parsed.takeError()));
+      else {
+        if (context == "simd") {
+          static const llvm::StringSet<> simdFeatures = {
+              "one",
+              "E",
+              "C",
+              "logE",
+              "f16",
+              "B",
+              "chain",
+              "vecwork",
+              "payload",
+              "tileR",
+              "paddedwork",
+              "doubling",
+              "treework",
+              "direct_group_work",
+              "direct_narrow_group_work",
+              "direct_half_row_groups"};
+          for (const auto &formula : *parsed) {
+            if (formula.projection != "legacy")
+              reader.setError(
+                  "SIMD prefixscan formula cannot use SIMT layout projection");
+            for (const auto &domain : formula.domains)
+              if (domain.warps != 0)
+                reader.setError(
+                    "SIMD prefixscan formula cannot restrict warps");
+            for (const auto &[name, coefficient] : formula.terms)
+              if (!simdFeatures.contains(name))
+                reader.setError("invalid SIMD prefixscan feature: " + name);
+          }
+        }
+        calibration.formulas = std::move(*parsed);
+      }
+    }
     calibration.prefixScanDependencyFactor =
         reader.number(*scan, "dependency_factor", prefix + ".prefix_scan");
     // Optional 1D factor for 1D tt.scan (S = N).  Falls back to the
@@ -2299,6 +2410,13 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
       return llvm::createStringError(
           std::errc::invalid_argument,
           "invalid prefixscan profile schema or target");
+    const bool hasFormulas = (scanRoot->getObject("simd") &&
+                              scanRoot->getObject("simd")->get("formulas")) ||
+                             (scanRoot->getObject("simt") &&
+                              scanRoot->getObject("simt")->get("formulas"));
+    if (hasFormulas && scanRoot->getString("unit") != "system_cycle")
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "unsupported prefixscan unit");
     for (llvm::StringRef mode :
          {llvm::StringRef("simd"), llvm::StringRef("simt")}) {
       auto *model = root->getObject(mode);
@@ -3048,6 +3166,9 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
     if (const auto *simdMemory = simd->getObject("memory"))
       readStridedShortCompletionFits(reader, *simdMemory, "simd.memory",
                                      simdProfile.stridedShortCompletionFits);
+    if (const auto *simdMemory = simd->getObject("memory"))
+      readSwideCompletionFits(reader, *simdMemory, "simd.memory",
+                              simdProfile.swideCompletionFits);
     readStageResources(reader, *simd, "simd", microbench, simdProfile);
     const auto predicate = simdProfile.operationRates.lookup("predicate.cmp");
     simdProfile.predicateOperationsPerCycle =
@@ -3196,6 +3317,8 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
           reader, simtProfile.maskedStridedStoreCopyCompletionByStrideBytes);
       readStridedShortCompletionFits(reader, *memory, "simt.memory",
                                      simtProfile.stridedShortCompletionFits);
+      readSwideCompletionFits(reader, *memory, "simt.memory",
+                              simtProfile.swideCompletionFits);
     }
     readStageResources(reader, *simt, "simt", microbench, simtProfile);
     if (const auto *resources = simt->getObject("stage_resources")) {
@@ -3591,7 +3714,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
       }
       const auto &[geometry, count] = *stage.workload.prefixScanCounts.begin();
       const auto &[extent, sequences, stride, results, reverse, combine,
-                   dataType, rank, dimension, elementBits] = geometry;
+                   dataType, rank, dimension, elementBits, fullShape,
+                   exactCombine, simpleBinary] = geometry;
       if (!std::isfinite(count) || std::abs(count - 1.0) > 1.0e-12 || reverse ||
           combine != "add" || results != 1 || stride != sequences ||
           extent < rank2ScanFit.minimumExtent ||
@@ -4429,6 +4553,8 @@ static std::string stageDependencyCompletionRejectionReason(
   const auto &expression = expressions.front();
   if (expression.constantTripCount)
     return "loop_trip_count_is_static";
+  if (expression.launchBoundTripCount)
+    return "loop_trip_count_is_launch_bound";
   if (!expression.supported || !expression.operation ||
       expression.operation->getName().getStringRef() != "scf.for")
     return "dynamic_loop_expression_not_supported";

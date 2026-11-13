@@ -648,6 +648,62 @@ module {
   EXPECT_TRUE(*v1Applied);
 }
 
+TEST(CostModelPassesTest, ExternalAnalysisAndSourceShareLaunchBoundLoopFacts) {
+  mlir::MLIRContext context;
+  auto module = parseModule(context, R"mlir(
+    module {
+      func.func @main(%limit: i32, %initial: i32) -> i32 {
+        %zero = arith.constant 0 : i32
+        %step = arith.constant 128 : i32
+        %result = scf.for %i = %zero to %limit step %step
+            iter_args(%state = %initial) -> (i32) : i32 {
+          %next = arith.addi %state, %i : i32
+          scf.yield %next : i32
+        }
+        return %result : i32
+      }
+    }
+  )mlir");
+  ASSERT_TRUE(module);
+  llvm::SmallString<128> path;
+  int fd = -1;
+  ASSERT_FALSE(llvm::sys::fs::createTemporaryFile("launch_bound_analysis",
+                                                  "mlir", fd, path));
+  {
+    llvm::raw_fd_ostream file(fd, true);
+    (*module).print(file);
+  }
+  SelectSimdSimtCostModelPassOptions options;
+  options.mode = "report";
+  options.profilePath = TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH;
+  options.actualTarget = "Ascend950PR_9579";
+  options.compileOn91095 = true;
+  options.analysisModulePath = path.str().str();
+  options.routeTransformCapabilityJSON =
+      R"({"runtime_scalar_values":[{"argument_index":0,"value":1024}]})";
+  const bool succeeded =
+      runPasses(*module, createSelectSimdSimtCostModelPass(options));
+  llvm::sys::fs::remove(path);
+  ASSERT_TRUE(succeeded);
+  auto attr =
+      (*module)->getAttrOfType<StringAttr>("ascend.simt_costmodel.report_json");
+  ASSERT_TRUE(attr);
+  auto report = llvm::json::parse(attr.getValue());
+  ASSERT_TRUE(static_cast<bool>(report));
+  auto *object = report->getAsObject();
+  ASSERT_NE(object, nullptr);
+  auto *loops = object->getArray("loop_workload_expressions");
+  ASSERT_NE(loops, nullptr);
+  ASSERT_EQ(loops->size(), 1u);
+  const auto *loop = loops->front().getAsObject();
+  ASSERT_NE(loop, nullptr);
+  EXPECT_EQ(loop->getInteger("launch_bound_trip_count"), 8);
+  EXPECT_EQ(loop->getString("workload_count_kind"), "exact_launch_bound");
+  auto function = module->lookupSymbol<mlir::func::FuncOp>("main");
+  ASSERT_TRUE(function);
+  EXPECT_FALSE(function.getArgAttr(0, "ascend.costmodel.runtime_value"));
+}
+
 TEST(CostModelPassesTest, MaterializeSimtScopePreservesEscapingSSAResult) {
   mlir::MLIRContext context;
   auto module = parseModule(context, R"mlir(

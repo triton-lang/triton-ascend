@@ -4,6 +4,7 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -50,7 +51,25 @@ static std::optional<int64_t> constantValue(const Json &expr) {
   return std::nullopt;
 }
 
+static std::optional<int64_t> launchBoundInteger(Value value) {
+  auto argument = dyn_cast<BlockArgument>(value);
+  if (!argument || !isa<IntegerType, IndexType>(value.getType()))
+    return std::nullopt;
+  auto function =
+      dyn_cast_or_null<FunctionOpInterface>(argument.getOwner()->getParentOp());
+  if (!function || argument.getOwner() != &function.getFunctionBody().front())
+    return std::nullopt;
+  auto attr = function.getArgAttrOfType<IntegerAttr>(
+      argument.getArgNumber(), "ascend.costmodel.runtime_value");
+  const unsigned width = bits(value.getType());
+  if (!attr || width == 0 || width > 64 || !attr.getValue().isSignedIntN(width))
+    return std::nullopt;
+  return attr.getValue().sextOrTrunc(64).getSExtValue();
+}
+
 static std::optional<int64_t> integerConstant(Value value) {
+  if (auto bound = launchBoundInteger(value))
+    return bound;
   Operation *definition = value.getDefiningOp();
   if (!definition || definition->getName().getStringRef() != "arith.constant")
     return std::nullopt;
@@ -160,6 +179,7 @@ class Extractor {
 public:
   bool supported = true;
   bool readsDevice = false;
+  bool usesLaunchBounds = false;
   Array limitations;
   Array memoryReads;
   llvm::DenseSet<unsigned> arguments;
@@ -188,6 +208,14 @@ public:
         return unknown(
             "non-entry block argument or loop-carried/induction value", width);
       arguments.insert(arg.getArgNumber());
+      if (auto bound = launchBoundInteger(value)) {
+        usesLaunchBounds = true;
+        return Object{{"op", "const"},
+                      {"bits", width},
+                      {"value", *bound},
+                      {"source", "launch_scalar_binding"},
+                      {"argument_index", arg.getArgNumber()}};
+      }
       Object result{{"op", "arg"},
                     {"bits", width},
                     {"index", arg.getArgNumber()},
@@ -404,6 +432,9 @@ LoopTripCountInfo mlir::ascend::analyzeLoopTripCount(
   } else {
     if (name == "scf.for" && loop->hasAttr("unsignedCmp") &&
         loop->getNumOperands() >= 3) {
+      lower = extractor.expression(loop->getOperand(0));
+      upper = extractor.expression(loop->getOperand(1));
+      step = extractor.expression(loop->getOperand(2));
       const auto lowerConstant = integerConstant(loop->getOperand(0));
       const auto upperConstant = integerConstant(loop->getOperand(1));
       const auto stepConstant = integerConstant(loop->getOperand(2));
@@ -416,10 +447,19 @@ LoopTripCountInfo mlir::ascend::analyzeLoopTripCount(
         extractor.unknown("while or unsigned loop trip count unsupported", 64);
   }
 
+  // Keep exact launch facts distinct from compile-time constants. The AST
+  // retains their provenance and the original argument dependency.
+  if (extractor.usesLaunchBounds) {
+    info.launchBoundTripCount = info.constantTripCount;
+    info.constantTripCount.reset();
+  }
   llvm::StringRef workloadKind = "fallback";
   if (info.constantTripCount) {
     info.workloadTripCount = *info.constantTripCount;
     workloadKind = "exact_constant";
+  } else if (info.launchBoundTripCount) {
+    info.workloadTripCount = *info.launchBoundTripCount;
+    workloadKind = "exact_launch_bound";
   } else if (info.upperBoundTripCount) {
     info.workloadTripCount = *info.upperBoundTripCount;
     info.workloadUsesUpperBound = info.workloadTripCount != 0;
@@ -466,6 +506,9 @@ LoopTripCountInfo mlir::ascend::analyzeLoopTripCount(
       {"count_scope", "per_loop_invocation_per_program"},
       {"constant_trip_count",
        info.constantTripCount ? Json(*info.constantTripCount) : Json(nullptr)},
+      {"launch_bound_trip_count", info.launchBoundTripCount
+                                      ? Json(*info.launchBoundTripCount)
+                                      : Json(nullptr)},
       {"upper_bound_trip_count", info.upperBoundTripCount
                                      ? Json(*info.upperBoundTripCount)
                                      : Json(nullptr)},

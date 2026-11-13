@@ -270,6 +270,76 @@ def test_ubtuner_uses_ttadapter_without_bridge_stage(monkeypatch):
     assert tuner._find_best_config() is expected
     assert consumed == [text]
 
+@pytest.mark.parametrize("raw", [{}, {"compile_mode": None}, {"compile_mode": "simd"}])
+def test_compile_mode_env_enables_costmodel_without_launch_options(monkeypatch, raw):
+    monkeypatch.setenv("TRITON_ASCEND_COMPILE_MODE", "simd_simt")
+    monkeypatch.setenv("TRITON_ASCEND_AUTO_SIMT_SCOPE", "auto")
+    monkeypatch.setenv("TRITON_ASCEND_AUTO_SIMT_SCOPE_DUMP", "./test_costmodel.json")
+    backend = compiler.AscendBackend(GPUTarget("npu", "Ascend950PR_9579", 32))
+    original = dict(raw)
+
+    options = backend.parse_options(raw)
+
+    assert options.compile_mode == "simd_simt"
+    assert options.auto_simt_scope_mode == "auto"
+    assert options.auto_simt_scope_dump == "./test_costmodel.json"
+    assert raw == original
+
+
+@pytest.mark.parametrize("env_mode", [None, ""])
+@pytest.mark.parametrize("raw, expected", [({}, "simd_simt_template"), ({"compile_mode": "simd"}, "simd")])
+def test_unset_or_empty_compile_mode_env_preserves_options(monkeypatch, env_mode, raw, expected):
+    monkeypatch.delenv("TRITON_ASCEND_COMPILE_MODE", raising=False)
+    if env_mode is not None:
+        monkeypatch.setenv("TRITON_ASCEND_COMPILE_MODE", env_mode)
+    backend = compiler.AscendBackend(GPUTarget("npu", "Ascend950PR_9579", 32))
+
+    assert backend.parse_options(raw).compile_mode == expected
+
+
+@pytest.mark.parametrize("env_mode, arch, expected", [
+    ("simt_template", "Ascend950PR_9579", "simd_simt_template"),
+    ("simt_only", "Ascend950PR_9579", "simt_only"),
+])
+def test_compile_mode_env_uses_canonical_validation(monkeypatch, env_mode, arch, expected):
+    monkeypatch.setenv("TRITON_ASCEND_COMPILE_MODE", env_mode)
+    options = compiler.AscendBackend(GPUTarget("npu", arch, 32)).parse_options({})
+
+    assert options.compile_mode == expected
+    assert options.is_pure_simt == (expected == "simt_only")
+
+
+@pytest.mark.parametrize("env_mode, arch, message", [
+    ("unknown_mode", "Ascend950PR_9579", "invalid compile_mode"),
+    ("simt_only", "Ascend910B1", "supported only on Ascend 950"),
+])
+def test_compile_mode_env_rejects_invalid_modes_and_targets(monkeypatch, env_mode, arch, message):
+    monkeypatch.setenv("TRITON_ASCEND_COMPILE_MODE", env_mode)
+    backend = compiler.AscendBackend(GPUTarget("npu", arch, 32))
+
+    with pytest.raises(ValueError, match=message):
+        backend.parse_options({})
+
+
+def test_compile_mode_env_keeps_runtime_scalar_binding_consistent(monkeypatch):
+    monkeypatch.setenv("TRITON_ASCEND_COMPILE_MODE", "simd_simt")
+    backend = compiler.AscendBackend(GPUTarget("npu", "Ascend950PR_9579", 32))
+
+    assert backend.get_runtime_compile_options(
+        {"N": 17}, [("i32", )], {"compile_mode": "simd"}) == {"auto_simt_runtime_scalar_values": ((0, 17), )}
+
+
+@pytest.mark.parametrize("env_mode", [None, "simt_only"])
+def test_runtime_scalar_binding_defers_target_validation(monkeypatch, env_mode):
+    monkeypatch.delenv("TRITON_ASCEND_COMPILE_MODE", raising=False)
+    if env_mode is not None:
+        monkeypatch.setenv("TRITON_ASCEND_COMPILE_MODE", env_mode)
+    backend = compiler.AscendBackend(GPUTarget("npu", "Ascend910B1", 32))
+
+    assert backend.get_runtime_compile_options({"N": 17}, [("i32", )], {"compile_mode": "simt_only"}) == {}
+    with pytest.raises(ValueError, match="supported only on Ascend 950"):
+        backend.parse_options({"compile_mode": "simt_only"})
+
 
 _IGNORED_OPTIONS = sorted(utils._DEPRECATED_NPU_OPTIONS - utils._DEPRECATED_NPU_OPTION_ROUTES.keys() -
                           utils._DEPRECATED_NPU_OPTION_ALIASES.keys() - {"stream"})

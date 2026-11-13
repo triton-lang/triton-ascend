@@ -574,8 +574,8 @@ TEST(SimdSimtCostModelTest, LoopCarriedRecurrenceAppliesScanDependencyFactor) {
     // Mixed shuffle pool: 320 scan-class steps (tt.scan) + 320 reduce-class
     // steps (tt.reduce).
     stage.workload.shuffleLaneSteps = 640.0;
-    stage.workload.prefixScanCounts[{32, 10, 1, 1, false, "add", "", 0, 0, 0}] =
-        1.0;
+    stage.workload.prefixScanCounts[{
+        32, 10, 1, 1, false, "add", "", 0, 0, 0, {}, "", false}] = 1.0;
     return stage;
   };
 
@@ -1948,6 +1948,102 @@ TEST(SimdSimtCostModelTest, ClippedDynamicLoopUsesStaticTripCountCap) {
   }
 }
 
+TEST(SimdSimtCostModelTest, LaunchBoundLoopTripCountMatchesStageWorkload) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  for (int64_t limit : {int64_t{0}, int64_t{128}, int64_t{1024}}) {
+    const int64_t expectedTrips = limit / 128;
+    std::string source = R"mlir(
+      module {
+        func.func @kernel(%limit: i32 {ascend.costmodel.runtime_value = LIMIT : i64}) {
+          %zero = arith.constant 0 : i32
+          %step = arith.constant 128 : i32
+          scf.for %i = %zero to %limit step %step : i32 {
+          }
+          return
+        }
+      }
+    )mlir";
+    source.replace(source.find("LIMIT"), 5, std::to_string(limit));
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(source, &context);
+    ASSERT_TRUE(module);
+    auto counts = analyzeLoopTripCountInfos(*module);
+    ASSERT_EQ(counts.size(), 1u);
+    EXPECT_FALSE(counts[0].constantTripCount);
+    ASSERT_TRUE(counts[0].launchBoundTripCount);
+    EXPECT_EQ(*counts[0].launchBoundTripCount, expectedTrips);
+    EXPECT_EQ(counts[0].workloadTripCount, expectedTrips);
+    EXPECT_FALSE(counts[0].workloadUsesFallback);
+    EXPECT_EQ(counts[0].description.getString("workload_count_kind"),
+              "exact_launch_bound");
+    const auto *upper = counts[0].description.getObject("upper");
+    ASSERT_TRUE(upper);
+    EXPECT_EQ(upper->getString("source"), "launch_scalar_binding");
+    EXPECT_EQ(upper->getInteger("value"), limit);
+
+    mlir::ascend::SimtAnchorPlan anchors;
+    auto partition = StagePartitioner().partition(*module, anchors,
+                                                  StagePartitionerOptions{});
+    if (!partition)
+      FAIL() << llvm::toString(partition.takeError());
+    bool foundLoop = false;
+    for (const auto &stage : partition->stages) {
+      if (!stage.features.hasLoop)
+        continue;
+      foundLoop = true;
+      // An unsplit zero-trip shell still has one entry; its body has no work.
+      EXPECT_EQ(stage.iterationCount, std::max<int64_t>(1, expectedTrips));
+      EXPECT_EQ(stage.features.unknownTripCountLoopCount, 0);
+    }
+    EXPECT_TRUE(foundLoop);
+    module->walk([&](mlir::scf::ForOp loop) {
+      loop->setAttr("unsignedCmp", mlir::UnitAttr::get(&context));
+    });
+    auto unsignedCounts = analyzeLoopTripCountInfos(*module);
+    ASSERT_EQ(unsignedCounts.size(), 1u);
+    EXPECT_FALSE(unsignedCounts[0].constantTripCount);
+    EXPECT_EQ(unsignedCounts[0].launchBoundTripCount,
+              std::optional<int64_t>(expectedTrips));
+    EXPECT_EQ(unsignedCounts[0].description.getString("workload_count_kind"),
+              "exact_launch_bound");
+  }
+}
+
+TEST(SimdSimtCostModelTest, InvalidOrMissingLaunchBoundRemainsUnknown) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  for (const char *attribute :
+       {"", " {ascend.costmodel.runtime_value = 2147483648 : i64}"}) {
+    std::string source = R"mlir(
+      module {
+        func.func @kernel(%limit: i32ATTRIBUTE) {
+          %zero = arith.constant 0 : i32
+          %step = arith.constant 128 : i32
+          scf.for %i = %zero to %limit step %step : i32 {
+          }
+          return
+        }
+      }
+    )mlir";
+    source.replace(source.find("ATTRIBUTE"), 9, attribute);
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(source, &context);
+    ASSERT_TRUE(module);
+    auto counts = analyzeLoopTripCountInfos(*module);
+    ASSERT_EQ(counts.size(), 1u);
+    EXPECT_FALSE(counts[0].constantTripCount);
+    EXPECT_FALSE(counts[0].launchBoundTripCount);
+    EXPECT_TRUE(counts[0].workloadUsesFallback);
+    EXPECT_EQ(counts[0].workloadTripCount, 1);
+    const auto *upper = counts[0].description.getObject("upper");
+    ASSERT_TRUE(upper);
+    EXPECT_EQ(upper->getString("op"), "arg");
+  }
+}
+
 TEST(SimdSimtCostModelTest, AdjacentStructuredLoopsRemainSerialStages) {
   mlir::MLIRContext context;
   context.getOrLoadDialect<mlir::arith::ArithDialect>();
@@ -2296,7 +2392,7 @@ TEST(SimdSimtCostModelTest, PerReductionMixedAxesAndPartialFallback) {
         static_cast<int64_t>(elements / work.shape[work.axis]),
         work.shape[work.axis], 32}] = work.instances;
     stage.reductionContributions.push_back(contribution);
-    mlir::ascend::mergeReductionResidualWorkload(stage.workload, contribution);
+    stage.workload.merge(contribution);
     auto estimate = takeReductionResult(mlir::ascend::estimateReductionCycles(
         work, *profile.reductionProfile, mlir::ascend::ReductionMode::SIMD,
         profile.baseSimtWarpCount));

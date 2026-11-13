@@ -10,7 +10,7 @@
   "indirect_memory_profile": "../indirect_memory/ascend_950pr_v1.json",
   "target": "Ascend950PR/dav-c310",
   "description": "Generic Stage Route Model hardware profile. Every kernel is derived from transformed TTIR resource workloads; absolute time adds measured kernel-boundary and global-load completion envelopes selected only by structural route facts. No operator identity, exact function DAG signature, shape whitelist, or kernel-specific elapsed intercept participates in scoring or prediction. SIMD f16 MMAD resource work uses the qualified Cube/TinyCube MAC/MTE1 formula within its calibrated domain.",
-  "prefixscan_profile": "../prefixscan/ascend_950pr_prefixscan_v1.json",
+  "prefixscan_profile": "../prefixscan/ascend_950pr_prefixscan.json",
   "microbenchmark_profile": "../microbench/ascend_950pr_v1.json",
   "compatible_targets": [
     "Ascend950PR_*",
@@ -361,6 +361,124 @@
           ],
           "structural_constants": [],
           "evidence": "data_provider/strided_ldst/pre-explore/results/final/errors_masked_store.csv, stride==2 branch; 100 points, MAPE 7.08%. Same shape as simd_store_masked_stride_gt2 with its own numbers: stride 2 lowers through DeinterleaveStatusOptimization (block move plus extract_slice), so the fixed and read-modify-write terms are visibly cheaper. Masked-only."
+        }
+      },
+      "strided_wide_completion": {
+        "description": "Closed-form StridedWide (rank-2, one unit-stride axis, run>=32B, unmasked, inner) completion fits.  Calibrated on the WIDE2/LOADV1 sweeps; a slot is a steady-state per-iteration cost in SYS_CNT nanoseconds (== system cycles at 1 GHz).  Admission is bounded to the swept domain; anything outside keeps the fallback mechanisms.",
+        "evidence": "swide_phys/phys_cap_mixed.json; data_provider/strided_ldst/pre-explore README section 5",
+        "simd_load_swide_rows_le4": {
+          "terms": [
+            "n",
+            "rows_x_duty",
+            "duty2",
+            "S128",
+            "lines_per_seg",
+            "run"
+          ],
+          "intercept_system_cycles": 70.80707178007145,
+          "coefficient_system_cycles": [
+            6.550360331216047e-05,
+            10.546150044763415,
+            -12.755333498457722,
+            7.293701819112106e-05,
+            4.672233295440351,
+            -0.032286399819482614
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows<=4, n=260, MAPE 3.14%)"
+        },
+        "simd_load_swide_rows_gt4": {
+          "terms": [
+            "n",
+            "rows_x_duty",
+            "total_lines",
+            "S256",
+            "duty",
+            "sqrt_n"
+          ],
+          "intercept_system_cycles": 101.52931530092435,
+          "coefficient_system_cycles": [
+            0.008196399400061767,
+            0.4790887100510337,
+            0.6099416684106536,
+            3.24053937338015e-05,
+            36.81513083856632,
+            -1.1093310965884338
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows>4, n=291, MAPE 9.39%)"
+        },
+        "simd_store_swide_rows_le2": {
+          "terms": [
+            "duty",
+            "mis32",
+            "rows_x_duty",
+            "inv_n",
+            "gap",
+            "S2048",
+            "S4096",
+            "L4096",
+            "mx512",
+            "mx128",
+            "elem_per_line",
+            "sqrt_n",
+            "mx256"
+          ],
+          "intercept_system_cycles": 86.575985175972,
+          "coefficient_system_cycles": [
+            22.529715252433903,
+            -0.1288193479212923,
+            3.6464780245187662,
+            147.6223233378004,
+            0.0016515237474710835,
+            3.990710573487153e-08,
+            -2.565564840733101e-07,
+            -7.283043439547354,
+            0.013011783751425162,
+            1.9904395389482001,
+            -1.8594783737502767,
+            0.4607797347207879,
+            -0.14606638536526004
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows<=2, n=130, MAPE 5.92%)"
+        },
+        "simd_store_swide_rows_gt2": {
+          "terms": [
+            "rows_x_duty",
+            "duty2",
+            "total_lines",
+            "mis32",
+            "L128",
+            "mx4096",
+            "rows2",
+            "mx1024",
+            "run",
+            "duty",
+            "cseg",
+            "mx512",
+            "mx2048",
+            "mx256",
+            "elem_per_line",
+            "mx128"
+          ],
+          "intercept_system_cycles": 94.22600457509917,
+          "coefficient_system_cycles": [
+            1.6163024361406704,
+            14.629849403081689,
+            0.8243103855623043,
+            82.17752540464355,
+            -0.29896592370791575,
+            -0.015523025381500806,
+            -0.00084773154288209,
+            0.022562954047882892,
+            -0.018441862203049574,
+            18.09331936108495,
+            0.011061891610479687,
+            0.008109627717129465,
+            0.014242820835483394,
+            -0.12942216910180598,
+            -2.690097213016283,
+            2.765691356386161
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows>2, n=464, MAPE 8.79%)"
         }
       }
     },
@@ -966,6 +1084,620 @@
             33.4824
           ],
           "evidence": "PHYS2_simt_store.json; 1210 points, MAPE 9.64%"
+        }
+      },
+      "strided_wide_completion": {
+        "factor_scale": {
+          "rows2": [
+            6.8651,
+            13.301600000000001
+          ],
+          "rows8": [
+            1.7555000000000001,
+            5.1448
+          ],
+          "rows16": [
+            1.4025000000000001,
+            5.5961999999999996
+          ],
+          "rows64": [
+            2.1575000000000002,
+            8.4451000000000001
+          ]
+        },
+        "description": "Closed-form StridedWide (rank-2, one unit-stride axis, run>=32B, unmasked, inner) completion fits.  Calibrated on the WIDE2/LOADV1 sweeps; a slot is a steady-state per-iteration cost in SYS_CNT nanoseconds (== system cycles at 1 GHz).  Admission is bounded to the swept domain; anything outside keeps the fallback mechanisms. Masked SIMT slots (store and load, rows 2/8/64/W-split and rows16/W-split) are separate linear fits: the measured masked unmasked ratio is only uniform for SIMD (median 1.000, 99.2% within 5%), while the SIMT masked store/load relationship is not a smooth offset, so sharing one formula degraded segment MAPE to 12-22%.",
+        "evidence": "swide_phys/phys_cap_mixed.json; data_provider/strided_ldst/pre-explore README section 5",
+        "simt_load_swide_rows2": {
+          "terms": [
+            "maxW16",
+            "maxW4",
+            "cseg_x_invW",
+            "cseg_mod32",
+            "minW8",
+            "h_div_w",
+            "h_pos"
+          ],
+          "intercept_system_cycles": 41.563258030556675,
+          "coefficient_system_cycles": [
+            1.416207779579969,
+            0.3871929844068339,
+            0.2268749367461054,
+            0.13141143425264834,
+            0.28341297344332167,
+            -0.08026133807015934,
+            1.0094461597897946
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=2, n=152, MAPE 3.48%)"
+        },
+        "simt_load_swide_rows8": {
+          "terms": [
+            "L256",
+            "maxW16",
+            "L2048",
+            "h_div_w",
+            "L512",
+            "L4096",
+            "L128",
+            "S4096",
+            "cseg",
+            "S2048",
+            "maxW8",
+            "bytes_per_lane",
+            "h"
+          ],
+          "intercept_system_cycles": 66.60742138694988,
+          "coefficient_system_cycles": [
+            -18.588208374855526,
+            0.7552818743839147,
+            -32.7574242984269,
+            0.09039437309018344,
+            50.96345595334658,
+            7.693423460463346,
+            -3.2996244958825973,
+            0.0007868006838824964,
+            -0.7747912739946121,
+            -0.00046847704536867216,
+            0.7728617573449519,
+            1.7739777304821907,
+            0.01666497215681117
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=8, n=150, MAPE 13.12%)"
+        },
+        "simt_load_swide_rows64_wle2": {
+          "terms": [
+            "n2W",
+            "mx64",
+            "S64",
+            "h",
+            "cseg_mod32"
+          ],
+          "intercept_system_cycles": 72.73962451267975,
+          "coefficient_system_cycles": [
+            0.0004038574602326462,
+            67.7218799690663,
+            -0.02732790660654466,
+            -0.3143413451634458,
+            -18.125295270150044
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,W<=2, n=46, MAPE 18.57%)"
+        },
+        "simt_load_swide_rows64_w3_8": {
+          "terms": [
+            "cseg_x_invW",
+            "bytes_per_lane",
+            "S128",
+            "cseg_mod32",
+            "n2W",
+            "elem_per_lane",
+            "elem_per_warp",
+            "h_div_w",
+            "iters",
+            "bytes_per_warp",
+            "q",
+            "W",
+            "S64",
+            "span"
+          ],
+          "intercept_system_cycles": 287.6451152805998,
+          "coefficient_system_cycles": [
+            10.20312371891428,
+            -5.837667963133048,
+            -0.003390441377767749,
+            -5.2916792769687975,
+            -4.51817846371263e-05,
+            4.7073968649124245,
+            0.15608425948103852,
+            0.1488394395054649,
+            6.9755768338724975,
+            0.03426144974335655,
+            2.308543299993566,
+            -12.31830016378729,
+            0.0059825847718102095,
+            -2.0558759314108614e-05
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,3-8, n=46, MAPE 13.21%)"
+        },
+        "simt_load_swide_rows64_wgt8": {
+          "terms": [
+            "n2W",
+            "h_pos",
+            "L2048",
+            "mx256",
+            "S2048",
+            "W",
+            "cseg",
+            "mx1024"
+          ],
+          "intercept_system_cycles": 165.65377213217153,
+          "coefficient_system_cycles": [
+            0.00025126837427824514,
+            9.51905426434818,
+            -0.28680056419922034,
+            0.0721277132940649,
+            1.559484321274019e-05,
+            0.761098075644741,
+            -1.5358019099477627,
+            -0.109017456174393
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,W>8, n=69, MAPE 7.30%)"
+        },
+        "simt_store_swide_rows2": {
+          "terms": [
+            "maxW8",
+            "S4096",
+            "h_pos",
+            "n2W",
+            "maxW16",
+            "minW16"
+          ],
+          "intercept_system_cycles": 22.707399708271602,
+          "coefficient_system_cycles": [
+            -0.026600123001709178,
+            2.36357962268659e-06,
+            -1.0239648132894672,
+            4.648928684239133e-06,
+            1.7477767684131595,
+            0.7011737549056575
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=2, n=231, MAPE 9.16%)"
+        },
+        "simt_store_swide_rows8": {
+          "terms": [
+            "maxW8",
+            "bytes_per_lane",
+            "mis32",
+            "maxW16",
+            "minW16",
+            "h_div_w",
+            "mx128",
+            "mx64"
+          ],
+          "intercept_system_cycles": 17.268088594597533,
+          "coefficient_system_cycles": [
+            0.2870238265712422,
+            0.5089786981070723,
+            14.324693287223194,
+            1.4474179245074685,
+            0.798587885979451,
+            0.0050094843941324765,
+            -0.0935995855964829,
+            0.17464015797556953
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=8, n=196, MAPE 9.22%)"
+        },
+        "simt_store_swide_rows64_wle2": {
+          "terms": [
+            "bytes_per_lane",
+            "L128",
+            "n2W",
+            "L256",
+            "duty2",
+            "r16_x_segW",
+            "mis32",
+            "S128"
+          ],
+          "intercept_system_cycles": 131.0056627583471,
+          "coefficient_system_cycles": [
+            1.1336966234620411,
+            -3.198854000907959,
+            3.751781032537796e-05,
+            2.816777871305374,
+            94.88901635458748,
+            -0.03863167016728473,
+            232.7486923753587,
+            -0.0011074989732837602
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,W<=2, n=46, MAPE 11.48%)"
+        },
+        "simt_store_swide_rows64_w3_8": {
+          "terms": [
+            "L128",
+            "r16_x_segW",
+            "L256",
+            "mis32",
+            "L512",
+            "bytes_per_lane",
+            "duty2",
+            "duty"
+          ],
+          "intercept_system_cycles": -28.77140952459056,
+          "coefficient_system_cycles": [
+            4.42237821150216,
+            0.35980850601981695,
+            2.830600026555298,
+            -24.120410822234795,
+            -3.0639499021902825,
+            -4.290220951123761,
+            558.9080482137553,
+            -489.24581049851156
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,3-8, n=46, MAPE 10.00%)"
+        },
+        "simt_store_swide_rows64_wgt8": {
+          "terms": [
+            "duty2",
+            "L256",
+            "W",
+            "bytes_per_lane",
+            "mis32",
+            "L128",
+            "L2048",
+            "duty"
+          ],
+          "intercept_system_cycles": -3.8885111945950026,
+          "coefficient_system_cycles": [
+            255.7238205080562,
+            1.021917031626603,
+            2.2681088165270973,
+            17.844840026561357,
+            107.28137151354433,
+            -1.3130963337274029,
+            -0.9795182661807715,
+            -228.8212346437155
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,W>8, n=69, MAPE 9.93%)"
+        },
+        "simt_load_swide_masked_rows16_w3_8": {
+          "terms": [
+            "h_div_w",
+            "L256",
+            "mx2048",
+            "mx128",
+            "S64",
+            "S4096",
+            "gap"
+          ],
+          "intercept_system_cycles": 44.05674483308826,
+          "coefficient_system_cycles": [
+            0.20931265462908033,
+            7.433445987999578,
+            0.24036756677235052,
+            -0.7363269483652769,
+            0.0004968442613021774,
+            -0.00010059814637276645,
+            -0.0005091735971588256
+          ],
+          "evidence": "swide_phys masked refit: 135 points, in-sample MAPE 8.12%"
+        },
+        "simt_load_swide_masked_rows16_wgt8": {
+          "terms": [
+            "iters_x_W",
+            "cseg_mod32",
+            "mx32",
+            "mx128",
+            "S256",
+            "inv_sectors"
+          ],
+          "intercept_system_cycles": 168.36118399707982,
+          "coefficient_system_cycles": [
+            0.5597812159158895,
+            -1.066539833750877,
+            1.364534828761934,
+            -0.9833624124852582,
+            0.00033577967867147766,
+            -26.028444365570444
+          ],
+          "evidence": "swide_phys masked refit: 206 points, in-sample MAPE 7.98%"
+        },
+        "simt_load_swide_masked_rows16_wle2": {
+          "terms": [
+            "cseg_x_invW",
+            "inv_n",
+            "S4096",
+            "W2",
+            "span",
+            "L256",
+            "L2048",
+            "L1024",
+            "run_x_W"
+          ],
+          "intercept_system_cycles": 2.9202151550882753,
+          "coefficient_system_cycles": [
+            9.241770976212099,
+            11117.57804444572,
+            -1.840968503930898e-05,
+            11.45353251755326,
+            -3.208125704071165e-05,
+            1.195888977869581,
+            -41.330645745234634,
+            41.062443256392015,
+            -0.1332721388556
+          ],
+          "evidence": "swide_phys masked refit: 133 points, in-sample MAPE 8.50%"
+        },
+        "simt_load_swide_masked_rows2": {
+          "terms": [
+            "W2",
+            "S32",
+            "cseg_mod32",
+            "n2W",
+            "bytes_per_lane"
+          ],
+          "intercept_system_cycles": 47.988871540526844,
+          "coefficient_system_cycles": [
+            0.025040332294076387,
+            0.00912140430225997,
+            -0.436531957547584,
+            -0.0013540081375220878,
+            1.3805979449991113
+          ],
+          "evidence": "swide_phys masked refit: 161 points, in-sample MAPE 6.14%"
+        },
+        "simt_load_swide_masked_rows64_w3_8": {
+          "terms": [
+            "cseg_x_invW",
+            "L32",
+            "cseg_mod32",
+            "log_n"
+          ],
+          "intercept_system_cycles": -8.621651288404319,
+          "coefficient_system_cycles": [
+            40.029617931873766,
+            -1.1876683374109205,
+            -7.241109172843648,
+            46.73256248343816
+          ],
+          "evidence": "swide_phys masked refit: 46 points, in-sample MAPE 15.03%"
+        },
+        "simt_load_swide_masked_rows64_wgt8": {
+          "terms": [
+            "n2W",
+            "W2",
+            "h_pos",
+            "inv_n",
+            "cseg_x_invW",
+            "S32"
+          ],
+          "intercept_system_cycles": 86.419836640563,
+          "coefficient_system_cycles": [
+            1.7376560887223952e-05,
+            0.01632541328175536,
+            -2.923276599290123,
+            24026.898037616156,
+            48.27884290488751,
+            0.0002899616703081842
+          ],
+          "evidence": "swide_phys masked refit: 69 points, in-sample MAPE 10.12%"
+        },
+        "simt_load_swide_masked_rows64_wle2": {
+          "terms": [
+            "n2W",
+            "cseg_x_invW",
+            "h",
+            "W",
+            "bytes_per_lane",
+            "run_x_W",
+            "cseg_x_minW4",
+            "L32"
+          ],
+          "intercept_system_cycles": -581.9540811502466,
+          "coefficient_system_cycles": [
+            7.29464405479839e-05,
+            21.248614731955698,
+            0.23807754962775696,
+            364.9263891387984,
+            6.330485210874599,
+            -6.8704724445948875,
+            -3.2944837130348756,
+            3.4181640393708674
+          ],
+          "evidence": "swide_phys masked refit: 46 points, in-sample MAPE 12.37%"
+        },
+        "simt_load_swide_masked_rows8": {
+          "terms": [
+            "L256",
+            "maxW16",
+            "mx2048",
+            "minW2",
+            "span_div_run",
+            "n2W",
+            "L2048",
+            "L512",
+            "S256",
+            "cseg_mod32"
+          ],
+          "intercept_system_cycles": 143.00656793302858,
+          "coefficient_system_cycles": [
+            -35.19680266362742,
+            1.4804803195358454,
+            0.15984808983852522,
+            -30.5422185840562,
+            0.03737143583126952,
+            0.0003934677074161527,
+            -37.76978057762826,
+            72.08531496922407,
+            -0.00045371896371381587,
+            -0.8067628041218515
+          ],
+          "evidence": "swide_phys masked refit: 160 points, in-sample MAPE 13.35%"
+        },
+        "simt_store_swide_masked_rows16_w3_8": {
+          "terms": [
+            "L64",
+            "mis32",
+            "L32",
+            "mx128",
+            "inv_n",
+            "S128"
+          ],
+          "intercept_system_cycles": 22.635416735933347,
+          "coefficient_system_cycles": [
+            0.5596521960722762,
+            43.417955401010175,
+            0.1515167592436255,
+            -0.2176399433607294,
+            -620.333194890821,
+            8.713863808923778e-05
+          ],
+          "evidence": "swide_phys masked refit: 138 points, in-sample MAPE 9.09%"
+        },
+        "simt_store_swide_masked_rows16_wgt8": {
+          "terms": [
+            "iters_x_W",
+            "cseg_mod32",
+            "W2",
+            "S256",
+            "inv_n"
+          ],
+          "intercept_system_cycles": 15.377081650884318,
+          "coefficient_system_cycles": [
+            1.0651317163047072,
+            -0.4011904370220126,
+            0.011084764318024583,
+            0.00011392993163724569,
+            847.4359721156189
+          ],
+          "evidence": "swide_phys masked refit: 207 points, in-sample MAPE 7.05%"
+        },
+        "simt_store_swide_masked_rows16_wle2": {
+          "terms": [
+            "bytes_per_lane",
+            "mis32",
+            "L256",
+            "duty2"
+          ],
+          "intercept_system_cycles": 20.058727317446284,
+          "coefficient_system_cycles": [
+            0.8802639705124315,
+            97.44228998485895,
+            0.23960881576069032,
+            5.710916790718574
+          ],
+          "evidence": "swide_phys masked refit: 138 points, in-sample MAPE 14.99%"
+        },
+        "simt_store_swide_masked_rows2": {
+          "terms": [
+            "maxW8",
+            "h",
+            "W2",
+            "h_pos",
+            "lines_per_seg",
+            "bytes_per_segline"
+          ],
+          "intercept_system_cycles": 29.372632369596992,
+          "coefficient_system_cycles": [
+            0.7445840317837307,
+            0.03532240194036454,
+            0.019811102748139756,
+            1.1078758623848257,
+            -3.884244306706881,
+            0.015162499639423822
+          ],
+          "evidence": "swide_phys masked refit: 357 points, in-sample MAPE 8.89%"
+        },
+        "simt_store_swide_masked_rows64_w3_8": {
+          "terms": [
+            "L32",
+            "duty2",
+            "L256",
+            "logW",
+            "bytes_per_lane",
+            "duty",
+            "L2048",
+            "rows_x_duty"
+          ],
+          "intercept_system_cycles": 443.3369460220371,
+          "coefficient_system_cycles": [
+            1.0161062237884844,
+            615.6226865529666,
+            1.414739900892535,
+            -155.8807160624284,
+            -3.1822028579135218,
+            -287.96367080192465,
+            -1.8317295974354906,
+            -3.94091667096077
+          ],
+          "evidence": "swide_phys masked refit: 82 points, in-sample MAPE 9.80%"
+        },
+        "simt_store_swide_masked_rows64_wgt8": {
+          "terms": [
+            "iters_x_W",
+            "mis32",
+            "mx128",
+            "bytes_per_lane",
+            "W2",
+            "S512",
+            "S32",
+            "S2048"
+          ],
+          "intercept_system_cycles": 46.663583451863765,
+          "coefficient_system_cycles": [
+            -0.15234112342749473,
+            257.1228462797858,
+            -3.4422317194243313,
+            16.21837057986433,
+            0.030371510685575545,
+            0.0004082473222341588,
+            0.0010304156185332236,
+            -5.979231422733107e-05
+          ],
+          "evidence": "swide_phys masked refit: 123 points, in-sample MAPE 9.82%"
+        },
+        "simt_store_swide_masked_rows64_wle2": {
+          "terms": [
+            "L256",
+            "mis32",
+            "duty2",
+            "run_x_W",
+            "L2048",
+            "duty",
+            "is32",
+            "L64"
+          ],
+          "intercept_system_cycles": -595.7681514549479,
+          "coefficient_system_cycles": [
+            2.9041455434082137,
+            540.8056375349074,
+            -112.80317339206835,
+            -0.5758093192978995,
+            -1.7758369730656143,
+            -157.1054835060292,
+            343.0821209402053,
+            6.849728507319865
+          ],
+          "evidence": "swide_phys masked refit: 82 points, in-sample MAPE 9.69%"
+        },
+        "simt_store_swide_masked_rows8": {
+          "terms": [
+            "maxW8",
+            "bytes_per_lane",
+            "W2",
+            "S256",
+            "cseg_x_invW",
+            "cseg_mod32",
+            "maxW4"
+          ],
+          "intercept_system_cycles": 22.438653803813956,
+          "coefficient_system_cycles": [
+            -0.03600031419326492,
+            0.9637041141196776,
+            0.016271699251942495,
+            6.933853258269347e-05,
+            -0.1609359034446372,
+            0.17973423568225694,
+            0.6569413666364836
+          ],
+          "evidence": "swide_phys masked refit: 322 points, in-sample MAPE 10.37%"
         }
       }
     },

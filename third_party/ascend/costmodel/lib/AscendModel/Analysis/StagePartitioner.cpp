@@ -35,24 +35,6 @@ using namespace mlir::ascend;
 
 namespace {
 
-static void recomputeIssueElements(StageWorkload &work) {
-  double elements =
-      work.scalarOperations + work.scalarLoadCount + work.scalarStoreCount;
-  for (const auto &[size, count] : work.predicateCounts)
-    elements += static_cast<double>(size) * count;
-  for (const auto &entry : work.operationCounts)
-    for (const auto &[size, count] : entry.second)
-      elements += static_cast<double>(size) * count;
-  elements +=
-      32.0 *
-      (work.loadWarpInstructions + work.storeWarpInstructions +
-       work.sharedLocalLoadInstructions + work.sharedLocalStoreInstructions +
-       work.privateStackLoadInstructions + work.privateStackStoreInstructions);
-  for (const AtomicWorkload &atomic : work.atomicWorkloads)
-    elements += atomic.logicalElements;
-  work.issueElements = elements;
-}
-
 static double getTypeElementCount(Type type) {
   if (auto shaped = dyn_cast<ShapedType>(type)) {
     if (!shaped.hasStaticShape())
@@ -772,13 +754,35 @@ static void accumulateReductionWorkload(Operation *operation,
          ++axisIndex)
       axisStride *= input.getShape()[axisIndex];
     const auto reverse = operation->getAttrOfType<mlir::BoolAttr>("reverse");
+    std::string exactCombine;
+    bool simpleBinary = false;
+    if (operation->getNumRegions() == 1 &&
+        llvm::hasSingleElement(operation->getRegion(0))) {
+      Block &body = operation->getRegion(0).front();
+      Operation *terminator = body.getTerminator();
+      if (terminator && terminator->getNumOperands() == 1) {
+        Operation *combine = terminator->getOperand(0).getDefiningOp();
+        if (combine) {
+          exactCombine = combine->getName().getStringRef().str();
+          simpleBinary =
+              body.getNumArguments() == 2 && combine->getNumOperands() == 2 &&
+              combine->getNumResults() == 1 &&
+              combine->getOperand(0) == body.getArgument(0) &&
+              combine->getOperand(1) == body.getArgument(1) &&
+              combine->getResult(0).getType() == input.getElementType();
+        }
+      }
+    }
     if (independentSequences > 0)
       work.prefixScanCounts[{
           extent, independentSequences, axisStride,
           static_cast<int64_t>(operation->getNumResults()),
           reverse && reverse.getValue(), classifyScanCombine(operation),
           typeToString(input.getElementType()), input.getRank(), dimension,
-          getScalarBitWidth(input.getElementType())}] += 1.0;
+          getScalarBitWidth(input.getElementType()),
+          std::vector<int64_t>(input.getShape().begin(),
+                               input.getShape().end()),
+          exactCombine, simpleBinary}] += 1.0;
     return;
   }
   const int64_t independentRows = input.getNumElements() / extent;
@@ -1244,90 +1248,6 @@ static void accumulateOneOperation(
       1.0;
   accumulateTensorOperationWorkload(operation, profileName, executionElements,
                                     work, mappedTensor);
-}
-
-static void mergeWorkload(StageWorkload &into, StageWorkload from);
-
-static constexpr double StageWorkload::*workloadScalarFields[] = {
-    &StageWorkload::scalarOperations,
-    &StageWorkload::loadBytes,
-    &StageWorkload::storeBytes,
-    &StageWorkload::loadOperations,
-    &StageWorkload::storeOperations,
-    &StageWorkload::loadWarpInstructions,
-    &StageWorkload::storeWarpInstructions,
-    &StageWorkload::indirectLoadBytes,
-    &StageWorkload::indirectStoreBytes,
-    &StageWorkload::indirectLoadTransactions,
-    &StageWorkload::indirectStoreTransactions,
-    &StageWorkload::partialContinuousLoadRows,
-    &StageWorkload::partialContinuousStoreRows,
-    &StageWorkload::partialContinuousLoadBytes,
-    &StageWorkload::partialContinuousStoreBytes,
-    &StageWorkload::partialContinuousLoadWarpInstructions,
-    &StageWorkload::partialContinuousStoreWarpInstructions,
-    &StageWorkload::sharedLocalLoadInstructions,
-    &StageWorkload::sharedLocalStoreInstructions,
-    &StageWorkload::privateStackLoadInstructions,
-    &StageWorkload::privateStackStoreInstructions,
-    &StageWorkload::reductionOperations,
-    &StageWorkload::shuffleLaneSteps,
-    &StageWorkload::dotOperations,
-    &StageWorkload::dotFlops,
-    &StageWorkload::loopBackedges,
-    &StageWorkload::conditionalBranches,
-    &StageWorkload::divergentBranches,
-    &StageWorkload::synchronizations,
-    &StageWorkload::scalarLoadCount,
-    &StageWorkload::scalarStoreCount,
-};
-
-template <typename Map> static void scaleCounts(Map &counts, double scale) {
-  for (auto &entry : counts)
-    entry.second *= scale;
-}
-
-template <typename Map> static void mergeCounts(Map &into, const Map &from) {
-  for (const auto &[key, count] : from)
-    into[key] += count;
-}
-
-static void scaleWorkload(StageWorkload &work, double scale) {
-  for (auto &reduction : work.reductionWorkloads)
-    reduction.instances *= scale;
-  for (auto field : workloadScalarFields)
-    work.*field *= scale;
-  for (auto &access : work.memoryAccesses)
-    access.count *= scale;
-  for (AtomicWorkload &atomic : work.atomicWorkloads) {
-    atomic.logicalElements *= scale;
-    atomic.logicalOperationInstances *= scale;
-  }
-  scaleCounts(work.indirectLoadCounts, scale);
-  scaleCounts(work.segmentedIndirectLoadCounts, scale);
-  scaleCounts(work.indirectStoreCounts, scale);
-  scaleCounts(work.segmentedIndirectStoreCounts, scale);
-  scaleCounts(work.continuousLoadCounts, scale);
-  scaleCounts(work.continuousStoreCounts, scale);
-  scaleCounts(work.predicateCounts, scale);
-  scaleCounts(work.prefixScanCounts, scale);
-  scaleCounts(work.reductionGeometryCounts, scale);
-  scaleCounts(work.reductionCombineClassCounts, scale);
-  scaleCounts(work.scalarizedMultiResultReductionCounts, scale);
-  scaleCounts(work.sortCounts, scale);
-  scaleCounts(work.oneTripMaskedAccumulatorReductionExtents, scale);
-  scaleCounts(work.dotFlopCounts, scale);
-  scaleCounts(work.dotShapeCounts, scale);
-  for (auto &[key, entry] : work.dotOperandPaths)
-    entry.second *= scale;
-  for (auto &entry : work.operationCounts)
-    for (auto &[size, count] : entry.second)
-      count *= scale;
-  for (TensorOperationWorkload &tensor : work.tensorOperationWorkloads) {
-    tensor.logicalElements *= scale;
-    tensor.segmentCount *= scale;
-  }
-  recomputeIssueElements(work);
 }
 
 static std::optional<int64_t> getConstantInteger(Value value) {
@@ -1949,7 +1869,9 @@ static bool hasKnownAtMostOneIteration(Operation *operation) {
   if (!operation)
     return false;
   const LoopTripCountInfo solution = analyzeLoopTripCount(operation);
-  return solution.constantTripCount && *solution.constantTripCount <= 1;
+  const auto exact = solution.constantTripCount ? solution.constantTripCount
+                                                : solution.launchBoundTripCount;
+  return exact && *exact <= 1;
 }
 
 /// Accumulate dynamic work, not merely the number of syntactic TTIR ops.
@@ -1991,10 +1913,27 @@ static void accumulateDynamicOperationTree(
     local.conditionalBranches = local.divergentBranches = 1.0;
   if (name.contains("barrier") || name.contains("sync"))
     local.synchronizations = 1.0;
-  scaleWorkload(local, multiplicity);
-  mergeWorkload(work, std::move(local));
+  // Record the scan's combine-region work separately, per occurrence.
+  // Formula evaluation decides whether to omit it or restore it on fallback.
+  const bool hasScanRegion =
+      name == "tt.scan" && local.prefixScanCounts.size() == 1;
+  if (hasScanRegion) {
+    StageWorkload regionWork;
+    for (Region &region : operation->getRegions())
+      for (Block &block : region)
+        for (Operation &nested : block.getOperations())
+          accumulateDynamicOperationTree(
+              &nested, regionWork, 1.0, fallbackLoopTripCount, estimates,
+              logicalProgramCountHint, mappedTensor, skipReductionBodies,
+              nullptr, memoryPatterns);
+    local.prefixScanCombineWorkloads.emplace(
+        local.prefixScanCounts.begin()->first, std::move(regionWork));
+  }
+  local.scale(multiplicity);
+  work.merge(std::move(local));
 
-  if (schedulingLoop)
+  // Retain the region separately until a candidate's fitted cost is known.
+  if (schedulingLoop || hasScanRegion)
     return;
   // A split loop shell owns only control and carried-state overhead; its body
   // operations are separate roots and must not be double-counted.
@@ -2053,65 +1992,10 @@ inferRuntimeGridStrideIterations(const LogicalStage &stage,
   return iterations;
 }
 
-static void mergeWorkload(StageWorkload &into, StageWorkload from) {
-  llvm::append_range(into.reductionWorkloads,
-                     std::move(from.reductionWorkloads));
-  for (auto field : workloadScalarFields)
-    into.*field += from.*field;
-  into.memoryAccesses.insert(into.memoryAccesses.end(),
-                             from.memoryAccesses.begin(),
-                             from.memoryAccesses.end());
-  llvm::append_range(into.atomicWorkloads, std::move(from.atomicWorkloads));
-  mergeCounts(into.indirectLoadCounts, from.indirectLoadCounts);
-  mergeCounts(into.segmentedIndirectLoadCounts,
-              from.segmentedIndirectLoadCounts);
-  mergeCounts(into.indirectStoreCounts, from.indirectStoreCounts);
-  mergeCounts(into.segmentedIndirectStoreCounts,
-              from.segmentedIndirectStoreCounts);
-  mergeCounts(into.continuousLoadCounts, from.continuousLoadCounts);
-  mergeCounts(into.continuousStoreCounts, from.continuousStoreCounts);
-  mergeCounts(into.predicateCounts, from.predicateCounts);
-  mergeCounts(into.prefixScanCounts, from.prefixScanCounts);
-  mergeCounts(into.reductionGeometryCounts, from.reductionGeometryCounts);
-  mergeCounts(into.reductionCombineClassCounts,
-              from.reductionCombineClassCounts);
-  mergeCounts(into.scalarizedMultiResultReductionCounts,
-              from.scalarizedMultiResultReductionCounts);
-  mergeCounts(into.sortCounts, from.sortCounts);
-  mergeCounts(into.oneTripMaskedAccumulatorReductionExtents,
-              from.oneTripMaskedAccumulatorReductionExtents);
-  mergeCounts(into.dotFlopCounts, from.dotFlopCounts);
-  mergeCounts(into.dotShapeCounts, from.dotShapeCounts);
-  for (const auto &[key, entry] : from.dotOperandPaths) {
-    into.dotOperandPaths[key].first = entry.first;
-    into.dotOperandPaths[key].second += entry.second;
-  }
-  for (const auto &[name, counts] : from.operationCounts)
-    for (const auto &[size, count] : counts)
-      into.operationCounts[name][size] += count;
-  for (TensorOperationWorkload &source : from.tensorOperationWorkloads) {
-    auto destination =
-        llvm::find_if(into.tensorOperationWorkloads,
-                      [&](const TensorOperationWorkload &item) {
-                        return item.operation == source.operation &&
-                               item.elementBitWidth == source.elementBitWidth &&
-                               item.contiguousElementsPerSegment ==
-                                   source.contiguousElementsPerSegment;
-                      });
-    if (destination == into.tensorOperationWorkloads.end()) {
-      into.tensorOperationWorkloads.push_back(std::move(source));
-      continue;
-    }
-    destination->logicalElements += source.logicalElements;
-    destination->segmentCount += source.segmentCount;
-  }
-  recomputeIssueElements(into);
-}
-
 static void makePerIteration(LogicalStage &stage) {
   const double count =
       static_cast<double>(std::max<int64_t>(1, stage.iterationCount));
-  scaleWorkload(stage.workload, 1.0 / count);
+  stage.workload.scale(1.0 / count);
 }
 
 static Operation *getTopLevelSemanticRoot(Operation *operation);
@@ -3672,12 +3556,11 @@ llvm::Error StageWorkloadAnalysis::analyze(
           root, external, semanticRootEntryMultiplicity(root),
           fallbackLoopTripCount, ignoredFeatures, logicalProgramCountHint, {},
           true, nullptr, memoryPatterns);
-    scaleWorkload(external, 1.0 / std::max<int64_t>(1, stage.iterationCount));
+    external.scale(1.0 / std::max<int64_t>(1, stage.iterationCount));
     stage.reductionExternalWorkload = std::move(external);
     for (auto &contribution : stage.reductionContributions)
-      scaleWorkload(contribution,
-                    1.0 / std::max<int64_t>(1, stage.iterationCount));
-    recomputeIssueElements(work);
+      contribution.scale(1.0 / std::max<int64_t>(1, stage.iterationCount));
+    work.recomputeIssueElements();
     stage.workload = std::move(work);
     makePerIteration(stage);
     stage.features.activeLaneRatio = 1.0;
@@ -3957,9 +3840,4 @@ StagePartitioner::partition(ModuleOp module, const SimtAnchorPlan &anchorPlan,
   if (llvm::Error error = StagePartitionVerifier().verify(*result))
     return std::move(error);
   return std::move(*result);
-}
-
-void mlir::ascend::mergeReductionResidualWorkload(StageWorkload &into,
-                                                  StageWorkload from) {
-  mergeWorkload(into, std::move(from));
 }

@@ -2414,6 +2414,8 @@ def _normalize_compile_mode(compile_mode, arch: str) -> str:
     Model, which selects the effective mode per kernel.  Pure-SIMT remains an
     Ascend 950-only explicit compile mode.
     """
+    # Preserve the process-wide override before validation and derived options.
+    compile_mode = os.environ.get("TRITON_ASCEND_COMPILE_MODE") or compile_mode
     if compile_mode is None:
         # TorchNPU's Inductor path forwards None when the kernel config does
         # not record a compile mode; "unspecified" resolves to the default.
@@ -3067,7 +3069,9 @@ class AscendBackend(BaseBackend):
         fact: it does not inspect a kernel name, argument name, source path, or
         tensor shape.
         """
-        compile_mode = options.get("compile_mode") or os.environ.get("TRITON_ASCEND_COMPILE_MODE", "")
+        # Binding runs before option parsing, including cache-key-only callers.
+        # Resolve precedence here; leave mode/target validation to NPUOptions.
+        compile_mode = os.environ.get("TRITON_ASCEND_COMPILE_MODE") or options.get("compile_mode")
         if compile_mode != "simd_simt":
             return {}
         explicit = options.get("auto_simt_runtime_scalar_values")

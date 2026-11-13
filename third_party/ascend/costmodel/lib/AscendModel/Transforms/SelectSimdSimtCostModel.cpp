@@ -198,8 +198,14 @@ struct SelectSimdSimtCostModelPass
       analysisModule = *parsedAnalysisModule;
     }
 
+    // Resolve launch facts in a private route-neutral view as well as in the
+    // transformed analysis view. Do not specialize the production TTIR.
+    OwningOpRef<ModuleOp> loopWorkloadModule;
+    if (parsedAnalysisModule)
+      loopWorkloadModule = cast<ModuleOp>(module->clone());
     SimdSimtCostModelOptions options;
-    options.loopWorkloadModule = module;
+    options.loopWorkloadModule =
+        loopWorkloadModule ? *loopWorkloadModule : analysisModule;
     options.profilePath = profilePath.getValue();
     options.actualTarget = actualTarget.getValue();
     options.numWarps =
@@ -234,7 +240,9 @@ struct SelectSimdSimtCostModelPass
           signalPassFailure();
           return;
         }
-        if (failed(attachRuntimeScalarValues(analysisModule, *object))) {
+        if (failed(attachRuntimeScalarValues(analysisModule, *object)) ||
+            (loopWorkloadModule &&
+             failed(attachRuntimeScalarValues(*loopWorkloadModule, *object)))) {
           module.emitError("invalid runtime scalar values in route capability");
           signalPassFailure();
           return;

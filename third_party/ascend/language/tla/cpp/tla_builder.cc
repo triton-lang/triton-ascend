@@ -957,7 +957,7 @@ void init_tla_builder(py::module &&m) {
           py::arg("mode") = "zeroing")
       .def(
           "create_simd_chistv2",
-          [](TLABuilder &self, Value acc, Value src, Value mask, int32_t bin) {
+          [](TLABuilder &self, Value acc, Value src, Value mask, int32_t bin) -> Value {
             return self.create<hivmave::VFCHistV2Op>(
                 acc.getType(), acc, src, mask,
                 self.getBuilder().getI32IntegerAttr(bin)).getResult();
@@ -965,13 +965,13 @@ void init_tla_builder(py::module &&m) {
           py::arg("acc"), py::arg("src"), py::arg("mask"), py::arg("bin"))
       .def(
           "create_simd_vsqz",
-          [](TLABuilder &self, Value src, Value mask) {
+          [](TLABuilder &self, Value src, Value mask) -> Value {
             return self.create<hivmave::VFSqueezeOp>(src.getType(), src, mask)
                 .getResult();
           })
       .def(
           "create_simd_vselr",
-          [](TLABuilder &self, Value src, Value indices) {
+          [](TLABuilder &self, Value src, Value indices) -> Value {
             return self.create<hivmave::VFSelectRegOp>(src.getType(), src, indices)
                 .getResult();
           })

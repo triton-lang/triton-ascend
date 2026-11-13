@@ -532,7 +532,7 @@ static void collectUpstream(int smallBlockId, Block *block,
         continue;
       }
       if (bm.getBlockIdByOp(defInBlock) == -1 ||
-          CVPipeline::getOpCoreType(defInBlock) !=
+          CVPipeline::getCoreTypeOfSimpleOpOrCf(defInBlock) !=
               CVPipeline::CoreType::VECTOR_ONLY) {
         haveCubeLink = true;
         break;
@@ -587,9 +587,8 @@ collectDownstream(int smallBlockId, Block *block,
           continue;
         }
 
-        if (bid == -1 || CVPipeline::getOpCoreType(userInBlock) !=
+        if (bid == -1 || CVPipeline::getCoreTypeOfSimpleOpOrCf(userInBlock) !=
                              CVPipeline::CoreType::VECTOR_ONLY) {
-          // FIXME: wait for multi-region
           haveCubeLink = true;
           break;
         }
@@ -801,7 +800,7 @@ void MergeSmallBlockPass::runOnOperation() {
       if (ops.empty() || cntComputeOps(ops) > MIN_VF_SIZE) {
         continue;
       }
-      if (CVPipeline::getOpCoreType(*ops.begin()) !=
+      if (CVPipeline::getCoreTypeOfSimpleOpOrCf(*ops.begin()) !=
           CVPipeline::CoreType::VECTOR_ONLY) {
         continue;
       }

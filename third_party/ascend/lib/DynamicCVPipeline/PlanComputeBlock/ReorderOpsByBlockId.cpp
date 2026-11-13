@@ -281,7 +281,7 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
       startingVectorBlocks.push_back(i);
     }
   }
-  constexpr size_t kPriviledgedMaxComputeOpCnt = 1;
+  constexpr size_t PRIVILEGED_MAX_COMPUTE_OP_CNT = 1;
   std::stable_partition(startingVectorBlocks.begin(),
                         startingVectorBlocks.end(), [this](unsigned idx) {
                           const auto blockId = groupIds[idx];
@@ -290,15 +290,13 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
                           for (auto op : ops) {
                             if (isTensorComputeOp(op)) {
                               computeOpCnt++;
-                              LOG_DEBUG("Tensor compute op: " << *op);
                             } else {
-                              LOG_DEBUG("Not tensor compute op: " << *op);
                             }
                           }
                           LOG_DEBUG("Summary: group id "
-                                    << blockId
-                                    << " compute ops: " << computeOpCnt);
-                          return computeOpCnt > kPriviledgedMaxComputeOpCnt;
+                                    << blockId << " compute ops: "
+                                    << computeOpCnt << "\n");
+                          return computeOpCnt <= PRIVILEGED_MAX_COMPUTE_OP_CNT;
                         });
   ready.append(startingVectorBlocks);
   unsigned head = 0;
@@ -307,12 +305,19 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
     auto cur = ready[head++];
 
     result.push_back(groupIds[cur]);
-
+    SmallVector<unsigned> nextReady;
     for (unsigned succIdx : succs[cur]) {
       if (--inDeg[succIdx] == 0) {
-        ready.push_back(succIdx);
+        nextReady.push_back(succIdx);
       }
     }
+    std::stable_partition(nextReady.begin(), nextReady.end(),
+                          [this](unsigned idx) {
+                            const auto blockId = groupIds[idx];
+                            const auto ops = bm.getOpsRefByBlockId(blockId);
+                            return ops.empty();
+                          });
+    ready.append(nextReady.begin(), nextReady.end());
   }
 
   ready.clear();

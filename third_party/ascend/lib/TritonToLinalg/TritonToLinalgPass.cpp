@@ -1573,16 +1573,28 @@ static void specializeFullRowCopies(ModuleOp moduleOp) {
   });
   IRRewriter rewriter(moduleOp.getContext());
   for (scf::ForOp loop : loops) {
-    // Do not duplicate nested control flow, allocations, or other accesses.
+    // Allow one conditional padding fill, checked against the copied row
+    // below. Other nested control flow, allocations and accesses stay intact.
     memref::CopyOp copy;
+    scf::IfOp padding;
     bool supported = true;
     unsigned numOps = 0;
     for (Operation &op : loop.getBody()->without_terminator()) {
-      if (++numOps > 32 || op.getNumRegions() != 0) {
+      if (++numOps > 32) {
         supported = false;
         break;
       }
-      if (auto candidate = dyn_cast<memref::CopyOp>(op)) {
+      if (auto candidate = dyn_cast<scf::IfOp>(op)) {
+        if (padding || candidate.getNumResults() != 0 ||
+            !candidate.getElseRegion().empty()) {
+          supported = false;
+          break;
+        }
+        padding = candidate;
+      } else if (op.getNumRegions() != 0) {
+        supported = false;
+        break;
+      } else if (auto candidate = dyn_cast<memref::CopyOp>(op)) {
         if (copy) {
           supported = false;
           break;
@@ -1638,6 +1650,20 @@ static void specializeFullRowCopies(ModuleOp moduleOp) {
         !isConstantIntValue(row.getMixedSizes()[1], width))
       continue;
 
+    if (padding) {
+      auto condition = padding.getCondition().getDefiningOp<arith::CmpIOp>();
+      auto body = padding.thenBlock()->without_terminator();
+      if (!condition || condition.getPredicate() != arith::CmpIPredicate::slt ||
+          condition.getLhs() != extent ||
+          !isConstantIntValue(condition.getRhs(), width) ||
+          !llvm::hasSingleElement(body))
+        continue;
+      auto fill = dyn_cast<linalg::FillOp>(*body.begin());
+      if (!fill || fill.getNumResults() != 0 ||
+          fill.getOutputs().front() != row.getResult())
+        continue;
+    }
+
     rewriter.setInsertionPoint(loop);
     Location loc = copy.getLoc();
     Value fullWidth = rewriter.create<arith::ConstantIndexOp>(loc, width);
@@ -1648,6 +1674,10 @@ static void specializeFullRowCopies(ModuleOp moduleOp) {
     rewriter.setInsertionPointToStart(branch.thenBlock());
     IRMapping mapping;
     auto fastLoop = cast<scf::ForOp>(rewriter.clone(*loop, mapping));
+    // extent == width makes the recognized extent < width padding inactive.
+    // Keep the original padding and its value unchanged in the tail loop.
+    if (padding)
+      rewriter.eraseOp(*fastLoop.getBody()->getOps<scf::IfOp>().begin());
     auto fastCopy = *fastLoop.getBody()->getOps<memref::CopyOp>().begin();
     // Under extent == width the two zero-offset subviews are the complete
     // static rows. Bypass them explicitly; no branch-sensitive folding needed.

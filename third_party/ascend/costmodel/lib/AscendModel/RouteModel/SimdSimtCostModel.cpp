@@ -1985,6 +1985,24 @@ static void readStageResources(ProfileJSONReader &reader,
       else
         profile.recurrenceGroupBaseWarpCount = *baseWarpCount;
     }
+    if (const auto *geometry =
+            recurrence->getObject("measured_reduction_geometry")) {
+      const std::string path =
+          prefix + ".loop_carried_recurrence.measured_reduction_geometry";
+      profile.recurrenceGroupMeasuredIndependentRows =
+          reader.integer(*geometry, "independent_rows", path);
+      profile.recurrenceGroupMeasuredExtent =
+          reader.integer(*geometry, "extent", path);
+      profile.recurrenceGroupMeasuredElementBits =
+          reader.integer(*geometry, "element_bits", path);
+      profile.recurrenceGroupMeasuredMaximumLaneSteps =
+          reader.integer(*geometry, "maximum_lane_steps", path);
+      if (profile.recurrenceGroupMeasuredIndependentRows <= 0 ||
+          profile.recurrenceGroupMeasuredExtent <= 0 ||
+          profile.recurrenceGroupMeasuredElementBits <= 0 ||
+          profile.recurrenceGroupMeasuredMaximumLaneSteps <= 0)
+        reader.setError(path + " values must be positive");
+    }
     readFactorMeasurementCurveFields(
         *recurrence, "system_cycle", microbench, reader,
         prefix + ".loop_carried_recurrence",

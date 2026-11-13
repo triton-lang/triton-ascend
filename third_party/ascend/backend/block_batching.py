@@ -41,17 +41,8 @@ class _BatchLaunchHandler:
     def run(self, fn, args, kwargs, grid, warmup, device, stream, backend, jit_tail):
         # Preserve pre-run hooks, cache identity and single callback evaluation
         # without adding a hook to the common JIT frontend.
-        from .block_auto_dispatch import prepare_launch
-        automatic = ("block_batching_factor" not in fn.arg_names
-                     and kwargs.get("block_batching_factor", "auto") == "auto")
-        capture_baseline = automatic and not warmup and _capture_state() is not False
-        kwargs, grid = prepare_launch(fn, args, kwargs, grid, warmup, device, backend)
         bind = None if warmup else lambda: fn.device_caches[device][4](*args, **kwargs)[0]
         grid = _annotate_launch_grid(kwargs, grid, bind=bind)
-        if capture_baseline:
-            # Warmup used the original JIT owner. Dynamic reuse can construct a
-            # different owner, whose first compile/load is forbidden in capture.
-            return jit_tail(args, kwargs, grid, warmup, device, stream)
         from .reuse.config import enabled
 
         if enabled():
@@ -276,18 +267,19 @@ def _batched_blocks(grid, axis, factor):
     return batched[0] * batched[1] * batched[2]
 
 
-def _core_floor(*, cv=False):
-    """Minimum grouped task count after normal device-limit validation.
+def _core_floor():
+    """Minimum merged task count for the supported AIV-only candidates.
 
-    The default vector-core occupancy heuristic applies to VV only. CV factor
-    selection can favor batching an underfilled wave, so it has no default
-    task-count floor. An explicit override remains effective for both paths.
+    Batching validates final execution mode as AIV, so its scheduling floor
+    must use available vector cores rather than cube cores. Device limits
+    remain owned and validated by the device interface. An explicit override
+    is honored only after that validation; zero disables the floor.
     """
     import os
     from triton.runtime import driver
     available_aiv = driver.active.utils.get_aivector_core_num()
     override = os.getenv("TA_BLOCK_BATCHING_CORE_FLOOR")
-    return int(override) if override is not None else (0 if cv else available_aiv)
+    return int(override) if override is not None else available_aiv
 
 
 def _capture_state():
@@ -396,10 +388,9 @@ class BatchKernel:
                 # the original extent is masked-off work bought for nothing.
                 reason = "GRID_NOT_REDUCED"
             elif _batched_blocks(grid, self.block_batching["selected_axis"],
-                                 1 if self._preserve_grid else self.request.factor) < _core_floor(
-                                     cv=_is_cv_report(self.block_batching)):
-                # CV short batches may benefit below one core wave. Apply the
-                # default AIV occupancy floor only to VV; honor explicit limits.
+                                 1 if self._preserve_grid else self.request.factor) < _core_floor():
+                # Apply the configured available-core scheduling floor. Its
+                # performance tradeoff is validated separately by workload.
                 reason = "GRID_BELOW_CORE_FLOOR"
             elif capture is not False:
                 reason = "CAPTURE_BASELINE" if capture else "CAPTURE_QUERY_UNAVAILABLE"
@@ -483,38 +474,9 @@ def _freeze_source(backend, src, baseline_options, backend_revision):
     return FrozenSource()
 
 
-def validate_candidate(candidate, request):
-    """Check the complete binary/guard contract before a candidate can compete."""
-    import hashlib
-    from .block_batching_report import VALIDATION_POLICY, CV_VALIDATION_POLICY, validate_vv_loop_contract
-    native_report = getattr(candidate.metadata, "block_batching", {})
-    cv = _is_cv_report(native_report)
-    if (native_report.get("cv_mode") not in ("disabled", "independent_batch_v1", "spatial_concat_v1")
-            or native_report.get("compile_status") != "COMPILED_GUARDED"
-            or native_report.get("validation_policy") != (CV_VALIDATION_POLICY if cv else VALIDATION_POLICY)):
-        raise BatchingRejected("CANDIDATE_VALIDATION_MISSING")
-    if (native_report.get("implementation_version") != IMPLEMENTATION_VERSION
-            or native_report.get("lane_width") != request.factor):
-        raise BatchingRejected("CANDIDATE_LAYOUT_MISMATCH")
-    if cv and native_report.get("tail_policy") != "full_groups_only":
-        raise BatchingRejected("CV_CONTRACT_MISMATCH")
-    expected = getattr(candidate.metadata, "block_batching_binary_sha256", None)
-    if expected != hashlib.sha256(candidate.kernel).hexdigest():
-        raise BatchingRejected("CANDIDATE_BINARY_CHANGED")
-    from .block_batching_guard_v3 import validate_plan_binding
-    guard = native_report.get("guard", {})
-    if (not validate_plan_binding(guard)
-            or getattr(candidate.metadata, "block_batching_plan_sha256", None) != guard.get("plan_fingerprint")):
-        raise BatchingRejected("CANDIDATE_PLAN_CHANGED")
-    validate_vv_loop_contract(candidate.metadata._asdict())
-    return dict(native_report)
-
-
 def compile_bundle(backend, src, options, compile_variant):
-    if options.get("block_batching_factor") == "auto":
-        from .block_auto_dispatch import compile_auto_bundle
-        return compile_auto_bundle(backend, src, options, compile_variant)
     import subprocess
+    import hashlib
     from triton.compiler.errors import MLIRCompilationError
     request = BatchRequest(options.get("block_batching_factor", 1), options.get("block_batching_axis", -1))
     normalized = backend.parse_options(options)
@@ -546,7 +508,29 @@ def compile_bundle(backend, src, options, compile_variant):
             raise BatchingRejected("AST_SOURCE_REQUIRED")
         positions = _runtime_positions(src)
         candidate, layout_fallback = _compile_layout_candidate(compile_variant, options, frozen, request)
-        report = validate_candidate(candidate, request)
+        from .block_batching_report import VALIDATION_POLICY, CV_VALIDATION_POLICY
+        native_report = getattr(candidate.metadata, "block_batching", {})
+        cv = _is_cv_report(native_report)
+        if (native_report.get("cv_mode") not in ("disabled", "independent_batch_v1", "spatial_concat_v1")
+                or native_report.get("compile_status") != "COMPILED_GUARDED"
+                or native_report.get("validation_policy") != (CV_VALIDATION_POLICY if cv else VALIDATION_POLICY)):
+            raise BatchingRejected("CANDIDATE_VALIDATION_MISSING")
+        if (native_report.get("implementation_version") != IMPLEMENTATION_VERSION
+                or native_report.get("lane_width") != request.factor):
+            raise BatchingRejected("CANDIDATE_LAYOUT_MISMATCH")
+        if cv and native_report.get("tail_policy") != "full_groups_only":
+            raise BatchingRejected("CV_CONTRACT_MISMATCH")
+        expected = getattr(candidate.metadata, "block_batching_binary_sha256", None)
+        if expected != hashlib.sha256(candidate.kernel).hexdigest():
+            raise BatchingRejected("CANDIDATE_BINARY_CHANGED")
+        from .block_batching_guard_v3 import validate_plan_binding
+        guard = native_report.get("guard", {})
+        if (not validate_plan_binding(guard)
+                or getattr(candidate.metadata, "block_batching_plan_sha256", None) != guard.get("plan_fingerprint")):
+            raise BatchingRejected("CANDIDATE_PLAN_CHANGED")
+        from .block_batching_report import validate_vv_loop_contract
+        validate_vv_loop_contract(candidate.metadata._asdict())
+        report = dict(native_report)
         if layout_fallback:
             report["layout"] = dict(report["layout"], requested_policy="auto", selected_policy="semantic_only",
                                     compile_fallback=layout_fallback)

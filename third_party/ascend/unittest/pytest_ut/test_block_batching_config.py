@@ -27,35 +27,25 @@ def test_core_floor_uses_available_aiv(device, monkeypatch, limit, expected):
 
 @pytest.mark.parametrize('limit', ['0,0', '33,66', '8,8', 'invalid', '8', '-1,-2'])
 @pytest.mark.parametrize('override', [None, '0', '7'])
-@pytest.mark.parametrize('cv', [False, True])
-def test_core_floor_preserves_device_validation(device, monkeypatch, limit, override, cv):
+def test_core_floor_preserves_device_validation(device, monkeypatch, limit, override):
     monkeypatch.setenv('NPU_DEVICE_LIMIT', limit)
     if override is not None:
         monkeypatch.setenv('TA_BLOCK_BATCHING_CORE_FLOOR', override)
     with pytest.raises(ValueError) as expected:
         device.get_aivector_core_num()
     with pytest.raises(ValueError) as actual:
-        batching._core_floor(cv=cv)
+        batching._core_floor()
     assert str(actual.value) == str(expected.value)
 
 
 @pytest.mark.parametrize('override', ['0', '7', '64'])
-@pytest.mark.parametrize('cv', [False, True])
-def test_core_floor_explicit_override_has_priority_after_validation(device, monkeypatch, override, cv):
+def test_core_floor_explicit_override_has_priority_after_validation(device, monkeypatch, override):
     monkeypatch.setenv('NPU_DEVICE_LIMIT', '8,16')
     monkeypatch.setenv('TA_BLOCK_BATCHING_CORE_FLOOR', override)
-    assert batching._core_floor(cv=cv) == int(override)
+    assert batching._core_floor() == int(override)
 
 
-@pytest.mark.parametrize('cv', [False, True])
-def test_core_floor_preserves_integer_override_validation(device, monkeypatch, cv):
+def test_core_floor_preserves_integer_override_validation(device, monkeypatch):
     monkeypatch.setenv('TA_BLOCK_BATCHING_CORE_FLOOR', 'invalid')
     with pytest.raises(ValueError):
-        batching._core_floor(cv=cv)
-
-
-@pytest.mark.parametrize('limit', [None, '16,32', '8,16'])
-def test_cv_has_no_default_occupancy_floor(device, monkeypatch, limit):
-    if limit is not None:
-        monkeypatch.setenv('NPU_DEVICE_LIMIT', limit)
-    assert batching._core_floor(cv=True) == 0
+        batching._core_floor()

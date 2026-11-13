@@ -230,8 +230,7 @@ def bundle_environment(monkeypatch):
     utils.backend_policy = 'torch_npu'
     monkeypatch.setitem(sys.modules, PACKAGE + '.utils', utils)
     monkeypatch.setattr(batching, '_capture_state', lambda: False)
-    default_core_floor = batching._core_floor
-    monkeypatch.setattr(batching, '_core_floor', lambda **_: 0)
+    monkeypatch.setattr(batching, '_core_floor', lambda: 0)
     monkeypatch.setattr(batching, '_freeze_source', lambda backend, src, opts, revision: src)
     launches = []
 
@@ -270,7 +269,7 @@ def bundle_environment(monkeypatch):
     wrapper = batching.BatchKernel(base, candidate, batching.BatchRequest(3, 0), report, [0, 1, 2, 3])
     launch = (2, 1, 1, 42, -999, {}, None, None, None, 10000, 100000, 4, 4)
     return types.SimpleNamespace(wrapper=wrapper, base=base, candidate=candidate, report=report, launch=launch,
-                                 launches=launches, knobs=knobs, Kernel=Kernel, default_core_floor=default_core_floor)
+                                 launches=launches, knobs=knobs, Kernel=Kernel)
 
 
 def test_bundle_selects_complete_variant_and_rechecks_alias(bundle_environment):
@@ -648,7 +647,7 @@ def test_vv_complete_and_partial_groups_execute_candidate(bundle_environment, ro
 @pytest.mark.parametrize('offset,applied', [(-3, False), (-1, True), (0, True), (1, True)])
 def test_core_floor_boundary_uses_ceiling_batch_count(bundle_environment, monkeypatch, floor, offset, applied):
     env = bundle_environment
-    monkeypatch.setattr(batching, '_core_floor', lambda **_: floor)
+    monkeypatch.setattr(batching, '_core_floor', lambda: floor)
     launch = list(env.launch)
     launch[0] = floor * 3 + offset
     env.wrapper.run(*launch)
@@ -686,43 +685,3 @@ def test_baseline_grid_hint_is_removed_before_freezing_and_compilation(bundle_en
     assert all('block_batching_grid' not in opts for opts in frozen_options + baseline_options)
     assert frozen_options[0] == frozen_options[1] == baseline_options[0] == baseline_options[1]
     assert [opts['block_batching_grid'] for opts in candidate_options] == [(1, 128, 1), (256, 1, 1)]
-
-
-@pytest.mark.parametrize('cv_mode', ['independent_batch_v1', 'spatial_concat_v1', 'disabled'])
-@pytest.mark.parametrize('override,expected', [(None, None), ('0', True), ('4', True), ('5', False)])
-def test_short_batch_uses_path_specific_floor(bundle_environment, monkeypatch, cv_mode, override, expected):
-    env = bundle_environment
-    utils = types.SimpleNamespace(get_aivector_core_num=lambda: 56)
-    monkeypatch.setattr(sys.modules['triton.runtime'], 'driver',
-                        types.SimpleNamespace(active=types.SimpleNamespace(utils=utils)), raising=False)
-    monkeypatch.setattr(batching, '_core_floor', env.default_core_floor)
-    monkeypatch.delenv('TA_BLOCK_BATCHING_CORE_FLOOR', raising=False)
-    if override is not None:
-        monkeypatch.setenv('TA_BLOCK_BATCHING_CORE_FLOOR', override)
-    env.report.update(cv_mode=cv_mode, candidate_factor=2, lane_width=2)
-    wrapper = batching.BatchKernel(env.base, env.candidate, batching.BatchRequest(2, 0), env.report, [0, 1, 2, 3])
-    launch = list(env.launch)
-    launch[0] = 8
-    wrapper.run(*launch)
-    applied = cv_mode != 'disabled' if expected is None else expected
-    assert wrapper.last_launch['applied_factor'] == (2 if applied else 1)
-    assert env.launches[-1][0] == ('candidate' if applied else 'baseline')
-    if applied:
-        assert wrapper.last_launch['batch_grid'] == (4, 1, 1)
-        # Removing the CV occupancy heuristic must still recheck aliasing.
-        launch[10] = launch[9]
-        wrapper.run(*launch)
-        assert wrapper.last_launch['reason'] == 'WRITE_ALIAS'
-        assert env.launches[-1][0] == 'baseline'
-    else:
-        assert wrapper.last_launch['reason'] == 'GRID_BELOW_CORE_FLOOR'
-
-
-def test_short_cv_still_requires_full_groups(bundle_environment):
-    env = bundle_environment
-    env.report['cv_mode'] = 'independent_batch_v1'
-    launch = list(env.launch)
-    launch[0] = 8
-    env.wrapper.run(*launch)  # F3 does not divide eight programs.
-    assert env.wrapper.last_launch['reason'] == 'CV_GRID_NOT_DIVISIBLE'
-    assert env.launches[-1][0] == 'baseline'

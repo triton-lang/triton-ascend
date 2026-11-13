@@ -384,8 +384,6 @@ def make_tla_ttir(mod, metadata, opt):
 
 
 def make_ttir(mod, metadata, opt):
-    if opt.block_batching_factor == "auto":
-        raise BatchingRejected("AUTO_SELECTION_REQUIRES_JIT_DISPATCH")
     if "hash" not in metadata:
         metadata["hash"] = hashlib.sha256(f"{mod}-{metadata}".encode()).hexdigest()
     # the same optimize pass for triton-ir as all other backends
@@ -478,8 +476,6 @@ def make_ttir(mod, metadata, opt):
         print(f"Dumping intermediate results to {dump_manager.cache_dir}")
         dump_manager.put(str(mod), "kernel.ttir.mlir", binary=False)
 
-    if getattr(opt, "block_auto_collect", False):
-        metadata["block_auto_ttir_sha256"] = hashlib.sha256(str(mod).encode()).hexdigest()
     return mod
 
 
@@ -654,8 +650,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             dump_manager = get_dump_manager(metadata["hash"])
             dump_manager.put(linalg_text, "kernel.ttadapter.mlir", binary=False)
 
-        if getattr(opt, "block_auto_collect", False):
-            metadata["block_auto_ttadapter_sha256"] = hashlib.sha256(linalg_text.encode()).hexdigest()
         return linalg_text
 
 
@@ -1115,21 +1109,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if plan_memory_strategy is not None:
             _compile_option_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
 
-        auto_temps = None
-        auto_compiler_sha256 = None
-        if getattr(opt, "block_auto_collect", False):
-            from .block_auto_artifacts import file_digest
-            auto_temps = _get_save_temps_dir(metadata['hash']) if opt.debug else os.path.join(tmpdir, "block_auto")
-            Path(auto_temps).mkdir(parents=True, exist_ok=True)
-            auto_compiler_sha256 = file_digest(npu_compiler_path)
-            _compile_option_list += [f"--save-temps={auto_temps}"]
-            dynamic_ub = metadata.get("shared_mem_dynamic_size")
-            if (metadata.get("parallel_mode") == "mix_simd_simt" and type(dynamic_ub) is int and dynamic_ub > 0
-                    and dynamic_ub % 1024 == 0):
-                # Bind the MIX compiler reservation to the existing runtime
-                # capacity; the supported compiler default is also 216 KiB.
-                _compile_option_list += [f"--simt-vf-dynamic-size={dynamic_ub // 1024}"]
-        elif opt.debug:
+        if opt.debug:
             _compile_option_list += [f"--save-temps={_get_save_temps_dir(metadata['hash'])}"]
 
         _compile_option_list += _masked_batch_compile_options(metadata, npu_compiler_path)
@@ -1186,12 +1166,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             validate_compilation_result(metadata)
             metadata["block_batching_binary_sha256"] = hashlib.sha256(Path(bin_path).read_bytes()).hexdigest()
             metadata["block_batching_plan_sha256"] = metadata["block_batching"]["guard"]["plan_fingerprint"]
-        binary = Path(bin_path).read_bytes()
-        if getattr(opt, "block_auto_collect", False):
-            from .block_auto_artifacts import collect
-            metadata["block_auto_evidence"] = collect(auto_temps, binary, npu_compiler_path, auto_compiler_sha256,
-                                                      metadata, cmd_list)
-        return binary
+        return Path(bin_path).read_bytes()
 
 
 def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
@@ -1509,12 +1484,8 @@ class NPUOptions:
     # driver-side profile scratch path inert.
     profile_scratch_size: int = 0
     enable_graph_optimize: bool = True
-    block_batching_factor: Union[int, str] = 1
+    block_batching_factor: int = 1
     block_batching_axis: int = -1
-    # The outer automatic JIT request owns the launch contract. Integer
-    # variants drop it and preserve only the request for CPU model evidence.
-    block_auto_contract: Optional[str] = None
-    block_auto_collect: bool = False
     # Original launch extents, including resolved callable grids for automatic
     # axis selection. This compile option distinguishes cached axis choices when
     # runtime grid dimensions change. VV permits partial final groups.
@@ -1646,12 +1617,7 @@ class NPUOptions:
     use_bytecode: bool = field(default=False, init=False)
 
     def __post_init__(self, arch, rule_mask):
-        automatic = self.block_batching_factor == "auto"
-        BatchRequest(1 if automatic else self.block_batching_factor, self.block_batching_axis)
-        if self.block_auto_contract is not None and not isinstance(self.block_auto_contract, str):
-            raise ValueError("block_auto_contract must be a serialized string")
-        if type(self.block_auto_collect) is not bool:
-            raise ValueError("block_auto_collect must be bool")
+        BatchRequest(self.block_batching_factor, self.block_batching_axis)
         if self.block_batching_grid is not None:
             grid = tuple(self.block_batching_grid)
             if len(grid) != 3 or any(type(x) is not int or x < 1 for x in grid):
@@ -1661,7 +1627,7 @@ class NPUOptions:
             raise ValueError("block_batching_layout must be auto or semantic_only")
         if self.block_batching_factor == 1:
             object.__setattr__(self, "block_batching_layout", "semantic_only")
-        if automatic or self.block_auto_collect or self.block_batching_factor > 1:
+        if self.block_batching_factor > 1:
             compiler_path, _ = _get_npucompiler_path()
             object.__setattr__(self, "block_batching_backend_revision", _batching_backend_revision(compiler_path))
         from triton.backends.ascend import _apply_ascend_patch
@@ -1980,7 +1946,7 @@ class AscendBackend(BaseBackend):
     def make_compilation_writer(self, src, options, cache, override_enabled):
         if not hasattr(src, "block_batching_source_hash"):
             return cache
-        if options.block_batching_factor != 1 and (override_enabled or options.ir_override):
+        if options.block_batching_factor > 1 and (override_enabled or options.ir_override):
             raise BatchingRejected("IR_OVERRIDE_NOT_SUPPORTED")
         from triton.runtime.cache import FileCacheManager
         if type(cache) is not FileCacheManager:

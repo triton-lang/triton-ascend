@@ -1,10 +1,8 @@
-# CV block batching: independent lanes and spatial concatenation
+# Manual CV block batching: independent lanes and spatial concatenation
 
 Dot-containing kernels automatically use CV batching when block batching is
-requested. CV integrates with the unified effect plan; no separate CV compilation
-option is required. Supported eager JIT calls automatically shortlist and rank
-factors using the CPU model described in [Block batching](block_batching.md).
-The explicit factor below selects the manual path with the same safety checks.
+requested. CV integrates with the unified effect plan and does not choose a
+factor automatically; no separate CV compilation option is required.
 
 ```python
 compiled = kernel[original_grid](
@@ -86,7 +84,7 @@ resizing just the dot. Such rewrites are reported as
 
 The proof is ordinary block matrix multiplication:
 
-```text
+```
 concat_rows(A0, A1) @ B = concat_rows(A0 @ B, A1 @ B)
 A @ concat_cols(B0, B1) = concat_cols(A @ B0, A @ B1)
 ```
@@ -243,16 +241,16 @@ negative strides, unchecked address overflow, or overlapping writes.
 The baseline compiles independently first. Before accepting a CV binary, validate
 its hash, matching native implementation, MIX/AIC mode, exact v3 grid contract,
 workspace, task type, absence of conflicting mappings and global lock use.
-Normal backend compilation admits resource usage. Recognized UB, L1 and
+Normal backend compilation admits resource usage. Recognized UB, L1/cbuf and
 L0A/B/C (`ca`, `cb`, `cc`) overflow selects baseline before submission, preserving
 the diagnostic. There is no runtime replay after device execution starts.
 Unknown internal compiler errors remain errors and must be investigated.
 
 Compilation success or baseline fallback is not optimization evidence. An
 accepted measurement requires `last_launch.runtime_status == 'APPLIED'`, the
-requested factor, numerical comparison and device timing without contention. Compare
+requested factor, numerical comparison and uncontended device timing. Compare
 baseline and candidate in adjacent interleaved rounds on identical inputs.
 
-The packaged backend compiler is unchanged; this revision changes TA's rewrite
+The packaged BishengIR backend is unchanged; this revision changes TA's rewrite
 and lowering into its existing operations. Tests and performance results are
 scoped to the registered environment and must not imply all CV kernels work.

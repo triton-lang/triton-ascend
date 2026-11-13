@@ -1986,7 +1986,7 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..a6d715e0107eee995dd92ee12fe0f72c
              alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
 diff --git a/third_party/proton/proton/mspti_instrumentation.py b/third_party/proton/proton/mspti_instrumentation.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..fadaf923bde18557669bfa993adc44d2227226b7
+index 0000000000000000000000000000000000000000..9e602a75dd506ae076e315a1be9162da56b835d7
 --- /dev/null
 +++ b/third_party/proton/proton/mspti_instrumentation.py
 @@ -0,0 +1,127 @@
@@ -2018,15 +2018,15 @@ index 0000000000000000000000000000000000000000..fadaf923bde18557669bfa993adc44d2
 +    def __init__(self):
 +        self.lib = C.CDLL(os.environ.get("PROTON_MSPTI_LIBRARY_PATH", "libmspti.so"))
 +        signatures = {
-+            "msptiInstrumentationStart": [C.c_uint32, C.POINTER(C.c_void_p)],
-+            "msptiInstrumentationStop": [C.c_void_p],
-+            "msptiInstrumentationGetRecords":
++            "msptiPerfMonitorStart": [C.c_uint32, C.POINTER(C.c_void_p)],
++            "msptiPerfMonitorStop": [C.c_void_p],
++            "msptiPerfMonitorGetRecords":
 +            [C.c_void_p,
 +             C.POINTER(C.POINTER(ScopeRecord)),
 +             C.POINTER(C.c_size_t),
 +             C.POINTER(CollectionStats)],
-+            "msptiInstrumentationDestroy": [C.c_void_p],
-+            "msptiInstrumentationGetRawData":
++            "msptiPerfMonitorDestroy": [C.c_void_p],
++            "msptiPerfMonitorGetRawData":
 +            [C.c_void_p, C.c_uint32, C.POINTER(C.POINTER(C.c_uint8)),
 +             C.POINTER(C.c_size_t)],
 +        }
@@ -2060,7 +2060,7 @@ index 0000000000000000000000000000000000000000..fadaf923bde18557669bfa993adc44d2
 +            convert.argtypes = [C.c_uint32, C.POINTER(C.c_uint32)]
 +            convert.restype = C.c_int
 +            self._check(convert(torch.npu.current_device(), C.byref(physical)), "physical device lookup")
-+            self._check(self.lib.msptiInstrumentationStart(physical.value, C.byref(self.handle)), "start")
++            self._check(self.lib.msptiPerfMonitorStart(physical.value, C.byref(self.handle)), "start")
 +        except BaseException:
 +            self._lock.release()
 +            raise
@@ -2071,10 +2071,10 @@ index 0000000000000000000000000000000000000000..fadaf923bde18557669bfa993adc44d2
 +            return []
 +        try:
 +            torch.npu.synchronize()
-+            rc = self.lib.msptiInstrumentationStop(self.handle)
++            rc = self.lib.msptiPerfMonitorStop(self.handle)
 +            records, count, stats = C.POINTER(ScopeRecord)(), C.c_size_t(), CollectionStats()
 +            self._check(
-+                self.lib.msptiInstrumentationGetRecords(self.handle, C.byref(records), C.byref(count), C.byref(stats)),
++                self.lib.msptiPerfMonitorGetRecords(self.handle, C.byref(records), C.byref(count), C.byref(stats)),
 +                "read")
 +            status = {name: getattr(stats, name) for name, _ in CollectionStats._fields_}
 +            values = [(r.channel, r.pipe, r.scope, r.start, r.end, r.frequency) for r in records[:count.value]]
@@ -2092,7 +2092,7 @@ index 0000000000000000000000000000000000000000..fadaf923bde18557669bfa993adc44d2
 +            return values
 +        finally:
 +            try:
-+                rc = self.lib.msptiInstrumentationDestroy(self.handle)
++                rc = self.lib.msptiPerfMonitorDestroy(self.handle)
 +            finally:
 +                self.handle = C.c_void_p()
 +                self._lock.release()
@@ -2113,7 +2113,7 @@ index 0000000000000000000000000000000000000000..fadaf923bde18557669bfa993adc44d2
 +            json.dumps({"stats": status, "records": records, "coverage": coverage}, indent=2))
 +        for channel in _CHANNEL_IDS:
 +            raw, size = C.POINTER(C.c_uint8)(), C.c_size_t()
-+            self._check(self.lib.msptiInstrumentationGetRawData(self.handle, channel, C.byref(raw), C.byref(size)),
++            self._check(self.lib.msptiPerfMonitorGetRawData(self.handle, channel, C.byref(raw), C.byref(size)),
 +                        "raw read")
 +            if size.value:
 +                (directory / f"channel-{channel}.bin").write_bytes(C.string_at(raw, size.value))

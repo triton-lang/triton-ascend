@@ -49,6 +49,7 @@ def test_ascend_instrumentation_a5(tmp_path, monkeypatch):
         torch.npu.synchronize()
         assert compiled.metadata.proton_collection == "mspti"
         assert compiled.metadata.profile_scratch_size == 0
+        assert compiled.metadata.profile_scratch_align == 1
     finally:
         proton.finalize(session, output_format="chrome_trace")
 

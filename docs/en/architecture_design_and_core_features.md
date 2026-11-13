@@ -94,7 +94,7 @@ NPUOptions are parameters that control the **compilation strategy of a single ke
 | Graph optimization | Toggle Graph Optimization at the TTIR level | `enable_graph_optimize` |
 | CV fusion and tiling | Automatic sub-block binding, Cube/Vector balancing and splitting | `enable_auto_bind_sub_block`, `enable_hivm_auto_cv_balance`, `tile_mix_vector_loop`, `tile_mix_cube_loop` |
 | VF / HFusion | VF fusion strategy and multiple-consumer fusion on the 950 series | `vf_fusion_mode`, `hfusion_enable_multiple_consumer_fusion` |
-| Synchronization | Solver, unit flag, and barrier/block injection | `sync_solver`, `unit_flag`, `inject_barrier_all`, `inject_block_all` |
+| Synchronization | Unit flag and barrier/block injection | `unit_flag`, `inject_barrier_all`, `inject_block_all` |
 | Multi-buffering and workspace | Buffer slot counts at each memory level and workspace multi-buffering | `multibuffer_mode`, `set_workspace_multibuffer` |
 | DynamicCV buffering | Number of buffer slots for veccore / cross-core / GM | `buf_slot_num_of_veccore`, `buf_slot_num_of_crosscore`, `buf_slot_num_of_gm` |
 

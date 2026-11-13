@@ -96,7 +96,7 @@ NPUOptions是控制**单个kernel编译策略**的参数，可通过 `triton.Con
 | 图优化 | TTIR层Graph Optimization开关 | `enable_graph_optimize` |
 | CV融合与tiling | 自动绑定sub-block、Cube/Vector平衡与切分 | `enable_auto_bind_sub_block`、`enable_hivm_auto_cv_balance`、`tile_mix_vector_loop`、`tile_mix_cube_loop` |
 | VF / HFusion | 950系列的VF融合策略与多consumer融合 | `vf_fusion_mode`、`hfusion_enable_multiple_consumer_fusion` |
-| 同步 | 求解器、unit flag及barrier/block注入 | `sync_solver`、`unit_flag`、`inject_barrier_all`、`inject_block_all` |
+| 同步 | unit flag及barrier/block注入 | `unit_flag`、`inject_barrier_all`、`inject_block_all` |
 | 多缓冲与Workspace | 各内存层级的缓冲槽数与workspace多缓冲级别 | `multibuffer_mode`、`set_workspace_multibuffer` |
 | DynamicCV缓冲 | veccore / 跨核 / GM的buffer slot数量 | `buf_slot_num_of_veccore`、`buf_slot_num_of_crosscore`、`buf_slot_num_of_gm` |
 

@@ -1772,4 +1772,10 @@ class AscendBackend(BaseBackend):
     def get_module_map(self) -> Dict[str, ModuleType]:
         from triton.language.extra.cann import libdevice
 
-        return {"triton.language.extra.libdevice": libdevice}
+        from . import bool_block_ptr
+
+        # Map module-qualified tl.* calls only. Mapping core would also remap
+        # global dtype/constexpr instances, which have no __name__ for the
+        # generic code generator's function-import lookup.
+        return {"triton.language.extra.libdevice": libdevice,
+                "triton.language": bool_block_ptr}

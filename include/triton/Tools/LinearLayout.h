@@ -433,8 +433,8 @@ public:
   }
 
   // Remove a dimension of size 1 from the layout.
-  [[nodiscard]] LinearLayout unsqueezeIn(StringAttr dim) const;
-  [[nodiscard]] LinearLayout unsqueezeOut(StringAttr dim) const;
+  [[nodiscard]] LinearLayout squeezeIns(StringAttr dim) const;
+  [[nodiscard]] LinearLayout squeezeOuts(StringAttr dim) const;
 
   const BasesT &getBases() const { return bases; }
 
@@ -594,9 +594,6 @@ public:
   [[nodiscard]] LinearLayout concatIns(const LinearLayout &other) const;
   [[nodiscard]] LinearLayout concatOuts(const LinearLayout &other) const;
 
-  // Remove all the bases that equal to 0 for the given input dimension.
-  [[nodiscard]] LinearLayout unsqueezeIns(StringAttr dim) const;
-
   // Computes the direct sum of two layouts.
   // https://en.wikipedia.org/wiki/Direct_sum#Direct_sum_of_matrices
   //
@@ -679,6 +676,15 @@ public:
   // dimensions. This means that it's the identity on those dimensions, and it
   // does not map other dimensions onto those or these onto other dimensions.
   bool isTrivialOver(ArrayRef<StringAttr> dimNames) const;
+
+  // Returns true if the output dimension `dim` is equal to the input dimension
+  // `dim`. Other input dimensions must not affect this output dimension, but
+  // `dim` is allowed to affect other output dimensions.
+  //
+  // For example, a layout mapping block -> (offset, block) as (1, 1) is the
+  // identity on the block output dimension, even though it is not trivial over
+  // block because block also affects offset.
+  bool isIdentityOnOutDim(StringAttr dim) const;
 
   // For an endomorphism on dimNames (linear map that maps dimNames to dimNames)
   // checks whether it is the identity map on these dimensions (i.e

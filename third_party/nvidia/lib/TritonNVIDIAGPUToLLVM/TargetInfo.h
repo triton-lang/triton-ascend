@@ -2,13 +2,14 @@
 #define TRITON_CONVERSION_TRITONGPU_TO_LLVM_TARGETINFONVIDIA_H
 
 #include "triton/Conversion/TritonGPUToLLVM/TargetInfoBase.h"
+#include "triton/Dialect/TritonNvidiaGPU/IR/TargetFeatures.h"
 
 namespace mlir::triton::NVIDIA {
 
 class TargetInfo : public mlir::triton::TargetInfoBase {
 public:
   TargetInfo(int computeCapability, int ptxVersion)
-      : computeCapability(computeCapability), ptxVersion(ptxVersion) {}
+      : targetFeatures(computeCapability), ptxVersion(ptxVersion) {}
 
   bool supportMaximumMinimum() const override;
 
@@ -19,19 +20,32 @@ public:
 
   void barrier(Location loc, RewriterBase &rewriter,
                triton::gpu::AddrSpace targets) const override;
+  void clusterBarrier(Location loc, RewriterBase &rewriter,
+                      Operation *sourceOp) const override;
 
   void warpSync(Location loc, RewriterBase &rewriter) const override;
 
   void storeDShared(RewriterBase &rewriter, Location loc, Value ptr,
-                    std::optional<Value> ctaId, Value val,
-                    Value pred) const override;
+                    Value ctaId, Value val, Value pred) const override;
   Value loadDShared(RewriterBase &rewriter, Location loc, Value ptr,
-                    std::optional<Value> ctaId, Type elemTy, Value pred,
+                    Value ctaId, Type elemTy, Value pred,
                     Operation *localLoadOp = nullptr) const override;
 
-  bool supportLdMatrix() const override { return computeCapability >= 75; }
-  bool supportStMatrix() const override { return computeCapability >= 90; }
-  bool supportLdStMatrixB8() const override { return computeCapability >= 100; }
+  bool supportLdMatrix() const override {
+    return targetFeatures.supportLdMatrix();
+  }
+  bool supportStMatrix() const override {
+    return targetFeatures.supportStMatrix();
+  }
+  bool supportLdStMatrixB8() const override {
+    return targetFeatures.supportLdStMatrixB8();
+  }
+  bool supportBitwidth16Elementwise() const override {
+    return targetFeatures.supportBitwidth16Elementwise();
+  }
+  bool supportBitwidth32Elementwise() const override {
+    return targetFeatures.supportBitwidth32Elementwise();
+  }
 
   Value shuffleXor(RewriterBase &rewriter, Location loc, Value val,
                    int i) const override;
@@ -49,8 +63,8 @@ public:
                   ProgramIDDim axis) const override;
 
   bool warpReduce(RewriterBase &rewriter, Location loc, SmallVector<Value> &acc,
-                  triton::ReduceOp op, unsigned numLaneToReduce,
-                  unsigned interleave) const override;
+                  triton::ReduceOp op,
+                  unsigned reduceLaneIdMask) const override;
 
   std::string getMulhiFuncName(Type resultElementTy) const override;
 
@@ -72,12 +86,14 @@ public:
   bool supportVectorizedAtomics() const override;
 
   int getPtxVersion() const { return ptxVersion; }
-  int getComputeCapability() const { return computeCapability; }
+  int getComputeCapability() const {
+    return targetFeatures.getComputeCapability();
+  }
 
   bool isCuda() const override { return true; }
 
 private:
-  int computeCapability;
+  triton::nvidia_gpu::TargetFeatures targetFeatures;
   int ptxVersion;
 };
 

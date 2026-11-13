@@ -25,7 +25,7 @@ public:
   LogicalResult
   matchAndRewrite(LLVM::CallOp callOp,
                   mlir::PatternRewriter &rewriter) const override {
-    if (isWrappedLLVMIntrinsic(callOp)) {
+    if (isWrappedLLVMIntrinsic(callOp) || isOcmlCall(callOp)) {
       return convertToLLVMIntrinsic(callOp, rewriter);
     } else {
       return failure();
@@ -36,6 +36,15 @@ private:
   bool isWrappedLLVMIntrinsic(LLVM::CallOp callOp) const {
     if (std::optional<StringRef> callee = callOp.getCallee()) {
       if (callee.value().starts_with("__triton_hip_")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool isOcmlCall(LLVM::CallOp callOp) const {
+    if (std::optional<StringRef> callee = callOp.getCallee()) {
+      if (callee.value().starts_with("__ocml_")) {
         return true;
       }
     }
@@ -65,7 +74,6 @@ private:
     StringRef calleeName = callOp.getCallee().value();
 
     auto operands = callOp.getOperands();
-    auto result = callOp.getResult();
 
     LLVM::LLVMFunctionType calleeType = callOp.getCalleeFunctionType();
     Type returnType = calleeType.getReturnType();
@@ -161,6 +169,12 @@ private:
       replacementOp = LLVM::FMulOp::create(rewriter, loc, returnType,
                                            posResult->getResult(0),
                                            sign->getResult(0), defaultFlags);
+    } else if (calleeName == "__ocml_tanh_f32") {
+      if (targetInfo.getISAFamily() == triton::amdgpu::ISAFamily::GFX1250) {
+        const char *intrinsic = "llvm.amdgcn.tanh.f32";
+        replacementOp = LLVM::createLLVMIntrinsicCallOp(
+            rewriter, loc, intrinsic, returnType, operands[0]);
+      }
     }
 
     if (replacementOp) {
@@ -179,8 +193,8 @@ private:
 struct ConvertBuiltinFuncToLLVM
     : public triton::impl::ConvertBuiltinFuncToLLVMBase<
           ConvertBuiltinFuncToLLVM> {
-  ConvertBuiltinFuncToLLVM(StringRef targetArch, bool ftz) {
-    this->arch = targetArch.str();
+  ConvertBuiltinFuncToLLVM(StringRef gfxArch, bool ftz) {
+    this->gfxArch = gfxArch.str();
     this->ftz = ftz;
   }
 
@@ -189,9 +203,9 @@ struct ConvertBuiltinFuncToLLVM
     ModuleOp mod = getOperation();
 
     GreedyRewriteConfig config;
-    config.setRegionSimplificationLevel(GreedySimplifyRegionLevel::Aggressive);
+    config.setRegionSimplificationLevel(GreedySimplifyRegionLevel::Normal);
 
-    AMD::TargetInfo targetInfo(this->arch.getValue());
+    AMD::TargetInfo targetInfo(this->gfxArch.getValue());
     RewritePatternSet patterns(context);
     patterns.add<CallOpConversion>(context, targetInfo, this->ftz);
 
@@ -206,8 +220,8 @@ struct ConvertBuiltinFuncToLLVM
 namespace mlir::triton {
 
 std::unique_ptr<OperationPass<ModuleOp>>
-createConvertBuiltinFuncToLLVMPass(StringRef targetArch, bool ftz) {
-  return std::make_unique<ConvertBuiltinFuncToLLVM>(targetArch, ftz);
+createConvertBuiltinFuncToLLVMPass(StringRef gfxArch, bool ftz) {
+  return std::make_unique<ConvertBuiltinFuncToLLVM>(gfxArch, ftz);
 }
 
 } // namespace mlir::triton

@@ -280,6 +280,7 @@ def test_block_ptr_if_carries_complete_dynamic_descriptor(choose):
 
 
 @pytest.mark.parametrize("steps", [0, 2, 5])
+@pytest.mark.skip(reason="Scope/block-ptr boundary support reverted; to be re-enabled after follow-up design analysis")
 def test_block_ptr_for_carries_changing_descriptor_and_ordinary_result(steps):
     a_cpu, b_cpu, a, b = _inputs()
     descriptor = torch.tensor([60, 55, 2, 3], dtype=torch.int64, device="npu")
@@ -299,6 +300,7 @@ def test_block_ptr_for_carries_changing_descriptor_and_ordinary_result(steps):
 
 
 @pytest.mark.parametrize("steps,switch_at", [(0, -1), (4, -1), (4, 2)])
+@pytest.mark.skip(reason="Scope/block-ptr boundary support reverted; to be re-enabled after follow-up design analysis")
 def test_block_ptr_while_carries_descriptor(steps, switch_at):
     a_cpu, b_cpu, a, b = _inputs()
     out = torch.empty(BLOCK, dtype=torch.float32, device="npu")
@@ -409,6 +411,7 @@ def test_opaque_tensor_pointer_loop(steps):
 
 
 @pytest.mark.parametrize("delta", [0, 3, 37])
+@pytest.mark.skip(reason="Scope/block-ptr boundary support reverted; to be re-enabled after follow-up design analysis")
 def test_scope_block_pointer_result(delta):
     a_cpu, _, a, _ = _inputs()
     out = torch.empty(BLOCK, dtype=torch.float32, device="npu")

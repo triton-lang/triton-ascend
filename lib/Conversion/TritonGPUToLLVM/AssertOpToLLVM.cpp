@@ -19,8 +19,6 @@ struct AssertOpConversion : public ConvertOpToLLVMPattern<triton::AssertOp> {
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     auto b = TritonLLVMOpBuilder(loc, rewriter);
-    auto ctx = rewriter.getContext();
-    auto typeConverter = getTypeConverter();
     auto elems = unpackLLElements(loc, adaptor.getCondition(), rewriter);
     auto elemTy = elems[0].getType();
     Value condition = b.int_val(elemTy.getIntOrFloatBitWidth(), 0);
@@ -31,8 +29,7 @@ struct AssertOpConversion : public ConvertOpToLLVMPattern<triton::AssertOp> {
                                               rewriter, loc, elemTy,
                                               rewriter.getZeroAttr(elemTy))));
       } else {
-        assert(false && "Unsupported type for assert");
-        return failure();
+        return op->emitError("Unsupported type for assert");
       }
     }
     llAssert(op, condition, adaptor.getMessage(), rewriter);
@@ -49,16 +46,15 @@ struct AssertOpConversion : public ConvertOpToLLVMPattern<triton::AssertOp> {
   }
   // op: the op at which the assert is inserted. Unlike printf, we need to
   // know about the op to split the block.
-  void llAssert(Operation *op, Value condition, StringRef message,
+  void llAssert(AssertOp op, Value condition, StringRef message,
                 ConversionPatternRewriter &rewriter) const {
 
-    auto ctx = rewriter.getContext();
     auto loc = op->getLoc();
+    auto b = TritonLLVMOpBuilder(loc, rewriter);
 
     StringRef file = "unknown";
     StringRef func = "unknown";
     int line = 0;
-    int col = 0;
 
     while (auto callLoc = dyn_cast<CallSiteLoc>(loc))
       loc = callLoc.getCallee();
@@ -69,27 +65,15 @@ struct AssertOpConversion : public ConvertOpToLLVMPattern<triton::AssertOp> {
     if (auto fileLineColLoc = dyn_cast<FileLineColLoc>(loc)) {
       file = fileLineColLoc.getFilename();
       line = fileLineColLoc.getLine();
-      col = fileLineColLoc.getColumn();
     }
 
-    // #block1
-    // if (condition) {
-    //   #block2
-    //   __assertfail(message);
-    // }
-    // #block3
-    Block *prevBlock = op->getBlock();
+    auto [prevBlock, ifBlock, thenBlock] =
+        createIfBlock(rewriter, loc, condition);
 
-    Block *ifBlock = rewriter.splitBlock(prevBlock, op->getIterator());
     rewriter.setInsertionPointToStart(ifBlock);
     targetInfo.assertFail(rewriter, loc, message, file, func, line);
 
     // Split a block after the call.
-    Block *thenBlock = rewriter.splitBlock(ifBlock, op->getIterator());
-    rewriter.setInsertionPointToEnd(ifBlock);
-    LLVM::BrOp::create(rewriter, loc, thenBlock);
-    rewriter.setInsertionPointToEnd(prevBlock);
-    LLVM::CondBrOp::create(rewriter, loc, condition, ifBlock, thenBlock);
     rewriter.setInsertionPointToStart(thenBlock);
   }
 

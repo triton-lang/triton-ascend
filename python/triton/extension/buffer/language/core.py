@@ -166,6 +166,9 @@ class buffer(tl.base_value):
     def _flatten_ir(self, handles: List[ir.value]) -> None:
         handles.append(self.handle)
 
+    def _set_name(self, builder: ir.builder, name: str) -> None:
+        self.handle.set_loc(builder.create_name_loc(name, self.handle.get_loc()))
+
     def __str__(self) -> str:
         # ex. "<16x32xfloat32, address_space>"
         res = '<' + 'x'.join(str(s) for s in self.shape) + 'x' + str(self.dtype)

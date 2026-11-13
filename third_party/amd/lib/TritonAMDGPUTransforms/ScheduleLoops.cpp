@@ -1,6 +1,7 @@
+#include "Dialect/TritonAMDGPU/IR/TargetFeatures.h"
 #include "TritonAMDGPUTransforms/Passes.h"
+#include "Utility.h"
 #include "amd/lib/TritonAMDGPUToLLVM/AsyncUtility.h"
-#include "amd/lib/TritonAMDGPUToLLVM/TargetInfo.h"
 #include "third_party/amd/include/Analysis/AxisInfoExt.h"
 #include "third_party/amd/lib/TritonAMDGPUTransforms/PipelineUtility.h"
 #include "triton/Analysis/AxisInfo.h"
@@ -88,14 +89,14 @@ namespace mlir {
 llvm::MapVector<Operation *, std::pair<int, Operation *>>
 getIndirectLevel(triton::AMD::ModuleAxisInfoAnalysis &axisInfoAnalysis,
                  scf::ForOp &forOp, int numStages) {
-  auto arch = getAMDArch(forOp->getParentOfType<ModuleOp>());
-  triton::AMD::ISAFamily isaFamily = triton::AMD::ISAFamily::Unknown;
-  if (arch)
-    isaFamily = triton::AMD::deduceISAFamily(*arch);
+  auto targetFeatures = triton::amdgpu::TargetFeatures::fromModuleOp(
+      forOp->getParentOfType<ModuleOp>());
+
+  bool filterSmallVectors = !targetFeatures.isCDNA4() &&
+                            !targetFeatures.isRDNA() &&
+                            !targetFeatures.isGFX1250();
 
   bool pipelineWithoutDot = forOp->hasAttr(mlir::triton::kNumStagesAttrName);
-  bool filterSmallVectors =
-      isaFamily != triton::AMD::ISAFamily::CDNA4 && !isRDNA(isaFamily);
   llvm::MapVector<Operation *, std::pair<int, Operation *>> loadOpToIndLevel =
       triton::gpu::loadOpsToIndirectionLevel(forOp, pipelineWithoutDot,
                                              axisInfoAnalysis, numStages,
@@ -308,21 +309,28 @@ namespace SingleDotSchedule {
 using namespace mlir::SingleDotSchedule;
 
 LogicalResult scheduleLoads(const LoadToInfoMap &loadToInfo, int maxDist,
-                            int numStages, const Stages &stages,
-                            const Clusters &clusters,
+                            const Stages &stages, const Clusters &clusters,
                             tt::CoarseSchedule &schedule) {
   // The stage gap between chained loads--this allows us to "spread" loads
   // with a non-one step in case the number of stages given by the user is
   // large.
+  int const numStages = schedule.getNumStages();
   assert(numStages >= 2 && "requires num_stages=2 at least");
   unsigned stagesBetweenLoads = llvm::divideCeil(numStages - 2, maxDist + 1);
   LDBG("stagesBetweenLoads = " << stagesBetweenLoads);
 
   // Put the root uses of the loads in the last stage.
   for (auto &[loadOp, info] : loadToInfo) {
-    // Non-LoadOp(s) are the (final) root uses of all LoadOp(s).
-    if (!isa<tt::LoadOp>(info.use))
+    // Hint: Basically, this condition is to check if the "use" is tt.dot.
+    // Consider the DU chains consisting only of load and dot : ld2->ld1->dot
+    // ld2's "use" is ld1 whose "use" is dot. We need to rule out internal node
+    // in the DU chain. Note that DescriptorLoadOp could be an internal node
+    // as its "indices" operands could come from a load. So, we need to check
+    // all load variants that could be pipelined.
+    if (!isa<tt::LoadOp, tt::DescriptorLoadOp, tt::DescriptorGatherOp>(
+            info.use)) {
       schedule.insert(info.use, stages[SCHED_COMPUTE], clusters[SCHED_COMPUTE]);
+    }
   }
 
   // Assign stages to the loads.
@@ -334,9 +342,9 @@ LogicalResult scheduleLoads(const LoadToInfoMap &loadToInfo, int maxDist,
   return success();
 }
 
-void initSymbolicSchedule(int maxDist, Stages &stages, int numStages,
-                          Clusters &clusters, tt::CoarseSchedule &schedule) {
-  int lastStage = numStages - 1;
+void initSymbolicSchedule(int maxDist, Stages &stages, Clusters &clusters,
+                          tt::CoarseSchedule &schedule) {
+  const int lastStage = schedule.getNumStages() - 1;
   stages[SCHED_GLOBAL_LOAD] = 0;
   stages[SCHED_LOCAL_STORE] = maxDist;
   stages[SCHED_LOCAL_LOAD] = lastStage;
@@ -349,8 +357,8 @@ void initSymbolicSchedule(int maxDist, Stages &stages, int numStages,
 
   // This is a symbolic cluster assignment. In this stage, we only focus on
   // global load and compute ops.
-  int globalLoadCluster = 0;
-  int computeCluster = 1;
+  constexpr int globalLoadCluster = 0;
+  constexpr int computeCluster = 1;
 
   clusters[SCHED_GLOBAL_LOAD] = clusterVec[globalLoadCluster];
   clusters[SCHED_COMPUTE] = clusterVec[computeCluster];
@@ -360,30 +368,21 @@ tt::CoarseSchedule
 buildSchedule(scf::ForOp &forOp, int numStages, const LoadToInfoMap &loadToInfo,
               triton::AMD::ModuleAxisInfoAnalysis &axisInfoAnalysis) {
   LDBG("Build SingleDotSchedule");
-  tt::CoarseSchedule schedule(numStages);
-  Stages stages;
-  Clusters clusters;
-
-  auto dumpSchedule = [&](llvm::StringRef msg) {
-    LLVM_DEBUG({
-      llvm::dbgs() << "\n";
-      LDBG(msg);
-      schedule.dump();
-    });
-  };
 
   int maxDist = 0;
-  for (auto &[l, info] : loadToInfo) {
+  for (auto &[_, info] : loadToInfo) {
     maxDist = std::max(maxDist, info.distToUse);
   }
 
-  int numBuffers = 1;
-  initSymbolicSchedule(maxDist, stages, numStages, clusters, schedule);
+  tt::CoarseSchedule schedule(numStages);
+  Stages stages;
+  Clusters clusters;
+  initSymbolicSchedule(maxDist, stages, clusters, schedule);
 
-  if (failed(scheduleLoads(loadToInfo, maxDist, numStages, stages, clusters,
-                           schedule)))
+  if (failed(scheduleLoads(loadToInfo, maxDist, stages, clusters, schedule)))
     return {};
-  dumpSchedule("Coarse schedule loads only:");
+
+  dumpScheduleDebug(schedule, DEBUG_TYPE, "Coarse schedule loads only:");
 
   return schedule;
 }
@@ -494,13 +493,6 @@ buildSchedule(scf::ForOp &forOp, int numStages, const LoadToInfoMap &loadToInfo,
   ChainedDotClusters clusters;
   std::generate(clusters.begin(), clusters.end(),
                 [&]() { return schedule.clusters.newAtBack(); });
-  auto dumpSchedule = [&](llvm::StringRef msg) {
-    LLVM_DEBUG({
-      llvm::dbgs() << "\n";
-      LDBG(msg);
-      schedule.dump();
-    });
-  };
 
   // Schedule dots
   auto dotOpsVec = llvm::to_vector(forOp.getBody()->getOps<tt::DotOp>());
@@ -512,12 +504,14 @@ buildSchedule(scf::ForOp &forOp, int numStages, const LoadToInfoMap &loadToInfo,
 
   if (failed(scheduleLoads(dotOps, loadToInfo, clusters, schedule)))
     return {};
-  dumpSchedule("Coarse schedule load and dots only:");
+  dumpScheduleDebug(schedule, DEBUG_TYPE,
+                    "Coarse schedule load and dots only:");
 
   if (failed(scheduleOpsBetweenDots(forOp, dotOps, schedule, clusters))) {
     return {};
   }
-  dumpSchedule("Coarse schedule after schedule ops between dots:");
+  dumpScheduleDebug(schedule, DEBUG_TYPE,
+                    "Coarse schedule after schedule ops between dots:");
 
   return schedule;
 }
@@ -542,11 +536,22 @@ void pipelineLoop(scf::ForOp forOp, int numStages) {
   LoadToInfoMap loadToInfo;
   for (const auto &[load, info] : loadOpToIndLevel) {
     auto [distance, use] = info;
+    LoadInfo loadInfo;
+    loadInfo.sharedEncoding = nullptr;
+    loadInfo.distToUse = distance;
+    loadInfo.use = use;
+
+    auto useTDM = isa<tt::DescriptorLoadOp, tt::DescriptorGatherOp>(load);
+    if (useTDM) {
+      loadToInfo[load] = loadInfo;
+      continue;
+    }
+
     auto newLoad = bypassLDS(load, use);
     if (newLoad) {
-      loadToInfo[newLoad] = {nullptr, distance, use};
+      loadToInfo[newLoad] = loadInfo;
     } else {
-      loadToInfo[load] = {nullptr, distance, use};
+      loadToInfo[load] = loadInfo;
     }
   }
 
@@ -578,7 +583,6 @@ struct ScheduleLoops : impl::TritonAMDGPUScheduleLoopsBase<ScheduleLoops> {
   using Base::Base;
 
   void runOnOperation() override {
-    ModuleOp moduleOp = getOperation();
     // check numStages
     SmallVector<scf::ForOp> loops;
     getOperation()->walk([&](scf::ForOp forOp) {

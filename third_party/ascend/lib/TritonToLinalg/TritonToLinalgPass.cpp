@@ -2606,13 +2606,16 @@ void TritonToLinalgPass::optimizeInterleavedStores(ModuleOp moduleOp) {
   for (auto [blockArg, materializeVec] : interleaveCandidate) {
     // Just enable optimization where exists double materializeOp with same
     // block argument destination.
-    if (materializeVec.size() != 2)
+    // Merging stores must preserve the condition under which each executes.
+    if (materializeVec.size() != 2 ||
+        materializeVec[0]->getBlock() != materializeVec[1]->getBlock())
       continue;
     auto result = InterleaveStatusOptimization(materializeVec);
   }
 
   for (auto [blockArg, materializeVec] : interleaveCandidateWithMask) {
-    if (materializeVec.size() != 2)
+    if (materializeVec.size() != 2 ||
+        materializeVec[0]->getBlock() != materializeVec[1]->getBlock())
       continue;
     auto result = InterleaveStatusWithMaskOptimization(materializeVec);
   }

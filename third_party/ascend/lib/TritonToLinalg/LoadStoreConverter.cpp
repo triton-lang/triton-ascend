@@ -32,6 +32,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HACC/Utils/Utils.h"
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 
@@ -1464,6 +1465,56 @@ AtomicMaxMinCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
   return success();
 }
 
+// getMemoryBoundary clips each checked axis to the tile. A unit axis thus
+// contains either no element or its complete element at offset zero. Guard the
+// store itself so the backend sees static storage, rather than deriving a
+// buffer capacity from a dynamic 0/1 slice on Ascend950.
+static LogicalResult
+storeWithUnitBoundaryGuard(triton::StoreOp op, Value value, Value pointer,
+                           ArrayRef<OpFoldResult> offsets,
+                           ArrayRef<OpFoldResult> sizes,
+                           ConversionPatternRewriter &rewriter) {
+  if (!hacc::utils::isAscend910_95(op->getParentOfType<ModuleOp>()))
+    return failure();
+  auto type = dyn_cast<RankedTensorType>(value.getType());
+  if (!type || !type.hasStaticShape())
+    return failure();
+
+  SmallVector<OpFoldResult> guardedSizes;
+  for (auto [dim, extent] : llvm::enumerate(type.getShape())) {
+    if (isConstantIntValue(offsets[dim], 0) &&
+        isConstantIntValue(sizes[dim], extent))
+      continue;
+    if (extent != 1)
+      return failure();
+    guardedSizes.push_back(sizes[dim]);
+  }
+  if (guardedSizes.empty())
+    return failure();
+
+  Location loc = op.getLoc();
+  Value one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+  Value active;
+  for (OpFoldResult size : guardedSizes) {
+    Value length = getValueOrCreateConstantIndexOp(rewriter, loc, size);
+    Value full = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
+                                                length, one);
+    if (active)
+      full = rewriter.create<arith::AndIOp>(loc, active, full);
+    active = full;
+  }
+  auto guard = rewriter.create<scf::IfOp>(loc, active);
+  {
+    OpBuilder::InsertionGuard insertionGuard(rewriter);
+    rewriter.setInsertionPointToStart(guard.thenBlock());
+    auto store = rewriter.create<bufferization::MaterializeInDestinationOp>(
+        loc, value, pointer);
+    store.setWritable(true);
+  }
+  rewriter.eraseOp(op);
+  return success();
+}
+
 LogicalResult
 StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const {
@@ -1488,6 +1539,9 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
     if (failed(getMemoryBoundary(op.getPtr(), boundaryCheck, pointerInfos,
                                  rewriter, srcOffsets, boundarySizes)))
       return rewriter.notifyMatchFailure(op, "missing block boundary facts");
+    if (succeeded(storeWithUnitBoundaryGuard(op, val, ptr, srcOffsets,
+                                             boundarySizes, rewriter)))
+      return success();
     SmallVector<OpFoldResult> dstOffsets = srcOffsets;
     auto srcSlice = mlir::ConverterUtils::makeExtractSliceOp(
         val, srcOffsets, boundarySizes, loc, rewriter);

@@ -50,7 +50,7 @@ public:
 private:
   llvm::LogicalResult processBlock(Block *block,
                                    const MemoryDependenceGraph &memGraph,
-                                   ComputeBlockIdManager &bm, bool &mergedAny);
+                                   ComputeBlockIdManager &bm);
 
   bool canMergeBlocks(BlockNode *target, BlockNode *source,
                       BlockDependencyGraph &graph,
@@ -64,8 +64,7 @@ private:
   // Perform iterative merging by repeatedly scanning the live cube blocks.
   llvm::LogicalResult performMerging(BlockDependencyGraph &graph,
                                      const MemoryDependenceGraph &memGraph,
-                                     ComputeBlockIdManager &bm,
-                                     bool &mergedAny);
+                                     ComputeBlockIdManager &bm);
 
   // Print graph structure
   void printGraph(BlockDependencyGraph &graph);

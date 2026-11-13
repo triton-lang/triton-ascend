@@ -32,16 +32,16 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
     tl.static_assert(E % 64 == 0, "E must be a multiple of 64 until tail DMA is supported")
     tl.static_assert(TMAX > 0 and CORES > 0)
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
-    scores_ub = tla.alloc_buffer((((E + 63) // 64) * 64, ), tl.float32, space="ub", versions=6)
+    scores_ub = tla.alloc((((E + 63) // 64) * 64, ), tl.float32, space="ub", versions=6)
     # int64 output (i32-equivalent): low word = index, high word = 0.
-    out_ub = tla.alloc_buffer((2 * K, ), tl.int32, space="ub", versions=6)
-    flag_ub = tla.alloc_buffer((1, ), tl.float32, space="ub")
+    out_ub = tla.alloc((2 * K, ), tl.int32, space="ub", versions=6)
+    flag_ub = tla.alloc((1, ), tl.float32, space="ub")
     for row in range(tl.program_id(0), num_tokens, CORES):
         if row < num_tokens:
             scr = tla.view(SCR_ptr, (((E + 63) // 64) * 64, ), strides=(1, ), offsets=(row * E, ))
             idx = tla.view(IDX_ptr, (2 * K, ), strides=(1, ), offsets=(row * 2 * K, ))
             flag = tla.view(FLAG_ptr, (1, ), strides=(1, ), offsets=(row, ))
-            tla.copy(scr, scores_ub)
+            tla.load_gm_to_ub(scr, scores_ub)
             with tla.scope.simd():
                 neg_inf = tla.simd.vsplat(float("-inf"), tl.float32)
                 zero32 = tla.simd.vsplat(0.0, tl.float32)
@@ -82,8 +82,8 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
                         new_sc = new_sc + (tla.simd.vsel(tla.simd.vcmp(idx_lane[i], winner, op=tla.simd.CMP.EQ),
                                                          neg_inf, sc[i]), )
                     sc = new_sc
-            tla.copy(out_ub, idx)
-            tla.copy(flag_ub, flag)
+            tla.store_ub_to_gm(out_ub, idx)
+            tla.store_ub_to_gm(flag_ub, flag)
 
 
 def constexprs():

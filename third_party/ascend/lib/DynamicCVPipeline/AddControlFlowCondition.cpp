@@ -356,7 +356,9 @@ void AddControlFlowConditionPass::runOnOperation() {
       "_jagged_dense_flash_attention_bwd_dv_db_dq_kernel",
       "parallel_nsa_compression_bwd_kernel_dq",
       "parallel_nsa_compression_bwd_kernel_dkv",
-      "kernel_sdpa_bwd_kv"};
+      "kernel_sdpa_bwd_kv",
+      "kernel_sda_fwd_down",
+      "kernel_sda_fwd_up"};
   // The outer main loop scheduling feature is built on the control flow
   // scheme of the upstream implementation: its static ordinal schedule and its
   // native credit handshake are not modelled by the normal preload scheme.

@@ -3,22 +3,20 @@
 
 namespace mlir::triton::cfg {
 
-BatchLoopLegality isSafeToBatchLoop(const BatchLoopFact *programLoop,
-                                    const BatchRangeFacts &ranges,
-                                    int gridAxis) {
+BatchResult<std::optional<BatchLogicalAxis>>
+isSafeToBatchLoop(const BatchLoopFact *programLoop, int gridAxis) {
   // Straight-line kernels and block-local loops retain program-level grouping.
-  // There is no program-axis loop to normalize in that case.
+  using Result = BatchResult<std::optional<BatchLogicalAxis>>;
   if (!programLoop)
-    return {true, "", std::nullopt};
+    return Result::success(std::nullopt);
 
-  auto schedule = normalizeBatchLoopCoordinates(*programLoop, ranges, gridAxis);
-  if (!schedule.axis)
-    return {false, schedule.reason, std::nullopt};
+  auto schedule = normalizeBatchLoopCoordinates(*programLoop, gridAxis);
+  if (!schedule.hasValue())
+    return Result::decline(schedule.diagnostic());
 
   // Each lane owns one original program and its complete row segment. The
-  // normalized segment bounds preserve its recurrence order and output slots;
-  // grouping must not repartition that segment across lanes.
-  return {true, "", schedule.axis};
+  // normalized bounds preserve its recurrence order and output slots.
+  return Result::success(std::move(schedule).takeValue());
 }
 
 } // namespace mlir::triton::cfg

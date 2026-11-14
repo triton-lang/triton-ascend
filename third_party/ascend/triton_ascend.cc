@@ -19,7 +19,7 @@
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
 #include "ascend/include/TritonToGraph/BlockBatching/BatchOpRegistry.h"
-#include "ascend/include/TritonToGraph/BlockBatching/BatchPlan.h"
+#include "ascend/include/TritonToGraph/BlockBatching/BatchRequest.h"
 #include "ascend/include/TritonToGraph/BlockBatching/MemoryModels.h"
 #include "ascend/include/TritonToGraph/BlockBatching/ReductionModels.h"
 #include "ascend/include/TritonToGraph/GraphOptimization.h"
@@ -167,6 +167,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         report["lane_width"] = result->laneWidth;
         report["guard_json"] = result->guardJSON;
         report["layout_json"] = result->layoutJSON;
+        report["computation_json"] = result->computationJSON;
         report["operations"] = result->operations;
         report["cv_mode"] = result->cvMode;
         report["cv_lowering"] = result->cvLowering;
@@ -209,6 +210,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         result["operation"] = report->operation;
         result["context"] = report->context;
         result["layout_json"] = report->layoutJSON;
+        result["computation_json"] = report->computationJSON;
         result["implementation_version"] =
             mlir::triton::cfg::kBatchImplementationVersion;
         result["operations"] = report->operations;

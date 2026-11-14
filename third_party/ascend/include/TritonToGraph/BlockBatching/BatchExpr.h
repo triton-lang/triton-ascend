@@ -3,6 +3,8 @@
 #define TRITON_TO_GRAPH_BLOCK_BATCHING_EXPR_H
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <utility>
 namespace mlir::triton::cfg {
 // Owned, immutable coordinate expressions. Coordinate IDs denote projections
 // in this access, not make_range SSA identity. No erased SSA value is retained.
@@ -44,6 +46,12 @@ struct BatchExpr {
   int64_t value = 0, extent = 0;
   BatchExprRef lhs, rhs;
   bool rangeOrigin = false;
+  // An empty expression or an unproved bound has no constant or interval.
+  static std::optional<int64_t> constant(const BatchExprRef &);
+  static std::optional<std::pair<int64_t, int64_t>>
+  rangeOf(const BatchExprRef &);
+  static int64_t largestKnownDivisor(const BatchExprRef &);
+  static bool isLaneUniform(const BatchExprRef &, unsigned mergeAxis);
   static BatchExprRef range(BatchExprRef start, BatchExprRef projection);
   static BatchExprRef leaf(Kind kind, int64_t value = 0, unsigned bits = 0,
                            int64_t extent = 0);

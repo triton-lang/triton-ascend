@@ -7,17 +7,6 @@
 #include "llvm/ADT/DenseSet.h"
 #include <string>
 namespace mlir::triton::cfg {
-struct BatchControlFlowPlan {
-  llvm::DenseMap<Value, bool> varying;
-  std::string reason;
-  Operation *operation = nullptr;
-  bool isVarying(Value value) const { return varying.lookup(value); }
-};
-// Uniform loads require a scoped ShareInvariantLoad noninterference proof.
-// Opaque reads retain lane multiplicity; rewriting consumes this fixed point.
-BatchControlFlowPlan analyzeBatchControlFlow(
-    triton::FuncOp function, int axis,
-    const llvm::DenseSet<Operation *> &replicatedLoads = {});
 // A true dot-accumulator/pointer recurrence keeps its original scf.for
 // zero-trip semantics. Retain the consumer workaround for invariant or
 // unclassified yielded tensors rather than wrapping every CV loop in an if.

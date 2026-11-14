@@ -1,14 +1,17 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-#include "TritonToGraph/BlockBatching/BatchAccessAnalysis.h"
+#include "TritonToGraph/BlockBatching/BatchAnalyzer.h"
 #include "TritonToGraph/BlockBatching/BatchFactsJSON.h"
 #include "TritonToGraph/BlockBatching/BatchLayoutPlan.h"
 #include "TritonToGraph/BlockBatching/BatchLoopForm.h"
 #include "TritonToGraph/BlockBatching/BatchLoopLegality.h"
 #include "TritonToGraph/BlockBatching/BatchLoopTransform.h"
+#include "TritonToGraph/BlockBatching/BatchMemoryRewriter.h"
 #include "TritonToGraph/BlockBatching/BatchOpRegistry.h"
 #include "TritonToGraph/BlockBatching/BatchPlan.h"
 #include "TritonToGraph/BlockBatching/BatchRangeAnalysis.h"
-#include "TritonToGraph/BlockBatching/BatchValueMapping.h"
+#include "TritonToGraph/BlockBatching/BatchRequest.h"
+#include "TritonToGraph/BlockBatching/BatchRewriteFinalizer.h"
+#include "TritonToGraph/BlockBatching/BatchRewriteWorkspace.h"
 #include "TritonToGraph/BlockBatching/CVSpatial.h"
 #include "TritonToGraph/BlockBatching/ControlFlowModels.h"
 #include "TritonToGraph/BlockBatching/ElementwiseModels.h"
@@ -410,7 +413,7 @@ bool structuredMaskExpr(const BatchExprRef &expr,
 // the stronger, conservative memory-domain guard. No predicate is rewritten
 // or erased, and a device-loaded value cannot enter this grammar.
 bool structuredControlMask(Value value, triton::FuncOp function,
-                           const BatchControlFlowPlan &control,
+                           const BatchRewriteWorkspace &control,
                            unsigned &budget) {
   if (!budget)
     return false;
@@ -523,7 +526,7 @@ bool constantZero(Value value) {
 // reduction lane from the packaged masked batch-DMA implementation.
 std::optional<llvm::json::Object>
 cvMaskContract(ArrayRef<Operation *> originals,
-               const BatchAccessReport &access) {
+               const BatchRewriteWorkspace &access) {
   Operation *dot = nullptr;
   bool multiple = false;
   for (auto *top : originals)
@@ -536,9 +539,7 @@ cvMaskContract(ArrayRef<Operation *> originals,
     });
   if (!dot || multiple)
     return std::nullopt;
-  llvm::DenseMap<Operation *, unsigned> ids;
-  for (auto [id, fact] : llvm::enumerate(access.accesses))
-    ids[fact.operation] = id;
+  const auto &ids = access.sourceIDsByOp();
   A inputs, outputs;
   for (unsigned operand = 0; operand < 2; ++operand) {
     Value value = dot->getOperand(operand);
@@ -569,10 +570,10 @@ cvMaskContract(ArrayRef<Operation *> originals,
       }
     }
   }
-  for (auto [id, fact] : llvm::enumerate(access.accesses)) {
+  for (auto [id, fact] : llvm::enumerate(access.facts->accesses())) {
     if (!fact.write)
       continue;
-    auto store = dyn_cast<triton::StoreOp>(fact.operation);
+    auto store = dyn_cast<triton::StoreOp>(access.sourceAccesses()[id]);
     if (!store)
       return std::nullopt;
     outputs.push_back(static_cast<int64_t>(id));
@@ -603,7 +604,8 @@ LogicalResult rewriteStructuredCV(ModuleOp module, triton::FuncOp function,
     if (!pidSource && static_cast<int>(pid.getAxis()) == axis)
       pidSource = pid;
   });
-  assert(pidSource && "validated program axis");
+  if (!pidSource)
+    return module.emitError("missing validated CV program axis"), failure();
   Value group = rewriter.clone(*pidSource)->getResult(0);
   Value group64 =
       rewriter.create<arith::ExtSIOp>(loc, rewriter.getI64Type(), group);
@@ -683,9 +685,127 @@ SmallVector<int64_t, 3> staticGridExtents(ModuleOp module) {
 }
 } // namespace
 
-static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
-                                                 BatchRequest request,
-                                                 bool fuseControlFlow = false) {
+// Shared source analysis, with exactly the existing CV/VV effect rules.
+// The returned obligations own no IR and perform no serialization or rewrite.
+static LogicalResult planBatchMemoryEffects(Block &block,
+                                            BatchRewriteWorkspace &access,
+                                            Operation *&diagnosticOp) {
+  for (auto [id, fact] : llvm::enumerate(access.facts->accesses())) {
+    BatchEffectRule rule =
+        fact.deviceAddress ? BatchEffectRule::ReplicateEffect
+        : fact.isVolatile  ? BatchEffectRule::PreserveVolatile
+        : !fact.write &&
+                !access.isVarying(access.sourceAccesses()[id]->getResult(0))
+            ? BatchEffectRule::ShareInvariantLoad
+        : fact.write ? BatchEffectRule::SupportedEffect
+                     : BatchEffectRule::ReplicateEffect;
+    bool byteDomain =
+        fact.write || fact.isVolatile || fact.normalizedPointer ||
+        !access.isVarying(access.sourceAccesses()[id]->getResult(0));
+    access.pendingEffects.push_back(
+        {static_cast<unsigned>(id), rule,
+         byteDomain ? BatchEffectProof::ByteDomain
+                    : BatchEffectProof::LaneCorrespondence});
+  }
+  // Known intervals retain the runtime disjointness proof. An opaque read
+  // needs no host range when its only observable write is a terminal store
+  // whose value consumes that read. Independent outputs, volatile effects,
+  // region-local reads and writes preceding a read require a stronger proof.
+  SmallVector<triton::StoreOp> writes;
+  bool hasVolatile = false;
+  for (auto [id, fact] : llvm::enumerate(access.facts->accesses())) {
+    if (fact.write)
+      writes.push_back(cast<triton::StoreOp>(access.sourceAccesses()[id]));
+    hasVolatile |= fact.isVolatile;
+  }
+  if (!writes.empty())
+    for (auto [id, fact] : llvm::enumerate(access.facts->accesses()))
+      if (fact.deviceAddress) {
+        diagnosticOp = access.sourceAccesses()[id];
+        auto read = cast<triton::LoadOp>(access.sourceAccesses()[id]);
+        if (writes.size() != 1 || hasVolatile || read->getBlock() != &block ||
+            writes.front()->getBlock() != &block ||
+            !read->isBeforeInBlock(writes.front().getOperation()) ||
+            !hasPureDataDependency(writes.front().getValue(), read.getResult()))
+          return failure();
+        access.pendingTerminalReads.push_back(id);
+      }
+  return success();
+}
+
+// Publishing is separate from rewriting: no unverified intermediate report
+// can supply an executable guard. All strategies use this one codec sink.
+static LogicalResult
+publishBatchAppliedRewrite(ModuleOp module,
+                           BatchResult<BatchAppliedRewrite> applied,
+                           BatchRewriteReport &report) {
+  if (!applied.hasValue())
+    return module.emitError(applied.diagnostic().reason), failure();
+  auto encoded = encodeBatchGuard(std::move(applied).takeValue());
+  if (!encoded.hasValue())
+    return module.emitError(encoded.diagnostic().reason), failure();
+  report.guardJSON = std::move(encoded).takeValue();
+  report.status = "REWRITTEN";
+  report.reason = "";
+  return success();
+}
+
+static LogicalResult rewriteVvSequentialIterations(
+    ModuleOp module, triton::FuncOp function, scf::ForOp scheduledLoop,
+    std::shared_ptr<const BatchPlan> plan, BatchRewriteWorkspace &workspace,
+    unsigned originalArgCount, BatchRewriteReport &report) {
+  report.vvLowering = "sequential_iterations_v1";
+  report.selectedAxis = plan->axis();
+  report.laneWidth = plan->factor();
+  report.layoutJSON = serializeBatchLayouts(plan->layouts());
+  markVvAggregations(function);
+  if (failed(markBatchEffects(workspace.sourceAccesses())))
+    return module.emitError("missing source VV effect"), failure();
+  workspace.invalidateSource();
+  if (failed(groupBatchLoopIterations(scheduledLoop, plan->factor())))
+    return failure();
+  if (failed(finalizeVvComputation(function, report.computationJSON, true,
+                                   plan->factor())))
+    return failure();
+  Builder builder(module.getContext());
+  module->setAttr("hacc.block_mapping_owner",
+                  builder.getStringAttr("block_batching"));
+  function->setAttr("hacc.block_mapping_owner",
+                    builder.getStringAttr("block_batching"));
+  // No program-grid transform or hidden extent arguments: program IDs,
+  // original loop strides and terminal recurrence slots keep their ABI.
+  if (failed(verify(module)))
+    return failure();
+  auto applied = BatchRewriteFinalizer::sequentialIterations(module, plan,
+                                                             originalArgCount);
+  return publishBatchAppliedRewrite(module, std::move(applied), report);
+}
+
+static LogicalResult
+finalizeVvProgramLanes(ModuleOp module, std::shared_ptr<const BatchPlan> plan,
+                       BatchRewriteWorkspace &workspace, Value group,
+                       unsigned originalArgCount, bool semanticOnly,
+                       BatchRewriteReport &report) {
+  if (failed(markBatchEffects(workspace.semanticAccesses)))
+    return module.emitError("missing generated VV effect"), failure();
+  auto layoutResults = initialBatchLayoutResults(plan->layouts());
+  if (!semanticOnly && failed(BatchMemoryRewriter::rewriteViews(
+                           module, workspace, plan->layouts(), layoutResults,
+                           workspace.semanticAccesses, group, originalArgCount,
+                           plan->axis(), plan->factor())))
+    return failure();
+  // Inner layout transactions may replace the entire generated body.
+  workspace.invalidateGenerated();
+  report.layoutJSON =
+      serializeBatchLayoutResults(plan->layouts(), layoutResults);
+  auto applied = BatchRewriteFinalizer::programLanes(
+      module, plan, originalArgCount, std::move(layoutResults));
+  return publishBatchAppliedRewrite(module, std::move(applied), report);
+}
+
+static FailureOr<BatchRewriteReport>
+rewriteImpl(ModuleOp module, BatchRequest request,
+            BatchRewriteWorkspace &workspace, bool fuseControlFlow = false) {
   if (!request.isValid())
     return failure();
   BatchRewriteReport report;
@@ -747,6 +867,7 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
   if (failed(normalizeBatchMemory(module, diagnosticOp, normalizationReason)))
     return reject(normalizationReason);
   normalizeIdentityReductionReshapes(function);
+  report.computationJSON = describeBatchComputation(function);
   auto &block = function.getBody().front();
   SmallVector<Operation *> originals;
   bool axes[3] = {};
@@ -853,12 +974,31 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
         diagnosticOp = failedOp;
         return reject(reason);
       }
+      // VV currently preserves each original program's one-dimensional scan
+      // domain (including singleton shape variants). Other scan domains need
+      // a separate lowering contract; do not force them through a new axis or
+      // a wider column layout merely because their memory can be structured.
+      if (!request.cv && isa<triton::ScanOp>(op) &&
+          !hasBatchIndependentScanDomain(
+              cast<RankedTensorType>(op.getOperand(0).getType()),
+              op.getAttrOfType<IntegerAttr>("axis").getInt()))
+        return reject("VV_SCAN_DOMAIN_NOT_SUPPORTED");
       op.walk([&](Operation *nested) {
         if (nested != &op)
           ++report.operations[nested->getName().getStringRef().str()];
       });
     } else if (op.getNumRegions() && !isa<scf::IfOp, scf::ForOp>(op))
       return reject("BASIC_CONTROL_FLOW_NOT_IMPLEMENTED");
+  }
+  BatchAnalyzer analyzer(function, indexBits, workspace);
+  if (!request.cv) {
+    auto aggregation = analyzer.analyzeAggregation();
+    if (!aggregation.hasValue()) {
+      if (aggregation.status() == decltype(aggregation)::Status::InternalError)
+        return module.emitError(aggregation.diagnostic().reason), failure();
+      diagnosticOp = analyzer.operation;
+      return reject(analyzer.reason);
+    }
   }
   if (request.cv && !report.operations.count("tt.dot"))
     return reject("CV_DOT_REQUIRED");
@@ -893,36 +1033,46 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
     return reject("NO_PROGRAM_AXIS");
   if (!axes[axis])
     return reject("UNUSED_BATCH_AXIS");
-  BatchPlan plan;
-  auto &access = plan.effects;
-  access = analyzeBatchAccesses(function, indexBits, cvControlFlow);
-  if (!access.reason.empty()) {
-    if (access.operation)
-      diagnosticOp = access.operation;
-    return reject(access.reason);
+  auto &facts = workspace.facts;
+  auto &plan = workspace.acceptedPlan;
+  auto &access = workspace;
+  auto collected = analyzer.collect(cvControlFlow, diagnosticOp);
+  if (!collected.hasValue()) {
+    const auto &first = collected.diagnostic();
+    if (collected.status() == decltype(collected)::Status::InternalError) {
+      module.emitError(first.reason);
+      return failure();
+    }
+    applyBatchDiagnostic(report, first);
+    return report;
   }
+  facts = std::move(collected).takeValue();
+  ArrayRef<BatchLoopFact> loopFacts = facts->loops();
+  auto &replicatedLoads = workspace.replicatedLoads;
   if (request.axis < 0 && !request.cv && !request.semanticOnly) {
-    // Prefer a proven contiguous column region, without timing, factor
-    // selection or operator-specific patterns. Unknown/non-pointwise cases
-    // retain the deterministic axis picked above; explicit axes are fixed.
+    // Prefer a proven contiguous column region. Do not replace an axis that
+    // can form a complete group with a shorter column axis: that would leave
+    // lanes unused in every group. Unknown grids, tails on all available axes
+    // and explicitly requested axes retain their established behavior.
     SmallVector<int64_t, 3> extents = staticGridExtents(module);
     for (int candidate = 0; candidate < 3; ++candidate)
       if (axes[candidate] && (extents.empty() || extents[candidate] > 1) &&
-          hasBatchColumnPointwiseRegion(function, access, candidate,
-                                        request.factor)) {
+          (extents.empty() || extents[candidate] >= request.factor ||
+           extents[axis] < request.factor) &&
+          BatchMemoryRewriter::probeColumnRegion(function, access, candidate,
+                                                 request.factor)) {
         axis = candidate;
         break;
       }
   }
-  report.guardJSON = access.guardJSON;
-  for (const auto &fact : access.accesses)
+  report.guardJSON = llvm::formatv("{0}", batchEffectsJSON(*facts)).str();
+  for (auto [id, fact] : llvm::enumerate(access.facts->accesses()))
     if (fact.deviceAddress)
-      plan.replicatedLoads.insert(fact.operation);
-  auto &control = plan.values;
-  control = analyzeBatchControlFlow(function, axis, plan.replicatedLoads);
-  if (!control.reason.empty()) {
-    diagnosticOp = control.operation;
-    return reject(control.reason);
+      replicatedLoads.insert(access.sourceAccesses()[id]);
+  const auto &control = workspace;
+  if (failed(analyzer.analyzeVariation(axis, replicatedLoads))) {
+    diagnosticOp = analyzer.operation;
+    return reject(analyzer.reason);
   }
   // CV loops do not use the VV program-axis retile proof. All lanes retain
   // the same bounds, iteration order and independent recurrence state.
@@ -940,46 +1090,44 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
   // 关卡 0：形态。程序轴循环最多一条，而且必须直接在函数体顶层。
   auto form = checkBatchLoopForm(
       function, [&](Value value) { return control.isVarying(value); });
-  if (!form.ok) {
-    diagnosticOp = form.operation;
-    return reject(form.reason);
+  if (!form.hasValue()) {
+    applyBatchDiagnostic(report, form.diagnostic());
+    return report;
   }
+  scf::ForOp programLoopOp = std::move(form).takeValue();
   // 关卡 1：坐标归一。拿函数级的那份循环事实，按 id 找回关卡 0 认下的那条。
   const BatchLoopFact *programLoop = nullptr;
-  if (form.programLoop) {
-    // 编号和采事实时一样，是同一个遍历里的序号（BatchAccessAnalysis.cpp:353-356）。
-    // 两边都是 function.walk 的默认次序，所以这里重数一遍就能对上。
-    unsigned id = 0, counter = 0;
-    function.walk([&](scf::ForOp loop) {
-      if (loop == form.programLoop)
-        id = counter;
-      ++counter;
-    });
-    for (const auto &fact : access.loops)
-      if (fact.id == id)
+  if (programLoopOp) {
+    // Reuse the analysis traversal; IDs also index the serialized loop facts.
+    auto id = access.loopID(programLoopOp.getOperation());
+    if (!id)
+      return module.emitError("missing validated batch source loop"), failure();
+    for (const auto &fact : loopFacts)
+      if (fact.id == *id)
         programLoop = &fact;
     if (!programLoop) {
       // 关卡 0 认下的循环在事实里没有对应项，只可能是里面一条访存都没有。
       // 那样的循环合并了也没有收益，保守拒掉。
-      diagnosticOp = form.programLoop;
+      diagnosticOp = programLoopOp;
       return reject("LOOP_WITHOUT_MEMORY_ACCESS");
     }
   }
-  BatchRangeFacts ranges(axis);
-  auto legality = isSafeToBatchLoop(programLoop, ranges, axis);
-  if (!legality.safe) {
-    diagnosticOp = form.programLoop;
-    return reject(legality.reason);
+  auto legality = isSafeToBatchLoop(programLoop, axis);
+  if (!legality.hasValue()) {
+    diagnosticOp = programLoopOp;
+    return reject(legality.diagnostic().reason);
   }
+
+  auto logicalAxis = std::move(legality).takeValue();
 
   // CV lowering changes matrix dimensions and may share an operand. The
   // terminal-read relaxation for VV does not prove those transformations.
   // Keep CV on the original byte-domain contract until an opaque-address
   // matrix proof is available.
   if (request.cv)
-    for (const auto &fact : access.accesses)
+    for (auto [id, fact] : llvm::enumerate(access.facts->accesses()))
       if (fact.deviceAddress) {
-        diagnosticOp = fact.operation;
+        diagnosticOp = access.sourceAccesses()[id];
         return reject("CV_DEVICE_ADDRESS_NOT_PROVEN");
       }
   bool sharedCV = false;
@@ -1007,66 +1155,37 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
       }
     }
   }
-  auto guard = llvm::json::parse(access.guardJSON);
-  if (!guard || !guard->getAsObject())
-    return module.emitError("invalid generated access facts"), failure();
-  auto &object = *guard->getAsObject();
-  object["version"] = 3;
-  object["plan_kind"] = "unified";
-  object["semantic_contract_version"] = 4;
-  object["memory_policy"] = "disjoint_or_terminal_store";
-  object["factor"] = request.factor;
-  object["axis"] = axis;
-  llvm::json::Array obligations;
-  for (auto [id, fact] : llvm::enumerate(access.accesses)) {
-    const char *rule =
-        fact.deviceAddress ? "ReplicateEffect"
-        : fact.isVolatile  ? "PreserveVolatile"
-        : !fact.write && !control.isVarying(fact.operation->getResult(0))
-            ? "ShareInvariantLoad"
-        : fact.write ? "SupportedEffect"
-                     : "ReplicateEffect";
-    obligations.push_back(llvm::json::Object{
-        {"access_id", static_cast<int64_t>(id)},
-        {"rule", rule},
-        {"proof", (fact.write || fact.isVolatile || fact.normalizedPointer ||
-                   !control.isVarying(fact.operation->getResult(0)))
-                      ? "byte_domain"
-                      : "lane_correspondence"}});
+  if (failed(planBatchMemoryEffects(block, access, diagnosticOp)))
+    return reject("UNPROVEN_MEMORY_NONINTERFERENCE");
+  workspace.pendingGuardAxis = axis;
+  if (request.cv) {
+    auto guard = encodeBatchPendingGuard(*facts, workspace.pendingEffects,
+                                         workspace.pendingTerminalReads, axis,
+                                         request.factor);
+    if (!guard)
+      return failure();
+    report.guardJSON = std::move(*guard);
   }
-  // Known intervals retain the runtime disjointness proof. An opaque read
-  // needs no host range when its only observable write is a terminal store
-  // whose value consumes that read. Independent outputs, volatile effects,
-  // region-local reads and writes preceding a read require a stronger proof.
-  SmallVector<triton::StoreOp> writes;
-  bool hasVolatile = false;
-  for (const auto &fact : access.accesses) {
-    if (fact.write)
-      writes.push_back(cast<triton::StoreOp>(fact.operation));
-    hasVolatile |= fact.isVolatile;
-  }
-  llvm::json::Array terminalReads;
-  if (!writes.empty())
-    for (auto [id, fact] : llvm::enumerate(access.accesses))
-      if (fact.deviceAddress) {
-        diagnosticOp = fact.operation;
-        auto read = cast<triton::LoadOp>(fact.operation);
-        if (writes.size() != 1 || hasVolatile || read->getBlock() != &block ||
-            writes.front()->getBlock() != &block ||
-            !read->isBeforeInBlock(writes.front().getOperation()) ||
-            !hasPureDataDependency(writes.front().getValue(), read.getResult()))
-          return reject("UNPROVEN_MEMORY_NONINTERFERENCE");
-        terminalReads.push_back(static_cast<int64_t>(id));
-      }
-  object["terminal_read_ids"] = std::move(terminalReads);
-  object["obligations"] = std::move(obligations);
-  report.guardJSON = llvm::formatv("{0}", *guard).str();
+  auto acceptPlan = [&](BatchStrategy strategy,
+                        std::optional<BatchLogicalAxis> logicalAxis,
+                        SmallVector<BatchLayoutPlan, 0> layouts = {}) {
+    auto accepted = BatchPlan::createChecked(
+        facts, axis, request.factor, strategy, logicalAxis, std::move(layouts),
+        std::move(workspace.pendingEffects),
+        std::move(workspace.pendingTerminalReads));
+    if (!accepted.hasValue()) {
+      module.emitError(accepted.diagnostic().reason);
+      return false;
+    }
+    plan = std::move(accepted).takeValue();
+    return true;
+  };
   // The same fact/coordinate/legality pipeline handles a single uniform
   // in-program loop as well as the existing cyclic program-axis loop.
-  scf::ForOp scheduledLoop = form.programLoop;
+  scf::ForOp scheduledLoop = programLoopOp;
   const BatchLoopFact *scheduledFact = programLoop;
-  auto scheduledLegality = legality;
-  if (!scheduledLoop && access.loops.size() == 1 &&
+  auto scheduledAxis = logicalAxis;
+  if (!scheduledLoop && loopFacts.size() == 1 &&
       report.operations.count("scf.for") &&
       report.operations.at("scf.for") == 1) {
     function.walk([&](scf::ForOp loop) {
@@ -1077,63 +1196,48 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
         scheduledLoop = loop;
     });
     if (scheduledLoop) {
-      scheduledFact = &access.loops.front();
-      scheduledLegality = isSafeToBatchLoop(scheduledFact, ranges, axis);
+      scheduledFact = &loopFacts.front();
+      auto scheduled = isSafeToBatchLoop(scheduledFact, axis);
+      scheduledAxis = scheduled.hasValue() ? std::move(scheduled).takeValue()
+                                           : std::nullopt;
     }
   }
+  const unsigned originalArgCount = function.getNumArguments();
   auto loopLowering = selectBatchLoopLowering(
-      scheduledFact,
-      scheduledLegality.axis ? &*scheduledLegality.axis : nullptr, ranges,
-      request.factor);
+      scheduledFact, scheduledAxis ? &*scheduledAxis : nullptr, request.factor);
   if (!request.cv && !request.semanticOnly &&
-      loopLowering == BatchLoopLowering::SequentialIterations) {
+      loopLowering == BatchSchedule::SequentialIterations) {
     if (validated.size() > 8192 / request.factor)
       return reject("LOOP_GROUP_CODE_SIZE_EXCEEDED");
-    object["loop_schedule"] =
-        llvm::json::Object{{"version", 1},
-                           {"kind", "sequential_iterations_v1"},
-                           {"grid_policy", "preserve"},
-                           {"factor", request.factor},
-                           {"loop", batchLoopJSON(*scheduledFact)}};
-    report.guardJSON = llvm::formatv("{0}", *guard).str();
-    report.vvLowering = "sequential_iterations_v1";
-    report.selectedAxis = axis;
-    report.laneWidth = request.factor;
-    report.layoutJSON = serializeBatchLayouts({});
-    if (failed(groupBatchLoopIterations(scheduledLoop, request.factor)))
+    if (!acceptPlan(BatchStrategy::SequentialLoop, scheduledAxis))
       return failure();
-    Builder builder(module.getContext());
-    module->setAttr("hacc.block_mapping_owner",
-                    builder.getStringAttr("block_batching"));
-    function->setAttr("hacc.block_mapping_owner",
-                      builder.getStringAttr("block_batching"));
-    // No program-grid transform or hidden extent arguments: program IDs,
-    // original loop strides and terminal recurrence slots keep their ABI.
-    if (failed(verify(module)))
+    if (failed(rewriteVvSequentialIterations(module, function, scheduledLoop,
+                                             plan, workspace, originalArgCount,
+                                             report)))
       return failure();
-    report.status = "REWRITTEN";
-    report.reason = "";
     return report;
   }
+  if (!request.cv)
+    markVvAggregations(function);
   bool maskedBatch = false;
   if (request.cv) {
     report.cvLowering = "rank3_batch_v1";
-    for (const auto &fact : access.accesses) {
+    for (auto [id, fact] : llvm::enumerate(access.facts->accesses())) {
       Value mask;
-      if (auto load = dyn_cast<triton::LoadOp>(fact.operation))
+      if (auto load = dyn_cast<triton::LoadOp>(access.sourceAccesses()[id]))
         mask = load.getMask();
-      if (auto store = dyn_cast<triton::StoreOp>(fact.operation))
+      if (auto store = dyn_cast<triton::StoreOp>(access.sourceAccesses()[id]))
         mask = store.getMask();
       if (!mask || constantTrueMask(mask))
         continue;
-      diagnosticOp = fact.operation;
+      diagnosticOp = access.sourceAccesses()[id];
       if (!fact.mask || !structuredMaskExpr(fact.mask, cvControlFlow)) {
         unsigned budget = 1024;
         if (!cvControlFlow ||
             !structuredControlMask(mask, function, control, budget))
           return reject("CV_UNSTRUCTURED_MEMORY_MASK");
       }
-      if (auto load = dyn_cast<triton::LoadOp>(fact.operation);
+      if (auto load = dyn_cast<triton::LoadOp>(access.sourceAccesses()[id]);
           load && !constantZero(load.getOther()))
         return reject("CV_MASKED_LOAD_REQUIRES_ZERO_OTHER");
       ++report.structuredMasks;
@@ -1145,7 +1249,8 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
         // in the lane-clone fallback. Try the complete region rewrite in a
         // nested sandbox; internal verification errors still propagate.
         OwningOpRef<ModuleOp> fused(module.clone());
-        auto attempt = rewriteImpl(fused.get(), request, true);
+        BatchRewriteWorkspace fusedWorkspace;
+        auto attempt = rewriteImpl(fused.get(), request, fusedWorkspace, true);
         if (failed(attempt))
           return failure();
         if (attempt->status == "REWRITTEN") {
@@ -1153,6 +1258,11 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
           module->setAttrs(candidate->getAttrs());
           module.getBodyRegion().takeBody(candidate.getBodyRegion());
           return attempt;
+        }
+        if (attempt->status != "REJECTED") {
+          module.emitError("unexpected CV fusion rewrite status: ")
+              << attempt->status;
+          return failure();
         }
         fusionReason = attempt->reason;
       }
@@ -1177,19 +1287,29 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
       report.selectedAxis = axis;
       report.laneWidth = request.factor;
       report.layoutJSON = serializeBatchLayouts({});
+      if (!acceptPlan(BatchStrategy::MatrixStaticLanes, logicalAxis))
+        return failure();
       if (failed(rewriteStructuredCV(module, function, originals, axis,
                                      request.factor)))
         return failure();
-      report.status = "REWRITTEN";
-      report.reason = "";
+      if (failed(publishBatchAppliedRewrite(
+              module,
+              BatchRewriteFinalizer::matrixLanes(module, plan, originalArgCount,
+                                                 report.guardJSON),
+              report)))
+        return failure();
       return report;
     }
     if (sharedCV) {
       std::string reason;
+      if (!acceptPlan(BatchStrategy::MatrixSpatial, logicalAxis))
+        return failure();
       if (failed(rewriteSpatialCV(module, function, axis, request.factor,
                                   report.cvLowering, reason))) {
         if (reason.empty())
           return failure();
+        if (reason == "CV_SPATIAL_GRID_CONTRACT_FAILED")
+          return function.emitError(reason), failure();
         diagnosticOp = function;
         return reject(reason);
       }
@@ -1216,8 +1336,12 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
       report.selectedAxis = axis;
       report.laneWidth = request.factor;
       report.layoutJSON = serializeBatchLayouts({});
-      report.status = "REWRITTEN";
-      report.reason = "";
+      if (failed(publishBatchAppliedRewrite(
+              module,
+              BatchRewriteFinalizer::matrixLanes(module, plan, originalArgCount,
+                                                 report.guardJSON),
+              report)))
+        return failure();
       return report;
     }
     // The stock consumer has no linked int8->int32 batch-MMA implementation.
@@ -1242,11 +1366,17 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
       report.selectedAxis = axis;
       report.laneWidth = request.factor;
       report.layoutJSON = serializeBatchLayouts({});
+      if (!acceptPlan(BatchStrategy::MatrixStaticLanes, logicalAxis))
+        return failure();
       if (failed(rewriteStructuredCV(module, function, originals, axis,
                                      request.factor)))
         return failure();
-      report.status = "REWRITTEN";
-      report.reason = "";
+      if (failed(publishBatchAppliedRewrite(
+              module,
+              BatchRewriteFinalizer::matrixLanes(module, plan, originalArgCount,
+                                                 report.guardJSON),
+              report)))
+        return failure();
       return report;
     }
     if (request.cvBatchMatmul) {
@@ -1271,9 +1401,9 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
           return reject("CV_BATCH_QUOTIENT_GROUP_CROSSES_PERIOD");
         }
       }
-      for (const auto &fact : access.accesses) {
+      for (auto [id, fact] : llvm::enumerate(access.facts->accesses())) {
         if (!rectangularBatchMask(fact.mask, axis, fact.shape.size())) {
-          diagnosticOp = fact.operation;
+          diagnosticOp = access.sourceAccesses()[id];
           return reject("CV_BATCH_MASK_RECTANGLE_NOT_PROVEN");
         }
       }
@@ -1313,16 +1443,31 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
       report.selectedAxis = axis;
       report.laneWidth = request.factor;
       report.layoutJSON = serializeBatchLayouts({});
+      if (!acceptPlan(BatchStrategy::MatrixStaticLanes, logicalAxis))
+        return failure();
       if (failed(rewriteStructuredCV(module, function, originals, axis,
                                      request.factor)))
         return failure();
-      report.status = "REWRITTEN";
-      report.reason = "";
+      if (failed(publishBatchAppliedRewrite(
+              module,
+              BatchRewriteFinalizer::matrixLanes(module, plan, originalArgCount,
+                                                 report.guardJSON),
+              report)))
+        return failure();
       return report;
     }
   }
-  auto &layouts = plan.layouts;
-  layouts = planBatchLayouts(access, axis, request.factor);
+  auto proposedLayouts = planBatchLayouts(access, axis, request.factor);
+  if (request.cv) {
+    if (!acceptPlan(BatchStrategy::MatrixBatch, logicalAxis,
+                    std::move(proposedLayouts)))
+      return failure();
+  } else {
+    if (!acceptPlan(BatchStrategy::VectorLanes, scheduledAxis,
+                    std::move(proposedLayouts)))
+      return failure();
+  }
+  ArrayRef<BatchLayoutPlan> layouts = plan->layouts();
   report.layoutJSON = serializeBatchLayouts(layouts);
   // Extend the existing pointwise memory-view requirement to a proved
   // uniform loop. Mere presence of scf.for is not a refusal: the loop facts
@@ -1330,23 +1475,23 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
   // unbridged inside that same loop. Reductions and other layouts retain
   // their established paths.
   if (!request.cv && scheduledFact && !scheduledFact->carriesValues &&
-      scheduledLegality.safe && scheduledLegality.axis &&
-      scheduledLegality.axis->distribution == BatchLogicalAxis::Blocked &&
-      batchLoopBoundsAreLaneUniform(*scheduledFact, ranges) &&
+      plan->logicalAxis() &&
+      plan->logicalAxis()->distribution == BatchLogicalAxis::Blocked &&
+      batchLoopBoundsAreLaneUniform(*scheduledFact, axis) &&
       !report.operations.count("scf.if") &&
       !report.operations.count("tt.reduce") &&
       !report.operations.count("tt.scan") &&
       !report.operations.count("tt.dot") && !layouts.empty() &&
       llvm::all_of(layouts, [&](const BatchLayoutPlan &layout) {
-        const auto &fact = access.accesses[layout.accessID];
+        const auto &fact = access.facts->accesses()[layout.accessID];
         return layout.action == BatchLayoutPlan::Keep &&
                layout.reason == "ALREADY_STRUCTURED" &&
                layout.maskClass == "independent_axes" && !fact.deviceAddress &&
                !fact.isVolatile && !fact.shape.empty() &&
                llvm::count_if(fact.shape,
                               [](int64_t size) { return size != 1; }) <= 1 &&
-               fact.loops.size() == 1 &&
-               fact.loops.front().id == scheduledFact->id;
+               fact.loopIDs.size() == 1 &&
+               fact.loopIDs.front() == scheduledFact->id;
       })) {
     diagnosticOp = scheduledLoop;
     return reject("LOOP_POINTWISE_MEMORY_VIEW_REQUIRED");
@@ -1365,21 +1510,19 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
   // 这道检查必须在动 IR 之前做完。改写开始之后没有回滚：原 op 已经删、事实上的
   // operation
   // 句柄已经清空，那时再拒既给不出诊断位置，也会留下一个改了一半的模块。
-  if (legality.axis)
+  if (programLoopOp && plan->logicalAxis())
     for (const auto &plan : layouts)
-      if (!access.accesses[plan.accessID].loops.empty() &&
+      if (!access.facts->accesses()[plan.accessID].loopIDs.empty() &&
           !plan.linearMemoryView) {
-        diagnosticOp = access.accesses[plan.accessID].operation;
+        diagnosticOp = access.sourceAccesses()[plan.accessID];
         return reject("LOOP_ACCESS_NOT_PROVEN");
       }
-  llvm::DenseMap<Operation *, unsigned> accessIDs;
-  SmallVector<Operation *> semanticAccesses(access.accesses.size(), nullptr);
-  for (auto [id, fact] : llvm::enumerate(access.accesses))
-    accessIDs[fact.operation] = id;
+  const auto &accessIDs = workspace.sourceIDsByOp();
+  auto &semanticAccesses = workspace.semanticAccesses;
+  semanticAccesses.resize(access.facts->accesses().size(), nullptr);
   report.selectedAxis = axis;
   report.laneWidth = request.factor;
-  const int64_t lanes = report.laneWidth;
-  const unsigned originalArgCount = function.getNumArguments();
+  const int64_t lanes = plan->factor();
   if (failed(addProgramGridHiddenExtentArguments(function, 3)))
     return reject("HIDDEN_ARGUMENT_CONFLICT");
 
@@ -1403,6 +1546,8 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
       pidSource = op;
       break;
     }
+  if (!pidSource)
+    return module.emitError("missing validated batch program axis"), failure();
   Value group = rewriter.clone(*pidSource)->getResult(0);
   // 合并后这一组覆盖的第一个原程序号。程序轴循环的界用它代换原来的 pid：各 lane
   // 共享这一个标量，lane u 的那一份由布局层重建的程序号项补上。
@@ -1429,10 +1574,8 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
   Value base32 = rewriter.create<arith::TruncIOp>(loc, i32, base64);
   Value base32Vec = rewriter.create<triton::SplatOp>(loc, lane32, base32);
   Value pid = rewriter.create<arith::AddIOp>(loc, base32Vec, lane);
-  BatchValueMapping values;
-  IRMapping &mapping = values.mapping;
   for (Value arg : function.getArguments())
-    values.map(arg, arg, false);
+    workspace.bindGenerated(arg, arg, false);
   auto liftedType = [&](Type t) -> RankedTensorType {
     SmallVector<int64_t> shape{lanes};
     if (auto tensor = dyn_cast<RankedTensorType>(t))
@@ -1445,7 +1588,12 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
       liftedValues;
   llvm::DenseMap<Block *, llvm::DenseMap<Type, Value>> liveMasks;
   auto lift = [&](Value old, RankedTensorType target) -> Value {
-    Value value = mapping.lookup(old);
+    auto binding = workspace.generatedBinding(old);
+    Value value = binding.value;
+    // Callers have checked the operation operands, captures, or derived
+    // pointer offsets before issuing an IR create with this value.
+    if (!value)
+      return {};
     if (value.getType() == target)
       return value;
     auto &cache = liftedValues[rewriter.getInsertionBlock()];
@@ -1460,7 +1608,7 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
     }
     while (cast<RankedTensorType>(value.getType()).getRank() <
            target.getRank()) {
-      int axis = values.isVarying(old)
+      int axis = binding.varying
                      ? cast<RankedTensorType>(value.getType()).getRank()
                      : 0;
       value = rewriter.create<triton::ExpandDimsOp>(loc, value, axis);
@@ -1488,6 +1636,18 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
     cache[maskType] = mask;
     return mask;
   };
+  bool invalidBinding = false;
+  auto bindingError = [&](llvm::StringRef why) -> LogicalResult {
+    invalidBinding = true;
+    diagnosticOp->emitError(why);
+    return failure();
+  };
+  auto requiredRemap = [&](Value source) {
+    Value generated = workspace.lookupGenerated(source);
+    if (!generated)
+      invalidBinding = true;
+    return generated;
+  };
   auto rejectRewrite = [&](llvm::StringRef reason) -> LogicalResult {
     setBatchDiagnostic(report, diagnosticOp, reason);
     return failure();
@@ -1510,11 +1670,11 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
       loc = op->getLoc();
       if (auto oldPid = dyn_cast<triton::GetProgramIdOp>(op);
           oldPid && static_cast<int>(oldPid.getAxis()) == axis) {
-        values.map(op->getResult(0), pid, true);
+        workspace.bindGenerated(op->getResult(0), pid, true);
         continue;
       }
       if (auto programs = dyn_cast<triton::GetNumProgramsOp>(op)) {
-        values.map(
+        workspace.bindGenerated(
             op->getResult(0),
             function.getArgument(originalArgCount +
                                  static_cast<unsigned>(programs.getAxis())),
@@ -1522,14 +1682,14 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
         continue;
       }
       for (Value operand : op->getOperands())
-        if (!values.contains(operand))
-          return rejectRewrite("VALUE_MAPPING_MISSING");
+        if (!workspace.lookupGenerated(operand))
+          return bindingError("VALUE_MAPPING_MISSING");
       if (isa<scf::YieldOp>(op)) {
         if (op->getNumOperands() != yieldTypes.size())
           return rejectRewrite("REGION_YIELD_TYPE_MISMATCH");
         SmallVector<Value> yielded;
         for (auto [old, type] : llvm::zip(op->getOperands(), yieldTypes)) {
-          Value value = mapping.lookup(old);
+          Value value = workspace.lookupGenerated(old);
           if (value.getType() != type && isa<RankedTensorType>(type))
             value = lift(old, cast<RankedTensorType>(type));
           if (value.getType() != type)
@@ -1548,7 +1708,8 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
         Operation *replacement = nullptr;
         if (auto branch = dyn_cast<scf::IfOp>(op)) {
           auto created = rewriter.create<scf::IfOp>(
-              loc, resultTypes, mapping.lookup(branch.getCondition()),
+              loc, resultTypes,
+              workspace.lookupGenerated(branch.getCondition()),
               !branch.getElseRegion().empty());
           created->setAttrs(op->getAttrs());
           for (auto [from, to] :
@@ -1568,26 +1729,32 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
           // 在新体里是 一个 lane 张量，scf.for
           // 的界只能是标量。重分块把界里的程序号换成合并 后的标量 group*F，lane
           // 间的差异改由布局层重建的程序号项承担。
-          BatchRetiledBounds retiled;
-          if (loop == form.programLoop)
-            retiled = retileBatchLoopBounds(
-                rewriter, loop, *legality.axis, pidSource->getResult(0), folded,
-                [&](Value v) { return mapping.lookupOrNull(v); });
-          auto bound = [&](Value original, Value replacement) {
-            return replacement ? replacement : mapping.lookup(original);
-          };
-          Value lower = bound(loop.getLowerBound(), retiled.lower);
-          Value upper = bound(loop.getUpperBound(), retiled.upper);
-          Value stride = bound(loop.getStep(), retiled.step);
-          if (loop == form.programLoop && !retiled.ok())
-            return rejectRewrite("LOOP_RETILING_FAILED");
+          Value lower, upper, stride;
+          if (loop == programLoopOp) {
+            auto retiled = retileBatchLoopBounds(
+                rewriter, loop, *plan->logicalAxis(), pidSource->getResult(0),
+                folded, requiredRemap);
+            if (invalidBinding)
+              return bindingError("VALUE_MAPPING_MISSING");
+            if (!retiled.hasValue())
+              return rejectRewrite(retiled.diagnostic().reason);
+            auto bounds = std::move(retiled).takeValue();
+            lower = bounds[0];
+            upper = bounds[1];
+            stride = bounds[2];
+          } else {
+            lower = workspace.lookupGenerated(loop.getLowerBound());
+            upper = workspace.lookupGenerated(loop.getUpperBound());
+            stride = workspace.lookupGenerated(loop.getStep());
+          }
           SmallVector<Value> init;
           for (auto [value, type] : llvm::zip(loop.getInitArgs(), resultTypes))
-            init.push_back(value.getType() == type && !values.isVarying(value)
-                               ? mapping.lookup(value)
+            init.push_back(value.getType() == type &&
+                                   !workspace.generatedBinding(value).varying
+                               ? workspace.lookupGenerated(value)
                            : isa<RankedTensorType>(type)
                                ? lift(value, cast<RankedTensorType>(type))
-                               : mapping.lookup(value));
+                               : workspace.lookupGenerated(value));
           // A backend loop-invariant-yield fold can replace a tensor result
           // even on a zero-trip loop. Express the original zero-trip result
           // explicitly, while leaving the positive iteration sequence intact.
@@ -1606,7 +1773,7 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
           created->setAttrs(op->getAttrs());
           while (!created.getBody()->empty())
             rewriter.eraseOp(&created.getBody()->back());
-          if (loop == form.programLoop) {
+          if (loop == programLoopOp) {
             // lane u 这一圈处理的行是 iv + u*R，R 是一个原程序拥有的行距。
             //
             // R 不取 axis.chunk：那个量对定长分块恒为
@@ -1618,13 +1785,15 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
             // 行距在循环外算一次。
             rewriter.setInsertionPoint(created);
             auto at = [&](int64_t p) {
-              return retileBatchLoopBounds(
-                         rewriter, loop, *legality.axis,
-                         pidSource->getResult(0), constant(i32, p),
-                         [&](Value v) { return mapping.lookupOrNull(v); })
-                  .lower;
+              auto bounds = retileBatchLoopBounds(
+                  rewriter, loop, *plan->logicalAxis(), pidSource->getResult(0),
+                  constant(i32, p), requiredRemap);
+              return bounds.hasValue() ? std::move(bounds).takeValue()[0]
+                                       : Value{};
             };
             Value atZero = at(0), atOne = at(1);
+            if (invalidBinding)
+              return bindingError("VALUE_MAPPING_MISSING");
             if (!atZero || !atOne)
               return rejectRewrite("LOOP_RETILING_FAILED");
             Value rows = rewriter.create<arith::SubIOp>(loc, atOne, atZero);
@@ -1648,26 +1817,26 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
                 rewriter.create<triton::SplatOp>(loc, rowVec, rows));
             Value base = rewriter.create<triton::SplatOp>(
                 loc, rowVec, created.getInductionVar());
-            values.map(loop.getInductionVar(),
-                       rewriter.create<arith::AddIOp>(loc, base, laneRows),
-                       true);
+            workspace.bindGenerated(
+                loop.getInductionVar(),
+                rewriter.create<arith::AddIOp>(loc, base, laneRows), true);
           } else
-            values.map(loop.getInductionVar(), created.getInductionVar(),
-                       false);
+            workspace.bindGenerated(loop.getInductionVar(),
+                                    created.getInductionVar(), false);
           for (auto [from, to, initial, yielded] :
                llvm::zip(loop.getRegionIterArgs(), created.getRegionIterArgs(),
                          loop.getInitArgs(), loop.getYieldedValues())) {
             Value mapped = to;
             if (cvControlFlow && maskedBatch &&
                 isa<triton::PointerType>(scalar(from.getType()))) {
-              Value base = mapping.lookup(initial);
+              Value base = workspace.lookupGenerated(initial);
               if (base.getType() != to.getType())
                 base = lift(initial, cast<RankedTensorType>(to.getType()));
               if (Value affine = rebuildCVPointerRecurrence(from, base, yielded,
                                                             created, rewriter))
                 mapped = affine;
             }
-            values.map(from, mapped, control.isVarying(from));
+            workspace.bindGenerated(from, mapped, control.isVarying(from));
           }
           if (failed(
                   rewriteBody(*loop.getBody(), created.getBody(), resultTypes)))
@@ -1684,7 +1853,7 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
         }
         for (auto [old, result] :
              llvm::zip(op->getResults(), replacement->getResults()))
-          values.map(old, result, control.isVarying(old));
+          workspace.bindGenerated(old, result, control.isVarying(old));
         continue;
       }
       bool var = op->getNumResults()
@@ -1694,9 +1863,9 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
                        });
       if (isa<triton::ReduceOp, triton::ScanOp>(op))
         for (Value capture : getBatchCombinerCaptures(op)) {
-          if (!values.contains(capture))
-            return rejectRewrite("VALUE_MAPPING_MISSING");
-          if (values.isVarying(capture))
+          if (!workspace.lookupGenerated(capture))
+            return bindingError("VALUE_MAPPING_MISSING");
+          if (workspace.generatedBinding(capture).varying)
             return rejectRewrite("UNSUPPORTED_REGION_CAPTURE");
         }
       if (var &&
@@ -1744,19 +1913,21 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
             tensor ? Type(RankedTensorType::get(tensor.getShape(), i64))
                    : Type(i64);
         auto mapped = [&](Value value, Type type) -> Value {
-          if (!values.contains(value))
+          if (!workspace.lookupGenerated(value))
             return {};
           return isa<RankedTensorType>(type)
                      ? lift(value, cast<RankedTensorType>(type))
-                     : mapping.lookup(value);
+                     : workspace.lookupGenerated(value);
         };
         Value base = mapped(plan->base, resultType);
         if (!base)
-          return rejectRewrite("VALUE_MAPPING_MISSING");
+          return bindingError("VALUE_MAPPING_MISSING");
         Value offset = constant(integerType, 0);
         for (auto [delta, subtract] : plan->byteOffsets) {
           Value value = mapped(delta, integerType);
-          if (!value || value.getType() != integerType)
+          if (!value)
+            return bindingError("VALUE_MAPPING_MISSING");
+          if (value.getType() != integerType)
             return rejectRewrite("POINTER_ROUNDTRIP_NOT_LOWERABLE");
           // Divisibility is proven on the original expression. The runtime
           // guard proves its signed range and the complete byte-address
@@ -1771,21 +1942,29 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
         replacement =
             rewriter.create<triton::AddPtrOp>(loc, resultType, base, offset);
       } else if (!var || isa<triton::ReturnOp>(op)) {
-        replacement = rewriter.clone(*op, mapping);
+        auto captures = op->getNumRegions() ? getBatchCombinerCaptures(op)
+                                            : SmallVector<Value>{};
+        auto operands = workspace.cloneOperands(op, captures);
+        if (!operands)
+          return bindingError("VALUE_MAPPING_MISSING");
+        replacement = rewriter.clone(*op, *operands);
       } else if (auto splat = dyn_cast<triton::SplatOp>(op)) {
         Value result = lift(splat.getSrc(), liftedType(splat.getType()));
-        values.map(splat.getResult(), result, true);
+        workspace.bindGenerated(splat.getResult(), result, true);
         continue;
       } else if (lookupBatchOp(op->getName().getStringRef())->model ==
                  BatchModel::Shape) {
-        IRMapping operands = mapping;
+        auto operands = workspace.cloneOperands(op);
+        if (!operands)
+          return bindingError("VALUE_MAPPING_MISSING");
         if (isa<triton::JoinOp>(op))
           for (Value operand : op->getOperands())
-            operands.map(operand, lift(operand, liftedType(operand.getType())));
+            operands->map(operand,
+                          lift(operand, liftedType(operand.getType())));
         SmallVector<Type> results;
         for (Type type : op->getResultTypes())
           results.push_back(liftedType(type));
-        replacement = rewriteBatchShape(op, results, operands, rewriter);
+        replacement = rewriteBatchShape(op, results, *operands, rewriter);
       } else if (isa<triton::ReduceOp, triton::ScanOp>(op)) {
         SmallVector<Value> inputs;
         for (Value source : op->getOperands())
@@ -1793,8 +1972,12 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
         SmallVector<Type> results;
         for (Type type : op->getResultTypes())
           results.push_back(liftedType(type));
+        auto captures = getBatchCombinerCaptures(op);
+        auto operands = workspace.cloneOperands(op, captures);
+        if (!operands)
+          return bindingError("VALUE_MAPPING_MISSING");
         replacement =
-            rewriteBatchReduction(op, inputs, results, mapping, rewriter);
+            rewriteBatchReduction(op, inputs, results, *operands, rewriter);
       } else if (isa<triton::DotOp>(op)) {
         // Each operand has its own shape: [F,M,K], [F,K,N], [F,M,N].
         // Broadcast uniform operands (including Acc) only along F. Never
@@ -1822,11 +2005,12 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
           if (id == accessIDs.end())
             return rejectRewrite("CV_BATCH_LOAD_ACCESS_MISSING");
           unsigned budget = 4096;
-          auto stride = coordinateStride(access.accesses[id->second].byteOffset,
-                                         0, budget);
+          auto stride = coordinateStride(
+              access.facts->accesses()[id->second].byteOffset, 0, budget);
           normalizeTranspose =
-              stride && *stride == static_cast<int64_t>(
-                                       access.accesses[id->second].bytes);
+              stride &&
+              *stride == static_cast<int64_t>(
+                             access.facts->accesses()[id->second].bytes);
         }
         if (normalizeTranspose) {
           if (load.getIsVolatile())
@@ -1853,7 +2037,8 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
               load.getPadding(), load.getCache(), load.getEvict(), false);
           replacement = rewriter.create<triton::TransOp>(
               loc, type, loaded, rewriter.getDenseI32ArrayAttr(order));
-          values.map(load.getResult(), replacement->getResult(0), true);
+          workspace.bindGenerated(load.getResult(), replacement->getResult(0),
+                                  true);
           semanticAccesses[accessIDs.lookup(op)] = loaded;
           continue;
         }
@@ -1916,8 +2101,10 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
           mask = liveFor(liftedType(op->getResult(0).getType()));
         auto safe = prepareBatchElementwiseOperands(op, *descriptor, lifted,
                                                     mask, loc, rewriter);
+        if (failed(safe))
+          return bindingError("missing active mask for an inactive lane");
         replacement = rewriteBatchElementwise(
-            op, *descriptor, safe, liftedType(op->getResult(0).getType()), loc,
+            op, *descriptor, *safe, liftedType(op->getResult(0).getType()), loc,
             rewriter);
       }
       if (auto found = accessIDs.find(op); found != accessIDs.end())
@@ -1926,24 +2113,28 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
            llvm::zip(op->getResults(), replacement->getResults())) {
         Type expected = var ? Type(liftedType(old.getType())) : old.getType();
         if (result.getType() != expected)
-          return rejectRewrite("VALUE_MAPPING_TYPE_MISMATCH");
-        values.map(old, result, var);
+          return bindingError("VALUE_MAPPING_TYPE_MISMATCH");
+        workspace.bindGenerated(old, result, var);
       }
     }
     return success();
   };
-  if (failed(rewriteBody(block, nullptr, {})))
+  if (failed(rewriteBody(block, nullptr, {}))) {
+    if (invalidBinding)
+      return failure();
     return report;
+  }
   // Verify effect correspondence while the original operations still exist.
   // Sharing changes dynamic multiplicity only under its emitted proof; every
   // source effect still owns exactly one generated operation at this stage.
-  for (auto [id, fact] : llvm::enumerate(access.accesses)) {
+  for (auto [id, fact] : llvm::enumerate(access.facts->accesses())) {
     Operation *generated = semanticAccesses[id];
-    if (!generated || generated->getName() != fact.operation->getName())
+    if (!generated ||
+        generated->getName() != access.sourceAccesses()[id]->getName())
       return module.emitError("missing or invalid planned memory effect"),
              failure();
     if (auto load = dyn_cast<triton::LoadOp>(generated)) {
-      auto source = cast<triton::LoadOp>(fact.operation);
+      auto source = cast<triton::LoadOp>(access.sourceAccesses()[id]);
       if (load.getCache() != source.getCache() ||
           load.getEvict() != source.getEvict() ||
           load.getIsVolatile() != source.getIsVolatile())
@@ -1952,16 +2143,17 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
   }
   // All layout facts are owned expressions. Drop original operation handles
   // before erasing source IR; only the generated semantic side table survives.
-  accessIDs.clear();
-  control.varying.clear();
-  plan.replicatedLoads.clear();
-  for (auto &fact : access.accesses)
-    fact.operation = nullptr;
+  workspace.invalidateSource();
   for (auto *op : llvm::reverse(originals))
     rewriter.eraseOp(op);
+  if (!request.cv &&
+      failed(finalizeVvComputation(function, report.computationJSON, false,
+                                   request.factor)))
+    return failure();
   ProgramGridTransformContract contract;
   contract.version = 3;
-  contract.transforms.push_back({0, axis, request.factor, false, false});
+  contract.transforms.push_back(
+      {0, plan->axis(), plan->factor(), false, false});
   if (failed(setProgramGridTransformContract(module, contract)))
     return module.emitError(
                "block batching generated an invalid grid contract"),
@@ -1972,20 +2164,18 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
                     rewriter.getStringAttr("block_batching"));
   if (failed(verify(module)))
     return module.emitError("block batching generated invalid TTIR"), failure();
-  bool closureValid = true;
-  module.walk([&](Operation *op) {
-    if (!closureValid)
-      return;
+  auto closure = module.walk([&](Operation *op) {
     auto name = op->getName().getStringRef();
     const auto *descriptor = lookupBatchOp(name);
     if (!descriptor || !descriptor->implemented ||
         (descriptor->model != BatchModel::Structural && !attrsSupported(op))) {
-      setBatchDiagnostic(report, op, "GENERATED_OP_CLOSURE_INVALID");
-      closureValid = false;
+      op->emitError("GENERATED_OP_CLOSURE_INVALID");
+      return WalkResult::interrupt();
     }
+    return WalkResult::advance();
   });
-  if (!closureValid)
-    return report;
+  if (closure.wasInterrupted())
+    return failure();
   // This is a compiler-owned lowering contract, not an accepted source
   // attribute. Attach it only after the generated operation closure has been
   // checked; adding it earlier makes the strict dot attribute policy reject
@@ -1995,43 +2185,29 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
     module.walk([&](triton::DotOp dot) {
       dot->setAttr("tt.cv_batch_full_mkn", rewriter.getUnitAttr());
     });
-  if (!request.semanticOnly &&
-      failed(rewriteBatchMemoryViews(module, access, layouts, semanticAccesses,
-                                     group, originalArgCount, axis,
-                                     request.factor)))
-    return failure();
-  report.layoutJSON = serializeBatchLayouts(layouts);
-  report.status = "REWRITTEN";
-  llvm::json::Array layoutChecks;
-  for (const auto &plan : layouts)
-    if (plan.rewritten && !plan.runtimeGuardJSON.empty()) {
-      auto parsed = llvm::json::parse(plan.runtimeGuardJSON);
-      if (!parsed) {
-        llvm::consumeError(parsed.takeError());
-        return module.emitError("invalid generated layout guard"), failure();
-      }
-      layoutChecks.push_back(std::move(*parsed));
-    }
-  {
-    auto parsed = llvm::json::parse(report.guardJSON);
-    if (!parsed) {
-      llvm::consumeError(parsed.takeError());
-      return module.emitError("invalid original access guard"), failure();
-    }
-    if (!parsed->getAsObject())
-      return module.emitError("invalid original access guard"), failure();
-    auto *proofs = parsed->getAsObject()->getArray("obligations");
-    if (!proofs || proofs->size() != layouts.size())
-      return module.emitError("invalid effect proof mapping"), failure();
-    for (const auto &layout : layouts)
-      if (layout.rewritten)
-        (*proofs)[layout.accessID].getAsObject()->operator[]("proof") =
-            "byte_domain";
-    if (!layoutChecks.empty())
-      (*parsed->getAsObject())["layout_checks"] = std::move(layoutChecks);
-    report.guardJSON = llvm::formatv("{0}", *parsed).str();
+  if (!request.cv) {
+    if (failed(finalizeVvProgramLanes(module, plan, workspace, group,
+                                      originalArgCount, request.semanticOnly,
+                                      report)))
+      return failure();
+    return report;
   }
-  report.reason = "";
+  auto layoutResults = initialBatchLayoutResults(layouts);
+  if (!request.semanticOnly &&
+      failed(BatchMemoryRewriter::rewriteViews(
+          module, access, layouts, layoutResults, semanticAccesses, group,
+          originalArgCount, axis, request.factor)))
+    return failure();
+  semanticAccesses.clear();
+  report.layoutJSON = serializeBatchLayoutResults(layouts, layoutResults);
+  report.status = "REWRITTEN";
+  if (failed(publishBatchAppliedRewrite(
+          module,
+          BatchRewriteFinalizer::matrixLanes(module, plan, originalArgCount,
+                                             report.guardJSON,
+                                             std::move(layoutResults)),
+          report)))
+    return failure();
   return report;
 }
 namespace {
@@ -2039,7 +2215,23 @@ namespace {
 FailureOr<BatchRewriteReport>
 rewriteInSandbox(ModuleOp module, BatchRequest request, bool commit) {
   OwningOpRef<ModuleOp> sandbox(module.clone());
-  auto result = rewriteImpl(sandbox.get(), request);
+  BatchRewriteWorkspace workspace;
+  auto result = rewriteImpl(sandbox.get(), request, workspace);
+  if (!request.cv && succeeded(result) && result->status != "REWRITTEN" &&
+      workspace.pendingGuardAxis) {
+    const auto &plan = workspace.acceptedPlan;
+    auto diagnostic =
+        plan ? encodeBatchPendingGuard(plan->facts(), plan->effects(),
+                                       plan->terminalReads(), plan->axis(),
+                                       plan->factor())
+             : encodeBatchPendingGuard(
+                   *workspace.facts, workspace.pendingEffects,
+                   workspace.pendingTerminalReads, *workspace.pendingGuardAxis,
+                   request.factor);
+    if (!diagnostic)
+      return failure();
+    result->guardJSON = std::move(*diagnostic);
+  }
   if (commit && succeeded(result) && result->status == "REWRITTEN") {
     ModuleOp candidate = sandbox.get();
     module->setAttrs(candidate->getAttrs());

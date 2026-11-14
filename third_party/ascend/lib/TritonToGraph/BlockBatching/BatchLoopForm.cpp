@@ -1,13 +1,16 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "TritonToGraph/BlockBatching/BatchLoopForm.h"
 
+#include "TritonToGraph/BlockBatching/BatchRequest.h"
+
 namespace mlir::triton::cfg {
 
-BatchLoopForm checkBatchLoopForm(Operation *function,
-                                 BatchVaryingPredicate isVarying) {
-  BatchLoopForm form;
+BatchResult<scf::ForOp> checkBatchLoopForm(Operation *function,
+                                           BatchVaryingPredicate isVarying) {
+  scf::ForOp programLoop;
+  BatchDiagnostic first;
   auto walk = function->walk<WalkOrder::PreOrder>([&](scf::ForOp loop) {
-    scf::ForOp outer = form.programLoop;
+    scf::ForOp outer = programLoop;
     // 程序轴循环内部的循环：上下界与步长必须定义在它之外，否则并合之后 F 份
     // 共用同一个内层循环时长度不一，并不到一起。只看定义位置，不追数据流，所以
     // 一个与循环变量无关的常量只要写在外层体内也会被拒——保守的方向，规范化之后
@@ -16,8 +19,8 @@ BatchLoopForm checkBatchLoopForm(Operation *function,
       for (Value bound :
            {loop.getLowerBound(), loop.getUpperBound(), loop.getStep()})
         if (outer->isAncestor(bound.getParentBlock()->getParentOp())) {
-          form.reason = "INNER_TRIP_COUNT_NOT_INVARIANT";
-          form.operation = loop;
+          first = snapshotBatchDiagnostic(loop, "loop_form",
+                                          "INNER_TRIP_COUNT_NOT_INVARIANT");
           return WalkResult::interrupt();
         }
       // 界在外层之外定义但随 pid 变化：程序轴循环套程序轴循环，落到下面拒。
@@ -33,19 +36,17 @@ BatchLoopForm checkBatchLoopForm(Operation *function,
     // 循环里，不与另一条程序轴循环并列。重分块要把"程序编号"和"这条循环的循环
     // 变量"合成一个行号，有两条就有两个行号要合，处理不了。
     if (outer || loop->getParentOp() != function) {
-      form.reason = "UNPROVEN_LOOP_COALESCING";
-      form.operation = loop;
+      first = snapshotBatchDiagnostic(loop, "loop_form",
+                                      "UNPROVEN_LOOP_COALESCING");
       return WalkResult::interrupt();
     }
-    form.programLoop = loop;
+    programLoop = loop;
     return WalkResult::advance();
   });
-  form.ok = !walk.wasInterrupted();
-  // 失败时不把已经认下的那条循环交出去。调用方只看 ok，但判定层万一拿到一条
-  // "已经被拒的循环"会非常难查，所以在这里清掉而不是靠约定。
-  if (!form.ok)
-    form.programLoop = nullptr;
-  return form;
+  if (walk.wasInterrupted())
+    return BatchResult<scf::ForOp>::decline(std::move(first));
+  // A null handle is a valid straight-line program.
+  return BatchResult<scf::ForOp>::success(programLoop);
 }
 
 bool batchLoopCarriesValues(scf::ForOp loop) {

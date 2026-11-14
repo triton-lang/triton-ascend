@@ -10,21 +10,22 @@ using K = BatchExpr;
 // binding constraint; it only stops a pathological DAG.
 constexpr unsigned kBudget = 256;
 
-BatchLoopScheduleResult reject(const char *reason) {
-  return {std::nullopt, reason};
+BatchResult<BatchLogicalAxis> reject(const char *reason) {
+  return BatchResult<BatchLogicalAxis>::decline(
+      {reason, "loop_coordinates", {}, {}, {}, {}});
 }
 
 // The coefficient of exactly one named leaf, when the form holds nothing else.
 // "Nothing else" is the point: p*16 + arg is not a shape we can scale, and
 // silently ignoring the extra term would scale the wrong thing.
-std::optional<int64_t> soleCoefficient(const BatchLinearForm &form,
+std::optional<int64_t> soleCoefficient(const BatchAffineForm &form,
                                        K::Kind kind, int64_t id) {
-  if (form.constant != 0 || form.terms.size() != 1)
+  if (form.offset.constant != 0 || form.terms.size() != 1)
     return std::nullopt;
   const auto &[key, coefficient] = *form.terms.begin();
-  if (key.first != kind || key.second != id)
+  if (std::get<0>(key) != kind || std::get<1>(key) != id)
     return std::nullopt;
-  return coefficient;
+  return coefficient.constant;
 }
 
 // 穿透位宽转换。TTIR 里 pid 和 rows_per_program 都是 i32，用之前各裹一层
@@ -39,16 +40,15 @@ const BatchExprRef &stripWidening(const BatchExprRef &e) {
 
 // 各份相同：不随合并轴上的程序号变化。lane u 要能算出自己那一段，段宽就必须
 // 对 F 条 lane 是同一个值。
-bool laneUniform(const BatchExprRef &e, const BatchRangeFacts &ranges) {
-  return e && ranges.isLaneUniform(e);
+bool laneUniform(const BatchExprRef &e, int gridAxis) {
+  return e && BatchExpr::isLaneUniform(e, gridAxis);
 }
 
 // 匹配 p*R（两种操作数次序都认），返回 R。R 只要求各份相同，可以是常数，也可以
 // 是运行期参数——rms_norm_backward 的 rows_per_program 就是个 i32 参数，拆不进
 // 仿射形式，所以这里走结构而不是 batchLinearForm。
-std::optional<BatchExprRef>
-matchProgramTimesWidth(const BatchExprRef &e, int gridAxis,
-                       const BatchRangeFacts &ranges) {
+std::optional<BatchExprRef> matchProgramTimesWidth(const BatchExprRef &e,
+                                                   int gridAxis) {
   const BatchExprRef &root = stripWidening(e);
   if (!root || root->kind != K::Mul)
     return std::nullopt;
@@ -56,7 +56,7 @@ matchProgramTimesWidth(const BatchExprRef &e, int gridAxis,
        {std::pair{root->lhs, root->rhs}, std::pair{root->rhs, root->lhs}}) {
     const BatchExprRef &program = stripWidening(maybeProgram);
     if (program && program->kind == K::Program && program->value == gridAxis &&
-        laneUniform(maybeWidth, ranges))
+        laneUniform(maybeWidth, gridAxis))
       return maybeWidth;
   }
   return std::nullopt;
@@ -65,15 +65,15 @@ matchProgramTimesWidth(const BatchExprRef &e, int gridAxis,
 // 段尾：lane 一致（整条循环的终点各份相同），或 min((p+1)*R, 各份相同式)。
 // 第二种是 min((pid+1)*rows_per_program, n_rows)，两个定长分块正例都长这样。
 bool matchSegmentUpper(const BatchExprRef &upper, const BatchExprRef &width,
-                       int gridAxis, const BatchRangeFacts &ranges) {
-  if (laneUniform(upper, ranges))
+                       int gridAxis) {
+  if (laneUniform(upper, gridAxis))
     return true;
   const BatchExprRef &root = stripWidening(upper);
   if (!root || root->kind != K::MinSI)
     return false;
   for (auto [maybeEnd, maybeCap] :
        {std::pair{root->lhs, root->rhs}, std::pair{root->rhs, root->lhs}}) {
-    if (!laneUniform(maybeCap, ranges))
+    if (!laneUniform(maybeCap, gridAxis))
       continue;
     const BatchExprRef &end = stripWidening(maybeEnd);
     if (!end || end->kind != K::Mul)
@@ -101,39 +101,37 @@ bool matchSegmentUpper(const BatchExprRef &upper, const BatchExprRef &width,
 }
 } // namespace
 
-BatchLoopLowering selectBatchLoopLowering(const BatchLoopFact *loop,
-                                          const BatchLogicalAxis *axis,
-                                          const BatchRangeFacts &ranges,
-                                          int64_t factor) {
+BatchSchedule selectBatchLoopLowering(const BatchLoopFact *loop,
+                                      const BatchLogicalAxis *axis,
+                                      int64_t factor) {
   if (!loop || !axis || loop->id != axis->loopID || !loop->carriesValues)
-    return BatchLoopLowering::ProgramLanes;
+    return BatchSchedule::ProgramLanes;
   // nullopt trip counts include both dynamic inputs and unrepresentable
   // static counts. Only the former may defer to a runtime guard.
-  if (batchLoopIterationArithmetic(*loop, ranges, factor) ==
+  if (batchLoopIterationArithmetic(*loop, factor) ==
       BatchLoopArithmetic::Unsafe)
-    return BatchLoopLowering::ProgramLanes;
+    return BatchSchedule::ProgramLanes;
   // No complete iteration group exists. Retain the original program-lane
   // route when the existing trip-count analysis can prove this statically.
-  if (auto trips = batchLoopConstantTripCount(*loop, ranges);
-      trips && *trips < factor)
-    return BatchLoopLowering::ProgramLanes;
+  if (auto trips = batchLoopConstantTripCount(*loop); trips && *trips < factor)
+    return BatchSchedule::ProgramLanes;
   if ((axis->distribution == BatchLogicalAxis::Cyclic) ||
       (axis->distribution == BatchLogicalAxis::Blocked &&
-       ranges.isLaneUniform(loop->lower) && ranges.isLaneUniform(loop->upper) &&
-       ranges.isLaneUniform(loop->step)))
-    return BatchLoopLowering::SequentialIterations;
-  return BatchLoopLowering::ProgramLanes;
+       BatchExpr::isLaneUniform(loop->lower, axis->gridAxis) &&
+       BatchExpr::isLaneUniform(loop->upper, axis->gridAxis) &&
+       BatchExpr::isLaneUniform(loop->step, axis->gridAxis)))
+    return BatchSchedule::SequentialIterations;
+  return BatchSchedule::ProgramLanes;
 }
 
-BatchLoopScheduleResult
-normalizeBatchLoopCoordinates(const BatchLoopFact &loop,
-                              const BatchRangeFacts &ranges, int gridAxis) {
+BatchResult<BatchLogicalAxis>
+normalizeBatchLoopCoordinates(const BatchLoopFact &loop, int gridAxis) {
   if (!loop.lower || !loop.upper || !loop.step || gridAxis < 0)
     return reject("UNPROVEN_LOOP_COALESCING");
 
   // 关卡一：步长必须是正的。成块发的 G*R 不是常数，但 num_programs >= 1 让它的
   // 值域下界为正，所以这一关对两种分布都过得去。
-  if (!batchLoopHasProvenPositiveStep(loop, ranges))
+  if (!batchLoopHasProvenPositiveStep(loop))
     return reject("UNPROVEN_POSITIVE_LOOP_STEP");
 
   // 关卡二：步长是常数就是定长分块。折叠之后 lane u 就是原程序 g*F+u，要守住
@@ -143,26 +141,29 @@ normalizeBatchLoopCoordinates(const BatchLoopFact &loop,
   //   同一个。
   // 其余拒。2026-11-02 之前这里对边界零要求，那条放开的依据是"合并只把步长乘
   // F、边界一个字不动"的不折叠手写版方案，与本设计服从的 grid /= F 不符。
-  if (batchLoopConstantStep(loop, ranges)) {
-    bool ok = laneUniform(loop.lower, ranges)
-                  ? laneUniform(loop.upper, ranges)
-                  : [&] {
-                      auto width =
-                          matchProgramTimesWidth(loop.lower, gridAxis, ranges);
-                      return width && matchSegmentUpper(loop.upper, *width,
-                                                        gridAxis, ranges);
-                    }();
+  if (batchLoopConstantStep(loop)) {
+    bool ok =
+        laneUniform(loop.lower, gridAxis)
+            ? laneUniform(loop.upper, gridAxis)
+            : [&] {
+                auto width = matchProgramTimesWidth(loop.lower, gridAxis);
+                return width && matchSegmentUpper(loop.upper, *width, gridAxis);
+              }();
     if (!ok)
       return reject("UNPROVEN_LANE_SEGMENT_BOUND");
-    return {BatchLogicalAxis{BatchLogicalAxis::Blocked, loop.id, gridAxis, 1},
-            ""};
+    return BatchResult<BatchLogicalAxis>::success(
+        {BatchLogicalAxis::Blocked, loop.id, gridAxis, 1});
   }
 
   // 关卡三：成块发。起点必须恰好是 p*R、步长恰好是 G*R，且两个 R 相同——R 就是
   // 一圈覆盖的行数，合并时把它放大到 R*F。
   unsigned budget = kBudget;
-  auto origin = batchLinearForm(loop.lower, budget, kBatchLoopLeaves);
-  auto stride = batchLinearForm(loop.step, budget, kBatchLoopLeaves);
+  auto origin =
+      BatchAffineForm::fromExpr(loop.lower, budget, kBatchLoopLeaves,
+                                BatchAffineForm::Profile::Integer, -1);
+  auto stride =
+      BatchAffineForm::fromExpr(loop.step, budget, kBatchLoopLeaves,
+                                BatchAffineForm::Profile::Integer, -1);
   if (!origin || !stride)
     return reject("UNPROVEN_LOOP_COALESCING");
   auto perProgram = soleCoefficient(*origin, K::Program, gridAxis);
@@ -173,12 +174,11 @@ normalizeBatchLoopCoordinates(const BatchLoopFact &loop,
     return reject("UNPROVEN_LOOP_COALESCING");
 
   // 成块发把 F 个程序的行折进一条循环，各份共用这一条循环，所以上界必须一致。
-  if (!ranges.isLaneUniform(loop.upper))
+  if (!BatchExpr::isLaneUniform(loop.upper, gridAxis))
     return reject("VARYING_LOOP_BOUND");
 
-  return {BatchLogicalAxis{BatchLogicalAxis::Cyclic, loop.id, gridAxis,
-                           *perProgram},
-          ""};
+  return BatchResult<BatchLogicalAxis>::success(
+      {BatchLogicalAxis::Cyclic, loop.id, gridAxis, *perProgram});
 }
 
 BatchExprRef normalizeBatchAccessOnLogicalAxis(const BatchExprRef &e,

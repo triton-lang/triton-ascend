@@ -3,6 +3,7 @@
 #define TRITON_TO_GRAPH_BLOCK_BATCHING_LOOP_TRANSFORM_H
 #include "TritonToGraph/BlockBatching/BatchLoopSchedule.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include <array>
 
 namespace mlir::triton::cfg {
 
@@ -20,11 +21,6 @@ LogicalResult groupBatchLoopIterations(scf::ForOp loop, int64_t factor);
 //
 // 没有 factor 入参：成块发的界只换程序号、步长不动，F 全部体现在调用方算好的
 // foldedProgramId 里；块宽放大 F 倍是布局层按 axis.chunk * F 做的，不在这里。
-struct BatchRetiledBounds {
-  Value lower, upper, step;
-  bool ok() const { return lower && upper && step; }
-};
-
 // 把界里的一个原值换成新函数体里的对应物。
 //
 // 存在的理由：界表达式读的是**原** IR，而原函数体在改写收尾时会被整体 erase
@@ -34,11 +30,11 @@ struct BatchRetiledBounds {
 // 返回空表示这个值在新体里没有对应物，整条界按失败处理。
 using BatchValueRemap = llvm::function_ref<Value(Value)>;
 
-// 失败时返回全空，调用方应当放弃这个候选而不是继续改写。
-BatchRetiledBounds retileBatchLoopBounds(OpBuilder &builder, scf::ForOp loop,
-                                         const BatchLogicalAxis &axis,
-                                         Value programId, Value foldedProgramId,
-                                         BatchValueRemap remap);
+// 失败时返回诊断，调用方应当放弃这个候选而不是继续改写。
+BatchResult<std::array<Value, 3>>
+retileBatchLoopBounds(OpBuilder &builder, scf::ForOp loop,
+                      const BatchLogicalAxis &axis, Value programId,
+                      Value foldedProgramId, BatchValueRemap remap);
 
 } // namespace mlir::triton::cfg
 #endif

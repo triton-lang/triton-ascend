@@ -9,6 +9,10 @@ namespace mlir::triton::cfg {
 // After TTIR conversion, preserve the one-dimensional implementation of
 // independent row scans. Only modules owned by block batching are rewritten.
 unsigned lowerBatchLaneScans(ModuleOp module, int64_t factor);
+// All non-scan dimensions must be singleton. firstDimension=1 excludes only
+// the newly added batch dimension when checking the lowered lane tensor.
+bool hasBatchIndependentScanDomain(RankedTensorType source, int64_t axis,
+                                   unsigned firstDimension = 0);
 LogicalResult verifyBatchReduction(Operation *op, std::string &reason,
                                    Operation *&failedOp);
 SmallVector<Value> getBatchCombinerCaptures(Operation *op);

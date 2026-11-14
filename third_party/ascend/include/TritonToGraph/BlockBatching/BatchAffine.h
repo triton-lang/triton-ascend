@@ -5,17 +5,9 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <tuple>
 #include <utility>
 namespace mlir::triton::cfg {
-// Deliberately bounded exact integer algebra: constant + sum(coefficient*leaf).
-// Every coefficient is proven by exact integer arithmetic or the whole
-// decomposition fails. No sampled value and no equality of byte strides can
-// establish a term here.
-struct BatchLinearForm {
-  using Key = std::pair<BatchExpr::Kind, int64_t>;
-  int64_t constant = 0;
-  std::map<Key, int64_t> terms;
-};
 // Which leaf kinds count as free variables. Every other leaf fails the
 // decomposition, so widening this set can only turn failures into successes,
 // never the reverse. That asymmetry is why each caller names its own set rather
@@ -34,12 +26,32 @@ inline constexpr BatchLeafMask kBatchLayoutLeaves =
 // logical axis.
 inline constexpr BatchLeafMask kBatchLoopLeaves =
     kBatchLayoutLeaves | batchLeaf(BatchExpr::Induction);
-// Returns nullopt when the expression is not affine over `leaves`, when any
-// coefficient overflows int64, or when `budget` runs out. `budget` is consumed
-// across the whole traversal and is deliberately by reference, so a caller
-// cannot be amplified by a deeply shared subexpression.
-std::optional<BatchLinearForm>
-batchLinearForm(const BatchExprRef &e, unsigned &budget, BatchLeafMask leaves);
+// Parameters retain their bit width. Coordinate keys retain the quotient or
+// remainder divisor.
+struct BatchAffineForm {
+  enum class Profile { Integer, Parameter };
+  using Key = std::tuple<BatchExpr::Kind, int64_t, int64_t>;
+  struct Coefficient {
+    using Atom = std::tuple<BatchExpr::Kind, int64_t, unsigned>;
+    int64_t constant = 0;
+    std::map<Atom, int64_t> parameters;
+    bool isZero() const { return constant == 0 && parameters.empty(); }
+    bool operator==(const Coefficient &other) const {
+      return constant == other.constant && parameters == other.parameters;
+    }
+    bool addScaled(const Coefficient &other, int64_t scale);
+    std::optional<Coefficient> multiply(const Coefficient &other) const;
+    std::optional<Coefficient> divide(int64_t divisor) const;
+    BatchExprRef expression() const;
+  };
+  Coefficient offset;
+  std::map<Key, Coefficient> terms;
+  bool symbolic() const;
+  static std::optional<BatchAffineForm> fromExpr(const BatchExprRef &e,
+                                                 unsigned &budget,
+                                                 BatchLeafMask leaves,
+                                                 Profile profile, int axis);
+};
 
 // Structural equality: same kind, same payload, same children, recursively.
 // Deliberately no canonicalization -- it does not see that 2*R and R*2 are the

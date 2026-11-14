@@ -31,9 +31,12 @@ def test_factor_tail_and_default(factor):
         y.fill_(-123)
         default = pointwise[(8, )](x, y, 1003, 128)
         torch.npu.synchronize()
-        # Explicit and omitted defaults can occupy distinct in-memory JIT cache entries.
-        assert default.hash == kernel.hash
-        assert not hasattr(default, 'candidate')
+        explicit_auto = pointwise[(8, )](x, y, 1003, 128, block_batching_factor="auto")
+        torch.npu.synchronize()
+        assert default is explicit_auto
+        assert default.block_auto_selection['selected_factor'] in (1, 2, 4)
+        assert not hasattr(kernel, 'block_auto_selection')
+        assert not hasattr(kernel, 'candidate')  # Explicit F1 disables selection.
         torch.testing.assert_close(y.cpu(), cpu * 2 + 1, rtol=0, atol=0)
         assert (storage[:16] == -123).all() and (storage[-16:] == -123).all()
 

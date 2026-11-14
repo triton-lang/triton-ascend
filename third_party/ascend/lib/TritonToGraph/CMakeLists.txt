@@ -25,6 +25,7 @@ add_triton_library(TritonToGraph
   BlockBatching/ReductionModels.cpp
   BlockBatching/ControlFlowModels.cpp
   BlockBatching/BatchAnalysis.cpp
+  BlockBatching/BatchRewriteFinalizer.cpp
   BlockBatching/BatchRewrite.cpp
   BlockBatching/CVSpatial.cpp
   GraphOptimizationPass.cpp

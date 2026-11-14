@@ -546,7 +546,7 @@ def _run_linalg_to_npubin(compiler, monkeypatch, function_name, has_blacklist_op
     result = getattr(compiler, function_name)(
         "module {}",
         {},
-        SimpleNamespace(debug=False, target_arch="Ascend950PR", is_pure_simt=False),
+        SimpleNamespace(debug=False, target_arch="Ascend950PR", is_pure_simt=False, block_auto_collect=False),
     )
     assert result == b"npubin"
     assert len(commands) == 1

@@ -1,6 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 """Evaluate one unified plan. Device SSA indices are never read on the host."""
-from .block_batching_guard import GuardFailure, I32_MAX, integer, checked
+from .block_batching_guard import GuardFailure, I32_MAX, integer, checked, check_write_alias
 from .block_batching_guard_v2 import ByteDomain, check_layout_guards
 
 
@@ -32,8 +32,8 @@ def check_iteration_arithmetic(loop, arguments, grid, factor):
     if not upper.uniform or not step.uniform or step.offset <= 0:
         raise GuardFailure('INVALID_LOOP_SCHEDULE')
     for value, bits in domain.checks:
-        checked(*domain.bounds(value, domain.full), bits)
-    lo, hi = domain.bounds(lower, domain.full)
+        checked(*value.bounds(domain.full), bits)
+    lo, hi = lower.bounds(domain.full)
     ub, stride, bits = upper.offset, step.offset, domain.bits(loop['bits'])
     # SCF's dynamic unroller uses positive ceil-div for (ub-lb)/step.
     # Require a complete group for every original program. Short/empty loops
@@ -131,10 +131,7 @@ def check_guard_v3(guard, arguments, grid, factor):
             if accesses[layout['access_id']]['device_address']:
                 raise GuardFailure('INVALID_LAYOUT_PROOF')
         check_layout_guards(guard, arguments, grid, factor)
-        for i, (lo, hi, write) in enumerate(ranges):
-            for a, b, other_write in ranges[:i]:
-                if (write or other_write) and lo < b and a < hi:
-                    raise GuardFailure('WRITE_ALIAS')
+        check_write_alias(ranges)
         if any(key in guard for key in ('require_full_masks', 'require_same_fractal_bounds', 'cv_mask_contract')):
             # The unified effect proof is necessary but does not establish
             # the packaged batch-MMA padding/reduction contract. Reuse the

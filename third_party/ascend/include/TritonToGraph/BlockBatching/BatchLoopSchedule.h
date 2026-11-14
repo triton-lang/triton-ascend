@@ -3,6 +3,7 @@
 #define TRITON_TO_GRAPH_BLOCK_BATCHING_LOOP_SCHEDULE_H
 #include "TritonToGraph/BlockBatching/BatchLoopFacts.h"
 #include "TritonToGraph/BlockBatching/BatchRangeAnalysis.h"
+#include "TritonToGraph/BlockBatching/BatchResult.h"
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -27,29 +28,20 @@ struct BatchLogicalAxis {
   int64_t chunk = 1;
 };
 
-struct BatchLoopScheduleResult {
-  std::optional<BatchLogicalAxis> axis;
-  std::string reason; // 空表示成功
-};
-
 // The existing coordinate proof also identifies program-owned recurrences.
 // Group their consecutive iterations without moving rows between programs or
 // reassociating carried values. The runtime proof checks the new arithmetic.
-enum class BatchLoopLowering { ProgramLanes, SequentialIterations };
-BatchLoopLowering selectBatchLoopLowering(const BatchLoopFact *loop,
-                                          const BatchLogicalAxis *axis,
-                                          const BatchRangeFacts &ranges,
-                                          int64_t factor);
+enum class BatchSchedule { ProgramLanes, SequentialIterations };
+BatchSchedule selectBatchLoopLowering(const BatchLoopFact *loop,
+                                      const BatchLogicalAxis *axis,
+                                      int64_t factor);
 
 // 入参是一条循环而不是一组访存：归一是循环的属性。"函数里有且只有一条程序轴
 // 循环、且在顶层"由 BatchLoopLegality 的形态检查负责，不在这里。
 //
-// 不收 BatchAccessFact，因为它带 Operation*，头文件会把整个 MLIR 方言和
-// llvm/Support/JSON.h 拖进判定层，破掉 C2/C3，也就没法脱离 MLIR 单测了。
 // 不收 factor：用到 F 的只有圈数门槛 T >= F 与 F <= R，那是主谓词的事。
-BatchLoopScheduleResult
-normalizeBatchLoopCoordinates(const BatchLoopFact &loop,
-                              const BatchRangeFacts &ranges, int gridAxis);
+BatchResult<BatchLogicalAxis>
+normalizeBatchLoopCoordinates(const BatchLoopFact &loop, int gridAxis);
 
 // 把访存表达式里这条循环的循环变量换成「下界 + 圈内偏移」，依据是恒等式
 //

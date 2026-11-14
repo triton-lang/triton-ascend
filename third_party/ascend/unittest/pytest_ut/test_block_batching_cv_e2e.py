@@ -76,3 +76,13 @@ def test_grouped_matrix_results(mode, loop, integer, k):
             assert kernel.block_batching['guard'][
                 'cv_loop_fusion_rejection'] == 'CV_BATCH_CONTROL_ACCUMULATOR_NOT_VALIDATED'
     assert kernel.block_batching['cv_lowering'] == expected_lowering
+    if mode == 0 and not loop and not integer:
+        c.fill_(-12345)
+        default = grouped_dot[(4, )](a, b, c, m, n, k, mode, loop, integer)
+        torch.npu.synchronize()
+        torch.testing.assert_close(c.cpu(), expected, rtol=0, atol=0)
+        assert (storage[:64] == -12345).all() and (storage[-64:] == -12345).all()
+        selection = default.block_auto_selection
+        assert selection['selected_factor'] in (1, 2, 4)
+        if selection['selected_factor'] > 1:
+            assert_applied(default, selection['selected_factor'])

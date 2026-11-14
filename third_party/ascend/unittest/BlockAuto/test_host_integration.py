@@ -82,17 +82,33 @@ class TestHostIntegration(unittest.TestCase):
         self.assertEqual(contract["arguments"]["x"]["shape"], [256, 512])
         self.assertNotIn("block_auto_contract", self.kwargs)
 
-    def test_default_and_explicit_factors_keep_manual_dispatch(self):
-        for factor in (None, 1, 2, 4):
+    def test_omitted_factor_matches_explicit_auto(self):
+        explicit, _ = self.dispatch.prepare_launch(self.fn, (Tensor(), 131072), self.kwargs, (256, ), False, 0,
+                                                   self.backend)
+        self.kwargs.pop("block_batching_factor")
+        self.calls.clear()
+        self.run_handler()
+        prepared = self.calls[-1][0][1]
+        self.assertEqual(prepared, explicit)
+        self.assertEqual(list(prepared), list(explicit))
+        self.assertEqual(prepared["block_batching_factor"], "auto")
+        self.assertNotIn("block_batching_factor", self.kwargs)
+
+    def test_incomplete_tensor_metadata_does_not_break_default_launch(self):
+        wrapper = SimpleNamespace(dtype="fp32", shape=(256, 512), stride=lambda: (512, 1))
+        self.assertEqual(self.dispatch._argument(wrapper), dict(kind="unsupported"))
+
+    def test_explicit_factors_keep_manual_dispatch(self):
+        for factor in (1, 2, 4):
             self.kwargs = dict(BLOCK=512, block_batching_axis=0)
-            if factor is not None:
-                self.kwargs["block_batching_factor"] = factor
+            self.kwargs["block_batching_factor"] = factor
             self.calls.clear()
             self.assertIs(self.run_handler(), self.result)
             self.assertEqual(len(self.calls), 1)
             self.assertIs(self.calls[0][0][1], self.kwargs)
 
     def test_warmup_and_capture_use_baseline_without_binding_or_grid_evaluation(self):
+        self.kwargs.pop("block_batching_factor")
 
         def unavailable(_):
             self.fail("grid must stay lazy")
@@ -107,6 +123,7 @@ class TestHostIntegration(unittest.TestCase):
             self.assertIs(values[2], unavailable)
 
     def test_non_a5_and_invalid_grid_keep_baseline(self):
+        self.kwargs.pop("block_batching_factor")
         for target, grid in (("Ascend910B", (256, )), ("Ascend950", (0, ))):
             self.backend.target.arch = target
             self.calls.clear()
@@ -154,8 +171,8 @@ class TestCompileIntegration(unittest.TestCase):
         self.backend = SimpleNamespace(parse_options=lambda _: SimpleNamespace(block_batching_backend_revision="r"))
         self.options = dict(block_batching_factor="auto", block_auto_contract=json.dumps(dict(grid=[256, 1, 1])))
         self.bundle = SimpleNamespace(candidate=object(), block_batching=dict(selected_axis=0))
-        self.manual = module("batching", _freeze_source=lambda *args: self.frozen, BatchingRejected=ValueError,
-                             compile_bundle=self.manual_compile, BatchRequest=lambda: "F1",
+        self.manual = module("batching", _freeze_source=lambda *args: self.frozen, compile_bundle=self.manual_compile,
+                             BatchRequest=lambda: "F1",
                              BatchKernel=lambda *args: SimpleNamespace(baseline=args[0], candidate=None))
         self.model = module(
             "model", select_candidates=self.select,
@@ -220,6 +237,54 @@ class TestCompileIntegration(unittest.TestCase):
         result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
         self.assertIs(result.baseline, self.baseline)
         self.assertIsNone(result.candidate)
+
+    def test_freeze_refusal_compiles_original_baseline_once(self):
+        worker = importlib.import_module(PACKAGE + ".block_batching_worker")
+        original = object()
+        self.manual._freeze_source = lambda *args: worker.BatchDecline("CUSTOM_CACHE_NOT_SUPPORTED", "freeze")
+        self.model.select_candidates = lambda candidates, contract: (
+            1, dict(selected_key="unmerged", reason="CUSTOM_CACHE_NOT_SUPPORTED"))
+        result = self.dispatch.compile_auto_bundle(self.backend, original, self.options, self.compile)
+        self.assertEqual(len(self.events), 1)
+        self.assertIs(self.events[0][1], original)
+        self.assertIsNone(result.candidate)
+        self.assertEqual(result.block_auto_selection["candidate_plan"]["reason"], "CUSTOM_CACHE_NOT_SUPPORTED")
+
+    def test_candidate_internal_failure_is_not_silently_downgraded(self):
+        worker = importlib.import_module(PACKAGE + ".block_batching_worker")
+
+        def fail(*args):
+            raise worker.BatchCompileError("broken protocol", kind="ProtocolError")
+
+        self.manual.compile_bundle = fail
+        with self.assertRaises(worker.BatchCompileError):
+            self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
+        self.assertEqual(len(self.events), 1)
+
+    def test_cv_probe_normalizes_f1_then_uses_supervised_rewrite(self):
+        worker = importlib.import_module(PACKAGE + ".block_batching_worker")
+        report = dict(compile_status="REWRITTEN", selected_axis=1, requested_factor=4)
+        ir = SimpleNamespace(context=lambda: "context", load_dialects=lambda _: None)
+        self.backend.parse_options = lambda values: SimpleNamespace(**values, enable_hivm_batch_matmul=True)
+        self.backend.target = object()
+        self.backend.load_dialects = lambda _: None
+        self.backend.get_codegen_implementation = lambda _: {}
+        self.backend.get_module_map = lambda: {}
+        frozen = SimpleNamespace(make_ir=lambda *args: "raw")
+
+        def normalize(module, metadata, options):
+            self.assertEqual(module, "raw")
+            self.assertEqual(options.block_batching_factor, 1)
+            self.assertFalse(options.enable_graph_optimize)
+            return "normalized"
+
+        with patch.dict(
+                sys.modules, {
+                    "triton._C.libtriton": module("triton._C.libtriton", ir=ir),
+                    PACKAGE + ".compiler": module("compiler", make_ttir=normalize),
+                }), patch.object(worker, "isolated_report", return_value=report) as probe:
+            self.assertIs(self.dispatch._probe(self.backend, frozen, {}, 1, 4), report)
+            probe.assert_called_once_with("probe", "normalized", 4, 1, "semantic_only", True)
 
 
 if __name__ == "__main__":

@@ -231,8 +231,9 @@ class NPULauncher(object):
         if self.launch_spec.grid_contract_version:
             capability = getattr(runtime, "capabilities", lambda: {})()
             if capability.get("program_grid_contract", 0) < 3 or capability.get("launch_spec", 0) < 2:
-                from .block_batching import BatchingRejected
-                raise BatchingRejected("NATIVE_ABI_MISMATCH")
+                error = NotImplementedError("NATIVE_ABI_MISMATCH")
+                error.ascend_launcher_abi_mismatch = True
+                raise error
             native = runtime.create_launcher_v2(self.launch_spec.as_dict(), self._argument_types)
         else:
             native = runtime.create_launcher(self.launch_spec.as_dict(), self._argument_types)

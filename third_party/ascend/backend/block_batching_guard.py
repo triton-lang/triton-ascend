@@ -5,15 +5,12 @@ Pointer roots are not assumed disjoint. All write/read and write/write spans
 are checked on every call, including roots unaffected by the batched axis.
 No tensor data or allocation capacity is read. Unknown domains select baseline.
 """
-from dataclasses import dataclass
 import operator
+
+from .block_batching_affine import Affine, GuardFailure
 
 I32_MAX = (1 << 31) - 1
 U64_MAX = (1 << 64) - 1
-
-
-class GuardFailure(ValueError):
-    pass
 
 
 def integer(value):
@@ -33,21 +30,24 @@ def checked(lo, hi, bits=64, unsigned=False):
     return lo, hi
 
 
-@dataclass(frozen=True)
-class Affine:
-    offset: int
-    coefficients: tuple = (0, 0, 0, 0)
+def positive_span(dimensions, span, is_exclusive, overlap_reason):
+    for stride, count in dimensions:
+        if stride < 0:
+            raise GuardFailure("NEGATIVE_STRIDE")
+        if count > 1 and stride == 0 and is_exclusive():
+            raise GuardFailure(overlap_reason)
+    for stride, count in sorted((s, n) for s, n in dimensions if n > 1 and s):
+        if is_exclusive() and stride <= span:
+            raise GuardFailure(overlap_reason)
+        span += stride * (count - 1)
+    return span
 
-    @property
-    def uniform(self):
-        return not any(self.coefficients)
 
-    def add(self, other, sign=1):
-        return Affine(self.offset + sign * other.offset,
-                      tuple(a + sign * b for a, b in zip(self.coefficients, other.coefficients)))
-
-    def scale(self, scale):
-        return Affine(self.offset * scale, tuple(c * scale for c in self.coefficients))
+def check_write_alias(ranges):
+    for i, (lo, hi, write) in enumerate(ranges):
+        for a, b, other_write in ranges[:i]:
+            if (write or other_write) and lo < b and a < hi:
+                raise GuardFailure("WRITE_ALIAS")
 
 
 class Domain:
@@ -101,15 +101,6 @@ class Domain:
             raise GuardFailure("UNSUPPORTED_GUARD_EXPRESSION")
         return result
 
-    @staticmethod
-    def bounds(affine, counts):
-        lo = hi = affine.offset
-        for coefficient, count in zip(affine.coefficients, counts):
-            delta = coefficient * (count - 1)
-            lo += min(0, delta)
-            hi += max(0, delta)
-        return lo, hi
-
     def access(self, access):
         address = self.expression(access["offset"])
         counts = [*self.grid, self.extent or 1]
@@ -124,7 +115,7 @@ class Domain:
         # is proved nonwrapping on the full original domain. Otherwise a
         # wrapped large PID could satisfy a predicate assumed to be false.
         for expression, bits in self.checks:
-            lo, hi = self.bounds(expression, counts)
+            lo, hi = expression.bounds(counts)
             checked(lo, hi, abs(bits), unsigned=bits < 0)
         if mask is not None:
             if (not limit.uniform or limit.offset <= 0 or index.offset < 0 or any(c < 0 for c in index.coefficients)
@@ -154,17 +145,7 @@ class Domain:
             raise GuardFailure("NON_UNIT_COLUMN_STRIDE")
         if dimensions is None:
             dimensions = list(zip(address.coefficients, counts))
-        for stride, count in dimensions:
-            if stride < 0:
-                raise GuardFailure("NEGATIVE_STRIDE")
-            if count > 1 and stride == 0 and access["write"]:
-                raise GuardFailure("OVERLAPPING_BLOCK_WRITES")
-        active = sorted((stride, count) for stride, count in dimensions if count > 1 and stride)
-        span = 0
-        for stride, count in active:
-            if access["write"] and stride <= span:
-                raise GuardFailure("OVERLAPPING_BLOCK_WRITES")
-            span += stride * (count - 1)
+        span = positive_span(dimensions, 0, lambda: access["write"], "OVERLAPPING_BLOCK_WRITES")
         # Read-only zero-stride dimensions are shared accesses, not extra work.
         end = address.offset + span
         checked(address.offset, end)
@@ -210,10 +191,7 @@ def check_guard(guard, arguments, grid, factor):
             if end <= start:
                 raise GuardFailure("INVALID_MEMORY_INTERVAL")
             ranges.append((start, end, access["write"]))
-        for i, (start, end, write) in enumerate(ranges):
-            for other_start, other_end, other_write in ranges[:i]:
-                if (write or other_write) and start < other_end and other_start < end:
-                    raise GuardFailure("WRITE_ALIAS")
+        check_write_alias(ranges)
         return True, "PROVEN_AT_RUNTIME"
     except (GuardFailure, IndexError, KeyError, TypeError, OverflowError) as error:
         return False, str(error)

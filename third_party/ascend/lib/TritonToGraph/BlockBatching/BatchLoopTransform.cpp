@@ -24,8 +24,7 @@ LogicalResult groupBatchLoopIterations(scf::ForOp loop, int64_t factor) {
   fact.upper = bound(loop.getUpperBound());
   fact.step = bound(loop.getStep());
   if (!fact.lower || !fact.upper || !fact.step ||
-      batchLoopIterationArithmetic(fact, BatchRangeFacts(0), factor) ==
-          BatchLoopArithmetic::Unsafe)
+      batchLoopIterationArithmetic(fact, factor) == BatchLoopArithmetic::Unsafe)
     return failure();
   MLIRContext *context = loop.getContext();
   auto grouped = loopUnrollByFactor(loop, factor);
@@ -110,32 +109,35 @@ Value substitute(OpBuilder &builder, Value value, Value programId, Value folded,
 
 } // namespace
 
-BatchRetiledBounds retileBatchLoopBounds(OpBuilder &builder, scf::ForOp loop,
-                                         const BatchLogicalAxis &axis,
-                                         Value programId, Value foldedProgramId,
-                                         BatchValueRemap remap) {
+BatchResult<std::array<Value, 3>>
+retileBatchLoopBounds(OpBuilder &builder, scf::ForOp loop,
+                      const BatchLogicalAxis &axis, Value programId,
+                      Value foldedProgramId, BatchValueRemap remap) {
   // 两种分布共用这一段，不按 distribution 分支：它们的界都写成程序号的函数
   // （成块发 p*R，定长分块 p*R → min((p+1)*R, N)），把程序号换成折叠后的
   // lane 号，算出来的就是这条 lane 该走的那一段。差别只在圈数——定长分块各
   // lane 可能差一个尾部，那是循环体掩码的事，不是界的事。
+  using Result = BatchResult<std::array<Value, 3>>;
+  auto decline = [] {
+    return Result::decline({"LOOP_RETILING_FAILED", "retile", {}, {}, {}, {}});
+  };
   (void)axis;
   if (!programId || !foldedProgramId ||
       programId.getType() != foldedProgramId.getType())
-    return {};
+    return decline();
 
   unsigned budget = kBudget;
-  BatchRetiledBounds bounds;
-  bounds.lower = substitute(builder, loop.getLowerBound(), programId,
-                            foldedProgramId, remap, budget);
-  bounds.upper = substitute(builder, loop.getUpperBound(), programId,
-                            foldedProgramId, remap, budget);
+  Value lower = substitute(builder, loop.getLowerBound(), programId,
+                           foldedProgramId, remap, budget);
+  Value upper = substitute(builder, loop.getUpperBound(), programId,
+                           foldedProgramId, remap, budget);
   // 步长不换程序号，但仍要过 remap：它同样读的是原 IR。tt.get_num_programs 已被
   // 重映射回隐藏的原始网格参数（BatchRewrite.cpp:407-413），所以这个表达式读到的
   // 是原始的 G 而不是 G/F；再乘一个 F 会让它变成 G*R*F，跳过 (F-1)/F 的行。
-  bounds.step = remap(loop.getStep());
-  if (!bounds.ok())
-    return {};
-  return bounds;
+  Value step = remap(loop.getStep());
+  if (!lower || !upper || !step)
+    return decline();
+  return Result::success({lower, upper, step});
 }
 
 } // namespace mlir::triton::cfg

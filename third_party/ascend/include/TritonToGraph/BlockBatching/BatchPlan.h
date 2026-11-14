@@ -1,75 +1,165 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-#ifndef TRITON_TO_GRAPH_BLOCK_BATCHING_BATCH_PLAN_H
-#define TRITON_TO_GRAPH_BLOCK_BATCHING_BATCH_PLAN_H
-
-#include "TritonToGraph/BlockBatching/BatchLayoutPlan.h"
-#include "TritonToGraph/BlockBatching/ControlFlowModels.h"
-#include "mlir/IR/BuiltinOps.h"
-#include "mlir/Support/LogicalResult.h"
-#include "llvm/ADT/StringRef.h"
-#include <cstdint>
-#include <map>
-#include <string>
+#ifndef TRITON_TO_GRAPH_BLOCK_BATCHING_PLAN_H
+#define TRITON_TO_GRAPH_BLOCK_BATCHING_PLAN_H
+#include "TritonToGraph/BlockBatching/BatchFacts.h"
+#include "TritonToGraph/BlockBatching/BatchLayoutFacts.h"
+#include "TritonToGraph/BlockBatching/BatchLoopSchedule.h"
+#include "TritonToGraph/BlockBatching/BatchResult.h"
+#include <memory>
+#include <optional>
 
 namespace mlir::triton::cfg {
-
-struct BatchPlan {
-  BatchAccessReport effects;
-  BatchControlFlowPlan values;
-  SmallVector<BatchLayoutPlan, 0> layouts;
-  llvm::DenseSet<Operation *> replicatedLoads;
+// Strategy describes lowering semantics, not a second class hierarchy.
+enum class BatchStrategy {
+  VectorLanes,
+  SequentialLoop,
+  MatrixStaticLanes,
+  MatrixSpatial,
+  MatrixBatch
 };
 
-enum class BlockMappingOwner { None, BlockBatching, Legacy };
-
-struct BatchRequest {
-  int64_t factor = 1;
-  int32_t axis = -1;
-  bool semanticOnly = false;
-  // CV supports independent lanes or a proved shared-operand spatial tile.
-  // The dispatcher proves a full group before launching either candidate.
-  bool cv = false;
-  // Opt-in independent rank-three lowering. Preserve rectangular masks;
-  // the guard proves complete reduction axes and unchanged padded footprints.
-  bool cvBatchMatmul = false;
-  bool isValid() const { return factor > 0 && axis >= -1 && axis <= 2; }
+enum class BatchEffectRule {
+  ReplicateEffect,
+  PreserveVolatile,
+  ShareInvariantLoad,
+  SupportedEffect
 };
-
-// No MLIR Value survives this read-only analysis. It may be serialized into
-// compiler metadata, but must never authorize a transformed launch.
-struct BatchAnalysisReport {
-  std::string status = "REJECTED";
-  std::string reason;
-  std::string location;
-  std::string operation;
-  std::string context;
-  std::string layoutJSON;
-  std::map<std::string, unsigned> operations;
+inline const char *batchEffectRuleName(BatchEffectRule rule) {
+  switch (rule) {
+  case BatchEffectRule::ReplicateEffect:
+    return "ReplicateEffect";
+  case BatchEffectRule::PreserveVolatile:
+    return "PreserveVolatile";
+  case BatchEffectRule::ShareInvariantLoad:
+    return "ShareInvariantLoad";
+  case BatchEffectRule::SupportedEffect:
+    return "SupportedEffect";
+  }
+  return nullptr;
+}
+enum class BatchEffectProof { ByteDomain, LaneCorrespondence };
+struct BatchEffectObligation {
+  unsigned accessID;
+  BatchEffectRule rule;
+  BatchEffectProof proof;
 };
+// All consumers share exactly the decision validated by createChecked. Layout
+// and effect buffers transfer only on success so refusals can still report
+// the original obligations.
+class BatchPlan {
+public:
+  BatchPlan(const BatchPlan &) = delete;
+  BatchPlan &operator=(const BatchPlan &) = delete;
+  static BatchResult<std::shared_ptr<const BatchPlan>>
+  createChecked(std::shared_ptr<const BatchFacts> facts, int axis,
+                int64_t factor, BatchStrategy strategy,
+                std::optional<BatchLogicalAxis> logicalAxis,
+                llvm::SmallVector<BatchLayoutPlan, 0> &&layouts,
+                llvm::SmallVector<BatchEffectObligation, 0> &&effects,
+                llvm::SmallVector<unsigned, 0> &&terminalReads) {
+    using Result = BatchResult<std::shared_ptr<const BatchPlan>>;
+    auto invalid = [](std::string reason,
+                      std::optional<unsigned> sourceID = {}) {
+      return Result::error({std::move(reason), "plan", {}, {}, {}, sourceID});
+    };
+    if (!facts || axis < 0 || axis >= 3 || factor <= 1 || factor > INT32_MAX)
+      return invalid("INVALID_BATCH_PLAN_REQUEST");
+    if (!validEffects(*facts, effects, terminalReads))
+      return invalid("INVALID_BATCH_EFFECT_OBLIGATIONS");
+    if (logicalAxis &&
+        (logicalAxis->gridAxis != axis ||
+         !facts->findLoop(logicalAxis->loopID) || logicalAxis->chunk < 1 ||
+         (logicalAxis->distribution != BatchLogicalAxis::Blocked &&
+          logicalAxis->distribution != BatchLogicalAxis::Cyclic)))
+      return invalid("INVALID_BATCH_LOGICAL_AXIS");
+    switch (strategy) {
+    case BatchStrategy::VectorLanes:
+    case BatchStrategy::MatrixBatch:
+      if (layouts.size() != facts->accesses().size())
+        return invalid("INCOMPLETE_BATCH_LAYOUT_MAPPING");
+      for (unsigned id = 0; id < layouts.size(); ++id)
+        if (layouts[id].accessID != id)
+          return invalid("INVALID_BATCH_LAYOUT_MAPPING", id);
+      break;
+    case BatchStrategy::SequentialLoop:
+      if (!logicalAxis)
+        return invalid("MISSING_BATCH_LOGICAL_AXIS");
+      [[fallthrough]];
+    case BatchStrategy::MatrixSpatial:
+    case BatchStrategy::MatrixStaticLanes:
+      if (!layouts.empty())
+        return invalid("UNEXPECTED_BATCH_LAYOUTS");
+      break;
+    default:
+      return invalid("INVALID_BATCH_STRATEGY");
+    }
+    return Result::success(std::shared_ptr<const BatchPlan>(new BatchPlan(
+        std::move(facts), axis, factor, strategy, logicalAxis,
+        std::move(layouts), std::move(effects), std::move(terminalReads))));
+  }
 
-struct BatchRewriteReport : BatchAnalysisReport {
-  std::string guardJSON;
-  std::string cvMode = "disabled";
-  std::string cvLowering = "disabled";
-  std::string vvLowering = "disabled";
-  unsigned structuredMasks = 0;
-  int selectedAxis = -1;
-  int64_t laneWidth = 1;
+  static bool validEffects(const BatchFacts &facts,
+                           llvm::ArrayRef<BatchEffectObligation> effects,
+                           llvm::ArrayRef<unsigned> terminalReads) {
+    if (effects.size() != facts.accesses().size())
+      return false;
+    for (unsigned id = 0; id < effects.size(); ++id)
+      if (effects[id].accessID != id ||
+          !batchEffectRuleName(effects[id].rule) ||
+          (effects[id].proof != BatchEffectProof::ByteDomain &&
+           effects[id].proof != BatchEffectProof::LaneCorrespondence))
+        return false;
+    for (unsigned id : terminalReads)
+      if (id >= effects.size())
+        return false;
+    return true;
+  }
+  BatchStrategy strategy() const { return selectedStrategy; }
+  bool isMatrix() const {
+    return selectedStrategy == BatchStrategy::MatrixStaticLanes ||
+           selectedStrategy == BatchStrategy::MatrixSpatial ||
+           selectedStrategy == BatchStrategy::MatrixBatch;
+  }
+  const BatchFacts &facts() const { return *sourceFacts; }
+  int axis() const { return selectedAxis; }
+  int64_t factor() const { return laneWidth; }
+  BatchSchedule schedule() const {
+    return selectedStrategy == BatchStrategy::SequentialLoop
+               ? BatchSchedule::SequentialIterations
+               : BatchSchedule::ProgramLanes;
+  }
+  bool preservesGrid() const {
+    return schedule() == BatchSchedule::SequentialIterations;
+  }
+  unsigned hiddenExtentCount() const { return preservesGrid() ? 0 : 3; }
+  const std::optional<BatchLogicalAxis> &logicalAxis() const {
+    return loopAxis;
+  }
+  const BatchLoopFact *groupedLoop() const {
+    return preservesGrid() ? sourceFacts->findLoop(loopAxis->loopID) : nullptr;
+  }
+  llvm::ArrayRef<BatchLayoutPlan> layouts() const { return layoutPlans; }
+  llvm::ArrayRef<BatchEffectObligation> effects() const { return effectRules; }
+  llvm::ArrayRef<unsigned> terminalReads() const { return terminalReadIDs; }
+
+private:
+  BatchPlan(std::shared_ptr<const BatchFacts> facts, int axis, int64_t factor,
+            BatchStrategy strategy, std::optional<BatchLogicalAxis> logicalAxis,
+            llvm::SmallVector<BatchLayoutPlan, 0> &&layouts,
+            llvm::SmallVector<BatchEffectObligation, 0> &&effects,
+            llvm::SmallVector<unsigned, 0> &&terminalReads)
+      : sourceFacts(std::move(facts)), selectedAxis(axis), laneWidth(factor),
+        selectedStrategy(strategy), loopAxis(logicalAxis),
+        layoutPlans(std::move(layouts)), effectRules(std::move(effects)),
+        terminalReadIDs(std::move(terminalReads)) {}
+  std::shared_ptr<const BatchFacts> sourceFacts;
+  int selectedAxis;
+  int64_t laneWidth;
+  BatchStrategy selectedStrategy;
+  std::optional<BatchLogicalAxis> loopAxis;
+  llvm::SmallVector<BatchLayoutPlan, 0> layoutPlans;
+  llvm::SmallVector<BatchEffectObligation, 0> effectRules;
+  llvm::SmallVector<unsigned, 0> terminalReadIDs;
 };
-void setBatchDiagnostic(BatchAnalysisReport &report, Operation *op,
-                        llvm::StringRef reason);
-
-// 成功时把改写结果提交回 module。
-FailureOr<BatchRewriteReport> rewriteBlockBatching(ModuleOp module,
-                                                   BatchRequest request);
-
-// 同样的改写，但**绝不提交**：module 一个字节都不变。干跑用这条。
-// 在它之前，干跑只能靠在外面再 clone 一层来躲开上面那次提交，于是一次干跑要把
-// 整个模块 clone 两遍。
-FailureOr<BatchRewriteReport> probeBlockBatching(ModuleOp module,
-                                                 BatchRequest request);
-
-FailureOr<BatchAnalysisReport> analyzeBlockBatching(ModuleOp module,
-                                                    BatchRequest request);
 } // namespace mlir::triton::cfg
 #endif

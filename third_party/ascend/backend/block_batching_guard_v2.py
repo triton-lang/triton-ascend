@@ -1,25 +1,7 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 """Byte-domain proof for static tensor-axis-aware access summaries."""
-from dataclasses import dataclass
-
-from .block_batching_guard import GuardFailure, I32_MAX, checked, integer
-
-
-@dataclass(frozen=True)
-class AffineND:
-    offset: int
-    coefficients: tuple
-
-    @property
-    def uniform(self):
-        return not any(self.coefficients)
-
-    def add(self, other, sign=1):
-        return AffineND(self.offset + sign * other.offset,
-                        tuple(a + sign * b for a, b in zip(self.coefficients, other.coefficients)))
-
-    def scale(self, value):
-        return AffineND(self.offset * value, tuple(c * value for c in self.coefficients))
+from .block_batching_affine import Affine
+from .block_batching_guard import GuardFailure, I32_MAX, checked, integer, positive_span, check_write_alias
 
 
 class ByteDomain:
@@ -60,8 +42,8 @@ class ByteDomain:
             if not step_expr.uniform:
                 raise GuardFailure("NON_UNIFORM_LOOP_DOMAIN")
             for value, bits in domain.checks:
-                checked(*domain.bounds(value, domain.full), bits)
-            upper_lo, upper = domain.bounds(upper_expr, domain.full)
+                checked(*value.bounds(domain.full), bits)
+            upper_lo, upper = upper_expr.bounds(domain.full)
             step = step_expr.offset
             bits = self.bits(loop["bits"])
             if step <= 0:
@@ -131,16 +113,7 @@ class ByteDomain:
         self.full = tuple(full)
 
     def constant(self, value):
-        return AffineND(value, (0, ) * len(self.full))
-
-    @staticmethod
-    def bounds(value, counts):
-        lo = hi = value.offset
-        for coefficient, count in zip(value.coefficients, counts):
-            delta = coefficient * (count - 1)
-            lo += min(0, delta)
-            hi += max(0, delta)
-        return lo, hi
+        return Affine(value, (0, ) * len(self.full))
 
     @staticmethod
     def bits(value):
@@ -173,7 +146,7 @@ class ByteDomain:
                 raise GuardFailure("INVALID_LOOP_DOMAIN")
             coefficients = [0] * len(self.full)
             coefficients[axis] = step
-            return AffineND(lower, tuple(coefficients))
+            return Affine(lower, tuple(coefficients))
         if name in ("pid", "coord"):
             axis = integer(node[1]) + (3 if name == "coord" else 0)
             if name == "pid" and not 0 <= axis < 3:
@@ -187,14 +160,14 @@ class ByteDomain:
                 coefficients[remainder_axis] = 1
             else:
                 coefficients[axis] = 1
-            return AffineND(0, tuple(coefficients))
+            return Affine(0, tuple(coefficients))
         if name in ("pid_div", "pid_rem"):
             axis, divisor = integer(node[1]), integer(node[2])
             if axis not in self.program_splits or self.program_splits[axis][0] != divisor:
                 raise GuardFailure("INVALID_PROGRAM_SPLIT")
             coefficients = [0] * len(self.full)
             coefficients[axis if name == "pid_div" else self.program_splits[axis][1]] = 1
-            return AffineND(0, tuple(coefficients))
+            return Affine(0, tuple(coefficients))
         if name in ("minsi", "maxsi"):
             lhs, rhs = self.expression(node[2]), self.expression(node[3])
             if not lhs.uniform or not rhs.uniform:
@@ -216,7 +189,7 @@ class ByteDomain:
             result = self.expression(node[2])
             if name == "extui":
                 source_bits = self.bits(node[3])
-                lo, hi = self.bounds(result, self.full)
+                lo, hi = result.bounds(self.full)
                 if lo < 0 <= hi:
                     raise GuardFailure("NON_AFFINE_UNSIGNED_EXTENSION")
                 if hi < 0:
@@ -259,11 +232,11 @@ class ByteDomain:
         lhs, rhs = self.expression(mask[1]), self.expression(mask[2])
         bits = self.bits(mask[3])
         for value, width in self.checks:
-            checked(*self.bounds(value, self.full), width)
+            checked(*value.bounds(self.full), width)
         if mask[0] == "ult":
             for value in (lhs, rhs):
-                checked(*self.bounds(value, self.full), bits, unsigned=True)
-        lo, hi = self.bounds(lhs.add(rhs, -1), self.full)
+                checked(*value.bounds(self.full), bits, unsigned=True)
+        lo, hi = lhs.add(rhs, -1).bounds(self.full)
         if (mask[0] == "eq" and (lo != 0 or hi != 0)) or (mask[0] != "eq" and hi >= 0):
             raise GuardFailure("CV_FULL_TILE_MASK_NOT_PROVEN")
 
@@ -319,7 +292,7 @@ class ByteDomain:
                 return
             if node[0] == "ult":
                 for value in (lhs, rhs):
-                    checked(*self.bounds(value, self.full), self.bits(node[3]), unsigned=True)
+                    checked(*value.bounds(self.full), self.bits(node[3]), unsigned=True)
             delta = lhs.add(rhs, -1)
             local = delta.coefficients[3:5]
             axes = [axis for axis, stride in enumerate(local) if stride]
@@ -327,13 +300,13 @@ class ByteDomain:
                 raise GuardFailure(reason)
             counts = list(self.full)
             counts[3:5] = [1, 1]
-            _, highest_offset = self.bounds(delta, counts)
+            _, highest_offset = delta.bounds(counts)
             axis = axes[0]
             active[axis] = max(0, min(active[axis], -highest_offset))
 
         prefix(mask)
         for value, bits in self.checks:
-            checked(*self.bounds(value, self.full), bits)
+            checked(*value.bounds(self.full), bits)
         if any(n == 0 or (n + q - 1) // q != (full + q - 1) // q for n, full, q in zip(active, self.shape, quantum)):
             raise GuardFailure(reason)
 
@@ -372,13 +345,13 @@ class ByteDomain:
                 raise GuardFailure(reason)
             if node[0] == "ult":
                 for value in (lhs, rhs):
-                    checked(*self.bounds(value, self.full), self.bits(node[3]), unsigned=True)
-            if touched[0] in axes and self.bounds(delta, self.full)[1] >= 0:
+                    checked(*value.bounds(self.full), self.bits(node[3]), unsigned=True)
+            if touched[0] in axes and delta.bounds(self.full)[1] >= 0:
                 raise GuardFailure(reason)
 
         prove(mask)
         for value, bits in self.checks:
-            checked(*self.bounds(value, self.full), bits)
+            checked(*value.bounds(self.full), bits)
 
     def interval(self, pointer):
         if any(count == 0 for count in self.loop_counts):
@@ -396,10 +369,10 @@ class ByteDomain:
         steps = [self.expression(node) for node in self.access.get("pointer_checks", ())]
         # Validate all source arithmetic before a mask is allowed to trim it.
         for expression, bits in self.checks:
-            lo, hi = self.bounds(expression, self.full)
+            lo, hi = expression.bounds(self.full)
             checked(lo, hi, bits)
         for step in steps:
-            lo, hi = self.bounds(step, self.full)
+            lo, hi = step.bounds(self.full)
             checked(pointer + lo, pointer + hi, 64, unsigned=True)
         # Unit column stride is a layout preference, not a requirement of a
         # byte-domain proof. Positive strided/gapped accesses are enclosed by
@@ -423,7 +396,7 @@ class ByteDomain:
             if not bound.uniform:
                 continue
             if predicate == "ult":
-                lo, hi = self.bounds(index, self.full)
+                lo, hi = index.bounds(self.full)
                 if lo < 0:
                     continue
                 limit = bound.offset % (1 << bits)
@@ -484,16 +457,7 @@ class ByteDomain:
                        if axis not in covered]
         if any(count <= 0 for _, count in dimensions):
             return None
-        for stride, count in dimensions:
-            if stride < 0:
-                raise GuardFailure("NEGATIVE_STRIDE")
-            if exclusive and count > 1 and stride == 0:
-                raise GuardFailure(overlap_reason)
-        span = width - 1
-        for stride, count in sorted((s, n) for s, n in dimensions if s and n > 1):
-            if exclusive and stride <= span:
-                raise GuardFailure(overlap_reason)
-            span += stride * (count - 1)
+        span = positive_span(dimensions, width - 1, lambda: exclusive, overlap_reason)
         start, end = pointer + address.offset, pointer + address.offset + span + 1
         checked(start, end, 64, unsigned=True)
         if start >= end:
@@ -538,8 +502,20 @@ def check_layout_guards(guard, arguments, grid, factor):
         # The bridged address carries the in-loop offset, so the loop domain
         # belongs here too; it is read by the same constructor as the original
         # access guard. Program coordinates then range over the physical grid.
-        domain = ByteDomain(arguments, grid, {"shape": layout["shape"], "loops": layout["loops"]})
-        domain.full = (*physical, *domain.shape, *domain.loop_counts)
+        domain = ByteDomain(
+            arguments, grid, {
+                "shape": layout["shape"],
+                "loops": layout["loops"],
+                "pointer_checks": layout["positive"] + layout["checks"] + layout["pointer_checks"],
+            })
+        # Register shared program quotient/remainder expressions before
+        # evaluating them. Preserve their extra axes and the original grid
+        # used by scalar bounds; only the batched program count changes.
+        if guard["axis"] in domain.program_splits:
+            raise GuardFailure("INVALID_LAYOUT_PROGRAM_SPLIT")
+        counts = list(domain.full)
+        counts[guard["axis"]] = physical[guard["axis"]]
+        domain.full = tuple(counts)
         for expr in layout["positive"]:
             value = domain.expression(expr)
             if not value.uniform or value.offset <= 0:
@@ -548,11 +524,11 @@ def check_layout_guards(guard, arguments, grid, factor):
             domain.expression(expr)
         pointers = [domain.expression(expr) for expr in layout["pointer_checks"]]
         for value, bits in domain.checks:
-            checked(*domain.bounds(value, domain.full), bits)
+            checked(*value.bounds(domain.full), bits)
         value = arguments[root]
         pointer = integer(value.data_ptr()) if hasattr(value, "data_ptr") else integer(value)
         for expr in pointers:
-            lo, hi = domain.bounds(expr, domain.full)
+            lo, hi = expr.bounds(domain.full)
             checked(pointer + lo, pointer + hi + layout["bytes"] - 1, 64, unsigned=True)
 
 
@@ -601,10 +577,10 @@ def static_cv_mask_refusal(guard):
                 lhs, rhs = domain.expression(mask[1]), domain.expression(mask[2])
                 delta = lhs.add(rhs, -1)
                 for value, bits in domain.checks:
-                    checked(*domain.bounds(value, domain.full), bits)
+                    checked(*value.bounds(domain.full), bits)
                 if mask[0] == "ult":
                     for value in (lhs, rhs):
-                        checked(*domain.bounds(value, domain.full), domain.bits(mask[3]), unsigned=True)
+                        checked(*value.bounds(domain.full), domain.bits(mask[3]), unsigned=True)
                 local = delta.coefficients[3:5]
                 axes = [axis for axis, coefficient in enumerate(local) if coefficient]
                 if len(axes) == 1 and local[axes[0]] == 1 and not any(delta.coefficients[:3]):
@@ -689,10 +665,7 @@ def check_guard_v2(guard, arguments, grid, factor):
             if result is not None:
                 ranges.append(result)
         check_layout_guards(guard, arguments, grid, factor)
-        for i, (lo, hi, write) in enumerate(ranges):
-            for a, b, other_write in ranges[:i]:
-                if (write or other_write) and lo < b and a < hi:
-                    raise GuardFailure("WRITE_ALIAS")
+        check_write_alias(ranges)
         return True, "PROVEN_AT_RUNTIME"
     except (GuardFailure, KeyError, IndexError, TypeError, OverflowError) as error:
         return False, str(error)

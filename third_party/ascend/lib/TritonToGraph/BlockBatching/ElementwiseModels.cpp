@@ -51,13 +51,14 @@ bool needsBatchActiveMask(Operation *op, const BatchOpDescriptor &descriptor) {
   return false;
 }
 
-SmallVector<Value> prepareBatchElementwiseOperands(
+FailureOr<SmallVector<Value>> prepareBatchElementwiseOperands(
     Operation *op, const BatchOpDescriptor &descriptor, ValueRange operands,
     Value activeMask, Location loc, IRRewriter &rewriter) {
   SmallVector<Value> result(operands.begin(), operands.end());
   if (!needsBatchActiveMask(op, descriptor))
     return result;
-  assert(activeMask && "poison-sensitive operands require a live mask");
+  if (!activeMask)
+    return failure();
   for (auto [index, operand] : llvm::enumerate(operands)) {
     auto policy = inactivePolicy(op, descriptor, index);
     if (policy == BatchInactivePolicy::Preserve ||

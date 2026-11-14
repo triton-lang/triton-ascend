@@ -56,7 +56,7 @@ bool fitsInBits(const Interval &span, unsigned bits) {
 
 } // namespace
 
-std::optional<int64_t> BatchRangeFacts::constant(const BatchExprRef &e) const {
+std::optional<int64_t> BatchExpr::constant(const BatchExprRef &e) {
   if (!e || isBoolean(e->kind))
     return std::nullopt;
   switch (e->kind) {
@@ -108,7 +108,7 @@ std::optional<int64_t> BatchRangeFacts::constant(const BatchExprRef &e) const {
   }
 }
 
-std::optional<Interval> BatchRangeFacts::range(const BatchExprRef &e) const {
+std::optional<Interval> BatchExpr::rangeOf(const BatchExprRef &e) {
   if (!e || isBoolean(e->kind))
     return std::nullopt;
   switch (e->kind) {
@@ -129,8 +129,8 @@ std::optional<Interval> BatchRangeFacts::range(const BatchExprRef &e) const {
   case K::Mul:
   case K::MinSI:
   case K::MaxSI: {
-    auto lhs = range(e->lhs);
-    auto rhs = range(e->rhs);
+    auto lhs = rangeOf(e->lhs);
+    auto rhs = rangeOf(e->rhs);
     if (!lhs || !rhs)
       return std::nullopt;
     int64_t lo, hi;
@@ -166,9 +166,9 @@ std::optional<Interval> BatchRangeFacts::range(const BatchExprRef &e) const {
     }
   }
   case K::ExtSI:
-    return range(e->lhs);
+    return rangeOf(e->lhs);
   case K::ExtUI: {
-    auto sub = range(e->lhs);
+    auto sub = rangeOf(e->lhs);
     if (!sub)
       return std::nullopt;
     if (sub->first >= 0)
@@ -180,7 +180,7 @@ std::optional<Interval> BatchRangeFacts::range(const BatchExprRef &e) const {
     return Interval(0, static_cast<int64_t>((uint64_t(1) << sourceBits) - 1));
   }
   case K::Trunc: {
-    auto sub = range(e->lhs);
+    auto sub = rangeOf(e->lhs);
     if (!sub || !fitsInBits(*sub, e->bits))
       return std::nullopt;
     return sub;
@@ -191,7 +191,7 @@ std::optional<Interval> BatchRangeFacts::range(const BatchExprRef &e) const {
   }
 }
 
-int64_t BatchRangeFacts::largestKnownDivisor(const BatchExprRef &e) const {
+int64_t BatchExpr::largestKnownDivisor(const BatchExprRef &e) {
   if (!e)
     return 1;
   // Mirrors MLIR's AffineExpr::getLargestKnownDivisor: a constant contributes
@@ -228,7 +228,7 @@ int64_t BatchRangeFacts::largestKnownDivisor(const BatchExprRef &e) const {
   }
 }
 
-bool BatchRangeFacts::isLaneUniform(const BatchExprRef &e) const {
+bool BatchExpr::isLaneUniform(const BatchExprRef &e, unsigned mergeAxis) {
   if (!e)
     return false;
   switch (e->kind) {
@@ -255,36 +255,33 @@ bool BatchRangeFacts::isLaneUniform(const BatchExprRef &e) const {
   }
   if (!e->lhs)
     return false;
-  if (!isLaneUniform(e->lhs))
+  if (!isLaneUniform(e->lhs, mergeAxis))
     return false;
-  return !e->rhs || isLaneUniform(e->rhs);
+  return !e->rhs || isLaneUniform(e->rhs, mergeAxis);
 }
 
-std::optional<int64_t> batchLoopConstantStep(const BatchLoopFact &loop,
-                                             const BatchRangeFacts &facts) {
-  return facts.constant(loop.step);
+std::optional<int64_t> batchLoopConstantStep(const BatchLoopFact &loop) {
+  return BatchExpr::constant(loop.step);
 }
 
-bool batchLoopHasProvenPositiveStep(const BatchLoopFact &loop,
-                                    const BatchRangeFacts &facts) {
-  auto stepRange = facts.range(loop.step);
+bool batchLoopHasProvenPositiveStep(const BatchLoopFact &loop) {
+  auto stepRange = BatchExpr::rangeOf(loop.step);
   return stepRange && stepRange->first > 0;
 }
 
 bool batchLoopBoundsAreLaneUniform(const BatchLoopFact &loop,
-                                   const BatchRangeFacts &facts) {
-  return facts.isLaneUniform(loop.lower) && facts.isLaneUniform(loop.upper) &&
-         facts.isLaneUniform(loop.step);
+                                   unsigned mergeAxis) {
+  return BatchExpr::isLaneUniform(loop.lower, mergeAxis) &&
+         BatchExpr::isLaneUniform(loop.upper, mergeAxis) &&
+         BatchExpr::isLaneUniform(loop.step, mergeAxis);
 }
 
-std::optional<int64_t>
-batchLoopConstantTripCount(const BatchLoopFact &loop,
-                           const BatchRangeFacts &facts) {
-  auto step = batchLoopConstantStep(loop, facts);
+std::optional<int64_t> batchLoopConstantTripCount(const BatchLoopFact &loop) {
+  auto step = batchLoopConstantStep(loop);
   if (!step || *step <= 0)
     return std::nullopt;
-  auto lower = facts.constant(loop.lower);
-  auto upper = facts.constant(loop.upper);
+  auto lower = BatchExpr::constant(loop.lower);
+  auto upper = BatchExpr::constant(loop.upper);
   if (!lower || !upper)
     return std::nullopt;
   if (*upper <= *lower)
@@ -300,7 +297,6 @@ batchLoopConstantTripCount(const BatchLoopFact &loop,
 }
 
 BatchLoopArithmetic batchLoopIterationArithmetic(const BatchLoopFact &loop,
-                                                 const BatchRangeFacts &facts,
                                                  int64_t factor) {
   using Result = BatchLoopArithmetic;
   if (factor <= 0 || !loop.bits || loop.bits > 64)
@@ -309,9 +305,9 @@ BatchLoopArithmetic batchLoopIterationArithmetic(const BatchLoopFact &loop,
   auto fits = [&](const llvm::APInt &value) {
     return value.isSignedIntN(loop.bits);
   };
-  auto lower = facts.constant(loop.lower);
-  auto upper = facts.constant(loop.upper);
-  auto step = facts.constant(loop.step);
+  auto lower = BatchExpr::constant(loop.lower);
+  auto upper = BatchExpr::constant(loop.upper);
+  auto step = BatchExpr::constant(loop.step);
   if (!fits(wide(factor)) || (lower && !fits(wide(*lower))) ||
       (upper && !fits(wide(*upper))) ||
       (step &&
@@ -327,7 +323,7 @@ BatchLoopArithmetic batchLoopIterationArithmetic(const BatchLoopFact &loop,
   if (!lower || !upper || !step)
     return Result::NeedsRuntimeGuard;
 
-  auto trips = batchLoopConstantTripCount(loop, facts);
+  auto trips = batchLoopConstantTripCount(loop);
   if (!trips)
     return Result::Unsafe;
   if (*trips == 0)
@@ -344,15 +340,15 @@ BatchLoopArithmetic batchLoopIterationArithmetic(const BatchLoopFact &loop,
   return Result::StaticSafe;
 }
 
-int64_t batchLoopTripCountDivisor(const BatchLoopFact &loop,
-                                  const BatchRangeFacts &facts) {
-  auto step = batchLoopConstantStep(loop, facts);
+int64_t batchLoopTripCountDivisor(const BatchLoopFact &loop) {
+  auto step = batchLoopConstantStep(loop);
   if (!step || *step <= 0)
     return 1;
   // trip = ceildiv(upper - lower, step). When step divides a factor common to
   // both ends, every trip count is a multiple of that factor over step.
-  const int64_t spanDivisor = std::gcd(facts.largestKnownDivisor(loop.lower),
-                                       facts.largestKnownDivisor(loop.upper));
+  const int64_t spanDivisor =
+      std::gcd(BatchExpr::largestKnownDivisor(loop.lower),
+               BatchExpr::largestKnownDivisor(loop.upper));
   if (spanDivisor <= 0 || spanDivisor % *step != 0)
     return 1;
   return std::max<int64_t>(1, spanDivisor / *step);

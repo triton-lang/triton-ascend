@@ -1,5 +1,6 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "TritonToGraph/BlockBatching/ControlFlowModels.h"
+#include "TritonToGraph/BlockBatching/BatchAnalyzer.h"
 #include "TritonToGraph/BlockBatching/ReductionModels.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -28,27 +29,25 @@ bool provenPositiveStep(Value step) {
          !amount.getValue().isZero();
 }
 
-struct Analysis {
-  BatchControlFlowPlan plan;
-  int axis;
+} // namespace
+LogicalResult BatchAnalyzer::analyzeVariation(
+    int axis, const llvm::DenseSet<Operation *> &replicatedLoads) {
+  workspace.beginVariationScope();
   unsigned budget = 8192;
-  const llvm::DenseSet<Operation *> &replicatedLoads;
-  Analysis(int axis, const llvm::DenseSet<Operation *> &loads)
-      : axis(axis), replicatedLoads(loads) {}
-  bool reject(Operation *op, llvm::StringRef reason) {
-    if (plan.reason.empty()) {
-      plan.reason = reason.str();
-      plan.operation = op;
+  auto reject = [&](Operation *op, llvm::StringRef why) {
+    if (reason.empty()) {
+      reason = why.str();
+      operation = op;
     }
     return false;
-  }
-  bool known(Value value, Operation *op) {
-    return plan.varying.count(value) || reject(op, "VALUE_VARIATION_UNKNOWN");
-  }
-  void record(Value value, bool varying) {
-    plan.varying[value] = plan.isVarying(value) || varying;
-  }
-  bool block(Block &body, unsigned depth = 0) {
+  };
+  auto known = [&](Value v, Operation *op) {
+    return workspace.known(v) || reject(op, "VALUE_VARIATION_UNKNOWN");
+  };
+  auto record = [&](Value v, bool varies) {
+    workspace.recordVariation(v, varies);
+  };
+  auto block = [&](auto &&self, Block &body, unsigned depth) -> bool {
     if (depth > 8)
       return reject(body.getParentOp(), "REGION_DEPTH_EXCEEDED");
     for (Operation &op : body) {
@@ -58,16 +57,16 @@ struct Analysis {
         if (!known(value, &op))
           return false;
       if (auto branch = dyn_cast<scf::IfOp>(op)) {
-        if (plan.isVarying(branch.getCondition()))
+        if (workspace.isVarying(branch.getCondition()))
           return reject(&op, "VARYING_CONTROL_CONDITION");
         if (!branch.getThenRegion().hasOneBlock() ||
             (!branch.getElseRegion().empty() &&
              !branch.getElseRegion().hasOneBlock()))
           return reject(&op, "UNSUPPORTED_REGION_SHAPE");
-        if (!block(branch.getThenRegion().front(), depth + 1))
+        if (!self(self, branch.getThenRegion().front(), depth + 1))
           return false;
         if (!branch.getElseRegion().empty() &&
-            !block(branch.getElseRegion().front(), depth + 1))
+            !self(self, branch.getElseRegion().front(), depth + 1))
           return false;
         if (branch.getNumResults()) {
           auto thenYield =
@@ -77,7 +76,7 @@ struct Analysis {
           for (auto [result, a, b] :
                llvm::zip(branch.getResults(), thenYield.getOperands(),
                          elseYield.getOperands()))
-            record(result, plan.isVarying(a) || plan.isVarying(b));
+            record(result, workspace.isVarying(a) || workspace.isVarying(b));
         }
         continue;
       }
@@ -101,22 +100,22 @@ struct Analysis {
         //
         // 判据和关卡 0 一致：三个界里任一随程序轴变化。
         record(loop.getInductionVar(),
-               plan.isVarying(loop.getLowerBound()) ||
-                   plan.isVarying(loop.getUpperBound()) ||
-                   plan.isVarying(loop.getStep()));
+               workspace.isVarying(loop.getLowerBound()) ||
+                   workspace.isVarying(loop.getUpperBound()) ||
+                   workspace.isVarying(loop.getStep()));
         for (auto [arg, init] :
              llvm::zip(loop.getRegionIterArgs(), loop.getInitArgs()))
-          record(arg, plan.isVarying(init));
+          record(arg, workspace.isVarying(init));
         bool stable = false;
         for (unsigned round = 0; round <= loop.getNumRegionIterArgs();
              ++round) {
-          if (!block(*loop.getBody(), depth + 1))
+          if (!self(self, *loop.getBody(), depth + 1))
             return false;
           stable = true;
           auto yield = cast<scf::YieldOp>(loop.getBody()->back());
           for (auto [arg, value] :
                llvm::zip(loop.getRegionIterArgs(), yield.getOperands())) {
-            if (plan.isVarying(value) && !plan.isVarying(arg)) {
+            if (workspace.isVarying(value) && !workspace.isVarying(arg)) {
               record(arg, true);
               stable = false;
             }
@@ -128,18 +127,18 @@ struct Analysis {
           return reject(&op, "LOOP_VARIATION_DID_NOT_CONVERGE");
         for (auto [result, arg] :
              llvm::zip(loop.getResults(), loop.getRegionIterArgs()))
-          record(result, plan.isVarying(arg));
+          record(result, workspace.isVarying(arg));
         continue;
       }
       if (isa<triton::ReduceOp, triton::ScanOp>(op))
         for (Value capture : getBatchCombinerCaptures(&op)) {
           if (!known(capture, &op))
             return false;
-          if (plan.isVarying(capture))
+          if (workspace.isVarying(capture))
             return reject(&op, "UNSUPPORTED_REGION_CAPTURE");
         }
-      bool varying = llvm::any_of(op.getOperands(),
-                                  [&](Value v) { return plan.isVarying(v); });
+      bool varying = llvm::any_of(
+          op.getOperands(), [&](Value v) { return workspace.isVarying(v); });
       if (auto load = dyn_cast<triton::LoadOp>(op);
           load && (load.getIsVolatile() || replicatedLoads.contains(&op)))
         varying = true;
@@ -149,17 +148,10 @@ struct Analysis {
         record(result, varying);
     }
     return true;
-  }
-};
-} // namespace
-BatchControlFlowPlan
-analyzeBatchControlFlow(triton::FuncOp function, int axis,
-                        const llvm::DenseSet<Operation *> &replicatedLoads) {
-  Analysis analysis(axis, replicatedLoads);
+  };
   for (Value arg : function.getArguments())
-    analysis.record(arg, false);
-  analysis.block(function.getBody().front());
-  return std::move(analysis.plan);
+    record(arg, false);
+  return success(block(block, function.getBody().front(), 0));
 }
 
 bool cvLoopNeedsZeroTripGuard(scf::ForOp loop) {

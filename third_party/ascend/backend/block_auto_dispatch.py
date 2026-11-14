@@ -8,14 +8,16 @@ import os
 def _argument(value):
     if value is None or type(value) in (bool, int) or type(value) is float and math.isfinite(value):
         return dict(kind="scalar", value=value)
-    if hasattr(value, "dtype") and hasattr(value, "shape") and callable(getattr(value, "stride", None)):
-        return dict(kind="tensor", dtype=str(value.dtype), shape=list(value.shape), stride=list(value.stride()),
-                    storage_offset=value.storage_offset())
+    if (hasattr(value, "dtype") and hasattr(value, "shape") and callable(getattr(value, "stride", None))
+            and callable(getattr(value, "storage_offset", None))):
+        shape, stride, offset = list(value.shape), list(value.stride()), value.storage_offset()
+        if all(type(n) is int for n in (*shape, *stride, offset)):
+            return dict(kind="tensor", dtype=str(value.dtype), shape=shape, stride=stride, storage_offset=offset)
     return dict(kind="unsupported")
 
 
 def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
-    if "block_batching_factor" in fn.arg_names or kwargs.get("block_batching_factor", 1) != "auto":
+    if "block_batching_factor" in fn.arg_names or kwargs.get("block_batching_factor", "auto") != "auto":
         return kwargs, grid
     from .block_batching import _capture_state
 
@@ -41,32 +43,41 @@ def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
     }
     contract = dict(grid=extents, arguments=arguments, argument_order=list(arguments),
                     core_floor=os.getenv("TA_BLOCK_BATCHING_CORE_FLOOR"), device_limit=os.getenv("NPU_DEVICE_LIMIT"))
-    return dict(kwargs, block_batching_grid=extents,
+    # Inject the public default before JIT cache selection and the bundle hook.
+    # Concrete compilation stages still receive numeric factors only.
+    # Raw option order participates in the in-memory JIT key. Canonicalize our
+    # keys so an omitted factor and an explicit "auto" share the same bundle.
+    result = {
+        key: value
+        for key, value in kwargs.items()
+        if key not in ("block_batching_factor", "block_batching_grid", "block_auto_contract")
+    }
+    return dict(result, block_batching_factor="auto", block_batching_grid=extents,
                 block_auto_contract=json.dumps(contract, sort_keys=True, separators=(",", ":"), allow_nan=False)), grid
 
 
 def _probe(backend, frozen, options, axis, factor):
     from triton._C.libtriton import ir
     from .compiler import make_ttir
-    from .block_batching import BatchingRejected
+    from .block_batching_worker import isolated_report
     normalized = backend.parse_options(
-        dict(options, block_batching_factor=factor, block_batching_axis=axis, block_auto_collect=False,
+        dict(options, block_batching_factor=1, block_batching_axis=axis, block_auto_collect=False,
              enable_graph_optimize=False, debug=False))
     context = ir.context()
     ir.load_dialects(context)
     backend.load_dialects(context)
     module = frozen.make_ir(backend.target, normalized, backend.get_codegen_implementation(normalized),
                             backend.get_module_map(), context)
-    metadata = dict(vars(normalized))
-    try:
-        make_ttir(module, metadata, normalized)
-    except BatchingRejected as error:
-        raise ValueError(str(error)) from error
-    return metadata["block_batching"]
+    # Normalize the same frozen frontend input as the compiled variants. The
+    # candidate rewrite runs under PR #11's supervised worker protocol; a
+    # capability refusal is a report, while compiler/protocol failures propagate.
+    module = make_ttir(module, dict(vars(normalized)), normalized)
+    return isolated_report("probe", str(module), factor, axis, "semantic_only", normalized.enable_hivm_batch_matmul)
 
 
 def compile_auto_bundle(backend, src, options, compile_variant):
     from . import block_batching as batching
+    from .block_batching_worker import BatchDecline
     from .block_auto import candidate_plan, select_candidates
     # Without a bound JIT launch there is no shape/grid contract to score.
     common = {key: value for key, value in options.items() if key not in ("block_auto_contract", "block_batching_grid")}
@@ -77,10 +88,9 @@ def compile_auto_bundle(backend, src, options, compile_variant):
     normalized = backend.parse_options(options)
     common["block_auto_collect"] = baseline_options["block_auto_collect"] = True
     refusal = None
-    try:
-        frozen = batching._freeze_source(backend, src, baseline_options, normalized.block_batching_backend_revision)
-    except batching.BatchingRejected as error:
-        frozen, refusal = src, str(error)
+    frozen = batching._freeze_source(backend, src, baseline_options, normalized.block_batching_backend_revision)
+    if isinstance(frozen, BatchDecline):
+        frozen, refusal = src, frozen.reason
     baseline = compile_variant(baseline_options, frozen)
     axis = options.get("block_batching_axis", -1)
     cv = getattr(baseline.metadata, "mix_mode", None) in ("aic", "mix")

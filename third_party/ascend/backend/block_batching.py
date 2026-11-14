@@ -7,7 +7,7 @@ compiler artifacts; rejected or guarded calls select the complete baseline.
 """
 from dataclasses import dataclass
 
-IMPLEMENTATION_VERSION = 46
+IMPLEMENTATION_VERSION = 56
 
 
 def _annotate_launch_grid(kwargs, grid, *, bind=None):
@@ -61,18 +61,36 @@ def get_launch_handler():
     return _launch_handler
 
 
+def _has_independent_row_layout(report):
+    """Recognize top-level row accesses already covered by the source proof.
+
+    This does not certify the backend memory form. The subsequent lowering
+    check and per-launch byte-domain proof remain mandatory.
+    """
+    if any(report.get("operations", {}).get(op) for op in ("scf.for", "scf.if")):
+        return False
+    accesses = report.get("layout", {}).get("accesses", [])
+    return bool(accesses) and all(
+        access.get("control_flow_independent") is True and access.get("proof_scope") == "existing_guard_no_wrap"
+        and access.get("action") == "Keep" and access.get("rewritten") is False
+        and access.get("reason") == "ALREADY_STRUCTURED" and access.get("mask_class") == "independent_axes" and
+        (shape := access.get("original_shape", [])) and all(type(extent) is int and extent > 0
+                                                            for extent in shape) and sum(extent != 1
+                                                                                         for extent in shape) <= 1
+        for access in accesses)
+
+
 def vv_layout_refusal(report):
     """Conservative structural matching for independent row pointwise bodies.
 
-    Without row aggregation, retaining separate row views adds the dynamic
-    batch prefix without forming the memory view used by contiguous pointwise
-    batching. Shared scalar/vector parameters do not establish that view for
-    the independent rows. Keep this class on the original kernel until its
-    row lowering is improved. This policy does not estimate latency
-    or inspect kernel names, grid sizes, tile widths or measured timings.
+    Proven top-level rows may use the structured backend path. Incomplete
+    layout evidence, shared accesses and control-flow bodies retain the
+    existing refusal. No kernel names or measured timings enter this policy.
     """
     if (report.get("owner") != "block_batching" or report.get("cv_mode") != "disabled"
             or report.get("lane_width", 1) <= 1):
+        return None
+    if _has_independent_row_layout(report):
         return None
     operations = report.get("operations", {})
     if (not operations.get("tt.load") or not operations.get("tt.store")
@@ -100,19 +118,101 @@ def vv_layout_refusal(report):
     return None
 
 
+def vv_computation_refusal(report):
+    """Require the native original-domain contract, independently of memory.
+
+    The native verifier checks combiners, effects and loop-carried values.
+    This boundary checks that their domain contract reached the compiler;
+    neither operation counts nor a successful memory conversion replace it.
+    """
+    if (report.get("owner") != "block_batching" or report.get("cv_mode") != "disabled"
+            or report.get("lane_width", 1) <= 1):
+        return None
+    computation = report.get("computation", {})
+    schedule = "sequential_iterations" if report.get("vv_lowering") == "sequential_iterations_v1" else "program_lanes"
+    if (computation.get("version") != 2 or computation.get("scope") != "normalized_original_program"
+            or computation.get("stage") != "semantic_ttir_before_memory_views"
+            or computation.get("schedule") != schedule or computation.get("lane_policy") != "separate_original_domains"
+            or not isinstance(computation.get("aggregations"), list)):
+        return "VV_COMPUTATION_DOMAIN_NOT_PROVEN"
+    expected = {"reduce": "original_program_reduction", "scan": "independent_row_scan"}
+    counts = {kind: 0 for kind in expected}
+    target_ids = set()
+    for source_id, aggregation in enumerate(computation["aggregations"]):
+        if (not isinstance(aggregation, dict) or type(aggregation.get("id")) is not int
+                or aggregation["id"] != source_id):
+            return "VV_COMPUTATION_DOMAIN_NOT_PROVEN"
+        kind = aggregation.get("kind")
+        if kind not in expected or aggregation.get("domain") != expected[kind]:
+            return "VV_COMPUTATION_DOMAIN_NOT_PROVEN"
+        axis = aggregation.get("original_axis")
+        shape = aggregation.get("original_shape")
+        targets = aggregation.get("mapped_operations")
+        if (type(axis) is not int or not isinstance(shape, list) or not 0 <= axis < len(shape)
+                or any(type(d) is not int or d <= 0 for d in shape) or not isinstance(targets, list) or not targets
+                or (schedule == "program_lanes" and len(targets) != 1)):
+            return "VV_COMPUTATION_DOMAIN_NOT_PROVEN"
+        for target in targets:
+            if not isinstance(target, dict):
+                return "VV_COMPUTATION_DOMAIN_NOT_PROVEN"
+            prefix = target.get("batch_prefix")
+            target_id = target.get("id")
+            if (type(prefix) is not bool or (schedule == "sequential_iterations" and prefix)
+                    or type(target_id) is not int or target_id < 0 or target_id in target_ids
+                    or type(target.get("axis")) is not int or type(aggregation.get("lifted_axis")) is not int
+                    or target.get("axis") != axis + int(prefix) or aggregation.get("lifted_axis") != target.get("axis")
+                    or target.get("shape") != ([report["lane_width"]] + shape if prefix else shape)):
+                return "VV_COMPUTATION_DOMAIN_NOT_PROVEN"
+            target_ids.add(target_id)
+        counts[kind] += 1
+    if target_ids != set(range(len(target_ids))):
+        return "VV_COMPUTATION_DOMAIN_NOT_PROVEN"
+    if any(count != report.get("operations", {}).get("tt." + kind, 0) for kind, count in counts.items()):
+        return "VV_COMPUTATION_DOMAIN_NOT_PROVEN"
+    return None
+
+
+def vv_memory_lowering_refusal(report):
+    """Keep VV candidates on supported memory paths after layout lowering.
+
+    Independent row reductions and scans remain supported. Their presence
+    does not prove that a batched access became a structured memory view:
+    reject residual indirect GM helpers regardless of the compute body.
+    Internal tensor gathers and SIMT arithmetic are not memory refusals.
+    """
+    if (report.get("owner") != "block_batching" or report.get("cv_mode") != "disabled"
+            or report.get("lane_width", 1) <= 1):
+        return None
+    observation = report.get("layout", {}).get("lowering_observation")
+    if (not isinstance(observation, dict) or observation.get("stage") != "ttadapter"
+            or observation.get("scope") != "module" or any(
+                type(observation.get(key)) is not int or observation[key] < 0
+                for key in ("indirect_load_ops", "indirect_store_ops"))):
+        return "VV_MEMORY_LOWERING_NOT_PROVEN"
+    if observation.get("indirect_load_ops", 0) or observation.get("indirect_store_ops", 0):
+        return "VV_INDIRECT_MEMORY_NOT_SUPPORTED"
+    return None
+
+
 def memory_compile_options(metadata, compiler_path, supports_inlining):
-    """Inline dynamic contiguous DMA helpers only in VV batching candidates.
+    """Inline contiguous or proved independent-row DMA in VV candidates.
 
     This is a lowering policy, not a factor selector or a profitability test.
     Unsupported compiler versions retain their normal candidate compilation.
     """
     report = metadata.get("block_batching", {})
     lowering = report.get("memory_lowering", {})
+    observation = report.get("layout", {}).get("lowering_observation", {})
+    row_copy = (_has_independent_row_layout(report) and observation.get("stage") == "ttadapter"
+                and observation.get("scope") == "module" and observation.get("indirect_load_ops") == 0
+                and observation.get("indirect_store_ops") == 0 and type(observation.get("memref_copy_ops")) is int
+                and observation["memref_copy_ops"] > 0)
     if (metadata.get("block_batching_factor", 1) <= 1 or report.get("owner") != "block_batching"
-            or report.get("cv_mode") != "disabled" or lowering.get("dynamic_contiguous_copy") is not True
+            or report.get("cv_mode") != "disabled" or not (lowering.get("dynamic_contiguous_copy") is True or row_copy)
             or not metadata["target"].arch.startswith("Ascend950") or metadata.get("mix_mode") != "aiv"
             or metadata.get("parallel_mode") != "simd"):
         return []
+    lowering["structured_row_copy"] = row_copy
     lowering["libcall_inlining"] = bool(supports_inlining(compiler_path))
     return ["--enable-lib-call-no-inline=false"] if lowering["libcall_inlining"] else []
 
@@ -146,8 +246,8 @@ def _is_cv_report(report):
     return report.get("cv_mode") in ("independent_batch_v1", "spatial_concat_v1")
 
 
-def analyze_request(mod, request, binding):
-    """Read-only preflight. Never suppress legacy optimizations on the baseline."""
+def analyze_request(mod, request, binding=None, *, report_listener=None):
+    """Run native preflight in a worker. Observe its completed report in the caller."""
     if request.factor == 1:
         return {
             "report_version": 1, "compile_status": "DISABLED", "requested_factor": 1, "requested_axis": request.axis,
@@ -160,97 +260,44 @@ def analyze_request(mod, request, binding):
             "report_version": 1, "compile_status": "REJECTED", "requested_factor": request.factor, "requested_axis":
             request.axis, "applied_factor": 1, "owner": "none", "reason": "FACTOR_OUT_OF_RANGE"
         }
-    analyze = getattr(binding, "analyze_block_batching", None)
-    if analyze is None:
-        raise RuntimeError("block_batching requires a matching rebuilt Ascend C++ extension")
-    return dict(analyze(mod, request.factor, request.axis, _has_dot(mod)))
+    from .block_batching_worker import BatchCompileError, isolated_report
+    if binding is not None:
+        from types import BuiltinFunctionType
+        analyze = getattr(binding, 'analyze_block_batching', None)
+        if analyze is None:
+            raise RuntimeError("block_batching requires a matching rebuilt Ascend C++ extension")
+        # An arbitrary Python wrapper may itself call native MLIR. Only the
+        # canonical pybind function can be reconstructed in the new interpreter.
+        native_analyze = None
+        if isinstance(analyze, BuiltinFunctionType):
+            from triton._C.libtriton import ascend
+            native_analyze = getattr(ascend.passes.ttir, 'analyze_block_batching', None)
+        if analyze is not native_analyze:
+            raise BatchCompileError(
+                'custom analysis bindings cannot be reconstructed in the worker. '
+                'use report_listener to observe native reports', kind='UnsupportedBinding', stage='analyze')
+    report = isolated_report('analyze', str(mod), request.factor, request.axis)
+    if report_listener is not None:
+        from copy import deepcopy
+        report_listener(deepcopy(report))
+    return report
 
 
-class BatchingRejected(RuntimeError):
-    """A modeled capability/proof rejection, not an internal compiler error."""
-
-    def __init__(self, reason, analysis=None):
-        super().__init__(reason)
-        self.analysis = analysis
-
-
-class LayoutTargetRejected(BatchingRejected):
-    """A resource refusal of an actually rewritten layout at the NPUIR stage."""
-
-    def __init__(self, factor, axis, diagnostic):
-        super().__init__("LAYOUT_TARGET_RESOURCE_REJECTED")
-        self.factor, self.axis = factor, axis
-        self.diagnostic = diagnostic
-        self.stage = "npubin"
-
-
-class CVTargetRejected(BatchingRejected):
-    """Modeled on-chip resource refusal before any candidate submission."""
-
-    def __init__(self, diagnostic):
-        super().__init__("CV_TARGET_RESOURCE_REJECTED")
-        self.diagnostic = diagnostic
-        self.stage = "npubin"
-
-
-def _cv_resource_refusal(returncode, diagnostic):
-    import re
-    if _internal_backend_error(returncode, diagnostic):
-        return False
-    return re.search(r"\b(?:ub|cbuf|ca|cb|cc) overflow,\s*requires\s+\d+\s+bits\s+while\s+\d+\s+bits\s+available\b",
-                     diagnostic, re.IGNORECASE) is not None
-
-
-def _internal_backend_error(returncode, diagnostic):
-    return returncode < 0 or returncode in (134, 139) or any(
-        marker in diagnostic for marker in ("PLEASE submit a bug report", "LLVM ERROR:", "Assertion", "Sanitizer",
-                                            "runtime error:", "failed to verify", "verification failed"))
-
-
-def _layout_resource_refusal(returncode, diagnostic):
-    import re
-    if _internal_backend_error(returncode, diagnostic):
-        return False
-    # Match the standard backend's resource diagnostic, not an arbitrary
-    # occurrence of "UB" and "overflow" in an internal compiler failure.
-    return re.search(r"\bub overflow,\s*requires\s+\d+\s+bits\s+while\s+\d+\s+bits\s+available\b", diagnostic,
-                     re.IGNORECASE) is not None
-
-
-def _compile_layout_candidate(compile_variant, options, frozen, request):
-    from triton.compiler.errors import MLIRCompilationError
-    policy = options.get("block_batching_layout", "auto")
-    try:
-        return compile_variant(dict(options), frozen), None
-    except (LayoutTargetRejected, MLIRCompilationError) as error:
-        cause = error
-        while isinstance(cause, MLIRCompilationError) and cause.__cause__ is not None:
-            cause = cause.__cause__
-        if not isinstance(cause, LayoutTargetRejected):
-            raise
-        if (policy != "auto" or cause.factor != request.factor or cause.axis != request.axis
-                or cause.stage != "npubin"):
-            raise
-        # Re-enter compilation from the SAME frozen frontend source. A distinct
-        # option identity prevents reusing auto IR, metadata or failed attempts.
-        fallback = dict(options, block_batching_layout="semantic_only")
-        detail = {"reason": str(cause), "stage": cause.stage, "diagnostic": cause.diagnostic}
-        import subprocess
-        try:
-            candidate = compile_variant(fallback, frozen)
-        except (BatchingRejected, subprocess.CalledProcessError, MLIRCompilationError) as fallback_error:
-            fallback_error.block_batching_layout_fallback = detail
-            raise
-        return candidate, detail
+def probe_request(mod, request, layout_policy='semantic_only', cv_batch_matmul=False):
+    if request.factor == 1 or request.factor > 2147483647:
+        return analyze_request(mod, request)
+    from .block_batching_worker import isolated_report
+    return isolated_report('probe', str(mod), request.factor, request.axis, layout_policy, cv_batch_matmul)
 
 
 def _runtime_positions(src):
+    from .block_batching_worker import BatchDecline
     constants = getattr(src, "constants", {})
     result = []
     for index, name in enumerate(src.fn.arg_names):
         signature = src.signature.get(name, src.signature.get(index))
         if not isinstance(signature, str):
-            raise BatchingRejected("NESTED_SIGNATURE_NOT_SUPPORTED")
+            return BatchDecline("NESTED_SIGNATURE_NOT_SUPPORTED", "signature")
         if signature != "constexpr" and (index, ) not in constants and index not in constants and name not in constants:
             result.append(index)
     return result
@@ -294,19 +341,26 @@ def _capture_state():
 class BatchKernel:
     """CompiledKernel-compatible facade selecting a complete variant per call."""
 
-    def __init__(self, baseline, candidate, request, report, positions):
+    def __init__(self, baseline, candidate, request, report, positions, *, publish_manifest=True):
         import hashlib
-        import json
         import threading
         from collections import namedtuple
         self.baseline, self.candidate = baseline, candidate
+        self._vv_mode = report.get("cv_mode") == "disabled"
+        if self._vv_mode:
+            from copy import deepcopy
+            report = deepcopy(report)
         self.request, self.block_batching = request, report
         self.positions = positions
         from .block_batching_report import validate_vv_loop_contract
         self._preserve_grid = (validate_vv_loop_contract(candidate.metadata._asdict())
                                if candidate is not None else False)
-        from .block_batching_guard import RuntimeGuard
-        self._guard = RuntimeGuard(report["guard"], request.factor) if candidate is not None else None
+        from .block_batching_contract import ExecutionContract
+        self._contract = (ExecutionContract.from_validated_candidate(
+            candidate, request, report, positions, self._preserve_grid) if candidate is not None else None)
+        # Legacy performance diagnostics inspect this evaluator. Dispatch and
+        # ownership stay in the common contract; this is an alias, not a copy.
+        self._guard = self._contract.guard if self._contract is not None and not self._vv_mode else None
         self._primary = candidate if candidate is not None else baseline
         self._lock = threading.RLock()
         self._ready = False
@@ -316,11 +370,16 @@ class BatchKernel:
             )).hexdigest()
         fields = dict(self._primary.metadata._asdict(), block_batching=report)
         self.metadata = namedtuple("BatchKernelMetadata", sorted(fields))(**fields)
+        if publish_manifest:
+            self.publish_manifest()
+
+    def publish_manifest(self):
+        import json
         from triton.runtime.cache import get_cache_manager
         manifest = {
-            "version": 1, "baseline_hash": baseline.hash, "candidate_hash":
-            candidate.hash if candidate is not None else None, "request":
-            {"factor": request.factor, "axis": request.axis}, "report": report
+            "version": 1, "baseline_hash": self.baseline.hash, "candidate_hash":
+            self.candidate.hash if self.candidate is not None else None, "request":
+            {"factor": self.request.factor, "axis": self.request.axis}, "report": self.block_batching
         }
         get_cache_manager(self.hash).put(json.dumps(manifest, sort_keys=True), "block_batching.bundle.json")
 
@@ -329,7 +388,11 @@ class BatchKernel:
 
     @property
     def last_launch(self):
-        return getattr(self._local, "launch", {"runtime_status": "NOT_LAUNCHED"})
+        result = getattr(self._local, "launch", {"runtime_status": "NOT_LAUNCHED"})
+        if self._vv_mode:
+            from copy import deepcopy
+            return deepcopy(result)
+        return result
 
     def _init_handles(self):
         with self._lock:
@@ -344,9 +407,13 @@ class BatchKernel:
                 from triton.runtime.errors import OutOfResources
                 try:
                     self.candidate._init_handles()
-                except (BatchingRejected, OutOfResources) as error:
+                except (OutOfResources, NotImplementedError) as error:
+                    if isinstance(error,
+                                  NotImplementedError) and not getattr(error, 'ascend_launcher_abi_mismatch', False):
+                        raise
                     self.block_batching.update(compile_status="REJECTED", reason=str(error), owner="none")
                     self.candidate = None
+                    self._contract = None
                     self._primary = self.baseline
                     from collections import namedtuple
                     fields = dict(self.baseline.metadata._asdict(), block_batching=self.block_batching)
@@ -375,50 +442,41 @@ class BatchKernel:
         reason = self.block_batching.get("reason", "CANDIDATE_UNAVAILABLE")
         accepted = False
         arguments = launch[9:]
+        contract = self._contract
         if self.candidate is not None:
             capture = _capture_state()
-            if _is_cv_report(self.block_batching) and grid[self.block_batching["selected_axis"]] % self.request.factor:
-                # VV candidates protect partial groups with a lane mask and
-                # safe inactive operands. CV still requires complete groups.
-                reason = "CV_GRID_NOT_DIVISIBLE"
-            elif not self._preserve_grid and not _reduces_blocks(grid, self.block_batching["selected_axis"],
-                                                                 self.request.factor):
-                # The device task domain is one dimensional: prepareGrid divides
-                # the selected axis and then multiplies all three extents. An
-                # axis too short to divide leaves that product untouched while
-                # the rewritten tile is still F times wider, so every lane past
-                # the original extent is masked-off work bought for nothing.
-                reason = "GRID_NOT_REDUCED"
-            elif (not (_is_cv_report(self.block_batching) and hasattr(self, "block_auto_selection"))
-                  and _batched_blocks(grid, self.block_batching["selected_axis"],
-                                      1 if self._preserve_grid else self.request.factor) < _core_floor()):
-                # The CPU selector accounts for CV small-grid profitability.
-                # Preserve the existing floor for VV and manual requests.
-                reason = "GRID_BELOW_CORE_FLOOR"
-            elif capture is not False:
-                reason = "CAPTURE_BASELINE" if capture else "CAPTURE_QUERY_UNAVAILABLE"
-            else:
-                runtime_args = [arguments[index] for index in self.positions]
-                accepted, reason = self._guard(runtime_args, grid)
+            from .block_batching_launch import candidate_launch_refusal
+            live = contract._legacy_report
+            request = contract._legacy_request if live is not None else contract
+            report = live if live is not None else {'selected_axis': contract.axis}
+            reason = candidate_launch_refusal(request, report, grid, contract.preserve_grid, capture,
+                                              cv=_is_cv_report(live) if live is not None else False,
+                                              reduces_blocks=_reduces_blocks, batched_blocks=_batched_blocks,
+                                              core_floor=_core_floor,
+                                              auto_selected=hasattr(self, "block_auto_selection"))
+            if reason is None:
+                accepted, reason = contract.guard([arguments[index] for index in contract.positions], grid)
                 if accepted:
-                    selected = self.candidate
+                    selected = contract.candidate
         # Never mix baseline function/metadata/workspace/layout with candidate.
         forwarded = list(launch)
         forwarded[4], forwarded[5] = selected.function, selected.packed_metadata
         forwarded[6] = selected.launch_metadata(grid, launch[3], *arguments)
         result = selected.run(*forwarded)
-        factor = self.request.factor if accepted else 1
+        requested_factor = contract.factor if contract is not None else self.request.factor
+        preserve_grid = contract.preserve_grid if contract is not None else self._preserve_grid
+        axis = contract.axis if contract is not None else self.block_batching.get("selected_axis")
+        factor = requested_factor if accepted else 1
         batch_grid = list(grid)
-        if accepted and not self._preserve_grid:
-            axis = self.block_batching["selected_axis"]
+        if accepted and not preserve_grid:
             batch_grid[axis] = (grid[axis] + factor - 1) // factor
         self._local.launch = {
             "runtime_status": "APPLIED" if accepted else "BASELINE_SELECTED", "owner":
-            "block_batching" if accepted else "baseline", "requested_factor": self.request.factor, "applied_factor":
-            factor, "selected_axis": self.block_batching.get("selected_axis"), "original_grid": grid, "batch_grid":
-            tuple(batch_grid), "reason": reason, "plan_id": self.hash
+            "block_batching" if accepted else "baseline", "requested_factor": requested_factor, "applied_factor":
+            factor, "selected_axis": axis, "original_grid": grid, "batch_grid": tuple(batch_grid), "reason": reason,
+            "plan_id": self.hash
         }
-        self._local.launch['grouping'] = 'loop_iterations' if accepted and self._preserve_grid else 'programs'
+        self._local.launch['grouping'] = 'loop_iterations' if accepted and preserve_grid else 'programs'
         if knobs.ascend.compile_only:
             self._local.launch.update(runtime_status="NOT_LAUNCHED", reason="COMPILE_ONLY")
         return result
@@ -440,7 +498,6 @@ class BatchKernel:
 def _freeze_source(backend, src, baseline_options, backend_revision):
     """Generate frontend IR once, then parse the same immutable snapshot per variant."""
     import hashlib
-    from pathlib import Path
     from triton._C.libtriton import ir
     from triton.compiler.compiler import ASTSource
     from triton.runtime.cache import get_cache_manager
@@ -457,113 +514,61 @@ def _freeze_source(backend, src, baseline_options, backend_revision):
     from triton.runtime.cache import FileCacheManager
     cache = get_cache_manager(fingerprint)
     if type(cache) is not FileCacheManager:
-        raise BatchingRejected("CUSTOM_CACHE_NOT_SUPPORTED")
+        from .block_batching_worker import BatchDecline
+        return BatchDecline("CUSTOM_CACHE_NOT_SUPPORTED", "freeze")
     path = cache.put(text, "block_batching.original.ttir", binary=False)
 
-    class FrozenSource(ASTSource):
+    from .block_batching_source import FrozenSource
+    return FrozenSource(src, path, fingerprint, hashlib.sha256(text.encode()).hexdigest())
 
-        def __init__(self):
-            self.__dict__.update(src.__dict__)
-            self.block_batching_source_hash = fingerprint
 
-        def hash(self):
-            return fingerprint
-
-        def make_ir(self, target, options, codegen_fns, module_map, context):
-            parsed = ir.parse_mlir_module(str(Path(path)), context)
-            parsed.context = context
-            return parsed
-
-    return FrozenSource()
+def rejected_bundle(baseline, request, decline, positions=(), retry=None):
+    reason = decline['reason']
+    report = dict(report_version=1, compile_status='REJECTED', owner='none', requested_factor=request.factor,
+                  requested_axis=request.axis, applied_factor=1, reason=reason)
+    if decline.get('analysis') is not None:
+        report['candidate_analysis'] = decline['analysis']
+    if 'diagnostic' in decline:
+        report.update(backend_diagnostic=decline['diagnostic'], stage=decline['stage'])
+    if retry:
+        report['layout'] = dict(requested_policy='auto', selected_policy='baseline', compile_fallback=retry)
+    return BatchKernel(baseline, None, request, report, positions)
 
 
 def compile_bundle(backend, src, options, compile_variant):
-    import subprocess
-    import hashlib
-    from triton.compiler.errors import MLIRCompilationError
-    request = BatchRequest(options.get("block_batching_factor", 1), options.get("block_batching_axis", -1))
-    normalized = backend.parse_options(options)
+    from triton import knobs
+    from .block_batching_worker import BatchDecline, CandidateCompiler, _baseline_environment
+    from .utils import backend_policy
+    request = BatchRequest(options.get('block_batching_factor', 1), options.get('block_batching_axis', -1))
+    if request.factor == 1:
+        return compile_variant(dict(options), src)
+    normalized = backend.parse_options(dict(options))
     baseline_options = dict(options, block_batching_factor=1, block_batching_axis=-1)
-    # Grid hints specialize candidate axis selection, never the original kernel.
-    baseline_options.pop("block_batching_grid", None)
-    freeze_rejection = None
-    try:
-        frozen = _freeze_source(backend, src, baseline_options, normalized.block_batching_backend_revision)
-    except BatchingRejected as error:
-        frozen, freeze_rejection = src, str(error)
+    baseline_options.pop('block_batching_grid', None)
+    refusal = None
+    if knobs.compilation.override or getattr(normalized, 'ir_override', None):
+        refusal = 'IR_OVERRIDE_NOT_SUPPORTED'
+    elif knobs.cache.manager_class is not None or knobs.cache.remote_manager_class is not None:
+        refusal = 'CUSTOM_CACHE_NOT_SUPPORTED'
+    frozen = src if refusal else _freeze_source(backend, src, baseline_options,
+                                                normalized.block_batching_backend_revision)
+    if isinstance(frozen, BatchDecline):
+        refusal, frozen = frozen.reason, src
     baseline = compile_variant(baseline_options, frozen)
-    report = {
-        "report_version": 1, "compile_status": "REJECTED", "owner": "none", "requested_factor": request.factor,
-        "requested_axis": request.axis, "applied_factor": 1
-    }
-    candidate, positions = None, []
-    try:
-        if freeze_rejection:
-            raise BatchingRejected(freeze_rejection)
-        if not str(backend.target.arch).startswith(("Ascend950", "Ascend910_95")):
-            raise BatchingRejected("TARGET_NOT_VALIDATED")
-        if normalized.is_pure_simt or normalized.compile_mode == "simt_only":
-            raise BatchingRejected("SIMT_NOT_SUPPORTED")
-        from .utils import backend_policy
-        if backend_policy not in (None, "torch_npu"):
-            raise BatchingRejected("FRAMEWORK_NOT_VALIDATED")
-        if not hasattr(src, "fn"):
-            raise BatchingRejected("AST_SOURCE_REQUIRED")
-        positions = _runtime_positions(src)
-        candidate, layout_fallback = _compile_layout_candidate(compile_variant, options, frozen, request)
-        from .block_batching_report import VALIDATION_POLICY, CV_VALIDATION_POLICY
-        native_report = getattr(candidate.metadata, "block_batching", {})
-        cv = _is_cv_report(native_report)
-        if (native_report.get("cv_mode") not in ("disabled", "independent_batch_v1", "spatial_concat_v1")
-                or native_report.get("compile_status") != "COMPILED_GUARDED"
-                or native_report.get("validation_policy") != (CV_VALIDATION_POLICY if cv else VALIDATION_POLICY)):
-            raise BatchingRejected("CANDIDATE_VALIDATION_MISSING")
-        if (native_report.get("implementation_version") != IMPLEMENTATION_VERSION
-                or native_report.get("lane_width") != request.factor):
-            raise BatchingRejected("CANDIDATE_LAYOUT_MISMATCH")
-        if cv and native_report.get("tail_policy") != "full_groups_only":
-            raise BatchingRejected("CV_CONTRACT_MISMATCH")
-        expected = getattr(candidate.metadata, "block_batching_binary_sha256", None)
-        if expected != hashlib.sha256(candidate.kernel).hexdigest():
-            raise BatchingRejected("CANDIDATE_BINARY_CHANGED")
-        from .block_batching_guard_v3 import validate_plan_binding
-        guard = native_report.get("guard", {})
-        if (not validate_plan_binding(guard)
-                or getattr(candidate.metadata, "block_batching_plan_sha256", None) != guard.get("plan_fingerprint")):
-            raise BatchingRejected("CANDIDATE_PLAN_CHANGED")
-        from .block_batching_report import validate_vv_loop_contract
-        validate_vv_loop_contract(candidate.metadata._asdict())
-        report = dict(native_report)
-        if layout_fallback:
-            report["layout"] = dict(report["layout"], requested_policy="auto", selected_policy="semantic_only",
-                                    compile_fallback=layout_fallback)
-    except (BatchingRejected, subprocess.CalledProcessError, MLIRCompilationError) as error:
-        if hasattr(error, "block_batching_layout_fallback"):
-            report["layout"] = {
-                "requested_policy": "auto", "selected_policy": "baseline", "compile_fallback":
-                error.block_batching_layout_fallback
-            }
-        cause = error
-        while isinstance(cause, MLIRCompilationError) and cause.__cause__ is not None:
-            cause = cause.__cause__
-        if isinstance(cause, BatchingRejected):
-            report["reason"] = str(cause)
-            if cause.analysis is not None:
-                report["candidate_analysis"] = cause.analysis
-            if isinstance(cause, CVTargetRejected):
-                report.update(backend_diagnostic=cause.diagnostic, stage=cause.stage)
-        elif isinstance(cause, subprocess.CalledProcessError):
-            detail = cause.stderr.decode(
-                errors="replace") if isinstance(cause.stderr, bytes) else str(cause.stderr or "")
-            if _internal_backend_error(cause.returncode, detail):
-                raise
-            reason = ("BATCH_TARGET_RESOURCE_REJECTED"
-                      if _cv_resource_refusal(cause.returncode, detail) else "BACKEND_COMPILE_REJECTED")
-            report.update(reason=reason, backend_returncode=cause.returncode, backend_diagnostic=detail[-16000:])
-        else:
-            # Internal verifier/runtime errors and unknown compiler failures
-            # retain their original wrapped diagnostics instead of disappearing
-            # behind a successful baseline launch.
-            raise
-        candidate = None
-    return BatchKernel(baseline, candidate, request, report, positions)
+    if not str(backend.target.arch).startswith(('Ascend950', 'Ascend910_95')):
+        refusal = refusal or 'TARGET_NOT_VALIDATED'
+    elif normalized.is_pure_simt or normalized.compile_mode == 'simt_only':
+        refusal = refusal or 'SIMT_NOT_SUPPORTED'
+    elif backend_policy not in (None, 'torch_npu'):
+        refusal = refusal or 'FRAMEWORK_NOT_VALIDATED'
+    elif not hasattr(src, 'fn'):
+        refusal = refusal or 'AST_SOURCE_REQUIRED'
+    if refusal:
+        return rejected_bundle(baseline, request, dict(reason=refusal))
+    positions = _runtime_positions(src)
+    if isinstance(positions, BatchDecline):
+        return rejected_bundle(baseline, request, positions.payload())
+    env_vars = _baseline_environment(frozen, backend, baseline_options, baseline)
+    if env_vars is None:
+        return rejected_bundle(baseline, request, dict(reason='BASELINE_ENVIRONMENT_NOT_PROVEN'), positions)
+    return CandidateCompiler(backend, frozen, env_vars).compile(baseline, options, request, positions)

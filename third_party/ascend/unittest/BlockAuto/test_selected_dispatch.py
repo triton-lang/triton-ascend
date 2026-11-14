@@ -1,6 +1,7 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 """Selected CV bundles keep runtime safety checks without a second performance veto."""
 import importlib
+from dataclasses import replace
 from pathlib import Path
 import sys
 import threading
@@ -33,6 +34,10 @@ class TestSelectedDispatch(unittest.TestCase):
         self.bundle._preserve_grid = False
         self.bundle.positions, self.bundle.hash = [0], 'bundle'
         self.bundle._guard = lambda args, grid: (True, 'PROVEN_AT_RUNTIME')
+        contract = importlib.import_module(package.__name__ + '.block_batching_contract').ExecutionContract
+        self.bundle._vv_mode = False
+        self.bundle._contract = contract(2, 0, False, self.bundle.positions, 'candidate', self.bundle.candidate,
+                                         self.bundle._guard, self.bundle.block_batching, self.bundle.request)
         self.knobs = SimpleNamespace(ascend=SimpleNamespace(compile_only=False))
 
     def dispatch(self, grid=4, capture=False):
@@ -58,7 +63,7 @@ class TestSelectedDispatch(unittest.TestCase):
         self.assertEqual(self.events, ['baseline', 'baseline'])
 
     def test_selected_cv_still_checks_aliases(self):
-        self.bundle._guard = lambda args, grid: (False, 'WRITE_ALIAS')
+        self.bundle._contract = replace(self.bundle._contract, guard=lambda args, grid: (False, 'WRITE_ALIAS'))
         self.assertEqual(self.dispatch()['reason'], 'WRITE_ALIAS')
         self.assertEqual(self.events, ['baseline'])
 

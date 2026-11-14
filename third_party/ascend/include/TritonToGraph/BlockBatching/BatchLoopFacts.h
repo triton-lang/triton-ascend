@@ -10,8 +10,8 @@ namespace mlir::triton::cfg {
 //
 // Only what the loop literally is. Everything derivable from these three
 // expressions -- constant step, trip count, divisibility, lane uniformity --
-// is answered on demand by BatchRangeFacts, so there is no field here that can
-// be stale or unfilled.
+// is answered on demand on the BatchExpr DAG, so there is no field here that
+// can be stale or unfilled.
 struct BatchLoopFact {
   unsigned id = 0;
   unsigned bits = 0;

@@ -1,10 +1,14 @@
 // RUN: %PYTHON %S/Inputs/rewrite.py %s --cv --batch-matmul | FileCheck %s
 
 // CHECK: compile_status: REWRITTEN
-// CHECK: cv_lowering: rank3_uniform_control_batch_v1
+// CHECK: cv_lowering: static_uniform_control_lanes_v1
+// CHECK-NOT: tensor<2x4x4xf32>
 // CHECK: scf.for
 // CHECK: tt.load {{.*}}, {{.*}}, {{.*}} :
-// CHECK: tt.dot {{.*}}tensor<2x4x4xf32>
+// CHECK: tt.dot {{.*}}tensor<4x4xf32>
+// CHECK: scf.for
+// CHECK: tt.load {{.*}}, {{.*}}, {{.*}} :
+// CHECK: tt.dot {{.*}}tensor<4x4xf32>
 // CHECK-NOT: tt.dot
 // CHECK: tt.return
 

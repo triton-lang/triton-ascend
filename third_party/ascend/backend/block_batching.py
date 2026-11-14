@@ -7,7 +7,7 @@ compiler artifacts; rejected or guarded calls select the complete baseline.
 """
 from dataclasses import dataclass
 
-IMPLEMENTATION_VERSION = 45
+IMPLEMENTATION_VERSION = 46
 
 
 def _annotate_launch_grid(kwargs, grid, *, bind=None):

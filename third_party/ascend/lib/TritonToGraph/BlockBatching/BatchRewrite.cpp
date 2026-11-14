@@ -1250,6 +1250,15 @@ static FailureOr<BatchRewriteReport> rewriteImpl(ModuleOp module,
       return report;
     }
     if (request.cvBatchMatmul) {
+      // The packaged rank-three consumer miscomputes loop-carried dot
+      // accumulators, even with a full reduction tile. Let the enclosing
+      // transactional attempt retain independent rank-two lane recurrences.
+      for (Operation *op : validated)
+        if (auto dot = dyn_cast<triton::DotOp>(op);
+            dot && cvControlFlow && !constantZero(dot.getC())) {
+          diagnosticOp = op;
+          return reject("CV_BATCH_CONTROL_ACCUMULATOR_NOT_VALIDATED");
+        }
       // A group that crosses a quotient period needs a discontinuous lane
       // address. The consumer's per-lane assembly before batch MMA is not
       // validated for this path; retain the transactional lane fallback.

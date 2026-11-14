@@ -37,7 +37,8 @@ def grouped_dot(A, B, C, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, MODE
 
 @pytest.mark.parametrize('mode,loop,integer,k', [(0, False, False, 32), (1, False, False, 32), (2, False, False, 32),
                                                  (0, True, False, 63), (1, True, False, 63), (2, True, False, 64),
-                                                 (2, True, False, 63), (0, False, True, 32), (2, False, True, 32)])
+                                                 (2, True, False, 63), (2, False, False, 31), (0, False, True, 32),
+                                                 (2, False, True, 32)])
 def test_grouped_matrix_results(mode, loop, integer, k):
     m, n = (127, 32) if mode == 0 else ((32, 127) if mode == 1 else (31, 29))
     batch = (4, ) if mode == 2 else ()
@@ -49,13 +50,18 @@ def test_grouped_matrix_results(mode, loop, integer, k):
     a, b = acpu.npu(), bcpu.npu()
     storage = torch.full((expected.numel() + 128, ), -12345, device='npu', dtype=expected.dtype)
     c = storage[64:-64].view(expected.shape)
+    if mode == 2 and loop:
+        grouped_dot[(4, )](a, b, c, m, n, k, mode, loop, integer, block_batching_factor=1)
+        torch.npu.synchronize()
+        torch.testing.assert_close(c.cpu(), expected, rtol=0, atol=0)
+        c.fill_(-12345)
     kernel = grouped_dot[(4, )](a, b, c, m, n, k, mode, loop, integer, block_batching_factor=2, block_batching_axis=0,
                                 enable_hivm_batch_matmul=True)
     torch.npu.synchronize()
     torch.testing.assert_close(c.cpu(), expected, rtol=0, atol=0)
     assert (storage[:64] == -12345).all() and (storage[-64:] == -12345).all()
     assert torch.equal(a.cpu(), acpu) and torch.equal(b.cpu(), bcpu)
-    if mode == 2 and loop and k % 32:
+    if mode == 2 and not loop and k % 32:
         # The batch consumer requires a full reduction tile; preserve safe fallback.
         assert kernel.last_launch['runtime_status'] == 'BASELINE_SELECTED'
         assert kernel.last_launch['applied_factor'] == 1
@@ -65,5 +71,8 @@ def test_grouped_matrix_results(mode, loop, integer, k):
     expected_lowering = ('spatial_m' if mode == 0 else 'spatial_n') + ('_uniform_control_v1' if loop else '_v1')
     if mode == 2:
         expected_lowering = 'static_integer_lanes_v1' if integer else (
-            'rank3_uniform_control_batch_v1' if loop else 'rank3_masked_batch_v1')
+            'static_uniform_control_lanes_v1' if loop else 'rank3_masked_batch_v1')
+        if loop:
+            assert kernel.block_batching['guard'][
+                'cv_loop_fusion_rejection'] == 'CV_BATCH_CONTROL_ACCUMULATOR_NOT_VALIDATED'
     assert kernel.block_batching['cv_lowering'] == expected_lowering

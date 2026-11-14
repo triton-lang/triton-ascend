@@ -184,7 +184,7 @@ def mmad(a, b, acc, transpose_a=False, transpose_b=False, clear_accum=False, uni
     if not (isinstance(a, buffer) and isinstance(b, buffer) and isinstance(acc, buffer)):
         raise TypeError("tla.mmad expects tla.buffer operands for a, b, acc")
     if a.space != "l1" or b.space != "l1":
-        raise ValueError("tla.mmad a/b must be L1 buffers (fill via tla.copy(gm->l1))")
+        raise ValueError("tla.mmad a/b must be L1 buffers (fill via tla.load_gm_to_l1)")
     if acc.space != "l0c":
         raise ValueError("tla.mmad acc must be an L0C buffer")
     if a.dtype != b.dtype:

@@ -35,13 +35,13 @@ SIGNATURE = {"A_ptr": "*fp32"}
 
 @tla.jit
 def device_print_kernel(A_ptr, M: tl.constexpr, N: tl.constexpr):
-    a_ub = tla.alloc_buffer((M, N), tl.float32, space="ub")
+    a_ub = tla.alloc((M, N), tl.float32, space="ub")
     a_blk = tla.view(A_ptr, (M, N), strides=(N, 1))
-    tla.copy(a_blk, a_ub)  # GM -> UB (hivm.hir.load)
+    tla.load_gm_to_ub(a_blk, a_ub)  # GM -> UB (hivm.hir.load)
     tla.device_print("ub[0, 0] = ", a_ub[0, 0])
     tla.device_print("ub[0, 1] = ", a_ub[0, 1], hex=True)
     with tla.scope.vector():
-        tla.copy(a_ub, a_blk)  # UB -> GM (hivm.hir.store), non-SIMD DMA
+        tla.store_ub_to_gm(a_ub, a_blk)  # UB -> GM (hivm.hir.store), non-SIMD DMA
 
 
 # negative kernels: must raise RuntimeError at compile time.
@@ -49,12 +49,12 @@ def _bad_inside_scope():
 
     @tla.jit
     def k(A_ptr, M: tl.constexpr, N: tl.constexpr):
-        a_ub = tla.alloc_buffer((M, N), tl.float32, space="ub")
+        a_ub = tla.alloc((M, N), tl.float32, space="ub")
         a_blk = tla.view(A_ptr, (M, N), strides=(N, 1))
-        tla.copy(a_blk, a_ub)
+        tla.load_gm_to_ub(a_blk, a_ub)
         with tla.scope.simd():
             tla.device_print("x = ", a_ub[0, 0])
-        tla.copy(a_ub, a_blk)
+        tla.store_ub_to_gm(a_ub, a_blk)
 
     return k
 
@@ -63,11 +63,10 @@ def _bad_l1():
 
     @tla.jit
     def k(A_ptr, M: tl.constexpr, N: tl.constexpr):
-        a_l1 = tla.alloc_buffer((M, N), tl.float32, space="l1")
+        a_l1 = tla.alloc((M, N), tl.float32, space="l1")
         a_blk = tla.view(A_ptr, (M, N), strides=(N, 1))
-        tla.copy(a_blk, a_l1)
+        tla.load_gm_to_l1(a_blk, a_l1)
         tla.device_print("x = ", a_l1[0, 0])
-        tla.copy(a_l1, a_blk)
 
     return k
 

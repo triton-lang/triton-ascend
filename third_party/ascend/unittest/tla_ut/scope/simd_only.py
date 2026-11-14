@@ -17,15 +17,15 @@ N = 64
 
 @tla.jit
 def simd_only(X_ptr, O_ptr, N: tl.constexpr):
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    x_ub = tla.alloc((N, ), tl.float32, space="ub")
+    o_ub = tla.alloc((N, ), tl.float32, space="ub")
     x_blk = tla.view(X_ptr, (N, ), strides=(1, ))
     o_blk = tla.view(O_ptr, (N, ), strides=(1, ))
-    tla.copy(x_blk, x_ub)
+    tla.load_gm_to_ub(x_blk, x_ub)
     with tla.scope.simd():  # standalone: not nested in a vector scope
         v = tla.simd.vlds(x_ub[0])
         tla.simd.vsts(o_ub[0], tla.simd.vadd(v, v))
-    tla.copy(o_ub, o_blk)
+    tla.store_ub_to_gm(o_ub, o_blk)
 
 
 def constexprs():

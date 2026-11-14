@@ -112,11 +112,11 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 
 // T2U-LABEL: tt.func public @marked_affine_index_carrier
 // T2U:       scf.for %[[IV:[a-zA-Z0-9_]+]] =
-// T2U-SAME:  -> (tensor<4x4xi32>, i32)
+// T2U:       arith.subi %[[IV]],
+// T2U:       arith.divui
 // T2U:       tt.addptr {{.*}}PointerDescriptorRebuild
 // T2U-SAME:  PointerDescriptorStructuredAxes = array<i32: 1, 1>
 // T2U:       tt.load
-// T2U:       scf.yield {{.*}} : tensor<4x4xi32>, i32
 
 // LINALG-LABEL: func.func @marked_affine_index_carrier
 // LINALG:       scf.for

@@ -455,4 +455,32 @@ void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
   });
 }
 
+// Find the ssbuffer.if computation block that owns `op`.
+scf::IfOp findIfOpContainingOp(Operation *op) {
+  if (!op) {
+    return nullptr;
+  }
+
+  constexpr int maxDepth = 100;
+  int depth = 0;
+
+  Operation *current = op;
+  while (current && depth < maxDepth) {
+    if (auto ifOp = dyn_cast<scf::IfOp>(current)) {
+      if (ifOp->hasAttr(CVPipeline::kIf)) {
+        return ifOp;
+      }
+    }
+    current = current->getParentOp();
+    depth++;
+  }
+
+  if (depth >= maxDepth) {
+    LDBG("Warning: Max depth " << maxDepth
+                               << " exceeded in findIfOpContainingOp");
+  }
+
+  return nullptr;
+}
+
 } // namespace mlir

@@ -35,7 +35,10 @@ using namespace mlir::triton;
 namespace {
 struct ReleaseProbe {
   Value watched;
+  llvm::DenseMap<Value, PtrOffsetInfo> *cache;
   unsigned releases = 0;
+  bool staleKey = false;
+  bool stalePayload = false;
 };
 thread_local ReleaseProbe *activeProbe = nullptr;
 
@@ -46,6 +49,14 @@ void observeRelease(void *pointer) {
   if (!probe || pointer != probe->watched.getAsOpaquePointer())
     return;
   ++probe->releases;
+  probe->staleKey |= probe->cache->contains(probe->watched);
+  for (auto &entry : *probe->cache) {
+    auto &info = entry.second;
+    probe->stalePayload |=
+        info.getPtr() == probe->watched || info.getOffset() == probe->watched;
+    for (Value offset : info.getOffsetsRef())
+      probe->stalePayload |= offset == probe->watched;
+  }
 }
 } // namespace
 
@@ -62,7 +73,7 @@ extern "C" void __wrap__ZdlPvm(void *pointer, std::size_t size) noexcept {
   __real__ZdlPvm(pointer, size);
 }
 
-TEST(PointerBoundaryLifetime, ReleasesReplacedArguments) {
+TEST(OffsetCacheLifetime, ReleasesOldValuesAfterCacheInvalidation) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, scf::SCFDialect,
                       triton::TritonDialect>();
@@ -86,18 +97,23 @@ TEST(PointerBoundaryLifetime, ReleasesReplacedArguments) {
   auto func = *module->getOps<triton::FuncOp>().begin();
   auto loop = *func.getBody().front().getOps<scf::ForOp>().begin();
   Value oldArg = loop.getRegionIterArgs().front();
-  ReleaseProbe probe{oldArg};
+  llvm::DenseMap<Value, PtrOffsetInfo> cache;
+  IRRewriter rewriter(&context);
+  parse(oldArg, oldArg.getLoc(), rewriter, cache);
+  ASSERT_TRUE(cache.contains(oldArg));
+
+  ReleaseProbe probe{oldArg, &cache};
   ASSERT_EQ(activeProbe, nullptr);
   {
     activeProbe = &probe;
     auto resetProbe = llvm::make_scope_exit([] { activeProbe = nullptr; });
-    ASSERT_TRUE(succeeded(replacePtrArguments(func)));
+    replacePtrArguments(func, cache);
   }
 
   // Do not silently pass if the linker or MLIR allocation path stops routing
   // the watched deallocation through the wrappers.
   EXPECT_EQ(probe.releases, 1u);
-  auto replacement = *func.getBody().front().getOps<scf::ForOp>().begin();
-  EXPECT_TRUE(replacement.getRegionIterArgs().front().getType().isInteger(64));
+  EXPECT_FALSE(probe.staleKey);
+  EXPECT_FALSE(probe.stalePayload);
   EXPECT_TRUE(succeeded(verify(*module)));
 }

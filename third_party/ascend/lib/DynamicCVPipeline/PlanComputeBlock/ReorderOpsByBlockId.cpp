@@ -281,7 +281,7 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
       startingVectorBlocks.push_back(i);
     }
   }
-  constexpr size_t kPriviledgedMaxComputeOpCnt = 1;
+  constexpr size_t PRIVILEGED_MAX_COMPUTE_OP_CNT = 1;
   std::stable_partition(startingVectorBlocks.begin(),
                         startingVectorBlocks.end(), [this](unsigned idx) {
                           const auto blockId = groupIds[idx];
@@ -290,29 +290,37 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
                           for (auto op : ops) {
                             if (isTensorComputeOp(op)) {
                               computeOpCnt++;
-                              LOG_DEBUG("Tensor compute op: " << *op);
                             } else {
-                              LOG_DEBUG("Not tensor compute op: " << *op);
                             }
                           }
                           LOG_DEBUG("Summary: group id "
-                                    << blockId
-                                    << " compute ops: " << computeOpCnt);
-                          return computeOpCnt > kPriviledgedMaxComputeOpCnt;
+                                    << blockId << " compute ops: "
+                                    << computeOpCnt << "\n");
+                          return computeOpCnt <= PRIVILEGED_MAX_COMPUTE_OP_CNT;
                         });
   ready.append(startingVectorBlocks);
+  unsigned head = 0;
 
-  while (!ready.empty()) {
-    auto cur = ready.pop_back_val();
+  while (head < ready.size()) {
+    auto cur = ready[head++];
 
     result.push_back(groupIds[cur]);
-
+    SmallVector<unsigned> nextReady;
     for (unsigned succIdx : succs[cur]) {
       if (--inDeg[succIdx] == 0) {
-        ready.push_back(succIdx);
+        nextReady.push_back(succIdx);
       }
     }
+    std::stable_partition(nextReady.begin(), nextReady.end(),
+                          [this](unsigned idx) {
+                            const auto blockId = groupIds[idx];
+                            const auto ops = bm.getOpsRefByBlockId(blockId);
+                            return ops.empty();
+                          });
+    ready.append(nextReady.begin(), nextReady.end());
   }
+
+  ready.clear();
 
   LLVM_DEBUG({
     LOG_DEBUG("Group order: ");
@@ -538,18 +546,6 @@ void ReorderOpsByBlockIdPass::runOnOperation() {
 
   if (CVPipeline::hasFallbackAttr(moduleOp)) {
     return;
-  }
-
-  // MergeComputeBlockPass sets kMergeComputeBlockApplied to record whether it
-  // actually merged blocks. Skip reorder only when it ran but merged nothing;
-  // consume the marker either way so it does not leak into the output IR.
-  if (auto applied = moduleOp->getAttrOfType<BoolAttr>(
-          CVPipeline::kMergeComputeBlockApplied)) {
-    moduleOp->removeAttr(CVPipeline::kMergeComputeBlockApplied);
-    if (!applied.getValue()) {
-      LOG_DEBUG("Skip reorder: MergeComputeBlock ran but merged nothing");
-      return;
-    }
   }
 
   LOG_DEBUG("Input mlir:\n" << moduleOp << "\n");

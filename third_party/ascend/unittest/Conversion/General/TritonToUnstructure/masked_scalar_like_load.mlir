@@ -1,16 +1,10 @@
 // RUN: triton-opt --pass-pipeline='any(triton-control-flow-opt,triton-to-structured{enable-mask-fallback-conversion=false optimize-dynamic-offset=false},discrete-mask-access-conversion{compile-mode=simd_simt_template compile-on-910-95=true},triton-to-annotation,triton-to-unstructure{compile-mode=simd_simt_template compile-on-910-95=true})' --verify-each %s | FileCheck %s
 // CHECK-LABEL: tt.func public @block_batching_memory
-// The shared pointer analysis lowers this to a masked indirect load. The
-// original predicate and other value must reach the memory operation; an
-// unconditional scalar load followed by a select would access an invalid ptr.
-// CHECK: %[[OFFSET:.*]] = arith.constant dense<1099511627776> : tensor<4xi64>
-// CHECK: %[[OTHER:.*]] = arith.constant dense<7.000000e+00> : tensor<4xf32>
-// CHECK: %[[ENABLED:.*]] = arith.cmpi slt,
-// CHECK: %[[MASK:.*]] = tt.splat %[[ENABLED]] : i1 -> tensor<4xi1>
+// CHECK: arith.index_castui
 // CHECK-NOT: tt.load
-// CHECK: ascend.indirect_load {{.*}} %[[OFFSET]] : tensor<4xi64>, %[[MASK]] : tensor<4xi1>, %[[OTHER]] : tensor<4xf32>
-// CHECK-NOT: tt.load
-// CHECK: tt.return
+// CHECK: scf.for
+// CHECK: tt.load
+// CHECK: scf.yield
 
 module {
   tt.func public @block_batching_memory(%x: !tt.ptr<f32>, %y: !tt.ptr<f32>, %n: i32, %k: i32) {

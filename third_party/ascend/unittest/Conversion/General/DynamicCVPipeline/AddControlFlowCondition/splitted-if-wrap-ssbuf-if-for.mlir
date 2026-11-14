@@ -8,14 +8,24 @@
 // ProcessArgs appends one shared iter_arg, then UpdateLoopOps appends block
 // counters. The first counter is the third iter_arg, initialized to the for
 // lower bound.
+// UpdateLoopIterTimes runs last and rewrites the main loop into an scf.while:
+// the induction variable becomes the first carried value, so the counters move
+// to the fourth and the fifth one. The while keeps the upper bound of the for
+// loop and its condition is the OR of the counters of the ssbuffer.if blocks
+// compared against that upper bound.
 
 // CHECK-LABEL: func.func @wrap_for_splitted_if
-// CHECK: scf.for %{{[^ ]+}} = %[[LB:[^ ]+]] to %{{[^ ]+}} step %[[STEP:[^ ]+]] iter_args(%{{[^ ]+}} = %{{[^ ]+}}, %{{[^ ]+}} = %{{[^ ]+}}, %[[CTR:[^ ]+]] = %[[LB]]
+// CHECK: scf.while (%[[IV:[^ ]+]] = %[[LB:[^ ,]+]], %{{[^ ,]+}} = %{{[^ ,]+}}, %{{[^ ,]+}} = %{{[^ ,]+}}, %[[CTR1:[^ ,]+]] = %[[LB]], %[[CTR2:[^ ,]+]] = %[[LB]], %{{[^ ,]+}} = %{{[^ ,]+}}, %{{[^ ,]+}} = %{{[^ ,]+}}) : (i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32)
+// CHECK: %[[CMP1:[^ ]+]] = arith.cmpi slt, %[[CTR1]], %[[UB:[^ ,]+]] : i32
+// CHECK: %[[CMP2:[^ ]+]] = arith.cmpi slt, %[[CTR2]], %[[UB]] : i32
+// CHECK: arith.ori %[[CMP1]], %[[CMP2]] : i1
+// CHECK: scf.condition
+// CHECK: arith.addi %[[IV]], %[[STEP:[^ ]+]] : i32
 // CHECK: %[[SPLIT:[^ ]+]] = arith.cmpi sgt, {{.*}}ssbuffer.block_id = 5 : i32
 // CHECK: scf.if %[[SPLIT]]
 // CHECK: arith.mulf {{.*}} : tensor<4xf32>
+// CHECK: arith.addi %[[CTR1]], %[[STEP]]
 // CHECK: } {{.*}}ssbuffer.if = 5 : i32}
-// CHECK: arith.addi %[[CTR]], %[[STEP]]
 // CHECK: } {{.*}}ssbuffer.splitted_if = 0 : i32}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intra_buf_count = 2 : i32} {

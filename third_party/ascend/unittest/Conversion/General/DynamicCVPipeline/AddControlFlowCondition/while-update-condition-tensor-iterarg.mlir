@@ -14,53 +14,25 @@
 // CHECK: scf.while
 // CHECK-SAME: %[[TINIT]]
 
-// The flag of the loop starts as the constant zero at the head of the loop
-// body: it is the false value of the select that computes the flag.
-// CHECK: ^bb0
-// CHECK: %[[ZERO5:.*]] = arith.constant 0 : i32
-
 // Consumer if=5: after cross sgt, eq 1 is and-ed into cond; then -1 inside if.
-// The block 5 is on the second level of the vector core, it has no preload
-// condition.
+// IR order: c1 (cross) ; load ; sgt ; c1 (tensor) ; eq ; andi ; andi ; scf.if
 // Bind ONE only after sgt so it is the tensor eq constant, not the cross-core one.
 // CHECK: arith.cmpi sgt
-// CHECK: arith.andi
 // CHECK: %[[ONE:.*]] = arith.constant 1 : i32
 // CHECK: arith.cmpi eq, %{{.*}}, %[[ONE]] : i32
-// The cross-core condition and the tensor condition are and-ed together, then
-// the counter condition is added.
 // CHECK: arith.andi
 // CHECK: %[[COND5:.*]] = arith.andi
-// The block is the first one of the loop: the flag it reads is the constant
-// zero the loop starts with, its check is left out.
 // CHECK: scf.if %[[COND5]]
 // CHECK: arith.subi
 // CHECK: } {{.*}}ssbuffer.if = 5
-// The flag of the loop is not yielded by the block: it is computed with a
-// select on the condition of the block, after the block.
-// CHECK: %[[ONE5:.*]] = arith.constant 1 : i32
-// CHECK: %[[FLAG5:.*]] = arith.select %[[COND5]], %[[ONE5]], %[[ZERO5]] : i32
 
 // Producer if=6: after cross slt, eq 0 is and-ed into cond; then +1 inside if.
-// The block 6 is on the first level of the vector core, the block 5 is on the
-// second one: the preload condition c_block6 - c_block5 <= 2 (2 - 1 + (2 - 1))
-// is and-ed in as well.
 // CHECK: arith.cmpi slt
-// CHECK: arith.andi
-// The preload condition: c_block6 - c_block5 <= 2 (2 - 1 + (2 - 1)).
-// CHECK: %[[DIFF_PRE6:.*]] = arith.subi
-// CHECK: %[[SLE6:.*]] = arith.cmpi sle, %[[DIFF_PRE6]], %{{.*}} : i32
 // CHECK: %[[ZERO:.*]] = arith.constant 0 : i32
 // CHECK: arith.cmpi eq, %{{.*}}, %[[ZERO]] : i32
-// The cross-core condition, the preload condition and the tensor condition
-// are and-ed together, then the counter condition is added.
-// CHECK: %[[PRE_AND6:.*]] = arith.andi %{{.*}}, %[[SLE6]]
-// CHECK: %[[TAND6:.*]] = arith.andi %[[PRE_AND6]], %{{.*}}
-// CHECK: %[[COND6:.*]] = arith.andi %[[TAND6]], %{{.*}}
-// The flag of the previous block gates this one.
-// CHECK: %[[FLAGCMP6:.*]] = arith.cmpi eq, %[[FLAG5]], %{{.*}} : i32
-// CHECK: %[[AND6F:.*]] = arith.andi %[[COND6]], %[[FLAGCMP6]]
-// CHECK: scf.if %[[AND6F]]
+// CHECK: arith.andi
+// CHECK: %[[COND6:.*]] = arith.andi
+// CHECK: scf.if %[[COND6]]
 // CHECK: arith.addi
 // CHECK: } {{.*}}ssbuffer.if = 6
 

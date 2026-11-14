@@ -1,9 +1,11 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 """CPU-only tests for analysis of helpers in candidate LLVM."""
 import json
+from pathlib import Path
+import tempfile
 import unittest
 
-from triton._C.libtriton import ascend
+from triton._C.libtriton import ascend, ir
 
 
 def analyze(source, *, mixed=False):
@@ -55,6 +57,25 @@ exit:
 
 
 class TestCandidateHelpers(unittest.TestCase):
+
+    def test_frontend_snapshot_preserves_llvm_assume_properties(self):
+        context = ir.context()
+        ir.load_dialects(context)
+        ascend.load_dialects(context)
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'input.mlir'
+            source.write_text('''module {
+              tt.func @kernel(%cond: i1) {
+                "llvm.intr.assume"(%cond) <{op_bundle_sizes = array<i32>}> : (i1) -> ()
+                tt.return
+              }
+            }''')
+            module = ir.parse_mlir_module(str(source), context)
+            bytecode = ascend.serialize_block_input(module)
+            self.assertTrue(bytecode.startswith(b'ML\xefR'))
+            source.write_bytes(bytecode)
+            restored = ir.parse_mlir_module(str(source), context)
+            self.assertIn('llvm.intr.assume', str(restored))
 
     def test_helper_cost_comes_from_the_candidate_body(self):
         short = analyze(candidate(operations=1))["score"]

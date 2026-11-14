@@ -66,25 +66,41 @@ def test_alias_fallback_and_cache_recovery():
     torch.testing.assert_close(y.cpu(), (cpu * 2 + 1) * 2 + 1, rtol=0, atol=0)
 
 
+def test_default_auto_large_pointwise():
+    x = torch.arange(131072, device='npu', dtype=torch.float32)
+    out = torch.empty_like(x)
+    kernel = pointwise[(256, )](x, out, x.numel(), 512)
+    torch.npu.synchronize()
+    torch.testing.assert_close(out, x * 2 + 1, rtol=0, atol=0)
+    if str(kernel.metadata.target.arch).startswith('Ascend910_93'):
+        assert kernel.block_auto_selection['model'] == 'jit-a3-resource-v1'
+        assert_applied(kernel, 2)
+        assert kernel.block_auto_selection['reason'] == 'A3_RESOURCE_SAFE_GROUPING'
+
+
 @pytest.mark.parametrize('mode', [0, 1])
-def test_portable_spatial_merge(mode):
+@pytest.mark.parametrize('blocks', [4, 128])
+def test_portable_spatial_merge(mode, blocks):
     from test_block_batching_cv_e2e import grouped_dot
-    m, n, k = (128, 32, 32) if mode == 0 else (32, 128, 32)
+    m, n, k = (blocks * 32, 32, 32) if mode == 0 else (32, blocks * 32, 32)
     torch.manual_seed(881)
     acpu, bcpu = torch.randint(-4, 5, (m, k)).float(), torch.randint(-4, 5, (k, n)).float()
     a, b = acpu.npu(), bcpu.npu()
     out = torch.empty((m, n), device='npu')
     expected = acpu @ bcpu
-    merged = grouped_dot[(4, )](a, b, out, m, n, k, mode, False, False, block_batching_factor=2, block_batching_axis=0)
+    merged = grouped_dot[(blocks, )](a, b, out, m, n, k, mode, False, False, block_batching_factor=2,
+                                     block_batching_axis=0)
     torch.npu.synchronize()
     torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)
     assert_applied(merged, 2)
-    automatic = grouped_dot[(4, )](a, b, out, m, n, k, mode, False, False)
+    automatic = grouped_dot[(blocks, )](a, b, out, m, n, k, mode, False, False)
     torch.npu.synchronize()
     torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)
     selection = automatic.block_auto_selection
     assert selection['selected_factor'] in (1, 2, 4)
     assert selection['candidate_plan']['candidates']
+    if blocks == 128 and str(automatic.metadata.target.arch).startswith('Ascend910_93'):
+        assert_applied(automatic, 2)
 
 
 def test_graph_capture_uses_baseline():

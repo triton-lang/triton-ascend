@@ -27,7 +27,11 @@ def collect(temps, compiler, metadata, *, cache_factory=None):
         single = directory / "kernel.ll"
         if single.is_file():
             sources["llvm"] = single
-        if not any(key.startswith("llvm") for key in sources):
+        target = metadata.get("target")
+        arch = target.get("arch", "") if isinstance(target, dict) else getattr(target, "arch", "")
+        # Published A3 consumers retain final allocation IR but remove LLVM.
+        # Its conservative resource/occupancy policy does not estimate cycles.
+        if not arch.startswith("Ascend910_93") and not any(key.startswith("llvm") for key in sources):
             raise ValueError("compiler did not preserve LLVM modules")
         contents = {role: path.read_bytes() for role, path in sources.items()}
         key = metadata["hash"]

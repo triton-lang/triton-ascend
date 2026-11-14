@@ -502,7 +502,7 @@ class BatchKernel:
 def _freeze_source(backend, src, baseline_options, backend_revision):
     """Generate frontend IR once, then parse the same immutable snapshot per variant."""
     import hashlib
-    from triton._C.libtriton import ir
+    from triton._C.libtriton import ascend, ir
     from triton.compiler.compiler import ASTSource
     from triton.runtime.cache import get_cache_manager
     if not isinstance(src, ASTSource) or hasattr(src, "block_batching_source_hash"):
@@ -513,17 +513,19 @@ def _freeze_source(backend, src, baseline_options, backend_revision):
     backend.load_dialects(context)
     module = src.make_ir(backend.target, options, backend.get_codegen_implementation(options), backend.get_module_map(),
                          context)
-    text = str(module)
-    fingerprint = hashlib.sha256((src.hash() + "\n" + backend_revision + "\n" + text).encode()).hexdigest()
+    # Vendor-compatible text deliberately omits newer LLVM properties. Use
+    # lossless bytecode for compiler-internal snapshots (including tl.assume).
+    data = ascend.serialize_block_input(module)
+    fingerprint = hashlib.sha256((src.hash() + "\n" + backend_revision + "\n").encode() + data).hexdigest()
     from triton.runtime.cache import FileCacheManager
     cache = get_cache_manager(fingerprint)
     if type(cache) is not FileCacheManager:
         from .block_batching_worker import BatchDecline
         return BatchDecline("CUSTOM_CACHE_NOT_SUPPORTED", "freeze")
-    path = cache.put(text, "block_batching.original.ttir", binary=False)
+    path = cache.put(data, "block_batching.original.ttir", binary=True)
 
     from .block_batching_source import FrozenSource
-    return FrozenSource(src, path, fingerprint, hashlib.sha256(text.encode()).hexdigest())
+    return FrozenSource(src, path, fingerprint, hashlib.sha256(data).hexdigest())
 
 
 def rejected_bundle(baseline, request, decline, positions=(), retry=None):

@@ -1,3 +1,4 @@
+#include "mlir/Bytecode/BytecodeWriter.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -667,6 +668,15 @@ void init_triton_ascend(py::module &&m) {
         return mlir::triton::ascend::selectBlockCandidates(request);
       },
       py::call_guard<py::gil_scoped_release>());
+
+  m.def("serialize_block_input", [](mlir::ModuleOp module) {
+    std::string data;
+    llvm::raw_string_ostream stream(data);
+    if (failed(mlir::writeBytecodeToFile(module, stream)))
+      throw std::runtime_error(
+          "cannot serialize block batching frontend input");
+    return py::bytes(data);
+  });
 
   m.def("load_dialects", [](mlir::MLIRContext &context) {
     mlir::DialectRegistry registry;

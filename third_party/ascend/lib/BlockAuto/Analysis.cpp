@@ -319,17 +319,11 @@ struct Profile {
   Profile(const Object &config) {
     // Preserve the existing 9579 model assumptions, not device measurements:
     // 56 Vector cores, 1650 MHz and 16 GB/s per core.
-    if (text(config, "mode") == "vv" &&
-        !StringRef(blockauto::str(config, "target_arch"))
-             .starts_with("Ascend910_93")) {
+    if (text(config, "mode") == "vv") {
       check(number(config, "cores") == 56,
             "compiled core count differs from the A5 model");
       localBandwidth = 16.0 * 1e9 / (1650.0 * 1e6);
       globalBandwidth = localBandwidth * 56;
-    } else if (text(config, "mode") == "vv") {
-      // Relative scheduling units for A3, not the A5 frequency/bandwidth
-      // calibration. Unknown A3 instructions still decline analysis.
-      globalBandwidth = localBandwidth * number(config, "cores");
     }
 #define AVE_COST_ENTRY(OP, SRC, DST, INTERVAL, LATENCY, SLOTS)                 \
   costs[#OP ":" #SRC ":" #DST] = {INTERVAL, LATENCY, SLOTS};
@@ -2248,7 +2242,11 @@ static O prepare(const O &item, const O &contract, MLIRContext &context) {
       state["merge_kind"] =
           mergeKind(sub(item, "metadata"), integer(item, "factor"));
     state["config"] = modelConfig(item, contract, arguments, ir);
-    state["needs_llvm"] = vv;
+    bool a3 = StringRef(str(sub(sub(item, "metadata"), "target"), "arch"))
+                  .starts_with("Ascend910_93");
+    state["resource_policy"] = a3;
+    state["preserves_grid"] = preservesGrid(sub(item, "metadata"));
+    state["needs_llvm"] = vv && !a3;
   } catch (const std::exception &error) {
     if (!flag(state, "resource_checked"))
       state["status"] = "RESOURCE_UNCONFIRMED";
@@ -2259,6 +2257,52 @@ static O prepare(const O &item, const O &contract, MLIRContext &context) {
   return state;
 }
 using Items = std::map<std::string, const O *>;
+static O rankA3Resources(const Items &items, const O &contract) {
+  // A3's public consumer does not export LLVM for cycle modelling. Admit
+  // only complete groups that retain at least one task per physical core,
+  // after final allocation and launch-ABI checks. Prefer the smallest factor;
+  // this is a conservative resource policy, not a predicted speedup.
+  O result{{"model", "jit-a3-resource-v1"}, {"selected_key", "unmerged"},
+           {"selected_axis", -1},           {"factor", 1},
+           {"model_complete", true},        {"device_timing_used", false},
+           {"reason", "A3_KEEP_BASELINE"}};
+  const O &base = *items.at("unmerged");
+  const O &baseConfig = sub(base, "config");
+  int64_t cores = integer(baseConfig, "cores"), best = 5;
+  O records;
+  for (const auto &[name, value] : items) {
+    const O &item = *value;
+    int64_t factor = integer(item, "factor"), axis = integer(item, "axis");
+    O row{{"factor", factor},
+          {"axis", axis},
+          {"resource_checked", flag(item, "resource_checked")},
+          {"status", str(item, "status", "RESOURCE_UNCONFIRMED")}};
+    if (item.get("error"))
+      row["error"] = get(item, "error");
+    if (flag(item, "resource_policy") && flag(item, "resource_checked")) {
+      const O &config = sub(item, "config");
+      row["status"] = "RESOURCE_CHECKED";
+      if (factor > 1 && !flag(item, "preserves_grid") &&
+          integer(array(contract, "grid")[axis]) % factor == 0 &&
+          integer(config, "cores") == cores &&
+          str(config, "mode") == str(baseConfig, "mode") &&
+          product(array(config, "grid")) >= cores &&
+          (flag(item, "vv") || str(item, "merge_kind") == "M" ||
+           str(item, "merge_kind") == "N") &&
+          factor < best) {
+        best = factor;
+        result["selected_key"] = name;
+        result["selected_axis"] = axis;
+        result["factor"] = factor;
+        result["reason"] = "A3_RESOURCE_SAFE_GROUPING";
+      }
+    }
+    records[name] = std::move(row);
+  }
+  result["candidates"] = std::move(records);
+  return result;
+}
+
 static O rank(const Items &items, const O &contract) {
   O result{{"model", "jit-cv-vv-native-v1"},
            {"selected_key", "unmerged"},
@@ -2285,6 +2329,8 @@ static O rank(const Items &items, const O &contract) {
                        {"candidates", std::move(states)}});
       return result;
     }
+    if (flag(baseline, "resource_policy"))
+      return rankA3Resources(items, contract);
     bool vv = flag(baseline, "vv");
     if (!vv) {
       bool tensor = false;

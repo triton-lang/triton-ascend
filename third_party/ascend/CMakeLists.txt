@@ -133,6 +133,7 @@ add_triton_plugin(TritonAscend
   LINK_LIBS
   LLVMAsmParser
   MLIRAnalysis
+  MLIRBytecodeWriter
   MLIRParser
   MLIRTargetLLVMIRImport
   MLIRLLVMIRToLLVMTranslation

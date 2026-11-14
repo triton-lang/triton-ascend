@@ -108,6 +108,24 @@ class TestNativeResources(unittest.TestCase):
 
 class TestNativeSelection(unittest.TestCase):
 
+    def test_a3_selection_preserves_full_core_occupancy_and_checks_ub(self):
+
+        def a3(factor, **kwargs):
+            value = item(factor, **kwargs)
+            value['metadata']['target']['arch'] = 'Ascend910_9391'
+            value['final_ir'] = value['final_ir'].replace('Ascend950', 'Ascend910_9391')
+            value.pop('llvm')
+            value.pop('optimized_llvm')
+            return value
+
+        for grid, offset, expected in ((224, 0, 2), (64, 0, 1), (225, 0, 1), (224, 253952, 1)):
+            launch = contract((grid, 1, 1))
+            states = prepare([a3(1), a3(2, offset=offset)], launch)
+            self.assertFalse(any(s['needs_llvm'] for s in states))
+            result = _native('rank', launch, candidates=states)
+            self.assertEqual(result['model'], 'jit-a3-resource-v1')
+            self.assertEqual(result['factor'], expected)
+
     def test_invalid_merge_parameters_are_rejected_before_grid_arithmetic(self):
         for mix_mode in ("aiv", "mix"):
             for factor, axis in ((0, 0), (3, 0), (2, -1), (4, 3)):

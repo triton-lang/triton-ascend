@@ -2630,7 +2630,7 @@ class AutoTilingTuner(Autotuner):
 
             cv_mode = parser_mode in ("cube", "mix") and cv_parse_result is not None
             warmup = getattr(self, "cv_warmup", 5) if cv_mode else 5
-            active = getattr(self, "cv_repeat", 30) if cv_mode else 30
+            active = min(getattr(self, "cv_repeat", 30), 30) if cv_mode else 30
             target_kernel_name = self._resolve_target_kernel_name(kernels_call, run_fns.keys())
             try:
                 time_cost = do_bench_npu(
@@ -2639,6 +2639,7 @@ class AutoTilingTuner(Autotuner):
                     active=active,
                     clear_l2_cache=True,
                     target_kernel_name=target_kernel_name,
+                    _active_limit=active if cv_mode else None,
                 )
                 assert len(time_cost) == len(run_fns)
                 timings = dict(zip(run_fns.keys(), time_cost))

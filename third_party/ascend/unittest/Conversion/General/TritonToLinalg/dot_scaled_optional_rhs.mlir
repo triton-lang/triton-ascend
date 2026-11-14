@@ -41,17 +41,17 @@ func.func @fp4_missing_rhs_multiple_blocks(%a: tensor<32x64xi8>, %sa: tensor<32x
 // CHECK-LABEL: func.func @fp8_missing_rhs
 // CHECK-NOT: scf.for
 // CHECK: %[[ONE:[^ ]+]] = arith.constant 127 : i8
-// CHECK: %[[EMPTY:[^ ]+]] = tensor.empty() : tensor<64x1xi8>
-// CHECK: %[[SCALE:[^ ]+]] = linalg.fill ins(%[[ONE]] : i8) outs(%[[EMPTY]] : tensor<64x1xi8>) -> tensor<64x1xi8>
+// CHECK: %[[EMPTY:[^ ]+]] = tensor.empty() : tensor<64x2xi8>
+// CHECK: %[[SCALE:[^ ]+]] = linalg.fill ins(%[[ONE]] : i8) outs(%[[EMPTY]] : tensor<64x2xi8>) -> tensor<64x2xi8>
 // CHECK: hfusion.matmul_mx {{.*}}%[[SCALE]]
-// CHECK-SAME: tensor<16x32xf8E4M3FN>, tensor<32x64xf8E5M2>, tensor<16x1xi8>, tensor<64x1xi8>
+// CHECK-SAME: tensor<16x64xf8E4M3FN>, tensor<64x64xf8E5M2>, tensor<16x2xi8>, tensor<64x2xi8>
 // CHECK-SAME: outs({{.*}} : tensor<16x64xf32>) -> tensor<16x64xf32>
 // CHECK-NOT: tensor.insert_slice
 // CHECK-NOT: scf.for
 // CHECK: return {{.*}} : tensor<16x64xf32>
 // CHECK-NOT: tt.dot_scaled
-func.func @fp8_missing_rhs(%a: tensor<16x32xf8E4M3FN>, %sa: tensor<16x1xi8>, %b: tensor<32x64xf8E5M2>, %c: tensor<16x64xf32>) -> tensor<16x64xf32> {
-  %d = tt.dot_scaled %a scale %sa, %b, %c lhs = e4m3 rhs = e5m2 {fastMath = false} : tensor<16x32xf8E4M3FN>, tensor<16x1xi8> * tensor<32x64xf8E5M2> -> tensor<16x64xf32>
+func.func @fp8_missing_rhs(%a: tensor<16x64xf8E4M3FN>, %sa: tensor<16x2xi8>, %b: tensor<64x64xf8E5M2>, %c: tensor<16x64xf32>) -> tensor<16x64xf32> {
+  %d = tt.dot_scaled %a scale %sa, %b, %c lhs = e4m3 rhs = e5m2 {fastMath = false} : tensor<16x64xf8E4M3FN>, tensor<16x2xi8> * tensor<64x64xf8E5M2> -> tensor<16x64xf32>
   return %d : tensor<16x64xf32>
 }
 

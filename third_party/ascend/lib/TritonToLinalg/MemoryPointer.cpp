@@ -25,6 +25,7 @@
 #include "TritonMemoryAccess/Utils.h"
 #include "Utils/PtrAnalysisUtils.h"
 #include "Utils/Utils.h"
+#include "bishengir/Dialect/HACC/Utils/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
@@ -161,21 +162,10 @@ static OpFoldResult remap(OpFoldResult field,
   return field;
 }
 
-FailureOr<Value> materializeMemoryPointer(Value pointer, Value converted,
-                                          const MemoryPointerInfos &infos,
-                                          ConversionPatternRewriter &rewriter) {
-  if (!isPointer(pointer.getType())) {
-    if (isa<MemRefType>(converted.getType()))
-      return converted;
-    return failure();
-  }
-  auto found = infos.find(pointer);
-  if (found == infos.end())
-    return failure();
-  const ptr::PtrInfo &info = found->second;
-  if (!info.hasScalarBase() || !info.offsets.hasStructuredForm())
-    return failure();
-  Location loc = pointer.getLoc();
+static FailureOr<Value>
+materializeMemoryPointer(const ptr::PtrInfo &info, Location loc,
+                         ConversionPatternRewriter &rewriter,
+                         OpFoldResult remappedOrigin = {}) {
   Value sourceBase = info.base;
   if (auto bridge = sourceBase.getDefiningOp<UnrealizedConversionCastOp>();
       bridge && bridge.getInputs().size() == 1 &&
@@ -197,7 +187,8 @@ FailureOr<Value> materializeMemoryPointer(Value pointer, Value converted,
   // A scalar base with no displacement already denotes the requested address.
   // Reusing it also preserves the complete-address fold for int_to_ptr.
   if (info.offsets.getShape().empty() && baseType.getRank() == 1 &&
-      isConstantIntValue(info.offsets.scalarOffset, 0))
+      isConstantIntValue(
+          remappedOrigin ? remappedOrigin : info.offsets.scalarOffset, 0))
     return base;
   OpFoldResult baseOffset;
   if (auto cast = base.getDefiningOp<memref::ReinterpretCastOp>())
@@ -208,9 +199,11 @@ FailureOr<Value> materializeMemoryPointer(Value pointer, Value converted,
     baseOffset = rewriter.create<memref::ExtractStridedMetadataOp>(loc, base)
                      .getOffset();
 
-  OpFoldResult offset =
-      addOpFoldResult(baseOffset, remap(info.offsets.scalarOffset, rewriter),
-                      loc, rewriter, rewriter.getIndexType());
+  OpFoldResult offset = addOpFoldResult(
+      baseOffset,
+      remappedOrigin ? remappedOrigin
+                     : remap(info.offsets.scalarOffset, rewriter),
+      loc, rewriter, rewriter.getIndexType());
   SmallVector<OpFoldResult> sizes, strides;
   for (auto [size, axis] :
        llvm::zip_equal(info.offsets.getShape(), info.offsets.axes)) {
@@ -249,17 +242,117 @@ FailureOr<Value> materializeMemoryPointer(Value pointer, Value converted,
       .getResult();
 }
 
-LogicalResult getMemoryBoundary(Value pointer, ArrayRef<int32_t> checks,
-                                const MemoryPointerInfos &infos,
-                                ConversionPatternRewriter &rewriter,
-                                SmallVectorImpl<OpFoldResult> &starts,
-                                SmallVectorImpl<OpFoldResult> &sizes) {
+FailureOr<Value> materializeMemoryPointer(Value pointer, Value converted,
+                                          const MemoryPointerInfos &infos,
+                                          ConversionPatternRewriter &rewriter) {
+  if (!isPointer(pointer.getType())) {
+    if (isa<MemRefType>(converted.getType()))
+      return converted;
+    return failure();
+  }
+  auto found = infos.find(pointer);
+  if (found == infos.end())
+    return failure();
+  const ptr::PtrInfo &info = found->second;
+  if (!info.hasScalarBase() || !info.offsets.hasStructuredForm())
+    return failure();
+  Location loc = pointer.getLoc();
+  return materializeMemoryPointer(info, loc, rewriter);
+}
+
+FailureOr<BoundaryCheckedPointer> materializeBoundaryCheckedMemoryPointer(
+    Value pointer, Value converted, ArrayRef<int32_t> checks,
+    const MemoryPointerInfos &infos, ConversionPatternRewriter &rewriter) {
+  auto unchanged = [&]() -> FailureOr<BoundaryCheckedPointer> {
+    auto view = materializeMemoryPointer(pointer, converted, infos, rewriter);
+    if (failed(view))
+      return failure();
+    return BoundaryCheckedPointer{*view, {}};
+  };
+  // Ascend950 memory planning is sensitive to equivalent descriptor
+  // expressions. Retain the legacy nonnegative coordinates for checked axes
+  // while getMemoryBoundary keeps the original tile padding and lengths.
+  auto make = pointer.getDefiningOp<triton::MakeTensorPtrOp>();
+  if (checks.empty() || !make ||
+      !hacc::utils::isAscend910_95(make->getParentOfType<ModuleOp>()) ||
+      make->hasAttr(controlflow::kPointerDescriptorRebuildAttr))
+    return unchanged();
+
+  auto found = infos.find(pointer);
+  if (found == infos.end())
+    return unchanged();
+  const ptr::PtrInfo &info = found->second;
+  if (!info.hasScalarBase() || !info.block ||
+      !info.offsets.hasStructuredForm() ||
+      info.block->descriptorBase != make.getBase())
+    return unchanged();
+  auto shape = info.offsets.getShape();
+  if (llvm::any_of(shape, ShapedType::isDynamic) ||
+      llvm::any_of(checks, [&](int32_t axis) {
+        return axis < 0 || static_cast<size_t>(axis) >= shape.size();
+      }))
+    return unchanged();
+
+  // The descriptor base may already include scalar addptr displacements.
+  // Rebuild from that origin, not from the complete old block offset.
+  auto base = infos.find(info.block->descriptorBase);
+  if (base == infos.end())
+    return unchanged();
+  const ptr::PtrInfo &baseInfo = base->second;
+  if (baseInfo.base != info.base || !baseInfo.hasScalarBase() ||
+      baseInfo.block || !baseInfo.offsets.valueType.isIndex() ||
+      !baseInfo.offsets.scalarOffset ||
+      baseInfo.getElementType() != info.getElementType())
+    return unchanged();
+
+  SmallVector<Value> checkedCoordinates;
+  for (int32_t axis : checks) {
+    Value coordinate = rewriter.getRemappedValue(make.getOffsets()[axis]);
+    if (!coordinate || !coordinate.getType().isInteger(32))
+      return unchanged();
+    checkedCoordinates.push_back(coordinate);
+  }
+
+  Location loc = pointer.getLoc();
+  SmallVector<OpFoldResult> coordinates;
+  for (OpFoldResult coordinate : info.block->coordinateOffsets)
+    coordinates.push_back(remap(coordinate, rewriter));
+  Value zero = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
+  for (auto [axis, coordinate] : llvm::zip_equal(checks, checkedCoordinates)) {
+    Value clamped = rewriter.create<arith::MaxSIOp>(loc, coordinate, zero);
+    coordinates[axis] =
+        rewriter
+            .create<arith::IndexCastOp>(loc, rewriter.getIndexType(), clamped)
+            .getResult();
+  }
+
+  OpFoldResult origin = remap(baseInfo.offsets.scalarOffset, rewriter);
+  for (auto [coordinate, axis] :
+       llvm::zip_equal(coordinates, info.offsets.axes)) {
+    // A unit tile axis may have memref stride 1; its address contribution
+    // must still use the original descriptor stride.
+    auto contribution =
+        mulOpFoldResult(coordinate, remap(axis.stride, rewriter), loc, rewriter,
+                        rewriter.getIndexType());
+    origin = addOpFoldResult(origin, contribution, loc, rewriter,
+                             rewriter.getIndexType());
+  }
+  auto view = materializeMemoryPointer(info, loc, rewriter, origin);
+  if (failed(view))
+    return failure();
+  return BoundaryCheckedPointer{*view, llvm::to_vector(checks)};
+}
+
+FailureOr<MemoryBoundary> getMemoryBoundary(
+    Value pointer, ArrayRef<int32_t> checks, ArrayRef<int32_t> zeroBasedAxes,
+    const MemoryPointerInfos &infos, ConversionPatternRewriter &rewriter) {
   auto found = infos.find(pointer);
   if (found == infos.end() || !found->second.block)
     return failure();
   const auto &info = found->second;
   Location loc = pointer.getLoc();
   OpFoldResult zero = rewriter.getIndexAttr(0);
+  MemoryBoundary boundary;
   for (auto [dim, extent] : llvm::enumerate(info.offsets.getShape())) {
     OpFoldResult size = rewriter.getIndexAttr(extent);
     OpFoldResult start = zero;
@@ -282,9 +375,12 @@ LogicalResult getMemoryBoundary(Value pointer, ArrayRef<int32_t> checks,
       size = maxOpFoldResult(zero, subOpFoldResult(end, start, loc, rewriter),
                              loc, rewriter);
     }
-    starts.push_back(start);
-    sizes.push_back(size);
+    boundary.tileStarts.push_back(start);
+    boundary.gmStarts.push_back(
+        llvm::is_contained(zeroBasedAxes, static_cast<int32_t>(dim)) ? zero
+                                                                     : start);
+    boundary.sizes.push_back(size);
   }
-  return success();
+  return boundary;
 }
 } // namespace mlir::triton

@@ -468,17 +468,23 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     normalizedScalarMemref =
         unwrapCanonicalI8ScalarPointerMaterialization(op.getPtr(), ptr);
 
+  SmallVector<int32_t> zeroBasedAxes;
   if (normalizedScalarMemref) {
     ptr = normalizedScalarMemref;
-  } else {
-    FailureOr<Value> resolvedPtr =
-        pointerInfos ? materializeMemoryPointer(op.getPtr(), ptr, *pointerInfos,
-                                                rewriter)
-                     : materializeLegacyPointer(op, ptr, rewriter);
-    if (failed(resolvedPtr))
+  } else if (pointerInfos) {
+    auto resolved = materializeBoundaryCheckedMemoryPointer(
+        op.getPtr(), ptr, op.getBoundaryCheck(), *pointerInfos, rewriter);
+    if (failed(resolved))
       return rewriter.notifyMatchFailure(
           op, "unable to materialize the load pointer as a memref");
-    ptr = *resolvedPtr;
+    ptr = resolved->view;
+    zeroBasedAxes = std::move(resolved->zeroBasedAxes);
+  } else {
+    auto resolved = materializeLegacyPointer(op, ptr, rewriter);
+    if (failed(resolved))
+      return rewriter.notifyMatchFailure(
+          op, "unable to materialize the load pointer as a memref");
+    ptr = *resolved;
   }
   // handling scalar
   if (isScalarLoad) {
@@ -630,10 +636,13 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   if (!boundaryCheck.empty()) {
     SmallVector<OpFoldResult> srcOffsets, dstOffsets, boundarySizes;
     if (pointerInfos) {
-      if (failed(getMemoryBoundary(op.getPtr(), boundaryCheck, *pointerInfos,
-                                   rewriter, srcOffsets, boundarySizes)))
+      auto boundary = getMemoryBoundary(op.getPtr(), boundaryCheck,
+                                        zeroBasedAxes, *pointerInfos, rewriter);
+      if (failed(boundary))
         return rewriter.notifyMatchFailure(op, "missing block boundary facts");
-      dstOffsets = srcOffsets;
+      srcOffsets = std::move(boundary->gmStarts);
+      dstOffsets = std::move(boundary->tileStarts);
+      boundarySizes = std::move(boundary->sizes);
     } else {
       getLegacyBoundary(op, ptr, rewriter, srcOffsets, dstOffsets,
                         boundarySizes);
@@ -1526,27 +1535,27 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
   auto ptr = adaptor.getPtr();
   auto val = adaptor.getValue();
 
-  FailureOr<Value> resolvedPtr =
-      materializeMemoryPointer(op.getPtr(), ptr, pointerInfos, rewriter);
-  if (failed(resolvedPtr))
+  auto boundaryCheck = op.getBoundaryCheck();
+  auto resolved = materializeBoundaryCheckedMemoryPointer(
+      op.getPtr(), ptr, boundaryCheck, pointerInfos, rewriter);
+  if (failed(resolved))
     return rewriter.notifyMatchFailure(
         op, "unable to materialize the store pointer as a memref");
-  ptr = *resolvedPtr;
+  ptr = resolved->view;
   // 1. boundary size check
-  auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {
-    SmallVector<OpFoldResult> srcOffsets, boundarySizes;
-    if (failed(getMemoryBoundary(op.getPtr(), boundaryCheck, pointerInfos,
-                                 rewriter, srcOffsets, boundarySizes)))
+    auto boundary =
+        getMemoryBoundary(op.getPtr(), boundaryCheck, resolved->zeroBasedAxes,
+                          pointerInfos, rewriter);
+    if (failed(boundary))
       return rewriter.notifyMatchFailure(op, "missing block boundary facts");
-    if (succeeded(storeWithUnitBoundaryGuard(op, val, ptr, srcOffsets,
-                                             boundarySizes, rewriter)))
+    if (succeeded(storeWithUnitBoundaryGuard(op, val, ptr, boundary->tileStarts,
+                                             boundary->sizes, rewriter)))
       return success();
-    SmallVector<OpFoldResult> dstOffsets = srcOffsets;
     auto srcSlice = mlir::ConverterUtils::makeExtractSliceOp(
-        val, srcOffsets, boundarySizes, loc, rewriter);
+        val, boundary->tileStarts, boundary->sizes, loc, rewriter);
     auto dstSubview = mlir::ConverterUtils::makeSubViewOp(
-        ptr, dstOffsets, boundarySizes, loc, rewriter);
+        ptr, boundary->gmStarts, boundary->sizes, loc, rewriter);
     auto storeOp = rewriter.create<bufferization::MaterializeInDestinationOp>(
         loc, srcSlice, dstSubview);
     storeOp.setWritable(true);

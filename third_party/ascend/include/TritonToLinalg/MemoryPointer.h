@@ -49,10 +49,23 @@ FailureOr<Value> materializeMemoryPointer(Value pointer, Value converted,
                                           ConversionPatternRewriter &rewriter);
 FailureOr<Value> materializePointerAddress(Value memref, Location loc,
                                            ConversionPatternRewriter &rewriter);
-LogicalResult getMemoryBoundary(Value pointer, ArrayRef<int32_t> checks,
-                                const MemoryPointerInfos &infos,
-                                ConversionPatternRewriter &rewriter,
-                                SmallVectorImpl<OpFoldResult> &starts,
-                                SmallVectorImpl<OpFoldResult> &sizes);
+// Checked coordinates can be clamped in the GM view while padding remains
+// relative to the original tile. Keep that choice local to this access.
+struct BoundaryCheckedPointer {
+  Value view;
+  SmallVector<int32_t> zeroBasedAxes;
+};
+FailureOr<BoundaryCheckedPointer> materializeBoundaryCheckedMemoryPointer(
+    Value pointer, Value converted, ArrayRef<int32_t> checks,
+    const MemoryPointerInfos &infos, ConversionPatternRewriter &rewriter);
+
+struct MemoryBoundary {
+  SmallVector<OpFoldResult> gmStarts;
+  SmallVector<OpFoldResult> tileStarts;
+  SmallVector<OpFoldResult> sizes;
+};
+FailureOr<MemoryBoundary> getMemoryBoundary(
+    Value pointer, ArrayRef<int32_t> checks, ArrayRef<int32_t> zeroBasedAxes,
+    const MemoryPointerInfos &infos, ConversionPatternRewriter &rewriter);
 } // namespace mlir::triton
 #endif

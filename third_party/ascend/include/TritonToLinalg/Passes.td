@@ -46,4 +46,9 @@ def DeduplicateDebugNops : Pass<"deduplicate-debug-nops", "mlir::ModuleOp"> {
     let constructor = "triton::createDeduplicateDebugNopsPass()";
 }
 
+def VectorAddressLookahead : Pass<"vector-address-lookahead", "mlir::ModuleOp"> {
+    let summary = "Look ahead pure SIMD Vector address computation after current GM loads";
+    let constructor = "triton::createVectorAddressLookaheadPass()";
+}
+
 #endif // TRITON_TO_LINALG_CONVERSION_PASSES

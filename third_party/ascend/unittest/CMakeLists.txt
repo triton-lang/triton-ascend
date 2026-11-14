@@ -37,3 +37,5 @@ add_subdirectory(Utils)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_subdirectory(Analysis)
 endif()
+
+add_subdirectory(utils_ut)

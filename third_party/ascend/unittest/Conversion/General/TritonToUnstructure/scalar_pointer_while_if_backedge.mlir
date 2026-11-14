@@ -32,13 +32,7 @@ tt.func public @scalar_pointer_while_if_backedge(
 // CHECK-SAME:  (i32, i64) -> (i32, i64)
 // CHECK:       scf.condition
 // CHECK-SAME:  i32, i64
-// CHECK:       %[[NEXT:.*]] = scf.if {{.*}} -> (i64)
-// CHECK:       tt.ptr_to_int
-// CHECK:       scf.yield {{.*}} : i64
-// CHECK:       } else {
-// CHECK:       tt.ptr_to_int
-// CHECK:       scf.yield {{.*}} : i64
-// CHECK:       tt.int_to_ptr %[[NEXT]] : i64 -> !tt.ptr<i32>
+// CHECK:       arith.select {{.*}} : !tt.ptr<i32>
 // CHECK:       tt.ptr_to_int
 // CHECK:       scf.yield
 // CHECK-SAME:  i32, i64

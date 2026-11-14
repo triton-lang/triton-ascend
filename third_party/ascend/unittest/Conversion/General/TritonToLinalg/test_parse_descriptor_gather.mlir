@@ -9,7 +9,7 @@
 // CHECK: %[[OUT_ALLOC:.*]] = memref.alloc() : memref<32x32xf32>
 // CHECK: scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}}
 // CHECK: %[[XOFFSET:.*]] = tensor.extract %[[XOFFSETS]][%{{.*}}] : tensor<32xi32>
-// CHECK: %[[DESC_VIEW:.*]] = memref.reinterpret_cast %{{.*}} to offset: [%{{.*}}], sizes: [1, 32], strides: [1, 1]
+// CHECK: %[[DESC_VIEW:.*]] = memref.reinterpret_cast %{{.*}} to offset: [%{{.*}}], sizes: [1, 32], strides: [128, 1]
 // CHECK: %[[OUT_SUBVIEW:.*]] = memref.subview %[[OUT_ALLOC]][%{{.*}}, 0] [1, 32] [1, 1]
 // CHECK: memref.copy %{{.*}}, %{{.*}}
 // CHECK: %[[OUT_TENSOR:.*]] = bufferization.to_tensor %[[OUT_ALLOC]] restrict writable : memref<32x32xf32>

@@ -956,6 +956,33 @@ void init_tla_builder(py::module &&m) {
           py::arg("kind"), py::arg("src"), py::arg("mask"),
           py::arg("mode") = "zeroing")
       .def(
+          "create_simd_chistv2",
+          [](TLABuilder &self, Value acc, Value src, Value mask, int32_t bin) -> Value {
+            return self.create<hivmave::VFCHistV2Op>(
+                acc.getType(), acc, src, mask,
+                self.getBuilder().getI32IntegerAttr(bin)).getResult();
+          },
+          py::arg("acc"), py::arg("src"), py::arg("mask"), py::arg("bin"))
+      .def(
+          "create_simd_vsqz",
+          [](TLABuilder &self, Value src, Value mask) -> Value {
+            return self.create<hivmave::VFSqueezeOp>(src.getType(), src, mask)
+                .getResult();
+          })
+      .def(
+          "create_simd_vselr",
+          [](TLABuilder &self, Value src, Value indices) -> Value {
+            return self.create<hivmave::VFSelectRegOp>(src.getType(), src, indices)
+                .getResult();
+          })
+      .def(
+          "create_simd_vscatter",
+          [](TLABuilder &self, Value dst, Value indices, Value src, Value mask) {
+            Value zero = self.create<arith::ConstantIndexOp>(0);
+            self.create<hivmave::VFScatterOp>(dst, ValueRange{zero}, indices,
+                                               mask, src);
+          })
+      .def(
           "create_simd_vreduce",
           [](TLABuilder &self, Value &vector, Value &mask,
              std::string &kind) -> Value {

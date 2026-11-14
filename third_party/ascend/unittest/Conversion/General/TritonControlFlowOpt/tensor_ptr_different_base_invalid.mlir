@@ -57,8 +57,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // LINALG-LABEL: func.func @if_tensor_ptr_different_base
 // LINALG:       arith.select
 // LINALG:       hivm.hir.pointer_cast
-// LINALG:       %[[VIEW:.*]] = memref.reinterpret_cast {{.*}} to offset: [0], sizes: [1], strides: [1]
-// LINALG:       %[[VALUE:.*]] = memref.load %[[VIEW]]
-// LINALG:       %[[SPLAT:.*]] = linalg.fill ins(%[[VALUE]] : f32) outs({{.*}} : tensor<4xf32>) -> tensor<4xf32>
-// LINALG:       bufferization.materialize_in_destination %[[SPLAT]]
+// LINALG:       memref.reinterpret_cast
+// LINALG:       memref.copy
+// LINALG:       bufferization.to_tensor
 // LINALG:       return

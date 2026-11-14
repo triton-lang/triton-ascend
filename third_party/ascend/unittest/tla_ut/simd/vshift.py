@@ -17,11 +17,11 @@ SHIFT = 3
 
 @tla.jit
 def vshl_i32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((3, N), tl.int32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(Y, (N, )), y)
+    x = tla.alloc((N, ), tl.int32, space="ub")
+    y = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((3, N), tl.int32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0])
         b = tla.simd.vlds(y[0])
@@ -31,16 +31,16 @@ def vshl_i32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(o[0, 0], tla.simd.vshl(a, b))
         tla.simd.vsts(o[1, 0], tla.simd.vshl(a, b, prefix))
         tla.simd.vsts(o[2, 0], tla.simd.vshl(a, b, none))
-    tla.copy(o, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (3, N)))
 
 
 @tla.jit
 def vshr_i32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((3, N), tl.int32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(Y, (N, )), y)
+    x = tla.alloc((N, ), tl.int32, space="ub")
+    y = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((3, N), tl.int32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0])
         b = tla.simd.vlds(y[0])
@@ -50,16 +50,16 @@ def vshr_i32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(o[0, 0], tla.simd.vshr(a, b))
         tla.simd.vsts(o[1, 0], tla.simd.vshr(a, b, prefix))
         tla.simd.vsts(o[2, 0], tla.simd.vshr(a, b, none))
-    tla.copy(o, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (3, N)))
 
 
 @tla.jit
 def vshr_u32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    o = tla.alloc_buffer((3, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(Y, (N, )), y)
+    x = tla.alloc((N, ), tl.uint32, space="ub")
+    y = tla.alloc((N, ), tl.uint32, space="ub")
+    o = tla.alloc((3, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0])
         b = tla.simd.vlds(y[0])
@@ -69,14 +69,14 @@ def vshr_u32(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(o[0, 0], tla.simd.vshr(a, b))
         tla.simd.vsts(o[1, 0], tla.simd.vshr(a, b, prefix))
         tla.simd.vsts(o[2, 0], tla.simd.vshr(a, b, none))
-    tla.copy(o, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (3, N)))
 
 
 @tla.jit
 def vshls_i32(X, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((3, N), tl.int32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
+    x = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((3, N), tl.int32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0])
         idx = tla.simd.vci(0)
@@ -85,19 +85,19 @@ def vshls_i32(X, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(o[0, 0], tla.simd.vshls(a, 3))
         tla.simd.vsts(o[1, 0], tla.simd.vshls(a, 3, prefix))
         tla.simd.vsts(o[2, 0], tla.simd.vshls(a, 3, none))
-    tla.copy(o, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (3, N)))
 
 
 @tla.jit
 def vshls_tensor_i32(X, O, N: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
+    x = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((N, ), tl.int32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0])
         s = tl.full((), 3, tl.int32)
         tla.simd.vsts(o[0], tla.simd.vshls(a, s))
-    tla.copy(o, tla.view(O, (N, )))
+    tla.store_ub_to_gm(o, tla.view(O, (N, )))
 
 
 def constexprs():

@@ -62,8 +62,7 @@ def _benign_diagnostics(data):
 def _a3_benign_diagnostics(data, expected_file):
     """Accept A3 warnings and the exact source-location echo for one retry."""
     text = _text(data)
-    locations = re.compile(
-        rf'^(?:loc\("{re.escape(expected_file)}":\d+:\d+\):\s*)+$')
+    locations = re.compile(rf'^(?:loc\("{re.escape(expected_file)}":\d+:\d+\):\s*)+$')
     for line in text.splitlines():
         if not line.strip():
             continue

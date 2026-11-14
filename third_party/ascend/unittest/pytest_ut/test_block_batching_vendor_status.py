@@ -60,8 +60,7 @@ def test_a3_resource_retry_requires_complete_diagnostics():
 def test_a3_resource_retry_accepts_captured_preamble_and_pipeline_warning():
     # A3 emits the loader note on stderr and a multi-location cv-pipelining
     # warning on stdout before the complete retry transcript.
-    err = subprocess.CalledProcessError(1, ['vendor'], output=A3_PIPELINE_WARNING,
-                                         stderr=A3_INFO + A3_LAYOUT)
+    err = subprocess.CalledProcessError(1, ['vendor'], output=A3_PIPELINE_WARNING, stderr=A3_INFO + A3_LAYOUT)
     refusal = vendor.classify_vendor_failure(err, dict(cv_mode='disabled'), OPTIONS, cv_resources=True)
     assert refusal.reason == 'VV_TARGET_RESOURCE_REJECTED'
     assert A3_INFO.decode() in refusal.diagnostic
@@ -70,7 +69,7 @@ def test_a3_resource_retry_accepts_captured_preamble_and_pipeline_warning():
 
 def test_a3_resource_retry_rejects_unknown_prefixed_diagnostic():
     err = subprocess.CalledProcessError(1, ['vendor'], output=A3_PIPELINE_WARNING,
-                                         stderr=b'[ERROR] unexpected compiler failure\n' + A3_LAYOUT)
+                                        stderr=b'[ERROR] unexpected compiler failure\n' + A3_LAYOUT)
     assert vendor.classify_vendor_failure(err, dict(cv_mode='disabled'), OPTIONS, cv_resources=True) is None
 
 

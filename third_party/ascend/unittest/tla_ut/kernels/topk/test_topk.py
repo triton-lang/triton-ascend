@@ -108,6 +108,25 @@ def test_run(rows, n, k, dtype, largest, pattern, wide_index):
     torch.testing.assert_close(idx.sort(dim=1).values, expected.sort(dim=1).values, rtol=0, atol=0)
 
 
+@pytest.mark.parametrize("largest", [True, False])
+@pytest.mark.parametrize("dim, k", [(-1, 3), (0, 3)])
+def test_output_order(largest, dim, k):
+    cpu = torch.tensor([[8, 2, 9, 7, 1], [5, 4, 4, 0, 6], [3, 9, 1, -1, 2]], dtype=torch.float32)
+    expected = torch.topk(cpu, k, dim=dim, largest=largest).values
+    x = cpu.npu()
+    topk = _kernels().topk
+    _check_matrix(cpu, expected, topk(x, k, dim, largest), dim, largest)
+    _check_matrix(cpu, expected, topk(x, k, dim, largest, sorted=False), dim, largest, sorted_output=False)
+
+
+def test_int64_full_range():
+    cpu = torch.tensor([[-2**63, 2**39, 2**39 + 1, -2**40, 2**63 - 1]], dtype=torch.int64)
+    for largest in (True, False):
+        expected = torch.topk(cpu, 3, largest=largest).values
+        actual = _kernels().topk(cpu.npu(), 3, largest=largest)
+        _check_matrix(cpu, expected, actual, -1, largest)
+
+
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
 def test_tiled_tail(dtype):
     cpu = torch.randint(-7, 8, (10003, ), generator=torch.Generator().manual_seed(23)).to(dtype)
@@ -216,14 +235,16 @@ def _matrix_input(case_id, shape, dtype, low, high):
     return torch.randint(low, high + 1, shape, dtype=dtype, generator=generator)
 
 
-def _check_matrix(cpu, expected, output, dim, largest):
+def _check_matrix(cpu, expected, output, dim, largest, *, sorted_output=True):
     values, indices = (tensor.cpu() for tensor in output)
     assert values.shape == indices.shape == expected.shape
     assert values.dtype == cpu.dtype and indices.dtype == torch.int64
     assert bool(((0 <= indices) & (indices < cpu.shape[dim])).all())
     assert bool(torch.diff(indices.sort(dim).values, dim=dim).ne(0).all())
     assert torch.equal(values, cpu.gather(dim, indices))
-    assert torch.equal(values.sort(dim, descending=largest).values, expected)
+    if not sorted_output:
+        values = values.sort(dim, descending=largest).values
+    assert torch.equal(values, expected)
 
 
 def _latency(call):
@@ -265,19 +286,21 @@ def test_matrix(case_id):
     cpu = _matrix_input(case_id, shape, dtype, low, high)
     x = cpu.npu()
     expected = torch.topk(cpu, k, dim=dim, largest=largest, sorted=True).values
-    torch_sorted = k == shape[dim]
-    out = (x.new_empty(expected.shape), x.new_empty(expected.shape, dtype=torch.int64))
+    sorted_output = os.environ.get("TLA_TOPK_SORTED", "1") == "1"
+    torch_sorted = sorted_output or k == shape[dim]
     kernels = _kernels()
 
     def torch_topk():
-        return torch.topk(x, k, dim=dim, largest=largest, sorted=torch_sorted, out=out)
+        return torch.topk(x, k, dim=dim, largest=largest, sorted=torch_sorted)
 
     def candidate(name):
         implementation, _, chunk = name.partition("-")
-        return kernels.topk(x, k, dim, largest, implementation=implementation, chunk=int(chunk or 4096),
-                            bounded_int64=dtype == torch.int64 and -(2**31) <= low <= high < 2**31)
+        chunk_size = int(chunk or 4096)
+        bounded_int64 = not sorted_output and dtype == torch.int64 and -(2**31) <= low <= high < 2**31
+        return kernels.topk(x, k, dim, largest, sorted=sorted_output, implementation=implementation, chunk=chunk_size,
+                            bounded_int64=bounded_int64)
 
-    _check_matrix(cpu, expected, torch_topk(), dim, largest)
+    _check_matrix(cpu, expected, torch_topk(), dim, largest, sorted_output=torch_sorted)
     baseline = _latency(torch_topk)
     print(
         "TOPK_RESULT",
@@ -290,13 +313,16 @@ def test_matrix(case_id):
         paths += _implementations(shape, dtype, k, dim)
     for name in paths:
         try:
-            _check_matrix(cpu, expected, candidate(name), dim, largest)
+            _check_matrix(cpu, expected, candidate(name), dim, largest, sorted_output=sorted_output)
             samples = _latency(lambda: candidate(name))
         except (TritonError, RuntimeError, AssertionError, ValueError) as error:
             print("TOPK_RESULT", json.dumps({"case": case_id, "path": name, "error": str(error)}), flush=True)
             if name == "auto":
                 raise
         else:
-            print("TOPK_RESULT",
-                  json.dumps({"case": case_id, "path": name, "median_us": median(samples), "samples_us": samples}),
-                  flush=True)
+            print(
+                "TOPK_RESULT",
+                json.dumps({
+                    "case": case_id, "path": name, "median_us": median(samples), "samples_us": samples, "sorted":
+                    sorted_output
+                }), flush=True)

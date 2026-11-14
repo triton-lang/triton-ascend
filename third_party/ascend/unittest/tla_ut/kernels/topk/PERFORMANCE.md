@@ -1,4 +1,4 @@
-# Ascend 950 TopK 性能
+# Ascend 950 TopK 无序输出历史性能
 
 在 blue2 物理 NPU 2 上使用从 yun 打出的联合包。Triton Ascend 为 `f337bc9b2`，NPU IR 为 `28fb0b0b3`。构建使用 Python 3.11、x86_64、glibc 2.39。测试机 CANN 为 9.1.0。
 
@@ -39,9 +39,9 @@
 
 前端发射 `ave.hir.chistv2`、`ave.hir.vselr`、`ave.hir.vsqz` 和 `ave.hir.vscatter`。NPU IR 保留 predicate 的布局和 scatter 的内存写入语义，到 AVE lowering 再生成设备指令。GSS 读取被调用函数前，由 module canonicalizer 隔开函数级 CSE 和 GSS 的调度。
 
-从 `tla_ut` 的父目录复测。
+当前 `topk()` 默认有序，性能矩阵默认按 `sorted=True` 对比。以下命令从 `tla_ut` 的父目录复测本文的历史无序口径。
 
 ```bash
-ASCEND_RT_VISIBLE_DEVICES=2 TLA_TEST_STAGE=all TLA_TOPK_MATRIX=1 \
+ASCEND_RT_VISIBLE_DEVICES=2 TLA_TEST_STAGE=all TLA_TOPK_MATRIX=1 TLA_TOPK_SORTED=0 \
   python -m pytest -q -s tla_ut/kernels/topk/test_topk.py tla_ut/vector/histogram.py
 ```

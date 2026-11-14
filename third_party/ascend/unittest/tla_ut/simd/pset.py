@@ -22,7 +22,7 @@ SIGNATURE = {"O": "*u32"}
 
 @tla.jit
 def pset(O, N: tl.constexpr):
-    o = tla.alloc_buffer((4, N), tl.uint32, space="ub")
+    o = tla.alloc((4, N), tl.uint32, space="ub")
     with tla.scope.simd():
         ones = tla.simd.vsplat(1, tl.uint32)
         zeros = tla.simd.vsplat(0, tl.uint32)
@@ -30,7 +30,7 @@ def pset(O, N: tl.constexpr):
         tla.simd.vsts(o[1, 0], tla.simd.vsel(tla.simd.pset(32, tla.simd.PAT.VL32), ones, zeros))
         tla.simd.vsts(o[2, 0], tla.simd.vsel(tla.simd.pset(32, tla.simd.PAT.M4), ones, zeros))
         tla.simd.vsts(o[3, 0], tla.simd.vsel(tla.simd.pset(32, tla.simd.PAT.ALLF), ones, zeros))
-    tla.copy(o, tla.view(O, (4, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (4, N)))
 
 
 def constexprs():

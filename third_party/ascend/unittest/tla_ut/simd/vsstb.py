@@ -20,16 +20,16 @@ SIGNATURE = {"X": "*fp8e5", "O": "*fp8e5"}
 
 @tla.jit
 def vsstb(X, O, N: tl.constexpr, STRIDE: tl.constexpr, ACTIVE: tl.constexpr):
-    src = tla.alloc_buffer((1, N), tl.float8e5, space="ub")
-    dst = tla.alloc_buffer((16, STRIDE), tl.float8e5, space="ub")
-    tla.copy(tla.view(X, (1, N)), src)
-    tla.copy(tla.view(O, (16, STRIDE)), dst)
+    src = tla.alloc((1, N), tl.float8e5, space="ub")
+    dst = tla.alloc((16, STRIDE), tl.float8e5, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (1, N)), src)
+    tla.load_gm_to_ub(tla.view(O, (16, STRIDE)), dst)
     with tla.scope.simd():
         v = tla.simd.vlds(src[0, 0])
         mask = tla.simd.pge(ACTIVE, N)
         tla.simd.vsstb(v, dst[0, N // 8], STRIDE)
         tla.simd.vsstb(v, dst[8, N // 8], STRIDE, mask)
-    tla.copy(dst, tla.view(O, (16, STRIDE)))
+    tla.store_ub_to_gm(dst, tla.view(O, (16, STRIDE)))
 
 
 def constexprs():

@@ -21,7 +21,6 @@
 
 import hashlib
 import math
-import os
 import shutil
 import subprocess
 import tempfile
@@ -43,19 +42,13 @@ _tiled_launch = threading.local()
 
 
 @lru_cache(maxsize=1)
-def _paired_sort_bitcode():
-    """Build the AscendC UB sorter once per source and installed SDK."""
-    source = Path(__file__).with_name("topk_sort_pairs.cpp")
-    toolkit = os.environ.get("ASCEND_HOME_PATH")
+def _proposal_sort_bitcode():
+    """Build the small UB intrinsic adapter with the CCE compiler."""
+    source = Path(__file__).with_name("topk_proposal_sort.cce")
     compiler = shutil.which("bisheng")
-    if not toolkit or compiler is None:
+    if compiler is None or not source.is_file():
         return None
-    sdk = Path(toolkit) / "asc"
-    if not sdk.is_dir():
-        sdk = Path(toolkit) / "x86_64-linux" / "asc"
-    if not (sdk / "include/adv_api/sort/sort.h").is_file() or not source.is_file():
-        return None
-    flags = [
+    flags = (
         "-x",
         "cce",
         "-emit-llvm",
@@ -68,29 +61,22 @@ def _paired_sort_bitcode():
         "-mllvm",
         "-disable-llvm-optzns",
         "-std=c++17",
-    ]
-    includes = ("", "include", "include/basic_api", "include/adv_api", "impl/basic_api", "impl", "include/interface")
-    flags.extend("-I" + str(sdk / path) for path in includes)
+    )
     version = subprocess.check_output([compiler, "--version"])
-    key = hashlib.sha256(source.read_bytes() + version + repr(flags).encode()).hexdigest()
-    cache = get_cache_manager(key)
-    filename = "topk_sort_pairs.bc"
-    cached = cache.get_file(filename)
-    if cached is not None:
+    cache = get_cache_manager(hashlib.sha256(source.read_bytes() + version + repr(flags).encode()).hexdigest())
+    name = "topk_proposal_sort.bc"
+    if cached := cache.get_file(name):
         return cached
-    with tempfile.TemporaryDirectory(prefix="triton-topk-") as directory:
-        output = Path(directory) / filename
-        subprocess.run([compiler, *flags, str(source), "-o", str(output)], check=True)
-        return cache.put(output.read_bytes(), filename)
+    with tempfile.TemporaryDirectory(prefix="triton-topk-") as folder:
+        binary = Path(folder) / name
+        subprocess.run([compiler, *flags, str(source), "-o", str(binary)], check=True)
+        return cache.put(binary.read_bytes(), name)
 
 
 @al.builtin
-def _sort_pairs(values, indices, count, largest, out_values, out_indices, workspace, bitcode, _semantic=None):
+def _sort_proposals(scores, positions, width, proposals, workspace, bitcode, _semantic=None):
     builder = _semantic.builder
-    suffix = {tl.float32: "f32", tl.float16: "f16", tl.bfloat16: "bf16", tl.int8: "i8", tl.uint8: "u8"}
-    use_merge = (largest.value and values.dtype == tl.float32
-                 and count.value % 32 == 0) or (values.dtype in (tl.float16, tl.bfloat16) and count.value <= 128)
-    symbol = ("topk_merge_" if use_merge else "topk_sort_") + suffix[values.dtype]
+    symbol = "sort_proposals"
     attrs = {
         "symbol": builder.get_string_attr(symbol),
         "bitcode": builder.get_string_attr(bitcode.value),
@@ -99,9 +85,9 @@ def _sort_pairs(values, indices, count, largest, out_values, out_indices, worksp
         "hivm.vf_mode": builder.parse_attr("#hivm.vf_mode<SIMD>"),
         "hivm.pipe": builder.parse_attr("#hivm.pipe<PIPE_V>"),
     }
-    ins = [values.handle, indices.handle, builder.get_int32(count.value), builder.get_int32(int(largest.value))]
-    outs = [out_values.handle, out_indices.handle, workspace.handle]
-    builder.create_custom_op(symbol, attrs, ins, outs, [])
+    builder.create_custom_op(
+        symbol, attrs,
+        [scores.handle, positions.handle, builder.get_int32(width.value)], [proposals.handle, workspace.handle], [])
 
 
 @triton.jit
@@ -168,11 +154,13 @@ def native_topk(
     FinalIndices=None,
     TILES: tl.constexpr = 0,
     SORT_BITCODE: tl.constexpr = None,
+    DIRECT: tl.constexpr = False,
 ):
     """Select each row and optionally merge the tiles in the same launch."""
     tl.static_assert(LAST_N == 0 or (K <= LAST_N and LAST_N < N))
     tl.static_assert(TILES * K <= 8192)
-    SORTED: tl.constexpr = SORT_BITCODE is not None
+    tl.static_assert(not DIRECT or SORT_BITCODE is not None)
+    tl.static_assert(SORT_BITCODE is None or (not TILES and Previous is None and not TILE_INDICES))
     dtype: tl.constexpr = X.dtype.element_ty
     tl.static_assert(dtype == tl.float32 or dtype == tl.float16 or dtype == tl.bfloat16 or dtype == tl.int32
                      or dtype == tl.int8 or dtype == tl.uint8)
@@ -185,8 +173,8 @@ def native_topk(
     output_lanes: tl.constexpr = 128 if bits == 16 else 64
     output_padded: tl.constexpr = ((K + output_lanes - 1) // output_lanes) * output_lanes
     top_digit: tl.constexpr = bits // 8 - 1
-    # The sorter processes 32-element runs and also issues full 64-lane loads.
-    sort_width: tl.constexpr = triton.cdiv(K, 64) * 64
+    direct_width: tl.constexpr = max(128, triton.next_power_of_2(N if DIRECT else K))
+    sort_count: tl.constexpr = N if DIRECT else K
 
     widths: tl.constexpr = (N, TILES * K)
     tails: tl.constexpr = (LAST_N, 0)
@@ -218,11 +206,10 @@ def native_topk(
                 keys = tla.alloc((padded_widths[phase], ), key_dtype, space="ub")
                 if not narrow_keys:
                     bytes_by_digit = tla.alloc((bits // 8, padded_widths[phase]), tl.uint8, space="ub")
-                picked = tla.alloc((output_padded, ), tl.uint32, space="ub")
+                picked_width: tl.constexpr = output_padded if SORT_BITCODE is None else direct_width
+                picked = tla.alloc((picked_width, ), tl.uint32, space="ub")
                 indices = tla.alloc((K * word_counts[phase], ), tl.int32, space="ub")
-                values = tla.alloc((sort_width if SORTED else K, ), dtype, space="ub")
-                if SORTED:
-                    selected_indices = tla.alloc((sort_width, ), tl.int32, space="ub")
+                values = tla.alloc((K, ), dtype, space="ub")
                 if previous is not None:
                     source_indices = tla.alloc((padded_widths[phase], ), tl.int32, space="ub")
                 if tails[phase]:
@@ -291,157 +278,224 @@ def native_topk(
                         lanes8, _ = simd.vdintlv(simd.vbitcast(lanes16, "uint8"),
                                                  simd.vbitcast(simd.vadds(lanes16, 128), "uint8"))
                         selected_bytes = ()
-                    # Refine the cutoff from the most significant digit. Each
-                    # pass sees only keys matching the preceding digits.
-                    for digit in tl.static_range(top_digit, -1, -1):
-                        hist_low = zero16
-                        hist_high = zero16
-                        if narrow_keys:
-                            # Deinterleave data and validity in the same order so the
-                            # histogram receives a predicate with one lane per byte.
-                            for base in range(0, padded_widths[phase], 256):
-                                bytes_pair = ()
-                                flags = ()
-                                for group in tl.static_range(2):
-                                    offset = base + group * 128
-                                    key = simd.vlds(keys[offset])
+                    if DIRECT:
+                        # Use all local positions when the selected fraction
+                        # is large enough to make the histogram pass redundant.
+                        for base in range(0, direct_width, 64):
+                            seq = simd.vadds(lanes, tla.cast(base, tl.uint32))
+                            simd.vsts(picked[base], seq)
+                    else:
+                        # Refine the cutoff from the most significant digit. Each
+                        # pass sees only keys matching the preceding digits.
+                        for digit in tl.static_range(top_digit, -1, -1):
+                            hist_low = zero16
+                            hist_high = zero16
+                            if narrow_keys:
+                                # Deinterleave data and validity in the same order so the
+                                # histogram receives a predicate with one lane per byte.
+                                for base in range(0, padded_widths[phase], 256):
+                                    bytes_pair = ()
+                                    flags = ()
+                                    for group in tl.static_range(2):
+                                        offset = base + group * 128
+                                        key = simd.vlds(keys[offset])
+                                        if tails[phase] or widths[phase] % 256 or digit != top_digit:
+                                            valid = simd.pset(16)
+                                            if tails[phase] or widths[phase] % 256:
+                                                valid = simd.vcmps(simd.vadds(lanes16, tla.cast(offset, tl.uint16)),
+                                                                   tla.cast(row_n, tl.uint16), op=simd.CMP.LT)
+                                            if digit != top_digit:
+                                                valid = simd.vcmp(simd.vand(key, simd.vdup(0xFF00, tl.uint16)), prefix,
+                                                                  mask=valid)
+                                            flags += (simd.vbitcast(simd.vsel(valid, one16, zero16), "uint8"), )
+                                        bytes_pair += (simd.vbitcast(key, "uint8"), )
+                                    low_bytes, high_bytes = simd.vdintlv(bytes_pair[0], bytes_pair[1])
+                                    packed_bytes = high_bytes if digit == top_digit else low_bytes
                                     if tails[phase] or widths[phase] % 256 or digit != top_digit:
-                                        valid = simd.pset(16)
-                                        if tails[phase] or widths[phase] % 256:
-                                            valid = simd.vcmps(simd.vadds(lanes16, tla.cast(offset, tl.uint16)),
-                                                               tla.cast(row_n, tl.uint16), op=simd.CMP.LT)
-                                        if digit != top_digit:
-                                            valid = simd.vcmp(simd.vand(key, simd.vdup(0xFF00, tl.uint16)), prefix,
-                                                              mask=valid)
-                                        flags += (simd.vbitcast(simd.vsel(valid, one16, zero16), "uint8"), )
-                                    bytes_pair += (simd.vbitcast(key, "uint8"), )
-                                low_bytes, high_bytes = simd.vdintlv(bytes_pair[0], bytes_pair[1])
-                                packed_bytes = high_bytes if digit == top_digit else low_bytes
-                                if tails[phase] or widths[phase] % 256 or digit != top_digit:
-                                    packed_flags, _unused_flags = simd.vdintlv(flags[0], flags[1])
-                                    active_bytes = simd.vcmps(packed_flags, 0, op=simd.CMP.NE)
-                                else:
-                                    active_bytes = simd.pset(8)
-                                hist_low = simd.chistv2(hist_low, packed_bytes, active_bytes, 0)
-                                hist_high = simd.chistv2(hist_high, packed_bytes, active_bytes, 1)
-                        else:
-                            # Each 256-lane load contains one byte per input element.
-                            for base in range(0, row_n, 256):
-                                last_lane = tla.cast(tl.minimum(255, row_n - base - 1), tl.uint8)
-                                valid8 = simd.vcmps(lanes8, last_lane, op=simd.CMP.LE)
-                                for prior in tl.static_range(top_digit, digit, -1):
-                                    previous_byte = simd.vlds(bytes_by_digit[prior, base])
-                                    valid8 = simd.vcmp(previous_byte, selected_bytes[top_digit - prior], mask=valid8)
-                                digit_bytes = simd.vlds(bytes_by_digit[digit, base])
-                                hist_low = simd.chistv2(hist_low, digit_bytes, valid8, 0)
-                                hist_high = simd.chistv2(hist_high, digit_bytes, valid8, 1)
-                        total = simd.vdupv(hist_high, pos=simd.POS.HIGHEST)
-                        # Convert the descending rank to an ascending ordinal.
-                        # The first cumulative bucket reaching it is the cutoff.
-                        target = simd.vadd(simd.vsub(total, rank), one16)
-                        below_lo = simd.vsel(simd.vcmp(hist_low, target, op=simd.CMP.LT), one16, zero16)
-                        below_hi = simd.vsel(simd.vcmp(hist_high, target, op=simd.CMP.LT), one16, zero16)
-                        bucket = simd.vdupv(simd.vreduce(simd.vadd(below_lo, below_hi), "add"))
-                        lane16 = simd.vand(bucket, simd.vdup(127, tl.uint16))
-                        count = simd.vsel(simd.vcmps(bucket, 128, op=simd.CMP.GE), simd.vselr(hist_high, lane16),
-                                          simd.vselr(hist_low, lane16))
-                        rank = simd.vsub(rank, simd.vsub(total, count))
-                        digit_value = bucket if narrow_keys else simd.vunpack(bucket, tl.uint32)
-                        prefix = simd.vor(prefix, simd.vshls(digit_value, digit * 8))
-                        if not narrow_keys and digit > 0:
-                            repetitions = simd.vmul(bucket, simd.vdup(257, tl.uint16))
-                            selected_bytes += (simd.vbitcast(repetitions, "uint8"), )
+                                        packed_flags, _unused_flags = simd.vdintlv(flags[0], flags[1])
+                                        active_bytes = simd.vcmps(packed_flags, 0, op=simd.CMP.NE)
+                                    else:
+                                        active_bytes = simd.pset(8)
+                                    hist_low = simd.chistv2(hist_low, packed_bytes, active_bytes, 0)
+                                    hist_high = simd.chistv2(hist_high, packed_bytes, active_bytes, 1)
+                            else:
+                                # Each 256-lane load contains one byte per input element.
+                                for base in range(0, row_n, 256):
+                                    last_lane = tla.cast(tl.minimum(255, row_n - base - 1), tl.uint8)
+                                    valid8 = simd.vcmps(lanes8, last_lane, op=simd.CMP.LE)
+                                    for prior in tl.static_range(top_digit, digit, -1):
+                                        previous_byte = simd.vlds(bytes_by_digit[prior, base])
+                                        valid8 = simd.vcmp(previous_byte, selected_bytes[top_digit - prior],
+                                                           mask=valid8)
+                                    digit_bytes = simd.vlds(bytes_by_digit[digit, base])
+                                    hist_low = simd.chistv2(hist_low, digit_bytes, valid8, 0)
+                                    hist_high = simd.chistv2(hist_high, digit_bytes, valid8, 1)
+                            total = simd.vdupv(hist_high, pos=simd.POS.HIGHEST)
+                            # Convert the descending rank to an ascending ordinal.
+                            # The first cumulative bucket reaching it is the cutoff.
+                            target = simd.vadd(simd.vsub(total, rank), one16)
+                            below_lo = simd.vsel(simd.vcmp(hist_low, target, op=simd.CMP.LT), one16, zero16)
+                            below_hi = simd.vsel(simd.vcmp(hist_high, target, op=simd.CMP.LT), one16, zero16)
+                            bucket = simd.vdupv(simd.vreduce(simd.vadd(below_lo, below_hi), "add"))
+                            lane16 = simd.vand(bucket, simd.vdup(127, tl.uint16))
+                            count = simd.vsel(simd.vcmps(bucket, 128, op=simd.CMP.GE), simd.vselr(hist_high, lane16),
+                                              simd.vselr(hist_low, lane16))
+                            rank = simd.vsub(rank, simd.vsub(total, count))
+                            digit_value = bucket if narrow_keys else simd.vunpack(bucket, tl.uint32)
+                            prefix = simd.vor(prefix, simd.vshls(digit_value, digit * 8))
+                            if not narrow_keys and digit > 0:
+                                repetitions = simd.vmul(bucket, simd.vdup(257, tl.uint16))
+                                selected_bytes += (simd.vbitcast(repetitions, "uint8"), )
 
-                    cutoff = simd.vunpack(prefix, tl.uint32) if narrow_keys else prefix
-                    strict_end = simd.vsub(simd.vdup(K, tl.uint32), simd.vunpack(rank, tl.uint32))
-                    # Pack keys above the cutoff first. Reserve the remaining
-                    # slots for the earliest equal keys in this row.
-                    strict_pos = zero32
-                    equal_pos = strict_end
-                    for base in range(0, compact_widths[phase], 64):
-                        if narrow_keys:
-                            key = simd.vunpack(simd.vlds(keys[base], dist="UNPK_B16"), tl.uint32)
-                        else:
-                            key = simd.vlds(keys[base])
-                        index = simd.vadds(lanes, tla.cast(base, tl.uint32))
-                        valid = simd.pset(32)
-                        if tails[phase] or widths[phase] % 64:
-                            valid = simd.vcmps(index, row_n, op=simd.CMP.LT)
-                        greater = simd.vcmp(key, cutoff, mask=valid, op=simd.CMP.GT)
-                        equal = simd.vcmp(key, cutoff, mask=valid)
-                        greater_count = simd.vdupv(simd.vreduce(one32, "add", mask=greater))
-                        equal_count = simd.vdupv(simd.vreduce(one32, "add", mask=equal))
-                        strict_offsets = simd.vadd(lanes, strict_pos)
-                        equal_offsets = simd.vadd(lanes, equal_pos)
-                        strict_mask = simd.vcmp(lanes, greater_count, op=simd.CMP.LT)
-                        equal_mask = simd.vcmps(equal_offsets, K, mask=simd.vcmp(lanes, equal_count, op=simd.CMP.LT),
-                                                op=simd.CMP.LT)
-                        simd.vscatter(picked, strict_offsets, simd.vsqz(index, greater), strict_mask)
-                        simd.vscatter(picked, equal_offsets, simd.vsqz(index, equal), equal_mask)
-                        strict_pos = simd.vadd(strict_pos, greater_count)
-                        equal_pos = simd.vadd(equal_pos, equal_count)
+                        cutoff = simd.vunpack(prefix, tl.uint32) if narrow_keys else prefix
+                        strict_end = simd.vsub(simd.vdup(K, tl.uint32), simd.vunpack(rank, tl.uint32))
+                        # Pack keys above the cutoff first. Reserve the remaining
+                        # slots for the earliest equal keys in this row.
+                        strict_pos = zero32
+                        equal_pos = strict_end
+                        for base in range(0, compact_widths[phase], 64):
+                            if narrow_keys:
+                                key = simd.vunpack(simd.vlds(keys[base], dist="UNPK_B16"), tl.uint32)
+                            else:
+                                key = simd.vlds(keys[base])
+                            index = simd.vadds(lanes, tla.cast(base, tl.uint32))
+                            valid = simd.pset(32)
+                            if tails[phase] or widths[phase] % 64:
+                                valid = simd.vcmps(index, row_n, op=simd.CMP.LT)
+                            greater = simd.vcmp(key, cutoff, mask=valid, op=simd.CMP.GT)
+                            equal = simd.vcmp(key, cutoff, mask=valid)
+                            greater_count = simd.vdupv(simd.vreduce(one32, "add", mask=greater))
+                            equal_count = simd.vdupv(simd.vreduce(one32, "add", mask=equal))
+                            strict_offsets = simd.vadd(lanes, strict_pos)
+                            equal_offsets = simd.vadd(lanes, equal_pos)
+                            strict_mask = simd.vcmp(lanes, greater_count, op=simd.CMP.LT)
+                            equal_mask = simd.vcmps(equal_offsets, K,
+                                                    mask=simd.vcmp(lanes, equal_count, op=simd.CMP.LT), op=simd.CMP.LT)
+                            simd.vscatter(picked, strict_offsets, simd.vsqz(index, greater), strict_mask)
+                            simd.vscatter(picked, equal_offsets, simd.vsqz(index, equal), equal_mask)
+                            strict_pos = simd.vadd(strict_pos, greater_count)
+                            equal_pos = simd.vadd(equal_pos, equal_count)
 
-                    simd.membar("VST_VLD")
-                    # Gather original values and translate candidate indices
-                    # back to positions in the original input during merging.
-                    if bits == 16:
-                        for start in range(0, K, 128):
-                            first = simd.vbitcast(simd.vlds(picked[start]), "uint16")
-                            second = simd.vbitcast(simd.vlds(picked[start + 64]), "uint16")
-                            selection, _ = simd.vdintlv(first, second)
-                            out_mask = simd.vcmps(simd.vadds(lanes16, tla.cast(start, tl.uint16)), K, op=simd.CMP.LT)
-                            simd.vsts(values[start], simd.vgather(data, selection, out_mask), dist="NORM_B16",
-                                      mask=out_mask)
+                        simd.membar("VST_VLD")
 
-                    for start in range(0, K, 64):
-                        out_mask = simd.vcmps(simd.vadds(lanes, tla.cast(start, tl.uint32)), K, op=simd.CMP.LT)
-                        selection = simd.vlds(picked[start])
-                        if bits == 32:
-                            simd.vsts(values[start], simd.vgather(data, selection, out_mask), mask=out_mask)
-                        elif bits == 8:
-                            raw = simd.vgather(keys, selection, out_mask)
-                            if not LARGEST:
-                                raw = simd.vxor(raw, ones)
-                            if dtype == tl.int8:
-                                raw = simd.vxor(raw, sign)
-                            simd.vsts(values[start], raw, dist="PK4_B32", mask=out_mask)
-                        if previous is not None:
-                            selection = simd.vbitcast(simd.vgather(source_indices, selection, out_mask), "uint32")
-                        elif phase == 0 and TILE_INDICES:
-                            selection = simd.vadds(selection, tla.cast(row * widths[phase], tl.uint32))
-                        if SORTED:
-                            simd.vsts(selected_indices[start], simd.vbitcast(selection, "int32"), mask=out_mask)
-                        elif word_counts[phase] == 2:
-                            # Store each nonnegative index as two consecutive 32-bit words.
-                            low, high = simd.vintlv(selection, zero32)
-                            positions = simd.vadds(lanes, tla.cast(start * 2, tl.uint32))
-                            low_mask = simd.vcmps(positions, K * 2, op=simd.CMP.LT)
-                            high_mask = simd.vcmps(simd.vadds(positions, 64), K * 2, op=simd.CMP.LT)
-                            simd.vsts(indices[start * 2], simd.vbitcast(low, "int32"), mask=low_mask)
-                            simd.vsts(indices[start * 2 + 64], simd.vbitcast(high, "int32"), mask=high_mask)
-                        else:
-                            simd.vsts(indices[start], simd.vbitcast(selection, "int32"), mask=out_mask)
+                    if SORT_BITCODE is None:
+                        # Gather original values and translate candidate indices
+                        # back to positions in the original input during merging.
+                        if bits == 16:
+                            for start in range(0, K, 128):
+                                first = simd.vbitcast(simd.vlds(picked[start]), "uint16")
+                                second = simd.vbitcast(simd.vlds(picked[start + 64]), "uint16")
+                                selection, _ = simd.vdintlv(first, second)
+                                out_mask = simd.vcmps(simd.vadds(lanes16, tla.cast(start, tl.uint16)), K,
+                                                      op=simd.CMP.LT)
+                                simd.vsts(values[start], simd.vgather(data, selection, out_mask), dist="NORM_B16",
+                                          mask=out_mask)
 
-                if SORTED:
-                    sorted_values = tla.alloc((sort_width, ), dtype, space="ub")
-                    sorted_indices = tla.alloc((sort_width, ), tl.int32, space="ub")
-                    workspace = tla.alloc((512 + (20 if bits == 16 else 16) * sort_width, ), tl.uint8, space="ub")
-                    _sort_pairs(values, selected_indices, K, LARGEST, sorted_values, sorted_indices, workspace,
-                                SORT_BITCODE)
-                    values = tla.subview(sorted_values, (0, ), (K, ))
-                    if word_counts[phase] == 2:
-                        with tla.scope.simd():
-                            sorted_lanes = simd.vbitcast(simd.vci(0), "uint32")
-                            for start in range(0, K, 64):
-                                selected = simd.vlds(sorted_indices[start])
-                                low, high = simd.vintlv(selected, simd.vdup(0, tl.int32))
-                                positions = simd.vadds(sorted_lanes, tla.cast(start * 2, tl.uint32))
+                        for start in range(0, K, 64):
+                            out_mask = simd.vcmps(simd.vadds(lanes, tla.cast(start, tl.uint32)), K, op=simd.CMP.LT)
+                            selection = simd.vlds(picked[start])
+                            if bits == 32:
+                                simd.vsts(values[start], simd.vgather(data, selection, out_mask), mask=out_mask)
+                            elif bits == 8:
+                                raw = simd.vgather(keys, selection, out_mask)
+                                if not LARGEST:
+                                    raw = simd.vxor(raw, ones)
+                                if dtype == tl.int8:
+                                    raw = simd.vxor(raw, sign)
+                                simd.vsts(values[start], raw, dist="PK4_B32", mask=out_mask)
+                            if previous is not None:
+                                selection = simd.vbitcast(simd.vgather(source_indices, selection, out_mask), "uint32")
+                            elif phase == 0 and TILE_INDICES:
+                                selection = simd.vadds(selection, tla.cast(row * widths[phase], tl.uint32))
+                            if word_counts[phase] == 2:
+                                # Store each nonnegative index as two consecutive 32-bit words.
+                                low, high = simd.vintlv(selection, zero32)
+                                positions = simd.vadds(lanes, tla.cast(start * 2, tl.uint32))
                                 low_mask = simd.vcmps(positions, K * 2, op=simd.CMP.LT)
                                 high_mask = simd.vcmps(simd.vadds(positions, 64), K * 2, op=simd.CMP.LT)
-                                simd.vsts(indices[start * 2], low, mask=low_mask)
-                                simd.vsts(indices[start * 2 + 64], high, mask=high_mask)
-                    else:
-                        indices = tla.subview(sorted_indices, (0, ), (K, ))
+                                simd.vsts(indices[start * 2], simd.vbitcast(low, "int32"), mask=low_mask)
+                                simd.vsts(indices[start * 2 + 64], simd.vbitcast(high, "int32"), mask=high_mask)
+                            else:
+                                simd.vsts(indices[start], simd.vbitcast(selection, "int32"), mask=out_mask)
+
+                if SORT_BITCODE is not None:
+                    # Build FP32 comparison scores and keep original positions
+                    # as the proposal payload. Narrow types use an exact encoding.
+                    width: tl.constexpr = direct_width
+                    scores = tla.alloc((width, ), tl.float32, space="ub")
+                    positions = tla.alloc((width, ), tl.uint32, space="ub")
+                    proposals = tla.alloc((2 * width, ), tl.uint32, space="ub")
+                    workspace = tla.alloc((2 * width, ), tl.uint32, space="ub")
+                    if bits == 16:
+                        selected_keys = tla.alloc((width, ), tl.uint16, space="ub")
+                        with tla.scope.simd():
+                            lanes = simd.vbitcast(simd.vci(0), "uint32")
+                            lane16, _ = simd.vdintlv(simd.vbitcast(lanes, "uint16"),
+                                                     simd.vbitcast(simd.vadds(lanes, 64), "uint16"))
+                            for start in range(0, width, 128):
+                                first = simd.vbitcast(simd.vlds(picked[start]), "uint16")
+                                second = simd.vbitcast(simd.vlds(picked[start + 64]), "uint16")
+                                selection, _ = simd.vdintlv(first, second)
+                                valid = simd.vcmps(simd.vadds(lane16, tla.cast(start, tl.uint16)), sort_count,
+                                                   op=simd.CMP.LT)
+                                simd.vsts(selected_keys[start], simd.vgather(keys, selection, valid), mask=valid)
+                    with tla.scope.simd():
+                        lanes = simd.vbitcast(simd.vci(0), "uint32")
+                        for start in range(0, width, 64):
+                            selected = simd.vlds(picked[start])
+                            order = simd.vadds(lanes, tla.cast(start, tl.uint32))
+                            valid = simd.vcmps(order, sort_count, op=simd.CMP.LT)
+                            if bits == 32:
+                                original = simd.vgather(data, selected, valid)
+                                sign = simd.vdup(0 if LARGEST else 0x80000000, tl.uint32)
+                                score = simd.vxor(simd.vbitcast(original, "uint32"), sign)
+                                score = simd.vsel(valid, score, simd.vdup(0xff800000, tl.uint32))
+                            else:
+                                if bits == 16:
+                                    key = simd.vunpack(simd.vlds(selected_keys[start], dist="UNPK_B16"), tl.uint32)
+                                else:
+                                    key = simd.vgather(keys, selected, valid)
+                                score = simd.vadds(key, tla.cast(0x00800000, tl.uint32))
+                                score = simd.vsel(valid, score, simd.vdup(0, tl.uint32))
+                            simd.vsts(scores[start], simd.vbitcast(score, "float32"))
+                            simd.vsts(positions[start], simd.vsel(valid, selected, simd.vdup(0, tl.uint32)))
+                    _sort_proposals(scores, positions, width, proposals, workspace, SORT_BITCODE)
+                    # Split the interleaved score/position pairs for output.
+                    with tla.scope.simd():
+                        lanes = simd.vbitcast(simd.vci(0), "uint32")
+                        for start in range(0, K, 64):
+                            pair_first = simd.vlds(proposals[2 * start])
+                            pair_second = simd.vlds(proposals[2 * start + 64])
+                            ordered, index = simd.vdintlv(pair_first, pair_second)
+                            pos = simd.vadds(lanes, tla.cast(start, tl.uint32))
+                            valid = simd.vcmps(pos, K, op=simd.CMP.LT)
+                            if bits == 32:
+                                sign = simd.vdup(0 if LARGEST else 0x80000000, tl.uint32)
+                                value = simd.vbitcast(simd.vxor(ordered, sign), "float32")
+                                simd.vsts(values[start], value, mask=valid)
+                            else:
+                                key = simd.vsub(ordered, simd.vdup(0x00800000, tl.uint32))
+                                if not LARGEST:
+                                    key = simd.vxor(key, simd.vdup((1 << bits) - 1, tl.uint32))
+                                if bits == 8:
+                                    if dtype == tl.int8:
+                                        key = simd.vxor(key, simd.vdup(128, tl.uint32))
+                                    simd.vsts(values[start], key, dist="PK4_B32", mask=valid)
+                                else:
+                                    sign = simd.vdup(0x8000, tl.uint32)
+                                    flip = simd.vsel(simd.vcmp(key, sign, op=simd.CMP.GE), sign,
+                                                     simd.vdup(0xffff, tl.uint32))
+                                    raw = simd.vxor(key, flip)
+                                    simd.vsts(values[start], raw, dist="PK_B32", mask=valid)
+                            if WIDE_INDEX:
+                                low, high = simd.vintlv(index, simd.vdup(0, tl.uint32))
+                                words = simd.vadds(lanes, tla.cast(start * 2, tl.uint32))
+                                low_mask = simd.vcmps(words, K * 2, op=simd.CMP.LT)
+                                high_mask = simd.vcmps(simd.vadds(words, 64), K * 2, op=simd.CMP.LT)
+                                simd.vsts(indices[2 * start], simd.vbitcast(low, "int32"), mask=low_mask)
+                                simd.vsts(indices[2 * start + 64], simd.vbitcast(high, "int32"), mask=high_mask)
+                            else:
+                                simd.vsts(indices[start], simd.vbitcast(index, "int32"), mask=valid)
                 tla.store_ub_to_gm(values, tla.view(out_values, (K, ), offsets=(row * K, )))
                 tla.store_ub_to_gm(
                     indices, tla.view(out_indices, (K * word_counts[phase], ),
@@ -461,13 +515,13 @@ def _full_topk(X, V, I, SIZE: tl.constexpr, N: tl.constexpr, INNER: tl.constexpr
 
 
 def _native_launch(x, rows, n, k, largest, cores, last_n=0, wide_index=False, previous=None, tile_indices=False,
-                   shape=None, sort_bitcode=None):
+                   shape=None, sort_bitcode=None, direct=False):
     shape = (rows, k) if shape is None else shape
     values = x.new_empty(shape)
     indices = x.new_empty(shape, dtype=torch.int64 if wide_index else torch.int32)
     storage = triton.reinterpret(indices, tl.int32) if wide_index else indices
     native_topk[(min(rows, cores), )](x, values, storage, rows, n, k, largest, last_n, wide_index, previous,
-                                      tile_indices, SORT_BITCODE=sort_bitcode)
+                                      tile_indices, SORT_BITCODE=sort_bitcode, DIRECT=direct)
     return values, indices
 
 
@@ -489,7 +543,7 @@ def _tiled_topk(x, k, largest, cores, chunk):
 
 @triton.jit
 def _restore_output(Values, Indices, V, I, K: tl.constexpr, INNER: tl.constexpr, ROW_TILE: tl.constexpr,
-                    K_TILE: tl.constexpr, WRITE_VALUES: tl.constexpr):
+                    K_TILE: tl.constexpr):
     groups = tl.cdiv(INNER, ROW_TILE)
     tile = tl.program_id(0)
     outer = tile // groups
@@ -500,40 +554,82 @@ def _restore_output(Values, Indices, V, I, K: tl.constexpr, INNER: tl.constexpr,
     index_ptr = tl.make_block_ptr(Indices + base, (INNER, K), (K, 1), (row, col), (ROW_TILE, K_TILE), (1, 0))
     index_out_ptr = tl.make_block_ptr(I + base, (K, INNER), (INNER, 1), (col, row), (K_TILE, ROW_TILE), (1, 0))
     index = tl.load(index_ptr, boundary_check=(0, 1), padding_option="zero")
-    if WRITE_VALUES:
-        value_ptr = tl.make_block_ptr(Values + base, (INNER, K), (K, 1), (row, col), (ROW_TILE, K_TILE), (1, 0))
-        value_out_ptr = tl.make_block_ptr(V + base, (K, INNER), (INNER, 1), (col, row), (K_TILE, ROW_TILE), (1, 0))
-        value = tl.load(value_ptr, boundary_check=(0, 1), padding_option="zero")
-        tl.store(value_out_ptr, tl.trans(value), boundary_check=(0, 1))
-    tl.store(index_out_ptr, tl.trans(index).to(tl.int64), boundary_check=(0, 1))
+    value_ptr = tl.make_block_ptr(Values + base, (INNER, K), (K, 1), (row, col), (ROW_TILE, K_TILE), (1, 0))
+    value_out_ptr = tl.make_block_ptr(V + base, (K, INNER), (INNER, 1), (col, row), (K_TILE, ROW_TILE), (1, 0))
+    value = tl.load(value_ptr, boundary_check=(0, 1), padding_option="zero")
+    tl.store(value_out_ptr, tl.trans(value), boundary_check=(0, 1))
+    tl.store(index_out_ptr, tl.trans(index).to(I.dtype.element_ty), boundary_check=(0, 1))
 
 
-def _restore_layout(x, values, indices, k, axis, fused):
+@triton.jit
+def _pack_rows(X, Y, N: tl.constexpr, INNER: tl.constexpr, WIDTH: tl.constexpr, COLUMNS: tl.constexpr):
+    groups: tl.constexpr = tl.cdiv(INNER, COLUMNS)
+    program = tl.program_id(0)
+    outer = program // groups
+    column = program % groups * COLUMNS
+    row = tl.program_id(1) * WIDTH
+    shape: tl.constexpr = (N, INNER)
+    source = tl.make_block_ptr(X + outer * N * INNER, shape, (INNER, 1), (row, column), (WIDTH, COLUMNS), (1, 0))
+    destination = tl.make_block_ptr(Y + outer * N * INNER, (INNER, N), (N, 1), (column, row), (COLUMNS, WIDTH), (1, 0))
+    tile = tl.load(source, boundary_check=(0, 1), padding_option="zero")
+    tl.store(destination, tl.trans(tile).to(Y.dtype.element_ty), boundary_check=(0, 1))
+
+
+@triton.jit
+def _cast(X, Y, N: tl.constexpr, BLOCK: tl.constexpr):
+    offset = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    tl.store(Y + offset, tl.load(X + offset, offset < N, other=0), offset < N)
+
+
+def _cast_tensor(x, dtype):
+    if x.dtype == dtype:
+        return x
+    output = x.new_empty(x.shape, dtype=dtype)
+    if x.numel():
+        block = 2048
+        _cast[(triton.cdiv(x.numel(), block), )](x, output, x.numel(), block)
+    return output
+
+
+def _contiguous_rows(x, axis, dtype=None):
+    n = x.shape[axis]
     inner = math.prod(x.shape[axis + 1:])
-    outer = values.shape[0] // inner
+    dtype = x.dtype if dtype is None else dtype
+    if inner == 1:
+        return _cast_tensor(x, dtype).view(-1, n)
+    row_count = x.numel() // n
+    result = x.new_empty((row_count, n), dtype=dtype)
+    if row_count:
+        width = min(64, triton.next_power_of_2(n))
+        cols = min(64, triton.next_power_of_2(inner))
+        if inner % 32:
+            width = min(width, 64 if x.element_size() == 2 else 32)
+            cols = min(cols, 32 if x.element_size() == 2 else 64)
+        grid = (row_count // inner * triton.cdiv(inner, cols), triton.cdiv(n, width))
+        _pack_rows[grid](x, result, n, inner, width, cols)
+    return result
+
+
+def _restore_layout(x, values, indices, k, axis, *, index_dtype=torch.int64):
+    inner = math.prod(x.shape[axis + 1:])
     shape = list(x.shape)
     shape[axis] = k
-    if fused and inner % 32 == 0 and k % 64 == 0 and values.numel() >= 2**20:
-        row_shape = (*x.movedim(axis, -1).shape[:-1], k)
-        out = values.view(row_shape).movedim(-1, axis).contiguous()
-        idx = indices.view(row_shape).movedim(-1, axis).contiguous().to(torch.int64)
-        return out, idx
-    out_indices = x.new_empty(shape, dtype=torch.int64)
-    if fused:
-        out = x.new_empty(shape)
-    else:
-        # The large strided path transposes values separately and casts indices
-        # as part of their transpose, avoiding a full int64 intermediate.
-        row_shape = (*x.movedim(axis, -1).shape[:-1], k)
-        out = values.view(row_shape).movedim(-1, axis).to(x.dtype).contiguous()
-    if inner % 64 == 0 and k % 64 == 0:
-        row_tile, k_tile = 64, 64
-    else:
-        row_tile, k_tile = (128, 16) if fused and inner % 32 else (32, 32) if fused else (64, 64)
-    row_tile = min(row_tile, triton.next_power_of_2(inner))
-    k_tile = min(k_tile, triton.next_power_of_2(k))
-    grid = (outer * triton.cdiv(inner, row_tile), triton.cdiv(k, k_tile))
-    _restore_output[grid](values, indices, out, out_indices, k, inner, row_tile, k_tile, fused)
+    if inner == 1:
+        return _cast_tensor(values, x.dtype).view(shape), _cast_tensor(indices, index_dtype).view(shape)
+    out = x.new_empty(shape)
+    out_indices = x.new_empty(shape, dtype=index_dtype)
+    if values.numel():
+        outer = values.numel() // (k * inner)
+        if inner % 64 == 0 and k % 64 == 0:
+            row_tile, k_tile = 64, 64
+        elif inner % 32:
+            row_tile, k_tile = 128, 16
+        else:
+            row_tile, k_tile = 32, 32
+        row_tile = min(row_tile, triton.next_power_of_2(inner))
+        k_tile = min(k_tile, triton.next_power_of_2(k))
+        grid = (outer * triton.cdiv(inner, row_tile), triton.cdiv(k, k_tile))
+        _restore_output[grid](values, indices, out, out_indices, k, inner, row_tile, k_tile)
     return out, out_indices
 
 
@@ -569,38 +665,37 @@ def _ordered_topk(x, k, axis, largest, implementation, bounded_int64):
     inner = math.prod(x.shape[axis + 1:])
     if n <= 32 and inner >= 128 and x.dtype in (torch.float16, torch.bfloat16):
         return _short_strided_topk(x, k, axis, largest, inner)
-    rows = x.movedim(axis, -1).contiguous().view(-1, n)
-    if not rows.shape[0]:
+    if not x.numel():
         shape = list(x.shape)
         shape[axis] = k
         return x.new_empty(shape), x.new_empty(shape, dtype=torch.int64)
     index_dtype = torch.int64 if axis == x.ndim - 1 else torch.int32
-    values, indices = rows, None
     wide_int64 = x.dtype == torch.int64 and not bounded_int64
-    if implementation == "radix" and not wide_int64:
+    select_first = implementation == "radix" and not wide_int64
+    source_dtype = torch.int32 if select_first and bounded_int64 and x.dtype == torch.int64 else x.dtype
+    rows = _contiguous_rows(x, axis, source_dtype)
+    values, indices = rows, None
+    if select_first:
         if n > 8192:
             raise ValueError("radix selection supports axes of at most 8192 elements")
-        source = rows.to(torch.int32) if x.dtype == torch.int64 else rows
         cores = driver.active.utils.get_aivector_core_num()
-        # Small K uses the existing rank or packed sort. Cap the adapter's UB
-        # footprint on longer rows, leaving space for the radix key planes.
-        sort_bitcode = None
-        if 96 <= k <= 2048 and (n <= 4096 or k <= 1024) and x.dtype in (torch.float32, torch.float16, torch.bfloat16,
-                                                                        torch.int8, torch.uint8):
-            sort_bitcode = _paired_sort_bitcode()
-        values, indices = _native_launch(source, rows.shape[0], n, k, largest, cores,
-                                         wide_index=sort_bitcode is not None and index_dtype == torch.int64,
-                                         sort_bitcode=sort_bitcode)
-        if sort_bitcode is not None:
-            if axis != x.ndim - 1:
-                return _restore_layout(x, values, indices, k, axis, fused=True)
-            shape = (*x.shape[:-1], k)
-            return values.view(shape), indices.view(shape)
+        # Sort narrow, short BF16 candidate rows with the existing batched
+        # packed-key path when no output transpose is needed.
+        minimum_k = 32 if x.dtype == torch.float32 else 96
+        use_sorter = (minimum_k <= k <= 2048 and (n <= 4096 or k <= 1024)
+                      and x.dtype in (torch.int8, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
+                      and not (x.dtype == torch.bfloat16 and inner == 1 and k <= 128))
+        bitcode = _proposal_sort_bitcode() if use_sorter else None
+        if bitcode is not None:
+            values, indices = _native_launch(rows, rows.shape[0], n, k, largest, cores, wide_index=axis == x.ndim - 1,
+                                             sort_bitcode=bitcode, direct=n <= 256 and k * 4 >= n)
+            return _restore_layout(x, values, indices, k, axis)
+        values, indices = _native_launch(rows, rows.shape[0], n, k, largest, cores)
     values, indices = _sort_output(values, indices, k, 1, largest, bounded_int64, index_dtype=index_dtype)
     if axis != x.ndim - 1:
-        return _restore_layout(x, values.to(x.dtype), indices, k, axis, fused=True)
+        return _restore_layout(x, values, indices, k, axis)
     shape = (*x.shape[:-1], k)
-    return values.to(x.dtype).view(shape), indices.view(shape)
+    return _cast_tensor(values, x.dtype).view(shape), indices.view(shape)
 
 
 def _short_strided_topk(x, k, axis, largest, inner):
@@ -709,7 +804,7 @@ def _select_topk(x, k, axis, largest, implementation, chunk, bounded_int64, fuse
             # Launch only resident blocks. Every block must reach the barrier.
             grid = (min(rows, cores), 1, 1)
             args = (x, partial_values, partial_indices, rows, chunk, k, largest, n % chunk, False, None, True, values,
-                    triton.reinterpret(indices, tl.int32), rows, None)
+                    triton.reinterpret(indices, tl.int32), rows, None, False)
             if launch is None:
                 compiled = native_topk[grid](*args)
                 if not capturing and compiled is not None:
@@ -721,8 +816,8 @@ def _select_topk(x, k, axis, largest, implementation, chunk, bounded_int64, fuse
         if x.dtype == torch.int64:
             if not bounded_int64:
                 raise ValueError("int64 radix requires the caller to guarantee the int32 range")
-            values, indices = _tiled_topk(x.to(torch.int32), k, largest, cores, chunk)
-            return values.to(x.dtype), indices
+            values, indices = _tiled_topk(_cast_tensor(x, torch.int32), k, largest, cores, chunk)
+            return _cast_tensor(values, x.dtype), indices
         return _tiled_topk(x, k, largest, cores, chunk)
 
     cores = driver.active.utils.get_aivector_core_num()
@@ -737,17 +832,9 @@ def _select_topk(x, k, axis, largest, implementation, chunk, bounded_int64, fuse
         return _native_launch(x, x.numel() // n, n, k, largest, cores, wide_index=True, shape=(*x.shape[:-1], k))
     if implementation != "radix" or n > 8192:
         raise ValueError(f"unsupported implementation for this axis: {implementation}")
-    rows = x.movedim(axis, -1).to(dtype).contiguous()
-    values, indices = _native_launch(rows,
-                                     rows.numel() // n, n, k, largest, cores, wide_index=inner == 1
-                                     and not fused_output)
-    if fused_output:
-        return _restore_layout(x, values, indices, k, axis, fused=True)
-    if inner % 64 == 0 and k % 64 == 0 and indices.numel() >= 1024**2:
-        return _restore_layout(x, values, indices, k, axis, fused=False)
-    shape = (*rows.shape[:-1], k)
-    return (values.view(shape).movedim(-1, axis).to(x.dtype).contiguous(),
-            indices.view(shape).movedim(-1, axis).to(torch.int64).contiguous())
+    rows = _contiguous_rows(x, axis, dtype)
+    values, indices = _native_launch(rows, rows.numel() // n, n, k, largest, cores, wide_index=inner == 1)
+    return _restore_layout(x, values, indices, k, axis)
 
 
 @triton.jit
@@ -785,11 +872,9 @@ def _sort_output(values, indices, k, axis, largest, bounded_int64=False, index_d
     rows = values.numel() // n
     width = triton.next_power_of_2(n)
     if values.dtype == torch.int64 and not bounded_int64 and indices is None and width > 1024:
-        rows_view = values.movedim(axis, -1).contiguous().view(rows, n)
+        rows_view = _contiguous_rows(values, axis)
         ordered_values, ordered_indices = _sort_wide_rows(rows_view, k, largest)
-        row_shape = (*values.movedim(axis, -1).shape[:-1], k)
-        return (ordered_values.view(row_shape).movedim(-1, axis).contiguous(),
-                ordered_indices.view(row_shape).movedim(-1, axis).to(index_dtype).contiguous())
+        return _restore_layout(values, ordered_values, ordered_indices, k, axis, index_dtype=index_dtype)
 
     rows_per_block = min(32, max(1, 2048 // width))
     if rows == 1 or (values.dtype == torch.int64 and not bounded_int64):

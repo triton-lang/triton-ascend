@@ -94,6 +94,17 @@ class TestNativeResources(unittest.TestCase):
         self.assertEqual(result["factor"], 1)
         self.assertEqual(result["reason"], "BASELINE_RESOURCE_UNCONFIRMED")
 
+    def test_a3_uses_compiled_resources_and_core_count(self):
+        value = item()
+        value["metadata"]["target"]["arch"] = "Ascend910_9391"
+        value["final_ir"] = value["final_ir"].replace("Ascend950", "Ascend910_9391").replace("56 : i32",
+                                                                                             "48 : i32").replace(
+                                                                                                 "28 : i32", "24 : i32")
+        state = prepare([value])[0]
+        self.assertTrue(state["resource_checked"])
+        self.assertEqual(state["config"]["cores"], 48)
+        self.assertEqual(state["config"]["target_arch"], "Ascend910_9391")
+
 
 class TestNativeSelection(unittest.TestCase):
 

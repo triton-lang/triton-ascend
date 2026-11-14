@@ -10,6 +10,10 @@ from dataclasses import dataclass
 IMPLEMENTATION_VERSION = 56
 
 
+def supports_target(arch):
+    return isinstance(arch, str) and arch.startswith(('Ascend950', 'Ascend910_95', 'Ascend910_93'))
+
+
 def _annotate_launch_grid(kwargs, grid, *, bind=None):
     """Attach launch extents before cache selection; return the launch grid.
 
@@ -546,7 +550,7 @@ def _freeze_refusal(normalized):
 
 def _candidate_refusal(backend, src, normalized):
     from .utils import backend_policy
-    if not str(backend.target.arch).startswith(('Ascend950', 'Ascend910_95')):
+    if not supports_target(backend.target.arch):
         return 'TARGET_NOT_VALIDATED'
     if normalized.is_pure_simt or normalized.compile_mode == 'simt_only':
         return 'SIMT_NOT_SUPPORTED'

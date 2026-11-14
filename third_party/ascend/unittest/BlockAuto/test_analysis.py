@@ -100,6 +100,16 @@ class TestCandidateHelpers(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "helper recursion limit"):
             analyze(source)
 
+    def test_large_launch_is_rejected_before_tracing_each_block(self):
+        request = dict(mode="vv", modules={"aiv": candidate()}, name="kernel", arguments=[], grid=[10001, 1, 1],
+                       cores=56, blocks=10001, auto_blockify=False)
+        item = dict(factor=1, axis=-1, vv=True, resource_checked=True, needs_llvm=True, config=request,
+                    optimized_llvm=candidate())
+        result = json.loads(
+            ascend.select_block_candidates(json.dumps(dict(action="rank", contract={}, candidates=[item]))))
+        self.assertFalse(result["model_complete"])
+        self.assertIn("launch outside bounded analysis", result["candidates"]["unmerged"]["error"])
+
 
 def simt_candidate():
     return '''

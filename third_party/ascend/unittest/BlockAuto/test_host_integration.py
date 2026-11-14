@@ -130,6 +130,13 @@ class TestHostIntegration(unittest.TestCase):
             self.run_handler(grid)
             self.assertEqual(self.calls[-1][0][1]["block_batching_factor"], 1)
 
+    def test_a3_enters_auto_without_a5_empirical_override(self):
+        self.backend.target.arch = "Ascend910_9391"
+        self.run_handler()
+        options = self.calls[-1][0][1]
+        self.assertEqual(options["block_batching_factor"], "auto")
+        self.assertFalse(json.loads(options["block_auto_contract"])["cv_empirical_short_batch"])
+
     def test_single_program_keeps_normal_cache_without_contract(self):
         for grid, axis in (((1, ), -1), ((1, 1, 1), -1), ((8, 1), 1)):
             self.kwargs["block_batching_axis"] = axis

@@ -20,11 +20,14 @@ def optimized_llvm(item):
     if not link.is_file():
         link = Path(shutil.which('llvm-link') or '')
     if not compiler.is_file() or not link.is_file():
-        raise ValueError('installed A5 optimizer/LLVM decoder is unavailable')
+        raise ValueError('installed optimizer/LLVM decoder is unavailable')
     meta = item.get('meta_library')
     if meta is None:
         raise ValueError('MIX needs one final-IR AIV bitcode reference')
-    library = Path(files['compiler']['path']).parent.parent.parent / 'lib/libdevice.10.bc'
+    arch = item['metadata'].get('target', {}).get('arch', 'Ascend950')
+    a3 = arch.startswith('Ascend910_93')
+    library = Path(
+        files['compiler']['path']).parent.parent.parent / ('lib/libdevice.220.bc' if a3 else 'lib/libdevice.10.bc')
     directory = getattr(cache, 'cache_dir', None)
     if not directory:
         raise ValueError('optimized LLVM requires a local compiler cache')
@@ -41,6 +44,17 @@ def optimized_llvm(item):
             str(meta), '-cce-link-aicore-ll-module',
             str(library)
         ]
+        if a3:
+            # A3 has no VF register pipeline. Match its ordinary vendor lane
+            # and libraries instead of passing A5-only optimization flags.
+            args = [
+                str(compiler), '-c', '-emit-llvm', '-x', 'ir', files['llvm']['path'], '-o',
+                str(output / 'kernel.bc'), '--cce-aicore-arch=dav-c220-vec', '--cce-aicore-only', '-O2',
+                '-cce-bitcode-is-aicore', '-Wno-override-module', '-mllvm', '-cce-aicore-dcci-insert-for-scalar=false',
+                '-mllvm', '-enable-module-inliner', '-cce-link-aicore-ll-module',
+                str(meta), '-cce-link-aicore-ll-module',
+                str(library)
+            ]
         env = dict(os.environ, ASCEND_RT_VISIBLE_DEVICES='', ASCEND_VISIBLE_DEVICES='', CUDA_VISIBLE_DEVICES='')
 
         def run(command):

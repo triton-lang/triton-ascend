@@ -5,7 +5,12 @@ import torch
 import triton
 import triton.language as tl
 
-from block_batching_test_utils import assert_applied, batching_target  # noqa: F401
+from block_batching_test_utils import assert_applied, require_batching_target
+
+
+@pytest.fixture(autouse=True)
+def batching_target(monkeypatch):
+    require_batching_target(monkeypatch, include_a3=True)
 
 
 @triton.jit
@@ -59,6 +64,27 @@ def test_alias_fallback_and_cache_recovery():
     torch.npu.synchronize()
     assert_applied(kernel, 2)
     torch.testing.assert_close(y.cpu(), (cpu * 2 + 1) * 2 + 1, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize('mode', [0, 1])
+def test_portable_spatial_merge(mode):
+    from test_block_batching_cv_e2e import grouped_dot
+    m, n, k = (128, 32, 32) if mode == 0 else (32, 128, 32)
+    torch.manual_seed(881)
+    acpu, bcpu = torch.randint(-4, 5, (m, k)).float(), torch.randint(-4, 5, (k, n)).float()
+    a, b = acpu.npu(), bcpu.npu()
+    out = torch.empty((m, n), device='npu')
+    expected = acpu @ bcpu
+    merged = grouped_dot[(4, )](a, b, out, m, n, k, mode, False, False, block_batching_factor=2, block_batching_axis=0)
+    torch.npu.synchronize()
+    torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)
+    assert_applied(merged, 2)
+    automatic = grouped_dot[(4, )](a, b, out, m, n, k, mode, False, False)
+    torch.npu.synchronize()
+    torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)
+    selection = automatic.block_auto_selection
+    assert selection['selected_factor'] in (1, 2, 4)
+    assert selection['candidate_plan']['candidates']
 
 
 def test_graph_capture_uses_baseline():

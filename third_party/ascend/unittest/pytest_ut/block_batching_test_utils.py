@@ -6,9 +6,14 @@ import triton
 
 @pytest.fixture(autouse=True)
 def batching_target(monkeypatch):
+    require_batching_target(monkeypatch)
+
+
+def require_batching_target(monkeypatch, *, include_a3=False):
     arch = triton.runtime.driver.active.get_current_target().arch
-    if not arch.startswith(('Ascend950', 'Ascend910_95')):
-        pytest.skip('Block batching is supported on Ascend950/Ascend910_95')
+    targets = ('Ascend950', 'Ascend910_95', 'Ascend910_93') if include_a3 else ('Ascend950', 'Ascend910_95')
+    if not arch.startswith(targets):
+        pytest.skip('This test requires ' + '/'.join(targets))
     # These are correctness tests, independent of the occupancy heuristic.
     monkeypatch.setenv('TA_BLOCK_BATCHING_CORE_FLOOR', '0')
 

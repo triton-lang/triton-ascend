@@ -163,6 +163,21 @@ class TestModelCache(unittest.TestCase):
                 self.optimizer.optimized_llvm(item)
         self.assertFalse((self.root / "cache/failed/block_auto_optimized.ll").exists())
 
+    def test_a3_optimizer_uses_c220_and_matching_libdevice(self):
+        item = dict(metadata=dict(hash="a3", target=dict(arch="Ascend910_9391")),
+                    files={"compiler": {"path": str(self.compiler)}, "llvm": {"path":
+                                                                              "candidate.ll"}}, meta_library="meta.bc")
+
+        def compile_cpu(command, **kwargs):
+            Path(command[command.index("-o") + 1]).write_text("optimized module")
+
+        with patch.object(self.optimizer.subprocess, "run", side_effect=compile_cpu) as run:
+            self.optimizer.optimized_llvm(item)
+        args = run.call_args_list[0].args[0]
+        self.assertIn("--cce-aicore-arch=dav-c220-vec", args)
+        self.assertTrue(any(value.endswith("libdevice.220.bc") for value in args))
+        self.assertFalse(any("vf-" in value or "c310" in value for value in args))
+
 
 if __name__ == "__main__":
     unittest.main()

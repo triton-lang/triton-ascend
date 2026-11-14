@@ -72,7 +72,7 @@ def test_a5_resource_failure_without_layout_retry_selects_baseline(mode, rewritt
         elif cv_resources:
             assert refusal.reason == 'CV_TARGET_RESOURCE_REJECTED'
         else:
-            assert refusal is None
+            assert refusal.reason == 'LAYOUT_TARGET_RESOURCE_REJECTED'
 
 
 @pytest.mark.parametrize('rc, stdout, stderr', [

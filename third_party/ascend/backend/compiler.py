@@ -923,6 +923,21 @@ def _dump_kernel_binary(metadata_hash: str, bin_path: str):
     dump_manager.put(Path(bin_path).read_bytes(), os.path.basename(bin_path), binary=True)
 
 
+def _finish_batch_compilation(metadata, opt, npu_compiler_path, bin_path, save_temps):
+    if "block_batching" in metadata:
+        if _batching_backend_revision(npu_compiler_path) != opt.block_batching_backend_revision:
+            raise BatchCompileError("BACKEND_CHANGED_DURING_COMPILE", stage="npubin")
+        decline = validate_compilation_result(metadata)
+        if decline is not None:
+            return decline
+        metadata["block_batching_binary_sha256"] = hashlib.sha256(Path(bin_path).read_bytes()).hexdigest()
+        metadata["block_batching_plan_sha256"] = metadata["block_batching"]["guard"]["plan_fingerprint"]
+    if opt.block_auto_collect:
+        from .block_auto_artifacts import collect
+        metadata["block_auto_evidence"] = collect(save_temps, npu_compiler_path, metadata)
+    return Path(bin_path).read_bytes()
+
+
 def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: dict, opt) -> Tuple[bool, str]:
     """
     Try to compile with given UB config, return (success, error_msg).
@@ -1199,18 +1214,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if Path(callback_path).is_file():
             __load_metadata_by_callback(callback_path, metadata)
 
-        if "block_batching" in metadata:
-            if _batching_backend_revision(npu_compiler_path) != opt.block_batching_backend_revision:
-                raise BatchCompileError("BACKEND_CHANGED_DURING_COMPILE", stage="npubin")
-            decline = validate_compilation_result(metadata)
-            if decline is not None:
-                return decline
-            metadata["block_batching_binary_sha256"] = hashlib.sha256(Path(bin_path).read_bytes()).hexdigest()
-            metadata["block_batching_plan_sha256"] = metadata["block_batching"]["guard"]["plan_fingerprint"]
-        if opt.block_auto_collect:
-            from .block_auto_artifacts import collect
-            metadata["block_auto_evidence"] = collect(save_temps, npu_compiler_path, metadata)
-        return Path(bin_path).read_bytes()
+        return _finish_batch_compilation(metadata, opt, npu_compiler_path, bin_path,
+                                         save_temps if opt.debug or opt.block_auto_collect else None)
 
 
 def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
@@ -1232,7 +1237,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         bin_path = os.path.join(tmpdir, bin_file_with_ext)
         callback_path = os.path.join(tmpdir, "libkernel.so")
         _compile_option_list = [
-            f"--target={NPUUtils().get_arch()}",
+            f"--target={opt.target_arch}",
         ]
 
         multibuffer_mode = metadata.get("multibuffer_mode")
@@ -1371,8 +1376,16 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += ["--mlir-print-ir-after-failure"]
             _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
 
-        if opt.debug:
-            _compile_option_list += [f"--save-temps={_get_save_temps_dir(metadata['hash'])}"]
+        save_temps = _get_save_temps_dir(metadata["hash"]) if opt.debug else tmpdir
+        if opt.debug or opt.block_auto_collect:
+            _compile_option_list += [f"--save-temps={save_temps}"]
+
+        masked_options = _masked_batch_compile_options(metadata, npu_compiler_path)
+        if isinstance(masked_options, BatchDecline):
+            return masked_options
+        _compile_option_list += masked_options
+        if metadata.get("enable_hivm_batch_matmul"):
+            _compile_option_list += ["--enable-hivm-batch-matmul"]
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
@@ -1381,7 +1394,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_path)
             print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
-        ret = _run_vendor_npubin(cmd_list, env, opt, metadata, tmpdir, bin_path, cv_resources=False)
+        ret = _run_vendor_npubin(cmd_list, env, opt, metadata, tmpdir, bin_path, cv_resources=True)
         if isinstance(ret, BatchDecline):
             return ret
 
@@ -1402,7 +1415,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if Path(callback_path).is_file():
             __load_metadata_by_callback(callback_path, metadata)
 
-        return Path(bin_path).read_bytes()
+        return _finish_batch_compilation(metadata, opt, npu_compiler_path, bin_path, save_temps)
 
 
 def get_libdevice(arch: str):

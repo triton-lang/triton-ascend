@@ -19,7 +19,7 @@ def _argument(value):
 def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
     if "block_batching_factor" in fn.arg_names or kwargs.get("block_batching_factor", "auto") != "auto":
         return kwargs, grid
-    from .block_batching import _capture_state
+    from .block_batching import _capture_state, supports_target
 
     def baseline():
         result = dict(kwargs, block_batching_factor=1)
@@ -27,7 +27,7 @@ def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
         return result, grid
 
     if (warmup or getattr(getattr(fn, "ASTSource", None), "frontend_kind", "triton") != "triton"
-            or not str(backend.target.arch).startswith(("Ascend950", "Ascend910_95")) or _capture_state() is not False):
+            or not supports_target(backend.target.arch) or _capture_state() is not False):
         return baseline()
     bound, specialization, _ = fn.device_caches[device][4](*args, **kwargs)
     if callable(grid):
@@ -48,6 +48,8 @@ def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
     }
     contract = dict(grid=extents, arguments=arguments, argument_order=list(arguments),
                     core_floor=os.getenv("TA_BLOCK_BATCHING_CORE_FLOOR"), device_limit=os.getenv("NPU_DEVICE_LIMIT"))
+    if str(backend.target.arch).startswith("Ascend910_93"):
+        contract["cv_empirical_short_batch"] = False
     # Inject the public default before JIT cache selection and the bundle hook.
     # Concrete compilation stages still receive numeric factors only.
     # Raw option order participates in the in-memory JIT key. Canonicalize our
@@ -110,7 +112,8 @@ def compile_auto_bundle(backend, src, options, compile_variant):
         plan = dict(candidates=[], reason=refusal)
     elif cv:
         plan = candidate_plan(contract, axis=axis, probe=lambda a, f: _probe(backend, frozen, common, env_vars, a, f))
-    elif math.prod(contract["grid"]) < batching._core_floor():
+    elif math.prod(contract["grid"]) < (int(contract["core_floor"])
+                                        if contract.get("core_floor") is not None else batching._core_floor()):
         plan = dict(candidates=[], reason="GRID_BELOW_CORE_FLOOR")
     else:
         extents = contract["grid"] if axis == -1 else [contract["grid"][axis]]

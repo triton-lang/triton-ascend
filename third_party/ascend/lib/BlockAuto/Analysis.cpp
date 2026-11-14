@@ -34,6 +34,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <deque>
@@ -298,6 +299,15 @@ struct Profile {
   std::set<std::string> covered;
   double localBandwidth = 32, globalBandwidth = 512;
   unsigned window = 64;
+  mutable unsigned tracedSteps = 0;
+  const std::chrono::steady_clock::time_point deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  void step() const {
+    check(++tracedSteps <= 1000000, "total scalar tracing budget exceeded");
+    if ((tracedSteps & 1023) == 0)
+      check(std::chrono::steady_clock::now() < deadline,
+            "static analysis time budget exceeded");
+  }
   void addRates(std::initializer_list<StringRef> operations,
                 std::initializer_list<StringRef> types, Rate rate = {}) {
     for (StringRef op : operations) {
@@ -309,11 +319,17 @@ struct Profile {
   Profile(const Object &config) {
     // Preserve the existing 9579 model assumptions, not device measurements:
     // 56 Vector cores, 1650 MHz and 16 GB/s per core.
-    if (text(config, "mode") == "vv") {
+    if (text(config, "mode") == "vv" &&
+        !StringRef(blockauto::str(config, "target_arch"))
+             .starts_with("Ascend910_93")) {
       check(number(config, "cores") == 56,
             "compiled core count differs from the A5 model");
       localBandwidth = 16.0 * 1e9 / (1650.0 * 1e6);
       globalBandwidth = localBandwidth * 56;
+    } else if (text(config, "mode") == "vv") {
+      // Relative scheduling units for A3, not the A5 frequency/bandwidth
+      // calibration. Unknown A3 instructions still decline analysis.
+      globalBandwidth = localBandwidth * number(config, "cores");
     }
 #define AVE_COST_ENTRY(OP, SRC, DST, INTERVAL, LATENCY, SLOTS)                 \
   costs[#OP ":" #SRC ":" #DST] = {INTERVAL, LATENCY, SLOTS};
@@ -1230,6 +1246,7 @@ struct Analyzer {
       unsigned visit = ++visits[block];
       Block *next = nullptr;
       for (Operation &i : *block) {
+        profile.step();
         if (constant(i)) {
           Scalar value;
           if (auto op = dyn_cast<LLVM::ConstantOp>(i))
@@ -1679,10 +1696,8 @@ json::Object analyzeBlockCandidate(const json::Object &config) {
   auto coreCount = config.getInteger("cores"),
        blockCount = config.getInteger("blocks");
   check(coreCount && blockCount && *coreCount > 0 && *coreCount <= 4096 &&
-            *blockCount > 0 &&
-            *blockCount <= std::numeric_limits<unsigned>::max() &&
-            (vv || (*blockCount <= 10000 &&
-                    (!autoBlock || *blockCount <= *coreCount))),
+            *blockCount > 0 && *blockCount <= 10000 &&
+            (vv || !autoBlock || *blockCount <= *coreCount),
         "launch outside bounded analysis");
   unsigned cores = *coreCount, blocks = *blockCount;
   std::vector<Scalar> args;
@@ -1804,8 +1819,11 @@ std::string CandidateIRAnalysis::metaLibrary() const {
 void CandidateIRAnalysis::checkResources(const O &item) const {
   const O &metadata = sub(item, "metadata");
   std::string mode = str(metadata, "parallel_mode");
-  check(str(sub(metadata, "target"), "arch") == "Ascend950PR_9579",
-        "cost model target is outside the validated A5 profile");
+  std::string arch = str(sub(metadata, "target"), "arch");
+  check(StringRef(arch).starts_with("Ascend950") ||
+            StringRef(arch).starts_with("Ascend910_95") ||
+            StringRef(arch).starts_with("Ascend910_93"),
+        "cost model target is unsupported");
   bool vv = str(metadata, "mix_mode") == "aiv",
        mixed = vv && mode == "mix_simd_simt", bound = false, hasUB = false;
   int64_t capacity = spec("UB_SIZE"),
@@ -1994,6 +2012,7 @@ O modelConfig(const O &item, const O &contract, const A &arguments,
             "only one Cube with two Vector subblocks is modelled");
   }
   O config{{"mode", vv ? "vv" : "cv"},
+           {"target_arch", get(sub(metadata, "target"), "arch")},
            {"modules", std::move(modules)},
            {"name", get(metadata, "name")},
            {"arguments", std::move(args)},

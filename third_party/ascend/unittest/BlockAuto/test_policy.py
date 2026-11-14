@@ -94,6 +94,19 @@ class TestNativeResources(unittest.TestCase):
 
 class TestNativeSelection(unittest.TestCase):
 
+    def test_invalid_merge_parameters_are_rejected_before_grid_arithmetic(self):
+        for mix_mode in ("aiv", "mix"):
+            for factor, axis in ((0, 0), (3, 0), (2, -1), (4, 3)):
+                with self.subTest(mix_mode=mix_mode, factor=factor, axis=axis):
+                    value = item(factor)
+                    value["axis"] = axis
+                    value["metadata"]["mix_mode"] = mix_mode
+                    state = prepare([value])[0]
+                    self.assertTrue(state["resource_checked"])
+                    self.assertFalse(state["needs_llvm"])
+                    self.assertNotIn("config", state)
+                    self.assertIn("invalid merge factor or axis", state["error"])
+
     def test_argument_positions_follow_compiler_abi_not_ssa_names(self):
         value = item()
         value["metadata"]["program_grid_transforms"] = dict(hidden_extent_axes=[0])

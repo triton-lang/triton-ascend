@@ -49,10 +49,8 @@ std::string rejection(const O &item, const O &contract,
                       const CandidateIRAnalysis &ir) {
   const O &metadata = sub(item, "metadata");
   A grid(array(contract, "grid"));
-  check(grid.size() == 3, "invalid launch grid");
   int64_t tasks = product(grid), factor = integer(item, "factor"),
           axis = integer(item, "axis");
-  check(factor == 1 || factor == 2 || factor == 4, "invalid factor");
   const V *floor = contract.get("runtime_core_floor");
   if (!floor)
     floor = contract.get("core_floor");
@@ -69,7 +67,6 @@ std::string rejection(const O &item, const O &contract,
   check(cores >= 0, "invalid core floor");
   if (factor == 1)
     return "";
-  check(axis >= 0 && axis < 3, "invalid axis");
   bool preserve = preservesGrid(metadata);
   if (!preserve)
     grid[axis] = (integer(grid[axis]) - 1) / factor + 1;
@@ -86,8 +83,6 @@ O modelConfig(const O &item, const O &contract, const A &arguments,
        preserve = vv && preservesGrid(metadata);
   int64_t factor = integer(item, "factor"), axis = integer(item, "axis"),
           cores = ir.spec(vv ? "VECTOR_CORE_COUNT" : "CUBE_CORE_COUNT");
-  check(factor == 1 || factor == 2 || factor == 4,
-        "factor outside automatic shortlist");
   check(mode == "simd" || (vv && mode == "mix_simd_simt"),
         "unmodelled execution mode");
   check(!flag(metadata, "ptsm_cap_authorized") &&
@@ -98,12 +93,9 @@ O modelConfig(const O &item, const O &contract, const A &arguments,
             integer(metadata, "coalesce_factor", 1) == 1,
         "additional grid transform");
   A grid(array(contract, "grid")), args(arguments);
-  check(grid.size() == 3, "invalid launch grid");
   product(grid);
-  if (factor != 1 && !preserve) {
-    check(axis >= 0 && axis < 3, "invalid axis");
+  if (factor != 1 && !preserve)
     grid[axis] = (integer(grid[axis]) - 1) / factor + 1;
-  }
   for (const V &n : grid)
     args.push_back(n);
   int64_t blocks = product(grid);

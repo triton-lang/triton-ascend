@@ -42,6 +42,10 @@ static O prepare(const O &item, const O &contract, MLIRContext &context) {
   bool vv = str(sub(item, "metadata"), "mix_mode") == "aiv";
   state["vv"] = vv;
   try {
+    int64_t factor = integer(item, "factor"), axis = integer(item, "axis");
+    check((factor == 1 || factor == 2 || factor == 4) &&
+              (factor == 1 || (axis >= 0 && axis < 3)),
+          "invalid merge factor or axis");
     if (vv) {
       std::string reason = rejection(item, contract, *ir);
       if (!reason.empty()) {
@@ -206,33 +210,31 @@ std::string selectBlockCandidates(llvm::StringRef request) {
   O result;
   if (action == "plan")
     result = planCV(input);
-  else {
-    check(action == "prepare" || action == "rank", "unknown selector action");
+  else if (action == "prepare") {
     DialectRegistry registry;
     registerCandidateDialects(registry);
     MLIRContext context(registry, MLIRContext::Threading::DISABLED);
     context.allowUnregisteredDialects();
-    Items items;
     A states;
+    for (const V &value : array(input, "candidates"))
+      states.push_back(prepare(object(value), contract, context));
+    bool baselineReady =
+        std::any_of(states.begin(), states.end(), [](const V &v) {
+          return str(object(v), "key") == "unmerged" &&
+                 flag(object(v), "resource_checked");
+        });
+    if (!baselineReady)
+      for (V &v : states)
+        (*v.getAsObject())["needs_llvm"] = false;
+    result = O{{"candidates", std::move(states)}};
+  } else {
+    check(action == "rank", "unknown selector action");
+    Items items;
     for (const V &value : array(input, "candidates")) {
       const O &item = object(value);
-      if (action == "prepare")
-        states.push_back(prepare(item, contract, context));
-      else
-        items[key(item)] = &item;
+      items[key(item)] = &item;
     }
-    if (action == "prepare") {
-      bool baselineReady =
-          std::any_of(states.begin(), states.end(), [](const V &v) {
-            return str(object(v), "key") == "unmerged" &&
-                   flag(object(v), "resource_checked");
-          });
-      if (!baselineReady)
-        for (V &v : states)
-          (*v.getAsObject())["needs_llvm"] = false;
-    }
-    result = action == "prepare" ? O{{"candidates", std::move(states)}}
-                                 : rank(items, contract);
+    result = rank(items, contract);
   }
   std::string output;
   raw_string_ostream stream(output);

@@ -138,10 +138,7 @@ O rankCV(const O &records, const O &contract) {
         axis >= 3 || integer(original[axis]) < factor ||
         integer(original[axis]) % factor)
       continue;
-    A grid(original);
-    grid[axis] = integer(grid[axis]) / factor;
-    if (V(std::move(grid)) == get(row, "batch_grid") &&
-        get(row, "mode") == get(baseline, "mode") &&
+    if (get(row, "mode") == get(baseline, "mode") &&
         get(row, "cube_core_count") == get(baseline, "cube_core_count") &&
         get(row, "useful_flops") == get(baseline, "useful_flops"))
       eligible.push_back(key.str());

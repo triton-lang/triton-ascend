@@ -631,22 +631,24 @@ def _sort_int64_tiles(X, Indices, V, I, OUT_WIDTH: tl.constexpr, N: tl.constexpr
 
 @triton.jit
 def _order_int64(x, valid, lane, WIDTH: tl.constexpr, LARGEST: tl.constexpr):
-    # Sort the low word first. Its sorted rank breaks ties in the high word.
+    # Stable low-to-high radix sorting. The previous rank breaks ties in
+    # each 16-bit digit, retaining the order of all less significant bits.
     bits: tl.constexpr = WIDTH.bit_length()
     suffix_mask: tl.constexpr = (1 << bits) - 1
-    key = x if LARGEST else ~x
-    low = key.to(tl.uint32).to(tl.int64)
-    high = (key >> 32) + 0x80000000
-    low_pair = (low << bits) | (WIDTH - lane).to(tl.int64)
-    ordered_low = tl.sort(tl.where(valid, low_pair, 0), descending=True)
-    low_order = (ordered_low & suffix_mask).to(tl.int32)
-    source = tl.maximum(0, WIDTH - low_order - (low_order == 0).to(tl.int32))
-    high = tl.gather(high, source, axis=0)
-    high_pair = (high << bits) | (WIDTH - lane).to(tl.int64)
-    ordered_high = tl.sort(tl.where(low_order > 0, high_pair, 0), descending=True)
-    high_order = (ordered_high & suffix_mask).to(tl.int32)
-    source = tl.maximum(0, WIDTH - high_order - (high_order == 0).to(tl.int32))
-    return tl.where(high_order > 0, tl.gather(low_order, source, axis=0), 0)
+    key = x.to(tl.uint64, bitcast=True) ^ 0x8000000000000000
+    if not LARGEST:
+        key = ~key
+    order = tl.where(valid, WIDTH - lane, 0)
+    for shift in tl.static_range(0, 64, 16):
+        source = tl.minimum(WIDTH - order, WIDTH - 1)
+        digit = ((tl.gather(key, source, axis=0) >> shift) & 0xFFFF).to(tl.int32)
+        pair = (digit << bits) | (WIDTH - lane)
+        score = (tl.where(order > 0, pair, 0) + 0x00800000).to(tl.float32, bitcast=True)
+        ranked = al.sort(score, descending=True).to(tl.int32, bitcast=True) - 0x00800000
+        prev_order = (ranked & suffix_mask).to(tl.int32)
+        source = tl.minimum(WIDTH - prev_order, WIDTH - 1)
+        order = tl.where(prev_order > 0, tl.gather(order, source, axis=0), 0)
+    return order
 
 
 @triton.jit

@@ -662,6 +662,7 @@ def patch_module(mod):
         yield from _orig_get_packages()
         yield "triton.backends.ascend.reuse"
         yield "triton.backends.ascend.reuse.dsl"
+        yield "triton.backends.ascend.block_auto_models"
         if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
             distributed_pkg_root = os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python",
                                                 "triton_dist")

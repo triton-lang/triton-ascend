@@ -1616,14 +1616,8 @@ class AscendBackend(BaseBackend):
 
     @staticmethod
     def get_jit_reuse_handler():
-        from .reuse.config import enabled
-
-        if not enabled():
-            return None
-
-        from .reuse.bridge import get_handler
-
-        return get_handler()
+        from .block_auto_dispatch import get_launch_handler
+        return get_launch_handler()
 
     @staticmethod
     def get_exact_request_scope():

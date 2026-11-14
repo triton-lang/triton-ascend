@@ -191,7 +191,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "simt_reorder_instruction",
     "storage_align",
     "stream",
-    "sync_solver",
     "use_bytecode",
     "vf_merge_level",
     "warp_size",

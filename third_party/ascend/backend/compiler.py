@@ -1057,6 +1057,11 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--enable-hivm-auto-cv-balance={enable_hivm_auto_cv_balance}"]
 
+        sync_solver = metadata["sync_solver"]
+        if sync_solver is not None:
+            _compile_option_list += \
+                [f"--enable-hivm-graph-sync-solver={sync_solver}"]
+
         unit_flag = metadata["unit_flag"]
         if unit_flag is not None:
             _compile_option_list += \
@@ -1298,6 +1303,13 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if enable_hivm_auto_cv_balance is not None:
             _compile_option_list += \
                 [f"--enable-hivm-auto-cv-balance={enable_hivm_auto_cv_balance}"]
+
+        sync_solver = metadata["sync_solver"]
+        if sync_solver is not None:
+            _compile_option_list += [
+                f"--enable-hivm-graph-sync-solver={sync_solver}",
+                f"--enable-hivm-cross-core-gss={sync_solver}",
+            ]
 
         unit_flag = metadata["unit_flag"]
         if unit_flag is not None:
@@ -1554,6 +1566,7 @@ class NPUOptions:
     enable_hivm_batch_matmul: bool = False
     # Only takes effect on the Ascend 950 non-pure-SIMT BiShengIR compilation path.
     enable_vf_stack_limit: bool = False
+    sync_solver: bool = None
     unit_flag: bool = None
     enable_flatten: bool = None
     enable_auto_vectorize_v2: bool = None
@@ -1649,7 +1662,6 @@ class NPUOptions:
     simt_reorder_instruction: bool = field(default=False, init=False)
     storage_align: Optional[bool] = field(default=None, init=False)
     stream: Optional[int] = field(default=None, init=False)
-    sync_solver: Optional[bool] = field(default=None, init=False)
     use_bytecode: bool = field(default=False, init=False)
 
     def __post_init__(self, arch, rule_mask):

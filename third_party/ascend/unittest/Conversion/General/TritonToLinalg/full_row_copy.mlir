@@ -286,3 +286,112 @@ module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
     return %buffer : memref<32x64xf32>
   }
 }
+
+// -----
+
+// CHECK: module attributes
+// CHECK-SAME: tt.full_row_copy
+// CHECK-LABEL: func.func @conditional_padding
+// CHECK: %[[OTHER:.*]] = arith.constant 7.000000e+00 : f32
+// CHECK: %[[FULL:.*]] = arith.cmpi eq,
+// CHECK: scf.if %[[FULL]] {
+// CHECK: scf.for
+// CHECK-NOT: scf.if
+// CHECK-NOT: linalg.fill
+// CHECK: memref.copy {{.*}} : memref<1x64xf32, {{.*}}> to memref<1x64xf32, {{.*}}>
+// CHECK: } else {
+// CHECK: scf.for
+// CHECK: scf.if
+// CHECK: linalg.fill ins(%[[OTHER]]
+// CHECK: memref.copy {{.*}} : memref<1x?xf32, {{.*}}> to memref<1x?xf32, {{.*}}>
+// CHECK: return
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @conditional_padding(%input: memref<?xf32>, %rows: index, %cols: index, %flag: i1) -> memref<32x64xf32> {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %other = arith.constant 7.0 : f32
+    %buffer = memref.alloc() : memref<32x64xf32>
+    scf.for %i = %c0 to %rows step %c1 {
+      %base = arith.muli %i, %c64 : index
+      %src = memref.reinterpret_cast %input to offset: [%base], sizes: [1, 64], strides: [64, 1] : memref<?xf32> to memref<1x64xf32, strided<[64, 1], offset: ?>>
+      %row = memref.subview %buffer[%i, 0] [1, 64] [1, 1] : memref<32x64xf32> to memref<1x64xf32, strided<[64, 1], offset: ?>>
+      %partial = arith.cmpi slt, %cols, %c64 : index
+      scf.if %partial {
+        linalg.fill ins(%other : f32) outs(%row : memref<1x64xf32, strided<[64, 1], offset: ?>>)
+      }
+      %read = memref.subview %src[0, 0] [1, %cols] [1, 1] : memref<1x64xf32, strided<[64, 1], offset: ?>> to memref<1x?xf32, strided<[64, 1], offset: ?>>
+      %write = memref.subview %row[0, 0] [1, %cols] [1, 1] : memref<1x64xf32, strided<[64, 1], offset: ?>> to memref<1x?xf32, strided<[64, 1], offset: ?>>
+      memref.copy %read, %write : memref<1x?xf32, strided<[64, 1], offset: ?>> to memref<1x?xf32, strided<[64, 1], offset: ?>>
+    } {ExtractedLoadOrStore, hivm.parallel_loop}
+    return %buffer : memref<32x64xf32>
+  }
+}
+
+// -----
+
+// CHECK: module attributes
+// CHECK-NOT: tt.full_row_copy
+// CHECK-LABEL: func.func @unrelated_padding_condition
+// CHECK-NOT: arith.cmpi eq
+// CHECK: scf.for
+// CHECK: scf.if
+// CHECK: linalg.fill
+// CHECK: memref.copy {{.*}} : memref<1x?xf32, {{.*}}> to memref<1x?xf32, {{.*}}>
+// CHECK: return
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @unrelated_padding_condition(%input: memref<?xf32>, %rows: index, %cols: index, %flag: i1) -> memref<32x64xf32> {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %other = arith.constant 7.0 : f32
+    %buffer = memref.alloc() : memref<32x64xf32>
+    scf.for %i = %c0 to %rows step %c1 {
+      %base = arith.muli %i, %c64 : index
+      %src = memref.reinterpret_cast %input to offset: [%base], sizes: [1, 64], strides: [64, 1] : memref<?xf32> to memref<1x64xf32, strided<[64, 1], offset: ?>>
+      %row = memref.subview %buffer[%i, 0] [1, 64] [1, 1] : memref<32x64xf32> to memref<1x64xf32, strided<[64, 1], offset: ?>>
+      %partial = arith.cmpi slt, %cols, %c64 : index
+      scf.if %flag {
+        linalg.fill ins(%other : f32) outs(%row : memref<1x64xf32, strided<[64, 1], offset: ?>>)
+      }
+      %read = memref.subview %src[0, 0] [1, %cols] [1, 1] : memref<1x64xf32, strided<[64, 1], offset: ?>> to memref<1x?xf32, strided<[64, 1], offset: ?>>
+      %write = memref.subview %row[0, 0] [1, %cols] [1, 1] : memref<1x64xf32, strided<[64, 1], offset: ?>> to memref<1x?xf32, strided<[64, 1], offset: ?>>
+      memref.copy %read, %write : memref<1x?xf32, strided<[64, 1], offset: ?>> to memref<1x?xf32, strided<[64, 1], offset: ?>>
+    } {ExtractedLoadOrStore, hivm.parallel_loop}
+    return %buffer : memref<32x64xf32>
+  }
+}
+
+// -----
+
+// CHECK: module attributes
+// CHECK-NOT: tt.full_row_copy
+// CHECK-LABEL: func.func @padding_other_destination
+// CHECK-NOT: arith.cmpi eq
+// CHECK: scf.for
+// CHECK: scf.if
+// CHECK: linalg.fill
+// CHECK: memref.copy {{.*}} : memref<1x?xf32, {{.*}}> to memref<1x?xf32, {{.*}}>
+// CHECK: return
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @padding_other_destination(%input: memref<?xf32>, %rows: index, %cols: index, %flag: i1) -> memref<32x64xf32> {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    %other = arith.constant 7.0 : f32
+    %buffer = memref.alloc() : memref<32x64xf32>
+    scf.for %i = %c0 to %rows step %c1 {
+      %base = arith.muli %i, %c64 : index
+      %src = memref.reinterpret_cast %input to offset: [%base], sizes: [1, 64], strides: [64, 1] : memref<?xf32> to memref<1x64xf32, strided<[64, 1], offset: ?>>
+      %row = memref.subview %buffer[%i, 0] [1, 64] [1, 1] : memref<32x64xf32> to memref<1x64xf32, strided<[64, 1], offset: ?>>
+      %partial = arith.cmpi slt, %cols, %c64 : index
+      scf.if %partial {
+        linalg.fill ins(%other : f32) outs(%buffer : memref<32x64xf32>)
+      }
+      %read = memref.subview %src[0, 0] [1, %cols] [1, 1] : memref<1x64xf32, strided<[64, 1], offset: ?>> to memref<1x?xf32, strided<[64, 1], offset: ?>>
+      %write = memref.subview %row[0, 0] [1, %cols] [1, 1] : memref<1x64xf32, strided<[64, 1], offset: ?>> to memref<1x?xf32, strided<[64, 1], offset: ?>>
+      memref.copy %read, %write : memref<1x?xf32, strided<[64, 1], offset: ?>> to memref<1x?xf32, strided<[64, 1], offset: ?>>
+    } {ExtractedLoadOrStore, hivm.parallel_loop}
+    return %buffer : memref<32x64xf32>
+  }
+}

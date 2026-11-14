@@ -42,7 +42,7 @@ def collect(temps, compiler, metadata, *, cache_factory=None):
     return evidence
 
 
-def load_evidence(kernel, *, cache_factory=None, compiler_path=None):
+def load_evidence(kernel, *, cache_factory=None):
     """Load the candidate's cached model inputs and runtime metadata."""
     metadata = kernel.metadata._asdict()
     if not isinstance(metadata.get("target"), dict) and hasattr(metadata.get("target"), "__dict__"):
@@ -50,10 +50,6 @@ def load_evidence(kernel, *, cache_factory=None, compiler_path=None):
     evidence = metadata.get("block_auto_evidence", {})
     if evidence.get("version") != VERSION or evidence.get("status") != "COLLECTED":
         raise ValueError("same-compilation model evidence unavailable")
-    compiler_path = compiler_path or evidence.get("compiler")
-    if compiler_path is None:
-        from .utils import _get_npucompiler_path
-        compiler_path, _ = _get_npucompiler_path()
     cache = (cache_factory or _cache)(evidence["cache_key"])
     result = dict(metadata=metadata, files={})
     for role, record in evidence["files"].items():
@@ -63,5 +59,5 @@ def load_evidence(kernel, *, cache_factory=None, compiler_path=None):
             raise ValueError("cached model input unavailable: " + role)
         result[role] = Path(path).read_text()
         result["files"][role] = dict(path=str(path))
-    result["files"]["compiler"] = dict(path=str(compiler_path))
+    result["files"]["compiler"] = dict(path=evidence["compiler"])
     return result

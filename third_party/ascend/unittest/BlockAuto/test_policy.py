@@ -41,12 +41,15 @@ def prepare(items, launch=None):
 class TestNativeResources(unittest.TestCase):
 
     def test_aligned_extent_and_shared_offsets(self):
-        value = item(dtype="2xi32", offset=8192)
+        value = item(dtype="2xi32", offset=253920)
         value["final_ir"] = value["final_ir"].replace(
             " return", " %alias = hivm.hir.pointer_cast(%offset) : memref<2xi32, #hivm.address_space<ub>>\n return")
         state = prepare([value])[0]
         self.assertTrue(state["resource_checked"])
-        self.assertEqual(state["ub_usage"]["address_extent_bits"], 8224 * 8)
+        # Aliases do not double-count, but the final small buffer still rounds
+        # up to 32 bytes. Moving it one byte past the boundary must fail.
+        value["final_ir"] = value["final_ir"].replace("constant(253920 :", "constant(253921 :")
+        self.assertFalse(prepare([value])[0]["resource_checked"])
 
     def test_ub_capacity_boundary(self):
         for offset, accepted in ((253920, True), (253952, False)):
@@ -64,14 +67,14 @@ class TestNativeResources(unittest.TestCase):
         self.assertIn("actual overflow unconfirmed", state["error"])
 
     def test_mix_uses_effective_runtime_capacity(self):
-        value = item(mode="mix_simd_simt")
-        self.assertEqual(prepare([value])[0]["ub_usage"]["capacity_bits"], 216 * 1024 * 8)
+        value = item(mode="mix_simd_simt", dtype="8xf32", offset=216 * 1024 - 32)
+        self.assertTrue(prepare([value])[0]["resource_checked"])
         value["metadata"]["shared_mem_dynamic_size"] = 208 * 1024
-        self.assertEqual(prepare([value])[0]["ub_usage"]["capacity_bits"], 208 * 1024 * 8)
-        value["final_ir"] = value["final_ir"].replace("constant(0 :", "constant(212992 :")
         state = prepare([value])[0]
         self.assertFalse(state["resource_checked"])
         self.assertIn("exceeds capacity", state["error"])
+        value["final_ir"] = value["final_ir"].replace("constant(221152 :", "constant(212960 :")
+        self.assertTrue(prepare([value])[0]["resource_checked"])
         value["metadata"]["shared_mem_dynamic_size"] = 248 * 1024
         self.assertFalse(prepare([value])[0]["resource_checked"])
 
@@ -116,7 +119,7 @@ class TestNativeSelection(unittest.TestCase):
                       arguments={"z": dict(kind="scalar", value=7), "a": dict(kind="tensor", dtype="fp32")})
         state = prepare([value], launch)[0]
         self.assertTrue(state["resource_checked"])
-        self.assertEqual(state["arguments"], [None, None, 7, None, 224])
+        self.assertEqual(state["config"]["arguments"], [None, None, 7, None, 224, 224, 1, 1])
         launch["argument_order"] = ["z", "z"]
         self.assertFalse(prepare([value], launch)[0]["resource_checked"])
 

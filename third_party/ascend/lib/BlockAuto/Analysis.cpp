@@ -1,13 +1,11 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "Selection.h"
-#include "mlir/Analysis/DataLayoutAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/DLTI/DLTI.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
-#include "mlir/Pass/AnalysisManager.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMIRToLLVMTranslation.h"
 #include "mlir/Target/LLVMIR/Import.h"
 #include "llvm/AsmParser/Parser.h"
@@ -20,7 +18,6 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/SourceMgr.h"
-#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -30,7 +27,6 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
-#include <numeric>
 #include <queue>
 #include <set>
 #include <stdexcept>
@@ -64,12 +60,6 @@ std::string text(const Object &o, StringRef key) {
   auto v = o.getString(key);
   check(bool(v), "missing string: " + key.str());
   return v->str();
-}
-std::string printValue(Operation &v) {
-  std::string s;
-  raw_string_ostream out(s);
-  v.print(out);
-  return s;
 }
 
 struct Pointer {
@@ -390,7 +380,6 @@ struct VectorPlan {
     std::string pipe =
         rate.unit == "load" || rate.unit == "store" ? rate.unit : "exec";
     auto &slots = legacySlots[pipe];
-    check(rate.slots <= slots.size(), "unsupported vector issue width");
     auto slot = std::min_element(slots.begin(), slots.begin() + rate.slots);
     pending.erase(std::remove_if(pending.begin(), pending.end(),
                                  [&](double t) { return t <= issue; }),
@@ -435,16 +424,13 @@ struct VectorPlan {
     for (unsigned i = 0; i < nodes.size(); ++i) {
       remaining[i] = nodes[i].deps.size();
       earliest[i] = nodes[i].earliest;
-      for (int parent : nodes[i].deps) {
-        check(parent >= 0 && parent < int(i), "invalid vector dependency");
+      for (int parent : nodes[i].deps)
         children[parent].push_back(i);
-      }
       if (!remaining[i])
         queue.emplace(earliest[i], i);
     }
     std::map<std::string, double> units;
     std::map<std::pair<std::string, std::string>, std::vector<double>> pipes;
-    unsigned completed = 0;
     while (!queue.empty()) {
       auto [time, i] = queue.top();
       queue.pop();
@@ -468,15 +454,12 @@ struct VectorPlan {
         end = start + n.rate.latency;
         finish = std::max(finish, end);
       }
-      ++completed;
       for (int child : children[i]) {
         earliest[child] = std::max(earliest[child], end);
         if (!--remaining[child])
           queue.emplace(earliest[child], child);
       }
     }
-    check(completed == nodes.size() && std::isfinite(finish),
-          "vector schedule did not complete");
     return finish;
   }
 };
@@ -540,7 +523,6 @@ struct KernelPlan : Plan {
     pipes[1] = add("vector", {scalar, pipes[1]}, cycles + 8);
   }
   void dma(bool load, double size) override {
-    check(size >= 0, "negative DMA extent");
     int pipe = load ? 4 : 5;
     pipes[pipe] = add("dma", {scalar, pipes[pipe]},
                       32 + size / profile.localBandwidth, size, 32);
@@ -889,7 +871,6 @@ struct CVPlan : Plan {
 
 double schedule(const std::vector<KernelPlan> &blocks, unsigned cores,
                 double bandwidth) {
-  check(cores && !blocks.empty(), "empty launch or invalid core count");
   struct State {
     std::map<int, std::vector<Ref>> children;
     std::vector<int> remaining;
@@ -916,7 +897,7 @@ double schedule(const std::vector<KernelPlan> &blocks, unsigned cores,
         ready.emplace(state.earliest[child], block, child);
     }
   };
-  unsigned next = 0, completed = 0;
+  unsigned next = 0;
   double dispatch = 0, issuer = 0, bus = 0, finish = 0;
   auto start = [&](unsigned core, double available) {
     if (next == blocks.size())
@@ -944,13 +925,11 @@ double schedule(const std::vector<KernelPlan> &blocks, unsigned cores,
       end = std::max(end, bus);
     }
     if (event.kind == "end") {
-      ++completed;
       finish = std::max(finish, end);
       start(states[block].core, end);
     }
     release(block, i, end);
   }
-  check(completed == blocks.size(), "dependency graph did not complete");
   return finish;
 }
 
@@ -1012,14 +991,8 @@ OwningOpRef<ModuleOp> parse(StringRef input, MLIRContext &context) {
   auto result = translateLLVMIRToModule(std::move(module), &context, false);
   check(bool(result), "cannot import candidate LLVM into MLIR");
   result->walk([](Operation *op) {
-    bool original = false;
-    op->getLoc()->walk([&](Location location) {
-      if (auto loc = dyn_cast<FileLineColLoc>(location))
-        original |=
-            loc.getFilename() == "block-auto-instruction" && loc.getLine() == 1;
-      return WalkResult::advance();
-    });
-    if (!original)
+    auto loc = op->getLoc()->findInstanceOf<FileLineColLoc>();
+    if (!loc || loc.getFilename() != "block-auto-instruction")
       op->setAttr("block_auto.materialized", UnitAttr::get(op->getContext()));
   });
   // CF implements successor selection from constant operands. Use it also for
@@ -1145,259 +1118,247 @@ struct Analyzer {
       unsigned visit = ++visits[block];
       Block *next = nullptr;
       for (Operation &i : *block) {
-        try {
-          if (constant(i)) {
-            Scalar value;
-            if (auto op = dyn_cast<LLVM::ConstantOp>(i))
-              value = fromAttribute(op.getValue());
-            else if (isa<LLVM::UndefOp, LLVM::PoisonOp>(i))
-              value = emptyAggregate(i.getResult(0).getType());
-            else if (auto zero = dyn_cast<LLVM::ZeroOp>(i))
-              if (auto type = dyn_cast<LLVM::LLVMPointerType>(zero.getType()))
-                if (type.getAddressSpace() == 6)
-                  value = Scalar(Pointer{});
-            env[i.getResult(0)] = value;
-            continue;
-          }
-          check(++steps <= (hook ? 100000 : 1000000),
-                "bounded scalar tracing limit");
-          bool materialized = i.hasAttr("block_auto.materialized");
-          if (hook && hook->record && !materialized)
-            hook->record(i, visit);
-          if (isa<LLVM::ReturnOp>(i)) {
-            TraceResult result;
-            if (isVector)
-              result.cycles = vector.complete();
-            if (lowered)
-              for (const auto &[p, v] : initial)
-                result.effects[p] = memory[p];
-            if (isVector)
-              cache[key] = result;
-            return result;
-          }
-          if (auto branch = dyn_cast<BranchOpInterface>(i)) {
-            if (isVector)
-              vector.scalar(i);
-            next = branch.getSuccessorForOperands(attributes(i));
-            check(next, "unknown scalar branch condition");
-            auto index =
-                llvm::find(i.getSuccessors(), next) - i.getSuccessors().begin();
-            auto operands =
-                branch.getSuccessorOperands(index).getForwardedOperands();
-            Environment values;
-            DenseMap<mlir::Value, std::set<int>> deps;
-            DenseMap<mlir::Value, double> times;
-            for (auto [arg, incoming] :
-                 llvm::zip(next->getArguments(), operands)) {
-              values[arg] = val(incoming);
-              deps[arg] = vector.dependencies[incoming];
-              times[arg] = vector.times[incoming];
-            }
-            for (const auto &entry : values) {
-              env[entry.first] = entry.second;
-              vector.dependencies[entry.first] = deps[entry.first];
-              vector.times[entry.first] = times[entry.first];
-            }
-            break;
-          }
-          if (!isVector && kernel && !materialized)
-            kernel->step();
-          Scalar result;
-          bool vectorCall = false;
-          if (auto call = dyn_cast<LLVM::CallOp>(&i)) {
-            auto callee =
-                call.getCallee()
-                    ? module.lookupSymbol<LLVM::LLVMFuncOp>(*call.getCallee())
-                    : LLVM::LLVMFuncOp{};
-            check(bool(callee), "indirect call is not modelled");
-            StringRef name = callName(call);
-            std::vector<Scalar> args;
-            for (mlir::Value a : call.getCalleeOperands())
-              args.push_back(val(a));
-            auto helper = [&](Plan *plan) {
-              check(depth < 8, "lowered helper recursion limit");
-              Memory inherited;
-              if (lowered)
-                for (const auto &a : args)
-                  if (auto *p = std::get_if<Pointer>(&a.data))
-                    if (memory.count(*p))
-                      inherited[*p] = memory[*p];
-              ++depth;
-              auto work = trace(callee, args, blockId, plan, inherited);
-              --depth;
-              for (const auto &[p, v] : work.effects)
-                memory[p] = v;
-              return work;
-            };
-            if (hook && hook->call && hook->call(name, args, result)) {
-            } else if (!callee.isExternal() &&
-                       callingConvention(callee) == 1023) {
-              check(!isVector && kernel, "nested vector call");
-              kernel->vf(helper(nullptr).cycles);
-            } else if (name.starts_with("load_gm_to_ubuf_") ||
-                       name.starts_with("store_ubuf_to_gm_") ||
-                       name.starts_with("copy_ubuf_to_ubuf_")) {
-              check(!isVector && kernel, "vector DMA helper");
-              if (lowered && !callee.isExternal())
-                helper(kernel);
-              else {
-                SmallVector<StringRef> match;
-                static const Regex transfer(
-                    R"(^(load_gm_to_ubuf|store_ubuf_to_gm|copy_ubuf_to_ubuf)_([0-9]+)d_(float|half|bfloat16_t|int[0-9]+_t|uint[0-9]+_t)$)");
-                check(transfer.match(name, &match),
-                      "unmodelled transfer helper");
-                bool copy = match[1] == "copy_ubuf_to_ubuf";
-                check(!copy || !lowered, "lowered UB copy definition missing");
-                unsigned rank = std::stoul(match[2].str());
-                check(args.size() >= 3 + rank, "transfer helper ABI");
-                std::string type = match[3].str();
-                unsigned bits = type == "float" ? 32
-                                : (type == "half" || type == "bfloat16_t")
-                                    ? 16
-                                    : std::stoul(type.substr(
-                                          type.find_first_of("0123456789")));
-                double bytes = extent(Args(args).slice(3, rank)) * bits / 8;
-                if (copy)
-                  kernel->vf(std::ceil(bytes / 256));
-                else
-                  kernel->dma(name.starts_with("load_"), bytes);
-              }
-            } else if (name == "llvm.hivm.GET.BLOCK.IDX")
-              result = Scalar(int64_t(blockId));
-            else if (name == "llvm.hivm.GET.SUBBLOCKID" && subblock >= 0)
-              result = Scalar(int64_t(subblock));
-            else if (name == "llvm.hivm.GET.CTRL") {
-              if (!lowered)
-                result = Scalar(int64_t(0));
-            } else if (name == "llvm.hivm.GET.SYS.VA.BASE" && lowered) {
-            } else if (name.starts_with("llvm.hivm.SBITSET")) {
-              if (args.size() == 2 && args[0].known() && args[1].known()) {
-                int64_t shift = args[1].integer();
-                check(shift >= 0 && shift < 64, "invalid control bit");
-                uint64_t mask = uint64_t(1) << shift, value = args[0].bits();
-                result = Scalar(APInt(64, name.contains("SBITSET1")
-                                              ? value | mask
-                                              : value & ~mask));
-              }
-            } else if (name == "llvm.hivm.SET.CTRL") {
-            } else if (name.contains(".FLAG.") && !isVector && kernel) {
-              check(args.size() == 3, "flag ABI");
-              kernel->flag(name.contains(".SET."), integer(args, 0),
-                           integer(args, 1), integer(args, 2));
-            } else if (name == "llvm.hivm.BARRIER" && !isVector && kernel)
-              kernel->barrier(integer(args, 0));
-            else if (name.starts_with("llvm.hivm.") && isVector) {
-              vector.add(call);
-              vectorCall = true;
-            } else if (!isVector && kernel &&
-                       (kernel->extra(name, args) ||
-                        (external && external(name, args, *kernel)))) {
-            } else {
-              check(lowered && !isVector && kernel && !callee.isExternal() &&
-                        callingConvention(callee) == 0 &&
-                        isa<LLVM::LLVMVoidType>(
-                            callee.getFunctionType().getReturnType()),
-                    "unmodelled call: " + name.str());
-              helper(kernel);
-            }
-
-          } else if (auto freeze = dyn_cast<LLVM::FreezeOp>(i)) {
-            result = val(i.getOperand(0));
-          } else if (auto alloc = dyn_cast<LLVM::AllocaOp>(i)) {
-            result = Scalar(Pointer{&i, lowered ? depth : 0, 0});
-          } else if (auto store = dyn_cast<LLVM::StoreOp>(i)) {
-            Scalar pointer = val(store.getAddr());
-            auto *p = std::get_if<Pointer>(&pointer.data);
-            if (p && p->allocation)
-              memory[*p] = val(store.getValue());
-            else
-              check(!isVector &&
-                        cast<LLVM::LLVMPointerType>(store.getAddr().getType())
-                                .getAddressSpace() == 6,
-                    "unmodelled scalar write");
-          } else if (auto load = dyn_cast<LLVM::LoadOp>(i)) {
-            Scalar pointer = val(load.getAddr());
-            if (auto *p = std::get_if<Pointer>(&pointer.data))
-              if (memory.count(*p))
-                result = memory[*p];
-            if (hook && hook->load)
-              result = hook->load(load);
-          } else if (auto extract = dyn_cast<LLVM::ExtractValueOp>(i)) {
-            result = val(extract.getContainer());
-            for (auto index : extract.getPosition()) {
-              auto *values = std::get_if<std::vector<Scalar>>(&result.data);
-              Scalar selected =
-                  values && index >= 0 && index < int64_t(values->size())
-                      ? (*values)[index]
-                      : Scalar();
-              result = std::move(selected);
-            }
-          } else if (auto insertOp = dyn_cast<LLVM::InsertValueOp>(i)) {
-            result = insert(val(insertOp.getContainer()),
-                            insertOp.getPosition(), val(insertOp.getValue()));
-          } else if (auto castOp = dyn_cast<LLVM::PtrToIntOp>(i)) {
-            auto pointer = val(castOp.getArg());
-            if (auto *p = std::get_if<Pointer>(&pointer.data))
-              if (lowered && !p->allocation)
-                result = Scalar(p->offset);
-          } else if (auto castOp = dyn_cast<LLVM::IntToPtrOp>(i)) {
-            auto source = val(castOp.getArg());
-            if (cast<LLVM::LLVMPointerType>(castOp.getType())
-                        .getAddressSpace() == 6 &&
-                source.known())
-              result = Scalar(Pointer{nullptr, 0, source.integer()});
-          } else if (auto gep = dyn_cast<LLVM::GEPOp>(i)) {
-            auto pointer = val(gep.getBase());
-            if (auto *p = std::get_if<Pointer>(&pointer.data))
-              if (lowered && !p->allocation) {
-                auto indices = gep.getRawConstantIndices();
-                check(indices.size() == 1 &&
-                          !isa<LLVM::LLVMStructType, LLVM::LLVMArrayType>(
-                              gep.getElemType()),
-                      "unsupported UB GEP layout");
-                Scalar index = indices[0] == LLVM::GEPOp::kDynamicIndex
-                                   ? val(gep.getDynamicIndices()[0])
-                                   : Scalar(int64_t(indices[0]));
-                if (index.known())
-                  result = Scalar(Pointer{
-                      nullptr, 0,
-                      p->offset +
-                          index.integer() *
-                              int64_t(layout.getTypeSize(gep.getElemType())
-                                          .getFixedValue())});
-              }
-          } else {
-            // Delegate arithmetic, comparisons, casts and selects to the
-            // dialect's fold hooks instead of maintaining an opcode evaluator.
-            check(isMemoryEffectFree(&i) ||
-                      isa<LLVM::LifetimeStartOp, LLVM::LifetimeEndOp>(i),
-                  "unmodelled instruction effects");
-            SmallVector<OpFoldResult> folded;
-            SmallVector<mlir::Value> operands(i.getOperands());
-            auto attrs = i.getAttrDictionary();
-            if (succeeded(i.fold(attributes(i), folded))) {
-              // As in SparseConstantPropagation, invocation-specific values
-              // must not cause an in-place rewrite of the shared analysis IR.
-              if (folded.empty()) {
-                i.setOperands(operands);
-                i.setAttrs(attrs);
-              } else if (folded.size() == 1) {
-                if (auto attr = dyn_cast<Attribute>(folded[0]))
-                  result = fromAttribute(attr);
-                else
-                  result = val(cast<mlir::Value>(folded[0]));
-              }
-            }
-          }
-          if (i.getNumResults())
-            env[i.getResult(0)] = result;
-          if (isVector && !vectorCall && !materialized)
-            vector.scalar(i);
-        } catch (const std::runtime_error &error) {
-          throw std::runtime_error(std::string(error.what()) + " in " +
-                                   fn.getSymName().str() + ": " +
-                                   printValue(i));
+        if (constant(i)) {
+          Scalar value;
+          if (auto op = dyn_cast<LLVM::ConstantOp>(i))
+            value = fromAttribute(op.getValue());
+          else if (isa<LLVM::UndefOp, LLVM::PoisonOp>(i))
+            value = emptyAggregate(i.getResult(0).getType());
+          else if (auto zero = dyn_cast<LLVM::ZeroOp>(i))
+            if (auto type = dyn_cast<LLVM::LLVMPointerType>(zero.getType()))
+              if (type.getAddressSpace() == 6)
+                value = Scalar(Pointer{});
+          env[i.getResult(0)] = value;
+          continue;
         }
+        check(++steps <= (hook ? 100000 : 1000000),
+              "bounded scalar tracing limit");
+        bool materialized = i.hasAttr("block_auto.materialized");
+        if (hook && hook->record && !materialized)
+          hook->record(i, visit);
+        if (isa<LLVM::ReturnOp>(i)) {
+          TraceResult result;
+          if (isVector)
+            result.cycles = vector.complete();
+          if (lowered)
+            for (const auto &[p, v] : initial)
+              result.effects[p] = memory[p];
+          if (isVector)
+            cache[key] = result;
+          return result;
+        }
+        if (auto branch = dyn_cast<BranchOpInterface>(i)) {
+          if (isVector)
+            vector.scalar(i);
+          next = branch.getSuccessorForOperands(attributes(i));
+          check(next, "unknown scalar branch condition");
+          auto index =
+              llvm::find(i.getSuccessors(), next) - i.getSuccessors().begin();
+          auto operands =
+              branch.getSuccessorOperands(index).getForwardedOperands();
+          SmallVector<std::tuple<Scalar, std::set<int>, double>> incoming;
+          for (auto operand : operands)
+            incoming.emplace_back(val(operand), vector.dependencies[operand],
+                                  vector.times[operand]);
+          for (auto [arg, state] : llvm::zip(next->getArguments(), incoming)) {
+            env[arg] = std::move(std::get<0>(state));
+            vector.dependencies[arg] = std::move(std::get<1>(state));
+            vector.times[arg] = std::get<2>(state);
+          }
+          break;
+        }
+        if (!isVector && kernel && !materialized)
+          kernel->step();
+        Scalar result;
+        bool vectorCall = false;
+        if (auto call = dyn_cast<LLVM::CallOp>(&i)) {
+          auto callee =
+              call.getCallee()
+                  ? module.lookupSymbol<LLVM::LLVMFuncOp>(*call.getCallee())
+                  : LLVM::LLVMFuncOp{};
+          check(bool(callee), "indirect call is not modelled");
+          StringRef name = callName(call);
+          std::vector<Scalar> args;
+          for (mlir::Value a : call.getCalleeOperands())
+            args.push_back(val(a));
+          auto helper = [&](Plan *plan) {
+            check(depth < 8, "lowered helper recursion limit");
+            Memory inherited;
+            if (lowered)
+              for (const auto &a : args)
+                if (auto *p = std::get_if<Pointer>(&a.data))
+                  if (memory.count(*p))
+                    inherited[*p] = memory[*p];
+            ++depth;
+            auto work = trace(callee, args, blockId, plan, inherited);
+            --depth;
+            for (const auto &[p, v] : work.effects)
+              memory[p] = v;
+            return work;
+          };
+          if (hook && hook->call && hook->call(name, args, result)) {
+          } else if (!callee.isExternal() &&
+                     callingConvention(callee) == 1023) {
+            check(!isVector && kernel, "nested vector call");
+            kernel->vf(helper(nullptr).cycles);
+          } else if (name.starts_with("load_gm_to_ubuf_") ||
+                     name.starts_with("store_ubuf_to_gm_") ||
+                     name.starts_with("copy_ubuf_to_ubuf_")) {
+            check(!isVector && kernel, "vector DMA helper");
+            if (lowered && !callee.isExternal())
+              helper(kernel);
+            else {
+              SmallVector<StringRef> match;
+              static const Regex transfer(
+                  R"(^(load_gm_to_ubuf|store_ubuf_to_gm|copy_ubuf_to_ubuf)_([0-9]+)d_(float|half|bfloat16_t|int[0-9]+_t|uint[0-9]+_t)$)");
+              check(transfer.match(name, &match), "unmodelled transfer helper");
+              bool copy = match[1] == "copy_ubuf_to_ubuf";
+              check(!copy || !lowered, "lowered UB copy definition missing");
+              unsigned rank = std::stoul(match[2].str());
+              check(args.size() >= 3 + rank, "transfer helper ABI");
+              std::string type = match[3].str();
+              unsigned bits = type == "float" ? 32
+                              : (type == "half" || type == "bfloat16_t")
+                                  ? 16
+                                  : std::stoul(type.substr(
+                                        type.find_first_of("0123456789")));
+              double bytes = extent(Args(args).slice(3, rank)) * bits / 8;
+              if (copy)
+                kernel->vf(std::ceil(bytes / 256));
+              else
+                kernel->dma(name.starts_with("load_"), bytes);
+            }
+          } else if (name == "llvm.hivm.GET.BLOCK.IDX")
+            result = Scalar(int64_t(blockId));
+          else if (name == "llvm.hivm.GET.SUBBLOCKID" && subblock >= 0)
+            result = Scalar(int64_t(subblock));
+          else if (name == "llvm.hivm.GET.CTRL") {
+            if (!lowered)
+              result = Scalar(int64_t(0));
+          } else if (name == "llvm.hivm.GET.SYS.VA.BASE" && lowered) {
+          } else if (name.starts_with("llvm.hivm.SBITSET")) {
+            if (args.size() == 2 && args[0].known() && args[1].known()) {
+              int64_t shift = args[1].integer();
+              check(shift >= 0 && shift < 64, "invalid control bit");
+              uint64_t mask = uint64_t(1) << shift, value = args[0].bits();
+              result =
+                  Scalar(APInt(64, name.contains("SBITSET1") ? value | mask
+                                                             : value & ~mask));
+            }
+          } else if (name == "llvm.hivm.SET.CTRL") {
+          } else if (name.contains(".FLAG.") && !isVector && kernel) {
+            check(args.size() == 3, "flag ABI");
+            kernel->flag(name.contains(".SET."), integer(args, 0),
+                         integer(args, 1), integer(args, 2));
+          } else if (name == "llvm.hivm.BARRIER" && !isVector && kernel)
+            kernel->barrier(integer(args, 0));
+          else if (name.starts_with("llvm.hivm.") && isVector) {
+            vector.add(call);
+            vectorCall = true;
+          } else if (!isVector && kernel &&
+                     (kernel->extra(name, args) ||
+                      (external && external(name, args, *kernel)))) {
+          } else {
+            check(lowered && !isVector && kernel && !callee.isExternal() &&
+                      callingConvention(callee) == 0 &&
+                      isa<LLVM::LLVMVoidType>(
+                          callee.getFunctionType().getReturnType()),
+                  "unmodelled call: " + name.str());
+            helper(kernel);
+          }
+
+        } else if (auto freeze = dyn_cast<LLVM::FreezeOp>(i)) {
+          result = val(i.getOperand(0));
+        } else if (auto alloc = dyn_cast<LLVM::AllocaOp>(i)) {
+          result = Scalar(Pointer{&i, lowered ? depth : 0, 0});
+        } else if (auto store = dyn_cast<LLVM::StoreOp>(i)) {
+          Scalar pointer = val(store.getAddr());
+          auto *p = std::get_if<Pointer>(&pointer.data);
+          if (p && p->allocation)
+            memory[*p] = val(store.getValue());
+          else
+            check(!isVector &&
+                      cast<LLVM::LLVMPointerType>(store.getAddr().getType())
+                              .getAddressSpace() == 6,
+                  "unmodelled scalar write");
+        } else if (auto load = dyn_cast<LLVM::LoadOp>(i)) {
+          Scalar pointer = val(load.getAddr());
+          if (auto *p = std::get_if<Pointer>(&pointer.data))
+            if (memory.count(*p))
+              result = memory[*p];
+          if (hook && hook->load)
+            result = hook->load(load);
+        } else if (auto extract = dyn_cast<LLVM::ExtractValueOp>(i)) {
+          result = val(extract.getContainer());
+          for (auto index : extract.getPosition()) {
+            auto *values = std::get_if<std::vector<Scalar>>(&result.data);
+            Scalar selected =
+                values && index >= 0 && index < int64_t(values->size())
+                    ? (*values)[index]
+                    : Scalar();
+            result = std::move(selected);
+          }
+        } else if (auto insertOp = dyn_cast<LLVM::InsertValueOp>(i)) {
+          result = insert(val(insertOp.getContainer()), insertOp.getPosition(),
+                          val(insertOp.getValue()));
+        } else if (auto castOp = dyn_cast<LLVM::PtrToIntOp>(i)) {
+          auto pointer = val(castOp.getArg());
+          if (auto *p = std::get_if<Pointer>(&pointer.data))
+            if (lowered && !p->allocation)
+              result = Scalar(p->offset);
+        } else if (auto castOp = dyn_cast<LLVM::IntToPtrOp>(i)) {
+          auto source = val(castOp.getArg());
+          if (cast<LLVM::LLVMPointerType>(castOp.getType()).getAddressSpace() ==
+                  6 &&
+              source.known())
+            result = Scalar(Pointer{nullptr, 0, source.integer()});
+        } else if (auto gep = dyn_cast<LLVM::GEPOp>(i)) {
+          auto pointer = val(gep.getBase());
+          if (auto *p = std::get_if<Pointer>(&pointer.data))
+            if (lowered && !p->allocation) {
+              auto indices = gep.getRawConstantIndices();
+              check(indices.size() == 1 &&
+                        !isa<LLVM::LLVMStructType, LLVM::LLVMArrayType>(
+                            gep.getElemType()),
+                    "unsupported UB GEP layout");
+              Scalar index = indices[0] == LLVM::GEPOp::kDynamicIndex
+                                 ? val(gep.getDynamicIndices()[0])
+                                 : Scalar(int64_t(indices[0]));
+              if (index.known())
+                result = Scalar(Pointer{
+                    nullptr, 0,
+                    p->offset +
+                        index.integer() *
+                            int64_t(layout.getTypeSize(gep.getElemType())
+                                        .getFixedValue())});
+            }
+        } else {
+          // Delegate arithmetic, comparisons, casts and selects to the
+          // dialect's fold hooks instead of maintaining an opcode evaluator.
+          check(isMemoryEffectFree(&i) ||
+                    isa<LLVM::LifetimeStartOp, LLVM::LifetimeEndOp>(i),
+                "unmodelled instruction effects");
+          SmallVector<OpFoldResult> folded;
+          SmallVector<mlir::Value> operands(i.getOperands());
+          auto attrs = i.getAttrDictionary();
+          if (succeeded(i.fold(attributes(i), folded))) {
+            // As in SparseConstantPropagation, invocation-specific values
+            // must not cause an in-place rewrite of the shared analysis IR.
+            if (folded.empty()) {
+              i.setOperands(operands);
+              i.setAttrs(attrs);
+            } else if (folded.size() == 1) {
+              if (auto attr = dyn_cast<Attribute>(folded[0]))
+                result = fromAttribute(attr);
+              else
+                result = val(cast<mlir::Value>(folded[0]));
+            }
+          }
+        }
+        if (i.getNumResults())
+          env[i.getResult(0)] = result;
+        if (isVector && !vectorCall && !materialized)
+          vector.scalar(i);
       }
       check(next, "missing scalar terminator");
       block = next;
@@ -1473,37 +1434,38 @@ struct SimtModel {
     LLVM::LLVMFuncOp target;
     uint64_t info = 0;
     unsigned infos = 0, launches = 0, steps = 0;
-    for (auto &block : wrapper.getBody())
-      for (auto &i : block) {
-        check(!isa<BranchOpInterface, LLVM::LoadOp, LLVM::StoreOp>(i),
-              "SIMT wrapper has unresolved control or memory");
-        steps += !constant(i) && !i.hasAttr("block_auto.materialized") &&
-                 !isa<LLVM::ReturnOp>(i);
-        if (auto call = dyn_cast<LLVM::CallOp>(&i)) {
-          auto fn = call.getCallee()
-                        ? analyzer.module.lookupSymbol<LLVM::LLVMFuncOp>(
-                              *call.getCallee())
-                        : LLVM::LLVMFuncOp{};
-          check(bool(fn), "indirect SIMT wrapper call");
-          if (callingConvention(fn) == 1022) {
-            target = fn;
-            ++launches;
-          } else if (callName(call) == "llvm.hivm.store.vfsimt.info") {
-            APInt dimensions;
-            check(call.getCalleeOperands().size() == 1 &&
-                      matchPattern(call.getCalleeOperands()[0],
-                                   m_ConstantInt(&dimensions)),
-                  "dynamic SIMT dimensions");
-            info = dimensions.getZExtValue();
-            ++infos;
-          } else
-            check(simtIntrinsic(callName(call)) ||
-                      callName(call) == "llvm.hivm.BARRIER",
-                  "unmodelled SIMT wrapper call");
+    std::vector<Scalar> arguments;
+    Hook capture;
+    capture.record = [&](Operation &op, unsigned) {
+      check(!isa<BranchOpInterface, LLVM::LoadOp, LLVM::StoreOp>(op),
+            "SIMT wrapper has unresolved control or memory");
+      steps += !isa<LLVM::ReturnOp>(op);
+      if (auto call = dyn_cast<LLVM::CallOp>(op))
+        if (callName(call) == "llvm.hivm.store.vfsimt.info") {
+          APInt dimensions;
+          check(call.getCalleeOperands().size() == 1 &&
+                    matchPattern(call.getCalleeOperands()[0],
+                                 m_ConstantInt(&dimensions)),
+                "dynamic SIMT dimensions");
+          info = dimensions.getZExtValue();
+          ++infos;
         }
-      }
-    check(infos == 1 && launches == 1 && target && !target.isExternal() &&
-              !(info >> 48),
+    };
+    capture.call = [&](StringRef name, Args args, Scalar &) {
+      auto fn = analyzer.module.lookupSymbol<LLVM::LLVMFuncOp>(name);
+      if (fn && callingConvention(fn) == 1022) {
+        target = fn;
+        ++launches;
+        arguments.assign(args.begin(), args.end());
+      } else
+        check(name == "llvm.hivm.store.vfsimt.info" ||
+                  name == "llvm.hivm.BARRIER" || simtIntrinsic(name),
+              "unmodelled SIMT wrapper call");
+      return true;
+    };
+    KernelPlan dummy(analyzer.profile);
+    analyzer.trace(wrapper, bound, 0, &dummy, {}, &capture);
+    check(infos == 1 && launches == 1 && !target.isExternal() && !(info >> 48),
           "expected one static SIMT launch");
     std::array<int64_t, 3> dims{int64_t(info & 65535),
                                 int64_t((info >> 16) & 65535),
@@ -1511,19 +1473,6 @@ struct SimtModel {
     check(*std::min_element(dims.begin(), dims.end()) > 0 &&
               dims[0] * dims[1] * dims[2] <= 4096,
           "SIMT launch exceeds bounded domain");
-    std::vector<Scalar> arguments;
-    Hook capture;
-    capture.call = [&](StringRef name, Args args, Scalar &) {
-      if (name == target.getSymName()) {
-        check(arguments.empty(), "multiple SIMT launches");
-        arguments.assign(args.begin(), args.end());
-      }
-      return name == target.getSymName() ||
-             name == "llvm.hivm.store.vfsimt.info" ||
-             name == "llvm.hivm.BARRIER";
-    };
-    KernelPlan dummy(analyzer.profile);
-    analyzer.trace(wrapper, bound, 0, &dummy, {}, &capture);
     check(arguments.size() == target.getNumArguments(), "SIMT launch ABI");
     for (const auto &a : target.getArguments())
       check(isa<LLVM::LLVMPointerType>(a.getType()) ||
@@ -1620,7 +1569,8 @@ json::Object analyzeBlockCandidate(const json::Object &config) {
   check(coreCount && blockCount && *coreCount > 0 && *coreCount <= 4096 &&
             *blockCount > 0 &&
             *blockCount <= std::numeric_limits<unsigned>::max() &&
-            (vv || *blockCount <= 10000),
+            (vv || (*blockCount <= 10000 &&
+                    (!autoBlock || *blockCount <= *coreCount))),
         "launch outside bounded analysis");
   unsigned cores = *coreCount, blocks = *blockCount;
   std::vector<Scalar> args;
@@ -1658,12 +1608,9 @@ json::Object analyzeBlockCandidate(const json::Object &config) {
   if (vv) {
     auto fn = entry("aiv");
     Analyzer analyzer(*modules.at("aiv"), profile, true);
-    std::unique_ptr<SimtModel> simt;
-    if (const auto *mixed = config.getObject("mixed")) {
-      simt = std::make_unique<SimtModel>(SimtModel{analyzer, *mixed, {}});
-    }
+    SimtModel simt{analyzer, blockauto::optional(config, "mixed"), {}};
     analyzer.external = [&](StringRef callee, Args args, Plan &plan) {
-      return simt && simt->call(callee, args, plan);
+      return config.getObject("mixed") && simt.call(callee, args, plan);
     };
     std::vector<KernelPlan> traces;
     for (unsigned block = 0; block < blocks; ++block) {
@@ -1693,7 +1640,6 @@ json::Object analyzeBlockCandidate(const json::Object &config) {
       }
       auto slot = autoBlock ? ends.begin() + block
                             : std::min_element(ends.begin(), ends.end());
-      check(slot < ends.end(), "invalid automatic core dispatch");
       *slot += graph.finish();
     }
     result["score"] =
@@ -1703,15 +1649,7 @@ json::Object analyzeBlockCandidate(const json::Object &config) {
     result["launched_groups"] = int64_t(blocks);
     result["counts"] = Object{{"useful_flops", flops}, {"mma_calls", mmas}};
   }
+  check(number(result, "score") >= 0, "invalid static cost");
   return result;
-}
-std::string analyzeBlockCandidate(StringRef request) {
-  auto parsed = json::parse(request);
-  if (!parsed)
-    throw std::runtime_error(toString(parsed.takeError()));
-  std::string output;
-  raw_string_ostream stream(output);
-  stream << json::Value(analyzeBlockCandidate(object(*parsed)));
-  return output;
 }
 } // namespace mlir::triton::ascend

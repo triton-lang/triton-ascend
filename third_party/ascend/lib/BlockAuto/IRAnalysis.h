@@ -12,7 +12,7 @@ class CandidateIRAnalysis {
 public:
   CandidateIRAnalysis(Operation *op, AnalysisManager &manager);
   int64_t spec(StringRef key) const;
-  O resources(const O &item) const;
+  void checkResources(const O &item) const;
   A launchArguments(const O &contract, const O &metadata) const;
   std::string metaLibrary() const;
 

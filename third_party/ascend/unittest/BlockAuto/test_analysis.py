@@ -6,10 +6,17 @@ import unittest
 from triton._C.libtriton import ascend
 
 
-def analyze(source):
+def analyze(source, *, mixed=False):
     request = dict(mode="vv", modules={"aiv": source}, name="kernel", arguments=[], grid=[1, 1, 1], cores=56, blocks=1,
                    auto_blockify=True)
-    return json.loads(ascend.analyze_block_candidate(json.dumps(request)))
+    if mixed:
+        request["mixed"] = dict(simt_transaction_bytes=64, simt_transition_cycles=32, simt_instruction_cycles=1)
+    item = dict(factor=1, axis=-1, vv=True, resource_checked=True, needs_llvm=True, config=request,
+                optimized_llvm=source)
+    result = json.loads(ascend.select_block_candidates(json.dumps(dict(action="rank", contract={}, candidates=[item]))))
+    if not result["model_complete"]:
+        raise RuntimeError(result["candidates"]["unmerged"]["error"])
+    return result["candidates"]["unmerged"]
 
 
 def candidate(helper="pow_fp32", operations=1, iterations=1):
@@ -92,6 +99,59 @@ class TestCandidateHelpers(unittest.TestCase):
         source += "\ndefine void @helper() { call void @helper()\nret void }"
         with self.assertRaisesRegex(RuntimeError, "helper recursion limit"):
             analyze(source)
+
+
+def simt_candidate():
+    return '''
+declare void @llvm.hivm.store.vfsimt.info(i64)
+declare i32 @llvm.hivm.get.TID.X()
+define void @kernel() {
+  call void @cumsum_1d_float_dim0(i32 32)
+  ret void
+}
+define void @cumsum_1d_float_dim0(i32 %n) {
+  call void @llvm.hivm.store.vfsimt.info(i64 4295032864)
+  call simt_entry void @worker(i32 %n)
+  ret void
+}
+define simt_entry void @worker(i32 %n) {
+  %tid = call i32 @llvm.hivm.get.TID.X()
+  %address = inttoptr i64 0 to ptr addrspace(6)
+  store i32 %tid, ptr addrspace(6) %address
+  ret void
+}
+'''
+
+
+class TestSimtWrapper(unittest.TestCase):
+
+    def test_dispatch_and_thread_work_are_both_counted(self):
+        source = simt_candidate()
+        score = analyze(source, mixed=True)["score"]
+        doubled = source.replace("4295032864", "4295032896")
+        self.assertGreater(analyze(doubled, mixed=True)["score"], score)
+
+    def test_multiple_launches_remain_unsupported(self):
+        source = simt_candidate().replace(
+            "call simt_entry void @worker(i32 %n)",
+            "call simt_entry void @worker(i32 %n)\n  call simt_entry void @worker(i32 %n)")
+        with self.assertRaisesRegex(RuntimeError, "one static SIMT launch"):
+            analyze(source, mixed=True)
+
+    def test_wrapper_control_and_memory_are_not_silently_skipped(self):
+        for prefix in ("br label %launch\nlaunch:", "store i32 1, ptr null"):
+            with self.subTest(prefix=prefix):
+                source = simt_candidate().replace("call void @llvm.hivm.store.vfsimt.info",
+                                                  prefix + "\n  call void @llvm.hivm.store.vfsimt.info")
+                with self.assertRaisesRegex(RuntimeError, "unresolved control or memory"):
+                    analyze(source, mixed=True)
+
+    def test_launch_size_still_requires_a_static_descriptor(self):
+        source = simt_candidate().replace("i32 %n) {\n  call void",
+                                          "i32 %n) {\n  %dynamic = zext i32 %n to i64\n  call void")
+        source = source.replace("i64 4295032864", "i64 %dynamic")
+        with self.assertRaisesRegex(RuntimeError, "dynamic SIMT dimensions"):
+            analyze(source, mixed=True)
 
 
 if __name__ == "__main__":

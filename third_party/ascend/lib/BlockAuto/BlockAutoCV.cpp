@@ -1,6 +1,5 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "Selection.h"
-#include <set>
 #include <tuple>
 
 namespace mlir::triton::ascend::blockauto {
@@ -29,7 +28,7 @@ O planCV(const O &request) {
   check(grid.size() == 3 && selectedAxis >= -1 && selectedAxis < 3,
         "invalid CV launch grid or axis");
   product(grid);
-  A probes, admitted;
+  A probes;
   auto result = [](StringRef reason, A candidates = {}) {
     return O{{"reason", reason}, {"candidates", std::move(candidates)}};
   };
@@ -41,6 +40,8 @@ O planCV(const O &request) {
           probes.push_back(O{{"axis", axis}, {"factor", factor}});
     return O{{"probes", std::move(probes)}};
   }
+  std::map<std::string, A> admitted;
+  std::map<int64_t, std::string> roles;
   for (const V &value : array(request, "reports")) {
     try {
       O item(object(value));
@@ -54,35 +55,30 @@ O planCV(const O &request) {
       check(integer(report, "selected_axis", -1) == axis &&
                 integer(report, "requested_factor") == factor,
             "frontend selected a different axis or factor");
-      admitted.push_back(
+      std::string kind = mergeKind(report, factor, true);
+      auto [role, inserted] = roles.emplace(axis, kind);
+      if (!inserted && role->second != kind)
+        return result("CV_AXIS_ROLE_DEPENDS_ON_FACTOR");
+      admitted[kind].push_back(
           O{{"axis", axis},
             {"factor", factor},
             {"key", "a" + std::to_string(axis) + "_f" + std::to_string(factor)},
-            {"merge_kind", mergeKind(report, factor, true)}});
+            {"merge_kind", kind}});
     } catch (const std::exception &) {
     }
   }
-  for (int64_t axis = 0; axis < 3; ++axis) {
-    std::set<std::string> roles;
-    for (const V &v : admitted)
-      if (integer(object(v), "axis") == axis)
-        roles.insert(str(object(v), "merge_kind"));
-    if (roles.size() > 1)
-      return result("CV_AXIS_ROLE_DEPENDS_ON_FACTOR");
-  }
   auto order = [](const V &v) {
     const O &o = object(v);
-    return std::make_tuple(str(o, "merge_kind"), integer(o, "axis"),
-                           integer(o, "factor"));
+    return std::make_pair(integer(o, "axis"), integer(o, "factor"));
   };
-  std::sort(admitted.begin(), admitted.end(),
-            [&](const V &a, const V &b) { return order(a) < order(b); });
+  for (auto &[kind, candidates] : admitted)
+    std::sort(candidates.begin(), candidates.end(),
+              [&](const V &a, const V &b) { return order(a) < order(b); });
   A spatial;
   const O *m = nullptr, *n = nullptr;
-  for (const V &v : admitted) {
-    const O &o = object(v);
-    std::string kind = str(o, "merge_kind");
-    if (kind == "M" || kind == "N") {
+  for (const std::string kind : {"M", "N"})
+    for (const V &v : admitted[kind]) {
+      const O &o = object(v);
       spatial.push_back(v);
       if (integer(o, "factor") == 4) {
         auto &slot = kind == "M" ? m : n;
@@ -90,7 +86,6 @@ O planCV(const O &request) {
           slot = &o;
       }
     }
-  }
   if (m && n)
     return result("CV_M4_N4", A{O(*m), O(*n)});
   if (m || n) {
@@ -106,13 +101,9 @@ O planCV(const O &request) {
     return result("CV_SPATIAL_F2_ONLY", std::move(spatial));
   }
   A batch;
-  int64_t axis = 3;
-  for (const V &v : admitted)
-    if (str(object(v), "merge_kind") == "batch")
-      axis = std::min(axis, integer(object(v), "axis"));
-  for (const V &v : admitted)
-    if (str(object(v), "merge_kind") == "batch" &&
-        integer(object(v), "axis") == axis)
+  for (const V &v : admitted["batch"])
+    if (batch.empty() ||
+        integer(object(v), "axis") == integer(object(batch.front()), "axis"))
       batch.push_back(v);
   StringRef reason = batch.empty() ? "CV_NO_ADMITTED_MERGE" : "CV_BATCH_F2_F4";
   return result(reason, std::move(batch));
@@ -134,8 +125,7 @@ O rankCV(const O &records, const O &contract) {
   for (const auto &[key, value] : records) {
     const O &row = object(value);
     int64_t factor = integer(row, "factor"), axis = integer(row, "axis");
-    if (factor == 1 || !flag(row, "resource_checked") || axis < 0 ||
-        axis >= 3 || integer(original[axis]) < factor ||
+    if (factor == 1 || !flag(row, "resource_checked") ||
         integer(original[axis]) % factor)
       continue;
     if (get(row, "mode") == get(baseline, "mode") &&

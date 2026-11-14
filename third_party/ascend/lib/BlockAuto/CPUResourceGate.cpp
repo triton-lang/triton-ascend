@@ -48,7 +48,7 @@ std::string CandidateIRAnalysis::metaLibrary() const {
       module->getAttrOfType<hivm::AIV_BITCODEAttr>("hivm.aiv_bitcode");
   return bitcode ? bitcode.getPath().getValue().str() : "";
 }
-O CandidateIRAnalysis::resources(const O &item) const {
+void CandidateIRAnalysis::checkResources(const O &item) const {
   const O &metadata = sub(item, "metadata");
   std::string mode = str(metadata, "parallel_mode");
   check(str(sub(metadata, "target"), "arch") == "Ascend950PR_9579",
@@ -106,13 +106,9 @@ O CandidateIRAnalysis::resources(const O &item) const {
           "no verifiable static UB allocation in final IR");
     end = 0;
   }
-  O usage{{"capacity_bits", capacity},
-          {"address_extent_bits", end},
-          {"conservative_upper_bound", bound}};
   if (vv) {
     check(mode == "simd" || mixed,
           "only AIV SIMD and MIX resource proofs are supported");
-    usage["backend_usable_bits"] = capacity;
     if (mixed) {
       int64_t dynamic = integer(metadata, "shared_mem_dynamic_size"),
               full = capacity;
@@ -122,13 +118,10 @@ O CandidateIRAnalysis::resources(const O &item) const {
       check(full - spec("MAXIMUM_D_CACHE_SIZE") <= capacity &&
                 capacity <= full - spec("MINIMAL_D_CACHE_SIZE"),
             "MIX dynamic UB conflicts with D-cache reservation");
-      usage["reserved_cache_bits"] = full - capacity;
-      usage["capacity_bits"] = capacity;
     }
   }
   check(end <= capacity, bound ? "i1 conservative UB upper bound exceeds "
                                  "capacity; actual overflow unconfirmed"
                                : "final UB address exceeds capacity");
-  return usage;
 }
 } // namespace mlir::triton::ascend::blockauto

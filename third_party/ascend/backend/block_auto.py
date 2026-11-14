@@ -37,12 +37,7 @@ def select_candidates(candidates, contract):
             items.append(item)
             if candidate.get("kernel") is not None:
                 try:
-                    evidence = load_evidence(candidate["kernel"])
-                    item.update({
-                        k: evidence[k]
-                        for k in ("metadata", "files", "final_ir", "llvm", "llvm_aic", "llvm_aiv")
-                        if k in evidence
-                    })
+                    item.update(load_evidence(candidate["kernel"]))
                 except (ValueError, KeyError, OSError) as error:
                     item.update(status="RESOURCE_UNCONFIRMED", error=str(error))
         # Resource checks need only allocation IR and metadata, not the LLVM bodies.
@@ -58,8 +53,7 @@ def select_candidates(candidates, contract):
         inputs = [{
             k: v
             for k, v in item.items()
-            if k not in ("metadata", "files", "final_ir", "ub_usage", "arguments",
-                         "meta_library") and not (k == "llvm" and item.get("vv"))
+            if k not in ("metadata", "files", "final_ir", "meta_library") and not (k == "llvm" and item.get("vv"))
         }
                   for item in items]
         report = _native("rank", contract, candidates=inputs)

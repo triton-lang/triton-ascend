@@ -18,51 +18,43 @@ static std::string key(const O &item) {
 static O prepare(const O &item, const O &contract, MLIRContext &context) {
   O state{
       {"key", key(item)}, {"resource_checked", false}, {"needs_llvm", false}};
-  OwningOpRef<ModuleOp> module;
-  std::unique_ptr<ModuleAnalysisManager> manager;
-  CandidateIRAnalysis *ir = nullptr;
+  bool vv = false;
   try {
     if (!item.get("metadata")) {
       if (!excluded(str(item, "status")))
         state["status"] = "RESOURCE_UNCONFIRMED";
       return state;
     }
-    module = parseCandidateIR(str(item, "final_ir"), context);
-    manager = std::make_unique<ModuleAnalysisManager>(module->getOperation(),
-                                                      nullptr);
-    ir = &AnalysisManager(*manager).getAnalysis<CandidateIRAnalysis>();
-    state["ub_usage"] = ir->resources(item);
-    state["arguments"] = ir->launchArguments(contract, sub(item, "metadata"));
+    auto module = parseCandidateIR(str(item, "final_ir"), context);
+    ModuleAnalysisManager manager(module->getOperation(), nullptr);
+    auto &ir = AnalysisManager(manager).getAnalysis<CandidateIRAnalysis>();
+    ir.checkResources(item);
+    A arguments = ir.launchArguments(contract, sub(item, "metadata"));
     state["resource_checked"] = true;
-  } catch (const std::exception &error) {
-    update(state, O{{"status", "RESOURCE_UNCONFIRMED"},
-                    {"error", std::string(error.what())}});
-    return state;
-  }
-  bool vv = str(sub(item, "metadata"), "mix_mode") == "aiv";
-  state["vv"] = vv;
-  try {
+    vv = str(sub(item, "metadata"), "mix_mode") == "aiv";
+    state["vv"] = vv;
     int64_t factor = integer(item, "factor"), axis = integer(item, "axis");
     check((factor == 1 || factor == 2 || factor == 4) &&
               (factor == 1 || (axis >= 0 && axis < 3)),
           "invalid merge factor or axis");
     if (vv) {
-      std::string reason = rejection(item, contract, *ir);
+      std::string reason = rejection(item, contract, ir);
       if (!reason.empty()) {
         update(state, O{{"status", "RUNTIME_REJECTED"}, {"error", reason}});
         return state;
       }
-      auto path = ir->metaLibrary();
+      auto path = ir.metaLibrary();
       if (!path.empty())
         state["meta_library"] = path;
     } else
       state["merge_kind"] =
           mergeKind(sub(item, "metadata"), integer(item, "factor"));
-    state["config"] =
-        modelConfig(item, contract, array(state, "arguments"), *ir);
+    state["config"] = modelConfig(item, contract, arguments, ir);
     state["needs_llvm"] = vv;
   } catch (const std::exception &error) {
-    if (vv)
+    if (!flag(state, "resource_checked"))
+      state["status"] = "RESOURCE_UNCONFIRMED";
+    else if (vv)
       state["status"] = "STATIC_ANALYSIS_UNSUPPORTED";
     state["error"] = std::string(error.what());
   }
@@ -142,13 +134,9 @@ static O rank(const Items &items, const O &contract) {
         if (vv)
           update(row, std::move(trace));
         else {
-          double score = number(trace, "score"),
-                 groups = number(trace, "launched_groups"),
-                 cores = number(trace, "cube_core_count");
+          double score = number(trace, "score");
           const O &counts = sub(trace, "counts");
-          check(number(counts, "mma_calls") > 0 && score > 0 && groups > 0 &&
-                    cores > 0 &&
-                    (!flag(trace, "auto_blockify") || groups <= cores),
+          check(number(counts, "mma_calls") > 0 && score > 0,
                 "incomplete Cube accounting");
           update(row, O{{"status", "STATIC_FEATURES_READY"},
                         {"resource_checked", true},
@@ -175,10 +163,8 @@ static O rank(const Items &items, const O &contract) {
       };
       for (const auto &[key, value] : records) {
         const O &row = object(value);
-        auto score = row.getNumber("score");
-        bool scored = str(row, "status") == "STATIC_COST_ESTIMATED" &&
-                      flag(row, "resource_checked") && score &&
-                      std::isfinite(*score) && *score >= 0;
+        bool scored = row.getNumber("score") &&
+                      str(row, "status") == "STATIC_COST_ESTIMATED";
         complete &= scored || excluded(str(row, "status"));
         if (scored && (best.empty() || order(key.str()) < order(best)))
           best = key.str();

@@ -40,15 +40,15 @@ def cast_back(X_ptr, SF_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.cons
     tl.static_assert(TMAX > 0 and CORES > 0)
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
     # plan B: copy block = full row HID(256), one MTE2 move per row.
-    x_ub = tla.alloc_buffer((BM, HID), tl.float8e4nv, space="ub", versions=VERSIONS)
-    sf_ub = tla.alloc_buffer((BM, HID // NPC), tl.float32, space="ub", versions=VERSIONS)
-    out_ub = tla.alloc_buffer((BM, HID), tl.float32, space="ub", versions=VERSIONS)
+    x_ub = tla.alloc((BM, HID), tl.float8e4nv, space="ub", versions=VERSIONS)
+    sf_ub = tla.alloc((BM, HID // NPC), tl.float32, space="ub", versions=VERSIONS)
+    out_ub = tla.alloc((BM, HID), tl.float32, space="ub", versions=VERSIONS)
     for pt in range(tl.program_id(0), tl.cdiv(num_tokens, BM), CORES):
         x_blk = tla.view(X_ptr, (BM, HID), strides=(HID, 1), offsets=(pt * BM, 0))
         sf_blk = tla.view(SF_ptr, (BM, HID // NPC), strides=(HID // NPC, 1), offsets=(pt * BM, 0))
         o_blk = tla.view(O_ptr, (BM, HID), strides=(HID, 1), offsets=(pt * BM, 0))
-        tla.copy(x_blk, x_ub)
-        tla.copy(sf_blk, sf_ub)
+        tla.load_gm_to_ub(x_blk, x_ub)
+        tla.load_gm_to_ub(sf_blk, sf_ub)
         with tla.scope.simd():
             # group mask: first 32 lanes use s0, last 32 use s1.
             low_half = tla.simd.pge(32, 64)
@@ -59,7 +59,7 @@ def cast_back(X_ptr, SF_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.cons
                 v = tla.simd.vlds(x_ub[0, c * 64], dist="UNPK4_B8")
                 vf = tla.simd.vextf(v, tl.float32)
                 tla.simd.vsts(out_ub[0, c * 64], tla.simd.vmul(vf, scale), dist="NORM_B32")
-        tla.copy(out_ub, o_blk)
+        tla.store_ub_to_gm(out_ub, o_blk)
 
 
 def constexprs():

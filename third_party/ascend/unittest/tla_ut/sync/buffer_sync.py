@@ -36,8 +36,8 @@ def buffer_token_add(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))
 
     tla.sync.mutex_lock(0, tla.sync.PIPE.MTE2)
-    tla.copy(a, a_ub)
-    tla.copy(b, b_ub)
+    tla.load_gm_to_ub(a, a_ub)
+    tla.load_gm_to_ub(b, b_ub)
     tla.sync.mutex_unlock(0, tla.sync.PIPE.MTE2)
     tla.sync.set_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.V, 0)
     tla.sync.wait_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.V, 0)
@@ -52,7 +52,7 @@ def buffer_token_add(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     tla.sync.wait_flag(tla.sync.PIPE.V, tla.sync.PIPE.MTE3, 1)
 
     tla.sync.mutex_lock(2, tla.sync.PIPE.MTE3)
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)
     tla.sync.mutex_unlock(2, tla.sync.PIPE.MTE3)
 
 

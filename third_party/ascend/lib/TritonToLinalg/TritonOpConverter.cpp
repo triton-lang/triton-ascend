@@ -635,14 +635,23 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
     }
   }
 
-  // A dynamic single-element slice is slower than prefix reconstruction on
-  // 950, notably when updating loop-carried scores. Keep direct slices for
-  // larger regions, including a point mask broadcast across a matrix row.
-  bool isDynamicSingleElement =
-      dynamicDim != -1 && llvm::all_of(mstate.dims, [](OpFoldResult dim) {
+  // Prefix reconstruction improves the measured mix_fused score-update and
+  // probability-selection loops on 950. Limit it to single elements indexed
+  // directly by a for induction variable; data-dependent positions such as
+  // TopK's reduction result must retain the direct-slice optimization.
+  bool useLoopPointPrefix = false;
+  if (dynamicDim != -1 && llvm::all_of(mstate.dims, [](OpFoldResult dim) {
         return isConstantIntValue(dim, 1);
-      });
-  bool useDirectSlices = useDirectSelectSlices && !isDynamicSingleElement;
+      })) {
+    Value position = dynamicOffset;
+    // Look through index casts only to classify the position. Slice creation
+    // and the bounds guard still use the original, potentially narrowed value.
+    while (auto castOp = position.getDefiningOp<arith::IndexCastOp>())
+      position = castOp.getIn();
+    auto forOp = scf::getForInductionVarOwner(position);
+    useLoopPointPrefix = forOp && forOp.getInductionVar() == position;
+  }
+  bool useDirectSlices = useDirectSelectSlices && !useLoopPointPrefix;
 
   // A constant destination needs a writable copy of the whole tensor. For a
   // tail mask, copying the complementary false prefix into a single-use true
@@ -667,8 +676,8 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
     // A2/A3 require the prefix reconstruction to keep all slice starts at zero.
     // Direct dynamic starts can trigger NPU IR alignment padding and UB
     // overflow. 950 supports unaligned UB copies and can use the original mask
-    // offsets for larger regions. Dynamic single elements also use this
-    // prefix path to avoid the cost of a nonzero-offset scalar copy.
+    // offsets. The loop-indexed single-element case above also retains this
+    // prefix path based on the measured codegen behavior.
     SmallVector<OpFoldResult> invertOffsets;
     SmallVector<OpFoldResult> invertFalseDims;
     SmallVector<OpFoldResult> invertTrueDims;

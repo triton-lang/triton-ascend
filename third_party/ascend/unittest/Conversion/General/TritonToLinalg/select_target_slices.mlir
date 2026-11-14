@@ -1,8 +1,8 @@
 // RUN: triton-opt --triton-to-linalg="compile-on-910-95=false" --split-input-file --verify-each %s | FileCheck %s --check-prefixes=COMMON,A2 --enable-var-scope
 // RUN: triton-opt --triton-to-linalg="compile-on-910-95=true" --split-input-file --verify-each %s | FileCheck %s --check-prefixes=COMMON,A5 --enable-var-scope
 
-// A dynamic single-element select uses zero-start prefixes on both targets.
-// On 950 this avoids a slower dynamic scalar copy; retain the bounds guard.
+// An arbitrary runtime point retains direct slices on 950. Only loop
+// induction positions use the single-element prefix fallback there.
 module {
   func.func @dynamic_point(%true: tensor<16xi32>, %false: tensor<16xi32>, %position: i32) -> tensor<16xi32> {
     %range = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
@@ -25,10 +25,12 @@ module {
 // COMMON: %[[RESULT:.*]] = scf.if %[[OOB]] -> (tensor<16xi32>) {
 // COMMON-NEXT: scf.yield %[[F]] : tensor<16xi32>
 // COMMON-NEXT: } else {
-// COMMON-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[F]][0] [%[[POS]]] [1]
-// COMMON-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[T]][0] [%[[POS]]] [1]
-// COMMON-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
-// COMMON-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [%[[END]]] [1]
+// A5-NEXT: %[[PART:.*]] = tensor.extract_slice %[[T]][%[[POS]]] [1] [1]
+// A5-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][%[[POS]]] [1] [1]
+// A2-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[F]][0] [%[[POS]]] [1]
+// A2-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[T]][0] [%[[POS]]] [1]
+// A2-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
+// A2-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [%[[END]]] [1]
 // COMMON-NEXT: scf.yield %[[INSERT]] : tensor<16xi32>
 // COMMON-NEXT: }
 // COMMON-NEXT: return %[[RESULT]] : tensor<16xi32>
@@ -292,7 +294,7 @@ module {
 
 // -----
 
-// A constant false value also keeps the dynamic single-element prefix path.
+// A constant false value alone must not disable the 950 point optimization.
 module {
   func.func @point_constant_false(%true: tensor<16xi32>, %position: i32) -> tensor<16xi32> {
     %range = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
@@ -309,10 +311,12 @@ module {
 // COMMON: scf.if
 // COMMON-NEXT: scf.yield %[[F]]
 // COMMON-NEXT: } else {
-// COMMON-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[F]][0] [%[[POS:.*]]] [1]
-// COMMON-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[T]][0] [%[[POS]]] [1]
-// COMMON-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
-// COMMON-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [%[[END]]] [1]
+// A5-NEXT: %[[PART:.*]] = tensor.extract_slice %[[T]][%[[POS:.*]]] [1] [1]
+// A5-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][%[[POS]]] [1] [1]
+// A2-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[F]][0] [%[[POS:.*]]] [1]
+// A2-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[T]][0] [%[[POS]]] [1]
+// A2-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
+// A2-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [%[[END]]] [1]
 // COMMON-NEXT: scf.yield %[[INSERT]]
 
 // -----
@@ -397,3 +401,146 @@ module {
 // A2-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [8] [1]
 // A2-NEXT: %[[RESULT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [8] [1]
 // COMMON-NEXT: return %[[RESULT]]
+
+// -----
+
+// The other mix_fused loop selects a probability with the induction variable
+// and reduces it. Its constant false tensor also keeps the prefix path.
+module {
+  func.func @loop_point_probability(%probabilities: tensor<64xf32>, %count: index) -> f32 {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %zero_f32 = arith.constant 0.0 : f32
+    %zeros = arith.constant dense<0.0> : tensor<64xf32>
+    %range = tt.make_range {start = 0 : i32, end = 64 : i32} : tensor<64xi32>
+    %sum = scf.for %row = %zero to %count step %one iter_args(%acc = %zero_f32) -> (f32) {
+      %row_i32 = arith.index_cast %row : index to i32
+      %rows = tt.splat %row_i32 : i32 -> tensor<64xi32>
+      %mask = arith.cmpi eq, %range, %rows : tensor<64xi32>
+      %selected = arith.select %mask, %probabilities, %zeros : tensor<64xi1>, tensor<64xf32>
+      %probability = "tt.reduce"(%selected) ({
+      ^bb0(%lhs: f32, %rhs: f32):
+        %value = arith.addf %lhs, %rhs : f32
+        tt.reduce.return %value : f32
+      }) {axis = 0 : i32} : (tensor<64xf32>) -> f32
+      %next = arith.addf %acc, %probability : f32
+      scf.yield %next : f32
+    }
+    return %sum : f32
+  }
+}
+// COMMON-LABEL: func.func @loop_point_probability(
+// COMMON-SAME: %[[T:[^ :]+]]: tensor<64xf32>
+// COMMON: %[[F:.*]] = linalg.fill {{.*}} -> tensor<64xf32>
+// COMMON: scf.for
+// COMMON: %[[SELECTED:.*]] = scf.if
+// COMMON-NEXT: scf.yield %[[F]]
+// COMMON-NEXT: } else {
+// COMMON-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[F]][0] [%[[POS:.*]]] [1]
+// COMMON-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[T]][0] [%[[POS]]] [1]
+// COMMON-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
+// COMMON-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [%[[END]]] [1]
+// COMMON-NEXT: scf.yield %[[INSERT]]
+// COMMON-NEXT: }
+// COMMON: linalg.reduce ins(%[[SELECTED]]
+
+// -----
+
+// A loop-carried integer position is not the induction variable. Keep its
+// single-element selection direct on 950, even inside an scf.for.
+module {
+  func.func @loop_carried_position(%true: tensor<64xi32>, %initial: tensor<64xi32>, %position: i32, %stride: i32, %count: index) -> tensor<64xi32> {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %range = tt.make_range {start = 0 : i32, end = 64 : i32} : tensor<64xi32>
+    %result:2 = scf.for %iv = %zero to %count step %one iter_args(%previous = %initial, %pos = %position) -> (tensor<64xi32>, i32) {
+      %positions = tt.splat %pos : i32 -> tensor<64xi32>
+      %mask = arith.cmpi eq, %range, %positions : tensor<64xi32>
+      %updated = arith.select %mask, %true, %previous : tensor<64xi1>, tensor<64xi32>
+      %next = arith.addi %pos, %stride : i32
+      scf.yield %updated, %next : tensor<64xi32>, i32
+    }
+    return %result#0 : tensor<64xi32>
+  }
+}
+// COMMON-LABEL: func.func @loop_carried_position(
+// COMMON-SAME: %[[T:[^ :]+]]: tensor<64xi32>
+// COMMON: scf.for {{.*}} iter_args(%[[F:[^ ]+]] =
+// COMMON: scf.if
+// COMMON-NEXT: scf.yield %[[F]]
+// COMMON-NEXT: } else {
+// A5-NEXT: %[[PART:.*]] = tensor.extract_slice %[[T]][%[[POS:.*]]] [1] [1]
+// A5-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][%[[POS]]] [1] [1]
+// A2-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[F]][0] [%[[POS:.*]]] [1]
+// A2-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[T]][0] [%[[POS]]] [1]
+// A2-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
+// A2-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [%[[END]]] [1]
+// COMMON-NEXT: scf.yield %[[INSERT]]
+
+// -----
+
+// An induction position selecting a whole row still uses direct slices on
+// 950: the prefix fallback applies only when the entire region is one element.
+module {
+  func.func @loop_point_row(%true: tensor<16x32xf32>, %initial: tensor<16x32xf32>, %count: index) -> tensor<16x32xf32> {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %range = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
+    %result = scf.for %row = %zero to %count step %one iter_args(%previous = %initial) -> (tensor<16x32xf32>) {
+      %row_i32 = arith.index_cast %row : index to i32
+      %rows = tt.splat %row_i32 : i32 -> tensor<16xi32>
+      %point = arith.cmpi eq, %range, %rows : tensor<16xi32>
+      %expanded = tt.expand_dims %point {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+      %mask = tt.broadcast %expanded : tensor<16x1xi1> -> tensor<16x32xi1>
+      %updated = arith.select %mask, %true, %previous : tensor<16x32xi1>, tensor<16x32xf32>
+      scf.yield %updated : tensor<16x32xf32>
+    }
+    return %result : tensor<16x32xf32>
+  }
+}
+// COMMON-LABEL: func.func @loop_point_row(
+// COMMON: scf.for
+// COMMON: scf.if
+// COMMON-NEXT: scf.yield
+// COMMON-NEXT: } else {
+// A5-NEXT: %[[PART:.*]] = tensor.extract_slice %{{.*}}[%[[POS:.*]], 0] [1, 32] [1, 1]
+// A5-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %{{.*}}[%[[POS]], 0] [1, 32] [1, 1]
+// A2-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %{{.*}}[0, 0] [%[[POS:.*]], 32] [1, 1]
+// A2-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %{{.*}}[0, 0] [%[[POS]], 32] [1, 1]
+// A2-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0, 0] [%[[END:.*]], 32] [1, 1]
+// A2-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %{{.*}}[0, 0] [%[[END]], 32] [1, 1]
+// COMMON-NEXT: scf.yield %[[INSERT]]
+
+// -----
+
+// TopK selects a point obtained from a reduction, not a loop induction
+// variable. Preserve the direct path for its large candidate vectors on 950.
+module {
+  func.func @reduction_point(%true: tensor<1024xi32>, %positions: tensor<1024xi32>) -> tensor<1024xi32> {
+    %position = "tt.reduce"(%positions) ({
+    ^bb0(%lhs: i32, %rhs: i32):
+      %minimum = arith.minsi %lhs, %rhs : i32
+      tt.reduce.return %minimum : i32
+    }) {axis = 0 : i32} : (tensor<1024xi32>) -> i32
+    %range = tt.make_range {start = 0 : i32, end = 1024 : i32} : tensor<1024xi32>
+    %points = tt.splat %position : i32 -> tensor<1024xi32>
+    %mask = arith.cmpi eq, %range, %points : tensor<1024xi32>
+    %false = arith.constant dense<-1> : tensor<1024xi32>
+    %selected = arith.select %mask, %true, %false : tensor<1024xi1>, tensor<1024xi32>
+    return %selected : tensor<1024xi32>
+  }
+}
+// COMMON-LABEL: func.func @reduction_point(
+// COMMON-SAME: %[[T:[^ :]+]]: tensor<1024xi32>
+// COMMON-DAG: %[[F:.*]] = linalg.fill {{.*}} -> tensor<1024xi32>
+// COMMON-DAG: linalg.reduce
+// COMMON: scf.if
+// COMMON-NEXT: scf.yield %[[F]]
+// COMMON-NEXT: } else {
+// A5-NEXT: %[[PART:.*]] = tensor.extract_slice %[[T]][%[[POS:.*]]] [1] [1]
+// A5-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][%[[POS]]] [1] [1]
+// A2-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[F]][0] [%[[POS:.*]]] [1]
+// A2-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[T]][0] [%[[POS]]] [1]
+// A2-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
+// A2-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [%[[END]]] [1]
+// COMMON-NEXT: scf.yield %[[INSERT]]

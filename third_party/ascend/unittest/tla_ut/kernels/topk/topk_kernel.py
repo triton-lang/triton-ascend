@@ -830,8 +830,11 @@ def _order_topk(X, Indices, V, I, N: tl.constexpr, K: tl.constexpr, INNER: tl.co
             if X.dtype.element_ty.primitive_bitwidth <= 16:
                 pair = ((key & 0xFFFF).to(tl.int32) << index_bits) | (WIDTH - lane)
                 ordered = _sort_packed(tl.where(lane < N, pair, 0))
-            else:
+            elif WIDTH <= 256:
+                # Wider tiles rarely fit once their position uses more bits.
                 ordered = _sort_key_range(key, lane < N, lane, WIDTH, 2)
+            else:
+                ordered = _sort_digits(key, lane < N, lane, WIDTH, 2)
             order_lane = tl.broadcast_to(tl.arange(0, selected)[None, :], (BATCH, selected))
             ordered = tl.gather(ordered, order_lane, axis=1)
         else:

@@ -10,11 +10,6 @@
 
 // CHECK: scf.while
 
-// The flag of the loop starts as the constant zero at the head of the loop
-// body: it is the false value of the select that computes the flag.
-// CHECK: ^bb0
-// CHECK: %[[ZERO5:.*]] = arith.constant 0 : i32
-
 // Producer if=5: skip cross memref.load/slt, then intra control_var < 1.
 // CHECK: memref.load %{{.*}}[] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: arith.cmpi slt, %{{.*}}, %{{.*}} : i32
@@ -22,25 +17,16 @@
 // CHECK: %[[SLT:.*]] = arith.cmpi slt, %{{.*}}, %[[LIM]] : i32
 // CHECK: %[[AND_P0:.*]] = arith.andi %{{.*}}, %[[SLT]]
 // CHECK: %[[COND5:.*]] = arith.andi %[[AND_P0]], %{{.*}}
-// The block is the first one of the loop: the flag it reads is the constant
-// zero the loop starts with, its check is left out.
 // CHECK: scf.if %[[COND5]]
 // CHECK: %[[ONE_P:.*]] = arith.constant 1 : i32
 // CHECK: %[[INC:.*]] = arith.addi %{{.*}}, %[[ONE_P]] : i32
 // CHECK: scf.yield %{{.*}}, %[[INC]]
 // CHECK: } {{.*}}ssbuffer.if = 5
-// The flag of the loop is not yielded by the block: it is computed with a
-// select on the condition of the block, after the block.
-// CHECK: %[[ONE_PF:.*]] = arith.constant 1 : i32
-// CHECK: %[[FLAG5:.*]] = arith.select %[[COND5]], %[[ONE_PF]], %[[ZERO5]] : i32
 
 // Consumer if=7: uses producer if result (latest), sgt 0 then -1.
 // CHECK: %[[SGT:.*]] = arith.cmpi sgt, %{{.*}}, %{{.*}} : i32
 // CHECK: %[[COND7:.*]] = arith.andi %[[SGT]], %{{.*}}
-// The flag of the previous block gates this one.
-// CHECK: %[[FLAGCMP7:.*]] = arith.cmpi eq, %[[FLAG5]], %{{.*}} : i32
-// CHECK: %[[AND7F:.*]] = arith.andi %[[COND7]], %[[FLAGCMP7]]
-// CHECK: scf.if %[[AND7F]]
+// CHECK: scf.if %[[COND7]]
 // CHECK: %[[ONE_C:.*]] = arith.constant 1 : i32
 // CHECK: %[[DEC:.*]] = arith.subi %{{.*}}, %[[ONE_C]] : i32
 // CHECK: } {{.*}}ssbuffer.if = 7

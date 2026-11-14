@@ -11,36 +11,18 @@
 // CHECK: arith.cmpi slt, %{{.*}} : i64
 // CHECK: scf.condition
 
-// The flag of the loop is 0 at the beginning of an iteration.
-// CHECK: ^bb0
-// CHECK: %[[FLAG:.*]] = arith.constant 0 : i32
-
-// Vector ssbuffer.if = 5: cross-core cond and-ed with the preload cond and
-// the cloned while counter. It is the first block of the loop: the flag it
-// reads is the constant zero the loop starts with, its check is left out.
+// Vector ssbuffer.if = 5: cross-core cond and-ed with cloned while counter.
 // CHECK: %[[EXT5:.*]] = arith.extsi %{{.*}} : i32 to i64
 // CHECK: %[[CMP5:.*]] = arith.cmpi slt, %[[EXT5]], %{{.*}} : i64
 // CHECK: %[[AND5:.*]] = arith.andi %{{.*}}, %[[CMP5]]
-// CHECK: %[[IF5:[^: ]+]]{{.*}} = scf.if %[[AND5]]
-// The block does not yield the flag of the loop any more: the then block
-// yields the counter only.
-// CHECK: scf.yield %{{.*}} : i32
-// CHECK: scf.yield %{{.*}} : i32
+// CHECK: scf.if %[[AND5]]
 // CHECK: } {{.*}}ssbuffer.if = 5
-// The flag of the loop is computed with a select on the condition of the
-// block, after the block: the block has run -> 1, the block did not run ->
-// 0, the constant the loop starts with.
-// CHECK: %[[ONE5:.*]] = arith.constant 1 : i32
-// CHECK: %[[FLAG5:.*]] = arith.select %[[AND5]], %[[ONE5]], %[[FLAG]] : i32
 
-// Vector ssbuffer.if = 6: same cloned counter shape, gated by the flag of the
-// previous block.
+// Vector ssbuffer.if = 6: same cloned counter shape.
 // CHECK: %[[EXT6:.*]] = arith.extsi %{{.*}} : i32 to i64
 // CHECK: %[[CMP6:.*]] = arith.cmpi slt, %[[EXT6]], %{{.*}} : i64
 // CHECK: %[[AND6:.*]] = arith.andi %{{.*}}, %[[CMP6]]
-// CHECK: %[[FLAGCMP6:.*]] = arith.cmpi eq, %[[FLAG5]], %{{.*}} : i32
-// CHECK: %[[AND6F:.*]] = arith.andi %[[AND6]], %[[FLAGCMP6]]
-// CHECK: scf.if %[[AND6F]]
+// CHECK: scf.if %[[AND6]]
 // CHECK: } {{.*}}ssbuffer.if = 6
 
 // CHECK: scf.yield

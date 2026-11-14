@@ -1,6 +1,4 @@
 """CPU resource checks and CV/VV candidate ranking."""
-from functools import lru_cache
-import json
 import math
 from pathlib import Path
 import re
@@ -8,19 +6,10 @@ import subprocess
 from .block_auto_models.native_model import reject
 from .block_auto_models.cpu_resource_gate import TARGET, inspect_final_ub, inspect_vv_ub, sha256
 
-_MODELS = Path(__file__).with_name("block_auto_models")
 _EXCLUDED = frozenset(
     ("UB_REJECTED", "COMPILE_REJECTED", "FRONTEND_REJECTED", "RUNTIME_REJECTED", "NO_MERGE_OPPORTUNITY"))
 
 VERSION = "jit-cv-vv-native-v1"
-
-
-@lru_cache(maxsize=1)
-def _instruction_model():
-    data = _MODELS / "vv_skill_data"
-    for name, expected in json.loads((data / "provenance.json").read_text())["sha256"].items():
-        reject(sha256(data / name) != expected, "packaged VV instruction asset changed: " + name)
-    return True
 
 
 def _contract_for_ttir(contract, ttir):
@@ -100,7 +89,6 @@ def select_candidates(candidates, contract):
     report = dict(model=VERSION, selected_key="unmerged", selected_axis=-1, model_complete=False,
                   reason="BASELINE_FALLBACK_INCOMPLETE_MODEL", candidates={}, device_timing_used=False)
     try:
-        _instruction_model()
         prepared = {}
         for candidate in candidates:
             factor, axis = candidate["factor"], candidate["axis"]

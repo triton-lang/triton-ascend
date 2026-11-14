@@ -15,6 +15,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -166,28 +167,54 @@ struct Profile {
   std::set<std::string> covered;
   double localBandwidth = 32, globalBandwidth = 512;
   unsigned window = 64;
+  void addRates(std::initializer_list<StringRef> operations,
+                std::initializer_list<StringRef> types, Rate rate = {}) {
+    for (StringRef op : operations) {
+      covered.insert(op.str());
+      for (StringRef type : types)
+        rates[op.str() + ":" + type.str()] = rate;
+    }
+  }
   Profile(const Object &config) {
-    localBandwidth = number(config, "local_bandwidth");
-    globalBandwidth = number(config, "global_bandwidth");
-    require(localBandwidth > 0 && globalBandwidth > 0, "nonpositive bandwidth");
+    // Preserve the existing 9579 model assumptions, not device measurements:
+    // 56 Vector cores, 1650 MHz and 16 GB/s per core.
+    if (text(config, "mode") == "vv") {
+      require(number(config, "cores") == 56,
+              "compiled core count differs from the A5 model");
+      localBandwidth = 16.0 * 1e9 / (1650.0 * 1e6);
+      globalBandwidth = localBandwidth * 56;
+    }
 #define AVE_COST_ENTRY(OP, SRC, DST, INTERVAL, LATENCY, SLOTS)                 \
   costs[#OP ":" #SRC ":" #DST] = {INTERVAL, LATENCY, SLOTS};
 #include "bishengir/Dialect/HIVMAVE/CostModelInfo/AVECostModelInfo.def"
 #undef AVE_COST_ENTRY
-    const auto &instruction = object(*config.get("instructions"));
-    for (const auto &op : array(instruction, "covered_ops"))
-      covered.insert(op.getAsString()->str());
-    for (const auto &row : array(instruction, "profiles")) {
-      const auto &o = object(row);
-      Rate rate{number(o, "throughput_cycles"), 4,
-                unsigned(number(o, "issue_slots")), text(o, "unit"),
-                text(o, "pipe")};
-      require(rate.interval > 0 && (rate.slots == 1 || rate.slots == 2),
-              "invalid instruction rate");
-      for (const auto &[op, types] : object(*o.get("instructions")))
-        for (const auto &dtype : *types.getAsArray())
-          rates[op.str() + ":" + dtype.getAsString()->str()] = rate;
-    }
+    // Fixed rates from the previously packaged instruction profile, revision
+    // 55b286e9113551634e9bcda1bb552cefc6c8a772. Keep dtype exclusions explicit.
+    addRates({"vadd", "vadds", "vsub", "vabs", "vneg"},
+             {"int8", "int16", "int32", "int64"}, {2, 4, 2});
+    addRates({"vmul", "vmuls"}, {"int16", "int32", "int64"}, {2, 4, 2});
+    addRates({"vadd", "vadds", "vsub", "vmul"}, {"fp16", "bf16", "fp32"});
+    addRates({"vmuls", "vabs", "vneg"}, {"fp16", "fp32"});
+    addRates({"vmax", "vmaxs", "vmin", "vmins", "vsel", "vcmp"},
+             {"int8", "fp16", "bf16", "int16", "fp32", "int32", "int64"});
+    addRates({"vand", "vor", "vxor"}, {"int8", "int16", "int32", "int64"});
+    addRates({"vnot"}, {"int8", "fp16", "int16", "fp32", "int32", "int64"});
+    std::initializer_list<StringRef> broadTypes = {"int8", "fp16",  "bf16",
+                                                   "fp8",  "fp4",   "int16",
+                                                   "fp32", "int32", "int64"};
+    addRates({"vdups"}, broadTypes);
+    addRates({"vcvtff.bf162f32.x"}, {"bf16"});
+    addRates({"vdiv", "vsqrt", "vexp", "vln"}, {"fp16"},
+             {8, 4, 2, "vector_alu", "vector_transcendental"});
+    Rate transcendental{4, 4, 2, "vector_alu", "vector_transcendental"};
+    addRates({"vdiv", "vsqrt", "vexp", "vexpdif", "vln"}, {"fp32"},
+             transcendental);
+    addRates({"vdiv"}, {"int16", "int32", "int64"}, transcendental);
+    addRates({"vexpdif"}, {"fp16"}, transcendental);
+    Rate vector{1, 4, 1, "vector", "vector"};
+    addRates({"vcadd", "vcmax"}, {"fp16", "int16", "fp32", "int32", "int64"},
+             vector);
+    addRates({"vbr"}, broadTypes, vector);
   }
   Rate cost(StringRef name, bool ready) const {
     std::string op =

@@ -1,5 +1,4 @@
 """Host metadata adapter for the in-process C++ cost analyzer."""
-import configparser
 import json
 import math
 from pathlib import Path
@@ -138,20 +137,11 @@ def analyze(modules, ttir, final_ir, metadata, contract, axis, factor, *, raw=No
         'unmodelled execution mode')
     args, grid, cores, blocks = launch_configuration(ttir, final_ir, metadata, contract, axis, factor,
                                                      'VECTOR' if vv else 'CUBE')
-    if vv:
-        cfg = configparser.ConfigParser(strict=False)
-        cfg.read(DATA / 'vv_skill_data/Ascend950PR_9579.ini')
-        local = float(cfg['VectorCoreMemoryRates']['ddr_rate']) * 1e9 / (float(cfg['VectorCoreSpec']['vec_freq']) * 1e6)
-        reject(cores != int(cfg['SoCInfo']['vector_core_cnt']), 'compiled core count differs from INI')
-    else:
-        local = 32
-        if 'aiv' in modules:
-            counts = re.findall(r'"VECTOR_CORE_COUNT", (\d+) : i32', final_ir)
-            reject(counts != [str(cores * 2)], 'only one Cube with two Vector subblocks is modelled')
+    if not vv and 'aiv' in modules:
+        counts = re.findall(r'"VECTOR_CORE_COUNT", (\d+) : i32', final_ir)
+        reject(counts != [str(cores * 2)], 'only one Cube with two Vector subblocks is modelled')
     config = dict(mode='vv' if vv else 'cv', modules=modules, name=metadata['name'], arguments=args, grid=grid,
-                  cores=cores, blocks=blocks, auto_blockify=metadata['auto_blockify_enabled'], local_bandwidth=local,
-                  global_bandwidth=local * cores if vv else 512, instructions=json.loads(
-                      (DATA / 'vv_skill_data/instruction_rates.json').read_text()))
+                  cores=cores, blocks=blocks, auto_blockify=metadata['auto_blockify_enabled'])
     if vv:
         config['raw_llvm'] = raw
         if metadata['parallel_mode'] == 'mix_simd_simt':

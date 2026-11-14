@@ -140,9 +140,7 @@ class TestModelContracts(unittest.TestCase):
         result = self.cv.candidate_plan({"grid": [8, 8, 1]}, probe=reject)
         self.assertEqual(result["candidates"], [])
 
-    def test_packaged_model_assets_match_their_recorded_hashes(self):
-        model = importlib.import_module(PACKAGE + ".block_auto_model")
-        self.assertTrue(model._instruction_model())
+    def test_packaged_helper_matches_its_recorded_hash(self):
         import hashlib
         import json
         data = BACKEND / "block_auto_models/vv_library_data"

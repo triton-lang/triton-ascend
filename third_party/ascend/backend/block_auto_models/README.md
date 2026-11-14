@@ -28,7 +28,10 @@ The independent model entry points are:
 - `ascend.analyze_block_candidate(request_json)`: analyze candidate LLVM on the
   CPU with the C++ scalar, instruction, pipeline and contention model.
 
-The current calibrated profile is Ascend950PR_9579. CV numeric coverage is FP32;
+The fixed Ascend950PR_9579 instruction and bandwidth assumptions are compiled
+into the C++ profile; no external instruction JSON or INI is loaded. These
+constants preserve the previous model and are not device measurements.
+CV numeric coverage is FP32;
 VV MIX and the pow helper require the matching recorded compiler/library
 profiles. Missing evidence, unsupported operations and unmodeled transformations
 remain explicit reasons to keep F1. A model decision is not proof of runtime

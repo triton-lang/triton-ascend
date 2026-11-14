@@ -635,6 +635,15 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
     }
   }
 
+  // A dynamic single-element slice is slower than prefix reconstruction on
+  // 950, notably when updating loop-carried scores. Keep direct slices for
+  // larger regions, including a point mask broadcast across a matrix row.
+  bool isDynamicSingleElement =
+      dynamicDim != -1 && llvm::all_of(mstate.dims, [](OpFoldResult dim) {
+        return isConstantIntValue(dim, 1);
+      });
+  bool useDirectSlices = useDirectSelectSlices && !isDynamicSingleElement;
+
   // A constant destination needs a writable copy of the whole tensor. For a
   // tail mask, copying the complementary false prefix into a single-use true
   // value instead lets bufferization reuse the computed value's buffer.
@@ -654,11 +663,12 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
         sliceDims[i] = mstate.offsets[i];
       sliceOffsets[i] = rewriter.getIndexAttr(0);
     }
-  } else if (!useDirectSelectSlices) {
+  } else if (!useDirectSlices) {
     // A2/A3 require the prefix reconstruction to keep all slice starts at zero.
     // Direct dynamic starts can trigger NPU IR alignment padding and UB
     // overflow. 950 supports unaligned UB copies and can use the original mask
-    // offsets.
+    // offsets for larger regions. Dynamic single elements also use this
+    // prefix path to avoid the cost of a nonzero-offset scalar copy.
     SmallVector<OpFoldResult> invertOffsets;
     SmallVector<OpFoldResult> invertFalseDims;
     SmallVector<OpFoldResult> invertTrueDims;
@@ -722,9 +732,9 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
   }
   LLVM_DEBUG({
     llvm::dbgs() << "  -> Created "
-                 << (overwriteFalsePrefix    ? "false-prefix"
-                     : useDirectSelectSlices ? "direct"
-                                             : "prefix")
+                 << (overwriteFalsePrefix ? "false-prefix"
+                     : useDirectSlices    ? "direct"
+                                          : "prefix")
                  << " select slices:\n";
     for (Operation *sliceOp : sliceOps)
       llvm::dbgs() << "     " << *sliceOp << "\n";

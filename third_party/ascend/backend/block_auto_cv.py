@@ -110,8 +110,7 @@ def rank_cv(candidates, contract):
                 or cores <= 0 or trace["auto_blockify"] and groups > cores, "incomplete Cube accounting")
             row.update(status="STATIC_FEATURES_READY", resource_checked=True, estimated_cycles=score,
                        merge_kind=merge_kind(metadata, factor), batch_grid=trace["logical_grid"], mode=trace["mode"],
-                       useful_flops=trace["counts"]["useful_flops"], cube_core_count=cores,
-                       compiler_sha256=item["compiler_sha256"])
+                       useful_flops=trace["counts"]["useful_flops"], cube_core_count=cores)
         except (ValueError, KeyError, TypeError, IndexError, StopIteration, OverflowError) as error:
             row["error"] = str(error)
             if factor == 1 or row["status"] not in TERMINAL_EXCLUSIONS:
@@ -129,7 +128,7 @@ def rank_cv(candidates, contract):
             continue
         grid[axis] //= factor
         if grid == row["batch_grid"] and all(row[k] == baseline[k]
-                                             for k in ("compiler_sha256", "mode", "cube_core_count", "useful_flops")):
+                                             for k in ("mode", "cube_core_count", "useful_flops")):
             eligible[key] = row
     ranked = dict(eligible, unmerged=baseline)
     selected = min(ranked, key=lambda key:

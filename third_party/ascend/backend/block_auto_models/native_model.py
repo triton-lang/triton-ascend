@@ -3,7 +3,6 @@ import json
 import math
 from pathlib import Path
 import re
-from ..block_auto_artifacts import file_digest as sha256
 
 DATA = Path(__file__).parent
 
@@ -106,28 +105,17 @@ def meta_path(ir):
     return Path(paths[0])
 
 
-def mixed_parameters(final_ir, files):
-    """Check the installed profile once; helper bodies come from optimized LLVM."""
-    provenance = json.loads((DATA / 'vv_mixed_data/provenance.json').read_text())
-    parameters = provenance['assumptions']
-    for name in ('simt_transaction_bytes', 'simt_transition_cycles', 'simt_instruction_cycles'):
-        reject(type(parameters.get(name)) is not int or parameters[name] <= 0, 'invalid MIX parameter: ' + name)
-    compiler = files['compiler']
-    reject(compiler['sha256'] != provenance['compiler_sha256'], 'MIX requires the pinned compiler')
-    path = meta_path(final_ir)
-    expected_dir = Path(compiler['path']).resolve().parent.parent / 'lib'
-    reject(path.resolve().parent != expected_dir, 'MIX library is outside the candidate compiler installation',
-           ValueError)
-    reject(path.name not in provenance['meta_variants'] or sha256(path) != provenance['meta_variants'][path.name],
-           'MIX needs matching declared AIV meta-library evidence')
+def mixed_parameters(final_ir):
+    """MIX assumptions; helper bodies come from the candidate's optimized LLVM."""
     entries = [line for line in final_ir.splitlines() if 'func.func ' in line and 'hacc.entry' in line]
     reject(
         len(entries) != 1 or 'hivm.vf_mode<MIX>' not in entries[0] or 'hivm.func_core_type<AIV>' not in entries[0],
         'MIX adapter supports one AIV SIMD/SIMT entry only')
-    return parameters
+    # Uncalibrated architecture assumptions; no operator timing inputs.
+    return dict(simt_transaction_bytes=64, simt_transition_cycles=32, simt_instruction_cycles=1)
 
 
-def analyze(modules, ttir, final_ir, metadata, contract, axis, factor, *, raw=None, mixed=None, library=None):
+def analyze(modules, ttir, final_ir, metadata, contract, axis, factor, *, raw=None):
     from triton._C.libtriton import ascend
     vv = raw is not None
     reject(metadata.get('target', {}).get('arch') != 'Ascend950PR_9579', 'unsupported target profile')
@@ -145,14 +133,10 @@ def analyze(modules, ttir, final_ir, metadata, contract, axis, factor, *, raw=No
     if vv:
         config['raw_llvm'] = raw
         if metadata['parallel_mode'] == 'mix_simd_simt':
-            config['mixed'] = mixed_parameters(final_ir, mixed)
+            config['mixed'] = mixed_parameters(final_ir)
         if re.search(r'\bcall\b[^\n]*@pow_fp32\(', modules['aiv']):
-            proof = json.loads((DATA / 'vv_library_data/provenance.json').read_text())
             path = DATA / 'vv_library_data/pow_fp32.ll'
-            reject(
-                not library or library['sha256'] != proof['libdevice_sha256'] or sha256(path) != proof['llvm_sha256'],
-                'pow needs matching pinned library evidence')
-            config.update(pow_llvm=path.read_text(), pow_wrapper_steps=proof['descriptor_scalar_steps'])
+            config.update(pow_llvm=path.read_text(), pow_wrapper_steps=25)
     try:
         return json.loads(ascend.analyze_block_candidate(json.dumps(config, allow_nan=False)))
     except RuntimeError as error:

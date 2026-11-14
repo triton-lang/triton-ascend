@@ -1,22 +1,8 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-"""Persist and verify CPU model inputs from the candidate's own compilation."""
-import hashlib
-import json
+"""Keep CPU model inputs in the candidate's ordinary compilation cache."""
 from pathlib import Path
 
 VERSION = 1
-
-
-def digest(data):
-    return hashlib.sha256(data).hexdigest()
-
-
-def file_digest(path):
-    result = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            result.update(block)
-    return result.hexdigest()
 
 
 def _cache(key):
@@ -24,17 +10,15 @@ def _cache(key):
     return get_cache_manager(key)
 
 
-def collect(temps, binary, compiler, compiler_sha256, metadata, command, *, cache_factory=None):
+def collect(temps, binary, compiler, metadata, command, *, cache_factory=None):
     """Save evidence before compiler temporaries disappear; never launch code.
 
     Missing intermediate output disables selection without invalidating a
-    successfully compiled baseline. Every file is addressed by its contents.
+    successfully compiled baseline. Cache identity belongs to the normal JIT.
     """
-    evidence = dict(version=VERSION, status="UNAVAILABLE", files={}, binary_sha256=digest(binary),
-                    compiler_sha256=compiler_sha256, target=metadata.get("target_arch"), command=list(command))
+    evidence = dict(version=VERSION, status="UNAVAILABLE", files={}, compiler=str(compiler),
+                    target=metadata.get("target_arch"), command=list(command))
     try:
-        if file_digest(compiler) != compiler_sha256:
-            raise ValueError("compiler changed during candidate compilation")
         if not binary.startswith(b"\x7fELF"):
             raise ValueError("candidate binary is not ELF")
         directory = Path(temps)
@@ -49,56 +33,45 @@ def collect(temps, binary, compiler, compiler_sha256, metadata, command, *, cach
         if not any(key.startswith("llvm") for key in sources):
             raise ValueError("compiler did not preserve LLVM modules")
         contents = {role: path.read_bytes() for role, path in sources.items()}
-        identity = dict(version=VERSION, binary=evidence["binary_sha256"], compiler=compiler_sha256,
-                        files={role: digest(data)
-                               for role, data in contents.items()})
-        key = digest(json.dumps(identity, sort_keys=True).encode())
+        key = metadata["hash"]
         cache = (cache_factory or _cache)(key)
         for role, data in contents.items():
             name = "block_auto_" + role + (".mlir" if role == "final_ir" else ".ll")
             cache.put(data, name, binary=True)
-            evidence["files"][role] = dict(name=name, sha256=digest(data))
+            evidence["files"][role] = dict(name=name)
         evidence.update(status="COLLECTED", cache_key=key)
-    except (OSError, ValueError) as error:
+    except (KeyError, OSError, ValueError) as error:
         evidence["reason"] = str(error)
     return evidence
 
 
 def load_evidence(kernel, *, cache_factory=None, compiler_path=None):
-    """Resolve persisted names and verify exact binary/compiler/file identities."""
+    """Load the candidate's cached model inputs and runtime metadata."""
     metadata = kernel.metadata._asdict()
     if not isinstance(metadata.get("target"), dict) and hasattr(metadata.get("target"), "__dict__"):
         metadata["target"] = vars(metadata["target"])
     evidence = metadata.get("block_auto_evidence", {})
     if evidence.get("version") != VERSION or evidence.get("status") != "COLLECTED":
         raise ValueError("same-compilation model evidence unavailable")
-    binary = kernel.kernel
-    if not isinstance(binary, bytes) or digest(binary) != evidence["binary_sha256"]:
-        raise ValueError("candidate binary changed after evidence collection")
+    compiler_path = compiler_path or evidence.get("compiler")
     if compiler_path is None:
         from .utils import _get_npucompiler_path
         compiler_path, _ = _get_npucompiler_path()
-    if file_digest(compiler_path) != evidence["compiler_sha256"]:
-        raise ValueError("candidate compiler identity changed")
     cache = (cache_factory or _cache)(evidence["cache_key"])
-    result = dict(metadata=metadata, binary_sha256=evidence["binary_sha256"],
-                  compiler_sha256=evidence["compiler_sha256"], files={}, command=evidence.get("command",
-                                                                                              []), evidence=evidence)
+    result = dict(metadata=metadata, files={}, command=evidence.get("command", []), evidence=evidence)
     for role, record in evidence["files"].items():
         name = record["name"]
         if Path(name).name != name:
             raise ValueError("invalid cached evidence name")
         path = cache.get_file(name)
-        if not path or file_digest(path) != record["sha256"]:
-            raise ValueError("cached model evidence changed: " + role)
+        if not path:
+            raise ValueError("cached model input unavailable: " + role)
         result[role] = Path(path).read_text()
-        result["files"][role] = dict(path=str(path), sha256=record["sha256"])
+        result["files"][role] = dict(path=str(path))
     # Frontend stages and runtime metadata already belong to CompiledKernel.
     stages = {"ttir": kernel.asm.get("ttir"), "ttadapter": kernel.asm.get("ttadapter")}
     if not all(isinstance(text, str) and text for text in stages.values()):
         raise ValueError("candidate frontend IR unavailable")
     result.update(stages)
-    path = cache.put(binary, "block_auto_binary.o", binary=True)
-    result["files"]["binary"] = dict(path=str(path), sha256=evidence["binary_sha256"])
-    result["files"]["compiler"] = dict(path=str(compiler_path), sha256=evidence["compiler_sha256"])
+    result["files"]["compiler"] = dict(path=str(compiler_path))
     return result

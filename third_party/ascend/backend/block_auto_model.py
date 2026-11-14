@@ -1,10 +1,9 @@
 """CPU resource checks and CV/VV candidate ranking."""
 import math
-from pathlib import Path
 import re
 import subprocess
 from .block_auto_models.native_model import reject
-from .block_auto_models.cpu_resource_gate import TARGET, inspect_final_ub, inspect_vv_ub, sha256
+from .block_auto_models.cpu_resource_gate import TARGET, inspect_final_ub, inspect_vv_ub
 
 _EXCLUDED = frozenset(
     ("UB_REJECTED", "COMPILE_REJECTED", "FRONTEND_REJECTED", "RUNTIME_REJECTED", "NO_MERGE_OPPORTUNITY"))
@@ -65,11 +64,9 @@ def _rank_vv(candidates, contract):
                 row.update(status="RUNTIME_REJECTED", error=refusal)
                 continue
             optimized = _optimized_llvm(item)
-            lib = Path(item["files"]["compiler"]["path"]).parent.parent.parent / "lib/libdevice.10.bc"
-            library = dict(path=str(lib), sha256=sha256(lib)) if "@pow_fp32(" in item["llvm"] else None
             row.update(
                 analyze({"aiv": optimized}, item["ttir"], item["final_ir"], item["metadata"], item["launch_contract"],
-                        item["axis"], item["factor"], library=library, mixed=item["files"], raw=item["llvm"]))
+                        item["axis"], item["factor"], raw=item["llvm"]))
         except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
             row.update(status="STATIC_ANALYSIS_UNSUPPORTED", error=f"{type(error).__name__}: {error}")
     scored = {

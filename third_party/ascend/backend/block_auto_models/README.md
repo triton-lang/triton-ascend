@@ -23,7 +23,7 @@ The independent model entry points are:
 - `block_auto_cv.candidate_plan(contract, probe=...)`: choose at most two merged
   candidates from frontend-proved M/N/batch roles. The supplied probe reports a
   supported role or raises `ValueError`; the model does not rewrite IR.
-- `block_auto_model.select_candidates(candidates, contract)`: verify preserved
+- `block_auto_model.select_candidates(candidates, contract)`: load preserved
   artifacts and resource limits, then select an available candidate or F1.
 - `ascend.analyze_block_candidate(request_json)`: analyze candidate LLVM on the
   CPU with the C++ scalar, instruction, pipeline and contention model.
@@ -31,9 +31,10 @@ The independent model entry points are:
 The fixed Ascend950PR_9579 instruction and bandwidth assumptions are compiled
 into the C++ profile; no external instruction JSON or INI is loaded. These
 constants preserve the previous model and are not device measurements.
-CV numeric coverage is FP32;
-VV MIX and the pow helper require the matching recorded compiler/library
-profiles. Missing evidence, unsupported operations and unmodeled transformations
+CV numeric coverage is FP32. Candidate artifacts use the ordinary compiler
+cache; the model adds no file fingerprints or compiler/library version pins.
+MIX helpers come from optimized candidate LLVM; pow uses a packaged reference
+body as a cost estimate. Missing inputs, unsupported operations and unmodeled transformations
 remain explicit reasons to keep F1. A model decision is not proof of runtime
 memory safety or numerical correctness; the future provider must retain the
 corresponding execution guards.

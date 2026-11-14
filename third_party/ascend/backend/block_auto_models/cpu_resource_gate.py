@@ -2,9 +2,6 @@
 from .native_model import reject
 import math
 import re
-from .. import block_auto_artifacts
-
-sha256 = block_auto_artifacts.file_digest
 
 TARGET = re.compile(r'hacc\.target\s*=\s*#hacc\.target<"([^"\n]+)">')
 
@@ -102,9 +99,8 @@ def inspect_vv_ub(ir, target, metadata, command, files):
             compiled = explicit[0] * 1024
         else:
             evidence = files.get("backend_defaults")
-            reject(not evidence, 'missing hash-bound compiler dynamic-UB default', ValueError)
+            reject(not evidence, 'missing compiler dynamic-UB default', ValueError)
             from pathlib import Path
-            reject(sha256(evidence['path']) != evidence['sha256'], 'compiler dynamic-UB default changed', ValueError)
             text = Path(evidence["path"]).read_text()
             defaults = re.findall(r"--simt-vf-dynamic-size=<int>[^\n]*Default is (\d+)\.", text)
             reject(len(defaults) != 1, 'unknown compiler dynamic-UB default', ValueError)
@@ -115,5 +111,5 @@ def inspect_vv_ub(ir, target, metadata, command, files):
         reject(usage.get('conservative_upper_bound'),
                'i1 conservative UB upper bound exceeds capacity; actual overflow unconfirmed', ValueError)
         raise ValueError("final UB address exceeds capacity")
-    usage["evidence"] = "hash-bound backend allocation, aligned extents and effective runtime capacity"
+    usage["evidence"] = "backend allocation, aligned extents and effective runtime capacity"
     return usage

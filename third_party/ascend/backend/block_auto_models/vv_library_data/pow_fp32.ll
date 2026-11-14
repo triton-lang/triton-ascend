@@ -1,4 +1,4 @@
-; Pinned pow SIMD body; declarations restored, debug references omitted.
+; Reference pow SIMD cost-model body; declarations restored, debug references omitted.
 define internal ptc_simdvf void @_mlir_ciface_pow_fp32.extracted(i32 %0, ptr nocapture %1, ptr addrspace(6) nocapture readonly %2, ptr addrspace(6) nocapture readonly %3, ptr addrspace(6) nocapture writeonly %4) unnamed_addr {
   %6 = tail call <256 x i1> @llvm.hivm.pset.b32(i32 0)
   %7 = tail call <64 x float> @llvm.hivm.vdups.z.v64f32(float 0x3FE6A09E60000000, <256 x i1> %6, i32 1)

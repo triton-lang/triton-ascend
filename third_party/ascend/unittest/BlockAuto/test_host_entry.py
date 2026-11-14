@@ -3,6 +3,7 @@
 import importlib
 from pathlib import Path
 import sys
+import tempfile
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -140,12 +141,59 @@ class TestModelContracts(unittest.TestCase):
         result = self.cv.candidate_plan({"grid": [8, 8, 1]}, probe=reject)
         self.assertEqual(result["candidates"], [])
 
-    def test_packaged_helper_matches_its_recorded_hash(self):
-        import hashlib
-        import json
-        data = BACKEND / "block_auto_models/vv_library_data"
-        proof = json.loads((data / "provenance.json").read_text())
-        self.assertEqual(hashlib.sha256((data / "pow_fp32.ll").read_bytes()).hexdigest(), proof["llvm_sha256"])
+    def test_pow_model_loads_reference_body_without_library_records(self):
+        binding = SimpleNamespace(analyze_block_candidate=lambda request: request)
+        modules = {"triton._C.libtriton": module("libtriton", ascend=binding)}
+        metadata = dict(target={"arch": "Ascend950PR_9579"}, parallel_mode="simd", name="kernel",
+                        auto_blockify_enabled=True)
+        with patch.dict(sys.modules, modules), patch.object(self.native, "launch_configuration",
+                                                            return_value=([], [64, 1, 1], 56, 56)):
+            config = self.native.analyze({"aiv": "call void @pow_fp32()"}, "", "", metadata, {}, 0, 1, raw="")
+        self.assertIn("define", config["pow_llvm"])
+        self.assertEqual(config["pow_wrapper_steps"], 25)
+
+    def test_mix_keeps_mode_checks_without_compiler_records(self):
+        ir = 'func.func @kernel() attributes {hacc.entry, hivm.vf_mode<MIX>, hivm.func_core_type<AIV>}'
+        self.assertEqual(self.native.mixed_parameters(ir),
+                         dict(simt_transaction_bytes=64, simt_transition_cycles=32, simt_instruction_cycles=1))
+        with self.assertRaisesRegex(ValueError, "one AIV SIMD/SIMT entry"):
+            self.native.mixed_parameters(ir.replace("<MIX>", "<SIMD>"))
+
+    def test_cv_ranks_without_compiler_records(self):
+        contract = dict(grid=[64, 1, 1], arguments={"x": dict(kind="tensor", dtype="fp32")})
+        items = [
+            dict(key="unmerged", factor=1, axis=0, metadata={}),
+            dict(key="a0_f2", factor=2, axis=0, metadata={"block_batching": {"cv_mode": "independent_batch_v1"}})
+        ]
+        traces = []
+        for item, score in zip(items, (100, 60)):
+            item.update(resource_checked=True, launch_contract=contract, ttir="", final_ir="")
+            traces.append(
+                dict(score=score, launched_groups=28, cube_core_count=28, auto_blockify=True,
+                     logical_grid=[64 // item["factor"], 1, 1], mode="cv", counts=dict(mma_calls=1, useful_flops=1024)))
+        with patch.object(self.cv, "analyze_candidate", side_effect=traces):
+            result = self.cv.rank_cv(items, contract)
+        self.assertTrue(result["model_complete"])
+        self.assertEqual(result["selected_key"], "a0_f2")
+
+    def test_mix_ub_default_still_must_match_runtime_capacity(self):
+        gate = importlib.import_module(PACKAGE + ".block_auto_models.cpu_resource_gate")
+        ir = '''func.func @kernel() attributes {hacc.entry, hivm.vf_mode<MIX>, hivm.func_core_type<AIV>}
+"UB_ALIGN_SIZE", 256 : i32
+"MAXIMUM_D_CACHE_SIZE", 524288 : i32
+"MINIMAL_D_CACHE_SIZE", 262144 : i32'''
+        metadata = dict(mix_mode="aiv", parallel_mode="mix_simd_simt", shared_mem_dynamic_size=216 * 1024)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "compiler-help.txt"
+            path.write_text("--simt-vf-dynamic-size=<int> Default is 216.\n")
+            files = {"backend_defaults": {"path": str(path)}}
+            usage = dict(capacity_bits=248 * 1024 * 8, address_extent_bits=256)
+            with patch.object(gate, "inspect_final_ub", side_effect=lambda *a, **k: dict(usage)):
+                self.assertEqual(
+                    gate.inspect_vv_ub(ir, "Ascend950", metadata, [], files)["capacity_bits"], 216 * 1024 * 8)
+                metadata["shared_mem_dynamic_size"] = 208 * 1024
+                with self.assertRaisesRegex(ValueError, "capacities differ"):
+                    gate.inspect_vv_ub(ir, "Ascend950", metadata, [], files)
 
     def test_missing_candidates_keep_baseline_without_loading_a_driver(self):
         model = importlib.import_module(PACKAGE + ".block_auto_model")
@@ -167,6 +215,102 @@ class TestModelContracts(unittest.TestCase):
         metadata["block_batching"]["guard"]["accesses"] = []
         with self.assertRaisesRegex(ValueError, "VV_LOOP_SCHEDULE_MISMATCH"):
             self.native.preserves_grid(metadata, 2)
+
+
+class LocalCache:
+
+    def __init__(self, directory):
+        self.cache_dir = str(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+
+    def put(self, data, name, binary=False):
+        path = Path(self.cache_dir) / name
+        path.write_bytes(data if isinstance(data, bytes) else data.encode())
+        return str(path)
+
+    def get_file(self, name):
+        path = Path(self.cache_dir) / name
+        return str(path) if path.is_file() else None
+
+
+class TestModelCache(unittest.TestCase):
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.compiler = self.root / "bisheng"
+        self.compiler.touch()
+        self.compiler.with_name("llvm-link").touch()
+        self.keys = []
+        self.cache_module = module("cache", get_cache_manager=self.cache)
+        modules = {
+            PACKAGE: module(PACKAGE, __path__=[str(BACKEND)]), PACKAGE + ".utils":
+            module("utils", _get_bisheng_path=lambda: str(self.compiler)), "triton.runtime.cache": self.cache_module
+        }
+        patcher = patch.dict(sys.modules, modules)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.artifacts = importlib.import_module(PACKAGE + ".block_auto_artifacts")
+        self.optimizer = importlib.import_module(PACKAGE + ".block_auto_models.vv_compilation")
+
+    def cache(self, key):
+        self.keys.append(key)
+        return LocalCache(self.root / "cache" / key)
+
+    def collect(self, key, text):
+        source = self.root / "temps"
+        source.mkdir(exist_ok=True)
+        (source / "module.hivm.opt.mlir").write_text("module {}")
+        (source / "kernel.ll").write_text(text)
+        metadata = {"hash": key}
+        evidence = self.artifacts.collect(source, b"\x7fELF", self.compiler, metadata, [], cache_factory=self.cache)
+        self.assertEqual(evidence["status"], "COLLECTED")
+        metadata["block_auto_evidence"] = evidence
+        return SimpleNamespace(metadata=SimpleNamespace(_asdict=lambda: metadata),
+                               asm=dict(ttir="ttir", ttadapter="ir"))
+
+    def test_artifacts_use_candidate_cache_and_need_no_file_records(self):
+        first = self.collect("first", "first module")
+        second = self.collect("second", "second module")
+        self.compiler.write_text("new compiler installation")
+        for kernel, expected in ((first, "first module"), (second, "second module")):
+            result = self.artifacts.load_evidence(kernel, cache_factory=self.cache)
+            self.assertEqual(result["llvm"], expected)
+            self.assertEqual(result["files"]["compiler"], dict(path=str(self.compiler)))
+        self.assertEqual(self.keys, ["first", "second", "first", "second"])
+
+    def test_missing_cached_input_remains_unavailable(self):
+        kernel = self.collect("missing", "module")
+        (self.root / "cache/missing/block_auto_llvm.ll").unlink()
+        with self.assertRaisesRegex(ValueError, "cached model input unavailable"):
+            self.artifacts.load_evidence(kernel, cache_factory=self.cache)
+
+    def test_optimizer_publishes_once_under_the_normal_candidate_key(self):
+        item = dict(metadata={"hash": "candidate"},
+                    files={"compiler": {"path": str(self.compiler)}, "llvm":
+                           {"path": "candidate.ll"}}, final_ir='hivm.aiv_bitcode = #hivm.aiv_bitcode<"meta.bc">')
+
+        def compile_cpu(command, **kwargs):
+            output = Path(command[command.index("-o") + 1])
+            output.write_text("optimized module")
+            self.assertEqual(kwargs["env"]["ASCEND_RT_VISIBLE_DEVICES"], "")
+
+        with patch.object(self.optimizer.subprocess, "run", side_effect=compile_cpu) as run:
+            self.assertEqual(self.optimizer.optimized_llvm(item), "optimized module")
+            self.assertEqual(self.optimizer.optimized_llvm(item), "optimized module")
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("-emit-llvm", run.call_args_list[0].args[0])
+        self.assertEqual(self.keys, ["candidate", "candidate"])
+
+    def test_optimizer_failure_does_not_publish_a_cache_entry(self):
+        item = dict(metadata={"hash": "failed"},
+                    files={"compiler": {"path": str(self.compiler)}, "llvm":
+                           {"path": "candidate.ll"}}, final_ir='hivm.aiv_bitcode = #hivm.aiv_bitcode<"meta.bc">')
+        with patch.object(self.optimizer.subprocess, "run", side_effect=OSError("optimizer failed")):
+            with self.assertRaisesRegex(OSError, "optimizer failed"):
+                self.optimizer.optimized_llvm(item)
+        self.assertFalse((self.root / "cache/failed/block_auto_optimized.ll").exists())
 
 
 if __name__ == "__main__":

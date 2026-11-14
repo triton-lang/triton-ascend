@@ -35,10 +35,15 @@ _A5_UB_DIAGNOSTIC = re.compile(
     r'need extra local buffer\.\)\n\[ERROR\] Failed to run BiShengIR regbase pipeline')
 
 _A3_UB_DIAGNOSTIC = re.compile(
+    r'(?:'
     r'\[NOTE\] Ub overflow detected; automatically set enable-code-motion to false and retrying compilation\.\n'
     r'\[NOTE\] Ub overflow detected; automatically set enable-auto-multi-buffer to false and retrying compilation\.\n'
     r'\[NOTE\] Due to Ub overflow, automatically set enable-code-motion to false, '
     r'set enable-auto-multi-buffer to false; compilation still failed\.\n'
+    r'|'
+    r'\[NOTE\] Ub overflow detected; automatically set enable-code-motion to false and retrying compilation\.\n'
+    r'\[NOTE\] Due to Ub overflow, automatically set enable-code-motion to false; compilation still failed\.\n'
+    r')'
     r'loc\("(?P<file>[^"\r\n]+/kernel(?:\.ttadapter)?\.mlir)":\d+:\d+\): error: Failed to run BiShengHIR pipeline\n+'
     r'loc\("(?P=file)":\d+:\d+\): error: ub overflow, requires (?P<required>\d{1,20}) bits while '
     r'(?P<available>\d{1,20}) bits available! \(possible reason: tiling basic block is too large '

@@ -34,6 +34,17 @@ _A5_UB_DIAGNOSTIC = re.compile(
     r'or block number is more than what user expect due to multi-buffer feature is enabled and some ops '
     r'need extra local buffer\.\)\n\[ERROR\] Failed to run BiShengIR regbase pipeline')
 
+_A3_UB_DIAGNOSTIC = re.compile(
+    r'\[NOTE\] Ub overflow detected; automatically set enable-code-motion to false and retrying compilation\.\n'
+    r'\[NOTE\] Ub overflow detected; automatically set enable-auto-multi-buffer to false and retrying compilation\.\n'
+    r'\[NOTE\] Due to Ub overflow, automatically set enable-code-motion to false, '
+    r'set enable-auto-multi-buffer to false; compilation still failed\.\n'
+    r'loc\("(?P<file>[^"\r\n]+/kernel(?:\.ttadapter)?\.mlir)":\d+:\d+\): error: Failed to run BiShengHIR pipeline\n+'
+    r'loc\("(?P=file)":\d+:\d+\): error: ub overflow, requires (?P<required>\d{1,20}) bits while '
+    r'(?P<available>\d{1,20}) bits available! \(possible reason: tiling basic block is too large '
+    r'or block number is more than what user expect due to multi-buffer feature is enabled and some ops '
+    r'need extra local buffer\.\)\n\[ERROR\] Failed to run BiShengIR pipeline')
+
 
 def _text(data):
     return data.decode(errors='replace') if isinstance(data, bytes) else (data or '')
@@ -71,6 +82,13 @@ def classify_vendor_failure(error, report, options, *, cv_resources):
         match = _A5_UB_DIAGNOSTIC.fullmatch(_text(error.stderr).strip())
         if match and int(match['required']) > int(match['available']):
             kind = 'ub'
+    if kind is None and error.returncode == 1:
+        match = _A3_UB_DIAGNOSTIC.fullmatch(_text(error.stderr).strip())
+        if match and int(match['required']) > int(match['available']):
+            # A3 can echo the same two locations on stdout without messages.
+            locations = rf'(?:loc\("{re.escape(match["file"])}":\d+:\d+\):\s*){{2}}'
+            if not _text(error.stdout).strip() or re.fullmatch(locations, _text(error.stdout).strip()):
+                kind = 'ub'
     if kind is not None and cv_resources and _is_cv_report(report):
         return BatchDecline("CV_TARGET_RESOURCE_REJECTED", "npubin",
                             diagnostic=diagnostic_text(error.stdout, error.stderr)[-16000:])

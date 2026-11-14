@@ -32,6 +32,7 @@
 #include "llvm/Support/Debug.h"
 
 static constexpr const char *DEBUG_TYPE = "UpdateLoopOps";
+static constexpr int kPipeSFlagId = 15;
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
   LLVM_DEBUG({                                                                 \
@@ -401,6 +402,166 @@ LogicalResult UpdateLoopOpsPass::addBlockCountersAndInnerDepConds(
   return success();
 }
 
+// Insert sync ops inside a main-loop body (scf.for or scf.while after-region):
+// wait at start, set before yield. Body block is resolved via getMainLoopBody.
+static LogicalResult
+insertSyncOpsInsideMainLoop(Block *loopBody, Location loc,
+                            hivm::TCoreTypeAttr coreType, PipeAttr setPipe,
+                            PipeAttr waitPipe, int waitFlagId, int setFlagId) {
+  Operation *forTerminator = loopBody->getTerminator();
+  if (!forTerminator) {
+    return failure();
+  }
+
+  // Insert wait at loop body start
+  OpBuilder insertionBuilder(&loopBody->front());
+  auto waitFlagAttr = insertionBuilder.getIntegerAttr(
+      insertionBuilder.getI64Type(), waitFlagId);
+  insertionBuilder.create<SyncBlockWaitOp>(loc, coreType, setPipe, waitPipe,
+                                           waitFlagAttr);
+
+  // Insert set before yield
+  OpBuilder setBuilder(forTerminator);
+  auto setFlagAttr =
+      setBuilder.getIntegerAttr(setBuilder.getI64Type(), setFlagId);
+  setBuilder.setInsertionPoint(forTerminator);
+  setBuilder.create<SyncBlockSetOp>(loc, coreType, setPipe, waitPipe,
+                                    setFlagAttr);
+
+  return success();
+}
+
+// Insert a sync op (SET before, or WAIT after) outside a main-loop op.
+// op-agnostic. `isBefore`: true -> SET, false -> WAIT.
+static LogicalResult
+insertSyncOpsOutsideMainLoop(Operation *loopOp, Location loc,
+                             hivm::TCoreTypeAttr coreType, PipeAttr setPipe,
+                             PipeAttr waitPipe, int flagId, bool isBefore) {
+  OpBuilder builder(loopOp);
+  auto flagAttr = builder.getIntegerAttr(builder.getI64Type(), flagId);
+  if (isBefore) {
+    builder.create<SyncBlockSetOp>(loc, coreType, setPipe, waitPipe, flagAttr);
+  } else {
+    builder.setInsertionPointAfter(loopOp);
+    builder.create<SyncBlockWaitOp>(loc, coreType, setPipe, waitPipe, flagAttr);
+  }
+  return success();
+}
+
+// Returns the loop body block for a main-loop op. scf.for has the single
+// region; scf.while uses the after region (where the actual loop body lives).
+static Block *getMainLoopBody(Operation *loopOp) {
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp)) {
+    return &whileOp.getAfter().front();
+  }
+  return &loopOp->getRegion(0).front();
+}
+
+// Insert PIPE_S for a main_loop op (scf.for or scf.while) by loop/scope type.
+// Body resolved via getMainLoopBody — scf.while uses the after region block.
+static LogicalResult
+insertPipeSForMainLoopOp(Operation *loopOp, scope::ScopeOp scopeOp,
+                         bool isScopeCube, bool isScopeVector, PipeAttr setPipe,
+                         PipeAttr waitPipe, int flagId) {
+  Block *loopBody = getMainLoopBody(loopOp);
+  Location loc = loopOp->getLoc();
+  bool isVectorFirst = loopOp->hasAttr(CVPipeline::kVectorFirst);
+  auto cubeType =
+      hivm::TCoreTypeAttr::get(loopOp->getContext(), hivm::TCoreType::CUBE);
+  auto vectorType =
+      hivm::TCoreTypeAttr::get(loopOp->getContext(), hivm::TCoreType::VECTOR);
+
+  if (isVectorFirst) {
+    if (isScopeCube) {
+      // vector_first + CUBE: before loop op (SET), inside (WAIT/SET)
+      if (failed(insertSyncOpsOutsideMainLoop(loopOp, loc, cubeType, setPipe,
+                                              waitPipe, flagId, true))) {
+        return failure();
+      }
+      if (failed(insertSyncOpsInsideMainLoop(loopBody, loc, cubeType, setPipe,
+                                             waitPipe, flagId, flagId))) {
+        return failure();
+      }
+    } else if (isScopeVector) {
+      // vector_first + VECTOR: inside (WAIT/SET), after loop op (WAIT)
+      if (failed(insertSyncOpsInsideMainLoop(loopBody, loc, vectorType, setPipe,
+                                             waitPipe, flagId, flagId))) {
+        return failure();
+      }
+      if (failed(insertSyncOpsOutsideMainLoop(loopOp, loc, vectorType, setPipe,
+                                              waitPipe, flagId, false))) {
+        return failure();
+      }
+    }
+  } else {
+    // cube_first (including default when neither attribute is present)
+    if (isScopeCube) {
+      // cube_first + CUBE: inside (WAIT/SET), after loop op (WAIT)
+      if (failed(insertSyncOpsInsideMainLoop(loopBody, loc, cubeType, setPipe,
+                                             waitPipe, flagId, flagId))) {
+        return failure();
+      }
+      if (failed(insertSyncOpsOutsideMainLoop(loopOp, loc, cubeType, setPipe,
+                                              waitPipe, flagId, false))) {
+        return failure();
+      }
+    } else if (isScopeVector) {
+      // cube_first + VECTOR: before loop op (SET), inside (WAIT/SET)
+      if (failed(insertSyncOpsOutsideMainLoop(loopOp, loc, vectorType, setPipe,
+                                              waitPipe, flagId, true))) {
+        return failure();
+      }
+      if (failed(insertSyncOpsInsideMainLoop(loopBody, loc, vectorType, setPipe,
+                                             waitPipe, flagId, flagId))) {
+        return failure();
+      }
+    }
+  }
+  return success();
+}
+
+LogicalResult UpdateLoopOpsPass::insertInterCorePipeS(ModuleOp module) {
+  auto cubeCoreType =
+      hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::CUBE);
+  auto vectorCoreType =
+      hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::VECTOR);
+  auto setPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
+  auto waitPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
+
+  WalkResult result = module.walk([&](scope::ScopeOp scopeOp) -> WalkResult {
+    auto scopeTypeAttr =
+        scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
+    if (!scopeTypeAttr) {
+      return WalkResult::advance();
+    }
+
+    bool isScopeCube = (scopeTypeAttr == cubeCoreType);
+    bool isScopeVector = (scopeTypeAttr == vectorCoreType);
+
+    // Walk both scf.for and scf.while with ssbuffer.main_loop; both need
+    // same PIPE_S sync. insertPipeSForMainLoopOp dispatches via
+    // getMainLoopBody.
+    WalkResult innerResult = scopeOp.walk([&](Operation *op) -> WalkResult {
+      if (!isMainLoopOp(op)) {
+        return WalkResult::advance();
+      }
+      if (failed(insertPipeSForMainLoopOp(op, scopeOp, isScopeCube,
+                                          isScopeVector, setPipeType,
+                                          waitPipeType, kPipeSFlagId))) {
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+
+    if (innerResult.wasInterrupted()) {
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+
+  return result.wasInterrupted() ? failure() : success();
+}
+
 // Analyzes producer/consumer relationship between tensor iter_args in
 // main_loop and ssbuffer.if. Downstream only acts on forOp (whileOp future
 // use).
@@ -546,6 +707,12 @@ void UpdateLoopOpsPass::runOnOperation() {
   // forOp from info-driven sets (no-ops when empty); whileOp unconditionally.
   if (infoToUse &&
       (failed(addBlockCountersAndInnerDepConds(module, infoToUse)))) {
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
+
+  // Insert PIPE_S inter-core synchronization
+  if (failed(insertInterCorePipeS(module))) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }

@@ -1,5 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 """Candidate subprocess and generation contracts, independent of the NPU driver."""
+import ast
 import importlib
 import os
 from pathlib import Path
@@ -443,7 +444,8 @@ worker._native_report = terminate
 
 
 @pytest.mark.parametrize('outcome', ['success', 'decline', 'unknown', 'wrong_stage'])
-def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_errors, outcome):
+@pytest.mark.parametrize('pipeline', ['simd', 'simt', 'tla'])
+def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_errors, outcome, pipeline):
     triton = ModuleType('triton')
     knobs = SimpleNamespace(cache=SimpleNamespace(dir=str(tmp_path / 'ordinary'), dump_dir=str(tmp_path / 'dump')))
     triton.knobs = knobs
@@ -452,7 +454,8 @@ def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_e
     writer = SimpleNamespace(cache_dir=str(tmp_path / 'generation'))
     Path(writer.cache_dir).mkdir()
     stages = worker._CandidateStages(source, tmp_path, writer)
-    options = SimpleNamespace(block_batching_factor=2)
+    options = SimpleNamespace(block_batching_factor=2, enable_tla_mode=pipeline == 'tla',
+                              is_pure_simt=pipeline == 'simt', compile_on_910_95=True)
     events = []
 
     def compile_single(src, compiled_target, opts, *, _env_vars):
@@ -471,8 +474,19 @@ def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_e
                 return worker.BatchDecline('NO_PROGRAM_AXIS', 'ttir' if outcome == 'decline' else 'ttadapter')
             return 'lowered'
 
+        compiler_path = Path(worker.__file__).with_name('compiler.py')
+        backend = next(n for n in ast.parse(compiler_path.read_text()).body
+                       if isinstance(n, ast.ClassDef) and n.name == 'AscendBackend')
+        add_stages = next(n for n in backend.body if isinstance(n, ast.FunctionDef) and n.name == 'add_stages')
+        namespace = dict(_active_attempt=worker._active_attempt, _with_debug_line=lambda stage, opt: stage,
+                         make_ttir=lambda module, metadata, opt: lower(module, metadata),
+                         make_tla_ttir=lambda module, metadata, opt: lower(module, metadata))
+        exec(compile(ast.Module(body=[add_stages], type_ignores=[]), str(compiler_path), 'exec'), namespace)
+        registered = {}
+        namespace['add_stages'](SimpleNamespace(target=SimpleNamespace(backend='npu')), registered, opts, None)
+        assert set(registered) == ({'ttir', 'npubin'} if pipeline == 'simt' else {'ttir', 'ttadapter', 'npubin'})
         try:
-            result = stages.wrap('ttir', lower)(object(), {})
+            result = registered['ttir'](object(), {})
         except Exception as error:
             raise compile_errors.MLIRCompilationError('stage failed') from error
         (Path(writer.cache_dir) / 'k.ttir').write_text(result)

@@ -1995,20 +1995,25 @@ class AscendBackend(BaseBackend):
                 stages["ttadapter"] = lambda src, metadata: tla_to_ttadapter(src, metadata, options)
             else:
                 stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
-                if options.is_pure_simt:
-                    stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
-                    return
-                stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
-            if options.compile_on_910_95:
-                stages["npubin"] = (
-                    lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(src, metadata, options))
+                if not options.is_pure_simt:
+                    stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
+            if options.is_pure_simt and not options.enable_tla_mode:
+                stages["npubin"] = lambda src, metadata: ttir_to_npubin(src, metadata, options)
             else:
-                stages["npubin"] = (
-                    lambda src, metadata: linalg_to_bin_enable_npu_compile_A2_A3(src, metadata, options))
-            stages["npubin"] = _with_debug_line(stages["npubin"], options)
+                if options.compile_on_910_95:
+                    stages["npubin"] = (
+                        lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(src, metadata, options))
+                else:
+                    stages["npubin"] = (
+                        lambda src, metadata: linalg_to_bin_enable_npu_compile_A2_A3(src, metadata, options))
+                stages["npubin"] = _with_debug_line(stages["npubin"], options)
         else:
             raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
                                       "Please ensure the target backend is set to 'npu'.")
+        attempt = _active_attempt.get()
+        if attempt is not None:
+            for ext, stage in stages.items():
+                stages[ext] = attempt.wrap(ext, stage)
 
     @functools.lru_cache()
     def hash(self):

@@ -1,44 +1,43 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-#include "Selection.h"
+#include "IRAnalysis.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include <set>
-#include <sstream>
 
 namespace mlir::triton::ascend::blockauto {
-static std::vector<std::string> argumentNames(const std::string &ttir) {
-  std::istringstream lines(ttir);
-  static const Regex names(R"(%([[:alnum:]_.$-]+):)");
-  for (std::string line; std::getline(lines, line);)
-    if (line.find("tt.func public @") != std::string::npos)
-      return matches(line, names);
-  throw std::runtime_error("candidate TTIR entry unavailable");
-}
-A launchArguments(const O &contract, const std::string &ttir) {
+A CandidateIRAnalysis::launchArguments(const O &contract,
+                                       const O &metadata) const {
   const O &arguments = sub(contract, "arguments");
   const A &order = array(contract, "argument_order"),
           &grid = array(contract, "grid");
   check(grid.size() == 3 && order.size() == arguments.size(),
-        "launch/TTIR ABI mismatch");
+        "launch ABI mismatch");
   A args{nullptr, nullptr}; // TA synchronization and workspace pointers.
   std::set<std::string> seen;
-  unsigned host = 0;
-  for (const auto &name : argumentNames(ttir)) {
-    if (StringRef(name).starts_with("__hacc_original_grid_")) {
-      size_t axis = std::string("xyz").find(name.back());
-      check(axis < 3, "invalid original grid argument");
-      args.push_back(grid[axis]);
-      continue;
-    }
-    check(host < order.size() && order[host].getAsString(),
-          "launch/TTIR ABI mismatch");
-    std::string key = order[host++].getAsString()->str();
-    check(seen.insert(key).second, "launch/TTIR ABI mismatch");
+  for (const V &name : order) {
+    check(bool(name.getAsString()), "missing host argument name");
+    std::string key = name.getAsString()->str();
+    check(seen.insert(key).second, "launch ABI mismatch");
     const O &arg = sub(arguments, key);
     check(str(arg, "kind") == "tensor" || str(arg, "kind") == "scalar",
           "unsupported host argument");
     args.push_back(str(arg, "kind") == "scalar" ? get(arg, "value")
                                                 : V(nullptr));
   }
-  check(host == order.size(), "launch/TTIR ABI mismatch");
+  // The compiler records hidden extents in ABI order; SSA names are irrelevant.
+  if (auto *axes = optional(metadata, "program_grid_transforms")
+                       .getArray("hidden_extent_axes"))
+    for (const V &value : *axes) {
+      int64_t axis = integer(value);
+      check(axis >= 0 && axis < 3, "invalid original grid axis");
+      args.push_back(grid[axis]);
+    }
+  auto entry = dyn_cast_or_null<FunctionOpInterface>(
+      SymbolTable::lookupSymbolIn(module, str(metadata, "name")));
+  if (!entry)
+    entry = dyn_cast_or_null<FunctionOpInterface>(SymbolTable::lookupSymbolIn(
+        module, str(metadata, "name") + "_mix_aic"));
+  check(entry && entry.getNumArguments() == args.size() + 3,
+        "launch/final IR ABI mismatch");
   return args;
 }
 bool preservesGrid(const O &metadata) {
@@ -46,7 +45,8 @@ bool preservesGrid(const O &metadata) {
   return str(optional(metadata, "block_batching"), "vv_lowering") ==
          "sequential_iterations_v1";
 }
-std::string rejection(const O &item, const O &contract) {
+std::string rejection(const O &item, const O &contract,
+                      const CandidateIRAnalysis &ir) {
   const O &metadata = sub(item, "metadata");
   A grid(array(contract, "grid"));
   check(grid.size() == 3, "invalid launch grid");
@@ -65,7 +65,7 @@ std::string rejection(const O &item, const O &contract) {
       floor && floor->kind() != V::Null
           ? (floor->getAsString() ? std::stoll(floor->getAsString()->str())
                                   : integer(*floor))
-          : spec(str(item, "final_ir"), "VECTOR_CORE_COUNT");
+          : ir.spec("VECTOR_CORE_COUNT");
   check(cores >= 0, "invalid core floor");
   if (factor == 1)
     return "";
@@ -78,13 +78,14 @@ std::string rejection(const O &item, const O &contract) {
     return "GRID_NOT_REDUCED";
   return merged < cores ? "GRID_BELOW_CORE_FLOOR" : "";
 }
-O modelConfig(const O &item, const O &contract, const A &arguments) {
+O modelConfig(const O &item, const O &contract, const A &arguments,
+              const CandidateIRAnalysis &ir) {
   const O &metadata = sub(item, "metadata");
-  std::string mode = str(metadata, "parallel_mode"), ir = str(item, "final_ir");
+  std::string mode = str(metadata, "parallel_mode");
   bool vv = str(metadata, "mix_mode") == "aiv",
        preserve = vv && preservesGrid(metadata);
   int64_t factor = integer(item, "factor"), axis = integer(item, "axis"),
-          cores = spec(ir, vv ? "VECTOR_CORE_COUNT" : "CUBE_CORE_COUNT");
+          cores = ir.spec(vv ? "VECTOR_CORE_COUNT" : "CUBE_CORE_COUNT");
   check(factor == 1 || factor == 2 || factor == 4,
         "factor outside automatic shortlist");
   check(mode == "simd" || (vv && mode == "mix_simd_simt"),
@@ -121,7 +122,7 @@ O modelConfig(const O &item, const O &contract, const A &arguments) {
     if (modules.empty() && item.get("llvm"))
       modules["aic"] = "";
     if (modules.get("aiv"))
-      check(spec(ir, "VECTOR_CORE_COUNT") == cores * 2,
+      check(ir.spec("VECTOR_CORE_COUNT") == cores * 2,
             "only one Cube with two Vector subblocks is modelled");
   }
   O config{{"mode", vv ? "vv" : "cv"},

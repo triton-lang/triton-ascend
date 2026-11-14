@@ -63,7 +63,5 @@ def load_evidence(kernel, *, cache_factory=None, compiler_path=None):
             raise ValueError("cached model input unavailable: " + role)
         result[role] = Path(path).read_text()
         result["files"][role] = dict(path=str(path))
-    # Frontend stages and runtime metadata already belong to CompiledKernel.
-    result["ttir"] = kernel.asm["ttir"]
     result["files"]["compiler"] = dict(path=str(compiler_path))
     return result

@@ -136,6 +136,10 @@ add_triton_plugin(TritonAscend
   ${CMAKE_CURRENT_SOURCE_DIR}/language/tla/cpp/tla_builder.cc
   LINK_LIBS
   LLVMAsmParser
+  MLIRAnalysis
+  MLIRParser
+  MLIRTargetLLVMIRImport
+  MLIRLLVMIRToLLVMTranslation
   TritonToGraph
   TritonToLinalg
   BiShengIRScopeDialect

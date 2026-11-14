@@ -1,5 +1,5 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-#include "Selection.h"
+#include "IRAnalysis.h"
 #include "llvm/Support/raw_ostream.h"
 #include <tuple>
 
@@ -15,17 +15,24 @@ static std::string key(const O &item) {
              : "a" + std::to_string(integer(item, "axis")) + "_f" +
                    std::to_string(integer(item, "factor"));
 }
-static O prepare(const O &item, const O &contract) {
+static O prepare(const O &item, const O &contract, MLIRContext &context) {
   O state{
       {"key", key(item)}, {"resource_checked", false}, {"needs_llvm", false}};
+  OwningOpRef<ModuleOp> module;
+  std::unique_ptr<ModuleAnalysisManager> manager;
+  CandidateIRAnalysis *ir = nullptr;
   try {
     if (!item.get("metadata")) {
       if (!excluded(str(item, "status")))
         state["status"] = "RESOURCE_UNCONFIRMED";
       return state;
     }
-    state["ub_usage"] = resources(item);
-    state["arguments"] = launchArguments(contract, str(item, "ttir"));
+    module = parseCandidateIR(str(item, "final_ir"), context);
+    manager = std::make_unique<ModuleAnalysisManager>(module->getOperation(),
+                                                      nullptr);
+    ir = &AnalysisManager(*manager).getAnalysis<CandidateIRAnalysis>();
+    state["ub_usage"] = ir->resources(item);
+    state["arguments"] = ir->launchArguments(contract, sub(item, "metadata"));
     state["resource_checked"] = true;
   } catch (const std::exception &error) {
     update(state, O{{"status", "RESOURCE_UNCONFIRMED"},
@@ -36,20 +43,19 @@ static O prepare(const O &item, const O &contract) {
   state["vv"] = vv;
   try {
     if (vv) {
-      std::string reason = rejection(item, contract);
+      std::string reason = rejection(item, contract, *ir);
       if (!reason.empty()) {
         update(state, O{{"status", "RUNTIME_REJECTED"}, {"error", reason}});
         return state;
       }
-      static const Regex meta(
-          R"re(hivm\.aiv_bitcode = #hivm\.aiv_bitcode<"([^"]+)">)re");
-      auto paths = matches(str(item, "final_ir"), meta);
-      if (paths.size() == 1)
-        state["meta_library"] = paths[0];
+      auto path = ir->metaLibrary();
+      if (!path.empty())
+        state["meta_library"] = path;
     } else
       state["merge_kind"] =
           mergeKind(sub(item, "metadata"), integer(item, "factor"));
-    state["config"] = modelConfig(item, contract, array(state, "arguments"));
+    state["config"] =
+        modelConfig(item, contract, array(state, "arguments"), *ir);
     state["needs_llvm"] = vv;
   } catch (const std::exception &error) {
     if (vv)
@@ -202,12 +208,16 @@ std::string selectBlockCandidates(llvm::StringRef request) {
     result = planCV(input);
   else {
     check(action == "prepare" || action == "rank", "unknown selector action");
+    DialectRegistry registry;
+    registerCandidateDialects(registry);
+    MLIRContext context(registry, MLIRContext::Threading::DISABLED);
+    context.allowUnregisteredDialects();
     Items items;
     A states;
     for (const V &value : array(input, "candidates")) {
       const O &item = object(value);
       if (action == "prepare")
-        states.push_back(prepare(item, contract));
+        states.push_back(prepare(item, contract, context));
       else
         items[key(item)] = &item;
     }

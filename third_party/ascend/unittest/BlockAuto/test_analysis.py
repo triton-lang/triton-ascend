@@ -62,6 +62,26 @@ class TestCandidateHelpers(unittest.TestCase):
         long = analyze(candidate(operations=8, iterations=4))["score"]
         self.assertGreater(long, short)
 
+    def test_imported_constants_do_not_add_issued_instructions(self):
+        source = candidate(operations=8, iterations=4).replace(
+            "store i32 4, ptr %trip",
+            "%count = extractvalue { i32, i32 } { i32 4, i32 0 }, 0\n  store i32 %count, ptr %trip")
+        # The original extractvalue costs one step; imported aggregate builders do not.
+        self.assertEqual(analyze(source)["score"], 73.5)
+
+    def test_freeze_preserves_the_scalar_loop_bound(self):
+        source = candidate(operations=8,
+                           iterations=4).replace("%count = load i32, ptr %trip",
+                                                 "%loaded = load i32, ptr %trip\n  %count = freeze i32 %loaded")
+        self.assertEqual(analyze(source)["score"], 73)
+
+    def test_loop_carried_vector_values_keep_their_dependencies(self):
+        source = candidate(operations=8, iterations=4)
+        self.assertEqual(analyze(source)["score"], 72.5)
+        source = source.replace("%v1 = call", "%carry = phi <64 x float> [%v0, %entry], [%v8, %loop]\n  %v1 = call")
+        source = source.replace("(<64 x float> %v0, <64 x float> %v0,", "(<64 x float> %carry, <64 x float> %carry,")
+        self.assertEqual(analyze(source)["score"], 180)
+
     def test_missing_helper_definition_is_not_assigned_zero_cost(self):
         source = "declare void @pow_fp32()\ndefine void @kernel() { call void @pow_fp32()\nret void }"
         with self.assertRaisesRegex(RuntimeError, "unmodelled call: pow_fp32"):

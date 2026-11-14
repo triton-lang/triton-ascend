@@ -78,12 +78,12 @@ inline int64_t product(const A &values) {
 }
 std::vector<std::string> matches(StringRef text, const Regex &pattern,
                                  unsigned group = 1);
-int64_t spec(StringRef ir, StringRef key);
-O resources(const O &item);
-A launchArguments(const O &contract, const std::string &ttir);
+class CandidateIRAnalysis;
 bool preservesGrid(const O &metadata);
-std::string rejection(const O &item, const O &contract);
-O modelConfig(const O &item, const O &contract, const A &arguments);
+std::string rejection(const O &item, const O &contract,
+                      const CandidateIRAnalysis &ir);
+O modelConfig(const O &item, const O &contract, const A &arguments,
+              const CandidateIRAnalysis &ir);
 std::string mergeKind(const O &metadata, int64_t factor, bool frontend = false);
 O planCV(const O &request);
 O rankCV(const O &records, const O &contract);

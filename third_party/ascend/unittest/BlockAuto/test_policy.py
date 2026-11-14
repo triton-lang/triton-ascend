@@ -16,18 +16,20 @@ def item(factor=1, *, mode="simd", dtype="16xf32", offset=0):
                     auto_blockify_enabled=True, shared_mem_dynamic_size=216 * 1024,
                     block_auto_evidence=dict(command=["--simt-vf-dynamic-size=216"]))
     ir = '''module attributes {hacc.target = #hacc.target<"Ascend950">,
-"UB_SIZE", 2031616 : i32, "UB_ALIGN_SIZE", 256 : i32,
-"MINIMAL_D_CACHE_SIZE", 262144 : i32, "MAXIMUM_D_CACHE_SIZE", 524288 : i32,
-"VECTOR_CORE_COUNT", 56 : i32, "CUBE_CORE_COUNT", 28 : i32}
-func.func @kernel() attributes {hacc.entry, hivm.func_core_type = #hivm.func_core_type<AIV>, hivm.vf_mode<MODE>} {
+dlti.target_system_spec = #dlti.target_system_spec<"NPU" = #hacc.target_device_spec<
+#dlti.dl_entry<"UB_SIZE", 2031616 : i32>, #dlti.dl_entry<"UB_ALIGN_SIZE", 256 : i32>,
+#dlti.dl_entry<"MINIMAL_D_CACHE_SIZE", 262144 : i32>, #dlti.dl_entry<"MAXIMUM_D_CACHE_SIZE", 524288 : i32>,
+#dlti.dl_entry<"VECTOR_CORE_COUNT", 56 : i32>, #dlti.dl_entry<"CUBE_CORE_COUNT", 28 : i32>>>} {
+func.func @kernel(%sync: !llvm.ptr<1>, %workspace: !llvm.ptr<1>, %x: !llvm.ptr<1>, %gx: i32, %gy: i32, %gz: i32) {
  %offset = llvm.mlir.constant(OFFSET : i64) : i64
  %buffer = hivm.hir.pointer_cast(%offset) : memref<DTYPE, #hivm.address_space<ub>>
+ return
 }
-'''.replace("MODE", "MIX" if mode == "mix_simd_simt" else "SIMD").replace("OFFSET",
-                                                                          str(offset)).replace("DTYPE", dtype)
+}
+'''.replace("OFFSET", str(offset)).replace("DTYPE", dtype)
     source = vector_body().replace("@kernel()", "@kernel(ptr %sync, ptr %workspace, ptr %x, i32 %gx, i32 %gy, i32 %gz)")
-    return dict(factor=factor, axis=-1 if factor == 1 else 0, metadata=metadata, final_ir=ir,
-                ttir="tt.func public @kernel(%arg0: !tt.ptr<f32>) {", llvm=source, optimized_llvm=source, files={})
+    return dict(factor=factor, axis=-1 if factor == 1 else 0, metadata=metadata, final_ir=ir, llvm=source,
+                optimized_llvm=source, files={})
 
 
 def prepare(items, launch=None):
@@ -40,7 +42,8 @@ class TestNativeResources(unittest.TestCase):
 
     def test_aligned_extent_and_shared_offsets(self):
         value = item(dtype="2xi32", offset=8192)
-        value["final_ir"] += "\n %alias = hivm.hir.pointer_cast(%offset) : memref<2xi32, #hivm.address_space<ub>>"
+        value["final_ir"] = value["final_ir"].replace(
+            " return", " %alias = hivm.hir.pointer_cast(%offset) : memref<2xi32, #hivm.address_space<ub>>\n return")
         state = prepare([value])[0]
         self.assertTrue(state["resource_checked"])
         self.assertEqual(state["ub_usage"]["address_extent_bits"], 8224 * 8)
@@ -91,9 +94,11 @@ class TestNativeResources(unittest.TestCase):
 
 class TestNativeSelection(unittest.TestCase):
 
-    def test_argument_positions_and_original_grid_survive_ttir_renaming(self):
+    def test_argument_positions_follow_compiler_abi_not_ssa_names(self):
         value = item()
-        value["ttir"] = "tt.func public @kernel(%arg0: i32, %arg1: !tt.ptr<f32>, %__hacc_original_grid_x: i32) {"
+        value["metadata"]["program_grid_transforms"] = dict(hidden_extent_axes=[0])
+        value["final_ir"] = value["final_ir"].replace("%x: !llvm.ptr<1>",
+                                                      "%renamed0: i32, %renamed1: !llvm.ptr<1>, %renamed2: i32")
         launch = dict(grid=[224, 1, 1],
                       arguments={"z": dict(kind="scalar", value=7), "a": dict(kind="tensor", dtype="fp32")})
         state = prepare([value], launch)[0]

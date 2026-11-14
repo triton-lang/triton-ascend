@@ -1,8 +1,20 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "Selection.h"
+#include "mlir/Analysis/DataLayoutAnalysis.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/Dialect/DLTI/DLTI.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/IR/Matchers.h"
+#include "mlir/Interfaces/ControlFlowInterfaces.h"
+#include "mlir/Pass/AnalysisManager.h"
+#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMIRToLLVMTranslation.h"
+#include "mlir/Target/LLVMIR/Import.h"
 #include "llvm/AsmParser/Parser.h"
-#include "llvm/IR/ConstantFold.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DIBuilder.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -26,6 +38,18 @@
 #include <variant>
 
 namespace mlir::triton::ascend {
+namespace blockauto {
+std::vector<std::string> matches(StringRef text, const Regex &pattern,
+                                 unsigned group) {
+  std::vector<std::string> result;
+  SmallVector<StringRef> groups;
+  while (pattern.match(text, &groups)) {
+    result.push_back(groups[group].str());
+    text = text.drop_front(groups[0].end() - text.begin());
+  }
+  return result;
+}
+} // namespace blockauto
 namespace {
 using namespace llvm;
 using Object = json::Object;
@@ -41,7 +65,7 @@ std::string text(const Object &o, StringRef key) {
   check(bool(v), "missing string: " + key.str());
   return v->str();
 }
-std::string printValue(const Value &v) {
+std::string printValue(Operation &v) {
   std::string s;
   raw_string_ostream out(s);
   v.print(out);
@@ -49,7 +73,7 @@ std::string printValue(const Value &v) {
 }
 
 struct Pointer {
-  const Value *allocation = nullptr;
+  Operation *allocation = nullptr;
   int depth = 0;
   int64_t offset = 0;
   bool operator<(const Pointer &p) const {
@@ -78,67 +102,87 @@ struct Scalar {
   }
 };
 using Memory = std::map<Pointer, Scalar>;
-using Environment = std::map<const Value *, Scalar>;
-Scalar emptyAggregate(Type *type) {
+using Environment = DenseMap<mlir::Value, Scalar>;
+Scalar emptyAggregate(mlir::Type type) {
   std::vector<Scalar> values;
-  if (auto *s = dyn_cast<StructType>(type))
-    for (Type *element : s->elements())
+  if (auto s = dyn_cast<LLVM::LLVMStructType>(type))
+    for (mlir::Type element : s.getBody())
       values.push_back(emptyAggregate(element));
-  else if (auto *a = dyn_cast<ArrayType>(type))
-    values.assign(a->getNumElements(), emptyAggregate(a->getElementType()));
+  else if (auto a = dyn_cast<LLVM::LLVMArrayType>(type))
+    values.assign(a.getNumElements(), emptyAggregate(a.getElementType()));
   else
     return {};
   return Scalar(std::move(values));
 }
-Scalar evaluate(const Value *value, const Environment &env) {
-  if (auto found = env.find(value); found != env.end())
-    return found->second;
-  if (auto *i = dyn_cast<ConstantInt>(value))
-    return Scalar(i->getValue());
-  if (auto *f = dyn_cast<ConstantFP>(value)) {
+Scalar fromAttribute(Attribute attr) {
+  if (auto integer = dyn_cast_or_null<IntegerAttr>(attr))
+    return Scalar(integer.getValue());
+  if (auto floating = dyn_cast_or_null<FloatAttr>(attr)) {
     Scalar result;
-    // Keep the previous abstract domain: hexadecimal payloads are unknown.
-    if (printValue(*f).find("0x") != std::string::npos)
-      return result;
-    double number = f->getValueAPF().convertToDouble();
-    if (std::isfinite(number))
-      result.data = number;
+    double value = floating.getValueAsDouble();
+    if (std::isfinite(value))
+      result.data = value;
     return result;
   }
-  if (isa<UndefValue, PoisonValue>(value))
-    return emptyAggregate(value->getType());
-  if (auto *a = dyn_cast<ConstantDataArray>(value)) {
-    std::vector<Scalar> result;
-    for (unsigned i = 0; i < a->getNumElements(); ++i)
-      result.push_back(evaluate(a->getElementAsConstant(i), env));
-    return Scalar(std::move(result));
-  }
-  if (auto *p = dyn_cast<ConstantPointerNull>(value))
-    if (p->getType()->getAddressSpace() == 6)
-      return Scalar(Pointer{});
-  if (auto *c = dyn_cast<ConstantExpr>(value))
-    if (c->getOpcode() == Instruction::IntToPtr &&
-        c->getType()->getPointerAddressSpace() == 6)
-      return Scalar(
-          Pointer{nullptr, 0, evaluate(c->getOperand(0), env).integer()});
-  if (isa<ConstantStruct, ConstantArray>(value)) {
-    std::vector<Scalar> result;
-    for (const Use &operand : cast<Constant>(value)->operands())
-      result.push_back(evaluate(operand, env));
-    return Scalar(std::move(result));
+  if (auto dense = dyn_cast_or_null<DenseElementsAttr>(attr)) {
+    std::vector<Scalar> values;
+    for (auto value : dense.getValues<Attribute>())
+      values.push_back(fromAttribute(value));
+    return Scalar(std::move(values));
   }
   return {};
 }
-Scalar insert(Scalar value, ArrayRef<unsigned> indices, const Scalar &element) {
+Attribute toAttribute(const Scalar &scalar, mlir::Type type) {
+  if (auto *value = std::get_if<APInt>(&scalar.data))
+    if (auto integer = dyn_cast<IntegerType>(type))
+      return IntegerAttr::get(type, value->sextOrTrunc(integer.getWidth()));
+  if (auto *value = std::get_if<double>(&scalar.data))
+    if (isa<FloatType>(type))
+      return FloatAttr::get(type, *value);
+  return {};
+}
+Scalar insert(Scalar value, ArrayRef<int64_t> indices, const Scalar &element) {
   if (indices.empty())
     return element;
   auto *values = std::get_if<std::vector<Scalar>>(&value.data);
   if (!values)
     return {};
-  check(indices.front() < values->size(), "invalid aggregate index");
+  check(indices.front() >= 0 && indices.front() < int64_t(values->size()),
+        "invalid aggregate index");
   (*values)[indices.front()] =
       insert((*values)[indices.front()], indices.drop_front(), element);
   return value;
+}
+bool constant(Operation &op) {
+  return isa<LLVM::ConstantOp, LLVM::UndefOp, LLVM::PoisonOp, LLVM::ZeroOp,
+             LLVM::AddressOfOp>(op);
+}
+// LLVM constants become operations during import, but do not issue
+// instructions.
+bool scalarIntrinsic(Operation &op) {
+  return op.hasAttr("block_auto.intrinsic") ||
+         isa<LLVM::LifetimeStartOp, LLVM::LifetimeEndOp>(op);
+}
+StringRef callName(LLVM::CallOp call) {
+  auto name = call.getCallee().value_or("");
+  return name.starts_with("a5.llvm.") ? name.drop_front(3) : name;
+}
+StringRef functionAttribute(LLVM::LLVMFuncOp fn, StringRef key) {
+  if (auto attributes = fn.getPassthrough())
+    for (Attribute attr : *attributes) {
+      if (auto pair = dyn_cast<ArrayAttr>(attr)) {
+        if (pair.size() == 2 && cast<StringAttr>(pair[0]).getValue() == key)
+          return cast<StringAttr>(pair[1]).getValue();
+      } else if (auto name = dyn_cast<StringAttr>(attr))
+        if (name.getValue() == key)
+          return key;
+    }
+  return {};
+}
+int callingConvention(LLVM::LLVMFuncOp fn) {
+  int convention = 0;
+  functionAttribute(fn, "block_auto_calling_conv").getAsInteger(10, convention);
+  return convention;
 }
 
 struct Rate {
@@ -289,8 +333,8 @@ struct VectorPlan {
   };
   const Profile &profile;
   bool readyMode;
-  std::map<const Value *, std::set<int>> dependencies;
-  std::map<const Value *, double> times;
+  DenseMap<mlir::Value, std::set<int>> dependencies;
+  DenseMap<mlir::Value, double> times;
   std::map<std::string, std::vector<double>> legacySlots{
       {"exec", {0, 0}}, {"load", {0, 0}}, {"store", {0}}};
   std::vector<Node> nodes;
@@ -299,20 +343,28 @@ struct VectorPlan {
   std::vector<double> pending;
   double issue = 0, finish = 0;
   VectorPlan(const Profile &p, bool ready) : profile(p), readyMode(ready) {}
-  std::set<int> deps(const Instruction &i) const {
+  static OperandRange readOperands(Operation &i) {
+    // CF forwards loop-carried SSA values on edges. They are phi inputs, not
+    // operands consumed by the branch instruction's issue resource.
+    return i.getOperands().take_front(isa<cf::BranchOp>(i) ? 0
+                                      : isa<cf::CondBranchOp>(i)
+                                          ? 1
+                                          : i.getNumOperands());
+  }
+  std::set<int> deps(Operation &i) const {
     std::set<int> result;
-    for (const Use &operand : i.operands())
+    for (mlir::Value operand : readOperands(i))
       if (auto at = dependencies.find(operand); at != dependencies.end())
         result.insert(at->second.begin(), at->second.end());
     return result;
   }
-  double dependencyTime(const Instruction &i) {
+  double dependencyTime(Operation &i) {
     double result = 0;
-    for (const Use &operand : i.operands())
+    for (mlir::Value operand : readOperands(i))
       result = std::max(result, times[operand]);
     return result;
   }
-  int node(const Instruction &i, Rate rate) {
+  int node(Operation &i, Rate rate) {
     auto parents = deps(i);
     parents.insert(control.begin(), control.end());
     size_t ordinal = retirement.size();
@@ -325,14 +377,14 @@ struct VectorPlan {
       retired.insert(retirement.back());
     retirement.push_back(nodes.size());
     nodes.push_back({retired, {}, 0, false});
-    if (!i.getType()->isVoidTy())
-      dependencies[&i] = {id};
+    if (i.getNumResults() != 0)
+      dependencies[i.getResult(0)] = {id};
     return id;
   }
-  void add(const CallBase &call) {
-    auto rate = profile.cost(call.getCalledFunction()->getName(), readyMode);
+  void add(LLVM::CallOp call) {
+    auto rate = profile.cost(callName(call), readyMode);
     if (readyMode) {
-      node(call, rate);
+      node(*call, rate);
       return;
     }
     std::string pipe =
@@ -345,7 +397,7 @@ struct VectorPlan {
                   pending.end());
     std::sort(pending.begin(), pending.end());
     double queued = pending.size() >= profile.window ? pending.front() : 0;
-    double start = std::max({issue, *slot, dependencyTime(call), queued});
+    double start = std::max({issue, *slot, dependencyTime(*call), queued});
     *slot = start + rate.interval;
     issue = start + 0.5;
     finish = std::max(finish, start + rate.latency);
@@ -353,18 +405,23 @@ struct VectorPlan {
                                  [&](double t) { return t <= start; }),
                   pending.end());
     pending.push_back(start + rate.latency);
-    times[&call] = start + rate.latency;
+    if (call->getNumResults())
+      times[call.getResult()] = start + rate.latency;
   }
-  void scalar(const Instruction &i) {
-    if (readyMode)
-      dependencies[&i] = deps(i);
-    else
-      times[&i] = dependencyTime(i);
-    if (!readyMode || isa<CallBase, AllocaInst, LoadInst, StoreInst,
-                          BitCastInst, ExtractValueInst, InsertValueInst>(i))
+  void scalar(Operation &i) {
+    if (i.getNumResults()) {
+      if (readyMode)
+        dependencies[i.getResult(0)] = deps(i);
+      else
+        times[i.getResult(0)] = dependencyTime(i);
+    }
+    if (!readyMode ||
+        isa<LLVM::CallOp, LLVM::AllocaOp, LLVM::LoadOp, LLVM::StoreOp,
+            LLVM::BitcastOp, LLVM::ExtractValueOp, LLVM::InsertValueOp>(i) ||
+        scalarIntrinsic(i))
       return;
     int id = node(i, {1, 1, 1, "vf_control", "vf_control"});
-    if (isa<BranchInst>(i))
+    if (isa<BranchOpInterface>(i))
       control = {id};
   }
   double complete() {
@@ -897,7 +954,7 @@ double schedule(const std::vector<KernelPlan> &blocks, unsigned cores,
   return finish;
 }
 
-std::unique_ptr<Module> parse(StringRef input, LLVMContext &context) {
+OwningOpRef<ModuleOp> parse(StringRef input, MLIRContext &context) {
   std::string source = input.str();
   for (auto [from, to] :
        {std::pair{" ptc_simdvf ", " cc 1023 "},
@@ -909,17 +966,120 @@ std::unique_ptr<Module> parse(StringRef input, LLVMContext &context) {
       pos += strlen(to);
     }
   }
+  llvm::LLVMContext llvmContext;
   SMDiagnostic diagnostic;
-  auto module = parseAssemblyString(source, diagnostic, context);
+  auto module = parseAssemblyString(source, diagnostic, llvmContext);
   check(bool(module),
-        "LLVM analysis parse failed: " + diagnostic.getMessage().str() + ": " +
-            diagnostic.getLineContents().str());
-  return module;
+        "LLVM analysis parse failed: " + diagnostic.getMessage().str());
+  StripDebugInfo(*module);
+  // Import materializes constant aggregates as SSA operations. Mark original
+  // instructions through the standard debug-location importer, so those extra
+  // operations never become issued work in the cost model.
+  DIBuilder debug(*module);
+  auto *file = debug.createFile("block-auto-instruction", "");
+  debug.createCompileUnit(dwarf::DW_LANG_C, file, "block-auto", false, "", 0);
+  auto *type = debug.createSubroutineType(debug.getOrCreateTypeArray({}));
+  // Upstream MLIR does not register BiSheng's private intrinsics/conventions.
+  // Keep them as ordinary calls plus an ABI attribute in this analysis copy.
+  for (auto &fn : *module) {
+    auto *scope = fn.isDeclaration()
+                      ? nullptr
+                      : debug.createFunction(file, fn.getName(), fn.getName(),
+                                             file, 1, type, 1, DINode::FlagZero,
+                                             DISubprogram::SPFlagDefinition);
+    if (scope)
+      fn.setSubprogram(scope);
+    if (fn.getName().starts_with("llvm.") && !fn.getIntrinsicID())
+      fn.setName("a5." + fn.getName());
+    if (fn.getCallingConv() >= 1022) {
+      fn.addFnAttr("block_auto_calling_conv",
+                   std::to_string(fn.getCallingConv()));
+      fn.setCallingConv(llvm::CallingConv::C);
+    }
+    for (auto &block : fn)
+      for (auto &op : block) {
+        SmallVector<std::pair<unsigned, MDNode *>> metadata;
+        op.getAllMetadataOtherThanDebugLoc(metadata);
+        for (auto [kind, value] : metadata)
+          op.setMetadata(kind, nullptr);
+        op.setDebugLoc(DILocation::get(llvmContext, 1, 0, scope));
+        if (auto *call = dyn_cast<llvm::CallBase>(&op))
+          if (call->getCallingConv() >= 1022)
+            call->setCallingConv(llvm::CallingConv::C);
+      }
+  }
+  debug.finalize();
+  auto result = translateLLVMIRToModule(std::move(module), &context, false);
+  check(bool(result), "cannot import candidate LLVM into MLIR");
+  result->walk([](Operation *op) {
+    bool original = false;
+    op->getLoc()->walk([&](Location location) {
+      if (auto loc = dyn_cast<FileLineColLoc>(location))
+        original |=
+            loc.getFilename() == "block-auto-instruction" && loc.getLine() == 1;
+      return WalkResult::advance();
+    });
+    if (!original)
+      op->setAttr("block_auto.materialized", UnitAttr::get(op->getContext()));
+  });
+  // CF implements successor selection from constant operands. Use it also for
+  // imported LLVM branches so loop traversal shares the standard interface.
+  result->walk([](Operation *op) {
+    OpBuilder builder(op);
+    if (auto branch = dyn_cast<LLVM::BrOp>(op)) {
+      cf::BranchOp::create(builder, op->getLoc(), branch.getDest(),
+                           branch.getDestOperands());
+      op->erase();
+    } else if (auto branch = dyn_cast<LLVM::CondBrOp>(op)) {
+      cf::CondBranchOp::create(
+          builder, op->getLoc(), branch.getCondition(), branch.getTrueDest(),
+          branch.getTrueDestOperands(), branch.getFalseDest(),
+          branch.getFalseDestOperands());
+      op->erase();
+    }
+  });
+  // LLVM dialect leaves integer folding to LLVM. Lift scalar operations to
+  // Arith so its existing fold hooks can use per-invocation abstract values.
+  static const StringMap<StringRef> arithmetic{
+      {"llvm.add", "arith.addi"},        {"llvm.sub", "arith.subi"},
+      {"llvm.mul", "arith.muli"},        {"llvm.sdiv", "arith.divsi"},
+      {"llvm.udiv", "arith.divui"},      {"llvm.srem", "arith.remsi"},
+      {"llvm.urem", "arith.remui"},      {"llvm.shl", "arith.shli"},
+      {"llvm.lshr", "arith.shrui"},      {"llvm.ashr", "arith.shrsi"},
+      {"llvm.and", "arith.andi"},        {"llvm.or", "arith.ori"},
+      {"llvm.xor", "arith.xori"},        {"llvm.zext", "arith.extui"},
+      {"llvm.sext", "arith.extsi"},      {"llvm.trunc", "arith.trunci"},
+      {"llvm.select", "arith.select"},   {"llvm.icmp", "arith.cmpi"},
+      {"llvm.intr.smin", "arith.minsi"}, {"llvm.intr.smax", "arith.maxsi"},
+      {"llvm.intr.umin", "arith.minui"}, {"llvm.intr.umax", "arith.maxui"}};
+  result->walk([](Operation *op) {
+    auto at = arithmetic.find(op->getName().getStringRef());
+    if (at == arithmetic.end() || op->getNumResults() != 1 ||
+        (!isa<IntegerType>(op->getResult(0).getType()) &&
+         !isa<LLVM::SelectOp>(op)))
+      return;
+    OpBuilder builder(op);
+    OperationState state(op->getLoc(), at->second);
+    state.addOperands(op->getOperands());
+    state.addTypes(op->getResultTypes());
+    if (auto cmp = dyn_cast<LLVM::ICmpOp>(op))
+      state.addAttribute("predicate",
+                         arith::CmpIPredicateAttr::get(
+                             op->getContext(), *arith::symbolizeCmpIPredicate(
+                                                   LLVM::stringifyICmpPredicate(
+                                                       cmp.getPredicate()))));
+    if (isa<LLVM::SMinOp, LLVM::SMaxOp, LLVM::UMinOp, LLVM::UMaxOp>(op))
+      state.addAttribute("block_auto.intrinsic", builder.getUnitAttr());
+    auto *replacement = builder.create(state);
+    op->replaceAllUsesWith(replacement->getResults());
+    op->erase();
+  });
+  return result;
 }
 struct Hook {
-  std::function<void(const Instruction &, unsigned)> record;
+  std::function<void(Operation &, unsigned)> record;
   std::function<bool(StringRef, Args, Scalar &)> call;
-  std::function<Scalar(const LoadInst &)> load;
+  std::function<Scalar(LLVM::LoadOp)> load;
 };
 std::string scalarKey(const Scalar &value) {
   if (auto *i = std::get_if<APInt>(&value.data)) {
@@ -945,20 +1105,21 @@ struct TraceResult {
   Memory effects;
 };
 struct Analyzer {
-  Module &module;
+  ModuleOp module;
+  DataLayout layout;
   const Profile &profile;
   bool lowered;
   int subblock = -1, depth = 0;
   std::map<std::string, TraceResult> cache;
   std::function<bool(StringRef, Args, Plan &)> external;
-  Analyzer(Module &m, const Profile &p, bool lowered)
-      : module(m), profile(p), lowered(lowered) {}
-  TraceResult trace(Function &fn, Args arguments, int blockId, Plan *kernel,
-                    Memory initial = {}, Hook *hook = nullptr) {
-    check(!fn.isDeclaration() && fn.arg_size() == arguments.size(),
-          "analysis entry ABI mismatch: " + fn.getName().str());
-    bool isVector = fn.getCallingConv() == 1023;
-    std::string key = fn.getName().str();
+  Analyzer(ModuleOp m, const Profile &p, bool lowered)
+      : module(m), layout(m), profile(p), lowered(lowered) {}
+  TraceResult trace(LLVM::LLVMFuncOp fn, Args arguments, int blockId,
+                    Plan *kernel, Memory initial = {}, Hook *hook = nullptr) {
+    check(!fn.isExternal() && fn.getNumArguments() == arguments.size(),
+          "analysis entry ABI mismatch: " + fn.getSymName().str());
+    bool isVector = callingConvention(fn) == 1023;
+    std::string key = fn.getSymName().str();
     for (const auto &a : arguments)
       key += ";" + scalarKey(a);
     for (const auto &[p, v] : initial)
@@ -967,41 +1128,43 @@ struct Analyzer {
       return cache.at(key);
     VectorPlan vector(profile, lowered);
     Environment env;
-    for (const auto &a : fn.args())
-      env[&a] = arguments[a.getArgNo()];
+    for (auto a : fn.getArguments())
+      env[a] = arguments[a.getArgNumber()];
     Memory memory = initial;
-    auto val = [&](const Value *v) { return evaluate(v, env); };
-    const BasicBlock *block = &fn.getEntryBlock(), *previous = nullptr;
-    std::map<const BasicBlock *, unsigned> visits;
+    auto val = [&](mlir::Value v) { return env.lookup(v); };
+    auto attributes = [&](Operation &op) {
+      SmallVector<Attribute> result;
+      for (auto v : op.getOperands())
+        result.push_back(toAttribute(val(v), v.getType()));
+      return result;
+    };
+    Block *block = &fn.getBody().front();
+    DenseMap<Block *, unsigned> visits;
     unsigned steps = 0;
     while (true) {
       unsigned visit = ++visits[block];
-      Environment phi;
-      std::map<const Value *, std::set<int>> phiDeps;
-      std::map<const Value *, double> phiTimes;
-      for (const auto &i : block->phis()) {
-        check(previous && i.getBasicBlockIndex(previous) >= 0,
-              "missing phi predecessor");
-        Value *incoming = i.getIncomingValueForBlock(previous);
-        phi[&i] = val(incoming);
-        phiDeps[&i] = vector.dependencies[incoming];
-        phiTimes[&i] = vector.times[incoming];
-      }
-      for (const auto &[v, x] : phi) {
-        env[v] = x;
-        vector.dependencies[v] = phiDeps[v];
-        vector.times[v] = phiTimes[v];
-      }
-      const BasicBlock *next = nullptr;
-      for (const Instruction &i : *block) {
+      Block *next = nullptr;
+      for (Operation &i : *block) {
         try {
+          if (constant(i)) {
+            Scalar value;
+            if (auto op = dyn_cast<LLVM::ConstantOp>(i))
+              value = fromAttribute(op.getValue());
+            else if (isa<LLVM::UndefOp, LLVM::PoisonOp>(i))
+              value = emptyAggregate(i.getResult(0).getType());
+            else if (auto zero = dyn_cast<LLVM::ZeroOp>(i))
+              if (auto type = dyn_cast<LLVM::LLVMPointerType>(zero.getType()))
+                if (type.getAddressSpace() == 6)
+                  value = Scalar(Pointer{});
+            env[i.getResult(0)] = value;
+            continue;
+          }
           check(++steps <= (hook ? 100000 : 1000000),
                 "bounded scalar tracing limit");
-          if (hook && hook->record)
+          bool materialized = i.hasAttr("block_auto.materialized");
+          if (hook && hook->record && !materialized)
             hook->record(i, visit);
-          if (isa<PHINode>(i))
-            continue;
-          if (isa<ReturnInst>(i)) {
+          if (isa<LLVM::ReturnOp>(i)) {
             TraceResult result;
             if (isVector)
               result.cycles = vector.complete();
@@ -1012,24 +1175,44 @@ struct Analyzer {
               cache[key] = result;
             return result;
           }
-          if (auto *br = dyn_cast<BranchInst>(&i)) {
+          if (auto branch = dyn_cast<BranchOpInterface>(i)) {
             if (isVector)
               vector.scalar(i);
-            next = br->getSuccessor(
-                br->isUnconditional() || val(br->getCondition()).integer() ? 0
-                                                                           : 1);
+            next = branch.getSuccessorForOperands(attributes(i));
+            check(next, "unknown scalar branch condition");
+            auto index =
+                llvm::find(i.getSuccessors(), next) - i.getSuccessors().begin();
+            auto operands =
+                branch.getSuccessorOperands(index).getForwardedOperands();
+            Environment values;
+            DenseMap<mlir::Value, std::set<int>> deps;
+            DenseMap<mlir::Value, double> times;
+            for (auto [arg, incoming] :
+                 llvm::zip(next->getArguments(), operands)) {
+              values[arg] = val(incoming);
+              deps[arg] = vector.dependencies[incoming];
+              times[arg] = vector.times[incoming];
+            }
+            for (const auto &entry : values) {
+              env[entry.first] = entry.second;
+              vector.dependencies[entry.first] = deps[entry.first];
+              vector.times[entry.first] = times[entry.first];
+            }
             break;
           }
-          if (!isVector && kernel)
+          if (!isVector && kernel && !materialized)
             kernel->step();
           Scalar result;
           bool vectorCall = false;
-          if (auto *call = dyn_cast<CallBase>(&i)) {
-            Function *callee = call->getCalledFunction();
-            check(callee, "indirect call is not modelled");
-            StringRef name = callee->getName();
+          if (auto call = dyn_cast<LLVM::CallOp>(&i)) {
+            auto callee =
+                call.getCallee()
+                    ? module.lookupSymbol<LLVM::LLVMFuncOp>(*call.getCallee())
+                    : LLVM::LLVMFuncOp{};
+            check(bool(callee), "indirect call is not modelled");
+            StringRef name = callName(call);
             std::vector<Scalar> args;
-            for (const Use &a : call->args())
+            for (mlir::Value a : call.getCalleeOperands())
               args.push_back(val(a));
             auto helper = [&](Plan *plan) {
               check(depth < 8, "lowered helper recursion limit");
@@ -1040,22 +1223,22 @@ struct Analyzer {
                     if (memory.count(*p))
                       inherited[*p] = memory[*p];
               ++depth;
-              auto work = trace(*callee, args, blockId, plan, inherited);
+              auto work = trace(callee, args, blockId, plan, inherited);
               --depth;
               for (const auto &[p, v] : work.effects)
                 memory[p] = v;
               return work;
             };
             if (hook && hook->call && hook->call(name, args, result)) {
-            } else if (!callee->isDeclaration() &&
-                       callee->getCallingConv() == 1023) {
+            } else if (!callee.isExternal() &&
+                       callingConvention(callee) == 1023) {
               check(!isVector && kernel, "nested vector call");
               kernel->vf(helper(nullptr).cycles);
             } else if (name.starts_with("load_gm_to_ubuf_") ||
                        name.starts_with("store_ubuf_to_gm_") ||
                        name.starts_with("copy_ubuf_to_ubuf_")) {
               check(!isVector && kernel, "vector DMA helper");
-              if (lowered && !callee->isDeclaration())
+              if (lowered && !callee.isExternal())
                 helper(kernel);
               else {
                 SmallVector<StringRef> match;
@@ -1079,16 +1262,6 @@ struct Analyzer {
                 else
                   kernel->dma(name.starts_with("load_"), bytes);
               }
-            } else if (name.starts_with("llvm.smin.") ||
-                       name.starts_with("llvm.umin.") ||
-                       name.starts_with("llvm.smax.") ||
-                       name.starts_with("llvm.umax.")) {
-              if (args.size() == 2 && args[0].known() && args[1].known())
-                result = (name.contains("min")
-                              ? args[0].integer() < args[1].integer()
-                              : args[0].integer() > args[1].integer())
-                             ? args[0]
-                             : args[1];
             } else if (name == "llvm.hivm.GET.BLOCK.IDX")
               result = Scalar(int64_t(blockId));
             else if (name == "llvm.hivm.GET.SUBBLOCKID" && subblock >= 0)
@@ -1114,130 +1287,119 @@ struct Analyzer {
             } else if (name == "llvm.hivm.BARRIER" && !isVector && kernel)
               kernel->barrier(integer(args, 0));
             else if (name.starts_with("llvm.hivm.") && isVector) {
-              vector.add(*call);
+              vector.add(call);
               vectorCall = true;
             } else if (!isVector && kernel &&
                        (kernel->extra(name, args) ||
                         (external && external(name, args, *kernel)))) {
             } else {
-              check(lowered && !isVector && kernel &&
-                        !callee->isDeclaration() &&
-                        callee->getCallingConv() == CallingConv::C &&
-                        callee->getReturnType()->isVoidTy(),
+              check(lowered && !isVector && kernel && !callee.isExternal() &&
+                        callingConvention(callee) == 0 &&
+                        isa<LLVM::LLVMVoidType>(
+                            callee.getFunctionType().getReturnType()),
                     "unmodelled call: " + name.str());
               helper(kernel);
             }
-          } else if (isa<FreezeInst>(i))
+
+          } else if (auto freeze = dyn_cast<LLVM::FreezeOp>(i)) {
             result = val(i.getOperand(0));
-          else if (isa<AllocaInst>(i))
+          } else if (auto alloc = dyn_cast<LLVM::AllocaOp>(i)) {
             result = Scalar(Pointer{&i, lowered ? depth : 0, 0});
-          else if (auto *store = dyn_cast<StoreInst>(&i)) {
-            Scalar pointer = val(store->getPointerOperand());
+          } else if (auto store = dyn_cast<LLVM::StoreOp>(i)) {
+            Scalar pointer = val(store.getAddr());
             auto *p = std::get_if<Pointer>(&pointer.data);
             if (p && p->allocation)
-              memory[*p] = val(store->getValueOperand());
+              memory[*p] = val(store.getValue());
             else
-              check(!isVector && store->getPointerAddressSpace() == 6,
+              check(!isVector &&
+                        cast<LLVM::LLVMPointerType>(store.getAddr().getType())
+                                .getAddressSpace() == 6,
                     "unmodelled scalar write");
-          } else if (auto *load = dyn_cast<LoadInst>(&i)) {
-            Scalar pointer = val(load->getPointerOperand());
+          } else if (auto load = dyn_cast<LLVM::LoadOp>(i)) {
+            Scalar pointer = val(load.getAddr());
             if (auto *p = std::get_if<Pointer>(&pointer.data))
               if (memory.count(*p))
                 result = memory[*p];
             if (hook && hook->load)
-              result = hook->load(*load);
-          } else if (auto *select = dyn_cast<SelectInst>(&i)) {
-            auto condition = val(select->getCondition());
-            if (condition.known())
-              result = val(condition.integer() ? select->getTrueValue()
-                                               : select->getFalseValue());
-          } else if (auto *extract = dyn_cast<ExtractValueInst>(&i)) {
-            result = val(extract->getAggregateOperand());
-            for (unsigned index : extract->getIndices()) {
+              result = hook->load(load);
+          } else if (auto extract = dyn_cast<LLVM::ExtractValueOp>(i)) {
+            result = val(extract.getContainer());
+            for (auto index : extract.getPosition()) {
               auto *values = std::get_if<std::vector<Scalar>>(&result.data);
-              Scalar selected = values && index < values->size()
-                                    ? (*values)[index]
-                                    : Scalar();
+              Scalar selected =
+                  values && index >= 0 && index < int64_t(values->size())
+                      ? (*values)[index]
+                      : Scalar();
               result = std::move(selected);
             }
-          } else if (auto *ins = dyn_cast<InsertValueInst>(&i))
-            result = insert(val(ins->getAggregateOperand()), ins->getIndices(),
-                            val(ins->getInsertedValueOperand()));
-          else if (auto *cmp = dyn_cast<ICmpInst>(&i)) {
-            auto a = val(cmp->getOperand(0)), b = val(cmp->getOperand(1));
-            check(cmp->getOperand(0)->getType()->isIntegerTy(),
-                  "unmodelled compare");
-            if (a.known() && b.known()) {
-              unsigned bits =
-                  cmp->getOperand(0)->getType()->getIntegerBitWidth();
-              result = Scalar(int64_t(ICmpInst::compare(APInt(bits, a.bits()),
-                                                        APInt(bits, b.bits()),
-                                                        cmp->getPredicate())));
-            }
-          } else if (auto *binary = dyn_cast<BinaryOperator>(&i)) {
-            auto a = val(binary->getOperand(0)), b = val(binary->getOperand(1));
-            if (i.getType()->isIntegerTy() && a.known() && b.known()) {
-              auto *left = ConstantInt::get(i.getType(), a.bits());
-              auto *right = ConstantInt::get(i.getType(), b.bits());
-              auto *folded = dyn_cast_or_null<ConstantInt>(
-                  ConstantFoldBinaryInstruction(i.getOpcode(), left, right));
-              check(folded, "undefined scalar arithmetic");
-              result = Scalar(folded->getValue());
-            }
-          } else if (isa<PtrToIntInst>(i) && lowered) {
-            auto pointer = val(i.getOperand(0));
+          } else if (auto insertOp = dyn_cast<LLVM::InsertValueOp>(i)) {
+            result = insert(val(insertOp.getContainer()),
+                            insertOp.getPosition(), val(insertOp.getValue()));
+          } else if (auto castOp = dyn_cast<LLVM::PtrToIntOp>(i)) {
+            auto pointer = val(castOp.getArg());
             if (auto *p = std::get_if<Pointer>(&pointer.data))
-              if (!p->allocation)
+              if (lowered && !p->allocation)
                 result = Scalar(p->offset);
-          } else if (auto *cast = dyn_cast<CastInst>(&i)) {
-            auto source = val(cast->getOperand(0));
-            if (auto *a = std::get_if<APInt>(&source.data)) {
-              if (i.getType()->isIntegerTy())
-                result = Scalar(
-                    i.getOpcode() == Instruction::ZExt
-                        ? a->zextOrTrunc(i.getType()->getIntegerBitWidth())
-                        : a->sextOrTrunc(i.getType()->getIntegerBitWidth()));
-              else if (i.getType()->isFloatingPointTy())
-                result = source;
-            } else if (auto *a = std::get_if<double>(&source.data)) {
-              if (i.getType()->isFloatingPointTy())
-                result = source;
-              else if (i.getType()->isIntegerTy() && *a >= double(INT64_MIN) &&
-                       *a < -double(INT64_MIN))
-                result = Scalar(APInt(i.getType()->getIntegerBitWidth(),
-                                      uint64_t(int64_t(*a))));
-            }
-          } else if (auto *gep = dyn_cast<GetElementPtrInst>(&i)) {
-            auto pointer = val(gep->getPointerOperand());
+          } else if (auto castOp = dyn_cast<LLVM::IntToPtrOp>(i)) {
+            auto source = val(castOp.getArg());
+            if (cast<LLVM::LLVMPointerType>(castOp.getType())
+                        .getAddressSpace() == 6 &&
+                source.known())
+              result = Scalar(Pointer{nullptr, 0, source.integer()});
+          } else if (auto gep = dyn_cast<LLVM::GEPOp>(i)) {
+            auto pointer = val(gep.getBase());
             if (auto *p = std::get_if<Pointer>(&pointer.data))
               if (lowered && !p->allocation) {
-                check(gep->getNumIndices() == 1 &&
-                          gep->getSourceElementType()->isSingleValueType(),
+                auto indices = gep.getRawConstantIndices();
+                check(indices.size() == 1 &&
+                          !isa<LLVM::LLVMStructType, LLVM::LLVMArrayType>(
+                              gep.getElemType()),
                       "unsupported UB GEP layout");
-                auto index = val(gep->getOperand(1));
+                Scalar index = indices[0] == LLVM::GEPOp::kDynamicIndex
+                                   ? val(gep.getDynamicIndices()[0])
+                                   : Scalar(int64_t(indices[0]));
                 if (index.known())
                   result = Scalar(Pointer{
                       nullptr, 0,
                       p->offset +
                           index.integer() *
-                              int64_t(module.getDataLayout().getTypeAllocSize(
-                                  gep->getSourceElementType()))});
+                              int64_t(layout.getTypeSize(gep.getElemType())
+                                          .getFixedValue())});
               }
-          } else
-            check(isa<FCmpInst, ExtractElementInst, InsertElementInst,
-                      ShuffleVectorInst>(i),
-                  "unmodelled instruction: " + printValue(i));
-          if (!i.getType()->isVoidTy())
-            env[&i] = result;
-          if (isVector && !vectorCall)
+          } else {
+            // Delegate arithmetic, comparisons, casts and selects to the
+            // dialect's fold hooks instead of maintaining an opcode evaluator.
+            check(isMemoryEffectFree(&i) ||
+                      isa<LLVM::LifetimeStartOp, LLVM::LifetimeEndOp>(i),
+                  "unmodelled instruction effects");
+            SmallVector<OpFoldResult> folded;
+            SmallVector<mlir::Value> operands(i.getOperands());
+            auto attrs = i.getAttrDictionary();
+            if (succeeded(i.fold(attributes(i), folded))) {
+              // As in SparseConstantPropagation, invocation-specific values
+              // must not cause an in-place rewrite of the shared analysis IR.
+              if (folded.empty()) {
+                i.setOperands(operands);
+                i.setAttrs(attrs);
+              } else if (folded.size() == 1) {
+                if (auto attr = dyn_cast<Attribute>(folded[0]))
+                  result = fromAttribute(attr);
+                else
+                  result = val(cast<mlir::Value>(folded[0]));
+              }
+            }
+          }
+          if (i.getNumResults())
+            env[i.getResult(0)] = result;
+          if (isVector && !vectorCall && !materialized)
             vector.scalar(i);
         } catch (const std::runtime_error &error) {
           throw std::runtime_error(std::string(error.what()) + " in " +
-                                   fn.getName().str() + ": " + printValue(i));
+                                   fn.getSymName().str() + ": " +
+                                   printValue(i));
         }
       }
       check(next, "missing scalar terminator");
-      previous = block;
       block = next;
     }
   }
@@ -1246,16 +1408,18 @@ struct Analyzer {
 struct Work {
   double instructions = 0, gmLoads = 0, gmStores = 0, ubLoads = 0, ubStores = 0,
          ubBytes = 0, barriers = 0;
-  void record(const Instruction &i) {
-    if (!isa<PHINode, ReturnInst, BitCastInst>(i))
+  void record(Operation &i) {
+    if (!(constant(i) || isa<LLVM::ReturnOp, LLVM::BitcastOp>(i)))
       ++instructions;
-    if (isa<LoadInst, StoreInst>(i)) {
-      bool load = isa<LoadInst>(i);
-      Type *type = load ? i.getType() : i.getOperand(0)->getType();
-      auto *pointer = load ? i.getOperand(0) : i.getOperand(1);
-      unsigned space = pointer->getType()->getPointerAddressSpace(),
-               bits = type->getScalarSizeInBits();
-      check((space == 1 || space == 6) && !type->isVectorTy() && bits &&
+    if (isa<LLVM::LoadOp, LLVM::StoreOp>(i)) {
+      bool load = isa<LLVM::LoadOp>(i);
+      mlir::Type type =
+          load ? i.getResult(0).getType() : i.getOperand(0).getType();
+      auto pointer = load ? i.getOperand(0) : i.getOperand(1);
+      unsigned space = cast<LLVM::LLVMPointerType>(pointer.getType())
+                           .getAddressSpace(),
+               bits = type.getIntOrFloatBitWidth();
+      check((space == 1 || space == 6) && !isa<VectorType>(type) && bits &&
                 bits <= 64,
             "unsupported SIMT memory access");
       if (space == 1)
@@ -1265,9 +1429,8 @@ struct Work {
         ubBytes += (bits + 7) / 8;
       }
     }
-    if (auto *call = dyn_cast<CallBase>(&i))
-      if (call->getCalledFunction() &&
-          call->getCalledFunction()->getName() == "llvm.hivm.sync.workitems")
+    if (auto call = dyn_cast<LLVM::CallOp>(&i))
+      if (callName(call) == "llvm.hivm.sync.workitems")
         ++barriers;
   }
   void combine(const Work &w, bool maximum = false) {
@@ -1292,47 +1455,54 @@ struct SimtModel {
     double cycles, bytes, startup;
   };
   std::map<std::string, Cost> cache;
-  Cost trace(Function &wrapper, Args input) {
+  Cost trace(LLVM::LLVMFuncOp wrapper, Args input) {
     std::vector<Scalar> bound;
-    for (const auto &a : wrapper.args()) {
-      check(a.getType()->isPointerTy() ||
-                std::holds_alternative<APInt>(input[a.getArgNo()].data),
+    for (const auto &a : wrapper.getArguments()) {
+      check(isa<LLVM::LLVMPointerType>(a.getType()) ||
+                std::holds_alternative<APInt>(input[a.getArgNumber()].data),
             "dynamic SIMT helper scalar");
-      bound.push_back(a.getType()->isPointerTy() ? Scalar()
-                                                 : input[a.getArgNo()]);
+      bound.push_back(isa<LLVM::LLVMPointerType>(a.getType())
+                          ? Scalar()
+                          : input[a.getArgNumber()]);
     }
-    std::string key = wrapper.getName().str();
+    std::string key = wrapper.getSymName().str();
     for (const auto &a : bound)
       key += ";" + scalarKey(a);
     if (cache.count(key))
       return cache.at(key);
-    Function *target = nullptr;
+    LLVM::LLVMFuncOp target;
     uint64_t info = 0;
     unsigned infos = 0, launches = 0, steps = 0;
-    for (auto &block : wrapper)
+    for (auto &block : wrapper.getBody())
       for (auto &i : block) {
-        check(!isa<BranchInst, SwitchInst, LoadInst, StoreInst>(i),
+        check(!isa<BranchOpInterface, LLVM::LoadOp, LLVM::StoreOp>(i),
               "SIMT wrapper has unresolved control or memory");
-        steps += !isa<ReturnInst>(i);
-        if (auto *call = dyn_cast<CallBase>(&i)) {
-          auto *fn = call->getCalledFunction();
-          check(fn, "indirect SIMT wrapper call");
-          if (fn->getCallingConv() == 1022) {
+        steps += !constant(i) && !i.hasAttr("block_auto.materialized") &&
+                 !isa<LLVM::ReturnOp>(i);
+        if (auto call = dyn_cast<LLVM::CallOp>(&i)) {
+          auto fn = call.getCallee()
+                        ? analyzer.module.lookupSymbol<LLVM::LLVMFuncOp>(
+                              *call.getCallee())
+                        : LLVM::LLVMFuncOp{};
+          check(bool(fn), "indirect SIMT wrapper call");
+          if (callingConvention(fn) == 1022) {
             target = fn;
             ++launches;
-          } else if (fn->getName() == "llvm.hivm.store.vfsimt.info") {
-            check(call->arg_size() == 1 &&
-                      isa<ConstantInt>(call->getArgOperand(0)),
+          } else if (callName(call) == "llvm.hivm.store.vfsimt.info") {
+            APInt dimensions;
+            check(call.getCalleeOperands().size() == 1 &&
+                      matchPattern(call.getCalleeOperands()[0],
+                                   m_ConstantInt(&dimensions)),
                   "dynamic SIMT dimensions");
-            info = cast<ConstantInt>(call->getArgOperand(0))->getZExtValue();
+            info = dimensions.getZExtValue();
             ++infos;
           } else
-            check(simtIntrinsic(fn->getName()) ||
-                      fn->getName() == "llvm.hivm.BARRIER",
+            check(simtIntrinsic(callName(call)) ||
+                      callName(call) == "llvm.hivm.BARRIER",
                   "unmodelled SIMT wrapper call");
         }
       }
-    check(infos == 1 && launches == 1 && target && !target->isDeclaration() &&
+    check(infos == 1 && launches == 1 && target && !target.isExternal() &&
               !(info >> 48),
           "expected one static SIMT launch");
     std::array<int64_t, 3> dims{int64_t(info & 65535),
@@ -1344,22 +1514,22 @@ struct SimtModel {
     std::vector<Scalar> arguments;
     Hook capture;
     capture.call = [&](StringRef name, Args args, Scalar &) {
-      if (name == target->getName()) {
+      if (name == target.getSymName()) {
         check(arguments.empty(), "multiple SIMT launches");
         arguments.assign(args.begin(), args.end());
       }
-      return name == target->getName() ||
+      return name == target.getSymName() ||
              name == "llvm.hivm.store.vfsimt.info" ||
              name == "llvm.hivm.BARRIER";
     };
     KernelPlan dummy(analyzer.profile);
     analyzer.trace(wrapper, bound, 0, &dummy, {}, &capture);
-    check(arguments.size() == target->arg_size(), "SIMT launch ABI");
-    for (const auto &a : target->args())
-      check(a.getType()->isPointerTy() ||
-                std::holds_alternative<APInt>(arguments[a.getArgNo()].data),
+    check(arguments.size() == target.getNumArguments(), "SIMT launch ABI");
+    for (const auto &a : target.getArguments())
+      check(isa<LLVM::LLVMPointerType>(a.getType()) ||
+                std::holds_alternative<APInt>(arguments[a.getArgNumber()].data),
             "dynamic SIMT scalar");
-    std::map<int, std::set<std::pair<const Instruction *, unsigned>>> warps;
+    std::map<int, std::set<std::pair<Operation *, unsigned>>> warps;
     Work total, issued;
     for (int64_t x = 0; x < dims[0]; ++x)
       for (int64_t y = 0; y < dims[1]; ++y)
@@ -1367,12 +1537,12 @@ struct SimtModel {
           std::array<int64_t, 3> coord{x, y, z};
           auto &events = warps[(x + dims[0] * (y + dims[1] * z)) / 32];
           Work upper;
-          bool indirect = wrapper.getName().starts_with("indirect_load_");
+          bool indirect = wrapper.getSymName().starts_with("indirect_load_");
           for (int mask = indirect ? 0 : -1; mask < (indirect ? 2 : 0);
                ++mask) {
             Work work;
             Hook hook;
-            hook.record = [&](const Instruction &i, unsigned visit) {
+            hook.record = [&](Operation &i, unsigned visit) {
               work.record(i);
               events.emplace(&i, visit);
             };
@@ -1386,14 +1556,15 @@ struct SimtModel {
                 value = Scalar(dims[axis]);
               return true;
             };
-            hook.load = [&](const LoadInst &i) {
-              return mask >= 0 && i.getType()->isIntegerTy(8) &&
-                             i.getPointerAddressSpace() == 6
+            hook.load = [&](LLVM::LoadOp i) {
+              return mask >= 0 && i.getType().isInteger(8) &&
+                             cast<LLVM::LLVMPointerType>(i.getAddr().getType())
+                                     .getAddressSpace() == 6
                          ? Scalar(int64_t(mask))
                          : Scalar();
             };
             KernelPlan plan(analyzer.profile);
-            analyzer.trace(*target, arguments, 0, &plan, {}, &hook);
+            analyzer.trace(target, arguments, 0, &plan, {}, &hook);
             upper.combine(work, true);
           }
           total.combine(upper);
@@ -1420,10 +1591,10 @@ struct SimtModel {
         name != "cumsum_1d_float_dim0" &&
         name != "indirect_load_nonvolatile_1d_bfloat16_t_int64_t")
       return false;
-    auto *fn = analyzer.module.getFunction(name);
-    check(fn && !fn->isDeclaration() && fn->arg_size() == args.size(),
+    auto fn = analyzer.module.lookupSymbol<LLVM::LLVMFuncOp>(name);
+    check(fn && !fn.isExternal() && fn.getNumArguments() == args.size(),
           "SIMT helper ABI mismatch");
-    auto cost = trace(*fn, args);
+    auto cost = trace(fn, args);
     auto &kernel = static_cast<KernelPlan &>(plan);
     Ref ref = kernel.add("simt_helper", kernel.all(), cost.cycles, cost.bytes,
                          cost.startup);
@@ -1437,7 +1608,11 @@ struct SimtModel {
 } // namespace
 json::Object analyzeBlockCandidate(const json::Object &config) {
   Profile profile(config);
-  LLVMContext context;
+  DialectRegistry registry;
+  registry.insert<LLVM::LLVMDialect, DLTIDialect, cf::ControlFlowDialect,
+                  arith::ArithDialect>();
+  registerLLVMDialectImport(registry);
+  MLIRContext context(registry, MLIRContext::Threading::DISABLED);
   bool vv = text(config, "mode") == "vv",
        autoBlock = config.getBoolean("auto_blockify").value_or(false);
   auto coreCount = config.getInteger("cores"),
@@ -1459,28 +1634,29 @@ json::Object analyzeBlockCandidate(const json::Object &config) {
       s.data = *f;
     args.push_back(s);
   }
-  std::map<std::string, std::unique_ptr<Module>> modules;
+  std::map<std::string, OwningOpRef<ModuleOp>> modules;
   for (const auto &[role, source] : object(*config.get("modules"))) {
     check(bool(source.getAsString()), "missing LLVM module text");
     modules[role.str()] = parse(*source.getAsString(), context);
   }
   std::string name = text(config, "name");
-  auto entry = [&](StringRef role) -> Function & {
+  auto entry = [&](StringRef role) {
     check(modules.count(role.str()), "LLVM core role missing");
     std::string suffix = vv || modules.size() == 1 ? "" : "_mix_" + role.str();
-    auto *fn = modules.at(role.str())->getFunction(name + suffix);
-    check(fn && !fn->isDeclaration() && fn->getCallingConv() != 1023,
+    auto fn =
+        modules.at(role.str())->lookupSymbol<LLVM::LLVMFuncOp>(name + suffix);
+    check(fn && !fn.isExternal() && callingConvention(fn) != 1023,
           "scalar entry missing");
     if (!vv && modules.size() == 1)
-      check(fn->hasFnAttribute("cube-only-kernel"),
+      check(!functionAttribute(fn, "cube-only-kernel").empty(),
             "single CV entry is not Cube");
-    return *fn;
+    return fn;
   };
   Object result{{"status", "STATIC_COST_ESTIMATED"},
                 {"auto_blockify", autoBlock}};
   result["logical_grid"] = Array(array(config, "grid"));
   if (vv) {
-    Function &fn = entry("aiv");
+    auto fn = entry("aiv");
     Analyzer analyzer(*modules.at("aiv"), profile, true);
     std::unique_ptr<SimtModel> simt;
     if (const auto *mixed = config.getObject("mixed")) {

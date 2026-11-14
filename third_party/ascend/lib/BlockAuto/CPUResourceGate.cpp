@@ -1,96 +1,108 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-#include "Selection.h"
-#include <set>
-#include <sstream>
+#include "IRAnalysis.h"
+#include "bishengir/Dialect/HACC/IR/HACC.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/Analysis/DataLayoutAnalysis.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/Dialect/DLTI/DLTI.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Matchers.h"
+#include "mlir/Parser/Parser.h"
 
 namespace mlir::triton::ascend::blockauto {
-std::vector<std::string> matches(StringRef text, const Regex &pattern,
-                                 unsigned group) {
-  std::vector<std::string> result;
-  SmallVector<StringRef> groups;
-  while (pattern.match(text, &groups)) {
-    result.push_back(groups[group].str());
-    text = text.drop_front(groups[0].end() - text.begin());
-  }
-  return result;
+void registerCandidateDialects(DialectRegistry &registry) {
+  registry.insert<arith::ArithDialect, cf::ControlFlowDialect, DLTIDialect,
+                  func::FuncDialect, LLVM::LLVMDialect, memref::MemRefDialect,
+                  scf::SCFDialect, hacc::HACCDialect, hivm::HIVMDialect>();
 }
-int64_t spec(StringRef ir, StringRef key) {
-  std::set<int64_t> values;
-  static const Regex value(
-      R"(^,[[:space:]]*([0-9]+)[[:space:]]*:[[:space:]]*i[0-9]+)");
-  StringRef remaining(ir);
-  std::string needle = "\"" + key.str() + "\"";
-  SmallVector<StringRef> groups;
-  for (size_t at; (at = remaining.find(needle)) != StringRef::npos;) {
-    remaining = remaining.drop_front(at + needle.size());
-    if (value.match(remaining, &groups))
-      values.insert(std::stoll(groups[1].str()));
-  }
-  check(values.size() == 1 && *values.begin() > 0,
-        "missing or ambiguous target specification: " + key.str());
-  return *values.begin();
+OwningOpRef<ModuleOp> parseCandidateIR(StringRef input, MLIRContext &context) {
+  std::string source = input.str();
+  // BiSheng LLVM 20 emits ':' here; the host LLVM 22 DLTI syntax uses '='.
+  StringRef old = "#dlti.target_system_spec<\"NPU\" :";
+  if (auto pos = source.find(old.str()); pos != std::string::npos)
+    source[pos + old.size() - 1] = '=';
+  auto module =
+      parseSourceString<ModuleOp>(source, ParserConfig(&context, false));
+  check(bool(module), "cannot parse candidate final MLIR");
+  return module;
 }
-O resources(const O &item) {
+CandidateIRAnalysis::CandidateIRAnalysis(Operation *op,
+                                         AnalysisManager &manager)
+    : module(cast<ModuleOp>(op)),
+      layout(manager.getAnalysis<DataLayoutAnalysis>().getAtOrAbove(op)) {}
+int64_t CandidateIRAnalysis::spec(StringRef key) const {
+  auto *ctx = module->getContext();
+  auto value = layout.getDevicePropertyValue(StringAttr::get(ctx, "NPU"),
+                                             StringAttr::get(ctx, key));
+  auto number = value ? dyn_cast<IntegerAttr>(*value) : IntegerAttr{};
+  check(number && number.getInt() > 0,
+        "missing target specification: " + key.str());
+  return number.getInt();
+}
+std::string CandidateIRAnalysis::metaLibrary() const {
+  auto bitcode =
+      module->getAttrOfType<hivm::AIV_BITCODEAttr>("hivm.aiv_bitcode");
+  return bitcode ? bitcode.getPath().getValue().str() : "";
+}
+O CandidateIRAnalysis::resources(const O &item) const {
   const O &metadata = sub(item, "metadata");
-  StringRef ir = item.getString("final_ir").value_or("");
   std::string mode = str(metadata, "parallel_mode");
   check(str(sub(metadata, "target"), "arch") == "Ascend950PR_9579",
         "cost model target is outside the validated A5 profile");
   bool vv = str(metadata, "mix_mode") == "aiv",
-       mixed = vv && mode == "mix_simd_simt", bound = false, function = false;
-  int64_t capacity = spec(ir, "UB_SIZE"),
-          alignment = vv ? spec(ir, "UB_ALIGN_SIZE") : 8, end = -1;
-  check(alignment >= 8 && alignment % 8 == 0, "invalid UB alignment");
-  std::map<std::string, int64_t> constants;
-  static const Regex functionPattern(
-      R"(^[[:space:]]*func\.func[[:space:]]+(private[[:space:]]+)?@([^[:space:](]+))"),
-      constantPattern(
-          R"(^[[:space:]]*(%[[:alnum:]_.$-]+) = llvm\.mlir\.constant\((-?[0-9]+) : (i[0-9]+|index)\))"),
-      pointerPattern(
-          R"(hivm\.hir\.pointer_cast\((%[[:alnum:]_.$-]+)\)[[:space:]]*:[[:space:]]*memref<(([0-9]+x)*)(bf16|[if][0-9]+),[[:space:]]*#hivm\.address_space<ub>>)");
-  std::istringstream lines(ir.str());
-  for (std::string line; std::getline(lines, line);) {
-    SmallVector<StringRef> m;
-    if (StringRef(line).contains("func.func") && functionPattern.match(line)) {
-      function = true;
-      constants.clear();
-    }
-    if (StringRef(line).contains("llvm.mlir.constant(") &&
-        constantPattern.match(line, &m))
-      constants[m[1].str()] = std::stoll(m[2].str());
-    if (line.find("#hivm.address_space<ub>") == std::string::npos)
-      continue;
-    check(line.find("memref.alloc") == std::string::npos,
-          "unresolved UB allocation remains in final IR");
-    if (line.find("hivm.hir.pointer_cast") == std::string::npos)
-      continue;
-    check(pointerPattern.match(line, &m) && constants.count(m[1].str()) &&
-              function,
-          "UB pointer has an unproved offset, shape or layout");
-    int64_t offset = constants[m[1].str()],
-            bits = m[4] == "bf16" ? 16 : std::stoll(m[4].drop_front().str());
+       mixed = vv && mode == "mix_simd_simt", bound = false, hasUB = false;
+  int64_t capacity = spec("UB_SIZE"),
+          alignment = vv ? spec("UB_ALIGN_SIZE") : 8, end = -1;
+  auto isUB = [](Type type) {
+    auto memref = dyn_cast<MemRefType>(type);
+    auto space =
+        memref
+            ? dyn_cast_or_null<hivm::AddressSpaceAttr>(memref.getMemorySpace())
+            : hivm::AddressSpaceAttr{};
+    return space && space.getAddressSpace() == hivm::AddressSpace::UB;
+  };
+  module->walk([&](Operation *op) {
+    hasUB |= llvm::any_of(op->getResultTypes(), isUB) ||
+             llvm::any_of(op->getOperandTypes(), isUB);
+    if (isa<memref::AllocOp, memref::AllocaOp>(op))
+      check(!isUB(op->getResult(0).getType()),
+            "unresolved UB allocation remains in final IR");
+    auto cast = dyn_cast<hivm::PointerCastOp>(op);
+    if (!cast || !isUB(cast.getType()))
+      return;
+    auto type = mlir::cast<MemRefType>(cast.getType());
+    check(type.hasStaticShape() && type.getLayout().isIdentity(),
+          "UB pointer has an unproved shape or layout");
+    auto width = layout.getTypeSizeInBits(type.getElementType());
+    check(!width.isScalable(), "scalable UB element size");
+    int64_t bits = width.getFixedValue();
     bool conservative = vv && bits == 1;
-    check(offset >= 0 && (conservative || (bits >= 8 && bits % 8 == 0)),
-          "unsupported UB element width or negative address");
+    check(conservative || (bits >= 8 && bits % 8 == 0),
+          "unsupported UB element width");
     A factors{conservative ? 8 : bits};
-    StringRef shape = m[2];
-    while (!shape.empty()) {
-      auto dim = shape.split('x');
-      factors.push_back(std::stoll(dim.first.str()));
-      shape = dim.second;
-    }
+    for (int64_t dim : type.getShape())
+      factors.push_back(dim);
     bits = product(factors);
-    check(bits <= INT64_MAX - alignment + 1 &&
-              offset <= (INT64_MAX - bits - alignment + 1) / 8,
-          "UB extent overflow");
-    end = std::max(end,
-                   offset * 8 + (bits + alignment - 1) / alignment * alignment);
+    for (auto addr : cast.getAddrs()) {
+      APInt offset;
+      check(matchPattern(addr, m_ConstantInt(&offset)) &&
+                offset.isNonNegative() && offset.isSignedIntN(64),
+            "UB pointer has an unproved offset");
+      int64_t start = offset.getSExtValue();
+      check(bits <= INT64_MAX - alignment + 1 &&
+                start <= (INT64_MAX - bits - alignment + 1) / 8,
+            "UB extent overflow");
+      end = std::max(end, start * 8 + int64_t(llvm::alignTo(bits, alignment)));
+    }
     bound |= conservative;
-  }
+  });
   if (end < 0) {
-    // Cube-only output may retain mix_mode=mix in compiler metadata.
-    check(function && !vv && !item.get("llvm_aiv") &&
-              !ir.contains("address_space<ub>"),
+    check(!module->getRegion(0).getOps<func::FuncOp>().empty() && !vv &&
+              !item.get("llvm_aiv") && !hasUB,
           "no verifiable static UB allocation in final IR");
     end = 0;
   }
@@ -107,10 +119,9 @@ O resources(const O &item) {
       check(dynamic > 0 && dynamic <= INT64_MAX / 8,
             "missing runtime dynamic UB size");
       capacity = dynamic * 8;
-      check(full - spec(ir, "MAXIMUM_D_CACHE_SIZE") <= capacity &&
-                capacity <= full - spec(ir, "MINIMAL_D_CACHE_SIZE"),
+      check(full - spec("MAXIMUM_D_CACHE_SIZE") <= capacity &&
+                capacity <= full - spec("MINIMAL_D_CACHE_SIZE"),
             "MIX dynamic UB conflicts with D-cache reservation");
-      // The compiler owns the effective shared-memory setting in metadata.
       usage["reserved_cache_bits"] = full - capacity;
       usage["capacity_bits"] = capacity;
     }

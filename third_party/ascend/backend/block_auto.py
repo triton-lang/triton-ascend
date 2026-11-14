@@ -40,7 +40,7 @@ def select_candidates(candidates, contract):
                     evidence = load_evidence(candidate["kernel"])
                     item.update({
                         k: evidence[k]
-                        for k in ("metadata", "files", "final_ir", "ttir", "llvm", "llvm_aic", "llvm_aiv")
+                        for k in ("metadata", "files", "final_ir", "llvm", "llvm_aic", "llvm_aiv")
                         if k in evidence
                     })
                 except (ValueError, KeyError, OSError) as error:
@@ -58,7 +58,7 @@ def select_candidates(candidates, contract):
         inputs = [{
             k: v
             for k, v in item.items()
-            if k not in ("metadata", "files", "final_ir", "ttir", "ub_usage", "arguments",
+            if k not in ("metadata", "files", "final_ir", "ub_usage", "arguments",
                          "meta_library") and not (k == "llvm" and item.get("vv"))
         }
                   for item in items]

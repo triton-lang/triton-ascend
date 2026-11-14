@@ -53,7 +53,7 @@ class TestHostEntry(unittest.TestCase):
         self.assertFalse(kwargs)
         for actual, expected in zip(args, self.values):
             self.assertIs(actual, expected)
-        self.assertNotIn(PACKAGE + ".block_auto_model", sys.modules)
+        self.assertNotIn(PACKAGE + ".block_auto", sys.modules)
 
     def test_absent_provider_does_not_bind_or_evaluate_grid(self):
 
@@ -96,7 +96,7 @@ class TestHostEntry(unittest.TestCase):
             return continuation(*arguments)
 
         self.backend.run_block_auto = provider
-        with patch.dict(sys.modules, {PACKAGE + ".block_auto_model": module("model", select_candidates=select)}):
+        with patch.dict(sys.modules, {PACKAGE + ".block_auto": module("model", select_candidates=select)}):
             self.assertIs(self.run_handler(), self.kernel)
         self.assertEqual(calls, [(self.fn, select)])
         self.assertEqual(len(self.events), 1)
@@ -111,113 +111,37 @@ class TestHostEntry(unittest.TestCase):
         self.assertFalse(self.events)
 
 
-class TestModelContracts(unittest.TestCase):
+class TestModelBridge(unittest.TestCase):
 
     def setUp(self):
-        self.patcher = patch.dict(sys.modules, {PACKAGE: module(PACKAGE, __path__=[str(BACKEND)])})
-        self.patcher.start()
-        self.addCleanup(self.patcher.stop)
-        self.cv = importlib.import_module(PACKAGE + ".block_auto_cv")
-        self.native = importlib.import_module(PACKAGE + ".block_auto_models.native_model")
+        patcher = patch.dict(sys.modules, {PACKAGE: module(PACKAGE, __path__=[str(BACKEND)])})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.bridge = importlib.import_module(PACKAGE + ".block_auto")
 
-    def probe(self, axis, factor):
-        return dict(compile_status="REWRITTEN", selected_axis=axis, requested_factor=factor,
-                    cv_mode="spatial_concat_v1", cv_lowering="spatial_m_v1" if axis == 0 else "spatial_n_v1")
+    def test_probe_failure_reaches_native_planner_without_inventing_a_candidate(self):
+        requested = [dict(axis=0, factor=2), dict(axis=1, factor=4)]
+        reports = []
 
-    def test_cv_shortlist_contains_two_proved_axes(self):
-        result = self.cv.candidate_plan({"grid": [8, 8, 1]}, probe=self.probe)
-        self.assertEqual(result["reason"], "CV_M4_N4")
-        self.assertEqual([(r["axis"], r["factor"]) for r in result["candidates"]], [(0, 4), (1, 4)])
+        def probe(axis, factor):
+            reports.append((axis, factor))
+            if axis == 1:
+                raise ValueError("unsupported rewrite")
+            return dict(selected_axis=axis, requested_factor=factor)
 
-    def test_cv_small_grid_never_invents_a_merge(self):
-        result = self.cv.candidate_plan({"grid": [1, 1, 1]}, probe=self.probe)
-        self.assertEqual(result["candidates"], [])
+        result = dict(candidates=[requested[0]], reason="native decision")
+        with patch.object(self.bridge, "_native", side_effect=[dict(probes=requested), result]) as native:
+            self.assertEqual(self.bridge.candidate_plan(dict(grid=[8, 8, 1]), probe=probe), result)
+        self.assertEqual(reports, [(0, 2), (1, 4)])
+        self.assertEqual(len(native.call_args.kwargs["reports"]), 1)
 
-    def test_cv_rejected_frontend_roles_are_excluded(self):
-
-        def reject(axis, factor):
-            raise ValueError("not transformable")
-
-        result = self.cv.candidate_plan({"grid": [8, 8, 1]}, probe=reject)
-        self.assertEqual(result["candidates"], [])
-
-    def test_model_passes_candidate_llvm_without_library_inputs(self):
-        binding = SimpleNamespace(analyze_block_candidate=lambda request: request)
-        modules = {"triton._C.libtriton": module("libtriton", ascend=binding)}
-        metadata = dict(target={"arch": "Ascend950PR_9579"}, parallel_mode="simd", name="kernel",
-                        auto_blockify_enabled=True)
-        with patch.dict(sys.modules, modules), patch.object(self.native, "launch_configuration",
-                                                            return_value=([], [64, 1, 1], 56, 56)):
-            llvm = {"aiv": "candidate LLVM containing linked helper bodies"}
-            config = self.native.analyze(llvm, "", "", metadata, {}, 0, 1, raw="raw LLVM")
-        self.assertEqual(config["modules"], llvm)
-        self.assertEqual(
-            set(config),
-            {"mode", "modules", "name", "arguments", "grid", "cores", "blocks", "auto_blockify", "raw_llvm"})
-
-    def test_mix_keeps_mode_checks_without_compiler_records(self):
-        ir = 'func.func @kernel() attributes {hacc.entry, hivm.vf_mode<MIX>, hivm.func_core_type<AIV>}'
-        self.assertEqual(self.native.mixed_parameters(ir),
-                         dict(simt_transaction_bytes=64, simt_transition_cycles=32, simt_instruction_cycles=1))
-        with self.assertRaisesRegex(ValueError, "one AIV SIMD/SIMT entry"):
-            self.native.mixed_parameters(ir.replace("<MIX>", "<SIMD>"))
-
-    def test_cv_ranks_without_compiler_records(self):
-        contract = dict(grid=[64, 1, 1], arguments={"x": dict(kind="tensor", dtype="fp32")})
-        items = [
-            dict(key="unmerged", factor=1, axis=0, metadata={}),
-            dict(key="a0_f2", factor=2, axis=0, metadata={"block_batching": {"cv_mode": "independent_batch_v1"}})
-        ]
-        traces = []
-        for item, score in zip(items, (100, 60)):
-            item.update(resource_checked=True, launch_contract=contract, ttir="", final_ir="")
-            traces.append(
-                dict(score=score, launched_groups=28, cube_core_count=28, auto_blockify=True,
-                     logical_grid=[64 // item["factor"], 1, 1], mode="cv", counts=dict(mma_calls=1, useful_flops=1024)))
-        with patch.object(self.cv, "analyze_candidate", side_effect=traces):
-            result = self.cv.rank_cv(items, contract)
-        self.assertTrue(result["model_complete"])
-        self.assertEqual(result["selected_key"], "a0_f2")
-
-    def test_mix_ub_default_still_must_match_runtime_capacity(self):
-        gate = importlib.import_module(PACKAGE + ".block_auto_models.cpu_resource_gate")
-        ir = '''func.func @kernel() attributes {hacc.entry, hivm.vf_mode<MIX>, hivm.func_core_type<AIV>}
-"UB_ALIGN_SIZE", 256 : i32
-"MAXIMUM_D_CACHE_SIZE", 524288 : i32
-"MINIMAL_D_CACHE_SIZE", 262144 : i32'''
-        metadata = dict(mix_mode="aiv", parallel_mode="mix_simd_simt", shared_mem_dynamic_size=216 * 1024)
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "compiler-help.txt"
-            path.write_text("--simt-vf-dynamic-size=<int> Default is 216.\n")
-            files = {"backend_defaults": {"path": str(path)}}
-            usage = dict(capacity_bits=248 * 1024 * 8, address_extent_bits=256)
-            with patch.object(gate, "inspect_final_ub", side_effect=lambda *a, **k: dict(usage)):
-                self.assertEqual(
-                    gate.inspect_vv_ub(ir, "Ascend950", metadata, [], files)["capacity_bits"], 216 * 1024 * 8)
-                metadata["shared_mem_dynamic_size"] = 208 * 1024
-                with self.assertRaisesRegex(ValueError, "capacities differ"):
-                    gate.inspect_vv_ub(ir, "Ascend950", metadata, [], files)
-
-    def test_missing_candidates_keep_baseline_without_loading_a_driver(self):
-        model = importlib.import_module(PACKAGE + ".block_auto_model")
-        factor, report = model.select_candidates([], {})
-        self.assertEqual(factor, 1)
-        self.assertFalse(report["model_complete"])
-
-    def test_unmerged_grid_does_not_need_batching_package(self):
-        self.assertFalse(self.native.preserves_grid({}, 1))
-
-    def test_iteration_schedule_requires_matching_loop_proof(self):
-        loop = dict(id=0, bits=32, lower=0, upper=16, step=1)
-        schedule = dict(version=1, kind="sequential_iterations_v1", grid_policy="preserve", factor=2, loop=loop)
-        metadata = dict(
-            block_batching=dict(vv_lowering="sequential_iterations_v1", lane_width=2, cv_mode="disabled",
-                                guard=dict(loop_schedule=schedule, accesses=[dict(loops=[loop])])),
-            program_grid_mapping_applied=False, row_coalescing_applied=False, ptsm_cap_authorized=False)
-        self.assertTrue(self.native.preserves_grid(metadata, 2))
-        metadata["block_batching"]["guard"]["accesses"] = []
-        with self.assertRaisesRegex(ValueError, "VV_LOOP_SCHEDULE_MISMATCH"):
-            self.native.preserves_grid(metadata, 2)
+    def test_native_json_keeps_argument_order(self):
+        import json
+        binding = SimpleNamespace(select_block_candidates=lambda request: request)
+        with patch.dict(sys.modules, {"triton._C.libtriton": module("libtriton", ascend=binding)}):
+            result = self.bridge._native("prepare", dict(arguments={"z": {}, "a": {}}), candidates=[])
+        self.assertEqual(result["contract"]["argument_order"], ["z", "a"])
+        self.assertEqual(json.dumps(result["candidates"]), "[]")
 
 
 class LocalCache:
@@ -291,8 +215,8 @@ class TestModelCache(unittest.TestCase):
 
     def test_optimizer_publishes_once_under_the_normal_candidate_key(self):
         item = dict(metadata={"hash": "candidate"},
-                    files={"compiler": {"path": str(self.compiler)}, "llvm":
-                           {"path": "candidate.ll"}}, final_ir='hivm.aiv_bitcode = #hivm.aiv_bitcode<"meta.bc">')
+                    files={"compiler": {"path": str(self.compiler)}, "llvm": {"path":
+                                                                              "candidate.ll"}}, meta_library='meta.bc')
 
         def compile_cpu(command, **kwargs):
             output = Path(command[command.index("-o") + 1])
@@ -308,8 +232,8 @@ class TestModelCache(unittest.TestCase):
 
     def test_optimizer_failure_does_not_publish_a_cache_entry(self):
         item = dict(metadata={"hash": "failed"},
-                    files={"compiler": {"path": str(self.compiler)}, "llvm":
-                           {"path": "candidate.ll"}}, final_ir='hivm.aiv_bitcode = #hivm.aiv_bitcode<"meta.bc">')
+                    files={"compiler": {"path": str(self.compiler)}, "llvm": {"path":
+                                                                              "candidate.ll"}}, meta_library='meta.bc')
         with patch.object(self.optimizer.subprocess, "run", side_effect=OSError("optimizer failed")):
             with self.assertRaisesRegex(OSError, "optimizer failed"):
                 self.optimizer.optimized_llvm(item)

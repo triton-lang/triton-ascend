@@ -19,7 +19,7 @@ class _LaunchHandler:
 
         provider = getattr(backend, "run_block_auto", None)
         if provider is not None and not warmup:
-            from .block_auto_model import select_candidates
+            from .block_auto import select_candidates
             # The provider owns compilation, cache identity, capture handling
             # and guarded dispatch. It must call continuation exactly once,
             # retaining the original launch when no candidate can be proved.

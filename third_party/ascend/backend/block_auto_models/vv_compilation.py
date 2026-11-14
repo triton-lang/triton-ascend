@@ -5,8 +5,6 @@ import shutil
 import subprocess
 import tempfile
 
-from .native_model import meta_path, reject
-
 
 def optimized_llvm(item):
     from triton.runtime.cache import get_cache_manager
@@ -21,11 +19,15 @@ def optimized_llvm(item):
     link = compiler.with_name('llvm-link')
     if not link.is_file():
         link = Path(shutil.which('llvm-link') or '')
-    reject(not compiler.is_file() or not link.is_file(), 'installed A5 optimizer/LLVM decoder is unavailable')
-    meta = meta_path(item['final_ir'])
+    if not compiler.is_file() or not link.is_file():
+        raise ValueError('installed A5 optimizer/LLVM decoder is unavailable')
+    meta = item.get('meta_library')
+    if meta is None:
+        raise ValueError('MIX needs one final-IR AIV bitcode reference')
     library = Path(files['compiler']['path']).parent.parent.parent / 'lib/libdevice.10.bc'
     directory = getattr(cache, 'cache_dir', None)
-    reject(not directory, 'optimized LLVM requires a local compiler cache')
+    if not directory:
+        raise ValueError('optimized LLVM requires a local compiler cache')
     with tempfile.TemporaryDirectory(prefix='block-auto-', dir=directory) as temporary:
         output = Path(temporary)
         args = [

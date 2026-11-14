@@ -527,6 +527,13 @@ void init_triton_ascend(py::module &&m) {
       },
       py::call_guard<py::gil_scoped_release>());
 
+  m.def(
+      "select_block_candidates",
+      [](const std::string &request) {
+        return mlir::triton::ascend::selectBlockCandidates(request);
+      },
+      py::call_guard<py::gil_scoped_release>());
+
   m.def("load_dialects", [](mlir::MLIRContext &context) {
     mlir::DialectRegistry registry;
     registry.insert<mlir::triton::ascend::TritonAscendDialect>();

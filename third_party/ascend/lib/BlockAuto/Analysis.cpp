@@ -1,5 +1,5 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-#include "BlockAuto/Analysis.h"
+#include "Selection.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/ConstantFold.h"
 #include "llvm/IR/Constants.h"
@@ -20,7 +20,6 @@
 #include <map>
 #include <numeric>
 #include <queue>
-#include <regex>
 #include <set>
 #include <stdexcept>
 #include <tuple>
@@ -33,29 +32,14 @@ using Object = json::Object;
 using Array = json::Array;
 using Ref = std::pair<int, double>;
 using Key = std::tuple<int, int, int>;
-void require(bool ok, const std::string &message) {
-  if (!ok)
-    throw std::runtime_error(message);
-}
+using blockauto::array;
+using blockauto::check;
+using blockauto::number;
+using blockauto::object;
 std::string text(const Object &o, StringRef key) {
   auto v = o.getString(key);
-  require(bool(v), "missing string: " + key.str());
+  check(bool(v), "missing string: " + key.str());
   return v->str();
-}
-double number(const Object &o, StringRef key) {
-  auto v = o.getNumber(key);
-  require(v && std::isfinite(*v), "missing finite number: " + key.str());
-  return *v;
-}
-const Object &object(const json::Value &v) {
-  auto *o = v.getAsObject();
-  require(o, "expected an object");
-  return *o;
-}
-const Array &array(const Object &o, StringRef key) {
-  auto *v = o.getArray(key);
-  require(v, "missing array: " + key.str());
-  return *v;
 }
 std::string printValue(const Value &v) {
   std::string s;
@@ -84,12 +68,12 @@ struct Scalar {
   bool known() const { return data.index() != 0; }
   int64_t integer() const {
     auto *i = std::get_if<APInt>(&data);
-    require(i && i->getBitWidth() <= 64, "unknown scalar integer");
+    check(i && i->getBitWidth() <= 64, "unknown scalar integer");
     return i->getBitWidth() == 1 ? i->getZExtValue() : i->getSExtValue();
   }
   uint64_t bits() const {
     auto *i = std::get_if<APInt>(&data);
-    require(i && i->getBitWidth() <= 64, "unknown scalar bit pattern");
+    check(i && i->getBitWidth() <= 64, "unknown scalar bit pattern");
     return i->getZExtValue();
   }
 };
@@ -151,7 +135,7 @@ Scalar insert(Scalar value, ArrayRef<unsigned> indices, const Scalar &element) {
   auto *values = std::get_if<std::vector<Scalar>>(&value.data);
   if (!values)
     return {};
-  require(indices.front() < values->size(), "invalid aggregate index");
+  check(indices.front() < values->size(), "invalid aggregate index");
   (*values)[indices.front()] =
       insert((*values)[indices.front()], indices.drop_front(), element);
   return value;
@@ -164,6 +148,7 @@ struct Rate {
 };
 struct Profile {
   std::map<std::string, Rate> costs, rates;
+  mutable std::map<std::pair<std::string, bool>, Rate> instructionRates;
   std::set<std::string> covered;
   double localBandwidth = 32, globalBandwidth = 512;
   unsigned window = 64;
@@ -179,8 +164,8 @@ struct Profile {
     // Preserve the existing 9579 model assumptions, not device measurements:
     // 56 Vector cores, 1650 MHz and 16 GB/s per core.
     if (text(config, "mode") == "vv") {
-      require(number(config, "cores") == 56,
-              "compiled core count differs from the A5 model");
+      check(number(config, "cores") == 56,
+            "compiled core count differs from the A5 model");
       localBandwidth = 16.0 * 1e9 / (1650.0 * 1e6);
       globalBandwidth = localBandwidth * 56;
     }
@@ -217,6 +202,13 @@ struct Profile {
     addRates({"vbr"}, broadTypes, vector);
   }
   Rate cost(StringRef name, bool ready) const {
+    auto key = std::make_pair(name.str(), ready);
+    auto found = instructionRates.find(key);
+    if (found == instructionRates.end())
+      found = instructionRates.emplace(key, instructionCost(name, ready)).first;
+    return found->second;
+  }
+  Rate instructionCost(StringRef name, bool ready) const {
     std::string op =
         name.drop_front(strlen("llvm.hivm.")).split('.').first.str();
     Rate result;
@@ -226,14 +218,10 @@ struct Profile {
       result = {4, 13, 2};
     if (op == "vln")
       result = {4, 15, 2};
-    std::vector<std::string> types;
-    std::string symbol = name.str();
-    static const std::regex vectorType(R"(\.v\d+(f\d+|i\d+|bf16))");
-    for (std::sregex_iterator i(symbol.begin(), symbol.end(), vectorType), end;
-         i != end; ++i) {
-      std::string type = (*i)[1];
+    static const Regex vectorType(R"(\.v[0-9]+(f[0-9]+|i[0-9]+|bf16))");
+    auto types = blockauto::matches(name, vectorType);
+    for (auto &type : types) {
       std::transform(type.begin(), type.end(), type.begin(), ::toupper);
-      types.push_back(type);
     }
     static const std::set<std::string> operations{
         "vadd", "vadds",   "vsub", "vmul", "vmuls", "vdiv", "vsqrt",
@@ -267,11 +255,9 @@ struct Profile {
       op = "vcvtff.bf162f32.x";
       dtype = "bf16";
     } else if (covered.count(op)) {
-      std::regex pattern(R"(\.v\d+(bf16|f\d+|i\d+|s\d+))");
-      std::string symbol = name.str();
-      for (std::sregex_iterator i(symbol.begin(), symbol.end(), pattern), end;
-           i != end; ++i) {
-        dtype = (*i)[1];
+      static const Regex pattern(R"(\.v[0-9]+(bf16|f[0-9]+|i[0-9]+|s[0-9]+))");
+      for (const auto &type : blockauto::matches(name, pattern)) {
+        dtype = type;
         if (dtype != "i1")
           break;
         dtype.clear();
@@ -284,8 +270,8 @@ struct Profile {
     }
     if (!dtype.empty()) {
       auto rate = rates.find(op + ":" + dtype);
-      require(rate != rates.end(),
-              "unsupported instruction dtype: " + name.str());
+      check(rate != rates.end(),
+            "unsupported instruction dtype: " + name.str());
       double latency = result.latency;
       result = rate->second;
       result.latency = latency;
@@ -352,7 +338,7 @@ struct VectorPlan {
     std::string pipe =
         rate.unit == "load" || rate.unit == "store" ? rate.unit : "exec";
     auto &slots = legacySlots[pipe];
-    require(rate.slots <= slots.size(), "unsupported vector issue width");
+    check(rate.slots <= slots.size(), "unsupported vector issue width");
     auto slot = std::min_element(slots.begin(), slots.begin() + rate.slots);
     pending.erase(std::remove_if(pending.begin(), pending.end(),
                                  [&](double t) { return t <= issue; }),
@@ -393,7 +379,7 @@ struct VectorPlan {
       remaining[i] = nodes[i].deps.size();
       earliest[i] = nodes[i].earliest;
       for (int parent : nodes[i].deps) {
-        require(parent >= 0 && parent < int(i), "invalid vector dependency");
+        check(parent >= 0 && parent < int(i), "invalid vector dependency");
         children[parent].push_back(i);
       }
       if (!remaining[i])
@@ -432,8 +418,8 @@ struct VectorPlan {
           queue.emplace(earliest[child], child);
       }
     }
-    require(completed == nodes.size() && std::isfinite(finish),
-            "vector schedule did not complete");
+    check(completed == nodes.size() && std::isfinite(finish),
+          "vector schedule did not complete");
     return finish;
   }
 };
@@ -445,17 +431,17 @@ struct Event {
 };
 using Args = ArrayRef<Scalar>;
 int64_t integer(Args args, unsigned i) {
-  require(i < args.size(), "helper argument missing");
+  check(i < args.size(), "helper argument missing");
   return args[i].integer();
 }
 double extent(Args args) {
   double size = 1;
   for (const Scalar &arg : args) {
     int64_t n = arg.integer();
-    require(n >= 0, "negative helper extent");
+    check(n >= 0, "negative helper extent");
     size *= n;
   }
-  require(std::isfinite(size), "helper extent overflow");
+  check(std::isfinite(size), "helper extent overflow");
   return size;
 }
 struct Plan {
@@ -497,19 +483,19 @@ struct KernelPlan : Plan {
     pipes[1] = add("vector", {scalar, pipes[1]}, cycles + 8);
   }
   void dma(bool load, double size) override {
-    require(size >= 0, "negative DMA extent");
+    check(size >= 0, "negative DMA extent");
     int pipe = load ? 4 : 5;
     pipes[pipe] = add("dma", {scalar, pipes[pipe]},
                       32 + size / profile.localBandwidth, size, 32);
   }
   void flag(bool set, int src, int dst, int id) override {
-    require(pipes.count(src) && pipes.count(dst),
-            "unmodelled synchronization pipe");
+    check(pipes.count(src) && pipes.count(dst),
+          "unmodelled synchronization pipe");
     Key key{src, dst, id};
     if (set)
       flags[key] = add("set", {scalar, pipes[src]});
     else {
-      require(flags.count(key), "wait without statically observed set");
+      check(flags.count(key), "wait without statically observed set");
       pipes[dst] = add("wait", {scalar, pipes[dst], flags.at(key)}, 1);
       flags.erase(key);
       if (dst == 0)
@@ -525,10 +511,10 @@ struct KernelPlan : Plan {
   void barrier(int) override { scalar = add("barrier", all()); }
   bool extra(StringRef name, Args args) override {
     if (name == "llvm.hivm.MOV.UB.TO.UB.v310") {
-      require(args.size() == 3, "UB DMA ABI mismatch");
+      check(args.size() == 3, "UB DMA ABI mismatch");
       uint64_t word = args[2].bits(), count = word & 65535,
                length = (word >> 16) & 65535;
-      require(count && length, "zero UB DMA burst");
+      check(count && length, "zero UB DMA burst");
       vf(std::ceil(double(count * length * 32) / 256));
     } else if (name.starts_with("llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2.") ||
                name == "llvm.hivm.MOV.UB.TO.OUT.ALIGN.V2.DV") {
@@ -538,45 +524,45 @@ struct KernelPlan : Plan {
       auto type = name.drop_front(strlen("llvm.hivm.MOV.OUT.TO.UB.ALIGN.V2."))
                       .split('.')
                       .first;
-      require(args.size() == 4 &&
-                  (!load || (types.count(type.str()) && name.ends_with(".DV"))),
-              "unknown DMA ABI");
+      check(args.size() == 4 &&
+                (!load || (types.count(type.str()) && name.ends_with(".DV"))),
+            "unknown DMA ABI");
       uint64_t first = args[2].bits();
       args[3].bits();
       uint64_t mask = (uint64_t(0xfff) << 4) | (uint64_t(0x1fffff) << 25) |
                       (load ? uint64_t(1) << 58 : 0);
-      require(!(first & ~mask), "unsupported DMA control flags");
+      check(!(first & ~mask), "unsupported DMA control flags");
       uint64_t count = (first >> 4) & 0xfff, length = (first >> 25) & 0x1fffff;
-      require(count && length, "zero DMA burst");
+      check(count && length, "zero DMA burst");
       dma(load, double(count * length));
     } else if (name.starts_with("llvm.hivm.ND.DMA.OUT.TO.UB.b")) {
-      require(ndPad && args.size() == 4, "NDDMA padding or ABI unavailable");
+      check(ndPad && args.size() == 4, "NDDMA padding or ABI unavailable");
       unsigned bits = 0;
-      require(!name.drop_front(strlen("llvm.hivm.ND.DMA.OUT.TO.UB.b"))
-                      .getAsInteger(10, bits) &&
-                  (bits == 8 || bits == 16 || bits == 32),
-              "unknown NDDMA dtype");
+      check(!name.drop_front(strlen("llvm.hivm.ND.DMA.OUT.TO.UB.b"))
+                    .getAsInteger(10, bits) &&
+                (bits == 8 || bits == 16 || bits == 32),
+            "unknown NDDMA dtype");
       uint64_t first = args[2].bits(), second = args[3].bits();
-      require(!(first & 15) &&
-                  !(second & ~((uint64_t(1) << 40) - 1 | uint64_t(1) << 56)),
-              "unsupported NDDMA flags");
+      check(!(first & 15) &&
+                !(second & ~((uint64_t(1) << 40) - 1 | uint64_t(1) << 56)),
+            "unsupported NDDMA flags");
       double bytes = bits / 8;
       for (unsigned shift : {4, 24, 44})
         bytes *= (first >> shift) & 0xfffff;
       for (unsigned shift : {0, 20})
         bytes *= (second >> shift) & 0xfffff;
-      require(bytes > 0, "zero NDDMA extent");
+      check(bytes > 0, "zero NDDMA extent");
       dma(true, bytes);
     } else if (name == "llvm.hivm.SET.PAD.CNT.NDDMA") {
-      require(args.size() == 1 && integer(args, 0) == 0,
-              "nonzero NDDMA padding");
+      check(args.size() == 1 && integer(args, 0) == 0, "nonzero NDDMA padding");
       ndPad = true;
     } else if (name == "llvm.hivm.SET.MOV.PAD.VAL" ||
                name == "llvm.hivm.SET.PAD.VAL.NDDMA" ||
-               std::regex_match(
-                   name.str(),
-                   std::regex(R"(llvm.hivm.SET.LOOP[0-4].STRIDE.NDDMA)"))) {
-      require(args.size() == 1, "unknown DMA setup ABI");
+               (name.starts_with("llvm.hivm.SET.LOOP") &&
+                name.size() == strlen("llvm.hivm.SET.LOOP0.STRIDE.NDDMA") &&
+                name[18] >= '0' && name[18] <= '4' &&
+                name.ends_with(".STRIDE.NDDMA"))) {
+      check(args.size() == 1, "unknown DMA setup ABI");
     } else if (!name.starts_with("llvm.lifetime.start.") &&
                !name.starts_with("llvm.lifetime.end."))
       return false;
@@ -601,9 +587,9 @@ struct CVGraph {
   }
   double finish() {
     for (const auto &[key, list] : waits)
-      require(sets.count(key), "cross-core wait without set");
+      check(sets.count(key), "cross-core wait without set");
     for (const auto &[key, list] : sets) {
-      require(list.size() == waits[key].size(), "unmatched cross-core flag");
+      check(list.size() == waits[key].size(), "unmatched cross-core flag");
       for (unsigned i = 0; i < list.size(); ++i)
         nodes[waits[key][i]].parents.insert(list[i]);
     }
@@ -632,7 +618,7 @@ struct CVGraph {
           ready.push(child);
       }
     }
-    require(completed == nodes.size(), "cyclic CV dependencies");
+    check(completed == nodes.size(), "cyclic CV dependencies");
     return result;
   }
 };
@@ -646,7 +632,7 @@ struct CVPlan : Plan {
   std::map<Key, std::deque<int>> flags;
   CVPlan(CVGraph &graph, int role) : graph(graph), role(role) {}
   int op(int pipe, double duration, std::vector<int> parents = {}) {
-    require(pipes.count(pipe), "unknown CV pipe");
+    check(pipes.count(pipe), "unknown CV pipe");
     parents.insert(parents.end(), {scalar, pipes[pipe]});
     int id = graph.add(duration, std::move(parents));
     pipes[pipe] = id;
@@ -665,7 +651,7 @@ struct CVPlan : Plan {
     if (set)
       queue.push_back(op(src, 1));
     else {
-      require(!queue.empty(), "CV local flag wait without set");
+      check(!queue.empty(), "CV local flag wait without set");
       op(dst, 1, {queue.front()});
       queue.pop_front();
     }
@@ -678,26 +664,26 @@ struct CVPlan : Plan {
     op(pipe == 6 ? 0 : pipe, 0, std::move(parents));
   }
   void mma(Args a, bool batch) {
-    require(role == -1 && a.size() == (batch ? 52 : 46), "unsupported MMA ABI");
+    check(role == -1 && a.size() == (batch ? 52 : 46), "unsupported MMA ABI");
     int offset = batch ? 4 : 0;
     int64_t m = integer(a, 23 + offset), k = integer(a, 24 + offset),
             n = integer(a, 25 + offset);
-    require(std::min({m, k, n}) > 0, "nonpositive MMA size");
+    check(std::min({m, k, n}) > 0, "nonpositive MMA size");
     int flagOffset = batch ? 6 : 0;
     int wa = integer(a, 37 + flagOffset), wb = integer(a, 38 + flagOffset);
     int ra = integer(a, 39 + flagOffset), rb = integer(a, 40 + flagOffset);
     for (unsigned i = 41 + flagOffset; i < 44 + flagOffset; ++i)
-      require(integer(a, i) == -1, "alternate MMA protocol");
+      check(integer(a, i) == -1, "alternate MMA protocol");
     int unit = integer(a, 44 + flagOffset), group = integer(a, 45 + flagOffset);
     if (batch) {
       int64_t count = integer(a, 3);
-      require(count >= 2 && count == integer(a, 16) && count == integer(a, 33),
-              "unsupported batch dimensions");
-      require(!(m % 16 || k % 8 || n % 16 || unit),
-              "unsupported batch tile or unit flag");
+      check(count >= 2 && count == integer(a, 16) && count == integer(a, 33),
+            "unsupported batch dimensions");
+      check(!(m % 16 || k % 8 || n % 16 || unit),
+            "unsupported batch tile or unit flag");
       int64_t chunk = std::min({65536 / (4 * m * k), 65536 / (4 * k * n),
                                 262144 / (4 * m * n), count});
-      require(chunk > 0, "batch matrix exceeds L0");
+      check(chunk > 0, "batch matrix exceeds L0");
       flag(false, 2, 3, 0);
       for (int event : {wa, wb})
         if (event >= 0)
@@ -725,11 +711,11 @@ struct CVPlan : Plan {
     }
     int64_t pm = (m + 15) / 16 * 16, pn = (n + 15) / 16 * 16;
     int64_t tile = std::min(8192 / pm / 8 * 8, 8192 / pn / 8 * 8) / 16 * 16;
-    require(tile && (unit == 0 || unit == 3),
-            "unsupported MMA buffer or unit mode");
-    require(!unit || (extent(a.slice(30, 2)) == m &&
-                      integer(a, 29) * integer(a, 32) == n),
-            "partial L0C update");
+    check(tile && (unit == 0 || unit == 3),
+          "unsupported MMA buffer or unit mode");
+    check(!unit || (extent(a.slice(30, 2)) == m &&
+                    integer(a, 29) * integer(a, 32) == n),
+          "partial L0C update");
     for (int64_t start = 0; start < k; start += tile) {
       int64_t actual = std::min(tile, k - start), pk = (actual + 7) / 8 * 8;
       int event = pingpong;
@@ -759,21 +745,21 @@ struct CVPlan : Plan {
   bool extra(StringRef name, Args a) override {
     if (name == "llvm.hivm.SET.INTRA.BLOCKI.mode" ||
         name == "llvm.hivm.WAIT.INTRA.BLOCKI.mode") {
-      require(a.size() == 2, "cross-core flag ABI");
+      check(a.size() == 2, "cross-core flag ABI");
       bool set = name.contains(".SET.");
       int id = integer(a, 1), subblock = role < 0 ? id / 16 : role,
           local = role < 0 ? id % 16 : id;
-      require(id >= 0 && id < (role < 0 ? 32 : 16), "cross-core flag range");
+      check(id >= 0 && id < (role < 0 ? 32 : 16), "cross-core flag range");
       Key key{int((role < 0) == set), subblock, local};
       (set ? graph.sets : graph.waits)[key].push_back(op(integer(a, 0), 4));
     } else if (name == "nd2nz_batch_float") {
-      require(role == -1 && a.size() == 23, "batch ND2NZ ABI");
+      check(role == -1 && a.size() == 23, "batch ND2NZ ABI");
       int64_t batch = integer(a, 3), rows = integer(a, 4), cols = integer(a, 5);
       int64_t stride = integer(a, 6), row = integer(a, 7), dst = integer(a, 17);
-      require(std::min({batch, rows, cols, stride, row, dst}) > 0 &&
-                  integer(a, 8) == 1 && integer(a, 12) == batch &&
-                  extent(a.slice(12, 5)) > 0,
-              "batch ND2NZ layout");
+      check(std::min({batch, rows, cols, stride, row, dst}) > 0 &&
+                integer(a, 8) == 1 && integer(a, 12) == batch &&
+                extent(a.slice(12, 5)) > 0,
+            "batch ND2NZ layout");
       bool fits =
           std::max({batch, row, stride, stride * 4, dst, dst / 8}) < 65536;
       int64_t commands = fits ? 1 : batch * (row < 65536 ? 1 : rows);
@@ -784,7 +770,7 @@ struct CVPlan : Plan {
       read += source;
     } else if (name == "nd2nz_float" || name == "set_l1_2d_float") {
       bool fill = name == "set_l1_2d_float";
-      require(role == -1 && a.size() == (fill ? 6 : 19), "L1 transfer ABI");
+      check(role == -1 && a.size() == (fill ? 6 : 19), "L1 transfer ABI");
       double src = extent(fill ? a.slice(4, 1) : a.slice(3, 2)) * 4;
       op(4, 32 + (fill ? src : std::max(src, extent(a.slice(10, 4)) * 4)) / 32);
       if (!fill)
@@ -800,15 +786,15 @@ struct CVPlan : Plan {
     } else if (name == "fixpipe_nz2nd_float_to_float_5d_to_3d_gm" ||
                name == "fixpipe_nz2nd_float_to_float_5d_to_3d_ubuf") {
       bool ub = name.ends_with("_ubuf");
-      require(role == -1 && a.size() == (ub ? 30 : 29) && integer(a, 27) == 0,
-              "batch Fixpipe ABI or unit mode");
+      check(role == -1 && a.size() == (ub ? 30 : 29) && integer(a, 27) == 0,
+            "batch Fixpipe ABI or unit mode");
       int64_t batch = integer(a, 16), m = integer(a, 17), n = integer(a, 18),
               src = integer(a, 8), c0 = integer(a, 11), dst = integer(a, 19),
               row = integer(a, 20);
-      require(std::min({batch, m, n, src, c0, dst, row}) > 0 && src % c0 == 0,
-              "batch Fixpipe layout");
+      check(std::min({batch, m, n, src, c0, dst, row}) > 0 && src % c0 == 0,
+            "batch Fixpipe layout");
       bool fits = std::max({batch, src / c0, dst}) <= 65535;
-      require(!ub || fits, "batch Fixpipe descriptor overflow");
+      check(!ub || fits, "batch Fixpipe descriptor overflow");
       int64_t commands = fits ? 1 : batch;
       double size = double(batch) * m * (ub ? std::max(n, row) : n) * 4;
       for (int64_t i = 0; i < commands; ++i)
@@ -818,14 +804,14 @@ struct CVPlan : Plan {
     } else if (name == "fixpipe_nz2nd_dual_float_to_float_4d_to_2d_ubuf" ||
                name == "fixpipe_nz2nd_float_to_float_4d_to_2d_gm") {
       bool dual = name.contains("_dual_");
-      require(role == -1 && a.size() == (dual ? 26 : 25) &&
-                  (!dual || integer(a, 25) == 1),
-              "Fixpipe ABI");
+      check(role == -1 && a.size() == (dual ? 26 : 25) &&
+                (!dual || integer(a, 25) == 1),
+            "Fixpipe ABI");
       int unit = integer(a, 23), group = integer(a, 24);
-      require(unit == 0 || unit == 3, "partial Fixpipe unit flag");
+      check(unit == 0 || unit == 3, "partial Fixpipe unit flag");
       std::vector<int> deps;
       if (unit) {
-        require(unitMma.count(group), "Fixpipe without preceding unit MMA");
+        check(unitMma.count(group), "Fixpipe without preceding unit MMA");
         deps.push_back(unitMma[group]);
       }
       double size = extent(a.slice(14, 2)) * 4 * (dual ? 2 : 1);
@@ -840,13 +826,13 @@ struct CVPlan : Plan {
   }
   void complete() {
     for (const auto &[key, queue] : flags)
-      require(queue.empty(), "unconsumed local CV flags");
+      check(queue.empty(), "unconsumed local CV flags");
   }
 };
 
 double schedule(const std::vector<KernelPlan> &blocks, unsigned cores,
                 double bandwidth) {
-  require(cores && !blocks.empty(), "empty launch or invalid core count");
+  check(cores && !blocks.empty(), "empty launch or invalid core count");
   struct State {
     std::map<int, std::vector<Ref>> children;
     std::vector<int> remaining;
@@ -907,7 +893,7 @@ double schedule(const std::vector<KernelPlan> &blocks, unsigned cores,
     }
     release(block, i, end);
   }
-  require(completed == blocks.size(), "dependency graph did not complete");
+  check(completed == blocks.size(), "dependency graph did not complete");
   return finish;
 }
 
@@ -925,9 +911,9 @@ std::unique_ptr<Module> parse(StringRef input, LLVMContext &context) {
   }
   SMDiagnostic diagnostic;
   auto module = parseAssemblyString(source, diagnostic, context);
-  require(bool(module),
-          "LLVM analysis parse failed: " + diagnostic.getMessage().str() +
-              ": " + diagnostic.getLineContents().str());
+  check(bool(module),
+        "LLVM analysis parse failed: " + diagnostic.getMessage().str() + ": " +
+            diagnostic.getLineContents().str());
   return module;
 }
 struct Hook {
@@ -969,8 +955,8 @@ struct Analyzer {
       : module(m), profile(p), lowered(lowered) {}
   TraceResult trace(Function &fn, Args arguments, int blockId, Plan *kernel,
                     Memory initial = {}, Hook *hook = nullptr) {
-    require(!fn.isDeclaration() && fn.arg_size() == arguments.size(),
-            "analysis entry ABI mismatch: " + fn.getName().str());
+    check(!fn.isDeclaration() && fn.arg_size() == arguments.size(),
+          "analysis entry ABI mismatch: " + fn.getName().str());
     bool isVector = fn.getCallingConv() == 1023;
     std::string key = fn.getName().str();
     for (const auto &a : arguments)
@@ -994,8 +980,8 @@ struct Analyzer {
       std::map<const Value *, std::set<int>> phiDeps;
       std::map<const Value *, double> phiTimes;
       for (const auto &i : block->phis()) {
-        require(previous && i.getBasicBlockIndex(previous) >= 0,
-                "missing phi predecessor");
+        check(previous && i.getBasicBlockIndex(previous) >= 0,
+              "missing phi predecessor");
         Value *incoming = i.getIncomingValueForBlock(previous);
         phi[&i] = val(incoming);
         phiDeps[&i] = vector.dependencies[incoming];
@@ -1009,8 +995,8 @@ struct Analyzer {
       const BasicBlock *next = nullptr;
       for (const Instruction &i : *block) {
         try {
-          require(++steps <= (hook ? 100000 : 1000000),
-                  "bounded scalar tracing limit");
+          check(++steps <= (hook ? 100000 : 1000000),
+                "bounded scalar tracing limit");
           if (hook && hook->record)
             hook->record(i, visit);
           if (isa<PHINode>(i))
@@ -1040,13 +1026,13 @@ struct Analyzer {
           bool vectorCall = false;
           if (auto *call = dyn_cast<CallBase>(&i)) {
             Function *callee = call->getCalledFunction();
-            require(callee, "indirect call is not modelled");
+            check(callee, "indirect call is not modelled");
             StringRef name = callee->getName();
             std::vector<Scalar> args;
             for (const Use &a : call->args())
               args.push_back(val(a));
             auto helper = [&](Plan *plan) {
-              require(depth < 8, "lowered helper recursion limit");
+              check(depth < 8, "lowered helper recursion limit");
               Memory inherited;
               if (lowered)
                 for (const auto &a : args)
@@ -1063,29 +1049,25 @@ struct Analyzer {
             if (hook && hook->call && hook->call(name, args, result)) {
             } else if (!callee->isDeclaration() &&
                        callee->getCallingConv() == 1023) {
-              require(!isVector && kernel, "nested vector call");
+              check(!isVector && kernel, "nested vector call");
               kernel->vf(helper(nullptr).cycles);
             } else if (name.starts_with("load_gm_to_ubuf_") ||
                        name.starts_with("store_ubuf_to_gm_") ||
                        name.starts_with("copy_ubuf_to_ubuf_")) {
-              require(!isVector && kernel, "vector DMA helper");
+              check(!isVector && kernel, "vector DMA helper");
               if (lowered && !callee->isDeclaration())
                 helper(kernel);
               else {
-                std::smatch match;
-                std::string symbol = name.str();
-                require(
-                    std::regex_match(
-                        symbol, match,
-                        std::regex(
-                            R"((load_gm_to_ubuf|store_ubuf_to_gm|copy_ubuf_to_ubuf)_(\d+)d_(float|half|bfloat16_t|int\d+_t|uint\d+_t))")),
-                    "unmodelled transfer helper");
+                SmallVector<StringRef> match;
+                static const Regex transfer(
+                    R"(^(load_gm_to_ubuf|store_ubuf_to_gm|copy_ubuf_to_ubuf)_([0-9]+)d_(float|half|bfloat16_t|int[0-9]+_t|uint[0-9]+_t)$)");
+                check(transfer.match(name, &match),
+                      "unmodelled transfer helper");
                 bool copy = match[1] == "copy_ubuf_to_ubuf";
-                require(!copy || !lowered,
-                        "lowered UB copy definition missing");
-                unsigned rank = std::stoul(match[2]);
-                require(args.size() >= 3 + rank, "transfer helper ABI");
-                std::string type = match[3];
+                check(!copy || !lowered, "lowered UB copy definition missing");
+                unsigned rank = std::stoul(match[2].str());
+                check(args.size() >= 3 + rank, "transfer helper ABI");
+                std::string type = match[3].str();
                 unsigned bits = type == "float" ? 32
                                 : (type == "half" || type == "bfloat16_t")
                                     ? 16
@@ -1118,7 +1100,7 @@ struct Analyzer {
             } else if (name.starts_with("llvm.hivm.SBITSET")) {
               if (args.size() == 2 && args[0].known() && args[1].known()) {
                 int64_t shift = args[1].integer();
-                require(shift >= 0 && shift < 64, "invalid control bit");
+                check(shift >= 0 && shift < 64, "invalid control bit");
                 uint64_t mask = uint64_t(1) << shift, value = args[0].bits();
                 result = Scalar(APInt(64, name.contains("SBITSET1")
                                               ? value | mask
@@ -1126,7 +1108,7 @@ struct Analyzer {
               }
             } else if (name == "llvm.hivm.SET.CTRL") {
             } else if (name.contains(".FLAG.") && !isVector && kernel) {
-              require(args.size() == 3, "flag ABI");
+              check(args.size() == 3, "flag ABI");
               kernel->flag(name.contains(".SET."), integer(args, 0),
                            integer(args, 1), integer(args, 2));
             } else if (name == "llvm.hivm.BARRIER" && !isVector && kernel)
@@ -1138,11 +1120,11 @@ struct Analyzer {
                        (kernel->extra(name, args) ||
                         (external && external(name, args, *kernel)))) {
             } else {
-              require(lowered && !isVector && kernel &&
-                          !callee->isDeclaration() &&
-                          callee->getCallingConv() == CallingConv::C &&
-                          callee->getReturnType()->isVoidTy(),
-                      "unmodelled call: " + name.str());
+              check(lowered && !isVector && kernel &&
+                        !callee->isDeclaration() &&
+                        callee->getCallingConv() == CallingConv::C &&
+                        callee->getReturnType()->isVoidTy(),
+                    "unmodelled call: " + name.str());
               helper(kernel);
             }
           } else if (isa<FreezeInst>(i))
@@ -1155,8 +1137,8 @@ struct Analyzer {
             if (p && p->allocation)
               memory[*p] = val(store->getValueOperand());
             else
-              require(!isVector && store->getPointerAddressSpace() == 6,
-                      "unmodelled scalar write");
+              check(!isVector && store->getPointerAddressSpace() == 6,
+                    "unmodelled scalar write");
           } else if (auto *load = dyn_cast<LoadInst>(&i)) {
             Scalar pointer = val(load->getPointerOperand());
             if (auto *p = std::get_if<Pointer>(&pointer.data))
@@ -1183,8 +1165,8 @@ struct Analyzer {
                             val(ins->getInsertedValueOperand()));
           else if (auto *cmp = dyn_cast<ICmpInst>(&i)) {
             auto a = val(cmp->getOperand(0)), b = val(cmp->getOperand(1));
-            require(cmp->getOperand(0)->getType()->isIntegerTy(),
-                    "unmodelled compare");
+            check(cmp->getOperand(0)->getType()->isIntegerTy(),
+                  "unmodelled compare");
             if (a.known() && b.known()) {
               unsigned bits =
                   cmp->getOperand(0)->getType()->getIntegerBitWidth();
@@ -1199,7 +1181,7 @@ struct Analyzer {
               auto *right = ConstantInt::get(i.getType(), b.bits());
               auto *folded = dyn_cast_or_null<ConstantInt>(
                   ConstantFoldBinaryInstruction(i.getOpcode(), left, right));
-              require(folded, "undefined scalar arithmetic");
+              check(folded, "undefined scalar arithmetic");
               result = Scalar(folded->getValue());
             }
           } else if (isa<PtrToIntInst>(i) && lowered) {
@@ -1229,9 +1211,9 @@ struct Analyzer {
             auto pointer = val(gep->getPointerOperand());
             if (auto *p = std::get_if<Pointer>(&pointer.data))
               if (lowered && !p->allocation) {
-                require(gep->getNumIndices() == 1 &&
-                            gep->getSourceElementType()->isSingleValueType(),
-                        "unsupported UB GEP layout");
+                check(gep->getNumIndices() == 1 &&
+                          gep->getSourceElementType()->isSingleValueType(),
+                      "unsupported UB GEP layout");
                 auto index = val(gep->getOperand(1));
                 if (index.known())
                   result = Scalar(Pointer{
@@ -1242,9 +1224,9 @@ struct Analyzer {
                                   gep->getSourceElementType()))});
               }
           } else
-            require(isa<FCmpInst, ExtractElementInst, InsertElementInst,
-                        ShuffleVectorInst>(i),
-                    "unmodelled instruction: " + printValue(i));
+            check(isa<FCmpInst, ExtractElementInst, InsertElementInst,
+                      ShuffleVectorInst>(i),
+                  "unmodelled instruction: " + printValue(i));
           if (!i.getType()->isVoidTy())
             env[&i] = result;
           if (isVector && !vectorCall)
@@ -1254,7 +1236,7 @@ struct Analyzer {
                                    fn.getName().str() + ": " + printValue(i));
         }
       }
-      require(next, "missing scalar terminator");
+      check(next, "missing scalar terminator");
       previous = block;
       block = next;
     }
@@ -1273,9 +1255,9 @@ struct Work {
       auto *pointer = load ? i.getOperand(0) : i.getOperand(1);
       unsigned space = pointer->getType()->getPointerAddressSpace(),
                bits = type->getScalarSizeInBits();
-      require((space == 1 || space == 6) && !type->isVectorTy() && bits &&
-                  bits <= 64,
-              "unsupported SIMT memory access");
+      check((space == 1 || space == 6) && !type->isVectorTy() && bits &&
+                bits <= 64,
+            "unsupported SIMT memory access");
       if (space == 1)
         (load ? gmLoads : gmStores)++;
       else {
@@ -1313,9 +1295,9 @@ struct SimtModel {
   Cost trace(Function &wrapper, Args input) {
     std::vector<Scalar> bound;
     for (const auto &a : wrapper.args()) {
-      require(a.getType()->isPointerTy() ||
-                  std::holds_alternative<APInt>(input[a.getArgNo()].data),
-              "dynamic SIMT helper scalar");
+      check(a.getType()->isPointerTy() ||
+                std::holds_alternative<APInt>(input[a.getArgNo()].data),
+            "dynamic SIMT helper scalar");
       bound.push_back(a.getType()->isPointerTy() ? Scalar()
                                                  : input[a.getArgNo()]);
     }
@@ -1329,41 +1311,41 @@ struct SimtModel {
     unsigned infos = 0, launches = 0, steps = 0;
     for (auto &block : wrapper)
       for (auto &i : block) {
-        require(!isa<BranchInst, SwitchInst, LoadInst, StoreInst>(i),
-                "SIMT wrapper has unresolved control or memory");
+        check(!isa<BranchInst, SwitchInst, LoadInst, StoreInst>(i),
+              "SIMT wrapper has unresolved control or memory");
         steps += !isa<ReturnInst>(i);
         if (auto *call = dyn_cast<CallBase>(&i)) {
           auto *fn = call->getCalledFunction();
-          require(fn, "indirect SIMT wrapper call");
+          check(fn, "indirect SIMT wrapper call");
           if (fn->getCallingConv() == 1022) {
             target = fn;
             ++launches;
           } else if (fn->getName() == "llvm.hivm.store.vfsimt.info") {
-            require(call->arg_size() == 1 &&
-                        isa<ConstantInt>(call->getArgOperand(0)),
-                    "dynamic SIMT dimensions");
+            check(call->arg_size() == 1 &&
+                      isa<ConstantInt>(call->getArgOperand(0)),
+                  "dynamic SIMT dimensions");
             info = cast<ConstantInt>(call->getArgOperand(0))->getZExtValue();
             ++infos;
           } else
-            require(simtIntrinsic(fn->getName()) ||
-                        fn->getName() == "llvm.hivm.BARRIER",
-                    "unmodelled SIMT wrapper call");
+            check(simtIntrinsic(fn->getName()) ||
+                      fn->getName() == "llvm.hivm.BARRIER",
+                  "unmodelled SIMT wrapper call");
         }
       }
-    require(infos == 1 && launches == 1 && target && !target->isDeclaration() &&
-                !(info >> 48),
-            "expected one static SIMT launch");
+    check(infos == 1 && launches == 1 && target && !target->isDeclaration() &&
+              !(info >> 48),
+          "expected one static SIMT launch");
     std::array<int64_t, 3> dims{int64_t(info & 65535),
                                 int64_t((info >> 16) & 65535),
                                 int64_t((info >> 32) & 65535)};
-    require(*std::min_element(dims.begin(), dims.end()) > 0 &&
-                dims[0] * dims[1] * dims[2] <= 4096,
-            "SIMT launch exceeds bounded domain");
+    check(*std::min_element(dims.begin(), dims.end()) > 0 &&
+              dims[0] * dims[1] * dims[2] <= 4096,
+          "SIMT launch exceeds bounded domain");
     std::vector<Scalar> arguments;
     Hook capture;
     capture.call = [&](StringRef name, Args args, Scalar &) {
       if (name == target->getName()) {
-        require(arguments.empty(), "multiple SIMT launches");
+        check(arguments.empty(), "multiple SIMT launches");
         arguments.assign(args.begin(), args.end());
       }
       return name == target->getName() ||
@@ -1372,11 +1354,11 @@ struct SimtModel {
     };
     KernelPlan dummy(analyzer.profile);
     analyzer.trace(wrapper, bound, 0, &dummy, {}, &capture);
-    require(arguments.size() == target->arg_size(), "SIMT launch ABI");
+    check(arguments.size() == target->arg_size(), "SIMT launch ABI");
     for (const auto &a : target->args())
-      require(a.getType()->isPointerTy() ||
-                  std::holds_alternative<APInt>(arguments[a.getArgNo()].data),
-              "dynamic SIMT scalar");
+      check(a.getType()->isPointerTy() ||
+                std::holds_alternative<APInt>(arguments[a.getArgNo()].data),
+            "dynamic SIMT scalar");
     std::map<int, std::set<std::pair<const Instruction *, unsigned>>> warps;
     Work total, issued;
     for (int64_t x = 0; x < dims[0]; ++x)
@@ -1419,12 +1401,12 @@ struct SimtModel {
     for (const auto &[warp, events] : warps)
       for (auto [i, visit] : events)
         issued.record(*i);
-    require(total.gmStores == 0, "unexpected SIMT GM store");
+    check(total.gmStores == 0, "unexpected SIMT GM store");
     double transaction = number(parameters, "simt_transaction_bytes"),
            transition = number(parameters, "simt_transition_cycles"),
            instruction = number(parameters, "simt_instruction_cycles");
-    require(transaction > 0 && transition > 0 && instruction > 0,
-            "invalid SIMT cost parameters");
+    check(transaction > 0 && transition > 0 && instruction > 0,
+          "invalid SIMT cost parameters");
     double bytes = total.gmLoads * transaction,
            startup = 2 * transition + steps;
     double cycles = startup + issued.instructions * instruction +
@@ -1439,8 +1421,8 @@ struct SimtModel {
         name != "indirect_load_nonvolatile_1d_bfloat16_t_int64_t")
       return false;
     auto *fn = analyzer.module.getFunction(name);
-    require(fn && !fn->isDeclaration() && fn->arg_size() == args.size(),
-            "SIMT helper ABI mismatch");
+    check(fn && !fn->isDeclaration() && fn->arg_size() == args.size(),
+          "SIMT helper ABI mismatch");
     auto cost = trace(*fn, args);
     auto &kernel = static_cast<KernelPlan &>(plan);
     Ref ref = kernel.add("simt_helper", kernel.all(), cost.cycles, cost.bytes,
@@ -1453,22 +1435,18 @@ struct SimtModel {
 };
 
 } // namespace
-std::string analyzeBlockCandidate(StringRef request) {
-  auto parsed = json::parse(request);
-  if (!parsed)
-    throw std::runtime_error(toString(parsed.takeError()));
-  const auto &config = object(*parsed);
+json::Object analyzeBlockCandidate(const json::Object &config) {
   Profile profile(config);
   LLVMContext context;
   bool vv = text(config, "mode") == "vv",
        autoBlock = config.getBoolean("auto_blockify").value_or(false);
   auto coreCount = config.getInteger("cores"),
        blockCount = config.getInteger("blocks");
-  require(coreCount && blockCount && *coreCount > 0 && *coreCount <= 4096 &&
-              *blockCount > 0 &&
-              *blockCount <= std::numeric_limits<unsigned>::max() &&
-              (vv || *blockCount <= 10000),
-          "launch outside bounded analysis");
+  check(coreCount && blockCount && *coreCount > 0 && *coreCount <= 4096 &&
+            *blockCount > 0 &&
+            *blockCount <= std::numeric_limits<unsigned>::max() &&
+            (vv || *blockCount <= 10000),
+        "launch outside bounded analysis");
   unsigned cores = *coreCount, blocks = *blockCount;
   std::vector<Scalar> args;
   for (const auto &v : array(config, "arguments")) {
@@ -1483,19 +1461,19 @@ std::string analyzeBlockCandidate(StringRef request) {
   }
   std::map<std::string, std::unique_ptr<Module>> modules;
   for (const auto &[role, source] : object(*config.get("modules"))) {
-    require(bool(source.getAsString()), "missing LLVM module text");
+    check(bool(source.getAsString()), "missing LLVM module text");
     modules[role.str()] = parse(*source.getAsString(), context);
   }
   std::string name = text(config, "name");
   auto entry = [&](StringRef role) -> Function & {
-    require(modules.count(role.str()), "LLVM core role missing");
+    check(modules.count(role.str()), "LLVM core role missing");
     std::string suffix = vv || modules.size() == 1 ? "" : "_mix_" + role.str();
     auto *fn = modules.at(role.str())->getFunction(name + suffix);
-    require(fn && !fn->isDeclaration() && fn->getCallingConv() != 1023,
-            "scalar entry missing");
+    check(fn && !fn->isDeclaration() && fn->getCallingConv() != 1023,
+          "scalar entry missing");
     if (!vv && modules.size() == 1)
-      require(fn->hasFnAttribute("cube-only-kernel"),
-              "single CV entry is not Cube");
+      check(fn->hasFnAttribute("cube-only-kernel"),
+            "single CV entry is not Cube");
     return *fn;
   };
   Object result{{"status", "STATIC_COST_ESTIMATED"},
@@ -1505,8 +1483,8 @@ std::string analyzeBlockCandidate(StringRef request) {
     Function &fn = entry("aiv");
     auto raw = parse(text(config, "raw_llvm"), context);
     auto *original = raw->getFunction(name);
-    require(original && original->getFunctionType() == fn.getFunctionType(),
-            "optimized entry ABI changed");
+    check(original && original->getFunctionType() == fn.getFunctionType(),
+          "optimized entry ABI changed");
     Analyzer analyzer(*modules.at("aiv"), profile, true);
     std::unique_ptr<SimtModel> simt;
     if (const auto *mixed = config.getObject("mixed")) {
@@ -1525,8 +1503,7 @@ std::string analyzeBlockCandidate(StringRef request) {
     result["core_count"] = int64_t(cores);
     result["model"] = "vv-lowered-entry-v1";
   } else {
-    require(modules.count("aic") && modules.size() <= 2,
-            "unsupported CV roles");
+    check(modules.count("aic") && modules.size() <= 2, "unsupported CV roles");
     std::vector<double> ends(std::min(cores, blocks));
     double bytes = 0, flops = 0, mmas = 0;
     for (unsigned block = 0; block < blocks; ++block) {
@@ -1544,7 +1521,7 @@ std::string analyzeBlockCandidate(StringRef request) {
       }
       auto slot = autoBlock ? ends.begin() + block
                             : std::min_element(ends.begin(), ends.end());
-      require(slot < ends.end(), "invalid automatic core dispatch");
+      check(slot < ends.end(), "invalid automatic core dispatch");
       *slot += graph.finish();
     }
     result["score"] =
@@ -1554,9 +1531,15 @@ std::string analyzeBlockCandidate(StringRef request) {
     result["launched_groups"] = int64_t(blocks);
     result["counts"] = Object{{"useful_flops", flops}, {"mma_calls", mmas}};
   }
+  return result;
+}
+std::string analyzeBlockCandidate(StringRef request) {
+  auto parsed = json::parse(request);
+  if (!parsed)
+    throw std::runtime_error(toString(parsed.takeError()));
   std::string output;
   raw_string_ostream stream(output);
-  stream << json::Value(std::move(result));
+  stream << json::Value(analyzeBlockCandidate(object(*parsed)));
   return output;
 }
 } // namespace mlir::triton::ascend

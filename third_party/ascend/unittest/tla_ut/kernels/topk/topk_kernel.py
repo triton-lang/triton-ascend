@@ -411,7 +411,10 @@ def _restore_layout(x, values, indices, k, axis, fused):
         # as part of their transpose, avoiding a full int64 intermediate.
         row_shape = (*x.movedim(axis, -1).shape[:-1], k)
         out = values.view(row_shape).movedim(-1, axis).to(x.dtype).contiguous()
-    row_tile, k_tile = (64, 16) if fused and inner % 32 else (32, 32) if fused else (64, 64)
+    if inner % 64 == 0 and k % 64 == 0:
+        row_tile, k_tile = 64, 64
+    else:
+        row_tile, k_tile = (64, 16) if fused and inner % 32 else (32, 32) if fused else (64, 64)
     row_tile = min(row_tile, triton.next_power_of_2(inner))
     k_tile = min(k_tile, triton.next_power_of_2(k))
     grid = (outer * triton.cdiv(inner, row_tile), triton.cdiv(k, k_tile))
@@ -432,14 +435,106 @@ def topk(x, k, dim=-1, largest=True, sorted=True, *, implementation="auto", chun
         implementation = "full" if k == n else "tiles" if n > 8192 else "radix"
     if implementation == "full" and k != n:
         raise ValueError("full selection requires k == n")
-    if implementation == "sort" or (sorted and implementation == "full"):
+    # Work on contiguous rows through selection and sorting, then restore
+    # the requested axis once. Candidate indices stay in int32 until then.
+    if sorted and k > 1 and fused_output is None and implementation in ("radix", "full", "sort"):
+        return _ordered_topk(x, k, axis, largest, implementation, bounded_int64)
+    if implementation == "sort" or (sorted
+                                    and implementation == "full") or (x.dtype == torch.int64 and not bounded_int64
+                                                                      and implementation == "radix"):
         return _sort_output(x, None, k, axis, largest, bounded_int64)
-    if x.dtype == torch.int64 and not bounded_int64 and implementation == "radix":
-        return _sort_output(x, None, k, axis, largest)
     values, indices = _select_topk(x, k, axis, largest, implementation, chunk, bounded_int64, fused_output)
     if sorted and k > 1:
         return _sort_output(values, indices, k, axis, largest, bounded_int64)
     return values, indices
+
+
+def _ordered_topk(x, k, axis, largest, implementation, bounded_int64):
+    n = x.shape[axis]
+    inner = math.prod(x.shape[axis + 1:])
+    if n <= 32 and inner >= 128 and x.dtype in (torch.float16, torch.bfloat16):
+        return _short_strided_topk(x, k, axis, largest, inner)
+    rows = x.movedim(axis, -1).contiguous().view(-1, n)
+    if not rows.shape[0]:
+        shape = list(x.shape)
+        shape[axis] = k
+        return x.new_empty(shape), x.new_empty(shape, dtype=torch.int64)
+    index_dtype = torch.int64 if axis == x.ndim - 1 else torch.int32
+    values, indices = rows, None
+    wide_int64 = x.dtype == torch.int64 and not bounded_int64
+    if implementation == "radix" and not wide_int64:
+        if n > 8192:
+            raise ValueError("radix selection supports axes of at most 8192 elements")
+        source = rows.to(torch.int32) if x.dtype == torch.int64 else rows
+        cores = driver.active.utils.get_aivector_core_num()
+        values, indices = _native_launch(source, rows.shape[0], n, k, largest, cores)
+    values, indices = _sort_output(values, indices, k, 1, largest, bounded_int64, index_dtype=index_dtype)
+    if axis != x.ndim - 1:
+        return _restore_layout(x, values.to(x.dtype), indices, k, axis, fused=True)
+    shape = (*x.shape[:-1], k)
+    return values.to(x.dtype).view(shape), indices.view(shape)
+
+
+def _short_strided_topk(x, k, axis, largest, inner):
+    n = x.shape[axis]
+    shape = list(x.shape)
+    shape[axis] = k
+    values = x.new_empty(shape)
+    indices = x.new_empty(shape, dtype=torch.int64)
+    if x.numel():
+        columns = 128
+        grid = (x.numel() // (n * inner) * triton.cdiv(inner, columns), )
+        _sort_short_columns[grid](x, values, indices, inner, n, k, triton.next_power_of_2(n), columns, largest)
+    return values, indices
+
+
+@triton.constexpr_function
+def _bitonic_peer(row, step):
+    return row ^ (1 << step)
+
+
+@triton.jit
+def _sort_short_columns(X, V, I, INNER: tl.constexpr, N: tl.constexpr, K: tl.constexpr, WIDTH: tl.constexpr,
+                        COLUMNS: tl.constexpr, LARGEST: tl.constexpr):
+    groups: tl.constexpr = triton.cdiv(INNER, COLUMNS)
+    tile = tl.program_id(0)
+    outer = tile // groups
+    column = tile % groups * COLUMNS + tl.arange(0, COLUMNS)
+    valid = column < INNER
+    bits: tl.constexpr = WIDTH.bit_length()
+    packed = ()
+    # Each register contains the same axis position from neighboring columns.
+    for row in tl.static_range(WIDTH):
+        if row < N:
+            value = tl.load(X + (outer * N + row) * INNER + column, valid, other=0)
+            key = _sort_key(value)
+            if not LARGEST:
+                key = ~key
+            score = ((key & 0xFFFF).to(tl.int32) << bits) | (WIDTH - row)
+        else:
+            score = tl.full((COLUMNS, ), 0, tl.int32)
+        packed += (score, )
+    for stage in tl.static_range(1, bits):
+        for step in tl.static_range(stage - 1, -1, -1):
+            next_scores = ()
+            for row in tl.static_range(WIDTH):
+                other = packed[_bitonic_peer(row, step)]
+                if (((row >> stage) ^ (row >> step)) & 1) == 0:
+                    score = tl.maximum(packed[row], other)
+                else:
+                    score = tl.minimum(packed[row], other)
+                next_scores += (score, )
+            packed = next_scores
+    for row in tl.static_range(K):
+        ordered = packed[row]
+        index = WIDTH - (ordered & ((1 << bits) - 1))
+        key = (ordered >> bits).to(tl.uint16)
+        if not LARGEST:
+            key = ~key
+        value = _decode_narrow_key(key, X.dtype.element_ty)
+        destination = (outer * K + row) * INNER + column
+        tl.store(V + destination, value, valid)
+        tl.store(I + destination, index, valid)
 
 
 def _select_topk(x, k, axis, largest, implementation, chunk, bounded_int64, fused_output):
@@ -550,12 +645,12 @@ def _byte_topk(X, V, I, N: tl.constexpr, K: tl.constexpr, WIDTH: tl.constexpr, L
     tl.store(I + row * K + pos, lane, keep)
 
 
-def _sort_output(values, indices, k, axis, largest, bounded_int64=False):
+def _sort_output(values, indices, k, axis, largest, bounded_int64=False, index_dtype=torch.int64):
     shape = list(values.shape)
     n = shape[axis]
     shape[axis] = k
     out_values = values.new_empty(shape)
-    out_indices = values.new_empty(shape, dtype=torch.int64)
+    out_indices = values.new_empty(shape, dtype=index_dtype)
     if not values.numel():
         return out_values, out_indices
     inner = math.prod(values.shape[axis + 1:])
@@ -566,7 +661,7 @@ def _sort_output(values, indices, k, axis, largest, bounded_int64=False):
         ordered_values, ordered_indices = _sort_wide_rows(rows_view, k, largest)
         row_shape = (*values.movedim(axis, -1).shape[:-1], k)
         return (ordered_values.view(row_shape).movedim(-1, axis).contiguous(),
-                ordered_indices.view(row_shape).movedim(-1, axis).contiguous())
+                ordered_indices.view(row_shape).movedim(-1, axis).to(index_dtype).contiguous())
 
     rows_per_block = min(32, max(1, 2048 // width))
     if rows == 1 or (values.dtype == torch.int64 and not bounded_int64):
@@ -630,24 +725,49 @@ def _sort_int64_tiles(X, Indices, V, I, OUT_WIDTH: tl.constexpr, N: tl.constexpr
 
 
 @triton.jit
+def _sort_packed(pair):
+    # Order-preserving encoding in the positive normal FP32 bit patterns.
+    score = (pair + 0x00800000).to(tl.float32, bitcast=True)
+    return al.sort(score, descending=True).to(tl.int32, bitcast=True) - 0x00800000
+
+
+@triton.jit
 def _order_int64(x, valid, lane, WIDTH: tl.constexpr, LARGEST: tl.constexpr):
+    key = x.to(tl.uint64, bitcast=True) ^ 0x8000000000000000
+    if not LARGEST:
+        key = ~key
+    # If the tile's key range is small, subtract its minimum to retain
+    # the full ordering and pack the result with the lane in one pass.
+    first = tl.min(tl.where(valid, key, 0xFFFFFFFFFFFFFFFF), axis=0)
+    last = tl.max(tl.where(valid, key, 0), axis=0)
+    bits: tl.constexpr = WIDTH.bit_length()
+    if (last - first) < (1 << (30 - bits)):
+        pair = ((key - first).to(tl.int32) << bits) | (WIDTH - lane)
+        order = _sort_packed(tl.where(valid, pair, 0)) & ((1 << bits) - 1)
+    else:
+        order = _sort_digits(key, valid, lane, WIDTH, 4)
+    return order
+
+
+@triton.jit
+def _sort_digits(key, valid, lane, WIDTH: tl.constexpr, DIGITS: tl.constexpr):
     # Stable low-to-high radix sorting. The previous rank breaks ties in
     # each 16-bit digit, retaining the order of all less significant bits.
     bits: tl.constexpr = WIDTH.bit_length()
     suffix_mask: tl.constexpr = (1 << bits) - 1
-    key = x.to(tl.uint64, bitcast=True) ^ 0x8000000000000000
-    if not LARGEST:
-        key = ~key
-    order = tl.where(valid, WIDTH - lane, 0)
-    for shift in tl.static_range(0, 64, 16):
+    order = tl.broadcast_to(tl.where(valid, WIDTH - lane, 0), key.shape)
+    for shift in tl.static_range(0, DIGITS * 16, 16):
         source = tl.minimum(WIDTH - order, WIDTH - 1)
-        digit = ((tl.gather(key, source, axis=0) >> shift) & 0xFFFF).to(tl.int32)
+        current = key if shift == 0 else tl.gather(key, source, axis=len(key.shape) - 1)
+        digit = ((current >> shift) & 0xFFFF).to(tl.int32)
         pair = (digit << bits) | (WIDTH - lane)
-        score = (tl.where(order > 0, pair, 0) + 0x00800000).to(tl.float32, bitcast=True)
-        ranked = al.sort(score, descending=True).to(tl.int32, bitcast=True) - 0x00800000
+        ranked = _sort_packed(tl.where(order > 0, pair, 0))
         prev_order = (ranked & suffix_mask).to(tl.int32)
         source = tl.minimum(WIDTH - prev_order, WIDTH - 1)
-        order = tl.where(prev_order > 0, tl.gather(order, source, axis=0), 0)
+        if shift == 0:
+            order = prev_order
+        else:
+            order = tl.where(prev_order > 0, tl.gather(order, source, axis=len(key.shape) - 1), 0)
     return order
 
 
@@ -696,30 +816,53 @@ def _order_topk(X, Indices, V, I, N: tl.constexpr, K: tl.constexpr, INNER: tl.co
         if not LARGEST:
             key = ~key
         index_bits: tl.constexpr = WIDTH.bit_length()
-        if X.dtype.element_ty.primitive_bitwidth <= 16 and index_bits <= 15:
-            pair = ((key & 0xFFFF).to(tl.int32) << index_bits) | (WIDTH - lane)
-        else:
-            pair = (key.to(tl.int64) << index_bits) | (WIDTH - lane).to(tl.int64)
         selected: tl.constexpr = triton.next_power_of_2(K)
-        if X.dtype.element_ty.primitive_bitwidth <= 16 and index_bits <= 14:
-            # Encode the packed key as a positive normal float. A bitcast
-            # preserves each bit and uses the hardware float sorter directly.
-            score = (tl.where(lane < N, pair, 0) + 0x00800000).to(tl.float32, bitcast=True)
-            ordered = al.sort(score, descending=True).to(tl.int32, bitcast=True) - 0x00800000
+        if index_bits <= 14:
+            if X.dtype.element_ty.primitive_bitwidth <= 16:
+                pair = ((key & 0xFFFF).to(tl.int32) << index_bits) | (WIDTH - lane)
+                ordered = _sort_packed(tl.where(lane < N, pair, 0))
+            else:
+                ordered = _sort_digits(key, lane < N, lane, WIDTH, 2)
             order_lane = tl.broadcast_to(tl.arange(0, selected)[None, :], (BATCH, selected))
             ordered = tl.gather(ordered, order_lane, axis=1)
         else:
-            # Compare wide integer keys directly to preserve their low bits.
+            pair = (key.to(tl.int64) << index_bits) | (WIDTH - lane).to(tl.int64)
             ordered = tl.topk(tl.where(lane < N, pair, 0), selected)
         local = WIDTH - (ordered & ((1 << index_bits) - 1)).to(tl.int32)
         out = tl.arange(0, selected)[None, :]
         valid = (row < ROWS) & (out < K)
-    source = base + local * INNER
-    value = tl.load(X + source, valid, other=0)
-    index = local if Indices is None else tl.load(Indices + source, valid, other=0)
+    if INNER == 1 and X.dtype.element_ty != tl.int64:
+        axis: tl.constexpr = len(x.shape) - 1
+        if X.dtype.element_ty.primitive_bitwidth <= 16 and WIDTH.bit_length() <= 14:
+            sorted_key = (ordered >> index_bits).to(tl.uint32)
+            if not LARGEST:
+                sorted_key = ~sorted_key
+            value = _decode_narrow_key(sorted_key, X.dtype.element_ty)
+        else:
+            value = tl.gather(x, tl.minimum(local, WIDTH - 1), axis=axis)
+        if Indices is None:
+            index = local
+        else:
+            idx = tl.load(Indices + base + lane, (row < ROWS) & (lane < N), other=0)
+            index = tl.gather(idx, tl.minimum(local, WIDTH - 1), axis=axis)
+    else:
+        source = base + local * INNER
+        value = tl.load(X + source, valid, other=0)
+        index = local if Indices is None else tl.load(Indices + source, valid, other=0)
     destination = row // INNER * K * INNER + row % INNER + out * INNER
     tl.store(V + destination, value, valid)
     tl.store(I + destination, index, valid)
+
+
+@triton.jit
+def _decode_narrow_key(key, DTYPE: tl.constexpr):
+    if DTYPE == tl.float16 or DTYPE == tl.bfloat16:
+        bits = key.to(tl.uint16)
+        raw = bits ^ tl.where(bits & 0x8000 != 0, 0x8000, 0xFFFF).to(tl.uint16)
+        return raw.to(DTYPE, bitcast=True)
+    if DTYPE == tl.int8:
+        key ^= 0x80
+    return key.to(DTYPE)
 
 
 @triton.jit

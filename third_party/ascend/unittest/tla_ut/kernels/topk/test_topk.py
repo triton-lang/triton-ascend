@@ -146,6 +146,16 @@ def test_wide_order_keys(dtype):
         _check_matrix(cpu, expected, topk(x, 65, largest=largest), -1, largest)
 
 
+@pytest.mark.parametrize("dtype, n, k", [(torch.float16, 17, 6), (torch.bfloat16, 7, 7)])
+def test_short_strided_rows(dtype, n, k):
+    generator = torch.Generator().manual_seed(23)
+    cpu = torch.randint(-7, 8, (2, n, 259), generator=generator).to(dtype)
+    x = cpu.npu()
+    for largest in (True, False):
+        expected = torch.topk(cpu, k, dim=1, largest=largest).values
+        _check_matrix(cpu, expected, _kernels().topk(x, k, dim=1, largest=largest), 1, largest)
+
+
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
 def test_tiled_tail(dtype):
     cpu = torch.randint(-7, 8, (10003, ), generator=torch.Generator().manual_seed(23)).to(dtype)

@@ -71,10 +71,10 @@ def constexprs(cap=F32_CAP, chunk=F32_CHUNK):
 @tla.jit
 def simd_tail_f32(A, B, C, O, N, ROW0, CAP: tl.constexpr, CHUNK: tl.constexpr, CORES: tl.constexpr, GIN: tl.constexpr,
                   GOUT: tl.constexpr):
-    a_ub = tla.alloc_buffer((CHUNK, ), tl.float32, space="ub")
-    b_ub = tla.alloc_buffer((CHUNK, ), tl.float32, space="ub")
-    c_ub = tla.alloc_buffer((CHUNK, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((13, CHUNK), tl.float32, space="ub")
+    a_ub = tla.alloc((CHUNK, ), tl.float32, space="ub")
+    b_ub = tla.alloc((CHUNK, ), tl.float32, space="ub")
+    c_ub = tla.alloc((CHUNK, ), tl.float32, space="ub")
+    o_ub = tla.alloc((13, CHUNK), tl.float32, space="ub")
     NBLK: tl.constexpr = (CAP + CHUNK - 1) // CHUNK
     for p in range(tl.program_id(0), NBLK, CORES):
         off = p * CHUNK
@@ -82,12 +82,12 @@ def simd_tail_f32(A, B, C, O, N, ROW0, CAP: tl.constexpr, CHUNK: tl.constexpr, C
         b = tla.view(B, (CHUNK, ), strides=(1, ), offsets=(GIN + off, ))
         c = tla.view(C, (CHUNK, ), strides=(1, ), offsets=(GIN + off, ))
         o = tla.view(O, (13, CHUNK), strides=(GIN + CAP + GOUT, 1), offsets=(ROW0, GIN + off))
-        tla.copy(a, a_ub)
-        tla.copy(b, b_ub)
-        tla.copy(c, c_ub)
+        tla.load_gm_to_ub(a, a_ub)
+        tla.load_gm_to_ub(b, b_ub)
+        tla.load_gm_to_ub(c, c_ub)
         # Seed the UB rows from GM: ALL rows are fully overwritten, masked rows
         # keep this non-zero sentinel in every lane >= N.
-        tla.copy(o, o_ub)
+        tla.load_gm_to_ub(o, o_ub)
         with tla.scope.simd():
             av = tla.simd.vlds(a_ub[0], dist="NORM")
             bv = tla.simd.vlds(b_ub[0], dist="NORM")
@@ -111,17 +111,17 @@ def simd_tail_f32(A, B, C, O, N, ROW0, CAP: tl.constexpr, CHUNK: tl.constexpr, C
                           mask=tail)
             tla.simd.vsts(o_ub[12, 0], tla.simd.vdupv(av, mask=tail, pos=tla.simd.POS.HIGHEST), dist="NORM_B32",
                           mask=tail)
-        tla.copy(o_ub, o)
+        tla.store_ub_to_gm(o_ub, o)
 
 
 @tla.jit
 def simd_tail_f16(A, B, C, I, O, N, ROW0, CAP: tl.constexpr, CHUNK: tl.constexpr, CORES: tl.constexpr,
                   GIN: tl.constexpr, GOUT: tl.constexpr):
-    a_ub = tla.alloc_buffer((CHUNK, ), tl.float16, space="ub")
-    b_ub = tla.alloc_buffer((CHUNK, ), tl.float16, space="ub")
-    c_ub = tla.alloc_buffer((CHUNK, ), tl.float16, space="ub")
-    i_ub = tla.alloc_buffer((CHUNK, ), tl.int16, space="ub")
-    o_ub = tla.alloc_buffer((13, CHUNK), tl.float16, space="ub")
+    a_ub = tla.alloc((CHUNK, ), tl.float16, space="ub")
+    b_ub = tla.alloc((CHUNK, ), tl.float16, space="ub")
+    c_ub = tla.alloc((CHUNK, ), tl.float16, space="ub")
+    i_ub = tla.alloc((CHUNK, ), tl.int16, space="ub")
+    o_ub = tla.alloc((13, CHUNK), tl.float16, space="ub")
     NBLK: tl.constexpr = (CAP + CHUNK - 1) // CHUNK
     for p in range(tl.program_id(0), NBLK, CORES):
         off = p * CHUNK
@@ -130,11 +130,11 @@ def simd_tail_f16(A, B, C, I, O, N, ROW0, CAP: tl.constexpr, CHUNK: tl.constexpr
         c = tla.view(C, (CHUNK, ), strides=(1, ), offsets=(GIN + off, ))
         i = tla.view(I, (CHUNK, ), strides=(1, ), offsets=(GIN + off, ))
         o = tla.view(O, (13, CHUNK), strides=(GIN + CAP + GOUT, 1), offsets=(ROW0, GIN + off))
-        tla.copy(a, a_ub)
-        tla.copy(b, b_ub)
-        tla.copy(c, c_ub)
-        tla.copy(i, i_ub)
-        tla.copy(o, o_ub)
+        tla.load_gm_to_ub(a, a_ub)
+        tla.load_gm_to_ub(b, b_ub)
+        tla.load_gm_to_ub(c, c_ub)
+        tla.load_gm_to_ub(i, i_ub)
+        tla.load_gm_to_ub(o, o_ub)
         with tla.scope.simd():
             av = tla.simd.vlds(a_ub[0], dist="NORM")
             bv = tla.simd.vlds(b_ub[0], dist="NORM")
@@ -158,7 +158,7 @@ def simd_tail_f16(A, B, C, I, O, N, ROW0, CAP: tl.constexpr, CHUNK: tl.constexpr
                           mask=tail)
             tla.simd.vsts(o_ub[12, 0], tla.simd.vdupv(av, mask=tail, pos=tla.simd.POS.HIGHEST), dist="NORM_B16",
                           mask=tail)
-        tla.copy(o_ub, o)
+        tla.store_ub_to_gm(o_ub, o)
 
 
 def _strip_locs(text):

@@ -39,6 +39,8 @@ class _BatchLaunchHandler:
     """Block-batching policy behind the existing backend JIT continuation."""
 
     def run(self, fn, args, kwargs, grid, warmup, device, stream, backend, jit_tail):
+        from .block_auto_dispatch import prepare_launch
+        kwargs, grid = prepare_launch(fn, args, kwargs, grid, warmup, device, backend)
         # Preserve pre-run hooks, cache identity and single callback evaluation
         # without adding a hook to the common JIT frontend.
         bind = None if warmup else lambda: fn.device_caches[device][4](*args, **kwargs)[0]
@@ -387,10 +389,11 @@ class BatchKernel:
                 # the rewritten tile is still F times wider, so every lane past
                 # the original extent is masked-off work bought for nothing.
                 reason = "GRID_NOT_REDUCED"
-            elif _batched_blocks(grid, self.block_batching["selected_axis"],
-                                 1 if self._preserve_grid else self.request.factor) < _core_floor():
-                # Apply the configured available-core scheduling floor. Its
-                # performance tradeoff is validated separately by workload.
+            elif (not (_is_cv_report(self.block_batching) and hasattr(self, "block_auto_selection"))
+                  and _batched_blocks(grid, self.block_batching["selected_axis"],
+                                      1 if self._preserve_grid else self.request.factor) < _core_floor()):
+                # The CPU selector accounts for CV small-grid profitability.
+                # Preserve the existing floor for VV and manual requests.
                 reason = "GRID_BELOW_CORE_FLOOR"
             elif capture is not False:
                 reason = "CAPTURE_BASELINE" if capture else "CAPTURE_QUERY_UNAVAILABLE"
@@ -441,7 +444,7 @@ def _freeze_source(backend, src, baseline_options, backend_revision):
     from triton._C.libtriton import ir
     from triton.compiler.compiler import ASTSource
     from triton.runtime.cache import get_cache_manager
-    if not isinstance(src, ASTSource):
+    if not isinstance(src, ASTSource) or hasattr(src, "block_batching_source_hash"):
         return src
     options = backend.parse_options(baseline_options)
     context = ir.context()

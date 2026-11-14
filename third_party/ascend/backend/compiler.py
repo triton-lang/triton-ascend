@@ -1104,8 +1104,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if plan_memory_strategy is not None:
             _compile_option_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
 
-        if opt.debug:
-            _compile_option_list += [f"--save-temps={_get_save_temps_dir(metadata['hash'])}"]
+        if opt.debug or opt.block_auto_collect:
+            save_temps = _get_save_temps_dir(metadata["hash"]) if opt.debug else tmpdir
+            _compile_option_list += [f"--save-temps={save_temps}"]
 
         _compile_option_list += _masked_batch_compile_options(metadata, npu_compiler_path)
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
@@ -1161,6 +1162,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             validate_compilation_result(metadata)
             metadata["block_batching_binary_sha256"] = hashlib.sha256(Path(bin_path).read_bytes()).hexdigest()
             metadata["block_batching_plan_sha256"] = metadata["block_batching"]["guard"]["plan_fingerprint"]
+        if opt.block_auto_collect:
+            from .block_auto_artifacts import collect
+            metadata["block_auto_evidence"] = collect(save_temps, npu_compiler_path, metadata)
         return Path(bin_path).read_bytes()
 
 
@@ -1472,7 +1476,9 @@ class NPUOptions:
     # driver-side profile scratch path inert.
     profile_scratch_size: int = 0
     enable_graph_optimize: bool = True
-    block_batching_factor: int = 1
+    block_auto_contract: Optional[str] = None
+    block_auto_collect: bool = False
+    block_batching_factor: Union[int, str] = 1
     block_batching_axis: int = -1
     # Original launch extents, including resolved callable grids for automatic
     # axis selection. This compile option distinguishes cached axis choices when
@@ -1605,7 +1611,8 @@ class NPUOptions:
     use_bytecode: bool = field(default=False, init=False)
 
     def __post_init__(self, arch, rule_mask):
-        BatchRequest(self.block_batching_factor, self.block_batching_axis)
+        BatchRequest(1 if self.block_batching_factor == "auto" else self.block_batching_factor,
+                     self.block_batching_axis)
         if self.block_batching_grid is not None:
             grid = tuple(self.block_batching_grid)
             if len(grid) != 3 or any(type(x) is not int or x < 1 for x in grid):
@@ -1615,7 +1622,7 @@ class NPUOptions:
             raise ValueError("block_batching_layout must be auto or semantic_only")
         if self.block_batching_factor == 1:
             object.__setattr__(self, "block_batching_layout", "semantic_only")
-        if self.block_batching_factor > 1:
+        if self.block_batching_factor == "auto" or self.block_batching_factor > 1:
             compiler_path, _ = _get_npucompiler_path()
             object.__setattr__(self, "block_batching_backend_revision", _batching_backend_revision(compiler_path))
         from triton.backends.ascend import _apply_ascend_patch
@@ -1943,6 +1950,9 @@ class AscendBackend(BaseBackend):
         return FileCacheManager(cache.key + "/attempts/" + uuid.uuid4().hex)
 
     def compile_bundle(self, src, options, compile_variant):
+        if options.get("block_batching_factor") == "auto":
+            from .block_auto_dispatch import compile_auto_bundle
+            return compile_auto_bundle(self, src, options, compile_variant)
         from .block_batching import compile_bundle
         return compile_bundle(self, src, options, compile_variant)
 

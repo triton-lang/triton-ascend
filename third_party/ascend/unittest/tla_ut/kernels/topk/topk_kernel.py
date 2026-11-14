@@ -738,14 +738,23 @@ def _order_int64(x, valid, lane, WIDTH: tl.constexpr, LARGEST: tl.constexpr):
         key = ~key
     # If the tile's key range is small, subtract its minimum to retain
     # the full ordering and pack the result with the lane in one pass.
-    first = tl.min(tl.where(valid, key, 0xFFFFFFFFFFFFFFFF), axis=0)
-    last = tl.max(tl.where(valid, key, 0), axis=0)
+    return _sort_key_range(key, valid, lane, WIDTH, 4)
+
+
+@triton.jit
+def _sort_key_range(key, valid, lane, WIDTH: tl.constexpr, DIGITS: tl.constexpr):
+    axis: tl.constexpr = len(key.shape) - 1
+    upper = ~tl.full((), 0, key.dtype)
+    first = tl.min(tl.where(valid, key, upper), axis=axis)
+    last = tl.max(tl.where(valid, key, 0), axis=axis)
     bits: tl.constexpr = WIDTH.bit_length()
-    if (last - first) < (1 << (30 - bits)):
-        pair = ((key - first).to(tl.int32) << bits) | (WIDTH - lane)
+    span = tl.max(last - first, axis=0) if axis else last - first
+    if span < (1 << (30 - bits)):
+        shifted = key - tl.expand_dims(first, axis) if axis else key - first
+        pair = (shifted.to(tl.int32) << bits) | (WIDTH - lane)
         order = _sort_packed(tl.where(valid, pair, 0)) & ((1 << bits) - 1)
     else:
-        order = _sort_digits(key, valid, lane, WIDTH, 4)
+        order = _sort_digits(key, valid, lane, WIDTH, DIGITS)
     return order
 
 
@@ -822,7 +831,7 @@ def _order_topk(X, Indices, V, I, N: tl.constexpr, K: tl.constexpr, INNER: tl.co
                 pair = ((key & 0xFFFF).to(tl.int32) << index_bits) | (WIDTH - lane)
                 ordered = _sort_packed(tl.where(lane < N, pair, 0))
             else:
-                ordered = _sort_digits(key, lane < N, lane, WIDTH, 2)
+                ordered = _sort_key_range(key, lane < N, lane, WIDTH, 2)
             order_lane = tl.broadcast_to(tl.arange(0, selected)[None, :], (BATCH, selected))
             ordered = tl.gather(ordered, order_lane, axis=1)
         else:

@@ -410,18 +410,16 @@ class _CandidateStages:
             _active_attempt.reset(token)
 
 
-def _compile(body, directory):
-    from dataclasses import asdict
+def _worker_input(body, directory):
     from triton import knobs
     from triton.backends.compiler import GPUTarget
-    from triton.compiler.compiler import _compile as compile_single, make_backend
-    from triton.runtime.cache import FileCacheManager
+    from triton.compiler.compiler import make_backend
     from .block_batching_source import FrozenSource
     from .reuse.snapshot import decode
     target = GPUTarget(**body['target'])
     source = FrozenSource.from_wire(body['source'], directory)
     _restore_knobs(knobs, body)
-    if body['device'] is not None:
+    if body.get('device') is not None:
         import torch_npu  # noqa: F401 - register the torch.npu device in this interpreter
         from triton.runtime import driver
         driver.active.set_current_device(body['device'])
@@ -430,7 +428,32 @@ def _compile(body, directory):
     normalized = backend.parse_options(dict(options))
     if _variant_key(source, backend, normalized, body['env_vars']) != body['variant']:
         raise ValueError('worker source, backend, options or environment differ')
+    return source, backend, options, normalized
 
+
+def _probe_selection(body, directory):
+    from triton._C.libtriton import ir
+    from .compiler import make_ttir
+    source, backend, _, normalized = _worker_input(body, directory)
+    context = ir.context()
+    ir.load_dialects(context)
+    backend.load_dialects(context)
+    module = source.make_ir(backend.target, normalized, backend.get_codegen_implementation(normalized),
+                            backend.get_module_map(), context)
+    metadata = dict(vars(normalized), hash=body['variant'])
+    result = make_ttir(module, metadata, normalized)
+    if isinstance(result, BatchDecline):
+        return 'NotApplicable', result.payload()
+    return 'Success', dict(report=metadata['block_batching'])
+
+
+def _compile(body, directory):
+    from dataclasses import asdict
+    from triton import knobs
+    from triton.compiler.compiler import _compile as compile_single
+    from triton.runtime.cache import FileCacheManager
+    source, backend, options, _ = _worker_input(body, directory)
+    target = backend.target
     cache = FileCacheManager(body['stage_key'])
     stage_dir = Path(cache.cache_dir).resolve()
     timings = {}
@@ -460,6 +483,8 @@ def _worker():
             raise ValueError('invalid request identity')
         if operation == 'compile':
             status, payload = _compile(body, directory)
+        elif operation == 'selection_probe':
+            status, payload = _probe_selection(body, directory)
         elif operation in ('analyze', 'probe'):
             status, payload = _native_report(operation, body, directory)
         else:
@@ -496,6 +521,36 @@ def _publish_generation(cache, record, pending):
         raise
 
 
+def _worker_request(backend, source, options, env_vars, variant):
+    from dataclasses import asdict
+    from triton import knobs
+    from .reuse.snapshot import encode
+    return dict(source=source.to_wire(), target=asdict(backend.target), env_vars=env_vars,
+                options=encode(dict(options)), variant=variant, cache_dir=str(Path(knobs.cache.dir).resolve()),
+                dump_dir=str(Path(knobs.cache.dump_dir).resolve()), knobs=_knob_overrides(knobs.compilation),
+                instrumentation_mode=knobs.compilation.instrumentation_mode, ascend_knobs=_knob_overrides(knobs.ascend),
+                autotuning_knobs=_knob_overrides(knobs.autotuning), propagate_env=knobs.propagate_env)
+
+
+def selection_probe(backend, frozen, options, env_vars):
+    """Run the selector's normal TTIR preparation and proof in an isolated interpreter."""
+    normalized = backend.parse_options(dict(options))
+    variant = _variant_key(frozen, backend, normalized, env_vars)
+    outcome = _attempt('selection_probe', _worker_request(backend, frozen, options, env_vars, variant))
+    if outcome.status == 'NotApplicable':
+        if outcome.payload.get('stage') != 'ttir':
+            raise BatchCompileError('invalid selector probe refusal stage', kind='ProtocolError')
+        return BatchDecline(**outcome.payload)
+    report = outcome.payload['report']
+    axis = report.get('selected_axis')
+    if (report.get('compile_status') != 'REWRITTEN' or report.get('owner') != 'block_batching'
+            or report.get('plan_id') != variant or report.get('candidate_factor') != normalized.block_batching_factor
+            or type(axis) is not int or axis not in (0, 1, 2)
+            or normalized.block_batching_axis >= 0 and axis != normalized.block_batching_axis):
+        raise BatchCompileError('invalid selector probe identity', kind='ProtocolError')
+    return report
+
+
 class CandidateCompiler:
     """Own one bundle request and at most one resource-directed retry."""
 
@@ -503,12 +558,10 @@ class CandidateCompiler:
         self.backend, self.source, self.env_vars = backend, source, dict(env_vars)
 
     def _variant(self, options, pending):
-        from dataclasses import asdict
         from triton import knobs
         from triton.compiler.compiler import CompileTimer
         from triton.runtime.cache import get_cache_manager
         from triton.runtime import driver
-        from .reuse.snapshot import encode
 
         listener = knobs.compilation.listener
         timer = CompileTimer() if listener else None
@@ -536,13 +589,8 @@ class CandidateCompiler:
             return None, (cache, None, group, variant, timer.end() if timer else None)
         generation = uuid4().hex
         device = None if knobs.ascend.compile_only else driver.active.get_current_device()
-        body = dict(source=self.source.to_wire(), target=asdict(self.backend.target), env_vars=self.env_vars,
-                    options=encode(dict(options)), variant=variant, stage_key=f'{cache.key}/attempts/{generation}',
-                    cache_dir=str(Path(knobs.cache.dir).resolve()), dump_dir=str(Path(knobs.cache.dump_dir).resolve()),
-                    timing=bool(listener), knobs=_knob_overrides(knobs.compilation),
-                    instrumentation_mode=knobs.compilation.instrumentation_mode,
-                    ascend_knobs=_knob_overrides(knobs.ascend), autotuning_knobs=_knob_overrides(knobs.autotuning),
-                    propagate_env=knobs.propagate_env, device=device)
+        body = _worker_request(self.backend, self.source, options, self.env_vars, variant)
+        body.update(stage_key=f'{cache.key}/attempts/{generation}', timing=bool(listener), device=device)
         stage_dir = attempts / generation
         stage_dir.mkdir(parents=True, exist_ok=False)
         pending.callback(shutil.rmtree, stage_dir)

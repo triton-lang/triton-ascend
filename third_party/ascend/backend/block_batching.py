@@ -535,34 +535,43 @@ def rejected_bundle(baseline, request, decline, positions=(), retry=None):
     return BatchKernel(baseline, None, request, report, positions)
 
 
-def compile_bundle(backend, src, options, compile_variant):
+def _freeze_refusal(normalized):
     from triton import knobs
-    from .block_batching_worker import BatchDecline, CandidateCompiler, _baseline_environment
+    if knobs.compilation.override or getattr(normalized, 'ir_override', None):
+        return 'IR_OVERRIDE_NOT_SUPPORTED'
+    if knobs.cache.manager_class is not None or knobs.cache.remote_manager_class is not None:
+        return 'CUSTOM_CACHE_NOT_SUPPORTED'
+    return None
+
+
+def _candidate_refusal(backend, src, normalized):
     from .utils import backend_policy
+    if not str(backend.target.arch).startswith(('Ascend950', 'Ascend910_95')):
+        return 'TARGET_NOT_VALIDATED'
+    if normalized.is_pure_simt or normalized.compile_mode == 'simt_only':
+        return 'SIMT_NOT_SUPPORTED'
+    if backend_policy not in (None, 'torch_npu'):
+        return 'FRAMEWORK_NOT_VALIDATED'
+    if not hasattr(src, 'fn'):
+        return 'AST_SOURCE_REQUIRED'
+    return None
+
+
+def compile_bundle(backend, src, options, compile_variant):
+    from .block_batching_worker import BatchDecline, CandidateCompiler, _baseline_environment
     request = BatchRequest(options.get('block_batching_factor', 1), options.get('block_batching_axis', -1))
     if request.factor == 1:
         return compile_variant(dict(options), src)
     normalized = backend.parse_options(dict(options))
     baseline_options = dict(options, block_batching_factor=1, block_batching_axis=-1)
     baseline_options.pop('block_batching_grid', None)
-    refusal = None
-    if knobs.compilation.override or getattr(normalized, 'ir_override', None):
-        refusal = 'IR_OVERRIDE_NOT_SUPPORTED'
-    elif knobs.cache.manager_class is not None or knobs.cache.remote_manager_class is not None:
-        refusal = 'CUSTOM_CACHE_NOT_SUPPORTED'
+    refusal = _freeze_refusal(normalized)
     frozen = src if refusal else _freeze_source(backend, src, baseline_options,
                                                 normalized.block_batching_backend_revision)
     if isinstance(frozen, BatchDecline):
         refusal, frozen = frozen.reason, src
     baseline = compile_variant(baseline_options, frozen)
-    if not str(backend.target.arch).startswith(('Ascend950', 'Ascend910_95')):
-        refusal = refusal or 'TARGET_NOT_VALIDATED'
-    elif normalized.is_pure_simt or normalized.compile_mode == 'simt_only':
-        refusal = refusal or 'SIMT_NOT_SUPPORTED'
-    elif backend_policy not in (None, 'torch_npu'):
-        refusal = refusal or 'FRAMEWORK_NOT_VALIDATED'
-    elif not hasattr(src, 'fn'):
-        refusal = refusal or 'AST_SOURCE_REQUIRED'
+    refusal = refusal or _candidate_refusal(backend, src, normalized)
     if refusal:
         return rejected_bundle(baseline, request, dict(reason=refusal))
     positions = _runtime_positions(src)

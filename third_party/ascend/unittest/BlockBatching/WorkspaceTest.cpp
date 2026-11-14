@@ -59,5 +59,27 @@ TEST(BatchRewriteWorkspaceTest, MissingAndExpiredBindings) {
   EXPECT_FALSE(workspace.lookupGenerated(source));
   EXPECT_FALSE(workspace.cloneOperands(op));
 }
+
+TEST(BatchRewriteWorkspaceTest, NarrowerMergePreservesPreviouslyKnownRows) {
+  MLIRContext context;
+  OpBuilder builder(&context);
+  Block block;
+  Value source =
+      block.addArgument(builder.getI32Type(), builder.getUnknownLoc());
+  BatchRewriteWorkspace workspace;
+  llvm::SmallBitVector wide(8), narrow(2);
+  wide.set(7);
+  narrow.set(1);
+
+  EXPECT_TRUE(workspace.mergeRows(source, wide, false));
+  EXPECT_TRUE(workspace.mergeRows(source, narrow, false));
+  EXPECT_FALSE(workspace.mergeRows(source, narrow, false));
+  auto domain = workspace.aggregation(source);
+  ASSERT_TRUE(domain);
+  wide.set(1);
+  EXPECT_EQ(domain->first, wide);
+  EXPECT_FALSE(domain->second);
+}
+
 } // namespace
 } // namespace mlir::triton::cfg

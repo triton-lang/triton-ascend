@@ -1,13 +1,11 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 """Selected CV bundles keep runtime safety checks without a second performance veto."""
 import importlib
-from dataclasses import replace
 from pathlib import Path
 import sys
-import threading
 from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 class TestSelectedDispatch(unittest.TestCase):
@@ -20,25 +18,27 @@ class TestSelectedDispatch(unittest.TestCase):
         self.addCleanup(self.patcher.stop)
         self.batching = importlib.import_module(package.__name__ + '.block_batching')
         self.events = []
-        self.bundle = object.__new__(self.batching.BatchKernel)
-        for role in ('baseline', 'candidate'):
-            setattr(
-                self.bundle, role,
-                SimpleNamespace(function=role, packed_metadata=role, launch_metadata=lambda *args: None,
-                                run=lambda *args: self.events.append(args[4])))
-        self.bundle._primary = self.bundle.candidate
-        self.bundle.request = self.batching.BatchRequest(2, 0)
-        self.bundle.block_batching = dict(cv_mode='independent_batch_v1', selected_axis=0)
-        self.bundle.block_auto_selection = dict(model_complete=True, selected_factor=2)
-        self.bundle._local = threading.local()
-        self.bundle._preserve_grid = False
-        self.bundle.positions, self.bundle.hash = [0], 'bundle'
-        self.bundle._guard = lambda args, grid: (True, 'PROVEN_AT_RUNTIME')
-        contract = importlib.import_module(package.__name__ + '.block_batching_contract').ExecutionContract
-        self.bundle._vv_mode = False
-        self.bundle._contract = contract(2, 0, False, self.bundle.positions, 'candidate', self.bundle.candidate,
-                                         self.bundle._guard, self.bundle.block_batching, self.bundle.request)
+        self.guard = Mock(return_value=(True, 'PROVEN_AT_RUNTIME'))
+
+        def kernel(role):
+            return SimpleNamespace(hash=role, metadata=SimpleNamespace(_asdict=lambda: {}), function=role,
+                                   packed_metadata=role, launch_metadata=lambda *args: None,
+                                   run=lambda *args: self.events.append(args[4]))
+
+        self.baseline, self.candidate = kernel('baseline'), kernel('candidate')
+        guard = importlib.import_module(package.__name__ + '.block_batching_guard')
+        make_guard = patch.object(guard, 'RuntimeGuard', return_value=self.guard)
+        make_guard.start()
+        self.addCleanup(make_guard.stop)
+        self.bundle = self.make_bundle('independent_batch_v1')
         self.knobs = SimpleNamespace(ascend=SimpleNamespace(compile_only=False))
+
+    def make_bundle(self, cv_mode):
+        report = dict(cv_mode=cv_mode, selected_axis=0, lane_width=2, guard={}, owner='block_batching')
+        bundle = self.batching.BatchKernel(self.baseline, self.candidate, self.batching.BatchRequest(2, 0), report, [0],
+                                           publish_manifest=False)
+        bundle.block_auto_selection = dict(model_complete=True, selected_factor=2)
+        return bundle
 
     def dispatch(self, grid=4, capture=False):
         triton = ModuleType('triton')
@@ -57,13 +57,12 @@ class TestSelectedDispatch(unittest.TestCase):
     def test_manual_cv_and_automatic_vv_retain_the_existing_floor(self):
         del self.bundle.block_auto_selection
         self.assertEqual(self.dispatch()['reason'], 'GRID_BELOW_CORE_FLOOR')
-        self.bundle.block_auto_selection = dict(selected_factor=2)
-        self.bundle.block_batching['cv_mode'] = 'disabled'
+        self.bundle = self.make_bundle('disabled')
         self.assertEqual(self.dispatch()['reason'], 'GRID_BELOW_CORE_FLOOR')
         self.assertEqual(self.events, ['baseline', 'baseline'])
 
     def test_selected_cv_still_checks_aliases(self):
-        self.bundle._contract = replace(self.bundle._contract, guard=lambda args, grid: (False, 'WRITE_ALIAS'))
+        self.guard.return_value = (False, 'WRITE_ALIAS')
         self.assertEqual(self.dispatch()['reason'], 'WRITE_ALIAS')
         self.assertEqual(self.events, ['baseline'])
 

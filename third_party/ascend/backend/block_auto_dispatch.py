@@ -56,29 +56,25 @@ def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
                 block_auto_contract=json.dumps(contract, sort_keys=True, separators=(",", ":"), allow_nan=False)), grid
 
 
-def _probe(backend, frozen, options, axis, factor):
-    from triton._C.libtriton import ir
-    from .compiler import make_ttir
-    from .block_batching_worker import isolated_report
-    normalized = backend.parse_options(
-        dict(options, block_batching_factor=1, block_batching_axis=axis, block_auto_collect=False,
-             enable_graph_optimize=False, debug=False))
-    context = ir.context()
-    ir.load_dialects(context)
-    backend.load_dialects(context)
-    module = frozen.make_ir(backend.target, normalized, backend.get_codegen_implementation(normalized),
-                            backend.get_module_map(), context)
-    # Normalize the same frozen frontend input as the compiled variants. The
-    # candidate rewrite runs under PR #11's supervised worker protocol; a
-    # capability refusal is a report, while compiler/protocol failures propagate.
-    module = make_ttir(module, dict(vars(normalized)), normalized)
-    return isolated_report("probe", str(module), factor, axis, "semantic_only", normalized.enable_hivm_batch_matmul)
+def _probe(backend, frozen, options, env_vars, axis, factor):
+    from .block_batching_worker import BatchCompileError, BatchDecline, selection_probe
+    values = dict(options, block_batching_factor=factor, block_batching_axis=axis, block_auto_collect=False,
+                  enable_graph_optimize=False, debug=False)
+    try:
+        report = selection_probe(backend, frozen, values, env_vars)
+    except ValueError as error:
+        # candidate_plan treats ValueError as an unsupported axis/factor. Only a
+        # modeled worker decline is such an outcome.
+        raise BatchCompileError(str(error), stage="selection_probe") from error
+    if isinstance(report, BatchDecline):
+        raise ValueError(report.reason)
+    return report
 
 
 def compile_auto_bundle(backend, src, options, compile_variant):
     from . import block_batching as batching
-    from .block_batching_worker import BatchDecline
     from .block_auto import candidate_plan, select_candidates
+    from .block_batching_worker import BatchDecline, _baseline_environment
     # Without a bound JIT launch there is no shape/grid contract to score.
     common = {key: value for key, value in options.items() if key not in ("block_auto_contract", "block_batching_grid")}
     baseline_options = dict(common, block_batching_factor=1, block_batching_axis=-1)
@@ -87,17 +83,28 @@ def compile_auto_bundle(backend, src, options, compile_variant):
     contract = json.loads(options["block_auto_contract"])
     normalized = backend.parse_options(options)
     common["block_auto_collect"] = baseline_options["block_auto_collect"] = True
-    refusal = None
-    frozen = batching._freeze_source(backend, src, baseline_options, normalized.block_batching_backend_revision)
+    refusal = batching._freeze_refusal(normalized)
+    frozen = src if refusal else batching._freeze_source(backend, src, baseline_options,
+                                                         normalized.block_batching_backend_revision)
     if isinstance(frozen, BatchDecline):
-        frozen, refusal = src, frozen.reason
+        refusal, frozen = frozen.reason, src
     baseline = compile_variant(baseline_options, frozen)
     axis = options.get("block_batching_axis", -1)
     cv = getattr(baseline.metadata, "mix_mode", None) in ("aic", "mix")
-    if refusal is not None:
+    if cv and not refusal:
+        refusal = batching._candidate_refusal(backend, src, normalized)
+        if not refusal:
+            positions = batching._runtime_positions(src)
+            if isinstance(positions, BatchDecline):
+                refusal = positions.reason
+        if not refusal:
+            env_vars = _baseline_environment(frozen, backend, baseline_options, baseline)
+            if env_vars is None:
+                refusal = "BASELINE_ENVIRONMENT_NOT_PROVEN"
+    if refusal:
         plan = dict(candidates=[], reason=refusal)
     elif cv:
-        plan = candidate_plan(contract, axis=axis, probe=lambda a, f: _probe(backend, frozen, common, a, f))
+        plan = candidate_plan(contract, axis=axis, probe=lambda a, f: _probe(backend, frozen, common, env_vars, a, f))
     else:
         plan = dict(candidates=[dict(axis=axis, factor=f) for f in (2, 4)], reason="VV_F2_F4_AUTOMATIC_AXIS")
 

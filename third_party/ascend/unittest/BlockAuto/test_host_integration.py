@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 BACKEND = Path(__file__).resolve().parents[2] / "backend"
 PACKAGE = "_block_auto_private_test"
@@ -178,7 +178,9 @@ class TestCompileIntegration(unittest.TestCase):
         self.backend = SimpleNamespace(parse_options=lambda _: SimpleNamespace(block_batching_backend_revision="r"))
         self.options = dict(block_batching_factor="auto", block_auto_contract=json.dumps(dict(grid=[256, 1, 1])))
         self.bundle = SimpleNamespace(candidate=object(), block_batching=dict(selected_axis=0))
-        self.manual = module("batching", _freeze_source=lambda *args: self.frozen, compile_bundle=self.manual_compile,
+        self.manual = module("batching", _freeze_source=lambda *args: self.frozen,
+                             _freeze_refusal=lambda normalized: None, _candidate_refusal=lambda *args: None,
+                             _runtime_positions=lambda src: [], compile_bundle=self.manual_compile,
                              BatchRequest=lambda: "F1",
                              BatchKernel=lambda *args: SimpleNamespace(baseline=args[0], candidate=None))
         self.model = module(
@@ -194,6 +196,10 @@ class TestCompileIntegration(unittest.TestCase):
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
         self.dispatch = importlib.import_module(PACKAGE + ".block_auto_dispatch")
+        self.worker = importlib.import_module(PACKAGE + ".block_batching_worker")
+        environment = patch.object(self.worker, "_baseline_environment", return_value={})
+        self.environment = environment.start()
+        self.addCleanup(environment.stop)
 
     def compile(self, options, frozen=None):
         self.events.append((options, frozen))
@@ -238,24 +244,68 @@ class TestCompileIntegration(unittest.TestCase):
         self.assertIs(result, bundle2)
         self.assertEqual(len(result.block_auto_selection["candidate_plan"]["candidates"]), 2)
 
+    def test_modeled_freeze_decline_compiles_f1_from_original_source(self):
+        src = object()
+        self.manual._freeze_source = lambda *args: self.worker.BatchDecline("CUSTOM_CACHE_NOT_SUPPORTED", "freeze")
+        self.model.select_candidates = lambda candidates, contract: (1, dict(reason="BASELINE_ONLY"))
+        result = self.dispatch.compile_auto_bundle(self.backend, src, self.options, self.compile)
+        self.assertEqual(result.block_auto_selection["candidate_plan"],
+                         dict(candidates=[], reason="CUSTOM_CACHE_NOT_SUPPORTED"))
+        self.assertEqual(len(self.events), 1)
+        self.assertIs(self.events[0][1], src)
+
+    def test_cv_with_unproven_baseline_environment_does_not_probe(self):
+        self.baseline.metadata.mix_mode = "aic"
+        self.environment.return_value = None
+        self.model.candidate_plan = Mock(side_effect=AssertionError("unproven environment cannot probe"))
+        self.model.select_candidates = lambda candidates, contract: (1, dict(reason="BASELINE_ONLY"))
+        result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
+        self.assertEqual(result.block_auto_selection["candidate_plan"],
+                         dict(candidates=[], reason="BASELINE_ENVIRONMENT_NOT_PROVEN"))
+        self.model.candidate_plan.assert_not_called()
+        self.assertIs(result.baseline, self.baseline)
+
+    def test_cv_probe_passes_the_verified_snapshot_and_overrides_only_probe_options(self):
+        self.baseline.metadata.mix_mode = "mix"
+        env = {"SAVED_FLAG": "submitted"}
+        self.environment.return_value = env
+        probe = Mock(return_value={"selected_axis": 1, "requested_factor": 2})
+
+        def planner(contract, axis, probe):
+            self.assertEqual(probe(1, 2), {"selected_axis": 1, "requested_factor": 2})
+            return dict(candidates=[], reason="NO_CANDIDATES")
+
+        self.model.candidate_plan = planner
+        self.model.select_candidates = lambda candidates, contract: (1, dict(reason="BASELINE_ONLY"))
+        with patch.object(self.worker, "selection_probe", probe):
+            self.dispatch.compile_auto_bundle(self.backend, object(), dict(self.options, num_stages=3), self.compile)
+        probe.assert_called_once_with(
+            self.backend, self.frozen,
+            dict(num_stages=3, block_batching_factor=2, block_batching_axis=1, block_auto_collect=False,
+                 enable_graph_optimize=False, debug=False), env)
+        self.assertEqual(len(self.events), 1)
+
+    def test_cv_probe_distinguishes_worker_refusal_from_internal_errors(self):
+        args = (self.backend, self.frozen, {}, {}, 0, 2)
+        with patch.object(self.worker, "selection_probe",
+                          return_value=self.worker.BatchDecline("UNUSED_BATCH_AXIS", "ttir")):
+            with self.assertRaisesRegex(ValueError, "UNUSED_BATCH_AXIS"):
+                self.dispatch._probe(*args)
+        failure = self.worker.BatchCompileError("native failure", kind="CompilerCrash", stage="ttir")
+        with patch.object(self.worker, "selection_probe", side_effect=failure):
+            with self.assertRaises(self.worker.BatchCompileError) as raised:
+                self.dispatch._probe(*args)
+            self.assertIs(raised.exception, failure)
+        with patch.object(self.worker, "selection_probe", side_effect=ValueError("invalid serialized input")):
+            with self.assertRaisesRegex(self.worker.BatchCompileError, "invalid serialized input"):
+                self.dispatch._probe(*args)
+
     def test_model_fallback_cannot_launch_a_rejected_merge(self):
         self.model.select_candidates = lambda candidates, contract: (
             1, dict(selected_key="unmerged", reason="MODEL_INCOMPLETE"))
         result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
         self.assertIs(result.baseline, self.baseline)
         self.assertIsNone(result.candidate)
-
-    def test_freeze_refusal_compiles_original_baseline_once(self):
-        worker = importlib.import_module(PACKAGE + ".block_batching_worker")
-        original = object()
-        self.manual._freeze_source = lambda *args: worker.BatchDecline("CUSTOM_CACHE_NOT_SUPPORTED", "freeze")
-        self.model.select_candidates = lambda candidates, contract: (
-            1, dict(selected_key="unmerged", reason="CUSTOM_CACHE_NOT_SUPPORTED"))
-        result = self.dispatch.compile_auto_bundle(self.backend, original, self.options, self.compile)
-        self.assertEqual(len(self.events), 1)
-        self.assertIs(self.events[0][1], original)
-        self.assertIsNone(result.candidate)
-        self.assertEqual(result.block_auto_selection["candidate_plan"]["reason"], "CUSTOM_CACHE_NOT_SUPPORTED")
 
     def test_candidate_internal_failure_is_not_silently_downgraded(self):
         worker = importlib.import_module(PACKAGE + ".block_batching_worker")
@@ -267,31 +317,6 @@ class TestCompileIntegration(unittest.TestCase):
         with self.assertRaises(worker.BatchCompileError):
             self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
         self.assertEqual(len(self.events), 1)
-
-    def test_cv_probe_normalizes_f1_then_uses_supervised_rewrite(self):
-        worker = importlib.import_module(PACKAGE + ".block_batching_worker")
-        report = dict(compile_status="REWRITTEN", selected_axis=1, requested_factor=4)
-        ir = SimpleNamespace(context=lambda: "context", load_dialects=lambda _: None)
-        self.backend.parse_options = lambda values: SimpleNamespace(**values, enable_hivm_batch_matmul=True)
-        self.backend.target = object()
-        self.backend.load_dialects = lambda _: None
-        self.backend.get_codegen_implementation = lambda _: {}
-        self.backend.get_module_map = lambda: {}
-        frozen = SimpleNamespace(make_ir=lambda *args: "raw")
-
-        def normalize(module, metadata, options):
-            self.assertEqual(module, "raw")
-            self.assertEqual(options.block_batching_factor, 1)
-            self.assertFalse(options.enable_graph_optimize)
-            return "normalized"
-
-        with patch.dict(
-                sys.modules, {
-                    "triton._C.libtriton": module("triton._C.libtriton", ir=ir),
-                    PACKAGE + ".compiler": module("compiler", make_ttir=normalize),
-                }), patch.object(worker, "isolated_report", return_value=report) as probe:
-            self.assertIs(self.dispatch._probe(self.backend, frozen, {}, 1, 4), report)
-            probe.assert_called_once_with("probe", "normalized", 4, 1, "semantic_only", True)
 
 
 if __name__ == "__main__":

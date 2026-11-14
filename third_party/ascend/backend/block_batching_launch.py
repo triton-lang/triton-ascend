@@ -16,8 +16,7 @@ def candidate_launch_refusal(request, report, grid, preserve_grid, capture, *, c
         return "CV_GRID_NOT_DIVISIBLE"
     if not preserve_grid and not reduces_blocks(grid, report["selected_axis"], request.factor):
         return "GRID_NOT_REDUCED"
-    # The native selector already scores CV small-grid profitability. Manual
-    # requests and VV retain the existing scheduling floor.
+    # The native selector scores small CV grids. Manual CV and VV keep the floor.
     if (not (cv and auto_selected)
             and batched_blocks(grid, report["selected_axis"], 1 if preserve_grid else request.factor) < core_floor()):
         return "GRID_BELOW_CORE_FLOOR"

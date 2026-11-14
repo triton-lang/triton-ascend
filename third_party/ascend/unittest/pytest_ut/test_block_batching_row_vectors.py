@@ -79,6 +79,35 @@ def test_row_relative_vector_uses_contiguous_region(tmp_path, axis, factor, requ
     assert runtime(args, grid)[0]
 
 
+@pytest.mark.parametrize('opcode', ['divsi', 'remsi'])
+@pytest.mark.parametrize('split_pid', ['%p', '%row'], ids=['tile-axis', 'row-axis'])
+@pytest.mark.parametrize('requested', [2, -1], ids=['rewrite', 'auto-probe'])
+def test_residual_program_split_requires_uniform_axis(tmp_path, opcode, split_pid, requested):
+    # Axis z tiles the vector; x selects a row. Auto prefers x unless the
+    # column-region probe proves z admits a contiguous pointwise rewrite.
+    text = row_vector_ir(2).replace(
+        '%mask = arith.cmpi slt, %idx, %nv : tensor<4xi64>', f'''%prefix = arith.cmpi slt, %idx, %nv : tensor<4xi64>
+    %three = arith.constant 3 : i32
+    %split = arith.{opcode} {split_pid}, %three : i32
+    %enabled = arith.cmpi slt, %split, %n : i32
+    %residual = tt.splat %enabled : i1 -> tensor<4xi1>
+    %mask = arith.andi %prefix, %residual : tensor<4xi1>''')
+    module = parse(tmp_path, text)
+    report = ascend.passes.ttir.rewrite_block_batching(module, 2, requested)
+    assert module.verify()
+    assert report['compile_status'] == 'REWRITTEN', report
+    layouts = json.loads(report['layout_json'])['accesses']
+    assert len(layouts) == 2
+    if split_pid == '%row':
+        assert report['selected_axis'] == 2
+        assert all(p['rewritten'] and p['action'] == 'PointwiseRegion' for p in layouts), layouts
+        assert 'tensor<8xf32>' in str(module)
+    else:
+        assert report['selected_axis'] == (0 if requested == -1 else 2)
+        assert all(not p['rewritten'] for p in layouts), layouts
+        assert 'tensor<8xf32>' not in str(module)
+
+
 def test_row_relative_vector_preserves_explicit_row_axis(tmp_path):
     module = parse(tmp_path, row_vector_ir(1))
     report = ascend.passes.ttir.rewrite_block_batching(module, 2, 2)

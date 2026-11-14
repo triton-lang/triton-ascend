@@ -82,13 +82,17 @@ public:
 
   void runOnOperation() override {
     ModuleOp moduleOp = getOperation();
+    auto owner =
+        moduleOp->getAttrOfType<StringAttr>("hacc.block_mapping_owner");
+    const bool batchOwned = owner && owner.getValue() == "block_batching";
     bool wasCoalesced = false;
     switch (phase) {
     case LayoutMemoryCompatibilityPhase::BeforeDiagonal:
       // Preserve the original module-wide, no-op-on-bailout semantics.  This
       // phase intentionally has no cleanup pass.
       wasCoalesced = moduleOp->hasAttr("hacc.coalesce_factor");
-      StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
+      if (!batchOwned)
+        StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
       if (!wasCoalesced && moduleOp->hasAttr("hacc.coalesce_factor"))
         emitAppliedGraphOptimizationRule(
             GraphOptimizationRuleId::StridedAxisCoalescing);
@@ -97,7 +101,8 @@ public:
       // Keep the legacy order.  Chunk sees Axis's module attr and consumes the
       // static-grid hint before the greedy StridedLoadStore patterns run.
       wasCoalesced = moduleOp->hasAttr("hacc.coalesce_factor");
-      ChunkCoalescing::rewriteChunkCoalesce(moduleOp);
+      if (!batchOwned)
+        ChunkCoalescing::rewriteChunkCoalesce(moduleOp);
       if (!wasCoalesced && moduleOp->hasAttr("hacc.coalesce_factor"))
         emitAppliedGraphOptimizationRule(
             GraphOptimizationRuleId::ChunkCoalescing);

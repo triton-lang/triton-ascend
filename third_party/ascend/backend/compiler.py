@@ -72,6 +72,18 @@ from triton.backends.ascend.utils import (
     is_cann_version_at_least,
 )
 from triton.backends.ascend.driver import (NPUUtils)
+from triton.backends.ascend.block_batching import BatchRequest, analyze_request, IMPLEMENTATION_VERSION
+from triton.backends.ascend.block_batching_worker import BatchCompileError, BatchDecline, _active_attempt
+from triton.backends.ascend.block_batching import memory_compile_options as batching_memory_compile_options
+from triton.backends.ascend.block_batching import vv_layout_refusal as batching_vv_layout_refusal
+from triton.backends.ascend.block_batching import vv_computation_refusal as batching_vv_computation_refusal
+from triton.backends.ascend.block_batching import vv_memory_lowering_refusal as batching_vv_memory_lowering_refusal
+from triton.backends.ascend.block_batching_report import (
+    VALIDATION_POLICY,
+    CV_AUTO_BLOCKIFY_LOWERINGS,
+    CV_MASKED_BATCH_LOWERINGS,
+    validate_compilation_result,
+)
 from triton.backends.ascend.program_grid import (
     DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK,
     PROGRAM_GRID_TRANSFORMS_ATTR,
@@ -224,6 +236,8 @@ def _finalize_program_launch_policy(metadata, opt):
             raise RuntimeError(f"invalid exported program_grid_transforms: {error}") from error
     if mapping_applied != (transforms is not None):
         raise RuntimeError("program_grid_mapping_applied disagrees with program_grid_transforms")
+    if transforms is not None and transforms["version"] == 3 and "block_batching" not in metadata:
+        raise RuntimeError("v3 grid contract requires an owned guarded block batching plan")
     if mapping_applied and row_coalescing_applied:
         raise RuntimeError("program-grid mapping conflicts with legacy RowCoalescing")
 
@@ -241,6 +255,12 @@ def _finalize_program_launch_policy(metadata, opt):
     else:
         auto_blockify_enabled = (_is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op
                                  and not ptsm_cap_authorized)
+    cv_report = metadata.get("block_batching", {})
+    if cv_report.get("cv_mode") in ("independent_batch_v1", "spatial_concat_v1"):
+        # The admitted CV lowerings retain the original-grid ABI while
+        # AutoBlockify loops over grouped programs, including uniform regions.
+        auto_blockify_enabled &= (cv_report.get("cv_lowering") in CV_AUTO_BLOCKIFY_LOWERINGS
+                                  and metadata["mix_mode"] == "mix")
 
     if auto_blockify_enabled and ptsm_cap_authorized:
         raise RuntimeError("AutoBlockify and persistent-grid cap cannot both be enabled")
@@ -283,6 +303,8 @@ def _with_debug_line(npubin_stage, options):
 
     def stage(src, metadata):
         artifact = npubin_stage(src, metadata)
+        if isinstance(artifact, BatchDecline):
+            return artifact
         return rewrite_debug_line(artifact, metadata=metadata, options=options)
 
     return stage
@@ -301,6 +323,27 @@ def _graph_optimize_core_num(opt):
         return npu_utils.get_aicore_num()
     except Exception:
         return 0
+
+
+@functools.lru_cache(maxsize=128)
+def _batching_backend_file_hash(path, size, mtime):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _batching_backend_revision(path):
+    # The driver delegates to hivmc-a5 and links template bitcode. A driver-only
+    # hash misses exactly the independently rebuilt components used by batching.
+    root = Path(path).resolve().parent.parent
+    files = {Path(path).resolve()}
+    files.update(p for p in (root / "bin").glob("*") if p.is_file())
+    files.update(p for p in (root / "lib").rglob("*.bc") if p.is_file())
+    # Invalidate old candidates compiled under the NPUIR-report admission policy.
+    digest = hashlib.sha256(VALIDATION_POLICY.encode())
+    for item in sorted(files):
+        stat = item.stat()
+        digest.update(str(item.relative_to(root)).encode())
+        digest.update(_batching_backend_file_hash(str(item), stat.st_size, stat.st_mtime_ns).encode())
+    return digest.hexdigest()
 
 
 def _graph_optimize_kwargs(opt):
@@ -361,8 +404,91 @@ def make_ttir(mod, metadata, opt):
     passes.common.add_licm(pm)
     passes.common.add_symbol_dce(pm)
     passes.ttir.add_loop_unroll(pm)
+    if getattr(opt, "block_batching_factor", 1) > 1:
+        # Rewrite only the candidate's normalized frontend IR. The bundle
+        # controller retains an independently compiled original baseline.
+        if opt.debug:
+            get_dump_manager(metadata['hash']).put(str(mod), 'block_batching.raw.ttir', binary=False)
+        pm.run(mod, 'block_batching_normalize')
+        if opt.debug:
+            get_dump_manager(metadata['hash']).put(str(mod), 'block_batching.normalized.ttir', binary=False)
+        if opt.block_batching_factor > 64:
+            return BatchDecline("FACTOR_EXCEEDS_LANE_CAPACITY", "ttir")
+        rewrite = getattr(ascend.passes.ttir, "rewrite_block_batching", None)
+        if rewrite is None:
+            raise RuntimeError("block batching requires the matching rebuilt C++ rewriter")
+        if opt.block_batching_grid is not None and opt.block_batching_axis < 0:
+            # Auto axis selection skips a grid axis the launch cannot divide.
+            # Absent the hint it keeps choosing the first axis the kernel reads
+            # a program id from, which may be a degenerate tiling axis.
+            _builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.target_arch)
+            _extents = ", ".join(f"{extent} : i32" for extent in opt.block_batching_grid)
+            mod.set_attr("hacc.block_batching_grid", _builder.parse_attr(f"[{_extents}]"))
+        batch_source = str(mod)
+        from .block_batching import _has_dot
+        cv = _has_dot(mod)
+        layout_policy = "semantic_only" if cv else opt.block_batching_layout
+        report = dict(
+            rewrite(mod, opt.block_batching_factor, opt.block_batching_axis, layout_policy, cv, cv
+                    and opt.enable_hivm_batch_matmul))
+        # Selection is done; hivmc rejects hacc.* module attrs it does not know.
+        _remove_attr = getattr(ascend.ir, "remove_attr", None)
+        if _remove_attr is not None:
+            _remove_attr(mod, "hacc.block_batching_grid")
+        if report.get("implementation_version") != opt.block_batching_implementation:
+            raise BatchCompileError("REWRITER_IMPLEMENTATION_MISMATCH", stage="ttir")
+        if report.get("lane_width") != opt.block_batching_factor and report["compile_status"] == "REWRITTEN":
+            raise BatchCompileError("CANDIDATE_LAYOUT_MISMATCH", stage="ttir")
+        # Retain native evidence even when admission fails before layout.
+        report["computation"] = json.loads(report.pop("computation_json", "") or "{}")
+        if report["compile_status"] not in ("REWRITTEN", "REJECTED"):
+            raise BatchCompileError("unknown rewrite status", stage="ttir")
+        if report["compile_status"] == "REJECTED":
+            analysis = {
+                key: report[key]
+                for key in ("selected_axis", "operations", "computation", "operation", "context", "location")
+            }
+            return BatchDecline(report["reason"], "ttir", analysis={"stage": "source", **analysis})
+        report["layout"] = json.loads(report.pop("layout_json"))
+        report["layout"]["requested_policy"] = opt.block_batching_layout
+        report["layout"]["selected_policy"] = layout_policy
+        report["guard"] = json.loads(report.pop("guard_json"))
+        report["guard"]["axis"] = report["selected_axis"]
+        if report.get("cv_lowering") in CV_MASKED_BATCH_LOWERINGS:
+            report["guard"]["require_same_fractal_bounds"] = True
+            from .block_batching_guard_v2 import static_cv_mask_refusal
+            reason = static_cv_mask_refusal(report["guard"])
+            if reason:
+                return BatchDecline(reason, "ttir")
+        from .block_batching_guard_v3 import bind_plan
+        bind_plan(report["guard"], batch_source)
+        report["owner"] = "block_batching"
+        refusal = batching_vv_computation_refusal(report)
+        if refusal:
+            return BatchDecline(
+                refusal, "ttir",
+                analysis={"stage": "source", "computation": report["computation"], "operations": report["operations"]})
+        report["admission"] = {"version": 1, "source": "proven", "layout": "pending", "memory_lowering": "pending"}
+        refusal = batching_vv_layout_refusal(report)
+        if refusal:
+            return BatchDecline(
+                refusal, "ttir",
+                analysis={key: report[key]
+                          for key in ("selected_axis", "operations", "layout", "computation")})
+        report["admission"]["layout"] = "proven"
+        report["plan_id"] = metadata["hash"]
+        report["candidate_factor"] = opt.block_batching_factor
+        metadata["block_batching"] = report
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
     if opt.enable_graph_optimize:
-        ascend.passes.ttir.add_graph_optimize(pm, **_graph_optimize_kwargs(opt))
+        graph_kwargs = _graph_optimize_kwargs(opt)
+        if opt.block_batching_factor > 1:
+            # Mapping ownership is reserved before any legacy graph rule runs.
+            # RowCoalescing also owns DotRow's special tail scheduling.
+            graph_kwargs["rule_mask"] = graph_kwargs.get("rule_mask", DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK) & ~(
+                (1 << 3) | (1 << 9) | (1 << 11))
+        ascend.passes.ttir.add_graph_optimize(pm, **graph_kwargs)
     if AscendBackend.instrumentation:
         AscendBackend.instrumentation.patch("ttir", pm, mod.context)
     pm.run(mod, 'make_ttir')
@@ -502,10 +628,22 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
 
         pm.run(mod, 'ttir_to_linalg')
+        if "block_batching" in metadata and metadata["block_batching"].get("cv_mode") == "disabled":
+            metadata["block_batching"]["lane_scans_lowered"] = ascend.passes.ttir.lower_block_batching_scans(
+                mod, opt.block_batching_factor)
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
         _export_program_grid_metadata(mod, metadata)
+        if "block_batching" in metadata:
+            metadata["block_batching"]["memory_lowering"] = {
+                "dynamic_contiguous_copy": ascend.passes.ttir.block_batching_has_dynamic_contiguous_copy(mod),
+                "libcall_inlining": False,
+            }
+            # Ownership has served every TA mapping/lowering gate. Preserve it
+            # in the immutable manifest, not as an unknown HACC LLVM attribute.
+            if not ascend.passes.ttir.clear_block_batching_owner(mod):
+                raise BatchCompileError("MAPPING_OWNER_LOST", stage="ttadapter")
 
         linalg_text = _serialize_module(mod, opt)
         if AscendBackend.instrumentation:
@@ -514,9 +652,36 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
                 match = re.search(rf"\b{key}\s*=\s*(\d+)", linalg_text)
                 if match:
                     metadata[key] = int(match.group(1))
+
+        if "block_batching" in metadata:
+            # Check the actual lowered GM helpers, not the presence of scan,
+            # reduction or internal SIMT arithmetic in the compute body.
+            metadata["block_batching"]["layout"]["lowering_observation"] = {
+                "scope": "module",
+                "stage": "ttadapter",
+                "indirect_load_ops":
+                len(re.findall(r"\b(?:func\.)?call\s+@triton_indirect_load(?:_\d+)?\b", linalg_text)),
+                "indirect_store_ops":
+                len(re.findall(r"\b(?:func\.)?call\s+@triton_indirect_store(?:_\d+)?\b", linalg_text)),
+                "memref_copy_ops": len(re.findall(r"\bmemref\.copy\b", linalg_text)),
+                "linalg_transpose_ops": len(re.findall(r"\blinalg\.transpose\b", linalg_text)),
+            }
+
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
             dump_manager.put(linalg_text, "kernel.ttadapter.mlir", binary=False)
+
+        if "block_batching" in metadata:
+            report = metadata["block_batching"]
+            refusal = batching_vv_memory_lowering_refusal(report)
+            if refusal:
+                analysis = {
+                    key: report[key]
+                    for key in ("selected_axis", "operations", "layout", "computation", "admission")
+                }
+                report["admission"]["memory_lowering"] = "rejected"
+                return BatchDecline(refusal, "ttadapter", analysis={"stage": "ttadapter", **analysis})
+            report["admission"]["memory_lowering"] = "proven"
 
         return linalg_text
 
@@ -692,6 +857,24 @@ def _full_row_copy_compile_options(metadata, compiler_path):
     return []
 
 
+def _masked_batch_compile_options(metadata, compiler_path):
+    report = metadata.get("block_batching", {})
+    if report.get("cv_lowering") not in CV_MASKED_BATCH_LOWERINGS:
+        return []
+    # Masked ND2NZ must retain the allocation's complete fractal footprint.
+    # Its current batch libcall does not initialize extra fractal blocks when
+    # trimming a rectangle shrinks that footprint (e.g. f32 K32 -> K23).
+    # A vector-ND2NZ option alone does not fix this. Keep source masks and
+    # Require unchanged 32-byte padding quanta in both axes as well as the
+    # allocation footprint: physical 16-row NZ extents alone do not suffice
+    # for transposed f32 K tails on the packaged batch-DMA implementation.
+    if (not metadata["target"].arch.startswith("Ascend950")
+            or report.get("guard", {}).get("require_same_fractal_bounds") is not True):
+        return BatchDecline("CV_MASKED_BATCH_MEMORY_LOWERING_UNSUPPORTED", "npubin")
+    report["cv_memory_lowering"] = "full_reduction_guard_v3"
+    return []
+
+
 def get_auto_bind_sub_block_option(metadata):
     # auto_tile_and_bind_subblock is read from the module.
     # enable_auto_bind_sub_block is set by the user and has a higher priority.
@@ -701,8 +884,8 @@ def get_auto_bind_sub_block_option(metadata):
 
 
 def _save_npuir_debug_output(stdout_bytes: bytes, stderr_bytes: bytes, tmpdir: str, metadata_hash: str):
-    stdout = stdout_bytes.decode('utf-8') if stdout_bytes else ''
-    stderr = stderr_bytes.decode('utf-8') if stderr_bytes else ''
+    stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
+    stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
     combined = stdout + stderr
     if not combined.strip():
         combined = "No output captured."
@@ -714,10 +897,45 @@ def _save_npuir_debug_output(stdout_bytes: bytes, stderr_bytes: bytes, tmpdir: s
     dump_manager.put(Path(output_path).read_text(encoding='utf-8'), "kernel.npuir.mlir", binary=False)
 
 
+def _run_vendor_npubin(cmd, env, opt, metadata, tmpdir, bin_path, *, cv_resources):
+    from .block_batching_vendor import classify_vendor_failure, require_candidate_binary
+    report = metadata.get("block_batching")
+    try:
+        result = subprocess.run(cmd, env=env, capture_output=True, check=True)
+    except subprocess.CalledProcessError as error:
+        if opt.debug:
+            _save_npuir_debug_output(error.stdout, error.stderr, tmpdir, metadata["hash"])
+        if report is not None:
+            decline = classify_vendor_failure(error, report, opt, cv_resources=cv_resources)
+            if decline is not None:
+                return decline
+        raise
+    if opt.debug:
+        _save_npuir_debug_output(result.stdout, result.stderr, tmpdir, metadata["hash"])
+    if report is not None:
+        require_candidate_binary(bin_path, result)
+    return result
+
+
 def _dump_kernel_binary(metadata_hash: str, bin_path: str):
     """Copy the compiled kernel object into the TRITON_DEBUG dump directory."""
     dump_manager = get_dump_manager(metadata_hash)
     dump_manager.put(Path(bin_path).read_bytes(), os.path.basename(bin_path), binary=True)
+
+
+def _finish_batch_compilation(metadata, opt, npu_compiler_path, bin_path, save_temps):
+    if "block_batching" in metadata:
+        if _batching_backend_revision(npu_compiler_path) != opt.block_batching_backend_revision:
+            raise BatchCompileError("BACKEND_CHANGED_DURING_COMPILE", stage="npubin")
+        decline = validate_compilation_result(metadata)
+        if decline is not None:
+            return decline
+        metadata["block_batching_binary_sha256"] = hashlib.sha256(Path(bin_path).read_bytes()).hexdigest()
+        metadata["block_batching_plan_sha256"] = metadata["block_batching"]["guard"]["plan_fingerprint"]
+    if opt.block_auto_collect:
+        from .block_auto_artifacts import collect
+        metadata["block_auto_evidence"] = collect(save_temps, npu_compiler_path, metadata)
+    return Path(bin_path).read_bytes()
 
 
 def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: dict, opt) -> Tuple[bool, str]:
@@ -743,7 +961,9 @@ def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: di
         compile_func = linalg_to_bin_enable_npu_compile_A2_A3
 
     try:
-        compile_func(linalg, metadata, opt)
+        compiled = compile_func(linalg, metadata, opt)
+        if isinstance(compiled, BatchDecline):
+            return False, compiled.reason
         return (True, "")
     except subprocess.CalledProcessError as e:
         error_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
@@ -928,6 +1148,11 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             if getattr(opt, "enable_tla_mode", False):
                 _compile_option_list += ["--enable-tla-mode=true"]
             _compile_option_list += _full_row_copy_compile_options(metadata, npu_compiler_path)
+            if "block_batching" in metadata:
+                for option in batching_memory_compile_options(metadata, npu_compiler_path,
+                                                              _supports_full_row_copy_inlining):
+                    if option not in _compile_option_list:
+                        _compile_option_list.append(option)
             # Temporary until the NPU compiler enables batch matmul by default in Q4.
             if metadata.get("enable_hivm_batch_matmul"):
                 _compile_option_list += ["--enable-hivm-batch-matmul"]
@@ -954,9 +1179,14 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if plan_memory_strategy is not None:
             _compile_option_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
 
-        if opt.debug:
-            _compile_option_list += [f"--save-temps={_get_save_temps_dir(metadata['hash'])}"]
+        if opt.debug or opt.block_auto_collect:
+            save_temps = _get_save_temps_dir(metadata["hash"]) if opt.debug else tmpdir
+            _compile_option_list += [f"--save-temps={save_temps}"]
 
+        masked_options = _masked_batch_compile_options(metadata, npu_compiler_path)
+        if isinstance(masked_options, BatchDecline):
+            return masked_options
+        _compile_option_list += masked_options
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
         if opt.debug or knobs.autotuning.print:
@@ -964,15 +1194,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_path)
             print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
-        try:
-            ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        except subprocess.CalledProcessError as e:
-            if opt.debug:
-                _save_npuir_debug_output(e.stdout, e.stderr, tmpdir, metadata["hash"])
-            raise
-
-        if opt.debug:
-            _save_npuir_debug_output(ret.stdout, ret.stderr, tmpdir, metadata["hash"])
+        ret = _run_vendor_npubin(cmd_list, env, opt, metadata, tmpdir, bin_path, cv_resources=True)
+        if isinstance(ret, BatchDecline):
+            return ret
 
         if proton_metadata_path is not None:
             metadata["proton_metadata"] = json.loads(proton_metadata_path.read_text(encoding="utf-8"))
@@ -995,7 +1219,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if Path(callback_path).is_file():
             __load_metadata_by_callback(callback_path, metadata)
 
-        return Path(bin_path).read_bytes()
+        return _finish_batch_compilation(metadata, opt, npu_compiler_path, bin_path,
+                                         save_temps if opt.debug or opt.block_auto_collect else None)
 
 
 def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
@@ -1017,7 +1242,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         bin_path = os.path.join(tmpdir, bin_file_with_ext)
         callback_path = os.path.join(tmpdir, "libkernel.so")
         _compile_option_list = [
-            f"--target={NPUUtils().get_arch()}",
+            f"--target={opt.target_arch}",
         ]
 
         multibuffer_mode = metadata.get("multibuffer_mode")
@@ -1163,8 +1388,16 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += ["--mlir-print-ir-after-failure"]
             _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
 
-        if opt.debug:
-            _compile_option_list += [f"--save-temps={_get_save_temps_dir(metadata['hash'])}"]
+        save_temps = _get_save_temps_dir(metadata["hash"]) if opt.debug else tmpdir
+        if opt.debug or opt.block_auto_collect:
+            _compile_option_list += [f"--save-temps={save_temps}"]
+
+        masked_options = _masked_batch_compile_options(metadata, npu_compiler_path)
+        if isinstance(masked_options, BatchDecline):
+            return masked_options
+        _compile_option_list += masked_options
+        if metadata.get("enable_hivm_batch_matmul"):
+            _compile_option_list += ["--enable-hivm-batch-matmul"]
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
@@ -1173,15 +1406,9 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_path)
             print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
-        try:
-            ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        except subprocess.CalledProcessError as e:
-            if opt.debug:
-                _save_npuir_debug_output(e.stdout, e.stderr, tmpdir, metadata["hash"])
-            raise
-
-        if opt.debug:
-            _save_npuir_debug_output(ret.stdout, ret.stderr, tmpdir, metadata["hash"])
+        ret = _run_vendor_npubin(cmd_list, env, opt, metadata, tmpdir, bin_path, cv_resources=True)
+        if isinstance(ret, BatchDecline):
+            return ret
 
         stdout_str = ret.stdout.decode('utf-8') if ret.stdout else ''
         match = re.search(r'UB\s+size\s*=\s*(\d+)\s*bits', stdout_str)
@@ -1200,7 +1427,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if Path(callback_path).is_file():
             __load_metadata_by_callback(callback_path, metadata)
 
-        return Path(bin_path).read_bytes()
+        return _finish_batch_compilation(metadata, opt, npu_compiler_path, bin_path, save_temps)
 
 
 def get_libdevice(arch: str):
@@ -1301,6 +1528,19 @@ class NPUOptions:
     # driver-side profile scratch path inert.
     profile_scratch_size: int = 0
     enable_graph_optimize: bool = True
+    block_auto_contract: Optional[str] = None
+    block_auto_collect: bool = False
+    # JIT launches inject "auto" when omitted. This internal default also
+    # serves direct compilation without a launch contract, which uses F1.
+    block_batching_factor: Union[int, str] = 1
+    block_batching_axis: int = -1
+    # Original launch extents, including resolved callable grids for automatic
+    # axis selection. This compile option distinguishes cached axis choices when
+    # runtime grid dimensions change. VV permits partial final groups.
+    block_batching_grid: Tuple[int] = None
+    block_batching_layout: str = "auto"
+    block_batching_implementation: int = field(default=IMPLEMENTATION_VERSION, init=False)
+    block_batching_backend_revision: str = field(default="", init=False)
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
     deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()
@@ -1425,6 +1665,20 @@ class NPUOptions:
     use_bytecode: bool = field(default=False, init=False)
 
     def __post_init__(self, arch, rule_mask):
+        BatchRequest(1 if self.block_batching_factor == "auto" else self.block_batching_factor,
+                     self.block_batching_axis)
+        if self.block_batching_grid is not None:
+            grid = tuple(self.block_batching_grid)
+            if len(grid) != 3 or any(type(x) is not int or x < 1 for x in grid):
+                raise ValueError("block_batching_grid must be three positive integers")
+            object.__setattr__(self, "block_batching_grid", grid)
+        if self.block_batching_layout not in ("auto", "semantic_only"):
+            raise ValueError("block_batching_layout must be auto or semantic_only")
+        if self.block_batching_factor == 1:
+            object.__setattr__(self, "block_batching_layout", "semantic_only")
+        if self.block_batching_factor == "auto" or self.block_batching_factor > 1:
+            compiler_path, _ = _get_npucompiler_path()
+            object.__setattr__(self, "block_batching_backend_revision", _batching_backend_revision(compiler_path))
         from triton.backends.ascend import _apply_ascend_patch
 
         if self.ir_override and self.ir_override.endswith((".mlirbc", ".bcmlir")):
@@ -1628,14 +1882,11 @@ class AscendBackend(BaseBackend):
 
     @staticmethod
     def get_jit_reuse_handler():
-        from .reuse.config import enabled
+        # Reuse the existing backend continuation; batching owns its launch
+        # hints and leaves the common JIT and reuse implementation unchanged.
+        from .block_batching import get_launch_handler
 
-        if not enabled():
-            return None
-
-        from .reuse.bridge import get_handler
-
-        return get_handler()
+        return get_launch_handler()
 
     @staticmethod
     def get_exact_request_scope():
@@ -1741,6 +1992,27 @@ class AscendBackend(BaseBackend):
         if AscendBackend.instrumentation:
             AscendBackend.instrumentation.load_dialects(ctx)
 
+    def make_compilation_writer(self, src, options, cache, override_enabled):
+        if not hasattr(src, "block_batching_source_hash"):
+            return cache
+        if options.block_batching_factor > 1 and (override_enabled or options.ir_override):
+            raise BatchCompileError("unisolated candidate override reached stage writer", stage="config")
+        from triton.runtime.cache import FileCacheManager
+        if type(cache) is not FileCacheManager:
+            raise BatchCompileError("custom cache reached frozen source writer", stage="config")
+        attempt = _active_attempt.get()
+        if attempt is not None:
+            return attempt.bind_writer(src, cache, options)
+        import uuid
+        return FileCacheManager(cache.key + "/attempts/" + uuid.uuid4().hex)
+
+    def compile_bundle(self, src, options, compile_variant):
+        if options.get("block_batching_factor") == "auto":
+            from .block_auto_dispatch import compile_auto_bundle
+            return compile_auto_bundle(self, src, options, compile_variant)
+        from .block_batching import compile_bundle
+        return compile_bundle(self, src, options, compile_variant)
+
     def add_stages(self, stages, options, language):
         if self.target.backend == "npu":
             if options.enable_tla_mode:
@@ -1748,20 +2020,25 @@ class AscendBackend(BaseBackend):
                 stages["ttadapter"] = lambda src, metadata: tla_to_ttadapter(src, metadata, options)
             else:
                 stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
-                if options.is_pure_simt:
-                    stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
-                    return
-                stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
-            if options.compile_on_910_95:
-                stages["npubin"] = (
-                    lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(src, metadata, options))
+                if not options.is_pure_simt:
+                    stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
+            if options.is_pure_simt and not options.enable_tla_mode:
+                stages["npubin"] = lambda src, metadata: ttir_to_npubin(src, metadata, options)
             else:
-                stages["npubin"] = (
-                    lambda src, metadata: linalg_to_bin_enable_npu_compile_A2_A3(src, metadata, options))
-            stages["npubin"] = _with_debug_line(stages["npubin"], options)
+                if options.compile_on_910_95:
+                    stages["npubin"] = (
+                        lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(src, metadata, options))
+                else:
+                    stages["npubin"] = (
+                        lambda src, metadata: linalg_to_bin_enable_npu_compile_A2_A3(src, metadata, options))
+                stages["npubin"] = _with_debug_line(stages["npubin"], options)
         else:
             raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
                                       "Please ensure the target backend is set to 'npu'.")
+        attempt = _active_attempt.get()
+        if attempt is not None:
+            for ext, stage in stages.items():
+                stages[ext] = attempt.wrap(ext, stage)
 
     @functools.lru_cache()
     def hash(self):

@@ -640,7 +640,7 @@ index c572f81e3..4b4332368 100644
  
  
 diff --git a/python/triton/compiler/compiler.py b/python/triton/compiler/compiler.py
-index d4872a463..86348211d 100644
+index d4872a4..e9c8909 100644
 --- a/python/triton/compiler/compiler.py
 +++ b/python/triton/compiler/compiler.py
 @@ -10,12 +10,16 @@ from ..runtime.autotuner import OutOfResources
@@ -660,7 +660,7 @@ index d4872a463..86348211d 100644
  
  # - ^\s*tt\.func\s+ : match the start of the string, any leading whitespace, the keyword func,
  #    and any following whitespace
-@@ -223,6 +227,26 @@ class CompileTimer:
+@@ -223,7 +227,40 @@ class CompileTimer:
          )
  
  
@@ -685,9 +685,23 @@ index d4872a463..86348211d 100644
 +
 +
  def compile(src, target=None, options=None, _env_vars=None):
++    # Backends may return a guarded bundle with independently cached variants.
++    # The default path and public call signature remain unchanged.
++    if target is None:
++        target = driver.active.get_current_target()
++    assert isinstance(target, GPUTarget), "target must be of GPUTarget type"
++    backend = make_backend(target)
++    hook = getattr(backend, "compile_bundle", None)
++    if hook is not None and options and options.get("block_batching_factor", 1) != 1:
++        return hook(src, options, lambda variant, frozen_src=None: _compile(src if frozen_src is None else frozen_src, target, variant, _env_vars))
++    return _compile(src, target, options, _env_vars)
++
++
++def _compile(src, target=None, options=None, _env_vars=None):
      compilation_listener = knobs.compilation.listener
      if compilation_listener:
-@@ -266,7 +290,8 @@ def compile(src, target=None, options=None, _env_vars=None):
+         timer = CompileTimer()
+@@ -266,7 +303,8 @@ def compile(src, target=None, options=None, _env_vars=None):
          # cache hit!
          res = CompiledKernel(src, metadata_group, hash)
          if compilation_listener:
@@ -697,7 +711,31 @@ index d4872a463..86348211d 100644
                  src=src,
                  metadata=res.metadata._asdict(),
                  metadata_group=metadata_group,
-@@ -321,7 +346,25 @@ def compile(src, target=None, options=None, _env_vars=None):
+@@ -275,6 +313,10 @@ def compile(src, target=None, options=None, _env_vars=None):
+             )
+         return res
+ 
++    writer_factory = getattr(backend, "make_compilation_writer", None)
++    stage_cache_manager = (writer_factory(src, options, fn_cache_manager, enable_override)
++                           if writer_factory is not None else fn_cache_manager)
++
+     # initialize metadata
+     metadata = {
+         "hash": hash,
+@@ -308,10 +350,10 @@ def compile(src, target=None, options=None, _env_vars=None):
+ 
+     if ir_source:
+         ir_filename = f"{file_name}.{src.ext}"
+-        metadata_group[ir_filename] = fn_cache_manager.put(module, ir_filename)
++        metadata_group[ir_filename] = stage_cache_manager.put(module, ir_filename)
+     else:
+         ir_filename = f"{file_name}.source"
+-        metadata_group[ir_filename] = fn_cache_manager.put(module, ir_filename)
++        metadata_group[ir_filename] = stage_cache_manager.put(module, ir_filename)
+ 
+     use_ir_loc = knobs.compilation.use_ir_loc
+     if ir_source and use_ir_loc:
+@@ -321,7 +363,25 @@ def compile(src, target=None, options=None, _env_vars=None):
      if compilation_listener:
          timer.finished_ir_initialization()
      for ext, compile_ir in list(stages.items())[first_stage:]:
@@ -724,18 +762,35 @@ index d4872a463..86348211d 100644
          ir_filename = f"{file_name}.{ext}"
          if fn_override_manager is None:
              # Users can override kernels at scale by setting `ir_override` in autotune config
-@@ -331,8 +378,8 @@ def compile(src, target=None, options=None, _env_vars=None):
+@@ -331,9 +391,9 @@ def compile(src, target=None, options=None, _env_vars=None):
          elif full_name := fn_override_manager.get_file(ir_filename):
              print(f"\nOverriding kernel with file {full_name}")
              next_module = parse(full_name, ext, context)
 -        # If TRITON_STORE_BINARY_ONLY is 1, only store cubin/hsaco/json
 -        if (not store_only_binary) or (ext in ("cubin", "hsaco", "json")):
+-            metadata_group[ir_filename] = fn_cache_manager.put(next_module, ir_filename)
 +        # If TRITON_STORE_BINARY_ONLY is 1, only store the final binary.
 +        if (not store_only_binary) or (ext in (backend.binary_ext, "json")):
-             metadata_group[ir_filename] = fn_cache_manager.put(next_module, ir_filename)
++            metadata_group[ir_filename] = stage_cache_manager.put(next_module, ir_filename)
          if fn_dump_manager is not None:
              fn_dump_manager.put(next_module, ir_filename)
-@@ -354,8 +401,8 @@ def compile(src, target=None, options=None, _env_vars=None):
+             if ext == "cubin":
+@@ -341,21 +401,21 @@ def compile(src, target=None, options=None, _env_vars=None):
+                 fn_dump_manager.put(sass, file_name + ".sass")
+         # use an env variable to parse ir from file
+         if use_ir_loc == ext:
+-            ir_full_name = fn_cache_manager.get_file(ir_filename)
++            ir_full_name = stage_cache_manager.get_file(ir_filename)
+             next_module.create_location_snapshot(ir_full_name)
+             print(f"Creating new locations for {ir_full_name}")
+         module = next_module
+         if compilation_listener:
+             timer.stage_finished(ext)
+     # write-back metadata
+-    metadata_group[metadata_filename] = fn_cache_manager.put(json.dumps(metadata, default=vars), metadata_filename,
++    metadata_group[metadata_filename] = stage_cache_manager.put(json.dumps(metadata, default=vars), metadata_filename,
+                                                              binary=False)
+     fn_cache_manager.put_group(metadata_filename, metadata_group)
  
      # notify any listener
      if compilation_listener:
@@ -746,7 +801,7 @@ index d4872a463..86348211d 100644
      # return handle to compiled kernel
      return CompiledKernel(src, metadata_group, hash)
  
-@@ -402,7 +449,9 @@ def _raise_error(err, *args, **kwargs):
+@@ -402,7 +462,9 @@ def _raise_error(err, *args, **kwargs):
  
  
  class CompiledKernel:
@@ -757,7 +812,7 @@ index d4872a463..86348211d 100644
      def __init__(self, src, metadata_group, hash):
          from collections import namedtuple
          metadata_path = next((Path(p) for c, p in metadata_group.items() if c.endswith(".json")))
-@@ -432,8 +483,33 @@ class CompiledKernel:
+@@ -432,8 +494,33 @@ class CompiledKernel:
          self.module = None
          self.function = None
          self._run = None
@@ -791,7 +846,7 @@ index d4872a463..86348211d 100644
          if self.module is not None:
              return
  
-@@ -459,20 +535,19 @@ class CompiledKernel:
+@@ -459,20 +546,19 @@ class CompiledKernel:
              max_tmem_size = 512  # tmem size in number of columns
              if self.metadata.tmem_size > max_tmem_size:
                  raise_(OutOfResources(self.metadata.tmem_size, max_tmem_size, "tensor memory"))
@@ -1021,7 +1076,7 @@ index 42bf7024f..8ab2a95b2 100644
          shape = [range]
          if ret_ty is None:
              ret_ty = tl.block_type(tl.int32, shape)
-@@ -1009,6 +1062,8 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1009,6 +1057,8 @@ class TritonSemantic(Generic[TensorTy]):
          # Check `boundary_check` argument
          boundary_check = self._canonicalize_boundary_check(boundary_check, dst_ty.get_block_shapes())
  
@@ -1030,7 +1085,7 @@ index 42bf7024f..8ab2a95b2 100644
          # Build IR
          return self.tensor(
              self.builder.create_tensor_pointer_load(ptr.handle, boundary_check, padding, cache, eviction, is_volatile),
-@@ -1026,7 +1081,12 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1026,7 +1076,12 @@ class TritonSemantic(Generic[TensorTy]):
              raise ValueError("`padding_option` or `boundary_check` argument is not supported for loading a tensor of"
                               "pointers or loading a scalar. Because the compiler does not know the boundary; please "
                               "use block pointers (defined by `make_block_ptr`) instead")
@@ -1044,7 +1099,7 @@ index 42bf7024f..8ab2a95b2 100644
          # For a pointer of scalar, check the type of `mask` and `other`
          if not ptr.type.is_block():
              if mask and mask.type.is_block():
-@@ -1065,13 +1125,19 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1065,13 +1120,19 @@ class TritonSemantic(Generic[TensorTy]):
  
          # Build IR
          if mask is None:
@@ -1069,7 +1124,7 @@ index 42bf7024f..8ab2a95b2 100644
          return ret
  
      def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
-@@ -1837,12 +1903,17 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1837,12 +1898,17 @@ class TritonSemantic(Generic[TensorTy]):
          is_signed = [arg.dtype.is_int_signed() for arg in args]
          return self.tensor(self.builder.create_print(prefix, hex, new_args, is_signed), tl.void)
  

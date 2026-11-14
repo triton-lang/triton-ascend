@@ -228,7 +228,15 @@ class NPULauncher(object):
         self.launch_spec = make_launch_spec(metadata, npu_utils)
         self._argument_types = argument_types(self.signature, constants)
         runtime, self._runtime_path = get_runtime(npu_utils.get_so_path(), metadata.debug)
-        native = runtime.create_launcher(self.launch_spec.as_dict(), self._argument_types)
+        if self.launch_spec.grid_contract_version:
+            capability = getattr(runtime, "capabilities", lambda: {})()
+            if capability.get("program_grid_contract", 0) < 3 or capability.get("launch_spec", 0) < 2:
+                error = NotImplementedError("NATIVE_ABI_MISMATCH")
+                error.ascend_launcher_abi_mismatch = True
+                raise error
+            native = runtime.create_launcher_v2(self.launch_spec.as_dict(), self._argument_types)
+        else:
+            native = runtime.create_launcher(self.launch_spec.as_dict(), self._argument_types)
         self.profile_scratch_size = int(getattr(metadata, "profile_scratch_size", 0) or 0)
         self.profile_scratch_align = int(getattr(metadata, "profile_scratch_align", 128) or 128)
         self.launch = wrap_handle_tensordesc(native, self.signature, bool(self.profile_scratch_size))

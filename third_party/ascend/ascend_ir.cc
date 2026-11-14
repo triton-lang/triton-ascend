@@ -618,14 +618,20 @@ void init_ascend_ir(py::module &&m) {
     py::list hiddenExtentAxes;
     hiddenExtentAxes.append(0);
     hiddenExtentAxes.append(1);
+    if (contract->version == 3)
+      hiddenExtentAxes.append(2);
     result["hidden_extent_axes"] = std::move(hiddenExtentAxes);
     py::list hiddenArgumentOrder;
     hiddenArgumentOrder.append("originalGridX");
     hiddenArgumentOrder.append("originalGridY");
+    if (contract->version == 3)
+      hiddenArgumentOrder.append("originalGridZ");
     result["hidden_argument_order"] = std::move(hiddenArgumentOrder);
     py::list hiddenArgumentTypes;
     hiddenArgumentTypes.append("i32");
     hiddenArgumentTypes.append("i32");
+    if (contract->version == 3)
+      hiddenArgumentTypes.append("i32");
     result["hidden_argument_types"] = std::move(hiddenArgumentTypes);
     py::list transforms;
     for (const mlir::triton::cfg::ProgramGridTransform &transform :

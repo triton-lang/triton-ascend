@@ -143,6 +143,21 @@ cann_get_launch_kernel_cfg(uint32_t shared_mem_dynamic_size) {
   return &cfgInfo;
 }
 #endif
+
+// Queue-disabled eager launches retain their synchronous contract. Capturing a
+// stream records the task instead: synchronizing it would invalidate the graph.
+static inline bool cann_stream_is_capturing(cann_stream stream) {
+#ifdef TRITON_CANN_910
+  aclmdlRICaptureStatus status = ACL_MODEL_RI_CAPTURE_STATUS_NONE;
+  aclmdlRI model = nullptr;
+  return aclmdlRICaptureGetInfo(stream, &status, &model) == ACL_SUCCESS &&
+         status == ACL_MODEL_RI_CAPTURE_STATUS_ACTIVE;
+#else
+  (void)stream;
+  return false;
+#endif
+}
+
 #endif // __cplusplus
 
 // NPU AOT stubs shared by the generated C sources (tools/extra/npu/compile.c);

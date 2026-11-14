@@ -28,9 +28,14 @@ def test_factor_tail_and_default(factor):
     if factor > 1:
         assert_applied(kernel, factor)
     else:
+        y.fill_(-123)
         default = pointwise[(8, )](x, y, 1003, 128)
-        assert default is kernel  # No implicit CPU selector or candidate compilation.
+        torch.npu.synchronize()
+        # Explicit and omitted defaults can occupy distinct in-memory JIT cache entries.
+        assert default.hash == kernel.hash
         assert not hasattr(default, 'candidate')
+        torch.testing.assert_close(y.cpu(), cpu * 2 + 1, rtol=0, atol=0)
+        assert (storage[:16] == -123).all() and (storage[-16:] == -123).all()
 
 
 def test_alias_fallback_and_cache_recovery():

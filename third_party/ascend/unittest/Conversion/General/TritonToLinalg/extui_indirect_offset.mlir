@@ -8,10 +8,14 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   // second loaded singleton without treating both operands as gather sources.
   // CHECK-LABEL: func.func @cmp_extui_row_offset(
   // CHECK: %[[WIDE:.*]] = arith.extui %{{.*}} : tensor<1xi1> to tensor<1xi32>
-  // CHECK: %[[VALUE:.*]] = tensor.extract %[[WIDE]][%{{.*}}] : tensor<1xi32>
-  // CHECK: %[[INDEX:.*]] = arith.index_cast %[[VALUE]] : i32 to index
-  // CHECK: arith.muli %{{.*}}, %[[INDEX]] : index
-  // CHECK: memref.reinterpret_cast
+  // Public analysis retains the complete singleton expression before extract.
+  // CHECK: %[[SELECTED:.*]] = arith.muli %{{.*}}, %[[WIDE]] : tensor<1xi32>
+  // CHECK: %[[COUNT64:.*]] = arith.extsi %[[SELECTED]] : tensor<1xi32> to tensor<1xi64>
+  // CHECK: %[[ROW:.*]] = arith.addi %[[COUNT64]], %{{.*}} : tensor<1xi64>
+  // CHECK: %[[OFFSET:.*]] = arith.muli %[[ROW]], %{{.*}} : tensor<1xi64>
+  // CHECK: %[[VALUE:.*]] = tensor.extract %[[OFFSET]][%{{.*}}] : tensor<1xi64>
+  // CHECK: %[[INDEX:.*]] = arith.index_cast %[[VALUE]] : i64 to index
+  // CHECK: memref.reinterpret_cast %{{.*}} to offset: [%[[INDEX]]]
   // CHECK: return
   tt.func public @cmp_extui_row_offset(%tokens: !tt.ptr<i64>, %counts: !tt.ptr<i64>, %data: !tt.ptr<f32>, %output: !tt.ptr<f32>) {
     %pad = arith.constant dense<2047> : tensor<1xi64>
@@ -63,10 +67,11 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   // Multiple boolean results must remain per-element offsets, not a shared
   // scalar or a mask controlling the gather.
   // CHECK-LABEL: func.func @cmp_extui_vector_offset(
-  // CHECK: %[[WIDE:.*]] = arith.extui %{{.*}} : tensor<8xi1> to tensor<8xi32>
+  // Scalarization uses i64 offsets; the extension must still be unsigned.
+  // CHECK: %[[WIDE:.*]] = arith.extui %{{.*}} : tensor<8xi1> to tensor<8xi64>
   // CHECK: scf.for %[[IV:[^ ]+]] =
-  // CHECK: %[[VALUE:.*]] = tensor.extract %[[WIDE]][%[[IV]]] : tensor<8xi32>
-  // CHECK: %[[INDEX:.*]] = arith.index_cast %[[VALUE]] : i32 to index
+  // CHECK: %[[VALUE:.*]] = tensor.extract %[[WIDE]][%[[IV]]] : tensor<8xi64>
+  // CHECK: %[[INDEX:.*]] = arith.index_cast %[[VALUE]] : i64 to index
   // CHECK: memref.reinterpret_cast %{{.*}} to offset: [%[[INDEX]]]
   // CHECK: memref.load
   // CHECK: return
@@ -88,10 +93,10 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   }
 
   // CHECK-LABEL: func.func @unsigned_vector_offset(
-  // CHECK: %[[WIDE:.*]] = arith.extui %{{.*}} : tensor<8xi8> to tensor<8xi32>
+  // CHECK: %[[WIDE:.*]] = arith.extui %{{.*}} : tensor<8xi8> to tensor<8xi64>
   // CHECK: scf.for %[[IV:[^ ]+]] =
-  // CHECK: %[[VALUE:.*]] = tensor.extract %[[WIDE]][%[[IV]]] : tensor<8xi32>
-  // CHECK: %[[INDEX:.*]] = arith.index_cast %[[VALUE]] : i32 to index
+  // CHECK: %[[VALUE:.*]] = tensor.extract %[[WIDE]][%[[IV]]] : tensor<8xi64>
+  // CHECK: %[[INDEX:.*]] = arith.index_cast %[[VALUE]] : i64 to index
   // CHECK: memref.reinterpret_cast %{{.*}} to offset: [%[[INDEX]]]
   // CHECK: memref.load
   // CHECK: return

@@ -80,7 +80,7 @@ def test_ir(tmp_path):
     module, context = compile_offline(
         _kernels().native_topk, {"X": "*fp32", "Values": "*fp32", "Indices": "*i32", "ROWS": "i32"}, {
             "N": 257, "K": 32, "LARGEST": True, "LAST_N": 0, "WIDE_INDEX": False, "Previous": None, "TILE_INDICES":
-            False, "FinalValues": None, "FinalIndices": None, "TILES": 0
+            False, "FinalValues": None, "FinalIndices": None, "TILES": 0, "SORT_BITCODE": None
         }, output_dir=tmp_path)
     ir = str(lower_offline(module, context, output_dir=tmp_path))
     assert ir.count("ave.hir.chistv2") == 8
@@ -144,6 +144,23 @@ def test_wide_order_keys(dtype):
     for largest in (True, False):
         expected = torch.topk(cpu, 65, largest=largest).values
         _check_matrix(cpu, expected, topk(x, 65, largest=largest), -1, largest)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("largest", [True, False])
+def test_paired_sort_tail(dtype, largest):
+    kernels = _kernels()
+    if kernels._paired_sort_bitcode() is None:
+        pytest.skip("AscendC SDK is unavailable")
+    # Include a row whose cutoff is tied at infinity and a row with subnormals.
+    limits = torch.finfo(dtype)
+    boundary = torch.tensor(
+        [-float("inf"), -limits.max, -limits.tiny / 2, -0.0, 0.0, limits.tiny / 2, limits.max,
+         float("inf")], dtype=dtype)
+    cpu = torch.stack((boundary.repeat(33)[:257], torch.full((257, ), -float("inf"), dtype=dtype)))
+    k = 97
+    expected = torch.topk(cpu, k, largest=largest).values
+    _check_matrix(cpu, expected, kernels.topk(cpu.npu(), k, largest=largest), -1, largest)
 
 
 @pytest.mark.parametrize("dtype, n, k", [(torch.float16, 17, 6), (torch.bfloat16, 7, 7)])

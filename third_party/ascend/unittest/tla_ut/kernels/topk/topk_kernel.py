@@ -19,8 +19,15 @@
 # THE SOFTWARE.
 """TopK kernels for Ascend 950, including radix selection and tiled reduction."""
 
+import hashlib
 import math
+import os
+import shutil
+import subprocess
+import tempfile
 import threading
+from functools import lru_cache
+from pathlib import Path
 
 import torch
 import triton
@@ -29,9 +36,72 @@ from triton.language.extra.cann import extension as al
 import triton.language.extra.tla as tla
 from triton.language.extra.tla.jit import TLAJITFunction
 from triton.runtime import driver
+from triton.runtime.cache import get_cache_manager
 
 simd = tla.simd
 _tiled_launch = threading.local()
+
+
+@lru_cache(maxsize=1)
+def _paired_sort_bitcode():
+    """Build the AscendC UB sorter once per source and installed SDK."""
+    source = Path(__file__).with_name("topk_sort_pairs.cpp")
+    toolkit = os.environ.get("ASCEND_HOME_PATH")
+    compiler = shutil.which("bisheng")
+    if not toolkit or compiler is None:
+        return None
+    sdk = Path(toolkit) / "asc"
+    if not sdk.is_dir():
+        sdk = Path(toolkit) / "x86_64-linux" / "asc"
+    if not (sdk / "include/adv_api/sort/sort.h").is_file() or not source.is_file():
+        return None
+    flags = [
+        "-x",
+        "cce",
+        "-emit-llvm",
+        "-c",
+        "-O2",
+        "--cce-aicore-only",
+        "--cce-aicore-arch=dav-c310-vec",
+        "--cce-generic-addrspace=off",
+        "--cce-auto-sync=off",
+        "-mllvm",
+        "-disable-llvm-optzns",
+        "-std=c++17",
+    ]
+    includes = ("", "include", "include/basic_api", "include/adv_api", "impl/basic_api", "impl", "include/interface")
+    flags.extend("-I" + str(sdk / path) for path in includes)
+    version = subprocess.check_output([compiler, "--version"])
+    key = hashlib.sha256(source.read_bytes() + version + repr(flags).encode()).hexdigest()
+    cache = get_cache_manager(key)
+    filename = "topk_sort_pairs.bc"
+    cached = cache.get_file(filename)
+    if cached is not None:
+        return cached
+    with tempfile.TemporaryDirectory(prefix="triton-topk-") as directory:
+        output = Path(directory) / filename
+        subprocess.run([compiler, *flags, str(source), "-o", str(output)], check=True)
+        return cache.put(output.read_bytes(), filename)
+
+
+@al.builtin
+def _sort_pairs(values, indices, count, largest, out_values, out_indices, workspace, bitcode, _semantic=None):
+    builder = _semantic.builder
+    suffix = {tl.float32: "f32", tl.float16: "f16", tl.bfloat16: "bf16", tl.int8: "i8", tl.uint8: "u8"}
+    use_merge = (largest.value and values.dtype == tl.float32
+                 and count.value % 32 == 0) or (values.dtype in (tl.float16, tl.bfloat16) and count.value <= 128)
+    symbol = ("topk_merge_" if use_merge else "topk_sort_") + suffix[values.dtype]
+    attrs = {
+        "symbol": builder.get_string_attr(symbol),
+        "bitcode": builder.get_string_attr(bitcode.value),
+        "gm_addr_args_indices": builder.parse_attr("array<i32>"),
+        "hivm.tcore_type": builder.parse_attr("#hivm.tcore_type<VECTOR>"),
+        "hivm.vf_mode": builder.parse_attr("#hivm.vf_mode<SIMD>"),
+        "hivm.pipe": builder.parse_attr("#hivm.pipe<PIPE_V>"),
+    }
+    ins = [values.handle, indices.handle, builder.get_int32(count.value), builder.get_int32(int(largest.value))]
+    outs = [out_values.handle, out_indices.handle, workspace.handle]
+    builder.create_custom_op(symbol, attrs, ins, outs, [])
 
 
 @triton.jit
@@ -97,10 +167,12 @@ def native_topk(
     FinalValues=None,
     FinalIndices=None,
     TILES: tl.constexpr = 0,
+    SORT_BITCODE: tl.constexpr = None,
 ):
     """Select each row and optionally merge the tiles in the same launch."""
     tl.static_assert(LAST_N == 0 or (K <= LAST_N and LAST_N < N))
     tl.static_assert(TILES * K <= 8192)
+    SORTED: tl.constexpr = SORT_BITCODE is not None
     dtype: tl.constexpr = X.dtype.element_ty
     tl.static_assert(dtype == tl.float32 or dtype == tl.float16 or dtype == tl.bfloat16 or dtype == tl.int32
                      or dtype == tl.int8 or dtype == tl.uint8)
@@ -113,6 +185,8 @@ def native_topk(
     output_lanes: tl.constexpr = 128 if bits == 16 else 64
     output_padded: tl.constexpr = ((K + output_lanes - 1) // output_lanes) * output_lanes
     top_digit: tl.constexpr = bits // 8 - 1
+    # The sorter processes 32-element runs and also issues full 64-lane loads.
+    sort_width: tl.constexpr = triton.cdiv(K, 64) * 64
 
     widths: tl.constexpr = (N, TILES * K)
     tails: tl.constexpr = (LAST_N, 0)
@@ -129,7 +203,16 @@ def native_topk(
         else:
             source, out_values, out_indices, previous = Values, FinalValues, FinalIndices, Indices
             row_count, step = 1, 1
-        for row in tl.range(tl.program_id(0), row_count, step):
+        if TILES:
+            row_start = tl.program_id(0)
+            row_end = row_count
+            row_step = step
+        else:
+            rows_per_core = tl.cdiv(row_count, step)
+            row_start = tl.program_id(0) * rows_per_core
+            row_end = tl.minimum(row_count, row_start + rows_per_core)
+            row_step = 1
+        for row in tl.range(row_start, row_end, row_step):
             with tla.scope.vector():
                 data = tla.alloc((padded_widths[phase], ), dtype, space="ub")
                 keys = tla.alloc((padded_widths[phase], ), key_dtype, space="ub")
@@ -137,7 +220,9 @@ def native_topk(
                     bytes_by_digit = tla.alloc((bits // 8, padded_widths[phase]), tl.uint8, space="ub")
                 picked = tla.alloc((output_padded, ), tl.uint32, space="ub")
                 indices = tla.alloc((K * word_counts[phase], ), tl.int32, space="ub")
-                values = tla.alloc((K, ), dtype, space="ub")
+                values = tla.alloc((sort_width if SORTED else K, ), dtype, space="ub")
+                if SORTED:
+                    selected_indices = tla.alloc((sort_width, ), tl.int32, space="ub")
                 if previous is not None:
                     source_indices = tla.alloc((padded_widths[phase], ), tl.int32, space="ub")
                 if tails[phase]:
@@ -324,7 +409,9 @@ def native_topk(
                             selection = simd.vbitcast(simd.vgather(source_indices, selection, out_mask), "uint32")
                         elif phase == 0 and TILE_INDICES:
                             selection = simd.vadds(selection, tla.cast(row * widths[phase], tl.uint32))
-                        if word_counts[phase] == 2:
+                        if SORTED:
+                            simd.vsts(selected_indices[start], simd.vbitcast(selection, "int32"), mask=out_mask)
+                        elif word_counts[phase] == 2:
                             # Store each nonnegative index as two consecutive 32-bit words.
                             low, high = simd.vintlv(selection, zero32)
                             positions = simd.vadds(lanes, tla.cast(start * 2, tl.uint32))
@@ -335,6 +422,26 @@ def native_topk(
                         else:
                             simd.vsts(indices[start], simd.vbitcast(selection, "int32"), mask=out_mask)
 
+                if SORTED:
+                    sorted_values = tla.alloc((sort_width, ), dtype, space="ub")
+                    sorted_indices = tla.alloc((sort_width, ), tl.int32, space="ub")
+                    workspace = tla.alloc((512 + (20 if bits == 16 else 16) * sort_width, ), tl.uint8, space="ub")
+                    _sort_pairs(values, selected_indices, K, LARGEST, sorted_values, sorted_indices, workspace,
+                                SORT_BITCODE)
+                    values = tla.subview(sorted_values, (0, ), (K, ))
+                    if word_counts[phase] == 2:
+                        with tla.scope.simd():
+                            sorted_lanes = simd.vbitcast(simd.vci(0), "uint32")
+                            for start in range(0, K, 64):
+                                selected = simd.vlds(sorted_indices[start])
+                                low, high = simd.vintlv(selected, simd.vdup(0, tl.int32))
+                                positions = simd.vadds(sorted_lanes, tla.cast(start * 2, tl.uint32))
+                                low_mask = simd.vcmps(positions, K * 2, op=simd.CMP.LT)
+                                high_mask = simd.vcmps(simd.vadds(positions, 64), K * 2, op=simd.CMP.LT)
+                                simd.vsts(indices[start * 2], low, mask=low_mask)
+                                simd.vsts(indices[start * 2 + 64], high, mask=high_mask)
+                    else:
+                        indices = tla.subview(sorted_indices, (0, ), (K, ))
                 tla.store_ub_to_gm(values, tla.view(out_values, (K, ), offsets=(row * K, )))
                 tla.store_ub_to_gm(
                     indices, tla.view(out_indices, (K * word_counts[phase], ),
@@ -354,13 +461,13 @@ def _full_topk(X, V, I, SIZE: tl.constexpr, N: tl.constexpr, INNER: tl.constexpr
 
 
 def _native_launch(x, rows, n, k, largest, cores, last_n=0, wide_index=False, previous=None, tile_indices=False,
-                   shape=None):
+                   shape=None, sort_bitcode=None):
     shape = (rows, k) if shape is None else shape
     values = x.new_empty(shape)
     indices = x.new_empty(shape, dtype=torch.int64 if wide_index else torch.int32)
     storage = triton.reinterpret(indices, tl.int32) if wide_index else indices
     native_topk[(min(rows, cores), )](x, values, storage, rows, n, k, largest, last_n, wide_index, previous,
-                                      tile_indices)
+                                      tile_indices, SORT_BITCODE=sort_bitcode)
     return values, indices
 
 
@@ -386,16 +493,19 @@ def _restore_output(Values, Indices, V, I, K: tl.constexpr, INNER: tl.constexpr,
     groups = tl.cdiv(INNER, ROW_TILE)
     tile = tl.program_id(0)
     outer = tile // groups
-    row = tile % groups * ROW_TILE + tl.arange(0, ROW_TILE)
-    col = tl.program_id(1) * K_TILE + tl.arange(0, K_TILE)
-    source = (outer * INNER + row[:, None]) * K + col[None, :]
-    valid = (row[:, None] < INNER) & (col[None, :] < K)
-    index = tl.load(Indices + source, valid, other=0)
-    destination = (outer * K + col[:, None]) * INNER + row[None, :]
+    row = tile % groups * ROW_TILE
+    col = tl.program_id(1) * K_TILE
+    base = outer * INNER * K
+    # Boundary checks retain contiguous DMA even on a partial tile.
+    index_ptr = tl.make_block_ptr(Indices + base, (INNER, K), (K, 1), (row, col), (ROW_TILE, K_TILE), (1, 0))
+    index_out_ptr = tl.make_block_ptr(I + base, (K, INNER), (INNER, 1), (col, row), (K_TILE, ROW_TILE), (1, 0))
+    index = tl.load(index_ptr, boundary_check=(0, 1), padding_option="zero")
     if WRITE_VALUES:
-        value = tl.load(Values + source, valid, other=0)
-        tl.store(V + destination, tl.trans(value), tl.trans(valid))
-    tl.store(I + destination, tl.trans(index), tl.trans(valid))
+        value_ptr = tl.make_block_ptr(Values + base, (INNER, K), (K, 1), (row, col), (ROW_TILE, K_TILE), (1, 0))
+        value_out_ptr = tl.make_block_ptr(V + base, (K, INNER), (INNER, 1), (col, row), (K_TILE, ROW_TILE), (1, 0))
+        value = tl.load(value_ptr, boundary_check=(0, 1), padding_option="zero")
+        tl.store(value_out_ptr, tl.trans(value), boundary_check=(0, 1))
+    tl.store(index_out_ptr, tl.trans(index).to(tl.int64), boundary_check=(0, 1))
 
 
 def _restore_layout(x, values, indices, k, axis, fused):
@@ -403,6 +513,11 @@ def _restore_layout(x, values, indices, k, axis, fused):
     outer = values.shape[0] // inner
     shape = list(x.shape)
     shape[axis] = k
+    if fused and inner % 32 == 0 and k % 64 == 0 and values.numel() >= 2**20:
+        row_shape = (*x.movedim(axis, -1).shape[:-1], k)
+        out = values.view(row_shape).movedim(-1, axis).contiguous()
+        idx = indices.view(row_shape).movedim(-1, axis).contiguous().to(torch.int64)
+        return out, idx
     out_indices = x.new_empty(shape, dtype=torch.int64)
     if fused:
         out = x.new_empty(shape)
@@ -414,7 +529,7 @@ def _restore_layout(x, values, indices, k, axis, fused):
     if inner % 64 == 0 and k % 64 == 0:
         row_tile, k_tile = 64, 64
     else:
-        row_tile, k_tile = (64, 16) if fused and inner % 32 else (32, 32) if fused else (64, 64)
+        row_tile, k_tile = (128, 16) if fused and inner % 32 else (32, 32) if fused else (64, 64)
     row_tile = min(row_tile, triton.next_power_of_2(inner))
     k_tile = min(k_tile, triton.next_power_of_2(k))
     grid = (outer * triton.cdiv(inner, row_tile), triton.cdiv(k, k_tile))
@@ -467,7 +582,20 @@ def _ordered_topk(x, k, axis, largest, implementation, bounded_int64):
             raise ValueError("radix selection supports axes of at most 8192 elements")
         source = rows.to(torch.int32) if x.dtype == torch.int64 else rows
         cores = driver.active.utils.get_aivector_core_num()
-        values, indices = _native_launch(source, rows.shape[0], n, k, largest, cores)
+        # Small K uses the existing rank or packed sort. Cap the adapter's UB
+        # footprint on longer rows, leaving space for the radix key planes.
+        sort_bitcode = None
+        if 96 <= k <= 2048 and (n <= 4096 or k <= 1024) and x.dtype in (torch.float32, torch.float16, torch.bfloat16,
+                                                                        torch.int8, torch.uint8):
+            sort_bitcode = _paired_sort_bitcode()
+        values, indices = _native_launch(source, rows.shape[0], n, k, largest, cores,
+                                         wide_index=sort_bitcode is not None and index_dtype == torch.int64,
+                                         sort_bitcode=sort_bitcode)
+        if sort_bitcode is not None:
+            if axis != x.ndim - 1:
+                return _restore_layout(x, values, indices, k, axis, fused=True)
+            shape = (*x.shape[:-1], k)
+            return values.view(shape), indices.view(shape)
     values, indices = _sort_output(values, indices, k, 1, largest, bounded_int64, index_dtype=index_dtype)
     if axis != x.ndim - 1:
         return _restore_layout(x, values.to(x.dtype), indices, k, axis, fused=True)
@@ -581,7 +709,7 @@ def _select_topk(x, k, axis, largest, implementation, chunk, bounded_int64, fuse
             # Launch only resident blocks. Every block must reach the barrier.
             grid = (min(rows, cores), 1, 1)
             args = (x, partial_values, partial_indices, rows, chunk, k, largest, n % chunk, False, None, True, values,
-                    triton.reinterpret(indices, tl.int32), rows)
+                    triton.reinterpret(indices, tl.int32), rows, None)
             if launch is None:
                 compiled = native_topk[grid](*args)
                 if not capturing and compiled is not None:

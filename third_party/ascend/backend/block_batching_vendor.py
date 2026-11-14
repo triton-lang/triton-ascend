@@ -45,6 +45,44 @@ _A3_UB_DIAGNOSTIC = re.compile(
     r'or block number is more than what user expect due to multi-buffer feature is enabled and some ops '
     r'need extra local buffer\.\)\n\[ERROR\] Failed to run BiShengIR pipeline')
 
+# The A3 compiler may prepend an informational line to stderr and emit
+# cv-pipelining warnings on stdout before the retry transcript.  Those lines
+# do not change the resource diagnosis; unrelated errors must still prevent a
+# fallback so that real compiler failures are not hidden.
+_BENIGN_DIAGNOSTIC_LINE = re.compile(
+    r'^(?:\s*|\[INFO\].*|\[WARNING\].*|warning:.*|'
+    r'(?:loc\([^\r\n]*?\):\s*)+warning:.*)$', re.I)
+
+
+def _benign_diagnostics(data):
+    text = _text(data)
+    return all(_BENIGN_DIAGNOSTIC_LINE.fullmatch(line) for line in text.splitlines() if line.strip())
+
+
+def _a3_benign_diagnostics(data, expected_file):
+    """Accept A3 warnings and the exact source-location echo for one retry."""
+    text = _text(data)
+    locations = re.compile(
+        rf'^(?:loc\("{re.escape(expected_file)}":\d+:\d+\):\s*)+$')
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        if _BENIGN_DIAGNOSTIC_LINE.fullmatch(line) or locations.fullmatch(line):
+            continue
+        return False
+    return True
+
+
+def _a3_retry_match(stderr):
+    """Match the complete A3 retry transcript with harmless compiler preamble."""
+    text = _text(stderr)
+    match = _A3_UB_DIAGNOSTIC.search(text)
+    if match is None or int(match['required']) <= int(match['available']):
+        return None
+    if not _benign_diagnostics(text[:match.start()]) or not _benign_diagnostics(text[match.end():]):
+        return None
+    return match
+
 
 def _text(data):
     return data.decode(errors='replace') if isinstance(data, bytes) else (data or '')
@@ -83,11 +121,12 @@ def classify_vendor_failure(error, report, options, *, cv_resources):
         if match and int(match['required']) > int(match['available']):
             kind = 'ub'
     if kind is None and error.returncode == 1:
-        match = _A3_UB_DIAGNOSTIC.fullmatch(_text(error.stderr).strip())
+        match = _a3_retry_match(error.stderr)
         if match and int(match['required']) > int(match['available']):
-            # A3 can echo the same two locations on stdout without messages.
-            locations = rf'(?:loc\("{re.escape(match["file"])}":\d+:\d+\):\s*){{2}}'
-            if not _text(error.stdout).strip() or re.fullmatch(locations, _text(error.stdout).strip()):
+            # A3 can echo the same two locations on stdout without messages;
+            # normal compiler warnings are also harmless.  Any non-benign
+            # stdout (for example an LLVM error) remains an internal failure.
+            if _a3_benign_diagnostics(error.stdout, match['file']):
                 kind = 'ub'
     if kind is not None and cv_resources and _is_cv_report(report):
         return BatchDecline("CV_TARGET_RESOURCE_REJECTED", "npubin",

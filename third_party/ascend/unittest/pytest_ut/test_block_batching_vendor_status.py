@@ -35,6 +35,10 @@ loc("/tmp/build/kernel.ttadapter.mlir":1:1): error: Failed to run BiShengHIR pip
 loc("/tmp/build/kernel.ttadapter.mlir":2:3): error: ub overflow, requires 2621440 bits while 1572864 bits available! (possible reason: tiling basic block is too large or block number is more than what user expect due to multi-buffer feature is enabled and some ops need extra local buffer.)
 [ERROR] Failed to run BiShengIR pipeline'''
 A3_LOCATIONS = b'loc("/tmp/build/kernel.ttadapter.mlir":1:1): loc("/tmp/build/kernel.ttadapter.mlir":2:3): '
+A3_INFO = b'[INFO] libbisheng-llc.so not found in LD_LIBRARY_PATH; using the configured compiler path.\n'
+A3_PIPELINE_WARNING = (
+    b'loc("/tmp/build/kernel.ttadapter.mlir":2:1): '
+    b'loc("/tmp/build/kernel.ttadapter.mlir":3:3): warning: cv-pipelining is disabled for this kernel\n')
 
 
 def test_a3_resource_retry_requires_complete_diagnostics():
@@ -51,6 +55,23 @@ def test_a3_resource_retry_requires_complete_diagnostics():
                                (1, A3_LOCATIONS, A3_LAYOUT.replace(b'2621440', b'1572864'))):
         err = subprocess.CalledProcessError(rc, ['vendor'], output=stdout, stderr=stderr)
         assert vendor.classify_vendor_failure(err, report, OPTIONS, cv_resources=True) is None
+
+
+def test_a3_resource_retry_accepts_captured_preamble_and_pipeline_warning():
+    # A3 emits the loader note on stderr and a multi-location cv-pipelining
+    # warning on stdout before the complete retry transcript.
+    err = subprocess.CalledProcessError(1, ['vendor'], output=A3_PIPELINE_WARNING,
+                                         stderr=A3_INFO + A3_LAYOUT)
+    refusal = vendor.classify_vendor_failure(err, dict(cv_mode='disabled'), OPTIONS, cv_resources=True)
+    assert refusal.reason == 'VV_TARGET_RESOURCE_REJECTED'
+    assert A3_INFO.decode() in refusal.diagnostic
+    assert A3_PIPELINE_WARNING.decode() in refusal.diagnostic
+
+
+def test_a3_resource_retry_rejects_unknown_prefixed_diagnostic():
+    err = subprocess.CalledProcessError(1, ['vendor'], output=A3_PIPELINE_WARNING,
+                                         stderr=b'[ERROR] unexpected compiler failure\n' + A3_LAYOUT)
+    assert vendor.classify_vendor_failure(err, dict(cv_mode='disabled'), OPTIONS, cv_resources=True) is None
 
 
 @pytest.mark.parametrize('filename', [b'kernel.mlir', b'kernel.ttadapter.mlir'])

@@ -113,6 +113,13 @@ class TestNativeResources(unittest.TestCase):
         self.assertTrue(state["resource_checked"])
         self.assertEqual(state["config"]["cores"], 48)
         self.assertEqual(state["config"]["target_arch"], "Ascend910_9391")
+        prefix = '%ffts: i64 {hacc.arg_type = #hacc.arg_type<ffts_base_address>}, '
+        value['final_ir'] = value['final_ir'].replace('@kernel(', '@kernel(' + prefix)
+        state = prepare([value])[0]
+        self.assertTrue(state['resource_checked'])
+        self.assertEqual(state['config']['arguments'], [None, None, None, None, 224, 1, 1])
+        value['final_ir'] = value['final_ir'].replace(prefix, '%unproved: i64, ')
+        self.assertFalse(prepare([value])[0]['resource_checked'])
 
 
 class TestNativeSelection(unittest.TestCase):

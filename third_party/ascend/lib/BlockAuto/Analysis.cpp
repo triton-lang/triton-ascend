@@ -1901,7 +1901,24 @@ A CandidateIRAnalysis::launchArguments(const O &contract,
           &grid = array(contract, "grid");
   check(grid.size() == 3 && order.size() == arguments.size(),
         "launch ABI mismatch");
-  A args{nullptr, nullptr}; // TA synchronization and workspace pointers.
+  auto entry = dyn_cast_or_null<FunctionOpInterface>(
+      SymbolTable::lookupSymbolIn(module, str(metadata, "name")));
+  if (!entry)
+    entry = dyn_cast_or_null<FunctionOpInterface>(SymbolTable::lookupSymbolIn(
+        module, str(metadata, "name") + "_mix_aic"));
+  check(entry && entry.getNumArguments() >= 2, "missing final IR entry");
+  A args;
+  auto prefix = entry.getArgAttrOfType<hacc::KernelArgTypeAttr>(
+      0, hacc::KernelArgTypeAttr::name);
+  if (prefix && prefix.getArgType() == hacc::KernelArgType::kFFTSBaseAddr) {
+    check(StringRef(str(sub(metadata, "target"), "arch"))
+                  .starts_with("Ascend910_93") &&
+              entry.getArgumentTypes()[0].isInteger(64),
+          "unproved FFTS launch prefix");
+    args.push_back(nullptr);
+  }
+  args.push_back(nullptr); // TA synchronization pointer.
+  args.push_back(nullptr); // Workspace pointer.
   std::set<std::string> seen;
   for (const V &name : order) {
     check(bool(name.getAsString()), "missing host argument name");
@@ -1921,12 +1938,7 @@ A CandidateIRAnalysis::launchArguments(const O &contract,
       check(axis >= 0 && axis < 3, "invalid original grid axis");
       args.push_back(grid[axis]);
     }
-  auto entry = dyn_cast_or_null<FunctionOpInterface>(
-      SymbolTable::lookupSymbolIn(module, str(metadata, "name")));
-  if (!entry)
-    entry = dyn_cast_or_null<FunctionOpInterface>(SymbolTable::lookupSymbolIn(
-        module, str(metadata, "name") + "_mix_aic"));
-  check(entry && entry.getNumArguments() == args.size() + 3,
+  check(entry.getNumArguments() == args.size() + 3,
         "launch/final IR ABI mismatch");
   return args;
 }

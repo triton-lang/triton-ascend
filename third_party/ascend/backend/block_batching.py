@@ -94,6 +94,14 @@ def vv_layout_refusal(report):
     if (report.get("owner") != "block_batching" or report.get("cv_mode") != "disabled"
             or report.get("lane_width", 1) <= 1):
         return None
+    # An unsupported symbolic bridge leaves coupled lane/local tail masks.
+    # Structured lowering can implement their store as a full-tile read/select/
+    # write, touching bytes owned by another program even when the source mask
+    # proves disjoint writes. Require the layout proof before backend lowering.
+    if any(
+            access.get("reason") == "SYMBOLIC_LAYOUT_BRIDGE_UNSUPPORTED"
+            for access in report.get("layout", {}).get("accesses", [])):
+        return "VV_SYMBOLIC_LAYOUT_NOT_PROVEN"
     if _has_independent_row_layout(report):
         return None
     operations = report.get("operations", {})

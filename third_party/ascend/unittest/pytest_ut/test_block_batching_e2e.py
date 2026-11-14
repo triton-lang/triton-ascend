@@ -78,6 +78,27 @@ def test_default_auto_large_pointwise():
         assert kernel.block_auto_selection['reason'] == 'A3_RESOURCE_SAFE_GROUPING'
 
 
+@pytest.mark.parametrize('block_pointer', [False, True])
+@pytest.mark.parametrize('factor', [2, 4, 'auto'])
+def test_dynamic_permute_tail_falls_back(block_pointer, factor):
+    from test_implicit_permute import (addptr_implicit_perm_load_store_3d, make_tensor_ptr_implicit_perm_load_store_3d)
+    fn = make_tensor_ptr_implicit_perm_load_store_3d if block_pointer else addptr_implicit_perm_load_store_3d
+    # The original block-pointer load is unmasked; pad its final physical tile.
+    size = 100 * 40 * 32
+    x = torch.arange(size + 32, dtype=torch.float32).npu()[:size].reshape(100, 40, 32)
+    storage = torch.full((size + 32, ), -123., device='npu')
+    out = storage[:size].reshape_as(x)
+    kernel = fn[(4, 10, 25)](x, out, 100, 40, 32, 1280, 32, 1, 4, 4, 10, block_batching_factor=factor)
+    torch.npu.synchronize()
+    torch.testing.assert_close(out, x, rtol=0, atol=0)
+    assert (storage[size:] == -123).all()
+    if factor == 'auto':
+        assert kernel.block_auto_selection['selected_factor'] == 1
+    else:
+        assert kernel.candidate is None
+        assert kernel.block_batching['reason'] == 'VV_SYMBOLIC_LAYOUT_NOT_PROVEN'
+
+
 @pytest.mark.parametrize('mode', [0, 1])
 @pytest.mark.parametrize('blocks', [4, 128])
 def test_portable_spatial_merge(mode, blocks):

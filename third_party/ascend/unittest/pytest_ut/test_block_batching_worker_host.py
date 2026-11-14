@@ -137,6 +137,7 @@ def test_valid_unsupported_lowering_and_corrupt_evidence_are_distinct(compile_er
         })
     refusal = batching.vv_memory_lowering_refusal(report)
     assert worker.BatchDecline(refusal, 'ttadapter').reason == 'VV_INDIRECT_MEMORY_NOT_SUPPORTED'
+    assert worker.BatchDecline('VV_SYMBOLIC_LAYOUT_NOT_PROVEN', 'ttir').reason == 'VV_SYMBOLIC_LAYOUT_NOT_PROVEN'
     del report['layout']['lowering_observation']['indirect_load_ops']
     invalid = batching.vv_memory_lowering_refusal(report)
     with pytest.raises(worker.BatchCompileError, match='VV_MEMORY_LOWERING_NOT_PROVEN'):

@@ -41,6 +41,22 @@ def test_shared_parameters_do_not_form_an_independent_row_memory_view(shape, wid
     assert value == before
 
 
+@pytest.mark.parametrize('operation', ['arith.addf', 'tt.reduce', 'tt.scan'])
+def test_unsupported_symbolic_bridge_requires_complete_fallback(operation):
+    value = report()
+    value['operations'][operation] = 1
+    value['layout']['accesses'][0].update(original_shape=[10, 4, 4], symbolic_stride=True, mask_class='linear_prefix',
+                                          reason='SYMBOLIC_LAYOUT_BRIDGE_UNSUPPORTED')
+    before = deepcopy(value)
+    assert batching.vv_layout_refusal(value) == 'VV_SYMBOLIC_LAYOUT_NOT_PROVEN'
+    assert value == before
+    value['layout']['accesses'][0].update(action='MemoryView', rewritten=True, reason='PROVEN_SYMBOLIC_STRIDE_CHAIN')
+    assert batching.vv_layout_refusal(value) is None
+    value['layout']['accesses'][0]['reason'] = 'SYMBOLIC_LAYOUT_BRIDGE_UNSUPPORTED'
+    value['cv_mode'] = 'spatial_concat_v1'
+    assert batching.vv_layout_refusal(value) is None
+
+
 @pytest.mark.parametrize("kind", [
     "baseline", "no_owner", "cv", "reduction", "scan", "dot", "loop", "if", "shared_only", "shared_high_rank", "view",
     "higher_rank", "empty", "scalar", "unknown_mask"

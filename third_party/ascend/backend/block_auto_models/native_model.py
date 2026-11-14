@@ -4,8 +4,6 @@ import math
 from pathlib import Path
 import re
 
-DATA = Path(__file__).parent
-
 UNKNOWN = None
 
 
@@ -134,9 +132,6 @@ def analyze(modules, ttir, final_ir, metadata, contract, axis, factor, *, raw=No
         config['raw_llvm'] = raw
         if metadata['parallel_mode'] == 'mix_simd_simt':
             config['mixed'] = mixed_parameters(final_ir)
-        if re.search(r'\bcall\b[^\n]*@pow_fp32\(', modules['aiv']):
-            path = DATA / 'vv_library_data/pow_fp32.ll'
-            config.update(pow_llvm=path.read_text(), pow_wrapper_steps=25)
     try:
         return json.loads(ascend.analyze_block_candidate(json.dumps(config, allow_nan=False)))
     except RuntimeError as error:

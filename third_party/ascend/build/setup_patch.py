@@ -744,8 +744,6 @@ def _build_setup_kwargs(mod, kwargs):
 
     # package_data for distributed
     package_data = dict(kwargs.get("package_data") or {})
-    auto_package = "triton.backends.ascend.block_auto_models"
-    package_data[auto_package] = list(package_data.get(auto_package, ())) + ["vv_library_data/*.ll"]
     if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
         package_data["triton_dist"] = ["*.py", "*.pyi"]
     if package_data:

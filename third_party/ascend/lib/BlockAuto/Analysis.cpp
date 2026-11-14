@@ -1134,11 +1134,17 @@ struct Analyzer {
             else if (name.starts_with("llvm.hivm.") && isVector) {
               vector.add(*call);
               vectorCall = true;
-            } else
-              require(!isVector && kernel &&
-                          (kernel->extra(name, args) ||
-                           (external && external(name, args, *kernel))),
+            } else if (!isVector && kernel &&
+                       (kernel->extra(name, args) ||
+                        (external && external(name, args, *kernel)))) {
+            } else {
+              require(lowered && !isVector && kernel &&
+                          !callee->isDeclaration() &&
+                          callee->getCallingConv() == CallingConv::C &&
+                          callee->getReturnType()->isVoidTy(),
                       "unmodelled call: " + name.str());
+              helper(kernel);
+            }
           } else if (isa<FreezeInst>(i))
             result = val(i.getOperand(0));
           else if (isa<AllocaInst>(i))
@@ -1506,36 +1512,8 @@ std::string analyzeBlockCandidate(StringRef request) {
     if (const auto *mixed = config.getObject("mixed")) {
       simt = std::make_unique<SimtModel>(SimtModel{analyzer, *mixed, {}});
     }
-    std::unique_ptr<Module> library;
-    std::unique_ptr<Analyzer> powAnalyzer;
-    if (auto source = config.getString("pow_llvm")) {
-      library = parse(*source, context);
-      powAnalyzer = std::make_unique<Analyzer>(*library, profile, true);
-    }
     analyzer.external = [&](StringRef callee, Args args, Plan &plan) {
-      if (simt && simt->call(callee, args, plan))
-        return true;
-      if (callee != "pow_fp32")
-        return false;
-      require(powAnalyzer && args.size() == 15,
-              "missing pow model or unsupported ABI");
-      int64_t n = integer(args, 3);
-      require(n >= 0 && n < (int64_t(1) << 31) && n == integer(args, 8) &&
-                  n == integer(args, 13),
-              "unknown pow extents");
-      for (unsigned i : {4, 9, 14})
-        require(integer(args, i) == 1, "noncontiguous pow input");
-      auto *fn = library->getFunction("_mlir_ciface_pow_fp32.extracted");
-      require(fn && fn->arg_size() == 5, "pow SIMD definition missing");
-      Pointer tail{fn->getArg(1), 0, 0};
-      auto trace = powAnalyzer->trace(
-          *fn, {Scalar(n / 64), Scalar(tail), Scalar(), Scalar(), Scalar()}, 0,
-          nullptr, {{tail, Scalar(n % 64)}});
-      int steps = number(config, "pow_wrapper_steps");
-      for (int i = 0; i < steps; ++i)
-        plan.step();
-      plan.vf(trace.cycles);
-      return true;
+      return simt && simt->call(callee, args, plan);
     };
     std::vector<KernelPlan> traces;
     for (unsigned block = 0; block < blocks; ++block) {

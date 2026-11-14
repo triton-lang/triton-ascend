@@ -141,16 +141,19 @@ class TestModelContracts(unittest.TestCase):
         result = self.cv.candidate_plan({"grid": [8, 8, 1]}, probe=reject)
         self.assertEqual(result["candidates"], [])
 
-    def test_pow_model_loads_reference_body_without_library_records(self):
+    def test_model_passes_candidate_llvm_without_library_inputs(self):
         binding = SimpleNamespace(analyze_block_candidate=lambda request: request)
         modules = {"triton._C.libtriton": module("libtriton", ascend=binding)}
         metadata = dict(target={"arch": "Ascend950PR_9579"}, parallel_mode="simd", name="kernel",
                         auto_blockify_enabled=True)
         with patch.dict(sys.modules, modules), patch.object(self.native, "launch_configuration",
                                                             return_value=([], [64, 1, 1], 56, 56)):
-            config = self.native.analyze({"aiv": "call void @pow_fp32()"}, "", "", metadata, {}, 0, 1, raw="")
-        self.assertIn("define", config["pow_llvm"])
-        self.assertEqual(config["pow_wrapper_steps"], 25)
+            llvm = {"aiv": "candidate LLVM containing linked helper bodies"}
+            config = self.native.analyze(llvm, "", "", metadata, {}, 0, 1, raw="raw LLVM")
+        self.assertEqual(config["modules"], llvm)
+        self.assertEqual(
+            set(config),
+            {"mode", "modules", "name", "arguments", "grid", "cores", "blocks", "auto_blockify", "raw_llvm"})
 
     def test_mix_keeps_mode_checks_without_compiler_records(self):
         ir = 'func.func @kernel() attributes {hacc.entry, hivm.vf_mode<MIX>, hivm.func_core_type<AIV>}'

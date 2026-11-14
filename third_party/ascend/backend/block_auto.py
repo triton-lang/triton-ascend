@@ -56,7 +56,13 @@ def select_candidates(candidates, contract):
             if k not in ("metadata", "files", "final_ir", "meta_library") and not (k == "llvm" and item.get("vv"))
         }
                   for item in items]
-        report = _native("rank", contract, candidates=inputs)
+        from .block_batching_worker import BatchCompileError, _attempt
+        try:
+            report = _attempt("select", dict(contract=contract, candidates=inputs), timeout=30).payload["report"]
+        except BatchCompileError as error:
+            if error.kind != "Timeout":
+                raise
+            raise ValueError("static selection exceeded its 30 second budget") from error
         return report.pop("factor"), report
     except (ValueError, KeyError, OSError, TypeError) as error:
         return 1, dict(model="jit-cv-vv-native-v1", selected_key="unmerged", selected_axis=-1, model_complete=False,

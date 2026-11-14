@@ -130,6 +130,15 @@ class TestHostIntegration(unittest.TestCase):
             self.run_handler(grid)
             self.assertEqual(self.calls[-1][0][1]["block_batching_factor"], 1)
 
+    def test_single_program_keeps_normal_cache_without_contract(self):
+        for grid, axis in (((1, ), -1), ((1, 1, 1), -1), ((8, 1), 1)):
+            self.kwargs["block_batching_axis"] = axis
+            self.calls.clear()
+            self.run_handler(grid)
+            options = self.calls[-1][0][1]
+            self.assertEqual(options["block_batching_factor"], 1)
+            self.assertNotIn("block_auto_contract", options)
+
     def test_other_frontends_keep_their_original_compilation_path(self):
         self.fn.ASTSource = SimpleNamespace(frontend_kind="tla")
         self.kwargs.pop("block_batching_factor")
@@ -180,8 +189,8 @@ class TestCompileIntegration(unittest.TestCase):
         self.bundle = SimpleNamespace(candidate=object(), block_batching=dict(selected_axis=0))
         self.manual = module("batching", _freeze_source=lambda *args: self.frozen,
                              _freeze_refusal=lambda normalized: None, _candidate_refusal=lambda *args: None,
-                             _runtime_positions=lambda src: [], compile_bundle=self.manual_compile,
-                             BatchRequest=lambda: "F1",
+                             _core_floor=lambda: 0, _runtime_positions=lambda src: [],
+                             compile_bundle=self.manual_compile, BatchRequest=lambda: "F1",
                              BatchKernel=lambda *args: SimpleNamespace(baseline=args[0], candidate=None))
         self.model = module(
             "model", select_candidates=self.select,
@@ -232,6 +241,20 @@ class TestCompileIntegration(unittest.TestCase):
             self.dispatch.compile_auto_bundle(self.backend, object(), dict(block_batching_factor="auto"), self.compile),
             self.baseline)
         self.assertEqual(len(self.events), 1)
+
+    def test_vv_below_core_floor_skips_candidates_and_model(self):
+        self.manual._core_floor = lambda: 512
+        self.model.select_candidates = Mock(side_effect=AssertionError("no candidate to score"))
+        result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(result.block_auto_selection["reason"], "GRID_BELOW_CORE_FLOOR")
+
+    def test_all_candidates_declined_does_not_score_the_baseline(self):
+        self.manual.compile_bundle = lambda *args: SimpleNamespace(candidate=None, block_batching=
+                                                                   {"reason": "NO_PROGRAM_AXIS"})
+        self.model.select_candidates = Mock(side_effect=AssertionError("no candidate to score"))
+        result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
+        self.assertEqual(result.block_auto_selection["reason"], "NO_COMPILED_CANDIDATE")
 
     def test_cv_uses_native_shortlist_and_preserves_selected_axis(self):
         self.baseline.metadata.mix_mode = "mix"

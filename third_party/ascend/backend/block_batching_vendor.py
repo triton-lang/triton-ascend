@@ -28,7 +28,7 @@ _A5_UB_DIAGNOSTIC = re.compile(
     r'Equivalent setting: --multibuffer-mode="\[\(gm, 2\), \(l1, 2\), \(l0c, 2\), \(ub, 2\)\]"\. '
     r'A3 default gm=4, A5 default gm=2; set a level to 1 to disable it\.\n'
     r"(?:warning: warning: --enable-preload=true overrides --enablecv-pipeline-mode; forcing 'Skew'\.\n)+"
-    r'loc\("(?P<file>[^"\r\n]+/kernel\.mlir)":\d+:\d+\): error: Failed to run buildFinalHIVMPipelines pipeline\n+'
+    r'loc\("(?P<file>[^"\r\n]+/kernel(?:\.ttadapter)?\.mlir)":\d+:\d+\): error: Failed to run buildFinalHIVMPipelines pipeline\n+'
     r'loc\("(?P=file)":\d+:\d+\): error: ub overflow, requires (?P<required>\d{1,20}) bits while '
     r'(?P<available>\d{1,20}) bits available! \(possible reason: tiling basic block is too large '
     r'or block number is more than what user expect due to multi-buffer feature is enabled and some ops '
@@ -67,20 +67,22 @@ def classify_vendor_failure(error, report, options, *, cv_resources):
     """Return a modeled refusal only for the matching candidate and npubin stage."""
     error.stage = 'npubin'
     kind = resource_kind(error.returncode, error.stdout, error.stderr)
+    if kind is None and error.returncode == 1 and not _text(error.stdout).strip():
+        match = _A5_UB_DIAGNOSTIC.fullmatch(_text(error.stderr).strip())
+        if match and int(match['required']) > int(match['available']):
+            kind = 'ub'
     if kind is not None and cv_resources and _is_cv_report(report):
         return BatchDecline("CV_TARGET_RESOURCE_REJECTED", "npubin",
                             diagnostic=diagnostic_text(error.stdout, error.stderr)[-16000:])
     if options.block_batching_layout == 'auto' and any(
             row.get('rewritten') for row in report.get('layout', {}).get('accesses', ())):
-        if (kind is None and report.get('cv_mode') == 'disabled' and error.returncode == 1
-                and not _text(error.stdout).strip()):
-            match = _A5_UB_DIAGNOSTIC.fullmatch(_text(error.stderr).strip())
-            if match and int(match['required']) > int(match['available']):
-                kind = 'ub'
         if kind == 'ub':
             return BatchDecline("LAYOUT_TARGET_RESOURCE_REJECTED", "npubin",
                                 diagnostic=diagnostic_text(error.stdout, error.stderr)[-16000:],
                                 factor=options.block_batching_factor, axis=options.block_batching_axis)
+    if kind is not None and report.get('cv_mode') == 'disabled':
+        return BatchDecline("VV_TARGET_RESOURCE_REJECTED", "npubin",
+                            diagnostic=diagnostic_text(error.stdout, error.stderr)[-16000:])
 
 
 def require_candidate_binary(path, result):

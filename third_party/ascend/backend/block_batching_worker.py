@@ -145,13 +145,15 @@ class CompileOutcome:
             raise BatchCompileError('unknown response status', kind='ProtocolError')
 
 
-def _attempt(operation, body):
+def _attempt(operation, body, *, timeout=None):
     with tempfile.TemporaryDirectory(prefix='triton-batch-worker-') as root:
         directory = Path(root)
         request = dict(protocol=_PROTOCOL, operation=operation, id=uuid4().hex, identity=_digest([operation, body]),
                        body=body)
         (directory / 'request').write_text(json.dumps(request, allow_nan=False))
-        diagnostic = _run_isolated([sys.executable, '-S', '-c', _BOOTSTRAP, str(directory)], directory, _TIMEOUT)
+        diagnostic = _run_isolated(
+            [sys.executable, '-S', '-c', _BOOTSTRAP, str(directory)], directory,
+            _TIMEOUT if timeout is None else timeout)
         result = directory / 'result'
         try:
             if result.stat().st_size > _MAX_REPLY:
@@ -248,7 +250,7 @@ VALUE_VARIATION_UNKNOWN VARYING_CONTROL_CONDITION VARYING_INDEX_NOT_IMPLEMENTED 
 VV_AGGREGATION_ANALYSIS_BUDGET_EXCEEDED VV_AGGREGATION_DOMAIN_NOT_PROVEN VV_MULTI_AXIS_REDUCTION_NOT_SUPPORTED
 VV_SCAN_DOMAIN_NOT_SUPPORTED VV_POINTWISE_MEMORY_VIEW_REQUIRED VV_INDIRECT_MEMORY_NOT_SUPPORTED UNSUPPORTED_FINAL_EXECUTION_MODE
 '''.split())
-_RESOURCE_REASONS = ('LAYOUT_TARGET_RESOURCE_REJECTED', 'CV_TARGET_RESOURCE_REJECTED')
+_RESOURCE_REASONS = ('LAYOUT_TARGET_RESOURCE_REJECTED', 'CV_TARGET_RESOURCE_REJECTED', 'VV_TARGET_RESOURCE_REJECTED')
 
 
 @dataclass(frozen=True)
@@ -487,6 +489,9 @@ def _worker():
             status, payload = _probe_selection(body, directory)
         elif operation in ('analyze', 'probe'):
             status, payload = _native_report(operation, body, directory)
+        elif operation == 'select':
+            from .block_auto import _native
+            status, payload = 'Success', dict(report=_native('rank', body['contract'], candidates=body['candidates']))
         else:
             raise ValueError('unknown worker operation')
     except Exception as error:

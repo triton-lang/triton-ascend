@@ -36,6 +36,11 @@ def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
             type(n) is not int or not 0 < n <= 2147483647 for n in grid):
         return baseline()
     extents = tuple(grid) + (1, ) * (3 - len(grid))
+    axis = kwargs.get("block_batching_axis", -1)
+    if max(extents) == 1 or type(axis) is int and 0 <= axis < 3 and extents[axis] == 1:
+        # No two programs can share a group. Keep the ordinary JIT cache key,
+        # including its runtime scalar/pointer specialization policy.
+        return baseline()
     arguments = {
         name: _argument(value)
         for (name, value), spec in zip(bound.items(), specialization)
@@ -91,7 +96,7 @@ def compile_auto_bundle(backend, src, options, compile_variant):
     baseline = compile_variant(baseline_options, frozen)
     axis = options.get("block_batching_axis", -1)
     cv = getattr(baseline.metadata, "mix_mode", None) in ("aic", "mix")
-    if cv and not refusal:
+    if not refusal:
         refusal = batching._candidate_refusal(backend, src, normalized)
         if not refusal:
             positions = batching._runtime_positions(src)
@@ -105,8 +110,12 @@ def compile_auto_bundle(backend, src, options, compile_variant):
         plan = dict(candidates=[], reason=refusal)
     elif cv:
         plan = candidate_plan(contract, axis=axis, probe=lambda a, f: _probe(backend, frozen, common, env_vars, a, f))
+    elif math.prod(contract["grid"]) < batching._core_floor():
+        plan = dict(candidates=[], reason="GRID_BELOW_CORE_FLOOR")
     else:
-        plan = dict(candidates=[dict(axis=axis, factor=f) for f in (2, 4)], reason="VV_F2_F4_AUTOMATIC_AXIS")
+        extents = contract["grid"] if axis == -1 else [contract["grid"][axis]]
+        plan = dict(candidates=[dict(axis=axis, factor=f) for f in (2, 4) if max(extents) >= f],
+                    reason="VV_F2_F4_AUTOMATIC_AXIS")
 
     def variant(values, frozen_src=None):
         return baseline if values["block_batching_factor"] == 1 else compile_variant(values, frozen_src)
@@ -127,7 +136,12 @@ def compile_auto_bundle(backend, src, options, compile_variant):
             selected_axis = report["selected_axis"]
             candidates.append(dict(factor=factor, axis=selected_axis, kernel=bundle.candidate))
             bundles[f"a{selected_axis}_f{factor}"] = bundle
-    factor, selection = select_candidates(candidates, contract)
+    if bundles:
+        factor, selection = select_candidates(candidates, contract)
+    else:
+        factor, selection = 1, dict(selected_key="unmerged", selected_axis=-1,
+                                    reason=plan.get("reason") if not plan["candidates"] else "NO_COMPILED_CANDIDATE",
+                                    model_complete=False, device_timing_used=False)
     if factor == 1:
         report = dict(compile_status="DISABLED", owner="none", requested_factor=1, applied_factor=1,
                       reason=selection["reason"])

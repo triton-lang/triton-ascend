@@ -44,7 +44,7 @@ def optimized_llvm(item):
         env = dict(os.environ, ASCEND_RT_VISIBLE_DEVICES='', ASCEND_VISIBLE_DEVICES='', CUDA_VISIBLE_DEVICES='')
 
         def run(command):
-            subprocess.run(command, capture_output=True, env=env, check=True, timeout=240)
+            subprocess.run(command, capture_output=True, env=env, check=True, timeout=30)
 
         run(args)
         run([str(link), '-S', str(output / 'kernel.bc'), '-o', str(output / 'optimized.ll')])

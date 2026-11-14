@@ -50,6 +50,23 @@ class TestModelBridge(unittest.TestCase):
         self.assertEqual(result["contract"]["argument_order"], ["z", "a"])
         self.assertEqual(json.dumps(result["candidates"]), "[]")
 
+    def test_selection_deadline_falls_back_but_protocol_errors_propagate(self):
+        worker = importlib.import_module(PACKAGE + ".block_batching_worker")
+        artifacts = importlib.import_module(PACKAGE + ".block_auto_artifacts")
+        for kind in ("Timeout", "ProtocolError"):
+            with patch.object(artifacts, "load_evidence", return_value={}), \
+                 patch.object(self.bridge, "_native", return_value=dict(candidates=[dict(needs_llvm=False)])), \
+                 patch.object(worker, "_attempt", side_effect=worker.BatchCompileError("test", kind=kind)) as attempt:
+                candidates = [dict(factor=1, axis=-1, kernel=object())]
+                if kind == "Timeout":
+                    factor, report = self.bridge.select_candidates(candidates, {})
+                    self.assertEqual(factor, 1)
+                    self.assertIn("budget", report["error"])
+                else:
+                    with self.assertRaises(worker.BatchCompileError):
+                        self.bridge.select_candidates(candidates, {})
+                self.assertEqual(attempt.call_args.kwargs["timeout"], 30)
+
 
 class LocalCache:
 

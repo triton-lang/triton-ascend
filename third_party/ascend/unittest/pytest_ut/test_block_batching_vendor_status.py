@@ -28,12 +28,14 @@ loc("/tmp/build/kernel.mlir":2:3): error: ub overflow, requires 2097152 bits whi
 [ERROR] Failed to run BiShengIR regbase pipeline'''
 
 
-def test_a5_vv_layout_budget_exhaustion():
-    err = subprocess.CalledProcessError(1, ['vendor'], stderr=A5_LAYOUT)
+@pytest.mark.parametrize('filename', [b'kernel.mlir', b'kernel.ttadapter.mlir'])
+def test_a5_vv_layout_budget_exhaustion(filename):
+    diagnostic = A5_LAYOUT.replace(b'kernel.mlir', filename)
+    err = subprocess.CalledProcessError(1, ['vendor'], stderr=diagnostic)
     refusal = vendor.classify_vendor_failure(err, dict(REWRITTEN, cv_mode='disabled'), OPTIONS, cv_resources=True)
     assert (refusal.reason, refusal.stage, refusal.factor, refusal.axis) == ('LAYOUT_TARGET_RESOURCE_REJECTED',
                                                                              'npubin', 4, -1)
-    assert refusal.diagnostic == A5_LAYOUT.decode()
+    assert refusal.diagnostic == diagnostic.decode()
 
 
 @pytest.mark.parametrize('rc, stdout, stderr', [
@@ -59,12 +61,18 @@ def test_a5_mixed_or_unproven_failure_is_internal(rc, stdout, stderr):
     ('disabled', False, 'auto'),
     ('disabled', True, 'semantic_only'),
 ])
-def test_a5_transcript_only_refuses_rewritten_vv_auto_layout(mode, rewritten, policy):
+def test_a5_resource_failure_without_layout_retry_selects_baseline(mode, rewritten, policy):
     err = subprocess.CalledProcessError(1, ['vendor'], stderr=A5_LAYOUT)
     report = {'cv_mode': mode, 'layout': {'accesses': [{'rewritten': rewritten}]}}
     options = SimpleNamespace(block_batching_layout=policy, block_batching_factor=4, block_batching_axis=-1)
     for cv_resources in (True, False):
-        assert vendor.classify_vendor_failure(err, report, options, cv_resources=cv_resources) is None
+        refusal = vendor.classify_vendor_failure(err, report, options, cv_resources=cv_resources)
+        if mode == 'disabled':
+            assert refusal.reason == 'VV_TARGET_RESOURCE_REJECTED'
+        elif cv_resources:
+            assert refusal.reason == 'CV_TARGET_RESOURCE_REJECTED'
+        else:
+            assert refusal is None
 
 
 @pytest.mark.parametrize('rc, stdout, stderr', [

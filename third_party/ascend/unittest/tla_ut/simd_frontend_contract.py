@@ -1419,12 +1419,13 @@ def test_every_python_builder_call_is_bound_and_whitelisted():
     base_cpp = (_TLA_DIR.parents[3] / "python" / "src" / "ir.cc").read_text()
     base_bound = set(re.findall(r'\.def\(\s*"(create_[a-z0-9_]+)"', base_cpp))
 
-    builder_py = (_TLA_DIR / "builder.py").read_text()
-    tree = ast.parse(builder_py)
+    # CodeGenerator mounts the CANN builder before TLA attaches its own methods.
     whitelisted = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "ascend_methods":
-            whitelisted = {elt.value for elt in node.value.elts}
+    shared_builder = _TLA_DIR.parent / "cann" / "extension" / "builder.py"
+    for builder_path in (_TLA_DIR / "builder.py", shared_builder):
+        for node in ast.walk(ast.parse(builder_path.read_text())):
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "ascend_methods":
+                whitelisted.update(elt.value for elt in node.value.elts)
 
     used = set()
     for py in _TLA_DIR.glob("*.py"):

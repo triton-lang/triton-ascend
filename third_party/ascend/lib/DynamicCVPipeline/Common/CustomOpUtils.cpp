@@ -24,6 +24,7 @@
 
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Analysis.h"
 
@@ -94,18 +95,33 @@ llvm::LogicalResult CustomOpAnalysis::collectBuffers() {
   return llvm::success();
 }
 
-/// Collect the ops that build one local buffer (`alloc -> to_tensor -> custom`,
-/// or `alloc -> custom -> to_tensor` when the custom op fills the buffer) and
-/// the layout conversion of the unit's output value.
+// Follow an unshared cast chain without moving uses from other blocks or
+// absorbing unrelated buffer users into the custom unit.
+static bufferization::ToTensorOp collectToTensorThroughViewLikeOpInterface(
+    Operation *user, Block *block, SmallVectorImpl<Operation *> &viewLikeOps) {
+  while (auto castOp = dyn_cast<ViewLikeOpInterface>(user)) {
+    if (castOp->getBlock() != block || !castOp->hasOneUse())
+      return nullptr;
+    viewLikeOps.push_back(castOp);
+    user = *castOp->getUsers().begin();
+  }
+  if (user->getBlock() != block)
+    return nullptr;
+  return dyn_cast<bufferization::ToTensorOp>(user);
+}
+
+/// Collect a local buffer, its optional memory_space_cast chain, the custom
+/// operation and to_tensor, plus the layout conversion of the output value.
 void CustomOpAnalysis::collectRelevantOps() {
   for (auto buf : localBuffers) {
     // Value the unit produces: the custom op's result for a read-only buffer,
     // the trailing `to_tensor` result when the custom op fills the buffer.
     Value outValue;
+    SmallVector<Operation *> viewLikeOps;
     if (buf.hasOneUse()) {
-      // pattern: alloc->to_tensor->customOp
-      auto toTensorOp =
-          llvm::dyn_cast<bufferization::ToTensorOp>(*buf.getUsers().begin());
+      // pattern: alloc -> memory_space_cast* -> to_tensor -> customOp
+      auto toTensorOp = collectToTensorThroughViewLikeOpInterface(
+          *buf.getUsers().begin(), customOp->getBlock(), viewLikeOps);
       if (!toTensorOp) {
         continue;
       }
@@ -118,6 +134,7 @@ void CustomOpAnalysis::collectRelevantOps() {
         outValue = customOp->getResult(0);
       }
       relevantOps.push_back(buf.getDefiningOp());
+      relevantOps.append(viewLikeOps.begin(), viewLikeOps.end());
       relevantOps.push_back(toTensorOp);
       relevantOps.push_back(customOp);
     } else {
@@ -127,10 +144,10 @@ void CustomOpAnalysis::collectRelevantOps() {
         if (user == customOp) {
           continue;
         }
-        auto currToTensorOp = llvm::dyn_cast<bufferization::ToTensorOp>(user);
+        auto currToTensorOp = collectToTensorThroughViewLikeOpInterface(
+            user, customOp->getBlock(), viewLikeOps);
         if (!currToTensorOp || toTensorOp) {
-          // 1. not to_tensor or customOp
-          // 2. or has another to_tensor
+          // Reject unrelated users and multiple tensor consumers.
           // skip this buffer
           toTensorOp = nullptr;
           break;
@@ -143,6 +160,7 @@ void CustomOpAnalysis::collectRelevantOps() {
       outValue = toTensorOp.getResult();
       relevantOps.push_back(buf.getDefiningOp());
       relevantOps.push_back(customOp);
+      relevantOps.append(viewLikeOps.begin(), viewLikeOps.end());
       relevantOps.push_back(toTensorOp);
     }
     if (!outValue || !outValue.hasOneUse()) {
@@ -168,14 +186,15 @@ void CustomOpAnalysis::determineLoadOrUnknown() {
   }
 }
 
-FailureOr<CustomOpAnalysis> CustomOpAnalysis::get(hivm::CustomOp customOp) {
+std::variant<CustomOpAnalysis, CoreType>
+CustomOpAnalysis::get(hivm::CustomOp customOp) {
   LOG_DEBUG("Analysing: " << customOp << "\n");
   CustomOpAnalysis result(customOp);
 
   result.determineCoreType();
   if (result.collectBuffers().failed()) {
     LOG_DEBUG("Failed to analyze: " << customOp << "\n");
-    return llvm::failure();
+    return result.coreType;
   }
   result.collectRelevantOps();
   result.determineLoadOrUnknown();

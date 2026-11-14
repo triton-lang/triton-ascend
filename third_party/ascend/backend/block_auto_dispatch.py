@@ -26,8 +26,8 @@ def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
         result.pop("block_auto_contract", None)
         return result, grid
 
-    if (warmup or not str(backend.target.arch).startswith(("Ascend950", "Ascend910_95"))
-            or _capture_state() is not False):
+    if (warmup or getattr(getattr(fn, "ASTSource", None), "frontend_kind", "triton") != "triton"
+            or not str(backend.target.arch).startswith(("Ascend950", "Ascend910_95")) or _capture_state() is not False):
         return baseline()
     bound, specialization, _ = fn.device_caches[device][4](*args, **kwargs)
     if callable(grid):

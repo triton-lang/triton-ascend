@@ -130,6 +130,13 @@ class TestHostIntegration(unittest.TestCase):
             self.run_handler(grid)
             self.assertEqual(self.calls[-1][0][1]["block_batching_factor"], 1)
 
+    def test_other_frontends_keep_their_original_compilation_path(self):
+        self.fn.ASTSource = SimpleNamespace(frontend_kind="tla")
+        self.kwargs.pop("block_batching_factor")
+        self.run_handler()
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][0][1]["block_batching_factor"], 1)
+
     def test_shape_and_scalar_values_are_part_of_jit_option_identity(self):
         first, _ = self.dispatch.prepare_launch(self.fn, (Tensor(), 131072), self.kwargs, (256, ), False, 0,
                                                 self.backend)

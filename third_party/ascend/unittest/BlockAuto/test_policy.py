@@ -61,6 +61,15 @@ class TestNativeResources(unittest.TestCase):
         self.assertFalse(state["resource_checked"])
         self.assertEqual(state["status"], "RESOURCE_UNCONFIRMED")
 
+    def test_empty_helper_scratch_does_not_hide_real_ub_overflow(self):
+        for offset, accepted in ((253920, True), (253952, False)):
+            value = item(dtype="1xf32", offset=offset)
+            value["final_ir"] = value["final_ir"].replace(
+                " return", " %zero = llvm.mlir.constant(0 : i64) : i64\n"
+                " %scratch = hivm.hir.pointer_cast(%zero) : memref<0xf32, #hivm.address_space<ub>>\n return")
+            self.assertEqual(prepare([value])[0]["resource_checked"], accepted)
+        self.assertFalse(prepare([item(dtype="0xf32", offset=-1)])[0]["resource_checked"])
+
     def test_i1_excess_remains_unconfirmed(self):
         state = prepare([item(dtype="262144xi1")])[0]
         self.assertEqual(state["status"], "RESOURCE_UNCONFIRMED")

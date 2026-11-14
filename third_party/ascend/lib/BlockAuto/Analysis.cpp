@@ -1851,7 +1851,9 @@ void CandidateIRAnalysis::checkResources(const O &item) const {
     A factors{conservative ? 8 : bits};
     for (int64_t dim : type.getShape())
       factors.push_back(dim);
-    bits = product(factors);
+    // The consumer emits zero-sized dummy buffers for unused helper scratch.
+    // Keep validating their offsets; only their allocation extent is zero.
+    bits = llvm::is_contained(type.getShape(), 0) ? 0 : product(factors);
     for (auto addr : cast.getAddrs()) {
       APInt offset;
       check(matchPattern(addr, m_ConstantInt(&offset)) &&

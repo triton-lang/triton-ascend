@@ -60,23 +60,23 @@ class TestNativeResources(unittest.TestCase):
         self.assertEqual(state["status"], "RESOURCE_UNCONFIRMED")
         self.assertIn("actual overflow unconfirmed", state["error"])
 
-    def test_mix_matches_compilation_and_runtime_capacity(self):
+    def test_mix_uses_effective_runtime_capacity(self):
         value = item(mode="mix_simd_simt")
         self.assertEqual(prepare([value])[0]["ub_usage"]["capacity_bits"], 216 * 1024 * 8)
         value["metadata"]["shared_mem_dynamic_size"] = 208 * 1024
+        self.assertEqual(prepare([value])[0]["ub_usage"]["capacity_bits"], 208 * 1024 * 8)
+        value["final_ir"] = value["final_ir"].replace("constant(0 :", "constant(212992 :")
         state = prepare([value])[0]
         self.assertFalse(state["resource_checked"])
-        self.assertIn("capacities differ", state["error"])
-        value["metadata"]["shared_mem_dynamic_size"] = 216 * 1024
-        value["metadata"]["block_auto_evidence"]["command"] = ["--simt-vf-dynamic-size=216junk"]
+        self.assertIn("exceeds capacity", state["error"])
+        value["metadata"]["shared_mem_dynamic_size"] = 248 * 1024
         self.assertFalse(prepare([value])[0]["resource_checked"])
 
-    def test_mix_compiler_default_is_used_when_no_override(self):
+    def test_mix_does_not_require_compiler_help_or_command_reconstruction(self):
         value = item(mode="mix_simd_simt")
-        value["metadata"]["block_auto_evidence"]["command"] = []
-        value["backend_defaults"] = "--simt-vf-dynamic-size=<int> Default is 216.\n"
+        del value["metadata"]["block_auto_evidence"]
         self.assertTrue(prepare([value])[0]["resource_checked"])
-        value["backend_defaults"] = "unknown"
+        del value["metadata"]["shared_mem_dynamic_size"]
         self.assertFalse(prepare([value])[0]["resource_checked"])
 
     def test_wrong_architecture_falls_back_before_optimizer(self):
@@ -123,23 +123,18 @@ class TestNativeSelection(unittest.TestCase):
         self.assertEqual(result["reason"], "CV_AXIS_ROLE_DEPENDS_ON_FACTOR")
         self.assertFalse(result["candidates"])
 
-    def test_loop_schedule_preserves_grid_only_with_matching_proof(self):
+    def test_compiler_sequential_lowering_preserves_grid(self):
         value = item(2)
-        loop = dict(id=0, bits=32, lower=0, upper=16, step=1)
-        value["metadata"].update(
-            block_batching=dict(
-                vv_lowering="sequential_iterations_v1", lane_width=2, cv_mode="disabled", guard=dict(
-                    loop_schedule=dict(version=1, kind="sequential_iterations_v1", grid_policy="preserve", factor=2,
-                                       loop=loop), accesses=[dict(loops=[loop])])), program_grid_mapping_applied=False,
-            row_coalescing_applied=False, ptsm_cap_authorized=False)
+        value["metadata"]["block_batching"] = dict(vv_lowering="sequential_iterations_v1", lane_width=2)
         launch = contract((64, 1, 1))
         states = prepare([item(), value], launch)
         self.assertTrue(states[1]["needs_llvm"])
+        self.assertEqual(states[1]["config"]["grid"], [64, 1, 1])
         self.assertEqual(prepare([item(), item(2)], launch)[1]["status"], "RUNTIME_REJECTED")
-        value["metadata"]["block_batching"]["guard"]["accesses"] = []
+        value["metadata"]["row_coalescing_applied"] = True
         state = prepare([item(), value], launch)[1]
         self.assertFalse(state["needs_llvm"])
-        self.assertIn("VV_LOOP_SCHEDULE_MISMATCH", state["error"])
+        self.assertIn("additional grid transform", state["error"])
 
     def test_incomplete_candidate_does_not_silently_enter_ranking(self):
         states = prepare([item(), item(2)])

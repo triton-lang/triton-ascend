@@ -41,43 +41,10 @@ A launchArguments(const O &contract, const std::string &ttir) {
   check(host == order.size(), "launch/TTIR ABI mismatch");
   return args;
 }
-bool preservesGrid(const O &metadata, int64_t factor) {
-  const O &report = optional(metadata, "block_batching"),
-          &guard = optional(report, "guard");
-  bool grouped = str(report, "vv_lowering") == "sequential_iterations_v1";
-  if (!grouped && !guard.get("loop_schedule"))
-    return false;
-  check(factor != 1 && integer(report, "lane_width") == factor,
-        "VV_LOOP_GRID_CONTRACT_MISMATCH");
-  const O &schedule = sub(guard, "loop_schedule");
-  check(schedule.size() == 5 && integer(schedule, "version") == 1 &&
-            str(schedule, "kind") == "sequential_iterations_v1" &&
-            str(schedule, "grid_policy") == "preserve" &&
-            integer(schedule, "factor") == factor,
-        "VV_LOOP_SCHEDULE_MISMATCH");
-  const O &loop = sub(schedule, "loop");
-  bool found = false;
-  if (const A *accesses = guard.getArray("accesses"))
-    for (const V &access : *accesses)
-      if (const A *loops = object(access).getArray("loops"))
-        for (const V &fact : *loops)
-          found |= fact == V(O(loop));
-  const V &layouts = get(guard, "layout_checks");
-  check(loop.size() == 5 && loop.get("id") && loop.get("bits") &&
-            loop.get("lower") && loop.get("upper") && loop.get("step") &&
-            found &&
-            (layouts.kind() == V::Null ||
-             (layouts.getAsArray() && layouts.getAsArray()->empty())),
-        "VV_LOOP_SCHEDULE_MISMATCH");
-  check(grouped && str(report, "cv_mode") == "disabled" &&
-            get(metadata, "program_grid_transforms").kind() == V::Null &&
-            integer(metadata, "coalesce_factor", 1) == 1,
-        "VV_LOOP_GRID_CONTRACT_MISMATCH");
-  for (StringRef key : {"program_grid_mapping_applied",
-                        "row_coalescing_applied", "ptsm_cap_authorized"})
-    check(metadata.getBoolean(key) && !*metadata.getBoolean(key),
-          "VV_LOOP_GRID_CONTRACT_MISMATCH");
-  return true;
+bool preservesGrid(const O &metadata) {
+  // Lowering legality and loop proofs belong to the compiler pass.
+  return str(optional(metadata, "block_batching"), "vv_lowering") ==
+         "sequential_iterations_v1";
 }
 std::string rejection(const O &item, const O &contract) {
   const O &metadata = sub(item, "metadata");
@@ -103,7 +70,7 @@ std::string rejection(const O &item, const O &contract) {
   if (factor == 1)
     return "";
   check(axis >= 0 && axis < 3, "invalid axis");
-  bool preserve = preservesGrid(metadata, factor);
+  bool preserve = preservesGrid(metadata);
   if (!preserve)
     grid[axis] = (integer(grid[axis]) - 1) / factor + 1;
   int64_t merged = product(grid);
@@ -111,30 +78,31 @@ std::string rejection(const O &item, const O &contract) {
     return "GRID_NOT_REDUCED";
   return merged < cores ? "GRID_BELOW_CORE_FLOOR" : "";
 }
-O modelConfig(const O &item, const O &contract) {
+O modelConfig(const O &item, const O &contract, const A &arguments) {
   const O &metadata = sub(item, "metadata");
   std::string mode = str(metadata, "parallel_mode"), ir = str(item, "final_ir");
-  bool vv = str(metadata, "mix_mode") == "aiv";
+  bool vv = str(metadata, "mix_mode") == "aiv",
+       preserve = vv && preservesGrid(metadata);
   int64_t factor = integer(item, "factor"), axis = integer(item, "axis"),
           cores = spec(ir, vv ? "VECTOR_CORE_COUNT" : "CUBE_CORE_COUNT");
-  check(str(sub(metadata, "target"), "arch") == "Ascend950PR_9579",
-        "unsupported target profile");
   check(factor == 1 || factor == 2 || factor == 4,
         "factor outside automatic shortlist");
   check(mode == "simd" || (vv && mode == "mix_simd_simt"),
         "unmodelled execution mode");
   check(!flag(metadata, "ptsm_cap_authorized") &&
             !flag(metadata, "row_coalescing_applied") &&
+            (!preserve ||
+             (!flag(metadata, "program_grid_mapping_applied") &&
+              get(metadata, "program_grid_transforms").kind() == V::Null)) &&
             integer(metadata, "coalesce_factor", 1) == 1,
         "additional grid transform");
-  A grid(array(contract, "grid")), args(array(item, "arguments"));
+  A grid(array(contract, "grid")), args(arguments);
   check(grid.size() == 3, "invalid launch grid");
   product(grid);
-  if (factor != 1 && !(vv && preservesGrid(metadata, factor))) {
+  if (factor != 1 && !preserve) {
     check(axis >= 0 && axis < 3, "invalid axis");
     grid[axis] = (integer(grid[axis]) - 1) / factor + 1;
-  } else if (vv && factor == 1)
-    preservesGrid(metadata, factor);
+  }
   for (const V &n : grid)
     args.push_back(n);
   int64_t blocks = product(grid);

@@ -20,9 +20,9 @@ using namespace llvm;
 using O = json::Object;
 using A = json::Array;
 using V = json::Value;
-inline void check(bool valid, const std::string &reason) {
+inline void check(bool valid, StringRef reason) {
   if (!valid)
-    throw std::runtime_error(reason);
+    throw std::runtime_error(reason.str());
 }
 inline const V &get(const O &o, StringRef key) {
   static const V missing = nullptr;
@@ -78,12 +78,12 @@ inline int64_t product(const A &values) {
 }
 std::vector<std::string> matches(StringRef text, const Regex &pattern,
                                  unsigned group = 1);
-int64_t spec(const std::string &ir, StringRef key);
+int64_t spec(StringRef ir, StringRef key);
 O resources(const O &item);
 A launchArguments(const O &contract, const std::string &ttir);
-bool preservesGrid(const O &metadata, int64_t factor);
+bool preservesGrid(const O &metadata);
 std::string rejection(const O &item, const O &contract);
-O modelConfig(const O &item, const O &contract);
+O modelConfig(const O &item, const O &contract, const A &arguments);
 std::string mergeKind(const O &metadata, int64_t factor, bool frontend = false);
 O planCV(const O &request);
 O rankCV(const O &records, const O &contract);

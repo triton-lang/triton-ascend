@@ -191,7 +191,7 @@ class TestModelCache(unittest.TestCase):
         (source / "module.hivm.opt.mlir").write_text("module {}")
         (source / "kernel.ll").write_text(text)
         metadata = {"hash": key}
-        evidence = self.artifacts.collect(source, b"\x7fELF", self.compiler, metadata, [], cache_factory=self.cache)
+        evidence = self.artifacts.collect(source, self.compiler, metadata, cache_factory=self.cache)
         self.assertEqual(evidence["status"], "COLLECTED")
         metadata["block_auto_evidence"] = evidence
         return SimpleNamespace(metadata=SimpleNamespace(_asdict=lambda: metadata),

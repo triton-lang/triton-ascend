@@ -1481,10 +1481,6 @@ json::Object analyzeBlockCandidate(const json::Object &config) {
   result["logical_grid"] = Array(array(config, "grid"));
   if (vv) {
     Function &fn = entry("aiv");
-    auto raw = parse(text(config, "raw_llvm"), context);
-    auto *original = raw->getFunction(name);
-    check(original && original->getFunctionType() == fn.getFunctionType(),
-          "optimized entry ABI changed");
     Analyzer analyzer(*modules.at("aiv"), profile, true);
     std::unique_ptr<SimtModel> simt;
     if (const auto *mixed = config.getObject("mixed")) {

@@ -58,7 +58,8 @@ def select_candidates(candidates, contract):
         inputs = [{
             k: v
             for k, v in item.items()
-            if k not in ("metadata", "files", "final_ir", "ttir", "ub_usage", "arguments", "meta_library")
+            if k not in ("metadata", "files", "final_ir", "ttir", "ub_usage", "arguments",
+                         "meta_library") and not (k == "llvm" and item.get("vv"))
         }
                   for item in items]
         report = _native("rank", contract, candidates=inputs)

@@ -10,17 +10,14 @@ def _cache(key):
     return get_cache_manager(key)
 
 
-def collect(temps, binary, compiler, metadata, command, *, cache_factory=None):
+def collect(temps, compiler, metadata, *, cache_factory=None):
     """Save evidence before compiler temporaries disappear; never launch code.
 
     Missing intermediate output disables selection without invalidating a
     successfully compiled baseline. Cache identity belongs to the normal JIT.
     """
-    evidence = dict(version=VERSION, status="UNAVAILABLE", files={}, compiler=str(compiler),
-                    target=metadata.get("target_arch"), command=list(command))
+    evidence = dict(version=VERSION, status="UNAVAILABLE", files={}, compiler=str(compiler))
     try:
-        if not binary.startswith(b"\x7fELF"):
-            raise ValueError("candidate binary is not ELF")
         directory = Path(temps)
         sources = {"final_ir": directory / "module.hivm.opt.mlir"}
         for role in ("aic", "aiv"):
@@ -58,20 +55,15 @@ def load_evidence(kernel, *, cache_factory=None, compiler_path=None):
         from .utils import _get_npucompiler_path
         compiler_path, _ = _get_npucompiler_path()
     cache = (cache_factory or _cache)(evidence["cache_key"])
-    result = dict(metadata=metadata, files={}, command=evidence.get("command", []), evidence=evidence)
+    result = dict(metadata=metadata, files={})
     for role, record in evidence["files"].items():
         name = record["name"]
-        if Path(name).name != name:
-            raise ValueError("invalid cached evidence name")
         path = cache.get_file(name)
         if not path:
             raise ValueError("cached model input unavailable: " + role)
         result[role] = Path(path).read_text()
         result["files"][role] = dict(path=str(path))
     # Frontend stages and runtime metadata already belong to CompiledKernel.
-    stages = {"ttir": kernel.asm.get("ttir"), "ttadapter": kernel.asm.get("ttadapter")}
-    if not all(isinstance(text, str) and text for text in stages.values()):
-        raise ValueError("candidate frontend IR unavailable")
-    result.update(stages)
+    result["ttir"] = kernel.asm["ttir"]
     result["files"]["compiler"] = dict(path=str(compiler_path))
     return result

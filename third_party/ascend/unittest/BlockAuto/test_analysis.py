@@ -7,8 +7,8 @@ from triton._C.libtriton import ascend
 
 
 def analyze(source):
-    request = dict(mode="vv", modules={"aiv": source}, raw_llvm=source, name="kernel", arguments=[], grid=[1, 1, 1],
-                   cores=56, blocks=1, auto_blockify=True)
+    request = dict(mode="vv", modules={"aiv": source}, name="kernel", arguments=[], grid=[1, 1, 1], cores=56, blocks=1,
+                   auto_blockify=True)
     return json.loads(ascend.analyze_block_candidate(json.dumps(request)))
 
 

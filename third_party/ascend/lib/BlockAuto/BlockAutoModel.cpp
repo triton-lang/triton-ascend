@@ -49,9 +49,7 @@ static O prepare(const O &item, const O &contract) {
     } else
       state["merge_kind"] =
           mergeKind(sub(item, "metadata"), integer(item, "factor"));
-    O input(item);
-    input["arguments"] = get(state, "arguments");
-    state["config"] = modelConfig(input, contract);
+    state["config"] = modelConfig(item, contract, array(state, "arguments"));
     state["needs_llvm"] = vv;
   } catch (const std::exception &error) {
     if (vv)
@@ -130,8 +128,6 @@ static O rank(const Items &items, const O &contract) {
         for (auto &[role, source] : *config.getObject("modules"))
           source = item.getString(vv ? "optimized_llvm" : "llvm_" + role.str())
                        .value_or(item.getString("llvm").value_or(""));
-        if (vv)
-          config["raw_llvm"] = item.getString("llvm").value_or("");
         O trace = analyzeBlockCandidate(config);
         if (vv)
           update(row, std::move(trace));

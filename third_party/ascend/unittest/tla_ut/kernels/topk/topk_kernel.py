@@ -638,12 +638,12 @@ def _order_int64(x, valid, lane, WIDTH: tl.constexpr, LARGEST: tl.constexpr):
     low = key.to(tl.uint32).to(tl.int64)
     high = (key >> 32) + 0x80000000
     low_pair = (low << bits) | (WIDTH - lane).to(tl.int64)
-    ordered_low = al.sort(tl.where(valid, low_pair, 0), descending=True)
+    ordered_low = tl.sort(tl.where(valid, low_pair, 0), descending=True)
     low_order = (ordered_low & suffix_mask).to(tl.int32)
     source = tl.maximum(0, WIDTH - low_order - (low_order == 0).to(tl.int32))
     high = tl.gather(high, source, axis=0)
     high_pair = (high << bits) | (WIDTH - lane).to(tl.int64)
-    ordered_high = al.sort(tl.where(low_order > 0, high_pair, 0), descending=True)
+    ordered_high = tl.sort(tl.where(low_order > 0, high_pair, 0), descending=True)
     high_order = (ordered_high & suffix_mask).to(tl.int32)
     source = tl.maximum(0, WIDTH - high_order - (high_order == 0).to(tl.int32))
     return tl.where(high_order > 0, tl.gather(low_order, source, axis=0), 0)
@@ -699,8 +699,16 @@ def _order_topk(X, Indices, V, I, N: tl.constexpr, K: tl.constexpr, INNER: tl.co
         else:
             pair = (key.to(tl.int64) << index_bits) | (WIDTH - lane).to(tl.int64)
         selected: tl.constexpr = triton.next_power_of_2(K)
-        ordered = al.sort(tl.where(lane < N, pair, 0), descending=True)
-        ordered = tl.gather(ordered, tl.broadcast_to(tl.arange(0, selected)[None, :], (BATCH, selected)), axis=1)
+        if X.dtype.element_ty.primitive_bitwidth <= 16 and index_bits <= 14:
+            # Encode the packed key as a positive normal float. A bitcast
+            # preserves each bit and uses the hardware float sorter directly.
+            score = (tl.where(lane < N, pair, 0) + 0x00800000).to(tl.float32, bitcast=True)
+            ordered = al.sort(score, descending=True).to(tl.int32, bitcast=True) - 0x00800000
+            order_lane = tl.broadcast_to(tl.arange(0, selected)[None, :], (BATCH, selected))
+            ordered = tl.gather(ordered, order_lane, axis=1)
+        else:
+            # Compare wide integer keys directly to preserve their low bits.
+            ordered = tl.topk(tl.where(lane < N, pair, 0), selected)
         local = WIDTH - (ordered & ((1 << index_bits) - 1)).to(tl.int32)
         out = tl.arange(0, selected)[None, :]
         valid = (row < ROWS) & (out < K)

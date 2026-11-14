@@ -127,6 +127,25 @@ def test_int64_full_range():
         _check_matrix(cpu, expected, actual, -1, largest)
 
 
+@pytest.mark.parametrize("dtype", [torch.float32, torch.int32, torch.int64])
+def test_wide_order_keys(dtype):
+    generator = torch.Generator().manual_seed(17)
+    if dtype == torch.int64:
+        high = torch.randint(-2**31, 2**31, (3, 2049), generator=generator)
+        low = torch.randint(0, 2**32, high.shape, generator=generator)
+        cpu = (high << 32) | low
+        cpu[:, ::4] = low[:, ::4]
+    elif dtype == torch.int32:
+        cpu = torch.randint(-2**31, 2**31, (3, 257), generator=generator, dtype=dtype)
+    else:
+        cpu = torch.randn((3, 257), generator=generator, dtype=dtype)
+    x = cpu.npu()
+    topk = _kernels().topk
+    for largest in (True, False):
+        expected = torch.topk(cpu, 65, largest=largest).values
+        _check_matrix(cpu, expected, topk(x, 65, largest=largest), -1, largest)
+
+
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
 def test_tiled_tail(dtype):
     cpu = torch.randint(-7, 8, (10003, ), generator=torch.Generator().manual_seed(23)).to(dtype)

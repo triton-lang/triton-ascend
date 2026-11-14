@@ -16,9 +16,9 @@
 // CHECK: %[[IN_CAST1:[A-Za-z0-9_]+]] = memref.reinterpret_cast %arg2 to offset: [%[[IN_OFF1:[A-Za-z0-9_]+]]], sizes: [4, 64], strides: [%[[IN_STRIDE1]], 1] : memref<?xf32> to memref<4x64xf32, strided<[?, 1], offset: ?>>
 // CHECK: memref.copy %{{.*}}, %{{.*}} : memref<?x?xf32, strided<[?, 1], offset: ?>> to memref<?x?xf32, strided<[64, 1]>>
 // CHECK: %[[TENSOR1:[A-Za-z0-9_]+]] = bufferization.to_tensor %{{.*}} restrict writable : memref<4x64xf32>
+// CHECK: %[[OUT_CAST1:[A-Za-z0-9_]+]] = memref.reinterpret_cast %arg3 to offset: [%[[OUT_OFF1:[A-Za-z0-9_]+]]], sizes: [64, 4], strides: [%[[OUT_STRIDE1]], 1] : memref<?xf32> to memref<64x4xf32, strided<[?, 1], offset: ?>>
 // CHECK: %[[EMPTY1:[A-Za-z0-9_]+]] = tensor.empty() : tensor<64x4xf32>
 // CHECK-NEXT: %[[TRANS1:[A-Za-z0-9_]+]] = linalg.transpose ins(%[[TENSOR1]] : tensor<4x64xf32>) outs(%[[EMPTY1]] : tensor<64x4xf32>) permutation = [1, 0]
-// CHECK: %[[OUT_CAST1:[A-Za-z0-9_]+]] = memref.reinterpret_cast %arg3 to offset: [%[[OUT_OFF1:[A-Za-z0-9_]+]]], sizes: [64, 4], strides: [%[[OUT_STRIDE1]], 1] : memref<?xf32> to memref<64x4xf32, strided<[?, 1], offset: ?>>
 // CHECK: %[[SLICE1:[A-Za-z0-9_]+]] = tensor.extract_slice %[[TRANS1]][0, 0] [%[[COLS1:[A-Za-z0-9_]+]], %[[ROWS1:[A-Za-z0-9_]+]]] [1, 1] : tensor<64x4xf32> to tensor<?x?xf32>
 
 // CHECK-LABEL: func.func @make_tensor_ptr_implicit_perm_load_2d(

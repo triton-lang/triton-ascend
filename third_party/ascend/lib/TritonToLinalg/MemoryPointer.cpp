@@ -33,6 +33,7 @@
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/SetVector.h"
+#include <iterator>
 
 using namespace mlir;
 namespace mlir::triton {
@@ -162,10 +163,44 @@ static OpFoldResult remap(OpFoldResult field,
   return field;
 }
 
-static FailureOr<Value>
-materializeMemoryPointer(const ptr::PtrInfo &info, Location loc,
-                         ConversionPatternRewriter &rewriter,
-                         OpFoldResult remappedOrigin = {}) {
+// Keep the producer-local view order of structured AddPtr lowering. Address
+// arithmetic and the memory operation stay at their existing insertion points.
+static void trySetAddPtrViewInsertionPoint(
+    triton::AddPtrOp anchor, Value base, OpFoldResult offset,
+    ArrayRef<OpFoldResult> sizes, ArrayRef<OpFoldResult> strides,
+    ConversionPatternRewriter &rewriter) {
+  auto original = rewriter.saveInsertionPoint();
+  Block *block = original.getBlock();
+  if (!anchor || !block || anchor->getBlock() != block)
+    return;
+  if (original.getPoint() != block->end() &&
+      !anchor->isBeforeInBlock(&*original.getPoint()))
+    return;
+
+  SmallVector<Value> dependencies{base};
+  auto addDependency = [&](OpFoldResult field) {
+    if (auto value = dyn_cast<Value>(field))
+      dependencies.push_back(value);
+  };
+  addDependency(offset);
+  for (OpFoldResult size : sizes)
+    addDependency(size);
+  for (OpFoldResult stride : strides)
+    addDependency(stride);
+
+  // Append after views already created at this anchor, rather than reversing
+  // their order when several accesses share one pointer.
+  auto point = std::next(anchor->getIterator());
+  while (point != original.getPoint() && isa<memref::ReinterpretCastOp>(*point))
+    ++point;
+  rewriter.setInsertionPoint(block, point);
+  if (failed(ptr::checkInsertionPoint(rewriter, dependencies)))
+    rewriter.restoreInsertionPoint(original);
+}
+
+static FailureOr<Value> materializeMemoryPointer(
+    const ptr::PtrInfo &info, Location loc, ConversionPatternRewriter &rewriter,
+    OpFoldResult remappedOrigin = {}, triton::AddPtrOp viewAnchor = {}) {
   Value sourceBase = info.base;
   if (auto bridge = sourceBase.getDefiningOp<UnrealizedConversionCastOp>();
       bridge && bridge.getInputs().size() == 1 &&
@@ -236,6 +271,9 @@ materializeMemoryPointer(const ptr::PtrInfo &info, Location loc,
                                        staticStrides);
   auto type = MemRefType::get(shape, baseType.getElementType(), layout,
                               baseType.getMemorySpace());
+  OpBuilder::InsertionGuard guard(rewriter);
+  trySetAddPtrViewInsertionPoint(viewAnchor, base, offset, sizes, strides,
+                                 rewriter);
   return rewriter
       .create<memref::ReinterpretCastOp>(loc, type, base, offset, sizes,
                                          strides)
@@ -256,8 +294,18 @@ FailureOr<Value> materializeMemoryPointer(Value pointer, Value converted,
   const ptr::PtrInfo &info = found->second;
   if (!info.hasScalarBase() || !info.offsets.hasStructuredForm())
     return failure();
+  // Scalar pointers and block descriptors retain their existing placement.
+  // In particular, checked MakeTensorPtr origins use a separate contract.
+  triton::AddPtrOp viewAnchor;
+  if (auto tensor = dyn_cast<RankedTensorType>(pointer.getType());
+      tensor && tensor.hasStaticShape() && !info.block) {
+    auto element = dyn_cast<triton::PointerType>(tensor.getElementType());
+    if (element && !isa<ShapedType>(element.getPointeeType()))
+      viewAnchor = pointer.getDefiningOp<triton::AddPtrOp>();
+  }
   Location loc = pointer.getLoc();
-  return materializeMemoryPointer(info, loc, rewriter);
+  return materializeMemoryPointer(info, loc, rewriter,
+                                  /*remappedOrigin=*/{}, viewAnchor);
 }
 
 FailureOr<BoundaryCheckedPointer> materializeBoundaryCheckedMemoryPointer(

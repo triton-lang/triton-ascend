@@ -28,11 +28,8 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/SplittedIfWrapSsbufIf.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfoLegacy.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimesLegacy.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopOps.h"
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopOpsLegacy.h"
 #include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -322,48 +319,18 @@ void AddControlFlowConditionPass::runOnOperation() {
   initDependentMapPass->setConditionInfo(&info);
   pm.addPass(std::move(initDependentMapPass));
 
-  // The kernels of legacyKernel keep the control flow conditions of the
-  // upstream implementation: they are not rewritten by the normal preload
-  // scheme. Every other kernel goes through the normal preload scheme.
-  // A module with an outer main loop keeps the upstream conditions too, see
-  // the useLegacyConditions computation below.
+  // Step4: Update for ops with block counters and inner dependency conditions,
+  // and insert PIPE_S inter-core synchronization
+  std::unique_ptr<UpdateLoopOpsPass> updateLoopOpsPass(new UpdateLoopOpsPass());
+  updateLoopOpsPass->setConditionInfo(&info);
+  pm.addPass(std::move(updateLoopOpsPass));
+
+  // Step5:Update the conditions of ifOp based on the intraCoreDependentMap and
+  // crossCoreDependentMap
+
   constexpr llvm::StringLiteral legacyKernel[] = {
-      "chunk_gated_delta_rule_fwd_kernel_h_blockdim64_npu_kernel",
-      "kernel_da_bwd_q_u",
-      "kernel_sdpa_bwd_q",
-      "_sdpa_infer_kernel",
-      "paged_prefill_kernel",
-      "flex_attention_backward_dkdv_kernel",
-      "flex_attention_backward_dq_kernel",
-      "flex_attention_kernel",
-      "kernel_sda_bwd_q_down",
-      "kernel_sda_bwd_q_up",
-      "paged_decode_fd_kernel",
-      "_swa_bwd_dkdv_kernel",
-      "kernel_da_bwd_d",
-      "kernel_da_bwd_kv_ul",
-      "kernel_da_bwd_kv_ur",
-      "_hstu_attn_fwd",
-      "kernel_sda_bwd_d",
-      "kernel_sda_bwd_kv_left",
-      "kernel_sda_bwd_kv_right",
-      "chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64",
-      "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
-      "chunk_bwd_kernel_dv_local",
-      "fwd_kernel",
-      "merge_fwd_bwd_kernel",
-      "parallel_path_fwd_kernel",
-      "_jagged_dense_flash_attention_bwd_dv_db_dq_kernel",
-      "parallel_nsa_compression_bwd_kernel_dq",
-      "parallel_nsa_compression_bwd_kernel_dkv",
-      "kernel_sdpa_bwd_kv",
-      "kernel_sda_fwd_down",
-      "kernel_sda_fwd_up"};
-  // The outer main loop scheduling feature is built on the control flow
-  // scheme of the upstream implementation: its static ordinal schedule and its
-  // native credit handshake are not modelled by the normal preload scheme.
-  // A module with an outer main loop keeps the upstream conditions.
-  bool useLegacyConditions = CVPipeline::hasOuterMainLoop(module);
+      "chunk_gated_delta_rule_fwd_kernel_h_blockdim128"};
+  bool useLegacyConditions = false;
   for (auto &op : module.getOps()) {
     auto funcOp = llvm::dyn_cast<func::FuncOp>(&op);
     if (funcOp && llvm::is_contained(legacyKernel, funcOp.getSymName())) {
@@ -372,46 +339,15 @@ void AddControlFlowConditionPass::runOnOperation() {
     }
   }
 
-  if (useLegacyConditions) {
-    // Step4: Update for ops with block counters and inner dependency
-    // conditions, and insert PIPE_S inter-core synchronization
-    std::unique_ptr<UpdateLoopOpsPassLegacy> legacyUpdateLoopOpsPass(
-        new UpdateLoopOpsPassLegacy());
-    legacyUpdateLoopOpsPass->setConditionInfo(&info);
-    pm.addPass(std::move(legacyUpdateLoopOpsPass));
+  auto updatePass = std::make_unique<UpdateConditionInfoPass>();
+  updatePass->setConditionInfo(&info);
+  pm.addPass(std::move(updatePass));
 
-    // Step5:Update the conditions of ifOp based on the intraCoreDependentMap
-    // and crossCoreDependentMap
-    std::unique_ptr<UpdateConditionInfoPassLegacy> legacyUpdatePass(
-        new UpdateConditionInfoPassLegacy());
-    legacyUpdatePass->setConditionInfo(&info);
-    pm.addPass(std::move(legacyUpdatePass));
-
-    // Step6: Update for loop iteration times based on intraCoreDependentMap
-    std::unique_ptr<UpdateLoopIterTimesPassLegacy>
-        legacyUpdateLoopIterTimesPass(new UpdateLoopIterTimesPassLegacy());
-    legacyUpdateLoopIterTimesPass->setConditionInfo(&info);
-    pm.addPass(std::move(legacyUpdateLoopIterTimesPass));
-  } else {
-    // Step4: Update for ops with block counters and inner dependency
-    // conditions, and insert PIPE_S inter-core synchronization
-    std::unique_ptr<UpdateLoopOpsPass> updateLoopOpsPass(
-        new UpdateLoopOpsPass());
-    updateLoopOpsPass->setConditionInfo(&info);
-    pm.addPass(std::move(updateLoopOpsPass));
-
-    // Step5:Update the conditions of ifOp based on the intraCoreDependentMap
-    // and crossCoreDependentMap
-    auto updatePass = std::make_unique<UpdateConditionInfoPass>();
-    updatePass->setConditionInfo(&info);
-    pm.addPass(std::move(updatePass));
-
-    // Step6: Update for loop iteration times based on intraCoreDependentMap
-    std::unique_ptr<UpdateLoopIterTimesPass> updateLoopIterTimesPass(
-        new UpdateLoopIterTimesPass());
-    updateLoopIterTimesPass->setConditionInfo(&info);
-    pm.addPass(std::move(updateLoopIterTimesPass));
-  }
+  // Step6: Update for loop iteration times based on intraCoreDependentMap
+  std::unique_ptr<UpdateLoopIterTimesPass> updateLoopIterTimesPass(
+      new UpdateLoopIterTimesPass());
+  updateLoopIterTimesPass->setConditionInfo(&info);
+  pm.addPass(std::move(updateLoopIterTimesPass));
 
   // Step7: Use the splitted_if condition to wrap each ssbuffer.if.
   std::unique_ptr<SplittedIfWrapSsbufIfPass> splittedIfWrapSsbufIfPass(
@@ -446,7 +382,6 @@ void registerAddControlFlowConditionPasses() {
   registerPass(createCreateIfOpsPass);
   registerPass(createProcessArgsPass);
   registerPass(createUpdateLoopOpsPass);
-  registerPass(createUpdateLoopIterTimesPass);
   registerPass(createAddControlFlowConditionPass);
 }
 } // namespace triton

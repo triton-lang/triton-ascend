@@ -3257,6 +3257,21 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                    .getResult(0);
   }
   if (useNativeMx) {
+    auto lhsTy = cast<RankedTensorType>(lhs.getType());
+    auto rhsTy = cast<RankedTensorType>(rhs.getType());
+    int64_t lhsK = lhsTy.getShape()[1];
+    int64_t rhsK = rhsTy.getShape()[0];
+
+    if (!ShapedType::isDynamic(lhsK) && !ShapedType::isDynamic(rhsK)) {
+      if (lhsK != rhsK) {
+        return op.emitError()
+               << "MatMulMx: lhs K (" << lhsK << ") != rhs K (" << rhsK << ")";
+      }
+      if (lhsK % 64 != 0) {
+        return op.emitError() << "MatMulMx: static K = " << lhsK
+                              << ", must be divisible by 64";
+      }
+    }
     if (!rhsScale) {
       auto rhsTy = cast<RankedTensorType>(rhs.getType());
       int64_t k = rhsTy.getDimSize(rhsTy.getRank() - 2);

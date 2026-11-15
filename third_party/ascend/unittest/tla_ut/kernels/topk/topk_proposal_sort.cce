@@ -1,0 +1,48 @@
+using u32 = unsigned int;
+using i32 = int;
+using u64 = unsigned long long;
+using i64 = long long;
+
+template <class T> struct UbMemref {
+  __ubuf__ T *allocated;
+  __ubuf__ T *aligned;
+  i64 offset;
+  i64 length;
+  i64 stride;
+
+  __aicore__ inline __ubuf__ T *data() const { return aligned + offset; }
+};
+
+extern "C" __aicore__ __attribute__((always_inline)) void
+_mlir_ciface_sort_proposals(UbMemref<float> *scores, UbMemref<u32> *indices,
+                           i32 width, UbMemref<float> *sorted,
+                           UbMemref<float> *scratch) {
+  // The vector sorter produces one eight-byte proposal per score.
+  constexpr u32 run = 32;
+  constexpr u32 wordsPerProposal = 2;
+  u32 mergePasses = 0;
+  for (u32 size = run; size < width; size *= 4)
+    ++mergePasses;
+  auto proposals = mergePasses % 2 == 0 ? sorted->data() : scratch->data();
+  auto temporary = mergePasses % 2 == 0 ? scratch->data() : sorted->data();
+  vbs(proposals, scores->data(), indices->data(), u64(width / run) << 56);
+
+  // Width is a power of two. Each level has either four equal lists per
+  // group, or one final two-list group.
+  for (u32 size = run; size < width; size *= 4) {
+    u32 lists = width / size >= 4 ? 4 : 2;
+    u32 repeats = width / (lists * size);
+    u64 lengths = size | (u64(size) << 16);
+    if (lists == 4)
+      lengths |= lengths << 32;
+    u64 config = repeats | (u64((1u << lists) - 1) << 8);
+    u32 offset = size * wordsPerProposal;
+    __ubuf__ float *sources[4] = {proposals, proposals + offset,
+                                   proposals + (lists == 4 ? 2 * offset : 0),
+                                   proposals + (lists == 4 ? 3 * offset : 0)};
+    vmrgsort4(temporary, sources, lengths, config);
+    auto buffer = proposals;
+    proposals = temporary;
+    temporary = buffer;
+  }
+}

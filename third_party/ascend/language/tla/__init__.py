@@ -25,7 +25,7 @@ from the TLA repo's SIMD VF additions.  It does **not** reuse the existing
 ``al``/``bl`` general interfaces (different programming paradigm).
 
 Exports: ``alloc`` (on-chip buffer + versions),
-``fill`` (scalar fill of a contiguous UB buffer),
+``fill`` (scalar fill of a contiguous UB buffer), ``histogram`` (UB bin counts),
 explicit DMA routes, ``view`` (GM view), ``scope`` (core-mode scopes:
 ``tla.scope.simd()`` / ``tla.scope.cube()``),
 ``simd`` (vector-register ops), ``where`` (eager scalar/SIMD select),
@@ -71,6 +71,7 @@ from .core import AddressSpace, buffer, buffer_type, vector, vector_type
 from .scope import scope
 from .alloc import alloc
 from .fill import fill
+from .histogram import histogram
 from .dma import (
     PadMode,
     EvictionPolicy,
@@ -199,6 +200,7 @@ __all__ = [
     # buffer alloc / view
     "alloc",
     "fill",
+    "histogram",
     "view",
     "subview",
     "reshape",

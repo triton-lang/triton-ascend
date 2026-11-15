@@ -1,14 +1,35 @@
 #pragma once
 
-// Clang >= 18 predefines the __MEMORY_SCOPE_* macros (InitPreprocessor.cpp);
-// older clang (e.g. 15 in CANN 8.5 containers) does not. Values match
-// clang's AtomicScopeModel: SYSTEM=0, DEVICE=1, WRKGRP=2, WVFRNT=3, SINGLE=4.
-#if defined(__clang__) && !defined(__MEMORY_SCOPE_WRKGRP)
+// Clang >= 18 predefines the __MEMORY_SCOPE_* macros (InitPreprocessor.cpp)
+// and declares the __scoped_atomic_* builtins (Builtins.td); older clang
+// does neither. Some Ascend CI containers additionally ship clang builds
+// that declare the scoped atomics but not the scope macros, so detect both
+// independently instead of keying on the version.
+#if defined(__clang__)
+// Scope macros; values match clang's AtomicScopeModel:
+// SYSTEM=0, DEVICE=1, WRKGRP=2, WVFRNT=3, SINGLE=4.
+#ifndef __MEMORY_SCOPE_WRKGRP
 #define __MEMORY_SCOPE_SYSTEM 0
 #define __MEMORY_SCOPE_DEVICE 1
 #define __MEMORY_SCOPE_WRKGRP 2
 #define __MEMORY_SCOPE_WVFRNT 3
 #define __MEMORY_SCOPE_SINGLE 4
+#endif
+// Scoped atomics; __is_identifier is 1 only when the name is not a builtin.
+// Fall back to the plain __atomic_* builtins (available in all clang builds
+// and in CUDA device mode), ignoring the memory-scope argument: gsan.ll is
+// only used by the NVIDIA backend for debugging, so the weaker scope is
+// acceptable for this compatibility path.
+#if __is_identifier(__scoped_atomic_fetch_add)
+#define __scoped_atomic_fetch_add(p, v, o, s) __atomic_fetch_add(p, v, o)
+#define __scoped_atomic_load_n(p, o, s) __atomic_load_n(p, o)
+#define __scoped_atomic_fetch_sub(p, v, o, s) __atomic_fetch_sub(p, v, o)
+#define __scoped_atomic_fetch_and(p, v, o, s) __atomic_fetch_and(p, v, o)
+#define __scoped_atomic_store_n(p, v, o, s) __atomic_store_n(p, v, o)
+#define __scoped_atomic_thread_fence(o, s) __atomic_thread_fence(o)
+#define __scoped_atomic_compare_exchange_n(p, e, d, w, o, f, s) \
+  __atomic_compare_exchange_n(p, e, d, w, o, f)
+#endif
 #endif
 
 #if defined(__CUDA__) && defined(__clang__)

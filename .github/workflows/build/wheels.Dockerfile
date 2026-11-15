@@ -79,6 +79,9 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     && export CCACHE_MAXSIZE=20G \
     && echo "cgroup: $(cg_cpus) CPUs, mem $(( $(cg_mem_bytes) / (1024*1024*1024) )) GiB -> MAX_JOBS=$MAX_JOBS, ccache at ${CCACHE_DIR} (max ${CCACHE_MAXSIZE})" \
     && export PATH="/opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin:${PATH}" \
+    && NEW_LIBSTDCXX="$(find /opt/rh/gcc-toolset-*/root/usr/lib64 /opt/rh/gcc-toolset-*/root/usr/lib -maxdepth 1 -name 'libstdc++.so.6' 2>/dev/null | sort -V | tail -1)" \
+    && if [ -n "${NEW_LIBSTDCXX}" ]; then export LD_LIBRARY_PATH="$(dirname "${NEW_LIBSTDCXX}")${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"; fi \
+    && echo "libstdc++ for LLVM tool binaries: ${NEW_LIBSTDCXX:-<none found, using image default>}" \
     && if [ -f setup_ascend.py ]; then \
          SETUP_DIR="./"; SETUP_PY="setup_ascend.py"; \
        elif [ -f setup.py ]; then \

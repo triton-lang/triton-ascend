@@ -20,13 +20,16 @@ def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
     if "block_batching_factor" in fn.arg_names or kwargs.get("block_batching_factor", "auto") != "auto":
         return kwargs, grid
     from .block_batching import _capture_state, supports_target
+    from .reuse.config import enabled as reuse_enabled
 
     def baseline():
         result = dict(kwargs, block_batching_factor=1)
         result.pop("block_auto_contract", None)
         return result, grid
 
-    if (warmup or getattr(getattr(fn, "ASTSource", None), "frontend_kind", "triton") != "triton"
+    # Dynamic reuse owns constexpr/tile adaptation and must receive the original
+    # callable grid. A concrete auto contract would split its variant families.
+    if (reuse_enabled() or warmup or getattr(getattr(fn, "ASTSource", None), "frontend_kind", "triton") != "triton"
             or not supports_target(backend.target.arch) or _capture_state() is not False):
         return baseline()
     bound, specialization, _ = fn.device_caches[device][4](*args, **kwargs)
@@ -61,6 +64,22 @@ def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
     }
     return dict(result, block_batching_factor="auto", block_batching_grid=extents,
                 block_auto_contract=json.dumps(contract, sort_keys=True, separators=(",", ":"), allow_nan=False)), grid
+
+
+def initialize_auto_kernel(cache, kernel):
+    """Share identical automatic decisions within the native per-device cache.
+
+    Launch contracts may differ in runtime scalars while producing the same
+    complete artifact and decision. Keep those contracts separate for selection,
+    but do not load an identical executable again. Clearing the JIT cache also
+    clears this identity; no process-global device handles are retained.
+    """
+    from .block_batching import BatchKernel
+    if isinstance(kernel, BatchKernel) and hasattr(kernel, "block_auto_selection"):
+        key = ("block_auto_kernel", kernel.hash, repr(kernel.block_batching), repr(kernel.block_auto_selection))
+        kernel = cache.setdefault(key, kernel)
+    kernel._init_handles()
+    return kernel
 
 
 def _probe(backend, frozen, options, env_vars, axis, factor):

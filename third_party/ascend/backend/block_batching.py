@@ -7,7 +7,7 @@ compiler artifacts; rejected or guarded calls select the complete baseline.
 """
 from dataclasses import dataclass
 
-IMPLEMENTATION_VERSION = 56
+IMPLEMENTATION_VERSION = 57
 
 
 def supports_target(arch):
@@ -43,7 +43,7 @@ class _BatchLaunchHandler:
     """Block-batching policy behind the existing backend JIT continuation."""
 
     def run(self, fn, args, kwargs, grid, warmup, device, stream, backend, jit_tail):
-        from .block_auto_dispatch import prepare_launch
+        from .block_auto_dispatch import initialize_auto_kernel, prepare_launch
         kwargs, grid = prepare_launch(fn, args, kwargs, grid, warmup, device, backend)
         # Preserve pre-run hooks, cache identity and single callback evaluation
         # without adding a hook to the common JIT frontend.
@@ -55,6 +55,10 @@ class _BatchLaunchHandler:
             from .reuse.bridge import get_handler
 
             return get_handler().run(fn, args, kwargs, grid, warmup, device, stream, backend, jit_tail)
+        if kwargs.get("block_batching_factor") == "auto":
+            cache = fn.device_caches[device][0]
+            return jit_tail(args, kwargs, grid, warmup, device, stream,
+                            initialize=lambda kernel: initialize_auto_kernel(cache, kernel))
         return jit_tail(args, kwargs, grid, warmup, device, stream)
 
 

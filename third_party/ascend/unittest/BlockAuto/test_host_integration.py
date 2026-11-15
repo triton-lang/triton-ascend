@@ -160,18 +160,46 @@ class TestHostIntegration(unittest.TestCase):
                                                  self.backend)
         self.assertNotEqual(first["block_auto_contract"], second["block_auto_contract"])
 
-    def test_reuse_receives_prepared_contract_and_continues_once(self):
+    def test_reuse_keeps_original_grid_and_unfragmented_options(self):
         self.config.enabled = lambda: True
+        grid = Mock(side_effect=AssertionError("reuse must receive the unevaluated grid"))
 
         def reuse(fn, args, kwargs, grid, warmup, device, stream, backend, tail):
             self.assertIs(fn, self.fn)
-            self.assertIn("block_auto_contract", kwargs)
+            self.assertNotIn("block_auto_contract", kwargs)
+            self.assertEqual(kwargs["block_batching_factor"], 1)
             return tail(args, kwargs, grid, warmup, device, stream)
 
         with patch.dict(sys.modules,
                         {PACKAGE + ".reuse.bridge": module("bridge", get_handler=lambda: SimpleNamespace(run=reuse))}):
-            self.assertIs(self.run_handler(), self.result)
+            self.assertIs(self.run_handler(grid), self.result)
+        grid.assert_not_called()
+        self.assertNotIn("bind", self.calls)
         self.assertEqual(len([item for item in self.calls if isinstance(item, tuple)]), 1)
+
+    def test_equivalent_auto_decisions_share_device_handle_and_identity(self):
+        cache = {}
+
+        class Kernel:
+            hash = "same-artifact"
+            block_batching = {"reason": "DISABLED"}
+            block_auto_selection = {"selected_factor": 1, "reason": "GRID_BELOW_CORE_FLOOR"}
+
+            def __init__(self):
+                self._init_handles = Mock()
+
+        first, second = Kernel(), Kernel()
+        with patch.object(self.batching, "BatchKernel", Kernel):
+            self.assertIs(self.dispatch.initialize_auto_kernel(cache, first), first)
+            self.assertIs(self.dispatch.initialize_auto_kernel(cache, second), first)
+            second._init_handles.assert_not_called()
+            # A different device/native cache cannot reuse the previous handle.
+            self.assertIs(self.dispatch.initialize_auto_kernel({}, second), second)
+            changed = Kernel()
+            changed.block_auto_selection = {"selected_factor": 1, "reason": "MODEL_INCOMPLETE"}
+            self.assertIs(self.dispatch.initialize_auto_kernel(cache, changed), changed)
+            cache.clear()
+            self.assertIs(self.dispatch.initialize_auto_kernel(cache, second), second)
 
     def test_launch_exception_is_not_replayed(self):
 

@@ -10,15 +10,31 @@
 //   sgt IF1#0, slt DEP1, then-yield subi IF1#0 then addi DEP1.
 
 // CHECK-LABEL: func.func @intra_core_condition_order
-// CHECK: iter_args(%[[CNT0:.*]] = %{{[^,]+}}, %[[CNT1:.*]] = %{{[^,]+}}, %[[CNT2:.*]] = %{{[^,]+}}, %[[DEP0:.*]] = %{{[^,]+}}, %[[DEP1:.*]] = %{{[^,)]+}})
+// CHECK: scf.while (%{{[^ ]+}} = %{{[^ ,]+}}, %[[CNT0:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT1:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT2:[^ ,]+]] = %{{[^ ,]+}}, %[[DEP0:[^ ,]+]] = %{{[^ ,]+}}, %[[DEP1:[^ ,]+]] = %{{[^ ,]+}})
+// CHECK: ^bb0
+// CHECK: %[[FLAG:.*]] = arith.constant 0 : i32
 // CHECK: arith.cmpi slt, %[[DEP0]], %{{.*}}
-// CHECK: %[[IF1:[0-9]+]]:2 = scf.if
+// The block is the first one of the loop: the flag it reads is the constant
+// zero the loop starts with, its check is left out.
+// CHECK: %[[AND1:.*]] = arith.andi %{{.*}}, %{{.*}}
+// CHECK: %[[IF1:[0-9]+]]:2 = scf.if %[[AND1]]
 // CHECK: arith.addi %[[DEP0]], %{{.*}}
+// The flag of the loop is not yielded by the block: it is computed with a
+// select on the condition of the block, after the block.
+// CHECK: %[[ONE1:.*]] = arith.constant 1 : i32
+// CHECK: %[[FLAG1:.*]] = arith.select %[[AND1]], %[[ONE1]], %[[FLAG]] : i32
 // CHECK: arith.cmpi sgt, %[[IF1]]#0, %{{.*}}
 // CHECK: arith.cmpi slt, %[[DEP1]], %{{.*}}
+// CHECK: %[[FLAGCMP2:.*]] = arith.cmpi eq, %[[FLAG1]], %{{.*}} : i32
 // CHECK: %[[DEC0:.*]] = arith.subi %[[IF1]]#0, %{{.*}}
 // CHECK: %[[INC1:.*]] = arith.addi %[[DEP1]], %{{.*}}
 // CHECK: scf.yield %[[DEC0]], %[[INC1]], %{{.*}}
+// The flag of the loop is cumulative: the select of the second block takes
+// the select of the first block as its false value.
+// CHECK: %[[ONE2:.*]] = arith.constant 1 : i32
+// CHECK: %[[FLAG2:.*]] = arith.select %{{.*}}, %[[ONE2]], %[[FLAG1]] : i32
+// The third block is gated by the flag of the second one.
+// CHECK: %[[FLAGCMP3:.*]] = arith.cmpi eq, %[[FLAG2]], %{{.*}} : i32
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @intra_core_condition_order(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {
@@ -27,6 +43,32 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %c16_i32 = arith.constant 16 : i32
 
     scope.scope : () -> () {
+      // The pipeline of the kernel: the vector core writes a tile into a cross
+      // core buffer that the cube core reads, the cube core writes a tile of
+      // its own that the vector core reads back. The three transfers make the
+      // cross core dependency of the module a VECTOR -> CUBE -> VECTOR -> CUBE
+      // chain, the shape the normal preload scheme is enabled on. The scheme
+      // only counts the cross core blocks that carry a condition, so the
+      // blocks of the chain are the blocks of the main loop. The transfers
+      // themselves sit outside the loop: they give the module the pipeline
+      // shape without changing the conditions of the loop the test checks.
+      %cbuf_t2 = memref.alloc() {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 2 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      annotation.mark %cbuf_t2 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<2>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 2 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      %dup_tcb_5 = memref.alloc() {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 2 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      annotation.mark %dup_tcb_5 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<5>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 2 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      %cbuf_t3 = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 3 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      annotation.mark %cbuf_t3 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<3>, ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 3 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      %cbuf_t4 = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 4 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      annotation.mark %cbuf_t4 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<4>, ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 4 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      %dup_tcb_7 = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 4 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      annotation.mark %dup_tcb_7 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<7>, ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 4 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      %tile_v2 = tensor.empty() {ssbuffer.block_id = 1 : i32} : tensor<8x4x16x16xf16>
+      hivm.hir.copy ins(%tile_v2 : tensor<8x4x16x16xf16>) outs(%cbuf_t2 : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossCoreDeps = [30 : i32, 1 : i32]}
+      hivm.hir.copy ins(%tile_v2 : tensor<8x4x16x16xf16>) outs(%dup_tcb_5 : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossCoreDeps = [30 : i32, 1 : i32]}
+      %tile_v3 = bufferization.to_tensor %cbuf_t3 {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 3 : i32, ssbuffer.crossCoreDeps = [31 : i32, 0 : i32]} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>> to tensor<8x4x16x16xf16>
+      %tile_v4 = tensor.empty() {ssbuffer.block_id = 3 : i32} : tensor<8x4x16x16xf16>
+      hivm.hir.copy ins(%tile_v4 : tensor<8x4x16x16xf16>) outs(%cbuf_t4 : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 4 : i32, ssbuffer.crossCoreDeps = [32 : i32, 1 : i32]}
+      hivm.hir.copy ins(%tile_v4 : tensor<8x4x16x16xf16>) outs(%dup_tcb_7 : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 4 : i32, ssbuffer.crossCoreDeps = [32 : i32, 1 : i32]}
       %alloc0 = memref.alloc() : memref<128xf32, #hivm.address_space<ub>>
       %mem0 = memref.memory_space_cast %alloc0 : memref<128xf32, #hivm.address_space<ub>> to memref<128xf32>
       %alloc1 = memref.alloc() : memref<128xf32, #hivm.address_space<ub>>
@@ -56,6 +98,19 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 
     scope.scope : () -> () {
+      %cbuf_c2 = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 2 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      annotation.mark %cbuf_c2 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<2>, ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 2 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      %cbuf_c3 = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 3 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      annotation.mark %cbuf_c3 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<3>, ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 3 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      %dup_tcb_6 = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 3 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      annotation.mark %dup_tcb_6 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<6>, ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 3 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      %cbuf_c4 = memref.alloc() {ssbuffer.block_id = 4 : i32, ssbuffer.transfer_id = 4 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      annotation.mark %cbuf_c4 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<4>, ssbuffer.block_id = 4 : i32, ssbuffer.transfer_id = 4 : i32} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+      %tile_c2 = bufferization.to_tensor %cbuf_c2 {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossCoreDeps = [30 : i32, 0 : i32]} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>> to tensor<8x4x16x16xf16>
+      %tile_c3 = tensor.empty() {ssbuffer.block_id = 3 : i32} : tensor<8x4x16x16xf16>
+      hivm.hir.copy ins(%tile_c3 : tensor<8x4x16x16xf16>) outs(%cbuf_c3 : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 3 : i32, ssbuffer.crossCoreDeps = [31 : i32, 1 : i32]}
+      hivm.hir.copy ins(%tile_c3 : tensor<8x4x16x16xf16>) outs(%dup_tcb_6 : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 3 : i32, ssbuffer.crossCoreDeps = [31 : i32, 1 : i32]}
+      %tile_c4 = bufferization.to_tensor %cbuf_c4 {ssbuffer.block_id = 4 : i32, ssbuffer.transfer_id = 4 : i32, ssbuffer.crossCoreDeps = [32 : i32, 0 : i32]} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>> to tensor<8x4x16x16xf16>
       %alloc = memref.alloc() : memref<128xf32, #hivm.address_space<ub>>
       %mem = memref.memory_space_cast %alloc : memref<128xf32, #hivm.address_space<ub>> to memref<128xf32>
       scf.for %iv = %c0_i32 to %c16_i32 step %c1_i32 : i32 {

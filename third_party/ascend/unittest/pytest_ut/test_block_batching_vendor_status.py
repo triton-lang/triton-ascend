@@ -26,6 +26,10 @@ loc("/tmp/build/kernel.mlir":1:1): error: Failed to run buildFinalHIVMPipelines 
 
 loc("/tmp/build/kernel.mlir":2:3): error: ub overflow, requires 2097152 bits while 2031616 bits available! (possible reason: tiling basic block is too large or block number is more than what user expect due to multi-buffer feature is enabled and some ops need extra local buffer.)
 [ERROR] Failed to run BiShengIR regbase pipeline'''
+A5_EXTERNAL_COMPILER = A5_LAYOUT.replace(
+    b"warning: warning:",
+    b'[INFO] libbisheng-llc.so not found at /usr/local/Ascend/cann-9.1.0/tools/bisheng_compiler/bin/../lib/libbisheng-llc.so; '
+    b'falling back to external `bisheng` process.\nwarning: warning:', 1).replace(b'2097152', b'2097408')
 
 A3_LAYOUT = b'''[NOTE] Ub overflow detected; automatically set enable-code-motion to false and retrying compilation.
 [NOTE] Ub overflow detected; automatically set enable-auto-multi-buffer to false and retrying compilation.
@@ -81,8 +85,9 @@ def test_a3_resource_retry_rejects_unknown_prefixed_diagnostic():
 
 
 @pytest.mark.parametrize('filename', [b'kernel.mlir', b'kernel.ttadapter.mlir'])
-def test_a5_vv_layout_budget_exhaustion(filename):
-    diagnostic = A5_LAYOUT.replace(b'kernel.mlir', filename)
+@pytest.mark.parametrize('diagnostic', [A5_LAYOUT, A5_EXTERNAL_COMPILER])
+def test_a5_vv_layout_budget_exhaustion(filename, diagnostic):
+    diagnostic = diagnostic.replace(b'kernel.mlir', filename)
     err = subprocess.CalledProcessError(1, ['vendor'], stderr=diagnostic)
     refusal = vendor.classify_vendor_failure(err, dict(REWRITTEN, cv_mode='disabled'), OPTIONS, cv_resources=True)
     assert (refusal.reason, refusal.stage, refusal.factor, refusal.axis) == ('LAYOUT_TARGET_RESOURCE_REJECTED',
@@ -101,6 +106,10 @@ def test_a5_vv_layout_budget_exhaustion(filename):
     (1, b'', A5_LAYOUT.replace(b'2097152', b'2031616')),
     (1, b'', A5_LAYOUT.replace(b'ub overflow', b'ca overflow')),
     (1, b'', A5_LAYOUT.replace(b'kernel.mlir":2', b'other.mlir":2')),
+    (1, b'', A5_EXTERNAL_COMPILER.replace(b'[INFO] libbisheng', b'[ERROR] libbisheng')),
+    (1, b'', A5_EXTERNAL_COMPILER + b'\nLLVM ERROR: verifier failed'),
+    (1, b'', A5_EXTERNAL_COMPILER.replace(b'2097408', b'2031616')),
+    (2, b'', A5_EXTERNAL_COMPILER),
 ])
 def test_a5_mixed_or_unproven_failure_is_internal(rc, stdout, stderr):
     err = subprocess.CalledProcessError(rc, ['vendor'], output=stdout, stderr=stderr)
@@ -114,17 +123,18 @@ def test_a5_mixed_or_unproven_failure_is_internal(rc, stdout, stderr):
     ('disabled', True, 'semantic_only'),
 ])
 def test_a5_resource_failure_without_layout_retry_selects_baseline(mode, rewritten, policy):
-    err = subprocess.CalledProcessError(1, ['vendor'], stderr=A5_LAYOUT)
-    report = {'cv_mode': mode, 'layout': {'accesses': [{'rewritten': rewritten}]}}
-    options = SimpleNamespace(block_batching_layout=policy, block_batching_factor=4, block_batching_axis=-1)
-    for cv_resources in (True, False):
-        refusal = vendor.classify_vendor_failure(err, report, options, cv_resources=cv_resources)
-        if mode == 'disabled':
-            assert refusal.reason == 'VV_TARGET_RESOURCE_REJECTED'
-        elif cv_resources:
-            assert refusal.reason == 'CV_TARGET_RESOURCE_REJECTED'
-        else:
-            assert refusal.reason == 'LAYOUT_TARGET_RESOURCE_REJECTED'
+    for diagnostic in (A5_LAYOUT, A5_EXTERNAL_COMPILER):
+        err = subprocess.CalledProcessError(1, ['vendor'], stderr=diagnostic)
+        report = {'cv_mode': mode, 'layout': {'accesses': [{'rewritten': rewritten}]}}
+        options = SimpleNamespace(block_batching_layout=policy, block_batching_factor=4, block_batching_axis=-1)
+        for cv_resources in (True, False):
+            refusal = vendor.classify_vendor_failure(err, report, options, cv_resources=cv_resources)
+            if mode == 'disabled':
+                assert refusal.reason == 'VV_TARGET_RESOURCE_REJECTED'
+            elif cv_resources:
+                assert refusal.reason == 'CV_TARGET_RESOURCE_REJECTED'
+            else:
+                assert refusal.reason == 'LAYOUT_TARGET_RESOURCE_REJECTED'
 
 
 @pytest.mark.parametrize('rc, stdout, stderr', [

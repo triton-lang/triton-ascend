@@ -27,6 +27,8 @@ _A5_UB_DIAGNOSTIC = re.compile(
     r'and --limit-auto-multi-buffer-buffer are deprecated and will be removed in BiShengIR 1\.4\.0\. '
     r'Equivalent setting: --multibuffer-mode="\[\(gm, 2\), \(l1, 2\), \(l0c, 2\), \(ub, 2\)\]"\. '
     r'A3 default gm=4, A5 default gm=2; set a level to 1 to disable it\.\n'
+    r'(?:\[INFO\] libbisheng-llc\.so not found at /[^\r\n;]+/libbisheng-llc\.so; '
+    r'falling back to external `bisheng` process\.\n)?'
     r"(?:warning: warning: --enable-preload=true overrides --enablecv-pipeline-mode; forcing 'Skew'\.\n)+"
     r'loc\("(?P<file>[^"\r\n]+/kernel(?:\.ttadapter)?\.mlir)":\d+:\d+\): error: Failed to run buildFinalHIVMPipelines pipeline\n+'
     r'loc\("(?P=file)":\d+:\d+\): error: ub overflow, requires (?P<required>\d{1,20}) bits while '

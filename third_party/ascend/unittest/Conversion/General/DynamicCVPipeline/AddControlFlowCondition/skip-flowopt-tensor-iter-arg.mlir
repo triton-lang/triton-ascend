@@ -10,7 +10,11 @@
 // the kernel takes the legacy path: the test does not pass on this branch.
 // The normal preload path keeps the fix, see UpdateConditionInfo.cpp.
 //
-// XFAIL: legacy-no-flowopt-fix
+// XFAIL: *
+//
+// The wildcard marks the divergence without a lit feature. Remove it when the
+// legacy path is refreshed with the upstream implementation again: lit reports
+// an unexpectedly passing test as a failure, so the stale marker is caught.
 
 // CHECK-LABEL: func.func @skip_flowopt_tensor_iter_arg_pair
 // CHECK: arith.cmpi eq

@@ -7,7 +7,7 @@ compiler artifacts; rejected or guarded calls select the complete baseline.
 """
 from dataclasses import dataclass
 
-IMPLEMENTATION_VERSION = 57
+IMPLEMENTATION_VERSION = 56
 
 
 def supports_target(arch):

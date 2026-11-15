@@ -23,13 +23,17 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CloneOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CrossCorePattern.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/SplittedIfWrapSsbufIf.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfoLegacy.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimesLegacy.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopOpsLegacy.h"
 #include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -72,6 +76,31 @@ static LogicalResult verifyControlFlowPrerequisites(ModuleOp module) {
   }
 
   return success();
+}
+
+// The main loops of the module: the loops that carry the ssbuffer.main_loop
+// attribute. The normal preload scheme merges the main loop of every core
+// into one scf.while, so it needs one main loop per core: two loops that
+// carry the same main loop id, one on each core. A kernel with a single main
+// loop runs on one core, and a kernel with more than two of them, or with
+// two different main loop ids, has a shape the scheme does not model.
+// The number of the main loops is reported through `count`.
+static bool hasCorePairMainLoop(ModuleOp module, unsigned &count) {
+  count = 0;
+  int64_t id = 0;
+  bool sameId = true;
+  module.walk([&](Operation *op) {
+    if (!CVPipeline::isMainLoopOp(op))
+      return;
+    auto attr = op->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
+    int64_t value = attr ? attr.getInt() : 0;
+    if (count == 0)
+      id = value;
+    else if (value != id)
+      sameId = false;
+    ++count;
+  });
+  return count == 2 && sameId;
 }
 
 static bool isOuterVectorPayload(Operation *op) {
@@ -319,35 +348,108 @@ void AddControlFlowConditionPass::runOnOperation() {
   initDependentMapPass->setConditionInfo(&info);
   pm.addPass(std::move(initDependentMapPass));
 
-  // Step4: Update for ops with block counters and inner dependency conditions,
-  // and insert PIPE_S inter-core synchronization
-  std::unique_ptr<UpdateLoopOpsPass> updateLoopOpsPass(new UpdateLoopOpsPass());
-  updateLoopOpsPass->setConditionInfo(&info);
-  pm.addPass(std::move(updateLoopOpsPass));
-
-  // Step5:Update the conditions of ifOp based on the intraCoreDependentMap and
-  // crossCoreDependentMap
-
+  // The kernels of legacyKernel keep the control flow conditions of the
+  // upstream implementation: they are not rewritten by the normal preload
+  // scheme.
   constexpr llvm::StringLiteral legacyKernel[] = {
-      "chunk_gated_delta_rule_fwd_kernel_h_blockdim128"};
-  bool useLegacyConditions = false;
+      "paged_decode_fd_kernel",
+      "fwd_kernel",
+      "merge_fwd_bwd_kernel",
+      "_swa_fwd_kernel"
+      "_sdpa_infer_kernel",
+      "paged_prefill_kernel",
+  };
+  // The normal preload scheme is only enabled for the kernels whose pipeline
+  // dependency is a chain of four computation blocks that alternates the
+  // cores: CUBE -> VECTOR -> CUBE -> VECTOR or VECTOR -> CUBE -> VECTOR ->
+  // CUBE. Every transfer of the chain has to carry the tightly coupled
+  // buffers of the validated pipeline: two buffers per transfer and no
+  // buffer shared by two transfers, so the chain carries six of them. A
+  // direction that several cross core groups carry holds the buffers of all
+  // of them, so a direction that holds more than the two buffers of a single
+  // transfer does not fit the scheme.
+  // The scheme is validated on two pipelines: the mla pipeline holds four
+  // computation blocks and the paged decode pipeline five. The conditions are
+  // computed for the blocks that carry a condition, so the kernel has to
+  // hold exactly four cross core blocks that carry a condition for the mla
+  // pipeline and exactly five of them for the paged decode pipeline.
+  // The scheme merges the main loop of every core into one scf.while, so the
+  // kernel has to have one main loop per core: two loops carrying the same
+  // main loop id.
+  // A kernel that holds more than one such pipeline keeps the conditions of
+  // the upstream implementation: the scheme is only validated for a single
+  // pipeline. The pipeline also has to be a linear chain, so it has a single
+  // entry block: two blocks feeding the same block is a merge, and the
+  // conditions of the scheme do not model a merge.
+  bool blacklisted = false;
   for (auto &op : module.getOps()) {
     auto funcOp = llvm::dyn_cast<func::FuncOp>(&op);
-    if (funcOp && llvm::is_contained(legacyKernel, funcOp.getSymName())) {
-      useLegacyConditions = true;
-      break;
-    }
+    if (!funcOp)
+      continue;
+    if (llvm::is_contained(legacyKernel, funcOp.getSymName()))
+      blacklisted = true;
   }
+  unsigned mainLoopCount = 0;
+  const bool corePairMainLoop = hasCorePairMainLoop(module, mainLoopCount);
+  const CrossCorePattern pattern = analyzeCrossCorePattern(module);
+  const bool patternMatched = pattern.pipelines == 1 && pattern.entries == 1;
+  const bool enableNormalPreload =
+      !blacklisted && corePairMainLoop && patternMatched;
+  LLVM_DEBUG({
+    DBGS() << "blacklisted: " << blacklisted
+           << ", main loops: " << mainLoopCount
+           << ", core pair main loop: " << corePairMainLoop
+           << ", pipelines: " << pattern.pipelines
+           << ", entries: " << pattern.entries
+           << ", pattern matched: " << patternMatched << "\n";
+  });
+  // The outer main loop scheduling feature is built on the control flow
+  // scheme of the upstream implementation: its static ordinal schedule and its
+  // native credit handshake are not modelled by the normal preload scheme.
+  // A module with an outer main loop keeps the upstream conditions.
+  const bool useLegacyConditions =
+      !enableNormalPreload || CVPipeline::hasOuterMainLoop(module);
 
-  auto updatePass = std::make_unique<UpdateConditionInfoPass>();
-  updatePass->setConditionInfo(&info);
-  pm.addPass(std::move(updatePass));
+  if (useLegacyConditions) {
+    // Step4: Update for ops with block counters and inner dependency
+    // conditions, and insert PIPE_S inter-core synchronization
+    std::unique_ptr<UpdateLoopOpsPassLegacy> legacyUpdateLoopOpsPass(
+        new UpdateLoopOpsPassLegacy());
+    legacyUpdateLoopOpsPass->setConditionInfo(&info);
+    pm.addPass(std::move(legacyUpdateLoopOpsPass));
 
-  // Step6: Update for loop iteration times based on intraCoreDependentMap
-  std::unique_ptr<UpdateLoopIterTimesPass> updateLoopIterTimesPass(
-      new UpdateLoopIterTimesPass());
-  updateLoopIterTimesPass->setConditionInfo(&info);
-  pm.addPass(std::move(updateLoopIterTimesPass));
+    // Step5:Update the conditions of ifOp based on the intraCoreDependentMap
+    // and crossCoreDependentMap
+    std::unique_ptr<UpdateConditionInfoPassLegacy> legacyUpdatePass(
+        new UpdateConditionInfoPassLegacy());
+    legacyUpdatePass->setConditionInfo(&info);
+    pm.addPass(std::move(legacyUpdatePass));
+
+    // Step6: Update for loop iteration times based on intraCoreDependentMap
+    std::unique_ptr<UpdateLoopIterTimesPassLegacy>
+        legacyUpdateLoopIterTimesPass(new UpdateLoopIterTimesPassLegacy());
+    legacyUpdateLoopIterTimesPass->setConditionInfo(&info);
+    pm.addPass(std::move(legacyUpdateLoopIterTimesPass));
+  } else {
+    // Step4: Update for ops with block counters and inner dependency
+    // conditions, and insert PIPE_S inter-core synchronization
+    std::unique_ptr<UpdateLoopOpsPass> updateLoopOpsPass(
+        new UpdateLoopOpsPass());
+    updateLoopOpsPass->setConditionInfo(&info);
+    pm.addPass(std::move(updateLoopOpsPass));
+
+    // Step5:Update the conditions of ifOp based on the intraCoreDependentMap
+    // and crossCoreDependentMap
+    auto updatePass = std::make_unique<UpdateConditionInfoPass>();
+    updatePass->setConditionInfo(&info);
+    pm.addPass(std::move(updatePass));
+
+    // Step6: Update for loop iteration times based on intraCoreDependentMap
+    std::unique_ptr<UpdateLoopIterTimesPass> updateLoopIterTimesPass(
+        new UpdateLoopIterTimesPass());
+    updateLoopIterTimesPass->setConditionInfo(&info);
+    pm.addPass(std::move(updateLoopIterTimesPass));
+  }
 
   // Step7: Use the splitted_if condition to wrap each ssbuffer.if.
   std::unique_ptr<SplittedIfWrapSsbufIfPass> splittedIfWrapSsbufIfPass(
@@ -382,6 +484,7 @@ void registerAddControlFlowConditionPasses() {
   registerPass(createCreateIfOpsPass);
   registerPass(createProcessArgsPass);
   registerPass(createUpdateLoopOpsPass);
+  registerPass(createUpdateLoopIterTimesPass);
   registerPass(createAddControlFlowConditionPass);
 }
 } // namespace triton

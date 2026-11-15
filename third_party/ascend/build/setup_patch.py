@@ -667,10 +667,12 @@ def patch_module(mod):
                     "auditwheel",
                     "-v",
                     "repair",
+                    # The wheels are built inside the manylinux_2_34 image
+                    # (glibc 2.34; CANN 9.2 requires newer glibc than 2.28),
+                    # so they carry GLIBC_2.34 / GLIBCXX_3.4.29 / CXXABI_1.3.13
+                    # symbols and can only be repaired to manylinux_2_34.
                     "--plat",
-                    f"manylinux_2_27_{platform.machine()}",
-                    "--plat",
-                    f"manylinux_2_28_{platform.machine()}",
+                    f"manylinux_2_34_{platform.machine()}",
                     "-w",
                     self.dist_dir,
                     file,

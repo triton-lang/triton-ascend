@@ -1,5 +1,16 @@
 #pragma once
 
+// Clang >= 18 predefines the __MEMORY_SCOPE_* macros (InitPreprocessor.cpp);
+// older clang (e.g. 15 in CANN 8.5 containers) does not. Values match
+// clang's AtomicScopeModel: SYSTEM=0, DEVICE=1, WRKGRP=2, WVFRNT=3, SINGLE=4.
+#if defined(__clang__) && !defined(__MEMORY_SCOPE_WRKGRP)
+#define __MEMORY_SCOPE_SYSTEM 0
+#define __MEMORY_SCOPE_DEVICE 1
+#define __MEMORY_SCOPE_WRKGRP 2
+#define __MEMORY_SCOPE_WVFRNT 3
+#define __MEMORY_SCOPE_SINGLE 4
+#endif
+
 #if defined(__CUDA__) && defined(__clang__)
 #define GSAN_DEVICE __attribute__((device))
 #define GSAN_HOST_DEVICE __attribute__((host)) __attribute__((device))

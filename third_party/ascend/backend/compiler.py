@@ -318,8 +318,8 @@ def _graph_optimize_core_num(opt):
     # Physical AI-core blocks the launcher will schedule, so the row-count policy
     # can keep at least one full wave after R-way coalescing.  The launcher picks
     # AIV for pure-SIMT kernels (final mix_mode "aiv") and AIC otherwise, so the
-    # compile-time proxy is opt.is_pure_simt.  A device-less/compile-only host
-    # returns 0, which disables the gridX/R >= coreNum check.
+    # compile-time proxy is opt.is_pure_simt. Preserve the online query-failure
+    # policy (0 disables the occupancy check); offline callers supply a context.
     try:
         npu_utils = NPUUtils()
         if getattr(opt, "is_pure_simt", False):

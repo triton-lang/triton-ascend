@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 import pytest
-from block_batching_contract_host import batching
+from block_batching_contract_host import report_module as reports
 from types import SimpleNamespace
 
 pytestmark = pytest.mark.backend('native')
@@ -25,7 +25,7 @@ def test_independent_row_pointwise_requires_a_memory_view(operation, width):
     for access in value["layout"]["accesses"]:
         access["original_shape"] = [width]
     before = deepcopy(value)
-    assert batching.vv_layout_refusal(value) == "VV_POINTWISE_MEMORY_VIEW_REQUIRED"
+    assert reports.vv_layout_refusal(value) == "VV_POINTWISE_MEMORY_VIEW_REQUIRED"
     assert value == before
 
 
@@ -37,7 +37,7 @@ def test_shared_parameters_do_not_form_an_independent_row_memory_view(shape, wid
         access["original_shape"] = [width]
     value["layout"]["accesses"].append(dict(action="Keep", rewritten=False, mask_class="shared", original_shape=shape))
     before = deepcopy(value)
-    assert batching.vv_layout_refusal(value) == "VV_POINTWISE_MEMORY_VIEW_REQUIRED"
+    assert reports.vv_layout_refusal(value) == "VV_POINTWISE_MEMORY_VIEW_REQUIRED"
     assert value == before
 
 
@@ -48,13 +48,13 @@ def test_unsupported_symbolic_bridge_requires_complete_fallback(operation):
     value['layout']['accesses'][0].update(original_shape=[10, 4, 4], symbolic_stride=True, mask_class='linear_prefix',
                                           reason='SYMBOLIC_LAYOUT_BRIDGE_UNSUPPORTED')
     before = deepcopy(value)
-    assert batching.vv_layout_refusal(value) == 'VV_SYMBOLIC_LAYOUT_NOT_PROVEN'
+    assert reports.vv_layout_refusal(value) == 'VV_SYMBOLIC_LAYOUT_NOT_PROVEN'
     assert value == before
     value['layout']['accesses'][0].update(action='MemoryView', rewritten=True, reason='PROVEN_SYMBOLIC_STRIDE_CHAIN')
-    assert batching.vv_layout_refusal(value) is None
+    assert reports.vv_layout_refusal(value) is None
     value['layout']['accesses'][0]['reason'] = 'SYMBOLIC_LAYOUT_BRIDGE_UNSUPPORTED'
     value['cv_mode'] = 'spatial_concat_v1'
-    assert batching.vv_layout_refusal(value) is None
+    assert reports.vv_layout_refusal(value) is None
 
 
 @pytest.mark.parametrize("kind", [
@@ -88,7 +88,7 @@ def test_other_structures_keep_their_existing_admission(kind):
         value["layout"]["accesses"][0]["original_shape"] = []
     elif kind == "unknown_mask":
         value["layout"]["accesses"][0]["mask_class"] = "unknown"
-    assert batching.vv_layout_refusal(value) is None
+    assert reports.vv_layout_refusal(value) is None
 
 
 @pytest.mark.parametrize('shape', [[1, 256], [256, 1], [1, 256, 1]])
@@ -96,7 +96,7 @@ def test_singleton_dimensions_preserve_independent_row_decision(shape):
     value = report()
     for access in value['layout']['accesses']:
         access['original_shape'] = shape
-    assert batching.vv_layout_refusal(value) == 'VV_POINTWISE_MEMORY_VIEW_REQUIRED'
+    assert reports.vv_layout_refusal(value) == 'VV_POINTWISE_MEMORY_VIEW_REQUIRED'
 
 
 @pytest.mark.parametrize('op', ['scf.if', 'scf.for'])
@@ -105,9 +105,9 @@ def test_value_only_control_flow_keeps_memory_view_requirement(op):
     value['operations'][op] = 1
     for access in value['layout']['accesses']:
         access['control_flow_independent'] = True
-    assert batching.vv_layout_refusal(value) == 'VV_POINTWISE_MEMORY_VIEW_REQUIRED'
+    assert reports.vv_layout_refusal(value) == 'VV_POINTWISE_MEMORY_VIEW_REQUIRED'
     value['layout']['accesses'][0]['control_flow_independent'] = False
-    assert batching.vv_layout_refusal(value) is None
+    assert reports.vv_layout_refusal(value) is None
 
 
 def structured_rows():
@@ -123,9 +123,9 @@ def test_proved_top_level_rows_reach_backend_memory_validation(shape):
     for access in value['layout']['accesses']:
         access['original_shape'] = shape
     before = deepcopy(value)
-    assert batching.vv_layout_refusal(value) is None
+    assert reports.vv_layout_refusal(value) is None
     # Source layout evidence cannot replace backend memory validation.
-    assert batching.vv_memory_lowering_refusal(value) == 'VV_MEMORY_LOWERING_NOT_PROVEN'
+    assert reports.vv_memory_lowering_refusal(value) == 'VV_MEMORY_LOWERING_NOT_PROVEN'
     assert value == before
 
 
@@ -134,24 +134,24 @@ def test_proved_top_level_rows_reach_backend_memory_validation(shape):
 def test_partial_row_evidence_retains_structural_refusal(field, bad):
     value = structured_rows()
     value['layout']['accesses'][0][field] = bad
-    assert batching.vv_layout_refusal(value) == 'VV_POINTWISE_MEMORY_VIEW_REQUIRED'
+    assert reports.vv_layout_refusal(value) == 'VV_POINTWISE_MEMORY_VIEW_REQUIRED'
 
 
 @pytest.mark.parametrize('operation', ['scf.for', 'scf.if'])
 def test_row_exception_does_not_admit_control_flow(operation):
     value = structured_rows()
     value['operations'][operation] = 1
-    assert batching.vv_layout_refusal(value) == 'VV_POINTWISE_MEMORY_VIEW_REQUIRED'
+    assert reports.vv_layout_refusal(value) == 'VV_POINTWISE_MEMORY_VIEW_REQUIRED'
 
 
 def test_row_exception_does_not_admit_shared_parameters_or_indirect_memory():
     value = structured_rows()
     value['layout']['accesses'][0].update(reason='SHARED_ACCESS', mask_class='shared')
-    assert batching.vv_layout_refusal(value) == 'VV_POINTWISE_MEMORY_VIEW_REQUIRED'
+    assert reports.vv_layout_refusal(value) == 'VV_POINTWISE_MEMORY_VIEW_REQUIRED'
     value = structured_rows()
     value['layout']['lowering_observation'] = dict(stage='ttadapter', scope='module', indirect_load_ops=1,
                                                    indirect_store_ops=0)
-    assert batching.vv_memory_lowering_refusal(value) == 'VV_INDIRECT_MEMORY_NOT_SUPPORTED'
+    assert reports.vv_memory_lowering_refusal(value) == 'VV_INDIRECT_MEMORY_NOT_SUPPORTED'
 
 
 def metadata():
@@ -187,14 +187,14 @@ def test_compile_policy_is_candidate_only(change):
         calls.append(path)
         return True
 
-    options = batching.memory_compile_options(value, "/compiler", supported)
+    options = reports.memory_compile_options(value, "/compiler", supported)
     assert options == (["--enable-lib-call-no-inline=false"] if change == "none" else [])
     assert calls == (["/compiler"] if change == "none" else [])
 
 
 def test_unsupported_compiler_keeps_candidate_policy_default():
     value = metadata()
-    assert batching.memory_compile_options(value, "/compiler", lambda _: False) == []
+    assert reports.memory_compile_options(value, "/compiler", lambda _: False) == []
     assert value["block_batching_factor"] == 2
     assert value["block_batching"]["memory_lowering"]["libcall_inlining"] is False
 
@@ -229,7 +229,7 @@ def test_structured_row_inlining_requires_source_and_backend_evidence(change):
         calls.append(path)
         return change != 'unsupported'
 
-    options = batching.memory_compile_options(value, '/compiler', supported)
+    options = reports.memory_compile_options(value, '/compiler', supported)
     assert options == (['--enable-lib-call-no-inline=false'] if change == 'none' else [])
     assert calls == (['/compiler'] if change in ('none', 'unsupported') else [])
     assert report['memory_lowering']['dynamic_contiguous_copy'] is False

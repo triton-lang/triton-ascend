@@ -99,15 +99,15 @@ def test_autotune_batching_default_and_override(explicit):
     options = dict(block_batching_factor='auto') if explicit == 'auto' else {}
     grid = lambda meta: (triton.cdiv(meta['N'], meta['B']), )
     from unittest.mock import patch
-    from triton.backends.ascend import block_auto_dispatch
-    original = block_auto_dispatch.prepare_launch
+    from triton.backends.ascend import block_batching
+    original = block_batching.prepare_launch
 
     def observe(*args, **kwargs):
         prepared = original(*args, **kwargs)
         seen.append(prepared[0]['block_batching_factor'])
         return prepared
 
-    with patch.object(block_auto_dispatch, 'prepare_launch', observe):
+    with patch.object(block_batching, 'prepare_launch', observe):
         warmed = tuned.warmup(x, out, x.numel(), grid=grid, **options)
         for item in warmed:
             if hasattr(item, 'result'):

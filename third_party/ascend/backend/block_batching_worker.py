@@ -198,7 +198,7 @@ def isolated_report(operation, ttir, factor, axis, policy='semantic_only', cv_ba
 def _native_report(operation, body, directory):
     from triton._C.libtriton import ascend, buffer_ir, ir
     from .compiler import distributed
-    from .block_batching import _has_dot
+    from .block_batching_report import _has_dot
     context = ir.context()
     ir.load_dialects(context)
     if distributed is not None:
@@ -658,7 +658,7 @@ class CandidateCompiler:
     def _compile_and_bind(self, baseline, options, request, positions, pending):
         from triton import knobs
         from triton.compiler.compiler import CompiledKernel, _notify_compilation_listener
-        from .block_batching import BatchKernel, IMPLEMENTATION_VERSION, rejected_bundle
+        from .block_batching import BatchKernel, IMPLEMENTATION_VERSION
         from .block_batching_report import validated_candidate_report
         options = dict(options)
         decline, compiled = self._variant(options, pending)
@@ -693,3 +693,149 @@ class CandidateCompiler:
                                          metadata=candidate.metadata._asdict(), metadata_group=group, times=timings,
                                          cache_hit=record is None)
         return bundle
+
+
+# Prepare and compile a baseline/candidate bundle.
+def analyze_request(mod, request, binding=None, *, report_listener=None):
+    """Run native preflight in a worker. Observe its completed report in the caller."""
+    if request.factor == 1:
+        return {
+            "report_version": 1, "compile_status": "DISABLED", "requested_factor": 1, "requested_axis": request.axis,
+            "applied_factor": 1, "owner": "none", "reason": "DISABLED"
+        }
+    # MLIR shapes and the future native launch contract use signed i32 extents.
+    # A positive Python integer outside that capability is not a config error.
+    if request.factor > 2147483647:
+        return {
+            "report_version": 1, "compile_status": "REJECTED", "requested_factor": request.factor, "requested_axis":
+            request.axis, "applied_factor": 1, "owner": "none", "reason": "FACTOR_OUT_OF_RANGE"
+        }
+    if binding is not None:
+        from types import BuiltinFunctionType
+        analyze = getattr(binding, 'analyze_block_batching', None)
+        if analyze is None:
+            raise RuntimeError("block_batching requires a matching rebuilt Ascend C++ extension")
+        # An arbitrary Python wrapper may itself call native MLIR. Only the
+        # canonical pybind function can be reconstructed in the new interpreter.
+        native_analyze = None
+        if isinstance(analyze, BuiltinFunctionType):
+            from triton._C.libtriton import ascend
+            native_analyze = getattr(ascend.passes.ttir, 'analyze_block_batching', None)
+        if analyze is not native_analyze:
+            raise BatchCompileError(
+                'custom analysis bindings cannot be reconstructed in the worker. '
+                'use report_listener to observe native reports', kind='UnsupportedBinding', stage='analyze')
+    report = isolated_report('analyze', str(mod), request.factor, request.axis)
+    if report_listener is not None:
+        from copy import deepcopy
+        report_listener(deepcopy(report))
+    return report
+
+
+def probe_request(mod, request, layout_policy='semantic_only', cv_batch_matmul=False):
+    if request.factor == 1 or request.factor > 2147483647:
+        return analyze_request(mod, request)
+    return isolated_report('probe', str(mod), request.factor, request.axis, layout_policy, cv_batch_matmul)
+
+
+def _runtime_positions(src):
+    constants = getattr(src, "constants", {})
+    result = []
+    for index, name in enumerate(src.fn.arg_names):
+        signature = src.signature.get(name, src.signature.get(index))
+        if not isinstance(signature, str):
+            return BatchDecline("NESTED_SIGNATURE_NOT_SUPPORTED", "signature")
+        if signature != "constexpr" and (index, ) not in constants and index not in constants and name not in constants:
+            result.append(index)
+    return result
+
+
+def _freeze_source(backend, src, baseline_options, backend_revision):
+    """Generate frontend IR once, then parse the same immutable snapshot per variant."""
+    import hashlib
+    from triton._C.libtriton import ascend, ir
+    from triton.compiler.compiler import ASTSource
+    from triton.runtime.cache import get_cache_manager
+    if not isinstance(src, ASTSource) or hasattr(src, "block_batching_source_hash"):
+        return src
+    options = backend.parse_options(baseline_options)
+    context = ir.context()
+    ir.load_dialects(context)
+    backend.load_dialects(context)
+    module = src.make_ir(backend.target, options, backend.get_codegen_implementation(options), backend.get_module_map(),
+                         context)
+    # Vendor-compatible text deliberately omits newer LLVM properties. Use
+    # lossless bytecode for compiler-internal snapshots (including tl.assume).
+    data = ascend.serialize_block_input(module)
+    fingerprint = hashlib.sha256((src.hash() + "\n" + backend_revision + "\n").encode() + data).hexdigest()
+    from triton.runtime.cache import FileCacheManager
+    cache = get_cache_manager(fingerprint)
+    if type(cache) is not FileCacheManager:
+        return BatchDecline("CUSTOM_CACHE_NOT_SUPPORTED", "freeze")
+    path = cache.put(data, "block_batching.original.ttir", binary=True)
+
+    from .block_batching_source import FrozenSource
+    return FrozenSource(src, path, fingerprint, hashlib.sha256(data).hexdigest())
+
+
+def rejected_bundle(baseline, request, decline, positions=(), retry=None):
+    from .block_batching import BatchKernel
+    reason = decline['reason']
+    report = dict(report_version=1, compile_status='REJECTED', owner='none', requested_factor=request.factor,
+                  requested_axis=request.axis, applied_factor=1, reason=reason)
+    if decline.get('analysis') is not None:
+        report['candidate_analysis'] = decline['analysis']
+    if 'diagnostic' in decline:
+        report.update(backend_diagnostic=decline['diagnostic'], stage=decline['stage'])
+    if retry:
+        report['layout'] = dict(requested_policy='auto', selected_policy='baseline', compile_fallback=retry)
+    return BatchKernel(baseline, None, request, report, positions)
+
+
+def _freeze_refusal(normalized):
+    from triton import knobs
+    if knobs.compilation.override or getattr(normalized, 'ir_override', None):
+        return 'IR_OVERRIDE_NOT_SUPPORTED'
+    if knobs.cache.manager_class is not None or knobs.cache.remote_manager_class is not None:
+        return 'CUSTOM_CACHE_NOT_SUPPORTED'
+    return None
+
+
+def _candidate_refusal(backend, src, normalized):
+    from .block_batching import supports_target
+    from .utils import backend_policy
+    if not supports_target(backend.target.arch):
+        return 'TARGET_NOT_VALIDATED'
+    if normalized.is_pure_simt or normalized.compile_mode == 'simt_only':
+        return 'SIMT_NOT_SUPPORTED'
+    if backend_policy not in (None, 'torch_npu'):
+        return 'FRAMEWORK_NOT_VALIDATED'
+    if not hasattr(src, 'fn'):
+        return 'AST_SOURCE_REQUIRED'
+    return None
+
+
+def compile_bundle(backend, src, options, compile_variant):
+    from .block_batching import BatchRequest
+    request = BatchRequest(options.get('block_batching_factor', 1), options.get('block_batching_axis', -1))
+    if request.factor == 1:
+        return compile_variant(dict(options), src)
+    normalized = backend.parse_options(dict(options))
+    baseline_options = dict(options, block_batching_factor=1, block_batching_axis=-1)
+    baseline_options.pop('block_batching_grid', None)
+    refusal = _freeze_refusal(normalized)
+    frozen = src if refusal else _freeze_source(backend, src, baseline_options,
+                                                normalized.block_batching_backend_revision)
+    if isinstance(frozen, BatchDecline):
+        refusal, frozen = frozen.reason, src
+    baseline = compile_variant(baseline_options, frozen)
+    refusal = refusal or _candidate_refusal(backend, src, normalized)
+    if refusal:
+        return rejected_bundle(baseline, request, dict(reason=refusal))
+    positions = _runtime_positions(src)
+    if isinstance(positions, BatchDecline):
+        return rejected_bundle(baseline, request, positions.payload())
+    env_vars = _baseline_environment(frozen, backend, baseline_options, baseline)
+    if env_vars is None:
+        return rejected_bundle(baseline, request, dict(reason='BASELINE_ENVIRONMENT_NOT_PROVEN'), positions)
+    return CandidateCompiler(backend, frozen, env_vars).compile(baseline, options, request, positions)

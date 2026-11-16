@@ -72,12 +72,12 @@ from triton.backends.ascend.utils import (
     is_cann_version_at_least,
 )
 from triton.backends.ascend.driver import (NPUUtils)
-from triton.backends.ascend.block_batching import BatchRequest, analyze_request, IMPLEMENTATION_VERSION
-from triton.backends.ascend.block_batching_worker import BatchCompileError, BatchDecline, _active_attempt
-from triton.backends.ascend.block_batching import memory_compile_options as batching_memory_compile_options
-from triton.backends.ascend.block_batching import vv_layout_refusal as batching_vv_layout_refusal
-from triton.backends.ascend.block_batching import vv_computation_refusal as batching_vv_computation_refusal
-from triton.backends.ascend.block_batching import vv_memory_lowering_refusal as batching_vv_memory_lowering_refusal
+from triton.backends.ascend.block_batching import BatchRequest, IMPLEMENTATION_VERSION
+from triton.backends.ascend.block_batching_worker import BatchCompileError, BatchDecline, _active_attempt, analyze_request
+from triton.backends.ascend.block_batching_report import memory_compile_options as batching_memory_compile_options
+from triton.backends.ascend.block_batching_report import vv_layout_refusal as batching_vv_layout_refusal
+from triton.backends.ascend.block_batching_report import vv_computation_refusal as batching_vv_computation_refusal
+from triton.backends.ascend.block_batching_report import vv_memory_lowering_refusal as batching_vv_memory_lowering_refusal
 from triton.backends.ascend.block_batching_report import (
     VALIDATION_POLICY,
     CV_AUTO_BLOCKIFY_LOWERINGS,
@@ -425,7 +425,7 @@ def make_ttir(mod, metadata, opt):
             _extents = ", ".join(f"{extent} : i32" for extent in opt.block_batching_grid)
             mod.set_attr("hacc.block_batching_grid", _builder.parse_attr(f"[{_extents}]"))
         batch_source = str(mod)
-        from .block_batching import _has_dot
+        from .block_batching_report import _has_dot
         cv = _has_dot(mod)
         layout_policy = "semantic_only" if cv else opt.block_batching_layout
         report = dict(
@@ -2008,9 +2008,9 @@ class AscendBackend(BaseBackend):
 
     def compile_bundle(self, src, options, compile_variant):
         if options.get("block_batching_factor") == "auto":
-            from .block_auto_dispatch import compile_auto_bundle
+            from .block_auto import compile_auto_bundle
             return compile_auto_bundle(self, src, options, compile_variant)
-        from .block_batching import compile_bundle
+        from .block_batching_worker import compile_bundle
         return compile_bundle(self, src, options, compile_variant)
 
     def add_stages(self, stages, options, language):

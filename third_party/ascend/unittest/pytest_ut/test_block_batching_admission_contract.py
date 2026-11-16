@@ -5,7 +5,7 @@ from copy import deepcopy
 
 import pytest
 from triton._C.libtriton import ascend
-from triton.backends.ascend.block_batching import vv_computation_refusal
+from triton.backends.ascend.block_batching_report import vv_computation_refusal
 from block_batching_contract_ir import parse, pointwise
 from test_block_batching_rectangular_mask import tiled_scan_ir
 from block_batching_contract_ir import reduction_ir

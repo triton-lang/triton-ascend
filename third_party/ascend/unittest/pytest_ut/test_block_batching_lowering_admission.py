@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 import pytest
-from triton.backends.ascend import block_batching as batching
+from triton.backends.ascend import block_batching_report as reports
 
 pytestmark = pytest.mark.backend('native')
 
@@ -23,7 +23,7 @@ def lowered_report(operation, loads=0, stores=0):
 def test_unsupported_lowered_memory_cannot_bypass_admission(operation, loads, stores):
     report = lowered_report(operation, loads, stores)
     before = deepcopy(report)
-    assert batching.vv_memory_lowering_refusal(report) == 'VV_INDIRECT_MEMORY_NOT_SUPPORTED'
+    assert reports.vv_memory_lowering_refusal(report) == 'VV_INDIRECT_MEMORY_NOT_SUPPORTED'
     assert report == before
 
 
@@ -31,14 +31,14 @@ def test_unsupported_lowered_memory_cannot_bypass_admission(operation, loads, st
 def test_structured_memory_keeps_existing_compute_support(operation):
     report = lowered_report(operation)
     report['lane_scans_lowered'] = 2 if operation == 'tt.scan' else 0
-    assert batching.vv_memory_lowering_refusal(report) is None
+    assert reports.vv_memory_lowering_refusal(report) is None
 
 
 @pytest.mark.parametrize('change', [dict(owner='none'), dict(lane_width=1), dict(cv_mode='independent_batch_v1')])
 def test_lowering_refusal_is_owned_by_vv_batching(change):
     report = lowered_report('tt.reduce', loads=1, stores=1)
     report.update(change)
-    assert batching.vv_memory_lowering_refusal(report) is None
+    assert reports.vv_memory_lowering_refusal(report) is None
 
 
 @pytest.mark.parametrize('observation', [
@@ -50,4 +50,4 @@ def test_lowering_refusal_is_owned_by_vv_batching(change):
 def test_missing_lowering_proof_is_not_zero_indirect_memory(observation):
     report = lowered_report('tt.reduce')
     report['layout']['lowering_observation'] = observation
-    assert batching.vv_memory_lowering_refusal(report) == 'VV_MEMORY_LOWERING_NOT_PROVEN'
+    assert reports.vv_memory_lowering_refusal(report) == 'VV_MEMORY_LOWERING_NOT_PROVEN'

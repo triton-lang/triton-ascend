@@ -9,7 +9,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from block_batching_contract_host import PACKAGE, batching, bundle_environment  # noqa: F401
+from block_batching_contract_host import PACKAGE, batching, report_module, bundle_environment  # noqa: F401
 
 worker = importlib.import_module(PACKAGE + '.block_batching_worker')
 
@@ -228,16 +228,16 @@ def test_valid_unsupported_lowering_and_corrupt_evidence_are_distinct(compile_er
         owner='block_batching', cv_mode='disabled', lane_width=4, layout={
             'lowering_observation': dict(stage='ttadapter', scope='module', indirect_load_ops=1, indirect_store_ops=0)
         })
-    refusal = batching.vv_memory_lowering_refusal(report)
+    refusal = report_module.vv_memory_lowering_refusal(report)
     assert worker.BatchDecline(refusal, 'ttadapter').reason == 'VV_INDIRECT_MEMORY_NOT_SUPPORTED'
     assert worker.BatchDecline('VV_SYMBOLIC_LAYOUT_NOT_PROVEN', 'ttir').reason == 'VV_SYMBOLIC_LAYOUT_NOT_PROVEN'
     del report['layout']['lowering_observation']['indirect_load_ops']
-    invalid = batching.vv_memory_lowering_refusal(report)
+    invalid = report_module.vv_memory_lowering_refusal(report)
     with pytest.raises(worker.BatchCompileError, match='VV_MEMORY_LOWERING_NOT_PROVEN'):
         worker.BatchDecline(invalid, 'ttadapter')
     source_decline = dict(compile_status='REJECTED', reason='VV_SCAN_DOMAIN_NOT_SUPPORTED')
     assert worker._report_status('probe', source_decline)[0] == 'NotApplicable'
-    malformed = batching.vv_computation_refusal(report)
+    malformed = report_module.vv_computation_refusal(report)
     with pytest.raises(worker.BatchCompileError, match='VV_COMPUTATION_DOMAIN_NOT_PROVEN'):
         worker.BatchDecline(malformed, 'ttir')
 
@@ -487,7 +487,7 @@ def test_analysis_binding_alias_and_isolated_report_listener(monkeypatch):
         value['details']['axis'] = 2
 
     for binding in (None, native, SimpleNamespace(analyze_block_batching=native.analyze_block_batching)):
-        result = batching.analyze_request('frozen TTIR', request, binding, report_listener=listener)
+        result = worker.analyze_request('frozen TTIR', request, binding, report_listener=listener)
         assert result['details']['axis'] == 0
     assert len(observed) == 3 and reports == [('analyze', 'frozen TTIR', 4, 0)] * 3
 
@@ -495,7 +495,7 @@ def test_analysis_binding_alias_and_isolated_report_listener(monkeypatch):
         raise LookupError('listener failed')
 
     with pytest.raises(LookupError, match='listener failed'):
-        batching.analyze_request('frozen TTIR', request, report_listener=listener_failure)
+        worker.analyze_request('frozen TTIR', request, report_listener=listener_failure)
     assert len(reports) == 4
 
 
@@ -508,11 +508,11 @@ def test_custom_analysis_binding_is_explicit_and_never_executes(monkeypatch):
     request = batching.BatchRequest(4, 0)
     for fn in (lambda *args: pytest.fail('unexpected injected binding'), math.cos):
         with pytest.raises(worker.BatchCompileError, match='report_listener') as err:
-            batching.analyze_request('module', request, SimpleNamespace(analyze_block_batching=fn))
+            worker.analyze_request('module', request, SimpleNamespace(analyze_block_batching=fn))
         assert (err.value.kind, err.value.stage) == ('UnsupportedBinding', 'analyze')
     with pytest.raises(RuntimeError, match='matching rebuilt Ascend'):
-        batching.analyze_request('module', request, SimpleNamespace())
-    assert batching.analyze_request('module', batching.BatchRequest(1, 0), object())['compile_status'] == 'DISABLED'
+        worker.analyze_request('module', request, SimpleNamespace())
+    assert worker.analyze_request('module', batching.BatchRequest(1, 0), object())['compile_status'] == 'DISABLED'
 
 
 @pytest.mark.parametrize('termination', ['SIGSEGV', 'SIGABRT'])
@@ -532,8 +532,8 @@ worker._native_report = terminate
 """)
     monkeypatch.setenv('PYTHONPATH', str(tmp_path))
     with pytest.raises(worker.BatchCompileError) as err:
-        batching.analyze_request('module', batching.BatchRequest(2, 0),
-                                 report_listener=lambda report: pytest.fail('invalid completion notification'))
+        worker.analyze_request('module', batching.BatchRequest(2, 0),
+                               report_listener=lambda report: pytest.fail('invalid completion notification'))
     assert (err.value.kind, err.value.stage) == ('Signal', 'analyze')
 
 

@@ -13,6 +13,7 @@ if PACKAGE not in sys.modules:
     sys.modules[PACKAGE] = package
 guard_module = importlib.import_module(PACKAGE + ".block_batching_guard")
 report_module = importlib.import_module(PACKAGE + ".block_batching_report")
+worker_module = importlib.import_module(PACKAGE + ".block_batching_worker")
 batching = importlib.import_module(PACKAGE + ".block_batching")
 check_guard = guard_module.check_guard
 
@@ -77,7 +78,7 @@ def bundle_environment(monkeypatch):
     monkeypatch.setitem(sys.modules, PACKAGE + '.utils', utils)
     monkeypatch.setattr(batching, '_capture_state', lambda: False)
     monkeypatch.setattr(batching, '_core_floor', lambda: 0)
-    monkeypatch.setattr(batching, '_freeze_source', lambda backend, src, opts, revision: src)
+    monkeypatch.setattr(worker_module, '_freeze_source', lambda backend, src, opts, revision: src)
     launches = []
 
     class Kernel:

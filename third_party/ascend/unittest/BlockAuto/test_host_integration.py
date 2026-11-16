@@ -43,7 +43,7 @@ class TestHostIntegration(unittest.TestCase):
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
         self.batching = importlib.import_module(PACKAGE + ".block_batching")
-        self.dispatch = importlib.import_module(PACKAGE + ".block_auto_dispatch")
+        self.dispatch = self.batching
         capture = patch.object(self.batching, "_capture_state", return_value=False)
         self.capture = capture.start()
         self.addCleanup(capture.stop)
@@ -97,6 +97,15 @@ class TestHostIntegration(unittest.TestCase):
     def test_incomplete_tensor_metadata_does_not_break_default_launch(self):
         wrapper = SimpleNamespace(dtype="fp32", shape=(256, 512), stride=lambda: (512, 1))
         self.assertEqual(self.dispatch._argument(wrapper), dict(kind="unsupported"))
+
+    def test_float_launch_arguments_keep_finite_values_only(self):
+        for value in (0.75, float("inf"), float("nan")):
+            with self.subTest(value=value):
+                options, _ = self.dispatch.prepare_launch(self.fn, (Tensor(), value), self.kwargs, (256, ), False, 0,
+                                                          self.backend)
+                argument = json.loads(options["block_auto_contract"])["arguments"]["size"]
+                expected = dict(kind="scalar", value=value) if value == 0.75 else dict(kind="unsupported")
+                self.assertEqual(argument, expected)
 
     def test_explicit_factors_keep_manual_dispatch(self):
         for factor in (1, 2, 4):
@@ -235,25 +244,27 @@ class TestCompileIntegration(unittest.TestCase):
         self.backend = SimpleNamespace(parse_options=lambda _: SimpleNamespace(block_batching_backend_revision="r"))
         self.options = dict(block_batching_factor="auto", block_auto_contract=json.dumps(dict(grid=[256, 1, 1])))
         self.bundle = SimpleNamespace(candidate=object(), block_batching=dict(selected_axis=0))
-        self.manual = module("batching", _freeze_source=lambda *args: self.frozen,
-                             _freeze_refusal=lambda normalized: None, _candidate_refusal=lambda *args: None,
-                             _core_floor=lambda: 0, _runtime_positions=lambda src: [],
-                             compile_bundle=self.manual_compile, BatchRequest=lambda: "F1",
-                             BatchKernel=lambda *args: SimpleNamespace(baseline=args[0], candidate=None))
-        self.model = module(
-            "model", select_candidates=self.select,
-            candidate_plan=lambda *args, **kw: dict(candidates=[dict(axis=1, factor=4),
-                                                                dict(axis=2, factor=4)]))
-        self.patcher = patch.dict(
-            sys.modules, {
-                PACKAGE: module(PACKAGE, __path__=[str(BACKEND)]),
-                PACKAGE + ".block_batching": self.manual,
-                PACKAGE + ".block_auto": self.model,
-            })
+        self.batching = module("batching", _core_floor=lambda: 0, BatchRequest=lambda: "F1",
+                               BatchKernel=lambda *args: SimpleNamespace(baseline=args[0], candidate=None))
+        self.patcher = patch.dict(sys.modules, {
+            PACKAGE: module(PACKAGE, __path__=[str(BACKEND)]),
+            PACKAGE + ".block_batching": self.batching,
+        })
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
-        self.dispatch = importlib.import_module(PACKAGE + ".block_auto_dispatch")
+        self.dispatch = self.model = importlib.import_module(PACKAGE + ".block_auto")
         self.worker = importlib.import_module(PACKAGE + ".block_batching_worker")
+        self.manual = self.worker
+        compile_patch = patch.multiple(self.worker, _freeze_source=lambda *args: self.frozen,
+                                       _freeze_refusal=lambda normalized: None, _candidate_refusal=lambda *args: None,
+                                       _runtime_positions=lambda src: [], compile_bundle=self.manual_compile)
+        model_patch = patch.multiple(
+            self.model, select_candidates=self.select,
+            candidate_plan=lambda *args, **kw: dict(candidates=[dict(axis=1, factor=4),
+                                                                dict(axis=2, factor=4)]))
+        for patcher in (compile_patch, model_patch):
+            patcher.start()
+            self.addCleanup(patcher.stop)
         environment = patch.object(self.worker, "_baseline_environment", return_value={})
         self.environment = environment.start()
         self.addCleanup(environment.stop)
@@ -291,7 +302,7 @@ class TestCompileIntegration(unittest.TestCase):
         self.assertEqual(len(self.events), 1)
 
     def test_vv_below_core_floor_skips_candidates_and_model(self):
-        self.manual._core_floor = lambda: 512
+        self.batching._core_floor = lambda: 512
         self.model.select_candidates = Mock(side_effect=AssertionError("no candidate to score"))
         result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
         self.assertEqual(len(self.events), 1)

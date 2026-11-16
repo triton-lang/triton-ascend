@@ -14,7 +14,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from block_batching_contract_host import PACKAGE, batching, bundle_environment  # noqa: F401
+from block_batching_contract_host import PACKAGE, batching, worker_module, bundle_environment  # noqa: F401
 
 pytestmark = pytest.mark.backend('native')
 
@@ -74,7 +74,7 @@ def boundary(packaged_entries, bundle_environment, monkeypatch):  # noqa: F811
     backend = SimpleNamespace(target=target, hash=lambda: 'ascend', parse_options=parse_options)
     source = SimpleNamespace(fn=SimpleNamespace(arg_names=[]), signature={}, hash=lambda: 'source',
                              parse_options=lambda: {})
-    backend.compile_bundle = lambda src, options, base: batching.compile_bundle(backend, src, options, base)
+    backend.compile_bundle = lambda src, options, base: worker_module.compile_bundle(backend, src, options, base)
     current = {'COMPILER_ENV': 'current'}
     groups = {}
     candidates = []

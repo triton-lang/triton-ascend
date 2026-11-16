@@ -30,7 +30,6 @@
 
 namespace mlir::CVPipeline {
 
-std::unique_ptr<OperationPass<ModuleOp>> createFuseNZSoftmaxPass();
 std::unique_ptr<OperationPass<ModuleOp>> createPatternMatchRewritePass();
 std::unique_ptr<OperationPass<ModuleOp>> createPackMemrefPass();
 

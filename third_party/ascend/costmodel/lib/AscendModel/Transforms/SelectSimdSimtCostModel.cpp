@@ -218,6 +218,10 @@ struct SelectSimdSimtCostModelPass
                       llvm::StringRef(detailedReport) != "0");
     options.includeDiagnosticStageDetailsInJSON = includeDiagnosticStageDetails;
     options.collectCalibrationEstimates = includeDiagnosticStageDetails;
+    // Auto is a whole-kernel decision: it may choose all-SIMD or all-SIMT,
+    // but it must not materialize a mixed SIMD/SIMT scope. Mixed plans remain
+    // available to explicit report-mode callers for diagnostics and tests.
+    options.allowMixedCandidate = !autoMode;
     options.compileOn91095 = compileOn91095.getValue();
     options.wholeKernelSuperblockMaterializable =
         wholeKernelSuperblockMaterializable.getValue();
@@ -275,6 +279,13 @@ struct SelectSimdSimtCostModelPass
             signalPassFailure();
             return;
           }
+        }
+        if (auto automatic = object->getBoolean("automatic_route_selection"))
+          options.automaticRouteSelection = *automatic;
+        else if (object->get("automatic_route_selection")) {
+          module.emitError("automatic_route_selection must be a boolean");
+          signalPassFailure();
+          return;
         }
         auto readFactors = [&](StringRef key, int64_t maximum,
                                std::vector<int64_t> &factors) {

@@ -2796,6 +2796,57 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
               ? schedule.mixedIterations
               : schedule.programsPerSlot;
 
+    // A whole-kernel F1 recurrence pays a completion envelope once per
+    // resident iteration.  Calibrate the short-work regime from the actual
+    // runtime schedule and saturate at the steady-state 10k-cycle tail; the
+    // Stage model does not know this runtime iteration count yet.
+    const bool wholeKernelF1Recurrence =
+        plan.candidate == StageKernelRouteKind::AllSIMT && factor == 1 &&
+        plan.implementations[index].mode == StageMode::SIMT &&
+        !plan.implementations[index].localScope;
+    if (wholeKernelF1Recurrence &&
+        stage.model == "loop_carried_recurrence" &&
+        runtime.loopIterationCount > 0) {
+      const double completionPerIteration = std::min(
+          10000.0, 6200.0 +
+                          38.0 * static_cast<double>(runtime.loopIterationCount));
+      fullBody += completionPerIteration;
+      plan.diagnostic<bool>("simt_recurrence_completion_applied") = true;
+      plan.diagnostic<double>(
+          "simt_recurrence_completion_system_cycles") +=
+          completionPerIteration;
+      plan.diagnostic<int64_t>("simt_recurrence_completion_iterations") =
+          runtime.loopIterationCount;
+    }
+
+    // A local SIMT recurrence has a short-work completion envelope only for
+    // the smallest superblock workload.  Larger workloads already amortize
+    // this handoff in their measured body; applying the envelope there would
+    // double count it and overpredict Mixed F4 by 12--18%.  Keep the decision
+    // here, after the runtime schedule is known, instead of in the static
+    // Stage model.
+    const bool shortMixedLocalRecurrence =
+        plan.candidate == StageKernelRouteKind::Mixed && factor == 4 &&
+        plan.implementations[index].mode == StageMode::SIMT &&
+        plan.implementations[index].localScope &&
+        stage.model == "loop_carried_recurrence" &&
+        costTable.logicalProgramCountHint > 0 &&
+        costTable.logicalProgramCountHint <= 512 &&
+        runtime.loopIterationCount > 0;
+    if (shortMixedLocalRecurrence) {
+      const double completionPerIteration = std::min(
+          10000.0, 6200.0 +
+                          38.0 * static_cast<double>(runtime.loopIterationCount));
+      fullBody += completionPerIteration;
+      plan.diagnostic<bool>("mixed_short_recurrence_completion_applied") =
+          true;
+      plan.diagnostic<double>(
+          "mixed_short_recurrence_completion_system_cycles") +=
+          completionPerIteration;
+      plan.diagnostic<int64_t>("mixed_short_recurrence_completion_iterations") =
+          runtime.loopIterationCount;
+    }
+
     if (hasGridStrideLoop) {
       const bool repeatedByGridStrideLoop =
           stage.features.isGridStrideLoopShell ||
@@ -2995,6 +3046,35 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       }
     }
 
+    // AIC dot work is issued by the parent loop. Mixed SuperBlock packing
+    // shares part of the dot service across logical programs, but the share
+    // is not complete once a scheduling slot contains multiple groups. The
+    // square-root overlap credit is a hardware occupancy term: it grows with
+    // the number of logical programs on the loaded slot and is proportional to
+    // the extra SuperBlock groups. It applies only to SIMD dot stages in a
+    // Mixed route; SIMT scopes and pure SIMD retain their measured formulas.
+    if (plan.candidate == StageKernelRouteKind::Mixed &&
+        plan.implementations[index].mode == StageMode::SIMD &&
+        stage.features.hasDot && factor > 1 &&
+        programsPerSchedulingSlot > 0) {
+      const double perProgramDotCycles =
+          selected->resources.dot > 0.0
+              ? selected->resources.dot
+              : std::max(0.0, fullBody / static_cast<double>(factor));
+      const double overlapPrograms =
+          0.5 * static_cast<double>(factor - 1) *
+          std::sqrt(static_cast<double>(programsPerSchedulingSlot));
+      const double overlapCycles =
+          std::max(0.0, overlapPrograms * perProgramDotCycles);
+      if (overlapCycles > 0.0) {
+        scaledStageCycles = std::max(setup, scaledStageCycles - overlapCycles);
+        plan.diagnostic<bool>("mixed_dot_overlap_credit_applied") = true;
+        plan.diagnostic<double>(
+            "mixed_dot_overlap_credit_system_cycles") += overlapCycles;
+        plan.diagnostic<double>("mixed_dot_overlap_credit_programs") +=
+            overlapPrograms;
+      }
+    }
     scaledStageCycles += scaledHandoffCycles;
     plan.logicalStageCycles[index] = scaledStageCycles;
     plan.scopeHandoffCycles[index] = scaledHandoffCycles;

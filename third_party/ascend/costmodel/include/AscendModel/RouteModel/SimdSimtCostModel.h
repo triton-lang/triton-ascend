@@ -75,6 +75,10 @@ struct SimdSimtCostModelOptions {
   /// Full Stage implementation matrices are diagnostic-only.
   bool includeDiagnosticStageDetailsInJSON = true;
   bool collectCalibrationEstimates = true;
+  /// Automatic route selection is restricted to a whole-kernel route. Mixed
+  /// SIMD/SIMT scope materialization is reserved for explicit report-mode
+  /// callers and must not be selected by Auto.
+  bool allowMixedCandidate = true;
   /// True only when the target backend can materialize the shared TTIR anchor
   /// plan.
   bool compileOn91095 = false;
@@ -102,6 +106,10 @@ struct SimdSimtCostModelOptions {
   std::vector<int64_t> scopeSuperblockFactors = {1, 2, 4};
   /// A backend resource pass can invalidate the pre-register-allocation winner.
   std::optional<SimdSimtCandidateKind> backendForcedDecision;
+  /// True when the caller is compiling Auto mode.  Backend feedback may force
+  /// the winning candidate during the second pass, but the elapsed target must
+  /// still use the AutoBlockify completion envelope.
+  bool automaticRouteSelection = false;
 };
 
 struct SimdSimtCostReport {
@@ -152,6 +160,15 @@ struct SimdSimtCostReport {
     double baseSelectionScore = 0.0;
     double predictedSystemCounterCycles = 0.0;
     double predictedMicroseconds = 0.0;
+    /// Event timing adds a queued completion envelope to the profiler-like
+    /// route prediction. These fields keep both values auditable.
+    bool eventTimingApplied = false;
+    double eventCompletionFloorSystemCycles = 0.0;
+    double eventBasePredictionSystemCounterCycles = 0.0;
+    double eventPredictedSystemCounterCycles = 0.0;
+    double eventPredictedMicroseconds = 0.0;
+    std::string eventFormula;
+    std::string eventEvidence;
 
     llvm::json::Object toJSON() const;
   } selectedRouteElapsed;

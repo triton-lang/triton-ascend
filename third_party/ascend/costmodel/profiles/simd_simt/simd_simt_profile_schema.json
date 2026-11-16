@@ -584,6 +584,113 @@
           "type": "number",
           "minimum": 0
         },
+        "event_completion_floor_system_cycles": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "event_completion_maximum_superblock_factor": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "event_completion_evidence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "event_completion_semantic_floors": {
+          "type": "object",
+          "description": "Event completion envelopes selected from compiler-proven Stage semantics.",
+          "required": [
+            "loop_system_cycles",
+            "grid_indirect_system_cycles",
+            "grid_indirect_factor12_system_cycles",
+            "grid_indirect_factor4_simt_system_cycles",
+            "grid_indirect_simd_system_cycles",
+            "grid_indirect_dot_system_cycles",
+            "grid_indirect_complex_system_cycles",
+            "grid_reduction_system_cycles",
+            "indirect_system_cycles",
+            "indirect_complex_system_cycles",
+            "indirect_store_system_cycles",
+            "indirect_store_simt_system_cycles",
+            "indirect_store_only_system_cycles",
+            "indirect_partial_system_cycles",
+            "reduction_loop_system_cycles",
+            "reduction_simd_long_system_cycles",
+            "reduction_generic_system_cycles",
+            "reduction_simple_system_cycles",
+            "reduction_complex_system_cycles",
+            "reduction_small_shuffle_system_cycles",
+            "reduction_large_shuffle_system_cycles",
+            "reduction_multiple_system_cycles",
+            "reduction_factor2_system_cycles",
+            "atomic_max_system_cycles",
+            "atomic_max_simt_system_cycles",
+            "atomic_max_simd_system_cycles",
+            "atomic_add_contiguous_system_cycles",
+            "atomic_discrete_system_cycles",
+            "loop_minimum_base_system_cycles",
+            "loop_direct_long_system_cycles",
+            "direct_simd_loop_system_cycles",
+            "grid_loop_system_cycles",
+            "grid_large_memory_system_cycles",
+            "straight_line_memory_system_cycles",
+            "dot_system_cycles",
+            "sort_system_cycles",
+            "scalar_math_system_cycles",
+            "scalar_exp_system_cycles",
+            "prefix_scan_system_cycles",
+            "complex_indirect_minimum_stage_count",
+            "reduction_minimum_stage_count",
+            "reduction_minimum_shuffle_lane_steps",
+            "evidence"
+          ],
+          "properties": {
+            "loop_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "grid_indirect_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "grid_indirect_factor12_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "grid_indirect_factor4_simt_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "grid_indirect_simd_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "grid_indirect_dot_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "grid_indirect_complex_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "grid_reduction_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "indirect_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "indirect_complex_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "indirect_store_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "indirect_store_simt_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "indirect_store_only_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "indirect_partial_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "reduction_loop_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "reduction_simd_long_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "reduction_generic_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "reduction_simple_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "reduction_complex_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "reduction_small_shuffle_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "reduction_large_shuffle_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "reduction_multiple_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "reduction_factor2_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "atomic_max_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "atomic_max_simt_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "atomic_max_simd_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "atomic_add_contiguous_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "atomic_discrete_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "loop_minimum_base_system_cycles": {"type": "number", "minimum": 0},
+            "loop_direct_long_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "direct_simd_loop_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "grid_loop_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "grid_large_memory_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "straight_line_memory_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "dot_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "sort_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "scalar_math_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "scalar_exp_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "prefix_scan_system_cycles": {"type": "number", "exclusiveMinimum": 0},
+            "complex_indirect_minimum_stage_count": {"type": "integer", "minimum": 1},
+            "reduction_minimum_stage_count": {"type": "integer", "minimum": 1},
+            "reduction_minimum_shuffle_lane_steps": {"type": "number", "minimum": 0},
+            "evidence": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
         "boundary_residual_system_cycles_by_physical_program_count": {
           "type": "object",
           "description": "Measured residual after subtracting the minimal kernel's modeled Stage resource score, keyed by the number of physical programs launched.",
@@ -1386,6 +1493,101 @@
                 }
               },
               "additionalProperties": false
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "simt_indirect_gather_completion": {
+          "type": "object",
+          "description": "Completion envelope for a rank-one masked FP32 loaded-index gather.",
+          "required": [
+            "completion_system_cycles",
+            "simd_completion_system_cycles",
+            "evidence"
+          ],
+          "properties": {
+            "completion_system_cycles": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "simd_completion_system_cycles": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "completion_system_cycles_by_factor": {
+              "type": "object",
+              "minProperties": 1,
+              "patternProperties": {
+                "^[1-9][0-9]*$": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "additionalProperties": false,
+              "description": "Factor-specific SIMT completion envelope selected by the compiler-proven SuperBlock factor."
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "superblock_structural_completion": {
+          "type": "object",
+          "description": "Completion-inclusive elapsed targets for structurally matched superblock holdout families.",
+          "required": [
+            "entries",
+            "evidence"
+          ],
+          "properties": {
+            "entries": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "family",
+                  "source_programs",
+                  "route",
+                  "factor",
+                  "elapsed_system_cycles"
+                ],
+                "properties": {
+                  "family": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_programs": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "route": {
+                    "enum": [
+                      "all_simd",
+                      "all_simt_only",
+                      "mixed_simd_simt"
+                    ]
+                  },
+                  "factor": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "elapsed_system_cycles": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "auto_elapsed_system_cycles": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
             },
             "evidence": {
               "type": "string",

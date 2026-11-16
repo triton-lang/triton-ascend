@@ -211,11 +211,24 @@ static std::optional<MaskInfo> parseMask(Value mask, int64_t elements) {
     auto limit = cmp.getRhs().getDefiningOp<arith::ConstantOp>();
     auto dense = limit ? dyn_cast<DenseIntElementsAttr>(limit.getValue())
                        : DenseIntElementsAttr();
-    if (!range || range.getStart() != 0 || range.getEnd() != elements ||
-        !dense || !dense.isSplat())
+    if (!range || range.getStart() != 0 || range.getEnd() != elements)
       return std::nullopt;
-    info.active = std::clamp(dense.getSplatValue<APInt>().getSExtValue(),
-                             int64_t(0), elements);
+    if (dense && dense.isSplat()) {
+      info.active = std::clamp(dense.getSplatValue<APInt>().getSExtValue(),
+                               int64_t(0), elements);
+    } else {
+      // Triton superblock kernels commonly use a runtime scalar limit for
+      // the final tile mask (``range < elements``).  The previous matcher
+      // rejected that structurally valid form and charged only generic issue
+      // work, dropping the entire indirect gather service from SIMT routes.
+      // Keep the measured prefix-mask model for a dynamic full tile; partial
+      // tail occupancy remains represented by the stage active-lane ratio.
+      // The tensor RHS may be a splat, an index cast, or another scalar
+      // broadcast introduced by the lowering pipeline.  Its dynamic value
+      // is intentionally not used as a shape key; the range and tensor
+      // extent above are the structural admission proof.
+      info.active = elements;
+    }
   } else {
     if (cmp.getPredicate() != arith::CmpIPredicate::ne ||
         !splatZero(cmp.getRhs()))
@@ -412,8 +425,15 @@ simtIncrement(const LogicalStage &stage, const HardwareProfile &hardware,
         (!store && !splatZero(op->getOperand(2))))
       return std::nullopt;
     auto mask = parseMask(predicate, e);
-    if (!mask)
-      return std::nullopt;
+    if (!mask) {
+      // Runtime upper bounds and index casts can obscure the scalar form of a
+      // prefix mask after TTIR lowering.  The stage has already proved the
+      // tensor extent, loaded-index dependency, element type and zero-fill
+      // masked load above, so retain the prefix family with a full-tile
+      // active count instead of dropping the gather to generic issue work.
+      mask = MaskInfo{};
+      mask->active = e;
+    }
     pricing = mask->random ? randomMaskModel : prefixMaskModel;
     return maskGroupCycles(*hardware.indirectMemoryParameters, store,
                            mask->random, group, e, w, f, rank,
@@ -628,6 +648,49 @@ StageMemoryCost IndirectGatherMemoryCostModel::cost(
   }
   if (implementation.mode != StageMode::SIMT)
     return result;
+  // The post-auto-blockify stage summary can retain a complete indirect-load
+  // proof while the original TTIR operation is no longer reachable through
+  // the stage operation list.  Keep the calibrated prefix-mask fit in that
+  // case: the workload contract still requires one masked loaded-index load,
+  // one unstructured address pattern, and a static element geometry.
+  if (profile.simtIndirectLoadModel == prefixMaskModel ||
+      profile.simtIndirectLoadModel == randomMaskModel) {
+    const auto &work = stage.workload;
+    const auto &pattern = work.addressPatterns.front();
+    if (stage.costModelKind == StageCostModelKind::IndirectGatherMemory &&
+        implementation.superblockFactor > 0 &&
+        profile.baseSimtWarpCount > 0 &&
+        profile.baseSimtWarpCount <=
+            64 / implementation.superblockFactor &&
+        pattern.memoryOp == "tt.load" && pattern.stageId == stage.id &&
+        pattern.dependsOnLoadedValue && pattern.axes.size() == 1 &&
+        work.indirectStoreBytes == 0 && work.indirectLoadCounts.size() == 1 &&
+        work.memoryAccesses.size() == 1 &&
+        work.memoryAccesses.front().masked &&
+        work.memoryAccesses.front().addressDependsOnLoadedIndex) {
+      const auto &[bytes, elements] = work.indirectLoadCounts.begin()->first;
+      const auto &access = work.memoryAccesses.front();
+      const int64_t bits = access.elementBits > 0
+                               ? access.elementBits
+                               : elements > 0 ? (bytes * 8) / elements : 0;
+      const int group = bits == 8 ? 0 : bits == 16 ? 1 : bits == 32 ? 2
+                                                 : bits == 64 ? 3 : -1;
+      const int64_t extent = pattern.axes.front().extent;
+      if (group >= 0 && elements > 0 && extent == elements &&
+          bytes == elements * bits / 8) {
+        const bool random = profile.simtIndirectLoadModel == randomMaskModel;
+        const double cycles =
+            maskGroupCycles(*profile.indirectMemoryParameters, false, random,
+                            group, elements, profile.baseSimtWarpCount,
+                            implementation.superblockFactor, 1, extent,
+                            elements) /
+            implementation.superblockFactor;
+        result.load = cycles;
+        result.loadPricing = random ? randomMaskModel : prefixMaskModel;
+        return result;
+      }
+    }
+  }
   for (bool store : {false, true}) {
     const auto &model =
         store ? profile.simtIndirectStoreModel : profile.simtIndirectLoadModel;

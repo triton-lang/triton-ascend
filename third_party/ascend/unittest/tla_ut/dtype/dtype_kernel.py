@@ -69,8 +69,8 @@ VFULL_UNSUPPORTED = frozenset({"int64", "uint64"})
 def dtype_copy(X, Y, DT: tl.constexpr, N: tl.constexpr):
     ub = tla.alloc((N, ), DT, space="ub")
     with tla.scope.vector():
-        tla.copy(tla.view(X, (N, )), ub)
-        tla.copy(ub, tla.view(Y, (N, )))
+        tla.load_gm_to_ub(tla.view(X, (N, )), ub)
+        tla.store_ub_to_gm(ub, tla.view(Y, (N, )))
 
 
 @tla.jit
@@ -79,7 +79,7 @@ def dtype_splat(O, DT: tl.constexpr, N: tl.constexpr):
     with tla.scope.vector():
         with tla.scope.simd():
             tla.simd.vsts(ub[0], tla.simd.vfull(0, DT, N))
-        tla.copy(ub, tla.view(O, (N, )))
+        tla.store_ub_to_gm(ub, tla.view(O, (N, )))
 
 
 def signature(ty):

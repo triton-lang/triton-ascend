@@ -36,11 +36,11 @@ def unpack_kernel(X, M, O, SB: tl.constexpr, DB: tl.constexpr, SIGNED: tl.conste
     D: tl.constexpr = 2048 // DB
     ST: tl.constexpr = tl.int8 if SB == 8 else tl.int16
     DT: tl.constexpr = tl.int16 if DB == 16 else tl.int32
-    x = tla.alloc_buffer((S, ), ST, space="ub")
-    m = tla.alloc_buffer((D, ), DT, space="ub")
-    out = tla.alloc_buffer((3, D), DT, space="ub")
-    tla.copy(tla.view(X, (S, )), x)
-    tla.copy(tla.view(M, (D, )), m)
+    x = tla.alloc((S, ), ST, space="ub")
+    m = tla.alloc((D, ), DT, space="ub")
+    out = tla.alloc((3, D), DT, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (S, )), x)
+    tla.load_gm_to_ub(tla.view(M, (D, )), m)
     with tla.scope.simd():
         src = tla.simd.vlds(x[0])
         mask = tla.simd.vcmps(tla.simd.vlds(m[0]), 0, op=tla.simd.CMP.NE)
@@ -56,7 +56,7 @@ def unpack_kernel(X, M, O, SB: tl.constexpr, DB: tl.constexpr, SIGNED: tl.conste
         tla.simd.vsts(out[0, 0], a, dist="NORM_B16" if DB == 16 else "NORM_B32")
         tla.simd.vsts(out[1, 0], b, dist="NORM_B16" if DB == 16 else "NORM_B32")
         tla.simd.vsts(out[2, 0], c, dist="NORM_B16" if DB == 16 else "NORM_B32")
-    tla.copy(out, tla.view(O, (3, D)))
+    tla.store_ub_to_gm(out, tla.view(O, (3, D)))
 
 
 CASES = [(sb, db, signed, selector)

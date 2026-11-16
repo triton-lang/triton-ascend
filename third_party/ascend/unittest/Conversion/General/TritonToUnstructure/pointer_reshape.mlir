@@ -104,8 +104,8 @@ tt.func @broadcast_pointer_reshape(%base: !tt.ptr<f32>, %offsets: tensor<2x1xi64
 // SCALAR:      scf.for
 // CHECK:       tt.return
 
-// setUnstructured must not leave scalarLike=true, which would bypass the
-// conservative access path before conversion examines any individual axis.
+// A reshape of a uniform pointer tensor remains uniform. One scalar load
+// followed by splat preserves the addresses without a per-lane loop.
 tt.func @uniform_pointer_reshape(%base: !tt.ptr<f32>) -> tensor<8xf32> {
   %bases = tt.splat %base : !tt.ptr<f32> -> tensor<2x4x!tt.ptr<f32>>
   %flat = tt.reshape %bases : tensor<2x4x!tt.ptr<f32>> -> tensor<8x!tt.ptr<f32>>
@@ -114,12 +114,13 @@ tt.func @uniform_pointer_reshape(%base: !tt.ptr<f32>) -> tensor<8xf32> {
 }
 
 // CHECK-LABEL: tt.func @uniform_pointer_reshape
-// INDIRECT:    ascend.indirect_load
-// SCALAR:      scf.for
+// CHECK-NOT:   scf.for
+// CHECK:       %[[UNIFORM:.*]] = tt.load %{{.*}} : !tt.ptr<f32>
+// CHECK:       tt.splat %[[UNIFORM]] : f32 -> tensor<8xf32>
 // CHECK:       tt.return
 
-// A lane-wise base is not a common scalar base. Extract actual reshaped
-// pointers lane by lane, rather than choosing one allocation for indirect_load.
+// Reshape the lane-wise bases and offsets consistently, then combine the
+// corresponding lanes. No single allocation can represent all these bases.
 tt.func @keep_lane_wise_base(%bases: tensor<2x4x!tt.ptr<f32>>, %offsets: tensor<2x4xi32>) -> tensor<8xf32> {
   %ptrs = tt.addptr %bases, %offsets : tensor<2x4x!tt.ptr<f32>>, tensor<2x4xi32>
   %flat = tt.reshape %ptrs : tensor<2x4x!tt.ptr<f32>> -> tensor<8x!tt.ptr<f32>>
@@ -128,10 +129,14 @@ tt.func @keep_lane_wise_base(%bases: tensor<2x4x!tt.ptr<f32>>, %offsets: tensor<
 }
 
 // CHECK-LABEL: tt.func @keep_lane_wise_base
-// CHECK:       %[[PTRS:.*]] = tt.addptr
-// CHECK:       %[[FLAT:.*]] = tt.reshape %[[PTRS]] : tensor<2x4x!tt.ptr<f32>> -> tensor<8x!tt.ptr<f32>>
-// CHECK:       scf.for
-// CHECK:       tensor.extract %[[FLAT]]
-// CHECK:       tt.load
+// CHECK-SAME:  %[[BASES:.*]]: tensor<2x4x!tt.ptr<f32>>, %[[OFFSETS:.*]]: tensor<2x4xi32>
+// CHECK:       %[[WIDE:.*]] = arith.extsi %[[OFFSETS]] : tensor<2x4xi32> to tensor<2x4xi64>
+// CHECK:       %[[FLAT_BASES:.*]] = tt.reshape %[[BASES]] : tensor<2x4x!tt.ptr<f32>> -> tensor<8x!tt.ptr<f32>>
+// CHECK:       %[[FLAT_OFFSETS:.*]] = tt.reshape %[[WIDE]] : tensor<2x4xi64> -> tensor<8xi64>
+// CHECK:       scf.for %[[LANE:[^ ]+]] =
+// CHECK:       %[[OFFSET:.*]] = tensor.extract %[[FLAT_OFFSETS]][%[[LANE]]]
+// CHECK:       %[[BASE:.*]] = tensor.extract %[[FLAT_BASES]][%[[LANE]]]
+// CHECK:       %[[PTR:.*]] = tt.addptr %[[BASE]], %[[OFFSET]] : !tt.ptr<f32>, i64
+// CHECK:       tt.load %[[PTR]] {{.*}} : !tt.ptr<f32>
 // CHECK-NOT:   ascend.indirect_load
 // CHECK:       tt.return

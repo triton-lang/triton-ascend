@@ -181,6 +181,8 @@ class _BatchLaunchHandler:
         # without adding a hook to the common JIT frontend.
         bind = None if warmup else lambda: fn.device_caches[device][4](*args, **kwargs)[0]
         grid = _annotate_launch_grid(kwargs, grid, bind=bind)
+        if "block_batching_factor" not in fn.arg_names and kwargs.get("block_batching_factor", 1) != 1:
+            kwargs = backend.prepare_block_compile_options(kwargs)
         from .reuse.config import enabled
 
         if enabled():

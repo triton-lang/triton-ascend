@@ -311,6 +311,8 @@ def _with_debug_line(npubin_stage, options):
 
 
 def _graph_optimize_core_num(opt):
+    if getattr(opt, "block_compile_context", None) is not None:
+        return opt.block_compile_context[1]
     # Physical AI-core blocks the launcher will schedule, so the row-count policy
     # can keep at least one full wave after R-way coalescing.  The launcher picks
     # AIV for pure-SIMT kernels (final mix_mode "aiv") and AIC otherwise, so the
@@ -323,6 +325,12 @@ def _graph_optimize_core_num(opt):
         return npu_utils.get_aicore_num()
     except Exception:
         return 0
+
+
+def _compile_device_limit(opt):
+    if getattr(opt, "block_compile_context", None) is not None:
+        return opt.block_compile_context[2]
+    return NPUUtils().get_device_limit()
 
 
 @functools.lru_cache(maxsize=128)
@@ -481,11 +489,6 @@ def make_ttir(mod, metadata, opt):
         metadata["block_batching"] = report
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
-    # Source rejection needs no device. Admitted candidates must initialize
-    # before graph optimization queries core counts or instrumentation runs.
-    attempt = _active_attempt.get()
-    if attempt is not None:
-        attempt.prepare_device()
     if opt.enable_graph_optimize:
         graph_kwargs = _graph_optimize_kwargs(opt)
         if opt.block_batching_factor > 1:
@@ -1037,7 +1040,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 
         _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
 
-        has_limit, aic, aiv = NPUUtils().get_device_limit()
+        has_limit, aic, aiv = _compile_device_limit(opt)
         if _is_a5_target_arch(metadata["target"].arch) or has_limit:
             _compile_option_list += [
                 f"--custom-aic-number={aic}",
@@ -1535,6 +1538,9 @@ class NPUOptions:
     enable_graph_optimize: bool = True
     block_auto_contract: Optional[str] = None
     block_auto_collect: bool = False
+    # Parent-resolved (architecture, graph core count, effective core limit,
+    # SIMT stack bytes). Included in the normal option hash and worker request.
+    block_compile_context: Optional[Tuple] = None
     # JIT launches inject "auto" when omitted. This internal default also
     # serves direct compilation without a launch contract, which uses F1.
     block_batching_factor: Union[int, str] = 1
@@ -1739,6 +1745,25 @@ class NPUOptions:
         else:
             object.__setattr__(self, "shared_mem_dynamic_size", 221184)
 
+        if self.block_compile_context is not None:
+            arch, cores, limit, stack = self.block_compile_context
+            if arch != self.target_arch or (cores is not None and (type(cores) is not int or cores < 0)):
+                raise ValueError("invalid block compilation architecture/core count")
+            if self.enable_graph_optimize and cores is None:
+                raise ValueError("block compilation requires a graph core count")
+            if limit is not None:
+                limited, aic, aiv = limit
+                if type(limited) is not bool or any(type(n) is not int or n <= 0 for n in (aic, aiv)):
+                    raise ValueError("invalid block compilation device limit")
+                limit = tuple(limit)
+            if self.compile_on_910_95 and limit is None:
+                raise ValueError("block compilation requires effective device limits")
+            if stack is not None and (type(stack) is not int or stack <= 0):
+                raise ValueError("invalid block compilation SIMT stack size")
+            if self.is_pure_simt and stack is None:
+                raise ValueError("block compilation requires a SIMT stack size")
+            object.__setattr__(self, "block_compile_context", (arch, cores, limit, stack))
+
     def hash(self):
         key = "_".join([f"{name}-{val}" for name, val in self.__dict__.items()])
         key = "_".join([key, get_cann_version_file_hash()])
@@ -1829,13 +1854,15 @@ def ttir_to_npubin(mod, metadata, opt):
             _compile_option_list += [f"--threads-per-warp={opt.warp_size}"]
             if opt.simt_optimization_mode != 0000000:
                 _compile_option_list += [f"--simt-optimization-mode={opt.simt_optimization_mode}"]
-            _compile_option_list += [f"--simt-stack-limit={get_simt_stack_limit()}"]
+            context = getattr(opt, "block_compile_context", None)
+            stack = context[3] if context is not None else get_simt_stack_limit()
+            _compile_option_list += [f"--simt-stack-limit={stack}"]
             if opt.shared_mem_dynamic_size is not None:
                 _compile_option_list += [f"--shared-mem-dynamic-size={opt.shared_mem_dynamic_size}"]
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
             if opt.compile_on_910_95:
-                has_limit, aic, aiv = NPUUtils().get_device_limit()
+                has_limit, aic, aiv = _compile_device_limit(opt)
                 if _is_a5_target_arch(metadata["target"].arch) or has_limit:
                     _compile_option_list += [
                         f"--custom-aic-number={aic}",
@@ -1868,8 +1895,11 @@ def get_simt_stack_limit():
     #  2. The kernel-time default simt_stack_limit=1152.
     _simt_stack_limit = 1152
     try:
-        import torch_npu
-        torch_npu_basic_path = os.path.dirname(torch_npu.__file__)
+        import importlib.util
+        import sys
+        package = sys.modules.get("torch_npu")
+        origin = package.__file__ if package is not None else importlib.util.find_spec("torch_npu").origin
+        torch_npu_basic_path = os.path.dirname(origin)
         _acl_cfg_path = os.path.join(torch_npu_basic_path, "acl_default.json")
         with open(_acl_cfg_path, "r") as f:
             _acl_cfg = json.load(f)
@@ -2012,11 +2042,26 @@ class AscendBackend(BaseBackend):
         return FileCacheManager(cache.key + "/attempts/" + uuid.uuid4().hex)
 
     def compile_bundle(self, src, options, compile_variant):
+        if options.get("block_batching_factor", 1) != 1:
+            options = self.prepare_block_compile_options(options)
         if options.get("block_batching_factor") == "auto":
             from .block_auto import compile_auto_bundle
             return compile_auto_bundle(self, src, options, compile_variant)
         from .block_batching_worker import compile_bundle
         return compile_bundle(self, src, options, compile_variant)
+
+    def prepare_block_compile_options(self, values):
+        """Resolve hardware inputs in the caller, before any candidate/cache lookup."""
+        options = self.parse_options(dict(values))
+        if options.block_compile_context is not None:
+            return dict(values, block_compile_context=options.block_compile_context)
+        from triton import knobs
+        if knobs.ascend.compile_only:
+            raise ValueError("compile-only block batching requires explicit block_compile_context")
+        context = (self.target.arch, _graph_optimize_core_num(options) if options.enable_graph_optimize else None,
+                   NPUUtils().get_device_limit() if options.compile_on_910_95 else None,
+                   get_simt_stack_limit() if options.is_pure_simt else None)
+        return dict(values, block_compile_context=context)
 
     def add_stages(self, stages, options, language):
         if self.target.backend == "npu":

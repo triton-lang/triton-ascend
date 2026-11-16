@@ -1259,6 +1259,49 @@ index 0c4d71049..42f463f55 100644
          self.nargs = None
          return ret
  
+diff --git a/python/triton/runtime/cache.py b/python/triton/runtime/cache.py
+index 0442f00e6..3553931de 100644
+--- a/python/triton/runtime/cache.py
++++ b/python/triton/runtime/cache.py
+@@ -271,6 +271,16 @@ def make_so_cache_key(version_hash, signature, constants, ids, **kwargs):
+ @functools.lru_cache()
+ def triton_key():
+     import pkgutil
++
++    def module_files(paths, prefix):
++        # walk_packages imports each package to find its children. Fingerprinting
++        # compiler files must not import frameworks or initialize device runtimes.
++        for module in pkgutil.iter_modules(paths, prefix):
++            spec = module.module_finder.find_spec(module.name)
++            yield spec.origin
++            if module.ispkg:
++                yield from module_files(spec.submodule_search_locations, module.name + ".")
++
+     TRITON_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+     contents = []
+     # frontend
+@@ -282,8 +292,8 @@ def triton_key():
+         (os.path.join(TRITON_PATH, "backends"), "triton.backends."),
+     ]
+     for path, prefix in path_prefixes:
+-        for lib in pkgutil.walk_packages([path], prefix=prefix):
+-            with open(lib.module_finder.find_spec(lib.name).origin, "rb") as f:
++        for filename in module_files([path], prefix):
++            with open(filename, "rb") as f:
+                 contents += [hashlib.sha256(f.read()).hexdigest()]
+
+     # backend
+@@ -298,8 +308,8 @@ def triton_key():
+     contents.append(libtriton_hash.hexdigest())
+     # language
+     language_path = os.path.join(TRITON_PATH, 'language')
+-    for lib in pkgutil.walk_packages([language_path], prefix="triton.language."):
+-        with open(lib.module_finder.find_spec(lib.name).origin, "rb") as f:
++    for filename in module_files([language_path], "triton.language."):
++        with open(filename, "rb") as f:
+             contents += [hashlib.sha256(f.read()).hexdigest()]
+     return f'{__version__}' + '-'.join(contents)
+
 diff --git a/python/triton/runtime/interpreter.py b/python/triton/runtime/interpreter.py
 index cd871cb2e..82eb6960d 100644
 --- a/python/triton/runtime/interpreter.py

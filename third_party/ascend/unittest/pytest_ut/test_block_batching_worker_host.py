@@ -14,6 +14,23 @@ from block_batching_contract_host import PACKAGE, batching, report_module, bundl
 worker = importlib.import_module(PACKAGE + '.block_batching_worker')
 
 
+def test_cold_compiler_fingerprint_does_not_import_device_frameworks():
+    import subprocess
+    subprocess.run([
+        sys.executable, '-I', '-c', '''
+import importlib.abc, sys
+class NoFramework(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name.split('.')[0] in ('torch', 'torch_npu'):
+            raise AssertionError('fingerprinting imported ' + name)
+sys.meta_path.insert(0, NoFramework())
+from triton.runtime.cache import triton_key
+assert triton_key() == triton_key()
+assert 'torch' not in sys.modules and 'torch_npu' not in sys.modules
+'''
+    ], check=True, timeout=30)
+
+
 @pytest.fixture
 def compile_errors(monkeypatch):
     errors = ModuleType('triton.compiler.errors')
@@ -150,9 +167,9 @@ def test_decline_cache_reuses_exact_attempt_and_retries_stale_entries(decline_co
 
     monkeypatch.setattr(worker, '_attempt', attempt)
 
-    def compile_factor(factor=2):
+    def compile_factor(factor=2, **options):
         with ExitStack() as pending:
-            assert compiler._variant(dict(block_batching_factor=factor), pending) == (refusal, None)
+            assert compiler._variant(dict(block_batching_factor=factor, **options), pending) == (refusal, None)
 
     compile_factor()
     compile_factor()
@@ -176,6 +193,12 @@ def test_decline_cache_reuses_exact_attempt_and_retries_stale_entries(decline_co
     assert len(calls) == 8
     compile_factor()
     assert len(calls) == 8
+    for context in [('Ascend950', 24, (False, 24, 48), 1152), ('Ascend950', 12, (True, 12, 24), 1152),
+                    ('Ascend950', 12, (True, 12, 24), 2048)]:
+        count = len(calls)
+        compile_factor(block_compile_context=context)
+        compile_factor(block_compile_context=context)
+        assert len(calls) == count + 1
 
 
 @pytest.mark.parametrize('failure', ['resource', 'budget', 'wrong_stage', 'Timeout', 'Signal', 'InternalError'])
@@ -262,7 +285,8 @@ def test_binding_before_index_publish_and_listener_afterwards(bundle_environment
     events = []
     candidate = env.candidate
     metadata = candidate.metadata._asdict()
-    metadata.update(hash='variant', target='npu', block_batching_backend_revision='r')
+    context = ('Ascend950', 24, (False, 24, 48), None)
+    metadata.update(hash='variant', target='npu', block_batching_backend_revision='r', block_compile_context=context)
     candidate.metadata = namedtuple('Metadata', metadata)(**metadata)
     fake_api = ModuleType('triton.compiler.compiler')
     fake_api.CompiledKernel = lambda *args: candidate
@@ -272,8 +296,9 @@ def test_binding_before_index_publish_and_listener_afterwards(bundle_environment
     monkeypatch.setattr(report_module, 'validated_candidate_report', lambda *args: dict(env.report))
     env.knobs.compilation = SimpleNamespace(listener=lambda **kwargs: events.append(('listener', kwargs['cache_hit'])))
     compiler = worker.CandidateCompiler(
-        SimpleNamespace(target='npu', parse_options=lambda opts: SimpleNamespace(block_batching_backend_revision='r')),
-        object(), {})
+        SimpleNamespace(
+            target='npu', parse_options=lambda opts: SimpleNamespace(block_batching_backend_revision='r',
+                                                                     block_compile_context=context)), object(), {})
     index = object()
     monkeypatch.setattr(worker, '_publish_generation', lambda *args: events.append('index'))
     monkeypatch.setattr(batching.BatchKernel, 'publish_manifest', lambda self: events.append(
@@ -287,6 +312,11 @@ def test_binding_before_index_publish_and_listener_afterwards(bundle_environment
     record = None
     compiler.compile(env.base, dict(block_batching_factor=3), batching.BatchRequest(3, 0), [0, 1, 2, 3])
     assert events == [('bundle', True), ('listener', True)]
+    events.clear()
+    candidate.metadata = candidate.metadata._replace(block_compile_context=('Ascend950', 12, (True, 12, 24), None))
+    with pytest.raises(worker.BatchCompileError, match='InvalidArtifact'):
+        compiler.compile(env.base, dict(block_batching_factor=3), batching.BatchRequest(3, 0), [0, 1, 2, 3])
+    assert not events
 
 
 def test_worker_spawn_failure_is_structured(tmp_path):
@@ -537,10 +567,9 @@ worker._native_report = terminate
     assert (err.value.kind, err.value.stage) == ('Signal', 'analyze')
 
 
-@pytest.mark.parametrize('device,outcome', [(None, 'success'), (0, 'success'), (0, 'decline'), (0, 'unknown'),
-                                            (0, 'wrong_stage'), (0, 'device_error')])
+@pytest.mark.parametrize('outcome', ['success', 'decline', 'unknown', 'wrong_stage'])
 @pytest.mark.parametrize('pipeline', ['simd', 'simt', 'tla'])
-def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_errors, outcome, pipeline, device):
+def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_errors, outcome, pipeline):
     triton = ModuleType('triton')
     knobs = SimpleNamespace(cache=SimpleNamespace(dir=str(tmp_path / 'ordinary'), dump_dir=str(tmp_path / 'dump')))
     triton.knobs = knobs
@@ -548,21 +577,10 @@ def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_e
     source, target, env = object(), object(), {'explicit': 'caller'}
     writer = SimpleNamespace(cache_dir=str(tmp_path / 'generation'))
     Path(writer.cache_dir).mkdir()
-    stages = worker._CandidateStages(source, tmp_path, writer, device)
+    stages = worker._CandidateStages(source, tmp_path, writer)
     options = SimpleNamespace(block_batching_factor=2, enable_tla_mode=pipeline == 'tla',
                               is_pure_simt=pipeline == 'simt', compile_on_910_95=True)
     events = []
-    devices = []
-
-    def set_device(value):
-        if outcome == 'device_error':
-            raise RuntimeError('device initialization failed')
-        devices.append(value)
-
-    runtime = ModuleType('triton.runtime')
-    runtime.driver = SimpleNamespace(active=SimpleNamespace(set_current_device=set_device))
-    monkeypatch.setitem(sys.modules, 'triton.runtime', runtime)
-    monkeypatch.setitem(sys.modules, 'torch_npu', ModuleType('torch_npu'))
 
     def compile_single(src, compiled_target, opts, *, _env_vars):
         assert src is source and compiled_target is target and _env_vars is env
@@ -574,13 +592,10 @@ def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_e
 
         def lower(module, metadata):
             assert (tmp_path / 'stage').read_text() == 'ttir'
-            assert not devices
             if outcome == 'unknown':
                 raise ValueError('unrecognized compiler error')
-            if outcome in ('decline', 'wrong_stage'):
+            if outcome != 'success':
                 return worker.BatchDecline('NO_PROGRAM_AXIS', 'ttir' if outcome == 'decline' else 'ttadapter')
-            if pipeline != 'tla':
-                stages.prepare_device()  # make_ttir's post-admission boundary.
             return 'lowered'
 
         compiler_path = Path(worker.__file__).with_name('compiler.py')
@@ -596,8 +611,6 @@ def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_e
         assert set(registered) == ({'ttir', 'npubin'} if pipeline == 'simt' else {'ttir', 'ttadapter', 'npubin'})
         try:
             result = registered['ttir'](object(), {})
-            for ext in ('ttadapter', 'npubin'):
-                stages.wrap(ext, lambda module, metadata: module)(result, {})
         except Exception as error:
             raise compile_errors.MLIRCompilationError('stage failed') from error
         (Path(writer.cache_dir) / 'k.ttir').write_text(result)
@@ -605,20 +618,15 @@ def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_e
         events.append('child listener')
         return result
 
-    device_error = outcome == 'device_error'
-    success = outcome == 'success'
-    if outcome in ('unknown', 'wrong_stage') or device_error:
+    if outcome in ('unknown', 'wrong_stage'):
         with pytest.raises(compile_errors.MLIRCompilationError) as error:
             stages.compile(compile_single, target, options, env)
-        expected_error = RuntimeError if device_error else (
-            ValueError if outcome == 'unknown' else worker.BatchCompileError)
-        assert isinstance(error.value.__cause__, expected_error)
+        assert isinstance(error.value.__cause__, ValueError if outcome == 'unknown' else worker.BatchCompileError)
     else:
         result = stages.compile(compile_single, target, options, env)
-        assert result == ('lowered' if success else worker.BatchDecline('NO_PROGRAM_AXIS', 'ttir'))
-    assert devices == ([device] if success and device is not None else [])
-    assert events == (['child listener'] if success else [])
-    assert bool(list(stages.index_root.rglob('__grp__*'))) == success
+        assert result == ('lowered' if outcome == 'success' else worker.BatchDecline('NO_PROGRAM_AXIS', 'ttir'))
+    assert events == (['child listener'] if outcome == 'success' else [])
+    assert bool(list(stages.index_root.rglob('__grp__*'))) == (outcome == 'success')
     assert not list(Path(writer.cache_dir).glob('__grp__*'))
     assert not (tmp_path / 'ordinary').exists()
     assert knobs.cache.dir == str(tmp_path / 'ordinary') and worker._active_attempt.get() is None

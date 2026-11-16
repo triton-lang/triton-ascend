@@ -47,7 +47,7 @@ class TestHostIntegration(unittest.TestCase):
         capture = patch.object(self.batching, "_capture_state", return_value=False)
         self.capture = capture.start()
         self.addCleanup(capture.stop)
-        self.backend = SimpleNamespace(target=SimpleNamespace(arch="Ascend950"))
+        self.backend = SimpleNamespace(target=SimpleNamespace(arch="Ascend950"), prepare_block_compile_options=dict)
         self.fn = SimpleNamespace(arg_names=["x", "size", "BLOCK"], device_caches={0: [None] * 4 + [self.bind]})
         self.kwargs = dict(block_batching_factor="auto", BLOCK=512)
         self.result = object()

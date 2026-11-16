@@ -364,19 +364,11 @@ _active_attempt = ContextVar('ascend_batch_compiler_attempt', default=None)
 class _CandidateStages:
     """Child-only cache and stage binding for a single call to Triton's compiler."""
 
-    def __init__(self, source, directory, writer, device=None):
+    def __init__(self, source, directory, writer):
         self.source, self.directory, self.writer = source, directory, writer
-        self.device = device
         self.index_root = directory / 'core-cache'
         self.decline = None
         self.stop = Exception('candidate stage declined')
-
-    def prepare_device(self):
-        if self.device is not None:
-            import torch_npu  # noqa: F401 - register torch.npu in this interpreter
-            from triton.runtime import driver
-            driver.active.set_current_device(self.device)
-            self.device = None
 
     def bind_writer(self, source, index, options):
         from triton import knobs
@@ -392,10 +384,6 @@ class _CandidateStages:
 
         def run(module, metadata):
             (self.directory / 'stage').write_text(ext)
-            # TTIR defers this until source admission; other pipelines/stages
-            # still need the caller's device before lowering or instrumentation.
-            if ext != 'ttir':
-                self.prepare_device()
             result = stage(module, metadata)
             if isinstance(result, BatchDecline):
                 if result.stage != ext:
@@ -440,6 +428,8 @@ def _worker_input(body, directory):
     options = decode(body['options'])
     backend = make_backend(target)
     normalized = backend.parse_options(dict(options))
+    if normalized.block_compile_context is None:
+        raise ValueError('candidate worker requires explicit block_compile_context')
     if _variant_key(source, backend, normalized, body['env_vars']) != body['variant']:
         raise ValueError('worker source, backend, options or environment differ')
     return source, backend, options, normalized
@@ -477,8 +467,7 @@ def _compile(body, directory):
             timings.update(asdict(kwargs['times']))
 
         knobs.compilation.listener = collect
-    candidate = _CandidateStages(source, directory, cache,
-                                 body.get('device')).compile(compile_single, target, options, body['env_vars'])
+    candidate = _CandidateStages(source, directory, cache).compile(compile_single, target, options, body['env_vars'])
     if isinstance(candidate, BatchDecline):
         return 'NotApplicable', candidate.payload()
     if candidate.hash != body['variant']:
@@ -599,7 +588,6 @@ class CandidateCompiler:
         from triton import knobs
         from triton.compiler.compiler import CompileTimer
         from triton.runtime.cache import get_cache_manager
-        from triton.runtime import driver
 
         listener = knobs.compilation.listener
         timer = CompileTimer() if listener else None
@@ -630,9 +618,8 @@ class CandidateCompiler:
             if refusal is not None:
                 return refusal, None
         generation = uuid4().hex
-        device = None if knobs.ascend.compile_only else driver.active.get_current_device()
         body = _worker_request(self.backend, self.source, options, self.env_vars, variant)
-        body.update(stage_key=f'{cache.key}/attempts/{generation}', timing=bool(listener), device=device)
+        body.update(stage_key=f'{cache.key}/attempts/{generation}', timing=bool(listener))
         stage_dir = attempts / generation
         stage_dir.mkdir(parents=True, exist_ok=False)
         pending.callback(shutil.rmtree, stage_dir)
@@ -683,9 +670,11 @@ class CandidateCompiler:
         cache, record, group, variant, timings = compiled
         try:
             candidate = CompiledKernel(self.source, group, variant)
+            normalized = self.backend.parse_options(dict(options))
             if (candidate.metadata.hash != variant or self.backend.target != candidate.metadata.target
-                    or candidate.metadata.block_batching_backend_revision != self.backend.parse_options(
-                        dict(options)).block_batching_backend_revision):
+                    or candidate.metadata.block_batching_backend_revision != normalized.block_batching_backend_revision
+                    or json.dumps(candidate.metadata.block_compile_context) != json.dumps(
+                        normalized.block_compile_context)):
                 raise ValueError('artifact metadata disagrees with candidate identity')
             report = validated_candidate_report(candidate, request, IMPLEMENTATION_VERSION)
             if retry:

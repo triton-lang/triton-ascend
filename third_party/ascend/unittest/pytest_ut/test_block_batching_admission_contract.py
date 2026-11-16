@@ -2,7 +2,6 @@
 """Admission evidence comes from the normalized kernel, not its name."""
 import json
 from copy import deepcopy
-from types import SimpleNamespace
 
 import pytest
 from triton._C.libtriton import ascend
@@ -87,33 +86,6 @@ def test_pointwise_contract_does_not_require_aggregation(tmp_path):
     assert report['compile_status'] == 'REWRITTEN'
     assert report['computation']['aggregations'] == []
     assert vv_computation_refusal(report) is None
-
-
-@pytest.mark.parametrize('decline', [False, True])
-def test_device_preparation_follows_source_admission(tmp_path, monkeypatch, decline):
-    from triton.backends.ascend import compiler
-    from triton.backends.ascend.block_batching_worker import BatchDecline, _active_attempt
-
-    events = []
-    options = SimpleNamespace(debug=False, block_batching_factor=2, block_batching_axis=0, block_batching_grid=None,
-                              block_batching_layout='auto',
-                              block_batching_implementation=compiler.IMPLEMENTATION_VERSION,
-                              enable_hivm_batch_matmul=False, enable_graph_optimize=True)
-
-    def graph_options(opt):
-        assert events == ['device']
-        events.append('graph_options')
-        return {}
-
-    monkeypatch.setattr(compiler, '_graph_optimize_kwargs', graph_options)
-    module = parse(tmp_path, pointwise(1 if decline else 0))
-    token = _active_attempt.set(SimpleNamespace(prepare_device=lambda: events.append('device')))
-    try:
-        result = compiler.make_ttir(module, {'hash': 'device-admission-test'}, options)
-    finally:
-        _active_attempt.reset(token)
-    assert isinstance(result, BatchDecline) == decline
-    assert events == ([] if decline else ['device', 'graph_options'])
 
 
 @pytest.mark.parametrize('policy,expected_axis', [('auto', 0), ('semantic_only', 1)])

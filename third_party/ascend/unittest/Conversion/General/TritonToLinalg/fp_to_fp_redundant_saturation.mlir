@@ -175,7 +175,7 @@ func.func @non_splat_bound(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
 
 // -----
 
-// Only value-preserving reshapes may be crossed; arithmetic can overflow again.
+// Multiplication can overflow the proven range again.
 // CHECK-LABEL: func.func @arithmetic_after_clamp
 // CHECK: arith.cmpf ogt
 // CHECK: arith.select
@@ -190,4 +190,404 @@ func.func @arithmetic_after_clamp(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %scaled = arith.mulf %clamp, %two : tensor<4xf32>
   %result = tt.fp_to_fp %scaled, rounding = rtne : tensor<4xf32> -> tensor<4xf8E4M3FN>
   return %result : tensor<4xf8E4M3FN>
+}
+
+// -----
+
+// Both NaN semantics and either min/max ordering establish a finite range.
+// CHECK-LABEL: func.func @minimumf_maximumf_bounded
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @minimumf_maximumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = arith.minimumf %x, %hi : f32
+  %v = arith.maximumf %lo, %a : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Both NaN semantics and either min/max ordering establish a finite range.
+// CHECK-LABEL: func.func @maximumf_minimumf_bounded
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @maximumf_minimumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = arith.maximumf %x, %lo : f32
+  %v = arith.minimumf %hi, %a : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Both NaN semantics and either min/max ordering establish a finite range.
+// CHECK-LABEL: func.func @minnumf_maxnumf_bounded
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @minnumf_maxnumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = arith.minnumf %x, %hi : f32
+  %v = arith.maxnumf %lo, %a : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Both NaN semantics and either min/max ordering establish a finite range.
+// CHECK-LABEL: func.func @maxnumf_minnumf_bounded
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @maxnumf_minnumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = arith.maxnumf %x, %lo : f32
+  %v = arith.minnumf %hi, %a : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// A single bound leaves the other infinity possible.
+// CHECK-LABEL: func.func @one_sided_minimumf
+// CHECK: arith.cmpf ogt
+// CHECK: arith.select
+// CHECK: arith.cmpf olt
+// CHECK: arith.select
+// CHECK: arith.truncf
+func.func @one_sided_minimumf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %v = arith.minimumf %x, %hi : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// A single bound leaves the other infinity possible.
+// CHECK-LABEL: func.func @one_sided_maximumf
+// CHECK: arith.cmpf ogt
+// CHECK: arith.select
+// CHECK: arith.cmpf olt
+// CHECK: arith.select
+// CHECK: arith.truncf
+func.func @one_sided_maximumf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %v = arith.maximumf %x, %lo : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Sign changes preserve the symmetric FP8 range.
+// CHECK-LABEL: func.func @bounded_negf
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @bounded_negf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = tt.clampf %x, %lo, %hi, propagateNan = all : f32
+  %v = arith.negf %a : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Sign changes preserve the symmetric FP8 range.
+// CHECK-LABEL: func.func @bounded_absf
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @bounded_absf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = tt.clampf %x, %lo, %hi, propagateNan = all : f32
+  %v = math.absf %a : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Abs does not establish a finite upper bound.
+// CHECK-LABEL: func.func @unbounded_abs
+// CHECK: arith.cmpf ogt
+// CHECK: arith.select
+// CHECK: arith.cmpf olt
+// CHECK: arith.select
+// CHECK: arith.truncf
+func.func @unbounded_abs(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %v = math.absf %x : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Abs also handles ranges entirely on one side of zero.
+// CHECK-LABEL: func.func @abs_negative_interval
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @abs_negative_interval(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -224.0 : f32
+  %hi = arith.constant -16.0 : f32
+  %a = tt.clampf %x, %lo, %hi, propagateNan = all : f32
+  %v = math.absf %a : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Abs also handles ranges entirely on one side of zero.
+// CHECK-LABEL: func.func @abs_positive_interval
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @abs_positive_interval(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant 16.0 : f32
+  %hi = arith.constant 224.0 : f32
+  %a = tt.clampf %x, %lo, %hi, propagateNan = all : f32
+  %v = math.absf %a : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Both select arms must fit; a constant arm is an exact range.
+// CHECK-LABEL: func.func @bounded_select
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @bounded_select(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = tt.clampf %x, %lo, %hi, propagateNan = all : f32
+  %v = arith.select %cond, %a, %hi : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// An unknown select arm retains saturation.
+// CHECK-LABEL: func.func @unbounded_select
+// CHECK: arith.cmpf ogt
+// CHECK: arith.select
+// CHECK: arith.cmpf olt
+// CHECK: arith.select
+// CHECK: arith.truncf
+func.func @unbounded_select(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = tt.clampf %x, %lo, %hi, propagateNan = all : f32
+  %v = arith.select %cond, %a, %y : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Ignoring a possible NaN can expose an unbounded other operand; finite clamp mode cannot.
+// CHECK-LABEL: func.func @minnumf_nan_all
+// CHECK: arith.cmpf ogt
+// CHECK: arith.select
+// CHECK: arith.cmpf olt
+// CHECK: arith.select
+// CHECK: arith.truncf
+func.func @minnumf_nan_all(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = tt.clampf %x, %lo, %hi, propagateNan = all : f32
+  %b = arith.minnumf %a, %y : f32
+  %v = arith.maximumf %b, %lo : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Ignoring a possible NaN can expose an unbounded other operand; finite clamp mode cannot.
+// CHECK-LABEL: func.func @minnumf_nan_none
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @minnumf_nan_none(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = tt.clampf %x, %lo, %hi, propagateNan = none : f32
+  %b = arith.minnumf %a, %y : f32
+  %v = arith.maximumf %b, %lo : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Ignoring a possible NaN can expose an unbounded other operand; finite clamp mode cannot.
+// CHECK-LABEL: func.func @maxnumf_nan_all
+// CHECK: arith.cmpf ogt
+// CHECK: arith.select
+// CHECK: arith.cmpf olt
+// CHECK: arith.select
+// CHECK: arith.truncf
+func.func @maxnumf_nan_all(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = tt.clampf %x, %lo, %hi, propagateNan = all : f32
+  %b = arith.maxnumf %a, %y : f32
+  %v = arith.minimumf %b, %hi : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Ignoring a possible NaN can expose an unbounded other operand; finite clamp mode cannot.
+// CHECK-LABEL: func.func @maxnumf_nan_none
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @maxnumf_nan_none(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = tt.clampf %x, %lo, %hi, propagateNan = none : f32
+  %b = arith.maxnumf %a, %y : f32
+  %v = arith.minimumf %b, %hi : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// Transpose, expand, broadcast and reshape preserve every element range.
+// CHECK-LABEL: func.func @bounded_shape_chain
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @bounded_shape_chain(%x: tensor<4x8xf32>) -> tensor<64xf8E4M3FN> {
+  %lo = arith.constant dense<-448.0> : tensor<4x8xf32>
+  %hi = arith.constant dense<448.0> : tensor<4x8xf32>
+  %a = tt.clampf %x, %lo, %hi, propagateNan = all : tensor<4x8xf32>
+  %b = tt.trans %a {order = array<i32: 1, 0>} : tensor<4x8xf32> -> tensor<8x4xf32>
+  %c = tt.expand_dims %b {axis = 0 : i32} : tensor<8x4xf32> -> tensor<1x8x4xf32>
+  %d = tt.broadcast %c : tensor<1x8x4xf32> -> tensor<2x8x4xf32>
+  %v = tt.reshape %d : tensor<2x8x4xf32> -> tensor<64xf32>
+  %result = tt.fp_to_fp %v, rounding = rtne : tensor<64xf32> -> tensor<64xf8E4M3FN>
+  return %result : tensor<64xf8E4M3FN>
+}
+
+// -----
+
+// Splat carries a scalar range to every tensor element.
+// CHECK-LABEL: func.func @bounded_splat
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @bounded_splat(%x: f32) -> tensor<4xf8E4M3FN> {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = tt.clampf %x, %lo, %hi, propagateNan = none : f32
+  %v = tt.splat %a : f32 -> tensor<4xf32>
+  %result = tt.fp_to_fp %v, rounding = rtne : tensor<4xf32> -> tensor<4xf8E4M3FN>
+  return %result : tensor<4xf8E4M3FN>
+}
+
+// -----
+
+// Finite globally ordered computed bounds can also prove a clamp range.
+// CHECK-LABEL: func.func @computed_clamp_bounds
+// CHECK-NOT: arith.cmpf
+// CHECK: arith.truncf
+func.func @computed_clamp_bounds(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %zero = arith.constant 0.0 : f32
+  %bound = tt.clampf %y, %zero, %hi, propagateNan = none : f32
+  %lower = arith.negf %bound : f32
+  %v = tt.clampf %x, %lower, %bound, propagateNan = all : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// A single signaling NaN may become a quiet NaN before the next minnum/maxnum.
+// CHECK-LABEL: func.func @minnumf_possible_snan
+// CHECK: arith.cmpf ogt
+// CHECK: arith.select
+// CHECK: arith.cmpf olt
+// CHECK: arith.select
+// CHECK: arith.truncf
+func.func @minnumf_possible_snan(%x: f32, %y: f32) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = arith.minnumf %x, %hi : f32
+  %b = arith.minnumf %a, %y : f32
+  %v = arith.maximumf %b, %lo : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// A single signaling NaN may become a quiet NaN before the next minnum/maxnum.
+// CHECK-LABEL: func.func @minnumf_constant_snan
+// CHECK: arith.cmpf ogt
+// CHECK: arith.select
+// CHECK: arith.cmpf olt
+// CHECK: arith.select
+// CHECK: arith.truncf
+func.func @minnumf_constant_snan(%x: f32, %y: f32) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %snan = arith.constant 0x7F800001 : f32
+  %a = arith.minnumf %snan, %hi : f32
+  %b = arith.minnumf %a, %y : f32
+  %v = arith.maximumf %b, %lo : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// A single signaling NaN may become a quiet NaN before the next minnum/maxnum.
+// CHECK-LABEL: func.func @maxnumf_possible_snan
+// CHECK: arith.cmpf ogt
+// CHECK: arith.select
+// CHECK: arith.cmpf olt
+// CHECK: arith.select
+// CHECK: arith.truncf
+func.func @maxnumf_possible_snan(%x: f32, %y: f32) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %a = arith.maxnumf %x, %lo : f32
+  %b = arith.maxnumf %a, %y : f32
+  %v = arith.minimumf %b, %hi : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
+}
+
+// -----
+
+// A single signaling NaN may become a quiet NaN before the next minnum/maxnum.
+// CHECK-LABEL: func.func @maxnumf_constant_snan
+// CHECK: arith.cmpf ogt
+// CHECK: arith.select
+// CHECK: arith.cmpf olt
+// CHECK: arith.select
+// CHECK: arith.truncf
+func.func @maxnumf_constant_snan(%x: f32, %y: f32) -> f8E4M3FN {
+  %lo = arith.constant -448.0 : f32
+  %hi = arith.constant 448.0 : f32
+  %snan = arith.constant 0x7F800001 : f32
+  %a = arith.maxnumf %snan, %lo : f32
+  %b = arith.maxnumf %a, %y : f32
+  %v = arith.minimumf %b, %hi : f32
+  %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
+  return %result : f8E4M3FN
 }

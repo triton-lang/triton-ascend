@@ -668,29 +668,138 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
   return failure();
 }
 
-static bool isClampedToFiniteFp8Range(Value input, const llvm::APFloat &limit) {
-  while (auto reshape = input.getDefiningOp<triton::ReshapeOp>())
-    input = reshape.getSrc();
-  auto clamp = input.getDefiningOp<triton::ClampFOp>();
-  if (!clamp)
-    return false;
+namespace {
+// Bounds cover every non-NaN element. NaNs need separate tracking because
+// minnum/maxnum can replace them with the other operand, even outside its
+// range.
+struct Fp8InputRange {
+  llvm::APFloat lower;
+  llvm::APFloat upper;
+  bool mayNaN;
+  bool maySignalingNaN;
+};
 
-  auto getFiniteBound = [](Value bound, llvm::APFloat &value) {
-    if (auto splat = bound.getDefiningOp<triton::SplatOp>())
-      bound = splat.getSrc();
-    return matchPattern(bound, m_ConstantFloat(&value)) && value.isFinite();
-  };
-  llvm::APFloat lower = limit, upper = limit;
-  if (!getFiniteBound(clamp.getMin(), lower) ||
-      !getFiniteBound(clamp.getMax(), upper))
-    return false;
+class Fp8InputRangeAnalysis {
+public:
+  bool isWithin(Value input, const llvm::APFloat &limit) {
+    auto range = infer(input, 0);
+    auto negativeLimit = limit;
+    negativeLimit.changeSign();
+    return range.lower.compare(negativeLimit) != llvm::APFloat::cmpLessThan &&
+           range.upper.compare(limit) != llvm::APFloat::cmpGreaterThan;
+  }
 
-  llvm::APFloat negativeLimit = limit;
-  negativeLimit.changeSign();
-  return lower.compare(negativeLimit) != llvm::APFloat::cmpLessThan &&
-         upper.compare(limit) != llvm::APFloat::cmpGreaterThan &&
-         lower.compare(upper) != llvm::APFloat::cmpGreaterThan;
-}
+private:
+  static llvm::APFloat min(const llvm::APFloat &a, const llvm::APFloat &b) {
+    return a.compare(b) == llvm::APFloat::cmpLessThan ? a : b;
+  }
+  static llvm::APFloat max(const llvm::APFloat &a, const llvm::APFloat &b) {
+    return a.compare(b) == llvm::APFloat::cmpGreaterThan ? a : b;
+  }
+  static Fp8InputRange unknown(Value value) {
+    auto type = cast<FloatType>(getElementTypeOrSelf(value.getType()));
+    return {llvm::APFloat::getInf(type.getFloatSemantics(), true),
+            llvm::APFloat::getInf(type.getFloatSemantics()), true, true};
+  }
+  static Fp8InputRange merge(const Fp8InputRange &a, const Fp8InputRange &b) {
+    return {min(a.lower, b.lower), max(a.upper, b.upper), a.mayNaN || b.mayNaN,
+            a.maySignalingNaN || b.maySignalingNaN};
+  }
+  static Fp8InputRange minMax(const Fp8InputRange &a, const Fp8InputRange &b,
+                              bool isMin, bool propagateNaN) {
+    auto combine = isMin ? min : max;
+    Fp8InputRange result{combine(a.lower, b.lower), combine(a.upper, b.upper),
+                         a.mayNaN || b.mayNaN,
+                         a.maySignalingNaN || b.maySignalingNaN};
+    if (!propagateNaN) {
+      // An ignored NaN selects the other operand without applying the bound.
+      if (a.mayNaN)
+        result = merge(result, b);
+      if (b.mayNaN)
+        result = merge(result, a);
+      // Constant folding may quiet a single signaling NaN instead of returning
+      // the numeric operand. The target may ignore it instead. With two NaNs,
+      // a select-based lowering may also preserve a signaling NaN unchanged.
+      result.mayNaN =
+          (a.mayNaN && b.mayNaN) || a.maySignalingNaN || b.maySignalingNaN;
+      result.maySignalingNaN =
+          (a.maySignalingNaN && b.mayNaN) || (b.maySignalingNaN && a.mayNaN);
+    }
+    return result;
+  }
+
+  Fp8InputRange infer(Value value, unsigned depth) {
+    if (auto it = cache.find(value); it != cache.end())
+      return it->second;
+    // Keep this local proof bounded; block arguments and unsupported arithmetic
+    // retain saturation, including loops and calculations that can overflow.
+    if (depth >= 32 || remaining == 0)
+      return unknown(value);
+    --remaining;
+    auto result = inferImpl(value, depth);
+    cache.try_emplace(value, result);
+    return result;
+  }
+
+  Fp8InputRange inferImpl(Value value, unsigned depth) {
+    auto result = unknown(value);
+    auto constant = result.lower;
+    if (matchPattern(value, m_ConstantFloat(&constant)) && !constant.isNaN())
+      return {constant, constant, false, false};
+    auto *op = value.getDefiningOp();
+    if (!op)
+      return result;
+    auto operand = [&](Value input) { return infer(input, depth + 1); };
+    if (isa<triton::ReshapeOp, triton::TransOp, triton::BroadcastOp,
+            triton::ExpandDimsOp, triton::SplatOp>(op))
+      return operand(op->getOperand(0));
+    if (auto select = dyn_cast<arith::SelectOp>(op))
+      return merge(operand(select.getTrueValue()),
+                   operand(select.getFalseValue()));
+    if (isa<arith::NegFOp, math::AbsFOp>(op)) {
+      result = operand(op->getOperand(0));
+      if (isa<arith::NegFOp>(op)) {
+        std::swap(result.lower, result.upper);
+        result.lower.changeSign();
+        result.upper.changeSign();
+      } else {
+        auto zero = llvm::APFloat::getZero(result.lower.getSemantics());
+        bool crossesZero =
+            result.lower.compare(zero) != llvm::APFloat::cmpGreaterThan &&
+            result.upper.compare(zero) != llvm::APFloat::cmpLessThan;
+        result.lower.clearSign();
+        result.upper.clearSign();
+        auto lower = crossesZero ? zero : min(result.lower, result.upper);
+        result.upper = max(result.lower, result.upper);
+        result.lower = lower;
+      }
+      return result;
+    }
+    if (isa<arith::MinimumFOp, arith::MaximumFOp, arith::MinNumFOp,
+            arith::MaxNumFOp>(op))
+      return minMax(operand(op->getOperand(0)), operand(op->getOperand(1)),
+                    isa<arith::MinimumFOp, arith::MinNumFOp>(op),
+                    isa<arith::MinimumFOp, arith::MaximumFOp>(op));
+    if (auto clamp = dyn_cast<triton::ClampFOp>(op)) {
+      auto lower = operand(clamp.getMin());
+      auto upper = operand(clamp.getMax());
+      // Only accept finite bounds with an established ordering.
+      if (lower.mayNaN || upper.mayNaN || !lower.lower.isFinite() ||
+          !upper.upper.isFinite() ||
+          lower.upper.compare(upper.lower) == llvm::APFloat::cmpGreaterThan)
+        return result;
+      bool propagateNaN = clamp.getPropagateNan() == PropagateNan::ALL;
+      return minMax(lower,
+                    minMax(operand(clamp.getX()), upper, true, propagateNaN),
+                    false, propagateNaN);
+    }
+    return result;
+  }
+
+  DenseMap<Value, Fp8InputRange> cache;
+  unsigned remaining = 128;
+};
+} // namespace
 
 static Value clampToFiniteFp8Range(Value input, Type dstElemType, Location loc,
                                    PatternRewriter &rewriter) {
@@ -704,9 +813,9 @@ static Value clampToFiniteFp8Range(Value input, Type dstElemType, Location loc,
   limit.convert(srcElemType.getFloatSemantics(),
                 llvm::APFloat::rmNearestTiesToEven, &losesInfo);
 
-  // Keep the existing clamp's NaN and signed-zero behavior. Its result is
-  // already in range or NaN, so the ordered comparisons below cannot change it.
-  if (isClampedToFiniteFp8Range(input, limit))
+  // Keep the producer's NaN and signed-zero behavior. If every non-NaN value
+  // is already in range, the ordered comparisons below cannot change it.
+  if (Fp8InputRangeAnalysis().isWithin(input, limit))
     return input;
 
   auto createBound = [&](const llvm::APFloat &value) -> Value {

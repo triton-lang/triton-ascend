@@ -290,6 +290,9 @@ class NPUDriver(DriverBase):
         self.utils = NPUUtils()
         self.launcher_cls = NPULauncher
         super().__init__()
+        # Install launch/autotune hooks in the device runtime, not as an
+        # accidental side effect of compiler-cache fingerprinting.
+        from . import runtime  # noqa: F401
 
     @classmethod
     def is_active(cls):

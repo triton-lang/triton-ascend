@@ -2,7 +2,7 @@
 
 ## SIMT 编译示例
 
-使用 SIMT 编译的 triton kernel 示例。通过 kernel 启动参数设置 `compile_mode='simt_only'`，即可启用纯 SIMT 编译。
+使用 SIMT 编译的 Triton Kernel 示例。通过 Kernel 启动参数设置 `compile_mode='simt_only'`，即可启用纯 SIMT 编译。
 
 ```python
 # Enable libdevice SIMT compilation
@@ -3816,7 +3816,7 @@ triton.language.extra.cann.libdevice.yn(n, x, _builder=None)
 - n: `int32`
 - x: `float32`
 
-返回值: `tl.tensor`, 返回输入参数的 n 阶第二类贝塞尔函数值。
+返回值: `tl.tensor`，返回输入参数的 n 阶第二类贝塞尔函数值。
 
 返回类型：`float32`
 

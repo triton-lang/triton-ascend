@@ -100,10 +100,11 @@ times_ms = do_bench_npu([fn_A, fn_B, fn_C])
 ```
 
 约束：
+
 - 当传入单个函数时，`do_bench_npu`会测量`fn`中所有指令的总时间，包括非kernel的指令。因此不要在传入的`fn`中包含无需测量的指令，或者使用`target_kernel_name` 参数。
 - 当传入多个函数时，`do_bench_npu` 只有在每个函数只包含一个 kernel 时，才能准确返回每个函数的 Device 侧时间。如果函数包含多个 kernel（包括非kernel的其他指令），`do_bench_npu` 无法正确区分哪个 kernel 属于哪个函数。请避免测试复杂函数的列表。
 
-### 2. 清除 L2 Cache
+### 2. 清除 L2 缓存
 
 要测量最坏情况下的性能或模拟冷启动内存场景，可以在每次迭代前清除 L2 缓存：
 
@@ -154,9 +155,9 @@ ms = do_bench_npu(fn, warmup=1, active=1)
 
 ### 2. 自动过滤缓存清除操作
 
-当使用 `clear_l2_cache=True` 时，profiler 会自动识别并过滤掉用于清除缓存的虚拟 kernel（例如包含 “ReduceSum” 或 “zero” 的操作），确保它们不会污染最终的计时计算。
+当使用 `clear_l2_cache=True` 时，profiler 会自动识别并过滤掉用于清除缓存的虚拟 kernel（例如包含“ReduceSum”或“zero”的操作），确保它们不会污染最终的计时计算。
 
-### 3. 单function中含有多kernel的时间收集
+### 3. 单函数中含有多kernel的时间收集
 
 在实际 NPU 执行中，单次 Triton kernel 启动可能会被底层调度程序拆分为多个硬件任务。`do_bench_npu` 会自动检测捕获到的实际行数（任务数）是否为预期迭代次数的倍数。如果是，它会计算倍数并正确平均时间，从而返回逻辑函数的准确总时间。
 
@@ -164,11 +165,11 @@ ms = do_bench_npu(fn, warmup=1, active=1)
 
 Triton-Ascend 的 Autotune 扩展支持切换 autotune 基准测试期间使用的性能收集方法。通过设置环境变量 `TRITON_BENCH_METHOD="npu"`，Autotune 机制将在内部调用 `do_bench_npu` 来评估候选配置。
 
-```python
+```bash
 export TRITON_BENCH_METHOD="npu"
 ```
 
-对于执行时间短的 kernel，建议使用此方法，否则 Host 侧启动延迟将主导社区 `do_bench` 的测量结果，从而导致选择配置非device侧最优。
+对于执行时间短的 kernel，建议使用此方法，否则 Host 侧启动延迟将主导社区 `do_bench` 的测量结果，从而导致选择配置非Device侧最优。
 
 ## 总结
 
@@ -177,4 +178,4 @@ export TRITON_BENCH_METHOD="npu"
 - 调用  `do_bench_npu(fn)` 获取纯 Device 侧执行时间；
 - 如果需要在复杂函数中隔离特定 kernel，请使用 `target_kernel_name`；
 - 如果需要稳定的最坏情况性能基线，请启用 `clear_l2_cache=True`；
-- 确保安装了 `mspti` ，以保持与社区 `do_bench` 的运行时性能持平。
+- 确保安装了 `mspti`，以保持与社区 `do_bench` 的运行时性能持平。

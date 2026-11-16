@@ -54,6 +54,77 @@ static bool canTransferAttrs(Operation *from, Operation *to) {
          isTrackedControlFlowOp(to) && from->getName() == to->getName();
 }
 
+/// Add a block_id check before SCF's generic if merge patterns run. The SCF
+/// patterns are registered in an anonymous namespace, so identify the two
+/// patterns by their debug names and delegate all merge logic to them.
+class BlockIdAwareIfMergePattern : public OpRewritePattern<scf::IfOp> {
+public:
+  enum class Kind { AdjacentMerge, NestedMerge };
+
+  BlockIdAwareIfMergePattern(MLIRContext *ctx,
+                             std::unique_ptr<RewritePattern> wrappedPattern,
+                             Kind kind)
+      : OpRewritePattern<scf::IfOp>(ctx, wrappedPattern->getBenefit()),
+        wrappedPattern(std::move(wrappedPattern)), kind(kind) {
+    setDebugName(this->wrappedPattern->getDebugName());
+    addDebugLabels(this->wrappedPattern->getDebugLabels());
+    setHasBoundedRewriteRecursion(
+        this->wrappedPattern->hasBoundedRewriteRecursion());
+  }
+
+  LogicalResult matchAndRewrite(scf::IfOp ifOp,
+                                PatternRewriter &rewriter) const override {
+    Operation *otherIf = nullptr;
+    if (kind == Kind::AdjacentMerge) {
+      otherIf = ifOp->getPrevNode();
+    } else {
+      auto nestedOps = ifOp.thenBlock()->without_terminator();
+      if (llvm::hasSingleElement(nestedOps)) {
+        if (auto nestedIf = dyn_cast<scf::IfOp>(*nestedOps.begin()))
+          otherIf = nestedIf;
+      }
+    }
+
+    if (otherIf && isa<scf::IfOp>(otherIf) &&
+        ifOp->getAttr(CVPipeline::kBlockId) !=
+            otherIf->getAttr(CVPipeline::kBlockId)) {
+      return rewriter.notifyMatchFailure(
+          ifOp, "cannot merge scf.if operations with different block IDs");
+    }
+
+    return wrappedPattern->matchAndRewrite(ifOp.getOperation(), rewriter);
+  }
+
+private:
+  std::unique_ptr<RewritePattern> wrappedPattern;
+  Kind kind;
+};
+
+struct IfMergePatternGuard {
+  llvm::StringLiteral debugNameSuffix;
+  BlockIdAwareIfMergePattern::Kind kind;
+};
+
+static constexpr IfMergePatternGuard kIfMergePatternGuards[] = {
+    {"CombineIfs", BlockIdAwareIfMergePattern::Kind::AdjacentMerge},
+    {"CombineNestedIfs", BlockIdAwareIfMergePattern::Kind::NestedMerge},
+};
+
+static void guardIfMergePatterns(MLIRContext *ctx,
+                                 RewritePatternSet &patterns) {
+  auto &nativePatterns = patterns.getNativePatterns();
+  for (std::unique_ptr<RewritePattern> &pattern : nativePatterns) {
+    StringRef debugName = pattern->getDebugName();
+    for (const IfMergePatternGuard &guard : kIfMergePatternGuards) {
+      if (!debugName.ends_with(guard.debugNameSuffix))
+        continue;
+      pattern = std::make_unique<BlockIdAwareIfMergePattern>(
+          ctx, std::move(pattern), guard.kind);
+      break;
+    }
+  }
+}
+
 class PreserveControlAttrsListener : public RewriterBase::Listener {
 public:
   void notifyOperationInserted(Operation *op, OpBuilder::InsertPoint) override {
@@ -170,6 +241,7 @@ void mlir::triton::PreserveControlAttrsCanonicalizePass::runOnOperation() {
 
   RewritePatternSet patterns(&getContext());
   populateCanonicalizationPatterns(&getContext(), patterns);
+  guardIfMergePatterns(&getContext(), patterns);
 
   PreserveControlAttrsListener listener;
   GreedyRewriteConfig config;

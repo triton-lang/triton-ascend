@@ -34,7 +34,6 @@
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "bishengir/Dialect/Utils/Util.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -57,11 +56,11 @@
 
 #include "DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
+#include "bishengir/Dialect/Utils/Util.h"
 
 using namespace llvm;
 using namespace mlir;
-using namespace triton;
-using namespace CVSplit;
+using namespace CVPipeline;
 
 static constexpr const char *DEBUG_TYPE = "SplitMatmul";
 #define LOG_DEBUG(...)                                                         \
@@ -489,6 +488,7 @@ static bool isOutputFilter(linalg::MatmulOp matmulOp, Value &outerOutValue,
   }
   return false;
 }
+
 static bool shouldSplitByOutput(linalg::MatmulOp matmulOp, Value &outerOutValue,
                                 Value &outerInValue) {
   if (isOutputFilter(matmulOp, outerOutValue, outerInValue)) {
@@ -546,6 +546,7 @@ static bool isInputFilter(linalg::MatmulOp matmulOp, Value &outerOutValue,
   }
   return false;
 }
+
 static bool shouldSplitByInput(linalg::MatmulOp matmulOp, Value &outerOutValue,
                                Value &outerInValue) {
   if (isInputFilter(matmulOp, outerOutValue, outerInValue)) {

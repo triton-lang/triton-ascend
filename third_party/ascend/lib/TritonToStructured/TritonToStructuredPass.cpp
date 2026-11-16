@@ -143,8 +143,15 @@ void TritonToStructuredPass::runOnOperation() {
                                      optimizeDynamicOffset,
                                      enableMaskFallbackConversion);
 
-  if (failed(applyPatternsGreedily(moduleOp,
-                                   std::move(tritonToStructuredPatterns)))) {
+  // Seed the worklist with memory ops while keeping newly generated operations
+  // eligible for rewriting, including loads/stores created by cat splitting.
+  SmallVector<Operation *> memoryOps;
+  moduleOp.walk([&](Operation *op) {
+    if (isa<triton::LoadOp, triton::StoreOp>(op))
+      memoryOps.push_back(op);
+  });
+  FrozenRewritePatternSet memoryPatterns(std::move(tritonToStructuredPatterns));
+  if (failed(applyOpPatternsGreedily(memoryOps, memoryPatterns))) {
     LLVM_DEBUG({ moduleOp->emitRemark("PtrAnalysis: rewrite MemOp failed"); });
   }
 

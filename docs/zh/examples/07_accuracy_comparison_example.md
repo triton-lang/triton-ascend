@@ -1,4 +1,4 @@
-# 精度比对 （Accuracy Comparison）
+# 精度比对（Accuracy Comparison）
 
 在本节中，我们将使用 Triton 编写一个简单的精度比对的程序。
 在此过程中，用户会学习到：
@@ -8,9 +8,14 @@
 ## 计算内核
 
 ```python
+import torch
+import torch_npu
+import triton
+import triton.language as tl
+
 def test_add(x0, x1):
     """
-    测试 Triton 实现的向量加法与 PyTorch 的结果,精度比对是否一致。
+    测试 Triton 实现的向量加法与 PyTorch 的结果，精度比对是否一致。
 
     步骤：
     1. 使用 PyTorch 计算参考结果（torch_ref）

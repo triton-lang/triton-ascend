@@ -202,6 +202,22 @@ SortOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
   return success();
 }
 
+// Parse a conv1d parameter attribute: an integer (uniform scalar) or a
+// DenseI32ArrayAttr [pad_left, pad_right]. Returns the raw values, or
+// std::nullopt for an invalid attribute.
+static std::optional<SmallVector<int64_t>>
+parseConv1dParamAttr(Attribute attr) {
+  if (auto intAttr = dyn_cast<IntegerAttr>(attr))
+    return SmallVector<int64_t>{intAttr.getInt()};
+  if (auto arrayAttr = dyn_cast<DenseI32ArrayAttr>(attr)) {
+    SmallVector<int64_t> values;
+    for (int32_t v : arrayAttr.asArrayRef())
+      values.push_back(static_cast<int64_t>(v));
+    return values;
+  }
+  return std::nullopt;
+}
+
 //-- Conv1dOp --
 LogicalResult Conv1dOp::verify() {
   auto inputType = dyn_cast<RankedTensorType>(getInput().getType());
@@ -250,6 +266,12 @@ LogicalResult Conv1dOp::verify() {
         "weight's input channel dimension must equal input channels / groups");
   }
 
+  auto padding = parseConv1dParamAttr(getPadding());
+  if (!padding || padding->empty() || padding->size() > 2) {
+    return emitOpError("padding must be an integer or a 2-element array "
+                       "[pad_left, pad_right]");
+  }
+
   return success();
 }
 
@@ -278,16 +300,22 @@ LogicalResult Conv1dOp::inferReturnTypes(
   int64_t K = weightShape[2];
 
   int64_t stride = adaptor.getStride();
-  int64_t padding_size = adaptor.getPaddingSize();
+  auto padding = parseConv1dParamAttr(adaptor.getPadding());
   int64_t dilation = adaptor.getDilation();
 
   if (stride == 0) {
     return failure();
   }
-  double l_out_double =
-      static_cast<double>(L_in + 2 * padding_size - dilation * (K - 1) - 1) /
-          stride +
-      1;
+  if (!padding || padding->empty() || padding->size() > 2) {
+    return failure();
+  }
+  // Uniform scalar or pair: front/back covers both forms.
+  int64_t pad_left = padding->front();
+  int64_t pad_right = padding->back();
+  double l_out_double = static_cast<double>(L_in + pad_left + pad_right -
+                                            dilation * (K - 1) - 1) /
+                            stride +
+                        1;
   int64_t L_out = static_cast<int64_t>(std::floor(l_out_double));
 
   constexpr int64_t dim3 = 3;

@@ -255,11 +255,56 @@ def _make_align_dim_attrs(op, builder, arg_attrs):
             assert False, f"{name}'s keys should be string or int"
 
 
+def _make_data_layout_attrs(op, builder, arg_attrs):
+    # data_layout should be a dict mapping argument name/index to a DataLayout enum value.
+    # Only applied for CUBE core type.
+    name = 'data_layout'
+    if not hasattr(op, name):
+        return
+
+    param_names = list(op.signature.parameters.keys()) if hasattr(op, "signature") else []
+
+    for arg, layout in op.data_layout.items():
+        layout_value = layout.value if isinstance(layout, core.DataLayout) else layout
+        if isinstance(arg, str) and arg in param_names:
+            arg_idx = param_names.index(arg)
+        elif isinstance(arg, int):
+            arg_idx = arg
+        else:
+            assert False, f"{name}'s keys should be string or int"
+        arg_attrs[arg_idx][name] = builder.get_data_layout_attr(layout_value)
+
+
+def _make_address_space_attrs(op, builder, arg_attrs):
+    # address_space should be a dict mapping argument name/index to an AddressSpace enum value
+    # (al.AddressSpace or ascend_ir.AddressSpace). Only applied for CUBE core type.
+    name = 'address_space'
+    if not hasattr(op, name):
+        return
+
+    param_names = list(op.signature.parameters.keys()) if hasattr(op, "signature") else []
+
+    for arg, space in op.address_space.items():
+        space_value = space.value if isinstance(space, core.AddressSpace) else space
+        if isinstance(arg, str) and arg in param_names:
+            arg_idx = param_names.index(arg)
+        elif isinstance(arg, int):
+            arg_idx = arg
+        else:
+            assert False, f"{name}'s keys should be string or int"
+        arg_attrs[arg_idx][name] = builder.get_target_attribute(space_value)
+
+
 def _make_arg_attrs(op, builder):
     num_args = len(op.signature.parameters) if hasattr(op, "signature") else 0
     arg_attrs = [{} for _ in range(num_args)]
 
     _make_align_dim_attrs(op, builder, arg_attrs)
+
+    if op.core == core.CORE.CUBE:
+        _make_data_layout_attrs(op, builder, arg_attrs)
+        _make_address_space_attrs(op, builder, arg_attrs)
+
     return arg_attrs
 
 

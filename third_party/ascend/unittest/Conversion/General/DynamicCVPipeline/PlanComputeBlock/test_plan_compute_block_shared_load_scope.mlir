@@ -37,8 +37,8 @@ module {
   // CHECK-LABEL: func.func @shared_load_scope_pre_classified_vector
   // CHECK: %[[VEC:[a-zA-Z0-9_]+]] = scope.scope : () -> tensor<4x4xf16> {
   // CHECK: } {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR", ssbuffer.load}
-  // CHECK: %[[MM:[a-zA-Z0-9_]+]] = linalg.matmul {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE"} ins(%[[VEC]],
   // CHECK: %[[ADD:[a-zA-Z0-9_]+]] = arith.addf %[[VEC]], %[[VEC]] {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK: %[[MM:[a-zA-Z0-9_]+]] = linalg.matmul {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE"} ins(%[[VEC]],
   // CHECK: return %[[MM]], %[[ADD]]
   // CHECK-NOT: scope.scope
   func.func @shared_load_scope_pre_classified_vector(%gm: memref<4x4xf16>, %arg0: tensor<4x4xf16>, %arg1: tensor<4x4xf32>, %rare: i1) -> (tensor<4x4xf32>, tensor<4x4xf16>) {

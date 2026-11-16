@@ -301,8 +301,16 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
   ready.append(startingVectorBlocks);
   unsigned head = 0;
 
+  bool hasCubeRun = false;
   while (head < ready.size()) {
     auto cur = ready[head++];
+
+    if (!bm.getOpsRefByBlockId(groupIds[cur]).empty() &&
+        getCoreTypeOfSimpleOpOrCf(
+            bm.getOpsRefByBlockId(groupIds[cur]).front()) ==
+            CVPipeline::CUBE_ONLY) {
+      hasCubeRun = true;
+    }
 
     result.push_back(groupIds[cur]);
     SmallVector<unsigned> nextReady;
@@ -318,6 +326,29 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
                             return ops.empty();
                           });
     ready.append(nextReady.begin(), nextReady.end());
+
+    if (!hasCubeRun) {
+      // Keep the consumed prefix fixed so head still selects the next group.
+      std::stable_partition(
+          ready.begin() + head, ready.end(), [this](unsigned idx) {
+            const auto blockId = groupIds[idx];
+            const auto ops = bm.getOpsRefByBlockId(blockId);
+            if (!ops.empty() && getCoreTypeOfSimpleOpOrCf(ops.front()) ==
+                                    CVPipeline::CUBE_ONLY) {
+              return false;
+            }
+            auto computeOpCnt = 0;
+            for (auto op : ops) {
+              if (isTensorComputeOp(op)) {
+                computeOpCnt++;
+              } else {
+              }
+            }
+            LOG_DEBUG("Summary new: group id "
+                      << blockId << " compute ops: " << computeOpCnt << "\n");
+            return computeOpCnt <= PRIVILEGED_MAX_COMPUTE_OP_CNT;
+          });
+    }
   }
 
   ready.clear();

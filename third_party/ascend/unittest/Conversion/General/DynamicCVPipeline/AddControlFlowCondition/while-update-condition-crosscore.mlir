@@ -1,4 +1,4 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=arith.select
 
 // UpdateConditionInfo on scf.while: cross-core (核间) buffer conditions.
 // Same dual-scope crossCoreDeps skeleton as while-update-condition-counter;
@@ -18,9 +18,7 @@
 
 // CHECK: scf.while
 
-// The flag of the loop is 0 at the beginning of an iteration.
 // CHECK: ^bb0
-// CHECK: %[[FLAG:.*]] = arith.constant 0 : i32
 
 // All the counter loads of the loop are gathered at the beginning of the do
 // region, in front of the compute blocks that read them. A counter is read
@@ -47,27 +45,19 @@
 // CHECK: %[[SLE5:.*]] = arith.cmpi sle, %[[DIFF_PRE5]], %{{.*}} : i32
 // CHECK: %[[PRE5:.*]] = arith.andi %[[CROSS5]], %[[SLE5]]
 // CHECK: %[[AND5:.*]] = arith.andi %[[PRE5]], %{{.*}}
-// The block is the first one of the loop: the flag it reads is the constant
-// zero the loop starts with, its check is left out.
+// The loop does not force a single block per iteration any more: the
+// condition of a block does not check the flag of the loop.
 // CHECK: scf.if %[[AND5]]
 // The block bumps only its own counter: the value it already read for the
 // conditions is reused, the counter is not loaded again.
 // CHECK: %[[ADD5:.*]] = arith.addi %[[LD_V5]], %{{.*}} : i32
 // CHECK: memref.store %[[ADD5]], %[[MEM_V5]][] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: } {{.*}}ssbuffer.if = 5
-// The flag of the loop is not yielded by the block: it is computed with a
-// select on the condition of the block, after the block.
-// CHECK: %[[ONE5:.*]] = arith.constant 1 : i32
-// CHECK: %[[FLAG5:.*]] = arith.select %[[AND5]], %[[ONE5]], %[[FLAG]] : i32
-
 // Vector if=6: consumer-only (c_cube - c_vec > 0), and-ed with while counter.
 // CHECK: %[[DIFF_IN6:.*]] = arith.subi %[[LD_C6]], %[[LD_V6]] : i32
 // CHECK: %[[SGT6:.*]] = arith.cmpi sgt, %[[DIFF_IN6]], %{{.*}} : i32
 // CHECK: %[[AND6:.*]] = arith.andi %[[SGT6]], %{{.*}}
-// The flag of the previous block gates this one.
-// CHECK: %[[FLAGCMP6:.*]] = arith.cmpi eq, %[[FLAG5]], %{{.*}} : i32
-// CHECK: %[[AND6F:.*]] = arith.andi %[[AND6]], %[[FLAGCMP6]]
-// CHECK: scf.if %[[AND6F]]
+// CHECK: scf.if %[[AND6]]
 // CHECK: %[[ADD6:.*]] = arith.addi %[[LD_V6]], %{{.*}} : i32
 // CHECK: memref.store %[[ADD6]], %[[MEM_V6]][] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: } {{.*}}ssbuffer.if = 6
@@ -100,8 +90,8 @@
 // CHECK: %[[SLE0:.*]] = arith.cmpi sle, %[[DIFF_PRE0]], %{{.*}} : i32
 // CHECK: %[[PRE0:.*]] = arith.andi %[[CROSS0]], %[[SLE0]]
 // CHECK: %[[AND0:.*]] = arith.andi %[[PRE0]], %{{.*}}
-// The block is the first one of the loop: the flag it reads is the constant
-// zero the loop starts with, its check is left out.
+// The loop does not force a single block per iteration any more: the
+// condition of a block does not check the flag of the loop.
 // CHECK: scf.if %[[AND0]]
 // The cube reuses the value of its own counter that it already read.
 // CHECK: %[[ADD0:.*]] = arith.addi %[[LD_OWN0]], %{{.*}} : i32

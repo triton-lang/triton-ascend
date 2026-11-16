@@ -1,4 +1,4 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=arith.select
 
 // Intra consumers are numbered by IR order, and that number selects the
 // iter arg. Edges only go forward: a two-if swap is a cycle and the pass
@@ -12,29 +12,17 @@
 // CHECK-LABEL: func.func @intra_core_condition_order
 // CHECK: scf.while (%{{[^ ]+}} = %{{[^ ,]+}}, %[[CNT0:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT1:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT2:[^ ,]+]] = %{{[^ ,]+}}, %[[DEP0:[^ ,]+]] = %{{[^ ,]+}}, %[[DEP1:[^ ,]+]] = %{{[^ ,]+}})
 // CHECK: ^bb0
-// CHECK: %[[FLAG:.*]] = arith.constant 0 : i32
 // CHECK: arith.cmpi slt, %[[DEP0]], %{{.*}}
-// The block is the first one of the loop: the flag it reads is the constant
-// zero the loop starts with, its check is left out.
+// The loop does not force a single block per iteration any more: the
+// condition of a block does not check the flag of the loop.
 // CHECK: %[[AND1:.*]] = arith.andi %{{.*}}, %{{.*}}
 // CHECK: %[[IF1:[0-9]+]]:2 = scf.if %[[AND1]]
 // CHECK: arith.addi %[[DEP0]], %{{.*}}
-// The flag of the loop is not yielded by the block: it is computed with a
-// select on the condition of the block, after the block.
-// CHECK: %[[ONE1:.*]] = arith.constant 1 : i32
-// CHECK: %[[FLAG1:.*]] = arith.select %[[AND1]], %[[ONE1]], %[[FLAG]] : i32
 // CHECK: arith.cmpi sgt, %[[IF1]]#0, %{{.*}}
 // CHECK: arith.cmpi slt, %[[DEP1]], %{{.*}}
-// CHECK: %[[FLAGCMP2:.*]] = arith.cmpi eq, %[[FLAG1]], %{{.*}} : i32
 // CHECK: %[[DEC0:.*]] = arith.subi %[[IF1]]#0, %{{.*}}
 // CHECK: %[[INC1:.*]] = arith.addi %[[DEP1]], %{{.*}}
 // CHECK: scf.yield %[[DEC0]], %[[INC1]], %{{.*}}
-// The flag of the loop is cumulative: the select of the second block takes
-// the select of the first block as its false value.
-// CHECK: %[[ONE2:.*]] = arith.constant 1 : i32
-// CHECK: %[[FLAG2:.*]] = arith.select %{{.*}}, %[[ONE2]], %[[FLAG1]] : i32
-// The third block is gated by the flag of the second one.
-// CHECK: %[[FLAGCMP3:.*]] = arith.cmpi eq, %[[FLAG2]], %{{.*}} : i32
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @intra_core_condition_order(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {

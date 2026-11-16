@@ -705,6 +705,10 @@ class JITFunction(JITCallable, KernelInterface[T]):
             hook(*args, **kwargs)
 
         kernel_cache, kernel_key_cache, target, backend, binder = self.device_caches[device]
+        resolve_launch_options = getattr(backend, "resolve_launch_options", None)
+        if resolve_launch_options is not None:
+            # Resolve route controls before the in-process cache lookup.
+            kwargs = resolve_launch_options(kwargs)
         # specialization is list[tuple[str, Any]], where first element of tuple is
         # the type and the second parameter is the 'specialization' value.
         bound_args, specialization, options = binder(*args, **kwargs)

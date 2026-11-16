@@ -52,7 +52,7 @@ def _compile_key_kernel(
 def _make_compile_key_tuner(monkeypatch, wrapped_fn):
     tuner = object.__new__(AutoTilingTuner)
     tuner.fn = wrapped_fn
-    tuner.arg_names = wrapped_fn.arg_names
+    tuner.arg_names = _compile_key_kernel.arg_names
     tuner.compile_parallel = False
     tuner.user_defined_pre_hook = False
 

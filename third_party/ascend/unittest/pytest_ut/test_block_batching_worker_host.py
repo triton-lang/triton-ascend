@@ -118,10 +118,6 @@ def test_checked_generation_rejects_lost_or_changed_binary(tmp_path):
 def decline_compiler(tmp_path, monkeypatch):
     import triton
     from triton.runtime.cache import FileCacheManager
-    monkeypatch.setattr(triton.knobs.cache, 'dir', str(tmp_path))
-    monkeypatch.setattr(triton.knobs.compilation, 'listener', None)
-    monkeypatch.setattr(triton.knobs.compilation, 'always_compile', False)
-    monkeypatch.setattr(triton.knobs.ascend, 'compile_only', True)
     monkeypatch.setattr(worker, '_variant_key', lambda src, backend, opts, env: worker._digest([vars(opts), env]))
     monkeypatch.setattr(worker, '_worker_request', lambda backend, src, opts, env, key: dict(variant=key))
     caches = {}
@@ -132,7 +128,12 @@ def decline_compiler(tmp_path, monkeypatch):
     monkeypatch.setattr(triton.runtime.cache, 'get_cache_manager', cache)
     compiler = worker.CandidateCompiler(SimpleNamespace(parse_options=lambda opts: SimpleNamespace(**opts)),
                                         SimpleNamespace(name='kernel'), {})
-    return compiler, caches
+    with triton.knobs.cache.scope(), triton.knobs.compilation.scope(), triton.knobs.ascend.scope():
+        triton.knobs.cache.dir = str(tmp_path)
+        triton.knobs.compilation.listener = None
+        triton.knobs.compilation.always_compile = False
+        triton.knobs.ascend.compile_only = True
+        yield compiler, caches
 
 
 def test_decline_cache_reuses_exact_attempt_and_retries_stale_entries(decline_compiler, monkeypatch):

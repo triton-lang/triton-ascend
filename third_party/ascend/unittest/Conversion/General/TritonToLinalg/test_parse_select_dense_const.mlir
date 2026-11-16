@@ -3,12 +3,9 @@
 // CHECK-LABEL: func.func @test_parse_select_dense_const
 // CHECK: %[[C32_I32:.*]] = arith.constant 32 : i32
 // CHECK: %[[C0_I32:.*]] = arith.constant 0 : i32
-// CHECK-DAG: %[[TRUE:.*]] = linalg.fill ins(%[[C0_I32]] : i32)
-// CHECK-DAG: %[[FALSE:.*]] = linalg.fill ins(%[[C32_I32]] : i32)
 // CHECK: %[[CMP:.*]] = arith.cmpi sgt, %{{.*}}, %[[C0_I32]] : i32
-// CHECK: %[[SELECT:.*]] = arith.select %[[CMP]], %[[TRUE]], %[[FALSE]] : tensor<8xi32>
-// CHECK: %[[ORIGIN:.*]] = tensor.extract %[[SELECT]][%{{.*}}] : tensor<8xi32>
-// CHECK: %[[IDX_CAST:.*]] = arith.index_cast %[[ORIGIN]] : i32 to index
+// CHECK: %[[SELECT:.*]] = arith.select %[[CMP]], %[[C0_I32]], %[[C32_I32]] : i32
+// CHECK: %[[IDX_CAST:.*]] = arith.index_cast %[[SELECT]] : i32 to index
 // CHECK: %[[ADD:.*]] = arith.addi %[[IDX_CAST]], %{{.*}} : index
 
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {

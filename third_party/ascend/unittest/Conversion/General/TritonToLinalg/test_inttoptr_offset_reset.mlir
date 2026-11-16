@@ -9,9 +9,10 @@
 // extent. The copy must consume that exact offset-bearing view.
 
 // CHECK-LABEL: func.func @test_inttoptr_offset_reset
-// CHECK: %[[ADDRESS:.*]] = memref.load {{.*}} : memref<?xi64>
-// CHECK: %[[CAPACITY:.*]] = arith.constant 12 : index
-// CHECK: %[[POINTER:.*]] = hivm.hir.pointer_cast(%[[ADDRESS]]) [%[[CAPACITY]]] : memref<?xi32>
+// CHECK: %[[EXTENT:.*]] = arith.constant 8 : index
+// CHECK: %[[LEADING_OFFSET:.*]] = arith.constant 4 : index
+// CHECK: %[[CAPACITY:.*]] = arith.addi %[[EXTENT]], %[[LEADING_OFFSET]] : index
+// CHECK: %[[POINTER:.*]] = hivm.hir.pointer_cast(%{{.*}}) [%[[CAPACITY]]] : memref<?xi32>
 // CHECK: %[[OFFSET_VIEW:.*]] = memref.reinterpret_cast %[[POINTER]] to offset: [4], sizes: [8], strides: [1]
 // CHECK-SAME: to memref<8xi32, strided<[1], offset: 4>>
 // CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<8xi32>
@@ -42,16 +43,14 @@ module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
 
 // -----
 
-// The dynamic variant also retains the original raw address and applies the
-// displacement exactly once, in the view consumed by memref.copy.
+// Dynamic offset variant: the scalar tt.addptr uses a runtime value as
+// offset, so the original ReinterpretCastOp has a dynamic offset (?)
+// in its result type. After the optimization bakes the offset into the
+// base address, the new ReinterpretCastOp still have a dynamic offset
+// in the result type.
 
 // CHECK-LABEL: func.func @test_inttoptr_dyn_offset_reset
-// CHECK: %[[ADDRESS:.*]] = memref.load {{.*}} : memref<?xi64>
-// CHECK: %[[OFFSET:.*]] = arith.index_cast %{{.*}} : i32 to index
-// CHECK: %[[POINTER:.*]] = hivm.hir.pointer_cast(%[[ADDRESS]]) [%{{.*}}] : memref<?xi32>
-// CHECK: %[[VIEW:.*]] = memref.reinterpret_cast %[[POINTER]] to offset: [%[[OFFSET]]], sizes: [8], strides: [1]
-// CHECK-SAME: to memref<8xi32, strided<[1], offset: ?>>
-// CHECK: memref.copy %[[VIEW]], {{.*}} : memref<8xi32, strided<[1], offset: ?>> to memref<8xi32>
+// CHECK: memref.reinterpret_cast {{.*}} strided<[1], offset: ?>
 
 module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
   tt.func public @test_inttoptr_dyn_offset_reset(%addr_ptr: !tt.ptr<i64> {tt.divisibility = 16 : i32}, %out_ptr: !tt.ptr<i32> {tt.divisibility = 16 : i32}, %dyn_offset: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false} {

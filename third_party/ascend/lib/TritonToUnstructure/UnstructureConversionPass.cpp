@@ -812,56 +812,67 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     ptrOffset = *full;
   }
 
-  // Handle these accesses before any speculative fallback IR is created.
-  // A failed match must leave the original operation intact for the final
-  // unsupported-mask diagnostic, without repeatedly inserting dead helpers.
-  if (runtimeLoopMask) {
-    if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
-                  std::is_same_v<MemAccOpTy, triton::StoreOp>) {
-      // A one-element tensor needs only a scalar predicate, including in SIMD
-      // mode. Use explicit control flow: the legacy scalar masked-load
-      // converter otherwise loads unconditionally and selects afterwards.
-      if (ptrType.getNumElements() == 1 &&
-          getResultElementType(ptrType).isIntOrFloat() &&
-          canUseIndirectFastPath(srcPtr, ptrOffset)) {
-        SmallVector<OpFoldResult> indices(ptrType.getRank(),
-                                          rewriter.getIndexAttr(0));
-        Value offset = createExtractOp(loc, ptrOffset, rewriter, indices);
-        Value base = srcPtr;
-        Value scalarPtr = rewriter.create<triton::AddPtrOp>(loc, base.getType(),
-                                                            base, offset);
-        Value mask = createExtractOp(loc, op.getMask(), rewriter, indices);
-        if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-          Value other = createExtractOp(loc, op.getOther(), rewriter, indices);
-          if (!other)
-            other = rewriter.create<arith::ConstantOp>(
-                loc, rewriter.getZeroAttr(getResultElementType(ptrType)));
-          auto guardedLoad = rewriter.create<scf::IfOp>(
-              loc, mask,
-              [&](OpBuilder &b, Location loc) {
-                auto load =
-                    b.create<triton::LoadOp>(loc, scalarPtr, op.getCache(),
-                                             op.getEvict(), op.getIsVolatile());
-                b.create<scf::YieldOp>(loc, load.getResult());
-              },
-              [&](OpBuilder &b, Location loc) {
-                b.create<scf::YieldOp>(loc, other);
-              });
-          rewriter.replaceOpWithNewOp<triton::SplatOp>(
-              op, op.getType(), guardedLoad.getResult(0));
-        } else {
-          Value value = createExtractOp(loc, op.getValue(), rewriter, indices);
-          rewriter.create<scf::IfOp>(
-              loc, mask, [&](OpBuilder &b, Location loc) {
-                b.create<triton::StoreOp>(loc, scalarPtr, value, op.getCache(),
-                                          op.getEvict());
-                b.create<scf::YieldOp>(loc);
-              });
-          rewriter.eraseOp(op);
-        }
-        return success();
-      }
+  // A single lane needs only a scalar predicate. Keep the access inside the
+  // true branch so a masked-off pointer is never dereferenced.
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
+                std::is_same_v<MemAccOpTy, triton::StoreOp>) {
+    bool scalarizeMask = runtimeLoopMask;
+    if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+      // The ordinary discrete-mask fast path uses scalar numeric loads. Bool
+      // storage normalization and volatile access retain their existing path.
+      scalarizeMask =
+          scalarizeMask ||
+          (mixCompileDiscreteMask && op.getMask() && !info.block &&
+           ptrType.hasStaticShape() && ptrType.getNumElements() == 1 &&
+           !op.getIsVolatile() && !getResultElementType(ptrType).isInteger(1) &&
+           !op->hasAttr("was_bool_to_int8") &&
+           !ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op));
     }
+    if (scalarizeMask && ptrType.hasStaticShape() &&
+        ptrType.getNumElements() == 1 &&
+        getResultElementType(ptrType).isIntOrFloat() &&
+        canUseIndirectFastPath(srcPtr, ptrOffset)) {
+      SmallVector<OpFoldResult> indices(ptrType.getRank(),
+                                        rewriter.getIndexAttr(0));
+      Value offset = createExtractOp(loc, ptrOffset, rewriter, indices);
+      Value base = srcPtr;
+      Value scalarPtr =
+          rewriter.create<triton::AddPtrOp>(loc, base.getType(), base, offset);
+      Value mask = createExtractOp(loc, op.getMask(), rewriter, indices);
+      if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+        Value other = createExtractOp(loc, op.getOther(), rewriter, indices);
+        if (!other)
+          other = rewriter.create<arith::ConstantOp>(
+              loc, rewriter.getZeroAttr(getResultElementType(ptrType)));
+        auto guardedLoad = rewriter.create<scf::IfOp>(
+            loc, mask,
+            [&](OpBuilder &b, Location loc) {
+              auto load =
+                  b.create<triton::LoadOp>(loc, scalarPtr, op.getCache(),
+                                           op.getEvict(), op.getIsVolatile());
+              b.create<scf::YieldOp>(loc, load.getResult());
+            },
+            [&](OpBuilder &b, Location loc) {
+              b.create<scf::YieldOp>(loc, other);
+            });
+        rewriter.replaceOpWithNewOp<triton::SplatOp>(op, op.getType(),
+                                                     guardedLoad.getResult(0));
+      } else {
+        Value value = createExtractOp(loc, op.getValue(), rewriter, indices);
+        rewriter.create<scf::IfOp>(loc, mask, [&](OpBuilder &b, Location loc) {
+          b.create<triton::StoreOp>(loc, scalarPtr, value, op.getCache(),
+                                    op.getEvict());
+          b.create<scf::YieldOp>(loc);
+        });
+        rewriter.eraseOp(op);
+      }
+      return success();
+    }
+  }
+
+  // Runtime loop masks have a stricter fallback contract. Ordinary discrete
+  // masks that did not scalarize continue through the existing paths below.
+  if (runtimeLoopMask) {
     if (compileOn91095Flag &&
         triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
         succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,

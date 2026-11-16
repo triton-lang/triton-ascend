@@ -13,10 +13,10 @@
 // CHECK: %[[CLAMPED:.*]] = arith.index_cast %[[CLAMPED32]] : i32 to index
 // CHECK: %[[OFFSET:.*]] = arith.muli %[[CLAMPED]], %[[STRIDE]] : index
 // CHECK: %[[INPUT:.*]] = memref.reinterpret_cast %[[SRC]] to offset: [%[[OFFSET]]], sizes: [8, 16], strides: [16, 1]
+// CHECK: %[[OUTPUT:.*]] = memref.reinterpret_cast %[[DST]] to offset: [%[[OFFSET]]], sizes: [8, 16], strides: [16, 1]
 // CHECK: %[[GM_READ:.*]] = memref.subview %[[INPUT]][0, 0] [%[[COUNT:.*]], 16] [1, 1]
 // CHECK: %[[UB_WRITE:.*]] = memref.subview %{{.*}}[%[[START:.*]], 0] [%[[COUNT]], 16] [1, 1]
 // CHECK: memref.copy %[[GM_READ]], %[[UB_WRITE]]
-// CHECK: %[[OUTPUT:.*]] = memref.reinterpret_cast %[[DST]] to offset: [%[[OFFSET]]], sizes: [8, 16], strides: [16, 1]
 // CHECK: %[[UB_READ:.*]] = tensor.extract_slice %{{.*}}[%[[START]], 0] [%[[COUNT]], 16] [1, 1]
 // CHECK: %[[GM_WRITE:.*]] = memref.subview %[[OUTPUT]][0, 0] [%[[COUNT]], 16] [1, 1]
 // CHECK: bufferization.materialize_in_destination %[[UB_READ]] in writable %[[GM_WRITE]]
@@ -42,11 +42,11 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK-DAG: %[[SRC_OFFSET:.*]] = arith.constant 17 : index
 // CHECK-DAG: %[[DST_OFFSET:.*]] = arith.constant 29 : index
 // CHECK: %[[INPUT:.*]] = memref.reinterpret_cast {{.*}} to offset: [%[[SRC_OFFSET]]], sizes: [8], strides: [1]
+// CHECK: %[[OUTPUT:.*]] = memref.reinterpret_cast {{.*}} to offset: [%[[DST_OFFSET]]], sizes: [8], strides: [1]
 // CHECK: linalg.fill
 // CHECK: %[[GM_READ:.*]] = memref.subview %[[INPUT]][0] [4] [1]
 // CHECK: %[[UB_WRITE:.*]] = memref.subview %{{.*}}[2] [4] [1]
 // CHECK: memref.copy %[[GM_READ]], %[[UB_WRITE]]
-// CHECK: %[[OUTPUT:.*]] = memref.reinterpret_cast {{.*}} to offset: [%[[DST_OFFSET]]], sizes: [8], strides: [1]
 // CHECK: %[[UB_READ:.*]] = tensor.extract_slice %{{.*}}[2] [4] [1]
 // CHECK: %[[GM_WRITE:.*]] = memref.subview %[[OUTPUT]][0] [4] [1]
 // CHECK: bufferization.materialize_in_destination %[[UB_READ]] in writable %[[GM_WRITE]]
@@ -106,10 +106,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK-LABEL: func.func @nonpositive_strides
 // CHECK: %[[OFFSET:.*]] = arith.constant 31 : index
 // CHECK: %[[NEG:.*]] = memref.reinterpret_cast {{.*}} to offset: [%[[OFFSET]]], sizes: [8], strides: [-2]
+// CHECK: %[[ZERO:.*]] = memref.reinterpret_cast {{.*}} to offset: [0], sizes: [8], strides: [0]
 // CHECK: %[[NEG_GM:.*]] = memref.subview %[[NEG]][0] [4] [1]
 // CHECK: %[[NEG_UB:.*]] = memref.subview %{{.*}}[2] [4] [1]
 // CHECK: memref.copy %[[NEG_GM]], %[[NEG_UB]]
-// CHECK: %[[ZERO:.*]] = memref.reinterpret_cast {{.*}} to offset: [0], sizes: [8], strides: [0]
 // CHECK: %[[ZERO_GM:.*]] = memref.subview %[[ZERO]][0] [4] [1]
 // CHECK: %[[ZERO_UB:.*]] = memref.subview %{{.*}}[2] [4] [1]
 // CHECK: memref.copy %[[ZERO_GM]], %[[ZERO_UB]]

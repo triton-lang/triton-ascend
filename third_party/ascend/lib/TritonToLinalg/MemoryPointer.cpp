@@ -198,9 +198,9 @@ static void trySetAddPtrViewInsertionPoint(
     rewriter.restoreInsertionPoint(original);
 }
 
-static FailureOr<Value> materializeMemoryPointer(
-    const ptr::PtrInfo &info, Location loc, ConversionPatternRewriter &rewriter,
-    OpFoldResult remappedOrigin = {}, triton::AddPtrOp viewAnchor = {}) {
+static FailureOr<Value>
+resolveMemoryPointerBase(const ptr::PtrInfo &info,
+                         ConversionPatternRewriter &rewriter) {
   Value sourceBase = info.base;
   if (auto bridge = sourceBase.getDefiningOp<UnrealizedConversionCastOp>();
       bridge && bridge.getInputs().size() == 1 &&
@@ -216,9 +216,18 @@ static FailureOr<Value> materializeMemoryPointer(
       break;
     base = cast.getInputs()[0];
   }
-  auto baseType = dyn_cast<MemRefType>(base.getType());
-  if (!baseType)
+  if (!isa<MemRefType>(base.getType()))
     return failure();
+  return base;
+}
+
+static FailureOr<Value>
+materializeMemoryPointer(const ptr::PtrInfo &info, Value base,
+                         ArrayRef<OpFoldResult> remappedStrides, Location loc,
+                         ConversionPatternRewriter &rewriter,
+                         OpFoldResult remappedOrigin = {},
+                         triton::AddPtrOp viewAnchor = {}) {
+  auto baseType = cast<MemRefType>(base.getType());
   // A scalar base with no displacement already denotes the requested address.
   // Reusing it also preserves the complete-address fold for int_to_ptr.
   if (info.offsets.getShape().empty() && baseType.getRank() == 1 &&
@@ -240,13 +249,12 @@ static FailureOr<Value> materializeMemoryPointer(
                      : remap(info.offsets.scalarOffset, rewriter),
       loc, rewriter, rewriter.getIndexType());
   SmallVector<OpFoldResult> sizes, strides;
-  for (auto [size, axis] :
-       llvm::zip_equal(info.offsets.getShape(), info.offsets.axes)) {
+  for (auto [size, stride] :
+       llvm::zip_equal(info.offsets.getShape(), remappedStrides)) {
     if (ShapedType::isDynamic(size))
       return failure();
     sizes.push_back(rewriter.getIndexAttr(size));
-    strides.push_back(size == 1 ? rewriter.getIndexAttr(1)
-                                : remap(axis.stride, rewriter));
+    strides.push_back(size == 1 ? rewriter.getIndexAttr(1) : stride);
   }
   if (sizes.empty()) {
     sizes.push_back(rewriter.getIndexAttr(1));
@@ -303,8 +311,14 @@ FailureOr<Value> materializeMemoryPointer(Value pointer, Value converted,
     if (element && !isa<ShapedType>(element.getPointeeType()))
       viewAnchor = pointer.getDefiningOp<triton::AddPtrOp>();
   }
+  auto base = resolveMemoryPointerBase(info, rewriter);
+  if (failed(base))
+    return failure();
+  SmallVector<OpFoldResult> strides;
+  for (const auto &axis : info.offsets.axes)
+    strides.push_back(remap(axis.stride, rewriter));
   Location loc = pointer.getLoc();
-  return materializeMemoryPointer(info, loc, rewriter,
+  return materializeMemoryPointer(info, *base, strides, loc, rewriter,
                                   /*remappedOrigin=*/{}, viewAnchor);
 }
 
@@ -361,10 +375,47 @@ FailureOr<BoundaryCheckedPointer> materializeBoundaryCheckedMemoryPointer(
     checkedCoordinates.push_back(coordinate);
   }
 
-  Location loc = pointer.getLoc();
-  SmallVector<OpFoldResult> coordinates;
+  auto remappedBase = resolveMemoryPointerBase(info, rewriter);
+  if (failed(remappedBase))
+    return failure();
+  OpFoldResult origin = remap(baseInfo.offsets.scalarOffset, rewriter);
+  SmallVector<OpFoldResult> coordinates, strides;
   for (OpFoldResult coordinate : info.block->coordinateOffsets)
     coordinates.push_back(remap(coordinate, rewriter));
+  for (const auto &axis : info.offsets.axes)
+    strides.push_back(remap(axis.stride, rewriter));
+
+  SmallVector<Value> dependencies{*remappedBase};
+  auto addDependency = [&](OpFoldResult field) {
+    if (auto value = dyn_cast<Value>(field))
+      dependencies.push_back(value);
+  };
+  addDependency(origin);
+  for (auto [axis, coordinate] : llvm::enumerate(coordinates))
+    if (!llvm::is_contained(checks, static_cast<int32_t>(axis)))
+      addDependency(coordinate);
+  llvm::append_range(dependencies, checkedCoordinates);
+  for (OpFoldResult stride : strides)
+    addDependency(stride);
+
+  // Match producer-local block views from the legacy lowering. Moving only
+  // the cast leaves its clamped origin at the access and cannot restore this
+  // order. The complete remapped inputs must dominate the same-block anchor;
+  // otherwise keep the view and its address arithmetic at the access.
+  OpBuilder::InsertionGuard guard(rewriter);
+  auto original = rewriter.saveInsertionPoint();
+  Block *block = original.getBlock();
+  if (make->getBlock() == block &&
+      (original.getPoint() == block->end() ||
+       make->isBeforeInBlock(&*original.getPoint()))) {
+    // Insert before the retained producer so multiple accesses append their
+    // view construction in order, without moving any memory operation.
+    rewriter.setInsertionPoint(make);
+    if (failed(ptr::checkInsertionPoint(rewriter, dependencies)))
+      rewriter.restoreInsertionPoint(original);
+  }
+
+  Location loc = pointer.getLoc();
   Value zero = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
   for (auto [axis, coordinate] : llvm::zip_equal(checks, checkedCoordinates)) {
     Value clamped = rewriter.create<arith::MaxSIOp>(loc, coordinate, zero);
@@ -374,18 +425,16 @@ FailureOr<BoundaryCheckedPointer> materializeBoundaryCheckedMemoryPointer(
             .getResult();
   }
 
-  OpFoldResult origin = remap(baseInfo.offsets.scalarOffset, rewriter);
-  for (auto [coordinate, axis] :
-       llvm::zip_equal(coordinates, info.offsets.axes)) {
+  for (auto [coordinate, stride] : llvm::zip_equal(coordinates, strides)) {
     // A unit tile axis may have memref stride 1; its address contribution
     // must still use the original descriptor stride.
-    auto contribution =
-        mulOpFoldResult(coordinate, remap(axis.stride, rewriter), loc, rewriter,
-                        rewriter.getIndexType());
+    auto contribution = mulOpFoldResult(coordinate, stride, loc, rewriter,
+                                        rewriter.getIndexType());
     origin = addOpFoldResult(origin, contribution, loc, rewriter,
                              rewriter.getIndexType());
   }
-  auto view = materializeMemoryPointer(info, loc, rewriter, origin);
+  auto view = materializeMemoryPointer(info, *remappedBase, strides, loc,
+                                       rewriter, origin);
   if (failed(view))
     return failure();
   return BoundaryCheckedPointer{*view, llvm::to_vector(checks)};

@@ -386,20 +386,6 @@ def _serialize_module(mod, opt):
     return mod.str_nodebug()
 
 
-def make_tla_ttir(mod, metadata, opt):
-    from triton.language.extra.tla.compiler import add_ttir_pipeline
-
-    if "hash" not in metadata:
-        metadata["hash"] = hashlib.sha256(f"{mod}-{metadata}".encode()).hexdigest()
-    pm = ir.pass_manager(mod.context)
-    pm.enable_debug()
-    add_ttir_pipeline(pm)
-    pm.run(mod, 'make_tla_ttir')
-    if opt.debug:
-        get_dump_manager(metadata["hash"]).put(str(mod), "kernel.ttir.mlir", binary=False)
-    return mod
-
-
 def make_ttir(mod, metadata, opt):
     if "hash" not in metadata:
         metadata["hash"] = hashlib.sha256(f"{mod}-{metadata}".encode()).hexdigest()
@@ -517,19 +503,6 @@ def _export_profile_metadata(mod, metadata):
     metadata["profile_scratch_align"] = 1
     if AscendBackend.instrumentation:
         metadata.update(ascend.ir.get_kernel_profile_metadata(mod))
-
-
-def tla_to_ttadapter(mod, metadata, opt):
-    from triton.language.extra.tla.compiler import lower_ttir
-
-    metadata["has_auto_blockify_blacklist_op"] = False
-    lower_ttir(mod, mod.context)
-    _export_profile_metadata(mod, metadata)
-    _export_program_grid_metadata(mod, metadata)
-    text = _serialize_module(mod, opt)
-    if opt.debug:
-        get_dump_manager(metadata["hash"]).put(text, "kernel.ttadapter.mlir", binary=False)
-    return text
 
 
 def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
@@ -983,7 +956,7 @@ def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: di
         return (False, str(e))
 
 
-def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
+def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt, *, extra_args=None):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     _finalize_program_launch_policy(metadata, opt)
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1200,9 +1173,14 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         _compile_option_list += masked_options
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
+        output_index = len(cmd_list) - 1
+        if extra_args is not None:
+            cmd_list.extend(extra_args(npu_compiler_path))
+
         if opt.debug or knobs.autotuning.print:
             print_cmd_list = cmd_list.copy()
-            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_path)
+            print_cmd_list[1], print_cmd_list[output_index] = _get_dump_paths(metadata["hash"], ttadapter_path,
+                                                                              bin_path)
             print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         ret = _run_vendor_npubin(cmd_list, env, opt, metadata, tmpdir, bin_path, cv_resources=True)
@@ -1234,7 +1212,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                                          save_temps if opt.debug or opt.block_auto_collect else None)
 
 
-def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
+def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt, *, extra_args=None):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     _finalize_program_launch_policy(metadata, opt)
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1412,9 +1390,14 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
+        output_index = len(cmd_list) - 1
+        if extra_args is not None:
+            cmd_list.extend(extra_args(npu_compiler_path))
+
         if opt.debug or knobs.autotuning.print:
             print_cmd_list = cmd_list.copy()
-            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_path)
+            print_cmd_list[1], print_cmd_list[output_index] = _get_dump_paths(metadata["hash"], ttadapter_path,
+                                                                              bin_path)
             print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         ret = _run_vendor_npubin(cmd_list, env, opt, metadata, tmpdir, bin_path, cv_resources=True)
@@ -2067,14 +2050,10 @@ class AscendBackend(BaseBackend):
 
     def add_stages(self, stages, options, language):
         if self.target.backend == "npu":
-            if options.enable_tla_mode:
-                stages["ttir"] = lambda src, metadata: make_tla_ttir(src, metadata, options)
-                stages["ttadapter"] = lambda src, metadata: tla_to_ttadapter(src, metadata, options)
-            else:
-                stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
-                if not options.is_pure_simt:
-                    stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
-            if options.is_pure_simt and not options.enable_tla_mode:
+            stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
+            if not options.is_pure_simt:
+                stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
+            if options.is_pure_simt:
                 stages["npubin"] = lambda src, metadata: ttir_to_npubin(src, metadata, options)
             else:
                 if options.compile_on_910_95:

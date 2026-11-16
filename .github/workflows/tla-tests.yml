@@ -1,5 +1,6 @@
 name: TLA Tests
 
+# Baseline-only CI probe for #3179; workflow behavior is unchanged.
 # Dedicated pipeline monitoring TLA (triton.language.extra.tla) changes.
 # TLA only targets the a5 (Ascend 950) environment, so a single job on the
 # a5 NPU runner tests the two stages as separate steps sharing one wheel

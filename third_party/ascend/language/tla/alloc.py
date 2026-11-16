@@ -77,25 +77,3 @@ def alloc(shape, dtype, space=None, versions=1, _semantic=None, *, scope=None):
     buf = buffer(_semantic.builder.create_tla_alloc(ty.to_ir(_semantic.builder)), ty)
     annotate_buffer_versions(buf, versions, _semantic=_semantic)
     return buf
-
-
-@builtin
-def alloc_buffer(shape, dtype, space=None, versions=1, _semantic=None, *, scope=None):
-    """Allocates an on-chip buffer; alias of :func:`alloc`.
-
-    :param shape: Non-empty sequence of positive compile-time extents in elements.
-    :type shape: tuple[int, ...] or list[int]
-    :param dtype: Compile-time element type, for example ``tl.float16``.
-    :type dtype: triton.language.dtype
-    :param space: Compile-time address space. Defaults to UB when ``scope``
-        is also omitted. The restrictions of :func:`alloc` also apply here.
-    :type space: tla.AddressSpace, str or None
-    :param versions: Positive compile-time multi-buffer count. Defaults to ``1``.
-    :type versions: int
-    :param scope: Keyword-only spelling of ``space``. Defaults to ``None``;
-        specify at most one of ``space`` and ``scope``.
-    :type scope: tla.AddressSpace, str or None
-    :return: An uninitialized, contiguous buffer.
-    :rtype: tla.buffer
-    """
-    return alloc(shape, dtype, space, versions, _semantic=_semantic, scope=scope)

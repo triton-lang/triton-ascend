@@ -24,9 +24,9 @@ Independent ``tla.*`` programming namespace for Ascend NPU kernels, migrated
 from the TLA repo's SIMD VF additions.  It does **not** reuse the existing
 ``al``/``bl`` general interfaces (different programming paradigm).
 
-Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
+Exports: ``alloc`` (on-chip buffer + versions),
 ``fill`` (scalar fill of a contiguous UB buffer),
-``copy`` (GM<->buffer), ``view`` (GM view), ``scope`` (core-mode scopes:
+explicit DMA routes, ``view`` (GM view), ``scope`` (core-mode scopes:
 ``tla.scope.simd()`` / ``tla.scope.cube()``),
 ``simd`` (vector-register ops), ``where`` (eager scalar/SIMD select),
 ``annotate_buffer_versions``, and scalar dtypes.
@@ -69,9 +69,8 @@ from triton.language.core import (
 
 from .core import AddressSpace, buffer, buffer_type, vector, vector_type
 from .scope import scope
-from .alloc import alloc_buffer, alloc
+from .alloc import alloc
 from .fill import fill
-from .copy import copy
 from .dma import (
     PadMode,
     EvictionPolicy,
@@ -124,7 +123,7 @@ from . import simd
 # Scalar / SIMD-register selection (eager, unlike TileLang T.if_then_else).
 from .selection import where
 
-# Cube-core ops (``mmad``/``mmad_mx``/``tla.copy`` L1/L0C routes).
+# Cube-core ops (``mmad``/``mmad_mx``).
 from . import cube
 from .cube import MxFormat
 
@@ -197,11 +196,9 @@ __all__ = [
     "vector",
     "vector_type",
 
-    # buffer alloc / copy / view
-    "alloc_buffer",
+    # buffer alloc / view
     "alloc",
     "fill",
-    "copy",
     "view",
     "subview",
     "reshape",

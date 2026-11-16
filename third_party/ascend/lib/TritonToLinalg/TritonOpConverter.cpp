@@ -3100,12 +3100,15 @@ DotConverter::matchAndRewrite(triton::ascend::DotOp op, OpAdaptor adaptor,
   if (failed(reconcileDotContractionK(op, a, b, inElemTy, rewriter, loc)))
     return failure();
 
-  // Uninitialized accumulator (accTy): mmadL1 (accumulate=false) overwrites it.
   int64_t numRows = cast<RankedTensorType>(a.getType()).getShape()[0];
   int64_t numCols = cast<RankedTensorType>(b.getType()).getShape()[1];
   auto ndResultTy = RankedTensorType::get({numRows, numCols}, accTy);
   Value acc = rewriter.create<tensor::EmptyOp>(
       loc, ArrayRef<int64_t>{numRows, numCols}, accTy);
+  // DynamicCV can split the accumulator add out of the matmul.
+  Value zero =
+      rewriter.create<arith::ConstantOp>(loc, rewriter.getZeroAttr(accTy));
+  acc = rewriter.create<linalg::FillOp>(loc, zero, acc).getResult(0);
   auto matmul = rewriter.create<linalg::MatmulOp>(
       loc, TypeRange{ndResultTy}, ValueRange{a, b}, ValueRange{acc});
   matmul->setAttr("input_precision", rewriter.getStringAttr("ieee"));

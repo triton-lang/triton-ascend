@@ -1603,53 +1603,51 @@ void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
       patterns.getContext());
   patterns.add<LoadStoreConverter::AtomicMaxMinCanonicalizer>(
       patterns.getContext());
-  patterns.add<
-      TTOpConverters::ScalarMathCanonicalizer<math::AbsFOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AcosOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AcoshOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AsinOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AsinhOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AtanOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::Atan2Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AtanhOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::CeilOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::CosOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::CoshOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::ErfOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::ExpOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::Exp2Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::ExpM1Op>,
-      TTOpConverters::ScalarMathCanonicalizer<math::FloorOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::FmaOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::LogOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::Log10Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::Log1pOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::Log2Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::PowFOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::RoundOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::RsqrtOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::SinOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::SinhOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::SqrtOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::TanOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::TanhOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::TruncOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::AddFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::SubFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<
-          arith::
-              MulFOp>, // TTOpConverters::ScalarMathCanonicalizer<arith::DivFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::NegFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::RemFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MaxNumFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MaximumFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MinNumFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MinimumFOp>
-      // By test, the following ops do not need canonicalization.
-      // TTOpConverters::ScalarMathCanonicalizer<arith::CmpFOp>
-      // TTOpConverters::ScalarMathCanonicalizer<arith::ExtFOp>
-      // TTOpConverters::ScalarMathCanonicalizer<arith::TruncFOp>
-      >(patterns.getContext());
+  patterns.add<TTOpConverters::ScalarMathCanonicalizer<math::AbsFOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AcosOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AcoshOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AsinOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AsinhOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AtanOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::Atan2Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AtanhOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::CeilOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::CosOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::CoshOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::ErfOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::ExpOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::Exp2Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::ExpM1Op>,
+               TTOpConverters::ScalarMathCanonicalizer<math::FloorOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::FmaOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::LogOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::Log10Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::Log1pOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::Log2Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::PowFOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::RoundOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::RsqrtOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::SinOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::SinhOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::SqrtOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::TanOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::TanhOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::TruncOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::AddFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::SubFOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<arith::MulFOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<arith::DivFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::NegFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::RemFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MaxNumFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MaximumFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MinNumFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MinimumFOp>
+               // By test, the following ops do not need canonicalization.
+               // TTOpConverters::ScalarMathCanonicalizer<arith::CmpFOp>
+               // TTOpConverters::ScalarMathCanonicalizer<arith::ExtFOp>
+               // TTOpConverters::ScalarMathCanonicalizer<arith::TruncFOp>
+               >(patterns.getContext());
   patterns.add<TTOpConverters::ReduceSingleCanonicalizer>(
       patterns.getContext());
   if (this->enableSelectAnalysis) {

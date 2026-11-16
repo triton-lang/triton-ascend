@@ -28,6 +28,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
+#include "llvm/ADT/SmallVector.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -58,6 +59,7 @@ inline constexpr llvm::StringLiteral kAnalyzeFlagId =
     "ssbuffer.analyze_flag_id";
 static constexpr llvm::StringLiteral kLoopDepthAttr = "ssbuffer.loop_depth";
 inline constexpr llvm::StringLiteral kLoopRegionAttr = "ssbuffer.loop_region";
+// Private read marker follows the proved value when scheduling clones the op.
 inline constexpr llvm::StringLiteral kCrossCoreDeps = "ssbuffer.crossCoreDeps";
 inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
 inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
@@ -356,6 +358,21 @@ inline bool isRealTensorComputeOp(Operation *op) {
 // - arith.trunci: i32 -> i8
 std::optional<hivm::FixpipePreQuantMode>
 getFixpipePreQuantMode(Operation *truncOp);
+
+bool isFixpipeQuantScaleHint(Operation *op);
+
+struct FixpipeOutputCastInfo {
+  linalg::MatmulOp matmulOp;
+  // Consumers precede producers so dead operations can be erased in order.
+  llvm::SmallVector<Operation *, 4> foldedOps;
+  Value quantScale;
+  hivm::FixpipePreQuantMode preQuantMode;
+  bool writesNZ;
+};
+
+// Match f32 matmul -> [NZ16 layout/scalar scale, either order] -> f16 cast.
+// Callers select the transfer edge when the producer has other users.
+std::optional<FixpipeOutputCastInfo> matchFixpipeOutputCast(Operation *castOp);
 
 // Trace an operand's defining op back through C2C intermediate ops to find the
 // underlying producing op. Returns null when the operand has no defining op.

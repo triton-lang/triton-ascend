@@ -43,6 +43,7 @@
 
 #include "ascend/include/DynamicCVPipeline/Common/SyncWall.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
 
@@ -633,6 +634,38 @@ planVectorBlockId(Block *block,
   return llvm::success();
 }
 
+// Read the current iteration's state in the block that updates it. Users in
+// later blocks then consume the converted value via normal tensor dependencies.
+static void placeLoopStateReads(Block *body, const MemoryDependenceGraph &graph,
+                                ComputeBlockIdManager &bm) {
+  auto loop = dyn_cast<scf::ForOp>(body->getParentOp());
+  if (!loop)
+    return;
+  auto yield = cast<scf::YieldOp>(body->getTerminator());
+  for (auto [state, next] :
+       llvm::zip_equal(loop.getRegionIterArgs(), yield.getOperands())) {
+    Operation *update = next.getDefiningOp();
+    if (!update || update->getBlock() != body ||
+        !isVectorSimpleOpOrCf(update) ||
+        !isa<RankedTensorType>(state.getType()) ||
+        !llvm::is_contained(update->getOperands(), state))
+      continue;
+    auto blockId = getOpBlockId(update);
+    if (!blockId)
+      continue;
+    for (Operation *user : state.getUsers()) {
+      if (!isa<arith::ExtFOp>(user) || user->getBlock() != body ||
+          user == update || !isVectorSimpleOpOrCf(user) ||
+          getOpBlockId(user) == blockId ||
+          willCreateCycle({user}, graph, *blockId, bm))
+        continue;
+      bm.updateBlockId(user, *blockId);
+      if (update->isBeforeInBlock(user))
+        user->moveBefore(update);
+    }
+  }
+}
+
 namespace {
 
 class PlanVectorBlockPass
@@ -681,6 +714,7 @@ void PlanVectorBlockPass::runOnOperation() {
         if (llvm::failed(planVectorBlockId(block, memDepGraph, bm))) {
           return WalkResult::interrupt();
         }
+        placeLoopStateReads(block, memDepGraph, bm);
         return WalkResult::advance();
       });
   if (result.wasInterrupted()) {

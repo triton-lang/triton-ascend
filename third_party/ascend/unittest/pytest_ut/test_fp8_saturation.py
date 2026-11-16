@@ -99,3 +99,47 @@ def test_fp8_downcast_clamping(src_dtype, dst_dtype, torch_dst_dtype, mode):
         assert torch.isnan(actual).all()
     else:
         torch.testing.assert_close(actual, torch.full_like(actual, expected), rtol=0, atol=0)
+
+
+@triton.jit
+def _clamp_reshape_downcast_fp8(X, Y, LIMIT: tl.constexpr, PROPAGATE_NAN: tl.constexpr):
+    offsets = tl.arange(0, 4)[:, None] * 8 + tl.arange(0, 8)[None, :]
+    value = tl.load(X + offsets)
+    clamped = tl.clamp(value, -LIMIT, LIMIT, propagate_nan=PROPAGATE_NAN)
+    result = clamped.reshape((32, )).to(Y.dtype.element_ty, fp_downcast_rounding="rtne")
+    tl.store(Y + tl.arange(0, 32), result)
+
+
+@pytest.mark.parametrize("dst_dtype,torch_dst_dtype", [(tl.float8e4nv, torch.float8_e4m3fn),
+                                                       (tl.float8e5, torch.float8_e5m2)])
+@pytest.mark.parametrize("propagate_nan", [tl.PropagateNan.NONE, tl.PropagateNan.ALL])
+def test_fp8_clamp_reshape_downcast(dst_dtype, torch_dst_dtype, propagate_nan):
+    arch = triton.runtime.driver.active.get_current_target().arch
+    if arch_generation(arch) != AscendArchGen.GEN5:
+        pytest.skip("FP8 conversion requires A5")
+
+    limit = torch.finfo(torch_dst_dtype).max
+    values = [
+        0.0, 1.0, 1.0625, 1.125, 1.1875, 2**-17, 2**-16, 2**-10, 2**-9, limit / 2, limit, limit + 1, 2 * limit, 65504.0,
+        float("inf"),
+        float("nan")
+    ]
+    source_cpu = torch.tensor([value * sign for sign in (1, -1) for value in values], dtype=torch.float32).reshape(4, 8)
+    source = source_cpu.to("npu")
+    output = torch.empty((source_cpu.numel(), ), dtype=torch.uint8, device="npu")
+    _clamp_reshape_downcast_fp8[(1, )](source, triton.reinterpret(output, dst_dtype), limit, propagate_nan)
+
+    # Match clamp's two NaN modes on CPU before rounding to FP8. No device FP8
+    # operations are needed; exact byte checks also distinguish +0 from -0.
+    lower = torch.tensor(-limit, dtype=source_cpu.dtype)
+    upper = torch.tensor(limit, dtype=source_cpu.dtype)
+    if propagate_nan == tl.PropagateNan.ALL:
+        reference = torch.maximum(lower, torch.minimum(source_cpu, upper))
+    else:
+        reference = torch.fmax(lower, torch.fmin(source_cpu, upper))
+    reference = reference.flatten()
+    expected_bits = reference.to(torch_dst_dtype).view(torch.uint8)
+    actual_bits = output.cpu()
+    nan_mask = torch.isnan(reference)
+    assert torch.isnan(actual_bits.view(torch_dst_dtype).float()[nan_mask]).all()
+    torch.testing.assert_close(actual_bits[~nan_mask], expected_bits[~nan_mask], rtol=0, atol=0)

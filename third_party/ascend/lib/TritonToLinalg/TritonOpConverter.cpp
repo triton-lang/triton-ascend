@@ -668,6 +668,30 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
   return failure();
 }
 
+static bool isClampedToFiniteFp8Range(Value input, const llvm::APFloat &limit) {
+  while (auto reshape = input.getDefiningOp<triton::ReshapeOp>())
+    input = reshape.getSrc();
+  auto clamp = input.getDefiningOp<triton::ClampFOp>();
+  if (!clamp)
+    return false;
+
+  auto getFiniteBound = [](Value bound, llvm::APFloat &value) {
+    if (auto splat = bound.getDefiningOp<triton::SplatOp>())
+      bound = splat.getSrc();
+    return matchPattern(bound, m_ConstantFloat(&value)) && value.isFinite();
+  };
+  llvm::APFloat lower = limit, upper = limit;
+  if (!getFiniteBound(clamp.getMin(), lower) ||
+      !getFiniteBound(clamp.getMax(), upper))
+    return false;
+
+  llvm::APFloat negativeLimit = limit;
+  negativeLimit.changeSign();
+  return lower.compare(negativeLimit) != llvm::APFloat::cmpLessThan &&
+         upper.compare(limit) != llvm::APFloat::cmpGreaterThan &&
+         lower.compare(upper) != llvm::APFloat::cmpGreaterThan;
+}
+
 static Value clampToFiniteFp8Range(Value input, Type dstElemType, Location loc,
                                    PatternRewriter &rewriter) {
   if (!isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType))
@@ -679,6 +703,11 @@ static Value clampToFiniteFp8Range(Value input, Type dstElemType, Location loc,
   bool losesInfo;
   limit.convert(srcElemType.getFloatSemantics(),
                 llvm::APFloat::rmNearestTiesToEven, &losesInfo);
+
+  // Keep the existing clamp's NaN and signed-zero behavior. Its result is
+  // already in range or NaN, so the ordered comparisons below cannot change it.
+  if (isClampedToFiniteFp8Range(input, limit))
+    return input;
 
   auto createBound = [&](const llvm::APFloat &value) -> Value {
     auto boundAttr = rewriter.getFloatAttr(srcElemType, value);

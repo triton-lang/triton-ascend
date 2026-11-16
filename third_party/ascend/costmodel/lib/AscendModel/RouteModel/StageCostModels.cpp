@@ -2553,8 +2553,26 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
         }
       }
     }
+    bool recurrenceGroupWithinMeasuredGeometry = true;
+    if (profile.recurrenceGroupMeasuredIndependentRows > 0) {
+      recurrenceGroupWithinMeasuredGeometry =
+          !work.reductionGeometryCounts.empty() &&
+          work.shuffleLaneSteps <=
+              static_cast<double>(
+                  profile.recurrenceGroupMeasuredMaximumLaneSteps);
+      for (const auto &[shape, count] : work.reductionGeometryCounts) {
+        if (count <= 0.0)
+          continue;
+        recurrenceGroupWithinMeasuredGeometry &=
+            std::get<0>(shape) ==
+                profile.recurrenceGroupMeasuredIndependentRows &&
+            std::get<1>(shape) == profile.recurrenceGroupMeasuredExtent &&
+            std::get<2>(shape) == profile.recurrenceGroupMeasuredElementBits;
+      }
+    }
     if (stage.costModelKind == StageCostModelKind::LoopCarriedRecurrence &&
-        stage.features.hasReduction && work.shuffleLaneSteps > 0.0) {
+        stage.features.hasReduction && work.shuffleLaneSteps > 0.0 &&
+        recurrenceGroupWithinMeasuredGeometry) {
       auto factorCurve =
           profile.recurrenceReductionGroupCyclesByFactorAndLaneSteps.find(
               superblockFactor);

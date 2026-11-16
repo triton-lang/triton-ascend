@@ -1331,10 +1331,16 @@ inferTensorAffineStrides(Value value, unsigned depth = 0) {
 
   if (name == "tt.expand_dims" && definition->getNumOperands() == 1) {
     auto axis = definition->getAttrOfType<IntegerAttr>("axis");
+    auto inputType =
+        dyn_cast<RankedTensorType>(definition->getOperand(0).getType());
     auto input = inferTensorAffineStrides(definition->getOperand(0), depth + 1);
-    if (!axis || !input || static_cast<int64_t>(input->size()) + 1 != rank ||
+    if (!axis || !inputType || inputType.getRank() + 1 != rank ||
         axis.getInt() < 0 || axis.getInt() >= rank)
       return std::nullopt;
+    // An inserted size-one axis is invariant even when the input's affine
+    // strides are unknown (for example, after a loaded-index remainder).
+    if (!input)
+      input = TensorAffineStrides(inputType.getRank(), std::nullopt);
     input->insert(input->begin() + axis.getInt(), int64_t(0));
     return input;
   }

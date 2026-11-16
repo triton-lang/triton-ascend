@@ -1,0 +1,641 @@
+{
+  "purpose": "FP16 masked loaded-index plus remainder segmented SIMD read service",
+  "target": "Ascend950PR",
+  "system_counter_frequency_mhz": 1000,
+  "probe_source": "calibration/probe_segmented_load_holdout_20261022.py",
+  "method": "32 physical programs; 100 warmups; 10 synchronized NPU profiler kernel durations per 1- or 2-read configuration; subtract count-1 median from count-2 median",
+  "fit": {
+    "fit_rows": {
+      "16": 379.0,
+      "32": 659.9999999999997,
+      "128": 2572.000000000001
+    },
+    "holdout_rows": 64,
+    "holdout_predicted_system_cycles": 1297.3333333333335,
+    "holdout_observed_system_cycles": 1362.5000000000007,
+    "holdout_relative_error": 0.04782874617737043,
+    "system_counter_frequency_mhz": 1000,
+    "scope_warning": "Whole-kernel paired delta includes accumulation; do not interpret as a hardware LDG instruction latency."
+  },
+  "excluded": [
+    "w2 rows32 columns64 first run: count-2 median 80.6355 us due profiler spikes; isolated repeat 0.6315 us used",
+    "w4 rows32 columns64: count-1 median 6702.5395 us due full-run stall; excluded"
+  ],
+  "interpretation": "Paired whole-kernel incremental service, including the extra accumulation; not an individual LDG instruction latency. Target metadata records 32 warps; fit uses 32-warp 16/32/128-row points. 64-row holdout prediction is 1.2973 us versus observed 1.3625 us (4.78%). Independent 2- and 4-warp 64-row controls give 1.3025 and 1.3365 us.",
+  "runs": [
+    {
+      "input": "calibration/cost_formula_20261022/load_holdout_c64/summary.json",
+      "sha256": "362b9fe766b8648ed27c88a1a50d71dea686159f00e0482efb0f6f09c9b0fd70",
+      "device": "ASCEND_RT_VISIBLE_DEVICES=0",
+      "records": [
+        {
+          "rows": 16,
+          "columns": 64,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 32,
+          "samples_us": [
+            2.209,
+            2.469,
+            2.19,
+            2.672,
+            2.191,
+            2.398,
+            2.19,
+            2.616,
+            2.115,
+            2.48
+          ],
+          "median_us": 2.3035,
+          "binary_sha256": "b383eb16c44ebb4665b759564913afdccd205c9dba2a64fdab1fa4c68d3ddb9b",
+          "precision_pass": true
+        },
+        {
+          "rows": 16,
+          "columns": 64,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 32,
+          "samples_us": [
+            2.916,
+            2.416,
+            2.832,
+            2.502,
+            3.032,
+            2.496,
+            2.864,
+            2.546,
+            2.791,
+            2.574
+          ],
+          "median_us": 2.6825,
+          "binary_sha256": "08c9234fa9451e4433dbf6e5a284c3a22dd620ce57be3a88b7b43e22c6c8dada",
+          "precision_pass": true
+        },
+        {
+          "rows": 32,
+          "columns": 64,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 32,
+          "samples_us": [
+            2.668,
+            3.146,
+            2.779,
+            3.066,
+            2.84,
+            3.069,
+            2.8,
+            3.027,
+            2.756,
+            3.198
+          ],
+          "median_us": 2.9335,
+          "binary_sha256": "705245232773ac4234309aed2f376d186ef84218d5201391895e390f57f3e794",
+          "precision_pass": true
+        },
+        {
+          "rows": 32,
+          "columns": 64,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 32,
+          "samples_us": [
+            3.822,
+            3.38,
+            3.826,
+            3.456,
+            3.999,
+            3.353,
+            3.812,
+            3.33,
+            3.731,
+            3.384
+          ],
+          "median_us": 3.5934999999999997,
+          "binary_sha256": "b57e6b0361f50c8aaabf30a93b3a7c0d3e4042207bf78178aeab133ea6d824e6",
+          "precision_pass": true
+        },
+        {
+          "rows": 64,
+          "columns": 64,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 32,
+          "samples_us": [
+            4.009,
+            4.325,
+            4.145,
+            4.185,
+            3.974,
+            4.161,
+            3.913,
+            4.325,
+            3.951,
+            4.437
+          ],
+          "median_us": 4.153,
+          "binary_sha256": "49f8b67ed55b905e932fa11606493354f427fd699232f50252172557c48bdbcf",
+          "precision_pass": true
+        },
+        {
+          "rows": 64,
+          "columns": 64,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 32,
+          "samples_us": [
+            5.727,
+            5.378,
+            5.589,
+            5.318,
+            5.685,
+            5.246,
+            5.541,
+            5.49,
+            5.576,
+            5.283
+          ],
+          "median_us": 5.5155,
+          "binary_sha256": "841fa91d3fb28ec543d0ed0dc5d1a61d8464cb392e2122c79f86c563cb793c51",
+          "precision_pass": true
+        },
+        {
+          "rows": 128,
+          "columns": 64,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 32,
+          "samples_us": [
+            6.449,
+            6.673,
+            6.579,
+            6.782,
+            6.329,
+            6.753,
+            6.404,
+            6.804,
+            6.507,
+            6.809
+          ],
+          "median_us": 6.6259999999999994,
+          "binary_sha256": "2fc5052cdfd37721688959fd148170619721203f657b255d68f71014dd2cd5dd",
+          "precision_pass": true
+        },
+        {
+          "rows": 128,
+          "columns": 64,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 32,
+          "samples_us": [
+            9.386,
+            9.104,
+            9.262,
+            9.05,
+            9.485,
+            9.064,
+            9.407,
+            9.134,
+            9.398,
+            9.02
+          ],
+          "median_us": 9.198,
+          "binary_sha256": "af788c0d12f6cc73be6912ef563ce870351fb9d3ab5e3597f01eaa87f75a6122",
+          "precision_pass": true
+        }
+      ]
+    },
+    {
+      "input": "calibration/cost_formula_20261022/load_holdout_w2_c64/summary.json",
+      "sha256": "9fed5996d818b4d547a7548c85bb58035722911862c07766a40fbaff9a3fdb7e",
+      "device": "ASCEND_RT_VISIBLE_DEVICES=0",
+      "records": [
+        {
+          "rows": 16,
+          "columns": 64,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            2.166,
+            2.693,
+            2.068,
+            2.537,
+            2.14,
+            2.463,
+            2.199,
+            2.641,
+            2.122,
+            2.412
+          ],
+          "median_us": 2.3055,
+          "binary_sha256": "b383eb16c44ebb4665b759564913afdccd205c9dba2a64fdab1fa4c68d3ddb9b",
+          "precision_pass": true
+        },
+        {
+          "rows": 16,
+          "columns": 64,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            2.899,
+            2.462,
+            3.067,
+            2.585,
+            2.856,
+            2.509,
+            2.923,
+            2.579,
+            2.879,
+            2.471
+          ],
+          "median_us": 2.7205,
+          "binary_sha256": "08c9234fa9451e4433dbf6e5a284c3a22dd620ce57be3a88b7b43e22c6c8dada",
+          "precision_pass": true
+        },
+        {
+          "rows": 32,
+          "columns": 64,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            2.649,
+            3.291,
+            2.796,
+            3.281,
+            2.844,
+            3.222,
+            2.878,
+            3.245,
+            2.765,
+            3.036
+          ],
+          "median_us": 2.957,
+          "binary_sha256": "705245232773ac4234309aed2f376d186ef84218d5201391895e390f57f3e794",
+          "precision_pass": true
+        },
+        {
+          "rows": 32,
+          "columns": 64,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            70.657,
+            71.311,
+            3.967,
+            3.78,
+            4.076,
+            104.18,
+            91.141,
+            90.739,
+            89.96,
+            96.729
+          ],
+          "median_us": 80.63550000000001,
+          "binary_sha256": "b57e6b0361f50c8aaabf30a93b3a7c0d3e4042207bf78178aeab133ea6d824e6",
+          "precision_pass": true
+        },
+        {
+          "rows": 64,
+          "columns": 64,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            3.926,
+            4.37,
+            4.033,
+            4.308,
+            4.002,
+            4.216,
+            3.953,
+            4.294,
+            3.922,
+            4.34
+          ],
+          "median_us": 4.1245,
+          "binary_sha256": "49f8b67ed55b905e932fa11606493354f427fd699232f50252172557c48bdbcf",
+          "precision_pass": true
+        },
+        {
+          "rows": 64,
+          "columns": 64,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            5.686,
+            5.32,
+            5.553,
+            5.326,
+            5.553,
+            5.227,
+            5.528,
+            5.253,
+            5.748,
+            5.248
+          ],
+          "median_us": 5.427,
+          "binary_sha256": "841fa91d3fb28ec543d0ed0dc5d1a61d8464cb392e2122c79f86c563cb793c51",
+          "precision_pass": true
+        },
+        {
+          "rows": 128,
+          "columns": 64,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            6.486,
+            6.808,
+            6.432,
+            6.671,
+            6.436,
+            7.096,
+            6.332,
+            6.788,
+            6.539,
+            6.821
+          ],
+          "median_us": 6.605,
+          "binary_sha256": "2fc5052cdfd37721688959fd148170619721203f657b255d68f71014dd2cd5dd",
+          "precision_pass": true
+        },
+        {
+          "rows": 128,
+          "columns": 64,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            9.271,
+            9.128,
+            9.342,
+            8.993,
+            9.415,
+            8.923,
+            9.275,
+            9.013,
+            9.517,
+            9.1
+          ],
+          "median_us": 9.1995,
+          "binary_sha256": "af788c0d12f6cc73be6912ef563ce870351fb9d3ab5e3597f01eaa87f75a6122",
+          "precision_pass": true
+        }
+      ]
+    },
+    {
+      "input": "calibration/cost_formula_20261022/load_holdout_w2_c64_r32_repeat/summary.json",
+      "sha256": "2ccf4575a1e63c4dabc85a560f51d403f3d6b1619c5c0f485db9debcb7125b36",
+      "device": "ASCEND_RT_VISIBLE_DEVICES=0",
+      "records": [
+        {
+          "rows": 32,
+          "columns": 64,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            2.922,
+            3.001,
+            2.669,
+            3.002,
+            2.742,
+            3.031,
+            2.799,
+            3.014,
+            2.815,
+            2.952
+          ],
+          "median_us": 2.9370000000000003,
+          "binary_sha256": "705245232773ac4234309aed2f376d186ef84218d5201391895e390f57f3e794",
+          "precision_pass": true
+        },
+        {
+          "rows": 32,
+          "columns": 64,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            3.746,
+            3.336,
+            3.811,
+            3.436,
+            3.684,
+            3.463,
+            3.674,
+            3.437,
+            3.818,
+            3.39
+          ],
+          "median_us": 3.5685000000000002,
+          "binary_sha256": "b57e6b0361f50c8aaabf30a93b3a7c0d3e4042207bf78178aeab133ea6d824e6",
+          "precision_pass": true
+        }
+      ]
+    },
+    {
+      "input": "calibration/cost_formula_20261022/load_holdout_w2_c32/summary.json",
+      "sha256": "116f5d11ae5e070667849acf2a5582e32a196eaf0348ac29d3c53ecec925651d",
+      "device": "ASCEND_RT_VISIBLE_DEVICES=0",
+      "records": [
+        {
+          "rows": 32,
+          "columns": 32,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            2.836,
+            3.087,
+            2.623,
+            3.015,
+            2.802,
+            2.99,
+            2.774,
+            3.204,
+            2.797,
+            3.02
+          ],
+          "median_us": 2.9130000000000003,
+          "binary_sha256": "a199b95088eaa5473636028c9e064f033081e2b9bb4579f70eed860553d0c491",
+          "precision_pass": true
+        },
+        {
+          "rows": 32,
+          "columns": 32,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            3.708,
+            3.322,
+            3.723,
+            3.434,
+            3.766,
+            3.358,
+            3.68,
+            3.311,
+            3.656,
+            3.326
+          ],
+          "median_us": 3.545,
+          "binary_sha256": "8b67c36807cf0e68708e461ef2c58a7c7e9147db4a0acba611ed549e6a2b9cbc",
+          "precision_pass": true
+        }
+      ]
+    },
+    {
+      "input": "calibration/cost_formula_20261022/load_holdout_w2_c128/summary.json",
+      "sha256": "21205c32ba02f4207a7504d1d36c2783faf334b8ac7b9b1e7a7cdb385293273b",
+      "device": "ASCEND_RT_VISIBLE_DEVICES=0",
+      "records": [
+        {
+          "rows": 32,
+          "columns": 128,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            2.827,
+            3.289,
+            2.81,
+            3.395,
+            2.91,
+            3.421,
+            2.833,
+            3.297,
+            2.872,
+            3.362
+          ],
+          "median_us": 3.0995,
+          "binary_sha256": "f4cf578268cf84b16dd5e62d6832cc00d1000f5004999ceb553ed123c13683ca",
+          "precision_pass": true
+        },
+        {
+          "rows": 32,
+          "columns": 128,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 2,
+          "samples_us": [
+            4.112,
+            3.894,
+            4.13,
+            3.928,
+            4.135,
+            3.902,
+            4.125,
+            3.98,
+            4.15,
+            3.951
+          ],
+          "median_us": 4.046,
+          "binary_sha256": "63d154355d8721b296a5e7b67b32aed355339f29554e096c5d549663251e04a3",
+          "precision_pass": true
+        }
+      ]
+    },
+    {
+      "input": "calibration/cost_formula_20261022/load_holdout_w4_c64/summary.json",
+      "sha256": "f98eeb7e923269efb5f952c7dea27cbb24bb82ae97d3bec7cff15af27ceb4814",
+      "device": "ASCEND_RT_VISIBLE_DEVICES=1",
+      "records": [
+        {
+          "rows": 32,
+          "columns": 64,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 4,
+          "samples_us": [
+            6780.077,
+            7162.786,
+            6752.415,
+            6803.362,
+            6594.878,
+            6549.025,
+            6646.403,
+            6699.686,
+            6685.155,
+            6705.393
+          ],
+          "median_us": 6702.5395,
+          "binary_sha256": "705245232773ac4234309aed2f376d186ef84218d5201391895e390f57f3e794",
+          "precision_pass": true
+        },
+        {
+          "rows": 32,
+          "columns": 64,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 4,
+          "samples_us": [
+            3.895,
+            3.328,
+            3.846,
+            3.422,
+            3.668,
+            3.38,
+            3.687,
+            3.447,
+            3.715,
+            3.339
+          ],
+          "median_us": 3.5575,
+          "binary_sha256": "b57e6b0361f50c8aaabf30a93b3a7c0d3e4042207bf78178aeab133ea6d824e6",
+          "precision_pass": true
+        },
+        {
+          "rows": 64,
+          "columns": 64,
+          "load_count": 1,
+          "programs": 32,
+          "num_warps": 4,
+          "samples_us": [
+            4.049,
+            4.247,
+            3.996,
+            4.441,
+            3.961,
+            4.231,
+            3.949,
+            4.362,
+            3.889,
+            4.39
+          ],
+          "median_us": 4.140000000000001,
+          "binary_sha256": "49f8b67ed55b905e932fa11606493354f427fd699232f50252172557c48bdbcf",
+          "precision_pass": true
+        },
+        {
+          "rows": 64,
+          "columns": 64,
+          "load_count": 2,
+          "programs": 32,
+          "num_warps": 4,
+          "samples_us": [
+            5.661,
+            5.343,
+            5.705,
+            5.347,
+            5.632,
+            5.284,
+            5.542,
+            5.203,
+            5.608,
+            5.411
+          ],
+          "median_us": 5.4765,
+          "binary_sha256": "841fa91d3fb28ec543d0ed0dc5d1a61d8464cb392e2122c79f86c563cb793c51",
+          "precision_pass": true
+        }
+      ]
+    }
+  ]
+}

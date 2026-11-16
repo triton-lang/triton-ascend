@@ -3165,6 +3165,35 @@
               "type": "integer",
               "minimum": 1
             },
+            "measured_reduction_geometry": {
+              "description": "Optional measured domain for the recurrence group curve. Outside it, use the analytical recurrence bound instead of extrapolating a different reduction geometry.",
+              "type": "object",
+              "required": [
+                "independent_rows",
+                "extent",
+                "element_bits",
+                "maximum_lane_steps"
+              ],
+              "properties": {
+                "independent_rows": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "extent": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "element_bits": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximum_lane_steps": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "additionalProperties": false
+            },
             "reduction_group_iteration_system_cycle_measurements": {
               "type": "object",
               "minProperties": 1,

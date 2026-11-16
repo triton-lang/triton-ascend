@@ -2,7 +2,9 @@
 
 // The GM view uses unit-axis stride 1 and a dynamic origin. The loaded value
 // lives in a dense local buffer whose unit-axis stride is 4. Atomic conversion
-// must reuse that buffer, preserving the distinct GM destination descriptor.
+// must reuse that buffer through the A2/A3 XCHG view, preserving the distinct
+// GM destination descriptor. The view prevents backend dead-store elimination
+// from erasing XCHG when its input is a directly allocated local buffer.
 // CHECK-LABEL: sym_name = "atomic_xchg_local_value"
 // CHECK: %[[LOCAL:.*]] = "memref.alloc"() {{.*}} : () -> memref<2x1x4xf32>
 // CHECK-NEXT: "memref.copy"(%{{.*}}, %[[LOCAL]])
@@ -11,7 +13,10 @@
 // CHECK: %[[DEST:.*]] = "memref.reinterpret_cast"({{.*}}) {{.*}} -> memref<2x1x4xf32, strided<[4, 1, 1], offset: ?>>
 // CHECK-NOT: "memref.alloc"
 // CHECK-NOT: "memref.copy"
-// CHECK: "hfusion.atomic_xchg"(%[[LOCAL]], %[[DEST]])
+// CHECK: %[[VIEW:.*]] = "memref.cast"(%[[LOCAL]]) : (memref<2x1x4xf32>) -> memref<2x1x4xf32, strided<[4, 4, 1], offset: ?>>
+// CHECK-NOT: "memref.alloc"
+// CHECK-NOT: "memref.copy"
+// CHECK: "hfusion.atomic_xchg"(%[[VIEW]], %[[DEST]])
 // CHECK-NOT: "memref.alloc"
 // CHECK-NOT: "memref.copy"
 // CHECK: "func.return"

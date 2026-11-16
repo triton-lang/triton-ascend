@@ -950,6 +950,16 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
     auto tensorType = cast<RankedTensorType>(inputVal.getType());
     auto inputType =
         MemRefType::get(tensorType.getShape(), tensorType.getElementType());
+    if (rmwOp == RMWOp::XCHG && !compileOn91095Flag) {
+      // A2/A3 dead-store elimination can erase XCHG on a direct allocation
+      // because the backend op lacks read effects. Preserve the legacy view
+      // boundary, with strides from the value rather than the GM pointer.
+      auto layout =
+          StridedLayoutAttr::get(rewriter.getContext(), ShapedType::kDynamic,
+                                 inputType.getStridesAndOffset().first);
+      inputType = MemRefType::get(tensorType.getShape(),
+                                  tensorType.getElementType(), layout);
+    }
     return rewriter.create<bufferization::ToMemrefOp>(loc, inputType, inputVal);
   };
   auto inputMemref = getInputMemref();

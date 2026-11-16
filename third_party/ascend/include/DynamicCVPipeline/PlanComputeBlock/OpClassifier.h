@@ -201,9 +201,8 @@ private:
   // Step 6: Handle CUBE_AND_VECTOR operations
   int handleCubeAndVector();
 
-  // Helper: split CUBE_AND_VECTOR operation into CUBE and VECTOR versions.
-  // Returns true when a split was actually performed.
-  bool splitOperationForCubeAndVector(
+  // Splits a CUBE_AND_VECTOR operation into CUBE and VECTOR versions.
+  void splitOperationForCubeAndVector(
       Operation *op, llvm::DenseSet<Operation *> &processedOps,
       llvm::DenseMap<Operation *, Operation *> &opToVectorClone);
 

@@ -49,18 +49,17 @@ namespace {
 
 /// Stamps `attrs` on `op` and on every op nested in its regions.
 ///
-/// The scope's tags describe the packed unit as a whole - `block_id` names the
-/// block the unit runs in, `core_type` the core - and the passes that read them
-/// look at an op's own attributes only, never at an enclosing op's. When the
-/// body comes out of the scope, a loop keeps its own region, so stamping the
-/// moved-out ops alone would leave the work inside the loop untagged and every
-/// later match would read it as unclassified.
+/// The scope tags describe the packed unit, not one op: `block_id` names the
+/// block it runs in, `core_type` names the core.
+/// Readers look at an op's own attributes, never at an enclosing op's.
+/// Pre: a moved-out loop keeps its own region, so its body must be stamped
+/// too, otherwise later matches read that work as unclassified.
 static void stampUnitAttrs(Operation *op, ArrayRef<NamedAttribute> attrs) {
   for (const NamedAttribute &attr : attrs) {
     op->setAttr(attr.getName(), attr.getValue());
   }
-  // A linalg op's region holds its payload, not a unit of work of its own; the
-  // classifier never tags those ops either.
+  // A linalg region holds the op's payload, not a unit of work.
+  // The classifier never tags those nested ops either.
   if (op->getDialect() && isa<linalg::LinalgDialect>(op->getDialect())) {
     return;
   }
@@ -85,18 +84,17 @@ public:
     if (hasFallbackAttr(module)) {
       return;
     }
-    // Collect first, then unpack: `unpackScopeOp` moves the body ops out and
-    // erases the scope, so mutating inside a `walk` callback would invalidate
-    // the walk's own traversal stack. The default post-order visits a nested
-    // scope before its parent, and unpacking the inner one only moves ops out
-    // of the outer body, so every collected pointer stays valid.
+    // Collect first, then unpack: `unpackScopeOp` erases the scope, so
+    // mutating inside a `walk` callback would invalidate its traversal stack.
+    // A post-order walk visits a nested scope before its parent, and unpacking
+    // the inner one only moves ops out of the outer body.
     SmallVector<scope::ScopeOp> scopes;
     module.walk([&](scope::ScopeOp scopeOp) { scopes.push_back(scopeOp); });
 
     for (scope::ScopeOp scopeOp : scopes) {
       llvm::SmallVector<Operation *> unpackedOps;
-      // `ssbuffer.load` marks the packed unit; it is a property of the scope,
-      // not of the work inside it, so the unpacked ops must not inherit it.
+      // `ssbuffer.load` marks the packed unit, a property of the scope.
+      // The unpacked ops must not inherit it.
       SmallVector<NamedAttribute> attrs;
       for (const NamedAttribute &attr : scopeOp->getAttrs()) {
         if (attr.getName() == kScopeLoadAttr) {
@@ -109,9 +107,8 @@ public:
         setFallbackAttr(module, ERRCODE_FAILED);
         return;
       }
-      // The scope is trusted to carry `block_id`; a scope without it is an
-      // upstream bug and is reported by the passes that consume `block_id`
-      // afterwards.
+      // The scope is trusted to carry `block_id`: a scope without it is an
+      // upstream bug, reported by the passes that consume `block_id` later.
       for (Operation *op : unpackedOps) {
         stampUnitAttrs(op, attrs);
       }

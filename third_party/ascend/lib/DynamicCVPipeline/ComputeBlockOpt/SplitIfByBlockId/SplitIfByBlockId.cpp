@@ -56,6 +56,7 @@
 #include "mlir/Support/WalkResult.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
+#include "ascend/include/DynamicCVPipeline/Common/IROrder.h"
 #include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
@@ -517,16 +518,16 @@ static void preprocessScalarDependencies(CandidateIf &cand) {
   auto processGroup = [](BlockGroup &group) {
     auto allOpsIter = llvm::concat<Operation *>(group.ops, group.nestedIfs);
     SmallVector<Operation *> allOps{allOpsIter.begin(), allOpsIter.end()};
-    // Same early-out as the previous BlockGroup-based ScalarClosure, which
-    // bailed out whenever `group.ops` was empty: a group holding only nested
-    // ifs is skipped. It also guards the `allOps.front()` deref below.
-    // TODO(cv-pipeline): revisit whether such nested-if-only groups need their
-    // outer scalar deps cloned as well; proceeding here would change behaviour
-    // relative to the old implementation.
+    // A group holding only nested ifs is skipped; this also guards the
+    // `allOps.front()` deref below.
+    // TODO: cloning the outer scalar deps of such a group would change
+    // behaviour, so it is left for a follow-up.
     if (group.ops.empty()) {
       return;
     }
-    ScalarClosure closure{(**allOps.begin()).getBlock(), allOps, true};
+    // `capture` clones the closure, so index math that reads memory belongs to
+    // the group: collect impure producers here.
+    ScalarClosure closure{(**allOps.begin()).getBlock(), allOps, true, true};
     closure.collect();
 
     auto [newOps, mapper] = closure.capture(group.blockId);
@@ -540,9 +541,7 @@ static void preprocessScalarDependencies(CandidateIf &cand) {
     group.nestedIfs.clear();
     group.ops.clear();
 
-    llvm::sort(allOps, [&closure](Operation *a, Operation *b) {
-      return closure.isBefore(a, b);
-    });
+    llvm::sort(allOps, isBeforeInIr);
 
     for (Operation *op : allOps) {
       op->walk([&, &mapper = mapper](Operation *innerOp) {

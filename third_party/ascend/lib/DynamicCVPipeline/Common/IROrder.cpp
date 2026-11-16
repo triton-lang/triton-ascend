@@ -20,38 +20,34 @@
  * THE SOFTWARE.
  */
 
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/IROrder.h"
 
 using namespace mlir;
 using namespace CVPipeline;
 
+static constexpr unsigned kInlineAncestorSlots = 8;
+
 static Block *parentBlockOf(Block *block) {
   Operation *parentOp = block->getParentOp();
   return parentOp ? parentOp->getBlock() : nullptr;
 }
 
-// Two-pointer walk: both pointers advance one level per step, and a pointer
-// that runs past the root restarts at the other's start, so each walks depth(a)
-// + depth(b) levels and they meet at the LCA (two disjoint trees both end at
-// nullptr and meet there).
-//
-// Do NOT implement this by walking `a` upward into a set while advancing `b`
-// one step at a time: when the two nodes have different depths the shallower
-// pointer reaches the LCA before the deeper one records it, so the LCA is
-// missed (or a higher ancestor is wrongly returned).
 Block *CVPipeline::lowestCommonAncestorBlock(Block *a, Block *b) {
   if (!a || !b) {
     return nullptr;
   }
-  Block *p = a;
-  Block *q = b;
-  while (p != q) {
-    p = p ? parentBlockOf(p) : b;
-    q = q ? parentBlockOf(q) : a;
+  llvm::SmallPtrSet<Block *, kInlineAncestorSlots> ancestorsOfA;
+  for (Block *block = a; block; block = parentBlockOf(block)) {
+    ancestorsOfA.insert(block);
   }
-  return p;
+  for (Block *block = b; block; block = parentBlockOf(block)) {
+    if (ancestorsOfA.contains(block)) {
+      return block;
+    }
+  }
+  return nullptr;
 }
 
 bool CVPipeline::isBeforeInIr(Operation *a, Operation *b) {
@@ -59,9 +55,8 @@ bool CVPipeline::isBeforeInIr(Operation *a, Operation *b) {
     return false;
   }
 
-  // Ops may live in different blocks, where a direct `isBeforeInBlock` is
-  // invalid: compare their ancestors in the lowest common ancestor block first,
-  // then fall back to the order inside their own block.
+  // Ops may live in different blocks, where `isBeforeInBlock` is invalid.
+  // Compare their ancestors in the common block first.
   Block *commonBlock = lowestCommonAncestorBlock(a->getBlock(), b->getBlock());
   if (!commonBlock) {
     return false;
@@ -72,19 +67,6 @@ bool CVPipeline::isBeforeInIr(Operation *a, Operation *b) {
     return aTop->isBeforeInBlock(bTop);
   }
 
-  if (a->getBlock() == b->getBlock()) {
-    return a->isBeforeInBlock(b);
-  }
-
   // Sibling regions of one multi-region op have no SSA order: report unordered.
   return false;
-}
-
-void CVPipeline::sortByDomOrder(MutableArrayRef<Operation *> ops) {
-  llvm::sort(ops,
-             [](Operation *a, Operation *b) { return isBeforeInIr(a, b); });
-}
-
-void CVPipeline::sortByDomOrder(SmallVectorImpl<Operation *> &ops) {
-  sortByDomOrder(MutableArrayRef<Operation *>(ops));
 }

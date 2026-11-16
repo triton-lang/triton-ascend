@@ -42,23 +42,23 @@ namespace mlir::CVPipeline {
 // by PackMemref carries the same tag.
 constexpr llvm::StringLiteral kScopeLoadAttr = "ssbuffer.load";
 
-/// True when `op` is the atomic load unit produced by PackMemref: a
-/// `scope::ScopeOp` tagged `kScopeLoadAttr`. Callers use it to keep treating a
-/// packed unit as one op instead of matching the `alloc -> copy -> to_tensor`
-/// chain that now lives in its body.
+/// True when `op` is the atomic load unit produced by PackMemref.
+/// That is a `scope::ScopeOp` tagged `kScopeLoadAttr`.
+/// Callers use it to treat a packed unit as one op, not as the
+/// `alloc -> copy -> to_tensor` chain that now lives in its body.
 inline bool isLoadScope(Operation *op) {
   return isa_and_nonnull<scope::ScopeOp>(op) && op->hasAttr(kScopeLoadAttr);
 }
 
-/// Packs `ops` into a fresh `scope::ScopeOp` created before `insertPosition`,
-/// defaulting to `ops.back()`. Values produced inside `ops` but consumed
-/// outside are routed through `scope::ReturnOp`, and their external users are
-/// redirected.
+/// Packs `ops` into a fresh `scope::ScopeOp` before `insertPosition`.
+/// `insertPosition` defaults to `ops.back()`.
+/// Post: a value produced in `ops` and used outside is routed through
+/// `scope::ReturnOp`, and its external users are redirected.
+/// Post: returns nullptr on failure; the caller restores any state it needs.
 ///
-/// PRECONDITIONS: `ops` must already follow dominance order. Captured values
-/// must dominate the insertion position, and the packed scope must dominate
-/// its remaining users.
-/// Returns nullptr on failure; the caller is responsible for any restoration.
+/// Pre: `ops` is already in dominance order.
+/// Pre: a captured value dominates `insertPosition`.
+/// Pre: the packed scope dominates its remaining users.
 scope::ScopeOp packScopeOp(llvm::ArrayRef<Operation *> ops,
                            Operation *insertPosition = nullptr);
 

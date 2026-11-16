@@ -65,7 +65,6 @@ void ComputeBlockOptPass::runOnOperation() {
 
   pm.addPass(createFixpipeOptPass());
   pm.addPass(createReorderOpsByBlockIdPass());
-  pm.addPass(createMoveLoadIntoUserPass());
   pm.addPass(createUnifyStoreBlockPass());
   pm.addPass(createExpSubfPatternPass());
   pm.addPass(createReorderOpsByBlockIdPass());

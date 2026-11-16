@@ -24,6 +24,7 @@
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
@@ -37,6 +38,7 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/OpDefinition.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Pass/Pass.h"
 
@@ -64,21 +66,19 @@ static constexpr const char *DEBUG_TYPE = "pack-memref";
     llvm::dbgs() << __VA_ARGS__ << "\n";                                       \
   })
 
-/// Outcome of a single packing attempt. Reporting goes through the pass-level
-/// `--debug-only=pack-memref` trace rather than a diagnostic, because an
-/// unpacked allocation keeps the OpClassifierPass fallback and therefore never
-/// makes the pass fail.
+/// Outcome of a single packing attempt.
+/// Reported through the `--debug-only=pack-memref` trace, not a diagnostic.
+/// An unpacked allocation keeps the OpClassifierPass fallback, so a skip
+/// never fails the pass.
 enum class PackUnitStatus {
   /// The allocation was packed into a scope.
   Packed,
 
-  /// The allocation is not a load unit (or does not form one consistently); it
-  /// is left untouched and the reason is logged.
+  /// Not a load unit, or not a consistent one: logged and left untouched.
   Skipped,
 };
 
-// The block directly containing `op` holds nothing but `op` (terminators
-// excepted).
+/// True when the block of `op` holds nothing but `op` and its terminator.
 static bool isOnlyOpInItsBlock(Operation *op) {
   Block *block = op->getBlock();
   if (!block) {
@@ -116,14 +116,10 @@ public:
 
 } // namespace
 
-// Group hivm.hir.custom together with its own local buffers into a scope unit.
 static void packCustomOpUnit(hivm::CustomOp customOp);
-// Pack `memref.alloc -> <ops on it> -> bufferization.to_tensor` load units.
 static PackUnitStatus packLoadUnit(memref::AllocOp allocOp);
-// Materializes the unit plus its closure into the op list of a new scope.
 static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
                                               ArrayRef<Operation *> scalars);
-// Two-pass module driver: custom-op units first, then the remaining load units.
 static void packAllCustomOpUnits(ModuleOp moduleOp);
 static void packAllLoadUnits(ModuleOp moduleOp);
 
@@ -133,9 +129,9 @@ void PackMemrefPass::runOnOperation() {
   packAllLoadUnits(moduleOp);
 }
 
-// Pack every hivm.hir.custom together with its local buffers. Each custom op
-// owns its buffers, so claim those allocations before load-unit packing looks
-// at them.
+/// Packs every `hivm.hir.custom` with its local buffers.
+/// Each custom op owns its buffers, so claim them before load-unit packing
+/// looks at the same allocations.
 static void packAllCustomOpUnits(ModuleOp moduleOp) {
   SmallVector<hivm::CustomOp> customOps;
   moduleOp.walk(
@@ -145,10 +141,10 @@ static void packAllCustomOpUnits(ModuleOp moduleOp) {
   }
 }
 
-// Packs the remaining allocations as load units. Every allocation that does not
-// form a load unit consistently is skipped with a `--debug-only=pack-memref`
-// trace: leaving it unpacked is safe, because OpClassifierPass still recognises
-// the raw `bufferization.to_tensor` chain.
+/// Packs the remaining allocations as load units.
+/// An allocation that does not form a load unit is skipped with a trace.
+/// Leaving it unpacked is safe: OpClassifierPass still recognises the raw
+/// `bufferization.to_tensor` chain.
 static void packAllLoadUnits(ModuleOp moduleOp) {
   SmallVector<memref::AllocOp> allocs;
   moduleOp.walk([&](memref::AllocOp alloc) { allocs.push_back(alloc); });
@@ -162,8 +158,8 @@ static void packAllLoadUnits(ModuleOp moduleOp) {
   }
 }
 
-/// Pack a custom op together with its buffers into one `scope::ScopeOp`
-/// carrying the analysed core type.
+/// Packs `hivm.hir.custom` with its buffers into one `scope::ScopeOp`.
+/// The scope carries the analysed core type.
 static void packCustomOpUnit(hivm::CustomOp customOp) {
   auto anaRes = CustomOpAnalysis::get(customOp);
   if (llvm::failed(anaRes)) {
@@ -173,10 +169,9 @@ static void packCustomOpUnit(hivm::CustomOp customOp) {
   auto &ana = anaRes.value();
   LDBG("packing " << ana.customOp);
 
-  // The analysed ops build the unit; the index arithmetic and views they read
-  // travel with them, exactly as in `packLoadUnit`. Skip the closure when the
-  // unit is not confined to one block: it would be collected from the wrong
-  // block, and the scope placement assumes a single block anyway.
+  // The analysed ops build the unit; the views they read travel with them.
+  // A unit spanning blocks gets no closure: it would be collected from the
+  // wrong block, and the scope placement assumes a single block.
   SmallVector<Operation *> unitOps(ana.relevantOps);
   if (unitOps.empty()) {
     LDBG("custom op unit holds no analysable buffer; nothing to pack");
@@ -187,11 +182,11 @@ static void packCustomOpUnit(hivm::CustomOp customOp) {
       unitOps, [block](Operation *op) { return op->getBlock() == block; });
   SmallVector<Operation *> packList(unitOps);
   if (sameBlock) {
-    sortByDomOrder(unitOps);
+    llvm::sort(unitOps, isBeforeInIr);
     ScalarClosure closure(block, unitOps, false);
     closure.collect();
     SmallVector<Operation *> scalars(closure.getScalars());
-    sortByDomOrder(scalars);
+    llvm::sort(scalars, isBeforeInIr);
     packList = buildPackList(unitOps, scalars);
   } else {
     LDBG("custom op unit spans blocks; packing it without a closure");
@@ -211,9 +206,8 @@ static void packCustomOpUnit(hivm::CustomOp customOp) {
     scopeOp->setAttr(CVPipeline::kScopeLoadAttr,
                      UnitAttr::get(scopeOp->getContext()));
   }
-  // Stamping is not a hint: OpClassifierPass treats any `ssbuffer.core_type` as
-  // authoritative and never re-colours it, so an undetermined core type must be
-  // left off for the op to be classified by its data flow.
+  // OpClassifierPass treats any `ssbuffer.core_type` as authoritative and never
+  // re-colours it, so an undetermined type must be left off.
   if (ana.coreType != UNDETERMINED) {
     scopeOp->setAttr(
         kCoreType,
@@ -221,13 +215,14 @@ static void packCustomOpUnit(hivm::CustomOp customOp) {
   }
 }
 
-/// Collects every `bufferization.to_tensor` that (transitively) reads `base`
-/// through view-like ops. The traversal follows the def-use chain instead of
-/// walking the enclosing block, so a memref yielded out of a region is not
-/// expected here: region results are not followed, hence their consumers are
-/// not collected.
-static SmallVector<bufferization::ToTensorOp> findToTensorsOver(Value base) {
-  SmallVector<bufferization::ToTensorOp> result;
+/// The single `bufferization::to_tensor` that transitively reads `base`.
+/// Follows view-like ops only, and stops at the second hit.
+/// Pre: a load unit has exactly one boundary.
+/// Post: failure when there is none, or more than one.
+/// Region results are not followed: a memref yielded out of a region does not
+/// contribute its consumers.
+static FailureOr<bufferization::ToTensorOp> findToTensorOver(Value base) {
+  FailureOr<bufferization::ToTensorOp> found;
   SmallVector<Value> worklist{base};
   llvm::DenseSet<Value> visited;
   while (!worklist.empty()) {
@@ -237,7 +232,10 @@ static SmallVector<bufferization::ToTensorOp> findToTensorsOver(Value base) {
     }
     for (Operation *user : cur.getUsers()) {
       if (auto toTensor = dyn_cast<bufferization::ToTensorOp>(user)) {
-        result.push_back(toTensor);
+        if (succeeded(found)) {
+          return failure();
+        }
+        found = toTensor;
         continue;
       }
       if (isa<ViewLikeOpInterface>(user)) {
@@ -247,20 +245,20 @@ static SmallVector<bufferization::ToTensorOp> findToTensorsOver(Value base) {
       }
     }
   }
-  return result;
+  return found;
 }
 
 namespace {
-/// A top-level op in the packing block, together with the concrete nested op
-/// that consumed the memref.
+/// A top-level op in the packing block and the nested op that used the memref.
 struct MemrefUse {
   Operation *top;
   Operation *user;
 };
 } // namespace
 
-/// Follows the def-use chain from `base` and collects the top-level consumers
-/// in `block` that precede `boundary` (the to_tensor that closes the unit).
+/// Top-level consumers of `base` in `block` that precede `boundary`.
+/// `base` is followed along the def-use chain; each consumer is reported once,
+/// by the top-level op that encloses it.
 static SmallVector<MemrefUse>
 collectMemrefUsesBefore(Value base, Block *block,
                         bufferization::ToTensorOp boundary) {
@@ -293,41 +291,32 @@ collectMemrefUsesBefore(Value base, Block *block,
   return uses;
 }
 
-/// Finds the single `bufferization.to_tensor` that closes the load unit rooted
-/// at `base`. Fails when there is no such boundary, or when the boundary is not
-/// a direct child of `block`: a nested boundary cannot move into the scope
-/// together with the allocation, and ordering it against the operations of
-/// `block` would break the same-block precondition of `isBeforeInBlock`.
+/// The to_tensor that closes the load unit rooted at `base`.
+/// Pre: `block` is the block of the allocation.
+/// Post: failure when the boundary is missing, or not a direct child of
+/// `block`: a nested boundary cannot move into the scope, and ordering it
+/// against the ops of `block` would break `isBeforeInBlock`.
 static FailureOr<bufferization::ToTensorOp> findLoadUnitBoundary(Value base,
                                                                  Block *block) {
-  SmallVector<bufferization::ToTensorOp> candidates = findToTensorsOver(base);
-  if (candidates.size() != 1) {
-    LDBG("skip " << base << ": expected one to_tensor, found "
-                 << candidates.size());
+  FailureOr<bufferization::ToTensorOp> candidate = findToTensorOver(base);
+  if (failed(candidate)) {
+    LDBG("skip " << base << ": expected exactly one to_tensor over it");
     return failure();
   }
-  bufferization::ToTensorOp boundary = candidates.front();
+  bufferization::ToTensorOp boundary = *candidate;
   if (boundary->getBlock() != block) {
     LDBG("skip " << base << ": to_tensor " << boundary
                  << " is not in the block of the allocation");
     return failure();
   }
-  // `findToTensorsOver` only follows view-like chains, so this cross-check can
-  // only fire for a chain `traceMemDef` cannot resolve. Such a unit is left
-  // unverified and falls back to the OpClassifierPass raw-to_tensor path.
-  if (traceMemDef(boundary.getBuffer()) != base) {
-    LDBG("skip " << base << ": to_tensor buffer does not trace back to it");
-    return failure();
-  }
   return boundary;
 }
 
-/// Collects every consumer of `base` that precedes `boundary` in `block` and
-/// rejects a consumer that is neither an ExtractedLoadOrStore loop nor a
-/// trivial single-op region. `isExtractedLoadStore` is set when the unit is
-/// driven by such a loop, which pins the unit to VECTOR. Fails when a consumer
-/// has an unrecognised shape; the caller then leaves the unit unpacked instead
-/// of aborting the pipeline.
+/// Collects the consumers of `base` that precede `boundary` in `block`.
+/// Post: failure when a consumer is neither an ExtractedLoadOrStore loop nor a
+/// trivial single-op region; the caller then leaves the unit unpacked.
+/// `isExtractedLoadStore` -> set when such a loop drives the unit, which pins
+/// the unit to VECTOR.
 static FailureOr<SmallVector<MemrefUse>>
 validateLoadUnitUses(Value base, Block *block,
                      bufferization::ToTensorOp boundary,
@@ -340,9 +329,8 @@ validateLoadUnitUses(Value base, Block *block,
       isExtractedLoadStore = true;
       continue;
     }
-    // `use.top != use.user` means the consumer is nested in a region of the
-    // top-level op; only a region holding nothing but that consumer can travel
-    // into the scope unchanged.
+    // Nested consumer (`top != user`): only a region holding nothing but that
+    // consumer can travel into the scope unchanged.
     if (use.top != use.user && !isOnlyOpInItsBlock(use.user)) {
       LDBG("skip load unit: expected an ExtractedLoadOrStore loop or a trivial "
            "single-op region; offending op: "
@@ -353,59 +341,74 @@ validateLoadUnitUses(Value base, Block *block,
   return uses;
 }
 
-/// True when the unit reads at least one buffer that comes from outside the
-/// kernel, i.e. a `func.func` block argument (the GM convention shared with
-/// `CustomOpAnalysis::collectBuffers`). A unit built only from local buffers is
-/// a compute pattern, not matmul input staging: tagging it `ssbuffer.load`
-/// would feed it to `OpClassifierPass::matchLoadPattern`, which reserves the
-/// load semantics for the load scopes that stage matmul inputs, so the caller
-/// skips it.
+/// True when `operand` is GM and `op` reads it.
+/// GM is the old rule: the operand traces back to a `func.func` block argument.
+/// An op that implements the effect interface then has to report a Read on this
+/// operand, so a write-only GM operand no longer counts. An op without one (a
+/// hivm op) keeps the old rule as is.
+static bool operandReadsGlobal(Operation *op, Value operand) {
+  auto blockArg = dyn_cast<BlockArgument>(traceMemDef(operand));
+  if (!blockArg || !isa<func::FuncOp>(blockArg.getOwner()->getParentOp())) {
+    return false;
+  }
+  auto effects = dyn_cast<MemoryEffectOpInterface>(op);
+  if (!effects) {
+    return true;
+  }
+  SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>> onValue;
+  effects.getEffectsOnValue(operand, onValue);
+  return llvm::any_of(onValue, [](const auto &effect) {
+    return isa_and_nonnull<MemoryEffects::Read>(effect.getEffect());
+  });
+}
+
+/// True when the unit reads a buffer that comes from outside the kernel.
+/// Such a buffer is a `func.func` block argument, the GM convention shared with
+/// `CustomOpAnalysis::collectBuffers`.
+///
+/// A unit built only from local buffers is a compute pattern, not staging.
+/// Tagging it `ssbuffer.load` would feed it to
+/// `OpClassifierPass::matchLoadPattern`, which reserves load semantics for the
+/// scopes that stage matmul inputs, so the caller skips it.
 static bool unitReadsGlobalMemory(ArrayRef<Operation *> unitOps) {
   for (Operation *unitOp : unitOps) {
-    bool reachedGm = false;
-    unitOp->walk([&](Operation *nestedOp) {
-      if (reachedGm) {
-        return;
-      }
+    // One bool answer, so the first GM read interrupts the walk.
+    WalkResult read = unitOp->walk([&](Operation *nestedOp) {
       for (Value operand : nestedOp->getOperands()) {
         if (!isa<MemRefType>(operand.getType())) {
           continue;
         }
-        auto blockArg = dyn_cast<BlockArgument>(traceMemDef(operand));
-        if (blockArg && isa<func::FuncOp>(blockArg.getOwner()->getParentOp())) {
-          reachedGm = true;
-          return;
+        if (operandReadsGlobal(nestedOp, operand)) {
+          return WalkResult::interrupt();
         }
       }
+      return WalkResult::advance();
     });
-    if (reachedGm) {
+    if (read.wasInterrupted()) {
       return true;
     }
   }
   return false;
 }
 
-/// Builds the dominance-ordered op list that moves into the scope: the unit ops
-/// plus the view/scalar dependencies. An op with a consumer outside the
-/// unit is cloned, the internal consumers are rewired to the clone, and the
-/// original keeps dominating the external uses. A closure op that must stay
-/// where it is (`staysOutside` below) is skipped instead.
-/// Preconditions: every op of `unitOps` and `scalars` is a direct child of the
-/// same block (the closure is collected with `includeParent = false`), and
-/// `scalars` contains view/scalar dependencies in dominance order.
+/// The dominance-ordered op list that moves into the scope.
+/// It holds the unit ops plus their view and scalar dependencies.
+/// Pre: `unitOps` and `scalars` are direct children of one block.
+/// Pre: `scalars` is in dominance order (`includeParent = false`).
+/// Post: an op with an outside consumer is cloned, not moved: the internal
+/// consumers read the clone, the original keeps dominating the outside uses.
+/// Post: an op that must stay put is skipped, its results are captured.
 static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
                                               ArrayRef<Operation *> scalars) {
   llvm::DenseSet<Operation *> inUnit(unitOps.begin(), unitOps.end());
 
-  // A closure op stays outside the new scope in two cases, so the new body
-  // captures its results instead of moving the op in:
-  //   tag            | condition
-  //   ---------------+----------------------------------
-  //   [ForeignAlloc] | reaches a foreign local allocation
-  //   [PackedUnit]   | is itself a `scope.scope` unit
-  // [ForeignAlloc] keeps two local buffers apart; [PackedUnit] keeps every
-  // packed unit atomic, because nesting it would redirect its results to an op
-  // created after the consumers they dominate.
+  // A closure op that stays outside is captured by result, not moved in.
+  // tag            | stays outside because
+  // [ForeignAlloc] | it reaches a foreign local allocation
+  // [PackedUnit]   | it is itself a `scope.scope` unit
+  // [ForeignAlloc] keeps two local buffers apart.
+  // [PackedUnit] keeps a packed unit atomic: nesting it would redirect its
+  // results to an op created after the consumers they dominate.
   llvm::DenseSet<Operation *> staysOutside;
   for (Operation *scalarOp : scalars) {
     if (isa<scope::ScopeOp>(scalarOp)) {
@@ -431,37 +434,38 @@ static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
 
   llvm::DenseSet<Operation *> inClosure;
   for (Operation *scalarOp : scalars) {
-    if (!staysOutside.contains(scalarOp)) {
-      inClosure.insert(scalarOp);
+    if (staysOutside.contains(scalarOp)) {
+      continue;
     }
+    inClosure.insert(scalarOp);
   }
 
-  // A closure op whose result reaches a consumer that stays outside the scope
-  // is copied: the clone travels in for the internal consumers while the
-  // original keeps serving the outside ones. The rule cascades, because a
-  // copied consumer's own original also stays outside and keeps reading its
-  // operands, so every producer feeding it has to be copied as well.
+  // Move or copy: an op moves in when every user of its results travels in.
+  // If any user stays outside, the original keeps serving it and the scope
+  // receives a clone instead. The rule cascades: a copied consumer's own
+  // original also stays outside and keeps reading its operands, so every
+  // producer feeding it is copied too.
   //
-  //   kind(user)              | consequence for the producer
-  //   ------------------------+---------------------------------
-  //   in the unit             | travels in; nothing to do
-  //   closure, moved in       | travels in; nothing to do
-  //   closure, copied         | its own original stays outside -> copy
-  //   outside / pinned        | reads across the scope boundary -> copy
+  // user                | travels in? | because
+  // in the unit         | yes         | it is packed anyway
+  // closure, moved in   | yes         | it travels with its consumers
+  // closure, copied     | no          | its original stays outside
+  // outside the closure | no          | it reads across the boundary
   //
-  // Walking `scalars` backwards visits every consumer before its producers
-  // (dominance order), so one pass reaches the fixpoint; an unsorted container
-  // would need the fixpoint loop back.
+  // `packLoadUnit` sorts `scalars` into IR order, so walking it backwards
+  // visits every user before its producers and one pass reaches the fixpoint.
   llvm::DenseSet<Operation *> copiedOps;
+  auto travelsIn = [&](Operation *user) {
+    return inUnit.contains(user) ||
+           (inClosure.contains(user) && !copiedOps.contains(user));
+  };
   for (Operation *scalarOp : llvm::reverse(scalars)) {
-    bool escape = llvm::any_of(scalarOp->getResults(), [&](Value result) {
+    bool escapes = llvm::any_of(scalarOp->getResults(), [&](Value result) {
       return llvm::any_of(result.getUses(), [&](OpOperand &use) {
-        Operation *user = use.getOwner();
-        return !inUnit.contains(user) &&
-               (!inClosure.contains(user) || copiedOps.contains(user));
+        return !travelsIn(use.getOwner());
       });
     });
-    if (escape) {
+    if (escapes) {
       copiedOps.insert(scalarOp);
     }
   }
@@ -481,11 +485,9 @@ static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
       continue;
     }
 
-    // External consumers exist: they keep using the original, while a clone
-    // travels into the scope for the internal consumers (same convention as
-    // `ScalarClosure::capture`: the packed region takes the clone). The clone
-    // is created at the original's position so it still dominates every
-    // consumer it is swapped into.
+    // External consumers exist: they keep the original, the scope takes a
+    // clone (same convention as `ScalarClosure::capture`). The clone sits at
+    // the original's position so it dominates every consumer it replaces.
     OpBuilder::InsertionGuard guard(builder);
     builder.setInsertionPoint(scalarOp);
     Operation *cloned = builder.clone(*scalarOp, mapper);
@@ -493,12 +495,9 @@ static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
       Value original = scalarOp->getResult(i);
       Value replacement = cloned->getResult(i);
       for (OpOperand &use : llvm::make_early_inc_range(original.getUses())) {
-        Operation *user = use.getOwner();
-        // Rewire only the consumers that travel into the scope: the original of
-        // a copied op stays outside (see `copiedOps` above) and must keep
-        // reading the original value.
-        if (inUnit.contains(user) ||
-            (inClosure.contains(user) && !copiedOps.contains(user))) {
+        // The clone serves the users that move in; a copied op's original
+        // keeps serving the ones that stay outside.
+        if (travelsIn(use.getOwner())) {
           use.set(replacement);
         }
       }
@@ -506,16 +505,16 @@ static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
     packList.push_back(cloned);
   }
 
-  sortByDomOrder(packList);
+  llvm::sort(packList, isBeforeInIr);
   return packList;
 }
 
-/// Packs `allocOp -> <ops operating on it> -> bufferization.to_tensor` (the
-/// to_tensor possibly reached through a subview / reinterpret_cast) into one
-/// `scope::ScopeOp` tagged with `ssbuffer.load`. When the unit is driven by an
-/// ExtractedLoadOrStore loop or carries an implicit-transpose annotation, the
-/// scope is stamped VECTOR right away. Any deviation leaves the
-/// allocation untouched and merely traces the reason.
+/// Packs `memref.alloc -> <ops on it> -> bufferization.to_tensor` into one
+/// `scope::ScopeOp` tagged `ssbuffer.load`.
+/// The to_tensor may be reached through a subview or a reinterpret_cast.
+/// Post: an ExtractedLoadOrStore unit or an implicit-transpose unit is also
+/// stamped VECTOR.
+/// Post: any deviation leaves the allocation untouched and traces the reason.
 static PackUnitStatus packLoadUnit(memref::AllocOp allocOp) {
   Value base = allocOp.getMemref();
   Block *block = allocOp->getBlock();
@@ -537,20 +536,19 @@ static PackUnitStatus packLoadUnit(memref::AllocOp allocOp) {
     return PackUnitStatus::Skipped;
   }
 
-  SmallVector<Operation *> unitOps{allocOp, *boundary};
+  llvm::SetVector<Operation *> unitOps;
+  unitOps.insert(allocOp);
+  unitOps.insert(*boundary);
   for (const MemrefUse &use : *uses) {
-    if (!llvm::is_contained(unitOps, use.top)) {
-      unitOps.push_back(use.top);
-    }
+    unitOps.insert(use.top);
   }
 
-  if (!unitReadsGlobalMemory(unitOps)) {
-    LDBG("skip " << base
-                 << ": unit reads no GM data, so it is a compute pattern");
+  if (!unitReadsGlobalMemory(unitOps.getArrayRef())) {
+    LDBG("skip " << base << ": unit reads no GM data, a compute pattern");
     return PackUnitStatus::Skipped;
   }
 
-  // OpClassifier skips the packed body, so preserve the implicit-transpose
+  // OpClassifier skips the packed body, so keep the implicit-transpose
   // restriction as an authoritative core type before hiding its annotations.
   bool hasImplicitTranspose =
       utils::getAnnotateOpWithAttr(base,
@@ -560,21 +558,22 @@ static PackUnitStatus packLoadUnit(memref::AllocOp allocOp) {
                                    hivm::kMayImplicitTransposeWithLastAxis)
           .has_value();
 
-  // Include result annotations in the unit so buildPackList sorts them with
-  // the load. The explicit insertion point keeps late annotations from
-  // delaying the scope past an existing tensor user.
+  // Result annotations join the unit so they sort with the load.
+  // The explicit insertion point keeps a late annotation from delaying the
+  // scope past an existing tensor user.
   for (Operation *user : (*boundary).getResult().getUsers()) {
     if (isa<annotation::MarkOp>(user) && user->getBlock() == block) {
-      unitOps.push_back(user);
+      unitOps.insert(user);
     }
   }
 
   // Collect the load unit's scalar and memref view dependencies.
-  ScalarClosure closure(block, unitOps, false);
+  ScalarClosure closure(block, unitOps.getArrayRef(), false);
   closure.collect();
   SmallVector<Operation *> scalars(closure.getScalars());
-  sortByDomOrder(scalars);
-  SmallVector<Operation *> packList = buildPackList(unitOps, scalars);
+  llvm::sort(scalars, isBeforeInIr);
+  SmallVector<Operation *> packList =
+      buildPackList(unitOps.getArrayRef(), scalars);
 
   auto scopeOp = packScopeOp(packList, *boundary);
   if (!scopeOp) {

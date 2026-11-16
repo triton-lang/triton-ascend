@@ -24,6 +24,8 @@ from types import FunctionType
 from triton.backends.ascend import compiler as ascend
 from triton.compiler import compiler as triton_compiler
 
+from ._schedule import sync_arguments
+
 _EXTRA_OPTIONS = "bishengir_extra_options"
 
 
@@ -92,17 +94,26 @@ class _TLABackend(ascend.AscendBackend):
             return super().add_stages(stages, options, language)
 
         extra_options = getattr(options, _EXTRA_OPTIONS, ())
+        sync_options = ()
 
         def compiler_arguments(executable):
-            if extra_options and os.path.basename(executable) != "bishengir-compile":
+            arguments = sync_options + extra_options
+            if arguments and os.path.basename(executable) != "bishengir-compile":
                 raise ValueError(f"TLA compiler arguments require bishengir-compile, got {executable!r}")
-            return extra_options
+            return arguments
 
         compiler = (ascend.linalg_to_bin_enable_npu_compile_910_95
                     if options.compile_on_910_95 else ascend.linalg_to_bin_enable_npu_compile_A2_A3)
 
+        def infer_then_lower(module, metadata):
+            nonlocal sync_options
+            # Look at the inlined kernel before sync_all expands to its
+            # implementation's block flags and pipe barriers.
+            sync_options = sync_arguments(module, options.disable_auto_inject_block_sync, extra_options)
+            return tla_to_ttadapter(module, metadata, options)
+
         stages["ttir"] = lambda module, metadata: make_tla_ttir(module, metadata, options)
-        stages["ttadapter"] = lambda module, metadata: tla_to_ttadapter(module, metadata, options)
+        stages["ttadapter"] = infer_then_lower
 
         def to_binary(module, metadata):
             return compiler(module, metadata, options, extra_args=compiler_arguments)

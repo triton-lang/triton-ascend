@@ -18,6 +18,12 @@ emits ``hivm.hir.sync_intra_block_set/wait`` for a single physical A5 counter;
 it performs no implicit partner-counter access. ``mutex_lock`` and
 ``mutex_unlock`` emit A5 buffer-token operations whose pipeline identifies
 the issuing hardware unit.
+
+Explicitly scheduled TLA kernels own cross-core synchronization. Handwritten
+pipe events, pipe barriers, buffer tokens and UnitFlags take over intra-core
+pipeline synchronization. Automatic buffer rotation requires compiler-managed
+intra-core synchronization. Automatic pipelines also own cross-core
+synchronization and buffer rotation. SIMD memory barriers are managed separately.
 """
 
 import enum

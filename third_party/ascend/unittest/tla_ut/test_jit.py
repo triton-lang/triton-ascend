@@ -42,6 +42,45 @@ def _kernel(N: tl.constexpr):
         tla.sync.barrier(tla.sync.PIPE.ALL)
 
 
+def _sync_kernel(LOCAL: tl.constexpr, CROSS: tl.constexpr, GLOBAL: tl.constexpr):
+    with tla.scope.vector():
+        if LOCAL == "pipe" or LOCAL == "signal":
+            tla.sync.set_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.V, 0)
+            if LOCAL == "pipe":
+                tla.sync.wait_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.V, 0)
+        if LOCAL == "mutex":
+            tla.sync.mutex_lock(0, tla.sync.PIPE.MTE2)
+            tla.sync.mutex_unlock(0, tla.sync.PIPE.MTE2)
+        if CROSS is not None:
+            tla.sync.block_set_flag(CROSS, tla.sync.PIPE.MTE3, 0)
+            tla.sync.block_wait_flag(CROSS, tla.sync.PIPE.MTE3, 0)
+        if GLOBAL:
+            tla.sync.sync_all(False)
+
+
+def _multibuffer_kernel(MANUAL: tl.constexpr):
+    with tla.scope.vector():
+        scratch = tla.alloc((32, ), tl.float32, versions=2)
+        if MANUAL:
+            tla.sync.barrier(tla.sync.PIPE.ALL)
+        tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, 0)
+        tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, 0)
+        with tla.scope.simd():
+            tla.simd.vlds(scratch[0], dist="NORM")
+
+
+def _unit_flag_kernel(CONTROL: tl.constexpr):
+    with tla.scope.cube():
+        a = tla.alloc((1, 1, 16, 16), tl.float16, space="l1")
+        b = tla.alloc((1, 1, 16, 16), tl.float16, space="l1")
+        acc = tla.alloc((1, 1, 16, 16), tl.float32, space="l0c")
+        tla.cube.mmad(a, b, acc, clear_accum=True, unit_flag_ctrl=CONTROL)
+
+
+def _mark_gm(ptr):
+    tla.annotate_buffer_versions(tla.view(ptr, (32, )), 2)
+
+
 @pytest.fixture(params=["Ascend910B2", "Ascend910_9589"])
 def compiler_argv(request, tmp_path, monkeypatch):
     target = GPUTarget("npu", request.param, 32)
@@ -133,6 +172,100 @@ def test_extra_options_launch(compiler_argv, monkeypatch):
 def test_extra_options_validation(value, exception):
     with pytest.raises(exception, match="bishengir_extra_options"):
         tla.jit(_kernel).warmup(32, grid=(1, ), bishengir_extra_options=value)
+
+
+def test_inferred_sync_options(compiler_argv):
+    intra = "--disable-hivm-auto-inject-sync"
+    cross = "--disable-auto-inject-block-sync"
+    block, counter = tla.sync.MODE.BLOCK, tla.sync.MODE.INTRA
+    jit = tla.jit(_sync_kernel)
+
+    for local, cross_mode, global_barrier, manual_intra in (
+        ("", None, False, False),
+        ("", None, True, False),
+        ("signal", None, False, True),
+        ("pipe", None, True, True),
+        ("mutex", None, False, True),
+        ("", block, False, False),
+        ("pipe", counter, False, True),
+    ):
+        jit.warmup(local, cross_mode, global_barrier, grid=(1, ))
+        argv = compiler_argv[-1]
+        assert (f"{intra}=true" in argv) == manual_intra
+        assert f"{cross}=true" in argv
+
+
+def test_unit_flag_sync_ownership(compiler_argv):
+    jit = tla.jit(_unit_flag_kernel)
+    disable = "--disable-hivm-auto-inject-sync=true"
+    jit.warmup(tla.UnitFlagMode.DISABLED, grid=(1, ))
+    assert disable not in compiler_argv[-1]
+    jit.warmup(tla.UnitFlagMode.ENABLED_WITH_UPDATE, grid=(1, ))
+    assert disable in compiler_argv[-1]
+
+
+def test_sync_ownership_rejects_conflicting_options(compiler_argv):
+    jit = tla.jit(_sync_kernel)
+    with pytest.raises(triton.TritonError, match="cannot combine handwritten and automatic intra-core"):
+        jit.warmup("pipe", None, False, grid=(1, ), bishengir_extra_options=["--disable-hivm-auto-inject-sync=false"])
+    with pytest.raises(triton.TritonError, match="requires handwritten cross-core"):
+        jit.warmup("", None, False, grid=(1, ), disable_auto_inject_block_sync=False)
+    assert not compiler_argv
+
+
+def test_multibuffering_requires_automatic_intra_core_sync(compiler_argv):
+    kernel = tla.jit(_multibuffer_kernel)
+    with pytest.raises(triton.TritonError, match="requires compiler-managed intra-core"):
+        kernel.warmup(True, grid=(1, ), bishengir_extra_options=["--disable-hivm-auto-inject-sync=false"])
+    with pytest.raises(triton.TritonError, match="requires compiler-managed intra-core"):
+        kernel.warmup(False, grid=(1, ), bishengir_extra_options=["--disable-hivm-auto-inject-sync=true"])
+    assert not compiler_argv
+    kernel.warmup(False, grid=(1, ))
+    assert "--disable-auto-inject-block-sync=true" in compiler_argv[-1]
+    assert "--disable-hivm-auto-inject-sync=true" not in compiler_argv[-1]
+
+
+def test_multibuffering_rejects_global_memory(compiler_argv):
+    with pytest.raises(triton.TritonError, match="requires a core-local buffer"):
+        tla.jit(_mark_gm).warmup(MockTensor(tl.float32), grid=(1, ))
+    assert not compiler_argv
+
+
+@pytest.mark.parametrize("body, argv", [
+    ("", ()),
+    ("hivm.hir.pipe_barrier[<PIPE_ALL>]", ()),
+    ("", ("--disable-auto-inject-block-sync", )),
+])
+def test_automatic_pipeline_sync_ownership(tmp_path, body, argv):
+    from triton._C.libtriton import ir
+    from triton.language.extra.tla._schedule import sync_arguments
+    from utils.tla_test_utils import make_context
+
+    path = tmp_path / "pipeline.mlir"
+    path.write_text(f"""module {{
+        tt.func @kernel() {{
+            %c0 = arith.constant 0 : index
+            %c1 = arith.constant 1 : index
+            scf.for %i = %c0 to %c1 step %c1 {{
+                {body}
+            }} {{hivm.cv_pipelined_loop}}
+            tt.return
+        }}
+    }}""")
+    context = make_context()
+    module = ir.parse_mlir_module(str(path), context)
+    if body or argv:
+        with pytest.raises(ValueError, match="tla.pipeline owns synchronization"):
+            sync_arguments(module, None, argv)
+    else:
+        assert sync_arguments(module, None, argv) == ()
+
+
+def test_sync_arguments_require_bishengir(compiler_argv, monkeypatch):
+    monkeypatch.setattr(ascend, "_get_npucompiler_path", lambda: ("/fake/npuc", {}))
+    with pytest.raises(triton.TritonError, match="require bishengir-compile"):
+        tla.jit(_kernel).warmup(32, grid=(1, ))
+    assert not compiler_argv
 
 
 def test_debug_command_includes_effective_arguments(compiler_argv, capsys):

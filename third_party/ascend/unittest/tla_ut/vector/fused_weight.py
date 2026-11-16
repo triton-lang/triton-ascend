@@ -7,7 +7,8 @@ Stages (env TLA_TEST_STAGE, default all with auto-degrade):
   compile : full compile, confirm .o/.npubin artifacts exist
   run     : real-device launch + accuracy (FUSED_WEIGHT OK)
 
-The output is explicitly stored from UB to GM with ``tla.store_ub_to_gm``.
+Note: original e2e used `tla.copy(o, ou)` with reversed GM<->UB direction
+(yields init values); this file fixes it to `tla.copy(ou, o)`.
 """
 import sys, os
 
@@ -27,9 +28,9 @@ SIGNATURE = {"H_ptr": "*bf16", "E_ptr": "*bf16", "O_ptr": "*fp32"}
 @tla.jit
 def fused_weight(H_ptr, E_ptr, O_ptr, H: tl.constexpr, HC: tl.constexpr, CORES: tl.constexpr, VERSIONS: tl.constexpr):
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
-    hu = tla.alloc((256, ), tl.bfloat16, space="ub", versions=VERSIONS)
-    eu = tla.alloc((256, ), tl.bfloat16, space="ub", versions=VERSIONS)
-    ou = tla.alloc((256, ), tl.float32, space="ub", versions=VERSIONS)
+    hu = tla.alloc_buffer((256, ), tl.bfloat16, space="ub", versions=VERSIONS)
+    eu = tla.alloc_buffer((256, ), tl.bfloat16, space="ub", versions=VERSIONS)
+    ou = tla.alloc_buffer((256, ), tl.float32, space="ub", versions=VERSIONS)
     num_tiles = H // 256
     for task in range(tl.program_id(0), HC * num_tiles, CORES):
         head = task % HC
@@ -38,8 +39,8 @@ def fused_weight(H_ptr, E_ptr, O_ptr, H: tl.constexpr, HC: tl.constexpr, CORES: 
         h = tla.view(H_ptr, (256, ), strides=(1, ), offsets=(base, ))
         e = tla.view(E_ptr, (256, ), strides=(1, ), offsets=(base, ))
         o = tla.view(O_ptr, (256, ), strides=(1, ), offsets=(base, ))
-        tla.load_gm_to_ub(h, hu)  # GM->UB x2
-        tla.load_gm_to_ub(e, eu)
+        tla.copy(h, hu)  # GM->UB x2
+        tla.copy(e, eu)
         with tla.scope.simd():  # VF 4x64 chunk
             for c in tl.static_range(4):
                 a = tla.simd.vlds(hu[c * 64], dist="UNPK_B16")
@@ -47,7 +48,7 @@ def fused_weight(H_ptr, E_ptr, O_ptr, H: tl.constexpr, HC: tl.constexpr, CORES: 
                 b = tla.simd.vlds(eu[c * 64], dist="UNPK_B16")
                 bf = tla.simd.vextf(b, tl.float32, part="part_even")
                 tla.simd.vsts(ou[c * 64], tla.simd.vmul(af, bf), dist="NORM_B32")
-        tla.store_ub_to_gm(ou, o)  # UB->GM (direction was reversed in original e2e; fixed)
+        tla.copy(ou, o)  # UB->GM (direction was reversed in original e2e; fixed)
 
 
 def constexprs():

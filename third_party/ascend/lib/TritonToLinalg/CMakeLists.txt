@@ -16,6 +16,7 @@ add_triton_library(TritonToLinalg
         DevicePrintOffsetRewrite.cpp
         DeduplicateDebugNopsPass.cpp
         CanonicalizeDebugLocationsPass.cpp
+        ZeroValuePropagationPass.cpp
 
   DEPENDS
   TritonToLinalgConversionPassIncGen

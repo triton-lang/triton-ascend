@@ -23,33 +23,28 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_IR_ORDER_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_IR_ORDER_H
 
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/SmallVector.h"
-
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Operation.h"
 
 namespace mlir::CVPipeline {
 
-/// Returns the lowest common ancestor block of `a` and `b`, or null when either
-/// is null. Two-pointer walk: no allocation, O(depth).
+/// Lowest common ancestor block of `a` and `b`.
+/// Pre: either argument may be null.
+/// Post: null when either is null or the two chains never meet.
 Block *lowestCommonAncestorBlock(Block *a, Block *b);
 
-/// True when `a` strictly precedes `b` in SSA order, i.e. when `a` dominates
-/// `b`. Never call `isBeforeInBlock` on ops of different blocks; this is the
-/// cross-block replacement.
-/// Precondition: `a` and `b` must not live in sibling regions of one
-/// multi-region op (`scf.if` then/else, `scf.for` body/...): such a pair has no
-/// dominance relation at all, and `false` is then overloaded to mean both
-/// "`b` precedes `a`" and "unordered". Callers feeding arbitrary op sets are
-/// responsible for excluding that case; no runtime check is performed.
+/// True when `a` strictly precedes `b` in SSA order.
+/// `a` or `b` null => false.
+/// `a` is `b` => false.
+/// Sibling regions => false, meaning unordered, not "`b` first".
+///
+/// Block cases:
+///   same block -> SSA order, via the ancestor comparison.
+///   nested block -> one is ordered by its ancestor in the common block.
+///   sibling regions -> unordered: they hold no dominance relation at all.
+/// `isBeforeInBlock` is invalid across blocks; this is the replacement.
+/// Pre: callers exclude the sibling-region case, no runtime check is done.
 bool isBeforeInIr(Operation *a, Operation *b);
-
-/// Sorts `ops` in place into the order given by `isBeforeInIr`.
-void sortByDomOrder(MutableArrayRef<Operation *> ops);
-
-/// Convenience overload for the containers used across the CV pipeline.
-void sortByDomOrder(SmallVectorImpl<Operation *> &ops);
 
 } // namespace mlir::CVPipeline
 

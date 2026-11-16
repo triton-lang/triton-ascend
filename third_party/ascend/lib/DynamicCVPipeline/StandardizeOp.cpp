@@ -28,11 +28,11 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 
-#include "DynamicCVPipeline/StandardizeOp/SplitMatmul.h"
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/Passes.h"
+#include "ascend/include/DynamicCVPipeline/StandardizeOp/SplitMatmul.h"
 
 using namespace mlir;
 using namespace triton;

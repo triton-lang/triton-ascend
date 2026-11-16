@@ -34,40 +34,31 @@
 
 namespace mlir::CVPipeline {
 
-/// Collects the scalar / view ops that a set of ops depends on, stopping at the
-/// first tensor dependency. Used to clone minimal index computation into a
-/// split block, and to decide which view ops travel with a packed scope.
+/// Scalar and view ops that a set of ops depends on.
+/// The walk stops at the first tensor dependency.
+///
+/// Used to clone index arithmetic into a split block.
+/// Also decides which view ops travel with a packed scope.
+///
+/// `includeParent` -> also collect from the parent block of `block`.
+/// `collectImpure` -> also collect producers with a memory effect.
+/// Off by default: a closure op may be cloned, and a clone repeats its effect.
 class ScalarClosure {
 public:
-  ScalarClosure(Block *block, ArrayRef<Operation *> ops, bool includeParent);
+  ScalarClosure(Block *block, ArrayRef<Operation *> ops, bool includeParent,
+                bool collectImpure = false);
 
   /// Collects the closure of `ops` into `scalarOps`.
   void collect();
 
-  /// Returns the collected scalar ops in insertion order. Collecting does not
-  /// define an order: callers that need dominance order must call
-  /// `sortByDomOrder` (`IROrder.h`) on their own copy, which keeps the ordering
-  /// requirement visible at the call site.
+  /// Collected ops in insertion order, which is not dominance order.
+  /// Callers needing order sort a copy with `llvm::sort(ops, isBeforeInIr)`.
   llvm::ArrayRef<Operation *> getScalars() const;
 
-  /// Comparator for dominance order: true when `a` strictly precedes `b`.
-  /// Forwards to `isBeforeInIr` (`IROrder.h`); the precondition is that both
-  /// ops are not in sibling regions of one multi-region op, NOT that they are
-  /// members of `scalarOps`.
-  ///
-  /// PRECONDITION: ops must not be spread over different regions of the same
-  /// multi-region op (e.g. the then/else regions of one `scf.if`);
-  /// `ScalarClosure` guarantees this by construction (it collects only from
-  /// `block` / `parentBlock`). If a caller violates it, a sibling-region pair
-  /// is reported as `false` in both orders, i.e. `false` is overloaded and
-  /// means either "`b` precedes `a`" or "unordered".
-  bool isBefore(Operation *a, Operation *b);
-
-  /// Clones every collected op that is not already inside `ops` into the block
-  /// of `ops`, tags each clone with `blockId`, and returns the clones plus the
-  /// original -> clone mapping. Ops already in `ops` are left in place.
-  /// Clones are emitted in dominance order, so each clone reads earlier clones
-  /// instead of originals placed after the insertion point.
+  /// Clones every collected op that is not in `ops` into `block`.
+  /// Each clone is tagged `blockId`; originals in `ops` stay in place.
+  /// Post: a clone reads earlier clones, never originals after it.
+  /// Returns the clones and the original -> clone mapping.
   std::pair<SmallVector<Operation *>, IRMapping> capture(int blockId);
 
 private:
@@ -77,6 +68,7 @@ private:
   mlir::Block *block = nullptr;
   mlir::Block *parentBlock = nullptr;
   bool includeParent = true;
+  bool collectImpure = false;
   llvm::ArrayRef<Operation *> ops;
   llvm::SetVector<Operation *> scalarOps;
 };

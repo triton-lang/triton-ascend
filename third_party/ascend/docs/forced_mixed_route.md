@@ -51,11 +51,6 @@ checks the effective route, selected factor, materialized-anchor count and
 scope-factor IR before accepting the compile. Metadata records the forced route/factor and materialized TTIR
 SHA256. NPU precision and performance still require a real runtime test.
 
-For Ascend 950 Mixed lowering, an extracted index-select loop keeps its gathered
-temporary in UB. CV lowering then transfers the gathered result to Cube. Leaving
-that temporary unclassified can pull vector-produced indices into L1 and emit an
-unsupported Cube scalar read, which failed on hardware with error 507015/271.
-The `test_forced_mixed_route.py::test_costmodel_forced_mixed_factors` regression
-runs in the ordinary pytest suite on supported devices. It checks F1/F2
-precision, distinct binaries, route environment changes, explicit route/factor
-options and live JIT cache reuse.
+The gather-dot F1/F2 regression depends on the Mixed index-select UB repair.
+Its lowering change and IR regression are reviewed in a separate PR.
+[Mixed index-select UB repair](https://github.com/triton-lang/triton-ascend/pull/3220).

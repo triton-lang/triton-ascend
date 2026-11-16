@@ -1573,16 +1573,28 @@ static void specializeFullRowCopies(ModuleOp moduleOp) {
   });
   IRRewriter rewriter(moduleOp.getContext());
   for (scf::ForOp loop : loops) {
-    // Do not duplicate nested control flow, allocations, or other accesses.
+    // Allow one conditional padding fill, checked against the copied row
+    // below. Other nested control flow, allocations and accesses stay intact.
     memref::CopyOp copy;
+    scf::IfOp padding;
     bool supported = true;
     unsigned numOps = 0;
     for (Operation &op : loop.getBody()->without_terminator()) {
-      if (++numOps > 32 || op.getNumRegions() != 0) {
+      if (++numOps > 32) {
         supported = false;
         break;
       }
-      if (auto candidate = dyn_cast<memref::CopyOp>(op)) {
+      if (auto candidate = dyn_cast<scf::IfOp>(op)) {
+        if (padding || candidate.getNumResults() != 0 ||
+            !candidate.getElseRegion().empty()) {
+          supported = false;
+          break;
+        }
+        padding = candidate;
+      } else if (op.getNumRegions() != 0) {
+        supported = false;
+        break;
+      } else if (auto candidate = dyn_cast<memref::CopyOp>(op)) {
         if (copy) {
           supported = false;
           break;
@@ -1638,6 +1650,20 @@ static void specializeFullRowCopies(ModuleOp moduleOp) {
         !isConstantIntValue(row.getMixedSizes()[1], width))
       continue;
 
+    if (padding) {
+      auto condition = padding.getCondition().getDefiningOp<arith::CmpIOp>();
+      auto body = padding.thenBlock()->without_terminator();
+      if (!condition || condition.getPredicate() != arith::CmpIPredicate::slt ||
+          condition.getLhs() != extent ||
+          !isConstantIntValue(condition.getRhs(), width) ||
+          !llvm::hasSingleElement(body))
+        continue;
+      auto fill = dyn_cast<linalg::FillOp>(*body.begin());
+      if (!fill || fill.getNumResults() != 0 ||
+          fill.getOutputs().front() != row.getResult())
+        continue;
+    }
+
     rewriter.setInsertionPoint(loop);
     Location loc = copy.getLoc();
     Value fullWidth = rewriter.create<arith::ConstantIndexOp>(loc, width);
@@ -1648,6 +1674,10 @@ static void specializeFullRowCopies(ModuleOp moduleOp) {
     rewriter.setInsertionPointToStart(branch.thenBlock());
     IRMapping mapping;
     auto fastLoop = cast<scf::ForOp>(rewriter.clone(*loop, mapping));
+    // extent == width makes the recognized extent < width padding inactive.
+    // Keep the original padding and its value unchanged in the tail loop.
+    if (padding)
+      rewriter.eraseOp(*fastLoop.getBody()->getOps<scf::IfOp>().begin());
     auto fastCopy = *fastLoop.getBody()->getOps<memref::CopyOp>().begin();
     // Under extent == width the two zero-offset subviews are the complete
     // static rows. Bypass them explicitly; no branch-sensitive folding needed.
@@ -1678,53 +1708,51 @@ void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
       patterns.getContext());
   patterns.add<LoadStoreConverter::AtomicMaxMinCanonicalizer>(
       patterns.getContext());
-  patterns.add<
-      TTOpConverters::ScalarMathCanonicalizer<math::AbsFOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AcosOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AcoshOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AsinOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AsinhOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AtanOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::Atan2Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AtanhOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::CeilOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::CosOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::CoshOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::ErfOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::ExpOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::Exp2Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::ExpM1Op>,
-      TTOpConverters::ScalarMathCanonicalizer<math::FloorOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::FmaOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::LogOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::Log10Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::Log1pOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::Log2Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::PowFOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::RoundOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::RsqrtOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::SinOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::SinhOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::SqrtOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::TanOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::TanhOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::TruncOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::AddFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::SubFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<
-          arith::
-              MulFOp>, // TTOpConverters::ScalarMathCanonicalizer<arith::DivFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::NegFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::RemFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MaxNumFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MaximumFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MinNumFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MinimumFOp>
-      // By test, the following ops do not need canonicalization.
-      // TTOpConverters::ScalarMathCanonicalizer<arith::CmpFOp>
-      // TTOpConverters::ScalarMathCanonicalizer<arith::ExtFOp>
-      // TTOpConverters::ScalarMathCanonicalizer<arith::TruncFOp>
-      >(patterns.getContext());
+  patterns.add<TTOpConverters::ScalarMathCanonicalizer<math::AbsFOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AcosOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AcoshOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AsinOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AsinhOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AtanOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::Atan2Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AtanhOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::CeilOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::CosOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::CoshOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::ErfOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::ExpOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::Exp2Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::ExpM1Op>,
+               TTOpConverters::ScalarMathCanonicalizer<math::FloorOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::FmaOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::LogOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::Log10Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::Log1pOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::Log2Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::PowFOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::RoundOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::RsqrtOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::SinOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::SinhOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::SqrtOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::TanOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::TanhOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::TruncOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::AddFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::SubFOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<arith::MulFOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<arith::DivFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::NegFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::RemFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MaxNumFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MaximumFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MinNumFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MinimumFOp>
+               // By test, the following ops do not need canonicalization.
+               // TTOpConverters::ScalarMathCanonicalizer<arith::CmpFOp>
+               // TTOpConverters::ScalarMathCanonicalizer<arith::ExtFOp>
+               // TTOpConverters::ScalarMathCanonicalizer<arith::TruncFOp>
+               >(patterns.getContext());
   patterns.add<TTOpConverters::ReduceSingleCanonicalizer>(
       patterns.getContext());
   if (this->enableSelectAnalysis) {
@@ -2606,13 +2634,16 @@ void TritonToLinalgPass::optimizeInterleavedStores(ModuleOp moduleOp) {
   for (auto [blockArg, materializeVec] : interleaveCandidate) {
     // Just enable optimization where exists double materializeOp with same
     // block argument destination.
-    if (materializeVec.size() != 2)
+    // Merging stores must preserve the condition under which each executes.
+    if (materializeVec.size() != 2 ||
+        materializeVec[0]->getBlock() != materializeVec[1]->getBlock())
       continue;
     auto result = InterleaveStatusOptimization(materializeVec);
   }
 
   for (auto [blockArg, materializeVec] : interleaveCandidateWithMask) {
-    if (materializeVec.size() != 2)
+    if (materializeVec.size() != 2 ||
+        materializeVec[0]->getBlock() != materializeVec[1]->getBlock())
       continue;
     auto result = InterleaveStatusWithMaskOptimization(materializeVec);
   }

@@ -21,6 +21,7 @@
  */
 
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -427,35 +428,6 @@ static void printDependentMaps(ControlFlowConditionInfo *info) {
       }
     }
   }
-}
-
-// Find the IfOp that contains a given operation
-static scf::IfOp findIfOpContainingOp(Operation *op) {
-  if (!op) {
-    return nullptr;
-  }
-
-  constexpr int maxDepth = 100;
-  int depth = 0;
-
-  Operation *current = op;
-  while (current && depth < maxDepth) {
-    if (auto ifOp = dyn_cast<scf::IfOp>(current)) {
-      if (ifOp->hasAttr(CVPipeline::kIf)) {
-        LDBG("Found ssbuffer.if at depth " << depth);
-        return ifOp;
-      }
-    }
-    current = current->getParentOp();
-    depth++;
-  }
-
-  if (depth >= maxDepth) {
-    LDBG("Warning: Max depth " << maxDepth
-                               << " exceeded in findIfOpContainingOp");
-  }
-
-  return nullptr;
 }
 
 // Compute producer buffer counts (max map size) from cross/intra-core maps;

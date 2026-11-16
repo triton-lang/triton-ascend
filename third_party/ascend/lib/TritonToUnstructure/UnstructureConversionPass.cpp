@@ -1177,9 +1177,15 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       rewriter.setInsertionPoint(accessedOp);
       Value residualMask =
           getResidualLoadMask(op.getMask(), boundedLoopAxes, rewriter);
-      if (residualMask)
+      if (residualMask) {
         accessedOp.getMaskMutable().assign(createExtractOp(
             loc, residualMask, rewriter, offsets, sizes, strides));
+      } else {
+        // The loop bounds enforce the complete mask. Padding for unvisited
+        // elements remains in the outer select below.
+        accessedOp.getMaskMutable().clear();
+        accessedOp.getOtherMutable().clear();
+      }
     }
   }
 

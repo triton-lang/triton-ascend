@@ -4,8 +4,8 @@
 // addptr must retain its nonzero origin and its stride in bytes.
 // CHECK-LABEL: func.func @bool_pointer_bitcast
 // CHECK: memref.reinterpret_cast {{.*}} to offset: [3], sizes: [8], strides: [1] : memref<?xi8> to memref<8xi8, strided<[1], offset: 3>>
-// CHECK: memref.copy
 // CHECK: memref.reinterpret_cast {{.*}} to offset: [5], sizes: [8], strides: [1] : memref<?xi8> to memref<8xi8, strided<[1], offset: 5>>
+// CHECK: memref.copy
 // CHECK: bufferization.materialize_in_destination
 // CHECK: return
 module {

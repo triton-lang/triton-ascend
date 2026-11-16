@@ -3242,9 +3242,13 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                      rhsElemType == triton::ScaleDotElemType::E5M2);
   bool isFP4Input = (lhsElemType == triton::ScaleDotElemType::E2M1) &&
                     (rhsElemType == triton::ScaleDotElemType::E2M1);
-  // MatMulMx consumes K-packed bytes and E8M0 scales. Its small-K
-  // decomposition requires at least 64 packed bytes (128 FP4 elements).
-  constexpr int64_t minimumNativeFp4StorageK = 64;
+  // Each E8M0 scale covers 32 consecutive elements along K. MatMulMx
+  // hardware requires K to span an integer number of 2-scale-block
+  // groups (64 elements for FP8, 64 packed bytes for FP4). K < this
+  // value or K not divisible by it should fall back to the software
+  // decomposed path rather than forming a native MatMulMxOp.
+  constexpr int64_t nativeMxKAlignment = 64;
+  constexpr int64_t minimumNativeFp4StorageK = nativeMxKAlignment;
   auto hasE8M0Scale = [](Value scale) {
     return !scale || cast<RankedTensorType>(scale.getType())
                          .getElementType()
@@ -3276,6 +3280,22 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                    .getResult(0);
   }
   if (useNativeMx) {
+    auto lhsTy = cast<RankedTensorType>(lhs.getType());
+    auto rhsTy = cast<RankedTensorType>(rhs.getType());
+    int64_t lhsK = lhsTy.getShape()[1];
+    int64_t rhsK = rhsTy.getShape()[0];
+
+    if (!ShapedType::isDynamic(lhsK) && !ShapedType::isDynamic(rhsK)) {
+      if (lhsK != rhsK) {
+        return op.emitError()
+               << "MatMulMx: lhs K (" << lhsK << ") != rhs K (" << rhsK << ")";
+      }
+      if (lhsK % nativeMxKAlignment != 0) {
+        return op.emitError()
+               << "MatMulMx: static K = " << lhsK << ", must be divisible by "
+               << nativeMxKAlignment;
+      }
+    }
     if (!rhsScale) {
       auto rhsTy = cast<RankedTensorType>(rhs.getType());
       int64_t k = rhsTy.getDimSize(rhsTy.getRank() - 2);

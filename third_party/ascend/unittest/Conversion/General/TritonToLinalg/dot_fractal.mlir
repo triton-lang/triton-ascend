@@ -64,7 +64,8 @@ module {
 // CHECK-LABEL: func.func @case1_a_fractal
 // CHECK-SAME:    mix_mode = "mix"
 // CHECK:         hivm.hir.convert_layout %{{.*}} output_shape [160, 320] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>} : (tensor<20x10x16x16xf16>) -> tensor<160x320xf16>
-// CHECK:         %[[ACC:.*]] = tensor.empty() : tensor<160x80xf32>
+// CHECK:         %[[EMPTY:.*]] = tensor.empty() : tensor<160x80xf32>
+// CHECK:         %[[ACC:.*]] = linalg.fill ins(%{{.*}} : f32) outs(%[[EMPTY]] : tensor<160x80xf32>) -> tensor<160x80xf32>
 // CHECK:         linalg.matmul {indexing_maps = [{{.*}}], input_precision = "ieee"} ins(%{{.*}}, %{{.*}} : tensor<160x320xf16>, tensor<320x80xf16>) outs(%[[ACC]] : tensor<160x80xf32>) -> tensor<160x80xf32>
 // ND result: no ND->Fractal convert afterwards.
 // CHECK-NOT:     hivm.hir.convert_layout

@@ -21,7 +21,6 @@
  */
 
 #include "TritonToLinalg/DescriptorConverter.h"
-#include "TritonToLinalg/BlockPtrAnalysis.h"
 #include "TritonToLinalg/MaskAnalysis.h"
 #include "TritonToLinalg/TritonOpConverter.h"
 #include "TritonToLinalg/TritonToLinalgPass.h"

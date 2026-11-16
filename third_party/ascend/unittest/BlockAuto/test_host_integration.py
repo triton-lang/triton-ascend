@@ -109,12 +109,20 @@ class TestHostIntegration(unittest.TestCase):
 
     def test_explicit_factors_keep_manual_dispatch(self):
         for factor in (1, 2, 4):
+            context = ("Ascend950", 24 // factor, (True, 24 // factor, 48 // factor), None)
+            self.backend.prepare_block_compile_options = Mock(
+                side_effect=lambda values: dict(values, block_compile_context=context))
             self.kwargs = dict(BLOCK=512, block_batching_axis=0)
             self.kwargs["block_batching_factor"] = factor
             self.calls.clear()
             self.assertIs(self.run_handler(), self.result)
             self.assertEqual(len(self.calls), 1)
-            self.assertIs(self.calls[0][0][1], self.kwargs)
+            if factor == 1:
+                self.assertIs(self.calls[0][0][1], self.kwargs)
+                self.backend.prepare_block_compile_options.assert_not_called()
+            else:
+                self.assertEqual(self.calls[0][0][1], dict(self.kwargs, block_compile_context=context))
+                self.backend.prepare_block_compile_options.assert_called_once_with(self.kwargs)
 
     def test_warmup_uses_the_same_contract_as_launch(self):
         self.kwargs.pop("block_batching_factor")

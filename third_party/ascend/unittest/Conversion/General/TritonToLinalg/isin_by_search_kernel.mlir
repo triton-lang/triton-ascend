@@ -6,7 +6,8 @@
 // CHECK-SAME: iter_args({{.*}}, %[[MASK:.*]] = %{{.*}}) -> (tensor<1xi1>, tensor<1xi32>, tensor<1xi32>, tensor<1xi1>) : i32
 // CHECK: %[[PREDICATE:.*]] = tensor.extract %[[MASK]][{{.*}}] {{.*}} : tensor<1xi1>
 // CHECK: %[[VALUE:.*]] = scf.if %[[PREDICATE]] -> (i16) {
-// CHECK-NEXT: %[[LOAD:.*]] = memref.load
+// CHECK-NEXT: %[[VIEW:.*]] = memref.reinterpret_cast
+// CHECK-NEXT: %[[LOAD:.*]] = memref.load %[[VIEW]]
 // CHECK-NEXT: scf.yield %[[LOAD]] : i16
 // CHECK-NEXT: } else {
 // CHECK-NEXT: scf.yield %{{.*}} : i16

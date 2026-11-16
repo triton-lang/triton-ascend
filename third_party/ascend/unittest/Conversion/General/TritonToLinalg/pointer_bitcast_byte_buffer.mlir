@@ -3,9 +3,14 @@
 // RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s --check-prefix=SIMT
 // RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' '--triton-to-linalg=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s --check-prefix=SIMT-LINALG
 
+// Byte offsets [0, 4, ..., 28] become contiguous i32 element offsets.
 // CHECK-LABEL: func.func @widen_tensor_offset
-// CHECK: scf.for
-// CHECK: hivm.hir.pointer_cast{{.*}} : memref<?xi32>
+// CHECK: %[[BASE:.*]] = memref.extract_aligned_pointer_as_index %{{.*}} : memref<?xi8> -> index
+// CHECK: %[[ADDRESS:.*]] = arith.index_cast %[[BASE]] : index to i64
+// CHECK: %[[CAPACITY:.*]] = arith.constant 8 : index
+// CHECK: %[[PTR:.*]] = hivm.hir.pointer_cast(%[[ADDRESS]]) [%[[CAPACITY]]] : memref<?xi32>
+// CHECK: %[[VIEW:.*]] = memref.reinterpret_cast %[[PTR]] to offset: [0], sizes: [8], strides: [1]
+// CHECK: memref.copy %[[VIEW]], {{.*}} : memref<8xi32, strided<[1]>> to memref<8xi32>
 // CHECK: return
 // UNSTRUCTURE-LABEL: tt.func public @widen_tensor_offset
 // UNSTRUCTURE: arith.divsi
@@ -13,7 +18,12 @@
 // UNSTRUCTURE: tt.int_to_ptr
 // UNSTRUCTURE-NOT: tt.bitcast
 // SIMT-LABEL: tt.func public @widen_tensor_offset
-// SIMT: ascend.indirect_load
+// SIMT: %[[OFFSETS:.*]] = arith.divsi {{.*}} : tensor<8xi64>
+// SIMT: %[[ADDRESS:.*]] = tt.ptr_to_int %{{.*}} : !tt.ptr<i8> -> i64
+// SIMT: %[[BASE:.*]] = tt.int_to_ptr %[[ADDRESS]] : i64 -> !tt.ptr<i32>
+// SIMT: %[[BASES:.*]] = tt.splat %[[BASE]] : !tt.ptr<i32> -> tensor<8x!tt.ptr<i32>>
+// SIMT: %[[PTRS:.*]] = tt.addptr %[[BASES]], %[[OFFSETS]] : tensor<8x!tt.ptr<i32>>, tensor<8xi64>
+// SIMT: tt.load %[[PTRS]] : tensor<8x!tt.ptr<i32>>
 // SIMT-NOT: tt.bitcast
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @widen_tensor_offset(

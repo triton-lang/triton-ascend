@@ -23,7 +23,6 @@
 #ifndef TRITON_ADAPTER_DESCRIPTORCONVERTER_H
 #define TRITON_ADAPTER_DESCRIPTORCONVERTER_H
 
-#include "TritonToLinalg/BlockPtrAnalysis.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "mlir/Dialect/Linalg/IR/Linalg.h"

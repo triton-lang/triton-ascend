@@ -364,11 +364,19 @@ _active_attempt = ContextVar('ascend_batch_compiler_attempt', default=None)
 class _CandidateStages:
     """Child-only cache and stage binding for a single call to Triton's compiler."""
 
-    def __init__(self, source, directory, writer):
+    def __init__(self, source, directory, writer, device=None):
         self.source, self.directory, self.writer = source, directory, writer
+        self.device = device
         self.index_root = directory / 'core-cache'
         self.decline = None
         self.stop = Exception('candidate stage declined')
+
+    def prepare_device(self):
+        if self.device is not None:
+            import torch_npu  # noqa: F401 - register torch.npu in this interpreter
+            from triton.runtime import driver
+            driver.active.set_current_device(self.device)
+            self.device = None
 
     def bind_writer(self, source, index, options):
         from triton import knobs
@@ -384,6 +392,10 @@ class _CandidateStages:
 
         def run(module, metadata):
             (self.directory / 'stage').write_text(ext)
+            # TTIR defers this until source admission; other pipelines/stages
+            # still need the caller's device before lowering or instrumentation.
+            if ext != 'ttir':
+                self.prepare_device()
             result = stage(module, metadata)
             if isinstance(result, BatchDecline):
                 if result.stage != ext:
@@ -425,10 +437,6 @@ def _worker_input(body, directory):
     target = GPUTarget(**body['target'])
     source = FrozenSource.from_wire(body['source'], directory)
     _restore_knobs(knobs, body)
-    if body.get('device') is not None:
-        import torch_npu  # noqa: F401 - register the torch.npu device in this interpreter
-        from triton.runtime import driver
-        driver.active.set_current_device(body['device'])
     options = decode(body['options'])
     backend = make_backend(target)
     normalized = backend.parse_options(dict(options))
@@ -469,7 +477,8 @@ def _compile(body, directory):
             timings.update(asdict(kwargs['times']))
 
         knobs.compilation.listener = collect
-    candidate = _CandidateStages(source, directory, cache).compile(compile_single, target, options, body['env_vars'])
+    candidate = _CandidateStages(source, directory, cache,
+                                 body.get('device')).compile(compile_single, target, options, body['env_vars'])
     if isinstance(candidate, BatchDecline):
         return 'NotApplicable', candidate.payload()
     if candidate.hash != body['variant']:

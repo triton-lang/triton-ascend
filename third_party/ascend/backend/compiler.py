@@ -481,6 +481,11 @@ def make_ttir(mod, metadata, opt):
         metadata["block_batching"] = report
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
+    # Source rejection needs no device. Admitted candidates must initialize
+    # before graph optimization queries core counts or instrumentation runs.
+    attempt = _active_attempt.get()
+    if attempt is not None:
+        attempt.prepare_device()
     if opt.enable_graph_optimize:
         graph_kwargs = _graph_optimize_kwargs(opt)
         if opt.block_batching_factor > 1:

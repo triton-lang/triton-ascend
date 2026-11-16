@@ -537,9 +537,10 @@ worker._native_report = terminate
     assert (err.value.kind, err.value.stage) == ('Signal', 'analyze')
 
 
-@pytest.mark.parametrize('outcome', ['success', 'decline', 'unknown', 'wrong_stage'])
+@pytest.mark.parametrize('device,outcome', [(None, 'success'), (0, 'success'), (0, 'decline'), (0, 'unknown'),
+                                            (0, 'wrong_stage'), (0, 'device_error')])
 @pytest.mark.parametrize('pipeline', ['simd', 'simt', 'tla'])
-def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_errors, outcome, pipeline):
+def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_errors, outcome, pipeline, device):
     triton = ModuleType('triton')
     knobs = SimpleNamespace(cache=SimpleNamespace(dir=str(tmp_path / 'ordinary'), dump_dir=str(tmp_path / 'dump')))
     triton.knobs = knobs
@@ -547,10 +548,21 @@ def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_e
     source, target, env = object(), object(), {'explicit': 'caller'}
     writer = SimpleNamespace(cache_dir=str(tmp_path / 'generation'))
     Path(writer.cache_dir).mkdir()
-    stages = worker._CandidateStages(source, tmp_path, writer)
+    stages = worker._CandidateStages(source, tmp_path, writer, device)
     options = SimpleNamespace(block_batching_factor=2, enable_tla_mode=pipeline == 'tla',
                               is_pure_simt=pipeline == 'simt', compile_on_910_95=True)
     events = []
+    devices = []
+
+    def set_device(value):
+        if outcome == 'device_error':
+            raise RuntimeError('device initialization failed')
+        devices.append(value)
+
+    runtime = ModuleType('triton.runtime')
+    runtime.driver = SimpleNamespace(active=SimpleNamespace(set_current_device=set_device))
+    monkeypatch.setitem(sys.modules, 'triton.runtime', runtime)
+    monkeypatch.setitem(sys.modules, 'torch_npu', ModuleType('torch_npu'))
 
     def compile_single(src, compiled_target, opts, *, _env_vars):
         assert src is source and compiled_target is target and _env_vars is env
@@ -562,10 +574,13 @@ def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_e
 
         def lower(module, metadata):
             assert (tmp_path / 'stage').read_text() == 'ttir'
+            assert not devices
             if outcome == 'unknown':
                 raise ValueError('unrecognized compiler error')
-            if outcome != 'success':
+            if outcome in ('decline', 'wrong_stage'):
                 return worker.BatchDecline('NO_PROGRAM_AXIS', 'ttir' if outcome == 'decline' else 'ttadapter')
+            if pipeline != 'tla':
+                stages.prepare_device()  # make_ttir's post-admission boundary.
             return 'lowered'
 
         compiler_path = Path(worker.__file__).with_name('compiler.py')
@@ -581,6 +596,8 @@ def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_e
         assert set(registered) == ({'ttir', 'npubin'} if pipeline == 'simt' else {'ttir', 'ttadapter', 'npubin'})
         try:
             result = registered['ttir'](object(), {})
+            for ext in ('ttadapter', 'npubin'):
+                stages.wrap(ext, lambda module, metadata: module)(result, {})
         except Exception as error:
             raise compile_errors.MLIRCompilationError('stage failed') from error
         (Path(writer.cache_dir) / 'k.ttir').write_text(result)
@@ -588,15 +605,20 @@ def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_e
         events.append('child listener')
         return result
 
-    if outcome in ('unknown', 'wrong_stage'):
+    device_error = outcome == 'device_error'
+    success = outcome == 'success'
+    if outcome in ('unknown', 'wrong_stage') or device_error:
         with pytest.raises(compile_errors.MLIRCompilationError) as error:
             stages.compile(compile_single, target, options, env)
-        assert isinstance(error.value.__cause__, ValueError if outcome == 'unknown' else worker.BatchCompileError)
+        expected_error = RuntimeError if device_error else (
+            ValueError if outcome == 'unknown' else worker.BatchCompileError)
+        assert isinstance(error.value.__cause__, expected_error)
     else:
         result = stages.compile(compile_single, target, options, env)
-        assert result == ('lowered' if outcome == 'success' else worker.BatchDecline('NO_PROGRAM_AXIS', 'ttir'))
-    assert events == (['child listener'] if outcome == 'success' else [])
-    assert bool(list(stages.index_root.rglob('__grp__*'))) == (outcome == 'success')
+        assert result == ('lowered' if success else worker.BatchDecline('NO_PROGRAM_AXIS', 'ttir'))
+    assert devices == ([device] if success and device is not None else [])
+    assert events == (['child listener'] if success else [])
+    assert bool(list(stages.index_root.rglob('__grp__*'))) == success
     assert not list(Path(writer.cache_dir).glob('__grp__*'))
     assert not (tmp_path / 'ordinary').exists()
     assert knobs.cache.dir == str(tmp_path / 'ordinary') and worker._active_attempt.get() is None

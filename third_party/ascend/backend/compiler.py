@@ -1099,10 +1099,9 @@ def _verify_forced_mixed_result(mod, metadata, opt, effective, factor, report):
     data = json.loads(report)
     text = str(mod)
     factor_attr = r"ascend\.scope_superblock\.factor\s*=\s*" + str(factor) + r"\s*:\s*i64"
-    if (effective != "mixed_simd_simt" or factor != opt.superblock_factor
-            or data.get("action_supported") is not True
-            or data.get("materialized_simt_anchor_count", 0) < 1
-            or "scope.scope" not in text or not re.search(factor_attr, text)):
+    if (effective != "mixed_simd_simt" or factor != opt.superblock_factor or data.get("action_supported") is not True
+            or data.get("materialized_simt_anchor_count", 0) < 1 or "scope.scope" not in text
+            or not re.search(factor_attr, text)):
         raise RuntimeError("forced Mixed was not materialized with the requested factor; refusing fallback")
     metadata["auto_simt_forced_route"] = effective
     metadata["auto_simt_forced_factor"] = factor
@@ -2742,9 +2741,8 @@ class NPUOptions:
         object.__setattr__(self, "auto_simt_scope_dump", dump)
         object.__setattr__(self, "auto_simt_model_profile", profile)
         object.__setattr__(self, "auto_simt_model_assets_hash", asset_hash)
-        if self.auto_simt_force_route and (
-                self.auto_simt_force_route != "mixed_simd_simt" or self.compile_mode != "simd_simt"
-                or self.auto_simt_scope_mode != "auto"):
+        if self.auto_simt_force_route and (self.auto_simt_force_route != "mixed_simd_simt"
+                                           or self.compile_mode != "simd_simt" or self.auto_simt_scope_mode != "auto"):
             raise ValueError("forced Mixed conflicts with the resolved compile mode or scope mode")
 
     def hash(self):

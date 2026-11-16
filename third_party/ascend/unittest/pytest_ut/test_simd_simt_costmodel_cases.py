@@ -376,16 +376,15 @@ def test_costmodel_forced_mixed_factors(tmp_path, monkeypatch):
     logical_programs, block = _vector_core_count(), 16
     a = torch.randn((logical_programs * block, 256), dtype=torch.float16, device="npu")
     b = torch.randn((256, block), dtype=torch.float16, device="npu")
-    indices = torch.tensor([10, 25, 100, 200, 5, 50, 150, 255, 1, 2, 3, 4, 6, 7, 8, 9],
-                           dtype=torch.int32, device="npu")
+    indices = torch.tensor([10, 25, 100, 200, 5, 50, 150, 255, 1, 2, 3, 4, 6, 7, 8, 9], dtype=torch.int32, device="npu")
     output = torch.empty((logical_programs * block, block), dtype=torch.float32, device="npu")
     index_cpu = indices.cpu().long()
     expected = a.cpu()[:, index_cpu].float() @ b.cpu()[index_cpu, :].float()
     args = (a, b, indices, output, a.shape[0], b.shape[1], *a.stride(), *b.stride(), *output.stride())
     # Reuse the report path while toggling route forcing through the environment
     # and supplying F through the ordinary superblock_factor launch option.
-    options = dict(_launch_options(tmp_path / "forced_mixed_route.json", logical_programs),
-                   BLOCK_M=block, BLOCK_N=block, BLOCK_K=block)
+    options = dict(_launch_options(tmp_path / "forced_mixed_route.json", logical_programs), BLOCK_M=block,
+                   BLOCK_N=block, BLOCK_K=block)
     kernels = {}
     binaries = {}
     for factor in (None, 1, 2, 1, None):

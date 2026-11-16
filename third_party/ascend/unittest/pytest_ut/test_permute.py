@@ -125,3 +125,25 @@ def test_permute_handwritten():
     print(r[0, 0, 0:8, 0:8])
     print(r1[0, 0, 0:8, 0:8])
     torch.testing.assert_close(r, r1, rtol=1e-3, atol=1e-3)
+
+
+@triton.jit
+def noop_permute_kernel(in_ptr0, out_ptr0, BLOCK: tl.constexpr):
+    offsets = tl.arange(0, BLOCK)
+    x = tl.load(in_ptr0 + offsets[:, None] * BLOCK + offsets[None, :])
+    flat = tl.ravel(x, can_reorder=False)
+    row = tl.reshape(flat, (1, BLOCK * BLOCK), can_reorder=False)
+    floored = tl.floor(row)
+    # (1, BLOCK*BLOCK) -> (BLOCK*BLOCK, 1): only the size-1 dim moves, so this is a
+    # no-op permute and should lower to a reshape rather than a cube transpose.
+    column = tl.permute(floored, (1, 0))
+    out = tl.reshape(column, (BLOCK * BLOCK, ))
+    tl.store(out_ptr0 + tl.arange(0, BLOCK * BLOCK), out)
+
+
+def test_permute_noop():
+    BLOCK = 64
+    x = torch.randn((BLOCK, BLOCK), dtype=torch.float32).npu()
+    out = torch.empty((BLOCK * BLOCK, ), dtype=torch.float32).npu()
+    noop_permute_kernel[(1, )](x, out, BLOCK=BLOCK, compile_mode="simd")
+    torch.testing.assert_close(out, torch.floor(x).ravel(), rtol=1e-3, atol=1e-3)

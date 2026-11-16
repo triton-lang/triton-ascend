@@ -34,6 +34,8 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HACC/Utils/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 
@@ -175,9 +177,11 @@ static CoreType getCoreTypeOfSimpleOpOrCfImpl(Operation *op) {
   CoreType coreType = CoreType::UNDETERMINED;
   Operation *failingOp = nullptr;
 
-  // we need to skip sub-op of non-cf ops with regions, hence preorder here
+  // Recurse through control flow, but keep packed scopes atomic: they do
+  // implement RegionBranchOpInterface, yet only their shell is classified.
   op->walk<WalkOrder::PreOrder>([&](Operation *subOp) -> WalkResult {
-    if (llvm::isa<RegionBranchOpInterface>(subOp) ||
+    if ((llvm::isa<RegionBranchOpInterface>(subOp) &&
+         !llvm::isa<scope::ScopeOp>(subOp)) ||
         subOp->hasTrait<OpTrait::IsTerminator>()) {
       return WalkResult::advance();
     }

@@ -178,6 +178,7 @@ def get_triton_ascend_patch_file():
         "python/triton/language/semantic.py",
         "python/triton/language/standard.py",
         "python/triton/runtime/autotuner.py",
+        "python/triton/runtime/cache.py",
         "python/triton/runtime/interpreter.py",
         "python/triton/runtime/autotuner.py",
         "python/triton/runtime/jit.py",

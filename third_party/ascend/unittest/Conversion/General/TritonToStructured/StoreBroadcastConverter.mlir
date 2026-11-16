@@ -5,6 +5,7 @@
 // memory location. The converter rewrites to store only the first index
 // along each broadcast axis via tensor.extract_slice, using the broadcast
 // source pointer.
+// Linalg gives the contiguous [1, 64] source row its natural pitch of 64.
 
 // -----
 

@@ -1,22 +1,26 @@
-// RUN: triton-opt %s --triton-to-unstructure | FileCheck %s
-// RUN: triton-opt %s --triton-to-unstructure | FileCheck %s --check-prefix=COUNT
+// RUN: triton-opt %s --triton-control-flow-opt --triton-to-unstructure | FileCheck %s
+// RUN: triton-opt %s --triton-control-flow-opt --triton-to-unstructure | FileCheck %s --check-prefix=COUNT
 //
 // Nested scalar and tensor pointer carriers must retain their live offsets.
 // Retired copies must not remain in the function and duplicate its stores.
 //
 // CHECK-LABEL: tt.func public @nested_pointer_retirement(
+// CHECK-SAME: %[[BASE:[^:]+]]: !tt.ptr<i32>
+// CHECK-DAG: %[[ZERO:.*]] = arith.constant 0 : i64
 // CHECK-DAG: %[[ONE:.*]] = arith.constant 1 : i64
-// CHECK-DAG: %[[STEP:.*]] = arith.constant dense<1> : tensor<4xi64>
-// CHECK: scf.for {{.*}} iter_args(%[[OUTER_SCALAR:.*]] = {{.*}}, %[[OUTER_VECTOR:.*]] = {{.*}}) -> (i64, tensor<4xi64>)
-// CHECK: %[[INNER:.*]]:2 = scf.for {{.*}} iter_args(%[[SCALAR:.*]] = %[[OUTER_SCALAR]], %[[VECTOR:.*]] = %[[OUTER_VECTOR]]) -> (i64, tensor<4xi64>)
-// CHECK: tt.addptr {{.*}}, %[[VECTOR]] : tensor<4x!tt.ptr<i32>>, tensor<4xi64>
-// CHECK: %[[POINTER:.*]] = tt.addptr {{.*}}, %[[SCALAR]] : !tt.ptr<i32>, i64
+// CHECK: scf.for {{.*}} iter_args(%[[OUTER:.*]] = %[[ZERO]], %[[OUTER_OFFSET:.*]] = {{.*}}) -> (i64, i32)
+// CHECK: %[[OUTER_PTR:.*]] = tt.addptr %[[BASE]], %[[OUTER]] : !tt.ptr<i32>, i64
+// CHECK: %[[INNER:.*]]:2 = scf.for {{.*}} iter_args(%[[CURSOR:.*]] = %[[ZERO]], %[[OFFSET:.*]] = %[[OUTER_OFFSET]]) -> (i64, i32)
+// CHECK: %[[POINTER:.*]] = tt.addptr %[[OUTER_PTR]], %[[CURSOR]] : !tt.ptr<i32>, i64
+// CHECK: tt.splat %[[OFFSET]] : i32 -> tensor<4xi32>
+// CHECK: tt.addptr {{.*}}PointerDescriptorRebuild
 // CHECK: tt.load %[[POINTER]] : !tt.ptr<i32>
 // CHECK: tt.store
-// CHECK-DAG: %[[NEXT_SCALAR:.*]] = arith.addi %[[SCALAR]], %[[ONE]] : i64
-// CHECK-DAG: %[[NEXT_VECTOR:.*]] = arith.addi %[[VECTOR]], %[[STEP]] : tensor<4xi64>
-// CHECK: scf.yield %[[NEXT_SCALAR]], %[[NEXT_VECTOR]] : i64, tensor<4xi64>
-// CHECK: scf.yield %[[INNER]]#0, %[[INNER]]#1 : i64, tensor<4xi64>
+// CHECK-DAG: %[[NEXT_CURSOR:.*]] = arith.addi %[[CURSOR]], %[[ONE]] : i64
+// CHECK-DAG: %[[NEXT_OFFSET:.*]] = arith.addi %[[OFFSET]], %{{.*}} : i32
+// CHECK: scf.yield %[[NEXT_CURSOR]], %[[NEXT_OFFSET]] : i64, i32
+// CHECK: %[[TOTAL:.*]] = arith.addi %[[OUTER]], %[[INNER]]#0 : i64
+// CHECK: scf.yield %[[TOTAL]], %[[INNER]]#1 : i64, i32
 // CHECK: tt.return
 //
 // COUNT-LABEL: tt.func public @nested_pointer_retirement(

@@ -2818,19 +2818,6 @@
       "evidence": "data_provider/950pr_simt_non_affine_rank1_memory_20261009.json; paired one-dimensional and channel-row structural families at source program counts 8/16/32/64/128/256. Curve points use the paired-layout center; the P128 point is the robust center of fresh-process medians on cards 0/2/4/5 plus the independent flat-layout measurement. Matching uses the compiler-proven non-affine FP address DAG, rank-one 32-element load/store geometry and source program count, never an operator or kernel name."
     },
     "system_counter_frequency_mhz": 1000,
-    "evidence": "The base curve is the fresh forced-SIMD minimal observable store-only kernel sweep at physical grids 1,2,4,8,16,32,56. The global-load residual is the median direct-copy profiler duration minus its compiler-derived route resource and the base boundary at P=1: 314.207 SYS_CNT for forced SIMD and 485.789 SYS_CNT for selected SIMT. Independent P=4/P=56 direct-copy controls confirm the term is a sub-microsecond completion envelope rather than a per-operation slope. Kernel argument count is reported for diagnosis only: the v105 held-out set disproved an additive argument-count charge because two four-argument kernels with different structural work required opposite corrections. The prologue/epilogue fields are an equal accounting split, not separately measured components.",
-    "boundary_residual_system_cycles_by_route_factor_and_physical_program_count": {
-      "all_simd": {
-        "1": {
-          "1": 614.0,
-          "2": 656.0,
-          "4": 692.0,
-          "8": 744.5,
-          "16": 852.5,
-          "32": 1079.0,
-          "56": 1524.5
-        }
-      }
-    }
+    "evidence": "The base curve is the fresh forced-SIMD minimal observable store-only kernel sweep at physical grids 1,2,4,8,16,32,56. The global-load residual is the median direct-copy profiler duration minus its compiler-derived route resource and the base boundary at P=1: 314.207 SYS_CNT for forced SIMD and 485.789 SYS_CNT for selected SIMT. Independent P=4/P=56 direct-copy controls confirm the term is a sub-microsecond completion envelope rather than a per-operation slope. Kernel argument count is reported for diagnosis only: the v105 held-out set disproved an additive argument-count charge because two four-argument kernels with different structural work required opposite corrections. The prologue/epilogue fields are an equal accounting split, not separately measured components."
   }
 }

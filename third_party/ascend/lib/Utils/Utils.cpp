@@ -38,7 +38,6 @@
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
-#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
@@ -75,17 +74,6 @@
 namespace mlir {
 
 namespace ConverterUtils {
-
-llvm::SmallString<128> generateUniqueFuncName(ModuleOp moduleOp,
-                                              llvm::StringRef funcNameBase) {
-  llvm::SmallString<128> funcName = funcNameBase;
-  int uniqueId = 0;
-  while (SymbolTable::lookupSymbolIn(moduleOp, funcName)) {
-    funcName = funcNameBase;
-    funcName += ("_" + std::to_string(uniqueId++));
-  }
-  return funcName;
-}
 
 std::optional<int64_t>
 getLastStrideOfReinterpretCastOp(memref::ReinterpretCastOp op) {

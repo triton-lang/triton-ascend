@@ -63,7 +63,6 @@ static bool isOpInMainLoop(Operation *op, const MainLoop &mainLoop) {
   return op && mainLoop.getOperation()->isProperAncestor(op);
 }
 
-
 // Return the outermost ssbuffer.id visible on `op`'s ancestor chain. -1 is
 // returned when an ancestor carries kMainLoop and the innermost id seen on
 // the walk is empty. Used by both Phase 1 (dep analysis) and Phase 2
@@ -99,7 +98,6 @@ void collectNestedOps(Block *block, SmallVector<Operation *> &ops) {
     }
   }
 }
-
 
 // Collect the values an op depends on: its direct operands plus the values its
 // nested regions capture from above.
@@ -989,7 +987,6 @@ static Value computeBufferIndex(OpBuilder &builder, const MainLoop &loop,
   return bufIdx;
 }
 
-
 // Find the last op in `anchorOp->getBlock()` whose `ssbuffer.block_id`
 // attribute matches `blockId`. Returns nullptr if anchorOp is null or has no
 // block, or if no such op is found.
@@ -1013,16 +1010,14 @@ static Operation *findLastOpWithBlockIdInBlock(Operation *anchorOp,
 // Two parts:
 //
 //   1) Select chain (counter + cmpis + nested `arith.select`) is anchored
-//      BEFORE `firstAnchor`. For N==2 it builds
+//      BEFORE `firstAnchor`. For buffer_num==2 it builds
 //          select(remsi==1, buf[1], buf[0])
-//      for N==3 it builds
+//      for buffer_num==3 it builds
 //          select(remsi==2, buf[2], select(remsi==1, buf[1], buf[0]))
 //      and so on; the innermost default is buf[0] (the remsi==0 case).
 //
 //   2) `bufferization.materialize_in_destination %depVal in restrict writable
-//      %sel` is anchored AFTER `matAnchor`. This single op replaces the
-//      previous `scf.if { hivm.hir.copy } else { hivm.hir.copy }` structure
-//      used to write into the per-iteration buffer.
+//      %sel` is anchored AFTER `matAnchor`. 
 //
 // intraDeps = [groupId, crossCoreProducerId] is set on the materialize op.
 // intra_buffer is no longer needed (no scf.if wrapper).
@@ -1034,39 +1029,30 @@ insertProducerLogic(OpBuilder &builder, Value depVal,
   SmallVector<Operation *> newOps;
   int N = buffers.size();
   Location loc = depVal.getLoc();
-  Operation *depDefinedOp = depVal.getDefiningOp();
-  if (!depDefinedOp)
-    return newOps;
-
-  MLIRContext *ctx = builder.getContext();
 
   // Build the destination memref.
   //   N==1: buffer[0] directly.
   //   N>=2: nested arith.select chain at firstAnchor.
   Value dstBuf;
-  if (N == kBufferCountOne) {
-    dstBuf = buffers[0].second;
-  } else {
-    OpBuilder selBuilder(builder);
-    selBuilder.setInsertionPoint(firstAnchor);
+  OpBuilder selBuilder(builder);
+  selBuilder.setInsertionPoint(firstAnchor);
 
-    Value bufIdx = computeBufferIndex(selBuilder, loop, loc, N, &newOps);
+  Value bufIdx = computeBufferIndex(selBuilder, loop, loc, N, &newOps);
 
-    // sel_0 = buf[0]                          ; default for remsi==0
-    // sel_i = arith.select(remsi == i, buf[i], sel_(i-1))   for i in [1, N-1]
-    Value selectedBuf = buffers[0].second;
-    for (int i = 1; i < N; ++i) {
-      Value iVal = selBuilder.create<mlir::arith::ConstantIntOp>(loc, i, 32);
-      Value cmp = selBuilder.create<mlir::arith::CmpIOp>(
-          loc, mlir::arith::CmpIPredicate::eq, bufIdx, iVal);
-      newOps.push_back(iVal.getDefiningOp());
-      newOps.push_back(cmp.getDefiningOp());
-      selectedBuf = selBuilder.create<mlir::arith::SelectOp>(
-          loc, cmp, buffers[i].second, selectedBuf);
-      newOps.push_back(selectedBuf.getDefiningOp());
-    }
-    dstBuf = selectedBuf;
+  // sel_0 = buf[0]                          ; default for remsi==0
+  // sel_i = arith.select(remsi == i, buf[i], sel_(i-1))   for i in [1, N-1]
+  Value selectedBuf = buffers[0].second;
+  for (int i = 1; i < N; ++i) {
+    Value iVal = selBuilder.create<mlir::arith::ConstantIntOp>(loc, i, 32);
+    Value cmp = selBuilder.create<mlir::arith::CmpIOp>(
+        loc, mlir::arith::CmpIPredicate::eq, bufIdx, iVal);
+    newOps.push_back(iVal.getDefiningOp());
+    newOps.push_back(cmp.getDefiningOp());
+    selectedBuf = selBuilder.create<mlir::arith::SelectOp>(
+        loc, cmp, buffers[i].second, selectedBuf);
+    newOps.push_back(selectedBuf.getDefiningOp());
   }
+  dstBuf = selectedBuf;
 
   // Insert materialize_in_destination right after matAnchor.
   OpBuilder matBuilder(builder);
@@ -1364,31 +1350,26 @@ static int processDepVal(Value depVal, const MainLoop &loop,
     enableOpt = mod->hasAttr(CVPipeline::kInsertionOptimization);
 
   // Create producer.
-  // When enable_buffer_insert_optimization is on, the select chain goes at the
-  // start of depDefinedOp's block_id=X region (BEFORE firstInRegion) and the
-  // materialize_in_destination goes at the end of that region (AFTER
-  // lastInRegion). Otherwise both anchors fall back to depDefinedOp, which
-  // keeps the original "tightly around the defining op" behavior.
+  // When enable_buffer_insert_optimization is on:
+  //   - select chain stays tightly before depDefinedOp (no region-start
+  //     relocation — firstAnchor remains depDefinedOp).
+  //   - materialize_in_destination is moved to the END of depDefinedOp's
+  //     block_id=X region (after lastInRegion)
   Operation *firstAnchor = depDefinedOp;
   Operation *producerAnchor = depDefinedOp;
   if (enableOpt) {
     if (auto prodId = getOpBlockId(depDefinedOp); prodId.has_value()) {
-      if (Operation *f =
-              findFirstOpWithBlockIdInBlock(depDefinedOp, *prodId))
-        firstAnchor = f;
-      if (Operation *l =
+      if (Operation *lastWithBlockId =
               findLastOpWithBlockIdInBlock(depDefinedOp, *prodId))
-        producerAnchor = l;
+        producerAnchor =
+            lastWithBlockId; // materialize moves to region end
     }
   }
-
   OpBuilder producedBuffers(loop.getContext());
   SmallVector<Operation *> producerNewOps =
       insertProducerLogic(producedBuffers, depVal, buffers, firstAnchor,
                           producerAnchor, loop, groupId);
   addBlockAttrForOps(producerNewOps, producerId, globalBuilder);
-  // intra_buffer is no longer emitted for the producer side — there's no
-  // scf.if wrapper anymore (the select chain + materialize op replaces it).
 
   // Single pass: process both normal ops and multi-region ops
   // For normal ops: generate one buffer selection per block_id and share among
@@ -1505,8 +1486,7 @@ processTensorDependencies(const MainLoop &loop,
           !isa<ShapedType>(depVal.getType()))
         continue;
 
-      // Skip tensor::EmptyOp - it carries no producer-consumer value flow;
-      // cloned per consumer in Phase 1 or otherwise harmless.
+      // Skip tensor::EmptyOp - it carries no producer-consumer value flow
       if (isa<tensor::EmptyOp>(depVal.getDefiningOp()))
         continue;
 
@@ -1578,7 +1558,7 @@ int cloneAllocTensorsInBlocks(
 // sequence in addInnerMultiBuffer lines 1999-2022; exposed here so the main
 // file can call it as a single unit.
 int runDepAnalysisAndClone(MainLoop &mainLoop, OpBuilder &globalBuilder,
-                           bool &i1Found,
+                           bool &i1Found, bool &memrefFound,
                            DenseMap<Value, InnerBlockInfo> &blocks,
                            DenseMap<Value, SmallVector<Value>> &depValueMap,
                            SmallVector<Operation *> &allOps,
@@ -1593,6 +1573,7 @@ int runDepAnalysisAndClone(MainLoop &mainLoop, OpBuilder &globalBuilder,
   // Memref-type dep values are not supported here.
   if (hasMemrefDepValue(depValueMap)) {
     LDBG("ERROR: Memref type dependent values found in user IR, fallback");
+    memrefFound = true;
     return -1;
   }
 

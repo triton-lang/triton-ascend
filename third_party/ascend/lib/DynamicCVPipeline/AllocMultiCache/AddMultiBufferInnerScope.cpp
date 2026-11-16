@@ -132,8 +132,7 @@ collectBufferValues(DenseMap<Value, SmallVector<Value>> &depValueMap,
       if (!shapedType)
         continue;
 
-      // Skip tensor::EmptyOp - it carries no producer-consumer value flow;
-      // cloned per consumer in Phase 1 or otherwise harmless.
+      // Skip tensor::EmptyOp - it carries no producer-consumer value flow
       if (isa<tensor::EmptyOp>(op))
         continue;
 
@@ -380,7 +379,7 @@ static void insertWhileCounterOps(const MainLoop &mainLoop) {
 
 static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
                                scope::ScopeOp vectorScope, int &groupId,
-                               bool &i1Found) {
+                               bool &i1Found, bool &memrefFound) {
   OpBuilder globalBuilder(mainLoop.getContext());
 
   // Two-phase dep collection for empty+fill cloning:
@@ -423,8 +422,9 @@ static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
   }
 
   DenseSet<Value> phase1ClonedDepVals;
-  if (runDepAnalysisAndClone(mainLoop, globalBuilder, i1Found, blocks,
-                             depValueMap, allOps, phase1ClonedDepVals) != 0)
+  if (runDepAnalysisAndClone(mainLoop, globalBuilder, i1Found, memrefFound,
+                             blocks, depValueMap, allOps,
+                             phase1ClonedDepVals) != 0)
     return -1;
 
   // Phase 2: re-collect deps now that cloned ops (and rematerialized scalar
@@ -562,9 +562,16 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
       // i1Found is reset per main_loop so it only triggers fallback for
       // the current scope's deps.
       bool i1Found = false;
-      int ret = addInnerMultiBuffer(mainLoop, builder, scope, groupId, i1Found);
+      bool memrefFound = false;
+      int ret = addInnerMultiBuffer(mainLoop, builder, scope, groupId, i1Found,
+                                    memrefFound);
       if (i1Found) {
         LDBG("i1 tensor dep found, setting fallback attribute");
+        CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+        return WalkResult::interrupt();
+      }
+      if (memrefFound) {
+        LDBG("memref dep found, setting fallback attribute to IGNORED");
         CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
         return WalkResult::interrupt();
       }

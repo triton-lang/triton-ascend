@@ -142,6 +142,8 @@ jobs:
             NUM_PROCS="$NPU_DEVICES"
           fi
           echo "Running pytest with $NUM_PROCS workers for $NPU_DEVICES NPU devices"
+          ${PYTHON} -m unittest discover -v \
+            -s third_party/ascend/unittest/costmodel_ut -p test_forced_mixed_controls.py
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/reuse_ut

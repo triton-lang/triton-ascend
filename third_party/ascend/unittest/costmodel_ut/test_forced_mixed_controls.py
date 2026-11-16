@@ -201,7 +201,8 @@ class ForcedMixedControlsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="forced-mixed-jit-") as directory:
             packaged_source = Path(directory) / "python/triton/runtime/jit.py"
             packaged_source.parent.mkdir(parents=True)
-            packaged_source.write_bytes(source.read_bytes())
+            tracked_source = subprocess.check_output(["git", "show", "HEAD:python/triton/runtime/jit.py"], cwd=repo)
+            packaged_source.write_bytes(tracked_source)
             result = subprocess.run(["git", "apply", "--include=python/triton/runtime/jit.py",
                                      str(patch_file)], cwd=directory, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)

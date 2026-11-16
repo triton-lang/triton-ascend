@@ -196,7 +196,6 @@ class ForcedMixedControlsTest(unittest.TestCase):
 
     def test_packaged_jit_patch_applies_and_preserves_route_cache_controls(self):
         repo = Path(__file__).resolve().parents[4]
-        source = repo / "python/triton/runtime/jit.py"
         patch_file = repo / "third_party/ascend/patch/triton-ascend-3.6.0.patch"
         with tempfile.TemporaryDirectory(prefix="forced-mixed-jit-") as directory:
             packaged_source = Path(directory) / "python/triton/runtime/jit.py"

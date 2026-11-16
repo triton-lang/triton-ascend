@@ -23,6 +23,18 @@
           "exclusiveMinimum": 0,
           "description": "Optional effective atomic rate for an all-SIMD launch containing exactly one physical program."
         },
+        "body_system_cycles_by_logical_elements": {
+          "type": "object",
+          "description": "Measured atomic body in system cycles (kernel boundary and non-atomic Stage work excluded) keyed by logical element count.",
+          "minProperties": 1,
+          "patternProperties": {
+            "^[1-9][0-9]*$": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
         "operation_startup_system_cycles": {
           "type": "number",
           "minimum": 0

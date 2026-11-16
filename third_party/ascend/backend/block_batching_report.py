@@ -37,8 +37,7 @@ def validate_vv_loop_contract(metadata):
     grouped = report.get('vv_lowering') == 'sequential_iterations_v1'
     if not grouped and 'loop_schedule' not in guard:
         return False
-    from .block_batching_guard import GuardFailure
-    from .block_batching_guard_v3 import iteration_schedule
+    from .block_batching_guard import GuardFailure, iteration_schedule
     try:
         loop = iteration_schedule(guard, report['lane_width'])
     except (GuardFailure, KeyError, TypeError) as error:
@@ -176,7 +175,7 @@ def validated_candidate_report(candidate, request, implementation_version):
     expected = getattr(candidate.metadata, "block_batching_binary_sha256", None)
     if expected != hashlib.sha256(candidate.kernel).hexdigest():
         raise BatchCompileError("CANDIDATE_BINARY_CHANGED", kind='InvalidArtifact', stage='validate')
-    from .block_batching_guard_v3 import validate_plan_binding
+    from .block_batching_guard import validate_plan_binding
     guard = native_report.get("guard", {})
     if (not validate_plan_binding(guard)
             or getattr(candidate.metadata, "block_batching_plan_sha256", None) != guard.get("plan_fingerprint")):

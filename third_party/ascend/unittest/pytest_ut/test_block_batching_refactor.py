@@ -286,3 +286,62 @@ def test_element_span_reports_negative_stride_before_reading_missing_write_polic
     access = {'offset': ['muli', 64, ['pid', 0, 32], ['const', -1, 64]], 'mask': None}
     with pytest.raises(guard_module.GuardFailure, match='NEGATIVE_STRIDE'):
         domain.access(access)
+
+
+def _guard_spec(version, accesses):
+    guard = dict(version=version, axis=0, accesses=accesses)
+    if version == 3:
+        guard.update(
+            plan_kind='unified', semantic_contract_version=4, memory_policy='disjoint_or_terminal_store', factor=2,
+            terminal_read_ids=[],
+            obligations=[dict(access_id=i, rule='SupportedEffect', proof='byte_domain') for i in range(len(accesses))])
+    return guard
+
+
+@pytest.mark.parametrize('version', [1, 2, 3])
+def test_guard_schemas_preserve_alias_overflow_and_cache_invalidation(version):
+    lane = ['range', 0, 8, 32] if version == 1 else ['coord', 0, 8, 32]
+    offset = ['addi', 32, ['muli', 32, ['pid', 0, 32], ['const', 8, 32]], lane]
+    if version != 1:
+        offset = ['muli', 64, offset, ['const', 4, 64]]
+    accesses = [dict(root=i, bytes=4, write=bool(i), mask=None, offset=offset) for i in range(2)]
+    if version != 1:
+        for access in accesses:
+            access.update(shape=[8], pointer_checks=[], loops=[], volatile=False, device_address=False)
+    spec = _guard_spec(version, accesses)
+    cached = guard_module.RuntimeGuard(spec, 2)
+    for arguments, grid, expected in [
+        ([4096, 8192], (2, 1, 1), (True, 'PROVEN_AT_RUNTIME')),
+        ([4096, 4096], (2, 1, 1), (False, 'WRITE_ALIAS')),
+        ([4096, 8192], (2**29, 1, 1), (False, 'INDEX_OVERFLOW')),
+        ([4096, 8192], (0, 1, 1), (False, 'EMPTY_GRID')),
+        ([0, 8192], (2, 1, 1), (False, 'INVALID_MEMORY_ARGUMENT')),
+        ([4096, 8192], (2, 1, 1), (True, 'PROVEN_AT_RUNTIME')),
+    ]:
+        assert guard_module.check_guard(spec, arguments, grid, 2) == expected
+        assert cached(arguments, grid) == expected
+
+
+@pytest.mark.parametrize('version', [2, 3])
+def test_cv_effect_proof_keeps_both_reduction_axes_and_padding(version):
+    row, column = ['coord', 0, 32, 32], ['coord', 1, 32, 32]
+    offset = [
+        'addi', 64, ['muli', 64, ['pid', 0, 32], ['const', 4096, 64]],
+        ['addi', 64, ['muli', 64, row, ['const', 128, 64]], ['muli', 64, column, ['const', 4, 64]]]
+    ]
+    accesses = [
+        dict(root=i, bytes=4, write=bool(i), mask=None, offset=offset, shape=[32, 32], pointer_checks=[], loops=[],
+             volatile=False, device_address=False) for i in range(2)
+    ]
+    accesses[0]['mask'] = ['slt', row, ['arg', 2, 32], 32]
+    spec = _guard_spec(version, accesses)
+    spec.update(
+        require_same_fractal_bounds=True,
+        cv_mask_contract=dict(version=1, inputs=[dict(access=0, operand=i, axes=[0, 1]) for i in range(2)],
+                              outputs=[1]))
+    for limit, expected in [(32, (True, 'PROVEN_AT_RUNTIME')), (31, (False, 'CV_BATCH_REDUCTION_MASK_NOT_PROVEN')),
+                            (24, (False, 'CV_BATCH_PADDING_NOT_PROVEN'))]:
+        assert guard_module.check_guard(spec, [1 << 20, 1 << 30, limit], (2, 1, 1), 2) == expected
+    if version == 3:
+        spec['obligations'][1]['rule'] = 'ShareInvariantLoad'
+        assert guard_module.check_guard(spec, [1 << 20, 1 << 30, 32], (2, 1, 1), 2) == (False, 'INVALID_EFFECT_PROOF')

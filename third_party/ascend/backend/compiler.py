@@ -456,11 +456,11 @@ def make_ttir(mod, metadata, opt):
         report["guard"]["axis"] = report["selected_axis"]
         if report.get("cv_lowering") in CV_MASKED_BATCH_LOWERINGS:
             report["guard"]["require_same_fractal_bounds"] = True
-            from .block_batching_guard_v2 import static_cv_mask_refusal
+            from .block_batching_guard import static_cv_mask_refusal
             reason = static_cv_mask_refusal(report["guard"])
             if reason:
                 return BatchDecline(reason, "ttir")
-        from .block_batching_guard_v3 import bind_plan
+        from .block_batching_guard import bind_plan
         bind_plan(report["guard"], batch_source)
         report["owner"] = "block_batching"
         refusal = batching_vv_computation_refusal(report)

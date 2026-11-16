@@ -117,6 +117,42 @@ unwrapCanonicalI8ScalarPointerMaterialization(Value originalPointer,
   return memref;
 }
 
+// Each extracted loop must advance a distinct unit-size slice dimension.
+// This is the form emitted by Unstructure; arbitrary insert_slice offsets may
+// revisit a destination and still require padding on every iteration.
+static bool hasDisjointLoopSlices(scf::ForOp innerLoop, scf::ForOp outerLoop,
+                                  tensor::InsertSliceOp insertSlice) {
+  auto offsets = insertSlice.getMixedOffsets();
+  auto sizes = insertSlice.getMixedSizes();
+  auto strides = insertSlice.getMixedStrides();
+  for (scf::ForOp loop = innerLoop; loop;
+       loop = dyn_cast<scf::ForOp>(loop->getParentOp())) {
+    if (!isConstantIntValue(loop.getStep(), 1))
+      return false;
+    bool advancesSlice = llvm::any_of(
+        llvm::zip_equal(offsets, sizes, strides), [&](auto dimension) {
+          auto [offset, size, stride] = dimension;
+          return dyn_cast<Value>(offset) == loop.getInductionVar() &&
+                 isConstantIntValue(size, 1) && isConstantIntValue(stride, 1);
+        });
+    if (!advancesSlice)
+      return false;
+    if (loop == outerLoop)
+      return true;
+  }
+  return false;
+}
+
+static bool samePaddingValue(Value left, Value right) {
+  if (!left || !right)
+    return false;
+  if (left == right)
+    return true;
+  Attribute leftAttr, rightAttr;
+  return matchPattern(left, m_Constant(&leftAttr)) &&
+         matchPattern(right, m_Constant(&rightAttr)) && leftAttr == rightAttr;
+}
+
 namespace {
 // Expand the memory operation, rather than a shared addptr producer. Multiple
 // users retain their original ordering, predicates, and atomic attributes.
@@ -571,6 +607,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
 
   Value allocOp;
   Value allocOpTmp;
+  Value reusablePadding;
   auto parentLoop = dyn_cast<scf::ForOp>(op->getParentOp());
   bool hasValidDiscreteLoop = op->hasAttr(ConverterUtils::discreteAttrName) &&
                               parentLoop &&
@@ -605,6 +642,17 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     if (isIndexSelectScenario)
       loopOp->setAttr("hivm.parallel_loop", rewriter.getUnitAttr());
     allocOp = rewriter.create<memref::AllocOp>(loc, fullMemRefType);
+    // Preserve a filled loop accumulator on the DMA allocation that replaces
+    // the loop result, including zero-iteration loops. Do not copy the initial
+    // tensor: for dot inputs that could become L1->L1.
+    if (auto fill = loopOp.getInitArgs()[0].getDefiningOp<linalg::FillOp>()) {
+      if (fill.getOutputs()[0].getDefiningOp<tensor::EmptyOp>()) {
+        rewriter.create<linalg::FillOp>(loc, fill.getInputs(),
+                                        ValueRange{allocOp});
+        if (hasDisjointLoopSlices(parentLoop, loopOp, insertSliceOp))
+          reusablePadding = fill.getInputs()[0];
+      }
+    }
     allocOpTmp = allocOp;
     rewriter.setInsertionPointAfter(loop);
     auto toTensorOp = rewriter.create<bufferization::ToTensorOp>(
@@ -726,13 +774,24 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
         op, "can not lower uncontinuout masked loads");
   }
 
+  auto [ptrStrides, ptrOffset] = memRefType.getStridesAndOffset();
+  bool mayDeinterleave =
+      !ptrStrides.empty() && mstate.getRank() == memRefType.getRank() &&
+      isConstantIntValue(mstate.offsets.back(), 0) &&
+      isConstantIntValue(mstate.dims.back(), memRefType.getShape().back()) &&
+      ptrStrides.back() == 2 && memRefType.getShape().back() % 2 == 0;
+
   Value tensorOtherBase;
   if (other) {
     auto scalarOther =
         mlir::ConverterUtils::getScalarValue(other, loc, rewriter);
     if (scalarOther) {
-      fillTensorWithOtherForMaskScenario(scalarOther, allocOp, mstate.dims,
-                                         rewriter);
+      // The full allocation already supplies these inactive elements. Keep
+      // per-row fills for overlapping/fallback slices and for deinterleave,
+      // whose current consumer explicitly checks for the row initialization.
+      if (mayDeinterleave || !samePaddingValue(reusablePadding, scalarOther))
+        fillTensorWithOtherForMaskScenario(scalarOther, allocOp, mstate.dims,
+                                           rewriter);
     } else if (isa<RankedTensorType>(other.getType())) {
       tensorOtherBase = other;
     } else {
@@ -748,17 +807,10 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   //
   // The basis is that last dimension range comparison would generate
   // unaccepted discontinuous mask.
-  if (!tensorOtherBase && mstate.getRank() == memRefType.getRank() &&
-      isConstantIntValue(mstate.offsets.back(), 0) &&
-      isConstantIntValue(mstate.dims.back(), memRefType.getShape().back())) {
-    auto [ptrStrides, ptrOffsets] = memRefType.getStridesAndOffset();
-    if (ptrStrides.back() == 2 && (memRefType.getShape().back() % 2 == 0) &&
-        DeinterleaveStatusWithMaskOptimization(op, ptr, rewriter, mstate,
-                                               allocOp, writebackDest)
-            .succeeded()) {
-      return success();
-    }
-  }
+  if (!tensorOtherBase && mayDeinterleave &&
+      succeeded(DeinterleaveStatusWithMaskOptimization(
+          op, ptr, rewriter, mstate, allocOp, writebackDest)))
+    return success();
 
   if (auto unrealizedCastOp = ptr.getDefiningOp<UnrealizedConversionCastOp>()) {
     // TODO : not support handle  associate with "module"

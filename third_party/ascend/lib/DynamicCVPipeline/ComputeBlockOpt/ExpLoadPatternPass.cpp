@@ -56,9 +56,9 @@ namespace {
 struct ExpLoadPattern {
   linalg::BroadcastOp broadcastOp;
   Operation *expOp = nullptr;
-  /// Ops of the load unit feeding `exp`: the atomic `ssbuffer.load` scope when
-  /// PackMemref packed it, otherwise the raw `alloc -> copy -> to_tensor`
-  /// chain.
+  /// Ops of the load unit feeding `exp`.
+  /// It is the atomic `ssbuffer.load` scope once PackMemref packed it,
+  /// otherwise the raw `alloc -> copy -> to_tensor` chain.
   SmallVector<Operation *> loadOps;
   arith::MulFOp mulfOp;
   int blockId = -1;
@@ -69,10 +69,11 @@ static bool isExpLike(Operation *op) {
   return isa_and_present<math::ExpOp, math::Exp2Op>(op);
 }
 
-/// Collects the ops of a load unit that PackMemref left unpacked, i.e. the raw
-/// `alloc -> memref.copy -> to_tensor` chain behind `loadValue`. Fails unless
-/// every op of the chain already sits in \p blockId, which is what lets the
-/// whole unit travel to another block.
+/// The ops of a load unit that PackMemref left unpacked.
+/// That is the raw `alloc -> memref.copy -> to_tensor` chain behind
+/// `loadValue`.
+/// Post: fails unless every op of the chain already sits in \p blockId, which
+/// is what lets the whole unit travel to another block.
 static bool collectRawLoadUnit(Value loadValue,
                                CVPipeline::ComputeBlockIdManager &bm,
                                int blockId,
@@ -107,8 +108,8 @@ static bool collectRawLoadUnit(Value loadValue,
 //   mulf <- broadcast <- exp/exp2 <- load
 //        ↖
 //           %arg
-// `load` is an `ssbuffer.load` scope after PackMemref, or the raw alloc/copy/
-// to_tensor chain when the unit was left unpacked.
+// `load` is an `ssbuffer.load` scope after PackMemref, or the raw
+// alloc/copy/to_tensor chain when the unit was left unpacked.
 static bool matchExpLoadPattern(linalg::BroadcastOp broadcastOp,
                                 CVPipeline::ComputeBlockIdManager &bm,
                                 ExpLoadPattern &info) {
@@ -130,9 +131,9 @@ static bool matchExpLoadPattern(linalg::BroadcastOp broadcastOp,
     return false;
   }
 
-  // The load unit must sit in the pattern's block: the scalar closure below is
-  // collected with `includeParent = false`, so every op of the pattern has to
-  // be a direct child of it.
+  // The load unit must sit in the pattern's block: the closure below is
+  // collected with `includeParent = false`, so every pattern op is a direct
+  // child of it.
   Value loadValue = expOp->getOperand(0);
   Operation *loadCarrier = loadValue.getDefiningOp();
   if (!loadCarrier || loadCarrier->getBlock() != broadcastOp->getBlock() ||
@@ -239,8 +240,8 @@ public:
       if (!CVPipeline::willCreateCycle(matchedOps.getArrayRef(), memGraph,
                                        info.newBlockId, bm)) {
         for (Operation *op : matchedOps) {
-          // A packed unit carries its block id on the scope only; stamping the
-          // body would break the scope atomicity the earlier passes rely on.
+          // A packed unit carries its block id on the scope only.
+          // Stamping its body would break the atomicity earlier passes rely on.
           if (CVPipeline::isLoadScope(op)) {
             bm.updateBlockId(op, info.newBlockId);
             continue;

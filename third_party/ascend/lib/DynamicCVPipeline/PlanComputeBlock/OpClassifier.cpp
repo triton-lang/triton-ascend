@@ -191,45 +191,36 @@ void OpClassifierPass::markCube(Operation *op) {
 }
 
 // ============================================================================
-// Pattern: load unit → matmul (Upstream)
+// Pattern: load unit -> matmul (Upstream)
 // ============================================================================
-// Matches cases where matmul's input comes from a load unit.
-// After PackMemrefPass the whole `alloc -> ... -> bufferization.to_tensor`
-// chain is a single scope::ScopeOp tagged `ssbuffer.load`; such a unit feeding
-// matmul must run on CUBE. A raw bufferization.to_tensor is only kept as a
-// fallback for unusual upstream input, since PackMemrefPass normally hides it
-// inside the scope.
-// Matching Logic
-//   1. If `def` is a load scope -> mark it CUBE and seed the BFS.
-//   2. Otherwise, if `def` is a bufferization.to_tensor, mark it and its memref
-//      source as CUBE (legacy fallback).
-// Purpose: Ensure matmul's input data loading executes on CUBE for efficient
-// matrix data transfer.
+// Matmul's input comes from a load unit, which must run on CUBE.
+// After PackMemrefPass that unit is one `scope::ScopeOp` tagged
+// `ssbuffer.load`; a raw to_tensor only appears for unusual upstream input.
+// Matching logic:
+//   isLoadScope(`def`) => mark it CUBE and seed the BFS
+//   raw to_tensor      => mark it and its memref source CUBE (fallback)
 // ============================================================================
 void OpClassifierPass::matchLoadPattern(Operation *def) {
-  if (auto scopeOp = dyn_cast<scope::ScopeOp>(def)) {
-    // A scope stamped by PackMemref keeps its authoritative core type. A
-    // pre-classified CUBE scope is not (re-)added to `cubeSeeds` here; Step 2
-    // seeds such ops separately from `allOps` so their upstream still
-    // propagates.
-    if (scopeOp->hasAttr(CVPipeline::kScopeLoadAttr) &&
-        !preClassifiedOps.contains(scopeOp)) {
-      opCoreTypes[scopeOp] = OP_CUBE_ONLY;
-      cubeSeeds.push_back(scopeOp);
+  if (isa<scope::ScopeOp>(def)) {
+    // A scope stamped by PackMemref keeps its authoritative core type.
+    // Step 2 seeds a pre-classified CUBE scope from `allOps`, not here, so its
+    // upstream still propagates.
+    if (CVPipeline::isLoadScope(def) && !preClassifiedOps.contains(def)) {
+      opCoreTypes[def] = OP_CUBE_ONLY;
+      cubeSeeds.push_back(def);
     }
     return;
   }
 
-  // PackMemref only packs units that read from GM, so a compute-pattern unit
-  // keeps its raw `to_tensor` and reaches this fallback by design.
+  // PackMemref packs only units that read from GM, so a compute-pattern unit
+  // keeps its raw to_tensor and reaches this fallback by design.
   auto toTensorOp = dyn_cast<bufferization::ToTensorOp>(def);
   if (!toTensorOp) {
     return;
   }
 
-  // PackMemref pins annotated load scopes to VECTOR. Unpacked load units
-  // still need this check on the raw to_tensor result.
-  // special case: implicit transpose -> remains vector
+  // Packmemref pins an annotated load scope to VECTOR.
+  // An unpacked unit still needs this check on the raw to_tensor result.
   if (utils::getAnnotateOpWithAttr(toTensorOp.getResult(),
                                    hivm::kMayImplicitTransposeWithLastAxis)) {
     return;
@@ -274,13 +265,13 @@ void OpClassifierPass::matchLoadPattern(Operation *def) {
 //   transpose itself remains CUBE, but its upstream chain stays VECTOR to avoid
 //   unnecessary CUBE expansion.
 //   A packed load scope (`scope::ScopeOp` tagged `ssbuffer.load`) feeding
-//   transpose is coloured directly via markCube: its alloc/copy/to_tensor body
-//   lives inside the region with no external SSA operands, so no BFS seeding is
-//   needed (unlike a raw to_tensor, whose separate memref alloc
-//   matchLoadPattern also seeds). PackMemref pre-classifies implicit-transpose
-//   units, which markCube's pre-classified guard then leaves as VECTOR.
-// Purpose: transpose is a common preprocessing op for matmul; executing on CUBE
-// leverages matrix transfer capabilities.
+//   transpose is coloured by markCube alone: its alloc/copy/to_tensor body sits
+//   inside the region with no external SSA operands, so no BFS seeding is
+//   needed. A raw to_tensor still needs matchLoadPattern to seed its separate
+//   memref alloc. PackMemref pre-classifies implicit-transpose units, which
+//   markCube's pre-classified guard then leaves as VECTOR.
+// Purpose: transpose is a preprocessing op for matmul, and CUBE transfers
+// matrices faster.
 // ============================================================================
 void OpClassifierPass::matchTransposePattern(Operation *def) {
   auto transposeOp = dyn_cast<linalg::TransposeOp>(def);
@@ -290,7 +281,7 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
 
   markCube(transposeOp);
 
-  // Helper lambda to check if an operand's defining op qualifies for CUBE seed
+  // CUBE-seed gate on the defining op of an operand.
   auto shouldMarkCubeSeed = [](Operation *opDef) -> bool {
     if (!opDef) {
       return false;
@@ -304,16 +295,14 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
   auto operands = transposeOp->getOperands();
   for (const auto &op : operands) {
     auto defOp = op.getDefiningOp();
-    // Implicit-transpose values stay VECTOR regardless of who produces them,
-    // so the annotation is checked before any CUBE marking (incl. load scopes).
+    // An implicit-transpose value stays VECTOR whoever produces it,
+    // so this check precedes every CUBE marking, load scopes included.
     if (utils::getAnnotateOpWithAttr(op,
                                      hivm::kMayImplicitTransposeWithLastAxis)) {
       continue;
     }
-    // A packed load scope is an atomic load unit: its alloc/copy/to_tensor
-    // body lives inside the region with no external SSA operands, so markCube
-    // alone colours it. A raw to_tensor still needs matchLoadPattern to also
-    // seed its separate memref alloc, so it is left to the gate below.
+    // A packed load scope is atomic and needs no seeding, so markCube
+    // suffices. A raw to_tensor is left to the gate below.
     if (CVPipeline::isLoadScope(defOp)) {
       markCube(defOp);
       continue;
@@ -1174,10 +1163,12 @@ int OpClassifierPass::propagateVectorUpstream() {
       for (OpOperand &init : loop.getInitsMutable()) {
         BlockArgument iterArg = loop.getTiedLoopRegionIterArg(&init);
         if (iterArg && isVectorProducerOp(CVPipeline::getLoopCarriedDefOp(
-                           iterArg, iterArg.getOwner())))
+                           iterArg, iterArg.getOwner()))) {
           continue;
-        if (Operation *defOp = init.get().getDefiningOp())
+        }
+        if (Operation *defOp = init.get().getDefiningOp()) {
           skipIterArgInits.insert(defOp);
+        }
       }
     }
 
@@ -1253,7 +1244,7 @@ Value getViewSource(Value val) {
 // not be swallowed into the cube pipe.
 bool isDisqualifyingLoaderOp(Operation *op) {
   // Whole-loop CUBE colouring must respect a packed load's fixed core type.
-  // An unclassified load can still be coloured by the loop's consumers.
+  // A loop consumer can still colour a load that has no core type yet.
   if (CVPipeline::isLoadScope(op) && op->hasAttr(CVPipeline::kCoreType) &&
       CVPipeline::getOpCoreType(op) != CVPipeline::CoreType::CUBE_ONLY) {
     return true;
@@ -1751,15 +1742,18 @@ int OpClassifierPass::handleSCFYield() {
 }
 
 bool OpClassifierPass::isVectorProducerOp(Operation *def) const {
-  if (!def)
+  if (!def) {
     return false;
+  }
   // Region containers are excluded: the default sweep marks them VECTOR
   // even when their body is CUBE, so they are not trusted as a producer
   // signal.
-  if (def->getNumRegions() > 0)
+  if (def->getNumRegions() > 0) {
     return false;
-  if (isTensorArithOrMathOp(def))
+  }
+  if (isTensorArithOrMathOp(def)) {
     return true;
+  }
   return getCoreType(def) == OP_VECTOR_ONLY;
 }
 
@@ -1822,18 +1816,18 @@ OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
 // handling. Only an op whose core type is CUBE_AND_VECTOR is duplicated.
 // ============================================================================
 
-bool OpClassifierPass::splitOperationForCubeAndVector(
+void OpClassifierPass::splitOperationForCubeAndVector(
     Operation *op, llvm::DenseSet<Operation *> &processedOps,
     llvm::DenseMap<Operation *, Operation *> &opToVectorClone) {
   // Guard against double-processing the same op
   if (processedOps.count(op)) {
-    return false;
+    return;
   }
   processedOps.insert(op);
 
   // Only split ops explicitly marked CUBE_AND_VECTOR
   if (opCoreTypes[op] != OP_CUBE_AND_VECTOR) {
-    return false;
+    return;
   }
 
   // ------------------------------------------------------------------
@@ -1917,23 +1911,19 @@ bool OpClassifierPass::splitOperationForCubeAndVector(
       use->set(vectorResult); // redirect to VECTOR clone
     }
   }
-
-  return true;
 }
 
 // ============================================================================
 // handleCubeAndVector: entry point for CUBE_AND_VECTOR splitting
 // ============================================================================
-// A single-core marker (CUBE / VECTOR) is authoritative and is never
-// duplicated; only an op whose core type is CUBE_AND_VECTOR is split into a
-// CUBE copy and a VECTOR copy. Cross-core consumption of a single-core op is
-// carried by the dependency chain, not by OpClassifier.
+// A single-core marker (CUBE / VECTOR) is authoritative: it is never
+// duplicated. Only a CUBE_AND_VECTOR op is split into a CUBE copy and a VECTOR
+// copy. Cross-core consumption of a single-core op travels along the dependency
+// chain, not through OpClassifier.
 int OpClassifierPass::handleCubeAndVector() {
-  // A single pass is enough: splitting only turns a CUBE_AND_VECTOR op into
-  // CUBE_ONLY / VECTOR_ONLY, so it can never create a new candidate (this is
-  // what the previous do/while loop guessed at). The candidates are snapshotted
-  // first because `splitOperationForCubeAndVector` appends the VECTOR clone to
-  // `allOps`, which would otherwise invalidate iterators over `allOps`.
+  // One pass suffices: a split only yields CUBE_ONLY / VECTOR_ONLY, so it can
+  // never create a new candidate. The candidates are snapshotted first because
+  // `splitOperationForCubeAndVector` appends the VECTOR clone to `allOps`.
   llvm::SmallVector<Operation *> cubeAndVectorOps;
   for (Operation *op : allOps) {
     if (opCoreTypes[op] == OP_CUBE_AND_VECTOR) {

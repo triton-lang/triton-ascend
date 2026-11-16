@@ -161,8 +161,9 @@ static void collectAllDeps(Operation *startOp,
   while (!worklist.empty()) {
     Operation *cur = worklist.pop_back_val();
     helper.forEachSource(cur, [&](Operation *src) {
-      if (collected.insert(src).second)
+      if (collected.insert(src).second) {
         worklist.push_back(src);
+      }
       return WalkResult::advance();
     });
   }
@@ -279,10 +280,12 @@ static SmallVector<VectorMergeEdge> collectVectorMergeEdges(
       continue;
     if (!hasTensorResult(blk))
       continue;
+    }
 
     // Must have exactly one CUBE predecessor and exactly one CUBE successor
     if (!findOnlyCubeNeighbour(blk.succs) || !findOnlyCubeNeighbour(blk.preds))
       continue;
+    }
 
     vecCandidates.insert(&blk);
   }
@@ -333,6 +336,7 @@ collectDepOpsInCubePre(const ComputeBlock &cubePre,
   for (Operation *op : depOps) {
     if (llvm::is_contained(cubePre.ops, op))
       opsToClone.insert(op);
+    }
   }
   return opsToClone;
 }

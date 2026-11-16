@@ -37,6 +37,7 @@ if "view_tla_src" not in sys.modules:
     package.__path__ = [str(TLA_DIR)]
     sys.modules["view_tla_src"] = package
 view = importlib.import_module("view_tla_src.view")
+core = importlib.import_module("view_tla_src.core")
 
 
 class Handle:
@@ -175,12 +176,45 @@ def test_runtime_gm_entry_forwards_shape_and_strides():
     call = sem.builder.calls[0]
     assert call[0] == "pointer_view"
     assert call[1] is src.handle
-    assert call[3][0] == (128, -1) and call[3][3] == (-1, 1)  # result type
+    # Result type: dynamic dims carry the MLIR sentinel, never -1.
+    assert call[3][0] == (128, core._DYNAMIC) and call[3][3] == (core._DYNAMIC, 1)
     assert call[4][0] == 128  # static size stays a constant
     assert call[4][1].value[0] == "cast" and call[4][1].value[1] is size
     assert call[5][0].value[0] == "cast" and call[5][0].value[1] is stride
     assert call[5][1] == 1
     assert result.shape == (128, None) and result.strides == (None, 1)
+
+
+def test_subview_on_gm_view_preserves_space():
+    sem = Semantic()
+    source = view.buffer(Handle(), view.buffer_type((8, 256), tl.bfloat16, "gm", (256, 1)))
+    sliced = view.subview(source, (0, 128), (4, 128), _semantic=sem)
+    assert sliced.space == "gm", "subview must keep the GM address space"
+    assert sliced.shape == (4, 128) and sliced.strides == (256, 1)
+    assert sliced.offset is None
+    assert sem.builder.calls[0][1] is source.handle
+
+
+def test_default_row_major_strides_with_dynamic_extent():
+    sem = PtrSemantic()
+    size = tl.tensor(Handle(), tl.int32)
+    src = tl.tensor(Handle(), tl.pointer_type(tl.bfloat16))
+    result = view.view(src, (128, size), _semantic=sem)
+    call = sem.builder.calls[0]
+    assert call[0] == "pointer_view"
+    # Default row-major: dim0 stride is the runtime product 1 * size.
+    assert call[5][0].value == ("mul", 1, size)
+    assert call[5][1] == 1
+    assert result.strides == (None, 1)
+
+
+def test_dynamic_entries_skip_static_bounds_check():
+    sem = Semantic()
+    rows = tl.tensor(Handle(), tl.int32)
+    # Statically 16 columns would exceed the 16-wide source only together with
+    # the offset; the dynamic size defers the bounds decision to runtime.
+    result = view.subview(buf((8, 16)), (0, 8), (rows, 16), _semantic=sem)
+    assert result.shape == (None, 16)
 
 
 @pytest.mark.parametrize("offsets,sizes,strides,reason", [

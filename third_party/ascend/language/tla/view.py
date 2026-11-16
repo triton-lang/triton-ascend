@@ -86,13 +86,17 @@ def _runtime_row_major(sizes, semantic):
 
 def _subview(src, sizes, steps, offsets, semantic):
     """Rank-preserving memref subview with mixed static/dynamic parameters."""
+    # A single dynamic entry makes the view runtime-shaped, deferring the
+    # bounds decision for the whole view to runtime; only fully static
+    # slices are rejected up front.
+    static_view = not any(_is_dynamic(v) for v in offsets + sizes + steps)
     offset_handles, size_dims, step_dims = [], [], []
     result_shape, result_strides = [], []
     for offset, size, step, extent, src_stride in zip(offsets, sizes, steps, src.shape, src.strides):
         offset = _check_scalar_int(offset)
         size = _check_dim(size, "sizes")
         step = _check_dim(step, "strides")
-        if (not _is_dynamic(offset) and not _is_dynamic(size) and not _is_dynamic(step) and extent is not None
+        if (static_view and extent is not None
                 and (offset < 0 or offset + (size - 1) * step >= extent)):
             raise ValueError("static view is outside the source buffer")
         offset_handles.append(semantic.to_tensor(offset).handle)
@@ -143,9 +147,10 @@ def subview(src, offsets, sizes, strides=None, _semantic=None):
 
     ``sizes``, ``strides`` and ``offsets`` each contain, per dimension, a
     positive compile-time integer or a scalar integer tensor (runtime value);
-    strides default to one and multiply the source strides. Static
-    out-of-bounds slices are rejected; dynamic entries must be in bounds at
-    runtime. The source dtype and memory space are preserved.
+    strides default to one and multiply the source strides. Fully static
+    out-of-bounds slices are rejected; a single dynamic entry defers the
+    bounds decision for the whole view to runtime. The source dtype and
+    memory space are preserved.
 
     This maps directly to ``memref.subview``. It preserves the source pitch:
     a compact prefix with a different pitch can instead be expressed by

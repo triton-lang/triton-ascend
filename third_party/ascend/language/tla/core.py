@@ -22,6 +22,12 @@ from enum import Enum
 
 from triton.language import core as tl
 
+# MLIR sentinel for a dynamic extent, stride or offset
+# (``ShapedType::kDynamic``). It is INT64_MIN, not -1: -1 is a plain negative
+# number for MemRefType/StridedLayoutAttr verification, which rejects it with
+# "invalid memref size" / "invalid stride".
+_DYNAMIC = -9223372036854775808
+
 
 def _shape(values):
     values = tuple(tl._unwrap_if_constexpr(v) for v in values)
@@ -158,9 +164,10 @@ class buffer_type(tl.base_type):
         self.offset = offset  # None denotes a dynamic subview offset.
 
     def to_ir(self, builder):
-        # None -> -1 (ShapedType::kDynamic); the offset keeps its optional.
-        shape = [-1 if dim is None else dim for dim in self.shape]
-        strides = [-1 if stride is None else stride for stride in self.strides]
+        # None -> ShapedType::kDynamic for extents and strides alike; the
+        # offset keeps its optional and is mapped by the builder.
+        shape = [_DYNAMIC if dim is None else dim for dim in self.shape]
+        strides = [_DYNAMIC if stride is None else stride for stride in self.strides]
         return builder.create_tla_buffer_type(shape, self.element_ty.to_ir(builder), self.space,
                                               strides, self.offset)
 

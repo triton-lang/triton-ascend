@@ -122,7 +122,8 @@ def test_compile_failure_key_preserves_explicit_batching(monkeypatch):
     assert default != manual and calls[-1]["block_batching_factor"] == 2
     explicit_config = Config({"BLOCK_SIZE": 128, "EVEN_M": True, "block_batching_factor": 2})
     assert tuner._get_jit_compile_cache_key(object(), 16, config=explicit_config, grid=(256, )) == manual
-    assert tuner._get_jit_compile_cache_key(object(), 16, config=config, grid=(256, ), block_batching_factor='auto') is None
+    assert tuner._get_jit_compile_cache_key(object(), 16, config=config, grid=(256, ),
+                                            block_batching_factor='auto') is None
 
 
 def test_compile_failure_key_replays_heuristics_before_binder(monkeypatch):

@@ -93,7 +93,7 @@ def test_autotune_batching_default_and_override(explicit):
 
     config_options = dict(block_batching_factor=2) if explicit == 2 else {}
     tuned = triton.autotune(configs=[triton.Config(dict(B=b, **config_options)) for b in (256, 512)], key=['N'],
-                           do_bench=bench)(pointwise)
+                            do_bench=bench)(pointwise)
     x = torch.arange(131072, device='npu', dtype=torch.float32)
     out = torch.full_like(x, -123.)
     options = dict(block_batching_factor='auto') if explicit == 'auto' else {}
@@ -116,6 +116,9 @@ def test_autotune_batching_default_and_override(explicit):
         assert (out == -123).all()
         kernel = tuned[grid](x, out, x.numel(), **options)
         tuned[grid](x, out, x.numel(), **options)  # Best-config cache hit.
+        tuned.compile_parallel = False
+        tuned.cache.clear()
+        tuned[grid](x, out, x.numel(), **options)  # Sequential candidate path.
     torch.npu.synchronize()
     assert seen and set(seen) == {1 if explicit is None else explicit}
     torch.testing.assert_close(out, x * 2 + 1, rtol=0, atol=0)

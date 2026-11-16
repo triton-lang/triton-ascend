@@ -639,8 +639,9 @@ class CandidateCompiler:
                                                            or not isinstance(refusal.get('diagnostic'), str)):
                 raise BatchCompileError('invalid resource refusal evidence', kind='ProtocolError')
             if _cacheable_decline(refusal):
-                cache.put(json.dumps(dict(version=_PROTOCOL, variant=variant, decline=refusal, digest=_digest(refusal))),
-                          _DECLINE, binary=False)
+                cache.put(
+                    json.dumps(dict(version=_PROTOCOL, variant=variant, decline=refusal, digest=_digest(refusal))),
+                    _DECLINE, binary=False)
             return refusal, None
         manifest = outcome.payload['manifest']
         group = _checked_group(manifest, attempts / generation, variant, name)

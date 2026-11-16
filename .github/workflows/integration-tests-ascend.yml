@@ -46,6 +46,33 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-
 
+      - name: Validate restored LLVM cache
+        shell: bash
+        run: |
+          ${PYTHON} - <<'PY'
+          import os
+          from pathlib import Path
+
+          if os.environ.get("LLVM_SYSPATH"):
+              print("LLVM_SYSPATH is explicit; preserving the supplied dependency")
+          else:
+              cache_home = Path(os.environ.get("TRITON_HOME") or Path.home())
+              llvm_cache = (cache_home / ".triton" / "llvm").resolve()
+              checked = set()
+              for marker in sorted(llvm_cache.glob("*/version.txt")):
+                  package = marker.parent.resolve()
+                  if package.parent != llvm_cache or package in checked:
+                      continue
+                  checked.add(package)
+                  configs = [package / "lib/cmake/llvm/LLVMConfig.cmake",
+                             package / "lib/cmake/mlir/MLIRConfig.cmake"]
+                  missing = [str(path.relative_to(package)) for path in configs if not path.is_file()]
+                  if missing:
+                      print(f"Invalid restored LLVM cache {package}; missing {missing}")
+                      marker.unlink()
+                      print("Removed the local version marker; setup will download this dependency again")
+          PY
+
       - name: Download and install Bisheng compiler
         shell: bash
         run: |

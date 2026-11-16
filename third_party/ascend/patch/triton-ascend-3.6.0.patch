@@ -898,7 +898,7 @@ index 582cd876c..034fe0f87 100644
  @core._tensor_member_fn
  def exp(x, _semantic=None):
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 42bf7024f..8ab2a95b2 100644
+index 42bf7024f..02be50917 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
 @@ -219,7 +219,7 @@ class TritonSemantic(Generic[TensorTy]):
@@ -920,7 +920,27 @@ index 42bf7024f..8ab2a95b2 100644
              if scalar_ty.is_int_signed():
                  return self.tensor(self.builder.create_srem(input.handle, other.handle), input.type)
              else:
-@@ -429,22 +432,61 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -417,8 +420,18 @@ class TritonSemantic(Generic[TensorTy]):
+         return input, other
+ 
+     def and_(self, input: TensorTy, other: TensorTy) -> TensorTy:
++        # Track boolean provenance without changing byte-valued data operations.
++        bool_mask = all(isinstance(value, bool) or
++                        (isinstance(value, self.tensor) and
++                         (value.dtype.is_bool() or
++                          (value.dtype.is_int8() and (getattr(value, 'was_bool_to_int8', False) or
++                                                     getattr(value, '_bool_mask', False)))))
++                        for value in (input, other))
+         input, other = self.bitwise_op_type_checking_impl(input, other)
+-        return self.tensor(self.builder.create_and(input.handle, other.handle), input.type)
++        ret = self.tensor(self.builder.create_and(input.handle, other.handle), input.type)
++        if bool_mask and ret.dtype.is_int8():
++            ret._bool_mask = True
++        return ret
+ 
+     def or_(self, input: TensorTy, other: TensorTy) -> TensorTy:
+         input, other = self.bitwise_op_type_checking_impl(input, other)
+@@ -429,22 +442,61 @@ class TritonSemantic(Generic[TensorTy]):
          return self.tensor(self.builder.create_xor(input.handle, other.handle), input.type)
  
      def logical_and(self, input: TensorTy, other: TensorTy) -> TensorTy:
@@ -988,7 +1008,7 @@ index 42bf7024f..8ab2a95b2 100644
          return self.invert(input)
  
      def lshr(self, input: TensorTy, other: TensorTy) -> TensorTy:
-@@ -468,14 +510,22 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -468,14 +520,22 @@ class TritonSemantic(Generic[TensorTy]):
  
      def minus(self, input: TensorTy) -> TensorTy:
          input_sca_ty = input.type.scalar
@@ -1012,7 +1032,7 @@ index 42bf7024f..8ab2a95b2 100644
              raise ValueError("wrong type argument to unary invert (" + input_sca_ty.__repr__() + ")")
          _1 = self.tensor(self.builder.get_all_ones_value(input_sca_ty.to_ir(self.builder)), input_sca_ty)
          return self.xor_(input, _1)
-@@ -579,8 +629,6 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -579,8 +639,6 @@ class TritonSemantic(Generic[TensorTy]):
          if end <= start:
              raise ValueError("arange's end argument must be greater than the start argument")
          range = end - start
@@ -1021,7 +1041,7 @@ index 42bf7024f..8ab2a95b2 100644
          shape = [range]
          if ret_ty is None:
              ret_ty = tl.block_type(tl.int32, shape)
-@@ -1009,6 +1062,8 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1009,6 +1067,8 @@ class TritonSemantic(Generic[TensorTy]):
          # Check `boundary_check` argument
          boundary_check = self._canonicalize_boundary_check(boundary_check, dst_ty.get_block_shapes())
  
@@ -1030,7 +1050,7 @@ index 42bf7024f..8ab2a95b2 100644
          # Build IR
          return self.tensor(
              self.builder.create_tensor_pointer_load(ptr.handle, boundary_check, padding, cache, eviction, is_volatile),
-@@ -1026,7 +1081,12 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1026,7 +1086,12 @@ class TritonSemantic(Generic[TensorTy]):
              raise ValueError("`padding_option` or `boundary_check` argument is not supported for loading a tensor of"
                               "pointers or loading a scalar. Because the compiler does not know the boundary; please "
                               "use block pointers (defined by `make_block_ptr`) instead")
@@ -1044,7 +1064,17 @@ index 42bf7024f..8ab2a95b2 100644
          # For a pointer of scalar, check the type of `mask` and `other`
          if not ptr.type.is_block():
              if mask and mask.type.is_block():
-@@ -1065,13 +1125,19 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1034,6 +1099,9 @@ class TritonSemantic(Generic[TensorTy]):
+             if other and other.type.is_block():
+                 raise ValueError("Other argument cannot be block type if pointer argument is not a block")
+ 
++        if mask is not None and mask.dtype.is_int8() and getattr(mask, '_bool_mask', False):
++            mask = self.cast(mask, tl.int1)
++
+         # Make `mask` and `other` into the same shape as `ptr`
+         if ptr.type.is_block():
+             if mask is not None:
+@@ -1065,13 +1133,19 @@ class TritonSemantic(Generic[TensorTy]):
  
          # Build IR
          if mask is None:
@@ -1069,7 +1099,7 @@ index 42bf7024f..8ab2a95b2 100644
          return ret
  
      def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
-@@ -1837,12 +1903,17 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1837,12 +1911,17 @@ class TritonSemantic(Generic[TensorTy]):
          is_signed = [arg.dtype.is_int_signed() for arg in args]
          return self.tensor(self.builder.create_print(prefix, hex, new_args, is_signed), tl.void)
  

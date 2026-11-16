@@ -137,7 +137,7 @@ bool hasQuantScaleCompileHint(Operation *op,
       return false;
     }
     matchedOps.insert(markOp);
-    return CVPipeline::isFixpipeQuantScaleHint(userOp);
+    return markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr);
   });
 }
 

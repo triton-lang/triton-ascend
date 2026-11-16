@@ -48,7 +48,6 @@ namespace mlir::triton {
 void StandardizeOpPass::getDependentDialects(DialectRegistry &registry) const {
   createPatternMatchRewritePass()->getDependentDialects(registry);
   createSplitMatmulPass()->getDependentDialects(registry);
-  createFuseNZSoftmaxPass()->getDependentDialects(registry);
 }
 
 void StandardizeOpPass::runOnOperation() {
@@ -61,7 +60,6 @@ void StandardizeOpPass::runOnOperation() {
   LOG_DEBUG("Input mlir:\n" << op);
   OpPassManager pm(op.getOperationName());
 
-  pm.addPass(createFuseNZSoftmaxPass());
   pm.addPass(createPatternMatchRewritePass());
   pm.addPass(createSplitMatmulPass());
   pm.addPass(createPackMemrefPass());

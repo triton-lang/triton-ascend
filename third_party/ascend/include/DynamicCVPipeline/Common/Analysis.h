@@ -24,6 +24,7 @@
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_ANALYSIS_H
 
 #include <cstddef>
+#include <variant>
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/TinyPtrVector.h"
@@ -89,8 +90,9 @@ public:
   hivm::PIPE pipe = hivm::PIPE::PIPE_UNASSIGNED;
   SmallVector<Operation *> relevantOps;
 
-  /// Analyses `customOp`; fails when its buffers cannot be resolved.
-  static llvm::FailureOr<CustomOpAnalysis> get(hivm::CustomOp customOp);
+  /// Analyses `customOp`; return analyzed core type when its buffers cannot be
+  /// resolved.
+  static std::variant<CustomOpAnalysis, CoreType> get(hivm::CustomOp customOp);
 
   /// Buffers the op consumes (all buffers when the pipe is unknown).
   llvm::TinyPtrVector<Value> getReads() {

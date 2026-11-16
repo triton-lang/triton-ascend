@@ -3,6 +3,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import pytest
 import torch
 import triton.language as tl
 import triton.language.extra.tla as tla
@@ -35,9 +36,10 @@ def test_ir():
         text = str(lower_offline(mod, ctx))
         assert "ave.hir.vcpadd" in text
         assert "ave.hir.vsel" not in text
-        mod, ctx = compile_offline(vcpadd_kernel, {"X": "*" + short, "M": "*" + mshort, "O": "*" + short},
-                                   {"D": dt, "I": mt, "N": n, "DIST": dist, "MODE": tla.simd.MODE.MERGING})
-        assert "ave.hir.vsel" in str(lower_offline(mod, ctx))
+        with pytest.raises(Exception) as err:
+            compile_offline(vcpadd_kernel, {"X": "*" + short, "M": "*" + mshort, "O": "*" + short},
+                            {"D": dt, "I": mt, "N": n, "DIST": dist, "MODE": tla.simd.MODE.MERGING})
+        assert "MODE.MERGING" in str(err.value)
     print("IR PASS: vcpadd")
 
 
@@ -46,8 +48,7 @@ def _launch():
     base = torch.arange(n, dtype=td)
     mask = torch.ones(n, dtype=torch.bool)
     out = torch.empty(n, dtype=td, device="npu")
-    vcpadd_kernel[(1, )](base.npu(), mask.to(md).npu(), out, D=dt, I=mt, N=n, DIST=dist,
-                         MODE=tla.simd.MODE.ZEROING)
+    vcpadd_kernel[(1, )](base.npu(), mask.to(md).npu(), out, D=dt, I=mt, N=n, DIST=dist, MODE=tla.simd.MODE.ZEROING)
     torch.npu.synchronize()
     return out
 
@@ -65,16 +66,14 @@ def test_run():
         for mask_name, mask in [("zero", torch.zeros(n, dtype=torch.bool)), ("one", torch.ones(n, dtype=torch.bool)),
                                 ("alternating", torch.arange(n) % 2 == 0), ("sparse", torch.arange(n) % 3 != 0)]:
             out = torch.empty(n, dtype=td, device="npu")
-            for mode_name, mode in [("zero", tla.simd.MODE.ZEROING), ("merge", tla.simd.MODE.MERGING)]:
-                out = torch.empty(n, dtype=td, device="npu")
-                vcpadd_kernel[(1, )](base.npu(), mask.to(md).npu(), out, D=dt, I=mt, N=n, DIST=dist, MODE=mode)
-                torch.npu.synchronize()
-                gated = torch.where(mask, base, torch.zeros_like(base))
-                zero_ref = torch.zeros(n, dtype=td)
-                zero_ref[:n // 2] = gated[0::2] + gated[1::2]
-                ref = torch.where(mask, zero_ref, base) if mode is tla.simd.MODE.MERGING else zero_ref
-                torch.testing.assert_close(out.cpu(), ref, rtol=0, atol=0)
-                print("RUN PASS: vcpadd", name, n, mask_name, mode_name)
+            vcpadd_kernel[(1, )](base.npu(), mask.to(md).npu(), out, D=dt, I=mt, N=n, DIST=dist,
+                                 MODE=tla.simd.MODE.ZEROING)
+            torch.npu.synchronize()
+            gated = torch.where(mask, base, torch.zeros_like(base))
+            ref = torch.zeros(n, dtype=td)
+            ref[:n // 2] = gated[0::2] + gated[1::2]
+            torch.testing.assert_close(out.cpu(), ref, rtol=0, atol=0)
+            print("RUN PASS: vcpadd", name, n, mask_name, "zero")
     print("RUN PASS: vcpadd all")
 
 

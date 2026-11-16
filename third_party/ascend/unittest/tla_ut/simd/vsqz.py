@@ -42,13 +42,15 @@ def _masks(name, n):
 
 def test_ir():
     for _, _, _, dt, mt, short, mshort, n, dist, _ in CASES:
-        for mode in (tla.simd.MODE.ZEROING, tla.simd.MODE.MERGING):
+        for mode in (tla.simd.SQUEEZE_STORE.STORED, tla.simd.SQUEEZE_STORE.NO_STORED):
             mod, ctx = compile_offline(vsqz_kernel, {"X": "*" + short, "M": "*" + mshort, "O": "*" + short},
                                        {"D": dt, "I": mt, "N": n, "DIST": dist, "MODE": mode})
             text = str(lower_offline(mod, ctx))
             assert "ave.hir.vsqz" in text
             assert "ave.hir.vscatter" not in text
-            assert ("ave.hir.vsel" in text) == (mode is tla.simd.MODE.MERGING)
+            # squeeze_store is a hardware operand, not a write mode: no vsel is added.
+            assert "ave.hir.vsel" not in text
+            assert ("no_stored" in text) == (mode is tla.simd.SQUEEZE_STORE.NO_STORED)
     print("IR PASS: vsqz")
 
 
@@ -58,7 +60,7 @@ def _launch():
     mask = torch.ones(n, dtype=torch.bool)
     out = torch.empty(n, dtype=td, device="npu")
     vsqz_kernel[(1, )](base.npu(), mask.to(md).npu(), out, D=dt, I=mt, N=n, DIST=dist,
-                       MODE=tla.simd.MODE.ZEROING)
+                       MODE=tla.simd.SQUEEZE_STORE.STORED)
     torch.npu.synchronize()
     return out
 
@@ -72,13 +74,17 @@ def test_compile():
 
 def test_run():
     by_name = {case[0]: case for case in CASES}
+    stored, no_stored = tla.simd.SQUEEZE_STORE.STORED, tla.simd.SQUEEZE_STORE.NO_STORED
     runs = [
-        ("i32", "zero", tla.simd.MODE.ZEROING),
-        ("i32", "sparse", tla.simd.MODE.MERGING),
-        ("i32", "alternating", tla.simd.MODE.MERGING),
-        ("u8", "sparse", tla.simd.MODE.MERGING),
-        ("f16", "sparse", tla.simd.MODE.MERGING),
-        ("f32", "sparse", tla.simd.MODE.MERGING),
+        ("i32", "zero", stored),
+        ("i32", "sparse", stored),
+        ("i32", "sparse", no_stored),
+        ("i32", "alternating", stored),
+        ("i32", "alternating", no_stored),
+        ("u8", "sparse", stored),
+        ("u8", "sparse", no_stored),
+        ("f16", "sparse", stored),
+        ("f32", "sparse", no_stored),
     ]
     for name, mask_name, mode in runs:
         _, td, md, dt, mt, _, _, n, dist, _ = by_name[name]
@@ -87,11 +93,11 @@ def test_run():
         out = torch.empty(n, dtype=td, device="npu")
         vsqz_kernel[(1, )](base.npu(), mask.to(md).npu(), out, D=dt, I=mt, N=n, DIST=dist, MODE=mode)
         torch.npu.synchronize()
-        zero_ref = torch.zeros(n, dtype=td)
-        zero_ref[:int(mask.sum())] = base[mask]
-        ref = torch.where(mask, zero_ref, base) if mode is tla.simd.MODE.MERGING else zero_ref
+        # squeeze_store does not change the vector result: compacted lanes then zeros.
+        ref = torch.zeros(n, dtype=td)
+        ref[:int(mask.sum())] = base[mask]
         torch.testing.assert_close(out.cpu(), ref, rtol=0, atol=0)
-        print("RUN PASS: vsqz", name, n, mask_name, "merge" if mode is tla.simd.MODE.MERGING else "zero")
+        print("RUN PASS: vsqz", name, n, mask_name, "no_stored" if mode is no_stored else "stored")
     print("RUN PASS: vsqz all")
 
 

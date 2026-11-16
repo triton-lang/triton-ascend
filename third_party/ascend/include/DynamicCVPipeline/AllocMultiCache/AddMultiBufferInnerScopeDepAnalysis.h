@@ -93,12 +93,11 @@ int cloneAllocTensorsInBlocks(
 // set whenever an i1 tensor dep surfaces; mirroring the original driver,
 // callers check `i1Found` after Phase 2's second dep collection rather than
 // here.
-int runDepAnalysisAndClone(CVPipeline::MainLoop &mainLoop,
-                           OpBuilder &globalBuilder, bool &i1Found,
-                           DenseMap<Value, InnerBlockInfo> &blocks,
-                           DenseMap<Value, SmallVector<Value>> &depValueMap,
-                           SmallVector<Operation *> &allOps,
-                           DenseSet<Value> &phase1ClonedDepVals);
+int runDepAnalysisAndClone(
+    CVPipeline::MainLoop &mainLoop, OpBuilder &globalBuilder, bool &i1Found,
+    bool &memrefFound, DenseMap<Value, InnerBlockInfo> &blocks,
+    DenseMap<Value, SmallVector<Value>> &depValueMap,
+    SmallVector<Operation *> &allOps, DenseSet<Value> &phase1ClonedDepVals);
 
 } // namespace triton
 } // namespace mlir

@@ -141,7 +141,11 @@ bool isDotRowTransform(const ProgramGridTransform &transform) {
 
 bool isSupportedSequence(ArrayRef<ProgramGridTransform> transforms) {
   if (transforms.size() == 1)
-    return isIAT16(transforms.front()) || isPTSM64(transforms.front()) ||
+    return isIAT16(transforms.front()) ||
+           (transforms.front().axis == 1 && transforms.front().factor == 64 &&
+            !transforms.front().persistentCoverage &&
+            !transforms.front().gridStrideAbiVerified) ||
+           isPTSM64(transforms.front()) ||
            isDotRowTransform(transforms.front());
   return transforms.size() == 2 && isIAT16(transforms[0]) &&
          isPTSM4(transforms[1]);

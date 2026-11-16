@@ -21,8 +21,9 @@
 
 A plain ``triton.jit`` kernel runs the generic ``make_ttir`` frontend and
 skips the TLA kernel-mode stamping.  Reusing ``ast_to_ttir`` keeps runtime
-kernels consistent with the offline tla_ut flow and sets
-``options.enable_tla_mode`` for the backend.
+kernels consistent with the offline tla_ut flow. Frontend options are resolved
+in ``compile()`` before compilation cache lookup and stage registration, and
+remain unchanged during codegen.
 """
 from triton.compiler.compiler import ASTSource
 from triton.runtime.jit import JITFunction
@@ -31,11 +32,14 @@ from triton.runtime.jit import JITFunction
 class TLASTSource(ASTSource):
     """ASTSource that emits TLA TTIR instead of the community frontend."""
 
+    frontend_kind = "tla"
+
+    def parse_options(self):
+        return {**super().parse_options(), "_frontend_kind": self.frontend_kind}
+
     def make_ir(self, target, options, codegen_fns, module_map, context):
         from triton.language.extra.tla.compiler import ast_to_ttir
 
-        # Enable the backend TLA lowering and --enable-tla-mode compile flag.
-        object.__setattr__(options, "enable_tla_mode", True)
         constexprs = {self.fn.arg_names[i[0]]: value for i, value in self.constants.items()}
         return ast_to_ttir(self.fn, self.signature, constexprs, context=context, options=options)
 

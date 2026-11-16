@@ -846,6 +846,29 @@ index 39e6c4dfb..c72ca65c2 100644
 +
 +    def format_line_delim(self, keyword):
 +        return f"///------------------{keyword}------------------\n"
+diff --git a/python/triton/language/core.py b/python/triton/language/core.py
+index 29f6a367f..dd6acce6a 100644
+--- a/python/triton/language/core.py
++++ b/python/triton/language/core.py
+@@ -1583,8 +1583,16 @@ def _aggregate(cls):
+ 
+     for (name, member) in inspect.getmembers(cls):
+         if inspect.isfunction(member) or inspect.ismethod(member) or isinstance(member, JITCallable):
+-            if name != "__init__":
+-                setattr(aggregate_value, name, member)
++            if name == "__init__":
++                continue
++            # __annotate__ is a Python 3.14+ internal; exclude from hash and
++            # don't copy it onto the aggregate value type.
++            if name == "__annotate__":
++                continue
++            setattr(aggregate_value, name, member)
++
++            # Exclude __annotate_func__ from hash — isn't user facing (Python 3.14+).
++            if name != "__annotate_func__":
+                 hash_attrs.append(member)
+ 
+     aggregate_value.hash_attrs = hash_attrs
 diff --git a/python/triton/language/math.py b/python/triton/language/math.py
 index 582cd876c..034fe0f87 100644
 --- a/python/triton/language/math.py
@@ -1450,3 +1473,128 @@ index 0f506818f..9961a4eb2 100644
              # launch kernel
              launch_metadata = kernel.launch_metadata(grid, stream, *bound_args.values())
              kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+diff --git a/python/triton/tools/compile.py b/python/triton/tools/compile.py
+index 73085d3d3160..ee5eb6410dcd 100644
+--- a/python/triton/tools/compile.py
++++ b/python/triton/tools/compile.py
+@@ -194,6 +194,11 @@ def compile_kernel(args: CompileArgs):
+         "_placeholder": "",
+         "warp_size": target.warp_size,
+     }
++    if target.backend == "npu":
++        # NPU AOT: launcher export and template params live in the NPU tools package.
++        from triton.tools.extra.npu.aot import prepare_params
++
++        prepare_params(ccinfo, kernel, signature, constants, out_path, params, arg_names_not_1)
+     output_files = []
+     backend_name = target.backend
+     template_dir = Path(__file__).parent / "extra" / backend_name
+diff --git a/python/triton/tools/link.py b/python/triton/tools/link.py
+index 75a1157a52f9..a86605bfaf6a 100644
+--- a/python/triton/tools/link.py
++++ b/python/triton/tools/link.py
+@@ -4,6 +4,8 @@ from typing import Sequence, Union
+ 
+ from dataclasses import dataclass
+ 
++from triton.tools.extra.npu import aot
++
+ 
+ def _exists(x):
+     return x is not None
+@@ -36,7 +38,7 @@ class HeaderParser:
+         # [name, hash, suffix]
+         self.kernel_name = re.compile("^([\\w]+)_([\\w]+)_([\\w]+)$")
+         # [(type, name)]
+-        self.c_sig = re.compile("[\\s]*(\\w+)\\s(\\w+)[,]?")
++        self.c_sig = re.compile(aot.c_sig_pattern())
+         # [d|c]
+         self.arg_suffix = re.compile("[c,d]")
+ 
+@@ -174,8 +176,8 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
+             if hint == 1  #
+             else None)
+         conds = " && ".join([  #
+-            cond_fn(val, hint)  #
+-            for val, hint in zip(meta.arg_names, meta.sizes)  #
++            aot.hint_condition(val, hint, ty)  #
++            for val, hint, ty in zip(meta.arg_names, meta.sizes, meta.arg_ctypes)  #
+             if hint is not None
+         ])
+         src += (f"  if ({conds})\n" if any(meta.sizes) else "if (1)\n"
+@@ -268,6 +270,12 @@ if __name__ == "__main__":
+         default="",
+         help="String to prefix kernel dispatcher names",
+     )
++    parser.add_argument(
++        "--backend",
++        type=str,
++        default="cuda",
++        help="Backend of the headers being linked (cuda|hip|npu); selects the result/stream types of the generated code (cuda.h for cuda|hip, NPU stand-ins for npu)",
++    )
+     args = parser.parse_args()
+ 
+     # metadata
+@@ -285,13 +293,21 @@ if __name__ == "__main__":
+     meta = meta_lists[0][0]
+     get_num_algos_decl = make_get_num_algos_decl(meta)
+     global_decl = make_global_decl(meta)
++    # CUDA/HIP take their types from <cuda.h>; the NPU toolchain ships no
++    # CUDA headers, so it supplies stand-ins and rewrites the type spellings.
++    if args.backend == "npu":
++        c_types_include = aot.c_types_include()
++    else:
++        c_types_include = "#include <cuda.h>"
+     with args.out.with_suffix(".h").open("w") as fp:
+-        out = "#include <cuda.h>\n"
++        out = c_types_include + "\n"
+         out += "\n".join(algo_decls)
+         out += "\n"
+         out += get_num_algos_decl
+         out += "\n"
+         out += global_decl
++        if args.backend == "npu":
++            out = aot.rewrite_types(out)
+         fp.write(out)
+ 
+     # generate source
+@@ -304,7 +322,7 @@ if __name__ == "__main__":
+     default_algo_kernel = make_default_algo_kernel(meta)
+     with args.out.with_suffix(".c").open("w") as fp:
+         out = ""
+-        out += "#include <cuda.h>\n"
++        out += c_types_include + "\n"
+         out += "#include <stdint.h>\n"
+         out += "#include <assert.h>\n"
+         out += "\n"
+@@ -319,4 +337,6 @@ if __name__ == "__main__":
+         out += load_unload_def
+         out += "\n"
+         out += default_algo_kernel
++        if args.backend == "npu":
++            out = aot.rewrite_types(out)
+         fp.write(out)
+
+
+diff --git a/lib/Dialect/Triton/Transforms/Combine.cpp b/lib/Dialect/Triton/Transforms/Combine.cpp
+index 1e9830c06..ddf1531da 100644
+--- a/lib/Dialect/Triton/Transforms/Combine.cpp
++++ b/lib/Dialect/Triton/Transforms/Combine.cpp
+@@ -160,7 +160,7 @@ public:
+     auto broadcastLhsShape =
+         cast<ShapedType>(broadcastLhsOp.getType()).getShape();
+     auto broadcastRhsShape =
+-        cast<ShapedType>(broadcastLhsOp.getType()).getShape();
++        cast<ShapedType>(broadcastRhsOp.getType()).getShape();
+     if (broadcastLhsShape[2] < 16 || broadcastRhsShape[0] < 16)
+       return failure();
+     Type newAccType = RankedTensorType::get(
+@@ -173,7 +173,7 @@ public:
+                                                   rewriter.getF32FloatAttr(0)));
+     rewriter.replaceOpWithNewOp<DotOp>(op, expandLhsOp.getSrc(),
+                                        expandRhsOp.getSrc(), newAcc,
+-                                       InputPrecision::TF32, 0);
++                                       InputPrecision::IEEE, 0);
+     return success();
+   }
+ };

@@ -63,6 +63,10 @@ enum TritonNpuLaunchFlag {
   // DotRow divides X by coalesce_factor (2/4/8/16/32), with ceil division.
   // It is mutually exclusive with IAT/PTSM and has no persistent X-axis cap.
   TRITON_NPU_DOT_ROW = 1 << 10,
+  // Modifier for standalone IAT: divide Y by 64 instead of 16.
+  // Requires IAT and cannot be combined with PTSM. The argument ABI is
+  // unchanged.
+  TRITON_NPU_IAT64 = 1 << 11,
 };
 
 typedef struct {
@@ -87,6 +91,7 @@ typedef struct {
   uint32_t task_type;
   uint32_t mix_ratio;
   uint32_t shared_mem_dynamic_size;
+  uint64_t profile_scratch_size;
 } TritonNpuLaunchSpecV1;
 
 typedef struct {
@@ -100,6 +105,7 @@ typedef struct {
   const int *shape_dims;
   const int *tensor_kinds;
   int num_tensors;
+  void *profile_scratch;
 } TritonNpuLaunchRequestV1;
 
 typedef struct TritonNpuLaunchPlan TritonNpuLaunchPlan;

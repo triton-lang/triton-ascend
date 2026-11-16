@@ -65,7 +65,8 @@ void MergeCubeBlockPass::runOnOperation() {
   for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
     if (kDisableMergeCubeKernel.contains(funcOp.getSymName())) {
       LDBG("Found unsupport kernel: " << funcOp.getSymName());
-      CVPipeline::setSkipExtraReorder(moduleOp, true);
+      moduleOp->setAttr(CVPipeline::kMergeComputeBlockApplied,
+                        BoolAttr::get(&getContext(), false));
       return;
     }
   }
@@ -78,7 +79,7 @@ void MergeCubeBlockPass::runOnOperation() {
 
   // Collect main loop body blocks via the shared walkMainLoop helper.
   llvm::SmallVector<Block *> mainLoopBlocks;
-  if (failed(CVPipeline::walkMainLoop(
+  if (failed(CVPipeline::SplitIf::walkMainLoop(
           moduleOp, [&](Operation *loop) -> llvm::LogicalResult {
             mainLoopBlocks.push_back(&loop->getRegion(0).front());
             return llvm::success();
@@ -99,7 +100,8 @@ void MergeCubeBlockPass::runOnOperation() {
   }
 
   if (!mergedAny) {
-    CVPipeline::setSkipExtraReorder(moduleOp, true);
+    moduleOp->setAttr(CVPipeline::kMergeComputeBlockApplied,
+                      BoolAttr::get(&getContext(), false));
   }
 
   LDBG("MergeCubeBlockPass completed\n" << moduleOp);

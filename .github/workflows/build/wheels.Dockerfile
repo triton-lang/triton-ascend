@@ -1,5 +1,5 @@
 # Build triton-ascend wheels inside a manylinux container.
-# Used by wheels.yml via docker/build-push-action@v7 — no Docker daemon needed
+# Used by ascend-wheels.yml via docker/build-push-action@v7 — no Docker daemon needed
 # on the runner; buildx talks to remote buildkitd.
 #
 # Layer order matters for the registry cache used by wheels.yml: everything
@@ -16,7 +16,20 @@ ARG PYTHON_VERSION=cp310
 ARG TRITON_WHEEL_VERSION_SUFFIX=+dev
 ARG BUILD_DATE=00000000
 ARG TRITON_BUILD_NPUIR=OFF
+# TD (Triton-distributed-ascend) defaults to ON for CI wheels: setup_patch.py
+# clones the pinned Triton-distributed-ascend revision and bundles the
+# triton_dist Python package plus the TritonDistributed compiler plugin into
+# the wheel, matching the TRITON_BUILD_TD=ON build in
+# integration-tests-ascend.yml. Without it, installing a CI wheel over an
+# install whose wheel bundled triton_dist deletes the package (pip uninstall
+# follows the old RECORD, leaving empty namespace dirs behind) and breaks
+# downstream imports like triton_dist.language.extra.libshmem_device.
+ARG TRITON_BUILD_TD=ON
 ARG ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.2.0-beta.2
+# AscendNPU-IR revision to build against: "stable" (branch HEAD — nightly /
+# regular PR wheels) or an exact 40-hex commit SHA (the Build-Pinned-Wheels
+# job passes the submodule gitlink so the wheel matches what local users get).
+ARG NPUIR_REF=stable
 
 # ---------------------------------------------------------------------------
 # Build dependencies (matching CIBW_BEFORE_ALL)
@@ -39,6 +52,7 @@ RUN export PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local
 # ---------------------------------------------------------------------------
 ENV TRITON_BUILD_WITH_CLANG_LLD=true \
     TRITON_BUILD_PROTON=OFF \
+    TRITON_BUILD_TD=${TRITON_BUILD_TD} \
     TRITON_WHEEL_NAME=triton-ascend \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
     TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX}${BUILD_DATE} \
@@ -52,6 +66,28 @@ ENV TRITON_BUILD_WITH_CLANG_LLD=true \
 # ---------------------------------------------------------------------------
 COPY . /project/
 WORKDIR /project
+
+# ---------------------------------------------------------------------------
+# Wheel builds track the AscendNPU-IR stable branch, NOT the pinned submodule
+# gitlink (local developer builds use the pin): fetch the stable sources here
+# so the product build code just sees an existing tree and never reaches into
+# the CI workflow scripts itself. Needed both for the C++ plugin build
+# (add_subdirectory(third_party/ascend/AscendNPU-IR)) and for the
+# TRITON_BUILD_NPUIR=ON in-image fallback. Includes the nested third-party
+# submodules (llvm-project / torch-mlir / shmem). NPUIR_REF overrides the
+# branch with an exact SHA for the pinned-submodule verification wheel.
+#
+# Then freeze the gitlink for the rest of the image build: the root setup.py
+# (BackendInstaller.prepare) runs `git submodule update --init ascend` from
+# third_party, whose directory-prefix pathspec also matches the nested
+# AscendNPU-IR gitlink — with the pre-fetched tree at a different SHA (the
+# stable-tracking flows) that command would silently checkout the pinned
+# SHA back over it. submodule.<name>.update=none makes every in-image
+# `git submodule update` skip it; the product code's own guards never issue
+# a submodule command when the tree already exists, so nothing else changes.
+# ---------------------------------------------------------------------------
+RUN NPUIR_REPO_BRANCH=${NPUIR_REF} bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR \
+ && git config submodule.third_party/ascend/AscendNPU-IR.update none
 
 # ---------------------------------------------------------------------------
 # Build the wheel with the target Python from the manylinux toolchain.
@@ -96,6 +132,15 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
        else \
          echo "No .npuir-payload in the build context; building without a bundled BishengIR"; \
        fi \
+    # CXX workaround for the TRITON_BUILD_NPUIR=ON in-image fallback only
+    # (build_npuir.py reads NPUIR_CXX_COMPILER): same wrapper as
+    # npuir-build.yml — the Ascend LLVM fork excludes <cstdint> under
+    # BSPUB_DAVINCI_BISHENGIR_A5 while this image's libstdc++ no longer
+    # provides stdint.h transitively, and clang 21's new -Wall warnings
+    # trip -Werror on LLVM 19 code.
+    && printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error\n' > /tmp/clang++-cstdint \
+    && chmod +x /tmp/clang++-cstdint \
+    && export NPUIR_CXX_COMPILER=/tmp/clang++-cstdint \
     && python3 ${SETUP_PY} bdist_wheel \
     && ccache -s \
     && mkdir -p /out \

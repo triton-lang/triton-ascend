@@ -21,13 +21,13 @@
  */
 
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
-#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "third_party/ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -430,35 +430,6 @@ static void printDependentMaps(ControlFlowConditionInfo *info) {
   }
 }
 
-// Find the IfOp that contains a given operation
-static scf::IfOp findIfOpContainingOp(Operation *op) {
-  if (!op) {
-    return nullptr;
-  }
-
-  constexpr int maxDepth = 100;
-  int depth = 0;
-
-  Operation *current = op;
-  while (current && depth < maxDepth) {
-    if (auto ifOp = dyn_cast<scf::IfOp>(current)) {
-      if (ifOp->hasAttr(CVPipeline::kIf)) {
-        LDBG("Found ssbuffer.if at depth " << depth);
-        return ifOp;
-      }
-    }
-    current = current->getParentOp();
-    depth++;
-  }
-
-  if (depth >= maxDepth) {
-    LDBG("Warning: Max depth " << maxDepth
-                               << " exceeded in findIfOpContainingOp");
-  }
-
-  return nullptr;
-}
-
 // Compute producer buffer counts (max map size) from cross/intra-core maps;
 // falls back to BufferCountManager IntraCore when the intra-core map is empty.
 static void computeProducerBufferCount(ControlFlowConditionInfo *info,
@@ -755,7 +726,8 @@ void InitDependentMapPass::runOnOperation() {
 
   // Step 6: Collect flowOpt if block pairs from DAG (only when buffer counts
   // exceed threshold)
-  if (isFlowOptEnabled(info)) {
+  if (info->crossCoreBufferCount > CROSS_CORE_BUFFER_COUNT_THRESHOLD &&
+      info->intraCoreBufferCount > INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
     LDBG("Buffer counts meet requirements, collecting flowOpt pairs.");
 
     if (collectFlowOptIfOpPairs(module, info) != 0) {

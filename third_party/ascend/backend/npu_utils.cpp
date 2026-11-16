@@ -24,12 +24,16 @@
 #include <Python.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <dlfcn.h>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -187,6 +191,81 @@ cann_register_kernel(const char *name, const void *data, size_t data_size,
   return std::make_tuple(devbinHandle, func_stub_handle);
 }
 #endif
+
+static PyObject *unavailableClockRate(const char *kind, int device,
+                                      const std::string &reason) {
+  std::string message = std::string(kind) +
+                        " clock rate is unavailable for NPU " +
+                        std::to_string(device) + ": " + reason +
+                        "; returning 0 (unknown), in kHz.";
+  if (PyErr_WarnEx(PyExc_RuntimeWarning, message.c_str(), 1) < 0)
+    return nullptr;
+  return PyLong_FromLong(0);
+}
+
+static void *getHalLibrary() {
+  // DSMI depends on symbols exported by the HAL library.
+  static void *library = dlopen("libascend_hal.so", RTLD_GLOBAL | RTLD_LAZY);
+  return library;
+}
+
+static PyObject *getVectorClockRate(PyObject *self, PyObject *args) {
+  int device;
+  if (!PyArg_ParseTuple(args, "i", &device))
+    return nullptr;
+  if (device < 0) {
+    PyErr_SetString(PyExc_ValueError, "Device ID must be non-negative");
+    return nullptr;
+  }
+  using GetDeviceInfo = int (*)(uint32_t, int32_t, int32_t, int64_t *);
+  void *library = getHalLibrary();
+  auto query =
+      library
+          ? reinterpret_cast<GetDeviceInfo>(dlsym(library, "halGetDeviceInfo"))
+          : nullptr;
+  if (!query)
+    return unavailableClockRate("Vector core", device,
+                                "halGetDeviceInfo is unavailable");
+  constexpr int32_t vector_core = 7;
+  constexpr int32_t frequency = 4;
+  int64_t mhz = 0;
+  int result = query(device, vector_core, frequency, &mhz);
+  if (result != 0 || mhz <= 0 || static_cast<uint64_t>(mhz) > UINT64_MAX / 1000)
+    return unavailableClockRate(
+        "Vector core", device,
+        "halGetDeviceInfo failed or returned an invalid frequency (error " +
+            std::to_string(result) + ")");
+  return PyLong_FromUnsignedLongLong(static_cast<uint64_t>(mhz) * 1000);
+}
+
+static PyObject *getHbmClockRate(PyObject *self, PyObject *args) {
+  int device;
+  if (!PyArg_ParseTuple(args, "i", &device))
+    return nullptr;
+  if (device < 0) {
+    PyErr_SetString(PyExc_ValueError, "Device ID must be non-negative");
+    return nullptr;
+  }
+  (void)getHalLibrary();
+  static void *library = dlopen("libdrvdsmi_host.so", RTLD_LOCAL | RTLD_LAZY);
+  using GetFrequency = int (*)(int, int, unsigned int *);
+  auto query = library ? reinterpret_cast<GetFrequency>(
+                             dlsym(library, "dsmi_get_device_frequency"))
+                       : nullptr;
+  if (!query)
+    return unavailableClockRate("HBM", device,
+                                "dsmi_get_device_frequency is unavailable");
+  // DSMI frequency selector 6 is HBM; selector 2 is the control CPU.
+  constexpr int hbm_frequency = 6;
+  unsigned int mhz = 0;
+  int result = query(device, hbm_frequency, &mhz);
+  if (result != 0 || mhz == 0)
+    return unavailableClockRate("HBM", device,
+                                "dsmi_get_device_frequency failed or returned "
+                                "an invalid frequency (error " +
+                                    std::to_string(result) + ")");
+  return PyLong_FromUnsignedLongLong(static_cast<uint64_t>(mhz) * 1000);
+}
 
 static std::tuple<void *, void *> registerKernel(const char *name,
                                                  const void *data,
@@ -442,17 +521,47 @@ extern "C" void *triton_allocate_workspace(uint64_t size, void **handle) {
   return retainTensor(std::move(tensor), handle, "workspace", size);
 }
 
+namespace {
+std::mutex g_raw_workspace_mutex;
+std::unordered_set<void *> g_raw_workspaces;
+} // namespace
+
 extern "C" void *triton_allocate_workspace_on_stream(uint64_t size,
                                                      void *stream) {
   // The caching allocator only reuses a freed block on its allocation stream.
   // Use the launch stream explicitly: it can differ from the submitting
   // thread's current stream, and the owner is released before device
   // completion.
-  return c10_npu::NPUCachingAllocator::raw_alloc_with_stream(
-      size, reinterpret_cast<aclrtStream>(stream));
+  if (c10_npu::NPUCachingAllocator::get()->initialized()) {
+    return c10_npu::NPUCachingAllocator::raw_alloc_with_stream(
+        size, reinterpret_cast<aclrtStream>(stream));
+  }
+  // The AOT C launcher loads npu_utils into a plain C process where the
+  // torch_npu caching allocator was never initialized. Fall back to raw
+  // CANN allocation; the registry lets release pair the matching free.
+  void *data = nullptr;
+  aclError ret = aclrtMalloc(&data, size, ACL_MEM_MALLOC_HUGE_FIRST);
+  if (ret != ACL_SUCCESS || data == nullptr) {
+    return nullptr;
+  }
+  std::lock_guard<std::mutex> lock(g_raw_workspace_mutex);
+  g_raw_workspaces.insert(data);
+  return data;
 }
 
 extern "C" void triton_release_workspace(void *data) {
+  if (data == nullptr) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_raw_workspace_mutex);
+    auto it = g_raw_workspaces.find(data);
+    if (it != g_raw_workspaces.end()) {
+      g_raw_workspaces.erase(it);
+      aclrtFree(data);
+      return;
+    }
+  }
   c10_npu::NPUCachingAllocator::raw_delete(data);
 }
 
@@ -483,6 +592,13 @@ static PyMethodDef NpuUtilsMethods[] = {
     {"load_kernel_binary", loadKernelBinary, METH_VARARGS,
      "Load NPU kernel binary into NPU driver"},
     {"get_arch", getArch, METH_VARARGS, "Get soc version of NPU"},
+    {"get_vector_clock_rate", getVectorClockRate, METH_VARARGS,
+     "Get vector-core clock rate in kHz for a logical device ID, or warn and "
+     "return zero if "
+     "unavailable"},
+    {"get_hbm_clock_rate", getHbmClockRate, METH_VARARGS,
+     "Get HBM clock rate in kHz for a logical device ID, or warn and return "
+     "zero if unavailable"},
     {"create_stream", createStream, METH_VARARGS, "Create a stream"},
     {"read_data_from_file", readDataFromBinaryFileWrapper, METH_VARARGS,
      "Read binary file into the array already allocated"},

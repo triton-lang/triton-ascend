@@ -197,6 +197,11 @@ def test_compile_only_requires_explicit_target_without_runtime_queries(monkeypat
     monkeypatch.setattr(compiler, 'NPUUtils', lambda: pytest.fail('offline compilation queried the NPU'))
     with knobs.ascend.scope():
         knobs.ascend.compile_only = True
+        # Direct F1 compilation bypasses the bundle hook but must not query a
+        # default device either. Check both stages before entering their tools.
+        for resolve in (compiler._graph_optimize_core_num, compiler._compile_device_limit):
+            with pytest.raises(ValueError, match='explicit block_compile_context'):
+                resolve(backend.parse_options({}))
         with pytest.raises(ValueError, match='explicit block_compile_context'):
             backend.prepare_block_compile_options(dict(block_batching_factor=2))
         values = dict(block_batching_factor=2, block_compile_context=(backend.target.arch, 24, (False, 24, 48), None))

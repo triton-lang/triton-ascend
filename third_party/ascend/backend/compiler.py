@@ -313,6 +313,8 @@ def _with_debug_line(npubin_stage, options):
 def _graph_optimize_core_num(opt):
     if getattr(opt, "block_compile_context", None) is not None:
         return opt.block_compile_context[1]
+    if knobs.ascend.compile_only:
+        raise ValueError("compile-only graph optimization requires explicit block_compile_context")
     # Physical AI-core blocks the launcher will schedule, so the row-count policy
     # can keep at least one full wave after R-way coalescing.  The launcher picks
     # AIV for pure-SIMT kernels (final mix_mode "aiv") and AIC otherwise, so the
@@ -330,6 +332,8 @@ def _graph_optimize_core_num(opt):
 def _compile_device_limit(opt):
     if getattr(opt, "block_compile_context", None) is not None:
         return opt.block_compile_context[2]
+    if knobs.ascend.compile_only:
+        raise ValueError("compile-only binary generation requires explicit block_compile_context")
     return NPUUtils().get_device_limit()
 
 
@@ -2055,7 +2059,6 @@ class AscendBackend(BaseBackend):
         options = self.parse_options(dict(values))
         if options.block_compile_context is not None:
             return dict(values, block_compile_context=options.block_compile_context)
-        from triton import knobs
         if knobs.ascend.compile_only:
             raise ValueError("compile-only block batching requires explicit block_compile_context")
         context = (self.target.arch, _graph_optimize_core_num(options) if options.enable_graph_optimize else None,

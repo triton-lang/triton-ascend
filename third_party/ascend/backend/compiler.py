@@ -236,7 +236,11 @@ def _finalize_program_launch_policy(metadata, opt):
             raise RuntimeError("persistent program-grid transform lacks coverage/ABI verification")
         ptsm_cap_authorized = True
 
-    if opt.is_pure_simt:
+    if opt.enable_tla_mode:
+        # TLA partitions work explicitly instead of relying on AutoBlockify,
+        # so the launcher must keep the full grid.
+        auto_blockify_enabled = False
+    elif opt.is_pure_simt:
         auto_blockify_enabled = _is_auto_map_parallel_blocks_enabled() and not row_coalescing_applied
     else:
         auto_blockify_enabled = (_is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op

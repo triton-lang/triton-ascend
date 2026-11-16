@@ -2599,8 +2599,8 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
   return newIfOp;
 }
 
-// Combine the conditions: crossCore condition + intraCore condition + counter
-// condition + flowOpt condition
+// Combine the conditions: crossCore condition + preload condition +
+// intraCore condition + counter condition + flowOpt condition
 int UpdateConditionInfoPass::combineConditions(
     ModuleOp module, Value crossCoreCond, Value preloadCond,
     Value intraCoreCond, Value flowOptCond, scf::IfOp ifOp, Operation *loopOp,
@@ -2820,6 +2820,9 @@ int UpdateConditionInfoPass::updateIfConds(
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
+    // The buffers a block reads from and writes to the other blocks of the
+    // same core are collected before the conditions are built: the intra-core
+    // condition of a block is built from them.
     SmallVector<SmallVector<int>> intraCoreInputValuesList(ifOps.size());
     SmallVector<SmallVector<int>> intraCoreOutputValuesList(ifOps.size());
     for (size_t ifIdx = 0; ifIdx < ifOps.size(); ++ifIdx) {

@@ -23,7 +23,6 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CloneOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CrossCorePattern.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
@@ -318,14 +317,6 @@ void AddControlFlowConditionPass::runOnOperation() {
       new InitDependentMapPass());
   initDependentMapPass->setConditionInfo(&info);
   pm.addPass(std::move(initDependentMapPass));
-
-  // The shape of the cross core dependency graph is reported for the
-  // diagnostics only: the normal preload scheme is the only scheme.
-  const CrossCorePattern pattern = analyzeCrossCorePattern(module);
-  LLVM_DEBUG({
-    DBGS() << "pipelines: " << pattern.pipelines
-           << ", entries: " << pattern.entries << "\n";
-  });
 
   // Step4: Update for ops with block counters and inner dependency
   // conditions, and insert PIPE_S inter-core synchronization

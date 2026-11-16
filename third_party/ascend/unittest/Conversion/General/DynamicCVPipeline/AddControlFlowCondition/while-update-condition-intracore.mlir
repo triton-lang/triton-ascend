@@ -1,4 +1,4 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=arith.select
 
 // UpdateConditionInfo on scf.while: intra-core (核内) conditions.
 // VECTOR while has producer (intraDeps role=1) then consumer (role=0).
@@ -19,6 +19,8 @@
 // CHECK: %[[SLT:.*]] = arith.cmpi slt, %{{.*}}, %[[LIM]] : i32
 // CHECK: %[[AND_P0:.*]] = arith.andi %{{.*}}, %[[SLT]]
 // CHECK: %[[COND5:.*]] = arith.andi %[[AND_P0]], %{{.*}}
+// The loop does not force a single block per iteration any more: the
+// condition of a block does not check the flag of the loop.
 // CHECK: scf.if %[[COND5]]
 // CHECK: %[[ONE_P:.*]] = arith.constant 1 : i32
 // CHECK: %[[INC:.*]] = arith.addi %{{.*}}, %[[ONE_P]] : i32

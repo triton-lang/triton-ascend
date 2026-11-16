@@ -8,9 +8,9 @@
 # 和评估标准文件，由 generate_rule.py 动态生成 OCR rule JSON。
 # 标准更新随上游仓库同步，无需手动维护本地规则文件。
 #
-# 触发方式：
+# 触发方式（仅目标分支为 main 的 PR）：
 #   - PR 自动触发：opened / synchronize / reopened
-#   - 评论手动触发：/doc-review 或 @doc-review
+#   - 评论手动触发：/doc-review 或 @doc-review（目标分支非 main 时取消本次运行，状态为 Cancelled）
 #
 # LLM credentials (shared with schedule_doc_translate.yaml):
 #   secret    TRANSLATION_ASCEND       default LLM API key (Volcengine deepseek-v4-flash)
@@ -54,6 +54,7 @@ concurrency:
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
+    branches: [main]
     paths:
       - 'docs/zh/**/*.md'
       - 'docs/zh/**/*.rst'
@@ -66,6 +67,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   doc-review:
@@ -103,14 +105,30 @@ jobs:
             });
             core.setOutput('base_ref', pullRequest.base.ref);
             core.setOutput('head_sha', pullRequest.head.sha);
+            core.setOutput('base_ok', pullRequest.base.ref === 'main' ? 'true' : 'false');
+
+      - name: Skip non-main PR
+        if: github.event_name == 'issue_comment' && steps.pr-context.outputs.base_ok != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.notice('Cancelled: doc review only runs on PRs targeting main.');
+            await github.rest.actions.cancelWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId
+            });
+            await new Promise(resolve => setTimeout(resolve, 60000));
 
       - name: Checkout repo
+        if: github.event_name == 'pull_request_target' || steps.pr-context.outputs.base_ok == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Clone doc-quality and generate rule JSON
         id: rule
+        if: github.event_name == 'pull_request_target' || steps.pr-context.outputs.base_ok == 'true'
         shell: bash
         timeout-minutes: 5
         continue-on-error: true
@@ -130,6 +148,7 @@ jobs:
 
       - name: Resolve LLM credentials
         id: llm
+        if: github.event_name == 'pull_request_target' || steps.pr-context.outputs.base_ok == 'true'
         shell: bash
         env:
           TRANSLATION_ASCEND: ${{ secrets.TRANSLATION_ASCEND }}
@@ -161,6 +180,7 @@ jobs:
 
       - name: Run Doc Quality Review
         uses: alibaba/open-code-review@main
+        if: github.event_name == 'pull_request_target' || steps.pr-context.outputs.base_ok == 'true'
         timeout-minutes: 60
         continue-on-error: true
         with:

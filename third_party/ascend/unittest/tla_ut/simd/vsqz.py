@@ -57,8 +57,7 @@ def _launch():
     base = torch.arange(n, dtype=td)
     mask = torch.ones(n, dtype=torch.bool)
     out = torch.empty(n, dtype=td, device="npu")
-    vsqz_kernel[(1, )](base.npu(), mask.to(md).npu(), out, D=dt, I=mt, N=n, DIST=dist,
-                       MODE=tla.simd.MODE.ZEROING)
+    vsqz_kernel[(1, )](base.npu(), mask.to(md).npu(), out, D=dt, I=mt, N=n, DIST=dist, MODE=tla.simd.MODE.ZEROING)
     torch.npu.synchronize()
     return out
 

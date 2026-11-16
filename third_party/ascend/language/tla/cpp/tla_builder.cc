@@ -26,6 +26,7 @@
 
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVMAVE/IR/HIVMAVE.h"
+#include "bishengir/Dialect/HIVMRegbaseIntrins/IR/HIVMRegbaseIntrins.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -90,6 +91,18 @@ Type resolveSimdElementType(MLIRContext *ctx, const py::object &elem) {
     return Float8E5M2Type::get(ctx);
   throw std::invalid_argument("unknown simd element tag \"" + tag +
                               "\"; expected i8 / bf16 / f32 / fp8e4nv");
+}
+
+// AVE uses logical predicate lengths; Regbase uses the physical 256-bit
+// register. This is the same bridge used by AVE lowering, not a bitcast or a
+// layout change. The native instruction determines the result's bit spacing.
+Value castPredicateStorage(TLABuilder &self, Value value, int64_t lanes) {
+  auto type = VectorType::get({lanes}, self.getBuilder().getI1Type());
+  if (value.getType() == type)
+    return value;
+  return self
+      .create<UnrealizedConversionCastOp>(TypeRange{type}, ValueRange{value})
+      .getResult(0);
 }
 
 // memref.view needs a one-dimensional identity-layout byte source. Rebase a
@@ -561,6 +574,134 @@ void init_tla_builder(py::module &&m) {
             createBufferSync<hivm::RlsBufOp>(self, buf_id, pipe, nonblocking);
           },
           py::arg("buf_id"), py::arg("pipe"), py::arg("nonblocking") = false)
+      // Register operations provided by the existing Regbase dialect.
+      .def(
+          "create_simd_pred_pack",
+          [](TLABuilder &self, Value src, bool unpack, int32_t part) -> Value {
+            if (!self.is_910_95())
+              throw std::invalid_argument(
+                  "predicate pack/unpack currently supports Ascend950 only");
+            auto type = dyn_cast<VectorType>(src.getType());
+            if (!type || type.getRank() != 1 ||
+                !type.getElementType().isInteger(1) ||
+                (unpack ? (type.getNumElements() != 256 &&
+                           type.getNumElements() != 128)
+                        : (type.getNumElements() != 128 &&
+                           type.getNumElements() != 64)) ||
+                (part != 0 && part != 1))
+              throw std::invalid_argument(
+                  "invalid predicate pack/unpack shape or part");
+            Value physicalSrc = castPredicateStorage(self, src, 256);
+            Value selector = self.create<arith::ConstantIntOp>(part, 32);
+            Value result;
+            if (unpack)
+              result = self.create<hivm_regbaseintrins::PunpackInstrOp>(
+                  physicalSrc.getType(), physicalSrc, selector);
+            else
+              result = self.create<hivm_regbaseintrins::PpackInstrOp>(
+                  physicalSrc.getType(), physicalSrc, selector);
+            int64_t lanes = type.getNumElements();
+            return castPredicateStorage(self, result,
+                                        unpack ? lanes / 2 : lanes * 2);
+          },
+          py::arg("src"), py::arg("unpack"), py::arg("part"))
+      .def(
+          "create_simd_pred_interleave",
+          [](TLABuilder &self, Value a, Value b,
+             bool inverse) -> std::pair<Value, Value> {
+            if (!self.is_910_95())
+              throw std::invalid_argument(
+                  "predicate interleave currently supports Ascend950 only");
+            auto type = dyn_cast<VectorType>(a.getType());
+            if (!type || type != b.getType() || type.getRank() != 1 ||
+                !type.getElementType().isInteger(1) ||
+                (type.getNumElements() != 64 && type.getNumElements() != 128 &&
+                 type.getNumElements() != 256))
+              throw std::invalid_argument(
+                  "predicate interleave requires matching 64/128/256 lanes");
+            a = castPredicateStorage(self, a, 256);
+            b = castPredicateStorage(self, b, 256);
+            auto pairType = LLVM::LLVMStructType::getLiteral(
+                self.getBuilder().getContext(), {a.getType(), b.getType()});
+            Value result;
+            using namespace hivm_regbaseintrins;
+            switch (type.getNumElements()) {
+            case 256:
+              if (inverse)
+                result = self.create<PDintlvB8InstrOp>(pairType, a, b);
+              else
+                result = self.create<PintlvB8InstrOp>(pairType, a, b);
+              break;
+            case 128:
+              if (inverse)
+                result = self.create<PDintlvB16InstrOp>(pairType, a, b);
+              else
+                result = self.create<PintlvB16InstrOp>(pairType, a, b);
+              break;
+            case 64:
+              if (inverse)
+                result = self.create<PDintlvB32InstrOp>(pairType, a, b);
+              else
+                result = self.create<PintlvB32InstrOp>(pairType, a, b);
+              break;
+            }
+            Value lo = self.create<LLVM::ExtractValueOp>(result, 0);
+            Value hi = self.create<LLVM::ExtractValueOp>(result, 1);
+            return {castPredicateStorage(self, lo, type.getNumElements()),
+                    castPredicateStorage(self, hi, type.getNumElements())};
+          },
+          py::arg("a"), py::arg("b"), py::arg("inverse"))
+      .def(
+          "create_simd_group_reduce",
+          [](TLABuilder &self, const std::string &kind, Value src, Value mask,
+             bool isUnsigned) -> Value {
+            if (!self.is_910_95())
+              throw std::invalid_argument(
+                  "group reduction currently supports Ascend950 only");
+            auto type = dyn_cast<VectorType>(src.getType());
+            if (!type || type.getRank() != 1)
+              throw std::invalid_argument("group reduction requires a vector");
+            auto elem = type.getElementType();
+            if (!(elem.isInteger(16) || elem.isInteger(32) || elem.isF16() ||
+                  elem.isF32()) ||
+                type.getNumElements() * type.getElementTypeBitWidth() != 2048 ||
+                (isUnsigned && isa<FloatType>(elem)))
+              throw std::invalid_argument("unsupported group reduction type");
+            if (mask.getType() !=
+                VectorType::get({type.getNumElements()},
+                                self.getBuilder().getI1Type()))
+              throw std::invalid_argument(
+                  "group reduction mask must match source lanes");
+            mask = castPredicateStorage(self, mask, 256);
+            Value result;
+            using namespace hivm_regbaseintrins;
+            if (kind == "add") {
+              if (isUnsigned)
+                result = self.create<VcgaddUXInstrOp>(type, src, mask);
+              else
+                result = self.create<VcgaddSXInstrOp>(type, src, mask);
+            } else if (kind == "max") {
+              if (isUnsigned)
+                result = self.create<VcgmaxUInstrOp>(type, src, mask);
+              else
+                result = self.create<VcgmaxSInstrOp>(type, src, mask);
+            } else if (kind == "min") {
+              if (isUnsigned)
+                result = self.create<VcgminUInstrOp>(type, src, mask);
+              else
+                result = self.create<VcgminSInstrOp>(type, src, mask);
+            } else {
+              throw std::invalid_argument("unknown group reduction kind");
+            }
+            // The i16 add ABI returns i16 bits containing eight i32 sums.
+            // Reinterpret the full register; a numeric cast loses sum bits.
+            if (kind == "add" && elem.isInteger(16))
+              result = self.create<vector::BitCastOp>(
+                  VectorType::get({64}, self.getBuilder().getI32Type()),
+                  result);
+            return result;
+          },
+          py::arg("kind"), py::arg("src"), py::arg("mask"), py::arg("unsigned"))
       // SIMD vector-register ops (AVE dialect, ave.hir.*).
       .def(
           "create_simd_vgather",

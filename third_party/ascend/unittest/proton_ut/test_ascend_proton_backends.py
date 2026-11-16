@@ -152,6 +152,7 @@ def test_instrumentation_off_on_off(tmp_path, n):
 
     before = launch()
     assert before.metadata.profile_scratch_size == 0
+    assert before.metadata.profile_scratch_align == 1
     assert "proton.record" not in before.asm["ttir"]
     base = tmp_path / "instrumentation"
     session = proton.start(str(base), backend="instrumentation", data="trace")
@@ -159,11 +160,13 @@ def test_instrumentation_off_on_off(tmp_path, n):
         for _ in range(2):
             compiled = launch()
         assert compiled.metadata.profile_scratch_size > 0
+        assert compiled.metadata.profile_scratch_align == 64
         assert compiled.metadata.profile_num_units == 1
     finally:
         proton.finalize(session, output_format="chrome_trace")
     after = launch()
     assert after.metadata.profile_scratch_size == 0
+    assert after.metadata.profile_scratch_align == 1
     assert after.asm["ttir"] == before.asm["ttir"]
     trace = json.loads(base.with_suffix(".chrome_trace").read_text())
     events = trace if isinstance(trace, list) else trace["traceEvents"]

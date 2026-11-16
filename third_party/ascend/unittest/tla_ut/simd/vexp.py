@@ -33,11 +33,11 @@ F16_SIGNATURE = {"X": "*fp16", "I": "*i16", "T": "*i16", "O": "*fp16"}
 
 @tla.jit
 def vexp(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (N, )), xb)
-    tla.copy(tla.view(T, (N, )), tb)
+    xb = tla.alloc((N, ), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), xb)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0])
         t = tla.simd.vlds(tb[0])
@@ -51,18 +51,18 @@ def vexp(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vexp(x, mask=none, mode=tla.simd.MODE.ZEROING))
         tla.simd.vsts(ob[4, 0], tla.simd.vexp(x, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vexp(x, mask=arb, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 @tla.jit
 def vexp_f16(X, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float16, space="ub")
-    ib = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float16, space="ub")
-    tla.copy(tla.view(X, (N, )), xb)
-    tla.copy(tla.view(I, (N, )), ib)
-    tla.copy(tla.view(T, (N, )), tb)
+    xb = tla.alloc((N, ), tl.float16, space="ub")
+    ib = tla.alloc((N, ), tl.int16, space="ub")
+    tb = tla.alloc((N, ), tl.int16, space="ub")
+    ob = tla.alloc((6, N), tl.float16, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), xb)
+    tla.load_gm_to_ub(tla.view(I, (N, )), ib)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0])
         idx = tla.simd.vlds(ib[0])
@@ -76,7 +76,7 @@ def vexp_f16(X, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vexp(x, mask=none, mode=tla.simd.MODE.ZEROING), dist="NORM_B16")
         tla.simd.vsts(ob[4, 0], tla.simd.vexp(x, mask=prefix, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
         tla.simd.vsts(ob[5, 0], tla.simd.vexp(x, mask=arb, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 def constexprs(lanes=None, active=None):

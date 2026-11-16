@@ -36,6 +36,7 @@
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
@@ -1180,6 +1181,12 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       if (residualMask) {
         accessedOp.getMaskMutable().assign(createExtractOp(
             loc, residualMask, rewriter, offsets, sizes, strides));
+        // The outer select restores padding after all slices are assembled.
+        // Keep nonuniform padding for the deinterleave lowering contract.
+        DenseElementsAttr other;
+        if (op.getOther() && matchPattern(op.getOther(), m_Constant(&other)) &&
+            other.isSplat())
+          accessedOp.getOtherMutable().clear();
       } else {
         // The loop bounds enforce the complete mask. Padding for unvisited
         // elements remains in the outer select below.

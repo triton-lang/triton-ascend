@@ -50,7 +50,7 @@ def route(src, dst, P: tl.constexpr, ROUTE: tl.constexpr):
     elif ROUTE == "ub_l1":
         tla.copy_ub_to_l1(src, dst, P)
     else:
-        tl.static_assert(False, "unknown explicit DMA route")
+        tla.copy(src, dst, P)
 
 
 def route_ir(src_space, dst_space, p, name, dtype=tl.float16):

@@ -24,6 +24,7 @@
 #include <memory>
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -270,17 +271,16 @@ collectKeepOpsToCube(Block *block, SmallVector<Operation *> toProcess,
 }
 
 static bool isTensorOperation(Operation *op) {
-  for (auto result : op->getResults()) {
-    if (isa<RankedTensorType>(result.getType())) {
-      return true;
-    }
-  }
-  for (auto operand : op->getOperands()) {
-    if (isa<RankedTensorType>(operand.getType())) {
-      return true;
-    }
-  }
-  return false;
+  auto hasTensorType = [](Type type) { return isa<RankedTensorType>(type); };
+  return op
+      ->walk<WalkOrder::PreOrder>([&](Operation *nestedOp) {
+        if (llvm::any_of(nestedOp->getResultTypes(), hasTensorType) ||
+            llvm::any_of(nestedOp->getOperandTypes(), hasTensorType)) {
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      })
+      .wasInterrupted();
 }
 
 static bool hasTensorOperation(const SmallVector<Operation *> &fuseGroup) {
@@ -322,6 +322,18 @@ collectAllDependenciesInFuseGroup(Operation *op,
   });
 }
 
+static bool hasEarlierCubeUser(Value value, Operation *updateOp) {
+  // Find a CUBE user that precedes the loop-carried update in the same block.
+  return llvm::any_of(value.getUsers(), [&](Operation *user) {
+    if (user->getBlock() != updateOp->getBlock()) {
+      return false;
+    }
+    // For now, approximate dependency using IR order within the same block.
+    return getCoreTypeOfSimpleOpOrCf(user) == CoreType::CUBE_ONLY &&
+           user->isBeforeInBlock(updateOp);
+  });
+}
+
 static SmallVector<Operation *>
 extractWholeFuseGroup(Block *block,
                       const SmallVector<Operation *> &nowFuseGroup,
@@ -340,8 +352,18 @@ extractWholeFuseGroup(Block *block,
       auto walkResult = op->walk([&](Operation *nestedOp) {
         for (auto operand : nestedOp->getOperands()) {
           auto *defOp = getLoopCarriedDefOp(operand, block);
-          if (defOp && bm.getBlockIdByOp(defOp) == -1 &&
+          if (!defOp) {
+            continue;
+          }
+          // If argValue has a CUBE user preceding its loop-carried update in
+          // the same block, the current user need not be deferred to merge
+          // with the update op.
+          if (hasEarlierCubeUser(operand, defOp)) {
+            continue;
+          }
+          if (bm.getBlockIdByOp(defOp) == -1 &&
               !llvm::is_contained(nowFuseGroup, defOp)) {
+            // means Operand is an argValue;
             return WalkResult::interrupt();
           }
         }

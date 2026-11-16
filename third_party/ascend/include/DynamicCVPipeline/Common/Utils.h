@@ -29,7 +29,7 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 
-#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 
 namespace mlir {
@@ -92,8 +92,6 @@ inline constexpr llvm::StringLiteral kCoreTypeCube = "CUBE";
 inline constexpr llvm::StringLiteral kCoreTypeVector = "VECTOR";
 inline constexpr llvm::StringLiteral kFromMakeRange = "tt.from_make_range";
 inline constexpr llvm::StringLiteral kSubBlock = "ssbuffer.subBlock";
-inline constexpr llvm::StringLiteral kMergeComputeBlockApplied =
-    "ssbuffer.merge_compute_block_applied";
 inline constexpr llvm::StringLiteral kMergeSmallBlockFirstRunDone =
     "ssbuffer.merge_small_block_first_run_done";
 
@@ -337,32 +335,12 @@ OpOperand *getLoopCarriedUpdateOperand(Value value, Block *loopBlock);
 ///         lifted into block; nullptr if no producer can be represented there.
 Operation *getLoopCarriedDefOp(Value argValue, Block *block);
 
-inline bool isTensorComputeOp(Operation *op) {
-  if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
-    if (linalg::isaCopyOpInterface(linalgOp)) {
-      return false;
-    }
-    auto genericOp = dyn_cast<linalg::GenericOp>(op);
-    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value()) {
-      return false;
-    }
-    if (isa<linalg::FillOp>(op)) {
-      return false;
-    }
-    return true;
-  }
+/// Recognize tensor computation, excluding copies, broadcasts, and fills that
+/// can be eliminated by constant initialization or direct InlineBrc lowering.
+bool isTensorComputeOp(Operation *operation);
 
-  if (op->hasTrait<mlir::OpTrait::Elementwise>()) {
-    return llvm::any_of(op->getResultTypes(),
-                        [](Type t) { return isa<RankedTensorType>(t); });
-  }
-
-  return false;
-}
-
-// Arithmetic/reduction on tensors. isTensorComputeOp already drops
-// copy/broadcast/fill. Transpose is only a permutation, and arith.select is
-// control-flow glue around ssbuffer.splitted_if, so neither counts.
+// Further exclude transpose permutations and arith.select control-flow glue
+// around ssbuffer.splitted_if from tensor computation.
 inline bool isRealTensorComputeOp(Operation *op) {
   if (!isTensorComputeOp(op))
     return false;

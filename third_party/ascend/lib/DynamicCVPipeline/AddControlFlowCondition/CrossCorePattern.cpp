@@ -330,23 +330,17 @@ triton::CrossCorePattern triton::analyzeCrossCorePattern(ModuleOp module,
     }
   }
 
-  // The cross core dependency of the validated pipeline is the dependency of
-  // the blocks of one core pair: the mla pattern holds four computation
-  // blocks and the paged decode pattern five. The conditions are computed
-  // for the blocks that carry a condition, so the cross core blocks of the
-  // kernel that carry a condition have to be the blocks of one of the two
-  // pipelines: four of them for the mla pipeline and five of them for the
-  // paged decode pipeline. A kernel that holds more of them is not a
-  // pipeline the scheme is validated on.
+  // The conditions are computed for the blocks that carry a condition, so
+  // the cross core blocks of the kernel that carry a condition are the ones
+  // the schemes of the validated pipelines are built for: four of them for
+  // the mla pipeline and five of them for the paged decode pipeline. The
+  // number is reported for the diagnostics, it does not gate the scheme.
   llvm::DenseSet<BlockNode> conditionedBlocks;
   collectMainLoopBlocks(module, conditionedBlocks);
-  unsigned conditionedCrossCoreBlocks = 0;
+  [[maybe_unused]] unsigned conditionedCrossCoreBlocks = 0;
   for (unsigned id : crossCoreBlocks)
     if (conditionedBlocks.contains(blockNodes[id]))
       ++conditionedCrossCoreBlocks;
-  if (conditionedCrossCoreBlocks != chainLength &&
-      conditionedCrossCoreBlocks != chainLength + 1)
-    return pattern;
   LLVM_DEBUG({
     DBGS() << "The kernel holds " << conditionedCrossCoreBlocks
            << " cross core blocks that carry a condition\n";

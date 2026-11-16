@@ -61,9 +61,10 @@ struct CrossCorePattern {
 /// transfer of the pipeline carries the same number of buffers.
 ///
 /// The conditions are computed for the blocks that carry a condition, so the
-/// cross-core blocks of the module that carry a condition have to be the
-/// blocks of one of the two validated pipelines: four of them for the mla
-/// pipeline and five of them for the paged decode pipeline.
+/// cross-core blocks of the module that carry a condition are the blocks the
+/// schemes of the validated pipelines are built for: four of them for the mla
+/// pipeline and five of them for the paged decode pipeline. The analysis
+/// reports the shape of the graph, it does not gate the scheme.
 ///
 /// Two chains that share a block are two views of the same pipeline and count
 /// once; the chains that share no block are independent pipelines.

@@ -63,6 +63,21 @@
 namespace mlir {
 namespace triton {
 
+hivm::PointerCastOp createScalarPointerCast(OpBuilder &builder, Location loc,
+                                            MemRefType resultType,
+                                            Value address) {
+  SmallVector<Value> dynamicSizes;
+  if (resultType.getNumDynamicDims() != 0) {
+    Value defaultSize = builder.create<arith::ConstantIndexOp>(loc, 1);
+    dynamicSizes.assign(resultType.getNumDynamicDims(), defaultSize);
+  }
+  auto pointerCast = builder.create<hivm::PointerCastOp>(
+      loc, resultType, ValueRange{address}, ValueRange{dynamicSizes});
+  pointerCast->setAttr(kScalarPointerCarrierAttr,
+                       UnitAttr::get(builder.getContext()));
+  return pointerCast;
+}
+
 // Recognize original scalar-pointer producers whose converted result may act
 // as a memref carrier. The parse site still requires BaseMemRefType, so merely
 // appearing in this list never makes an unconverted pointer an opaque source.

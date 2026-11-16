@@ -23,8 +23,7 @@
 #ifndef TRITON_ADAPTER_UNSTRUCTURECONVERSION_H
 #define TRITON_ADAPTER_UNSTRUCTURECONVERSION_H
 
-#include "TritonMemoryAccess/PtrAnalysisInfo.h"
-#include "mlir/Interfaces/LoopLikeInterface.h"
+#include "ascend/include/TritonToUnstructure/OffsetAnalysis.h"
 #include "mlir/Pass/Pass.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
@@ -93,7 +92,8 @@ public:
 
   explicit UnstructuredMemAccessConverter(
       MLIRContext *context, bool forceScalarizeMode,
-      const mlir::triton::ptr::PtrInfo &info, bool fromTensorArgument);
+      const llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+      const llvm::SmallDenseMap<Value, bool> &fromTensorArg);
   LogicalResult matchAndRewrite(MemAccOpTy op,
                                 PatternRewriter &rewriter) const override;
 
@@ -109,15 +109,15 @@ private:
   template <typename U = MemAccOpTy>
   typename std::enable_if<std::is_same_v<U, triton::LoadOp>,
                           LogicalResult>::type
-  splatAndLoadScenario(MemAccOpTy op, const mlir::triton::ptr::PtrInfo &info,
+  splatAndLoadScenario(MemAccOpTy op, const PtrOffsetInfo &ptrOffsetInfo,
                        PatternRewriter &rewriter) const;
 
   template <typename... Args>
   MemAccOpTy createMemAccOp(MemAccOpTy op, Value ptrToAccess, Location loc,
                             PatternRewriter &rewriter, Args &&...args) const;
 
-  const mlir::triton::ptr::PtrInfo &info;
-  bool fromTensorArgument;
+  const llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap;
+  const llvm::SmallDenseMap<Value, bool> &fromTensorArg;
   bool forceScalarizeMode;
 };
 
@@ -130,11 +130,24 @@ public:
   void runOnOperation() override;
 
 private:
+  void runPreparse(LoopLikeOpInterface op);
+  template <typename MemAccOpTy,
+            typename = std::enable_if_t<
+                std::is_same_v<MemAccOpTy, triton::LoadOp> ||
+                std::is_same_v<MemAccOpTy, triton::StoreOp> ||
+                std::is_same_v<MemAccOpTy, triton::AtomicRMWOp> ||
+                std::is_same_v<MemAccOpTy, triton::AtomicCASOp>>>
+  void runParse(MemAccOpTy op);
+  llvm::DenseMap<Value, PtrOffsetInfo> offsetMap;
+  llvm::DenseMap<Value, PtrOffsetInfo> offsetMapForLoopArgs;
+  llvm::SmallDenseMap<Value, bool> fromTensorArg;
+
   LogicalResult processIfYieldAddHoistOperations(ModuleOp moduleOp);
 };
 
 } // namespace
 
-LogicalResult replacePtrArguments(triton::FuncOp funcOp);
+void replacePtrArguments(triton::FuncOp funcOp,
+                         llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap);
 
 #endif // TRITON_ADAPTER_UNSTRUCTURECONVERSION_H

@@ -29,7 +29,7 @@ def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
 
     # Dynamic reuse owns constexpr/tile adaptation and must receive the original
     # callable grid. A concrete auto contract would split its variant families.
-    if (reuse_enabled() or warmup or getattr(getattr(fn, "ASTSource", None), "frontend_kind", "triton") != "triton"
+    if (reuse_enabled() or getattr(getattr(fn, "ASTSource", None), "frontend_kind", "triton") != "triton"
             or not supports_target(backend.target.arch) or _capture_state() is not False):
         return baseline()
     bound, specialization, _ = fn.device_caches[device][4](*args, **kwargs)
@@ -49,6 +49,9 @@ def prepare_launch(fn, args, kwargs, grid, warmup, device, backend):
         for (name, value), spec in zip(bound.items(), specialization)
         if spec[0] != "constexpr"
     }
+    # dtype-only warmup uses MockTensor, which has no real storage/layout.
+    if warmup and any(value["kind"] == "unsupported" for value in arguments.values()):
+        return baseline()
     contract = dict(grid=extents, arguments=arguments, argument_order=list(arguments),
                     core_floor=os.getenv("TA_BLOCK_BATCHING_CORE_FLOOR"), device_limit=os.getenv("NPU_DEVICE_LIMIT"))
     if str(backend.target.arch).startswith("Ascend910_93"):

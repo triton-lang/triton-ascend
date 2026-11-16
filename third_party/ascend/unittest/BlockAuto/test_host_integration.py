@@ -107,13 +107,26 @@ class TestHostIntegration(unittest.TestCase):
             self.assertEqual(len(self.calls), 1)
             self.assertIs(self.calls[0][0][1], self.kwargs)
 
-    def test_warmup_and_capture_use_baseline_without_binding_or_grid_evaluation(self):
+    def test_warmup_uses_the_same_contract_as_launch(self):
+        self.kwargs.pop("block_batching_factor")
+        self.run_handler(warmup=True)
+        warmed = self.calls[-1][0][1]
+        self.run_handler()
+        self.assertEqual(warmed, self.calls[-1][0][1])
+        self.assertEqual(warmed["block_batching_factor"], "auto")
+        incomplete = SimpleNamespace(dtype="fp32", shape=(1, ), stride=lambda: (1, ))
+        options, _ = self.dispatch.prepare_launch(self.fn, (incomplete, 131072), self.kwargs, (256, ), True, 0,
+                                                  self.backend)
+        self.assertEqual(options["block_batching_factor"], 1)
+        self.assertNotIn("block_auto_contract", options)
+
+    def test_capture_uses_baseline_without_binding_or_grid_evaluation(self):
         self.kwargs.pop("block_batching_factor")
 
         def unavailable(_):
             self.fail("grid must stay lazy")
 
-        for warmup, capture in ((True, False), (False, True), (False, None)):
+        for warmup, capture in ((True, True), (False, True), (False, None)):
             self.calls.clear()
             self.capture.return_value = capture
             self.run_handler(unavailable, warmup)

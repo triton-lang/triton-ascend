@@ -68,14 +68,63 @@ def test_alias_fallback_and_cache_recovery():
 
 def test_default_auto_large_pointwise():
     x = torch.arange(131072, device='npu', dtype=torch.float32)
-    out = torch.empty_like(x)
+    out = torch.full_like(x, -123.)
+    warmed = pointwise.warmup(x, out, x.numel(), 512, grid=(256, ))
+    torch.npu.synchronize()
+    assert (out == -123).all()  # warmup may compile candidates, never execute them.
+    assert warmed.block_auto_selection['candidate_plan']['candidates']
     kernel = pointwise[(256, )](x, out, x.numel(), 512)
+    assert kernel is warmed
     torch.npu.synchronize()
     torch.testing.assert_close(out, x * 2 + 1, rtol=0, atol=0)
     if str(kernel.metadata.target.arch).startswith('Ascend910_93'):
         assert kernel.block_auto_selection['model'] == 'jit-a3-resource-v1'
         assert_applied(kernel, 2)
         assert kernel.block_auto_selection['reason'] == 'A3_RESOURCE_SAFE_GROUPING'
+
+
+@pytest.mark.parametrize('explicit', [None, 'auto', 2])
+def test_autotune_batching_default_and_override(explicit):
+    seen = []
+
+    def bench(fn, quantiles):
+        fn()
+        return 1.0  # Functional test; no device performance assertion.
+
+    config_options = dict(block_batching_factor=2) if explicit == 2 else {}
+    tuned = triton.autotune(configs=[triton.Config(dict(B=b, **config_options)) for b in (256, 512)], key=['N'],
+                           do_bench=bench)(pointwise)
+    x = torch.arange(131072, device='npu', dtype=torch.float32)
+    out = torch.full_like(x, -123.)
+    options = dict(block_batching_factor='auto') if explicit == 'auto' else {}
+    grid = lambda meta: (triton.cdiv(meta['N'], meta['B']), )
+    from unittest.mock import patch
+    from triton.backends.ascend import block_auto_dispatch
+    original = block_auto_dispatch.prepare_launch
+
+    def observe(*args, **kwargs):
+        prepared = original(*args, **kwargs)
+        seen.append(prepared[0]['block_batching_factor'])
+        return prepared
+
+    with patch.object(block_auto_dispatch, 'prepare_launch', observe):
+        warmed = tuned.warmup(x, out, x.numel(), grid=grid, **options)
+        for item in warmed:
+            if hasattr(item, 'result'):
+                item.result()
+        torch.npu.synchronize()
+        assert (out == -123).all()
+        kernel = tuned[grid](x, out, x.numel(), **options)
+        tuned[grid](x, out, x.numel(), **options)  # Best-config cache hit.
+    torch.npu.synchronize()
+    assert seen and set(seen) == {1 if explicit is None else explicit}
+    torch.testing.assert_close(out, x * 2 + 1, rtol=0, atol=0)
+    if explicit is None:
+        assert not hasattr(kernel, 'block_auto_selection') and not hasattr(kernel, 'candidate')
+    elif explicit == 'auto':
+        assert hasattr(kernel, 'block_auto_selection')
+    else:
+        assert_applied(kernel, explicit)
 
 
 @pytest.mark.parametrize('block_pointer', [False, True])

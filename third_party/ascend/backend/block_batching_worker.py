@@ -22,6 +22,10 @@ _TERMINATION_GRACE = 0.5
 _MAX_REPLY = 32 * 1024 * 1024
 _LOG_TAIL = 16384
 _MANIFEST = 'block_batching.artifacts'
+_DECLINE = 'block_batching.decline'
+# Extend only for audited, deterministic TTIR failures. Resource limits,
+# analysis budgets and abnormal worker exits must remain retryable.
+_CACHEABLE_DECLINES = frozenset({'UNSUPPORTED_ADDRESS_EXPRESSION'})
 _BOOTSTRAP = ('import resource; resource.setrlimit(resource.RLIMIT_CORE, (0, 0)); '
               'import site; site.main(); from triton.backends.ascend.block_batching_worker import _worker; _worker()')
 
@@ -556,6 +560,26 @@ def selection_probe(backend, frozen, options, env_vars):
     return report
 
 
+def _cacheable_decline(payload):
+    return (isinstance(payload, dict) and payload.keys() <= {'reason', 'stage', 'analysis'}
+            and payload.get('stage') == 'ttir' and payload.get('reason') in _CACHEABLE_DECLINES
+            and ('analysis' not in payload or isinstance(payload['analysis'], dict)))
+
+
+def _cached_decline(cache, variant):
+    path = cache.get_file(_DECLINE)
+    if path:
+        try:
+            record = json.loads(Path(path).read_bytes())
+            payload = record['decline']
+            if (_cacheable_decline(payload) and type(record['version']) is int
+                    and record == dict(version=_PROTOCOL, variant=variant, decline=payload, digest=_digest(payload))):
+                return payload
+        except (OSError, ValueError, KeyError, TypeError):
+            pass  # Incomplete or stale negative entries require fresh analysis.
+    return None
+
+
 class CandidateCompiler:
     """Own one bundle request and at most one resource-directed retry."""
 
@@ -592,6 +616,10 @@ class CandidateCompiler:
                 raise BatchCompileError(f'invalid published index: {error}', kind='InvalidArtifact',
                                         stage='cache') from error
             return None, (cache, None, group, variant, timer.end() if timer else None)
+        if not knobs.compilation.always_compile:
+            refusal = _cached_decline(cache, variant)
+            if refusal is not None:
+                return refusal, None
         generation = uuid4().hex
         device = None if knobs.ascend.compile_only else driver.active.get_current_device()
         body = _worker_request(self.backend, self.source, options, self.env_vars, variant)
@@ -610,6 +638,9 @@ class CandidateCompiler:
             if refusal['reason'] in _RESOURCE_REASONS and (refusal.get('stage') != 'npubin'
                                                            or not isinstance(refusal.get('diagnostic'), str)):
                 raise BatchCompileError('invalid resource refusal evidence', kind='ProtocolError')
+            if _cacheable_decline(refusal):
+                cache.put(json.dumps(dict(version=_PROTOCOL, variant=variant, decline=refusal, digest=_digest(refusal))),
+                          _DECLINE, binary=False)
             return refusal, None
         manifest = outcome.payload['manifest']
         group = _checked_group(manifest, attempts / generation, variant, name)

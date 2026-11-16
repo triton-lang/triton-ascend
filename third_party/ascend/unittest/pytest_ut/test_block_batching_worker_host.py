@@ -114,6 +114,98 @@ def test_checked_generation_rejects_lost_or_changed_binary(tmp_path):
         worker._checked_group(manifest, tmp_path, 'v', 'f')
 
 
+@pytest.fixture
+def decline_compiler(tmp_path, monkeypatch):
+    import triton
+    from triton.runtime.cache import FileCacheManager
+    monkeypatch.setattr(triton.knobs.cache, 'dir', str(tmp_path))
+    monkeypatch.setattr(triton.knobs.compilation, 'listener', None)
+    monkeypatch.setattr(triton.knobs.compilation, 'always_compile', False)
+    monkeypatch.setattr(triton.knobs.ascend, 'compile_only', True)
+    monkeypatch.setattr(worker, '_variant_key', lambda src, backend, opts, env: worker._digest([vars(opts), env]))
+    monkeypatch.setattr(worker, '_worker_request', lambda backend, src, opts, env, key: dict(variant=key))
+    caches = {}
+
+    def cache(key):
+        return caches.setdefault(key, FileCacheManager(key))
+
+    monkeypatch.setattr(triton.runtime.cache, 'get_cache_manager', cache)
+    compiler = worker.CandidateCompiler(SimpleNamespace(parse_options=lambda opts: SimpleNamespace(**opts)),
+                                        SimpleNamespace(name='kernel'), {})
+    return compiler, caches
+
+
+def test_decline_cache_reuses_exact_attempt_and_retries_stale_entries(decline_compiler, monkeypatch):
+    import json
+    from contextlib import ExitStack
+    from triton import knobs
+    compiler, caches = decline_compiler
+    calls = []
+    refusal = dict(reason='UNSUPPORTED_ADDRESS_EXPRESSION', stage='ttir', analysis={'stage': 'source'})
+
+    def attempt(operation, body):
+        calls.append(body['variant'])
+        return SimpleNamespace(status='NotApplicable', payload=refusal)
+
+    monkeypatch.setattr(worker, '_attempt', attempt)
+
+    def compile_factor(factor=2):
+        with ExitStack() as pending:
+            assert compiler._variant(dict(block_batching_factor=factor), pending) == (refusal, None)
+
+    compile_factor()
+    compile_factor()
+    assert len(calls) == 1
+    first = next(iter(caches.values()))
+    assert not list((Path(first.cache_dir) / 'attempts').iterdir())
+    compile_factor(4)
+    compiler.env_vars['test'] = 'changed'
+    compile_factor()
+    assert len(set(calls)) == 3
+    compiler.env_vars.clear()
+    knobs.compilation.always_compile = True
+    compile_factor()
+    knobs.compilation.always_compile = False
+    path = Path(first.get_file(worker._DECLINE))
+    stored = json.loads(path.read_text())
+    for corrupt in ('{', json.dumps(dict(stored, variant='wrong')), json.dumps(dict(stored, digest='wrong')),
+                    json.dumps(dict(stored, version=True))):
+        path.write_text(corrupt)
+        compile_factor()
+    assert len(calls) == 8
+    compile_factor()
+    assert len(calls) == 8
+
+
+@pytest.mark.parametrize('failure', ['resource', 'budget', 'wrong_stage', 'Timeout', 'Signal', 'InternalError'])
+def test_non_static_failures_are_never_cached(decline_compiler, monkeypatch, failure):
+    from contextlib import ExitStack
+    compiler, caches = decline_compiler
+    calls = []
+
+    def attempt(*args):
+        calls.append(1)
+        if failure in ('Timeout', 'Signal', 'InternalError'):
+            raise worker.BatchCompileError('failed', kind=failure)
+        payload = dict(reason='ANALYSIS_BUDGET_EXCEEDED', stage='ttir')
+        if failure == 'resource':
+            payload = dict(reason='VV_TARGET_RESOURCE_REJECTED', stage='npubin', diagnostic='UB overflow')
+        elif failure == 'wrong_stage':
+            payload = dict(reason='UNSUPPORTED_ADDRESS_EXPRESSION', stage='ttadapter')
+        return SimpleNamespace(status='NotApplicable', payload=payload)
+
+    monkeypatch.setattr(worker, '_attempt', attempt)
+    for _ in range(2):
+        with ExitStack() as pending:
+            if failure in ('Timeout', 'Signal', 'InternalError'):
+                with pytest.raises(worker.BatchCompileError):
+                    compiler._variant({}, pending)
+            else:
+                assert compiler._variant({}, pending)[1] is None
+    assert len(calls) == 2
+    assert all(cache.get_file(worker._DECLINE) is None for cache in caches.values())
+
+
 def test_failed_binding_does_not_publish(bundle_environment, monkeypatch):  # noqa: F811
     env = bundle_environment
     compiler_api = ModuleType('triton.compiler.compiler')

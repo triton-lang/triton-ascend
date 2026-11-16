@@ -28,39 +28,46 @@
 namespace mlir {
 namespace triton {
 
-/// The shape of the cross-core dependency graph of the blocks that carry a
-/// condition.
-enum class CrossCoreShape {
-  /// The graph does not hold a shape the normal preload scheme models.
-  None,
-  /// A linear chain of four or five blocks: the mla and paged decode
-  /// pipelines.
-  LinearChain,
-  /// Two linear chains of four blocks sharing no block and no buffer.
-  TwoChains,
-  /// A linear chain of three blocks: the hstu attention pipeline.
-  ShortChain,
-  /// A tree of six or seven blocks that may fork and merge: the nsa
-  /// compression backward pipeline.
-  Tree,
-  /// A forest of four chains of three blocks sharing no block and no
-  /// buffer: the flex attention backward pipeline.
-  ShortChainForest,
-};
-
 /// The shape of the cross-core dependency graph of a module.
 struct CrossCorePattern {
   /// The number of independent pipelines of the graph.
   unsigned pipelines = 0;
-  /// The number of entry blocks of the pipelines: the blocks that no other
-  /// block of the chains feeds. A merge has two entries.
+  /// The number of entry blocks of the pipelines: the blocks of the
+  /// qualifying chains that no other block of the chains feeds. A pipeline
+  /// that is a single linear chain has one entry; two blocks feeding the
+  /// same block is a merge, and the merge has two entries.
   unsigned entries = 0;
-  /// The shape the graph holds.
-  CrossCoreShape shape = CrossCoreShape::None;
 };
 
 /// Analyzes the cross-core dependency graph of `module` and reports its
 /// pipelines.
+///
+/// The nodes of the graph are the computation blocks, a block being the pair
+/// of the scope that holds it and its `ssbuffer.block_id`; block ids are only
+/// unique inside a scope. The edges are the cross-core dependencies, the
+/// producer block of a dependency group feeding the consumer block of the
+/// same group. Every edge joins two different cores, so a chain always
+/// alternates the cores: CUBE -> VECTOR -> CUBE -> VECTOR or VECTOR -> CUBE
+/// -> VECTOR -> CUBE.
+///
+/// A chain has to carry the tightly coupled buffers of the validated
+/// pipeline: every transfer of the chain is double buffered and no buffer is
+/// shared by two transfers of the chain, so the chain of `chainLength` blocks
+/// uses 2 * (chainLength - 1) tightly coupled buffers.
+///
+/// One direction of the graph may be carried by several cross-core groups.
+/// The buffers of the direction are the buffers of all of them, and the
+/// direction has to carry the buffers of exactly one transfer, so that every
+/// transfer of the pipeline carries the same number of buffers.
+///
+/// The conditions are computed for the blocks that carry a condition, so the
+/// cross-core blocks of the module that carry a condition are the blocks the
+/// schemes of the validated pipelines are built for: four of them for the mla
+/// pipeline and five of them for the paged decode pipeline. The analysis
+/// reports the shape of the graph, it does not gate the scheme.
+///
+/// Two chains that share a block are two views of the same pipeline and count
+/// once; the chains that share no block are independent pipelines.
 CrossCorePattern analyzeCrossCorePattern(ModuleOp module,
                                          unsigned chainLength = 4);
 

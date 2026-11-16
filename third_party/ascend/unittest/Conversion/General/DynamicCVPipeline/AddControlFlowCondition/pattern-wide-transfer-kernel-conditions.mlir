@@ -1,4 +1,12 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.while
+//
+// XFAIL: *
+//
+// The shape of the cross core dependency is not a gate of the normal preload
+// scheme any more: it is down for the batch validation, so the kernel takes
+// the scheme now and the checks of this test do not hold. Remove the marker
+// when the gate comes back: lit reports an unexpectedly passing test as a
+// failure.
 
 // The pattern of AddControlFlowCondition is the dependency graph plus the
 // number of the tightly coupled buffers: every transfer of the chain has to

@@ -371,45 +371,6 @@ def test_costmodel_gather_dot_min(tmp_path):
     _assert_performance("gather_dot_min", launch, tmp_path / "gather_profile", 5.478, tolerance=1.35)
 
 
-@simd_simt_910_95_only
-def test_costmodel_forced_mixed_factors(tmp_path, monkeypatch):
-    logical_programs, block = _vector_core_count(), 16
-    a = torch.randn((logical_programs * block, 256), dtype=torch.float16, device="npu")
-    b = torch.randn((256, block), dtype=torch.float16, device="npu")
-    indices = torch.tensor([10, 25, 100, 200, 5, 50, 150, 255, 1, 2, 3, 4, 6, 7, 8, 9], dtype=torch.int32, device="npu")
-    output = torch.empty((logical_programs * block, block), dtype=torch.float32, device="npu")
-    index_cpu = indices.cpu().long()
-    expected = a.cpu()[:, index_cpu].float() @ b.cpu()[index_cpu, :].float()
-    args = (a, b, indices, output, a.shape[0], b.shape[1], *a.stride(), *b.stride(), *output.stride())
-    # Reuse the report path while toggling route forcing through the environment
-    # and supplying F through the ordinary superblock_factor launch option.
-    options = dict(_launch_options(tmp_path / "forced_mixed_route.json", logical_programs), BLOCK_M=block,
-                   BLOCK_N=block, BLOCK_K=block)
-    kernels = {}
-    binaries = {}
-    for factor in (None, 1, 2, 1, None):
-        if factor is None:
-            monkeypatch.delenv("TRITON_ASCEND_AUTO_SIMT_FORCE_ROUTE", raising=False)
-        else:
-            monkeypatch.setenv("TRITON_ASCEND_AUTO_SIMT_FORCE_ROUTE", "mixed_simd_simt")
-        launch_options = dict(options, superblock_factor=factor if factor is not None else 1)
-        compiled = gather_dot_min.warmup(*args, grid=(logical_programs, 1), **launch_options)
-        if factor is not None:
-            assert compiled.metadata.auto_simt_effective_kind == "mixed_simd_simt"
-            assert compiled.metadata.auto_simt_forced_factor == factor
-            assert compiled.metadata.auto_simt_scope_superblock_factor == factor
-        else:
-            assert not compiled.metadata.auto_simt_force_route
-        if factor in kernels:
-            assert compiled is kernels[factor]
-        kernels[factor] = compiled
-        binaries[factor] = compiled.asm["npubin"]
-        gather_dot_min[(logical_programs, 1)](*args, **launch_options)
-        torch.npu.synchronize()
-        torch.testing.assert_close(output.cpu(), expected, rtol=1e-2, atol=1e-2)
-    assert binaries[1] != binaries[2]
-
-
 @triton.heuristics({"IS_VARLEN": lambda args: args["cu_seqlens"] is not None})
 @triton.jit(do_not_specialize=["T"])
 def merge_16x16_to_64x64_inverse_kernel(

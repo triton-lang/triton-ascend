@@ -13,7 +13,9 @@ python your_test.py
 
 When the launch does not specify them, this supplies
 `compile_mode="simd_simt"` and `auto_simt_scope_mode="auto"`.
-An explicitly conflicting mode, including `off` or `report`, raises an error.
+The existing process-wide compile-mode override retains precedence. `None`
+compile modes and empty scope defaults resolve to the forced-mode defaults.
+An effective conflicting mode, including `off` or `report`, raises an error.
 Pass F through the existing `superblock_factor` launch option. Its default is 1.
 An explicit `auto_simt_force_route` overrides the route environment variable.
 
@@ -38,19 +40,22 @@ serialized compiler options and disk-cache hash, including at F1. Changing
 
 The scope backend currently supports F1/F2/F4. Admission also requires the
 original warp, target, logical-program, resource and scope-materialization
-checks. Forcing does not make an unsupported factor or an illegal Mixed plan
-legal. Unsupported requests raise errors. The ordinary auto route remains free to select any legal candidate.
+checks. Unsupported requests raise errors. F2/F4 also require admission through
+the existing AutoBlockify V1 policy. For an eligible kernel, V1 can follow the
+existing `TRITON_ALL_BLOCKS_PARALLEL=1` setting. Blacklist and resource checks
+continue to determine admission.
 
 The existing native capability contract restricts the Mixed factor set, selects
 the forced legal candidate and materializes its scopes. The Python boundary
-checks the effective route, selected factor, materialized-anchor count and scope-factor IR before accepting
-the compile. Metadata records the forced route/factor and materialized TTIR
+checks the effective route, selected factor, materialized-anchor count and
+scope-factor IR before accepting the compile. Metadata records the forced route/factor and materialized TTIR
 SHA256. NPU precision and performance still require a real runtime test.
 
 For Ascend 950 Mixed lowering, an extracted index-select loop keeps its gathered
 temporary in UB. CV lowering then transfers the gathered result to Cube. Leaving
 that temporary unclassified can pull vector-produced indices into L1 and emit an
 unsupported Cube scalar read, which failed on hardware with error 507015/271.
-The opt-in `test_costmodel_forced_mixed_factors` regression checks F1/F2 precision,
-distinct binaries, route environment changes and explicit factor changes through
-the live JIT cache.
+The `test_forced_mixed_route.py::test_costmodel_forced_mixed_factors` regression
+runs in the ordinary pytest suite on supported devices. It checks F1/F2
+precision, distinct binaries, route environment changes, explicit route/factor
+options and live JIT cache reuse.

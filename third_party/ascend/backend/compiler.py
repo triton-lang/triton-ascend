@@ -1081,8 +1081,12 @@ def _resolve_forced_mixed_options(options):
     resolved["auto_simt_force_route"] = route
     if not route:
         return resolved
-    mode = resolved.get("compile_mode", os.environ.get("TRITON_ASCEND_COMPILE_MODE", "simd_simt"))
-    scope = resolved.get("auto_simt_scope_mode", os.environ.get("TRITON_ASCEND_AUTO_SIMT_SCOPE", "auto"))
+    mode = os.environ.get("TRITON_ASCEND_COMPILE_MODE") or resolved.get("compile_mode")
+    if mode is None:
+        mode = "simd_simt"
+    mode = getattr(mode, "value", mode)
+    scope = _normalize_auto_simt_scope_mode(
+        resolved.get("auto_simt_scope_mode") or os.environ.get("TRITON_ASCEND_AUTO_SIMT_SCOPE") or "auto")
     if mode != "simd_simt" or scope != "auto":
         raise ValueError("forced Mixed requires compile_mode='simd_simt' and auto_simt_scope_mode='auto'")
     resolved.update(compile_mode=mode, auto_simt_scope_mode=scope)
@@ -3146,7 +3150,7 @@ class AscendBackend(BaseBackend):
         return {"auto_simt_runtime_scalar_values": tuple(values)}
 
     def parse_options(self, opts) -> Any:
-        opts = self.resolve_launch_options(opts)
+        resolved_opts = self.resolve_launch_options(opts)
         # TODO: get available targets when building options?
         if self.target.backend == "npu":
             _warn_deprecated_ascend_env_vars()
@@ -3158,11 +3162,11 @@ class AscendBackend(BaseBackend):
             # Serialized NPUOptions include backend-only derived fields.  Use
             # those provenance markers instead of depending on every public
             # field being present, which changes whenever the dataclass evolves.
-            internal_options = _is_internal_npu_options(opts, self.target.arch)
+            internal_options = _is_internal_npu_options(resolved_opts, self.target.arch)
             # Normalize a copy, except for the legacy launch keyword below.
             # NPUOptions retains compatibility defaults for legacy names so
             # JIT and Inductor can still recognize them as compile options.
-            normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts)
+            normalized_opts = resolved_opts if internal_options else _remove_deprecated_npu_options(resolved_opts)
             args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
             options = NPUOptions(arch=self.target.arch, **args)
             # Lazy init enable_dynamic_cv_pipeline if not provided.

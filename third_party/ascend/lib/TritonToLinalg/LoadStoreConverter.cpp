@@ -942,13 +942,15 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
   auto dstMemref = ptr;
   Value inputVal = val;
 
-  // Lazily materialize a memref view only when we truly need buffer
-  // semantics (e.g., mask subview or XCHG lowering). Otherwise keep tensor
-  // inputs to avoid redundant to_memref conversions before hivm.store.
+  // Tensor inputs use dense local storage. Destination GM offsets and strides
+  // belong to the pointer operand and must not be copied into this buffer type.
   auto getInputMemref = [&]() -> Value {
     if (isa<MemRefType>(inputVal.getType()))
       return inputVal;
-    return rewriter.create<bufferization::ToMemrefOp>(loc, ptrType, inputVal);
+    auto tensorType = cast<RankedTensorType>(inputVal.getType());
+    auto inputType =
+        MemRefType::get(tensorType.getShape(), tensorType.getElementType());
+    return rewriter.create<bufferization::ToMemrefOp>(loc, inputType, inputVal);
   };
   auto inputMemref = getInputMemref();
   auto inputMemrefType = cast<MemRefType>(inputMemref.getType());

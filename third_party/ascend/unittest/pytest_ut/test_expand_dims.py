@@ -28,18 +28,13 @@ import pytest
 
 @triton.jit
 def fn_npu_(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr):
-    xidx = tl.arange(0, XB)
-    yidx = tl.arange(0, YB)
-    zidx = tl.arange(0, ZB)
-
-    idx = xidx[:, None, None] * YB * ZB + yidx[None, :, None] * ZB + zidx[None, None, :]
+    idx = tl.arange(0, XB * YB * ZB).reshape((XB, YB, ZB))
 
     X = tl.load(x_ptr + idx)
 
     ret = tl.expand_dims(X, 2)
 
-    oidx = xidx[:, None, None, None] * YB * ZB + yidx[None, :, None, None] * ZB + tl.arange(
-        0, 1)[None, None, :, None] + zidx[None, None, None, :]
+    oidx = tl.expand_dims(idx, 2)
 
     tl.store(output_ptr + oidx, ret)
 

@@ -6,9 +6,9 @@
 namespace mlir::triton::cfg {
 
 // Layer 2 contract, same as BatchLoopSchedule.h: a pure predicate over facts.
-// No MLIR, no IR walking, no diagnostics. 关卡 0 的形态检查必须走 IR，所以它住
-// 在 BatchLoopForm.h；这里只吃它的结论。
-// programLoop 为空表示关卡 0 判定"没有程序轴循环"，那是合法形态不是失败。
+// No MLIR, IR walking or diagnostics. Gate 0 walks IR in BatchLoopForm.h;
+// this layer consumes its result. A null programLoop means there is no
+// program-axis loop, which is a valid form rather than a failure.
 BatchResult<std::optional<BatchLogicalAxis>>
 isSafeToBatchLoop(const BatchLoopFact *programLoop, int gridAxis);
 

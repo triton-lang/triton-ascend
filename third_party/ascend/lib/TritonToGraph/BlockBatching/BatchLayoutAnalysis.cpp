@@ -73,7 +73,8 @@ bool rangeGroup(E e, ArrayRef<int64_t> axes) {
 // A bound on a coordinate, before byte scaling, associates that coordinate's
 // local projections with the selected program direction. It excludes all
 // other program directions, even if their strides happen to be equal.
-// 名字不叫 bind：实参里有 std::shared_ptr，ADL 会把 std::bind 拉进候选集。
+// Avoid naming this bind: std::shared_ptr arguments would bring std::bind
+// into the overload set through ADL.
 bool bindProgramDirection(E predicate, const BatchFacts::Access &fact,
                           BatchLayoutPlan &plan) {
   if (predicate->kind != K::SLT || contains(predicate->rhs, K::Coordinate) ||
@@ -92,7 +93,8 @@ bool bindProgramDirection(E predicate, const BatchFacts::Access &fact,
       continue;
     if (std::get<0>(key) == K::Coordinate && value > 0)
       axes.push_back(std::get<1>(key));
-    // 圈内偏移对整块是一个各份相同的平移，不参与方向绑定，放行但不记轴。
+    // The iteration offset translates every lane equally. Accept it without
+    // binding it to a program direction.
     else if (std::get<0>(key) == K::Induction)
       continue;
     else if (key != Key{K::Program, plan.gridAxis, 0})
@@ -122,12 +124,13 @@ SmallVector<BatchLayoutPlan, 0>
 planBatchLayouts(const BatchRewriteWorkspace &scope, int axis, int64_t factor) {
   SmallVector<BatchLayoutPlan, 0> plans;
   for (auto [id, originalFact] : llvm::enumerate(scope.facts->accesses())) {
-    // 把循环变量接回程序号，再往下全程用归一后的这一份。不接的话，一条按行走
-    // 的访存地址里只有归纳变量、没有 K::Program，下面第一个分支就会判它
-    // SHARED_ACCESS——字面正确但结论错，程序号只是藏在循环下界里。
+    // Expose the program ID through the induction variable and use the
+    // normalized expression throughout. Otherwise a row access contains only
+    // Induction, not K::Program, and would incorrectly become SHARED_ACCESS
+    // even though its lower bound depends on the program ID.
     //
-    // 地址与掩码必须一起换、而且只换一次：下面要拿 plan.coordinate 和谓词做
-    // 指针相等比较，两边来源不同就对不上。
+    // Normalize addresses and masks together, exactly once: later checks
+    // compare plan.coordinate and predicate nodes by pointer identity.
     BatchFacts::Access fact = originalFact;
     bool normalized = true;
     for (unsigned id : originalFact.loopIDs) {
@@ -151,8 +154,8 @@ planBatchLayouts(const BatchRewriteWorkspace &scope, int axis, int64_t factor) {
     llvm::raw_string_ostream stream(plan.location);
     scope.sourceAccesses()[id]->getLoc().print(stream);
     if (!normalized) {
-      // 归一不下去就按证不出处理，绝不退回原式：那等于把"程序号不在地址里"这个
-      // 错误结论静默放行。
+      // Failed normalization means the proof is unavailable. Reusing the
+      // original expression would silently hide its program-ID dependence.
       plan.reason = "LOOP_ORIGIN_UNPROVEN";
       plans.push_back(std::move(plan));
       continue;
@@ -247,15 +250,13 @@ planBatchLayouts(const BatchRewriteWorkspace &scope, int axis, int64_t factor) {
               auto [kind, id, divisor] = term.first;
               return kind == K::Program && id != axis && !term.second.isZero();
             });
-        // 这里原本还带一条 fact.loopIDs.empty()。它挡住的不只是程序轴循环——块内
-        // 循环今天就放行，这类访存一路证得出
-        // PROVEN_DIRECTION_AND_STRIDE_CHAIN， 却因为这一条而 linearMemoryView
-        // 为假，于是 BatchMemoryView.cpp:451
-        // 一律跳过：证出来了从不改写。删掉之后它们第一次进入改写路径，这是本步
-        // 唯一一处改变已发布行为的地方，干跑 diff 要逐行过目。
+        // Do not require fact.loopIDs.empty(): even ordinary inner loops can
+        // prove PROVEN_DIRECTION_AND_STRIDE_CHAIN. That restriction would leave
+        // linearMemoryView false and make BatchMemoryView skip a proved
+        // rewrite.
         //
-        // 地址里真的用到循环变量时，圈内偏移会作为 K::Induction 的 rest term
-        // 留下来，由下面两处和发射器一起接住。
+        // When an address uses the loop variable, its iteration offset remains
+        // as a K::Induction residual term for the checks below and the emitter.
         bool simple = (leading || columnRegion) && fact.shape.size() <= 3;
         auto origin = address->offset.divide(fact.bytes);
         auto stride =
@@ -302,8 +303,9 @@ planBatchLayouts(const BatchRewriteWorkspace &scope, int axis, int64_t factor) {
             simple = false;
             continue;
           }
-          // Induction 与前三者同级：它代表圈内偏移，发射器从外层 scf.for 取回
-          // 循环变量（BatchMemoryView.cpp 的 Emitter::upper）。
+          // Induction denotes the iteration offset, like the other scalar
+          // terms. Emitter::upper in BatchMemoryView.cpp recovers it from the
+          // enclosing scf.for induction variable.
           if (kind != K::Coordinate && kind != K::Program && kind != K::Grid &&
               kind != K::Induction && !uniformDivision)
             simple = false;

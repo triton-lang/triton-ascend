@@ -593,9 +593,10 @@ BatchAnalyzer::collect(bool recurrences, Operation *fallbackLocation) {
     for (Operation *parent = op->getParentOp();
          parent != function.getOperation(); parent = parent->getParentOp()) {
       if (auto loop = dyn_cast<scf::ForOp>(parent)) {
-        // 循环内的写不再在这里拒（S8b2）。它和循环内的读走同一条证明：地址归一到
-        // 逻辑轴，再由布局层证方向与步长链。证不出的话驱动层的
-        // LOOP_ACCESS_NOT_PROVEN 会把整条 kernel 拒掉，不会悄悄放行。
+        // Loop stores use the same proof as loop loads: normalize the address
+        // onto the logical axis, then prove its direction and stride chain in
+        // layout analysis. If proof fails, LOOP_ACCESS_NOT_PROVEN rejects the
+        // whole kernel rather than admitting an unproved access.
         BatchLoopFact fact;
         auto id = sourceLoopID(loop);
         if (!id)
@@ -605,8 +606,8 @@ BatchAnalyzer::collect(bool recurrences, Operation *fallbackLocation) {
         fact.lower = integer(loop.getLowerBound(), {});
         fact.upper = integer(loop.getUpperBound(), {});
         fact.step = integer(loop.getStep(), {});
-        // 跨行归约在 IR 里的对应物就是 iter_args，判定层的关卡 1.5a
-        // 查的是这一位 （设计 §2.4 第 13 行）。这里是它全程唯一的生产者。
+        // Cross-row reductions appear as iter_args in the IR. This is the sole
+        // producer of the carriesValues fact consumed by loop legality checks.
         fact.carriesValues = batchLoopCarriesValues(loop);
         loops.push_back(fact.id);
         loopsByID.try_emplace(fact.id, std::move(fact));

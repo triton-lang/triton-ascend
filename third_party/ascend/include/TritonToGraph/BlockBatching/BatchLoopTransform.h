@@ -11,26 +11,29 @@ namespace mlir::triton::cfg {
 // neither original program ownership nor reduction order changes.
 LogicalResult groupBatchLoopIterations(scf::ForOp loop, int64_t factor);
 
-// 第 3 层：变换。这里只重算程序轴循环的三个界；循环体、iter_args、零迭代分支
-// 都由既有的重建逻辑照常处理（BatchRewrite.cpp:457-493），不新建一条路径。
+// Layer 3: transformation. Recompute only the program-axis loop's three
+// bounds. Existing reconstruction in BatchRewrite.cpp handles the body,
+// iter_args and zero-iteration path.
 //
-// 不认 triton::GetProgramIdOp，改为由调用方把"原来的程序号"和"合并后的标量
-// group*F"一并传进来。驱动层本来就已经找到了那个
-// op（BatchRewrite.cpp:298-303）， 这样本文件只依赖 arith 与 scf，不把 Triton
-// dialect 拖进变换层。
+// The caller supplies the original program ID and the folded scalar group*F;
+// this layer need not recognize triton::GetProgramIdOp. It depends only on
+// arith and scf, without importing the Triton dialect.
 //
-// 没有 factor 入参：成块发的界只换程序号、步长不动，F 全部体现在调用方算好的
-// foldedProgramId 里；块宽放大 F 倍是布局层按 axis.chunk * F 做的，不在这里。
-// 把界里的一个原值换成新函数体里的对应物。
+// No factor argument is needed: cyclic bounds substitute the program ID and
+// retain the original step. F is already included in foldedProgramId; the
+// layout layer enlarges the chunk to axis.chunk * F.
 //
-// 存在的理由：界表达式读的是**原** IR，而原函数体在改写收尾时会被整体 erase
-// （BatchRewrite.cpp）。与程序号无关的那些子链（`pid*R` 里的 R）如果原样留在新
-// 界上，erase 之后就是悬空引用。调用方手里有原值到新值的映射，这里问它要。
+// Map an original value in a bound to its counterpart in the new function
+// body. Bound expressions reference the original IR, whose body is erased
+// when rewriting finishes. Keeping a program-independent subexpression,
+// such as R in pid*R, would leave a dangling reference. The caller owns the
+// original-to-rewritten value map.
 //
-// 返回空表示这个值在新体里没有对应物，整条界按失败处理。
+// A null result means no counterpart exists; reject the entire bound.
 using BatchValueRemap = llvm::function_ref<Value(Value)>;
 
-// 失败时返回诊断，调用方应当放弃这个候选而不是继续改写。
+// Return a diagnostic on failure. The caller must abandon the candidate
+// instead of continuing the rewrite.
 BatchResult<std::array<Value, 3>>
 retileBatchLoopBounds(OpBuilder &builder, scf::ForOp loop,
                       const BatchLogicalAxis &axis, Value programId,

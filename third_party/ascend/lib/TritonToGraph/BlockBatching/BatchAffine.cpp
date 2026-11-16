@@ -86,8 +86,9 @@ BatchAffineForm::fromExpr(const E &e, unsigned &budget, BatchLeafMask leaves,
     value.parameters[{e->kind, e->value, e->bits}] = 1;
     return BatchAffineForm{value, {}};
   }
-  // Induction 在这里和坐标同级：normalizeBatchAccessOnLogicalAxis 已经把循环
-  // 变量换成「下界 + 圈内偏移」，剩下的这个叶子代表圈内偏移，各份相同。
+  // Treat Induction like a coordinate. normalizeBatchAccessOnLogicalAxis
+  // has replaced the loop variable with lower + iteration offset; the
+  // remaining leaf denotes the offset, which is uniform across lanes.
   const bool division =
       e->kind == K::ProgramQuotient || e->kind == K::ProgramRemainder;
   if ((leaves & batchLeaf(e->kind)) &&
@@ -150,8 +151,9 @@ BatchAffineForm::fromExpr(const E &e, unsigned &budget, BatchLeafMask leaves,
                                                               : std::nullopt;
 }
 bool batchExprEquivalent(const BatchExprRef &a, const BatchExprRef &b) {
-  // 共享子树在界表达式里很常见（段首段尾读的是同一个 SSA 值），先比指针既是
-  // 快路径，也让递归深度跟着 DAG 的共享结构走而不是展开后的树。
+  // Bounds often share subtrees, such as the same SSA value at both segment
+  // ends. Compare pointers first for a fast path and to traverse shared DAG
+  // structure instead of repeatedly expanding it into a tree.
   if (a == b)
     return true;
   if (!a || !b)

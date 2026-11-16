@@ -24,7 +24,8 @@ struct BatchLogicalAxis {
   Distribution distribution = Cyclic;
   unsigned loopID = 0;
   int gridAxis = -1;
-  // 一圈覆盖几行。成块发是 R，定长分块恒为 1（它靠步长走，不靠块宽）。
+  // Rows covered by one iteration: R for cyclic distribution, always 1 for
+  // blocked distribution, which advances by its step rather than chunk width.
   int64_t chunk = 1;
 };
 
@@ -36,28 +37,32 @@ BatchSchedule selectBatchLoopLowering(const BatchLoopFact *loop,
                                       const BatchLogicalAxis *axis,
                                       int64_t factor);
 
-// 入参是一条循环而不是一组访存：归一是循环的属性。"函数里有且只有一条程序轴
-// 循环、且在顶层"由 BatchLoopLegality 的形态检查负责，不在这里。
+// Normalize one loop, not a set of accesses: coordinates are a loop property.
+// The form check used by BatchLoopLegality enforces a single program-axis loop
+// at function top level; that check does not belong here.
 //
-// 不收 factor：用到 F 的只有圈数门槛 T >= F 与 F <= R，那是主谓词的事。
+// No factor argument is needed. Factor-dependent checks such as T >= F and
+// F <= R belong to the main legality predicate.
 BatchResult<BatchLogicalAxis>
 normalizeBatchLoopCoordinates(const BatchLoopFact &loop, int gridAxis);
 
-// 把访存表达式里这条循环的循环变量换成「下界 + 圈内偏移」，依据是恒等式
+// Replace this loop's induction variable in an access expression with its
+// lower bound plus an iteration offset:
 //
-//     Induction(id)  ≡  loop.lower  +  Induction(id)'
+//     Induction(id) = loop.lower + Induction(id)'
 //
-// 右边的 Induction 代表圈内偏移（0, step, 2*step, …）。按 lane 不同的部分全部
-// 集中在 lower 里（成块发与定长分块的 lower 都是 p*R，step 各份相同），所以代换
-// 之后程序号显式出现在地址里，圈内偏移则是一个各份相同的量。
+// The primed term denotes 0, step, 2*step, ... and is uniform across lanes.
+// Lane variation resides in lower: both cyclic and blocked segments start at
+// p*R and use a uniform step. Substitution exposes the program ID in the
+// address while keeping the iteration offset uniform.
 //
-// 存在的理由：布局分析整套机制挂在"byteOffset 里有没有
-// K::Program"上，而带程序轴
-// 循环时程序号住在循环下界里，不在地址里——于是一条按行走的访存会被判成
-// SHARED_ACCESS（"不随程序轴变化"）。代换是把它接上去的那一步。
+// Layout analysis looks for K::Program in byteOffset. Without substitution,
+// the program ID remains hidden in the loop's lower bound, so a row access
+// would incorrectly appear to be SHARED_ACCESS.
 //
-// 返回空表示代换不下去（lower 缺失），调用方应按证不出处理，不要退而用原式。
-// 不含这条循环变量的表达式原样返回，指针不变。
+// Return null if substitution cannot be proved, including a missing lower
+// bound. Callers must not fall back to the original expression. Expressions
+// independent of this induction variable retain their original pointer.
 BatchExprRef normalizeBatchAccessOnLogicalAxis(const BatchExprRef &e,
                                                const BatchLoopFact &loop);
 } // namespace mlir::triton::cfg

@@ -32,7 +32,8 @@ struct BatchLoopFact {
   bool carriesValues = true;
 };
 
-// 序列化不在这里。它是输出格式，不是数据载体，见 BatchFactsJSON.h。
+// Serialization belongs to the output format, not the data types; see
+// BatchFactsJSON.h.
 
 } // namespace mlir::triton::cfg
 #endif

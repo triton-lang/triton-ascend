@@ -8,15 +8,16 @@
 namespace mlir::triton::cfg {
 namespace {
 
-// 常数正步长，或者 num_programs × 正常数。后者是成块发的步长
-// （for r in range(pid, N, num_programs)），它不是编译期常量但恒为正：网格大小
-// 至少是 1。只认这两种形状，不做一般的符号正性证明。
+// Accept a positive constant step or num_programs times a positive constant.
+// The latter covers cyclic loops such as range(pid, N, num_programs): it is
+// not constant, but the grid has at least one program. This is deliberately
+// limited to those forms, not a general symbolic positivity proof.
 bool provenPositiveStep(Value step) {
   if (step.getDefiningOp<triton::GetNumProgramsOp>())
     return true;
-  // 符号扩展保值：正数扩宽之后还是同一个正数，所以可以直接看进去。少了这一条，
-  // 凡是源码写过 tl.program_id(0).cast(tl.int64) 的 kernel 整条循环都抬到 i64，
-  // 三个界全裹着 extsi，一个都证不出来——正例 #7 就是这么被拒的。
+  // Sign extension preserves positive values, so inspect its operand.
+  // Casting tl.program_id(0) to tl.int64 can wrap all loop bounds in
+  // extsi; those wrappers must not prevent a positivity proof.
   if (auto widened = step.getDefiningOp<arith::ExtSIOp>())
     return provenPositiveStep(widened.getIn());
   if (auto product = step.getDefiningOp<arith::MulIOp>())
@@ -81,24 +82,25 @@ LogicalResult BatchAnalyzer::analyzeVariation(
         continue;
       }
       if (auto loop = dyn_cast<scf::ForOp>(op)) {
-        // 界随程序轴变化不再在这里拒。认不认得出这条循环、能不能按 lane
-        // 重分块， 是关卡 0（BatchLoopForm.h）和关卡
-        // 1（BatchLoopSchedule.h）的事：它们
-        // 看得见两种分布的形态，这里看不见。三个界里任何一个变都归关卡 0 接管，
-        // 所以这里放行不会留下无人认领的形状。
+        // Delegate program-dependent bounds to the form and coordinate checks
+        // in BatchLoopForm.h and BatchLoopSchedule.h. They recognize the
+        // supported distributions. Any varying bound or step is owned by gate
+        // 0, so accepting it here cannot bypass the later legality checks.
         if (!provenPositiveStep(loop.getStep()))
           return reject(&op, "UNPROVEN_POSITIVE_LOOP_STEP");
         if (loop.getNumRegionIterArgs() > 128)
           return reject(&op, "ANALYSIS_BUDGET_EXCEEDED");
-        // 程序轴循环的循环变量按 lane 变化，普通循环的不变。
+        // A program-axis loop's induction value varies across semantic lanes;
+        // an ordinary loop's does not.
         //
-        // 看着矛盾：合并之后 scf.for 的界只能是标量，循环变量当然也是标量。但这
-        // 一位管的不是界，是**体**——lane u 这一圈处理的行是 iv +
-        // u*R，由它派生的 下标因此各 lane 不同，语义体必须给它们加上 lane
-        // 轴，否则桥折不成一条宽 访存。界由 retileBatchLoopBounds
-        // 另算，走的不是这条映射 （BatchRewrite.cpp 的循环重建）。
+        // The rebuilt scf.for still uses scalar bounds and a scalar induction
+        // variable. This flag describes its body: lane u processes iv + u*R,
+        // so derived indices need a lane axis for the wide-memory bridge.
+        // retileBatchLoopBounds computes scalar bounds separately from this
+        // map.
         //
-        // 判据和关卡 0 一致：三个界里任一随程序轴变化。
+        // Use the same criterion as gate 0: any bound or step varies with the
+        // selected program axis.
         record(loop.getInductionVar(),
                workspace.isVarying(loop.getLowerBound()) ||
                    workspace.isVarying(loop.getUpperBound()) ||

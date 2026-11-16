@@ -1,9 +1,9 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "TritonToGraph/BlockBatching/BatchExpr.h"
 
-// 从 BatchAccessAnalysis.cpp 原样搬来，一个字符没改。
-// 只依赖 <memory>，不碰 MLIR 也不碰 JSON——分出来之后判定层的单测才能
-// 不经由 BatchAccessAnalysis.cpp 把整条 Triton/GPU 依赖链拖进来。
+// Expression support extracted from BatchAccessAnalysis.cpp without semantic
+// changes. Depending only on <memory>, not MLIR or JSON, lets legality tests
+// avoid the full Triton/GPU dependency chain.
 namespace mlir::triton::cfg {
 BatchExprRef BatchExpr::leaf(Kind kind, int64_t value, unsigned bits,
                              int64_t extent) {

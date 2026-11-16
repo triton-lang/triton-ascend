@@ -7,8 +7,8 @@
 
 namespace mlir::triton::cfg {
 
-// 关卡 0 住在事实层而不是判定层，因为它必须走 IR。判定层（BatchLoopLegality.h）
-// 只吃这里的结论，所以能保持零 MLIR 依赖。
+// Gate 0 belongs to the fact layer because it walks IR. The legality layer
+// (BatchLoopLegality.h) consumes its result without depending on MLIR.
 //
 // Whether a value varies along the axis being merged. Injected rather than
 // passed a full analysis workspace: that one bit is all the form check needs
@@ -22,12 +22,12 @@ using BatchVaryingPredicate = llvm::function_ref<bool(Value)>;
 BatchResult<scf::ForOp> checkBatchLoopForm(Operation *function,
                                            BatchVaryingPredicate isVarying);
 
-// 循环会不会把值从这一圈带到下一圈，用来填 BatchLoopFact::carriesValues。
-// 跨行归约（dW_row += …，循环结束才写一次）在 IR 里的对应物就是 iter_args，
-// 判定层的关卡 1.5a 查的是这一位。
+// Detect values carried between iterations for BatchLoopFact::carriesValues.
+// Cross-row reductions, such as dW_row += ... followed by one final store,
+// appear as iter_args in the IR. Legality checks consume this fact.
 //
-// 放在这里而不是直接写在采事实的地方：那边链着 Triton dialect，给它写单测会
-// 把整条 GPU 依赖链拖进测试目标（C1/C2）。这里只认 scf，测得起。
+// Keep this helper separate from Triton-dependent fact collection so its
+// tests need only the scf dialect, not the full Triton/GPU dependency chain.
 bool batchLoopCarriesValues(scf::ForOp loop);
 
 } // namespace mlir::triton::cfg

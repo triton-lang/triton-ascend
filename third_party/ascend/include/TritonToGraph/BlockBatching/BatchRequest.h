@@ -66,13 +66,13 @@ void applyBatchDiagnostic(BatchAnalysisReport &report,
 void setBatchDiagnostic(BatchAnalysisReport &report, Operation *op,
                         llvm::StringRef reason);
 
-// 成功时把改写结果提交回 module。
+// Commit the rewritten result to module on success.
 FailureOr<BatchRewriteReport> rewriteBlockBatching(ModuleOp module,
                                                    BatchRequest request);
 
-// 同样的改写，但**绝不提交**：module 一个字节都不变。干跑用这条。
-// 在它之前，干跑只能靠在外面再 clone 一层来躲开上面那次提交，于是一次干跑要把
-// 整个模块 clone 两遍。
+// Run the same rewrite without committing; module remains unchanged.
+// Dry runs use this entry point to avoid cloning the whole module a second
+// time merely to discard the committed result.
 FailureOr<BatchRewriteReport> probeBlockBatching(ModuleOp module,
                                                  BatchRequest request);
 

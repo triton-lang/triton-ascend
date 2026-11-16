@@ -39,15 +39,17 @@ LogicalResult groupBatchLoopIterations(scf::ForOp loop, int64_t factor) {
 }
 namespace {
 
-// 界表达式在实测 kernel 里都只有两三个 op，这个预算只是防病态输入。
+// Observed kernel bounds use only a few operations; this budget protects
+// against pathological expression graphs.
 constexpr unsigned kBudget = 256;
 
-// value 的定义链**可能**读到 programId 吗。证得出读不到才返回 false——那种子链
-// 整条交给调用方的 remap，一个 op 都不克隆。
+// Return whether value's defining graph may depend on programId. Return
+// false only when independence is proved; the caller then remaps that
+// entire subtree without cloning operations.
 //
-// 不确定时一律返回 true，由主路径按原样往下走，那里有带区域的 op 与预算这两道
-// 拒绝。反过来写（不确定就当无关）会把两道都绕过去：一个从区域里捕获程序号的 op
-// 操作数上看不见它，会被当成无关子链原样留下，而那条界仍然用着原来的程序号。
+// Uncertainty returns true so the main path still applies its region and
+// budget checks. Assuming independence could miss a program ID captured
+// inside a region and leave the original ID in a rewritten bound.
 bool mayReadProgramId(Value value, Value programId, unsigned &budget) {
   if (value == programId)
     return true;
@@ -56,7 +58,7 @@ bool mayReadProgramId(Value value, Value programId, unsigned &budget) {
   --budget;
   Operation *definition = value.getDefiningOp();
   if (!definition)
-    return false; // 函数参数：定义在循环之外，与程序号无关。
+    return false; // Function argument, independent of pid.
   if (definition->getNumRegions())
     return true;
   return llvm::any_of(definition->getOperands(), [&](Value operand) {
@@ -64,8 +66,9 @@ bool mayReadProgramId(Value value, Value programId, unsigned &budget) {
   });
 }
 
-// 把 value 的定义链重建一份，其中对 programId 的读取换成 folded。预算用尽或遇到
-// 不敢克隆的 op 返回空，由调用方整条放弃——绝不返回一条只换了一半的表达式。
+// Rebuild value's defining graph, substituting folded for programId.
+// Return null on budget exhaustion or an unsafe operation so the caller
+// rejects the entire bound, never a partially substituted expression.
 Value substitute(OpBuilder &builder, Value value, Value programId, Value folded,
                  BatchValueRemap remap, unsigned &budget) {
   if (value == programId)
@@ -73,17 +76,19 @@ Value substitute(OpBuilder &builder, Value value, Value programId, Value folded,
   if (!budget)
     return nullptr;
   --budget;
-  // 与程序号无关的整条子链：不重建，问调用方要新体里的对应物。原样留下会在原函数
-  // 体被 erase 之后变成悬空引用。
+  // Remap program-independent subtrees through the caller instead of
+  // cloning them. Retaining the original values would leave dangling
+  // references when the original function body is erased.
   unsigned probe = budget;
   if (!mayReadProgramId(value, programId, probe))
     return remap(value);
   Operation *definition = value.getDefiningOp();
   if (!definition)
-    return remap(value); // 函数参数之类，与程序号无关。
-  // 带区域的 op 能从外层捕获值，程序号可以藏在区域里而不出现在操作数上。那样
-  // 下面"操作数都没变，所以整条与程序号无关"的推断就不成立，会把一条仍然用着
-  // 原程序号的界原样留下。这一关必须在那个推断之前，不能并进克隆前的判断。
+    return remap(value); // Independent values, such as function arguments.
+  // An operation with regions can capture programId without listing it as
+  // an operand. Check regions before concluding that unchanged operands
+  // imply independence; otherwise a bound could retain the original ID.
+  // This check must precede that inference, not just the final clone.
   if (definition->getNumRegions())
     return nullptr;
   SmallVector<Value> operands;
@@ -97,13 +102,14 @@ Value substitute(OpBuilder &builder, Value value, Value programId, Value folded,
     operands.push_back(rebuilt);
   }
   if (!changed)
-    return remap(value); // 走到这里说明预算在探测时用尽了，保守交给调用方。
-  // 克隆一条读内存的指令会改变访存次数，证不出等价就不做（C9）。
+    return remap(value); // Probe budget exhausted; defer to the caller.
+  // Cloning a memory read changes access multiplicity. Reject it unless
+  // equivalence is proved.
   if (!isMemoryEffectFree(definition))
     return nullptr;
   Operation *clone = builder.clone(*definition);
   clone->setOperands(operands);
-  // 按结果序号取，不假定单结果：value 可能是第二个结果。
+  // Select the matching result index; value need not be the first result.
   return clone->getResult(cast<OpResult>(value).getResultNumber());
 }
 
@@ -113,10 +119,11 @@ BatchResult<std::array<Value, 3>>
 retileBatchLoopBounds(OpBuilder &builder, scf::ForOp loop,
                       const BatchLogicalAxis &axis, Value programId,
                       Value foldedProgramId, BatchValueRemap remap) {
-  // 两种分布共用这一段，不按 distribution 分支：它们的界都写成程序号的函数
-  // （成块发 p*R，定长分块 p*R → min((p+1)*R, N)），把程序号换成折叠后的
-  // lane 号，算出来的就是这条 lane 该走的那一段。差别只在圈数——定长分块各
-  // lane 可能差一个尾部，那是循环体掩码的事，不是界的事。
+  // Both distributions express bounds in terms of the program ID: cyclic
+  // starts at p*R; blocked spans p*R to min((p+1)*R, N). Substituting the
+  // folded lane ID recovers that lane's segment without a distribution
+  // branch. A blocked tail may change a lane's trip count; body masks handle
+  // that difference.
   using Result = BatchResult<std::array<Value, 3>>;
   auto decline = [] {
     return Result::decline({"LOOP_RETILING_FAILED", "retile", {}, {}, {}, {}});
@@ -131,9 +138,10 @@ retileBatchLoopBounds(OpBuilder &builder, scf::ForOp loop,
                            foldedProgramId, remap, budget);
   Value upper = substitute(builder, loop.getUpperBound(), programId,
                            foldedProgramId, remap, budget);
-  // 步长不换程序号，但仍要过 remap：它同样读的是原 IR。tt.get_num_programs 已被
-  // 重映射回隐藏的原始网格参数（BatchRewrite.cpp:407-413），所以这个表达式读到的
-  // 是原始的 G 而不是 G/F；再乘一个 F 会让它变成 G*R*F，跳过 (F-1)/F 的行。
+  // Do not substitute the program ID in the step, but still remap its
+  // original-IR values. tt.get_num_programs maps to the hidden original-grid
+  // argument, so the step uses G, not G/F. Multiplying it by F again would
+  // produce G*R*F and skip (F-1)/F of the rows.
   Value step = remap(loop.getStep());
   if (!lower || !upper || !step)
     return decline();

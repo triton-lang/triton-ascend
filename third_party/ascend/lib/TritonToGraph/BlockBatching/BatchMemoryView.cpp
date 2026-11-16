@@ -22,8 +22,8 @@ bool isConstant(BatchExprRef expression, int64_t value) {
          expression->value == value;
 }
 
-// 逐节点比对两个表达式。表达式不做 hash-cons，相同的式子会是两个不同的对象，
-// 所以指针相等问不出"是不是同一个量"。
+// Compare expressions node by node. They are not hash-consed, so equal
+// expressions can be distinct objects; pointer equality alone is insufficient.
 bool sameExpression(BatchExprRef a, BatchExprRef b) {
   if (a == b)
     return true;
@@ -68,9 +68,10 @@ std::string layoutRuntimeGuard(const BatchLayoutPlan &plan,
       int64_t id = coordinateMap[term.id];
       value = K::leaf(K::Coordinate, id, 32, targetShape[id]);
     } else {
-      // 循环变量的位宽按它那条循环来，不能写死 32。源码只要写过
-      // tl.program_id(0).cast(tl.int64)，整条循环就是 i64，运行期守卫会拿这一位
-      // 和循环域里登记的位宽对照，对不上直接报 INVALID_LOOP_DOMAIN。
+      // Use the loop induction variable's actual bit width, not a fixed 32.
+      // Casting tl.program_id(0) to tl.int64 can make the whole loop i64.
+      // Runtime guards compare this width with the registered loop domain
+      // and reject a mismatch as INVALID_LOOP_DOMAIN.
       unsigned bits = 32;
       if (term.kind == K::Induction)
         for (unsigned id : fact.loopIDs)
@@ -90,9 +91,10 @@ std::string layoutRuntimeGuard(const BatchLayoutPlan &plan,
   llvm::json::Array shape, checks, loops;
   for (int64_t n : targetShape)
     shape.push_back(n);
-  // 桥上的地址含圈内偏移，运行期要解释 iv 就得有循环域。和原访存守卫共用同一份
-  // 序列化与同一段解释代码（ByteDomain.__init__），不另立一套语义。没有循环的
-  // 访存这里是空数组，运行期行为一个字不变。
+  // Bridge addresses contain iteration offsets, so runtime evaluation needs
+  // the loop domains. Reuse the original access guards' serialization and
+  // ByteDomain interpretation. Loop-free accesses keep an empty domain list
+  // and their existing behavior.
   for (unsigned id : fact.loopIDs)
     loops.push_back(batchLoopJSON(*facts.findLoop(id)));
   for (E expression : {logicalBase, add(logicalBase, range), endpoint,
@@ -137,9 +139,10 @@ bool supportedPredicate(BatchExprRef e, int axis, ArrayRef<int64_t> fused) {
   if (e->kind == K::Unknown || e->kind == K::Induction || e->kind == K::ExtUI ||
       e->kind == K::Trunc || e->kind == K::ULT)
     return false;
-  // 批处理后的 get_program_id 返回组号，per-lane 的程序号是 group*F + lane。
-  // 商/余数叶子同样由批处理轴派生，整组 lane 只会得到一个谓词值，掩码对
-  // lane>=1 就是错的。地址侧已在 BatchAffineForm 拒绝它们，残差掩码必须一致。
+  // Batched get_program_id returns a group ID; each original lane ID is
+  // group*F + lane. Quotient/remainder leaves derived from that axis would
+  // give one predicate for the whole group, which is wrong for lane >= 1.
+  // Residual masks must reject them just as BatchAffineForm does for addresses.
   if ((e->kind == K::Program || e->kind == K::ProgramQuotient ||
        e->kind == K::ProgramRemainder) &&
       e->value == axis)
@@ -297,9 +300,9 @@ Value BatchMemoryRewriter::expression(BatchExprRef e) {
     auto axis = mappedAxis(e->value);
     return axis ? range(*axis) : Value{};
   }
-  // Induction 和其余标量叶子一样转给 upper()。漏掉它的话这里会掉进下面的二元
-  // 分支，对空的 e->lhs 解引用——不是报错，是直接崩。圈内偏移正是以这种叶子的
-  // 形式出现在 rest term 里的。
+  // Handle Induction through upper(), like other scalar leaves. Otherwise
+  // an iteration-offset residual term would reach the binary-expression
+  // path and dereference a null e->lhs.
   if (e->kind == K::Constant || e->kind == K::Argument || e->kind == K::Grid ||
       e->kind == K::Program || e->kind == K::Induction ||
       e->kind == K::ProgramQuotient || e->kind == K::ProgramRemainder)
@@ -674,16 +677,15 @@ LogicalResult BatchMemoryRewriter::rewriteMemoryView(
   }
   SmallVector<int64_t> expectedShape{factor};
   llvm::append_range(expectedShape, plan.shape);
-  // 采事实时循环是沿父链自内向外记的（BatchAccessAnalysis.cpp:409-426），
-  // 这里用同样的次序走回来，按位置配上编号。两边对不上就整条放弃——那说明
-  // 克隆改变了嵌套结构，继续发射只会得到一条地址错了的访存。
+  // Facts record enclosing loops from innermost to outermost. Walk the same
+  // order and match IDs by position. Reject any mismatch: cloning changed
+  // the nesting structure, so emitting an address would be unsafe.
   //
-  // 还原的是**圈内偏移**（0, step, 2*step,
-  // …）而不是循环变量本身：布局分析对每 一条循环都做过代换 Induction(id) ≡
-  // lower + Induction(id)' （BatchLayoutAnalysis.cpp:249，经
-  // normalizeBatchAccessOnLogicalAxis），剩下
-  // 的这个节点代表的是等号右边那一项。还整个循环变量的话下界会被算两遍——程序轴
-  // 循环上这正是 g*F*R 那一项，地址直接错掉。
+  // Recover the iteration offset (0, step, 2*step, ...), not the full induction
+  // variable. normalizeBatchAccessOnLogicalAxis replaced each variable with
+  // lower + Induction(id)'; this remaining leaf denotes the primed offset.
+  // Using the full variable would count lower twice, including the g*F*R
+  // term of a program-axis loop.
   SmallVector<Value> enclosing;
   for (Operation *parent = op->getParentOp(); parent;
        parent = parent->getParentOp())
@@ -709,24 +711,26 @@ LogicalResult BatchMemoryRewriter::rewriteMemoryView(
   Value logicalBase = base;
   if (plan.origin)
     logicalBase = r.create<arith::AddIOp>(loc, base, constant(plan.origin));
-  // 掩码必须界住地址真正落到的那一行。logicalBase 只含程序号那一项，圈内偏移
-  // 在下面以 rest term 的形式加进 offsetBase——两边不同步的话第 k 圈会拿第 0
-  // 圈 的掩码，越界就拦不住了。没有循环时 rest term 里不会有
-  // Induction，这一段是 空转。
+  // The mask must bound the row actually addressed. logicalBase initially
+  // contains only the program term; offsetBase also receives iteration-offset
+  // residuals below. Keep both in sync, or later iterations would use the
+  // first iteration's mask and could access out of bounds. Loop-free accesses
+  // have no Induction residuals.
   //
-  // 只在元素步长为 1、元素起点为 0 时成立：那时 offsetBase = base，元素单位和
-  // 逻辑单位是同一个量，圈内偏移可以直接加到 logicalBase 上。别的比例关系要另
-  // 行证明，没证之前整条劝退，不发一条掩码错了的访存。
+  // Only add an offset to logicalBase with a proved unit conversion. Unit
+  // element stride and zero element origin make the units identical; other
+  // scalings need an exact proof before emitting the access.
   Value shifted;
   for (const auto &term : plan.restTerms) {
     if (term.kind != K::Induction)
       continue;
-    // logicalBase 是**行单位**，而 term.coefficient
-    // 是**元素单位**。两者的换算 系数必须精确知道，不能估。认两种情形：
-    //   元素步长为 1  两种单位本来就是同一个，照搬系数。
-    //   系数恰是元素步长  循环变量就是行号，换算系数精确为 1，行偏移即 iv。
-    //      正例 #7/#8 的二维按行访存全落在这一支；少了它，它们会静悄悄地退回
-    //      语义体——照样 REWRITTEN、照样算对，只是宽访存桥没搭上，比基线慢。
+    // logicalBase uses row units; term.coefficient uses element units.
+    // Accept only exact conversions:
+    //   Unit element stride: retain the coefficient unchanged.
+    //   Coefficient equals element stride: the variable is a row index,
+    //     so its row coefficient is exactly 1.
+    // The latter preserves the wide-memory bridge for two-dimensional row
+    // accesses instead of falling back to the correct but slower semantic body.
     bool unit = isConstant(plan.elementStride, 1);
     if ((!unit && !sameExpression(term.coefficient, plan.elementStride)) ||
         !isConstant(plan.elementOrigin, 0)) {
@@ -756,13 +760,13 @@ LogicalResult BatchMemoryRewriter::rewriteMemoryView(
       r.create<arith::MulIOp>(loc, grid, constant(plan.tileExtent));
   if (plan.origin)
     endpoint = r.create<arith::AddIOp>(loc, endpoint, constant(plan.origin));
-  // 没有圈内偏移时两条界融成一条 min，这是已发布的形状，原样保留。
+  // Without an iteration offset, retain the existing single-min bound.
   //
-  // 有圈内偏移就不能融：两条界管的不是一回事。plan.upper
-  // 界的是这条访存真正落到 的行，圈内偏移要算进去；endpoint = G*tileExtent
-  // 界的是 lane 活没活，它说的是 "原网格只有 G
-  // 份"，和走到第几圈无关。把圈内偏移塞进 min 里，第 k 圈的活 lane
-  // 会被当成越界挡掉——少读，不是多读，但一样是算错。
+  // With an offset, the bounds describe different domains: plan.upper limits
+  // the actual accessed row and includes the iteration offset, whereas
+  // endpoint = G*tileExtent limits active lanes in the original grid,
+  // independently of iteration. Combining them would incorrectly mask active
+  // lanes in later iterations and omit required reads.
   Value limitValue = upper(plan.upper);
   if (!limitValue)
     return function.emitError("invalid planned layout upper bound"), failure();

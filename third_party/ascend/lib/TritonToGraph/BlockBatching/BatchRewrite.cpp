@@ -842,10 +842,10 @@ rewriteImpl(ModuleOp module, BatchRequest request,
     diagnosticOp = f.getOperation();
     if (function || !f.isPublic())
       return reject("EXPECTED_SINGLE_PUBLIC_ENTRY");
-    // 提前 return 会被降成 cf.cond_br，函数体从此不止一块。这一条原先和"入口
-    // 不止一个"共用同一个码，而真实算子里触发的全是这一种——liger 的
-    // llama4_rope、cross_entropy、grpo_loss 都只有一个 public 入口，照着那个
-    // 码查会一路查错方向。拒还是拒，但要说对拒的是什么。
+    // Early returns lower to cf.cond_br and create multiple body blocks.
+    // Distinguish this from multiple public entry points: Liger llama4_rope,
+    // cross_entropy and grpo_loss each have one entry but can have this CFG.
+    // Reject the form with a diagnostic that identifies the actual cause.
     if (f.getBody().getBlocks().size() != 1)
       return reject("MULTI_BLOCK_ENTRY_BODY");
     function = f;
@@ -1087,7 +1087,8 @@ rewriteImpl(ModuleOp module, BatchRequest request,
           diagnosticOp = op;
           return reject("CV_VARYING_LOOP_BOUND");
         }
-  // 关卡 0：形态。程序轴循环最多一条，而且必须直接在函数体顶层。
+  // Gate 0: allow at most one program-axis loop, directly at function top
+  // level.
   auto form = checkBatchLoopForm(
       function, [&](Value value) { return control.isVarying(value); });
   if (!form.hasValue()) {
@@ -1095,7 +1096,8 @@ rewriteImpl(ModuleOp module, BatchRequest request,
     return report;
   }
   scf::ForOp programLoopOp = std::move(form).takeValue();
-  // 关卡 1：坐标归一。拿函数级的那份循环事实，按 id 找回关卡 0 认下的那条。
+  // Gate 1: normalize coordinates using the function-level facts for the
+  // loop ID accepted by gate 0.
   const BatchLoopFact *programLoop = nullptr;
   if (programLoopOp) {
     // Reuse the analysis traversal; IDs also index the serialized loop facts.
@@ -1106,8 +1108,9 @@ rewriteImpl(ModuleOp module, BatchRequest request,
       if (fact.id == *id)
         programLoop = &fact;
     if (!programLoop) {
-      // 关卡 0 认下的循环在事实里没有对应项，只可能是里面一条访存都没有。
-      // 那样的循环合并了也没有收益，保守拒掉。
+      // A loop accepted by gate 0 has no fact entry only if it has no memory
+      // accesses. Batching that loop offers no benefit; conservatively reject
+      // it.
       diagnosticOp = programLoopOp;
       return reject("LOOP_WITHOUT_MEMORY_ACCESS");
     }
@@ -1496,20 +1499,19 @@ rewriteImpl(ModuleOp module, BatchRequest request,
     diagnosticOp = scheduledLoop;
     return reject("LOOP_POINTWISE_MEMORY_VIEW_REQUIRED");
   }
-  // 新关卡：有程序轴循环时，圈内访存必须全部被布局层证下来。
+  // Every access inside a program-axis loop requires a proved layout.
   //
-  // 没有循环时 Keep 是安全的：证不出就不改写，交回通用的 lane 加宽，程序号派生
-  // 的值被提成 lane 张量，数值照样对。程序轴循环破坏了这个兜底——合并后循环变量
-  // 必须是各 lane 共享的标量（scf.for 的界不可能按 lane
-  // 不同），于是只由它派生的 值也被判成非 varying、不会被提，lane u
-  // 该读的那一份只存在于布局层重建的程序号 项里。这类访存一旦落到
-  // Keep，合并后会对所有 lane 读同一处——**静默算错**。 看的是 linearMemoryView
-  // 而不是 action：证到了 PROVEN_… 但这一位为假的访存， BatchMemoryView.cpp:451
-  // 照样跳过，结果一样是循环重分块了而访存原样不动。
+  // Without such a loop, Keep is safe: generic lane widening handles the
+  // access by lifting program-derived values into lane tensors. Retiling a
+  // program-axis loop makes its induction variable a shared scalar, so the
+  // layout bridge must reconstruct each lane's program-dependent address.
+  // Keeping an unmodified access could make all lanes read the same location.
+  // Check linearMemoryView, not only action: a PROVEN_* access with this bit
+  // unset is still skipped by BatchMemoryView.
   //
-  // 这道检查必须在动 IR 之前做完。改写开始之后没有回滚：原 op 已经删、事实上的
-  // operation
-  // 句柄已经清空，那时再拒既给不出诊断位置，也会留下一个改了一半的模块。
+  // Complete this check before mutating IR. After rewriting starts, original
+  // operations are erased and fact operation handles are cleared; rejecting
+  // then would lose diagnostic locations and leave a partial rewrite.
   if (programLoopOp && plan->logicalAxis())
     for (const auto &plan : layouts)
       if (!access.facts->accesses()[plan.accessID].loopIDs.empty() &&
@@ -1549,8 +1551,9 @@ rewriteImpl(ModuleOp module, BatchRequest request,
   if (!pidSource)
     return module.emitError("missing validated batch program axis"), failure();
   Value group = rewriter.clone(*pidSource)->getResult(0);
-  // 合并后这一组覆盖的第一个原程序号。程序轴循环的界用它代换原来的 pid：各 lane
-  // 共享这一个标量，lane u 的那一份由布局层重建的程序号项补上。
+  // First original program ID covered by the folded group. Program-axis
+  // loop bounds substitute this shared scalar for pid; the layout bridge
+  // reconstructs the lane-specific program terms.
   Value folded =
       rewriter.create<arith::MulIOp>(loc, group, constant(i32, request.factor));
   Value group64 = rewriter.create<arith::ExtSIOp>(loc, i64, group);
@@ -1725,10 +1728,10 @@ rewriteImpl(ModuleOp module, BatchRequest request,
           replacement = created;
         } else {
           auto loop = cast<scf::ForOp>(op);
-          // 程序轴循环的三个界不能照搬映射：下界是 pid 的函数，而 pid
-          // 在新体里是 一个 lane 张量，scf.for
-          // 的界只能是标量。重分块把界里的程序号换成合并 后的标量 group*F，lane
-          // 间的差异改由布局层重建的程序号项承担。
+          // Do not reuse the ordinary value map for these bounds: pid becomes a
+          // lane tensor in the new body, but scf.for requires scalar bounds.
+          // Retiling substitutes scalar group*F; the layout bridge reconstructs
+          // the differences between lanes.
           Value lower, upper, stride;
           if (loop == programLoopOp) {
             auto retiled = retileBatchLoopBounds(
@@ -1774,15 +1777,15 @@ rewriteImpl(ModuleOp module, BatchRequest request,
           while (!created.getBody()->empty())
             rewriter.eraseOp(&created.getBody()->back());
           if (loop == programLoopOp) {
-            // lane u 这一圈处理的行是 iv + u*R，R 是一个原程序拥有的行距。
+            // Lane u processes row iv + u*R, where R is the row spacing between
+            // original programs.
             //
-            // R 不取 axis.chunk：那个量对定长分块恒为
-            // 1，不是行距。两种分布的下界 都是 p*R 这个一次式（关卡 1
-            // 已经证过形态），所以直接从界里取差分： R = lower(p=1) -
-            // lower(p=0)。对成块发与定长分块一样成立，也不用把
-            // 新字段加进判定层的契约。
+            // Do not use axis.chunk: it is always 1 for blocked distribution,
+            // not the row spacing. Gate 1 proved lower = p*R for both
+            // distributions, so obtain R as lower(p=1) - lower(p=0) without
+            // adding a fact field.
             OpBuilder::InsertionGuard guard(rewriter);
-            // 行距在循环外算一次。
+            // Compute row spacing once, outside the loop.
             rewriter.setInsertionPoint(created);
             auto at = [&](int64_t p) {
               auto bounds = retileBatchLoopBounds(
@@ -1798,10 +1801,10 @@ rewriteImpl(ModuleOp module, BatchRequest request,
               return rejectRewrite("LOOP_RETILING_FAILED");
             Value rows = rewriter.create<arith::SubIOp>(loc, atOne, atZero);
             rewriter.setInsertionPointToStart(created.getBody());
-            // 循环变量不一定是 i32。源码只要写过
-            // tl.program_id(0).cast(tl.int64)， 整条循环就抬到 i64，而 lane
-            // 号是 tt.make_range 出来的，只能是 i32。 两边不同宽就拼不出 iv +
-            // u*R，改写会产出过不了验证的 IR。
+            // The induction variable may be i64 after
+            // tl.program_id(0).cast(tl.int64), while tt.make_range produces i32
+            // lane IDs. Match their widths before forming iv + u*R, or the
+            // rewritten IR will fail verification.
             Type rowType = created.getInductionVar().getType();
             auto rowInt = dyn_cast<IntegerType>(rowType);
             if (!rowInt || rowInt.getWidth() < 32)
@@ -2211,7 +2214,8 @@ rewriteImpl(ModuleOp module, BatchRequest request,
   return report;
 }
 namespace {
-// 两个入口共用的那一步：改写永远发生在私有沙箱上，差别只在成功之后提不提交。
+// Both entry points rewrite a private sandbox; they differ only in whether
+// a successful result is committed.
 FailureOr<BatchRewriteReport>
 rewriteInSandbox(ModuleOp module, BatchRequest request, bool commit) {
   OwningOpRef<ModuleOp> sandbox(module.clone());

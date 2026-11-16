@@ -2,6 +2,7 @@
 """CPU-only checks; no Triton driver or device is initialized."""
 import importlib
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 from types import ModuleType, SimpleNamespace
@@ -54,7 +55,7 @@ class TestModelBridge(unittest.TestCase):
         worker = importlib.import_module(PACKAGE + ".block_batching_worker")
         artifacts = importlib.import_module(PACKAGE + ".block_auto_artifacts")
         for kind in ("Timeout", "ProtocolError"):
-            with patch.object(artifacts, "load_evidence", return_value={}), \
+            with patch.object(artifacts, "load_resources", return_value={}), \
                  patch.object(self.bridge, "_native", return_value=dict(candidates=[dict(needs_llvm=False)])), \
                  patch.object(worker, "_attempt", side_effect=worker.BatchCompileError("test", kind=kind)) as attempt:
                 candidates = [dict(factor=1, axis=-1, kernel=object())]
@@ -66,6 +67,17 @@ class TestModelBridge(unittest.TestCase):
                     with self.assertRaises(worker.BatchCompileError):
                         self.bridge.select_candidates(candidates, {})
                 self.assertEqual(attempt.call_args.kwargs["timeout"], 30)
+
+    def test_incomplete_resource_response_cannot_drop_a_candidate(self):
+        artifacts = importlib.import_module(PACKAGE + ".block_auto_artifacts")
+        with patch.object(artifacts, "load_resources", return_value={}), \
+             patch.object(self.bridge, "_native", return_value=dict(candidates=[])), \
+             patch.object(artifacts, "load_analysis") as analysis:
+            factor, report = self.bridge.select_candidates([dict(factor=1, axis=-1)], {})
+        self.assertEqual(factor, 1)
+        self.assertFalse(report["model_complete"])
+        self.assertIn("one state per candidate", report["error"])
+        analysis.assert_not_called()
 
 
 class LocalCache:
@@ -103,7 +115,6 @@ class TestModelCache(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.artifacts = importlib.import_module(PACKAGE + ".block_auto_artifacts")
-        self.optimizer = importlib.import_module(PACKAGE + ".block_auto_models.vv_compilation")
 
     def cache(self, key):
         self.keys.append(key)
@@ -126,16 +137,22 @@ class TestModelCache(unittest.TestCase):
         second = self.collect("second", "second module")
         self.compiler.write_text("new compiler installation")
         for kernel, expected in ((first, "first module"), (second, "second module")):
-            result = self.artifacts.load_evidence(kernel, cache_factory=self.cache)
+            resources = self.artifacts.load_resources(dict(factor=2, axis=0, kernel=kernel))
+            self.assertNotIn("llvm", resources)
+            self.assertEqual(resources["files"]["compiler"], dict(path=str(self.compiler)))
+            result = self.artifacts.load_analysis(resources, dict(vv=False, needs_llvm=False))
             self.assertEqual(result["llvm"], expected)
-            self.assertEqual(result["files"]["compiler"], dict(path=str(self.compiler)))
+            self.assertFalse({"metadata", "files", "final_ir", "meta_library"}.intersection(result))
+            self.assertNotIn("llvm", resources)
         self.assertEqual(self.keys, ["first", "second", "first", "second"])
 
     def test_missing_cached_input_remains_unavailable(self):
         kernel = self.collect("missing", "module")
         (self.root / "cache/missing/block_auto_llvm.ll").unlink()
-        with self.assertRaisesRegex(ValueError, "cached model input unavailable"):
-            self.artifacts.load_evidence(kernel, cache_factory=self.cache)
+        result = self.artifacts.load_resources(dict(factor=4, axis=1, kernel=kernel))
+        self.assertEqual(result["status"], "RESOURCE_UNCONFIRMED")
+        self.assertIn("cached model input unavailable", result["error"])
+        self.assertNotIn("metadata", result)
 
     def test_optimizer_publishes_once_under_the_normal_candidate_key(self):
         item = dict(metadata={"hash": "candidate"},
@@ -147,9 +164,12 @@ class TestModelCache(unittest.TestCase):
             output.write_text("optimized module")
             self.assertEqual(kwargs["env"]["ASCEND_RT_VISIBLE_DEVICES"], "")
 
-        with patch.object(self.optimizer.subprocess, "run", side_effect=compile_cpu) as run:
-            self.assertEqual(self.optimizer.optimized_llvm(item), "optimized module")
-            self.assertEqual(self.optimizer.optimized_llvm(item), "optimized module")
+        state = dict(vv=True, needs_llvm=True)
+        with patch.object(self.artifacts.subprocess, "run", side_effect=compile_cpu) as run:
+            for _ in range(2):
+                result = self.artifacts.load_analysis(item, state)
+                self.assertEqual(result["optimized_llvm"], "optimized module")
+                self.assertNotIn("llvm", result)
         self.assertEqual(run.call_count, 2)
         self.assertIn("-emit-llvm", run.call_args_list[0].args[0])
         self.assertEqual(self.keys, ["candidate", "candidate"])
@@ -158,10 +178,47 @@ class TestModelCache(unittest.TestCase):
         item = dict(metadata={"hash": "failed"},
                     files={"compiler": {"path": str(self.compiler)}, "llvm": {"path":
                                                                               "candidate.ll"}}, meta_library='meta.bc')
-        with patch.object(self.optimizer.subprocess, "run", side_effect=OSError("optimizer failed")):
-            with self.assertRaisesRegex(OSError, "optimizer failed"):
-                self.optimizer.optimized_llvm(item)
-        self.assertFalse((self.root / "cache/failed/block_auto_optimized.ll").exists())
+        for error in (OSError("optimizer failed"), subprocess.TimeoutExpired("bisheng", 30)):
+            with self.subTest(error=type(error).__name__), \
+                 patch.object(self.artifacts.subprocess, "run", side_effect=error):
+                result = self.artifacts.load_analysis(item, dict(vv=True, needs_llvm=True))
+            self.assertEqual(result["status"], "STATIC_ANALYSIS_UNSUPPORTED")
+            self.assertNotIn("optimized_llvm", result)
+            self.assertFalse((self.root / "cache/failed/block_auto_optimized.ll").exists())
+
+    def test_cv_and_a3_inputs_do_not_invoke_the_vv_optimizer(self):
+        files = {}
+        for role in ("llvm_aic", "llvm_aiv"):
+            path = self.root / (role + ".ll")
+            path.write_text(role + " body")
+            files[role] = dict(path=str(path))
+        with patch.object(self.artifacts.subprocess, "run") as run:
+            cv = self.artifacts.load_analysis(dict(files=files), dict(vv=False, needs_llvm=False))
+            a3 = self.artifacts.load_analysis(dict(files={}), dict(vv=True, needs_llvm=False, resource_policy=True))
+            rejected = dict(factor=4, axis=1, status="COMPILE_REJECTED", error="unsupported rewrite")
+            resources = self.artifacts.load_resources(rejected)
+            failed = self.artifacts.load_analysis(resources, dict(needs_llvm=False))
+        run.assert_not_called()
+        self.assertEqual((cv["llvm_aic"], cv["llvm_aiv"]), ("llvm_aic body", "llvm_aiv body"))
+        self.assertEqual(a3, dict(vv=True, needs_llvm=False, resource_policy=True))
+        self.assertEqual(failed, dict(rejected, needs_llvm=False))
+
+    def test_resource_loading_does_not_read_llvm_and_late_loss_rejects_analysis(self):
+        kernel = self.collect("late-loss", "module")
+        read_text = Path.read_text
+        reads = []
+
+        def read(path, *args, **kwargs):
+            reads.append(path.suffix)
+            return read_text(path, *args, **kwargs)
+
+        with patch.object(Path, "read_text", read):
+            resources = self.artifacts.load_resources(dict(factor=1, axis=-1, kernel=kernel))
+        self.assertEqual(reads, [".mlir"])
+        (self.root / "cache/late-loss/block_auto_llvm.ll").unlink()
+        result = self.artifacts.load_analysis(resources, dict(vv=False, needs_llvm=False))
+        self.assertEqual(result["status"], "STATIC_ANALYSIS_UNSUPPORTED")
+        self.assertNotIn("llvm", result)
 
     def test_a3_requires_final_ir_but_not_unavailable_llvm(self):
         source = self.root / "a3-temps"

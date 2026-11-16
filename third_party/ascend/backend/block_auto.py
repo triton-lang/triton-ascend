@@ -1,7 +1,6 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 """JIT/cache callbacks for the native CPU selector; no device execution."""
 import json
-import subprocess
 
 
 def _native(action, contract, **inputs):
@@ -28,34 +27,13 @@ def candidate_plan(contract, *, probe, axis=-1):
 
 
 def select_candidates(candidates, contract):
-    from .block_auto_artifacts import load_evidence
-    from .block_auto_models.vv_compilation import optimized_llvm
+    from .block_auto_artifacts import load_resources, load_analysis
     try:
-        items = []
-        for candidate in candidates:
-            item = {k: candidate[k] for k in ("factor", "axis", "status", "error") if k in candidate}
-            items.append(item)
-            if candidate.get("kernel") is not None:
-                try:
-                    item.update(load_evidence(candidate["kernel"]))
-                except (ValueError, KeyError, OSError) as error:
-                    item.update(status="RESOURCE_UNCONFIRMED", error=str(error))
-        # Resource checks need only allocation IR and metadata, not the LLVM bodies.
-        inputs = [{k: "" if k.startswith("llvm") else v for k, v in item.items()} for item in items]
-        prepared = _native("prepare", contract, candidates=inputs)["candidates"]
-        for item, state in zip(items, prepared):
-            item.update(state)
-            if state["needs_llvm"]:
-                try:
-                    item["optimized_llvm"] = optimized_llvm(item)
-                except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
-                    item.update(status="STATIC_ANALYSIS_UNSUPPORTED", error=str(error))
-        inputs = [{
-            k: v
-            for k, v in item.items()
-            if k not in ("metadata", "files", "final_ir", "meta_library") and not (k == "llvm" and item.get("vv"))
-        }
-                  for item in items]
+        resources = [load_resources(candidate) for candidate in candidates]
+        prepared = _native("prepare", contract, candidates=resources)["candidates"]
+        if len(prepared) != len(resources):
+            raise ValueError("resource checks did not return one state per candidate")
+        inputs = [load_analysis(item, state) for item, state in zip(resources, prepared)]
         from .block_batching_worker import BatchCompileError, _attempt
         try:
             report = _attempt("select", dict(contract=contract, candidates=inputs), timeout=30).payload["report"]

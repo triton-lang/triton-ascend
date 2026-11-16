@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
+import subprocess
+import tempfile
 from pathlib import Path
 import re
 import types
@@ -189,8 +191,25 @@ class ForcedMixedControlsTest(unittest.TestCase):
         self.assertEqual(metadata, {"compile_mode": "simd"})
 
     def test_environment_changes_are_resolved_before_real_jit_cache_lookup(self):
-        cmplr = self._load_compiler_module()
         source = Path(__file__).resolve().parents[4] / "python/triton/runtime/jit.py"
+        self._check_jit_cache_switches(source)
+
+    def test_packaged_jit_patch_applies_and_preserves_route_cache_controls(self):
+        repo = Path(__file__).resolve().parents[4]
+        source = repo / "python/triton/runtime/jit.py"
+        patch_file = repo / "third_party/ascend/patch/triton-ascend-3.6.0.patch"
+        with tempfile.TemporaryDirectory(prefix="forced-mixed-jit-") as directory:
+            packaged_source = Path(directory) / "python/triton/runtime/jit.py"
+            packaged_source.parent.mkdir(parents=True)
+            packaged_source.write_bytes(source.read_bytes())
+            result = subprocess.run(["git", "apply", "--include=python/triton/runtime/jit.py",
+                                     str(patch_file)], cwd=directory, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("def _run_jit_tail", packaged_source.read_text())
+            self._check_jit_cache_switches(packaged_source)
+
+    def _check_jit_cache_switches(self, source):
+        cmplr = self._load_compiler_module()
         tree = ast.parse(source.read_text(encoding="utf-8-sig"))
         compute = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "compute_cache_key")
         jit = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "JITFunction")
@@ -207,7 +226,8 @@ class ForcedMixedControlsTest(unittest.TestCase):
             types.SimpleNamespace(runtime=types.SimpleNamespace(debug=False),
                                   compilation=types.SimpleNamespace(instrumentation_mode=None)),
         }
-        exec(compile(ast.Module(body=[compute, run], type_ignores=[]), str(source), "exec"), namespace)
+        tail = [node for node in jit.body if isinstance(node, ast.FunctionDef) and node.name == "_run_jit_tail"]
+        exec(compile(ast.Module(body=[compute, run] + tail, type_ignores=[]), str(source), "exec"), namespace)
         cache, compiled = {}, []
         backend = types.SimpleNamespace(resolve_launch_options=cmplr._resolve_forced_mixed_options)
         instance = types.SimpleNamespace(
@@ -222,6 +242,8 @@ class ForcedMixedControlsTest(unittest.TestCase):
             return result
 
         instance._do_compile = compile_kernel
+        if tail:
+            instance._run_jit_tail = types.MethodType(namespace["_run_jit_tail"], instance)
 
         def launch(**kwargs):
             return namespace["run"](instance, grid=(1, ), warmup=True, compile_mode="simd_simt",

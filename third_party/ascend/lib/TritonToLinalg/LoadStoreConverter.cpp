@@ -587,6 +587,17 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     if (isIndexSelectScenario)
       loopOp->setAttr("hivm.parallel_loop", rewriter.getUnitAttr());
     allocOp = rewriter.create<memref::AllocOp>(loc, fullMemRefType);
+    // UnstructureConversion may seed the loop with a freshly filled tensor
+    // instead of restoring padding through an outer select. This converter
+    // replaces the entire loop result with the DMA destination, so preserve
+    // that initialization on this allocation, including zero-iteration loops.
+    // Do not copy the initial tensor: for dot inputs that could become L1->L1.
+    if (auto fill = loopOp.getInitArgs()[0].getDefiningOp<linalg::FillOp>()) {
+      if (fill.getOutputs()[0].getDefiningOp<tensor::EmptyOp>()) {
+        rewriter.create<linalg::FillOp>(loc, fill.getInputs(),
+                                        ValueRange{allocOp});
+      }
+    }
     allocOpTmp = allocOp;
     rewriter.setInsertionPointAfter(loop);
     auto toTensorOp = rewriter.create<bufferization::ToTensorOp>(

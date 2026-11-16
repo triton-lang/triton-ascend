@@ -1,0 +1,636 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+"""Automatic-selection orchestration, cache identity and JIT policy; CPU-only."""
+import importlib
+import subprocess
+import sys
+import tempfile
+import unittest
+import json
+import pytest
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from unittest.mock import patch, Mock
+from block_batching_test_utils import assign_npu  # noqa: F401 - pytest fixtures
+
+pytestmark = pytest.mark.backend('native')
+
+# Model bridge and cache
+
+BACKEND = Path(__file__).resolve().parents[2] / "backend"
+
+ENTRY_PACKAGE = "_block_auto_entry_test"
+
+
+def module(name, **values):
+    result = ModuleType(name)
+    result.__dict__.update(values)
+    return result
+
+
+class TestModelBridge(unittest.TestCase):
+
+    def setUp(self):
+        patcher = patch.dict(sys.modules, {ENTRY_PACKAGE: module(ENTRY_PACKAGE, __path__=[str(BACKEND)])})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.bridge = importlib.import_module(ENTRY_PACKAGE + ".block_auto")
+
+    def test_probe_failure_reaches_native_planner_without_inventing_a_candidate(self):
+        requested = [dict(axis=0, factor=2), dict(axis=1, factor=4)]
+        reports = []
+
+        def probe(axis, factor):
+            reports.append((axis, factor))
+            if axis == 1:
+                raise ValueError("unsupported rewrite")
+            return dict(selected_axis=axis, requested_factor=factor)
+
+        result = dict(candidates=[requested[0]], reason="native decision")
+        with patch.object(self.bridge, "_native", side_effect=[dict(probes=requested), result]) as native:
+            self.assertEqual(self.bridge.candidate_plan(dict(grid=[8, 8, 1]), probe=probe), result)
+        self.assertEqual(reports, [(0, 2), (1, 4)])
+        self.assertEqual(len(native.call_args.kwargs["reports"]), 1)
+
+    def test_native_json_keeps_argument_order(self):
+        import json
+        binding = SimpleNamespace(select_block_candidates=lambda request: request)
+        with patch.dict(sys.modules, {"triton._C.libtriton": module("libtriton", ascend=binding)}):
+            result = self.bridge._native("prepare", dict(arguments={"z": {}, "a": {}}), candidates=[])
+        self.assertEqual(result["contract"]["argument_order"], ["z", "a"])
+        self.assertEqual(json.dumps(result["candidates"]), "[]")
+
+    def test_selection_deadline_falls_back_but_protocol_errors_propagate(self):
+        worker = importlib.import_module(ENTRY_PACKAGE + ".block_batching_worker")
+        artifacts = importlib.import_module(ENTRY_PACKAGE + ".block_auto_artifacts")
+        for kind in ("Timeout", "ProtocolError"):
+            with patch.object(artifacts, "load_resources", return_value={}), \
+                 patch.object(self.bridge, "_native", return_value=dict(candidates=[dict(needs_llvm=False)])), \
+                 patch.object(worker, "_attempt", side_effect=worker.BatchCompileError("test", kind=kind)) as attempt:
+                candidates = [dict(factor=1, axis=-1, kernel=object())]
+                if kind == "Timeout":
+                    factor, report = self.bridge.select_candidates(candidates, {})
+                    self.assertEqual(factor, 1)
+                    self.assertIn("budget", report["error"])
+                else:
+                    with self.assertRaises(worker.BatchCompileError):
+                        self.bridge.select_candidates(candidates, {})
+                self.assertEqual(attempt.call_args.kwargs["timeout"], 30)
+
+    def test_incomplete_resource_response_cannot_drop_a_candidate(self):
+        artifacts = importlib.import_module(ENTRY_PACKAGE + ".block_auto_artifacts")
+        with patch.object(artifacts, "load_resources", return_value={}), \
+             patch.object(self.bridge, "_native", return_value=dict(candidates=[])), \
+             patch.object(artifacts, "load_analysis") as analysis:
+            factor, report = self.bridge.select_candidates([dict(factor=1, axis=-1)], {})
+        self.assertEqual(factor, 1)
+        self.assertFalse(report["model_complete"])
+        self.assertIn("one state per candidate", report["error"])
+        analysis.assert_not_called()
+
+
+class LocalCache:
+
+    def __init__(self, directory):
+        self.cache_dir = str(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+
+    def put(self, data, name, binary=False):
+        path = Path(self.cache_dir) / name
+        path.write_bytes(data if isinstance(data, bytes) else data.encode())
+        return str(path)
+
+    def get_file(self, name):
+        path = Path(self.cache_dir) / name
+        return str(path) if path.is_file() else None
+
+
+class TestModelCache(unittest.TestCase):
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.compiler = self.root / "bisheng"
+        self.compiler.touch()
+        self.compiler.with_name("llvm-link").touch()
+        self.keys = []
+        self.cache_module = module("cache", get_cache_manager=self.cache)
+        modules = {
+            ENTRY_PACKAGE: module(ENTRY_PACKAGE, __path__=[str(BACKEND)]), ENTRY_PACKAGE + ".utils":
+            module("utils", _get_bisheng_path=lambda: str(self.compiler)), "triton.runtime.cache": self.cache_module
+        }
+        patcher = patch.dict(sys.modules, modules)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.artifacts = importlib.import_module(ENTRY_PACKAGE + ".block_auto_artifacts")
+
+    def cache(self, key):
+        self.keys.append(key)
+        return LocalCache(self.root / "cache" / key)
+
+    def collect(self, key, text):
+        source = self.root / "temps"
+        source.mkdir(exist_ok=True)
+        (source / "module.hivm.opt.mlir").write_text("module {}")
+        (source / "kernel.ll").write_text(text)
+        metadata = {"hash": key}
+        evidence = self.artifacts.collect(source, self.compiler, metadata, cache_factory=self.cache)
+        self.assertEqual(evidence["status"], "COLLECTED")
+        metadata["block_auto_evidence"] = evidence
+        return SimpleNamespace(metadata=SimpleNamespace(_asdict=lambda: metadata),
+                               asm=dict(ttir="ttir", ttadapter="ir"))
+
+    def test_artifacts_use_candidate_cache_and_need_no_file_records(self):
+        first = self.collect("first", "first module")
+        second = self.collect("second", "second module")
+        self.compiler.write_text("new compiler installation")
+        for kernel, expected in ((first, "first module"), (second, "second module")):
+            resources = self.artifacts.load_resources(dict(factor=2, axis=0, kernel=kernel))
+            self.assertNotIn("llvm", resources)
+            self.assertEqual(resources["files"]["compiler"], dict(path=str(self.compiler)))
+            result = self.artifacts.load_analysis(resources, dict(vv=False, needs_llvm=False))
+            self.assertEqual(result["llvm"], expected)
+            self.assertFalse({"metadata", "files", "final_ir", "meta_library"}.intersection(result))
+            self.assertNotIn("llvm", resources)
+        self.assertEqual(self.keys, ["first", "second", "first", "second"])
+
+    def test_missing_cached_input_remains_unavailable(self):
+        kernel = self.collect("missing", "module")
+        (self.root / "cache/missing/block_auto_llvm.ll").unlink()
+        result = self.artifacts.load_resources(dict(factor=4, axis=1, kernel=kernel))
+        self.assertEqual(result["status"], "RESOURCE_UNCONFIRMED")
+        self.assertIn("cached model input unavailable", result["error"])
+        self.assertNotIn("metadata", result)
+
+    def test_optimizer_publishes_once_under_the_normal_candidate_key(self):
+        item = dict(metadata={"hash": "candidate"},
+                    files={"compiler": {"path": str(self.compiler)}, "llvm": {"path":
+                                                                              "candidate.ll"}}, meta_library='meta.bc')
+
+        def compile_cpu(command, **kwargs):
+            output = Path(command[command.index("-o") + 1])
+            output.write_text("optimized module")
+            self.assertEqual(kwargs["env"]["ASCEND_RT_VISIBLE_DEVICES"], "")
+
+        state = dict(vv=True, needs_llvm=True)
+        with patch.object(self.artifacts.subprocess, "run", side_effect=compile_cpu) as run:
+            for _ in range(2):
+                result = self.artifacts.load_analysis(item, state)
+                self.assertEqual(result["optimized_llvm"], "optimized module")
+                self.assertNotIn("llvm", result)
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("-emit-llvm", run.call_args_list[0].args[0])
+        self.assertEqual(self.keys, ["candidate", "candidate"])
+
+    def test_optimizer_failure_does_not_publish_a_cache_entry(self):
+        item = dict(metadata={"hash": "failed"},
+                    files={"compiler": {"path": str(self.compiler)}, "llvm": {"path":
+                                                                              "candidate.ll"}}, meta_library='meta.bc')
+        for error in (OSError("optimizer failed"), subprocess.TimeoutExpired("bisheng", 30)):
+            with self.subTest(error=type(error).__name__), \
+                 patch.object(self.artifacts.subprocess, "run", side_effect=error):
+                result = self.artifacts.load_analysis(item, dict(vv=True, needs_llvm=True))
+            self.assertEqual(result["status"], "STATIC_ANALYSIS_UNSUPPORTED")
+            self.assertNotIn("optimized_llvm", result)
+            self.assertFalse((self.root / "cache/failed/block_auto_optimized.ll").exists())
+
+    def test_cv_and_a3_inputs_do_not_invoke_the_vv_optimizer(self):
+        files = {}
+        for role in ("llvm_aic", "llvm_aiv"):
+            path = self.root / (role + ".ll")
+            path.write_text(role + " body")
+            files[role] = dict(path=str(path))
+        with patch.object(self.artifacts.subprocess, "run") as run:
+            cv = self.artifacts.load_analysis(dict(files=files), dict(vv=False, needs_llvm=False))
+            a3 = self.artifacts.load_analysis(dict(files={}), dict(vv=True, needs_llvm=False, resource_policy=True))
+            rejected = dict(factor=4, axis=1, status="COMPILE_REJECTED", error="unsupported rewrite")
+            resources = self.artifacts.load_resources(rejected)
+            failed = self.artifacts.load_analysis(resources, dict(needs_llvm=False))
+        run.assert_not_called()
+        self.assertEqual((cv["llvm_aic"], cv["llvm_aiv"]), ("llvm_aic body", "llvm_aiv body"))
+        self.assertEqual(a3, dict(vv=True, needs_llvm=False, resource_policy=True))
+        self.assertEqual(failed, dict(rejected, needs_llvm=False))
+
+    def test_resource_loading_does_not_read_llvm_and_late_loss_rejects_analysis(self):
+        kernel = self.collect("late-loss", "module")
+        read_text = Path.read_text
+        reads = []
+
+        def read(path, *args, **kwargs):
+            reads.append(path.suffix)
+            return read_text(path, *args, **kwargs)
+
+        with patch.object(Path, "read_text", read):
+            resources = self.artifacts.load_resources(dict(factor=1, axis=-1, kernel=kernel))
+        self.assertEqual(reads, [".mlir"])
+        (self.root / "cache/late-loss/block_auto_llvm.ll").unlink()
+        result = self.artifacts.load_analysis(resources, dict(vv=False, needs_llvm=False))
+        self.assertEqual(result["status"], "STATIC_ANALYSIS_UNSUPPORTED")
+        self.assertNotIn("llvm", result)
+
+    def test_a3_requires_final_ir_but_not_unavailable_llvm(self):
+        source = self.root / "a3-temps"
+        source.mkdir()
+        metadata = dict(hash="a3", target=dict(arch="Ascend910_9391"))
+        collect = lambda: self.artifacts.collect(source, self.compiler, metadata, cache_factory=self.cache)
+        self.assertEqual(collect()["status"], "UNAVAILABLE")
+        (source / "module.hivm.opt.mlir").write_text("module {}")
+        evidence = collect()
+        self.assertEqual(evidence["status"], "COLLECTED")
+        self.assertEqual(set(evidence["files"]), {"final_ir"})
+
+
+# JIT and bundle integration
+
+PACKAGE = "_block_auto_private_test"
+
+
+class Tensor:
+    dtype = "torch.float32"
+    shape = (256, 512)
+
+    def stride(self):
+        return (512, 1)
+
+    def storage_offset(self):
+        return 0
+
+
+class TestHostIntegration(unittest.TestCase):
+
+    def setUp(self):
+        self.calls = []
+        self.config = module(PACKAGE + ".reuse.config", enabled=lambda: False)
+        self.patcher = patch.dict(
+            sys.modules, {
+                PACKAGE: module(PACKAGE, __path__=[str(BACKEND)]),
+                PACKAGE + ".reuse": module(PACKAGE + ".reuse", __path__=[]),
+                PACKAGE + ".reuse.config": self.config,
+            })
+        self.patcher.start()
+        self.addCleanup(self.patcher.stop)
+        self.batching = importlib.import_module(PACKAGE + ".block_batching")
+        self.dispatch = self.batching
+        capture = patch.object(self.batching, "_capture_state", return_value=False)
+        self.capture = capture.start()
+        self.addCleanup(capture.stop)
+        self.backend = SimpleNamespace(target=SimpleNamespace(arch="Ascend950"), prepare_block_compile_options=dict)
+        self.fn = SimpleNamespace(arg_names=["x", "size", "BLOCK"], device_caches={0: [None] * 4 + [self.bind]})
+        self.kwargs = dict(block_batching_factor="auto", BLOCK=512)
+        self.result = object()
+
+    def bind(self, *args, **kwargs):
+        self.calls.append("bind")
+        return dict(x=args[0], size=args[1], BLOCK=kwargs["BLOCK"]), [("*fp32", None), ("i32", None),
+                                                                      ("constexpr", 512)], kwargs
+
+    def tail(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return self.result
+
+    def run_handler(self, grid=(256, ), warmup=False):
+        return self.batching.get_launch_handler().run(self.fn, (Tensor(), 131072), self.kwargs, grid, warmup, 0, 42,
+                                                      self.backend, self.tail)
+
+    def test_auto_contract_resolves_grid_once_and_excludes_constexpr(self):
+
+        def grid(bound):
+            self.calls.append("grid")
+            return (bound["size"] // bound["BLOCK"], )
+
+        self.assertIs(self.run_handler(grid), self.result)
+        self.assertEqual(self.calls[:2], ["bind", "grid"])
+        self.assertEqual(len(self.calls), 3)
+        args, kwargs = self.calls[-1]
+        self.assertEqual(args[2], (256, ))
+        contract = json.loads(args[1]["block_auto_contract"])
+        self.assertEqual(contract["argument_order"], ["x", "size"])
+        self.assertEqual(contract["grid"], [256, 1, 1])
+        self.assertEqual(contract["arguments"]["x"]["shape"], [256, 512])
+        self.assertNotIn("block_auto_contract", self.kwargs)
+
+    def test_omitted_factor_matches_explicit_auto(self):
+        explicit, _ = self.dispatch.prepare_launch(self.fn, (Tensor(), 131072), self.kwargs, (256, ), False, 0,
+                                                   self.backend)
+        self.kwargs.pop("block_batching_factor")
+        self.calls.clear()
+        self.run_handler()
+        prepared = self.calls[-1][0][1]
+        self.assertEqual(prepared, explicit)
+        self.assertEqual(list(prepared), list(explicit))
+        self.assertEqual(prepared["block_batching_factor"], "auto")
+        self.assertNotIn("block_batching_factor", self.kwargs)
+
+    def test_incomplete_tensor_metadata_does_not_break_default_launch(self):
+        wrapper = SimpleNamespace(dtype="fp32", shape=(256, 512), stride=lambda: (512, 1))
+        self.assertEqual(self.dispatch._argument(wrapper), dict(kind="unsupported"))
+
+    def test_float_launch_arguments_keep_finite_values_only(self):
+        for value in (0.75, float("inf"), float("nan")):
+            with self.subTest(value=value):
+                options, _ = self.dispatch.prepare_launch(self.fn, (Tensor(), value), self.kwargs, (256, ), False, 0,
+                                                          self.backend)
+                argument = json.loads(options["block_auto_contract"])["arguments"]["size"]
+                expected = dict(kind="scalar", value=value) if value == 0.75 else dict(kind="unsupported")
+                self.assertEqual(argument, expected)
+
+    def test_explicit_factors_keep_manual_dispatch(self):
+        for factor in (1, 2, 4):
+            context = ("Ascend950", 24 // factor, (True, 24 // factor, 48 // factor), None)
+            self.backend.prepare_block_compile_options = Mock(
+                side_effect=lambda values: dict(values, block_compile_context=context))
+            self.kwargs = dict(BLOCK=512, block_batching_axis=0)
+            self.kwargs["block_batching_factor"] = factor
+            self.calls.clear()
+            self.assertIs(self.run_handler(), self.result)
+            self.assertEqual(len(self.calls), 1)
+            if factor == 1:
+                self.assertIs(self.calls[0][0][1], self.kwargs)
+                self.backend.prepare_block_compile_options.assert_not_called()
+            else:
+                self.assertEqual(self.calls[0][0][1], dict(self.kwargs, block_compile_context=context))
+                self.backend.prepare_block_compile_options.assert_called_once_with(self.kwargs)
+
+    def test_warmup_uses_the_same_contract_as_launch(self):
+        self.kwargs.pop("block_batching_factor")
+        self.run_handler(warmup=True)
+        warmed = self.calls[-1][0][1]
+        self.run_handler()
+        self.assertEqual(warmed, self.calls[-1][0][1])
+        self.assertEqual(warmed["block_batching_factor"], "auto")
+        incomplete = SimpleNamespace(dtype="fp32", shape=(1, ), stride=lambda: (1, ))
+        options, _ = self.dispatch.prepare_launch(self.fn, (incomplete, 131072), self.kwargs, (256, ), True, 0,
+                                                  self.backend)
+        self.assertEqual(options["block_batching_factor"], 1)
+        self.assertNotIn("block_auto_contract", options)
+
+    def test_capture_uses_baseline_without_binding_or_grid_evaluation(self):
+        self.kwargs.pop("block_batching_factor")
+
+        def unavailable(_):
+            self.fail("grid must stay lazy")
+
+        for warmup, capture in ((True, True), (False, True), (False, None)):
+            self.calls.clear()
+            self.capture.return_value = capture
+            self.run_handler(unavailable, warmup)
+            self.assertEqual(len(self.calls), 1)
+            values, _ = self.calls[0]
+            self.assertEqual(values[1]["block_batching_factor"], 1)
+            self.assertIs(values[2], unavailable)
+
+    def test_non_a5_and_invalid_grid_keep_baseline(self):
+        self.kwargs.pop("block_batching_factor")
+        for target, grid in (("Ascend910B", (256, )), ("Ascend950", (0, ))):
+            self.backend.target.arch = target
+            self.calls.clear()
+            self.run_handler(grid)
+            self.assertEqual(self.calls[-1][0][1]["block_batching_factor"], 1)
+
+    def test_a3_enters_auto_without_a5_empirical_override(self):
+        self.backend.target.arch = "Ascend910_9391"
+        self.run_handler()
+        options = self.calls[-1][0][1]
+        self.assertEqual(options["block_batching_factor"], "auto")
+        self.assertFalse(json.loads(options["block_auto_contract"])["cv_empirical_short_batch"])
+
+    def test_single_program_keeps_normal_cache_without_contract(self):
+        for grid, axis in (((1, ), -1), ((1, 1, 1), -1), ((8, 1), 1)):
+            self.kwargs["block_batching_axis"] = axis
+            self.calls.clear()
+            self.run_handler(grid)
+            options = self.calls[-1][0][1]
+            self.assertEqual(options["block_batching_factor"], 1)
+            self.assertNotIn("block_auto_contract", options)
+
+    def test_other_frontends_keep_their_original_compilation_path(self):
+        self.fn.ASTSource = SimpleNamespace(frontend_kind="tla")
+        self.kwargs.pop("block_batching_factor")
+        self.run_handler()
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][0][1]["block_batching_factor"], 1)
+
+    def test_shape_and_scalar_values_are_part_of_jit_option_identity(self):
+        first, _ = self.dispatch.prepare_launch(self.fn, (Tensor(), 131072), self.kwargs, (256, ), False, 0,
+                                                self.backend)
+        second, _ = self.dispatch.prepare_launch(self.fn, (Tensor(), 65536), self.kwargs, (128, ), False, 0,
+                                                 self.backend)
+        self.assertNotEqual(first["block_auto_contract"], second["block_auto_contract"])
+
+    def test_reuse_keeps_original_grid_and_unfragmented_options(self):
+        self.config.enabled = lambda: True
+        grid = Mock(side_effect=AssertionError("reuse must receive the unevaluated grid"))
+
+        def reuse(fn, args, kwargs, grid, warmup, device, stream, backend, tail):
+            self.assertIs(fn, self.fn)
+            self.assertNotIn("block_auto_contract", kwargs)
+            self.assertEqual(kwargs["block_batching_factor"], 1)
+            return tail(args, kwargs, grid, warmup, device, stream)
+
+        with patch.dict(sys.modules,
+                        {PACKAGE + ".reuse.bridge": module("bridge", get_handler=lambda: SimpleNamespace(run=reuse))}):
+            self.assertIs(self.run_handler(grid), self.result)
+        grid.assert_not_called()
+        self.assertNotIn("bind", self.calls)
+        self.assertEqual(len([item for item in self.calls if isinstance(item, tuple)]), 1)
+
+    def test_equivalent_auto_decisions_share_device_handle_and_identity(self):
+        cache = {}
+
+        class Kernel:
+            hash = "same-artifact"
+            block_batching = {"reason": "DISABLED"}
+            block_auto_selection = {"selected_factor": 1, "reason": "GRID_BELOW_CORE_FLOOR"}
+
+            def __init__(self):
+                self._init_handles = Mock()
+
+        first, second = Kernel(), Kernel()
+        with patch.object(self.batching, "BatchKernel", Kernel):
+            self.assertIs(self.dispatch.initialize_auto_kernel(cache, first), first)
+            self.assertIs(self.dispatch.initialize_auto_kernel(cache, second), first)
+            second._init_handles.assert_not_called()
+            # A different device/native cache cannot reuse the previous handle.
+            self.assertIs(self.dispatch.initialize_auto_kernel({}, second), second)
+            changed = Kernel()
+            changed.block_auto_selection = {"selected_factor": 1, "reason": "MODEL_INCOMPLETE"}
+            self.assertIs(self.dispatch.initialize_auto_kernel(cache, changed), changed)
+            cache.clear()
+            self.assertIs(self.dispatch.initialize_auto_kernel(cache, second), second)
+
+    def test_launch_exception_is_not_replayed(self):
+
+        def fail(*args, **kwargs):
+            self.calls.append("launch")
+            raise RuntimeError("launch error")
+
+        self.tail = fail
+        with self.assertRaisesRegex(RuntimeError, "launch error"):
+            self.run_handler()
+        self.assertEqual(self.calls.count("launch"), 1)
+
+
+class TestCompileIntegration(unittest.TestCase):
+
+    def setUp(self):
+        self.events = []
+        self.baseline = SimpleNamespace(metadata=SimpleNamespace(mix_mode="aiv"))
+        self.frozen = object()
+        self.backend = SimpleNamespace(parse_options=lambda _: SimpleNamespace(block_batching_backend_revision="r"))
+        self.options = dict(block_batching_factor="auto", block_auto_contract=json.dumps(dict(grid=[256, 1, 1])))
+        self.bundle = SimpleNamespace(candidate=object(), block_batching=dict(selected_axis=0))
+        self.batching = module("batching", _core_floor=lambda: 0, BatchRequest=lambda: "F1",
+                               BatchKernel=lambda *args: SimpleNamespace(baseline=args[0], candidate=None))
+        self.patcher = patch.dict(sys.modules, {
+            PACKAGE: module(PACKAGE, __path__=[str(BACKEND)]),
+            PACKAGE + ".block_batching": self.batching,
+        })
+        self.patcher.start()
+        self.addCleanup(self.patcher.stop)
+        self.dispatch = self.model = importlib.import_module(PACKAGE + ".block_auto")
+        self.worker = importlib.import_module(PACKAGE + ".block_batching_worker")
+        self.manual = self.worker
+        compile_patch = patch.multiple(self.worker, _freeze_source=lambda *args: self.frozen,
+                                       _freeze_refusal=lambda normalized: None, _candidate_refusal=lambda *args: None,
+                                       _runtime_positions=lambda src: [], compile_bundle=self.manual_compile)
+        model_patch = patch.multiple(
+            self.model, select_candidates=self.select,
+            candidate_plan=lambda *args, **kw: dict(candidates=[dict(axis=1, factor=4),
+                                                                dict(axis=2, factor=4)]))
+        for patcher in (compile_patch, model_patch):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        environment = patch.object(self.worker, "_baseline_environment", return_value={})
+        self.environment = environment.start()
+        self.addCleanup(environment.stop)
+
+    def compile(self, options, frozen=None):
+        self.events.append((options, frozen))
+        self.assertEqual(options["block_batching_factor"], 1)
+        self.assertNotIn("block_auto_contract", options)
+        return self.baseline
+
+    def manual_compile(self, backend, frozen, options, compile_variant):
+        self.assertIs(frozen, self.frozen)
+        self.assertIs(compile_variant(dict(options, block_batching_factor=1), frozen), self.baseline)
+        self.events.append((options["block_batching_axis"], options["block_batching_factor"]))
+        if options["block_batching_factor"] == 2:
+            return SimpleNamespace(candidate=None, block_batching=dict(reason="RESOURCE_LIMIT"))
+        return self.bundle
+
+    def select(self, candidates, contract):
+        self.assertEqual(len(candidates), 3)
+        self.assertEqual(candidates[1]["status"], "COMPILE_REJECTED")
+        self.assertIs(candidates[2]["kernel"], self.bundle.candidate)
+        return 4, dict(selected_key="a0_f4", selected_axis=0, reason="LOWER_ESTIMATED_LATENCY")
+
+    def test_selection_returns_existing_manual_bundle_and_compiles_baseline_once(self):
+        result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
+        self.assertIs(result, self.bundle)
+        self.assertEqual(result.block_auto_selection["selected_factor"], 4)
+        self.assertEqual(self.events[1:], [(-1, 2), (-1, 4)])
+
+    def test_without_launch_contract_only_baseline_is_compiled(self):
+        self.assertIs(
+            self.dispatch.compile_auto_bundle(self.backend, object(), dict(block_batching_factor="auto"), self.compile),
+            self.baseline)
+        self.assertEqual(len(self.events), 1)
+
+    def test_vv_below_core_floor_skips_candidates_and_model(self):
+        self.batching._core_floor = lambda: 512
+        self.model.select_candidates = Mock(side_effect=AssertionError("no candidate to score"))
+        result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(result.block_auto_selection["reason"], "GRID_BELOW_CORE_FLOOR")
+
+    def test_all_candidates_declined_does_not_score_the_baseline(self):
+        self.manual.compile_bundle = lambda *args: SimpleNamespace(candidate=None, block_batching=
+                                                                   {"reason": "NO_PROGRAM_AXIS"})
+        self.model.select_candidates = Mock(side_effect=AssertionError("no candidate to score"))
+        result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
+        self.assertEqual(result.block_auto_selection["reason"], "NO_COMPILED_CANDIDATE")
+
+    def test_cv_uses_native_shortlist_and_preserves_selected_axis(self):
+        self.baseline.metadata.mix_mode = "mix"
+        bundle1 = SimpleNamespace(candidate=object(), block_batching=dict(selected_axis=1))
+        bundle2 = SimpleNamespace(candidate=object(), block_batching=dict(selected_axis=2))
+        self.manual.compile_bundle = lambda backend, frozen, options, compile: bundle1 if options["block_batching_axis"
+                                                                                                  ] == 1 else bundle2
+        self.model.select_candidates = lambda candidates, contract: (4, dict(selected_key="a2_f4", selected_axis=2))
+        result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
+        self.assertIs(result, bundle2)
+        self.assertEqual(len(result.block_auto_selection["candidate_plan"]["candidates"]), 2)
+
+    def test_modeled_freeze_decline_compiles_f1_from_original_source(self):
+        src = object()
+        self.manual._freeze_source = lambda *args: self.worker.BatchDecline("CUSTOM_CACHE_NOT_SUPPORTED", "freeze")
+        self.model.select_candidates = lambda candidates, contract: (1, dict(reason="BASELINE_ONLY"))
+        result = self.dispatch.compile_auto_bundle(self.backend, src, self.options, self.compile)
+        self.assertEqual(result.block_auto_selection["candidate_plan"],
+                         dict(candidates=[], reason="CUSTOM_CACHE_NOT_SUPPORTED"))
+        self.assertEqual(len(self.events), 1)
+        self.assertIs(self.events[0][1], src)
+
+    def test_cv_with_unproven_baseline_environment_does_not_probe(self):
+        self.baseline.metadata.mix_mode = "aic"
+        self.environment.return_value = None
+        self.model.candidate_plan = Mock(side_effect=AssertionError("unproven environment cannot probe"))
+        self.model.select_candidates = lambda candidates, contract: (1, dict(reason="BASELINE_ONLY"))
+        result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
+        self.assertEqual(result.block_auto_selection["candidate_plan"],
+                         dict(candidates=[], reason="BASELINE_ENVIRONMENT_NOT_PROVEN"))
+        self.model.candidate_plan.assert_not_called()
+        self.assertIs(result.baseline, self.baseline)
+
+    def test_cv_probe_passes_the_verified_snapshot_and_overrides_only_probe_options(self):
+        self.baseline.metadata.mix_mode = "mix"
+        env = {"SAVED_FLAG": "submitted"}
+        self.environment.return_value = env
+        probe = Mock(return_value={"selected_axis": 1, "requested_factor": 2})
+
+        def planner(contract, axis, probe):
+            self.assertEqual(probe(1, 2), {"selected_axis": 1, "requested_factor": 2})
+            return dict(candidates=[], reason="NO_CANDIDATES")
+
+        self.model.candidate_plan = planner
+        self.model.select_candidates = lambda candidates, contract: (1, dict(reason="BASELINE_ONLY"))
+        with patch.object(self.worker, "selection_probe", probe):
+            self.dispatch.compile_auto_bundle(self.backend, object(), dict(self.options, num_stages=3), self.compile)
+        probe.assert_called_once_with(
+            self.backend, self.frozen,
+            dict(num_stages=3, block_batching_factor=2, block_batching_axis=1, block_auto_collect=False,
+                 enable_graph_optimize=False, debug=False), env)
+        self.assertEqual(len(self.events), 1)
+
+    def test_cv_probe_distinguishes_worker_refusal_from_internal_errors(self):
+        args = (self.backend, self.frozen, {}, {}, 0, 2)
+        with patch.object(self.worker, "selection_probe",
+                          return_value=self.worker.BatchDecline("UNUSED_BATCH_AXIS", "ttir")):
+            with self.assertRaisesRegex(ValueError, "UNUSED_BATCH_AXIS"):
+                self.dispatch._probe(*args)
+        failure = self.worker.BatchCompileError("native failure", kind="CompilerCrash", stage="ttir")
+        with patch.object(self.worker, "selection_probe", side_effect=failure):
+            with self.assertRaises(self.worker.BatchCompileError) as raised:
+                self.dispatch._probe(*args)
+            self.assertIs(raised.exception, failure)
+        with patch.object(self.worker, "selection_probe", side_effect=ValueError("invalid serialized input")):
+            with self.assertRaisesRegex(self.worker.BatchCompileError, "invalid serialized input"):
+                self.dispatch._probe(*args)
+
+    def test_model_fallback_cannot_launch_a_rejected_merge(self):
+        self.model.select_candidates = lambda candidates, contract: (
+            1, dict(selected_key="unmerged", reason="MODEL_INCOMPLETE"))
+        result = self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
+        self.assertIs(result.baseline, self.baseline)
+        self.assertIsNone(result.candidate)
+
+    def test_candidate_internal_failure_is_not_silently_downgraded(self):
+        worker = importlib.import_module(PACKAGE + ".block_batching_worker")
+
+        def fail(*args):
+            raise worker.BatchCompileError("broken protocol", kind="ProtocolError")
+
+        self.manual.compile_bundle = fail
+        with self.assertRaises(worker.BatchCompileError):
+            self.dispatch.compile_auto_bundle(self.backend, object(), self.options, self.compile)
+        self.assertEqual(len(self.events), 1)

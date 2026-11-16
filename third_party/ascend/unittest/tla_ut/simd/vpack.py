@@ -15,9 +15,9 @@ SHAPE_I32 = dict(n=64)
 
 @tla.jit
 def vpack_i16(X, O, N: tl.constexpr, PART: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    o = tla.alloc_buffer((2 * N, ), tl.int8, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
+    x = tla.alloc((N, ), tl.int16, space="ub")
+    o = tla.alloc((2 * N, ), tl.int8, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         v = tla.simd.vlds(x[0])
         if PART == 0:
@@ -25,14 +25,14 @@ def vpack_i16(X, O, N: tl.constexpr, PART: tl.constexpr):
         else:
             packed = tla.simd.vpack(v, part="part_odd")
         tla.simd.vsts(o[0], packed, dist="NORM_B8")
-    tla.copy(o, tla.view(O, (2 * N, )))
+    tla.store_ub_to_gm(o, tla.view(O, (2 * N, )))
 
 
 @tla.jit
 def vpack_u16(X, O, N: tl.constexpr, PART: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint16, space="ub")
-    o = tla.alloc_buffer((2 * N, ), tl.uint8, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
+    x = tla.alloc((N, ), tl.uint16, space="ub")
+    o = tla.alloc((2 * N, ), tl.uint8, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         v = tla.simd.vlds(x[0])
         if PART == 0:
@@ -40,14 +40,14 @@ def vpack_u16(X, O, N: tl.constexpr, PART: tl.constexpr):
         else:
             packed = tla.simd.vpack(v, part="part_odd")
         tla.simd.vsts(o[0], packed, dist="NORM_B8")
-    tla.copy(o, tla.view(O, (2 * N, )))
+    tla.store_ub_to_gm(o, tla.view(O, (2 * N, )))
 
 
 @tla.jit
 def vpack_i32(X, O, N: tl.constexpr, PART: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((2 * N, ), tl.int16, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
+    x = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((2 * N, ), tl.int16, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         v = tla.simd.vlds(x[0])
         if PART == 0:
@@ -55,14 +55,14 @@ def vpack_i32(X, O, N: tl.constexpr, PART: tl.constexpr):
         else:
             packed = tla.simd.vpack(v, part="part_odd")
         tla.simd.vsts(o[0], packed, dist="NORM_B16")
-    tla.copy(o, tla.view(O, (2 * N, )))
+    tla.store_ub_to_gm(o, tla.view(O, (2 * N, )))
 
 
 @tla.jit
 def vpack_u32(X, O, N: tl.constexpr, PART: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    o = tla.alloc_buffer((2 * N, ), tl.uint16, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
+    x = tla.alloc((N, ), tl.uint32, space="ub")
+    o = tla.alloc((2 * N, ), tl.uint16, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         v = tla.simd.vlds(x[0])
         if PART == 0:
@@ -70,7 +70,7 @@ def vpack_u32(X, O, N: tl.constexpr, PART: tl.constexpr):
         else:
             packed = tla.simd.vpack(v, part="part_odd")
         tla.simd.vsts(o[0], packed, dist="NORM_B16")
-    tla.copy(o, tla.view(O, (2 * N, )))
+    tla.store_ub_to_gm(o, tla.view(O, (2 * N, )))
 
 
 CASES = {

@@ -19,9 +19,12 @@ ARG TRITON_BUILD_NPUIR=OFF
 ARG ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.2.0-beta.2
 
 # ---------------------------------------------------------------------------
-# Build dependencies (matching CIBW_BEFORE_ALL)
+# Build dependencies (matching CIBW_BEFORE_ALL). git is required by the
+# TRITON_BUILD_TD=ON path below, whose setup_patch.py clones the pinned
+# Triton-Distributed checkout from gitcode during the wheel build (the
+# in-image npuir fallback in build_npuir.py uses git as well).
 # ---------------------------------------------------------------------------
-RUN dnf install -y clang lld ccache cmake
+RUN dnf install -y clang lld ccache cmake git
 
 # ---------------------------------------------------------------------------
 # Install setuptools + wheel for the target Python (not pre-installed in
@@ -37,8 +40,14 @@ RUN export PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local
 # ---------------------------------------------------------------------------
 # Environment matching the original CIBW_ENVIRONMENT
 # ---------------------------------------------------------------------------
+# TRITON_BUILD_TD=ON ships Triton-Distributed in the wheel: setup_patch.py
+# clones the pinned TD commit from gitcode at build time, cmake builds the
+# TritonDistributed plugin and the TD csrc, and the triton_dist Python
+# package is bundled next to triton. Same flag the integration-tests and
+# documentation workflows already build with.
 ENV TRITON_BUILD_WITH_CLANG_LLD=true \
     TRITON_BUILD_PROTON=OFF \
+    TRITON_BUILD_TD=ON \
     TRITON_WHEEL_NAME=triton-ascend \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
     TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX}${BUILD_DATE} \

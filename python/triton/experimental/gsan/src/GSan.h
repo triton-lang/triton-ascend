@@ -27,7 +27,7 @@
 #define __scoped_atomic_fetch_and(p, v, o, s) __atomic_fetch_and(p, v, o)
 #define __scoped_atomic_store_n(p, v, o, s) __atomic_store_n(p, v, o)
 #define __scoped_atomic_thread_fence(o, s) __atomic_thread_fence(o)
-#define __scoped_atomic_compare_exchange_n(p, e, d, w, o, f, s) \
+#define __scoped_atomic_compare_exchange_n(p, e, d, w, o, f, s)                \
   __atomic_compare_exchange_n(p, e, d, w, o, f)
 #endif
 #endif

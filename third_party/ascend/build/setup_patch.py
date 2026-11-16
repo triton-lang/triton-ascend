@@ -420,30 +420,54 @@ def _ensure_npuir_submodule():
     build_npuir()
 
 
-def _patch_distributed_sources(distributed_dir):
-    """Adapt the pinned Triton-Distributed sources to the triton 3.8 headers.
+# In-place rewrites applied to the pinned Triton-Distributed checkout so it
+# builds against the triton 3.8 tree (see _patch_distributed_sources). Each
+# rule must be idempotent: the old text must not match again after the
+# replacement.
+_TD_SOURCE_REWRITES = [
+    # Triton 3.8 renamed include/triton/Tools/Sys/GetEnv.hpp to GetEnv.h
+    # (contents and namespaces unchanged).
+    ('"triton/Tools/Sys/GetEnv.hpp"', '"triton/Tools/Sys/GetEnv.h"'),
+    # LLVM 21's mlir-tblgen refuses to generate docs without -dialect= when
+    # the loaded records span more than one dialect, and setup.py builds the
+    # mlir-doc target after the main build. Triton 3.8's own dialect docs
+    # pass it (e.g. -dialect=tt); the pinned TD commit does not. The SIMT
+    # targets are not configured under TRITON_USE_ASCEND, but keep them
+    # adapted for non-ascend TD builds.
+    ("add_mlir_doc(DistributedDialect DistributedDialect dialects/ -gen-dialect-doc)",
+     "add_mlir_doc(DistributedDialect DistributedDialect dialects/ -gen-dialect-doc -dialect=distributed)"),
+    ("add_mlir_doc(DistributedOps DistributedOps dialects/ -gen-op-doc)",
+     "add_mlir_doc(DistributedOps DistributedOps dialects/ -gen-op-doc -dialect=distributed)"),
+    ("add_mlir_doc(SIMTDialect SIMTDialect dialects/ -gen-dialect-doc)",
+     "add_mlir_doc(SIMTDialect SIMTDialect dialects/ -gen-dialect-doc -dialect=simt)"),
+    ("add_mlir_doc(SIMTOps SIMTOps dialects/ -gen-op-doc)",
+     "add_mlir_doc(SIMTOps SIMTOps dialects/ -gen-op-doc -dialect=simt)"),
+]
 
-    Triton 3.8 renamed ``include/triton/Tools/Sys/GetEnv.hpp`` to
-    ``GetEnv.h`` (contents and namespaces unchanged). The pinned
-    Triton-Distributed commit predates the rename and upstream TD has no
-    adapted commit yet (master still ships the old include), so rewrite the
-    include here after checkout. The rewrite is idempotent and becomes a
-    no-op once a future TD pin carries the rename itself.
+
+def _patch_distributed_sources(distributed_dir):
+    """Adapt the pinned Triton-Distributed checkout to the triton 3.8 tree.
+
+    The pinned TD commit predates triton 3.8 and upstream TD has no adapted
+    commit yet (master still ships the old forms), so apply
+    _TD_SOURCE_REWRITES here after checkout. The rewrites are idempotent and
+    become no-ops once a future TD pin carries the adaptations itself.
     """
-    old_include = '"triton/Tools/Sys/GetEnv.hpp"'
-    new_include = '"triton/Tools/Sys/GetEnv.h"'
     patched = []
-    for pattern in ("*.cc", "*.cpp", "*.h", "*.hpp"):
+    for pattern in ("*.cc", "*.cpp", "*.h", "*.hpp", "CMakeLists.txt"):
         for path in sorted(distributed_dir.rglob(pattern)):
             try:
                 text = path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
                 continue
-            if old_include in text:
-                path.write_text(text.replace(old_include, new_include), encoding="utf-8")
+            updated = text
+            for old, new in _TD_SOURCE_REWRITES:
+                updated = updated.replace(old, new)
+            if updated != text:
+                path.write_text(updated, encoding="utf-8")
                 patched.append(path.relative_to(distributed_dir).as_posix())
     if patched:
-        print(f"Rewrote GetEnv.hpp -> GetEnv.h for triton 3.8 in: {', '.join(patched)}")
+        print(f"Adapted Triton-Distributed sources for triton 3.8: {', '.join(patched)}")
 
 
 def _ensure_distributed_submodule():
@@ -485,7 +509,7 @@ def _ensure_distributed_submodule():
         for name in dirty:
             path = distributed_dir / name
             text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
-            if '"triton/Tools/Sys/GetEnv.h"' in text:
+            if any(new in text for _, new in _TD_SOURCE_REWRITES):
                 rewritten.append(name)
         if rewritten:
             checkout_file(rewritten, cwd=distributed_dir)

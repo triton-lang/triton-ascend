@@ -260,6 +260,40 @@ int getVariantThreadCount() {
   return value;
 }
 
+/// Turns the context's multithreading on for its lifetime and restores the
+/// flag after. It only ever enables: a context that already had it is left
+/// alone.
+///
+/// Needed because every MLIRContext built from Python is constructed with
+/// threading off (upstream Triton's own binding), and with it off the
+/// attribute and type uniquers run unlocked, so parallel trials would race on
+/// them. Flipping it is safe here: MLIR forbids the change only while one of
+/// its own parallel regions is active, and the search uses plain std::threads,
+/// so the guard is built before any worker starts and destroyed after the join.
+class ScopedContextThreading {
+public:
+  ScopedContextThreading(MLIRContext *context, bool enable)
+      : context(context) {
+    if (enable && !context->isMultithreadingEnabled()) {
+      context->disableMultithreading(false);
+      restoreToDisabled = true;
+    }
+  }
+
+  ~ScopedContextThreading() {
+    if (restoreToDisabled) {
+      context->disableMultithreading(true);
+    }
+  }
+
+  ScopedContextThreading(const ScopedContextThreading &) = delete;
+  ScopedContextThreading &operator=(const ScopedContextThreading &) = delete;
+
+private:
+  MLIRContext *context;
+  bool restoreToDisabled = false;
+};
+
 /// Swallows everything written to stdout and stderr while it is alive.
 ///
 /// A trial run drives the whole pipeline, and the pipeline is talkative: debug
@@ -524,19 +558,8 @@ void AddDynamicCVPipelinePass::runOnOperation() {
   if (variantCount > 1) {
     prepareVariantSearchDialects(&getContext(), this->mainLoopUnrollFactor);
 
-    // How many trials to score at once. A context with multithreading
-    // switched off runs the same code one candidate at a time.
-    const int requestedThreads = getVariantThreadCount();
-    const bool threadingEnabled = getContext().isMultithreadingEnabled();
-    const int threadCount =
-        (requestedThreads > 1 && threadingEnabled)
-            ? std::min(requestedThreads, variantCount)
-            : 1;
-    if (requestedThreads > 1 && threadCount == 1) {
-      llvm::errs() << "[" << DEBUG_TYPE
-                   << "]   scoring one candidate at a time (the context's"
-                      " multithreading is off)\n";
-    }
+    // How many trials to score at once, capped at the number of candidates.
+    const int threadCount = std::min(getVariantThreadCount(), variantCount);
     llvm::errs() << "[" << DEBUG_TYPE << "] variant search: trying "
                  << variantCount << " operation orderings";
     if (threadCount > 1) {
@@ -558,6 +581,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
       // phase rather than one per thread: two silencers would undo each
       // other.
       OutputSilencer hush;
+      ScopedContextThreading threading(&getContext(), threadCount > 1);
       if (threadCount > 1) {
         // The workers are plain std::thread rather than a borrow from the
         // context's pool: that pool is sized for the machine, and how many

@@ -20,7 +20,8 @@ from utils.tla_test_utils import get_stages, compile_offline, lower_offline, che
 @tla.jit
 def _allocate_only(SPACE: tl.constexpr, VERSIONS: tl.constexpr):
     with tla.scope.cube():
-        tla.alloc((16, 16), tl.float32, space=SPACE, versions=VERSIONS)
+        buf = tla.alloc((16, 16), tl.float32, space=SPACE)
+        tla.annotate_buffer_versions(buf, VERSIONS)
 
 
 @tla.jit
@@ -92,12 +93,10 @@ def test_enum_and_legacy_types_agree():
 def test_invalid_allocation_arguments():
     # Errors must precede builder access; these calls need no native builder.
     semantic = object()
-    with pytest.raises(ValueError, match="only one of space and scope"):
-        tla.alloc((16, 16), tl.float32, "ub", scope=tla.AddressSpace.L1, _semantic=semantic)
     with pytest.raises(ValueError, match="kernel arguments"):
         tla.alloc((16, 16), tl.float32, space=tla.AddressSpace.GM, _semantic=semantic)
-    with pytest.raises(ValueError, match="positive integer"):
-        tla.alloc((16, 16), tl.float32, versions=0, _semantic=semantic)
+    with pytest.raises(ValueError, match="positive int"):
+        tla.annotate_buffer_versions(object(), 0, _semantic=semantic)
 
 
 def _launch(compile_only=False, seed=7):

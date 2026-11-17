@@ -24,7 +24,7 @@ Independent ``tla.*`` programming namespace for Ascend NPU kernels, migrated
 from the TLA repo's SIMD VF additions.  It does **not** reuse the existing
 ``al``/``bl`` general interfaces (different programming paradigm).
 
-Exports: ``alloc`` (on-chip buffer + versions),
+Exports: ``alloc`` (on-chip buffer),
 ``fill`` (scalar fill of a contiguous UB buffer),
 explicit DMA routes, ``view`` (GM view), ``scope`` (core-mode scopes:
 ``tla.scope.simd()`` / ``tla.scope.cube()``),

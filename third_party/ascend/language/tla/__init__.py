@@ -72,6 +72,7 @@ from .scope import scope
 from .alloc import alloc_buffer, alloc
 from .fill import fill
 from .copy import copy
+from .strided_memory import stride_load, stride_store
 from .dma import (
     PadMode,
     EvictionPolicy,
@@ -202,6 +203,8 @@ __all__ = [
     "alloc",
     "fill",
     "copy",
+    "stride_load",
+    "stride_store",
     "view",
     "subview",
     "reshape",

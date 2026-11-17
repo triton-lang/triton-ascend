@@ -65,6 +65,8 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_tla_expand_shape',
         'create_tla_load',
         'create_tla_store',
+        'create_tla_stride_load',
+        'create_tla_stride_store',
         'create_tla_nd2nz',
         'create_tla_copy',
         'create_tla_l12ub',

@@ -1191,6 +1191,22 @@ CONSTRAINTS = {
         "example":
         "copy",
     },
+    **{
+        f"{_TLA_PREFIX}.{name}": {
+            "constraints": [
+                "``stride_load`` 为 GM->UB，``stride_store`` 为 UB->GM；仅接受同 dtype 的 buffer。",
+                "UB tile 秩为 1–3；``strides``、``numels`` 各有 rank 个整数标量，支持运行时表达式。",
+                "``offset + sum(i[d] * strides[d])`` 以元素为单位，相对于 GM view 原点；不叠乘 GM buffer 自带 strides。",
+                "``numels`` 是有效元素数，按 UB tile 大小截断；load 的无效位置填 other，store 不写无效位置。",
+                "仅用于 AIV，放在普通内核体或 ``scope.vector()`` 中，不能放入 ``scope.simd()``；需要 Ascend 950/960 SIMT 模板。",
+                "支持 float16/bfloat16/float32 及有符号、无符号 8/16/32/64 位整数。",
+                "stride 必须为正；对应 UB 维度大小为 1 时可为 0。GM、UB 的 view 偏移均保留。",
+                "当前后端内部按 i32 计算：索引参数、UB 大小/步长及索引中间结果必须在有符号 32 位范围内。",
+                "调用方保证有效 GM 地址不越界；store 的有效写地址不得重叠。",
+            ],
+        }
+        for name in ("stride_load", "stride_store")
+    },
     f"{_TLA_PREFIX}.view": {
         "constraints": [
             "指针入口：``src`` 必须是指针 tensor，``strides`` 为最终 memref 步长，默认行主序。",

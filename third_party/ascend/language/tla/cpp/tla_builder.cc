@@ -39,8 +39,10 @@
 #include "mlir/IR/Region.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LLVM.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringMap.h"
 
+#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -391,6 +393,78 @@ MemRefLayoutAttrInterface tlaBufferLayout(MLIRContext *ctx,
 void checkDmaBuffers(Value src, Value dst) {
   if (!isa<MemRefType>(src.getType()) || !isa<MemRefType>(dst.getType()))
     throw std::invalid_argument("TLA DMA requires memref operands");
+}
+
+void checkStrideTransfer(TLABuilder &self, Value gm, Value tile, Value offset,
+                         ValueRange strides, ValueRange numels) {
+  auto gmType = dyn_cast<MemRefType>(gm.getType());
+  auto tileType = dyn_cast<MemRefType>(tile.getType());
+  // GM uses the default memory space in TLA before NPUIR normalization.
+  if (!gmType || !tileType ||
+      (gmType.getMemorySpace() &&
+       hivm::getOptionalHIVMAddressSpace(gmType) != hivm::AddressSpace::GM) ||
+      hivm::getOptionalHIVMAddressSpace(tileType) != hivm::AddressSpace::UB)
+    throw std::invalid_argument("TLA stride transfers require GM/UB buffers");
+  if (gmType.getElementType() != tileType.getElementType())
+    throw std::invalid_argument(
+        "TLA stride transfers require matching buffer element types");
+  int64_t rank = tileType.getRank();
+  if (rank < 1 || rank > 3 || strides.size() != static_cast<size_t>(rank) ||
+      numels.size() != static_cast<size_t>(rank))
+    throw std::invalid_argument(
+        "TLA stride transfers require a rank 1-3 UB tile and one stride/numel "
+        "per dimension");
+  Type indexType = offset.getType();
+  if (!indexType.isInteger(32) && !indexType.isInteger(64))
+    throw std::invalid_argument("TLA stride offset must be i32 or i64");
+  for (Value value : strides)
+    if (value.getType() != indexType)
+      throw std::invalid_argument("TLA strides must have the offset type");
+  for (Value value : numels)
+    if (value.getType() != indexType)
+      throw std::invalid_argument("TLA numels must have the offset type");
+  auto &builder = self.getBuilder();
+  if (enclosingCoreType(builder) != hivm::TCoreType::VECTOR)
+    throw std::invalid_argument("TLA stride transfers require the AIV core");
+  for (Operation *op = builder.getInsertionBlock()->getParentOp(); op;
+       op = op->getParentOp())
+    if (op->hasAttr("hivm.vector_function"))
+      throw std::invalid_argument(
+          "TLA stride transfers launch SIMT templates and must be outside "
+          "SIMD/SIMT vector functions");
+}
+
+// The template ABI takes a rank-one GM descriptor. Explicit op strides are
+// physical element strides; the GM view's strides only describe its storage
+// span. Reinterpret that span without copying or losing a subview offset.
+Value strideTransferGMView(TLABuilder &self, Value gm) {
+  auto type = cast<MemRefType>(gm.getType());
+  SmallVector<int64_t> strides;
+  int64_t offset;
+  if (!type.hasStaticShape() || type.getRank() == 0 ||
+      failed(type.getStridesAndOffset(strides, offset)))
+    throw std::invalid_argument(
+        "TLA stride transfers require a statically shaped strided GM buffer");
+  int64_t span = 1;
+  for (auto [size, stride] : llvm::zip(type.getShape(), strides)) {
+    if (size <= 0 || stride <= 0 || ShapedType::isDynamic(stride) ||
+        size - 1 > (std::numeric_limits<int64_t>::max() - span) / stride)
+      throw std::invalid_argument("invalid GM buffer span for stride transfer");
+    span += (size - 1) * stride;
+  }
+  if (type.getRank() == 1 && strides.front() == 1)
+    return gm;
+  auto &builder = self.getBuilder();
+  OpFoldResult origin = builder.getIndexAttr(offset);
+  if (ShapedType::isDynamic(offset))
+    origin = self.create<memref::ExtractStridedMetadataOp>(gm).getOffset();
+  auto flatType = MemRefType::get(
+      {span}, type.getElementType(),
+      StridedLayoutAttr::get(builder.getContext(), offset, {1}),
+      type.getMemorySpace());
+  return self.create<memref::ReinterpretCastOp>(
+      flatType, gm, origin, ArrayRef<OpFoldResult>{builder.getIndexAttr(span)},
+      ArrayRef<OpFoldResult>{builder.getIndexAttr(1)});
 }
 
 void setDmaAttrs(Operation *op, const py::dict &attrs) {
@@ -1524,6 +1598,40 @@ void init_tla_builder(py::module &&m) {
             setDmaAttrs(op, attrs);
           },
           py::arg("src"), py::arg("dst"), py::arg("attrs"))
+      .def(
+          "create_tla_stride_load",
+          [](TLABuilder &self, Value src, Value dst, Value offset, Value other,
+             const std::vector<Value> &strides,
+             const std::vector<Value> &numels) {
+            checkStrideTransfer(self, src, dst, offset, strides, numels);
+            if (other.getType() !=
+                cast<MemRefType>(dst.getType()).getElementType())
+              throw std::invalid_argument(
+                  "TLA stride_load other must match the buffer element type");
+            auto op = self.create<hivm::StrideLoadOp>(
+                TypeRange{}, strideTransferGMView(self, src), dst, offset,
+                other, strides, numels);
+            op->setAttr(hivm::VFModeAttr::name,
+                        hivm::VFModeAttr::get(self.getBuilder().getContext(),
+                                             hivm::VFMode::SIMT));
+          },
+          py::arg("src"), py::arg("dst"), py::arg("offset"), py::arg("other"),
+          py::arg("strides"), py::arg("numels"))
+      .def(
+          "create_tla_stride_store",
+          [](TLABuilder &self, Value src, Value dst, Value offset,
+             const std::vector<Value> &strides,
+             const std::vector<Value> &numels) {
+            checkStrideTransfer(self, dst, src, offset, strides, numels);
+            // Native StrideStoreOp takes the GM destination first.
+            auto op = self.create<hivm::StrideStoreOp>(
+                strideTransferGMView(self, dst), src, offset, strides, numels);
+            op->setAttr(hivm::VFModeAttr::name,
+                        hivm::VFModeAttr::get(self.getBuilder().getContext(),
+                                             hivm::VFMode::SIMT));
+          },
+          py::arg("src"), py::arg("dst"), py::arg("offset"), py::arg("strides"),
+          py::arg("numels"))
       .def(
           "create_tla_nd2nz",
           [](TLABuilder &self, Value src, Value dst, const py::dict &attrs) {

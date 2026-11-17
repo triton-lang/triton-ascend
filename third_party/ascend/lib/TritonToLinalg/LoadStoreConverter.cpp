@@ -504,7 +504,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     normalizedScalarMemref =
         unwrapCanonicalI8ScalarPointerMaterialization(op.getPtr(), ptr);
 
-  SmallVector<int32_t> zeroBasedAxes;
+  SmallVector<ClampedPointerAxis> clampedAxes;
   if (normalizedScalarMemref) {
     ptr = normalizedScalarMemref;
   } else if (pointerInfos) {
@@ -514,7 +514,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
       return rewriter.notifyMatchFailure(
           op, "unable to materialize the load pointer as a memref");
     ptr = resolved->view;
-    zeroBasedAxes = std::move(resolved->zeroBasedAxes);
+    clampedAxes = std::move(resolved->clampedAxes);
   } else {
     auto resolved = materializeLegacyPointer(op, ptr, rewriter);
     if (failed(resolved))
@@ -684,8 +684,8 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   if (!boundaryCheck.empty()) {
     SmallVector<OpFoldResult> srcOffsets, dstOffsets, boundarySizes;
     if (pointerInfos) {
-      auto boundary = getMemoryBoundary(op.getPtr(), boundaryCheck,
-                                        zeroBasedAxes, *pointerInfos, rewriter);
+      auto boundary = getMemoryBoundary(op.getPtr(), boundaryCheck, clampedAxes,
+                                        *pointerInfos, rewriter);
       if (failed(boundary))
         return rewriter.notifyMatchFailure(op, "missing block boundary facts");
       srcOffsets = std::move(boundary->gmStarts);
@@ -1609,7 +1609,7 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
   // 1. boundary size check
   if (!boundaryCheck.empty()) {
     auto boundary =
-        getMemoryBoundary(op.getPtr(), boundaryCheck, resolved->zeroBasedAxes,
+        getMemoryBoundary(op.getPtr(), boundaryCheck, resolved->clampedAxes,
                           pointerInfos, rewriter);
     if (failed(boundary))
       return rewriter.notifyMatchFailure(op, "missing block boundary facts");

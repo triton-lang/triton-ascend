@@ -914,7 +914,11 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
   auto getInputMemref = [&]() -> Value {
     if (isa<MemRefType>(inputVal.getType()))
       return inputVal;
-    return rewriter.create<bufferization::ToMemrefOp>(loc, ptrType, inputVal);
+    auto valTensorType = cast<RankedTensorType>(inputVal.getType());
+    MemRefType valMemRefType = MemRefType::get(valTensorType.getShape(),
+                                               valTensorType.getElementType());
+    return rewriter.create<bufferization::ToMemrefOp>(loc, valMemRefType,
+                                                      inputVal);
   };
   auto inputMemref = getInputMemref();
   auto inputMemrefType = cast<MemRefType>(inputMemref.getType());

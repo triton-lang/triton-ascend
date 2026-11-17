@@ -53,8 +53,8 @@ FailureOr<Value> materializePointerAddress(Value memref, Location loc,
 // relative to the original tile. Keep that choice local to this access.
 struct ClampedPointerAxis {
   int32_t axis;
-  // max(source i32 coordinate, 0), signed-cast to index for the GM view.
-  Value coordinate;
+  // max(source i32 coordinate, 0), kept constant or signed-cast to index.
+  OpFoldResult coordinate;
 };
 struct BoundaryCheckedPointer {
   Value view;

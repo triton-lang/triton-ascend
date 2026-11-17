@@ -1,4 +1,4 @@
-// RUN: triton-opt --add-block-id-for-control-ops --data-dependency-analysis --inter-core-transfer-and-sync --mark-main-loop %s | FileCheck %s
+// RUN: triton-opt --split-input-file --add-block-id-for-control-ops --data-dependency-analysis --inter-core-transfer-and-sync --mark-main-loop %s | FileCheck %s
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @test_assume_memdep(%arg2: memref<?xbf16> {tt.tensor_kind = 0 : i32}, %arg14: i32) {
@@ -20,4 +20,22 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK-LABEL: func.func @test_assume_memdep
 // CHECK-NOT: hivm.hir.sync_block_set
 // CHECK-NOT: hivm.hir.sync_block_wait
+// CHECK: return
+
+// -----
+
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @tensor_custom_unrelated_buffer(%src: memref<16xf32>, %a: tensor<16xf32>) -> tensor<16xf32> {
+    %buf = memref.alloc() {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} : memref<16xf32>
+    memref.copy %src, %buf {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} : memref<16xf32> to memref<16xf32>
+    %init = tensor.empty() {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "VECTOR"} : tensor<16xf32>
+    %out = hivm.hir.custom {hivm.pipe = #hivm.pipe<PIPE_V>, hivm.tcore_type = #hivm.tcore_type<VECTOR>, hivm.vf_mode = #hivm.vf_mode<SIMD>, no_side_effect, ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "VECTOR", symbol = "tensor_custom"} "tensor_custom" ins(%a : tensor<16xf32>) outs(%init : tensor<16xf32>) -> tensor<16xf32>
+    return %out : tensor<16xf32>
+  }
+}
+
+// CHECK-LABEL: func.func @tensor_custom_unrelated_buffer
+// CHECK-NOT: hivm.hir.sync_block_
+// CHECK: hivm.hir.custom
+// CHECK-NOT: hivm.hir.sync_block_
 // CHECK: return

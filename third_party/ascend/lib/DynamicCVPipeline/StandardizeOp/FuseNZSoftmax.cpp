@@ -244,6 +244,7 @@ hivm::CustomOp createNZSoftmax(IRRewriter &rewriter, Location loc, Value score,
   auto custom = rewriter.create<hivm::CustomOp>(
       loc, ValueRange(outputs).getTypes(), symbol.getValue(), inputs, outputs,
       ValueRange{});
+  custom.setNoSideEffect(true);
   custom->setAttr(hivm::CustomOp::kSymbolAttrName, symbol);
   SmallVector<Attribute> argAttrs(inputs.size(),
                                   rewriter.getDictionaryAttr({}));

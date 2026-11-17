@@ -63,22 +63,15 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
 1. **代码准备**：通过`git checkout`检出指定版本的LLVM源码并应用补丁。
 
     ```bash
-    # 请在 triton-ascend 仓库根目录下执行，确保 cmake/llvm-hash.txt 可解析；
-    # 该文件必须只包含一个有效的 LLVM commit 哈希。
+    # 从当前 Triton 仓库读取 LLVM 版本并应用本地补丁。
     TRITON_ROOT="$(pwd)"
     [ -f "$TRITON_ROOT/cmake/llvm-hash.txt" ] || { echo "请在 triton-ascend 仓库根目录下执行本代码块：在 $(pwd) 下未找到 cmake/llvm-hash.txt。"; exit 1; }
     LLVM_COMMIT=$(cat "$TRITON_ROOT/cmake/llvm-hash.txt" | tr -d '\r\n') || exit 1
-    # pin 必须恰好是一个 40 位十六进制字符的 commit 哈希；若文件为空或格式
-    # 错误，不在校验处报错的话，会在随后的 git checkout 内部以晦涩方式失败。
-    # 十六进制字符大小写均合法；统一转小写，使校验与 git 输出一致，
-    # 也与下方补丁文件名校验的处理方式保持一致。
     LLVM_COMMIT=$(printf '%s' "$LLVM_COMMIT" | tr 'A-F' 'a-f')
     if [ "${#LLVM_COMMIT}" -ne 40 ] || [ -n "$(printf '%s' "$LLVM_COMMIT" | tr -d '0-9a-f')" ]; then
       echo "cmake/llvm-hash.txt 为空或不是单个 40 位 commit 哈希 —— 请检查该文件。" >&2
       exit 1
     fi
-    # 上方离线流程已将 LLVM 检出随仓库一并传输：若目录已存在，则跳过克隆，
-    # 仅在此执行固定 commit 的检出与应用补丁。
     if [ ! -d "$TRITON_ROOT/llvm-project/.git" ]; then
       if [ -d "$TRITON_ROOT/llvm-project" ] && [ -n "$(ls -A "$TRITON_ROOT/llvm-project" 2>/dev/null)" ]; then
         echo "llvm-project/ 已存在但不是 git 仓库，请清理该目录或补齐 .git 后再执行。" >&2
@@ -88,16 +81,7 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
     fi
     cd llvm-project
     git checkout "$LLVM_COMMIT" || exit 1
-    # 强制使用 C locale，确保 git apply 的行为不受当前 shell 会话 locale 设置的影响。
-    # 该设置在当前终端会话内持续生效；如需恢复，请在补丁应用完成后执行 unset LC_ALL。
     export LC_ALL=C
-    # 文件名中 llvm_patch_ 与 .patch 之间的 token 可能内嵌目标 commit 的十六进制
-    # 前缀。若该 token 为纯十六进制且不是 llvm-hash.txt 固定 commit 的前缀，
-    # 说明补丁来自另一个 LLVM 版本：在此给出明确报错并终止，而不是等到
-    # git apply 才以晦涩的方式失败。非纯十六进制的 token 是描述性名称，
-    # 不携带 commit 信息。恰由十六进制字符组成的描述性名称无法与 commit
-    # 前缀区分；请为此类补丁文件改名以跳过该校验。大写十六进制字符先统一
-    # 转为小写，这样以 pin 对应 commit 前缀的大写拼写命名的补丁文件也能被接受。
     for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
       [ -f "$patch" ] || continue
       name=$(basename "$patch")
@@ -116,8 +100,6 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
           esac
           ;;
       esac
-      # 在已打过补丁的目录上重复执行本代码块是安全的：若补丁已应用
-      # （正向 --check 失败但反向 --check 通过），则跳过而不是报错退出。
       if git apply --check "$patch" 2>/dev/null; then
         git apply "$patch" || exit 1
       elif git apply -R --check "$patch" 2>/dev/null; then

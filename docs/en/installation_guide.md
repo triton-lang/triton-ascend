@@ -62,23 +62,15 @@ If you need to customize the LLVM build process, follow the steps below to compi
 1. **Prepare the source code**: Check out the LLVM source code of the specified version with `git checkout` and apply the patch.
 
     ```bash
-    # Run from the root of your triton-ascend checkout so that cmake/llvm-hash.txt
-    # resolves; the file must contain exactly one valid LLVM commit hash.
+    # Read the LLVM pin and apply patches from this Triton checkout.
     TRITON_ROOT="$(pwd)"
     [ -f "$TRITON_ROOT/cmake/llvm-hash.txt" ] || { echo "Run this block from the root of your triton-ascend checkout: cmake/llvm-hash.txt not found under $(pwd)."; exit 1; }
     LLVM_COMMIT=$(cat "$TRITON_ROOT/cmake/llvm-hash.txt" | tr -d '\r\n') || exit 1
-    # The pin must be exactly one 40-hex-character commit hash; an empty or
-    # malformed file would otherwise fail later inside git checkout. Hex digits
-    # may be either case; normalize to lowercase so the check matches how git
-    # prints hashes and stays consistent with the patch-name check below.
     LLVM_COMMIT=$(printf '%s' "$LLVM_COMMIT" | tr 'A-F' 'a-f')
     if [ "${#LLVM_COMMIT}" -ne 40 ] || [ -n "$(printf '%s' "$LLVM_COMMIT" | tr -d '0-9a-f')" ]; then
       echo "cmake/llvm-hash.txt is empty or not a single 40-character commit hash — please check the file." >&2
       exit 1
     fi
-    # The offline flow above transfers the LLVM checkout with the repository:
-    # when the tree is already present, skip the clone and only check out
-    # the pinned commit and apply patches.
     if [ ! -d "$TRITON_ROOT/llvm-project/.git" ]; then
       if [ -d "$TRITON_ROOT/llvm-project" ] && [ -n "$(ls -A "$TRITON_ROOT/llvm-project" 2>/dev/null)" ]; then
         echo "llvm-project/ exists but is not a git repository; clean it or restore .git before continuing." >&2
@@ -88,20 +80,7 @@ If you need to customize the LLVM build process, follow the steps below to compi
     fi
     cd llvm-project
     git checkout "$LLVM_COMMIT" || exit 1
-    # Force the C locale so git apply behaves deterministically regardless of the
-    # shell session's locale settings. The setting persists for the rest of this
-    # terminal; run `unset LC_ALL` after the patches are applied to restore it.
     export LC_ALL=C
-    # The filename token between llvm_patch_ and .patch may embed the target
-    # commit as a hex prefix. A hex-only token that is not a prefix of the
-    # commit pinned in llvm-hash.txt marks a patch left over from a different
-    # LLVM revision: reject it here with a clear message instead of letting
-    # git apply fail later with an obscure error. Tokens that are not hex-only
-    # are descriptive names and carry no commit reference. A descriptive name
-    # that happens to be all hex characters cannot be told apart from a commit
-    # prefix; rename such a patch file to skip this check. Uppercase hex digits
-    # are normalized to lowercase first, so a patch file named with the
-    # uppercase spelling of the pinned commit's prefix is still accepted.
     for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
       [ -f "$patch" ] || continue
       name=$(basename "$patch")
@@ -120,9 +99,6 @@ If you need to customize the LLVM build process, follow the steps below to compi
           esac
           ;;
       esac
-      # Re-running this block on an already-patched tree is safe: if the patch
-      # is already applied (git apply --check fails but its reverse applies
-      # cleanly), skip it instead of erroring out.
       if git apply --check "$patch" 2>/dev/null; then
         git apply "$patch" || exit 1
       elif git apply -R --check "$patch" 2>/dev/null; then

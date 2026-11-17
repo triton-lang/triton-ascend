@@ -1,7 +1,7 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
 
 // Unit Tests for AddControlFlowCondition Pass - Cross Core Dependencies Test
-module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32, ssbuffer.load_store_buf_conut = 1 : i32} {
   // ============================================
   // Test Case 2: @test_data_flow_with_intra_dependent
   // ============================================

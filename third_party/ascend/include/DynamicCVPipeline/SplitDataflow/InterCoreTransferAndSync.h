@@ -107,6 +107,8 @@ public:
   }
 
 private:
+  class InsertPointAnalyzer;
+
   mlir::ModuleOp module;
   int transferIndex = 0;
   int markAllocIndex = 0;
@@ -178,14 +180,6 @@ private:
                        TransferSyncInsertPoint &insertPoint, int prodBlockId,
                        int consBlockId, llvm::StringRef prodTag,
                        llvm::StringRef consTag, int transferIndex);
-  mlir::Operation *analyzeConsumerReadInsertPoint(Value srcValue,
-                                                  int iniConsumerId);
-  mlir::Operation *getConsumerWaitPoint(int transferIndex);
-  mlir::Operation *getCopyPointBeforeStore(Value depValue,
-                                           Operation *vectorEndOp,
-                                           int iniProducerBlockId);
-  mlir::Operation *getFixpipePointAfterProducer(Value depValue,
-                                                int iniProducerBlockId);
   linalg::MatmulOp findYieldMatmulInSplitIf(Value splittedIfResult);
   void AnalyzeSplittedIf(DependencyInfo &dep);
   mlir::Operation *insertVectorToCubeTransfer(

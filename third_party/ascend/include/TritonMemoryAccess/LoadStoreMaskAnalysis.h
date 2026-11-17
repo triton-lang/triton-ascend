@@ -50,6 +50,10 @@ public:
   SmallVector<OpFoldResult> dims;
   SmallVector<OpFoldResult> offsets;
   OpFoldResult scalar;
+  // True when the mask contains a runtime i1 scalar splatted to a tensor.
+  // Such a mask covers either the whole tensor or no elements, so its extent
+  // is not a statically bounded contiguous interval.
+  bool hasUniformBoolMask = false;
 
   int64_t getRank() const {
     assert(dims.size() == offsets.size() && "dims and offsets rank mismatch!");

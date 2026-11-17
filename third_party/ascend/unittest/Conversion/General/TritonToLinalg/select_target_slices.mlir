@@ -157,6 +157,27 @@ module {
 
 // -----
 
+// A runtime scalar condition splatted into a tensor covers either the whole
+// tensor or no elements. It must not become a dynamically sized slice.
+module {
+  func.func @uniform_scalar_mask(%true: tensor<16xf32>, %false: tensor<16xf32>, %cond: i1) -> tensor<16xf32> {
+    %mask = tt.splat %cond : i1 -> tensor<16xi1>
+    %result = arith.select %mask, %true, %false : tensor<16xi1>, tensor<16xf32>
+    return %result : tensor<16xf32>
+  }
+}
+// COMMON-LABEL: func.func @uniform_scalar_mask(
+// COMMON-SAME: %[[T:[^ :]+]]: tensor<16xf32>, %[[F:[^ :]+]]: tensor<16xf32>, %[[C:[^ :]+]]: i1
+// COMMON-NOT: tensor.extract_slice
+// COMMON-NOT: tensor.insert_slice
+// COMMON: linalg.fill ins(%[[C]] : i1)
+// COMMON: %[[RESULT:.*]] = arith.select %{{.*}}, %[[T]], %[[F]]
+// COMMON: return %[[RESULT]]
+// COMMON-NOT: tensor.extract_slice
+// COMMON-NOT: tensor.insert_slice
+
+// -----
+
 // Matrix operations do not change the select-slice policy.
 module {
   func.func @mixed_dynamic_point(%lhs: tensor<16x32xf16>, %rhs: tensor<32x32xf16>, %false: tensor<16x32xf32>, %start: i32, %end: i32) -> tensor<16x32xf32> {

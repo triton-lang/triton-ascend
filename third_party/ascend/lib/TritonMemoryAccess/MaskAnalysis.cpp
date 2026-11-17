@@ -553,6 +553,9 @@ LogicalResult MaskState::minStates(const MaskState &lhsState,
     return failure();
   }
 
+  this->hasUniformBoolMask =
+      lhsState.hasUniformBoolMask || rhsState.hasUniformBoolMask;
+
   for (uint32_t i = 0; i < lhsState.getRank(); i++) {
     auto lhsOffset = lhsState.offsets[i];
     auto rhsOffset = rhsState.offsets[i];
@@ -944,6 +947,7 @@ LogicalResult MaskState::parseSplat(triton::SplatOp splatOp,
       this->offsets.push_back(builder.getIndexAttr(0));
     }
 
+    this->hasUniformBoolMask = true;
     this->scalar = nullptr;
     return success();
   }

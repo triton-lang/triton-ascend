@@ -584,6 +584,16 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
         op, "Cannot lower continuous masked selects");
   }
 
+  // A runtime i1 scalar splatted into a tensor selects either the whole
+  // tensor or none of it. Its extent is dynamic, so turning the select into
+  // extract_slice/insert_slice would create a dynamically shaped UB buffer
+  // that PlanMemory cannot size. Keep the whole-tensor select instead.
+  if (mstate.hasUniformBoolMask) {
+    mstate.eraseInsertedOps(op, rewriter);
+    return rewriter.notifyMatchFailure(
+        op, "uniform boolean mask requires a static select extent");
+  }
+
   // 2. Get mask position
   MaskPosition maskPos = mstate.getMaskPosition(tensorShape);
   LLVM_DEBUG({

@@ -26,6 +26,7 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -33,6 +34,7 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/WalkResult.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
@@ -88,8 +90,6 @@ static bool isValidI1Producer(Operation *op) {
 }
 
 static bool isPureAndRegionless(Operation *op) {
-  if (op->hasTrait<OpTrait::HasRecursiveMemoryEffects>())
-    return false;
   if (auto iface = dyn_cast<MemoryEffectOpInterface>(op)) {
     SmallVector<MemoryEffects::EffectInstance> effects;
     iface.getEffects(effects);
@@ -106,9 +106,8 @@ namespace triton {
 
 void SinkI1ProducersIntoUsersPass::runOnOperation() {
   ModuleOp moduleOp = getOperation();
-  CVPipeline::ComputeBlockIdManager bm(moduleOp);
   LOG_DEBUG(moduleOp);
-
+  CVPipeline::ComputeBlockIdManager bm(moduleOp);
   SmallVector<Operation *> producers;
   // find single-result and regionless op with i1 tensor result-type
   moduleOp.walk([&](Operation *op) {
@@ -156,6 +155,7 @@ void SinkI1ProducersIntoUsersPass::runOnOperation() {
       p->moveBefore(orderedConsumuers[0]);
       LOG_DEBUG("move producer " << *p << " to " << consumerBlockId << "\n");
       bm.updateBlockId(p, consumerBlockId);
+      seenBlockIds.insert(consumerBlockId);
       blockId2Producer.insert({consumerBlockId, p});
     }
 

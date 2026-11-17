@@ -1,17 +1,7 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
 
 // Same-iteration tensor iter-arg pairs cannot add flowopt condition.
-//
-// The legacy path of this branch is a frozen snapshot of the upstream
-// implementation at the fork point of the normal preload branch. The flowopt
-// fix of the upstream commit 33819a5b6 landed after that point, so the legacy
-// path does not carry it. The kernel of this test has three blocks and no
-// tightly coupled buffer, so the pattern analysis does not recognize it and
-// the kernel takes the legacy path: the test does not pass on this branch.
-// The normal preload path keeps the fix, see UpdateConditionInfo.cpp.
-//
-// XFAIL: *
-//
+
 // The wildcard marks the divergence without a lit feature. Remove it when the
 // legacy path is refreshed with the upstream implementation again: lit reports
 // an unexpectedly passing test as a failure, so the stale marker is caught.

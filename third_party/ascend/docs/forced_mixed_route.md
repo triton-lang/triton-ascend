@@ -51,6 +51,7 @@ checks the effective route, selected factor, materialized-anchor count and
 scope-factor IR before accepting the compile. Metadata records the forced route/factor and materialized TTIR
 SHA256. NPU precision and performance still require a real runtime test.
 
-The gather-dot F1/F2 regression depends on the Mixed index-select UB repair.
-Its lowering change and IR regression are reviewed in a separate PR.
-[Mixed index-select UB repair](https://github.com/triton-lang/triton-ascend/pull/3220).
+The `test_costmodel_forced_mixed_factors` regression uses a one-dimensional
+indirect load with multiple logical-program loop iterations. It verifies
+Auto/F1/F2 route changes, precision, binary distinction and cache reuse in an
+isolated child process.

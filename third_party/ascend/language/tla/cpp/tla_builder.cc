@@ -990,8 +990,11 @@ void init_tla_builder(py::module &&m) {
       .def(
           "create_simd_vselr",
           [](TLABuilder &self, Value src, Value indices) -> Value {
-            return self.create<hivmave::VFSelectRegOp>(src.getType(), src, indices)
-                .getResult();
+            Value mask = self.create<hivmave::VFPgeOp>(
+                VectorType::get({128}, self.getBuilder().getI1Type()),
+                hivmave::PgePattern::H).getResult();
+            return self.create<hivmave::VFRegisterGatherOp>(
+                src.getType(), src, indices, mask).getResult();
           })
       .def(
           "create_simd_vscatter",

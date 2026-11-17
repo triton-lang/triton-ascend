@@ -24,8 +24,7 @@ def generate_bitmask(rows, cols, row_capacity, column_capacity, *, mask):
     bits_per_byte = 8
     row_bytes = column_capacity // bits_per_byte
     groups = dense.view(row_capacity, row_bytes, bits_per_byte)
-    bit_weights = torch.tensor([1, 2, 4, 8, 16, 32, 64, 128],
-                               dtype=torch.int32, device=device)
+    bit_weights = torch.tensor([1, 2, 4, 8, 16, 32, 64, 128], dtype=torch.int32, device=device)
 
     # Weight each 0/1 value by its bit position, then sum each group.
     group_bits = groups.to(torch.int32)
@@ -36,8 +35,7 @@ def generate_bitmask(rows, cols, row_capacity, column_capacity, *, mask):
 
 
 @triton.jit
-def unpack_mask(Packed, row_start, col_start, ROW_BYTES: tl.constexpr,
-                BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+def unpack_mask(Packed, row_start, col_start, ROW_BYTES: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
     """Decode one tile. col_start is byte-aligned and the full tile is backed by GM."""
     row = tl.arange(0, BLOCK_M)[:, None]
     col = tl.arange(0, BLOCK_N)[None, :]

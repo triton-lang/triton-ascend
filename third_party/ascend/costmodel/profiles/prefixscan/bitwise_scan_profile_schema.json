@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ascend bitwise scan completion profile",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "target": {
+      "const": "Ascend950PR"
+    },
+    "cycle_unit": {
+      "const": "system_cycle"
+    },
+    "formulas": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "terms": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "terms"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "dispatch": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "simd",
+              "simt"
+            ]
+          },
+          "element_bits": {
+            "enum": [
+              8,
+              16,
+              32,
+              64
+            ]
+          },
+          "algorithm": {
+            "enum": [
+              "S1",
+              "T1",
+              "T2"
+            ]
+          },
+          "operation_group": {
+            "enum": [
+              "all_bitwise",
+              "and",
+              "or_xor"
+            ]
+          },
+          "reverse": {
+            "type": "boolean",
+            "description": "Preferred scan direction; omit for a shared tree. Matching prefers the requested direction, then a shared tree, then the remaining direction."
+          },
+          "tree": {
+            "$ref": "#/$defs/tree"
+          }
+        },
+        "required": [
+          "mode",
+          "element_bits",
+          "algorithm",
+          "operation_group",
+          "tree"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "target",
+    "cycle_unit",
+    "formulas",
+    "dispatch"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "tree": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "properties": {
+            "formula": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "formula"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "feature": {
+              "type": "string",
+              "minLength": 1
+            },
+            "threshold": {
+              "type": "number"
+            },
+            "left": {
+              "$ref": "#/$defs/tree"
+            },
+            "right": {
+              "$ref": "#/$defs/tree"
+            }
+          },
+          "required": [
+            "feature",
+            "threshold",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

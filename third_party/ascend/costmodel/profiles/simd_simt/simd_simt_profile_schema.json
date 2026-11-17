@@ -4487,6 +4487,10 @@
     "prefixscan_profile": {
       "type": "string",
       "minLength": 1
+    },
+    "bitwise_scan_profile": {
+      "type": "string",
+      "minLength": 1
     }
   },
   "required": [

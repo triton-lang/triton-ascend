@@ -3132,7 +3132,8 @@ static double estimateStageBase(const LogicalStage &stage,
                                   (mode == StageMode::SIMT ? ownedMemory : 0.0),
                               r.issue);
     }
-    if (r.scanCompletionCycles == 0.0 && mode == StageMode::SIMT &&
+    if (r.scanCompletionCycles == 0.0 && r.scanFormulaCounts.empty() &&
+        mode == StageMode::SIMT &&
         stage.scheduleKind == StageScheduleKind::StraightLine &&
         !stage.features.isGridStrideLoopShell &&
         !stage.features.insideGridStrideLoopBody &&

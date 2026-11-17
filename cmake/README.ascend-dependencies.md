@@ -9,15 +9,15 @@ pins and native Git submodule metadata instead of maintaining JSON mirrors.
 | `json-version.txt` | Ascend `setup_patch.py` JSON package reader |
 | `bisheng-version.txt` | integration-tests-ascend, sync-upstream, DynamicCVPipeline and TLA installers; filename and mandatory SHA256 per architecture |
 | `triton-distributed-info.json` | Optional distributed source preparation; repository and full commit SHA |
-| `npuir-info.json` | NPU-IR CI tracking policy; repository address comes from `.gitmodules`, local pinned revision stays in the gitlink |
+| `npuir-info.json` | NPU-IR CI (Continuous Integration) tracking policy; repository address comes from `.gitmodules`, local pinned revision stays in the gitlink |
 | `nvidia-toolchain-version.json` | Existing upstream NVIDIA toolchain mechanism; no Ascend copy |
 
 LLVM patch files remain in `third_party/ascend/patch/llvm_patch_*.patch`.
 The existing sorted patch-content hash and prebuilt LLVM naming stay unchanged,
-including the AlmaLinux ABI exception. No dependency version is upgraded here.
+including the AlmaLinux ABI (Application Binary Interface) exception. No dependency version is upgraded here.
 Core upstream build entry points (`setup.py`, `python/build_helpers.py`,
 `CMakeLists.txt`, `Makefile`, `scripts/build-llvm-project.sh`) are unchanged
-relative to this PR's main-dev merge base; Ascend overrides live under
+relative to this PR (Pull Request)'s main-dev merge base; Ascend overrides live under
 `third_party/ascend/build/`.
 
 BiSheng readers use existing shell tools. Packaging uses Python's standard
@@ -31,7 +31,7 @@ Python/build prerequisites stay in existing requirements/project declarations.
 Runtime CANN/torch combinations, historical release recipes and image matrices
 keep their existing roles: different supported environments are not duplicate
 pins of the same logical source dependency. This change adds no release-image
-product and changes no CI throttling policy.
+product and changes no CI (Continuous Integration) throttling policy.
 
 Run from the repository root:
 

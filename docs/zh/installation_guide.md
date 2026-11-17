@@ -372,7 +372,7 @@ for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
   elif git apply -R --check "$patch" 2>/dev/null; then
     echo "补丁 $name 已应用，跳过。"
   else
-    echo "补丁 $name 无法干净地应用于当前目录，请查看上方 git apply 输出。" >&2
+    echo "补丁 $name 无法干净地应用于当前目录，请重新执行 git apply --check \"$patch\" 查看具体原因。" >&2
     exit 1
   fi
 done

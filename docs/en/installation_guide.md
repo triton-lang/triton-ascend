@@ -378,7 +378,7 @@ for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
   elif git apply -R --check "$patch" 2>/dev/null; then
     echo "Patch $name is already applied; skipping."
   else
-    echo "Patch $name does not apply cleanly to this tree; see git apply output above." >&2
+    echo "Patch $name does not apply cleanly to this tree; re-run 'git apply --check \"$patch\"' to see the reason." >&2
     exit 1
   fi
 done

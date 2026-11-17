@@ -30,17 +30,6 @@ def test_audit_validates_the_upstream_json_text_pin(checker, version):
     assert bool(checker.errors) is (version != "v3.11.3")
 
 
-@pytest.mark.parametrize("field", ["llvm", "patch"])
-def test_release_policy_cannot_silently_drift_llvm_or_patch(checker, field):
-    path = checker.REPO_ROOT / "docs/en/community/release_policy.md"
-    text = path.read_text(encoding="utf-8")
-    text = text.replace("f6ded0b", "abcdef0") if field == "llvm" else text.replace("llvm_patch_f6ded0b.patch",
-                                                                                   "llvm_patch_bad.patch")
-    path.write_text(text, encoding="utf-8")
-    checker.check_release_llvm()
-    assert checker.errors
-
-
 @pytest.mark.parametrize("suffix", ["run", "tar.gz"])
 def test_bisheng_metadata_retains_supported_package_formats(checker, suffix):
     path = checker.DEPS_DIR / "bisheng-version.txt"

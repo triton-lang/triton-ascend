@@ -1,13 +1,11 @@
 # 快速安装
 
-本文主要介绍在 Ubuntu 环境中如何快速完成 **Triton-Ascend** 基础配套的安装，如果需要详细的操作步骤请参考[<u>《安装介绍》</u>](#installation-guide)。
+本文主要介绍在 Ubuntu 环境中如何快速完成 **Triton-Ascend** 基础配套的安装，如果需要详细的操作步骤请参考[<u>《安装介绍》</u>](#anzhuangzhinan)。
 
 ## 基于Docker镜像快速搭建
-
 直接使用 Triton-Ascend 发布的开箱即用的镜像，快速构筑开发环境。
 
 ### 确认镜像
-
 **表1** 昇腾芯片与对应产品及镜像 tag 部分对照表。更多镜像参见 [OVERVIEW.zh.md](../../docker/OVERVIEW.zh.md) 文档。
 <table style="table-layout: fixed; width: 100%; border-collapse: collapse;">
   <tr style="height: 50px;">
@@ -33,8 +31,7 @@
 </table>
 
 ### 具体实施
-
-1. 创建容器
+1.  创建容器
 
     ```bash
     # 假设您的NPU设备型号是A3，且设备安装在/dev/davinci1上，并且您的NPU驱动程序安装在/usr/local/Ascend上：
@@ -64,36 +61,29 @@
     /bin/bash
     ```
 
-2. 进入容器
-
+2.  进入容器
     ```bash
     docker exec -it triton-ascend_container bash
     ```
-
 3. 拉取代码
-
-    ```bash
-    # 拉取triton-ascend源码仓及用例
-    git clone https://github.com/triton-lang/triton-ascend.git
-    cd triton-ascend
-    ```
-
+```bash
+# 拉取triton-ascend源码仓及用例
+git clone https://github.com/triton-lang/triton-ascend.git
+cd triton-ascend
+```
 4. 运行示例：<a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
-
-    ```bash
-    # 运行tutorials示例：
-    python3 ./third_party/ascend/tutorials/01-vector-add.py
-    ```
-
+```bash
+# 运行tutorials示例：
+python3 ./third_party/ascend/tutorials/01-vector-add.py
+```
 观察到类似的输出即说明环境配置正确：
-
-```text
+```
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
 ```
 
-# 安装介绍 <a id="installation-guide"></a>
+# 安装介绍 <a id = "anzhuangzhinan" ></a>
 
 ## 概述
 
@@ -103,9 +93,12 @@ Triton-Ascend 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，主�
 
 ## 硬件和操作系统
 
-- Ascend 产品：支持 Atlas A2/A3/A5 系列。
-- NPU 配置：建议至少单卡 32GB 内存。
-- 操作系统：需 Linux 系统，具体选择请参考<a href="https://www.hiascend.com/hardware/compatibility" style="text-decoration: none; color: #0066cc;">兼容性查询助手</a>。本文接下来所有操作均以 Ubuntu 环境演示。
+-   Ascend 产品：支持 Atlas A2/A3/A5 系列。
+
+-   NPU 配置：建议至少单卡 32GB 内存。
+
+-   操作系统：需 Linux 系统，具体选择请参考<a href="https://www.hiascend.com/hardware/compatibility" style="text-decoration: none; color: #0066cc;">兼容性查询助手</a>。本文接下来所有操作均以 Ubuntu 环境演示。
+
 
 ## 安装方式选择
 
@@ -187,45 +180,42 @@ Triton-Ascend 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，主�
     </tbody>
 </table>
 
-#### 检查安装环境<a id="env-prepare"></a>
-
+#### 检查安装环境<a id = "huanjingzhunbei" ></a>
 确定 CANN、Python 和 Torch-NPU 软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
-- CANN 版本推荐：9.0.0
-- Python 版本推荐：python3.11
-- PyTorch 版本推荐：2.7.1
-- Torch-NPU 版本推荐：2.7.1.post4
+-   CANN 版本推荐：9.0.0
+-   Python 版本推荐：python3.11
+-   Pytorch 版本推荐：2.7.1
+-   Torch-NPU 版本推荐：2.7.1.post4。
 
 #### whl包安装
-
-1. 检查 Python 版本
+1.  检查 Python 版本
 
     ```bash
     python3 --version
     ```
-
     若命令回显如下所示，则表示 Python 版本为 3.11.15：
-
     ```text
     root@test:/# python3 --version
     Python 3.11.15
     ```
 
-2. 安装 whl 包
-    - Triton-Ascend 3.2.0 及以下版本，Triton-Ascend 和 Triton 不能同时存在。需要先卸载社区 Triton，再安装 Triton-Ascend。
-    - Triton-Ascend 3.2.1 及以上版本，Triton-Ascend 通过将 Triton 声明为安装依赖来缓解安装覆盖问题。具体参见[FAQ](#appendix-faq)
+2.  安装 whl 包
+    -    Triton-Ascend 3.2.0 及以下版本，Triton-Ascend 和 Triton 不能同时存在。需要先卸载社区 Triton，再安装 Triton-Ascend。
+    -    Triton-Ascend 3.2.1 及以上版本，Triton-Ascend 通过将 Triton 声明为安装依赖来缓解安装覆盖问题。具体参见[FAQ](#附录faq)
 
     ```bash
     # 以安装 triton-ascend 3.2.1 为例
     pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
     ```
 
-### 源码编译安装
 
-如果需要对 **Triton-Ascend** 进行开发或自定义修改，可以采用源代码编译安装的方法。在安装环境和依赖准备好后，推荐使用[<u>在线安装</u>](#quick-install)的方式完成基于源码安装；若有特殊需求，如目标机器无法联网等原因，可以进行[<u>离线安装</u>](#manual-install)。
+### 源码编译安装
+如果需要对 **Triton-Ascend** 进行开发或自定义修改，可以采用源代码编译安装的方法。在安装环境和依赖准备好后，推荐使用[<u>在线安装</u>](#kuaisuanzhuang)的方式完成基于源码安装；若有特殊需求，如目标机器无法联网等原因，可以进行[<u>离线安装</u>](#shoudonganzhuang)。
+
 
 #### 检查安装环境
+确定 CANN、Python 和 torch_npu 软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。具体参考软件包安装的[<u>环境准备事项</u>](#huanjingzhunbei)
 
-确定 CANN、Python 和 torch_npu 软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。具体参考软件包安装的[<u>环境准备事项</u>](#env-prepare)
 
 **系统推荐**
 **表3** PyTorch 兼容性推荐版本表
@@ -258,12 +248,10 @@ Triton-Ascend 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，主�
 </table>
 
 #### 安装依赖
-
-1. 安装系统库依赖
+1.  安装系统库依赖
     安装 zlib1g-dev / lld / clang，可选择安装 ccache 包用于加速构建。
-    - 推荐版本 clang >= 15
-    - 推荐版本 lld >= 15
-
+    -   推荐版本 clang >= 15
+    -   推荐版本 lld >= 15
     ```bash
     apt update
     apt install zlib1g-dev clang-15 lld-15
@@ -271,15 +259,13 @@ Triton-Ascend 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，主�
     update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
     update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100
     ```
-
-2. 安装 Python 依赖
-
+2.  安装 Python 依赖
     ```bash
     pip install ninja cmake wheel pybind11 # build-time dependencies
     ```
 
-#### 在线安装<a id="quick-install"></a>
 
+#### 在线安装<a id = "kuaisuanzhuang" ></a>
 ```bash
 git clone https://github.com/triton-lang/triton-ascend.git
 cd triton-ascend
@@ -292,116 +278,29 @@ export LLVM_SYSPATH=/path/to/LLVM
 pip install -e .
 ```
 
-#### 离线安装 - 基于LLVM构建<a id="manual-install"></a>
-
+#### 离线安装 - 基于LLVM构建<a id = "shoudonganzhuang" ></a>
 Triton 使用 LLVM 22 为 GPU 和 CPU 生成代码。同样，昇腾的毕昇编译器也依赖 LLVM 生成 NPU 代码，因此需要编译 LLVM 源码才能使用。请关注依赖的 LLVM 特定版本。
 
-前置条件：本节的各步骤均在 `triton-ascend` 仓库根目录下执行，且该仓库必须已存在于本机。若目标机器可联网，现在直接克隆仓库并进入其根目录。若目标机器离线，请勿在其上执行下方克隆命令：应在可联网的机器上克隆，再将整个仓库拷贝过来（例如用 `scp -r` 或 `tar`）后继续。离线机器还需要 LLVM 源码树：如[代码准备](#code-preparation)所述，`llvm-project` git 仓库是在联网机器上于仓库内部克隆并检出的，因此传输到离线机器的拷贝必须包含它。
-
-可联网机器上的克隆与进入命令：
-
-```bash
-git clone https://github.com/triton-lang/triton-ascend.git
-cd triton-ascend
-```
-
-本节标题中的「离线」指安装过程不下载任何预编译包：所有组件都在本机从源码构建。但获取源码本身——上方的克隆以及[代码准备](#code-preparation)中的LLVM检出——仍需要联网，请将其与 `triton-ascend` 仓库一起传输到离线机器。
-
-##### 代码准备<a id="code-preparation"></a>
-
+##### 代码准备
 通过 `git checkout` 检出指定版本的 LLVM 源码并应用补丁：
-
 ```bash
-# 请在 triton-ascend 仓库根目录下执行，确保 cmake/llvm-hash.txt 可解析；
-# 该文件必须只包含一个有效的 LLVM commit 哈希。
-TRITON_ROOT="$(pwd)"
-[ -f "$TRITON_ROOT/cmake/llvm-hash.txt" ] || { echo "请在 triton-ascend 仓库根目录下执行本代码块：在 $(pwd) 下未找到 cmake/llvm-hash.txt。"; exit 1; }
-LLVM_COMMIT=$(cat "$TRITON_ROOT/cmake/llvm-hash.txt" | tr -d '\r\n') || exit 1
-# pin 必须恰好是一个 40 位十六进制字符的 commit 哈希；若文件为空或格式
-# 错误，不在校验处报错的话，会在随后的 git checkout 内部以晦涩方式失败。
-# 十六进制字符大小写均合法；统一转小写，使校验与 git 输出一致，
-# 也与下方补丁文件名校验的处理方式保持一致。
-LLVM_COMMIT=$(printf '%s' "$LLVM_COMMIT" | tr 'A-F' 'a-f')
-if [ "${#LLVM_COMMIT}" -ne 40 ] || [ -n "$(printf '%s' "$LLVM_COMMIT" | tr -d '0-9a-f')" ]; then
-  echo "cmake/llvm-hash.txt 为空或不是单个 40 位 commit 哈希 —— 请检查该文件。" >&2
-  exit 1
-fi
-# 上方离线流程已将 LLVM 检出随仓库一并传输：若目录已存在，则跳过克隆，
-# 仅在此执行固定 commit 的检出与应用补丁。
-if [ ! -d "$TRITON_ROOT/llvm-project/.git" ]; then
-  if [ -d "$TRITON_ROOT/llvm-project" ] && [ -n "$(ls -A "$TRITON_ROOT/llvm-project" 2>/dev/null)" ]; then
-    echo "llvm-project/ 已存在但不是 git 仓库，请清理该目录或补齐 .git 后再执行。" >&2
-    exit 1
-  fi
-  git clone --no-checkout https://github.com/llvm/llvm-project.git || exit 1
-fi
+git clone --no-checkout https://github.com/llvm/llvm-project.git
 cd llvm-project
-git checkout "$LLVM_COMMIT" || exit 1
-# 强制使用 C locale，确保 git apply 的行为不受当前 shell 会话 locale 设置的影响。
-# 该设置在当前终端会话内持续生效；如需恢复，请在补丁应用完成后执行 unset LC_ALL。
-export LC_ALL=C
-# 文件名中 llvm_patch_ 与 .patch 之间的 token 可能内嵌目标 commit 的十六进制
-# 前缀。若该 token 为纯十六进制且不是 llvm-hash.txt 固定 commit 的前缀，
-# 说明补丁来自另一个 LLVM 版本：在此给出明确报错并终止，而不是等到
-# git apply 才以晦涩的方式失败。非纯十六进制的 token 是描述性名称，
-# 不携带 commit 信息。恰由十六进制字符组成的描述性名称无法与 commit
-# 前缀区分；请为此类补丁文件改名以跳过该校验。大写十六进制字符先统一
-# 转为小写，这样以 pin 对应 commit 前缀的大写拼写命名的补丁文件也能被接受。
-for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
-  [ -f "$patch" ] || continue
-  name=$(basename "$patch")
-  token=${name#llvm_patch_}
-  token=${token%.patch}
-  token=$(printf '%s' "$token" | tr 'A-F' 'a-f')
-  case "$token" in
-    ""|*[!0-9a-f]*) ;;
-    *)
-      case "$LLVM_COMMIT" in
-        "$token"*) ;;
-        *)
-          echo "补丁 $name 为纯十六进制名但非 llvm-hash.txt 固定 commit（$LLVM_COMMIT）的前缀；若它是由十六进制字符组成的描述性名称，请重命名以避免误判。" >&2
-          exit 1
-          ;;
-      esac
-      ;;
-  esac
-  # 在已打过补丁的目录上重复执行本代码块是安全的：若补丁已应用
-  # （正向 --check 失败但反向 --check 通过），则跳过而不是报错退出。
-  if git apply --check "$patch" 2>/dev/null; then
-    git apply "$patch" || exit 1
-  elif git apply -R --check "$patch" 2>/dev/null; then
-    echo "补丁 $name 已应用，跳过。"
-  else
-    echo "补丁 $name 无法干净地应用于当前目录，请重新执行 git apply --check \"$patch\" 查看具体原因。" >&2
-    exit 1
-  fi
-done
+git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
+wget https://raw.githubusercontent.com/triton-lang/triton-ascend/refs/heads/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
+git apply llvm_patch_f6ded0b.patch
 ```
 
 ##### 构建安装LLVM
-
-本小节的各代码块通过 shell 局部变量（TRITON_ROOT、LLVM_INSTALL_PREFIX）串联：
-请在同一终端中自「代码准备」代码块起连续执行。每个代码块也注明了独立执行时的
-兜底方式——在 triton-ascend 仓库根目录执行、并先重跑步骤1——但每个代码块各开
-新终端时，需要反复阅读这些注释才能正确衔接。
-
-- 步骤1：设置环境变量 LLVM_INSTALL_PREFIX 为您的目标安装路径
-
+-   步骤1：设置环境变量 LLVM_INSTALL_PREFIX 为您的目标安装路径
     ```bash
     # 路径为用户规划的llvm安装路径,需根据实际调整
     export LLVM_INSTALL_PREFIX=/path/to/llvm-install
     ```
-
-- 步骤2：执行以下命令进行构建和安装 LLVM。请在上一个代码块（步骤1）的同一终端内执行。
-
+-   步骤2：执行以下命令进行构建和安装 LLVM
     ```bash
-    # 默认上方的「代码准备」代码块已在同一终端会话中执行；独立执行本代码块时，
-    # 请位于 triton-ascend 仓库根目录，并先执行步骤1设置 LLVM_INSTALL_PREFIX。
-    [ -n "$LLVM_INSTALL_PREFIX" ] || { echo "LLVM_INSTALL_PREFIX 未设置 —— 请先执行步骤1设置目标安装路径。"; exit 1; }
-    TRITON_ROOT="${TRITON_ROOT:-$(pwd)}"
-    [ -d "$TRITON_ROOT/llvm-project" ] || { echo "在 $TRITON_ROOT 下未找到 llvm-project/ —— 请先执行「代码准备」代码块完成克隆。"; exit 1; }
-    cd "$TRITON_ROOT/llvm-project"
-    mkdir -p build
+    cd {PATH_TO}/llvm_project # 路径为用户拉取LLVM代码的路径,需根据实际调整
+    mkdir build
     cd build
     cmake ../llvm \
         -G Ninja \
@@ -416,35 +315,19 @@ done
         -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
     ninja install
     ```
-
-- 步骤3：需要拷贝 FileCheck 到目标安装路径。请在上一个代码块（步骤2）的同一终端内执行。
-
+-   步骤3：需要拷贝 FILECHECK 到目标安装路径
     ```bash
-    # 请在 triton-ascend 仓库根目录执行，或沿用步骤2的同一终端（其中已设置 TRITON_ROOT）。
-    [ -n "$LLVM_INSTALL_PREFIX" ] || { echo "LLVM_INSTALL_PREFIX 未设置 —— 请先执行步骤1设置目标安装路径。"; exit 1; }
-    TRITON_ROOT="${TRITON_ROOT:-$(pwd)}"
-    [ -f "$TRITON_ROOT/llvm-project/build/bin/FileCheck" ] || { echo "在 $TRITON_ROOT 下未找到 FileCheck —— 请先从 triton-ascend 仓库根目录执行步骤1-2。"; exit 1; }
-    cp  "$TRITON_ROOT"/llvm-project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
+    cp  {PATH_TO}/llvm_project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
     ```
 
+
 ##### 构建 Triton-Ascend
-
-本节开头的前置条件已完成仓库克隆并进入其根目录，此处无需克隆命令。
-步骤1的首条命令会在 TRITON_ROOT 未设置时以当前目录作为仓库根目录，
-并校验该目录下存在 setup.py；请在仓库根目录执行本代码块（或沿用
-「代码准备」代码块的同一终端，其中已设置 TRITON_ROOT），使校验通过。
-请沿用上方「构建安装LLVM」各步骤的同一终端——LLVM_INSTALL_PREFIX 仅
-当前终端有效，新开 shell 时需重新执行其步骤1。
-
-- 步骤1：编译安装 Triton-Ascend。请在上方「构建安装LLVM」各步骤的同一终端内执行。
-
+-   步骤1：克隆 Triton-Ascend
     ```bash
-    # 新开 shell 时请先重新执行上方 LLVM 步骤1设置 LLVM_INSTALL_PREFIX，
-    # 再从仓库根目录执行本代码块（TRITON_ROOT 回退为当前目录）。
-    TRITON_ROOT="${TRITON_ROOT:-$(pwd)}"
-    [ -f "$TRITON_ROOT/setup.py" ] || { echo "在 $TRITON_ROOT 下未找到 setup.py —— 请在 triton-ascend 仓库根目录执行本代码块。"; exit 1; }
-    [ -n "$LLVM_INSTALL_PREFIX" ] || { echo "LLVM_INSTALL_PREFIX 未设置 —— 请先执行「基于LLVM构建」的步骤设置目标安装路径。"; exit 1; }
-    cd "$TRITON_ROOT"
+    git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
+    ```
+-   步骤2：编译安装 Triton-Ascend
+    ```bash
     # 确认已设置 [基于LLVM构建] 章节中，LLVM安装的目标路径 ${LLVM_INSTALL_PREFIX}
     # 确认已安装clang>=15，lld>=15，ccache
 
@@ -458,7 +341,6 @@ done
     ```
 
 ### 镜像包安装
-
 通过 Dockerfile 安装 Docker 环境镜像。使用 quay.io/ascend/cann 预构建镜像作为基础镜像，跳过 CANN 安装步骤，显著加快构建速度。
 
 #### 检查镜像版本
@@ -533,9 +415,9 @@ done
   </tr>
 </table>
 
-#### 镜像安装
 
-1. 构建镜像
+#### 镜像安装
+1.  构建镜像
 
     ```bash
     # 这里以 9.0.0-a3-ubuntu22.04-py3.11 为例
@@ -545,8 +427,7 @@ done
     -t triton-ascend-image:latest -f ./docker/Dockerfile .
     ```
 
-2. 启动容器
-
+2.  启动容器
     ```bash
     docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container --net=host --privileged \
     --security-opt seccomp=unconfined \
@@ -574,10 +455,9 @@ done
     docker exec -u root -it triton-ascend_container /bin/bash
     ```
 
+
 ## 安装结果验证
-
 安装运行时依赖：
-
 ```bash
 # 拉取triton-ascend源码仓及用例（可选，非源码编译安装运行示例时需拉源码仓）
 git clone https://github.com/triton-lang/triton-ascend.git
@@ -585,74 +465,57 @@ cd triton-ascend && pip install -r requirements.txt
 ```
 
 运行示例：<a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
-
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 # 运行tutorials示例：
 python3 ./third_party/ascend/tutorials/01-vector-add.py
 ```
-
 观察到类似的输出即说明环境配置正确：
-
-```text
+```
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
 ```
 
-# 附录：FAQ<a id="appendix-faq"></a>
+# 附录：FAQ<a id = "附录faq" ></a>
 
 ## 安装 torch_npu 时出现报错“ERROR: No matching distribution found for torch==2.7.1+cpu”
 
 ### 解决措施
-
 可以尝试手动安装 torch 后再安装 torch_npu：
-
-```bash
+```
 pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu
 ```
 
 ## 编译安装 Triton-Ascend 时，如果GCC < 9.4.0，可能报错 “ld.lld: error: unable to find library -lstdc++fs”
 
 ### 解决措施
-
 一般是链接器无法找到 stdc++fs 库引起的报错。该库用于支持 GCC 9 之前版本的文件系统特性。此时需要手动把 CMake 文件中以下相关代码片段的注释打开。
 文件路径：triton-ascend/CMakeLists.txt
-
-```cmake
+```
 if (NOT WIN32 AND NOT APPLE)
 link_libraries(stdc++fs)
 endif()
 ```
-
 ## 执行算子时报错 ModuleNotFoundError: No module named 'triton._C.libtriton.ascend'; 'triton._C.libtriton' is not a package
-
 ### 根因分析
-
  triton-ascend 目录被triton覆盖,导致triton-ascend功能受损。
-
 ### 解决措施
-
  卸载已损坏的triton-ascend,重新安装即可。以3.2.1 版本为例，可执行如下命令修复：
-
 ```bash
 pip uninstall triton-ascend triton
 pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
 ```
 
 ## Triton-Ascend 3.2.1 版本为何新增依赖triton？
-
 答复：Triton-Ascend 是基于Triton进行的二次开发，与Triton安装目录同名。若用户安装Triton-Ascend之后，在此安装triton或依赖triton的三方件，会覆盖triton目录，导致Triton-ascend功能受损。
 因此通过增加triton依赖，当triton被覆盖安装时会有如下提醒。
-
 ```text
 ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
 triton-ascend 3.2.1 requires triton==3.5.0, but you have triton 3.5.1 which is incompatible.
 ```
-
 若用户遇到且想恢复triton-ascend功能，可做如下操作：
-
 ```bash
 pip uninstall triton-ascend triton
 pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
@@ -660,11 +523,9 @@ pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra
 ```
 
 ## Triton-Ascend 3.2.1 版本依赖的 Triton 版本为何不一致？
-
 答复：x86 与 arm 使用不同版本的社区 Triton 安装包的原因是社区从 3.5 版本开始才提供 arm 版本安装包：x86 依赖 triton==3.2.0，arm 依赖 triton==3.5.0。
 
 ## 如何确认芯片类型
-
 您可以使用 npu-smi 命令查看系统上的 NPU 型号。例如，在 npu-smi info 命令的输出中，"910B4" 对应芯片类型 A2 （昇腾 910b 系列）：
 
 ```Text

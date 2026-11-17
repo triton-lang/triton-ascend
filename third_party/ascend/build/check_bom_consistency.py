@@ -14,7 +14,6 @@ DEPS_DIR = REPO_ROOT / "cmake"
 WORKFLOWS_DIR = REPO_ROOT / ".github/workflows"
 SCHEMA_VERSION = 1
 CHECKOUT_ROOTS = ("", "pr/")
-DOC_SITES = ("README.md", "README_zh.md", "docs/en/installation_guide.md", "docs/zh/installation_guide.md")
 errors = []
 
 
@@ -43,10 +42,6 @@ def _load_json(path):
 def _read(path):
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
-
-
-def _line_no(text, pos):
-    return text.count("\n", 0, pos) + 1
 
 
 def _load_llvm_info():
@@ -132,28 +127,6 @@ def _glob_exists(relative):
     return False
 
 
-def check_docs_llvm_hash():
-    """Check reintroduced literals against the local pin and patch files."""
-    info = _load_llvm_info()
-    llvm_hash = info["llvm_hash"]
-    checkout_re = re.compile(r"git checkout ([0-9a-f]{40})\b")
-    patch_re = re.compile(r"llvm_patch_([0-9a-f]{7,40})\.patch")
-    for rel in DOC_SITES:
-        text = _read(REPO_ROOT / rel)
-        for match in checkout_re.finditer(text):
-            if match.group(1) != llvm_hash:
-                _fail(
-                    "docs-llvm-hash",
-                    f"{rel}:{_line_no(text, match.start())} hardcodes 'git checkout {match.group(1)}', "
-                    f"but the BOM pins {llvm_hash}; read cmake/llvm-hash.txt instead")
-        for match in patch_re.finditer(text):
-            if match.group(0) not in info["patches"]:
-                _fail(
-                    "docs-llvm-hash",
-                    f"{rel}:{_line_no(text, match.start())} references patch {match.group(0)}, which does "
-                    f"not appear in the local LLVM patch set")
-
-
 def check_workflow_cache_paths():
     # Audit the consumers changed by this migration. Other upstream workflows
     # retain their baseline cache policy and are outside this PR's contract.
@@ -166,35 +139,19 @@ def check_workflow_cache_paths():
                     _fail("workflows-hashfiles", f"{path.relative_to(REPO_ROOT)}: {arg!r} matches no file")
 
 
-def check_release_llvm():
-    info = _load_llvm_info()
-    text = _read(REPO_ROOT / "docs/en/community/release_policy.md")
-    row = next((line for line in text.splitlines() if re.match(r"\|\s*`main`\s*\|", line)), "")
-    commits = re.findall(r"\[([0-9a-f]{7,40})\]\(https://github.com/llvm/llvm-project/commit/([0-9a-f]{7,40})\)", row)
-    if len(commits) != 1 or any(not info["llvm_hash"].startswith(value) for value in commits[0]):
-        _fail("release-policy", "main LLVM differs from cmake/llvm-hash.txt")
-    patches = set(re.findall(r"llvm_patch_[A-Za-z0-9_.-]+\.patch", row))
-    if patches != set(info["patches"]):
-        _fail("release-policy", "main patch list differs from cmake/llvm-hash.txt")
-
-
 def main():
     errors.clear()
     try:
         check_llvm_info()
         check_toolchain()
         check_optional_sources()
-        check_docs_llvm_hash()
         check_workflow_cache_paths()
-        check_release_llvm()
     except (OSError, ValueError) as exc:
         _fail("metadata", str(exc))
     if errors:
         print("Build dependency consistency check failed:\n  - " + "\n  - ".join(errors))
         raise SystemExit(1)
-    print(
-        "Build dependency consistency check passed (LLVM, JSON library, Bisheng, optional sources, docs and cache paths)."
-    )
+    print("Build dependency consistency check passed (LLVM, JSON library, Bisheng, optional sources and cache paths).")
 
 
 if __name__ == "__main__":

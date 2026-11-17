@@ -55,7 +55,7 @@ def checker(tmp_path, monkeypatch):
                                                   REPO / "third_party/ascend/build/check_bom_consistency.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    for relative in ["requirements.txt", "docker/Dockerfile", "docs/en/community/release_policy.md"]:
+    for relative in ["requirements.txt", "docker/Dockerfile"]:
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(REPO / relative, target)

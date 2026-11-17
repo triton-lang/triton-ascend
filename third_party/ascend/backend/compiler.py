@@ -469,9 +469,13 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             # which only the pipeline itself can point at.
             main_loop_unroll_factor = metadata.get("main_loop_unroll_factor") or 1
             demote_f32_reduction = metadata.get("demote_f32_reduction") or False
+            # Flip to False to see why a variant trial failed: a trial that
+            # dies otherwise takes its diagnostics with it.
+            quiet_variant_trials = True
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95,
                                                            main_loop_unroll_factor,
-                                                           demote_f32_reduction)
+                                                           demote_f32_reduction,
+                                                           quiet_variant_trials)
 
         if AscendBackend.instrumentation:
             if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):

@@ -573,14 +573,17 @@ void AddDynamicCVPipelinePass::runOnOperation() {
 
     {
       // Nothing a trial prints is worth reading: it describes IR that is
-      // about to be discarded, and with several trials at once the
-      // interleaving is noise even where a single line would have made
-      // sense. The estimate is asked to stay quiet, and the rest of the
-      // pipeline is silenced at the descriptor. The redirection is
-      // process-wide, which is why there is one silencer for the whole
-      // phase rather than one per thread: two silencers would undo each
-      // other.
-      OutputSilencer hush;
+      // about to be discarded. The estimate is asked to stay quiet, and the
+      // rest of the pipeline is silenced at the descriptor, which is the only
+      // thing that covers prints this pass does not own.
+      //
+      // quiet-variant-trials=false keeps it off: the redirection is undone
+      // only on the way out, so a trial that dies takes its diagnostics with
+      // it, and that is exactly when they are worth reading.
+      std::optional<OutputSilencer> hush;
+      if (this->quietVariantTrials) {
+        hush.emplace();
+      }
       ScopedContextThreading threading(&getContext(), threadCount > 1);
       if (threadCount > 1) {
         // The workers are plain std::thread rather than a borrow from the

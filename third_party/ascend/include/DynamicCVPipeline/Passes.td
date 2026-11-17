@@ -20,7 +20,10 @@ def AddDynamicCVPipeline : Pass<"add_dynamic_cv_pipeline", "mlir::ModuleOp"> {
         "Unroll factor of the main loop; <= 1 disables the unroll">,
         Option<"demoteF32Reduction", "demote-f32-reduction",
         "bool", /*default*/"false",
-        "Demote f32 reduction between extf and truncf to f16">
+        "Demote f32 reduction between extf and truncf to f16">,
+        Option<"quietVariantTrials", "quiet-variant-trials",
+        "bool", /*default*/"true",
+        "Discard what the variant search's trials print; turn off to see why a trial failed">
     ];
     let dependentDialects = ["hivm::HIVMDialect", "bufferization::BufferizationDialect", "scope::ScopeDialect", "annotation::AnnotationDialect", "LLVM::LLVMDialect"];
 }

@@ -161,15 +161,18 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       "add_dynamic_cv_pipeline",
       [](mlir::PassManager &pm, bool compileOn91095,
                                 int mainLoopUnrollFactor,
-                                bool demotef32Reduction) {
+                                bool demotef32Reduction,
+                                bool quietVariantTrials) {
         AddDynamicCVPipelineOptions opts;
         opts.compileOn91095 = compileOn91095;
         opts.mainLoopUnrollFactor = mainLoopUnrollFactor;
         opts.demoteF32Reduction = demotef32Reduction;
+        opts.quietVariantTrials = quietVariantTrials;
         pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
       },
       py::arg("pm"), py::arg("compile_on_910_95"),
-      py::arg("main_loop_unroll_factor") = 1, py::arg("demote_f32_reduction") = false);
+      py::arg("main_loop_unroll_factor") = 1, py::arg("demote_f32_reduction") = false,
+      py::arg("quiet_variant_trials") = true);
 
   m.def(
       "add_graph_optimize",

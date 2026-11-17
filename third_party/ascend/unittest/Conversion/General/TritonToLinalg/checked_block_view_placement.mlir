@@ -81,10 +81,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // 950-LABEL: func.func @shared_producer_distinct_checks(
 // 950-SAME: %[[SRC:[^ ,]+]]: memref<?xf32>
 // 950-SAME: %[[OBSERVER:[^ ,]+]]: memref<?xf32>
-// 950-DAG: %[[ROWS_ORIGIN:.*]] = arith.constant 30 : index
-// 950-DAG: %[[COLS_ORIGIN:.*]] = arith.constant 16 : index
-// 950: %[[ROWS_VIEW:.*]] = memref.reinterpret_cast %[[SRC]] to offset: [%[[ROWS_ORIGIN]]]
-// 950: %[[COLS_VIEW:.*]] = memref.reinterpret_cast %[[SRC]] to offset: [%[[COLS_ORIGIN]]]
+// 950: %[[ROWS_VIEW:.*]] = memref.reinterpret_cast %[[SRC]] to offset: [30]
+// 950: %[[COLS_VIEW:.*]] = memref.reinterpret_cast %[[SRC]] to offset: [16]
 // 950: %[[OBSERVED:.*]] = memref.load %[[OBSERVER]]
 // 950: %[[ROWS_GM:.*]] = memref.subview %[[ROWS_VIEW]]
 // 950: memref.copy %[[ROWS_GM]],

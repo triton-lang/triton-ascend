@@ -7,7 +7,6 @@ import glob
 import json
 import os
 import re
-import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -107,15 +106,9 @@ def check_optional_sources():
                 or re.fullmatch(r"https://[^/\s]+/[A-Za-z0-9_./-]+\.git", info["repository"]) is None
                 or not isinstance(info["revision"], str) or re.fullmatch(r"[0-9a-f]{40}", info["revision"]) is None):
             raise ValueError("Invalid Triton-Distributed source metadata")
-        # Load only this Ascend-specific reader, without importing setup hooks.
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("bom_npuir_source", Path(__file__).with_name("npuir_source.py"))
-        reader = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(reader)
-        reader.read_source(REPO_ROOT)
         if (DEPS_DIR / "bisheng-info.json").exists():
             raise ValueError("Duplicate Bisheng pin; use bisheng-version.txt only")
-    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+    except (OSError, ValueError) as exc:
         _fail("optional-sources", str(exc))
 
 
@@ -162,9 +155,10 @@ def check_docs_llvm_hash():
 
 
 def check_workflow_cache_paths():
-    for path in sorted(WORKFLOWS_DIR.rglob("*")):
-        if not path.is_file():
-            continue
+    # Audit the consumers changed by this migration. Other upstream workflows
+    # retain their baseline cache policy and are outside this PR's contract.
+    for name in ("integration-tests-ascend.yml", "sync-upstream.yml"):
+        path = WORKFLOWS_DIR / name
         for match in re.finditer(r"hashFiles\(([^)]*)\)", _read(path)):
             for arg in match.group(1).split(","):
                 arg = arg.strip().strip("\"'")

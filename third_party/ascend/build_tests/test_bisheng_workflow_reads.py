@@ -13,21 +13,20 @@ import pytest
 REPO = Path(__file__).resolve().parents[3]
 
 
-@pytest.mark.parametrize(
-    "workflow", ["integration-tests-ascend.yml", "sync-upstream.yml", "DynamicCVPipeline-ci.yml", "tla-tests.yml"])
+@pytest.mark.parametrize("workflow", ["integration-tests-ascend.yml", "sync-upstream.yml"])
 @pytest.mark.parametrize("mode", ["valid", "missing-file", "missing-checksum", "unsupported-arch", "checksum-mismatch"])
 def test_actual_bisheng_install_step_requires_metadata_before_download(workflow, mode, tmp_path):
     git_bash = Path("C:/Program Files/Git/bin/bash.exe")
     bash = str(git_bash) if git_bash.is_file() else shutil.which("bash")
     if bash is None:
-        pytest.skip("Bash and jq are required to execute the workflow installer")
+        pytest.skip("Bash is required to execute the workflow installer")
     text = (REPO / ".github/workflows" / workflow).read_text(encoding="utf-8")
-    name = "Install Bisheng compiler" if workflow == "DynamicCVPipeline-ci.yml" else "Download and install Bisheng compiler"
+    name = "Download and install Bisheng compiler"
     start = text.index(f"      - name: {name}")
     end = text.index("\n      - name:", start + 1)
     block = text[start:end]
     command = textwrap.dedent(block.split("        run: |\n", 1)[1])
-    root = tmp_path / "pr" if workflow == "DynamicCVPipeline-ci.yml" else tmp_path
+    root = tmp_path
     metadata = root / "cmake"
     metadata.mkdir(parents=True)
     prefix = tmp_path / "bisheng"

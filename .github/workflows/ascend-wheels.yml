@@ -19,11 +19,6 @@ on:
       - version.txt
       - cmake/llvm-hash.txt
       - cmake/json-version.txt
-      - cmake/npuir-info.json
-      - cmake/triton-distributed-info.json
-      - .gitmodules
-      - third_party/ascend/build/npuir_source.py
-      - third_party/ascend/build/setup_patch.py
       # AscendNPU-IR submodule pin bumps: trigger the Build-Pinned-Wheels job
       # so the PR that moves the pin proves the pinned combination builds.
       - third_party/ascend/AscendNPU-IR
@@ -101,20 +96,6 @@ jobs:
           # push/workflow_dispatch/schedule: use the matrix branch ref.
           ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
 
-      # Older matrix branches predate this source policy. Read their default
-      # policy from this workflow's revision rather than adding fallback pins.
-      - name: Load source policy for historical branches
-        if: hashFiles('third_party/ascend/build/npuir_source.py') == ''
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: .ascend-ci-policy
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /cmake/npuir-info.json
-            /third_party/ascend/build/npuir_source.py
-            /.gitmodules
-
       - name: Restore npuir payload from local cache
         id: npuir-cache
         if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
@@ -127,40 +108,15 @@ jobs:
           # when the upstream source actually moves, and is shared across all
           # matrix branches (the payload no longer depends on the triton-ascend
           # branch). Cached on the shared-volume PVC (/root/.cache).
-          POLICY_ROOT=.
-          if [ ! -f third_party/ascend/build/npuir_source.py ]; then
-            POLICY_ROOT=.ascend-ci-policy
-          fi
-          # The job container (cann:*-ubuntu22.04) ships no usable python on
-          # the step PATH, so resolve the policy with git + sed only. The
-          # policy files stay the single source of truth: the submodule path
-          # and CI ref come from cmake/npuir-info.json (fixed shape, enforced
-          # by check_bom_consistency.py) and the repository URL from
-          # .gitmodules — the same values npuir_source.py reads where python
-          # is available (fetch script, Dockerfile, local builds).
-          NPUIR_SUBMODULE=$(sed -n 's/.*"submodule"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-            "$POLICY_ROOT/cmake/npuir-info.json")
-          NPUIR_REF=$(sed -n 's/.*"ci_ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-            "$POLICY_ROOT/cmake/npuir-info.json")
-          NPUIR_URL=$(git config --file "$POLICY_ROOT/.gitmodules" --get "submodule.${NPUIR_SUBMODULE}.url")
-          if [ -z "$NPUIR_SUBMODULE" ] || [ -z "$NPUIR_REF" ] || [ -z "$NPUIR_URL" ]; then
-            echo "::error::cannot read the npuir source policy (cmake/npuir-info.json + .gitmodules)"
+          NPUIR_SHA=""
+          for attempt in 1 2 3; do
+            NPUIR_SHA=$(git ls-remote https://gitcode.com/Ascend/AscendNPU-IR.git refs/heads/stable | awk '{print $1}') && [ -n "$NPUIR_SHA" ] && break || true
+            echo "ls-remote attempt ${attempt}/3 failed; retrying in 10s..."
+            sleep 10
+          done
+          if [ -z "$NPUIR_SHA" ]; then
+            echo "::error::cannot resolve AscendNPU-IR stable HEAD from gitcode"
             exit 1
-          fi
-          if printf '%s' "$NPUIR_REF" | grep -qE '^[0-9a-fA-F]{40}$'; then
-            NPUIR_SHA=$(printf '%s' "$NPUIR_REF" | tr 'A-F' 'a-f')
-          else
-            NPUIR_SHA=""
-            for attempt in 1 2 3; do
-              NPUIR_SHA=$(git ls-remote "$NPUIR_URL" "refs/heads/${NPUIR_REF}" | awk '{print $1}') \
-                && [ -n "$NPUIR_SHA" ] && break || true
-              echo "ls-remote attempt ${attempt}/3 failed; retrying in 10s..."
-              sleep 10
-            done
-            if [ -z "$NPUIR_SHA" ] || ! printf '%s' "$NPUIR_SHA" | grep -qE '^[0-9a-f]{40}$'; then
-              echo "::error::cannot resolve AscendNPU-IR ${NPUIR_REF} HEAD at ${NPUIR_URL}"
-              exit 1
-            fi
           fi
           echo "AscendNPU-IR stable HEAD: ${NPUIR_SHA}"
           echo "npuir_sha=${NPUIR_SHA}" >> "$GITHUB_OUTPUT"
@@ -313,7 +269,6 @@ jobs:
           build-args: |
             MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
             PYTHON_VERSION=${{ matrix.python }}
-            NPUIR_REF=${{ steps.npuir-cache.outputs.npuir_sha }}
             TRITON_BUILD_NPUIR=${{ steps.prepare-payload.outputs.build_npuir || matrix.branch.npuir }}
             TRITON_WHEEL_VERSION_SUFFIX=+${{ matrix.branch.local }}
             BUILD_DATE=${{ steps.vars.outputs.build_date }}

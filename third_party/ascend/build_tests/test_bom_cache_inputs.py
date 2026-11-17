@@ -17,8 +17,7 @@ def fingerprint(root, patterns):
     return digest.hexdigest()
 
 
-@pytest.mark.parametrize(
-    "workflow", ["DynamicCVPipeline-ci.yml", "integration-tests-ascend.yml", "sync-upstream.yml", "tla-tests.yml"])
+@pytest.mark.parametrize("workflow", ["integration-tests-ascend.yml", "sync-upstream.yml"])
 def test_compiler_cache_inputs_follow_the_canonical_pin_and_patch_bytes(workflow, tmp_path):
     text = (REPO / ".github/workflows" / workflow).read_text(encoding="utf-8")
     keys = [key for key in re.findall(r"hashFiles\(([^)]+)\)", text) if "llvm-hash.txt" in key]

@@ -9,22 +9,14 @@ vendored-source contract: a populated source tree without Git metadata is used
 as supplied, without network access. Such archives do not authenticate their
 own provenance; this refactor introduces no new required archive manifest.
 
-`npuir-info.json` identifies the native submodule and the CI tracking ref.
-`third_party/ascend/build/npuir_source.py` reads its repository from
-`.gitmodules`. Local setup still uses the native gitlink; ordinary CI still
-tracks the existing `stable` branch. Pinned-wheel verification still uses the
-gitlink SHA. The wheel workflow resolves its tracking ref once per matrix job
-and passes that SHA to the Docker build, including the in-image build fallback.
-Historical matrix branches without the reader use this workflow revision's
-policy checkout; no fallback URL/branch literal is maintained in the workflow.
-Their existing build recipes continue receiving the selected SHA.
-
-`NPUIR_REPO_URL` and `NPUIR_REPO_BRANCH` remain explicit diagnostic overrides.
-An exact SHA avoids ref resolution. Missing/invalid policy fails before a
-download. Nested dependency revisions remain native gitlinks in the selected
-NPU-IR tree, rather than copies in Triton's metadata. An upstream branch build
-failure remains visible; the metadata change does not silently select an older
-working commit.
+The AscendNPU-IR source keeps its existing policy. Its repository URL is in
+`.gitmodules`; local builds use the native gitlink, and the existing wheel and
+payload workflows follow `stable` through their original fetch script.
+This PR does not migrate that policy, add another pin or modify those workflows.
+Nested dependency revisions remain gitlinks in the selected NPU-IR tree.
+The existing `NPUIR_REPO_URL` and `NPUIR_REPO_BRANCH` diagnostic overrides
+remain available. A separate source-policy migration must validate its own
+external compiler and payload builds before it is proposed for merge.
 
 These inputs define source selection, not a complete runtime compatibility
 matrix or certification of payload provenance. Existing artifact fallback and

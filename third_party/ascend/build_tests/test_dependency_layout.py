@@ -5,7 +5,7 @@ REPO = Path(__file__).resolve().parents[3]
 
 def test_dependency_metadata_uses_upstream_layout_without_duplicate_pins():
     assert not (REPO / "third_party/ascend/deps").exists()
-    for name in ("llvm-hash.txt", "json-version.txt", "bisheng-info.json"):
+    for name in ("llvm-hash.txt", "json-version.txt", "bisheng-version.txt"):
         assert (REPO / "cmake" / name).is_file()
     for name in ("llvm-info.json", "json-info.json", "dependencies.py", "TritonDependencies.cmake"):
         assert not (REPO / "cmake" / name).exists()

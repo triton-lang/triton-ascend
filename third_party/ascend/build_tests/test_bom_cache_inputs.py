@@ -43,6 +43,11 @@ def test_compiler_cache_inputs_follow_the_canonical_pin_and_patch_bytes(workflow
         json_pin.write_text("v3.12.0\n")
         assert fingerprint(tmp_path, patterns) != before, f"{workflow}: JSON version missing from cache inputs"
 
+        bisheng_pin = tmp_path / "cmake/bisheng-version.txt"
+        before = fingerprint(tmp_path, patterns)
+        bisheng_pin.write_text("x86_64: changed.run\n")
+        assert fingerprint(tmp_path, patterns) != before, f"{workflow}: Bisheng pin missing from cache inputs"
+
         patch = next((tmp_path / "third_party/ascend/patch").glob("llvm_patch_*.patch"))
         before = fingerprint(tmp_path, patterns)
         patch.write_bytes(patch.read_bytes() + b"\nchanged patch\n")

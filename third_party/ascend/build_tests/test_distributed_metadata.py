@@ -1,44 +1,34 @@
-import importlib.util
 import json
-from pathlib import Path
-from types import ModuleType, SimpleNamespace
-import sys
+import subprocess
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[3]
-
 
 @pytest.mark.parametrize("source_checkout", [True, False])
-def test_distributed_preparation_uses_metadata_even_for_source_distributions(tmp_path, monkeypatch, source_checkout):
-    package = ModuleType("ascend_distributed_test")
-    package.__path__ = [str(REPO / "third_party/ascend/build")]
-    monkeypatch.setitem(sys.modules, package.__name__, package)
-    spec = importlib.util.spec_from_file_location(f"{package.__name__}.setup_patch",
-                                                  REPO / "third_party/ascend/build/setup_patch.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    metadata = tmp_path / "cmake/triton-distributed-info.json"
-    metadata.parent.mkdir()
-    metadata.write_text(
-        json.dumps({"schema_version": 1, "repository": "https://example.invalid/distributed.git", "revision":
-                    "a" * 40}))
-    parent = tmp_path / "third_party/ascend"
-    parent.mkdir(parents=True)
-    monkeypatch.setattr(module, "_REPO_ROOT", tmp_path)
+def test_distributed_clone_uses_metadata_with_or_without_parent_git(ascend_setup, tmp_path, monkeypatch,
+                                                                  source_checkout):
+    remote = tmp_path / "remote"
+    subprocess.run(["git", "init", str(remote)], check=True, capture_output=True)
+    (remote / "CMakeLists.txt").write_text("# distributed fixture\n")
+    subprocess.run(["git", "-C", str(remote), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(remote), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "commit", "-m", "fixture"], check=True, capture_output=True)
+    sha = subprocess.check_output(["git", "-C", str(remote), "rev-parse", "HEAD"], text=True).strip()
+    root = tmp_path / "source"
+    (root / "cmake").mkdir(parents=True)
+    (root / "third_party/ascend").mkdir(parents=True)
+    if source_checkout:
+        subprocess.run(["git", "init", str(root)], check=True, capture_output=True)
+    url = "https://example.invalid/distributed.git"
+    (root / "cmake/triton-distributed-info.json").write_text(json.dumps({
+        "schema_version": 1, "repository": url, "revision": sha,
+    }))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", f"url.{remote.as_uri()}.insteadOf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", url)
     monkeypatch.setenv("TRITON_BUILD_TD", "ON")
-    monkeypatch.setattr(module, "_is_git_repo", lambda: source_checkout)
-    monkeypatch.setattr(module, "_add_git_safe_dir", lambda *args: None)
-    calls = []
-
-    def call(command, **kwargs):
-        calls.append(command)
-        if command[1] == "clone":
-            (parent / "Triton-distributed-ascend").mkdir()
-
-    monkeypatch.setattr(module, "_git_check_call_with_retry", call)
-    monkeypatch.setattr(module.subprocess, "check_call", call)
-    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="a" * 40))
-    module._ensure_distributed_submodule()
-    assert any("https://example.invalid/distributed.git" in command for command in calls)
-    assert ["git", "checkout", "a" * 40] in calls
+    monkeypatch.setattr(ascend_setup, "_REPO_ROOT", root)
+    ascend_setup._ensure_distributed_submodule()
+    destination = root / "third_party/ascend/Triton-distributed-ascend"
+    assert (destination / "CMakeLists.txt").read_text() == "# distributed fixture\n"
+    assert subprocess.check_output(["git", "-C", str(destination), "rev-parse", "HEAD"], text=True).strip() == sha

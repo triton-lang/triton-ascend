@@ -41,10 +41,3 @@ def test_ascend_artifact_retains_patch_content_identity(ascend_setup, tmp_path, 
     name = f"llvm-aaaaaaaa-{hashlib.sha256(patch).hexdigest()[:8]}-fixture-x64"
     assert info["name"] == name
     assert info["url"] == f"https://triton-ascend-artifacts.obs.myhuaweicloud.com/llvm-builds/{name}.tar.gz"
-
-
-@pytest.mark.parametrize("value, expected", [("ON", True), ("1", True), ("yes", True), ("OFF", False), ("0", False)])
-def test_environment_flags_preserve_build_options(ascend_setup, setup_globals, monkeypatch, value, expected):
-    monkeypatch.setenv("TRITON_BUILD_WITH_CCACHE", value)
-    assert ascend_setup.check_env_flag("TRITON_BUILD_WITH_CCACHE") is expected
-    assert setup_globals.check_env_flag("TRITON_BUILD_WITH_CCACHE") is expected

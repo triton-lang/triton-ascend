@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "submodule": "third_party/ascend/AscendNPU-IR",
+  "ci_ref": "stable"
+}

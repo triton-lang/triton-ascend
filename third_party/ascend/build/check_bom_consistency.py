@@ -7,6 +7,7 @@ import glob
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -70,22 +71,23 @@ def check_llvm_info():
 
 
 def _load_bisheng_info():
-    info = _load_json(DEPS_DIR / "bisheng-info.json")
-    if set(info) != {"schema_version", "bisheng"}:
-        raise ValueError("bisheng-info.json requires schema_version and bisheng")
-    bisheng = info["bisheng"]
-    if not isinstance(bisheng, dict) or set(bisheng) != {"x86_64", "aarch64"}:
-        raise ValueError("bisheng must declare x86_64 and aarch64")
-    for arch, entry in bisheng.items():
-        if not isinstance(entry, dict) or set(entry) != {"file", "sha256"}:
-            raise ValueError(f"bisheng {arch} requires file and sha256")
-        filename, checksum = entry["file"], entry["sha256"]
-        if not isinstance(filename, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:run|tar\.gz)",
-                                                         filename) is None:
+    entries = {}
+    for line in _read(DEPS_DIR / "bisheng-version.txt").splitlines():
+        if not line.strip():
+            continue
+        key, separator, value = line.partition(": ")
+        if not separator or key in entries:
+            raise ValueError("bisheng-version.txt requires unique key: value entries")
+        entries[key] = value.strip()
+    expected = {"x86_64", "x86_64_sha256", "aarch64", "aarch64_sha256"}
+    if set(entries) != expected:
+        raise ValueError("bisheng-version.txt requires a file and sha256 for both architectures")
+    for arch in ("x86_64", "aarch64"):
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:run|tar\.gz)", entries[arch]) is None:
             raise ValueError(f"bisheng {arch} needs a safe .run or .tar.gz basename")
-        if not isinstance(checksum, str) or re.fullmatch(r"[0-9a-fA-F]{64}", checksum) is None:
+        if re.fullmatch(r"[0-9a-fA-F]{64}", entries[arch + "_sha256"]) is None:
             raise ValueError(f"bisheng {arch} needs a full SHA-256")
-    return info
+    return entries
 
 
 def check_toolchain():
@@ -98,31 +100,25 @@ def check_toolchain():
         _fail("toolchain", str(exc))
 
 
-def check_bisheng_pins():
-    """bisheng-version.txt keeps its upstream role as the tla-tests pin while
-    bisheng-info.json serves the other workflow installers; while both files
-    exist they must agree, so a Bisheng update cannot silently split them."""
-    legacy = DEPS_DIR / "bisheng-version.txt"
-    if not legacy.is_file():
-        return
+def check_optional_sources():
     try:
-        pins = _load_bisheng_info()["bisheng"]
-        entries = {}
-        for line in _read(legacy).splitlines():
-            if not line.strip():
-                continue
-            key, separator, value = line.partition(": ")
-            if not separator:
-                raise ValueError(f"bisheng-version.txt: unparsable line {line.strip()!r}")
-            entries[key] = value.strip()
-        for arch in ("x86_64", "aarch64"):
-            for field, legacy_key in (("file", arch), ("sha256", arch + "_sha256")):
-                if entries.get(legacy_key) != pins[arch][field]:
-                    _fail(
-                        "bisheng-pins", f"bisheng-version.txt {legacy_key} {entries.get(legacy_key)!r} "
-                        f"differs from bisheng-info.json {arch} {field}")
-    except (OSError, ValueError) as exc:
-        _fail("bisheng-pins", str(exc))
+        info = _load_json(DEPS_DIR / "triton-distributed-info.json")
+        if (set(info) != {"schema_version", "repository", "revision"}
+                or not isinstance(info["repository"], str)
+                or re.fullmatch(r"https://[^/\s]+/[A-Za-z0-9_./-]+\.git", info["repository"]) is None
+                or not isinstance(info["revision"], str)
+                or re.fullmatch(r"[0-9a-f]{40}", info["revision"]) is None):
+            raise ValueError("Invalid Triton-Distributed source metadata")
+        # Load only this Ascend-specific reader, without importing setup hooks.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("bom_npuir_source", Path(__file__).with_name("npuir_source.py"))
+        reader = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reader)
+        reader.read_source(REPO_ROOT)
+        if (DEPS_DIR / "bisheng-info.json").exists():
+            raise ValueError("Duplicate Bisheng pin; use bisheng-version.txt only")
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        _fail("optional-sources", str(exc))
 
 
 def _glob_exists(relative):
@@ -195,7 +191,7 @@ def main():
     try:
         check_llvm_info()
         check_toolchain()
-        check_bisheng_pins()
+        check_optional_sources()
         check_docs_llvm_hash()
         check_workflow_cache_paths()
         check_release_llvm()
@@ -204,7 +200,7 @@ def main():
     if errors:
         print("Build dependency consistency check failed:\n  - " + "\n  - ".join(errors))
         raise SystemExit(1)
-    print("Build dependency consistency check passed (LLVM, JSON library, Bisheng, legacy pin, docs and cache paths).")
+    print("Build dependency consistency check passed (LLVM, JSON library, Bisheng, optional sources, docs and cache paths).")
 
 
 if __name__ == "__main__":

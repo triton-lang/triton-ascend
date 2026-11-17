@@ -54,16 +54,13 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann9.1.0-ubuntu22.04-950-py3.12-tla-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann9.1.0-ubuntu22.04-950-py3.12-tla-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/bisheng-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann9.1.0-ubuntu22.04-950-py3.12-tla-
 
       - name: Download and install Bisheng compiler
         shell: bash
         run: |
-          if [ ! -f cmake/bisheng-version.txt ]; then
-            echo "cmake/bisheng-version.txt not found, skipping"
-            exit 0
-          fi
+          set -euo pipefail
 
           # The ascendnpu-ir run package is arch-specific: aarch64 (a3) and
           # x86_64 (a5) each have their own; select by the container's arch.
@@ -72,22 +69,15 @@ jobs:
           BISHENG_FILENAME=$(sed -n "s/^${ARCH}: //p" cmake/bisheng-version.txt | xargs)
           BISHENG_SHA256=$(sed -n "s/^${ARCH}_sha256: //p" cmake/bisheng-version.txt | xargs)
 
-          if [ -z "${BISHENG_FILENAME}" ]; then
-            echo "Error: cmake/bisheng-version.txt has no entry for arch ${ARCH}." >&2
-            exit 1
-          fi
+          [[ "$BISHENG_FILENAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.run$ ]]
+          [[ "$BISHENG_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]
 
           echo "Downloading: ${BISHENG_FILENAME} (arch=${ARCH})"
           curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
             --retry-delay 10 -C - \
             "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
 
-          if [ -n "${BISHENG_SHA256}" ]; then
-            echo "Verifying SHA256 checksum..."
-            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
-          else
-            echo "Warning: No SHA256 checksum provided, skipping verification"
-          fi
+          echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
 
           chmod +x bisheng.run
           ./bisheng.run --quiet --install --install-path=/usr/local/bisheng

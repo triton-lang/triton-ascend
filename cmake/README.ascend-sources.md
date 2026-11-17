@@ -1,33 +1,32 @@
 # Optional Ascend source dependencies
 
-This page describes the metadata files behind the optional Ascend source
-dependencies (the distributed backend) and what the wheel-build CI
-(Continuous Integration) jobs do with each selection.
+`triton-distributed-info.json` owns the distributed repository and immutable
+revision. It is read only with `TRITON_BUILD_TD` enabled. A Git checkout is
+verified against the metadata and can reuse the target revision offline.
+Changing the remote requires an explicit local checkout update; local changes
+are never overwritten to switch revisions. Source archives retain the existing
+vendored-source contract: a populated source tree without Git metadata is used
+as supplied, without network access. Such archives do not authenticate their
+own provenance; this refactor introduces no new required archive manifest.
 
-`cmake/triton-distributed-info.json` owns the optional distributed backend
-repository and revision. The distributed-backend setup step in the Ascend
-setup hook (`third_party/ascend/build/setup_patch.py`,
-`_ensure_distributed_submodule`) reads this metadata and verifies the
-checked-out commit, including outside a Git source checkout. It runs only
-when `TRITON_BUILD_TD` is enabled (e.g. `ON`); the distributed backend is
-otherwise not built.
+`npuir-info.json` identifies the native submodule and the CI tracking ref.
+`third_party/ascend/build/npuir_source.py` reads its repository from
+`.gitmodules`. Local setup still uses the native gitlink; ordinary CI still
+tracks the existing `stable` branch. Pinned-wheel verification still uses the
+gitlink SHA. The wheel workflow resolves its tracking ref once per matrix job
+and passes that SHA to the Docker build, including the in-image build fallback.
+Historical matrix branches without the reader use this workflow revision's
+policy checkout; no fallback URL/branch literal is maintained in the workflow.
+Their existing build recipes continue receiving the selected SHA.
 
-The AscendNPU-IR compiler source keeps its existing selection: workflow and
-image builds track the upstream `stable` branch through
-`.github/workflows/build/fetch-npuir-stable.sh`, which stays at its main-dev
-version in this change. AscendNPU-IR source metadata is a follow-up once the
-repository/branch selection needs to vary by target.
+`NPUIR_REPO_URL` and `NPUIR_REPO_BRANCH` remain explicit diagnostic overrides.
+An exact SHA avoids ref resolution. Missing/invalid policy fails before a
+download. Nested dependency revisions remain native gitlinks in the selected
+NPU-IR tree, rather than copies in Triton's metadata. An upstream branch build
+failure remains visible; the metadata change does not silently select an older
+working commit.
 
-Wheel build, test and publication share the selected source ref and artifact
-tag. The ref is the head that triggered the run, which comes from one of three
-sources: the `push` commit, the pull request's head commit, or a ref picked by
-a manual `workflow_dispatch` trigger. The `Build-Wheels` job in
-`.github/workflows/ascend-wheels.yml` selects this ref via the checkout step's
-`ref` expression, without preparing an extra Python interpreter. Pull requests
-explicitly select the head commit. Post-submit throttling queries the current
-branch and CI workflow filename.
-
-These settings do not define a complete runtime compatibility matrix or certify
-compiler ABI (Application Binary Interface) compatibility. A moving watch
-branch is not a frozen release lock, and source identity and artifact
-provenance have separate validation requirements.
+These inputs define source selection, not a complete runtime compatibility
+matrix or certification of payload provenance. Existing artifact fallback and
+publication behavior is preserved. Historical release snapshots need not
+follow current development pins.

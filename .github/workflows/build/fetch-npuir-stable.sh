@@ -26,8 +26,9 @@
 #   NPUIR_SHA=$(bash fetch-npuir-stable.sh)
 set -eu -o pipefail
 
-URL="${NPUIR_REPO_URL:-https://gitcode.com/Ascend/AscendNPU-IR.git}"
-BRANCH="${NPUIR_REPO_BRANCH:-stable}"
+SCRIPT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+READER="${SCRIPT_ROOT}/third_party/ascend/build/npuir_source.py"
+URL=$(python3 "$READER" --repository)
 DEST="third_party/ascend/AscendNPU-IR"
 WITH_NESTED=1
 for arg in "$@"; do
@@ -67,19 +68,10 @@ fetch_at() { # fetch_at <dest> <sha> <url> — depth-1 fetch of an exact SHA.
   git -C "$dest" checkout -q FETCH_HEAD
 }
 
-if printf '%s' "$BRANCH" | grep -qE '^[0-9a-fA-F]{40}$'; then
-  # An exact commit SHA (e.g. the submodule gitlink): no ref resolution
-  # needed; the depth-1 `want <sha>` fetch below serves it directly.
-  SHA="$BRANCH"
-  log "pinned SHA: ${SHA}"
-else
-  SHA=$(retry 3 git ls-remote "$URL" "refs/heads/${BRANCH}" | awk '{print $1}')
-  if [ -z "$SHA" ]; then
-    log "could not resolve refs/heads/${BRANCH} at ${URL}"
-    exit 1
-  fi
-  log "${BRANCH} HEAD: ${SHA}"
-fi
+# The resolver reads the CI policy from cmake/ and the URL from .gitmodules.
+# NPUIR_REPO_BRANCH may already be a resolved SHA from the wheel workflow.
+SHA=$(python3 "$READER" --resolve)
+log "selected SHA: ${SHA}"
 
 NEED_FETCH=1
 if [ -d "${DEST}/.git" ]; then
@@ -92,7 +84,7 @@ if [ -d "${DEST}/.git" ]; then
     # contexts never hit this (the destination is either absent or a clean
     # checkout of a previous stable HEAD).
     log "ERROR: ${DEST} is at ${CURRENT} with local modifications;" \
-        "refusing to overwrite with ${BRANCH} HEAD ${SHA}"
+        "refusing to overwrite with selected source ${SHA}"
     exit 1
   fi
 fi

@@ -13,12 +13,12 @@ import pytest
 REPO = Path(__file__).resolve().parents[3]
 
 
-@pytest.mark.parametrize("workflow", ["integration-tests-ascend.yml", "sync-upstream.yml", "DynamicCVPipeline-ci.yml"])
+@pytest.mark.parametrize("workflow", ["integration-tests-ascend.yml", "sync-upstream.yml", "DynamicCVPipeline-ci.yml", "tla-tests.yml"])
 @pytest.mark.parametrize("mode", ["valid", "missing-file", "missing-checksum", "unsupported-arch", "checksum-mismatch"])
 def test_actual_bisheng_install_step_requires_metadata_before_download(workflow, mode, tmp_path):
     git_bash = Path("C:/Program Files/Git/bin/bash.exe")
     bash = str(git_bash) if git_bash.is_file() else shutil.which("bash")
-    if bash is None or shutil.which("jq") is None:
+    if bash is None:
         pytest.skip("Bash and jq are required to execute the workflow installer")
     text = (REPO / ".github/workflows" / workflow).read_text(encoding="utf-8")
     name = "Install Bisheng compiler" if workflow == "DynamicCVPipeline-ci.yml" else "Download and install Bisheng compiler"
@@ -43,7 +43,7 @@ def test_actual_bisheng_install_step_requires_metadata_before_download(workflow,
     elif mode == "checksum-mismatch":
         data["bisheng"]["x86_64"]["sha256"] = "0" * 64
     if mode != "missing-file":
-        (metadata / "bisheng-info.json").write_text(json.dumps(data))
+        (metadata / "bisheng-version.txt").write_text("\n".join(f"{key}: {value}" for entry in data["bisheng"].values() for key, value in (("x86_64", entry.get("file", "")), ("x86_64_sha256", entry.get("sha256", "")))))
     (tmp_path / "installer.sh").write_bytes(installer)
     harness = '''set -euo pipefail
 uname() { printf 'x86_64\\n'; }
@@ -67,7 +67,7 @@ curl() { touch downloaded.txt; cp "$TEST_INSTALLER" "${@: -1}"; }
 def test_integration_installer_retains_tar_payload_support(tmp_path):
     git_bash = Path("C:/Program Files/Git/bin/bash.exe")
     bash = str(git_bash) if git_bash.is_file() else shutil.which("bash")
-    if bash is None or shutil.which("jq") is None:
+    if bash is None:
         pytest.skip("Bash and jq are required")
     text = (REPO / ".github/workflows/integration-tests-ascend.yml").read_text(encoding="utf-8")
     block = text.split("      - name: Download and install Bisheng compiler\n", 1)[1].split("\n      - name:", 1)[0]
@@ -82,10 +82,7 @@ def test_integration_installer_retains_tar_payload_support(tmp_path):
         archive.addfile(info, io.BytesIO(content))
     metadata = tmp_path / "cmake"
     metadata.mkdir()
-    (metadata / "bisheng-info.json").write_text(
-        json.dumps(
-            {"bisheng": {"x86_64": {"file": payload.name, "sha256":
-                                    hashlib.sha256(payload.read_bytes()).hexdigest()}}}))
+    (metadata / "bisheng-version.txt").write_text(f"x86_64: {payload.name}\nx86_64_sha256: {hashlib.sha256(payload.read_bytes()).hexdigest()}\n")
     harness = 'uname() { echo x86_64; }\ncurl() { cp "$TEST_PAYLOAD" "${@: -1}"; }\n'
     script = tmp_path / "install.sh"
     script.write_text(harness + command, encoding="utf-8", newline="\n")

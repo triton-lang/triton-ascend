@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 
@@ -8,19 +6,19 @@ def test_unknown_checkout_prefix_stays_invalid(checker):
     assert checker._glob_exists("pr/requirements.txt")
 
 
-@pytest.mark.parametrize("mutation", ["copied-json", "invalid-checksum", "unsafe-file", "missing-arch"])
+@pytest.mark.parametrize("mutation", ["duplicate", "invalid-checksum", "unsafe-file", "missing-arch"])
 def test_toolchain_rejects_invalid_inputs(checker, mutation):
-    path = checker.DEPS_DIR / "bisheng-info.json"
-    data = json.loads(path.read_text())
-    if mutation == "copied-json":
-        data["json"] = "v3.11.3"
+    path = checker.DEPS_DIR / "bisheng-version.txt"
+    text = path.read_text()
+    if mutation == "duplicate":
+        text += text.splitlines()[0] + "\n"
     elif mutation == "invalid-checksum":
-        data["bisheng"]["x86_64"]["sha256"] = "bad"
+        text = "\n".join(line + "invalid" if "_sha256:" in line else line for line in text.splitlines())
     elif mutation == "unsafe-file":
-        data["bisheng"]["x86_64"]["file"] = "../outside.run"
+        text = text.replace("x86_64: ", "x86_64: ../")
     else:
-        del data["bisheng"]["aarch64"]
-    path.write_text(json.dumps(data))
+        text = "\n".join(line for line in text.splitlines() if not line.startswith("aarch64"))
+    path.write_text(text)
     checker.check_toolchain()
     assert checker.errors
 
@@ -43,39 +41,10 @@ def test_release_policy_cannot_silently_drift_llvm_or_patch(checker, field):
     assert checker.errors
 
 
-def test_duplicate_json_keys_are_rejected(checker):
-    path = checker.DEPS_DIR / "bisheng-info.json"
-    path.write_text('{"schema_version": 1, "schema_version": 1}')
-    with pytest.raises(ValueError, match="duplicate"):
-        checker._load_bisheng_info()
-
-
 @pytest.mark.parametrize("suffix", ["run", "tar.gz"])
 def test_bisheng_metadata_retains_supported_package_formats(checker, suffix):
-    path = checker.DEPS_DIR / "bisheng-info.json"
-    data = json.loads(path.read_text())
-    data["bisheng"]["x86_64"]["file"] = f"fixture.{suffix}"
-    path.write_text(json.dumps(data))
-    checker.check_toolchain()
-    assert not checker.errors
-
-
-@pytest.mark.parametrize("field", ["file", "sha256", "both"])
-def test_legacy_bisheng_pin_must_agree_with_bisheng_info(checker, field):
     path = checker.DEPS_DIR / "bisheng-version.txt"
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if field == "file":
-        lines = [line.replace("ascendnpu-ir_2.0.0_linux-x86.run", "renamed.run") for line in lines]
-    elif field == "sha256":
-        lines = ["%s  %s" % (line, "deadbeef") if "_sha256: " in line and "x86" in line else line for line in lines]
-    else:
-        lines = ["%s  %s" % (line, "deadbeef") if "_sha256: " in line else line for line in lines]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    checker.check_bisheng_pins()
-    assert checker.errors, "a diverging legacy Bisheng pin must fail the audit"
-
-
-def test_absent_legacy_bisheng_pin_is_not_an_error(checker):
-    (checker.DEPS_DIR / "bisheng-version.txt").unlink()
-    checker.check_bisheng_pins()
+    text = path.read_text().replace("ascendnpu-ir_2.0.0_linux-x86.run", "fixture." + suffix)
+    path.write_text(text)
+    checker.check_toolchain()
     assert not checker.errors

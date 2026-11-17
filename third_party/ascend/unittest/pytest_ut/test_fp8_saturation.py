@@ -99,3 +99,137 @@ def test_fp8_downcast_clamping(src_dtype, dst_dtype, torch_dst_dtype, mode):
         assert torch.isnan(actual).all()
     else:
         torch.testing.assert_close(actual, torch.full_like(actual, expected), rtol=0, atol=0)
+
+
+@triton.jit
+def _clamp_reshape_downcast_fp8(X, Y, LIMIT: tl.constexpr, PROPAGATE_NAN: tl.constexpr):
+    offsets = tl.arange(0, 4)[:, None] * 8 + tl.arange(0, 8)[None, :]
+    value = tl.load(X + offsets)
+    clamped = tl.clamp(value, -LIMIT, LIMIT, propagate_nan=PROPAGATE_NAN)
+    result = clamped.reshape((32, )).to(Y.dtype.element_ty, fp_downcast_rounding="rtne")
+    tl.store(Y + tl.arange(0, 32), result)
+
+
+@pytest.mark.parametrize("dst_dtype,torch_dst_dtype", [(tl.float8e4nv, torch.float8_e4m3fn),
+                                                       (tl.float8e5, torch.float8_e5m2)])
+@pytest.mark.parametrize("propagate_nan", [tl.PropagateNan.NONE, tl.PropagateNan.ALL])
+def test_fp8_clamp_reshape_downcast(dst_dtype, torch_dst_dtype, propagate_nan):
+    arch = triton.runtime.driver.active.get_current_target().arch
+    if arch_generation(arch) != AscendArchGen.GEN5:
+        pytest.skip("FP8 conversion requires A5")
+
+    limit = torch.finfo(torch_dst_dtype).max
+    values = [
+        0.0, 1.0, 1.0625, 1.125, 1.1875, 2**-17, 2**-16, 2**-10, 2**-9, limit / 2, limit, limit + 1, 2 * limit, 65504.0,
+        float("inf"),
+        float("nan")
+    ]
+    source_cpu = torch.tensor([value * sign for sign in (1, -1) for value in values], dtype=torch.float32).reshape(4, 8)
+    source = source_cpu.to("npu")
+    output = torch.empty((source_cpu.numel(), ), dtype=torch.uint8, device="npu")
+    _clamp_reshape_downcast_fp8[(1, )](source, triton.reinterpret(output, dst_dtype), limit, propagate_nan)
+
+    # Match clamp's two NaN modes on CPU before rounding to FP8. No device FP8
+    # operations are needed; exact byte checks also distinguish +0 from -0.
+    lower = torch.tensor(-limit, dtype=source_cpu.dtype)
+    upper = torch.tensor(limit, dtype=source_cpu.dtype)
+    if propagate_nan == tl.PropagateNan.ALL:
+        reference = torch.maximum(lower, torch.minimum(source_cpu, upper))
+    else:
+        reference = torch.fmax(lower, torch.fmin(source_cpu, upper))
+    reference = reference.flatten()
+    expected_bits = reference.to(torch_dst_dtype).view(torch.uint8)
+    actual_bits = output.cpu()
+    nan_mask = torch.isnan(reference)
+    assert torch.isnan(actual_bits.view(torch_dst_dtype).float()[nan_mask]).all()
+    torch.testing.assert_close(actual_bits[~nan_mask], expected_bits[~nan_mask], rtol=0, atol=0)
+
+
+@triton.jit
+def _bounded_downcast_fp8(X, Y, LIMIT: tl.constexpr, PROPAGATE_NAN: tl.constexpr, PATH: tl.constexpr):
+    offsets = tl.arange(0, 4)[:, None] * 8 + tl.arange(0, 8)[None, :]
+    value = tl.load(X + offsets)
+    if PATH == "minmax":
+        bounded = tl.maximum(tl.minimum(value, LIMIT, propagate_nan=PROPAGATE_NAN), -LIMIT, propagate_nan=PROPAGATE_NAN)
+    elif PATH == "maxmin":
+        bounded = tl.minimum(tl.maximum(value, -LIMIT, propagate_nan=PROPAGATE_NAN), LIMIT, propagate_nan=PROPAGATE_NAN)
+    else:
+        clamped = tl.clamp(value, -LIMIT, LIMIT, propagate_nan=PROPAGATE_NAN)
+        if PATH == "select":
+            narrow = tl.clamp(value, -LIMIT / 2, LIMIT / 2, propagate_nan=PROPAGATE_NAN)
+            bounded = tl.where(offsets % 2 == 0, clamped, narrow)
+        elif PATH == "abs":
+            bounded = tl.abs(clamped)
+        elif PATH == "neg":
+            bounded = -clamped
+        elif PATH == "trans":
+            bounded = clamped.T
+        elif PATH == "broadcast":
+            bounded = tl.broadcast_to(clamped[:, None, :], (4, 2, 8))
+        elif PATH == "minnum_nan_fallback":
+            bounded = tl.minimum(clamped, 2 * LIMIT, propagate_nan=tl.PropagateNan.NONE)
+        else:
+            tl.static_assert(PATH == "maxnum_nan_fallback")
+            bounded = tl.maximum(clamped, -2 * LIMIT, propagate_nan=tl.PropagateNan.NONE)
+    OUT_BLOCK: tl.constexpr = 64 if PATH == "broadcast" else 32
+    result = bounded.reshape((OUT_BLOCK, )).to(Y.dtype.element_ty, fp_downcast_rounding="rtne")
+    tl.store(Y + tl.arange(0, OUT_BLOCK), result)
+
+
+@pytest.mark.parametrize("dst_dtype,torch_dst_dtype", [(tl.float8e4nv, torch.float8_e4m3fn),
+                                                       (tl.float8e5, torch.float8_e5m2)])
+@pytest.mark.parametrize("path,propagate_nan",
+                         [(path, propagate_nan)
+                          for path in ("minmax", "maxmin", "select", "abs", "neg", "trans", "broadcast")
+                          for propagate_nan in (tl.PropagateNan.NONE, tl.PropagateNan.ALL)] +
+                         [("minnum_nan_fallback", tl.PropagateNan.ALL), ("maxnum_nan_fallback", tl.PropagateNan.ALL)])
+def test_fp8_bounded_downcast(dst_dtype, torch_dst_dtype, path, propagate_nan):
+    arch = triton.runtime.driver.active.get_current_target().arch
+    if arch_generation(arch) != AscendArchGen.GEN5:
+        pytest.skip("FP8 conversion requires A5")
+
+    limit = torch.finfo(torch_dst_dtype).max
+    values = [
+        0.0, 1.0, 1.0625, 1.125, 1.1875, 2**-17, 2**-16, 2**-10, 2**-9, limit / 2, limit, limit + 1, 2 * limit, 65504.0,
+        float("inf"),
+        float("nan")
+    ]
+    source_cpu = torch.tensor([value * sign for sign in (1, -1) for value in values], dtype=torch.float32).reshape(4, 8)
+    source = source_cpu.to("npu")
+    output_size = 64 if path == "broadcast" else 32
+    output = torch.empty((output_size, ), dtype=torch.uint8, device="npu")
+    _bounded_downcast_fp8[(1, )](source, triton.reinterpret(output, dst_dtype), limit, propagate_nan, path)
+
+    minimum = torch.minimum if propagate_nan == tl.PropagateNan.ALL else torch.fmin
+    maximum = torch.maximum if propagate_nan == tl.PropagateNan.ALL else torch.fmax
+    lower = torch.tensor(-limit, dtype=source_cpu.dtype)
+    upper = torch.tensor(limit, dtype=source_cpu.dtype)
+    reference = maximum(lower, minimum(source_cpu, upper))
+    if path == "maxmin":
+        reference = minimum(maximum(source_cpu, lower), upper)
+    elif path == "select":
+        narrow = maximum(lower / 2, minimum(source_cpu, upper / 2))
+        condition = torch.arange(32).reshape(4, 8) % 2 == 0
+        reference = torch.where(condition, reference, narrow)
+    elif path == "abs":
+        reference = reference.abs()
+    elif path == "neg":
+        reference = -reference
+    elif path == "trans":
+        reference = reference.T
+    elif path == "broadcast":
+        reference = reference[:, None, :].expand(4, 2, 8)
+    elif path == "minnum_nan_fallback":
+        reference = torch.fmin(reference, 2 * upper)
+    elif path == "maxnum_nan_fallback":
+        reference = torch.fmax(reference, 2 * lower)
+
+    # A NaN from the clamp can select the out-of-range minnum/maxnum operand.
+    # Ordered saturation must still clamp these values and preserve signed zero.
+    reference = torch.where(reference > upper, upper, reference)
+    reference = torch.where(reference < lower, lower, reference).flatten()
+    expected_bits = reference.to(torch_dst_dtype).view(torch.uint8)
+    actual_bits = output.cpu()
+    nan_mask = torch.isnan(reference)
+    assert torch.isnan(actual_bits.view(torch_dst_dtype).float()[nan_mask]).all()
+    torch.testing.assert_close(actual_bits[~nan_mask], expected_bits[~nan_mask], rtol=0, atol=0)

@@ -1629,6 +1629,77 @@ ReduceConverter::convertToTargetOp(triton::ReduceOp op,
               })
           .getResult(0);
 
+  // A ±Inf identity init swallows the "all-NaN reduces to NaN" semantics of
+  // minnumf/maxnumf: minnumf(+Inf, NaN) = +Inf, so a reduction axis whose
+  // elements are all NaN yields ±Inf instead of the NaN required by LLVM's
+  // minnum/maxnum (both operands NaN -> NaN). Detect the all-NaN case with
+  // a second minnumf reduction over an isNaN mask (NaN -> 1.0, otherwise
+  // -> 0.0) and restore NaN in the result.
+  if (!multiOpReduce && isa<FloatType>(elemType) &&
+      isa<arith::MinNumFOp, arith::MaxNumFOp>(rop)) {
+    auto floatElemType = cast<FloatType>(elemType);
+
+    // nanMask = uitofp(cmpf une(source, source)) : NaN -> 1.0, else -> 0.0.
+    // UNE (x != x is true only for NaN) is used because the hfusion backend
+    // does not accept the UNO predicate.
+    Value nanCmp = rewriter.create<arith::CmpFOp>(
+        loc, arith::CmpFPredicate::UNE, source, source);
+    Value nanMask = rewriter.create<arith::UIToFPOp>(loc, sourceType, nanCmp);
+
+    // The mask never contains NaN, so +Inf (the minnumf identity) is a safe
+    // init for the mask reduction: the result is 1.0 if and only if every
+    // element along the axis is NaN.
+    Value posInfConst = rewriter.create<arith::ConstantOp>(
+        loc, constantType,
+        rewriter.getFloatAttr(constantType,
+                              std::numeric_limits<float>::infinity()));
+    Value maskInitTensor;
+    if (isVectorReduce) {
+      auto holder = rewriter.create<bufferization::AllocTensorOp>(
+          loc, RankedTensorType::get({}, constantType), ValueRange{});
+      maskInitTensor =
+          rewriter
+              .create<linalg::FillOp>(loc, posInfConst, holder.getResult())
+              .getResult(0);
+    } else {
+      Value init = rewriter.create<tensor::EmptyOp>(
+          loc, cast<RankedTensorType>(resType).getShape(), constantType);
+      maskInitTensor =
+          rewriter.create<linalg::FillOp>(loc, posInfConst, init).getResult(0);
+    }
+    Value maskReduced =
+        rewriter
+            .create<linalg::ReduceOp>(
+                loc, ValueRange{nanMask}, ValueRange{maskInitTensor},
+                SmallVector<int64_t>{axis},
+                [&](OpBuilder &opBuilder, Location innerLoc,
+                    ValueRange inputs) {
+                  Value minVal = opBuilder.create<arith::MinNumFOp>(
+                      innerLoc, inputs[0], inputs[1]);
+                  opBuilder.create<linalg::YieldOp>(innerLoc, minVal);
+                })
+            .getResult(0);
+
+    // finalResult = select(maskReduced == 1.0, NaN, finalResult)
+    auto reducedTensorType = cast<RankedTensorType>(maskReduced.getType());
+    Value oneTensor = rewriter.create<arith::ConstantOp>(
+        loc, reducedTensorType,
+        DenseElementsAttr::get(
+            reducedTensorType,
+            rewriter.getFloatAttr(floatElemType, 1.0).getValue()));
+    Value allNan = rewriter.create<arith::CmpFOp>(
+        loc, arith::CmpFPredicate::OEQ, maskReduced, oneTensor);
+    Value nanTensor = rewriter.create<arith::ConstantOp>(
+        loc, reducedTensorType,
+        DenseElementsAttr::get(
+            reducedTensorType,
+            rewriter.getFloatAttr(floatElemType,
+                                  std::numeric_limits<float>::quiet_NaN())
+                .getValue()));
+    finalResult = rewriter.create<arith::SelectOp>(loc, allNan, nanTensor,
+                                                   finalResult);
+  }
+
   if (sourceType.getRank() == 1) {
     finalResult =
         rewriter.create<tensor::ExtractOp>(loc, constantType, finalResult);

@@ -158,6 +158,8 @@ __all__ = [
     "vreduce_sum",
     "vreduce_max",
     "vreduce_min",
+    "vbs",
+    "vmrgsort4",
     "vci",
     "pge",
     "membar",
@@ -2983,6 +2985,37 @@ def vreduce_min(regs, _semantic=None) -> vector:
     :func:`vreduce_max` with ``ave.hir.vmin``.
     """
     return _reduce_across(regs, "min", _semantic)
+
+
+@builtin
+def vbs(scores, indices, dst, _semantic=None):
+    """Sort each group of 32 UB scores descending and carry indices along.
+
+    Call in the vector scope, outside a register SIMD scope.
+    """
+    from .sorting import _check_scores
+
+    _check_scores(scores, indices, dst)
+    _semantic.builder.create_simd_vbs(scores.handle, indices.handle, dst.handle)
+
+
+@builtin
+def vmrgsort4(src, dst, run_size, _semantic=None):
+    """Merge adjacent descending runs of interleaved score/index pairs.
+
+    Call in the vector scope, outside a register SIMD scope.
+    """
+    from .sorting import _ub_vector
+
+    words = _ub_vector(src, tl.uint32)
+    run = _unwrap_if_constexpr(run_size)
+    if (_ub_vector(dst, tl.uint32) != words or type(run) is not int or not 32 <= run <= words // 4 or run % 32
+            or words % (2 * run)):
+        raise ValueError("invalid UB pair-buffer dimensions or merge run size")
+    runs = words // (2 * run)
+    if words > 8192 or (runs != 2 and runs % 4 != 0):
+        raise ValueError("requires complete two- or four-way merge groups")
+    _semantic.builder.create_simd_vmrgsort4(src.handle, dst.handle, run)
 
 
 @builtin

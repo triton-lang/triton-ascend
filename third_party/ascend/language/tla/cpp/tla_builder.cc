@@ -955,6 +955,24 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("kind"), py::arg("src"), py::arg("mask"),
           py::arg("mode") = "zeroing")
+
+      .def(
+          "create_tla_sort_pairs",
+          [](TLABuilder &self, Value scores, Value indices, Value dst,
+             Value scratch) {
+            self.create<hivm::VSortPairsOp>(scores, indices, dst, scratch);
+          })
+      .def(
+          "create_simd_vbs",
+          [](TLABuilder &self, Value scores, Value indices, Value dst) {
+            self.create<hivmave::VFSort32Op>(scores, indices, dst);
+          })
+      .def(
+          "create_simd_vmrgsort4",
+          [](TLABuilder &self, Value src, Value dst, int64_t runSize) {
+            self.create<hivmave::VFMergeSort4Op>(
+                src, dst, self.getBuilder().getI64IntegerAttr(runSize));
+          })
       .def(
           "create_simd_vreduce",
           [](TLABuilder &self, Value &vector, Value &mask,

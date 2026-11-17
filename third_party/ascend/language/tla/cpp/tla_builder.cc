@@ -995,7 +995,7 @@ void init_tla_builder(py::module &&m) {
           [](TLABuilder &self, Value src, Value indices) -> Value {
             Value mask = self.create<hivmave::VFPgeOp>(
                 VectorType::get({128}, self.getBuilder().getI1Type()),
-                hivmave::PgePattern::H).getResult();
+                hivmave::PgePattern::ALL).getResult();
             return self.create<hivmave::VFRegisterGatherOp>(
                 src.getType(), src, indices, mask).getResult();
           })

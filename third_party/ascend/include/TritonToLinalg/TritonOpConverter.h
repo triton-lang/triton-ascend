@@ -744,17 +744,17 @@ public:
 };
 
 class DevicePrintConverter : public OpConversionPattern<triton::PrintOp> {
+public:
   using OpConversionPattern<triton::PrintOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::PrintOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
 
 private:
   static constexpr llvm::StringRef printFuncNameBase = "triton_print";
   static constexpr llvm::StringRef prefixAttrName = "prefix";
   static constexpr llvm::StringRef hexAttrName = "hex";
-
-public:
-  LogicalResult
-  matchAndRewrite(triton::PrintOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override;
 };
 
 struct MatmulConverter : public OpConversionPattern<triton::DotOp> {

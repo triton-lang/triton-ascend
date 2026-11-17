@@ -22,6 +22,8 @@
  */
 
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
+#include "TritonMemoryAccess/PtrAnalysis.h"
+#include "TritonMemoryAccess/Utils.h"
 #include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
@@ -2752,16 +2754,86 @@ LogicalResult TritonPreciseSqrtConverter::matchAndRewrite(
   return success();
 }
 
+// Materialize a pointer operand of tt.print as an i64 address
+static FailureOr<Value>
+materializePrintAddress(Value pointer, ConversionPatternRewriter &rewriter) {
+  mlir::triton::ptr::PtrAnalysis analysis(rewriter);
+  FailureOr<mlir::triton::ptr::PtrInfo> analyzed = analysis.analyze(pointer);
+  if (failed(analyzed))
+    return failure();
+  const mlir::triton::ptr::PtrInfo &info = *analyzed;
+  if (!info.base || info.block || !info.hasScalarBase() ||
+      !info.offsets.fullOffsets)
+    return failure();
+  Type pointee = info.getElementType();
+  if (!pointee || !pointee.isIntOrFloat())
+    return failure();
+
+  Location loc = pointer.getLoc();
+  Value base = rewriter.getRemappedValue(info.base);
+  if (!base)
+    return failure();
+  // Unwraps the converted base out of its type bridge and reports whether it
+  // reached the memory stage as a memref.
+  FailureOr<Value> baseAddress = materializePointerAddress(base, loc, rewriter);
+  if (failed(baseAddress))
+    return failure();
+  return *baseAddress;
+}
+
 LogicalResult DevicePrintConverter::matchAndRewrite(
     triton::PrintOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
   auto moduleOp = op->getParentOfType<ModuleOp>();
+  rewriter.setInsertionPoint(op);
+  ArrayRef<int32_t> isSigned = op.getIsSigned();
+  SmallVector<Value, 4> args;
+  SmallVector<Type, 4> inputTypes;
+  for (auto [i, arg] : llvm::enumerate(adaptor.getArgs())) {
+    Value val = arg;
+    Type origTy = op.getArgs()[i].getType();
+    Type origElemTy = isa<ShapedType>(origTy)
+                          ? cast<ShapedType>(origTy).getElementType()
+                          : origTy;
+    Type elemTy = isa<ShapedType>(val.getType())
+                      ? cast<ShapedType>(val.getType()).getElementType()
+                      : val.getType();
+    if (isa<triton::PointerType>(origElemTy)) {
+      FailureOr<Value> addresses =
+          materializePrintAddress(op.getArgs()[i], rewriter);
+      if (failed(addresses))
+        return rewriter.notifyMatchFailure(
+            op, "cannot materialize printed pointer address");
+      val = *addresses;
+    } else if (i < isSigned.size() && isSigned[i] == 0 &&
+               isa<IntegerType>(elemTy) &&
+               cast<IntegerType>(elemTy).getWidth() < 64 &&
+               !cast<IntegerType>(elemTy).isInteger(1)) {
+      unsigned width = cast<IntegerType>(elemTy).getWidth();
+      Type widenedTy = rewriter.getI64Type();
+      if (auto tensorTy = dyn_cast<RankedTensorType>(val.getType()))
+        widenedTy = tensorTy.clone(widenedTy);
+      val = rewriter.create<arith::ExtSIOp>(op.getLoc(), widenedTy, val);
+      uint64_t maskValue = (uint64_t{1} << width) - 1;
+      Value mask;
+      if (auto tensorTy = dyn_cast<RankedTensorType>(widenedTy)) {
+        auto maskAttr = DenseElementsAttr::get(
+            tensorTy,
+            rewriter.getIntegerAttr(rewriter.getI64Type(), maskValue));
+        mask = rewriter.create<arith::ConstantOp>(op.getLoc(), widenedTy,
+                                                  maskAttr);
+      } else {
+        mask = rewriter.create<arith::ConstantOp>(
+            op.getLoc(),
+            rewriter.getIntegerAttr(rewriter.getI64Type(), maskValue));
+      }
+      val = rewriter.create<arith::AndIOp>(op.getLoc(), val, mask);
+    }
+    args.push_back(val);
+    inputTypes.push_back(val.getType());
+  }
   rewriter.setInsertionPoint(moduleOp.getBody(),
                              std::prev(moduleOp.getBody()->end()));
-  SmallVector<Type, 4> inputTypes;
-  for (auto arg : op.getArgs()) {
-    inputTypes.push_back(arg.getType());
-  }
   auto libFnType = rewriter.getFunctionType(inputTypes, {});
   // See ScanConverter: the name is uniqued before the op is created so that a
   // kernel named "triton_print" cannot make SymbolTable assert.
@@ -2775,7 +2847,7 @@ LogicalResult DevicePrintConverter::matchAndRewrite(
   funcOp->setAttr(hexAttrName, hexAttr);
 
   rewriter.setInsertionPoint(op);
-  rewriter.create<func::CallOp>(op.getLoc(), funcOp, op.getArgs());
+  rewriter.create<func::CallOp>(op.getLoc(), funcOp, args);
 
   rewriter.eraseOp(op);
   return success();

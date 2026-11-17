@@ -21,7 +21,7 @@ from utils.tla_test_utils import get_stages, compile_offline, lower_offline, che
 def _allocate_only(SPACE: tl.constexpr, VERSIONS: tl.constexpr):
     with tla.scope.cube():
         buf = tla.alloc((16, 16), tl.float32, space=SPACE)
-        tla.annotate_buffer_versions(buf, VERSIONS)
+        tla.annotate_multi_buffer(buf, VERSIONS)
 
 
 @tla.jit
@@ -96,7 +96,7 @@ def test_invalid_allocation_arguments():
     with pytest.raises(ValueError, match="kernel arguments"):
         tla.alloc((16, 16), tl.float32, space=tla.AddressSpace.GM, _semantic=semantic)
     with pytest.raises(ValueError, match="positive int"):
-        tla.annotate_buffer_versions(object(), 0, _semantic=semantic)
+        tla.annotate_multi_buffer(object(), 0, _semantic=semantic)
 
 
 def _launch(compile_only=False, seed=7):

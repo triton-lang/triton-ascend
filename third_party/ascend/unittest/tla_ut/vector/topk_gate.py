@@ -35,8 +35,8 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
     scores_ub = tla.alloc((((E + 63) // 64) * 64, ), tl.float32, space="ub")
     # int64 output (i32-equivalent): low word = index, high word = 0.
     out_ub = tla.alloc((2 * K, ), tl.int32, space="ub")
-    tla.annotate_buffer_versions(scores_ub, 6)
-    tla.annotate_buffer_versions(out_ub, 6)
+    tla.annotate_multi_buffer(scores_ub, 6)
+    tla.annotate_multi_buffer(out_ub, 6)
     flag_ub = tla.alloc((1, ), tl.float32, space="ub")
     for row in range(tl.program_id(0), num_tokens, CORES):
         if row < num_tokens:

@@ -30,9 +30,9 @@ def fused_weight(H_ptr, E_ptr, O_ptr, H: tl.constexpr, HC: tl.constexpr, CORES: 
     hu = tla.alloc((256, ), tl.bfloat16, space="ub")
     eu = tla.alloc((256, ), tl.bfloat16, space="ub")
     ou = tla.alloc((256, ), tl.float32, space="ub")
-    tla.annotate_buffer_versions(hu, VERSIONS)
-    tla.annotate_buffer_versions(eu, VERSIONS)
-    tla.annotate_buffer_versions(ou, VERSIONS)
+    tla.annotate_multi_buffer(hu, VERSIONS)
+    tla.annotate_multi_buffer(eu, VERSIONS)
+    tla.annotate_multi_buffer(ou, VERSIONS)
     num_tiles = H // 256
     for task in range(tl.program_id(0), HC * num_tiles, CORES):
         head = task % HC

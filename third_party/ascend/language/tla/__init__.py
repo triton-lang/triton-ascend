@@ -29,7 +29,7 @@ Exports: ``alloc`` (on-chip buffer),
 explicit DMA routes, ``view`` (GM view), ``scope`` (core-mode scopes:
 ``tla.scope.simd()`` / ``tla.scope.cube()``),
 ``simd`` (vector-register ops), ``where`` (eager scalar/SIMD select),
-``annotate_buffer_versions``, and scalar dtypes.
+``annotate_multi_buffer``, and scalar dtypes.
 
 Scalar types share Triton's dtype protocol, so ``tla.float32`` can be passed
 directly to buffer, vector, and cast APIs.  The re-exported names map to the
@@ -110,7 +110,7 @@ from .dma import (
 
 from .view import view, subview, reshape
 from .scalar import select, abs, maximum, minimum, cast, max_value, cdiv, infinity, clamp
-from .aux_ops import annotate_buffer_versions, assume
+from .aux_ops import annotate_multi_buffer, assume
 
 from . import math
 from .math import compensated_rstd, truncmod, sqrt
@@ -226,7 +226,7 @@ __all__ = [
     "device_print",
 
     # aux ops
-    "annotate_buffer_versions",
+    "annotate_multi_buffer",
     "assume",
 
     # simd ops

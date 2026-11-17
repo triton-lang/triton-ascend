@@ -43,9 +43,9 @@ def cast_back(X_ptr, SF_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.cons
     x_ub = tla.alloc((BM, HID), tl.float8e4nv, space="ub")
     sf_ub = tla.alloc((BM, HID // NPC), tl.float32, space="ub")
     out_ub = tla.alloc((BM, HID), tl.float32, space="ub")
-    tla.annotate_buffer_versions(x_ub, VERSIONS)
-    tla.annotate_buffer_versions(sf_ub, VERSIONS)
-    tla.annotate_buffer_versions(out_ub, VERSIONS)
+    tla.annotate_multi_buffer(x_ub, VERSIONS)
+    tla.annotate_multi_buffer(sf_ub, VERSIONS)
+    tla.annotate_multi_buffer(out_ub, VERSIONS)
     for pt in range(tl.program_id(0), tl.cdiv(num_tokens, BM), CORES):
         x_blk = tla.view(X_ptr, (BM, HID), strides=(HID, 1), offsets=(pt * BM, 0))
         sf_blk = tla.view(SF_ptr, (BM, HID // NPC), strides=(HID // NPC, 1), offsets=(pt * BM, 0))

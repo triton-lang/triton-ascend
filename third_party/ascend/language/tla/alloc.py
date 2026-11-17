@@ -55,7 +55,7 @@ def alloc(shape, dtype, space=None, _semantic=None):
         with tla.scope.cube():
             acc = tla.alloc((4, 1, 16, 16), tl.float32, space=tla.AddressSpace.L0C)
 
-    Use ``tla.annotate_buffer_versions(buf, n)`` to request multi-buffering
+    Use ``tla.annotate_multi_buffer(buf, n)`` to request multi-buffering
     for the allocated buffer.
     """
     space = _unwrap_if_constexpr(space)

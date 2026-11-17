@@ -33,11 +33,11 @@ def grad_w_reduce(P_ptr, WH_ptr, WE_ptr, GH_ptr, GE_ptr, H: tl.constexpr, HC: tl
     we_ub = tla.alloc((1, BW), tl.bfloat16, space="ub")
     gh_ub = tla.alloc((1, BW), tl.float32, space="ub")
     ge_ub = tla.alloc((1, BW), tl.float32, space="ub")
-    tla.annotate_buffer_versions(p_ub, VERSIONS)
-    tla.annotate_buffer_versions(wh_ub, VERSIONS)
-    tla.annotate_buffer_versions(we_ub, VERSIONS)
-    tla.annotate_buffer_versions(gh_ub, VERSIONS)
-    tla.annotate_buffer_versions(ge_ub, VERSIONS)
+    tla.annotate_multi_buffer(p_ub, VERSIONS)
+    tla.annotate_multi_buffer(wh_ub, VERSIONS)
+    tla.annotate_multi_buffer(we_ub, VERSIONS)
+    tla.annotate_multi_buffer(gh_ub, VERSIONS)
+    tla.annotate_multi_buffer(ge_ub, VERSIONS)
     for task in range(tl.program_id(0), (H // BW) * HC, CORES):
         shard = task // HC
         head = task % HC

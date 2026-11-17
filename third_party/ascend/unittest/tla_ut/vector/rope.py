@@ -30,8 +30,8 @@ def rope(X_ptr, CS_ptr, B: tl.constexpr, S: tl.constexpr, NH: tl.constexpr, RD: 
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
     x_ub = tla.alloc((1, BT, NH, RD), tl.float32, space="ub")
     cs_ub = tla.alloc((BT, RD), tl.float32, space="ub")
-    tla.annotate_buffer_versions(x_ub, VERSIONS)
-    tla.annotate_buffer_versions(cs_ub, VERSIONS)
+    tla.annotate_multi_buffer(x_ub, VERSIONS)
+    tla.annotate_multi_buffer(cs_ub, VERSIONS)
     n_seq_blk = S // BT
     for task in range(tl.program_id(0), B * n_seq_blk, CORES):
         b = task // n_seq_blk

@@ -29,8 +29,8 @@ def rmsnorm(X_ptr, W_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.constex
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
     x_ub = tla.alloc((1, PAD_H), tl.bfloat16, space="ub")
     out_ub = tla.alloc((1, PAD_H), tl.float32, space="ub")
-    tla.annotate_buffer_versions(x_ub, VERSIONS)
-    tla.annotate_buffer_versions(out_ub, VERSIONS)
+    tla.annotate_multi_buffer(x_ub, VERSIONS)
+    tla.annotate_multi_buffer(out_ub, VERSIONS)
     w_ub = tla.alloc((PAD_H, ), tl.bfloat16, space="ub")
     rstd_ub = tla.alloc((64, ), tl.float32, space="ub")
     for task in range(tl.program_id(0), num_tokens, CORES):

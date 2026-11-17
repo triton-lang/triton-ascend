@@ -45,8 +45,8 @@ def simd_elementwise(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, BLK: tl.const
     tl.static_assert(TMAX % 2 == 0, "one pair of rows per output row")
     xy_ub = tla.alloc((2, BLK), tl.float32, space="ub")
     o_ub = tla.alloc((BLK, ), tl.float32, space="ub")
-    tla.annotate_buffer_versions(xy_ub, 2)
-    tla.annotate_buffer_versions(o_ub, 2)
+    tla.annotate_multi_buffer(xy_ub, 2)
+    tla.annotate_multi_buffer(o_ub, 2)
     for p in range(tl.program_id(0), num_tokens // 2, CORES):
         xy = tla.view(X_ptr, (2, BLK), strides=(BLK, 1), offsets=(2 * p, 0))
         o = tla.view(O_ptr, (BLK, ), strides=(1, ), offsets=(p * BLK, ))

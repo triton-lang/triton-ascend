@@ -33,8 +33,8 @@ def expand_to_mhc_fwd(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, H: tl.conste
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
     x_ub = tla.alloc((1, H_BLK), tl.bfloat16, space="ub")
     o_ub = tla.alloc((MHC, 1, H_BLK), tl.bfloat16, space="ub")
-    tla.annotate_buffer_versions(x_ub, NS)
-    tla.annotate_buffer_versions(o_ub, NS)
+    tla.annotate_multi_buffer(x_ub, NS)
+    tla.annotate_multi_buffer(o_ub, NS)
     for task in range(tl.program_id(0), num_tokens * (H // H_BLK), CORES):
         n = task // (H // H_BLK)
         hb = task % (H // H_BLK)

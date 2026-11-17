@@ -127,7 +127,7 @@ private:
 
   // Downstream pattern matching helpers
   void matchStorePattern(Operation *user);
-  void matchExtractSlicePattern(Operation *user);
+  void matchExtractSlicePattern(Operation *user, bool sameBlock);
   void matchMaterializePattern(Operation *user);
   void matchFixpipeOutputCastPatterns();
 

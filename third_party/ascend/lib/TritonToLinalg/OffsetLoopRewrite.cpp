@@ -27,6 +27,7 @@
 #include "Utils/Utils.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/IRMapping.h"
+#include "mlir/IR/Matchers.h"
 #include "llvm/ADT/SetVector.h"
 
 using namespace mlir;
@@ -166,6 +167,31 @@ Value rebuildOffset(RankedTensorType type,
   return result;
 }
 
+// An earlier nested-loop analysis may have sampled this carrier before the
+// current analysis created its own origin. Map those same-block samples too,
+// so they do not keep the reconstructed offset tensor alive.
+void mapOriginSamples(Value argument, Value origin, OpBuilder &builder,
+                      IRMapping &mapping) {
+  auto type = cast<RankedTensorType>(argument.getType());
+  if (llvm::is_contained(type.getShape(), int64_t{0}))
+    return;
+  Value scalar;
+  for (Operation *user : argument.getUsers()) {
+    auto extract = dyn_cast<tensor::ExtractOp>(user);
+    if (!extract || extract->getBlock() != argument.getParentBlock() ||
+        !llvm::all_of(extract.getIndices(), [](Value index) {
+          return matchPattern(index, m_Zero());
+        }))
+      continue;
+    // Rebuilding casts the origin back to the tensor element width. Preserve
+    // that truncation before any existing cast of the sample back to index.
+    if (!scalar)
+      scalar = *castIntegerLike(builder, extract.getLoc(), origin,
+                                type.getElementType());
+    mapping.map(extract.getResult(), scalar);
+  }
+}
+
 LogicalResult rewriteOffsetLoop(LoopLikeOpInterface loop,
                                 IRRewriter &rewriter) {
   if (!isa<scf::ForOp, scf::WhileOp>(loop.getOperation()) ||
@@ -277,6 +303,7 @@ LogicalResult rewriteOffsetLoop(LoopLikeOpInterface loop,
           rebuildOffset(cast<RankedTensorType>(oldArgs[slot.index].getType()),
                         info, fields, b, loc);
       mapping.map(oldArgs[slot.index], rebuilt);
+      mapOriginSamples(oldArgs[slot.index], fields.front(), b, mapping);
       if (auto origin = dyn_cast<Value>(info.scalarOffset))
         mapping.map(origin, fields.front());
       for (auto [dim, axis] : llvm::enumerate(info.axes))

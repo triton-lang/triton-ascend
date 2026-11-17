@@ -556,6 +556,9 @@ static bool shouldSplitByInput(linalg::MatmulOp matmulOp, Value &outerOutValue,
   if (!outerInOp) {
     return true;
   }
+  if (isa<tensor::EmptyOp>(outerInOp)) {
+    return false;
+  }
 
   if (operationIsFillZero(outerInValue.getDefiningOp())) {
     LOG_DEBUG("Not split because bias is zero. " << matmulOp);

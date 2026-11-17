@@ -33,6 +33,7 @@
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/SetVector.h"
+#include <algorithm>
 #include <iterator>
 #include <limits>
 
@@ -417,12 +418,22 @@ FailureOr<BoundaryCheckedPointer> materializeBoundaryCheckedMemoryPointer(
   }
 
   Location loc = pointer.getLoc();
-  Value zero = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
+  Value zero;
   SmallVector<ClampedPointerAxis> clampedAxes;
   for (auto [axis, coordinate] : llvm::zip_equal(checks, checkedCoordinates)) {
-    Value clamped = rewriter.create<arith::MaxSIOp>(loc, coordinate, zero);
-    Value gmCoordinate = rewriter.create<arith::IndexCastOp>(
-        loc, rewriter.getIndexType(), clamped);
+    OpFoldResult gmCoordinate;
+    if (auto constant = getConstantIntValue(coordinates[axis])) {
+      // Boundary sizes must retain static axes for unit-axis load/store guards.
+      gmCoordinate = rewriter.getIndexAttr(std::max<int64_t>(0, *constant));
+    } else {
+      if (!zero)
+        zero = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
+      Value clamped = rewriter.create<arith::MaxSIOp>(loc, coordinate, zero);
+      gmCoordinate =
+          rewriter
+              .create<arith::IndexCastOp>(loc, rewriter.getIndexType(), clamped)
+              .getResult();
+    }
     coordinates[axis] = gmCoordinate;
     clampedAxes.push_back({axis, gmCoordinate});
   }
@@ -488,8 +499,9 @@ getMemoryBoundary(Value pointer, ArrayRef<int32_t> checks,
         llvm::find_if(clampedAxes, [axisNumber](const auto &axis) {
           return axis.axis == axisNumber;
         });
-    Value gmCoordinate =
-        clampedAxis != clampedAxes.end() ? clampedAxis->coordinate : Value{};
+    OpFoldResult gmCoordinate = clampedAxis != clampedAxes.end()
+                                    ? clampedAxis->coordinate
+                                    : OpFoldResult{};
     if (llvm::is_contained(checks, axisNumber)) {
       OpFoldResult coordinate =
           remap(info.block->coordinateOffsets[dim], rewriter);

@@ -10,12 +10,12 @@
 // through subviews of both sides.
 module {
   // CHECK-LABEL: func.func @shared_load_scope_unstamped
-  // CHECK: %[[VEC:.*]] = scope.scope : () -> tensor<4x4xf16> {
-  // CHECK: } {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR", ssbuffer.load}
-  // CHECK: %[[ADD:.*]] = arith.addf %[[VEC]], %[[VEC]] {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR"}
   // CHECK: %[[CUBE:.*]] = scope.scope : () -> tensor<4x4xf16> {
   // CHECK: } {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
   // CHECK: linalg.matmul {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE"} ins(%[[CUBE]],
+  // CHECK: %[[VEC:.*]] = scope.scope : () -> tensor<4x4xf16> {
+  // CHECK: } {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR", ssbuffer.load}
+  // CHECK: %[[ADD:.*]] = arith.addf %[[VEC]], %[[VEC]] {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR"}
   func.func @shared_load_scope_unstamped(%gm: memref<4x4xf16>, %arg0: tensor<4x4xf16>, %arg1: tensor<4x4xf32>) -> (tensor<4x4xf32>, tensor<4x4xf16>) {
     %0 = scope.scope : () -> tensor<4x4xf16> {
       %alloc = memref.alloc() : memref<4x4xf16>

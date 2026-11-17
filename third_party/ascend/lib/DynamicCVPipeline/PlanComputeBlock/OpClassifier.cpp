@@ -304,7 +304,7 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
     // A packed load scope is atomic and needs no seeding, so markCube
     // suffices. A raw to_tensor is left to the gate below.
     if (CVPipeline::isLoadScope(defOp)) {
-      markCube(defOp);
+      matchLoadPattern(defOp);
       continue;
     }
     if (!shouldMarkCubeSeed(defOp)) {
@@ -492,7 +492,7 @@ void OpClassifierPass::matchStorePattern(Operation *user) {
 }
 
 // ============================================================================
-// Pattern: matmul → tensor.extract_slice → hivm.store (Downstream)
+// Pattern: matmul -> tensor.extract_slice chain -> store (Downstream)
 // ============================================================================
 // Matches cases where matmul's output is sliced before being stored.
 // extract_slice extracts a sub-region (slice) of a tensor, commonly used after
@@ -504,26 +504,63 @@ void OpClassifierPass::matchStorePattern(Operation *user) {
 //   %memref[%offset] : tensor<256x256xf32> to memref
 // Matching Logic
 //   1. Check if matmul result's user is tensor.extract_slice
-//   2. If matched, mark extract_slice as CUBE and add to cubeSeeds
-//   3. Further check all users of extract_slice and mark hivm.store as CUBE
+//   2. In the matmul's block, mark the slice and its direct stores as CUBE
+//   3. Across blocks, follow consecutive slices and seed CUBE colouring only
+//      for paths reaching a store; stop at other operations
 // Purpose: After tiled matrix computation, slice and store operations on CUBE
 // improve local data transfer efficiency.
 // ============================================================================
-void OpClassifierPass::matchExtractSlicePattern(Operation *user) {
+void OpClassifierPass::matchExtractSlicePattern(Operation *user,
+                                                bool sameBlock) {
   auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(user);
   if (!extractSliceOp) {
     return;
   }
 
+  // Preserve the original matching for slices in the matmul's block.
+  if (sameBlock) {
+    markCube(extractSliceOp);
+    cubeSeeds.push_back(extractSliceOp);
+    for (Operation *sliceUser : extractSliceOp->getUsers()) {
+      if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(
+              sliceUser)) {
+        markCube(sliceUser);
+        cubeSeeds.push_back(sliceUser);
+      }
+    }
+    return;
+  }
+
+  // Across blocks, a slice consumed by VECTOR arithmetic is not a CUBE store
+  // pattern.
+  // Seeding it would also colour its index chain CUBE and unnecessarily
+  // duplicate both the slice and the indices during CUBE_AND_VECTOR splitting.
+  llvm::SmallVector<Operation *> stores;
+  llvm::SmallVector<Operation *> worklist{extractSliceOp.getOperation()};
+  llvm::DenseSet<Operation *> visited;
+  while (!worklist.empty()) {
+    Operation *slice = worklist.pop_back_val();
+    if (!visited.insert(slice).second) {
+      continue;
+    }
+    for (Operation *sliceUser : slice->getUsers()) {
+      if (isa<tensor::ExtractSliceOp>(sliceUser)) {
+        worklist.push_back(sliceUser);
+      } else if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(
+                     sliceUser)) {
+        stores.push_back(sliceUser);
+      }
+    }
+  }
+  if (stores.empty()) {
+    return;
+  }
+
   markCube(extractSliceOp);
   cubeSeeds.push_back(extractSliceOp);
-  // Also mark downstream hivm.hir.store as CUBE
-  for (Operation *sliceUser : extractSliceOp->getUsers()) {
-    if (isa<hivm::StoreOp>(sliceUser) ||
-        isa<bufferization::MaterializeInDestinationOp>(sliceUser)) {
-      markCube(sliceUser);
-      cubeSeeds.push_back(sliceUser);
-    }
+  for (Operation *store : stores) {
+    markCube(store);
+    cubeSeeds.push_back(store);
   }
 }
 
@@ -681,7 +718,8 @@ int OpClassifierPass::patternMatchCUBE() {
             break;
           }
           matchStorePattern(curUser);
-          matchExtractSlicePattern(curUser);
+          matchExtractSlicePattern(curUser,
+                                   curUser->getBlock() == op->getBlock());
           matchMaterializePattern(curUser);
           break;
         }
@@ -765,34 +803,43 @@ findIterArgUpstreamOps(Value def,
 // dependencies
 void OpClassifierPass::getUpstreamOpsWithMemoryDeps(
     Operation *cur, llvm::SmallVectorImpl<Operation *> &upstreamOps) {
-  // Collect SSA dependencies (direct operands)
-  for (Value operand : cur->getOperands()) {
-    Operation *def = operand.getDefiningOp();
-    if (def && def != cur) {
-      // Check if this def is an scf.for iter_arg that is a scalar
-      LLVM_DEBUG(DBGS() << "push op: " << *def << "\n");
-      upstreamOps.push_back(def);
-    }
-    if (isScalarIterArgOp(operand)) {
-      findIterArgUpstreamOps(operand, upstreamOps);
-    }
-  }
-  if (!isa<bufferization::ToTensorOp>(cur)) {
-    // Only consider memory dependencies for non-to_tensor ops,
-    // as to_tensor already has SSA deps to its memref source
-    return;
-  }
-  // Collect memory dependencies
-  if (memDepGraph) {
-    // Get operations that define memory used by current op
-    for (Operation *memDef : memDepGraph->getMemDefs(cur)) {
-      LLVM_DEBUG(DBGS() << "memDef: cur " << *cur << " -> memDef " << *memDef
-                        << "\n");
-      if (isa<memref::CopyOp>(memDef)) {
-        LLVM_DEBUG(DBGS() << "push op: " << *memDef << "\n");
-        upstreamOps.push_back(memDef);
+  auto collectDependencies = [&](Operation *op) {
+    // A scope captures values through its body rather than explicit operands.
+    // Inspect every nested op, including scalar loop-carried dependencies.
+    for (Value operand : op->getOperands()) {
+      Operation *def = operand.getDefiningOp();
+      if (def && def != cur) {
+        // Check if this def is an scf.for iter_arg that is a scalar
+        LLVM_DEBUG(DBGS() << "push op: " << *def << "\n");
+        upstreamOps.push_back(def);
+      }
+      if (isScalarIterArgOp(operand)) {
+        findIterArgUpstreamOps(operand, upstreamOps);
       }
     }
+    if (isa<bufferization::ToTensorOp>(op) && memDepGraph) {
+      for (Operation *memDef : memDepGraph->getMemDefs(op)) {
+        LLVM_DEBUG(DBGS() << "memDef: cur " << *cur << " -> memDef " << *memDef
+                          << "\n");
+        if (isa<memref::CopyOp>(memDef)) {
+          LLVM_DEBUG(DBGS() << "push op: " << *memDef << "\n");
+          upstreamOps.push_back(memDef);
+        }
+      }
+    }
+  };
+
+  if (isLoadScope(cur)) {
+    const size_t firstDependency = upstreamOps.size();
+    cur->walk(collectDependencies);
+    // Keep the scope atomic: only dependencies outside its body participate in
+    // the classifier's upstream propagation.
+    auto externalEnd = std::remove_if(
+        upstreamOps.begin() + firstDependency, upstreamOps.end(),
+        [&](Operation *dep) { return dep == cur || cur->isAncestor(dep); });
+    upstreamOps.erase(externalEnd, upstreamOps.end());
+  } else {
+    collectDependencies(cur);
   }
 }
 

@@ -23,6 +23,7 @@
 #include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
+#include "ascend/include/DynamicCVPipeline/Common/ScopeOpUtils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
@@ -161,24 +162,23 @@ static void collectAllDeps(Operation *startOp,
   while (!worklist.empty()) {
     Operation *cur = worklist.pop_back_val();
     helper.forEachSource(cur, [&](Operation *src) {
-      if (collected.insert(src).second) {
+      if (collected.insert(src).second)
         worklist.push_back(src);
-      }
       return WalkResult::advance();
     });
   }
 }
 
-/// Returns the bufferization::ToTensorOp in CubePre that Cube depends on,
+/// Returns Load in CubePre that Cube depends on.
 /// only to_tensor ops whose feeding memref.copy loads data from GM (external
 /// func argument).
 static SmallVector<Operation *>
-findToTensorDeps(const ComputeBlock *cubePre,
-                 const DenseSet<Operation *> &edgeSrcOps) {
+findLoadDeps(const ComputeBlock *cubePre,
+             const DenseSet<Operation *> &edgeSrcOps) {
   SmallVector<Operation *> result;
   for (Operation *srcOp : edgeSrcOps) {
-    
-    if (CVPipeline::isLoadScope(srcOp) && llvm::is_contained(cubePre->ops, srcOp)) {
+    if (CVPipeline::isLoadScope(srcOp) &&
+        llvm::is_contained(cubePre->ops, srcOp)) {
       result.push_back(srcOp);
     }
   }
@@ -227,7 +227,7 @@ static void cloneOpCrossCubeDep(
     record.clonedOps.push_back(cloned);
     // A cloned load scope keeps its atomicity: stamp the scope, not its body.
     cloned->walk<WalkOrder::PreOrder>([&](Operation *innerOp) {
-      bm.updateBlockId(innerOp, cubeId); 
+      bm.updateBlockId(innerOp, cube->id);
       return CVPipeline::isLoadScope(innerOp) ? WalkResult::skip()
                                               : WalkResult::advance();
     });
@@ -280,12 +280,10 @@ static SmallVector<VectorMergeEdge> collectVectorMergeEdges(
       continue;
     if (!hasTensorResult(blk))
       continue;
-    }
 
     // Must have exactly one CUBE predecessor and exactly one CUBE successor
     if (!findOnlyCubeNeighbour(blk.succs) || !findOnlyCubeNeighbour(blk.preds))
       continue;
-    }
 
     vecCandidates.insert(&blk);
   }
@@ -326,17 +324,16 @@ static void markSubBlock(const ComputeBlock &predV, const ComputeBlock &succV) {
 /// to break the cycle.
 static SmallPtrSet<Operation *, kCloneDepSetInlineSize>
 collectDepOpsInCubePre(const ComputeBlock &cubePre,
-                       ArrayRef<Operation *> toTensorOps,
+                       ArrayRef<Operation *> loadOps,
                        const CVPipeline::MemoryDependenceGraph &memGraph) {
   SmallPtrSet<Operation *, kCloneDepSetInlineSize> opsToClone;
   SmallPtrSet<Operation *, kCloneDepSetInlineSize> depOps;
-  for (Operation *toTensor : toTensorOps) {
-    collectAllDeps(toTensor, memGraph, depOps);
+  for (Operation *loadOp : loadOps) {
+    collectAllDeps(loadOp, memGraph, depOps);
   }
   for (Operation *op : depOps) {
     if (llvm::is_contained(cubePre.ops, op))
       opsToClone.insert(op);
-    }
   }
   return opsToClone;
 }
@@ -362,12 +359,12 @@ tryCloneFromCubePre(const VectorMergeEdge &edge,
 
   // c. Check if Cube depends on CubePre via to_tensor whose feeding
   // memref.copy loads data from GM (external func argument).
-  SmallVector<Operation *> toTensorOps;
+  SmallVector<Operation *> loadOps;
   auto edgeIt = cube->inEdgeSrcOps.find(cubePre);
   if (edgeIt != cube->inEdgeSrcOps.end()) {
-    toTensorOps = findToTensorDeps(cubePre, edgeIt->second, memGraph);
+    loadOps = findLoadDeps(cubePre, edgeIt->second);
   }
-  if (toTensorOps.empty()) {
+  if (loadOps.empty()) {
     LOG_DEBUG("Cube(" << cube->id << ") depends on CubePre(" << cubePre->id
                       << ") not for load data, skipping clone");
     return false;
@@ -376,7 +373,7 @@ tryCloneFromCubePre(const VectorMergeEdge &edge,
   // d. Trace back all transitive dependencies of the to_tensor ops and
   // keep the ones in CubePre; clone them to Cube.
   SmallPtrSet<Operation *, kCloneDepSetInlineSize> opsToClone =
-      collectDepOpsInCubePre(*cubePre, toTensorOps, memGraph);
+      collectDepOpsInCubePre(*cubePre, loadOps, memGraph);
   cloneOpCrossCubeDep(cubePre, cube, opsToClone, bm, record);
   return true;
 }

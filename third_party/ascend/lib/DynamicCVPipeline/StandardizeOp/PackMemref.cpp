@@ -579,7 +579,7 @@ static PackUnitStatus packLoadUnit(memref::AllocOp allocOp) {
   }
 
   // Collect the load unit's scalar and memref view dependencies.
-  ScalarClosure closure(block, unitOps.getArrayRef(), false);
+  ScalarClosure closure(block, unitOps.getArrayRef(), true);
   closure.collect();
   SmallVector<Operation *> scalars(closure.getScalars());
   llvm::sort(scalars, isBeforeInIr);

@@ -115,7 +115,9 @@ remapEffectValue(const MemoryEffects::EffectInstance &effect, Value value) {
 bool isKnownNoMemoryEffectCall(Operation *op) {
   auto callOp = dyn_cast<func::CallOp>(op);
   return callOp && (callOp.getCallee().starts_with("triton_indirect_load") ||
-                    callOp.getCallee().starts_with("triton_stride_load"));
+                    callOp.getCallee().starts_with("triton_stride_load") ||
+                    callOp.getCallee().starts_with("triton_gather") ||
+                    callOp.getCallee().starts_with("triton_stride_store"));
 }
 
 bool shouldAnalyzeAsLeaf(Operation *op) {
@@ -292,7 +294,8 @@ static EffectsTy collectOuterEffects(Operation *op, bool &unknown,
 
   return llvm::TypeSwitch<Operation *, EffectsTy>(op)
       .Case([](annotation::MarkOp markOp) -> EffectsTy {
-        if (markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr)) {
+        if (markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr) ||
+            markOp->hasAttr(CVPipeline::kGMLoadMultiBufferHintAttr)) {
           return {};
         }
         MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Write::get());

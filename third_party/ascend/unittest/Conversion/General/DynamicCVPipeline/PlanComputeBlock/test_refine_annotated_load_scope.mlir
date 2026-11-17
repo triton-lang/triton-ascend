@@ -1,17 +1,18 @@
 // RUN: triton-opt --ssbuf-standardize-op-pack-memref --plan-compute-block %s | FileCheck %s
 
-// C is only needed by the post-matmul add. Its annotation must not introduce
-// a memory dependency into the unrelated bias load and retain C in the first
-// vector block. The C load must be scheduled after the matmul with its extf.
+// The annotated C load stays VECTOR and shares a block with its extf.
+// The current planner emits this group before the bias load and matmul;
+// the post-matmul add consumes the converted C value in a later VECTOR group.
 module {
   // CHECK-LABEL: func.func @refine_annotated_load(
-  // CHECK: %[[BIAS:.*]] = scope.scope : () -> tensor<4xf16> {
-  // CHECK: linalg.matmul
   // CHECK: %[[C:.*]] = scope.scope : () -> tensor<4x4xf16> {
   // CHECK: annotation.mark {{.*}} {MayImplicitTransposeWithLastAxis}
   // CHECK: scope.return
   // CHECK-NEXT: } {ssbuffer.block_id = [[C_BLOCK:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR", ssbuffer.load}
-  // CHECK: arith.extf %[[C]] {ssbuffer.block_id = [[C_BLOCK]] : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK: %[[C_F32:.*]] = arith.extf %[[C]] {ssbuffer.block_id = [[C_BLOCK]] : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK: %[[BIAS:.*]] = scope.scope : () -> tensor<4xf16> {
+  // CHECK: %[[MM:.*]] = linalg.matmul
+  // CHECK: arith.addf %[[MM]], %[[C_F32]] {{.*}}ssbuffer.core_type = "VECTOR"
   func.func @refine_annotated_load(%c: memref<4x4xf16>, %bias: memref<4xf16>, %a: tensor<4x4xf16>, %b: tensor<4x4xf16>, %count: index) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index

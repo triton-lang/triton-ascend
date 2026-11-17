@@ -58,24 +58,84 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
 
 ### 自定义LLVM构建（可选）
 
-如需自定义构建LLVM，可执行以下步骤编译Triton-Ascend：
+如需自定义构建LLVM，可执行以下步骤编译Triton-Ascend：步骤1–3需在同一终端连续执行，并从准备构建的已有Triton-Ascend仓库根目录开始。离线环境需先从联网机器传入该仓库及LLVM源码。
 
 1. **代码准备**：通过`git checkout`检出指定版本的LLVM源码并应用补丁。
 
     ```bash
-    git clone --no-checkout https://github.com/llvm/llvm-project.git
+    # 请在 triton-ascend 仓库根目录下执行，确保 cmake/llvm-hash.txt 可解析；
+    # 该文件必须只包含一个有效的 LLVM commit 哈希。
+    TRITON_ROOT="$(pwd)"
+    [ -f "$TRITON_ROOT/cmake/llvm-hash.txt" ] || { echo "请在 triton-ascend 仓库根目录下执行本代码块：在 $(pwd) 下未找到 cmake/llvm-hash.txt。"; exit 1; }
+    LLVM_COMMIT=$(cat "$TRITON_ROOT/cmake/llvm-hash.txt" | tr -d '\r\n') || exit 1
+    # pin 必须恰好是一个 40 位十六进制字符的 commit 哈希；若文件为空或格式
+    # 错误，不在校验处报错的话，会在随后的 git checkout 内部以晦涩方式失败。
+    # 十六进制字符大小写均合法；统一转小写，使校验与 git 输出一致，
+    # 也与下方补丁文件名校验的处理方式保持一致。
+    LLVM_COMMIT=$(printf '%s' "$LLVM_COMMIT" | tr 'A-F' 'a-f')
+    if [ "${#LLVM_COMMIT}" -ne 40 ] || [ -n "$(printf '%s' "$LLVM_COMMIT" | tr -d '0-9a-f')" ]; then
+      echo "cmake/llvm-hash.txt 为空或不是单个 40 位 commit 哈希 —— 请检查该文件。" >&2
+      exit 1
+    fi
+    # 上方离线流程已将 LLVM 检出随仓库一并传输：若目录已存在，则跳过克隆，
+    # 仅在此执行固定 commit 的检出与应用补丁。
+    if [ ! -d "$TRITON_ROOT/llvm-project/.git" ]; then
+      if [ -d "$TRITON_ROOT/llvm-project" ] && [ -n "$(ls -A "$TRITON_ROOT/llvm-project" 2>/dev/null)" ]; then
+        echo "llvm-project/ 已存在但不是 git 仓库，请清理该目录或补齐 .git 后再执行。" >&2
+        exit 1
+      fi
+      git clone --no-checkout https://github.com/llvm/llvm-project.git || exit 1
+    fi
     cd llvm-project
-    git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-    wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
-    git apply llvm_patch_f6ded0b.patch
+    git checkout "$LLVM_COMMIT" || exit 1
+    # 强制使用 C locale，确保 git apply 的行为不受当前 shell 会话 locale 设置的影响。
+    # 该设置在当前终端会话内持续生效；如需恢复，请在补丁应用完成后执行 unset LC_ALL。
+    export LC_ALL=C
+    # 文件名中 llvm_patch_ 与 .patch 之间的 token 可能内嵌目标 commit 的十六进制
+    # 前缀。若该 token 为纯十六进制且不是 llvm-hash.txt 固定 commit 的前缀，
+    # 说明补丁来自另一个 LLVM 版本：在此给出明确报错并终止，而不是等到
+    # git apply 才以晦涩的方式失败。非纯十六进制的 token 是描述性名称，
+    # 不携带 commit 信息。恰由十六进制字符组成的描述性名称无法与 commit
+    # 前缀区分；请为此类补丁文件改名以跳过该校验。大写十六进制字符先统一
+    # 转为小写，这样以 pin 对应 commit 前缀的大写拼写命名的补丁文件也能被接受。
+    for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
+      [ -f "$patch" ] || continue
+      name=$(basename "$patch")
+      token=${name#llvm_patch_}
+      token=${token%.patch}
+      token=$(printf '%s' "$token" | tr 'A-F' 'a-f')
+      case "$token" in
+        ""|*[!0-9a-f]*) ;;
+        *)
+          case "$LLVM_COMMIT" in
+            "$token"*) ;;
+            *)
+              echo "补丁 $name 为纯十六进制名但非 llvm-hash.txt 固定 commit（$LLVM_COMMIT）的前缀；若它是由十六进制字符组成的描述性名称，请重命名以避免误判。" >&2
+              exit 1
+              ;;
+          esac
+          ;;
+      esac
+      # 在已打过补丁的目录上重复执行本代码块是安全的：若补丁已应用
+      # （正向 --check 失败但反向 --check 通过），则跳过而不是报错退出。
+      if git apply --check "$patch" 2>/dev/null; then
+        git apply "$patch" || exit 1
+      elif git apply -R --check "$patch" 2>/dev/null; then
+        echo "补丁 $name 已应用，跳过。"
+      else
+        echo "补丁 $name 无法干净地应用于当前目录，请重新执行 git apply --check \"$patch\" 查看具体原因。" >&2
+        exit 1
+      fi
+    done
     ```
 
-2. **构建LLVM**：路径`/path/llvm-install`为用户规划的LLVM安装路径，需根据实际调整；路径`{PATH_TO}`为第一步中检出LLVM源码的路径。
+2. **构建LLVM**：路径`/path/llvm-install`为用户规划的LLVM安装路径，需根据实际调整；后续步骤均使用第一步设置的`TRITON_ROOT`定位同一个仓库。
 
     ```bash
     export LLVM_INSTALL_PREFIX=/path/llvm-install
-    cd {PATH_TO}/llvm-project
-    mkdir build
+    [ -n "${TRITON_ROOT:-}" ] || { echo "Run step 1 in the same terminal first."; exit 1; }
+    cd "$TRITON_ROOT/llvm-project"
+    mkdir -p build
     cd build
     cmake ../llvm \
         -G Ninja \
@@ -90,14 +150,15 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
         -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
     ninja install
 
-    cp  {PATH_TO}/llvm-project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
+    cp "$TRITON_ROOT/llvm-project/build/bin/FileCheck" "$LLVM_INSTALL_PREFIX/bin/FileCheck"
     ```
 
 3. **编译Triton-Ascend**：通过配置LLVM路径定位依赖库，启用ccache加速编译，并关闭Proton和单元测试来减少构建开销。
 
     ```bash
-    git clone https://github.com/triton-lang/triton-ascend.git
-    cd triton-ascend
+    [ -n "${TRITON_ROOT:-}" ] || { echo "Run step 1 in the same terminal first."; exit 1; }
+    [ -n "${LLVM_INSTALL_PREFIX:-}" ] || { echo "Set LLVM_INSTALL_PREFIX in step 2 first."; exit 1; }
+    cd "$TRITON_ROOT"
     LLVM_SYSPATH=${LLVM_INSTALL_PREFIX} \
     TRITON_BUILD_WITH_CCACHE=true \
     TRITON_BUILD_WITH_CLANG_LLD=true \

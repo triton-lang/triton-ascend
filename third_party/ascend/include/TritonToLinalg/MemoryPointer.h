@@ -51,9 +51,14 @@ FailureOr<Value> materializePointerAddress(Value memref, Location loc,
                                            ConversionPatternRewriter &rewriter);
 // Checked coordinates can be clamped in the GM view while padding remains
 // relative to the original tile. Keep that choice local to this access.
+struct ClampedPointerAxis {
+  int32_t axis;
+  // max(source i32 coordinate, 0), signed-cast to index for the GM view.
+  Value coordinate;
+};
 struct BoundaryCheckedPointer {
   Value view;
-  SmallVector<int32_t> zeroBasedAxes;
+  SmallVector<ClampedPointerAxis> clampedAxes;
 };
 FailureOr<BoundaryCheckedPointer> materializeBoundaryCheckedMemoryPointer(
     Value pointer, Value converted, ArrayRef<int32_t> checks,
@@ -64,8 +69,10 @@ struct MemoryBoundary {
   SmallVector<OpFoldResult> tileStarts;
   SmallVector<OpFoldResult> sizes;
 };
-FailureOr<MemoryBoundary> getMemoryBoundary(
-    Value pointer, ArrayRef<int32_t> checks, ArrayRef<int32_t> zeroBasedAxes,
-    const MemoryPointerInfos &infos, ConversionPatternRewriter &rewriter);
+FailureOr<MemoryBoundary>
+getMemoryBoundary(Value pointer, ArrayRef<int32_t> checks,
+                  ArrayRef<ClampedPointerAxis> clampedAxes,
+                  const MemoryPointerInfos &infos,
+                  ConversionPatternRewriter &rewriter);
 } // namespace mlir::triton
 #endif

@@ -34,6 +34,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/SetVector.h"
 #include <iterator>
+#include <limits>
 
 using namespace mlir;
 namespace mlir::triton {
@@ -417,12 +418,13 @@ FailureOr<BoundaryCheckedPointer> materializeBoundaryCheckedMemoryPointer(
 
   Location loc = pointer.getLoc();
   Value zero = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
+  SmallVector<ClampedPointerAxis> clampedAxes;
   for (auto [axis, coordinate] : llvm::zip_equal(checks, checkedCoordinates)) {
     Value clamped = rewriter.create<arith::MaxSIOp>(loc, coordinate, zero);
-    coordinates[axis] =
-        rewriter
-            .create<arith::IndexCastOp>(loc, rewriter.getIndexType(), clamped)
-            .getResult();
+    Value gmCoordinate = rewriter.create<arith::IndexCastOp>(
+        loc, rewriter.getIndexType(), clamped);
+    coordinates[axis] = gmCoordinate;
+    clampedAxes.push_back({axis, gmCoordinate});
   }
 
   for (auto [coordinate, stride] : llvm::zip_equal(coordinates, strides)) {
@@ -437,12 +439,40 @@ FailureOr<BoundaryCheckedPointer> materializeBoundaryCheckedMemoryPointer(
                                        rewriter, origin);
   if (failed(view))
     return failure();
-  return BoundaryCheckedPointer{*view, llvm::to_vector(checks)};
+  return BoundaryCheckedPointer{*view, std::move(clampedAxes)};
 }
 
-FailureOr<MemoryBoundary> getMemoryBoundary(
-    Value pointer, ArrayRef<int32_t> checks, ArrayRef<int32_t> zeroBasedAxes,
-    const MemoryPointerInfos &infos, ConversionPatternRewriter &rewriter) {
+// Both parent - coordinate and parent - max(coordinate, 0) must fit in
+// index64. Checked GM coordinates come from i32; keep the old expression
+// when the parent's range cannot be proven without an integer-range analysis.
+static bool hasSafeBoundaryDifference(OpFoldResult parent) {
+  if (auto constant = getConstantIntValue(parent)) {
+    constexpr int64_t minParent = std::numeric_limits<int64_t>::min() +
+                                  std::numeric_limits<int32_t>::max();
+    constexpr int64_t maxParent = std::numeric_limits<int64_t>::max() +
+                                  std::numeric_limits<int32_t>::min();
+    return *constant >= minParent && *constant <= maxParent;
+  }
+  Value value = dyn_cast<Value>(parent);
+  while (value) {
+    if (auto type = dyn_cast<IntegerType>(value.getType());
+        type && type.getWidth() <= 32)
+      return true;
+    if (auto cast = value.getDefiningOp<arith::IndexCastOp>())
+      value = cast.getIn();
+    else if (auto ext = value.getDefiningOp<arith::ExtSIOp>())
+      value = ext.getIn();
+    else
+      break;
+  }
+  return false;
+}
+
+FailureOr<MemoryBoundary>
+getMemoryBoundary(Value pointer, ArrayRef<int32_t> checks,
+                  ArrayRef<ClampedPointerAxis> clampedAxes,
+                  const MemoryPointerInfos &infos,
+                  ConversionPatternRewriter &rewriter) {
   auto found = infos.find(pointer);
   if (found == infos.end() || !found->second.block)
     return failure();
@@ -453,7 +483,14 @@ FailureOr<MemoryBoundary> getMemoryBoundary(
   for (auto [dim, extent] : llvm::enumerate(info.offsets.getShape())) {
     OpFoldResult size = rewriter.getIndexAttr(extent);
     OpFoldResult start = zero;
-    if (llvm::is_contained(checks, static_cast<int32_t>(dim))) {
+    const int32_t axisNumber = static_cast<int32_t>(dim);
+    auto clampedAxis =
+        llvm::find_if(clampedAxes, [axisNumber](const auto &axis) {
+          return axis.axis == axisNumber;
+        });
+    Value gmCoordinate =
+        clampedAxis != clampedAxes.end() ? clampedAxis->coordinate : Value{};
+    if (llvm::is_contained(checks, axisNumber)) {
       OpFoldResult coordinate =
           remap(info.block->coordinateOffsets[dim], rewriter);
       OpFoldResult parent = remap(info.block->parentShape[dim], rewriter);
@@ -463,19 +500,27 @@ FailureOr<MemoryBoundary> getMemoryBoundary(
                           subOpFoldResult(zero, coordinate, loc, rewriter), loc,
                           rewriter),
           loc, rewriter);
-      auto end = minOpFoldResult(
-          size,
-          maxOpFoldResult(zero,
-                          subOpFoldResult(parent, coordinate, loc, rewriter),
-                          loc, rewriter),
-          loc, rewriter);
-      size = maxOpFoldResult(zero, subOpFoldResult(end, start, loc, rewriter),
-                             loc, rewriter);
+      if (gmCoordinate && hasSafeBoundaryDifference(parent)) {
+        // Reuse the actual GM origin, retaining the original tile padding.
+        // For x=-2, parent=5, tile=32 this copies 5 elements into lanes [2,7).
+        auto available = maxOpFoldResult(
+            zero, subOpFoldResult(parent, gmCoordinate, loc, rewriter), loc,
+            rewriter);
+        auto capacity = subOpFoldResult(size, start, loc, rewriter);
+        size = minOpFoldResult(available, capacity, loc, rewriter);
+      } else {
+        auto end = minOpFoldResult(
+            size,
+            maxOpFoldResult(zero,
+                            subOpFoldResult(parent, coordinate, loc, rewriter),
+                            loc, rewriter),
+            loc, rewriter);
+        size = maxOpFoldResult(zero, subOpFoldResult(end, start, loc, rewriter),
+                               loc, rewriter);
+      }
     }
     boundary.tileStarts.push_back(start);
-    boundary.gmStarts.push_back(
-        llvm::is_contained(zeroBasedAxes, static_cast<int32_t>(dim)) ? zero
-                                                                     : start);
+    boundary.gmStarts.push_back(gmCoordinate ? zero : start);
     boundary.sizes.push_back(size);
   }
   return boundary;

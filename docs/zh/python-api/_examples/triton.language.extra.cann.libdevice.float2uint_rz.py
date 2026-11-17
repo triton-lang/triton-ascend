@@ -1,11 +1,16 @@
+import os
+
+os.environ.setdefault("TRITON_ENABLE_LIBDEVICE_SIMT", "1")
+
 import pytest
 import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
 import torch
-from triton.backends.ascend.utils import is_compile_on_910_95
+from triton.backends.ascend.utils import triton_enable_libdevice_simt
 
-_SIMT_SKIP_MSG = "SIMT libdevice examples require a register-based Ascend target; skipping."
+_SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950PR&950DT products target "
+                  "with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
 
 _OUT_DTYPE = torch.uint32
 
@@ -29,7 +34,7 @@ def triton_kernel(input0, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: 
         tl.store(output + (x0), tmp1, mask=mask)
 
 
-@pytest.mark.skipif(not is_compile_on_910_95(), reason=_SIMT_SKIP_MSG)
+@pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
 def test_float2uint_rz():
     x0 = torch.abs((torch.rand((8, )) * 3.0 - 1.5).to(torch.float32))
     expected = (torch_float2uint_rz_reference(x0)).npu()
@@ -42,7 +47,7 @@ def test_float2uint_rz():
 
 
 if __name__ == "__main__":
-    if not is_compile_on_910_95():
+    if not triton_enable_libdevice_simt():
         print(_SIMT_SKIP_MSG)
     else:
         test_float2uint_rz()

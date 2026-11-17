@@ -39,10 +39,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // The valid source addresses are src+[17,18,19,20], and the destinations
 // are dst+[29,30,31,32]. Neither scalar base displacement may be added twice.
 // CHECK-LABEL: func.func @negative_prefix_preserves_base
-// CHECK-DAG: %[[SRC_OFFSET:.*]] = arith.constant 17 : index
-// CHECK-DAG: %[[DST_OFFSET:.*]] = arith.constant 29 : index
-// CHECK: %[[INPUT:.*]] = memref.reinterpret_cast {{.*}} to offset: [%[[SRC_OFFSET]]], sizes: [8], strides: [1]
-// CHECK: %[[OUTPUT:.*]] = memref.reinterpret_cast {{.*}} to offset: [%[[DST_OFFSET]]], sizes: [8], strides: [1]
+// CHECK: %[[INPUT:.*]] = memref.reinterpret_cast {{.*}} to offset: [17], sizes: [8], strides: [1]
+// CHECK: %[[OUTPUT:.*]] = memref.reinterpret_cast {{.*}} to offset: [29], sizes: [8], strides: [1]
 // CHECK: linalg.fill
 // CHECK: %[[GM_READ:.*]] = memref.subview %[[INPUT]][0] [4] [1]
 // CHECK: %[[UB_WRITE:.*]] = memref.subview %{{.*}}[2] [4] [1]
@@ -73,8 +71,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // 20 + (-1)*16 + max(-2,0) = 4. The two valid columns occupy UB [0,2].
 // Clamping both coordinates would incorrectly change the origin to 20.
 // CHECK-LABEL: func.func @unchecked_negative_axis
-// CHECK: %[[OFFSET:.*]] = arith.constant 4 : index
-// CHECK: %[[INPUT:.*]] = memref.reinterpret_cast {{.*}} to offset: [%[[OFFSET]]], sizes: [2, 4], strides: [16, 1]
+// CHECK: %[[INPUT:.*]] = memref.reinterpret_cast {{.*}} to offset: [4], sizes: [2, 4], strides: [16, 1]
 // CHECK: %[[GM:.*]] = memref.subview %[[INPUT]][0, 0] [2, 2] [1, 1]
 // CHECK: %[[UB:.*]] = memref.subview %{{.*}}[0, 2] [2, 2] [1, 1]
 // CHECK: memref.copy %[[GM]], %[[UB]]
@@ -104,8 +101,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // The zero-stride load reads its one address into the same four logical lanes.
 // Bounds depend on coordinates even when the physical stride is zero.
 // CHECK-LABEL: func.func @nonpositive_strides
-// CHECK: %[[OFFSET:.*]] = arith.constant 31 : index
-// CHECK: %[[NEG:.*]] = memref.reinterpret_cast {{.*}} to offset: [%[[OFFSET]]], sizes: [8], strides: [-2]
+// CHECK: %[[NEG:.*]] = memref.reinterpret_cast {{.*}} to offset: [31], sizes: [8], strides: [-2]
 // CHECK: %[[ZERO:.*]] = memref.reinterpret_cast {{.*}} to offset: [0], sizes: [8], strides: [0]
 // CHECK: %[[NEG_GM:.*]] = memref.subview %[[NEG]][0] [4] [1]
 // CHECK: %[[NEG_UB:.*]] = memref.subview %{{.*}}[2] [4] [1]

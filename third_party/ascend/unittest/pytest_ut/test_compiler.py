@@ -186,6 +186,23 @@ def test_active_options_keep_explicit_values(backend):
     assert options.num_warps == 16
 
 
+def test_block_batching_opt_out_is_discoverable_and_accepted(backend):
+
+    @triton.jit
+    def kernel():
+        pass
+
+    baseline = backend.parse_options({"num_warps": 16})
+    assert baseline.__dict__["block_batching_factor"] == 1
+    kwargs = {"num_warps": 16, "block_batching_factor": 1}
+    options, signature, constexprs, attrs = kernel._pack_args(backend, kwargs, {}, [], None)
+
+    assert kwargs == {"num_warps": 16, "block_batching_factor": 1}
+    assert options.__dict__ == baseline.__dict__
+    assert options.hash() == baseline.hash()
+    assert signature == constexprs == attrs == {}
+
+
 @pytest.mark.parametrize(
     "arch, requested, expected",
     [

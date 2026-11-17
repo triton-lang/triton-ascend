@@ -984,8 +984,11 @@ void init_tla_builder(py::module &&m) {
       .def(
           "create_simd_vsqz",
           [](TLABuilder &self, Value src, Value mask) -> Value {
-            return self.create<hivmave::VFSqueezeOp>(src.getType(), src, mask)
-                .getResult();
+            auto op = self.create<hivmave::VsqzOp>(src.getType(), src, mask);
+            op->setAttr("squeeze_store", hivmave::SqueezeStoreModeAttr::get(
+                self.getBuilder().getContext(),
+                hivmave::SqueezeStoreMode::NO_STORED));
+            return op.getResult();
           })
       .def(
           "create_simd_vselr",

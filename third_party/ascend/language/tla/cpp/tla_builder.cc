@@ -955,6 +955,57 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("kind"), py::arg("src"), py::arg("mask"),
           py::arg("mode") = "zeroing")
+
+      .def(
+          "create_tla_sort_pairs",
+          [](TLABuilder &self, Value scores, Value indices, Value dst,
+             Value scratch) {
+            self.create<hivm::VSortPairsOp>(scores, indices, dst, scratch);
+          })
+      .def(
+          "create_simd_vbs",
+          [](TLABuilder &self, Value scores, Value indices, Value dst) {
+            self.create<hivmave::VFSort32Op>(scores, indices, dst);
+          })
+      .def(
+          "create_simd_vmrgsort4",
+          [](TLABuilder &self, Value src, Value dst, int64_t runSize) {
+            self.create<hivmave::VFMergeSort4Op>(
+                src, dst, self.getBuilder().getI64IntegerAttr(runSize));
+          })
+      .def(
+          "create_simd_chistv2",
+          [](TLABuilder &self, Value acc, Value src, Value mask, int32_t bin) -> Value {
+            return self.create<hivmave::VFCHistV2Op>(
+                acc.getType(), acc, src, mask,
+                self.getBuilder().getI32IntegerAttr(bin)).getResult();
+          },
+          py::arg("acc"), py::arg("src"), py::arg("mask"), py::arg("bin"))
+      .def(
+          "create_simd_vsqz",
+          [](TLABuilder &self, Value src, Value mask) -> Value {
+            auto op = self.create<hivmave::VsqzOp>(src.getType(), src, mask);
+            op->setAttr("squeeze_store", hivmave::SqueezeStoreModeAttr::get(
+                self.getBuilder().getContext(),
+                hivmave::SqueezeStoreMode::NO_STORED));
+            return op.getResult();
+          })
+      .def(
+          "create_simd_vselr",
+          [](TLABuilder &self, Value src, Value indices) -> Value {
+            Value mask = self.create<hivmave::VFPgeOp>(
+                VectorType::get({128}, self.getBuilder().getI1Type()),
+                hivmave::PgePattern::ALL).getResult();
+            return self.create<hivmave::VFRegisterGatherOp>(
+                src.getType(), src, indices, mask).getResult();
+          })
+      .def(
+          "create_simd_vscatter",
+          [](TLABuilder &self, Value dst, Value indices, Value src, Value mask) {
+            Value zero = self.create<arith::ConstantIndexOp>(0);
+            self.create<hivmave::VFScatterOp>(dst, ValueRange{zero}, indices,
+                                               mask, src);
+          })
       .def(
           "create_simd_vreduce",
           [](TLABuilder &self, Value &vector, Value &mask,

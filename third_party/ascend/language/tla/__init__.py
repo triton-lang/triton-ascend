@@ -129,6 +129,7 @@ from . import cube
 from .cube import MxFormat
 
 # Explicit pipeline / global synchronization.
+from .sorting import sort_pairs
 from . import sync
 from .sync import sub_block_id
 
@@ -243,6 +244,7 @@ __all__ = [
     "MxFormat",
 
     # explicit synchronization
+    "sort_pairs",
     "sync",
     "sub_block_id",
 

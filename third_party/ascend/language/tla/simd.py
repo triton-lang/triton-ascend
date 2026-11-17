@@ -147,6 +147,10 @@ __all__ = [
     "vabsdif",
     "vexpdif",
     "vreduce",
+    "chistv2",
+    "vsqz",
+    "vselr",
+    "vscatter",
     "vcmax",
     "vcmin",
     "vcmp",
@@ -158,6 +162,8 @@ __all__ = [
     "vreduce_sum",
     "vreduce_max",
     "vreduce_min",
+    "vbs",
+    "vmrgsort4",
     "vci",
     "pge",
     "membar",
@@ -2704,6 +2710,67 @@ def vrsqrt(src, _semantic=None) -> vector:
 
 
 @builtin
+def chistv2(acc, src, mask, bin, _semantic=None) -> vector:
+    """Accumulate masked byte prefix counts into a uint16 register on Ascend 950.
+
+    ``bin`` is 0 for thresholds 0–127 or 1 for thresholds 128–255. Each
+    lane of ``acc`` receives the number of active bytes less than or equal
+    to its threshold, added to its prior count. Keep totals within uint16.
+    """
+    _require_vector(acc, "acc")
+    _require_vector(src, "src")
+    if acc.type != vector_type(128, tl.uint16) or src.type != vector_type(256, tl.uint8):
+        raise ValueError("chistv2 requires vector<128xuint16> acc and vector<256xuint8> src")
+    _check_mask(mask, 256)
+    bin = _unwrap_if_constexpr(bin)
+    if type(bin) is not int or bin not in (0, 1):
+        raise ValueError("chistv2 bin must be the compile-time integer 0 or 1")
+    handle = _semantic.builder.create_simd_chistv2(acc.handle, src.handle, mask.handle, bin)
+    return vector(handle, acc.type)
+
+
+@builtin
+def vsqz(src, mask, _semantic=None) -> vector:
+    """Compact active int32/uint32 lanes in input order, then zero the tail."""
+    _require_vector(src, "src")
+    if src.dtype not in (tl.int32, tl.uint32) or src.shape != (64, ):
+        raise ValueError("vsqz requires a full 32-bit integer register")
+    _check_mask(mask, 64)
+    handle = _semantic.builder.create_simd_vsqz(src.handle, mask.handle)
+    return vector(handle, src.type)
+
+
+@builtin
+def vselr(src, indices, _semantic=None) -> vector:
+    """Gather uint16 lanes from a register using uint16 lane indices."""
+    _require_vector(src, "src")
+    _require_vector(indices, "indices")
+    expected = vector_type(128, tl.uint16)
+    if src.type != expected or indices.type != expected:
+        raise ValueError("vselr requires full uint16 source and index registers")
+    handle = _semantic.builder.create_simd_vselr(src.handle, indices.handle)
+    return vector(handle, src.type)
+
+
+@builtin
+def vscatter(dst, indices, src, mask, _semantic=None):
+    """Store active uint32 lanes to a flat uint32 UB allocation.
+
+    Indices are element offsets. Active indices must be distinct and in bounds.
+    """
+    if (not isinstance(dst, buffer) or dst.space != "ub" or dst.dtype != tl.uint32 or dst.strides != (1, )
+            or dst.offset != 0):
+        raise ValueError("vscatter requires a contiguous uint32 UB buffer at offset zero")
+    _require_vector(src, "src")
+    _require_vector(indices, "indices")
+    expected = vector_type(64, tl.uint32)
+    if src.type != expected or indices.type != expected:
+        raise ValueError("vscatter requires full uint32 source and index registers")
+    _check_mask(mask, 64)
+    _semantic.builder.create_simd_vscatter(dst.handle, indices.handle, src.handle, mask.handle)
+
+
+@builtin
 def vreduce(src, kind, mask=None, _semantic=None) -> vector:
     """
     Horizontal reduction (``ave.hir.reduction``) of a vector register.
@@ -2983,6 +3050,37 @@ def vreduce_min(regs, _semantic=None) -> vector:
     :func:`vreduce_max` with ``ave.hir.vmin``.
     """
     return _reduce_across(regs, "min", _semantic)
+
+
+@builtin
+def vbs(scores, indices, dst, _semantic=None):
+    """Sort each group of 32 UB scores descending and carry indices along.
+
+    Call in the vector scope, outside a register SIMD scope.
+    """
+    from .sorting import _check_scores
+
+    _check_scores(scores, indices, dst)
+    _semantic.builder.create_simd_vbs(scores.handle, indices.handle, dst.handle)
+
+
+@builtin
+def vmrgsort4(src, dst, run_size, _semantic=None):
+    """Merge adjacent descending runs of interleaved score/index pairs.
+
+    Call in the vector scope, outside a register SIMD scope.
+    """
+    from .sorting import _ub_vector
+
+    words = _ub_vector(src, tl.uint32)
+    run = _unwrap_if_constexpr(run_size)
+    if (_ub_vector(dst, tl.uint32) != words or type(run) is not int or not 32 <= run <= words // 4 or run % 32
+            or words % (2 * run)):
+        raise ValueError("invalid UB pair-buffer dimensions or merge run size")
+    runs = words // (2 * run)
+    if words > 8192 or (runs != 2 and runs % 4 != 0):
+        raise ValueError("requires complete two- or four-way merge groups")
+    _semantic.builder.create_simd_vmrgsort4(src.handle, dst.handle, run)
 
 
 @builtin

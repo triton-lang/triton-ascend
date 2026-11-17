@@ -23,9 +23,7 @@ This does not define a device launcher ABI. Standard Triton ASTSource accepts
 pointer strings; this entry point accepts tla.buffer_type without creating
 pointer tensors or changing Triton's global type parser.
 
-The TLA wiring is self-contained: ``setup_unified_builder`` (mounted in
-``CodeGenerator.__init__`` by the patch) registers the ``with tla.scope.*``
-handlers and attaches the TLA builder methods.
+The TLA code generator mounts the TLA builder for every kernel and JIT helper.
 """
 import re
 from collections import namedtuple
@@ -218,6 +216,20 @@ def check_ttadapter(module):
             raise ValueError(f"kernel entry must have {key} = {index} : i64")
 
 
+class _TLACodeGenerator(CodeGenerator):
+
+    def __init__(self, context, *args, **kwargs):
+        from triton._C.libtriton.ascend import ir as ascend_ir
+
+        from .builder import setup_unified_builder
+
+        super().__init__(context, *args, **kwargs)
+        arch = getattr(self.builder.options, "arch", None)
+        tla_builder = ascend_ir.tla_builder(context, arch or "")
+        tla_builder.set_loc(self.file_name, self.begin_line + 1, 0)
+        setup_unified_builder(self.builder, tla_builder)
+
+
 def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
     """Compile a kernel whose runtime arguments are TLA buffers or scalars.
 
@@ -238,16 +250,10 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
     prototype = ASTFunction([], types, constants, {})
     file_name, begin_line = get_jit_fn_file_line(fn)
     proxy = namedtuple("SpecializationProxy", "constants signature")(constexprs, signature)
-    generator = CodeGenerator(context, prototype, gscope=fn.get_capture_scope(), function_name=fn.repr(proxy),
-                              jit_fn=fn, is_kernel=True, file_name=file_name, begin_line=begin_line, options=options,
-                              codegen_fns={}, module_map={}, module=module, is_gluon=False)
+    generator = _TLACodeGenerator(context, prototype, gscope=fn.get_capture_scope(), function_name=fn.repr(proxy),
+                                  jit_fn=fn, is_kernel=True, file_name=file_name, begin_line=begin_line,
+                                  options=options, codegen_fns={}, module_map={}, module=module, is_gluon=False)
     arch = getattr(options, "arch", None)
-    # Mount the TLA builder on the code generator before visiting the AST.
-    from triton.language.extra.tla.builder import setup_unified_builder
-
-    tla_builder = ascend_ir.tla_builder(context, arch or "")
-    tla_builder.set_loc(file_name, begin_line, 0)
-    setup_unified_builder(generator.builder, tla_builder)
     generator.visit(fn.parse())
     module = generator.module
     module.context = context

@@ -81,7 +81,7 @@ jobs:
           - {runs_on: 'linux-aarch64-cpu-16', arch: 'aarch64'}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         # No submodules: the build no longer uses the pinned AscendNPU-IR
         # gitlink. The next step fetches the upstream stable branch HEAD
         # (plus the nested llvm-project / torch-mlir / shmem submodules)
@@ -269,7 +269,7 @@ jobs:
         arch: [x86_64, aarch64]
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Download npuir payload artifact
         uses: dawidd6/action-download-artifact@v9

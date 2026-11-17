@@ -51,7 +51,7 @@ jobs:
     steps:
       # ── Checkout triton-ascend (full history + tags + submodules) ──────────
       - name: Checkout triton-ascend
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true

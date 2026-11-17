@@ -33,10 +33,10 @@ def scoped_add(x, y, out, n: tl.constexpr, BLOCK: tl.constexpr):
             tl.store(out + offsets, result, offsets < n)
 
 
-def test_perf_monitor_instrumentation(tmp_path, monkeypatch):
+def test_ascend_instrumentation_a5(tmp_path, monkeypatch):
     monkeypatch.setenv("TRITON_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("PROTON_MSPTI_LIBRARY_PATH", str(tmp_path / "absent-libmspti.so"))
-    output = tmp_path / "perf_monitor"
+    output = tmp_path / "a5_instrumentation"
     x = torch.randn(4096, device="npu")
     y = torch.randn_like(x)
     out = torch.empty_like(x)

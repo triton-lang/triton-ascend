@@ -21,9 +21,12 @@
  */
 
 #include "TritonToUnstructure/UnstructureConversionPass.h"
+#include "TritonMemoryAccess/PtrAnalysis.h"
+#include "TritonMemoryAccess/Utils.h"
 #include "TritonToLinalg/MaskAnalysis.h"
 #include "TritonToStructured/CannonicalizerConverter.h"
 #include "TritonToUnstructure/IndirectAtomicUtils.h"
+#include "Utils/PtrAnalysisUtils.h"
 #include "Utils/Utils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
@@ -33,11 +36,13 @@
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/TypeSwitch.h"
 
 #include <optional>
 
@@ -342,7 +347,7 @@ static int64_t getTypeSizeInByte(Type type) {
 
 template <typename MemAccOpTy>
 void normalizeDiscreteMaskAccessForFallback(MemAccOpTy &op,
-                                            PtrOffsetInfo &ptrOffsetInfo,
+                                            SmallVector<bool> &structuredAxes,
                                             PatternRewriter &rewriter) {
   if (!op->hasAttr(ConverterUtils::discreteMaskAttrName)) {
     return;
@@ -363,7 +368,7 @@ void normalizeDiscreteMaskAccessForFallback(MemAccOpTy &op,
   }
 
   rewriter.setInsertionPoint(op);
-  ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
+  llvm::fill(structuredAxes, false);
 }
 
 // ======================== 950 template-SIMT indirect fast-path lowering
@@ -573,7 +578,7 @@ template <typename MemAccOpTy>
 Value UnstructuredMemAccessConverter<MemAccOpTy>::createExtractOp(
     Location loc, Value value, PatternRewriter &rewriter,
     ArrayRef<OpFoldResult> iterIdx) const {
-  if (!value)
+  if (!value || !isa<RankedTensorType>(value.getType()))
     return value;
   SmallVector<Value> indices;
   for (auto idxOfr : iterIdx) {
@@ -610,8 +615,13 @@ template <typename... Args>
 triton::LoadOp UnstructuredMemAccessConverter<triton::LoadOp>::createMemAccOp(
     triton::LoadOp op, Value ptrToAccess, Location loc,
     PatternRewriter &rewriter, Args &&...args) const {
-  return rewriter.create<triton::LoadOp>(loc, ptrToAccess, op.getCache(),
-                                         op.getEvict(), op.getIsVolatile());
+  Value mask =
+      createExtractOp(loc, op.getMask(), rewriter, std::forward<Args>(args)...);
+  Value other = createExtractOp(loc, op.getOther(), rewriter,
+                                std::forward<Args>(args)...);
+  return rewriter.create<triton::LoadOp>(loc, ptrToAccess, mask, other,
+                                         op.getCache(), op.getEvict(),
+                                         op.getIsVolatile());
 }
 
 template <>
@@ -696,78 +706,30 @@ triton::StoreOp UnstructuredMemAccessConverter<triton::StoreOp>::createMemAccOp(
   auto extractedMask =
       createExtractOp(loc, op.getMask(), rewriter, std::forward<Args>(args)...);
   return rewriter.create<triton::StoreOp>(loc, ptrToAccess, extractedValue,
-                                          extractedMask);
+                                          extractedMask, op.getCache(),
+                                          op.getEvict());
 }
 
 template <>
 template <>
 LogicalResult
 UnstructuredMemAccessConverter<triton::LoadOp>::splatAndLoadScenario<
-    triton::LoadOp>(triton::LoadOp op, const PtrOffsetInfo &ptrOffsetInfo,
+    triton::LoadOp>(triton::LoadOp op, const mlir::triton::ptr::PtrInfo &info,
                     PatternRewriter &rewriter) const {
-  auto loc = op.getLoc();
-  if (!ptrOffsetInfo.isPointerDescriptorOwned()) {
-    // Preserve the legacy scalar-like path for unmarked pointer tensors. The
-    // analyzed-base reconstruction below is a descriptor handoff contract.
-    // Provenance is carried by PtrOffsetInfo so supported pointer-preserving
-    // operations, such as an ordinary addptr after the rebuild, do not lose
-    // ownership; unrelated pointer tensors still keep this legacy path.
-    SmallVector<OpFoldResult> indices(ptrOffsetInfo.getRank(),
-                                      rewriter.getIndexAttr(0));
-    Value extractedPtr = createExtractOp(loc, op.getPtr(), rewriter, indices);
-    Value mask = op.getMask();
-    Value other = op.getOther();
-    Value loadedValue = rewriter.create<triton::LoadOp>(
-        loc, extractedPtr, /*mask=*/nullptr, /*other=*/nullptr,
-        /*boundaryCheck=*/ArrayRef<int32_t>(),
-        /*PaddingOptionAttr=*/nullptr);
-    loadedValue = rewriter.create<triton::SplatOp>(
-        loc, op.getResult().getType(), loadedValue);
-    if (mask)
-      rewriter.replaceOpWithNewOp<arith::SelectOp>(op, mask, loadedValue,
-                                                   other);
-    else
-      rewriter.replaceOp(op, loadedValue);
-    return success();
-  }
-
-  Value scalarBase = ptrOffsetInfo.getPtr();
-  Value scalarOffset = ptrOffsetInfo.getOffset();
-  if (!scalarBase || !isa<triton::PointerType>(scalarBase.getType()) ||
-      !scalarOffset)
+  // A masked or volatile load must retain the individual access semantics.
+  if (op.getMask() || op.getIsVolatile() || !info.hasScalarBase() || info.block)
     return failure();
-
-  if (auto offsetType = dyn_cast<RankedTensorType>(scalarOffset.getType())) {
-    if (offsetType.getRank() != ptrOffsetInfo.getRank() ||
-        !isa<IntegerType>(offsetType.getElementType()))
-      return failure();
-    SmallVector<OpFoldResult> indices(ptrOffsetInfo.getRank(),
-                                      rewriter.getIndexAttr(0));
-    scalarOffset = createExtractOp(loc, scalarOffset, rewriter, indices);
-  } else if (!scalarOffset.getType().isIndex() &&
-             !isa<IntegerType>(scalarOffset.getType())) {
+  Value origin = getValueOrCreateConstantIndexOp(rewriter, op.getLoc(),
+                                                 info.offsets.scalarOffset);
+  auto offset =
+      castIntegerLike(rewriter, op.getLoc(), origin, rewriter.getI64Type());
+  if (failed(offset))
     return failure();
-  }
-
-  // PtrOffsetInfo already represents the analyzed address as scalarBase plus
-  // scalarOffset. Rebuild that scalar pointer directly instead of extracting
-  // a pointer lane from the original tensor-of-pointers value. This keeps the
-  // pointer producer in the T2L-supported addptr family; only the numerical
-  // offset is extracted from a tensor when necessary.
-  Value ptrToLoad = rewriter.create<triton::AddPtrOp>(loc, scalarBase.getType(),
-                                                      scalarBase, scalarOffset);
-  Value mask = op.getMask();
-  Value other = op.getOther();
-  Value loadedValue = rewriter.create<triton::LoadOp>(
-      loc, ptrToLoad, /*mask=*/nullptr, /*other=*/nullptr,
-      /*boundaryCheck=*/ArrayRef<int32_t>(),
-      /*PaddingOptionAttr=*/nullptr);
-  loadedValue = rewriter.create<triton::SplatOp>(loc, op.getResult().getType(),
-                                                 loadedValue);
-  if (mask)
-    rewriter.replaceOpWithNewOp<arith::SelectOp>(op, mask, loadedValue, other);
-  else
-    rewriter.replaceOp(op, loadedValue);
+  Value pointer = rewriter.create<triton::AddPtrOp>(
+      op.getLoc(), info.base.getType(), info.base, *offset);
+  Value loaded = rewriter.create<triton::LoadOp>(
+      op.getLoc(), pointer, op.getCache(), op.getEvict(), op.getIsVolatile());
+  rewriter.replaceOpWithNewOp<triton::SplatOp>(op, op.getType(), loaded);
   return success();
 }
 
@@ -805,11 +767,10 @@ static triton::LoadOp rewriteSimdDiscreteMaskLoad(triton::LoadOp op,
 template <typename MemAccOpTy>
 UnstructuredMemAccessConverter<MemAccOpTy>::UnstructuredMemAccessConverter(
     MLIRContext *context, bool forceScalarizeMode,
-    const llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
-    const llvm::SmallDenseMap<Value, bool> &fromTensorArg)
-    : OpRewritePattern<MemAccOpTy>(context),
-      forceScalarizeMode(forceScalarizeMode), offsetMap(offsetMap),
-      fromTensorArg(fromTensorArg) {}
+    const mlir::triton::ptr::PtrInfo &info, bool fromTensorArgument)
+    : OpRewritePattern<MemAccOpTy>(context), info(info),
+      fromTensorArgument(fromTensorArgument),
+      forceScalarizeMode(forceScalarizeMode) {}
 
 template <typename MemAccOpTy>
 LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
@@ -826,93 +787,121 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   if (!ptrType || op->hasAttr(ConverterUtils::discreteAttrName))
     return failure();
-  if (!offsetMap.contains(ptr))
-    return op.emitError() << "PtrOffsetInfo should be computed\n" << ptr;
+  unsigned rank = info.offsets.axes.size();
+  bool scalarLike =
+      !info.block && info.hasScalarBase() && info.offsets.isUniform();
+  SmallVector<bool> structuredAxes;
+  for (auto [size, axis] :
+       llvm::zip_equal(ptrType.getShape(), info.offsets.axes))
+    structuredAxes.push_back(
+        info.hasScalarBase() &&
+        (axis.kind == mlir::triton::ptr::AxisKind::Structured || size == 1 ||
+         (info.block && axis.kind == mlir::triton::ptr::AxisKind::Invariant)));
+  auto isStructured = [&] {
+    return llvm::all_of(structuredAxes, [](bool v) { return v; });
+  };
+  Value srcPtr = info.base;
+  Value ptrOffset;
+  if (!info.block) {
+    auto full = mlir::triton::ptr::detail::materializeFullOffset(
+        info.offsets,
+        RankedTensorType::get(ptrType.getShape(), rewriter.getI64Type()),
+        rewriter, loc);
+    if (failed(full))
+      return op.emitError("cannot materialize the complete pointer offset");
+    ptrOffset = *full;
+  }
 
-  auto ptrOffsetInfo = offsetMap.at(ptr);
-
-  // Handle these accesses before any speculative fallback IR is created.
-  // A failed match must leave the original operation intact for the final
-  // unsupported-mask diagnostic, without repeatedly inserting dead helpers.
-  if (runtimeLoopMask) {
-    if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
-                  std::is_same_v<MemAccOpTy, triton::StoreOp>) {
-      // A one-element tensor needs only a scalar predicate, including in SIMD
-      // mode. Use explicit control flow: the legacy scalar masked-load
-      // converter otherwise loads unconditionally and selects afterwards.
-      if (ptrType.getNumElements() == 1 &&
-          getResultElementType(ptrType).isIntOrFloat() &&
-          canUseIndirectFastPath(ptrOffsetInfo.getPtr(),
-                                 ptrOffsetInfo.getOffset())) {
-        SmallVector<OpFoldResult> indices(ptrType.getRank(),
-                                          rewriter.getIndexAttr(0));
-        Value offset =
-            createExtractOp(loc, ptrOffsetInfo.getOffset(), rewriter, indices);
-        Value base = ptrOffsetInfo.getPtr();
-        Value scalarPtr = rewriter.create<triton::AddPtrOp>(loc, base.getType(),
-                                                            base, offset);
-        Value mask = createExtractOp(loc, op.getMask(), rewriter, indices);
-        if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-          Value other = createExtractOp(loc, op.getOther(), rewriter, indices);
-          if (!other)
-            other = rewriter.create<arith::ConstantOp>(
-                loc, rewriter.getZeroAttr(getResultElementType(ptrType)));
-          auto guardedLoad = rewriter.create<scf::IfOp>(
-              loc, mask,
-              [&](OpBuilder &b, Location loc) {
-                auto load =
-                    b.create<triton::LoadOp>(loc, scalarPtr, op.getCache(),
-                                             op.getEvict(), op.getIsVolatile());
-                b.create<scf::YieldOp>(loc, load.getResult());
-              },
-              [&](OpBuilder &b, Location loc) {
-                b.create<scf::YieldOp>(loc, other);
-              });
-          rewriter.replaceOpWithNewOp<triton::SplatOp>(
-              op, op.getType(), guardedLoad.getResult(0));
-        } else {
-          Value value = createExtractOp(loc, op.getValue(), rewriter, indices);
-          rewriter.create<scf::IfOp>(
-              loc, mask, [&](OpBuilder &b, Location loc) {
-                b.create<triton::StoreOp>(loc, scalarPtr, value, op.getCache(),
-                                          op.getEvict());
-                b.create<scf::YieldOp>(loc);
-              });
-          rewriter.eraseOp(op);
-        }
-        return success();
-      }
+  // A single lane needs only a scalar predicate. Keep the access inside the
+  // true branch so a masked-off pointer is never dereferenced.
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
+                std::is_same_v<MemAccOpTy, triton::StoreOp>) {
+    bool scalarizeMask = runtimeLoopMask;
+    if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+      // The ordinary discrete-mask fast path uses scalar numeric loads. Bool
+      // storage normalization and volatile access retain their existing path.
+      scalarizeMask =
+          scalarizeMask ||
+          (mixCompileDiscreteMask && op.getMask() && !info.block &&
+           ptrType.hasStaticShape() && ptrType.getNumElements() == 1 &&
+           !op.getIsVolatile() && !getResultElementType(ptrType).isInteger(1) &&
+           !op->hasAttr("was_bool_to_int8") &&
+           !ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op));
     }
+    if (scalarizeMask && ptrType.hasStaticShape() &&
+        ptrType.getNumElements() == 1 &&
+        getResultElementType(ptrType).isIntOrFloat() &&
+        canUseIndirectFastPath(srcPtr, ptrOffset)) {
+      SmallVector<OpFoldResult> indices(ptrType.getRank(),
+                                        rewriter.getIndexAttr(0));
+      Value offset = createExtractOp(loc, ptrOffset, rewriter, indices);
+      Value base = srcPtr;
+      Value scalarPtr =
+          rewriter.create<triton::AddPtrOp>(loc, base.getType(), base, offset);
+      Value mask = createExtractOp(loc, op.getMask(), rewriter, indices);
+      if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+        Value other = createExtractOp(loc, op.getOther(), rewriter, indices);
+        if (!other)
+          other = rewriter.create<arith::ConstantOp>(
+              loc, rewriter.getZeroAttr(getResultElementType(ptrType)));
+        auto guardedLoad = rewriter.create<scf::IfOp>(
+            loc, mask,
+            [&](OpBuilder &b, Location loc) {
+              auto load =
+                  b.create<triton::LoadOp>(loc, scalarPtr, op.getCache(),
+                                           op.getEvict(), op.getIsVolatile());
+              b.create<scf::YieldOp>(loc, load.getResult());
+            },
+            [&](OpBuilder &b, Location loc) {
+              b.create<scf::YieldOp>(loc, other);
+            });
+        rewriter.replaceOpWithNewOp<triton::SplatOp>(op, op.getType(),
+                                                     guardedLoad.getResult(0));
+      } else {
+        Value value = createExtractOp(loc, op.getValue(), rewriter, indices);
+        rewriter.create<scf::IfOp>(loc, mask, [&](OpBuilder &b, Location loc) {
+          b.create<triton::StoreOp>(loc, scalarPtr, value, op.getCache(),
+                                    op.getEvict());
+          b.create<scf::YieldOp>(loc);
+        });
+        rewriter.eraseOp(op);
+      }
+      return success();
+    }
+  }
+
+  // Runtime loop masks have a stricter fallback contract. Ordinary discrete
+  // masks that did not scalarize continue through the existing paths below.
+  if (runtimeLoopMask) {
     if (compileOn91095Flag &&
-        triton::ascend::isSimtTemplateMode(unstructureCompileMode))
-      return tryRewriteIndirectFastPath(op, loc, ptrOffsetInfo.getPtr(),
-                                        ptrOffsetInfo.getOffset(),
-                                        ptrType.getShape(), rewriter);
-    return rewriter.notifyMatchFailure(
-        op, "loop mask requires a supported masked indirect access");
+        triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
+        succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,
+                                             ptrType.getShape(), rewriter)))
+      return success();
+    return op.emitError(
+        "cannot lower this loop-carried mask with a masked "
+        "indirect access for the selected target and compile mode");
   }
 
   if (checkUnstructureAnnotated(op, rewriter))
-    ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
+    llvm::fill(structuredAxes, false);
 
   bool maskRewritten = false;
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    if (simdDiscreteMask ||
-        (axisDiscreteMask && ptrOffsetInfo.isStructured())) {
+    if (simdDiscreteMask || (axisDiscreteMask && isStructured())) {
       op = rewriteSimdDiscreteMaskLoad(op, rewriter);
       rewriter.setInsertionPoint(op);
       maskRewritten = true;
     }
   }
 
-  if (ptrOffsetInfo.isStructured() && !mixCompileDiscreteMask &&
-      (!ptrOffsetInfo.isScalarLike() ||
+  if (isStructured() && !mixCompileDiscreteMask &&
+      (!scalarLike ||
        llvm::all_of(ptrType.getShape(), [](int64_t dim) { return dim == 1; })))
-    return success(maskRewritten);
+    return success();
 
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    if (ptrOffsetInfo.isScalarLike() &&
-        succeeded(splatAndLoadScenario(op, ptrOffsetInfo, rewriter))) {
+    if (scalarLike && succeeded(splatAndLoadScenario(op, info, rewriter))) {
       return success();
     }
   }
@@ -921,23 +910,20 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     auto &os = llvm::dbgs();
     os << "Converting " << op->getName() << "\n";
     os << op << "\n";
-    for (auto structured : ptrOffsetInfo.getStructuredRef())
+    for (auto structured : structuredAxes)
       os << static_cast<int>(structured);
     os << "\n";
-    os << ptrOffsetInfo.isScalarLike() << "\n";
+    os << scalarLike << "\n";
   });
 
   std::optional<MaskState> mstate = runMaskAnalysis(op, rewriter);
 
-  normalizeDiscreteMaskAccessForFallback(op, ptrOffsetInfo, rewriter);
+  normalizeDiscreteMaskAccessForFallback(op, structuredAxes, rewriter);
 
-  if (forceScalarizeMode || ptrOffsetInfo.isScalarLike() ||
-      fromTensorArg.at(ptr)) {
-    ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
+  if (forceScalarizeMode || scalarLike || fromTensorArgument) {
+    llvm::fill(structuredAxes, false);
   }
 
-  auto srcPtr = ptrOffsetInfo.getPtr();
-  auto ptrOffset = ptrOffsetInfo.getOffset();
   if (!isa<triton::PointerType>(srcPtr.getType()) &&
       !isTensorOfPointers(srcPtr.getType()))
     return rewriter.notifyMatchFailure(
@@ -955,29 +941,28 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   int64_t sizeInByte = getTypeSizeInByte(resultElementType);
 
   int64_t continuousSize = sizeInByte;
-  for (int i = ptrOffsetInfo.getRank() - 1; i >= 0; i--) {
-    if (!ptrOffsetInfo.isStructured(i))
+  for (int i = rank - 1; i >= 0; i--) {
+    if (!structuredAxes[i])
       break;
     continuousSize *= resultShape[i];
   }
 
   int64_t discreteSize = sizeInByte;
-  for (int i = 0; i < ptrOffsetInfo.getRank(); ++i) {
-    if (!ptrOffsetInfo.isStructured(i))
+  for (unsigned i = 0; i < rank; ++i) {
+    if (!structuredAxes[i])
       discreteSize *= resultShape[i];
   }
 
   // Force scalarize if memory is not aligned
   if (continuousSize % 32 != 0) {
-    ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
+    llvm::fill(structuredAxes, false);
   }
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "UnStructured Flag check:\n";
     os << "discrete axis size before scalarization: " << discreteSize << "\n";
-    os << "ptrOffsetInfo.isStructured: " << ptrOffsetInfo.isStructured()
-       << "\n";
+    os << "structured access: " << isStructured() << "\n";
     os << "compileOn91095Flag: " << compileOn91095Flag << "\n";
     os << "compileMode: " << static_cast<int>(unstructureCompileMode) << "\n";
   });
@@ -985,7 +970,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   bool templateIndirectFastPathEnabled =
       compileOn91095Flag &&
       triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
-      ((!axisDiscreteMask && !ptrOffsetInfo.isStructured() &&
+      ((!axisDiscreteMask && !isStructured() &&
         continuousSize < 64) || // cont mask
        (axisDiscreteMask && discreteSize > continuousSize) ||
        mixCompileDiscreteMask);
@@ -1045,8 +1030,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   for (size_t i = 0; i < resultShape.size(); i++) {
     auto size = resultShape[i];
-    auto structured = ptrOffsetInfo.getStructuredRef()[i] ==
-                      PtrOffsetInfo::AxisInfo::structured;
+    bool structured = structuredAxes[i];
     // handle indirect dimension
     strides.push_back(rewriter.getIndexAttr(1));
     Value sizeVal =
@@ -1057,15 +1041,6 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       extractedShape.push_back(size);
     } else {
       scf::ForOp forOp;
-      if (auto mtptOp =
-              srcPtr.template getDefiningOp<triton::MakeTensorPtrOp>()) {
-        auto tptShape = mtptOp.getShape()[i];
-        if (tptShape.getType() != rewriter.getIndexType()) {
-          tptShape = rewriter.create<arith::IndexCastOp>(
-              loc, rewriter.getIndexType(), tptShape);
-        }
-        sizeVal = rewriter.create<arith::MinSIOp>(loc, sizeVal, tptShape);
-      }
 
       Value loopLower = zeroIdx;
       Value loopUpper = sizeVal;
@@ -1110,33 +1085,26 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     }
   }
 
-  bool fullyUnstructured = ptrOffsetInfo.isUnstructuredOrScalarlike();
+  bool fullyUnstructured =
+      llvm::none_of(structuredAxes, [](bool v) { return v; });
   auto extractedType = RankedTensorType::get(extractedShape, resultElementType);
 
   Value extractedOffset;
-  if (fullyUnstructured) {
-    if (auto mtptOp =
-            srcPtr.template getDefiningOp<triton::MakeTensorPtrOp>()) {
-      auto I64Type = rewriter.getIntegerType(64);
-      srcPtr = mtptOp.getBase();
-      extractedOffset = rewriter.create<arith::ConstantIntOp>(loc, 0, 64);
-      for (auto [indVar, offset, stride] : llvm::zip_equal(
-               offsets, ptrOffsetInfo.getOffsets(), mtptOp.getStrides())) {
-        Value inductionVar = rewriter.create<arith::IndexCastOp>(
-            loc, I64Type, cast<Value>(indVar));
-        Value tptOffset = rewriter.create<arith::ExtSIOp>(loc, I64Type, offset);
-        Value tptStride = rewriter.create<arith::ExtSIOp>(loc, I64Type, stride);
-        tptOffset = rewriter.create<arith::MulIOp>(loc, tptStride, tptOffset);
-        tptStride =
-            rewriter.create<arith::MulIOp>(loc, tptStride, inductionVar);
-        extractedOffset =
-            rewriter.create<arith::AddIOp>(loc, extractedOffset, tptOffset);
-        extractedOffset =
-            rewriter.create<arith::AddIOp>(loc, extractedOffset, tptStride);
-      }
-    } else {
-      extractedOffset = createExtractOp(loc, ptrOffset, rewriter, offsets);
-    }
+  if (info.block) {
+    if (!fullyUnstructured)
+      return op.emitError("partial block-pointer scalarization is unsupported");
+    SmallVector<Value> indices;
+    for (OpFoldResult offset : offsets)
+      indices.push_back(getValueOrCreateConstantIndexOp(rewriter, loc, offset));
+    auto scalar = mlir::triton::ptr::materializeOffsetAt(info.offsets, indices,
+                                                         rewriter, loc);
+    if (failed(scalar))
+      return op.emitError("cannot materialize the block pointer offset");
+    Value indexOffset = getValueOrCreateConstantIndexOp(rewriter, loc, *scalar);
+    extractedOffset =
+        *castIntegerLike(rewriter, loc, indexOffset, rewriter.getI64Type());
+  } else if (fullyUnstructured) {
+    extractedOffset = createExtractOp(loc, ptrOffset, rewriter, offsets);
   } else {
     extractedOffset =
         createExtractOp(loc, ptrOffset, rewriter, offsets, sizes, strides);
@@ -1175,6 +1143,44 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     accessedOp =
         createMemAccOp(op, ptrToAccess, loc, rewriter, offsets, sizes, strides);
   }
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
+                std::is_same_v<MemAccOpTy, triton::StoreOp>) {
+    if (info.block && fullyUnstructured && !op.getBoundaryCheck().empty()) {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPoint(accessedOp);
+      Value predicate = accessedOp.getMask();
+      Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+      for (int32_t dim : op.getBoundaryCheck()) {
+        Value coordinate = getValueOrCreateConstantIndexOp(
+            rewriter, loc,
+            addOpFoldResult(info.block->coordinateOffsets[dim], offsets[dim],
+                            loc, rewriter));
+        Value extent = getValueOrCreateConstantIndexOp(
+            rewriter, loc, info.block->parentShape[dim]);
+        Value lower = rewriter.create<arith::CmpIOp>(
+            loc, arith::CmpIPredicate::sge, coordinate, zero);
+        Value upper = rewriter.create<arith::CmpIOp>(
+            loc, arith::CmpIPredicate::slt, coordinate, extent);
+        Value valid = rewriter.create<arith::AndIOp>(loc, lower, upper);
+        predicate = predicate
+                        ? rewriter.create<arith::AndIOp>(loc, predicate, valid)
+                        : valid;
+      }
+      accessedOp.getMaskMutable().assign(predicate);
+      if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+        if (auto padding = op.getPadding()) {
+          TypedAttr value = rewriter.getZeroAttr(resultElementType);
+          if (*padding == triton::PaddingOption::PAD_NAN)
+            value = rewriter.getFloatAttr(
+                resultElementType,
+                llvm::APFloat::getNaN(
+                    cast<FloatAttr>(value).getValue().getSemantics()));
+          accessedOp.getOtherMutable().assign(
+              rewriter.create<arith::ConstantOp>(loc, value).getResult());
+        }
+      }
+    }
+  }
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
     // Preserve the mask on retained dimensions, just as stores and atomics do.
     // BubbleUpOperation exposes the sliced mask for structured lowering.
@@ -1183,9 +1189,21 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       rewriter.setInsertionPoint(accessedOp);
       Value residualMask =
           getResidualLoadMask(op.getMask(), boundedLoopAxes, rewriter);
-      if (residualMask)
+      if (residualMask) {
         accessedOp.getMaskMutable().assign(createExtractOp(
             loc, residualMask, rewriter, offsets, sizes, strides));
+        // The outer select restores padding after all slices are assembled.
+        // Keep nonuniform padding for the deinterleave lowering contract.
+        DenseElementsAttr other;
+        if (op.getOther() && matchPattern(op.getOther(), m_Constant(&other)) &&
+            other.isSplat())
+          accessedOp.getOtherMutable().clear();
+      } else {
+        // The loop bounds enforce the complete mask. Padding for unvisited
+        // elements remains in the outer select below.
+        accessedOp.getMaskMutable().clear();
+        accessedOp.getOtherMutable().clear();
+      }
     }
   }
 
@@ -1235,8 +1253,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       if (fullyUnstructured && accessedOp.getMask()) {
         auto mask = createExtractOp(
             loc, accessedOp.getMask(), rewriter,
-            SmallVector<OpFoldResult>(ptrOffsetInfo.getRank(),
-                                      rewriter.getIndexAttr(0)));
+            SmallVector<OpFoldResult>(rank, rewriter.getIndexAttr(0)));
         rewriter.create<scf::IfOp>(loc, mask, [&](OpBuilder &b, Location loc) {
           b.create<triton::AtomicRMWOp>(
                loc, accessedOp.getType(), accessedOp.getAtomicRmwOp(),
@@ -1261,40 +1278,6 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   return success();
 }
 
-void TritonToUnstructurePass::runPreparse(LoopLikeOpInterface op) {
-  IRRewriter rewriter(&getContext());
-  auto loc = op.getLoc();
-
-  LLVM_DEBUG({
-    auto &os = llvm::dbgs();
-    os << "Pre-parsing " << op->getName() << "\n" << op << "\n";
-  });
-
-  Block::BlockArgListType args;
-  ValueRange yields;
-  if (auto whileOp = dyn_cast<scf::WhileOp>(op.getOperation())) {
-    args = whileOp.getBeforeArguments();
-    yields = whileOp.getYieldOp().getOperands();
-  } else {
-    args = op.getRegionIterArgs();
-    yields = op.getYieldedValues();
-  }
-
-  for (auto [arg, yield] : llvm::zip_equal(args, yields)) {
-    if (auto tensorType = dyn_cast<RankedTensorType>(yield.getType())) {
-      parse(yield, loc, rewriter, offsetMapForLoopArgs);
-      offsetMap[arg] = offsetMapForLoopArgs.at(yield);
-      LLVM_DEBUG({
-        auto &os = llvm::dbgs();
-        os << "Pre-parsing result of\n" << arg << "\nis ";
-        for (auto structured : offsetMap[arg].getStructuredRef())
-          os << static_cast<int>(structured);
-        os << '\n';
-      });
-    }
-  }
-}
-
 static bool isFromTensorArg(Value v,
                             llvm::SmallDenseMap<Value, bool> &fromTensorArg) {
   if (fromTensorArg.contains(v))
@@ -1314,15 +1297,30 @@ static bool isFromTensorArg(Value v,
   return false;
 }
 
-template <typename MemAccOpTy, typename>
-void TritonToUnstructurePass::runParse(MemAccOpTy op) {
-  IRRewriter rewriter(&getContext());
-  LLVM_DEBUG({
-    auto &os = llvm::dbgs();
-    os << "Parsing " << op->getName() << "\n" << op << "\n";
-  });
-  parse(op.getPtr(), op.getLoc(), rewriter, offsetMap);
-  isFromTensorArg(op.getPtr(), fromTensorArg);
+// A query owns one stable source-IR session. Consume its facts immediately;
+// the next memory operation is analyzed after all earlier RAUW has completed.
+template <typename OpTy>
+static LogicalResult lowerMemoryAccess(OpTy op, bool forceScalarize,
+                                       PatternRewriter &rewriter) {
+  if (!resolvePtrTensorType(op.getPtr()) ||
+      op->hasAttr(ConverterUtils::discreteAttrName))
+    return success();
+  rewriter.setInsertionPoint(op);
+  FailureOr<mlir::triton::ptr::PtrInfo> info = failure();
+  {
+    mlir::triton::ptr::PtrAnalysis analysis(rewriter);
+    if (failed(importPointerDescriptorFacts(
+            op->template getParentOfType<triton::FuncOp>(), analysis)))
+      return failure();
+    info = analysis.analyze(op.getPtr());
+  }
+  if (failed(info))
+    return op.emitError("public pointer analysis failed");
+  llvm::SmallDenseMap<Value, bool> fromTensorArg;
+  bool fromArgument = isFromTensorArg(op.getPtr(), fromTensorArg);
+  UnstructuredMemAccessConverter<OpTy> converter(
+      op.getContext(), forceScalarize, *info, fromArgument);
+  return converter.matchAndRewrite(op, rewriter);
 }
 
 LogicalResult
@@ -1364,46 +1362,49 @@ void TritonToUnstructurePass::runOnOperation() {
   MLIRContext *ctx = &getContext();
 
   canonicalizeSupportedPointerBitcasts(moduleOp);
-
-  moduleOp->walk([this](triton::FuncOp funcOp) {
-    replacePtrArguments(funcOp, offsetMapForLoopArgs);
+  // Fix one permitted lane order before analyzing a pointer reshape. The
+  // original pointers and the derived integer offsets must share that order.
+  moduleOp.walk([](triton::ReshapeOp op) {
+    if (isTensorOfPointers(op.getType()) && !op.getType().getEncoding())
+      op->removeAttr("allow_reorder");
   });
-  offsetMapForLoopArgs.clear();
+  SmallVector<Operation *> customOps;
+  moduleOp.walk([&](Operation *op) {
+    if (isDistributedTypeCustomOp(op))
+      customOps.push_back(op);
+  });
+  IRRewriter annotationRewriter(ctx);
+  for (Operation *op : customOps)
+    (void)checkStructureAnnotated(op, annotationRewriter);
 
-  if (failed(processIfYieldAddHoistOperations(moduleOp))) {
-    moduleOp.emitWarning("Failed to process IfYieldAddHoist operations");
-  }
-
-  moduleOp->walk([this](LoopLikeOpInterface op) { runPreparse(op); });
-  moduleOp->walk([this](Operation *op) {
-    if (auto loadOp = dyn_cast<triton::LoadOp>(op)) {
-      runParse(loadOp);
-    } else if (auto storeOp = dyn_cast<triton::StoreOp>(op)) {
-      runParse(storeOp);
-    } else if (auto atomicRMWOp = dyn_cast<triton::AtomicRMWOp>(op)) {
-      runParse(atomicRMWOp);
-    } else if (auto atomicCASOp = dyn_cast<triton::AtomicCASOp>(op)) {
-      runParse(atomicCASOp);
+  for (auto func : moduleOp.getOps<triton::FuncOp>()) {
+    if (failed(replacePtrArguments(func))) {
+      signalPassFailure();
+      return;
     }
-  });
-
-  RewritePatternSet patterns(ctx);
-
-  patterns.add<UnstructuredMemAccessConverter<triton::LoadOp>,
-               UnstructuredMemAccessConverter<triton::StoreOp>,
-               UnstructuredMemAccessConverter<triton::AtomicRMWOp>,
-               UnstructuredMemAccessConverter<triton::AtomicCASOp>>(
-      ctx, forceScalarizeMode, offsetMap, fromTensorArg);
-
-  LLVM_DEBUG({
-    auto &os = llvm::dbgs();
-    os << "Parsing done\n";
-  });
-
-  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
-    moduleOp->emitError("failed to apply Patterns");
+  }
+  if (failed(processIfYieldAddHoistOperations(moduleOp))) {
     signalPassFailure();
     return;
+  }
+  SmallVector<Operation *> accesses;
+  moduleOp.walk([&](Operation *op) {
+    if (isa<triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp,
+            triton::AtomicCASOp>(op))
+      accesses.push_back(op);
+  });
+  PatternRewriter rewriter(ctx);
+  for (Operation *access : accesses) {
+    LogicalResult result =
+        llvm::TypeSwitch<Operation *, LogicalResult>(access)
+            .Case<triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp,
+                  triton::AtomicCASOp>([&](auto op) {
+              return lowerMemoryAccess(op, forceScalarizeMode, rewriter);
+            });
+    if (failed(result)) {
+      signalPassFailure();
+      return;
+    }
   }
 
   bool unsupportedLoopMask = false;
@@ -1418,11 +1419,6 @@ void TritonToUnstructurePass::runOnOperation() {
     signalPassFailure();
     return;
   }
-
-  // The offset-boundary marker is only an intra-pass analysis handoff.  Do
-  // not expose it to T2L or let it inhibit later canonicalization.
-  moduleOp->walk(
-      [](Operation *op) { op->removeAttr(kScalarPointerOffsetBoundaryAttr); });
 
   PassManager pm(&getContext(), moduleOp.getOperationName());
   pm.addPass(createCSEPass());

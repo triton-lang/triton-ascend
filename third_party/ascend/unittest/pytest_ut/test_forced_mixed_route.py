@@ -60,7 +60,6 @@ def _check_forced_mixed_factors(tmp_path, monkeypatch):
         "BLOCK_SIZE": block,
     }
     kernels = {}
-    binaries = {}
     for factor in (None, 1, 2, 1, None):
         if factor is None:
             monkeypatch.delenv("TRITON_ASCEND_AUTO_SIMT_FORCE_ROUTE", raising=False)
@@ -77,12 +76,14 @@ def _check_forced_mixed_factors(tmp_path, monkeypatch):
         if factor in kernels:
             assert compiled is kernels[factor]
         kernels[factor] = compiled
-        binaries[factor] = compiled.asm["npubin"]
         _forced_mixed_indirect_load_kernel[(logical_programs, )](*args, **launch_options)
         torch.npu.synchronize()
         torch.testing.assert_close(output.cpu(), expected, rtol=0, atol=0)
         print(f"route={compiled.metadata.auto_simt_effective_kind} factor={factor} precision=passed", flush=True)
-    assert binaries[1] != binaries[2]
+    assert len({kernel.hash for kernel in kernels.values()}) == 3
+    assert kernels[1] is not kernels[2]
+    # Equivalent machine code is valid after downstream optimization.
+    assert kernels[1].metadata.auto_simt_forced_ttir_sha256 != kernels[2].metadata.auto_simt_forced_ttir_sha256
     explicit_options = dict(options, auto_simt_force_route="mixed_simd_simt", superblock_factor=2)
     explicit = _forced_mixed_indirect_load_kernel.warmup(*args, grid=(logical_programs, ), **explicit_options)
     assert explicit is kernels[2]

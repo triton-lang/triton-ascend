@@ -53,5 +53,5 @@ SHA256. NPU precision and performance still require a real runtime test.
 
 The `test_costmodel_forced_mixed_factors` regression uses a one-dimensional
 indirect load with multiple logical-program loop iterations. It verifies
-Auto/F1/F2 route changes, precision, binary distinction and cache reuse in an
-isolated child process.
+Auto/F1/F2 route changes, precision, distinct compilation keys and materialized
+factor IR, and cache reuse in an isolated child process.

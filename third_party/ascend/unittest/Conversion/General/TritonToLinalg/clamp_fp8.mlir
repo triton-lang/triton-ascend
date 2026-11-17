@@ -1,4 +1,4 @@
-// RUN: triton-opt '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simd' --triton-to-annotation '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd' --triton-to-hivm --triton-to-hfusion --triton-to-llvm --bubble-up-operation '--triton-to-linalg=global-kernel=false named-ops=True enable-nd2nz-on-vector=False compile-on-910-95=True compile-mode=simd' --split-input-file %s | FileCheck %s
+// RUN: triton-opt '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simd' --triton-to-annotation '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd' --triton-to-hivm --triton-to-hfusion --triton-to-llvm --bubble-up-operation '--triton-to-linalg=global-kernel=false named-ops=True enable-nd2nz-on-vector=False compile-on-910-95=True compile-mode=simd' --split-input-file %s | FileCheck %s --implicit-check-not=arith.cmpf --implicit-check-not=arith.select
 
 module {
 		tt.func public @tt_clamp_3d(%arg0: !tt.ptr<f8E4M3FN> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<f8E4M3FN> {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %arg3: !tt.ptr<f32> {tt.divisibility = 16 : i32}) attributes {noinline = false} {
@@ -77,11 +77,7 @@ module {
 // CHECK: %[[CLAMP_RESULT:[A-Za-z0-9_]+]] = arith.maxnumf %[[TENSOR_F32_MIN]], %[[CLAMP_MAX]] : tensor<2x29x4xf32>
 
 // CHECK: %[[CAST_OUTPUT:[A-Za-z0-9_]+]] = memref.reinterpret_cast %arg3 to offset: [%[[OFFSET]]], sizes: [2, 29, 4], strides: [116, 4, 1] : memref<?xf8E4M3FN> to memref<2x29x4xf8E4M3FN, strided<[116, 4, 1], offset: ?>>
-// CHECK: %[[ABOVE:.*]] = arith.cmpf ogt, %[[CLAMP_RESULT]], %[[UPPER:.*]] : tensor<2x29x4xf32>
-// CHECK: %[[HIGH:.*]] = arith.select %[[ABOVE]], %[[UPPER]], %[[CLAMP_RESULT]] : tensor<2x29x4xi1>, tensor<2x29x4xf32>
-// CHECK: %[[BELOW:.*]] = arith.cmpf olt, %[[HIGH]], %[[LOWER:.*]] : tensor<2x29x4xf32>
-// CHECK: %[[CLAMPED:.*]] = arith.select %[[BELOW]], %[[LOWER]], %[[HIGH]] : tensor<2x29x4xi1>, tensor<2x29x4xf32>
-// CHECK: %[[F32_TO_F8:[A-Za-z0-9_]+]] = arith.truncf %[[CLAMPED]] {round_mode = #hfusion.round_mode<rint>} : tensor<2x29x4xf32> to tensor<2x29x4xf8E4M3FN>
+// CHECK: %[[F32_TO_F8:[A-Za-z0-9_]+]] = arith.truncf %[[CLAMP_RESULT]] {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<2x29x4xf32> to tensor<2x29x4xf8E4M3FN>
 // CHECK: bufferization.materialize_in_destination %[[F32_TO_F8]] in writable %[[CAST_OUTPUT]] : (tensor<2x29x4xf8E4M3FN>, memref<2x29x4xf8E4M3FN, strided<[116, 4, 1], offset: ?>>) -> ()
 
 

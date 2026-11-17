@@ -668,177 +668,6 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
   return failure();
 }
 
-namespace {
-// Bounds cover every non-NaN element. NaNs need separate tracking because
-// minnum/maxnum can replace them with the other operand, even outside its
-// range.
-struct Fp8InputRange {
-  llvm::APFloat lower;
-  llvm::APFloat upper;
-  bool mayNaN;
-  bool maySignalingNaN;
-};
-
-class Fp8InputRangeAnalysis {
-public:
-  bool isWithin(Value input, const llvm::APFloat &limit) {
-    auto range = infer(input, 0);
-    auto negativeLimit = limit;
-    negativeLimit.changeSign();
-    return range.lower.compare(negativeLimit) != llvm::APFloat::cmpLessThan &&
-           range.upper.compare(limit) != llvm::APFloat::cmpGreaterThan;
-  }
-
-private:
-  static llvm::APFloat min(const llvm::APFloat &a, const llvm::APFloat &b) {
-    return a.compare(b) == llvm::APFloat::cmpLessThan ? a : b;
-  }
-  static llvm::APFloat max(const llvm::APFloat &a, const llvm::APFloat &b) {
-    return a.compare(b) == llvm::APFloat::cmpGreaterThan ? a : b;
-  }
-  static Fp8InputRange unknown(Value value) {
-    auto type = cast<FloatType>(getElementTypeOrSelf(value.getType()));
-    return {llvm::APFloat::getInf(type.getFloatSemantics(), true),
-            llvm::APFloat::getInf(type.getFloatSemantics()), true, true};
-  }
-  static Fp8InputRange merge(const Fp8InputRange &a, const Fp8InputRange &b) {
-    return {min(a.lower, b.lower), max(a.upper, b.upper), a.mayNaN || b.mayNaN,
-            a.maySignalingNaN || b.maySignalingNaN};
-  }
-  static Fp8InputRange minMax(const Fp8InputRange &a, const Fp8InputRange &b,
-                              bool isMin, bool propagateNaN) {
-    auto combine = isMin ? min : max;
-    Fp8InputRange result{combine(a.lower, b.lower), combine(a.upper, b.upper),
-                         a.mayNaN || b.mayNaN,
-                         a.maySignalingNaN || b.maySignalingNaN};
-    if (!propagateNaN) {
-      // An ignored NaN selects the other operand without applying the bound.
-      if (a.mayNaN)
-        result = merge(result, b);
-      if (b.mayNaN)
-        result = merge(result, a);
-      // Constant folding may quiet a single signaling NaN instead of returning
-      // the numeric operand. The target may ignore it instead. With two NaNs,
-      // a select-based lowering may also preserve a signaling NaN unchanged.
-      result.mayNaN =
-          (a.mayNaN && b.mayNaN) || a.maySignalingNaN || b.maySignalingNaN;
-      result.maySignalingNaN =
-          (a.maySignalingNaN && b.mayNaN) || (b.maySignalingNaN && a.mayNaN);
-    }
-    return result;
-  }
-
-  Fp8InputRange infer(Value value, unsigned depth) {
-    if (auto it = cache.find(value); it != cache.end())
-      return it->second;
-    // Keep this local proof bounded; block arguments and unsupported arithmetic
-    // retain saturation, including loops and calculations that can overflow.
-    if (depth >= 32 || remaining == 0)
-      return unknown(value);
-    --remaining;
-    auto result = inferImpl(value, depth);
-    cache.try_emplace(value, result);
-    return result;
-  }
-
-  Fp8InputRange inferImpl(Value value, unsigned depth) {
-    auto result = unknown(value);
-    auto constant = result.lower;
-    if (matchPattern(value, m_ConstantFloat(&constant)) && !constant.isNaN())
-      return {constant, constant, false, false};
-    auto *op = value.getDefiningOp();
-    if (!op)
-      return result;
-    auto operand = [&](Value input) { return infer(input, depth + 1); };
-    if (isa<triton::ReshapeOp, triton::TransOp, triton::BroadcastOp,
-            triton::ExpandDimsOp, triton::SplatOp>(op))
-      return operand(op->getOperand(0));
-    if (auto select = dyn_cast<arith::SelectOp>(op))
-      return merge(operand(select.getTrueValue()),
-                   operand(select.getFalseValue()));
-    if (isa<arith::NegFOp, math::AbsFOp>(op)) {
-      result = operand(op->getOperand(0));
-      if (isa<arith::NegFOp>(op)) {
-        std::swap(result.lower, result.upper);
-        result.lower.changeSign();
-        result.upper.changeSign();
-      } else {
-        auto zero = llvm::APFloat::getZero(result.lower.getSemantics());
-        bool crossesZero =
-            result.lower.compare(zero) != llvm::APFloat::cmpGreaterThan &&
-            result.upper.compare(zero) != llvm::APFloat::cmpLessThan;
-        result.lower.clearSign();
-        result.upper.clearSign();
-        auto lower = crossesZero ? zero : min(result.lower, result.upper);
-        result.upper = max(result.lower, result.upper);
-        result.lower = lower;
-      }
-      return result;
-    }
-    if (isa<arith::MinimumFOp, arith::MaximumFOp, arith::MinNumFOp,
-            arith::MaxNumFOp>(op))
-      return minMax(operand(op->getOperand(0)), operand(op->getOperand(1)),
-                    isa<arith::MinimumFOp, arith::MinNumFOp>(op),
-                    isa<arith::MinimumFOp, arith::MaximumFOp>(op));
-    if (auto clamp = dyn_cast<triton::ClampFOp>(op)) {
-      auto lower = operand(clamp.getMin());
-      auto upper = operand(clamp.getMax());
-      // Only accept finite bounds with an established ordering.
-      if (lower.mayNaN || upper.mayNaN || !lower.lower.isFinite() ||
-          !upper.upper.isFinite() ||
-          lower.upper.compare(upper.lower) == llvm::APFloat::cmpGreaterThan)
-        return result;
-      bool propagateNaN = clamp.getPropagateNan() == PropagateNan::ALL;
-      return minMax(lower,
-                    minMax(operand(clamp.getX()), upper, true, propagateNaN),
-                    false, propagateNaN);
-    }
-    return result;
-  }
-
-  DenseMap<Value, Fp8InputRange> cache;
-  unsigned remaining = 128;
-};
-} // namespace
-
-static Value clampToFiniteFp8Range(Value input, Type dstElemType, Location loc,
-                                   PatternRewriter &rewriter) {
-  if (!isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType))
-    return input;
-
-  auto srcElemType = cast<FloatType>(getElementTypeOrSelf(input.getType()));
-  auto dstFloatType = cast<FloatType>(dstElemType);
-  auto limit = llvm::APFloat::getLargest(dstFloatType.getFloatSemantics());
-  bool losesInfo;
-  limit.convert(srcElemType.getFloatSemantics(),
-                llvm::APFloat::rmNearestTiesToEven, &losesInfo);
-
-  // Keep the producer's NaN and signed-zero behavior. If every non-NaN value
-  // is already in range, the ordered comparisons below cannot change it.
-  if (Fp8InputRangeAnalysis().isWithin(input, limit))
-    return input;
-
-  auto createBound = [&](const llvm::APFloat &value) -> Value {
-    auto boundAttr = rewriter.getFloatAttr(srcElemType, value);
-    TypedAttr attr = boundAttr;
-    if (auto tensorType = dyn_cast<RankedTensorType>(input.getType()))
-      attr = DenseElementsAttr::get(tensorType, ArrayRef<Attribute>{boundAttr});
-    return rewriter.create<arith::ConstantOp>(loc, attr);
-  };
-  Value upper = createBound(limit);
-  limit.changeSign();
-  Value lower = createBound(limit);
-
-  // Triton FP8 downcasts saturate finite overflows and infinities. Ordered
-  // comparisons keep NaNs and signed zeros unchanged before rounding.
-  Value above = rewriter.create<arith::CmpFOp>(loc, arith::CmpFPredicate::OGT,
-                                               input, upper);
-  Value clamped = rewriter.create<arith::SelectOp>(loc, above, upper, input);
-  Value below = rewriter.create<arith::CmpFOp>(loc, arith::CmpFPredicate::OLT,
-                                               clamped, lower);
-  return rewriter.create<arith::SelectOp>(loc, below, lower, clamped);
-}
-
 LogicalResult
 FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
                                      PatternRewriter &rewriter) const {
@@ -901,17 +730,18 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
 
     auto extOp = rewriter.create<arith::ExtFOp>(loc, f32Type, input);
     extOp->setAttr("round_mode", roundModeAttr);
-    Value truncInput =
-        clampToFiniteFp8Range(extOp.getResult(), dstElemType, loc, rewriter);
-    auto truncOp =
-        rewriter.create<arith::TruncFOp>(loc, resultType, truncInput);
-    truncOp->setAttr("round_mode", roundModeAttr);
-    rewriter.replaceOp(op, truncOp.getResult());
-  } else if (srcBitwidth > dstBitwidth) {
-    // Downcast: use arith.truncf with round_mode=rint
-    input = clampToFiniteFp8Range(input, dstElemType, loc, rewriter);
+    input = extOp.getResult();
+    srcBitwidth = 32;
+  }
+
+  if (srcBitwidth > dstBitwidth) {
+    // FP8 RTNE conversions use satfinite semantics: finite overflow and
+    // infinities saturate, while NaNs remain NaNs. NPUIR must preserve this
+    // contract through folding and lowering for both scalars and tensors.
     auto truncOp = rewriter.create<arith::TruncFOp>(loc, resultType, input);
     truncOp->setAttr("round_mode", roundModeAttr);
+    if (isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType))
+      truncOp->setAttr("enable_saturate", rewriter.getBoolAttr(true));
     rewriter.replaceOp(op, truncOp.getResult());
   } else {
     // Upcast: use arith.extf with round_mode=rint

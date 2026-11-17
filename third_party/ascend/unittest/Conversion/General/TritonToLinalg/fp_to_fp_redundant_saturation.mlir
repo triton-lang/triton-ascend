@@ -1,12 +1,14 @@
-// RUN: triton-opt --triton-to-hfusion --triton-to-linalg --split-input-file %s | FileCheck %s
+// RUN: triton-opt --triton-to-hfusion --triton-to-linalg --split-input-file %s | FileCheck %s --implicit-check-not=arith.cmpf --implicit-check-not=arith.select
+
+// Saturation belongs to the conversion, independently of its producer.
+// Only the original select operations are permitted; no range guards are added.
 
 // Keep the original clamp, including its treatment of NaNs and signed zeros.
 // CHECK-LABEL: func.func @scalar_clamped_e4m3
 // CHECK: arith.minnumf
-// CHECK: %[[CLAMP:.*]] = arith.maxnumf
-// CHECK-NOT: arith.cmpf
-// CHECK-NOT: arith.select
-// CHECK: arith.truncf %[[CLAMP]] {{.*}} : f32 to f8E4M3FN
+// CHECK: arith.maxnumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @scalar_clamped_e4m3(%input: f32) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -14,17 +16,15 @@ func.func @scalar_clamped_e4m3(%input: f32) -> f8E4M3FN {
   %result = tt.fp_to_fp %clamp, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// The SwiGLU path reshapes an already-clamped tensor before the FP8 cast.
-// The proof must also accept NaNs propagated by the existing clamp.
+// The SwiGLU clamp and reshape retain the same saturating conversion contract.
 // CHECK-LABEL: func.func @reshape_clamped_e4m3
 // CHECK: arith.minimumf
 // CHECK: arith.maximumf
-// CHECK-NOT: arith.cmpf
-// CHECK-NOT: arith.select
-// CHECK: arith.truncf {{.*}} : tensor<1536xf32> to tensor<1536xf8E4M3FN>
+// CHECK: tensor.reshape
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<1536xf32> to tensor<1536xf8E4M3FN>
+// CHECK: return %[[RESULT]] : tensor<1536xf8E4M3FN>
 func.func @reshape_clamped_e4m3(%input: tensor<48x32xf32>) -> tensor<1536xf8E4M3FN> {
   %lo_scalar = arith.constant -448.0 : f32
   %hi_scalar = arith.constant 448.0 : f32
@@ -36,16 +36,14 @@ func.func @reshape_clamped_e4m3(%input: tensor<48x32xf32>) -> tensor<1536xf8E4M3
   %result = tt.fp_to_fp %flat, rounding = rtne : tensor<1536xf32> -> tensor<1536xf8E4M3FN>
   return %result : tensor<1536xf8E4M3FN>
 }
-
 // -----
 
-// Bounds are compared in the source type, using the destination format's limit.
+// The original f16 clamp is preserved before the E5M2 conversion.
 // CHECK-LABEL: func.func @clamped_f16_e5m2
 // CHECK: arith.minnumf
-// CHECK: %[[CLAMP:.*]] = arith.maxnumf
-// CHECK-NOT: arith.cmpf
-// CHECK-NOT: arith.select
-// CHECK: arith.truncf %[[CLAMP]] {{.*}} : tensor<4xf16> to tensor<4xf8E5M2>
+// CHECK: arith.maxnumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<4xf16> to tensor<4xf8E5M2>
+// CHECK: return %[[RESULT]] : tensor<4xf8E5M2>
 func.func @clamped_f16_e5m2(%input: tensor<4xf16>) -> tensor<4xf8E5M2> {
   %lo = arith.constant dense<-57344.0> : tensor<4xf16>
   %hi = arith.constant dense<57344.0> : tensor<4xf16>
@@ -53,16 +51,14 @@ func.func @clamped_f16_e5m2(%input: tensor<4xf16>) -> tensor<4xf8E5M2> {
   %result = tt.fp_to_fp %clamp, rounding = rtne : tensor<4xf16> -> tensor<4xf8E5M2>
   return %result : tensor<4xf8E5M2>
 }
-
 // -----
 
-// A strictly narrower interval also makes the added saturation redundant.
+// A narrower bf16 clamp also uses the same saturating conversion.
 // CHECK-LABEL: func.func @narrow_clamped_bf16_e4m3
 // CHECK: arith.minnumf
-// CHECK: %[[CLAMP:.*]] = arith.maxnumf
-// CHECK-NOT: arith.cmpf
-// CHECK-NOT: arith.select
-// CHECK: arith.truncf %[[CLAMP]] {{.*}} : tensor<4xbf16> to tensor<4xf8E4M3FN>
+// CHECK: arith.maxnumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<4xbf16> to tensor<4xf8E4M3FN>
+// CHECK: return %[[RESULT]] : tensor<4xf8E4M3FN>
 func.func @narrow_clamped_bf16_e4m3(%input: tensor<4xbf16>) -> tensor<4xf8E4M3FN> {
   %lo = arith.constant dense<-224.0> : tensor<4xbf16>
   %hi = arith.constant dense<224.0> : tensor<4xbf16>
@@ -70,32 +66,28 @@ func.func @narrow_clamped_bf16_e4m3(%input: tensor<4xbf16>) -> tensor<4xf8E4M3FN
   %result = tt.fp_to_fp %clamp, rounding = rtne : tensor<4xbf16> -> tensor<4xf8E4M3FN>
   return %result : tensor<4xf8E4M3FN>
 }
-
 // -----
 
-// Unknown bounds cannot establish a finite interval.
+// Dynamic bounds do not require an extra software saturation sequence.
 // CHECK-LABEL: func.func @dynamic_bound
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<4xf32> to tensor<4xf8E4M3FN>
+// CHECK: return %[[RESULT]] : tensor<4xf8E4M3FN>
 func.func @dynamic_bound(%input: tensor<4xf32>, %hi: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %lo = arith.constant dense<-448.0> : tensor<4xf32>
   %clamp = tt.clampf %input, %lo, %hi, propagateNan = none : tensor<4xf32>
   %result = tt.fp_to_fp %clamp, rounding = rtne : tensor<4xf32> -> tensor<4xf8E4M3FN>
   return %result : tensor<4xf8E4M3FN>
 }
-
 // -----
 
-// A clamp for a wider interval cannot replace FP8 saturation.
+// The conversion saturates values above the destination range.
 // CHECK-LABEL: func.func @wide_upper_bound
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<4xf32> to tensor<4xf8E4M3FN>
+// CHECK: return %[[RESULT]] : tensor<4xf8E4M3FN>
 func.func @wide_upper_bound(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %lo = arith.constant dense<-448.0> : tensor<4xf32>
   %hi = arith.constant dense<480.0> : tensor<4xf32>
@@ -103,16 +95,14 @@ func.func @wide_upper_bound(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %result = tt.fp_to_fp %clamp, rounding = rtne : tensor<4xf32> -> tensor<4xf8E4M3FN>
   return %result : tensor<4xf8E4M3FN>
 }
-
 // -----
 
-// Both ends of the interval must be covered by the range proof.
+// The conversion saturates values below the destination range.
 // CHECK-LABEL: func.func @wide_lower_bound
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<4xf32> to tensor<4xf8E4M3FN>
+// CHECK: return %[[RESULT]] : tensor<4xf8E4M3FN>
 func.func @wide_lower_bound(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %lo = arith.constant dense<-480.0> : tensor<4xf32>
   %hi = arith.constant dense<448.0> : tensor<4xf32>
@@ -120,17 +110,14 @@ func.func @wide_lower_bound(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %result = tt.fp_to_fp %clamp, rounding = rtne : tensor<4xf32> -> tensor<4xf8E4M3FN>
   return %result : tensor<4xf8E4M3FN>
 }
-
 // -----
 
-// NaN bounds do not prove a range: unordered APFloat comparisons must not
-// accidentally satisfy the bounds check. Clamp's NaN bounds are unspecified.
+// Preserve the original clamp with a NaN bound and the saturation contract.
 // CHECK-LABEL: func.func @nan_bound
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<4xf32> to tensor<4xf8E4M3FN>
+// CHECK: return %[[RESULT]] : tensor<4xf8E4M3FN>
 func.func @nan_bound(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %lo = arith.constant dense<-448.0> : tensor<4xf32>
   %hi = arith.constant dense<0x7FC00000> : tensor<4xf32>
@@ -138,16 +125,14 @@ func.func @nan_bound(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %result = tt.fp_to_fp %clamp, rounding = rtne : tensor<4xf32> -> tensor<4xf8E4M3FN>
   return %result : tensor<4xf8E4M3FN>
 }
-
 // -----
 
-// An infinite bound still permits an infinite value through the original clamp.
+// An infinite bound still permits infinity through the original clamp.
 // CHECK-LABEL: func.func @infinite_bound
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<4xf32> to tensor<4xf8E4M3FN>
+// CHECK: return %[[RESULT]] : tensor<4xf8E4M3FN>
 func.func @infinite_bound(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %lo = arith.constant dense<0xFF800000> : tensor<4xf32>
   %hi = arith.constant dense<448.0> : tensor<4xf32>
@@ -155,16 +140,14 @@ func.func @infinite_bound(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %result = tt.fp_to_fp %clamp, rounding = rtne : tensor<4xf32> -> tensor<4xf8E4M3FN>
   return %result : tensor<4xf8E4M3FN>
 }
-
 // -----
 
-// Do not infer a tensor-wide bound from just one lane of a non-splat constant.
+// Different bounds in different lanes use the same saturating conversion.
 // CHECK-LABEL: func.func @non_splat_bound
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<4xf32> to tensor<4xf8E4M3FN>
+// CHECK: return %[[RESULT]] : tensor<4xf8E4M3FN>
 func.func @non_splat_bound(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %lo = arith.constant dense<-448.0> : tensor<4xf32>
   %hi = arith.constant dense<[448.0, 448.0, 480.0, 448.0]> : tensor<4xf32>
@@ -172,16 +155,15 @@ func.func @non_splat_bound(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %result = tt.fp_to_fp %clamp, rounding = rtne : tensor<4xf32> -> tensor<4xf8E4M3FN>
   return %result : tensor<4xf8E4M3FN>
 }
-
 // -----
 
-// Multiplication can overflow the proven range again.
+// Multiplication can overflow the clamp range before the conversion.
 // CHECK-LABEL: func.func @arithmetic_after_clamp
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: arith.mulf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<4xf32> to tensor<4xf8E4M3FN>
+// CHECK: return %[[RESULT]] : tensor<4xf8E4M3FN>
 func.func @arithmetic_after_clamp(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %lo = arith.constant dense<-448.0> : tensor<4xf32>
   %hi = arith.constant dense<448.0> : tensor<4xf32>
@@ -191,13 +173,14 @@ func.func @arithmetic_after_clamp(%input: tensor<4xf32>) -> tensor<4xf8E4M3FN> {
   %result = tt.fp_to_fp %scaled, rounding = rtne : tensor<4xf32> -> tensor<4xf8E4M3FN>
   return %result : tensor<4xf8E4M3FN>
 }
-
 // -----
 
-// Both NaN semantics and either min/max ordering establish a finite range.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @minimumf_maximumf_bounded
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minimumf
+// CHECK: arith.maximumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @minimumf_maximumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -206,13 +189,14 @@ func.func @minimumf_maximumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Both NaN semantics and either min/max ordering establish a finite range.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @maximumf_minimumf_bounded
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.maximumf
+// CHECK: arith.minimumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @maximumf_minimumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -221,13 +205,14 @@ func.func @maximumf_minimumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Both NaN semantics and either min/max ordering establish a finite range.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @minnumf_maxnumf_bounded
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @minnumf_maxnumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -236,13 +221,14 @@ func.func @minnumf_maxnumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Both NaN semantics and either min/max ordering establish a finite range.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @maxnumf_minnumf_bounded
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.maxnumf
+// CHECK: arith.minnumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @maxnumf_minnumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -251,16 +237,13 @@ func.func @maxnumf_minnumf_bounded(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// A single bound leaves the other infinity possible.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @one_sided_minimumf
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minimumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @one_sided_minimumf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -268,16 +251,13 @@ func.func @one_sided_minimumf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// A single bound leaves the other infinity possible.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @one_sided_maximumf
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.maximumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @one_sided_maximumf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -285,13 +265,15 @@ func.func @one_sided_maximumf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Sign changes preserve the symmetric FP8 range.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @bounded_negf
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minimumf
+// CHECK: arith.maximumf
+// CHECK: arith.negf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @bounded_negf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -300,13 +282,15 @@ func.func @bounded_negf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Sign changes preserve the symmetric FP8 range.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @bounded_absf
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minimumf
+// CHECK: arith.maximumf
+// CHECK: math.absf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @bounded_absf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -315,28 +299,27 @@ func.func @bounded_absf(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Abs does not establish a finite upper bound.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @unbounded_abs
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: math.absf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @unbounded_abs(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %v = math.absf %x : f32
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Abs also handles ranges entirely on one side of zero.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @abs_negative_interval
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minimumf
+// CHECK: arith.maximumf
+// CHECK: math.absf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @abs_negative_interval(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -224.0 : f32
   %hi = arith.constant -16.0 : f32
@@ -345,13 +328,15 @@ func.func @abs_negative_interval(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Abs also handles ranges entirely on one side of zero.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @abs_positive_interval
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minimumf
+// CHECK: arith.maximumf
+// CHECK: math.absf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @abs_positive_interval(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant 16.0 : f32
   %hi = arith.constant 224.0 : f32
@@ -360,13 +345,15 @@ func.func @abs_positive_interval(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Both select arms must fit; a constant arm is an exact range.
+// Preserve the original select and saturate its result.
 // CHECK-LABEL: func.func @bounded_select
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minimumf
+// CHECK: arith.maximumf
+// CHECK: arith.select
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @bounded_select(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -375,16 +362,15 @@ func.func @bounded_select(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// An unknown select arm retains saturation.
+// An unbounded select arm has the same saturating conversion contract.
 // CHECK-LABEL: func.func @unbounded_select
-// CHECK: arith.cmpf ogt
+// CHECK: arith.minimumf
+// CHECK: arith.maximumf
 // CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @unbounded_select(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -393,16 +379,16 @@ func.func @unbounded_select(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Ignoring a possible NaN can expose an unbounded other operand; finite clamp mode cannot.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @minnumf_nan_all
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minimumf
+// CHECK: arith.maximumf
+// CHECK: arith.minnumf
+// CHECK: arith.maximumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @minnumf_nan_all(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -412,13 +398,16 @@ func.func @minnumf_nan_all(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Ignoring a possible NaN can expose an unbounded other operand; finite clamp mode cannot.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @minnumf_nan_none
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: arith.minnumf
+// CHECK: arith.maximumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @minnumf_nan_none(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -428,16 +417,16 @@ func.func @minnumf_nan_none(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Ignoring a possible NaN can expose an unbounded other operand; finite clamp mode cannot.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @maxnumf_nan_all
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minimumf
+// CHECK: arith.maximumf
+// CHECK: arith.maxnumf
+// CHECK: arith.minimumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @maxnumf_nan_all(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -447,13 +436,16 @@ func.func @maxnumf_nan_all(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Ignoring a possible NaN can expose an unbounded other operand; finite clamp mode cannot.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @maxnumf_nan_none
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: arith.maxnumf
+// CHECK: arith.minimumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @maxnumf_nan_none(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -463,13 +455,17 @@ func.func @maxnumf_nan_none(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// Transpose, expand, broadcast and reshape preserve every element range.
+// Transpose, broadcast and reshape preserve the original producer chain.
 // CHECK-LABEL: func.func @bounded_shape_chain
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minimumf
+// CHECK: arith.maximumf
+// CHECK: linalg.transpose
+// CHECK: linalg.broadcast
+// CHECK: tensor.reshape
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<64xf32> to tensor<64xf8E4M3FN>
+// CHECK: return %[[RESULT]] : tensor<64xf8E4M3FN>
 func.func @bounded_shape_chain(%x: tensor<4x8xf32>) -> tensor<64xf8E4M3FN> {
   %lo = arith.constant dense<-448.0> : tensor<4x8xf32>
   %hi = arith.constant dense<448.0> : tensor<4x8xf32>
@@ -481,13 +477,15 @@ func.func @bounded_shape_chain(%x: tensor<4x8xf32>) -> tensor<64xf8E4M3FN> {
   %result = tt.fp_to_fp %v, rounding = rtne : tensor<64xf32> -> tensor<64xf8E4M3FN>
   return %result : tensor<64xf8E4M3FN>
 }
-
 // -----
 
-// Splat carries a scalar range to every tensor element.
+// A scalar clamp becomes a fill before the saturating tensor conversion.
 // CHECK-LABEL: func.func @bounded_splat
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: linalg.fill
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<4xf32> to tensor<4xf8E4M3FN>
+// CHECK: return %[[RESULT]] : tensor<4xf8E4M3FN>
 func.func @bounded_splat(%x: f32) -> tensor<4xf8E4M3FN> {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -496,13 +494,17 @@ func.func @bounded_splat(%x: f32) -> tensor<4xf8E4M3FN> {
   %result = tt.fp_to_fp %v, rounding = rtne : tensor<4xf32> -> tensor<4xf8E4M3FN>
   return %result : tensor<4xf8E4M3FN>
 }
-
 // -----
 
-// Finite globally ordered computed bounds can also prove a clamp range.
+// Preserve the computed bounds and both clamps.
 // CHECK-LABEL: func.func @computed_clamp_bounds
-// CHECK-NOT: arith.cmpf
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.maxnumf
+// CHECK: arith.negf
+// CHECK: arith.minimumf
+// CHECK: arith.maximumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @computed_clamp_bounds(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -513,16 +515,15 @@ func.func @computed_clamp_bounds(%x: f32, %y: f32, %cond: i1) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// A single signaling NaN may become a quiet NaN before the next minnum/maxnum.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @minnumf_possible_snan
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minnumf
+// CHECK: arith.minnumf
+// CHECK: arith.maximumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @minnumf_possible_snan(%x: f32, %y: f32) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -532,16 +533,13 @@ func.func @minnumf_possible_snan(%x: f32, %y: f32) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// A single signaling NaN may become a quiet NaN before the next minnum/maxnum.
+// The existing sNaN minnum fold may simplify the producer; saturation remains.
 // CHECK-LABEL: func.func @minnumf_constant_snan
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.maximumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @minnumf_constant_snan(%x: f32, %y: f32) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -552,16 +550,15 @@ func.func @minnumf_constant_snan(%x: f32, %y: f32) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// A single signaling NaN may become a quiet NaN before the next minnum/maxnum.
+// Preserve the producer operations and use the uniform saturation contract.
 // CHECK-LABEL: func.func @maxnumf_possible_snan
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.maxnumf
+// CHECK: arith.maxnumf
+// CHECK: arith.minimumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @maxnumf_possible_snan(%x: f32, %y: f32) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32
@@ -571,16 +568,13 @@ func.func @maxnumf_possible_snan(%x: f32, %y: f32) -> f8E4M3FN {
   %result = tt.fp_to_fp %v, rounding = rtne : f32 -> f8E4M3FN
   return %result : f8E4M3FN
 }
-
 // -----
 
-// A single signaling NaN may become a quiet NaN before the next minnum/maxnum.
+// The existing sNaN maxnum fold may simplify the producer; saturation remains.
 // CHECK-LABEL: func.func @maxnumf_constant_snan
-// CHECK: arith.cmpf ogt
-// CHECK: arith.select
-// CHECK: arith.cmpf olt
-// CHECK: arith.select
-// CHECK: arith.truncf
+// CHECK: arith.minimumf
+// CHECK: %[[RESULT:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: return %[[RESULT]] : f8E4M3FN
 func.func @maxnumf_constant_snan(%x: f32, %y: f32) -> f8E4M3FN {
   %lo = arith.constant -448.0 : f32
   %hi = arith.constant 448.0 : f32

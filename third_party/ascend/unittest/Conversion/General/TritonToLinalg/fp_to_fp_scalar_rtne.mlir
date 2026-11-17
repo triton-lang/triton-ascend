@@ -1,8 +1,8 @@
-// RUN: triton-opt --triton-to-hfusion --triton-to-linalg %s | FileCheck %s
+// RUN: triton-opt --triton-to-hfusion --triton-to-linalg %s | FileCheck %s --implicit-check-not=arith.cmpf --implicit-check-not=arith.select
 
 // CHECK-LABEL: func.func @scalar_fp32_to_fp8_rtne
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: %[[CAST:.*]] = arith.truncf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: %[[CAST:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return %[[CAST]] : f8E4M3FN
 // CHECK-LABEL: func.func @scalar_fp8_to_fp32_rtne
@@ -10,26 +10,23 @@
 // CHECK: %[[FP8_TO_F32:.*]] = arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E4M3FN to f32
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return %[[FP8_TO_F32]] : f32
+// CHECK-LABEL: func.func @scalar_f8e5m2_to_fp32_rtne
+// CHECK-NOT: enable_saturate
+// CHECK: %[[E5_UPCAST:.*]] = arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E5M2 to f32
+// CHECK-NOT: enable_saturate
+// CHECK: return %[[E5_UPCAST]] : f32
 // CHECK-LABEL: func.func @scalar_f8e4m3fn_to_f8e5m2_rtne
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: %[[E4_TO_F32:.*]] = arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E4M3FN to f32
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: %[[E5_ABOVE:.*]] = arith.cmpf ogt, %[[E4_TO_F32]], %[[E5_UPPER:.*]] : f32
-// CHECK: %[[E5_HIGH:.*]] = arith.select %[[E5_ABOVE]], %[[E5_UPPER]], %[[E4_TO_F32]] : f32
-// CHECK: %[[E5_BELOW:.*]] = arith.cmpf olt, %[[E5_HIGH]], %[[E5_LOWER:.*]] : f32
-// CHECK: %[[E5_CLAMPED:.*]] = arith.select %[[E5_BELOW]], %[[E5_LOWER]], %[[E5_HIGH]] : f32
-// CHECK: %[[F32_TO_E5:.*]] = arith.truncf %[[E5_CLAMPED]] {round_mode = #hfusion.round_mode<rint>} : f32 to f8E5M2
+// CHECK: %[[F32_TO_E5:.*]] = arith.truncf %[[E4_TO_F32]] {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E5M2
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return %[[F32_TO_E5]] : f8E5M2
 // CHECK-LABEL: func.func @scalar_f8e5m2_to_f8e4m3fn_default
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: %[[E5_TO_F32:.*]] = arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E5M2 to f32
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: %[[E4_ABOVE:.*]] = arith.cmpf ogt, %[[E5_TO_F32]], %[[E4_UPPER:.*]] : f32
-// CHECK: %[[E4_HIGH:.*]] = arith.select %[[E4_ABOVE]], %[[E4_UPPER]], %[[E5_TO_F32]] : f32
-// CHECK: %[[E4_BELOW:.*]] = arith.cmpf olt, %[[E4_HIGH]], %[[E4_LOWER:.*]] : f32
-// CHECK: %[[E4_CLAMPED:.*]] = arith.select %[[E4_BELOW]], %[[E4_LOWER]], %[[E4_HIGH]] : f32
-// CHECK: %[[F32_TO_E4:.*]] = arith.truncf %[[E4_CLAMPED]] {round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: %[[F32_TO_E4:.*]] = arith.truncf %[[E5_TO_F32]] {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return %[[F32_TO_E4]] : f8E4M3FN
 // CHECK-LABEL: func.func @scalar_fp16_to_bf16_rtne
@@ -43,11 +40,12 @@
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : tensor<8xf8E4M3FN> to tensor<8xf32>
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: arith.truncf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : tensor<8xf32> to tensor<8xf8E5M2>
+// CHECK: arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : tensor<8xf32> to tensor<8xf8E5M2>
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return
 // CHECK-LABEL: func.func @scalar_f8e4m3fn_identity
 // CHECK-NOT: tt.fp_to_fp
+// CHECK-NOT: enable_saturate
 // CHECK: return %{{.*}} : f8E4M3FN
 module {
   tt.func @scalar_fp32_to_fp8_rtne(%arg0: f32) -> f8E4M3FN {
@@ -57,6 +55,11 @@ module {
 
   tt.func @scalar_fp8_to_fp32_rtne(%arg0: f8E4M3FN) -> f32 {
     %0 = tt.fp_to_fp %arg0, rounding = rtne : f8E4M3FN -> f32
+    tt.return %0 : f32
+  }
+
+  tt.func @scalar_f8e5m2_to_fp32_rtne(%arg0: f8E5M2) -> f32 {
+    %0 = tt.fp_to_fp %arg0, rounding = rtne : f8E5M2 -> f32
     tt.return %0 : f32
   }
 

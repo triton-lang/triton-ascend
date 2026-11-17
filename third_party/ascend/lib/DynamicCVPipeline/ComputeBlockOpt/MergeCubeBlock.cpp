@@ -65,6 +65,8 @@ void MergeCubeBlockPass::runOnOperation() {
   for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
     if (kDisableMergeCubeKernel.contains(funcOp.getSymName())) {
       LDBG("Found unsupport kernel: " << funcOp.getSymName());
+      moduleOp->setAttr(CVPipeline::kMergeComputeBlockApplied,
+                        BoolAttr::get(&getContext(), false));
       return;
     }
   }
@@ -89,11 +91,17 @@ void MergeCubeBlockPass::runOnOperation() {
   LDBG("Found " << mainLoopBlocks.size() << " main loop blocks\n");
 
   // Process each main loop block
+  bool mergedAny = false;
   for (Block *block : mainLoopBlocks) {
-    if (failed(processBlock(block, memGraph, bm))) {
+    if (failed(processBlock(block, memGraph, bm, mergedAny))) {
       CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);
       return;
     }
+  }
+
+  if (!mergedAny) {
+    moduleOp->setAttr(CVPipeline::kMergeComputeBlockApplied,
+                      BoolAttr::get(&getContext(), false));
   }
 
   LDBG("MergeCubeBlockPass completed\n" << moduleOp);
@@ -102,7 +110,7 @@ void MergeCubeBlockPass::runOnOperation() {
 llvm::LogicalResult
 MergeCubeBlockPass::processBlock(Block *block,
                                  const MemoryDependenceGraph &memGraph,
-                                 ComputeBlockIdManager &bm) {
+                                 ComputeBlockIdManager &bm, bool &mergedAny) {
   LDBG("Processing Block: " << *block);
   if (Operation *parentOp = block->getParentOp()) {
     LDBG("  Parent operation: " << parentOp->getName().getStringRef());
@@ -133,7 +141,7 @@ MergeCubeBlockPass::processBlock(Block *block,
   // Step 2: Perform iterative merging. The nested loop inside performs the
   // candidate selection itself by re-scanning the live cube blocks every
   // round, so there is no separate findMergeCandidates phase.
-  if (failed(performMerging(graph, memGraph, bm))) {
+  if (failed(performMerging(graph, memGraph, bm, mergedAny))) {
     LDBG("Failed to perform merging");
     return llvm::failure();
   }
@@ -144,7 +152,7 @@ MergeCubeBlockPass::processBlock(Block *block,
 llvm::LogicalResult
 MergeCubeBlockPass::performMerging(BlockDependencyGraph &graph,
                                    const MemoryDependenceGraph &memGraph,
-                                   ComputeBlockIdManager &bm) {
+                                   ComputeBlockIdManager &bm, bool &mergedAny) {
 
   // Collect the live cube blocks once. After every merge we simply drop
   // the merged-out source from this list, so we never need to re-scan
@@ -156,6 +164,7 @@ MergeCubeBlockPass::performMerging(BlockDependencyGraph &graph,
   }
 
   bool merged = true;
+  int mergeCount = 0;
 
   while (merged) {
     merged = false;
@@ -182,6 +191,7 @@ MergeCubeBlockPass::performMerging(BlockDependencyGraph &graph,
           return llvm::failure();
         }
         merged = true;
+        mergeCount++;
 
         // Update graph structure. After this call, the BlockNode pointed to
         // by `source` has been destroyed; the pointer value itself remains
@@ -209,6 +219,11 @@ MergeCubeBlockPass::performMerging(BlockDependencyGraph &graph,
       }
     }
   }
+
+  // Preserve merges performed in earlier loop bodies.
+  mergedAny |= mergeCount > 0;
+
+  LDBG("Merged " << mergeCount << " blocks\n");
 
   return llvm::success();
 }

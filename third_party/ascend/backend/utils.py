@@ -26,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sysconfig
+import threading
 import warnings
 from pathlib import Path
 import logging
@@ -689,9 +690,21 @@ def _get_auto_blockify_blacklist_reasons(ir_text: str):
     return [description for pattern, description in AUTO_BLOCKIFY_BLACKLIST_RULES if pattern.search(ir_text)]
 
 
+# The same kernel is compiled repeatedly during warmup, and the safety scan
+# produces the same result every time.  Warn once per (kernel, reasons) pair so
+# a new kernel or a new unsafe-op reason is still reported without flooding logs.
+_AUTO_BLOCKIFY_WARNED: set[tuple[str, tuple[str, ...]]] = set()
+_AUTO_BLOCKIFY_WARNED_LOCK = threading.Lock()
+
+
 def _warn_auto_blockify_disabled(kernel_name: str, blacklist_reasons) -> None:
     if not blacklist_reasons:
         return
+    warning_key = (kernel_name, tuple(blacklist_reasons))
+    with _AUTO_BLOCKIFY_WARNED_LOCK:
+        if warning_key in _AUTO_BLOCKIFY_WARNED:
+            return
+        _AUTO_BLOCKIFY_WARNED.add(warning_key)
     reasons = ", ".join(blacklist_reasons)
     print(f"[WARNING] AutoBlockify disabled for kernel '{kernel_name}'. "
           f"Unsafe ops: {reasons}. Enabling may cause correctness issues. "

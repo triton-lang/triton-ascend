@@ -1382,12 +1382,16 @@ index 0f506818f..9961a4eb2 100644
      specialization = [{','.join(specialization)}]
      return params, specialization, options
  """
-@@ -704,20 +720,39 @@ class JITFunction(JITCallable, KernelInterface[T]):
+@@ -704,24 +720,43 @@ class JITFunction(JITCallable, KernelInterface[T]):
          for hook in self.pre_run_hooks:
              hook(*args, **kwargs)
  
 -        kernel_cache, kernel_key_cache, target, backend, binder = self.device_caches[device]
 +        _, _, _, backend, _ = self.device_caches[device]
+         resolve_launch_options = getattr(backend, "resolve_launch_options", None)
+         if resolve_launch_options is not None:
+             # Resolve route controls before the in-process cache lookup.
+             kwargs = resolve_launch_options(kwargs)
 +        get_handler = getattr(backend, "get_jit_reuse_handler", None)
 +        handler = get_handler() if get_handler is not None else None
 +        if handler is not None:
@@ -1428,7 +1432,7 @@ index 0f506818f..9961a4eb2 100644
              if kernel is None:
                  return None
  
-@@ -731,7 +766,9 @@ class JITFunction(JITCallable, KernelInterface[T]):
+@@ -735,7 +770,9 @@ class JITFunction(JITCallable, KernelInterface[T]):
          if not warmup:
              # canonicalize grid
              assert grid is not None
@@ -1439,7 +1443,7 @@ index 0f506818f..9961a4eb2 100644
                  grid = grid(bound_args)
              grid_size = len(grid)
              grid_0 = grid[0]
-@@ -739,6 +776,14 @@ class JITFunction(JITCallable, KernelInterface[T]):
+@@ -743,6 +780,14 @@ class JITFunction(JITCallable, KernelInterface[T]):
              grid_2 = grid[2] if grid_size > 2 else 1
              if hasattr(kernel, "result"):
                  kernel = kernel.result()

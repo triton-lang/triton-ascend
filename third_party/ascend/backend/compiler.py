@@ -1070,6 +1070,48 @@ def _can_materialize_scope_superblock(metadata, opt, whole_kernel_materializable
                 and int(getattr(opt, "num_warps", 0) or 0) > 0)
 
 
+def _resolve_forced_mixed_options(options):
+    """Resolve explicit controls before JIT caching; kwargs override environment."""
+    route = options.get("auto_simt_force_route")
+    if route is None:
+        route = os.environ.get("TRITON_ASCEND_AUTO_SIMT_FORCE_ROUTE", "")
+    if route not in ("", "mixed_simd_simt"):
+        raise ValueError("auto_simt_force_route must be empty or 'mixed_simd_simt'")
+    resolved = {key: value for key, value in options.items() if key != "auto_simt_force_route"}
+    resolved["auto_simt_force_route"] = route
+    if not route:
+        return resolved
+    mode = os.environ.get("TRITON_ASCEND_COMPILE_MODE") or resolved.get("compile_mode")
+    if mode is None:
+        mode = "simd_simt"
+    mode = getattr(mode, "value", mode)
+    scope = _normalize_auto_simt_scope_mode(
+        resolved.get("auto_simt_scope_mode") or os.environ.get("TRITON_ASCEND_AUTO_SIMT_SCOPE") or "auto")
+    if mode != "simd_simt" or scope != "auto":
+        raise ValueError("forced Mixed requires compile_mode='simd_simt' and auto_simt_scope_mode='auto'")
+    resolved.update(compile_mode=mode, auto_simt_scope_mode=scope)
+    resolved.setdefault("superblock_factor", 1)
+    factor = resolved["superblock_factor"]
+    if type(factor) is not int or factor not in (1, 2, 4, 8, 16, 32, 64):
+        raise ValueError("forced Mixed factor must be a power of two in 1..64")
+    return resolved
+
+
+def _verify_forced_mixed_result(mod, metadata, opt, effective, factor, report):
+    if not getattr(opt, "auto_simt_force_route", ""):
+        return
+    data = json.loads(report)
+    text = str(mod)
+    factor_attr = r"ascend\.scope_superblock\.factor\s*=\s*" + str(factor) + r"\s*:\s*i64"
+    if (effective != "mixed_simd_simt" or factor != opt.superblock_factor or data.get("action_supported") is not True
+            or data.get("materialized_simt_anchor_count", 0) < 1 or "scope.scope" not in text
+            or not re.search(factor_attr, text)):
+        raise RuntimeError("forced Mixed was not materialized with the requested factor; refusing fallback")
+    metadata["auto_simt_forced_route"] = effective
+    metadata["auto_simt_forced_factor"] = factor
+    metadata["auto_simt_forced_ttir_sha256"] = hashlib.sha256(text.encode()).hexdigest()
+
+
 def _publish_route_transform_capability(metadata, opt) -> str:
     """Publish the single capability fact consumed by scoring and lowering.
 
@@ -1196,6 +1238,13 @@ def _publish_route_transform_capability(metadata, opt) -> str:
     # Keep this contract factual. Route-specific Q/group/tail composition has
     # one implementation in the native RouteSolver; duplicating that formula
     # in Python previously let the two sides drift apart.
+    if getattr(opt, "auto_simt_force_route", ""):
+        requested = opt.superblock_factor
+        if requested not in superblock_factors:
+            raise ValueError(f"forced Mixed F{requested} unsupported; legal scope factors={superblock_factors}")
+        superblock_factors = [requested]
+        capability["scope_superblock_factors"] = superblock_factors
+        capability["backend_forced_route_candidate"] = "mixed_simd_simt"
     capability_json = json.dumps(capability, sort_keys=True, separators=(",", ":"))
     metadata["route_transform_capability"] = capability_json
     metadata["route_transform_v1_materializable"] = v1_materializable
@@ -1259,6 +1308,7 @@ def _run_cpp_simd_simt_costmodel(mod, metadata, opt, analysis_ttir_code: str = "
     if not report or effective not in {"all_simd", "all_simt_only", "mixed_simd_simt", "backend_default"}:
         raise RuntimeError("invalid native SIMD/SIMT costmodel result")
     _apply_cpp_simd_simt_decision(metadata, effective, superblock_factor, report, int(opt.num_warps))
+    _verify_forced_mixed_result(mod, metadata, opt, effective, superblock_factor, report)
     return effective
 
 
@@ -2569,6 +2619,7 @@ class NPUOptions:
     auto_simt_runtime_scalar_values: Tuple[Tuple[int, int], ...] = ()
     # Native AscendModel selection: Python only schedules the C++ passes.
     # Empty/"off" disables the route model; "auto" selects, "report" dumps.
+    auto_simt_force_route: Optional[str] = None
     auto_simt_scope_mode: str = ""
     auto_simt_scope_dump: str = ""
     auto_simt_model_profile: str = ""
@@ -2694,6 +2745,9 @@ class NPUOptions:
         object.__setattr__(self, "auto_simt_scope_dump", dump)
         object.__setattr__(self, "auto_simt_model_profile", profile)
         object.__setattr__(self, "auto_simt_model_assets_hash", asset_hash)
+        if self.auto_simt_force_route and (self.auto_simt_force_route != "mixed_simd_simt"
+                                           or self.compile_mode != "simd_simt" or self.auto_simt_scope_mode != "auto"):
+            raise ValueError("forced Mixed conflicts with the resolved compile mode or scope mode")
 
     def hash(self):
         key = "_".join([f"{name}-{val}" for name, val in self.__dict__.items()])
@@ -3020,6 +3074,10 @@ def get_simt_stack_limit():
 class AscendBackend(BaseBackend):
 
     @staticmethod
+    def resolve_launch_options(options):
+        return _resolve_forced_mixed_options(options)
+
+    @staticmethod
     def get_jit_reuse_handler():
         from .reuse.config import enabled
 
@@ -3092,6 +3150,7 @@ class AscendBackend(BaseBackend):
         return {"auto_simt_runtime_scalar_values": tuple(values)}
 
     def parse_options(self, opts) -> Any:
+        resolved_opts = self.resolve_launch_options(opts)
         # TODO: get available targets when building options?
         if self.target.backend == "npu":
             _warn_deprecated_ascend_env_vars()
@@ -3103,11 +3162,11 @@ class AscendBackend(BaseBackend):
             # Serialized NPUOptions include backend-only derived fields.  Use
             # those provenance markers instead of depending on every public
             # field being present, which changes whenever the dataclass evolves.
-            internal_options = _is_internal_npu_options(opts, self.target.arch)
+            internal_options = _is_internal_npu_options(resolved_opts, self.target.arch)
             # Normalize a copy, except for the legacy launch keyword below.
             # NPUOptions retains compatibility defaults for legacy names so
             # JIT and Inductor can still recognize them as compile options.
-            normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts)
+            normalized_opts = resolved_opts if internal_options else _remove_deprecated_npu_options(resolved_opts)
             args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
             options = NPUOptions(arch=self.target.arch, **args)
             # Lazy init enable_dynamic_cv_pipeline if not provided.

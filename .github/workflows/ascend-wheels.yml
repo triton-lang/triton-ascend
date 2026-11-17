@@ -131,7 +131,12 @@ jobs:
           if [ ! -f third_party/ascend/build/npuir_source.py ]; then
             POLICY_ROOT=.ascend-ci-policy
           fi
-          NPUIR_SHA=$(python3 "$POLICY_ROOT/third_party/ascend/build/npuir_source.py" --resolve)
+          # The job container (cann:9.0.0-a3-ubuntu22.04-py3.12) exposes only a
+          # versioned interpreter (python3.12) without a plain python3 symlink
+          # on PATH; pick the first interpreter that answers.
+          PY3=$(command -v python3 || command -v python3.12 || command -v python3.11 || command -v python3.10 || command -v python)
+          [ -n "$PY3" ] || { echo "::error::no python interpreter on PATH to run the npuir source policy"; exit 1; }
+          NPUIR_SHA=$("$PY3" "$POLICY_ROOT/third_party/ascend/build/npuir_source.py" --resolve)
           echo "AscendNPU-IR stable HEAD: ${NPUIR_SHA}"
           echo "npuir_sha=${NPUIR_SHA}" >> "$GITHUB_OUTPUT"
           CACHE_DIR="/root/.cache/npuir-payload/${NPUIR_SHA}-${{ matrix.config.arch }}"

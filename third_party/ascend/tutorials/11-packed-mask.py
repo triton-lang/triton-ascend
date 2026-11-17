@@ -36,15 +36,16 @@ import torch_npu
 import triton
 import triton.language as tl
 
+from triton.backends.ascend.utils import is_register_based_arch
 from triton_kernels.packed_mask import generate_bitmask, unpack_mask
 
 
 @triton.jit
 def packed_mask_kernel(score_ptr, packed_ptr, output_ptr, M: tl.constexpr, N: tl.constexpr, BLOCK_M: tl.constexpr,
-                       BLOCK_N: tl.constexpr):
+                       BLOCK_N: tl.constexpr, SHIFT_DTYPE: tl.constexpr):
     row_start = tl.program_id(0) * BLOCK_M
     col_start = tl.program_id(1) * BLOCK_N
-    bits = unpack_mask(packed_ptr, row_start, col_start, N // 8, BLOCK_M, BLOCK_N)
+    bits = unpack_mask(packed_ptr, row_start, col_start, N // 8, BLOCK_M, BLOCK_N, SHIFT_DTYPE)
     score_block = tl.make_block_ptr(score_ptr, (M, N), (N, 1), (row_start, col_start), (BLOCK_M, BLOCK_N), (1, 0))
     output_block = tl.make_block_ptr(output_ptr, (M, N), (N, 1), (row_start, col_start), (BLOCK_M, BLOCK_N), (1, 0))
     score = tl.load(score_block)
@@ -62,7 +63,9 @@ def apply_packed_mask(score, packed, block_m, block_n):
     m, n = score.shape
     output = torch.empty_like(score)
     grid = (m // block_m, n // block_n)
-    packed_mask_kernel[grid](score, packed, output, m, n, BLOCK_M=block_m, BLOCK_N=block_n)
+    arch = triton.runtime.driver.active.get_current_target().arch
+    shift_dtype = tl.uint8 if is_register_based_arch(arch) else tl.int16
+    packed_mask_kernel[grid](score, packed, output, m, n, BLOCK_M=block_m, BLOCK_N=block_n, SHIFT_DTYPE=shift_dtype)
     return output
 
 

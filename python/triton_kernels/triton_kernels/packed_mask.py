@@ -35,7 +35,8 @@ def generate_bitmask(rows, cols, row_capacity, column_capacity, *, mask):
 
 
 @triton.jit
-def unpack_mask(Packed, row_start, col_start, ROW_BYTES: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+def unpack_mask(Packed, row_start, col_start, ROW_BYTES: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+                SHIFT_DTYPE: tl.constexpr = tl.int16):
     """Decode one tile. col_start is byte-aligned and the full tile is backed by GM."""
     row = tl.arange(0, BLOCK_M)[:, None]
     col = tl.arange(0, BLOCK_N)[None, :]
@@ -43,7 +44,7 @@ def unpack_mask(Packed, row_start, col_start, ROW_BYTES: tl.constexpr, BLOCK_M: 
     # Find the packed byte and the bit position for each logical column.
     start_byte = col_start // 8
     byte_col = start_byte + col // 8
-    bit = (col % 8).to(tl.uint8)
+    bit = (col % 8).to(SHIFT_DTYPE)
 
     # Eight adjacent logical columns share one address, as in FA.
     row_offset = (row_start + row) * ROW_BYTES
@@ -51,7 +52,10 @@ def unpack_mask(Packed, row_start, col_start, ROW_BYTES: tl.constexpr, BLOCK_M: 
     packed = tl.load(ptrs)
 
     # Shift the selected bit into the lowest position, then keep only that bit.
-    shifted = packed >> bit
+    # Use int16 on A2/A3 until the frontend accepts uint8 right shifts.
+    # Register-based targets can shift the original uint8 values.
+    shift_input = packed.to(SHIFT_DTYPE)
+    shifted = shift_input >> bit
     bits = shifted & 1
     decoded = bits.to(tl.uint8)
     return decoded

@@ -27,15 +27,16 @@ import torch_npu
 import triton
 import triton.language as tl
 
+from triton.backends.ascend.utils import is_register_based_arch
 from triton_kernels.packed_mask import generate_bitmask, unpack_mask
 
 
 @triton.jit
 def packed_mask_kernel(score_ptr, packed_ptr, output_ptr, M: tl.constexpr, N: tl.constexpr, BLOCK_M: tl.constexpr,
-                       BLOCK_N: tl.constexpr):
+                       BLOCK_N: tl.constexpr, SHIFT_DTYPE: tl.constexpr):
     row_start = tl.program_id(0) * BLOCK_M
     col_start = tl.program_id(1) * BLOCK_N
-    bits = unpack_mask(packed_ptr, row_start, col_start, N // 8, BLOCK_M, BLOCK_N)
+    bits = unpack_mask(packed_ptr, row_start, col_start, N // 8, BLOCK_M, BLOCK_N, SHIFT_DTYPE)
     score_block = tl.make_block_ptr(score_ptr, (M, N), (N, 1), (row_start, col_start), (BLOCK_M, BLOCK_N), (1, 0))
     output_block = tl.make_block_ptr(output_ptr, (M, N), (N, 1), (row_start, col_start), (BLOCK_M, BLOCK_N), (1, 0))
     score = tl.load(score_block)
@@ -49,7 +50,11 @@ def packed_mask_kernel(score_ptr, packed_ptr, output_ptr, M: tl.constexpr, N: tl
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
 @pytest.mark.parametrize("case", ["aligned", "tail", "short"])
 def test_packed_mask(block_n, dtype, case):
-    block_m = 32
+    arch = triton.runtime.driver.active.get_current_target().arch
+    register_based = is_register_based_arch(arch)
+    # Keep the widened BN512 decode tile within the A2/A3 UB capacity.
+    block_m = 16 if not register_based and block_n == 512 else 32
+    shift_dtype = tl.uint8 if register_based else tl.int16
     row_capacity, column_capacity = 2 * block_m, 2 * block_n
     if case == "aligned":
         rows, cols = row_capacity, column_capacity
@@ -80,7 +85,7 @@ def test_packed_mask(block_n, dtype, case):
     output_triton = torch.empty_like(score)
     grid = (row_capacity // block_m, column_capacity // block_n)
     packed_mask_kernel[grid](score, packed, output_triton, row_capacity, column_capacity, BLOCK_M=block_m,
-                             BLOCK_N=block_n)
+                             BLOCK_N=block_n, SHIFT_DTYPE=shift_dtype)
 
     output_torch = score_cpu + torch.where(dense, 0.0, -8.0).to(dtype)
     torch.testing.assert_close(output_triton.cpu(), output_torch, rtol=0, atol=0)

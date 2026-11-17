@@ -1,14 +1,6 @@
 # Triton-Ascend FAQ
 
-## 1. 安装与环境配置
-
-**Q: 如何正确安装 Triton-Ascend？是否支持 pip 直接安装？**
-
-A: 可以直接使用pip 安装
-
-```Python
-pip install triton-ascend
-```
+test
 
 **Q: 社区 Triton 和 Triton-Ascend 能否同时存在？**
 

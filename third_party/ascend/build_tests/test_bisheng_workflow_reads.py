@@ -13,7 +13,8 @@ import pytest
 REPO = Path(__file__).resolve().parents[3]
 
 
-@pytest.mark.parametrize("workflow", ["integration-tests-ascend.yml", "sync-upstream.yml", "DynamicCVPipeline-ci.yml", "tla-tests.yml"])
+@pytest.mark.parametrize(
+    "workflow", ["integration-tests-ascend.yml", "sync-upstream.yml", "DynamicCVPipeline-ci.yml", "tla-tests.yml"])
 @pytest.mark.parametrize("mode", ["valid", "missing-file", "missing-checksum", "unsupported-arch", "checksum-mismatch"])
 def test_actual_bisheng_install_step_requires_metadata_before_download(workflow, mode, tmp_path):
     git_bash = Path("C:/Program Files/Git/bin/bash.exe")
@@ -43,7 +44,10 @@ def test_actual_bisheng_install_step_requires_metadata_before_download(workflow,
     elif mode == "checksum-mismatch":
         data["bisheng"]["x86_64"]["sha256"] = "0" * 64
     if mode != "missing-file":
-        (metadata / "bisheng-version.txt").write_text("\n".join(f"{key}: {value}" for entry in data["bisheng"].values() for key, value in (("x86_64", entry.get("file", "")), ("x86_64_sha256", entry.get("sha256", "")))))
+        (metadata / "bisheng-version.txt").write_text("\n".join(f"{key}: {value}" for entry in data["bisheng"].values()
+                                                                for key, value in (("x86_64", entry.get("file", "")),
+                                                                                   ("x86_64_sha256",
+                                                                                    entry.get("sha256", "")))))
     (tmp_path / "installer.sh").write_bytes(installer)
     harness = '''set -euo pipefail
 uname() { printf 'x86_64\\n'; }
@@ -82,7 +86,8 @@ def test_integration_installer_retains_tar_payload_support(tmp_path):
         archive.addfile(info, io.BytesIO(content))
     metadata = tmp_path / "cmake"
     metadata.mkdir()
-    (metadata / "bisheng-version.txt").write_text(f"x86_64: {payload.name}\nx86_64_sha256: {hashlib.sha256(payload.read_bytes()).hexdigest()}\n")
+    (metadata / "bisheng-version.txt"
+     ).write_text(f"x86_64: {payload.name}\nx86_64_sha256: {hashlib.sha256(payload.read_bytes()).hexdigest()}\n")
     harness = 'uname() { echo x86_64; }\ncurl() { cp "$TEST_PAYLOAD" "${@: -1}"; }\n'
     script = tmp_path / "install.sh"
     script.write_text(harness + command, encoding="utf-8", newline="\n")

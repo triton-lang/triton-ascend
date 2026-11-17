@@ -103,11 +103,9 @@ def check_toolchain():
 def check_optional_sources():
     try:
         info = _load_json(DEPS_DIR / "triton-distributed-info.json")
-        if (set(info) != {"schema_version", "repository", "revision"}
-                or not isinstance(info["repository"], str)
+        if (set(info) != {"schema_version", "repository", "revision"} or not isinstance(info["repository"], str)
                 or re.fullmatch(r"https://[^/\s]+/[A-Za-z0-9_./-]+\.git", info["repository"]) is None
-                or not isinstance(info["revision"], str)
-                or re.fullmatch(r"[0-9a-f]{40}", info["revision"]) is None):
+                or not isinstance(info["revision"], str) or re.fullmatch(r"[0-9a-f]{40}", info["revision"]) is None):
             raise ValueError("Invalid Triton-Distributed source metadata")
         # Load only this Ascend-specific reader, without importing setup hooks.
         import importlib.util
@@ -200,7 +198,9 @@ def main():
     if errors:
         print("Build dependency consistency check failed:\n  - " + "\n  - ".join(errors))
         raise SystemExit(1)
-    print("Build dependency consistency check passed (LLVM, JSON library, Bisheng, optional sources, docs and cache paths).")
+    print(
+        "Build dependency consistency check passed (LLVM, JSON library, Bisheng, optional sources, docs and cache paths)."
+    )
 
 
 if __name__ == "__main__":

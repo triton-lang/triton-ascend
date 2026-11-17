@@ -10,6 +10,7 @@ import time
 
 
 def read_source(root: Path, ref_override=None):
+
     def unique_keys(pairs):
         result = {}
         for key, value in pairs:
@@ -18,8 +19,7 @@ def read_source(root: Path, ref_override=None):
             result[key] = value
         return result
 
-    info = json.loads((root / "cmake/npuir-info.json").read_text(encoding="utf-8"),
-                      object_pairs_hook=unique_keys)
+    info = json.loads((root / "cmake/npuir-info.json").read_text(encoding="utf-8"), object_pairs_hook=unique_keys)
     if (not isinstance(info, dict) or set(info) != {"schema_version", "submodule", "ci_ref"}
             or type(info["schema_version"]) is not int or info["schema_version"] != 1):
         raise ValueError("Invalid NPU-IR source metadata schema")
@@ -27,14 +27,19 @@ def read_source(root: Path, ref_override=None):
     if not isinstance(path, str) or re.fullmatch(r"third_party/ascend/[A-Za-z0-9_-]+", path) is None:
         raise ValueError("Invalid NPU-IR submodule path")
     repository = subprocess.check_output([
-        "git", "config", "--file", str(root / ".gitmodules"), "--get", f"submodule.{path}.url",
+        "git",
+        "config",
+        "--file",
+        str(root / ".gitmodules"),
+        "--get",
+        f"submodule.{path}.url",
     ], text=True).strip()
     repository = os.environ.get("NPUIR_REPO_URL") or repository
     if re.fullmatch(r"https://[^/\s]+/[A-Za-z0-9_./-]+\.git", repository) is None:
         raise ValueError("NPU-IR requires an HTTPS repository URL")
     ref = ref_override if ref_override is not None else info["ci_ref"]
-    if (not isinstance(ref, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]*", ref)
-            or ref.startswith("refs/") or ".." in ref
+    if (not isinstance(ref, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]*", ref) or ref.startswith("refs/")
+            or ".." in ref
             or subprocess.run(["git", "check-ref-format", "--branch", ref], capture_output=True).returncode):
         raise ValueError("NPU-IR ref must be a branch name or a full commit SHA")
     return repository, ref

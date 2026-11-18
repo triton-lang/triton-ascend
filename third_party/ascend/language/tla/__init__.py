@@ -67,6 +67,7 @@ from triton.language.core import (
     uint64,
 )
 
+from ._decorator import experimental
 from .core import AddressSpace, buffer, buffer_type, vector, vector_type
 from .scope import scope
 from .alloc import alloc
@@ -241,6 +242,7 @@ __all__ = [
     "sync",
     "sub_block_id",
 
-    # kernel decorator
+    # decorators
     "jit",
+    "experimental",
 ]

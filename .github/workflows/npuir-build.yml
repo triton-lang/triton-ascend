@@ -9,11 +9,8 @@ on:
   # the workflow file on the default branch.
   schedule:
     - cron: "17 2 * * *"
-  push:
-    paths:
-      - .github/workflows/npuir-build.yml
-      - .github/workflows/build/fetch-npuir-stable.sh
   pull_request:
+    branches: [release/**, main]
     paths:
       - .github/workflows/npuir-build.yml
       - .github/workflows/build/fetch-npuir-stable.sh

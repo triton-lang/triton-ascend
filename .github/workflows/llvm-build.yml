@@ -1,13 +1,8 @@
 name: LLVM Build
 
 on:
-  push:
-    paths:
-      - cmake/llvm-info.json
-      - third_party/ascend/patch/llvm_patch_*.patch
-      - .github/workflows/llvm-build.yml
-      - .github/workflows/build/almalinux.Dockerfile
   pull_request:
+    branches: [release/**, main]
     paths:
       - cmake/llvm-info.json
       - third_party/ascend/patch/llvm_patch_*.patch

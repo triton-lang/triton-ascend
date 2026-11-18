@@ -5,6 +5,7 @@ on:
   push:
     branches: [release/**]
   pull_request:
+    branches: [release/**, main]
     paths:
       - .github/workflows/wheels.yml
       - .github/workflows/build/wheels.Dockerfile

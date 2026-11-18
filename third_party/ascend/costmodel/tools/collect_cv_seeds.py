@@ -137,6 +137,23 @@ def read_records(cache_dir):
     return rows, skipped
 
 
+def looks_like_kernel_dir(path):
+    """True if this is one kernel's cache entry rather than the cache itself.
+
+    The cache is a directory of per-hash directories, so a path pointing one
+    level too deep reads as an empty cache -- which is indistinguishable, from
+    the output alone, from a cache nothing was ever written to. Easy mistake to
+    make, since the per-hash directory is the one worth looking inside by hand.
+    """
+    try:
+        entries = os.listdir(path)
+    except OSError:
+        return False
+    has_subdir = any(os.path.isdir(os.path.join(path, entry))
+                     for entry in entries)
+    return not has_subdir and any(entry.endswith(".json") for entry in entries)
+
+
 def deduplicate(rows):
     """One row per (kernel, hash), last seen winning.
 
@@ -212,6 +229,9 @@ def summarise(rows, stream):
     counts = {}
     for row in rows:
         counts[row["status"]] = counts.get(row["status"], 0) + 1
+    if not counts:
+        stream.write("0 kernel(s)\n")
+        return
     parts = [f"{status}={count}" for status, count in sorted(counts.items())]
     stream.write(f"{len(rows)} kernel(s): " + ", ".join(parts) + "\n")
 
@@ -249,11 +269,19 @@ def main(argv=None):
             print(f"collect_cv_seeds: {cache} is not a directory",
                   file=sys.stderr)
             return 2
+        if looks_like_kernel_dir(cache):
+            print(f"collect_cv_seeds: {cache} holds one kernel's files, not"
+                  " per-hash directories -- pass the cache root instead"
+                  # Both separators, so the hint is right whichever way the
+                  # path was typed.
+                  f" ({os.path.dirname(cache.rstrip('/\\')) or '.'})",
+                  file=sys.stderr)
         found, missed = read_records(cache)
         rows.extend(found)
         skipped += missed
 
     rows = deduplicate(rows)
+    collected = len(rows)
 
     if args.only_found:
         rows = [row for row in rows
@@ -264,8 +292,24 @@ def main(argv=None):
 
     rows.sort(key=lambda row: sort_key(row, args.sort))
 
-    if not rows:
-        # Said out loud, because the overwhelmingly likely cause is a cache
+    # An empty result has two completely different causes, and telling the user
+    # the wrong one costs them a debugging session: nothing was recorded, or
+    # everything recorded was filtered out. The second is the ordinary case --
+    # --only-found on a suite where the cost model preferred the baseline
+    # everywhere is an answer, not a failure -- so it must not be reported as a
+    # cache that was never written.
+    if not rows and collected:
+        applied = []
+        if args.only_found:
+            applied.append("--only-found")
+        if args.status:
+            applied.append("--status " + " ".join(args.status))
+        print(f"collect_cv_seeds: {collected} kernel(s) recorded, none left"
+              f" after {', '.join(applied)}."
+              " Run without the filter to see what was recorded.",
+              file=sys.stderr)
+    elif not rows:
+        # Nothing at all on disk. The overwhelmingly likely cause is a cache
         # that was served rather than written.
         print("collect_cv_seeds: no seed decisions found."
               " A kernel already in the cache is not recompiled, so a run"

@@ -114,7 +114,7 @@ from .scalar import select, abs, maximum, minimum, cast, max_value, cdiv, infini
 from .aux_ops import annotate_buffer_versions, assume, program_id
 
 from . import math
-from .math import compensated_rstd, truncmod, sqrt
+from .math import truncmod, sqrt
 from .debug import device_assert, device_print
 
 # SIMD vector-register ops.  ``simd`` is exported as a module so its ``cast``
@@ -225,7 +225,6 @@ __all__ = [
 
     # math helpers / diagnostics
     "math",
-    "compensated_rstd",
     "truncmod",
     "sqrt",
     "device_assert",

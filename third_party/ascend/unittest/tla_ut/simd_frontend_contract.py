@@ -23,7 +23,7 @@ These run on any host with ``triton`` importable -- no AscendNPU-IR build, no
 device.  They load ``language/tla/simd.py`` **from the source tree** and drive
 it with a recording mock builder, so they check the frontend contract:
 
-- signature/defaults and that internal callers (``math.compensated_rstd``)
+- signature/defaults and that internal callers (``simd.compensated_rstd``)
   still work with the extended ``vdiv`` signature,
 - which AVE op/kind each dtype selects (esp. unsigned vs signed),
 - ``mode`` / ``precision`` rejection instead of silent degradation,
@@ -136,7 +136,7 @@ class _Recorder:
     def create_simd_unary(self, kind, src, mask, mode="zeroing"):
         return self._record("unary", kind, src, mask, mode)
 
-    def create_simd_vfma(self, acc, lhs, rhs, mask, mode):
+    def create_simd_vfma(self, acc, lhs, rhs, mask, mode="zeroing"):
         return self._record("vfma", acc, lhs, rhs, mask, mode)
 
     def create_simd_vcvt(self, kind, src, mask, out_elem_tag, part, round="round", sat=True, mode="zeroing"):
@@ -1045,14 +1045,15 @@ def test_dtype_support_is_enforced_per_op():
     assert _last(sem)[1][0] == "max"
 
 
-def test_existing_internal_callers_still_work():
-    """math.compensated_rstd calls vdiv/vmul/vfma/vsplat with keyword _semantic."""
-    src = (_TLA_DIR / "math.py").read_text()
-    assert "S.vdiv(" in src
-    # the call shape used there must still bind: vdiv(a, b, _semantic=...)
+def test_compensated_rstd_keeps_simd_result_type():
+    assert "compensated_rstd" in simd.__all__
+    assert "compensated_rstd" not in math_src.__all__
+    assert _triton_is_builtin(simd.compensated_rstd)
     sem = _Semantic()
-    simd.vdiv(_vec(64, tl.float32), _vec(64, tl.float32), _semantic=sem)
-    assert _last(sem)[0] == "binary"
+    square_sum = _vec(64, tl.float32)
+    result = simd.compensated_rstd(square_sum, 256, 1e-6, _semantic=sem)
+    assert result.type == square_sum.type
+    assert any(name == "binary" and args[0] == "div" for name, args in sem.builder.calls)
 
 
 # --------------------------------------------------------------------------

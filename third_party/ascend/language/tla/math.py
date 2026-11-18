@@ -38,7 +38,6 @@ import triton.language as tl
 from triton.language.core import builtin, tensor, _unwrap_if_constexpr
 
 from . import simd as S
-from .core import vector
 
 __all__ = ["compensated_rstd", "truncmod", "sqrt"]
 
@@ -77,29 +76,15 @@ def truncmod(a, b, _semantic=None):
 
 @builtin
 def sqrt(x, _semantic=None):
-    """
-    Square root of a scalar or each lane of a SIMD vector.
-
-    Like TileLang's ``T.sqrt``, this returns an IR expression, preserves the
-    input dtype, and does not implicitly convert integers to floating point.
-
-    :param x: f32 scalar tensor, Python/constexpr float inferred as f32 by
-        Triton, or f16/f32 vector register. Block tensors are not supported
-    :return: scalar ``tl.tensor`` or vector register, same dtype as ``x``;
-        vector results also preserve the lane count
-    """
+    """Return the square root of a rank-0 FP32 tensor or an FP32-inferred Python float."""
     x = _unwrap_if_constexpr(x)
-    if isinstance(x, vector):
-        if x.dtype not in (tl.float16, tl.float32):
-            raise TypeError(f"sqrt supports float16/float32 vectors, got {x.dtype}")
-        return S.vsqrt(x, _semantic=_semantic)
     if isinstance(x, tensor):
         if x.type.is_block():
-            raise TypeError("sqrt does not support block tensors; use a tla.vector")
+            raise TypeError("tla.sqrt expects a scalar, got a block tensor")
         if x.dtype != tl.float32:
             raise TypeError(f"sqrt supports float32 scalars, got {x.dtype}")
     elif not isinstance(x, float):
-        raise TypeError("sqrt expects a float32 scalar or a float16/float32 tla.vector")
+        raise TypeError("tla.sqrt expects a float32 scalar")
     x = _semantic.to_tensor(x)
     if x.dtype != tl.float32:
         raise TypeError(f"sqrt supports float32 scalars, got {x.dtype}")

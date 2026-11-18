@@ -28,7 +28,7 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 ``fill`` (scalar fill of a contiguous UB buffer),
 ``copy`` (GM<->buffer), ``view`` (GM view), ``scope`` (core-mode scopes:
 ``tla.scope.simd()`` / ``tla.scope.cube()``),
-``simd`` (vector-register ops), ``where`` (eager scalar/SIMD select),
+``simd`` (vector-register ops), ``where`` (eager scalar select),
 ``annotate_buffer_versions``, and scalar dtypes.
 
 Scalar types share Triton's dtype protocol, so ``tla.float32`` can be passed
@@ -121,7 +121,7 @@ from .debug import device_assert, device_print
 # (ave.hir.vextf) does not shadow unrelated top-level names.
 from . import simd
 
-# Scalar / SIMD-register selection (eager, unlike TileLang T.if_then_else).
+# Eager scalar selection.
 from .selection import where
 
 # Cube-core ops (``mmad``/``mmad_mx``/``tla.copy`` L1/L0C routes).
@@ -239,7 +239,7 @@ __all__ = [
     # simd ops
     "simd",
 
-    # scalar / SIMD selection
+    # scalar selection
     "where",
 
     # cube ops

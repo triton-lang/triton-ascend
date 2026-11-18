@@ -1134,7 +1134,7 @@ def test_truncmod_invalid_operands():
         True, 1.5,
         tl.constexpr(True),
         tl.constexpr(1.0),
-        tl.tensor("block", tl.block_type(tl.int32, [64])),
+        tl.tensor("block", tl.block_type(tl.int32, [1])),
         tl.tensor(_ScalarHandle("arg", "i1"), tl.int1),
         tl.tensor(_ScalarHandle("arg", "f32"), tl.float32),
         _vec(64, tl.int32),
@@ -1192,10 +1192,10 @@ def test_sqrt_runtime_scalar_and_large_literal():
 
 
 @pytest.mark.parametrize("dtype,lanes", [(tl.float16, 128), (tl.float32, 64)])
-def test_sqrt_vector_preserves_type(dtype, lanes):
+def test_simd_vsqrt_preserves_type(dtype, lanes):
     sem = _Semantic()
     value = _vec(lanes, dtype)
-    result = math_src.sqrt(value, _semantic=sem)
+    result = simd.vsqrt(value, _semantic=sem)
     assert isinstance(result, simd.vector) and result.type == value.type
     assert sem.builder.calls[0] == ("pge", ("ALL", lanes))
     name, args = _last(sem)
@@ -1209,14 +1209,15 @@ def test_sqrt_rejects_invalid_inputs_before_builder():
         1, True, 1 + 2j,
         tl.constexpr(1),
         tl.constexpr(True),
-        tl.tensor("block", tl.block_type(tl.float32, [64])),
+        tl.tensor("block", tl.block_type(tl.float32, [1])),
+        _vec(64, tl.float32),
+        _vec(128, tl.float16),
         tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, "ub"))
     ]
     values += [
         tl.tensor(_ScalarHandle("arg", "x"), dtype)
         for dtype in (tl.float16, tl.bfloat16, tl.float64, tl.int32, tl.int1)
     ]
-    values += [_vec(64, dtype) for dtype in (tl.int32, tl.uint32, tl.bfloat16, tl.float64, tl.int1)]
     for value in values:
         with pytest.raises(TypeError, match="sqrt"):
             math_src.sqrt(value, _semantic=_NoBuilder())
@@ -1294,53 +1295,39 @@ def test_where_runtime_scalar_bool_condition_delegates():
     assert (x.value, y.value) == (1, 2)
 
 
-def test_where_vector_mask_uses_vsel():
+def test_simd_vsel_uses_vector_mask():
     sem = _Semantic()
     mask, a, b = _mask(64), _vec(64, tl.float32), _vec(64, tl.float32)
-    result = selection.where(mask, a, b, _semantic=sem)
+    result = simd.vsel(mask, a, b, _semantic=sem)
     assert result.type == a.type
-    assert result is not a and result is not b
-    name, args = _last(sem)
-    assert name == "vsel"
-    assert args == (mask.handle, a.handle, b.handle)
-
-
-@pytest.mark.parametrize("condition, want", [(True, "x"), (False, "y"), (tl.constexpr(True), "x"),
-                                             (tl.constexpr(False), "y")])
-def test_where_const_bool_folds_vector_arms_without_ir(condition, want):
-    sem = _Semantic()
-    a, b = _vec(64, tl.float32), _vec(64, tl.float32)
-    result = selection.where(condition, a, b, _semantic=sem)
-    assert result is (a if want == "x" else b)
-    assert sem.builder.calls == []
+    assert _last(sem) == ("vsel", (mask.handle, a.handle, b.handle))
 
 
 def test_where_invalid_inputs_never_reach_the_builder():
     vec = _vec(64, tl.float32)
-    other = _vec(64, tl.int32)
     mask = _mask(64)
-    block = tl.tensor("block", tl.block_type(tl.float32, [64]))
-    block_cond = tl.tensor("block_cond", tl.block_type(tl.int1, [64]))
+    block = tl.tensor("block", tl.block_type(tl.float32, [1]))
+    block_cond = tl.tensor("block_cond", tl.block_type(tl.int1, [1]))
     int_cond = tl.tensor("int_cond", tl.int32)
     bool_cond = tl.tensor("bool_cond", tl.int1)
+    ptr = tl.tensor("ptr", tl.pointer_type(tl.float32))
     buf = tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, "ub"))
-    sem = _NoBuilder()
     cases = [
-        (TypeError, "condition must be", lambda: selection.where(1, 1.0, 2.0, _semantic=sem)),
-        (TypeError, "int1 dtype", lambda: selection.where(int_cond, 1.0, 2.0, _semantic=sem)),
-        (TypeError, "block tensor", lambda: selection.where(block_cond, 1.0, 2.0, _semantic=sem)),
-        (TypeError, "block tensor", lambda: selection.where(True, block, 1.0, _semantic=sem)),
-        (TypeError, "scalar value", lambda: selection.where(True, buf, 1.0, _semantic=sem)),
-        (TypeError, "vector condition requires", lambda: selection.where(mask, 1.0, 2.0, _semantic=sem)),
-        (ValueError, "same-typed", lambda: selection.where(mask, vec, other, _semantic=sem)),
-        (TypeError, "mix scalar and tla.vector", lambda: selection.where(True, vec, 1.0, _semantic=sem)),
-        (TypeError, "runtime scalar bool", lambda: selection.where(bool_cond, vec, vec, _semantic=sem)),
-        (ValueError, "mask must be", lambda: selection.where(_mask(32), vec, vec, _semantic=sem)),
-        (ValueError, "mask must be", lambda: selection.where(_mask(64, tl.float32), vec, vec, _semantic=sem)),
+        ("condition must be", (1, 1.0, 2.0)),
+        ("int1 dtype", (int_cond, 1.0, 2.0)),
+        ("block tensor", (block_cond, 1.0, 2.0)),
+        ("block tensor", (True, block, 1.0)),
+        ("condition must be", (mask, 1.0, 2.0)),
+        ("condition must be", (mask, vec, vec)),
+        ("x must be", (True, vec, vec)),
+        ("x must be", (tl.constexpr(False), vec, vec)),
+        ("y must be", (bool_cond, 1.0, vec)),
+        ("x must be", (True, ptr, ptr)),
+        ("x must be", (True, buf, 1.0)),
     ]
-    for exc_type, match, call in cases:
-        with pytest.raises(exc_type, match=match):
-            call()
+    for match, operands in cases:
+        with pytest.raises(TypeError, match=match):
+            selection.where(*operands, _semantic=_NoBuilder())
 
 
 # --------------------------------------------------------------------------

@@ -8,7 +8,13 @@
 // CHECK-LABEL: func.func @inner_counter_index
 // CHECK: scf.while {{.*}} : (tensor<128xf32>, index, i32) -> (tensor<128xf32>, index, i32)
 // CHECK: ^bb0(%{{[^:]+}}: tensor<128xf32>, %[[IV_INDEX:[^:]+]]: index, %[[COUNT_INDEX:[^:]+]]: i32):
-// CHECK: bufferization.materialize_in_destination %{{[^:]+}} in restrict writable %{{[^:]+}} {{.*}} : (tensor<128xf32>, memref<128xf32>) -> ()
+// Producer scf.if dispatch: each branch materializes into its OWN concrete
+// buffer with `restrict writable`.
+// CHECK: scf.if %{{.+}} {
+// CHECK:   bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 7 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<128xf32>, memref<128xf32>) -> ()
+// CHECK: } else {
+// CHECK:   bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 7 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<128xf32>, memref<128xf32>) -> ()
+// CHECK: } {ssbuffer.block_id = 7 : i32, ssbuffer.intra_buffer}
 // CHECK-NEXT: %[[ONE_INDEX:[^ ]+]] = arith.constant {{.*}} 1 : i32
 // CHECK-NEXT: %[[NEXT_COUNT_INDEX:[^ ]+]] = arith.addi %[[COUNT_INDEX]], %[[ONE_INDEX]] {{.*}}ssbuffer.iterCounter{{.*}} : i32
 // CHECK: %[[NEXT_IV_INDEX:[^ ]+]] = arith.addi %[[IV_INDEX]], %{{[^ ]+}} : index
@@ -47,7 +53,13 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intr
 // CHECK-LABEL: func.func @inner_counter_i32
 // CHECK: scf.while {{.*}} : (tensor<128xf32>, i32, i32) -> (tensor<128xf32>, i32, i32)
 // CHECK: ^bb0(%{{[^:]+}}: tensor<128xf32>, %[[IV_I32:[^:]+]]: i32, %[[COUNT_I32:[^:]+]]: i32):
-// CHECK: bufferization.materialize_in_destination %{{[^:]+}} in restrict writable %{{[^:]+}} {{.*}} : (tensor<128xf32>, memref<128xf32>) -> ()
+// Producer scf.if dispatch: each branch materializes into its OWN concrete
+// buffer with `restrict writable`.
+// CHECK: scf.if %{{.+}} {
+// CHECK:   bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 7 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<128xf32>, memref<128xf32>) -> ()
+// CHECK: } else {
+// CHECK:   bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 7 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<128xf32>, memref<128xf32>) -> ()
+// CHECK: } {ssbuffer.block_id = 7 : i32, ssbuffer.intra_buffer}
 // CHECK-NEXT: %[[ONE_I32:[^ ]+]] = arith.constant {{.*}} 1 : i32
 // CHECK-NEXT: %[[NEXT_COUNT_I32:[^ ]+]] = arith.addi %[[COUNT_I32]], %[[ONE_I32]] {{.*}}ssbuffer.iterCounter{{.*}} : i32
 // CHECK: %[[NEXT_IV_I32:[^ ]+]] = arith.addi %[[IV_I32]], %{{[^ ]+}} : i32
@@ -86,7 +98,13 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intr
 // CHECK-LABEL: func.func @inner_counter_i64
 // CHECK: scf.while {{.*}} : (tensor<128xf32>, i64, i32) -> (tensor<128xf32>, i64, i32)
 // CHECK: ^bb0(%{{[^:]+}}: tensor<128xf32>, %[[IV_I64:[^:]+]]: i64, %[[COUNT_I64:[^:]+]]: i32):
-// CHECK: bufferization.materialize_in_destination %{{[^:]+}} in restrict writable %{{[^:]+}} {{.*}} : (tensor<128xf32>, memref<128xf32>) -> ()
+// Producer scf.if dispatch: each branch materializes into its OWN concrete
+// buffer with `restrict writable`.
+// CHECK: scf.if %{{.+}} {
+// CHECK:   bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 7 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<128xf32>, memref<128xf32>) -> ()
+// CHECK: } else {
+// CHECK:   bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 7 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<128xf32>, memref<128xf32>) -> ()
+// CHECK: } {ssbuffer.block_id = 7 : i32, ssbuffer.intra_buffer}
 // CHECK-NEXT: %[[ONE_I64:[^ ]+]] = arith.constant {{.*}} 1 : i32
 // CHECK-NEXT: %[[NEXT_COUNT_I64:[^ ]+]] = arith.addi %[[COUNT_I64]], %[[ONE_I64]] {{.*}}ssbuffer.iterCounter{{.*}} : i32
 // CHECK: %[[NEXT_IV_I64:[^ ]+]] = arith.addi %[[IV_I64]], %{{[^ ]+}} : i64

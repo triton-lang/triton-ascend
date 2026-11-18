@@ -130,28 +130,31 @@ def _exp_fp32(x):
 def _log1p_fp32(x):
     # The smallest positive 1+x from a float32 x > -1 is normal, so extracting
     # its exponent and mantissa does not require subnormal normalization.
-    u = tl.where((x > -1.0) & (x < float("inf")), 1.0 + x, 1.0)
+    value = tl.where((x > -1.0) & (x < float("inf")), x, 0.0)
+    u = 1.0 + value
     bits = tl.cast(u, tl.uint32, bitcast=True)
     exponent = tl.cast(bits >> 23, tl.int32) - 127
     mantissa = tl.cast((bits & 0x007FFFFF) | 0x3F800000, tl.float32, bitcast=True)
     upper = mantissa > 1.4142135623730951
     mantissa = tl.where(upper, mantissa * 0.5, mantissa)
-    exponent = tl.cast(exponent + tl.cast(upper, tl.int32), tl.float32)
+    exponent = exponent + tl.cast(upper, tl.int32)
 
+    # For exponent zero, the original input already gives m-1 exactly.
+    # Elsewhere |log1p(x)| is bounded away from zero, so rounding 1+x
+    # contributes only a small absolute error.
+    delta = tl.where(exponent == 0, value, mantissa - 1.0)
     # ln(m) = 2 * atanh(z), z = (m-1)/(m+1) and abs(z) <= 0.172.
-    z = (mantissa - 1.0) / (mantissa + 1.0)
+    z = delta / (2.0 + delta)
     z2 = z * z
     poly = (1.0 / 11.0) * z2 + (1.0 / 9.0)
     poly = poly * z2 + (1.0 / 7.0)
     poly = poly * z2 + (1.0 / 5.0)
     poly = poly * z2 + (1.0 / 3.0)
-    log_u = exponent * _LN2_HI + (exponent * _LN2_LO + 2.0 * z * (poly * z2 + 1.0))
+    exponent_float = tl.cast(exponent, tl.float32)
+    log_u = exponent_float * _LN2_HI + (exponent_float * _LN2_LO + 2.0 * z * (poly * z2 + 1.0))
 
-    # Correct the rounding of 1+x. When u rounded to 1, return x itself.
-    # The same selection preserves signed zero, +inf and NaN.
-    unit = u == 1.0
-    delta = tl.where(unit, 1.0, u - 1.0)
-    y = tl.where(unit, x, log_u * (x / delta))
+    # This selection returns very small x and preserves signed zero, +inf and NaN.
+    y = tl.where(u == 1.0, x, log_u)
     domain_error = tl.where(x == -1.0, -float("inf"), float("nan"))
     return tl.where(x <= -1.0, domain_error, y)
 

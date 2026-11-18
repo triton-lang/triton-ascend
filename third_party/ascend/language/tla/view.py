@@ -33,7 +33,7 @@
 ``space`` only applies to a pointer entry; a buffer's space is its own.
 """
 from triton.language.core import builtin, tensor, int64, _unwrap_if_constexpr
-from .core import buffer, buffer_type, _shape, _row_major_strides
+from .core import buffer, buffer_type, _normalize_space, _shape, _row_major_strides
 
 
 def _numel(sizes):
@@ -73,6 +73,7 @@ def _entry(src, sizes, strides, offsets, space, semantic):
     """GM views preserve pointer provenance; other spaces use address binding."""
     if src.shape:
         raise TypeError("view expects a scalar pointer")
+    space = _normalize_space(space)
     if space == "gm":
         elem_ty = src.dtype.element_ty
         if not (elem_ty.is_int() or elem_ty.is_floating()) or elem_ty.primitive_bitwidth % 8:
@@ -146,7 +147,7 @@ def view(src, shape, strides=None, offsets=None, space="gm", _semantic=None):
     :param space: Address space for a pointer source. Defaults to ``"gm"``.
         Ignored for a buffer source, whose space is preserved; a non-default
         value raises ``ValueError`` in that case.
-    :type space: str
+    :type space: str or tla.AddressSpace
     :return: A buffer view aliasing the source memory.
     :rtype: tla.buffer
     :raises ValueError: If the rank of ``strides``/``offsets`` does not match
@@ -154,11 +155,10 @@ def view(src, shape, strides=None, offsets=None, space="gm", _semantic=None):
     :raises TypeError: If ``src`` is neither a pointer tensor nor a
         ``tla.buffer``.
 
-    A pointer source lowers to a one-dimensional ``hivm.hir.pointer_cast`` plus
-    a single ``memref.reinterpret_cast`` carrying the linear offset and the
-    full sizes/strides, so arbitrary strides and offsets are supported. A
-    buffer source lowers to ``memref.subview`` and preserves the source pitch;
-    use :func:`reshape` for a contiguous rank change.
+    A GM pointer view preserves kernel argument provenance and carries sizes,
+    strides and a linear element offset. Non-GM pointer views use address
+    binding. A buffer source lowers to ``memref.subview`` and preserves the
+    source pitch; use :func:`reshape` for a contiguous rank change.
 
     .. note::
         Only static positive extents are accepted. GM buffers must be created

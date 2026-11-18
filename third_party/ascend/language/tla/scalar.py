@@ -23,8 +23,9 @@ import math
 
 from triton.language import core as tl
 from triton.language.math import abs as _triton_abs
+from triton.language.math import exp as _triton_exp
 
-__all__ = ["select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "clamp"]
+__all__ = ["select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "exp", "clamp"]
 
 
 def _check_scalar(value, name):
@@ -73,6 +74,26 @@ def abs(x, _semantic=None):
     if isinstance(x, tl.tensor) and x.dtype.is_floating() and x.dtype not in (tl.float16, tl.float32):
         raise TypeError(f"tla.abs does not support dtype {x.dtype}")
     return _triton_abs(x, _semantic=_semantic)
+
+
+def _fp32_scalar(x, name, semantic):
+    x = tl._unwrap_if_constexpr(x)
+    if isinstance(x, tl.tensor):
+        if not x.type.is_block() and x.dtype == tl.float32:
+            return x
+    elif isinstance(x, float):
+        return semantic.scalar_constant(x, tl.float32)
+    raise TypeError(f"{name} expects a float32 scalar tensor or a Python float")
+
+
+@tl.builtin
+def exp(x, _semantic=None):
+    """Return the natural exponential of a float32 scalar or Python float.
+
+    The result is a float32 scalar. Use the SIMD-specific interface for
+    vector registers.
+    """
+    return _triton_exp(_fp32_scalar(x, "tla.exp", _semantic), _semantic=_semantic)
 
 
 @tl.builtin

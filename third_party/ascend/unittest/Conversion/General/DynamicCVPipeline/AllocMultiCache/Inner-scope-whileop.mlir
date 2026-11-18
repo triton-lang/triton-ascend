@@ -6,7 +6,7 @@
 //       (legacy shape supported by hasMainLoopAttr).
 //     - setupWhileIterArgCounter is SKIPPED (bufNum==1 → no dead iter_arg).
 //     - Cross-block tensor dep still gets single-buffer treatment
-//       (single memref.alloc + single hivm.hir.copy + single to_tensor).
+//       (single memref.alloc + single materialize_in_destination + single to_tensor).
 //     - NO scf.if dispatch is emitted (N==1 fast path).
 //     - The original whileOp is preserved verbatim (no extra i32 iter_arg).
 //   We pin the buffer count to 1 via the module-level
@@ -45,9 +45,14 @@
 // CHECK-DAG:   memref.alloc() : memref<128xf32, #hivm.address_space<ub>>
 // WhileOp's do-region bb0 has 3 block-args now (the new i32 counter is the last one).
 // CHECK:       ^bb0(%{{.*}}: tensor<128xf32>, %{{.*}}: i32, %{{.*}}: i32):
-// Producer arith.select chain (replaces scf.if dispatch; refactor innerscope).
-// CHECK:       arith.select
-// CHECK:       bufferization.materialize_in_destination {{.*}}: (tensor<128xf32>, memref<128xf32>) -> ()
+// Producer scf.if dispatch on the buffer index. Every branch materializes into
+// its OWN concrete buffer with `restrict writable` — the destination is a real
+// memref, never an arith.select result, so the restrict contract holds.
+// CHECK:       scf.if %{{.+}} {
+// CHECK:         bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 7 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<128xf32>, memref<128xf32>) -> ()
+// CHECK:       } else {
+// CHECK:         bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 7 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<128xf32>, memref<128xf32>) -> ()
+// CHECK:       } {ssbuffer.block_id = 7 : i32, ssbuffer.intra_buffer}
 // arith.addi increment for the multi-buffer counter (block_id=7, the first user's block).
 // CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 7 : i32, ssbuffer.iterCounter} : i32
 // Consumer scf.if dispatch returning tensor.
@@ -90,9 +95,13 @@
 // Multi-buffer must be emitted (proves cross-block judgment saw 8 != 12).
 // CHECK-DAG:   memref.alloc() : memref<32xf32, #hivm.address_space<ub>>
 // CHECK-DAG:   memref.alloc() : memref<32xf32, #hivm.address_space<ub>>
-// Producer-side select chain + materialize (replaces scf.if dispatch).
-// CHECK:       arith.select
-// CHECK:       bufferization.materialize_in_destination {{.*}}: (tensor<32xf32>, memref<32xf32>) -> ()
+// Producer-side scf.if dispatch: each branch materializes into its OWN
+// concrete buffer with `restrict writable`.
+// CHECK:       scf.if %{{.+}} {
+// CHECK:         bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 8 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<32xf32>, memref<32xf32>) -> ()
+// CHECK:       } else {
+// CHECK:         bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 8 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<32xf32>, memref<32xf32>) -> ()
+// CHECK:       } {ssbuffer.block_id = 8 : i32, ssbuffer.intra_buffer}
 // arith.addi increment for the multi-buffer counter (block_id=8, the first user's block).
 // CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 8 : i32, ssbuffer.iterCounter} : i32
 // Counter-aware whileOp carries ssbuffer.iterCounter alongside main_loop.
@@ -140,8 +149,13 @@
 // Multi-buffer producer (two allocs at block 5) emits the dispatch.
 // CHECK-DAG:   memref.alloc() : memref<16xf32, #hivm.address_space<ub>>
 // CHECK-DAG:   memref.alloc() : memref<16xf32, #hivm.address_space<ub>>
-// CHECK:       arith.select
-// CHECK:       bufferization.materialize_in_destination {{.*}}: (tensor<16xf32>, memref<16xf32>) -> ()
+// Producer scf.if dispatch: each branch materializes into its OWN concrete
+// buffer with `restrict writable`.
+// CHECK:       scf.if %{{.+}} {
+// CHECK:         bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<16xf32>, memref<16xf32>) -> ()
+// CHECK:       } else {
+// CHECK:         bufferization.materialize_in_destination {{.*}} in restrict writable {{.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.intraDeps = [{{.*}} : i32, 1 : i32]} : (tensor<16xf32>, memref<16xf32>) -> ()
+// CHECK:       } {ssbuffer.block_id = 5 : i32, ssbuffer.intra_buffer}
 // Constant 1 carrying block_id = 5 (relocated with the addi).
 // CHECK:       %{{.+}} = arith.constant {ssbuffer.block_id = 5 : i32} 1 : i32
 // Counter add-1 carries block_id = 5 and is tagged iterCounter.

@@ -587,6 +587,12 @@ void init_ascend_ir(py::module &&m) {
       .value("Fractal", hivm::DataLayout::Fractal)
       .export_values();
 
+  py::enum_<hivm::MemoryEffect>(m, "MemoryEffect", py::module_local())
+      .value("READ", hivm::MemoryEffect::READ)
+      .value("WRITE", hivm::MemoryEffect::WRITE)
+      .value("READ_WRITE", hivm::MemoryEffect::READ_WRITE)
+      .export_values();
+
   m.def("load_dialects", [](MLIRContext &context) {
     gDefaultAscendContext = &context;
     DialectRegistry registry;
@@ -1246,6 +1252,12 @@ void init_ascend_ir(py::module &&m) {
             auto *ctx = self.getBuilder().getContext();
             return hivm::DataLayoutAttr::get(ctx, layout);
           })
+      .def("get_memory_effect_attr",
+           [](AscendNPUIROpBuilder &self,
+              hivm::MemoryEffect effect) -> Attribute {
+             return hivm::MemoryEffectAttr::get(self.getBuilder().getContext(),
+                                                effect);
+           })
       .def("get_iterator_types_attr",
            [](AscendNPUIROpBuilder &self,
               const std::vector<hivm::IteratorType> &array) {

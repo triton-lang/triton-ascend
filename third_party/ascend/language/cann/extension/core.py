@@ -50,6 +50,7 @@ __all__ = [
     "conv2d",
     "AddressSpace",
     "DataLayout",
+    "MemoryEffect",
 ]
 
 import enum
@@ -156,6 +157,18 @@ class IteratorType(enum.Enum):
 class DataLayout(enum.Enum):
     ND = ascend_ir.DataLayout.ND
     Fractal = ascend_ir.DataLayout.Fractal
+
+
+class MemoryEffect(enum.Enum):
+    """Per-operand access for a custom op when ``no_side_effect`` is set.
+
+    String spellings ``"read"``, ``"write"``, and ``"read_write"`` are also
+    accepted on ``self.memory_effect``.
+    """
+
+    Read = ascend_ir.MemoryEffect.READ
+    Write = ascend_ir.MemoryEffect.WRITE
+    ReadWrite = ascend_ir.MemoryEffect.READ_WRITE
 
 
 class AddressSpace(enum.Enum):

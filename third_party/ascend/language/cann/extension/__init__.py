@@ -46,6 +46,7 @@ from .core import (
     conv2d,
     AddressSpace,
     DataLayout,
+    MemoryEffect,
 )
 
 from .scope import scope
@@ -110,6 +111,7 @@ __all__ = [
     "conv1d",
     "conv2d",
     "DataLayout",
+    "MemoryEffect",
 
     # address space
     "ascend_address_space",

@@ -300,6 +300,45 @@ def _make_address_space_attrs(op, builder, arg_attrs):
         arg_attrs[arg_idx][name] = builder.get_target_attribute(space_value)
 
 
+def _memory_effect_value(effect):
+    if isinstance(effect, core.MemoryEffect):
+        return effect.value
+    if isinstance(effect, str):
+        mapping = {
+            'read': core.MemoryEffect.Read,
+            'write': core.MemoryEffect.Write,
+            'read_write': core.MemoryEffect.ReadWrite,
+        }
+        assert effect in mapping, (
+            "memory_effect must be 'read', 'write', or 'read_write'")
+        return mapping[effect].value
+    return effect
+
+
+def _make_memory_effect_attrs(op, builder, arg_attrs):
+    # memory_effect maps an argument name or index to read, write, or
+    # read_write. Set it when the operand does not use the default
+    # (ins=read, outs=write, tmps=read_write). The compiler reads the key
+    # only when no_side_effect is set. arg_attrs stays [inputs..., outputs...].
+    name = 'memory_effect'
+    if not hasattr(op, name):
+        return
+
+    param_names = list(op.signature.parameters.keys()) if hasattr(op, "signature") else []
+
+    for arg, effect in op.memory_effect.items():
+        effect_value = _memory_effect_value(effect)
+        if isinstance(arg, str) and arg in param_names:
+            arg_idx = param_names.index(arg)
+        elif isinstance(arg, int):
+            arg_idx = arg
+        else:
+            assert False, f"{name}'s keys should be string or int"
+        assert 0 <= arg_idx < len(arg_attrs), (
+            f"{name} index {arg_idx} is outside [inputs..., outputs...]")
+        arg_attrs[arg_idx][name] = builder.get_memory_effect_attr(effect_value)
+
+
 def _make_arg_attrs(op, builder):
     num_args = len(op.signature.parameters) if hasattr(op, "signature") else 0
     arg_attrs = [{} for _ in range(num_args)]
@@ -309,6 +348,7 @@ def _make_arg_attrs(op, builder):
     if op.core == core.CORE.CUBE:
         _make_data_layout_attrs(op, builder, arg_attrs)
         _make_address_space_attrs(op, builder, arg_attrs)
+    _make_memory_effect_attrs(op, builder, arg_attrs)
 
     return arg_attrs
 

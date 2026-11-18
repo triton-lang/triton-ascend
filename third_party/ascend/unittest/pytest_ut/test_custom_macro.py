@@ -33,6 +33,7 @@ class my_custom_macro_op:
 
     def __init__(self, x, out=None):
         self.indexing_map = [al.affine_map.get_identity(1)]
+        self.memory_effect = {"out": al.MemoryEffect.ReadWrite}
 
 
 @triton.jit
@@ -97,6 +98,7 @@ def test_custom_macro_op_lowers_to_custom_macro():
         assert "hivm.hir.custom_macro" in line
         assert "hivm.hir.custom " not in line
         assert "hivm.pipe_in = #hivm.pipe<PIPE_MTE2>" in line
+        assert "arg_attrs = [{}, {memory_effect = #hivm.memory_effect<read_write>}]" in line
         assert "hivm.pipe_out = #hivm.pipe<PIPE_V>" in line
         assert "hivm.tcore_type = #hivm.tcore_type<VECTOR>" in line
         assert "hivm.vf_mode = #hivm.vf_mode<SIMD>" in line

@@ -1742,7 +1742,7 @@ index a672722a1279f68cf80d5fde3d0b654100611d7a..c59e4d63797650f49f014f34f1c7921c
      # active hooks
      active_hooks: list[Hook] = []
 diff --git a/third_party/proton/proton/hooks/instrumentation.py b/third_party/proton/proton/hooks/instrumentation.py
-index aac27ad1887339d44c3d16e47ce48c456b474d4c..a6d715e0107eee995dd92ee12fe0f72ccfd5b6fd 100644
+index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3bc21e452 100644
 --- a/third_party/proton/proton/hooks/instrumentation.py
 +++ b/third_party/proton/proton/hooks/instrumentation.py
 @@ -42,6 +42,30 @@ class CudaAllocator:
@@ -1816,10 +1816,10 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..a6d715e0107eee995dd92ee12fe0f72c
 +        self.allocator = NpuAllocator(self) if _get_backend_name() == "ascend" else CudaAllocator(self)
          self.buffer = None
          self.metadata_path: Dict[Any, Optional[str]] = {}
-+        self._mspti_functions = set()
-+        self._mspti_collector = None
-+        self._mspti_warmup_remaining = {}
-+        self._mspti_skipping_warmup = False
++        self._perf_monitor_functions = set()
++        self._perf_monitor = None
++        self._warmup_remaining = {}
++        self._skipping_warmup = False
  
      def activate(self):
          if InstrumentationHook.active_count > 0:
@@ -1877,8 +1877,8 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..a6d715e0107eee995dd92ee12fe0f72c
          if InstrumentationHook.active_count == 0:
              return
  
-+        if self._mspti_collector is not None and self._mspti_collector.handle:
-+            self._mspti_collector.stop()
++        if self._perf_monitor is not None and self._perf_monitor.active:
++            self._perf_monitor.stop()
 +
          InstrumentationHook.active_count -= 1
  
@@ -1899,7 +1899,7 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..a6d715e0107eee995dd92ee12fe0f72c
 +            import json
 +            with open(metadata_path) as file:
 +                compiled_metadata = json.load(file)
-+            if compiled_metadata.get("proton_collection") == "mspti":
++            if compiled_metadata.get("proton_collection") in ("perf_monitor", "a5_perf_monitor", "mspti"):
 +                entries = compiled_metadata.get("proton_metadata", [])
 +                if len(entries) != 1 or entries[0]["proton"]["format_version"] != 2:
 +                    raise RuntimeError(
@@ -1908,16 +1908,16 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..a6d715e0107eee995dd92ee12fe0f72c
 +                names = [(s["start_region_id"] & 0x3ff, s["name"]) for s in scopes]
 +                parents = [(s["start_region_id"] & 0x3ff, s["parent_id"]) for s in scopes if s["parent_id"] >= 0]
 +                libproton.init_function_metadata(function, name, names, parents, metadata_path)
-+                self._mspti_functions.add(function)
++                self._perf_monitor_functions.add(function)
 +                import os
 +                import warnings
 +                warmup = int(os.environ.get("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES", "0"))
 +                if not 0 <= warmup <= 100:
 +                    raise ValueError("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES must be between 0 and 100")
-+                self._mspti_warmup_remaining[function] = warmup
++                self._warmup_remaining[function] = warmup
 +                if warmup:
 +                    warnings.warn(
-+                        f"A5 instrumentation PoC: the first {warmup} launch(es) of {name} are explicit warmup and not collected"
++                        f"Hardware instrumentation: the first {warmup} launch(es) of {name} are explicit warmup and not collected"
 +                    )
 +                return
 +
@@ -1945,15 +1945,15 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..a6d715e0107eee995dd92ee12fe0f72c
  
      def enter(self, metadata: LazyDict) -> None:
          func = metadata.data.get("function")
-+        if func in self._mspti_functions:
-+            if self._mspti_collector is None:
-+                from ..mspti_instrumentation import MsptiInstrumentationCollector
-+                self._mspti_collector = MsptiInstrumentationCollector()
-+            if self._mspti_warmup_remaining[func]:
-+                self._mspti_warmup_remaining[func] -= 1
-+                self._mspti_skipping_warmup = True
++        if func in self._perf_monitor_functions:
++            if self._perf_monitor is None:
++                from ..ascend_perf_monitor import PerfMonitorCollector
++                self._perf_monitor = PerfMonitorCollector()
++            if self._warmup_remaining[func]:
++                self._warmup_remaining[func] -= 1
++                self._skipping_warmup = True
 +                return
-+            self._mspti_collector.start()
++            self._perf_monitor.start()
 +            return
          stream = metadata.data.get("stream")
          alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
@@ -1962,13 +1962,13 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..a6d715e0107eee995dd92ee12fe0f72c
  
      def exit(self, metadata: LazyDict) -> None:
          func = metadata.data.get("function")
-+        if func in self._mspti_functions:
-+            if self._mspti_skipping_warmup:
++        if func in self._perf_monitor_functions:
++            if self._skipping_warmup:
 +                import torch
 +                torch.npu.synchronize()
-+                self._mspti_skipping_warmup = False
++                self._skipping_warmup = False
 +                return
-+            records = self._mspti_collector.stop()
++            records = self._perf_monitor.stop()
 +            libproton.record_instrumentation_events(func, records)
 +            return
          stream = metadata.data.get("stream")
@@ -1984,139 +1984,249 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..a6d715e0107eee995dd92ee12fe0f72c
                  return 0
  
              alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
-diff --git a/third_party/proton/proton/mspti_instrumentation.py b/third_party/proton/proton/mspti_instrumentation.py
+diff --git a/third_party/proton/proton/ascend_perf_monitor.py b/third_party/proton/proton/ascend_perf_monitor.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..9e602a75dd506ae076e315a1be9162da56b835d7
+index 0000000000000000000000000000000000000000..3ecab1c937369697b548fff7ae73ba2b083f9605
 --- /dev/null
-+++ b/third_party/proton/proton/mspti_instrumentation.py
-@@ -0,0 +1,127 @@
-+"""Experimental serialized A5 instrumentation capture through the MSPTI PoC C API."""
++++ b/third_party/proton/proton/ascend_perf_monitor.py
+@@ -0,0 +1,237 @@
++"""Serialized Hardware sampling. The device ABI is supplied by CANN and the driver."""
 +import ctypes as C
 +import json
 +import os
++from pathlib import Path
++import struct
 +import threading
 +import time
 +import warnings
-+from pathlib import Path
 +
-+_CHANNEL_IDS = range(11, 29)
-+
-+
-+class ScopeRecord(C.Structure):
-+    _fields_ = [("start", C.c_uint64), ("end", C.c_uint64), ("channel", C.c_uint32), ("pipe", C.c_uint32),
-+                ("scope", C.c_uint32), ("frequency", C.c_uint32)]
++_CHANNELS = range(11, 29)  # Six triplets: AIC, AIV0, AIV1.
++_MAX_BYTES = 64 << 20
++_MAX_RECORDS = (16 << 20) // 32
 +
 +
-+class CollectionStats(C.Structure):
-+    _fields_ = [("bytes", C.c_uint64), ("incomplete", C.c_uint64), ("overflow", C.c_uint64),
-+                ("driver_error", C.c_int32), ("flush_error", C.c_int32)]
++def _decode(raw, clocks):
++    records = []
++    incomplete = 0
++    for channel, data in raw.items():
++        starts = {}
++        cycle = 0
++        tail = len(data) % 4
++        incomplete += bool(tail)
++        for delta, info in struct.iter_unpack("<HH", memoryview(data)[:len(data) - tail]):
++            pipe = info >> 12
++            if pipe not in (0, 1, 2, 3, 4, 5, 10, 15):
++                continue
++            cycle += delta
++            scope = info & 0x3ff
++            if pipe == 15 or not info & 0x400 or scope >= 0x188:
++                continue  # Status words and the protocol-v2 drain markers are not user scopes.
++            key = (pipe, scope)
++            if info & 0x800:
++                start = starts.pop(key, None)
++                if start is None:
++                    incomplete += 1
++                else:
++                    if len(records) >= _MAX_RECORDS:
++                        raise RuntimeError("Decoded record limit exceeded")
++                    clock = clocks[(channel - _CHANNELS.start) % 3 != 0]
++                    records.append((channel, pipe, scope, start, cycle, clock))
++            else:
++                incomplete += key in starts
++                starts[key] = cycle
++        incomplete += len(starts)
++    return records, incomplete
 +
 +
-+class MsptiInstrumentationCollector:
++class _CommandParams(C.Structure):
++    _fields_ = [("path_len", C.c_uint32), ("limit", C.c_uint32), ("data_len", C.c_uint32), ("path", C.c_char * 1024),
++                ("data", C.c_char * 4096)]
++
++
++class _Command(C.Structure):
++    _fields_ = [("switch", C.c_uint64), ("switch_hi", C.c_uint64), ("count", C.c_uint32), ("devices", C.c_uint32 * 64),
++                ("model", C.c_uint32), ("kind", C.c_uint32), ("cache", C.c_uint32), ("params", _CommandParams)]
++
++
++class _Start(C.Structure):
++    _fields_ = [("kind", C.c_int), ("period", C.c_uint), ("realtime", C.c_uint), ("config", C.c_void_p),
++                ("config_size", C.c_uint)]
++
++
++def _bind(lib, symbol, *args):
++    fn = getattr(lib, symbol)
++    fn.argtypes, fn.restype = args, C.c_int
++    return fn
++
++
++def _check(rc, operation):
++    if rc:
++        raise RuntimeError(f"Performance monitor: {operation} failed ({rc})")
++
++
++class _Driver:
++
++    def __init__(self):
++        hal = C.CDLL("libascend_hal.so")
++        u, p = C.c_uint32, C.c_void_p
++        self.physical = _bind(C.CDLL("libruntime.so"), "rtGetDevicePhyIdByIndex", u, C.POINTER(u))
++        self.command = _bind(C.CDLL("libprofapi.so"), "profSetProfCommand", p, u)
++        self.info = _bind(hal, "halGetDeviceInfo", u, C.c_int, C.c_int, C.POINTER(C.c_int64))
++        self.start = _bind(hal, "prof_drv_start", u, u, C.POINTER(_Start))
++        self.read = _bind(hal, "prof_channel_read", u, u, p, u)
++        self.flush = _bind(hal, "halProfDataFlush", u, u, C.POINTER(u))
++        self.stop = _bind(hal, "prof_stop", u, u)
++
++    def set_command(self, device, kind):
++        cmd = _Command()
++        cmd.switch = (1 << 23) | (1 << 32)  # PROF_INSTR | PROF_OP_TIMESTAMP
++        cmd.count, cmd.devices[0], cmd.model, cmd.kind = 1, device, 0xffffffff, kind
++        _check(self.command(C.byref(cmd), C.sizeof(cmd)), f"command {kind}")
++
++    def clocks(self, device):
++        values = []
++        for module in (4, 7):  # AICORE / VECTOR_CORE, DRV_INFO_TYPE_FREQUE, in MHz.
++            value = C.c_int64()
++            _check(self.info(device, module, 4, C.byref(value)), "clock lookup")
++            if not 0 < value.value <= 0xffffffff:
++                raise RuntimeError(f"Invalid device clock: {value.value}")
++            values.append(value.value)
++        return values
++
++
++class PerfMonitorCollector:
 +    _lock = threading.Lock()
 +
 +    def __init__(self):
-+        self.lib = C.CDLL(os.environ.get("PROTON_MSPTI_LIBRARY_PATH", "libmspti.so"))
-+        signatures = {
-+            "msptiPerfMonitorStart": [C.c_uint32, C.POINTER(C.c_void_p)],
-+            "msptiPerfMonitorStop": [C.c_void_p],
-+            "msptiPerfMonitorGetRecords":
-+            [C.c_void_p,
-+             C.POINTER(C.POINTER(ScopeRecord)),
-+             C.POINTER(C.c_size_t),
-+             C.POINTER(CollectionStats)],
-+            "msptiPerfMonitorDestroy": [C.c_void_p],
-+            "msptiPerfMonitorGetRawData":
-+            [C.c_void_p, C.c_uint32, C.POINTER(C.POINTER(C.c_uint8)),
-+             C.POINTER(C.c_size_t)],
-+        }
-+        for name, args in signatures.items():
-+            try:
-+                fn = getattr(self.lib, name)
-+            except AttributeError as error:
-+                raise RuntimeError(
-+                    f"A5 instrumentation requires the MSPTI instrumentation PoC library with {name}") from error
-+            fn.argtypes, fn.restype = args, C.c_int
-+        self.handle = C.c_void_p()
-+        warnings.warn(
-+            "A5 instrumentation samples hardware channels, not every Triton program/block. "
-+            "Channel IDs are not core IDs; an empty capture does not prove that the kernel did not execute.",
-+            stacklevel=2)
-+
-+    @staticmethod
-+    def _check(rc, operation):
-+        if rc:
-+            raise RuntimeError(f"MSPTI instrumentation {operation} failed: {rc}")
++        self.driver = _Driver()
++        self.active = False
++        self._stop_lock = threading.Lock()
++        warnings.warn("Hardware sampling does not cover all logical blocks; channel IDs are not core IDs.",
++                      stacklevel=2)
 +
 +    def start(self):
 +        import torch
 +        if not self._lock.acquire(blocking=False):
-+            raise RuntimeError("The A5 instrumentation PoC supports only serialized kernel captures")
++            raise RuntimeError("Concurrent performance monitor captures are not supported")
++        self.channels, self.raw, self.errors = [], {}, []
++        self.size, self.reader, self.command_started = 0, None, False
++        self.done = threading.Event()
 +        try:
-+            torch.npu.synchronize()
-+            runtime = C.CDLL("libruntime.so")
++            logical = torch.npu.current_device()
++            torch.npu.synchronize(logical)
 +            physical = C.c_uint32()
-+            convert = runtime.rtGetDevicePhyIdByIndex
-+            convert.argtypes = [C.c_uint32, C.POINTER(C.c_uint32)]
-+            convert.restype = C.c_int
-+            self._check(convert(torch.npu.current_device(), C.byref(physical)), "physical device lookup")
-+            self._check(self.lib.msptiPerfMonitorStart(physical.value, C.byref(self.handle)), "start")
++            _check(self.driver.physical(logical, C.byref(physical)), "physical device lookup")
++            self.logical, self.device = logical, physical.value
++            self.clocks = self.driver.clocks(self.device)
++            self.driver.set_command(self.device, 1)
++            self.command_started = True
++            config = (C.c_uint32 * 4)(32, 0, 0, 0)  # period, timeline mode, group type, group number
++            params = _Start(0, 0, 1, C.cast(config, C.c_void_p), C.sizeof(config))
++            for ch in _CHANNELS:
++                _check(self.driver.start(self.device, ch, C.byref(params)), f"start channel {ch}")
++                self.channels.append(ch)
++            self.reader = threading.Thread(target=self._read)
++            self.reader.start()
++            self.active = True
 +        except BaseException:
-+            self._lock.release()
++            try:
++                self._close()
++                if self.errors:
++                    warnings.warn("Performance monitor cleanup after failed start: " + "; ".join(self.errors))
++            finally:
++                self._lock.release()
 +            raise
 +
-+    def stop(self):
-+        import torch
-+        if not self.handle:
-+            return []
++    def _read(self):
++        buf = C.create_string_buffer(2 << 20)
 +        try:
-+            torch.npu.synchronize()
-+            rc = self.lib.msptiPerfMonitorStop(self.handle)
-+            records, count, stats = C.POINTER(ScopeRecord)(), C.c_size_t(), CollectionStats()
-+            self._check(
-+                self.lib.msptiPerfMonitorGetRecords(self.handle, C.byref(records), C.byref(count), C.byref(stats)),
-+                "read")
-+            status = {name: getattr(stats, name) for name, _ in CollectionStats._fields_}
-+            values = [(r.channel, r.pipe, r.scope, r.start, r.end, r.frequency) for r in records[:count.value]]
-+            self._dump_debug(status, values)
-+            if rc or not count.value:
-+                raise RuntimeError(
-+                    f"Incomplete/empty MSPTI instrumentation capture: rc={rc}, stats={json.dumps(status)}; "
-+                    "this is partial hardware sampling, not guaranteed coverage of every logical block")
-+            if stats.flush_error:
-+                warnings.warn(
-+                    f"MSPTI instrumentation flush returned {stats.flush_error}; received records are returned, "
-+                    "but their presence does not establish complete capture.", stacklevel=2)
-+            if len({row[5] for row in values}) != 1:
-+                raise RuntimeError("Mixed AIC/AIV frequencies require separate instrumentation clock domains")
-+            return values
-+        finally:
-+            try:
-+                rc = self.lib.msptiPerfMonitorDestroy(self.handle)
-+            finally:
-+                self.handle = C.c_void_p()
-+                self._lock.release()
-+            self._check(rc, "destroy")
++            while True:
++                # Nonblocking reads of our own channels only. After flush, drain to empty before closing.
++                final = self.done.is_set()
++                received = False
++                for ch in self.channels:
++                    n = self.driver.read(self.device, ch, buf, len(buf))
++                    if n < 0 or n > len(buf):
++                        raise RuntimeError(f"Failed to read channel {ch}: {n}")
++                    if n:
++                        if n > _MAX_BYTES - self.size:
++                            raise RuntimeError("Raw capture limit exceeded")
++                        self.raw.setdefault(ch, bytearray()).extend(memoryview(buf).cast("B")[:n])
++                        self.size += n
++                        received = True
++                if not received:
++                    if final:
++                        break
++                    self.done.wait(0.005)
++        except Exception as error:
++            self.errors.append(str(error))
 +
-+    def _dump_debug(self, status, records):
++    def _close(self):
++        try:
++            self.done.set()
++            if self.reader is not None and self.reader.ident is not None:
++                self.reader.join()
++            for ch in reversed(self.channels):
++                try:
++                    _check(self.driver.stop(self.device, ch), f"stop channel {ch}")
++                except Exception as error:
++                    self.errors.append(str(error))
++            if self.command_started:
++                try:
++                    self.driver.set_command(self.device, 2)
++                except Exception as error:
++                    self.errors.append(str(error))
++        finally:
++            self.active = False
++
++    def stop(self):
++        with self._stop_lock:
++            if not self.active:
++                return []
++            try:
++                return self._finish()
++            finally:
++                self._lock.release()
++
++    def _finish(self):
++        import torch
++        flush_errors = {}
++        try:
++            torch.npu.synchronize(self.logical)
++            for ch in self.channels:
++                rc = self.driver.flush(self.device, ch, C.byref(C.c_uint32()))
++                if rc:
++                    flush_errors[ch] = rc
++            time.sleep(0.2)
++        finally:
++            self._close()
++        if self.errors:
++            raise RuntimeError("; ".join(self.errors))
++        if flush_errors:
++            warnings.warn(f"Channel flush errors: {flush_errors}; collection may be incomplete")
++        records, incomplete = _decode(self.raw, self.clocks)
 +        root = os.environ.get("PROTON_INSTRUMENTATION_DEBUG_DIR")
-+        if not root:
-+            return
-+        directory = Path(root) / str(time.time_ns())
-+        directory.mkdir(parents=True)
-+        observed = sorted({record[0] for record in records})
-+        coverage = {
-+            "kind": "sampled_hardware_channels", "requested_channels": list(_CHANNEL_IDS), "observed_channels":
-+            observed, "all_logical_blocks": False
-+        }
-+        (directory / "records.json").write_text(
-+            json.dumps({"stats": status, "records": records, "coverage": coverage}, indent=2))
-+        for channel in _CHANNEL_IDS:
-+            raw, size = C.POINTER(C.c_uint8)(), C.c_size_t()
-+            self._check(self.lib.msptiPerfMonitorGetRawData(self.handle, channel, C.byref(raw), C.byref(size)),
-+                        "raw read")
-+            if size.value:
-+                (directory / f"channel-{channel}.bin").write_bytes(C.string_at(raw, size.value))
++        if root:
++            directory = Path(root) / str(time.time_ns())
++            directory.mkdir(parents=True)
++            for ch, data in self.raw.items():
++                (directory / f"channel-{ch}.bin").write_bytes(data)
++            coverage = {
++                "kind": "sampled_hardware_channels", "requested_channels": list(_CHANNELS), "observed_channels":
++                sorted({r[0]
++                        for r in records}), "all_logical_blocks": False
++            }
++            (directory / "records.json").write_text(
++                json.dumps({
++                    "records": records, "stats":
++                    {"bytes": self.size, "incomplete": incomplete, "flush_errors": flush_errors}, "coverage": coverage
++                }))
++        if incomplete or not records:
++            raise RuntimeError(
++                f"Incomplete/empty performance monitor capture: {self.size} bytes, {incomplete} unmatched words/scopes")
++        if len({r[5] for r in records}) != 1:
++            raise RuntimeError("Mixed AIC/AIV clock domains")
++        return records
 diff --git a/third_party/proton/proton/profile.py b/third_party/proton/proton/profile.py
 index 126b3abbeaf71fed1781f283fd53704cca41b42e..c1ca884d5d09e0453990310d44b42651cbfad2d9 100644
 --- a/third_party/proton/proton/profile.py

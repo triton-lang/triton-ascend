@@ -1658,8 +1658,7 @@ ReduceConverter::convertToTargetOp(triton::ReduceOp op,
       auto holder = rewriter.create<bufferization::AllocTensorOp>(
           loc, RankedTensorType::get({}, constantType), ValueRange{});
       maskInitTensor =
-          rewriter
-              .create<linalg::FillOp>(loc, posInfConst, holder.getResult())
+          rewriter.create<linalg::FillOp>(loc, posInfConst, holder.getResult())
               .getResult(0);
     } else {
       Value init = rewriter.create<tensor::EmptyOp>(
@@ -1693,11 +1692,12 @@ ReduceConverter::convertToTargetOp(triton::ReduceOp op,
         loc, reducedTensorType,
         DenseElementsAttr::get(
             reducedTensorType,
-            rewriter.getFloatAttr(floatElemType,
-                                  std::numeric_limits<float>::quiet_NaN())
+            rewriter
+                .getFloatAttr(floatElemType,
+                              std::numeric_limits<float>::quiet_NaN())
                 .getValue()));
-    finalResult = rewriter.create<arith::SelectOp>(loc, allNan, nanTensor,
-                                                   finalResult);
+    finalResult =
+        rewriter.create<arith::SelectOp>(loc, allNan, nanTensor, finalResult);
   }
 
   if (sourceType.getRank() == 1) {

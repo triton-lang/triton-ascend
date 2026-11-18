@@ -168,8 +168,7 @@ class buffer_type(tl.base_type):
         # offset keeps its optional and is mapped by the builder.
         shape = [_DYNAMIC if dim is None else dim for dim in self.shape]
         strides = [_DYNAMIC if stride is None else stride for stride in self.strides]
-        return builder.create_tla_buffer_type(shape, self.element_ty.to_ir(builder), self.space,
-                                              strides, self.offset)
+        return builder.create_tla_buffer_type(shape, self.element_ty.to_ir(builder), self.space, strides, self.offset)
 
     def _flatten_ir_types(self, builder, out):
         out.append(self.to_ir(builder))

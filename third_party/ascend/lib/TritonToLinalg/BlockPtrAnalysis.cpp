@@ -2064,18 +2064,9 @@ LogicalResult BlockDataParser::rewriteMakeTensorPtrOp(
   if (auto shapedType = dyn_cast<ShapedType>(pointerType.getPointeeType())) {
     resultShape = shapedType.getShape();
     data.getSizesRef().clear();
-    for (auto [dim_size, shapeValue] : llvm::zip(resultShape, op.getShape())) {
-      if (dim_size == ShapedType::kDynamic) {
-        // A '?' entry in the result memref type must be backed by a runtime
-        // size operand, otherwise reinterpret_cast sees a dynamic entry in
-        // 'static_sizes' with no matching 'sizes' value and fails
-        // verification. Static dims keep their folded attribute.
-        data.getSizesRef().push_back(
-            getOpFoldResultOfLayoutInfo(shapeValue, rewriter));
-      } else {
-        data.getSizesRef().push_back(
-            IntegerAttr::get(IntegerType::get(op.getContext(), 64), dim_size));
-      }
+    for (auto dim_size : resultShape) {
+      data.getSizesRef().push_back(
+          IntegerAttr::get(IntegerType::get(op.getContext(), 64), dim_size));
     }
   } else {
     // scalar pointer, should produce a one dimensional memref

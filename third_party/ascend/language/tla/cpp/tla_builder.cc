@@ -405,8 +405,8 @@ OpFoldResult toMixedDim(TLABuilder &self, const py::object &value) {
     return self.getBuilder().getIndexAttr(value.cast<int64_t>());
   auto dim = value.cast<Value>();
   if (!dim.getType().isIndex())
-    dim = self.create<arith::IndexCastOp>(self.getBuilder().getIndexType(),
-                                          dim);
+    dim =
+        self.create<arith::IndexCastOp>(self.getBuilder().getIndexType(), dim);
   return dim;
 }
 

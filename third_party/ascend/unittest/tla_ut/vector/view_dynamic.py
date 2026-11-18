@@ -65,8 +65,8 @@ def signature(case):
 
 
 @tla.jit
-def dynamic_window(X, O, rows, off, pitch, DTYPE: tl.constexpr, MODE: tl.constexpr, H: tl.constexpr,
-                   D: tl.constexpr, DPAD: tl.constexpr):
+def dynamic_window(X, O, rows, off, pitch, DTYPE: tl.constexpr, MODE: tl.constexpr, H: tl.constexpr, D: tl.constexpr,
+                   DPAD: tl.constexpr):
     with tla.scope.vector():
         if MODE == "ub_dyn":
             # Whole pitched tensor into UB, then a dynamic window out of it.

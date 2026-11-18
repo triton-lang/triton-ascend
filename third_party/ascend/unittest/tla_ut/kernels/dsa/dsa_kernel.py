@@ -272,11 +272,13 @@ def _sparse_mla(
                                     tla.simd.vsstb(rope, packed[32, local_row * 16], GRP * 16, mask=half)
                             tla.copy_ub_to_l1(
                                 tla.subview(packed, offsets=(0, 0), sizes=(32, GR * 16)),
-                                tla.subview(kv_lat_flat, offsets=(((t + 1) % 3) * 32, position * 16), sizes=(32, GR * 16)),
+                                tla.subview(kv_lat_flat, offsets=(((t + 1) % 3) * 32, position * 16),
+                                            sizes=(32, GR * 16)),
                             )
                             tla.copy_ub_to_l1(
                                 tla.subview(packed, offsets=(32, 0), sizes=(4, GR * 16)),
-                                tla.subview(kv_rope_flat, offsets=(((t + 1) % 2) * 4, position * 16), sizes=(4, GR * 16)),
+                                tla.subview(kv_rope_flat, offsets=(((t + 1) % 2) * 4, position * 16),
+                                            sizes=(4, GR * 16)),
                             )
                         if step < 4:
                             position = sub * (BN // 2) + step * GR
@@ -405,8 +407,10 @@ def _sparse_mla(
                         strides=(512, 1),
                     ),
                 )
-            tla.store_ub_to_gm(tla.subview(maximum, offsets=(0, ), sizes=(VM, )), tla.view(MAX + token * H + head + sub * VM, (VM, )))
-            tla.store_ub_to_gm(tla.subview(denominator, offsets=(0, ), sizes=(VM, )), tla.view(SUM + token * H + head + sub * VM, (VM, )))
+            tla.store_ub_to_gm(tla.subview(maximum, offsets=(0, ), sizes=(VM, )),
+                               tla.view(MAX + token * H + head + sub * VM, (VM, )))
+            tla.store_ub_to_gm(tla.subview(denominator, offsets=(0, ), sizes=(VM, )),
+                               tla.view(SUM + token * H + head + sub * VM, (VM, )))
             tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, FLAG_JOB_DONE)
             tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_JOB_ACK)
         with tla.scope.cube():

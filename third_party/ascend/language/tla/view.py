@@ -96,8 +96,7 @@ def _subview(src, sizes, steps, offsets, semantic):
         offset = _check_scalar_int(offset)
         size = _check_dim(size, "sizes")
         step = _check_dim(step, "strides")
-        if (static_view and extent is not None
-                and (offset < 0 or offset + (size - 1) * step >= extent)):
+        if (static_view and extent is not None and (offset < 0 or offset + (size - 1) * step >= extent)):
             raise ValueError("static view is outside the source buffer")
         offset_handles.append(semantic.to_tensor(offset).handle)
         size_dims.append(_to_ir_dim(semantic, size))
@@ -130,14 +129,11 @@ def _entry(src, sizes, strides, offsets, semantic):
     shape_ty = tuple(None if _is_dynamic(s) else s for s in sizes)
     strides_ty = tuple(None if _is_dynamic(s) else s for s in strides)
     ty = buffer_type(shape_ty, src.dtype.element_ty, "gm", strides_ty, offset=None)
-    size_dims = [
-        semantic.cast(semantic.to_tensor(s), int64).handle if _is_dynamic(s) else s for s in sizes
-    ]
-    stride_dims = [
-        semantic.cast(semantic.to_tensor(s), int64).handle if _is_dynamic(s) else s for s in strides
-    ]
-    handle = semantic.builder.create_tla_pointer_view(src.handle, semantic.to_tensor(linear).handle,
-                                                      ty.to_ir(semantic.builder), size_dims, stride_dims)
+    size_dims = [semantic.cast(semantic.to_tensor(s), int64).handle if _is_dynamic(s) else s for s in sizes]
+    stride_dims = [semantic.cast(semantic.to_tensor(s), int64).handle if _is_dynamic(s) else s for s in strides]
+    handle = semantic.builder.create_tla_pointer_view(src.handle,
+                                                      semantic.to_tensor(linear).handle, ty.to_ir(semantic.builder),
+                                                      size_dims, stride_dims)
     return buffer(handle, ty)
 
 

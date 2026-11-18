@@ -2,18 +2,12 @@
 
 // Same-iteration tensor iter-arg pairs cannot add flowopt condition.
 //
-// The legacy path of this branch is a frozen snapshot of the upstream
-// implementation at the fork point of the normal preload branch. The flowopt
-// fix of the upstream commit 33819a5b6 landed after that point, so the legacy
-// path does not carry it. The normal preload path keeps the fix, see
-// UpdateConditionInfo.cpp.
+// The flowopt fix of the upstream commit 33819a5b6 is carried by the normal
+// preload path, see UpdateConditionInfo.cpp.
 //
 // The kernel of this test has three blocks and no tightly coupled buffer. It
-// takes the legacy path when the black list and the pattern gate are in
-// place, and the test does not pass then. The gate is down for the batch
-// validation of the normal preload scheme, so the kernel takes that path and
-// the test passes now. Mark it as expected to fail again when the gate comes
-// back.
+// takes the normal preload path, the path that carries the fix, so the test
+// passes.
 
 // CHECK-LABEL: func.func @skip_flowopt_tensor_iter_arg_pair
 // CHECK: arith.cmpi eq

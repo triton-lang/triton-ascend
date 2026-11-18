@@ -1,7 +1,7 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
 
-// Block 5 contains two splitted_ifs. checkCanWrap rejects the module and
-// leaves both inside ssbuffer.if 5.
+// Block 5 contains two splitted_ifs. The normal scheme has no wrap step, so
+// it leaves both inside ssbuffer.if 5.
 
 // CHECK-LABEL: func.func @more_than_one_splitted_if
 // CHECK: } {{.*}}ssbuffer.splitted_if = 0 : i32}

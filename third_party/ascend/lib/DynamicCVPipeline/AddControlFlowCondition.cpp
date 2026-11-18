@@ -26,7 +26,6 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/SplittedIfWrapSsbufIf.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopOps.h"
@@ -337,11 +336,14 @@ void AddControlFlowConditionPass::runOnOperation() {
   updateLoopIterTimesPass->setConditionInfo(&info);
   pm.addPass(std::move(updateLoopIterTimesPass));
 
-  // Step7: Use the splitted_if condition to wrap each ssbuffer.if.
-  std::unique_ptr<SplittedIfWrapSsbufIfPass> splittedIfWrapSsbufIfPass(
-      new SplittedIfWrapSsbufIfPass());
-  splittedIfWrapSsbufIfPass->setConditionInfo(&info);
-  pm.addPass(std::move(splittedIfWrapSsbufIfPass));
+  // There is no Step7. The condition of a computation block sits on the outer
+  // scf.if of the block, the one that carries ssbuffer.if: the block counter
+  // is the induction variable of the scf.while that replaced the main loop, so
+  // it has to advance on every iteration of the loop, whatever the data
+  // dependent condition of the block is. Wrapping the ssbuffer.if in a scf.if
+  // on the splitted_if condition would move the counter increment under that
+  // data dependent condition, and the loop would never end when the condition
+  // is false.
 
   if (failed(runPipeline(pm, module))) {
     LDBG("Pass failed!");

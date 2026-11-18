@@ -1,15 +1,14 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.for --implicit-check-not=arith.select
 
 // A kernel whose cross-core dependency is a CUBE -> VECTOR -> CUBE -> VECTOR
-// chain is recognized by the pattern and uses the normal preload scheme: the
-// main loop is an scf.while. The upstream scheme keeps the scf.for loop, the
-// implicit check forbids it. The loop does not force a single block per
-// iteration any more: no block computes the flag of the loop, the implicit
-// check forbids the select that computed it.
+// chain uses the normal preload scheme: the main loop is an scf.while. The
+// upstream scheme keeps the scf.for loop, the implicit check forbids it. The
+// loop does not force a single block per iteration any more: no block
+// computes the flag of the loop, the implicit check forbids the select that
+// computed it.
 //
 // The dependency chain of this test is:
 //   cube block 0 -> vector block 1 -> cube block 2 -> vector block 3
-// The name of the kernel is not in the black list of AddControlFlowCondition.
 
 // CHECK-LABEL: func.func @pattern_kernel_conditions
 

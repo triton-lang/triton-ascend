@@ -1,7 +1,7 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
 
-// Block 5 has a tensor mulf and no splitted_if. checkCanWrap rejects the
-// module and does not invent a splitted_if.
+// Block 5 has a tensor mulf and no splitted_if. The normal scheme has no
+// wrap step, so it does not invent a splitted_if.
 
 // CHECK-LABEL: func.func @tensor_without_splitted_if
 // CHECK-NOT: ssbuffer.splitted_if

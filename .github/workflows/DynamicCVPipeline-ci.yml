@@ -214,24 +214,6 @@ jobs:
             ${{ github.workspace }}/.ccache
           key: ${{ runner.os }}-${{ runner.arch }}-cann9.1.0-ubuntu22.04-950-py3.12-dcv-mojo-${{ hashFiles('pr/cmake/llvm-hash.txt', 'pr/cmake/json-version.txt', 'pr/cmake/nvidia-toolchain-version.json', 'pr/third_party/ascend/patch/llvm_patch_*.patch') }}
 
-      - name: Install Bisheng compiler
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd pr
-          arch=$(uname -m)
-          filename=$(sed -n "s/^${arch}: //p" cmake/bisheng-version.txt | xargs)
-          checksum=$(sed -n "s/^${arch}_sha256: //p" cmake/bisheng-version.txt | xargs)
-          test -n "$filename"
-          test -n "$checksum"
-          curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
-            "https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/cann/${filename}" \
-            -o bisheng.run
-          echo "${checksum}  bisheng.run" | sha256sum -c -
-          chmod +x bisheng.run
-          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
-          echo /usr/local/bisheng/tools/bishengir/bin >> "$GITHUB_PATH"
-
       - name: Build and install PR wheel for Mojo check
         shell: bash
         env:

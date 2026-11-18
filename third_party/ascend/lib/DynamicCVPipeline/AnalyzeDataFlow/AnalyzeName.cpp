@@ -42,7 +42,7 @@ namespace {
 
 static constexpr llvm::StringLiteral interceptrFunc[]{
     "kernel_sdpa_bwd_kv", "_sparse_decode_kernel",
-    "_sparse_decode_model1_kernel", "fused_chunk_fwd_kernel"};
+    "_sparse_decode_model1_kernel", "fused_chunk_fwd_kernel", "_sparse_gqa_chunk_prefill", "_sparse_gqa_prefill"};
 
 static LogicalResult verifyFuncNames(ModuleOp module) {
   bool intercepted = false;

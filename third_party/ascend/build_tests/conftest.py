@@ -52,7 +52,7 @@ def setup_globals(monkeypatch, tmp_path):
 @pytest.fixture
 def checker(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location("bom_checker_test",
-                                                  REPO / "third_party/ascend/build/check_bom_consistency.py")
+                                                  REPO / ".github/scripts/check_bom_consistency.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     for relative in ["requirements.txt", "docker/Dockerfile"]:

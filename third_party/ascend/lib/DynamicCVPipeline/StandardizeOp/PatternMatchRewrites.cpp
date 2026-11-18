@@ -20,10 +20,14 @@
  * THE SOFTWARE.
  */
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/Debug.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/IRMapping.h"
+#include "mlir/IR/Matchers.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
@@ -42,6 +46,105 @@ static constexpr const char *DEBUG_TYPE = "PatternMatchRewrites";
 static constexpr llvm::StringLiteral needSplitAllFuncNme[]{""};
 
 namespace {
+
+OpFoldResult getSingletonElement(Value tensor) {
+  if (auto fill = tensor.getDefiningOp<linalg::FillOp>())
+    return fill.getInputs().front();
+  if (auto insert = tensor.getDefiningOp<tensor::InsertOp>();
+      insert && llvm::all_of(insert.getIndices(), [](Value index) {
+        return matchPattern(index, m_Zero());
+      }))
+    return insert.getScalar();
+  if (auto elements = tensor.getDefiningOp<tensor::FromElementsOp>())
+    return elements.getElements().front();
+  if (auto constant = tensor.getDefiningOp<arith::ConstantOp>())
+    if (auto splat = dyn_cast<SplatElementsAttr>(constant.getValue()))
+      return splat.getSplatValue<TypedAttr>();
+  return {};
+}
+
+Value scalarizeScale(Value scale, PatternRewriter &rewriter,
+                     llvm::DenseMap<Value, Value> &scalars) {
+  if (Value cached = scalars.lookup(scale))
+    return cached;
+
+  OpBuilder::InsertionGuard guard(rewriter);
+  Value result = scale;
+  Operation *def = scale.getDefiningOp();
+  if (auto extract = dyn_cast_if_present<tensor::ExtractOp>(def)) {
+    auto mul = extract.getTensor().getDefiningOp<arith::MulFOp>();
+    auto type = cast<RankedTensorType>(extract.getTensor().getType());
+    if (mul && type.hasStaticShape() && type.getNumElements() == 1 &&
+        llvm::all_of(extract.getIndices(), [](Value index) {
+          return matchPattern(index, m_Zero());
+        })) {
+      OpFoldResult lhs = getSingletonElement(mul.getLhs());
+      OpFoldResult rhs = getSingletonElement(mul.getRhs());
+      if (lhs && rhs) {
+        auto materialize = [&](OpFoldResult element) -> Value {
+          if (auto value = dyn_cast<Value>(element))
+            return scalarizeScale(value, rewriter, scalars);
+          return rewriter.create<arith::ConstantOp>(
+              extract.getLoc(), cast<TypedAttr>(cast<Attribute>(element)));
+        };
+        rewriter.setInsertionPoint(extract);
+        Value left = materialize(lhs), right = materialize(rhs);
+        result = rewriter.create<arith::MulFOp>(mul.getLoc(), left, right,
+                                                mul.getFastmath());
+      }
+    }
+  } else if (def && def->hasTrait<OpTrait::Elementwise>() &&
+             def->getNumResults() == 1 && isPure(def) &&
+             llvm::all_of(def->getOperandTypes(), [](Type type) {
+               return type.isIntOrIndexOrFloat();
+             })) {
+    IRMapping mapping;
+    for (Value operand : def->getOperands())
+      if (Value scalar = scalarizeScale(operand, rewriter, scalars);
+          scalar != operand)
+        mapping.map(operand, scalar);
+    if (!mapping.getValueMap().empty()) {
+      rewriter.setInsertionPoint(def);
+      result = rewriter.clone(*def, mapping)->getResult(0);
+    }
+  }
+  scalars.try_emplace(scale, result);
+  return result;
+}
+
+struct ScalarizeFixpipeScale : OpRewritePattern<arith::TruncFOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(arith::TruncFOp cast,
+                                PatternRewriter &rewriter) const override {
+    auto folded = matchFixpipeOutputCast(cast);
+    if (!folded || !folded->quantScale)
+      return failure();
+
+    // Recover the scale before cube/vector planning sees its tensor producers.
+    llvm::DenseMap<Value, Value> scalars;
+    Value scale = scalarizeScale(folded->quantScale, rewriter, scalars);
+    if (scale == folded->quantScale)
+      return failure();
+
+    auto fill = mlir::cast<linalg::FillOp>(folded->foldedOps.back());
+    if (fill->hasOneUse()) {
+      rewriter.modifyOpInPlace(fill, [&] { fill->setOperand(0, scale); });
+    } else {
+      Value original = fill->getResult(0);
+      auto *user = *llvm::find_if(folded->foldedOps, [&](Operation *op) {
+        return llvm::is_contained(op->getOperands(), original);
+      });
+      rewriter.setInsertionPoint(fill);
+      IRMapping mapping;
+      mapping.map(folded->quantScale, scale);
+      Value updated = rewriter.clone(*fill, mapping)->getResult(0);
+      rewriter.modifyOpInPlace(
+          user, [&] { user->replaceUsesOfWith(original, updated); });
+    }
+    return success();
+  }
+};
 
 class PatternMatchRewritePass
     : public PassWrapper<PatternMatchRewritePass, OperationPass<ModuleOp>> {
@@ -85,7 +188,7 @@ void PatternMatchRewritePass::runOnOperation() {
   auto *ctx = &getContext();
   RewritePatternSet patterns(ctx);
   patterns.add<SplitMatmulPattern>(ctx, needSplitAll);
-  patterns.add<FoldExpandExtCollapse>(ctx);
+  patterns.add<FoldExpandExtCollapse, ScalarizeFixpipeScale>(ctx);
 
   // the way we handle matmul dependencies across for blocks
   // requres the patternmatching to go top-down

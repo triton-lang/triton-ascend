@@ -36,7 +36,13 @@ from utils.tla_test_utils import check_kernel_binary, compile_offline, get_stage
 def unary_math(out, x, OP: tl.constexpr):
     ub = tla.alloc((64, ), tl.float32)
     with tla.scope.vector():
-        y = OP(x)
+        if OP == "exp":
+            y = tla.exp(x)
+        elif OP == "log1p":
+            y = tla.log1p(x)
+        else:
+            tl.static_assert(OP == "sigmoid")
+            y = tla.sigmoid(x)
         tl.static_assert(y.dtype == tl.float32)
         with tla.scope.simd():
             tla.simd.vsts(ub[0], tla.simd.vdup(y, tl.float32), dist="NORM_B32")
@@ -48,12 +54,14 @@ _CONFIGS = [
     dict(name="exp", op=tla.exp, ir=("math.exp", ), values=(-100.0, -80.0, -1.5, 1.5, 80.0, 100.0)),
     dict(name="log1p", op=tla.log1p, ir=("math.log", "arith.select"),
          values=(-2.0, -1.0, -1.0 + 2.0**-24, -1e-8, 1e-8, 1e-4, 1.5, 1e30)),
+    dict(name="sigmoid", op=tla.sigmoid, ir=("math.exp", "arith.select"),
+         values=(-100.0, -80.0, -1.5, 1.5, 80.0, 100.0)),
 ]
 
 
 @matrix(_CONFIGS)
 def test_ir(case):
-    module, ctx = compile_offline(unary_math, {"out": "*fp32", "x": "fp32"}, {"OP": case["op"]})
+    module, ctx = compile_offline(unary_math, {"out": "*fp32", "x": "fp32"}, {"OP": case["name"]})
     lowered = str(lower_offline(module, ctx))
     for op in case["ir"]:
         assert op in lowered
@@ -65,7 +73,7 @@ def test_ir(case):
 @matrix(_CONFIGS)
 def test_unsupported_inputs(case):
     for x in (True, 2, tla.alloc, tl.tensor(None, tl.float16), tl.tensor(None, tl.float64),
-              tl.tensor(None, tl.block_type(tl.float32, (64, )))):
+              tl.tensor(None, tl.block_type(tl.float32, [64]))):
         with pytest.raises(TypeError, match=rf"tla\.{case['name']} expects a float32 scalar"):
             case["op"](x, _semantic=object())
 
@@ -79,7 +87,7 @@ def _output():
 
 @matrix(_CONFIGS)
 def test_compile(case):
-    check_kernel_binary(unary_math.warmup(_output(), 0.25, OP=case["op"], grid=(1, )))
+    check_kernel_binary(unary_math.warmup(_output(), 0.25, OP=case["name"], grid=(1, )))
 
 
 @matrix(_CONFIGS)
@@ -89,7 +97,7 @@ def test_run(case):
     out = _output()
     reference = getattr(torch, case["name"])
     for x in (*_SPECIAL, *case["values"]):
-        unary_math[(1, )](out, x, OP=case["op"])
+        unary_math[(1, )](out, x, OP=case["name"])
         torch.npu.synchronize()
         expected = reference(torch.tensor(x, dtype=torch.float32)).expand_as(out)
         actual = out.cpu()

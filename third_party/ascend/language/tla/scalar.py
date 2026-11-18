@@ -26,7 +26,9 @@ from triton.language.math import abs as _triton_abs
 from triton.language.math import exp as _triton_exp
 from triton.language.math import log as _triton_log
 
-__all__ = ["select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "exp", "log1p", "clamp"]
+__all__ = [
+    "select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "exp", "log1p", "sigmoid", "clamp"
+]
 
 
 def _check_scalar(value, name):
@@ -114,6 +116,19 @@ def log1p(x, _semantic=None):
     scale = _semantic.truediv(x, divisor)
     result = _semantic.mul(_triton_log(rounded, _semantic=_semantic), scale, sanitize_overflow=False)
     return tl.where(unchanged, x, result, _semantic=_semantic)
+
+
+@tl.builtin
+def sigmoid(x, _semantic=None):
+    """Return the logistic sigmoid of a float32 scalar or Python float."""
+    x = _fp32_scalar(x, "tla.sigmoid", _semantic)
+    # A nonpositive exponent avoids premature overflow for large negative x.
+    magnitude = _triton_abs(x, _semantic=_semantic)
+    exp_neg_abs = _triton_exp(_semantic.minus(magnitude), _semantic=_semantic)
+    nonnegative = _semantic.greater_equal(x, 0.0)
+    numerator = tl.where(nonnegative, 1.0, exp_neg_abs, _semantic=_semantic)
+    denominator = _semantic.add(1.0, exp_neg_abs, sanitize_overflow=False)
+    return _semantic.truediv(numerator, denominator)
 
 
 @tl.builtin

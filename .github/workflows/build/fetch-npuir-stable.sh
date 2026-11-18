@@ -4,6 +4,9 @@
 #
 # This replaces the old submodule-pin flow: the npuir payload now tracks the
 # upstream stable branch instead of the gitlink recorded in .gitmodules.
+# After checkout a minimal idempotent source patch is applied (see the
+# HIVMCMainA5.cpp guard at the bottom) so the fetched tree also builds
+# against the older CANN preinstalled in the manylinux payload image.
 #
 # gitcode branch clones are unreliable from the CI pods, but `want <sha>`
 # depth-1 fetches are served fine, so resolve stable -> SHA with ls-remote
@@ -69,6 +72,19 @@ if [ -z "$SHA" ]; then
 fi
 log "${BRANCH} HEAD: ${SHA}"
 
+# File touched by the guard patch at the bottom of this script.
+A5_MAIN_REL="bishengir/lib/Tools/hivmc/A5/HIVMCMainA5.cpp"
+
+# Undo the guard patch a previous run left in the tree, so moving to a new
+# stable SHA is not refused by the local-modification guard below (same
+# pattern as the TD checkout in setup_patch.py).
+if [ -d "${DEST}/.git" ] \
+   && grep -qs "#if BISHENGIR_HAVE_BISHENG_LLC" "${DEST}/${A5_MAIN_REL}" \
+   && [ -n "$(git -C "$DEST" status --porcelain -- "$A5_MAIN_REL" 2>/dev/null)" ]; then
+  log "restoring ${A5_MAIN_REL} patched by a previous run"
+  git -C "$DEST" checkout -- "$A5_MAIN_REL"
+fi
+
 NEED_FETCH=1
 if [ -d "${DEST}/.git" ]; then
   CURRENT=$(git -C "$DEST" rev-parse HEAD 2>/dev/null || echo "")
@@ -101,6 +117,39 @@ if [ "$WITH_NESTED" -eq 1 ]; then
     log "fetching ${path} @ ${sha} from ${url}"
     fetch_at "${DEST}/${path}" "$sha" "$url"
   done
+fi
+
+# Upstream stable assumes the vendor in-process compiler header
+# (bisheng-llc.h) is available, but the CANN 9.2.0-beta.2 preinstalled in
+# the manylinux payload image predates it: configure then freezes
+# BISHENGIR_HAVE_BISHENG_LLC to 0 ("bisheng-llc.h not found; using external
+# bisheng backend") and HIVMCMainA5.cpp's unguarded BISHENG_LLC_VF_STACK_OVERFLOW
+# use fails to compile. Wrap it in the same guard upstream itself uses in
+# BishengLlcBridge.cpp. Idempotent, and a no-op once upstream changes the
+# region (their own guard or a refactor); drop this block once a stable HEAD
+# builds without it. Broken from at least af999e735 through 945424108.
+if [ -f "${DEST}/${A5_MAIN_REL}" ]; then
+  python3 - "${DEST}/${A5_MAIN_REL}" <<'PYEOF'
+import sys
+
+path = sys.argv[1]
+old = ("      if (res.vendorStatus == BISHENG_LLC_VF_STACK_OVERFLOW)\n"
+       "        return llvm::make_error<VFStackOverflowError>();\n")
+new = "#if BISHENGIR_HAVE_BISHENG_LLC\n" + old + "#endif\n"
+with open(path, encoding="utf-8") as f:
+    text = f.read()
+if new in text:
+    sys.exit(0)
+if old not in text:
+    print("[fetch-npuir] vendor-status use site not found in HIVMCMainA5.cpp;"
+          " upstream fixed or refactored it, remove the guard patch from"
+          " fetch-npuir-stable.sh", file=sys.stderr)
+    sys.exit(0)
+with open(path, "w", encoding="utf-8") as f:
+    f.write(text.replace(old, new, 1))
+print("[fetch-npuir] guarded the BISHENG_LLC_VF_STACK_OVERFLOW use in"
+      " HIVMCMainA5.cpp", file=sys.stderr)
+PYEOF
 fi
 
 echo "$SHA"

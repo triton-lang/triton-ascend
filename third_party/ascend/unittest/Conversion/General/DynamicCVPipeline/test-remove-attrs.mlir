@@ -5,9 +5,19 @@
 // own. It has to go: hivmc rejects module attributes it does not recognise.
 // CHECK-NOT: ssbuffer.blockDeps
 
+// The variant search's seed and the record of the seed that was applied sit on
+// the module too, and go the same way for the same reason. The second is the
+// one worth checking: it is written late, by ReorderOpsByBlockId, specifically
+// so that something downstream can still read the seed -- which makes
+// forgetting to strip it an easy mistake and hivmc the place it shows up.
+// CHECK-NOT: ssbuffer.reorder_seed
+// CHECK-NOT: ssbuffer.reorder_seed_applied
+
 module attributes {ssbuffer.blockDeps = [
     {producer = 1 : i32, consumer = 2 : i32, kind = "v2c"},
-    {producer = 2 : i32, consumer = 3 : i32, kind = "mem"}]} {
+    {producer = 2 : i32, consumer = 3 : i32, kind = "mem"}],
+    ssbuffer.reorder_seed = -1 : i64,
+    ssbuffer.reorder_seed_applied = 7 : i64} {
   // CHECK-LABEL: func.func @test_remove_core_type_and_block_id
   func.func @test_remove_core_type_and_block_id(%arg0: memref<1024x1024xf32>) {
     // CHECK: memref.alloc() : memref<1024x1024xf32>

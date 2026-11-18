@@ -98,6 +98,16 @@ inline constexpr llvm::StringLiteral kIterExtension =
 /// variant search before each attempt. Absent means the ordinary block-level
 /// path, which is what an ordinary compilation takes.
 inline constexpr llvm::StringLiteral kReorderSeed = "ssbuffer.reorder_seed";
+/// The seed ReorderOpsByBlockId actually applied, kept because kReorderSeed
+/// above is overwritten with -1 the moment it is spent and so cannot be read
+/// back by anything downstream.
+///
+/// Separate from the "spent" marker on purpose: the marker is a protocol
+/// between the pass's two runs and has to keep meaning exactly what it did,
+/// while this is a record for the report and for the seed table. Removed with
+/// the other ssbuffer attributes before the module leaves this pipeline.
+inline constexpr llvm::StringLiteral kReorderSeedApplied =
+    "ssbuffer.reorder_seed_applied";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kMayNotExecNPU = "may_not_exec";
 inline constexpr llvm::StringLiteral kLoopCarriedL0C =
@@ -138,6 +148,66 @@ inline constexpr const char *ERRCODE_ATTR =
 static constexpr const int ERRCODE_FAILED = 1;
 static constexpr const int ERRCODE_IGNORED = 2;
 static constexpr const int ERRCODE_TUPLE_PRELOAD_FAILED = 3;
+
+//===----------------------------------------------------------------------===//
+// What the variant search decided, published for the Python driver
+//===----------------------------------------------------------------------===//
+// These four live in the triton_ascend.* namespace rather than ssbuffer.*
+// because they are not read by any pass: the driver reads them off the module
+// right after the pipeline has run, copies them into the compilation metadata
+// and removes them again, the way it already handles ERRCODE_ATTR. They are
+// therefore deliberately absent from RemoveSsbufAttrPass's list -- that pass
+// runs inside the pipeline, which would strip them before anyone could read
+// them.
+//
+// Set at the very end of AddDynamicCVPipelinePass, on every exit from it. Not
+// earlier: the fallback path replaces the module's whole attribute dictionary
+// from a backup, so anything written before that point is lost.
+
+/// The seed this pass decided to compile with (i64). 0 is the untouched
+/// pipeline, which the search treats as an ordinary candidate; -1 means the
+/// pass decided nothing, either because no search ran or because no candidate
+/// survived.
+///
+/// Does not report a seed that came from TRITON_ASCEND_REORDER_SEED: that is a
+/// by-hand reproduction path, and the seed it selects is applied further down
+/// without this pass being involved. kSearchStatus says which case it is, and
+/// the cost report names the seed that was really applied.
+inline constexpr const char *SEED_ATTR =
+    "triton_ascend.dynamic_cv_pipeline.chosen_seed";
+
+/// Which of the mutually exclusive outcomes below produced that seed (i64).
+inline constexpr const char *SEARCH_STATUS_ATTR =
+    "triton_ascend.dynamic_cv_pipeline.search_status";
+
+/// How many candidates the search scored and how many of them were usable
+/// (i64 each). Both 0 when no search ran. Published because a winner means
+/// something quite different when it beat 199 other orderings than when it was
+/// the only one that compiled.
+inline constexpr const char *VARIANTS_USABLE_ATTR =
+    "triton_ascend.dynamic_cv_pipeline.variants_usable";
+inline constexpr const char *VARIANTS_TOTAL_ATTR =
+    "triton_ascend.dynamic_cv_pipeline.variants_total";
+
+/// The outcomes SEARCH_STATUS_ATTR distinguishes.
+///
+/// Only about the seed decision. Whether the pipeline then survived is a
+/// separate question that ERRCODE_ATTR already answers, so these deliberately
+/// do not encode a failure: the driver combines the two.
+enum SearchStatus {
+  /// No search was asked for, so the pass chose nothing.
+  SEARCH_NOT_REQUESTED = 0,
+  /// A search ran and a seed other than the baseline won.
+  SEARCH_SEED_FOUND = 1,
+  /// A search ran and the untouched pipeline was still the cheapest.
+  SEARCH_BASELINE_BEST = 2,
+  /// A search ran and not one ordering could be scored.
+  SEARCH_NONE_USABLE = 3,
+  /// The seed was handed to the pass by its caller, so no search ran.
+  SEARCH_SEED_SUPPLIED = 4,
+  /// The pass declined the module before reaching any of the above.
+  SEARCH_UNSUPPORTED_TARGET = 5,
+};
 constexpr int WHILE_LOOP_LIMIT = 100000;
 constexpr int64_t CACHE_TABLE_BUFFER_SIZE = 4096;
 constexpr int64_t BYTE_SIZE = 8;
@@ -172,6 +242,29 @@ llvm::LogicalResult verifyOpBlockId(Operation *op);
 int getAvailableBlockId(ModuleOp module);
 void setFallbackAttr(ModuleOp module, int errorCode);
 bool hasFallbackAttr(ModuleOp module);
+
+/// The name of the kernel this module holds, or an empty string.
+///
+/// Only used to label log output, which is why it is this crude: it matches the
+/// operation by name instead of asking for a FuncOp, so the header needs no
+/// dependency on the Func dialect, and a kernel module has exactly one
+/// function anyway. Matching the name rather than taking the first symbol in
+/// the body matters: a module can open with a memref.global, and labelling
+/// every cost report with a buffer's name would be worse than labelling none.
+/// A caller that gets "" simply prints no name -- there is nothing here worth
+/// failing a compilation over.
+inline llvm::StringRef getKernelName(ModuleOp module) {
+  for (Operation &op : module.getBodyRegion().front()) {
+    llvm::StringRef opName = op.getName().getStringRef();
+    if (opName != "func.func" && opName != "tt.func") {
+      continue;
+    }
+    if (auto name = op.getAttrOfType<StringAttr>("sym_name")) {
+      return name.getValue();
+    }
+  }
+  return {};
+}
 bool isScfOp(Operation *op);
 bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp,
                        const CVPipeline::MemoryDependenceGraph &memGraph);

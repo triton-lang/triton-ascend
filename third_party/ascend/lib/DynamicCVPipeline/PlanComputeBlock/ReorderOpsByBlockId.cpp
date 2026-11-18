@@ -1434,7 +1434,17 @@ void ReorderOpsByBlockIdPass::runOnOperation() {
   // Mark the seed as spent, so the second run of this pass -- at the end of
   // SplitDataflow, once transfers and sync flags refer to block ids -- takes
   // the ordinary block-level path instead of regrouping underneath them.
+  //
+  // Marking it destroys the value, so keep a copy first. Everything that wants
+  // to know afterwards which ordering it is looking at -- the cost report, and
+  // through it the seed table -- would otherwise have to re-derive the seed
+  // from an attribute that now reads -1 for every variant alike. This runs
+  // only on the first of the two passes, since by the second variantSeed is
+  // already empty, so the record is written exactly once.
   if (variantSeed) {
+    moduleOp->setAttr(CVPipeline::kReorderSeedApplied,
+                      builder.getI64IntegerAttr(
+                          static_cast<int64_t>(*variantSeed)));
     moduleOp->setAttr(CVPipeline::kReorderSeed, builder.getI64IntegerAttr(-1));
   }
 

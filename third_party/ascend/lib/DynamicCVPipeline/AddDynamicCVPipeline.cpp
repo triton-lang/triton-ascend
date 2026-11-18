@@ -471,6 +471,48 @@ VariantScore runVariantTrial(MLIRContext *context, ModuleOp moduleBackup,
   return score;
 }
 
+/// Publishes what the search decided onto the module, as the pass returns.
+///
+/// A destructor rather than four calls because this pass has three exits --
+/// the unsupported-target check, the success return inside the retry loop, and
+/// falling off the end after a fallback -- and an outcome that is recorded on
+/// two of them is worse than useless: a missing row and a wrong row read the
+/// same from a table. Being last also matters on its own. The fallback path
+/// ends with restoreModuleFromBackup, which assigns the module's whole
+/// attribute dictionary from a backup taken before any of this ran, so
+/// anything written earlier is silently dropped; a destructor is the one place
+/// guaranteed to be after it.
+///
+/// The fields are written as they are decided. Left alone, they describe a
+/// compilation that was never asked to choose anything, which is what an
+/// ordinary build is.
+class SearchReport {
+public:
+  explicit SearchReport(ModuleOp module) : module(module) {}
+
+  ~SearchReport() {
+    OpBuilder builder(module.getContext());
+    module->setAttr(CVPipeline::SEED_ATTR, builder.getI64IntegerAttr(seed));
+    module->setAttr(CVPipeline::SEARCH_STATUS_ATTR,
+                    builder.getI64IntegerAttr(status));
+    module->setAttr(CVPipeline::VARIANTS_USABLE_ATTR,
+                    builder.getI64IntegerAttr(usable));
+    module->setAttr(CVPipeline::VARIANTS_TOTAL_ATTR,
+                    builder.getI64IntegerAttr(total));
+  }
+
+  SearchReport(const SearchReport &) = delete;
+  SearchReport &operator=(const SearchReport &) = delete;
+
+  int64_t seed = -1;
+  int64_t status = CVPipeline::SEARCH_NOT_REQUESTED;
+  int64_t usable = 0;
+  int64_t total = 0;
+
+private:
+  ModuleOp module;
+};
+
 } // namespace
 
 // must collect all sub-passes since they now are not added to pipeline
@@ -494,7 +536,16 @@ void AddDynamicCVPipelinePass::runOnOperation() {
   LDBG("Enter pass");
   moduleOp->removeAttr(CVPipeline::ERRCODE_ATTR);
 
+  // Records the seed decision on the way out, whichever way out that is.
+  SearchReport report(moduleOp);
+  // Every line this pass prints carries it, so that a run over a suite of
+  // kernels can be read: the search is the one part of the pipeline that
+  // prints a conclusion, and a conclusion with no subject is unusable in a
+  // log holding several hundred of them.
+  const llvm::StringRef kernelName = CVPipeline::getKernelName(moduleOp);
+
   if (!compileOn91095Flag) {
+    report.status = CVPipeline::SEARCH_UNSUPPORTED_TARGET;
     llvm::errs() << "Add-dynamic-cv-pipeline is only supported on 91095 now.\n";
     return;
   }
@@ -521,7 +572,33 @@ void AddDynamicCVPipelinePass::runOnOperation() {
   // pre-load below takes care of the one place a trial would still write to
   // it.
   const int variantCount = getVariantCount();
-  if (variantCount > 1) {
+
+  // A caller that already knows which ordering it wants says so, and no search
+  // runs -- not even if one was asked for. That is the point of the option: a
+  // seed read from a table has to be compiled, not re-derived, or a replay is
+  // not a replay. It is an option rather than an environment variable because
+  // it names one compilation; the environment is process-wide and would leak
+  // the seed of one kernel into the next.
+  //
+  // The attribute is set even for seed 0, although zero and absent mean the
+  // same thing to the pass that reads it. Present-and-zero also shuts out
+  // TRITON_ASCEND_REORDER_SEED, which absent would not, so "the table says
+  // this kernel wants the untouched pipeline" survives a stray variable in the
+  // environment.
+  if (this->reorderSeed >= 0) {
+    report.seed = this->reorderSeed;
+    report.status = CVPipeline::SEARCH_SEED_SUPPLIED;
+    moduleOp->setAttr(CVPipeline::kReorderSeed,
+                      builder.getI64IntegerAttr(this->reorderSeed));
+    llvm::errs() << "[" << DEBUG_TYPE << "] " << kernelName
+                 << ": compiling the ordering supplied by the caller, seed "
+                 << this->reorderSeed << "; no search";
+    if (variantCount > 1) {
+      llvm::errs() << ", although " << kVariantCountEnvVar << "="
+                   << variantCount << " asked for one";
+    }
+    llvm::errs() << "\n";
+  } else if (variantCount > 1) {
     prepareVariantSearchDialects(&getContext(), this->mainLoopUnrollFactor);
 
     // How many trials to score at once, capped at the number of candidates.
@@ -542,8 +619,9 @@ void AddDynamicCVPipelinePass::runOnOperation() {
                    << kVariantCountEnvVar
                    << " was not set when it was built\n";
     }
-    llvm::errs() << "[" << DEBUG_TYPE << "] variant search: trying "
-                 << variantCount << " operation orderings";
+    llvm::errs() << "[" << DEBUG_TYPE << "] " << kernelName
+                 << ": variant search: trying " << variantCount
+                 << " operation orderings";
     if (threadCount > 1) {
       llvm::errs() << " on " << threadCount << " thread(s)";
     }
@@ -757,8 +835,19 @@ void AddDynamicCVPipelinePass::runOnOperation() {
       }
     }
 
-    llvm::errs() << "[" << DEBUG_TYPE << "] variant search: " << usable << " of "
-                 << variantCount << " ordering(s) compiled";
+    // What the search concluded, for the seed table. Recorded here rather than
+    // where the attribute is set below, because "none usable" is also a
+    // conclusion and that branch sets no attribute.
+    report.usable = usable;
+    report.total = variantCount;
+    report.seed = bestSeed;
+    report.status = bestSeed < 0 ? CVPipeline::SEARCH_NONE_USABLE
+                                 : (bestSeed == 0 ? CVPipeline::SEARCH_BASELINE_BEST
+                                                  : CVPipeline::SEARCH_SEED_FOUND);
+
+    llvm::errs() << "[" << DEBUG_TYPE << "] " << kernelName
+                 << ": variant search: " << usable << " of " << variantCount
+                 << " ordering(s) compiled";
     if (bestSeed >= 0) {
       llvm::errs() << ", keeping seed " << bestSeed << " at " << bestCost
                    << " cycles\n";

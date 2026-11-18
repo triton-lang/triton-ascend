@@ -559,6 +559,81 @@ kernel but are the wrong channel for autotuning, where every configuration has
 different sizes. Passing the values explicitly (pass option or module attribute)
 is the intended replacement.
 
+### Variant search
+
+| Variable | Meaning |
+|---|---|
+| `TRITON_ASCEND_CV_VARIANTS` | how many operation orderings to score; 1 or unset is the ordinary single compilation |
+| `TRITON_ASCEND_CV_VARIANT_THREADS` | how many candidates to score at once; a ceiling, capped at the candidate count |
+| `TRITON_ASCEND_CV_UB_SLACK_BYTES` | extra Unified Buffer a candidate may hold over the baseline; unset derives it from what the baseline leaves unused |
+| `TRITON_ASCEND_CV_STAGE_SLACK` | extra software-pipeline buffer factor a candidate may carry over the baseline; defaults to 0 |
+| `TRITON_ASCEND_REORDER_SEED` | compile one ordering by hand, for reproducing a candidate; 0 is the untouched pipeline |
+
+### Seed table
+
+A search run over a suite of kernels has to answer one question per kernel:
+did the cost model prefer some ordering to the untouched pipeline, and which.
+That answer is recorded automatically and replayed on request.
+
+**Recording needs nothing.** Every compilation that ran the CV pipeline puts
+its decision into the compilation metadata, which triton serialises to
+`<cache>/<hash>/<kernel>.json` beside each kernel and hands to
+`triton.knobs.compilation.listener`. Collecting those into a table is left to
+the harness: one file per kernel, written through a temp file and a rename, so
+no two processes ever contend for one path.
+
+| Metadata key | Meaning |
+|---|---|
+| `cv_kernel_name` | the kernel, as the table keys it together with `hash` |
+| `cv_seed` | the ordering compiled; `0` is the untouched pipeline, `-1` none chosen |
+| `cv_search_status` / `cv_search_status_name` | `no_search`, `seed_found`, `baseline_best`, `none_usable`, `from_table`, `wrong_chip`, `ignored`, `fallback` |
+| `cv_variants_usable` / `cv_variants_total` | how many orderings were scored and how many could be |
+| `cv_cost` | the estimate for the ordering that was compiled |
+| `cv_cost_resource` / `cv_cost_recurrence` / `cv_second_bound` | the two bounds, and the one that decides ties |
+| `cv_ub_peak` / `cv_ub_capacity` | Unified Buffer held live, against what the part has |
+| `cv_pipeline_stages` / `cv_pipeline_depth` | software-pipeline stage count, and the buffer factor that predicts a refusal |
+| `cv_rc` | the pipeline's return code; `0` is success |
+| `cv_seed_requested` | the seed this compilation was told to use, or `-1` |
+
+`cv_search_status_name` is the one field combining both halves of the outcome:
+the search reports what it decided about the ordering, the return code reports
+whether the pipeline then survived, and neither alone is the answer.
+
+**Replaying needs the table.** Naming a file is what turns replay on; there is
+no second variable for the mode.
+
+| Variable | Meaning |
+|---|---|
+| `TRITON_ASCEND_CV_SEED_TABLE` | a table of seeds to compile instead of searching for them |
+
+```bash
+TRITON_ALWAYS_COMPILE=1 TRITON_ASCEND_CV_SEED_TABLE=seeds.jsonl python run_kernels.py
+```
+
+JSONL or delimited text, by line, with `#` comments:
+
+```
+{"kernel_name": "attn_fwd", "hash": "9f2c...", "seed": 7}
+kernel_name,hash,seed
+attn_fwd,9f2c...,7
+```
+
+A kernel listed in the table is compiled with its seed and **no search runs**,
+even if `TRITON_ASCEND_CV_VARIANTS` asked for one — a replay that re-derives
+the seed is not a replay. A kernel that is not listed, or listed with no usable
+seed, compiles exactly as it would with no table at all; both are logged,
+because a caller who named a table is expecting a hit and a silent miss would
+be indistinguishable from a replay. The table is re-read on every compilation,
+so one edited during a run takes effect during it, and every lookup logs the
+file's mtime — once the table can change mid-run, that is the only way to say
+afterwards which version produced a result.
+
+> **`TRITON_ALWAYS_COMPILE=1` is required**, for recording and for replay
+> alike. Neither of these variables is cache-invalidating, so without it a
+> kernel compiled once is served from the cache: no record is written, and a
+> replayed seed is never applied. This is also what keeps the table's key
+> stable, since the compilation hash is then the same in both runs.
+
 ### Hardware profile
 
 `third_party/ascend/costmodel/configs/ascend_custom.json` describes the newer

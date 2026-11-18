@@ -1098,7 +1098,10 @@ def test_ttir_to_linalg_dynamic_cv_pipeline_is_a5_only(
         add_triton_to_linalg=noop,
         add_merge_concat_load_buffer=noop,
         set_enable_buffer_insert_optimization=noop,
-        add_dynamic_cv_pipeline=lambda _pm, _compile_on_910_95: dynamic_cv_calls.append(arch),
+        # Takes whatever it is given: this asserts only that the pass was added
+        # for this arch, and pinning the stub to one arity makes an unrelated
+        # new pass option look like a failure of that assertion.
+        add_dynamic_cv_pipeline=lambda *_args, **_kwargs: dynamic_cv_calls.append(arch),
     )
     monkeypatch.setattr(
         compiler_module,

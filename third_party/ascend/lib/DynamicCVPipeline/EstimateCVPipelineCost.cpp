@@ -3906,8 +3906,24 @@ void estimateModuleCost(ModuleOp module, llvm::StringRef hardwareConfigPath) {
     module->setAttr(kCVPipelineBlocks, builder.getArrayAttr(blockAttrs));
   }
 
+  // Which kernel this report is about, and which of its orderings. Without
+  // them a log from a run over a suite of kernels is a wall of numbers with
+  // nothing to attach them to, and a variant search makes that worse: the
+  // report is for the ordering that won, which is not the one an unlabelled
+  // reader would assume. The applied seed is read from the record
+  // ReorderOpsByBlockId leaves behind, because the seed attribute itself has
+  // been overwritten with -1 by the time this pass runs. Absent means no
+  // variant was applied, which is the untouched pipeline, i.e. seed 0.
+  const llvm::StringRef kernelName = CVPipeline::getKernelName(module);
+  int64_t appliedSeed = 0;
+  if (auto applied =
+          module->getAttrOfType<IntegerAttr>(CVPipeline::kReorderSeedApplied)) {
+    appliedSeed = applied.getInt();
+  }
+
   auto reportTo = [&](llvm::raw_ostream &os) {
-    os << "[" << DEBUG_TYPE << "] " << config->getName() << ": " << totalCycles
+    os << "[" << DEBUG_TYPE << "] " << kernelName << " (seed " << appliedSeed
+       << "): " << config->getName() << ": " << totalCycles
        << " cycles ("
        << llvm::format("%.3f", config->cyclesToMicroseconds(totalCycles))
        << " us) over " << breakdown.blocks.size() << " block(s), "

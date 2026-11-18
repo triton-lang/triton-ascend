@@ -36,6 +36,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List, Optional, Tuple, Union
 from .debug_line_rewriter import rewrite_debug_line
+from .cv_seed_table import NO_SEED, lookup_seed, record_decision
 
 from triton import knobs
 from triton._C.libtriton import ir, passes, ascend, buffer_ir
@@ -454,6 +455,17 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
             ascend.passes.ttir.add_merge_concat_load_buffer(pm)
         target_arch = metadata.get("target_arch", metadata.get("arch", ""))
+        # Set when the CV pipeline is in the pipeline below, so the seed it
+        # chose is read back afterwards for that compilation and only that one.
+        cv_pipeline_added = False
+        cv_requested_seed = NO_SEED
+        # The kernel's own name, which is how a seed table and a log line refer
+        # to it. metadata["kernel_name"] is not set until the linalg produced
+        # below has been parsed, so it is taken from the TTIR, where the entry
+        # point is the one public tt.func. Falls back to the empty string
+        # rather than raising: nothing here is worth failing a compilation for.
+        cv_kernel_match = re.search(r"tt\.func\spublic\s+@(\w+)", ttir_code)
+        cv_kernel_name = cv_kernel_match.group(1) if cv_kernel_match else ""
         if metadata["enable_dynamic_cv_pipeline"] and _is_a5_target_arch(target_arch):
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
@@ -472,10 +484,18 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             # Flip to False to see why a variant trial failed: a trial that
             # dies otherwise takes its diagnostics with it.
             quiet_variant_trials = True
+            # A seed table, when one is configured, replaces the search for
+            # the kernels it lists. Passed as a pass option rather than left to
+            # the environment because it names this compilation: the
+            # environment is process-wide and would carry one kernel's seed
+            # into the next kernel compiled after it.
+            cv_requested_seed = lookup_seed(cv_kernel_name, metadata["hash"])
+            cv_pipeline_added = True
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95,
                                                            main_loop_unroll_factor,
                                                            demote_f32_reduction,
-                                                           quiet_variant_trials)
+                                                           quiet_variant_trials,
+                                                           cv_requested_seed)
 
         if AscendBackend.instrumentation:
             if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
@@ -526,6 +546,13 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         # TRITON_ASCEND_CV_VARIANTS itself and scores the candidates here, in
         # this process.
         pm.run(mod, 'ttir_to_linalg')
+
+        # Which ordering the pipeline compiled, into the metadata triton
+        # persists. Before the call below, which consumes the return code this
+        # needs in order to tell "the search chose nothing" from "the pipeline
+        # gave up".
+        if cv_pipeline_added:
+            record_decision(mod, metadata, cv_kernel_name, cv_requested_seed)
 
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,

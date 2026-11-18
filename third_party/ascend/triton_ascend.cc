@@ -162,17 +162,21 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       [](mlir::PassManager &pm, bool compileOn91095,
                                 int mainLoopUnrollFactor,
                                 bool demotef32Reduction,
-                                bool quietVariantTrials) {
+                                bool quietVariantTrials,
+                                int64_t reorderSeed) {
         AddDynamicCVPipelineOptions opts;
         opts.compileOn91095 = compileOn91095;
         opts.mainLoopUnrollFactor = mainLoopUnrollFactor;
         opts.demoteF32Reduction = demotef32Reduction;
         opts.quietVariantTrials = quietVariantTrials;
+        opts.reorderSeed = reorderSeed;
         pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
       },
       py::arg("pm"), py::arg("compile_on_910_95"),
       py::arg("main_loop_unroll_factor") = 1, py::arg("demote_f32_reduction") = false,
-      py::arg("quiet_variant_trials") = true);
+      py::arg("quiet_variant_trials") = true,
+      // -1 searches as usual; >= 0 compiles that ordering and skips the search.
+      py::arg("reorder_seed") = -1);
 
   m.def(
       "add_graph_optimize",

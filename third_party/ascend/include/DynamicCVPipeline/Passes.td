@@ -23,7 +23,10 @@ def AddDynamicCVPipeline : Pass<"add_dynamic_cv_pipeline", "mlir::ModuleOp"> {
         "Demote f32 reduction between extf and truncf to f16">,
         Option<"quietVariantTrials", "quiet-variant-trials",
         "bool", /*default*/"true",
-        "Discard what the variant search's trials print; turn off to see why a trial failed">
+        "Discard what the variant search's trials print; turn off to see why a trial failed">,
+        Option<"reorderSeed", "reorder-seed",
+        "int64_t", /*default*/"-1",
+        "Compile this operation ordering instead of searching for one; -1 searches as usual">
     ];
     let dependentDialects = ["hivm::HIVMDialect", "bufferization::BufferizationDialect", "scope::ScopeDialect", "annotation::AnnotationDialect", "LLVM::LLVMDialect"];
 }

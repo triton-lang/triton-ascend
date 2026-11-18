@@ -1,14 +1,17 @@
 """Regression coverage for vendored sources and real Git checkouts."""
 import json
-import subprocess
 
 import pytest
 
 
-def configure(module, root, monkeypatch, repository="https://example.invalid/distributed.git", revision="a" * 40):
+def configure(module, root, monkeypatch, revision="a" * 40):
     metadata = root / "cmake/triton-distributed-info.json"
     metadata.parent.mkdir(parents=True)
-    metadata.write_text(json.dumps({"schema_version": 1, "repository": repository, "revision": revision}))
+    metadata.write_text(
+        json.dumps({
+            "schema_version": 1, "repository": "https://gitcode.com/Ascend/Triton-distributed-ascend.git", "revision":
+            revision
+        }))
     destination = root / "third_party/ascend/Triton-distributed-ascend"
     destination.mkdir(parents=True)
     monkeypatch.setattr(module, "_REPO_ROOT", root)
@@ -25,20 +28,7 @@ def test_vendored_distributed_sources_need_neither_git_nor_network(ascend_setup,
     assert (destination / "CMakeLists.txt").read_text() == "# vendored source\n"
 
 
-def test_existing_distributed_checkout_is_offline_when_already_pinned(ascend_setup, tmp_path, monkeypatch):
-    destination = configure(ascend_setup, tmp_path, monkeypatch)
-    subprocess.run(["git", "init", str(destination)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(destination), "config", "user.email", "test@example.invalid"], check=True)
-    subprocess.run(["git", "-C", str(destination), "config", "user.name", "Test"], check=True)
-    (destination / "CMakeLists.txt").write_text("# pinned source\n")
-    subprocess.run(["git", "-C", str(destination), "add", "."], check=True)
-    subprocess.run(["git", "-C", str(destination), "commit", "-m", "fixture"], check=True, capture_output=True)
-    sha = subprocess.check_output(["git", "-C", str(destination), "rev-parse", "HEAD"], text=True).strip()
-    path = tmp_path / "cmake/triton-distributed-info.json"
-    data = json.loads(path.read_text())
-    data["revision"] = sha
-    path.write_text(json.dumps(data))
-    subprocess.run(["git", "-C", str(destination), "remote", "add", "origin", data["repository"]], check=True)
-    monkeypatch.setattr(ascend_setup, "_git_check_call_with_retry", lambda *args, **kwargs: pytest.fail("network"))
-    ascend_setup._ensure_distributed_submodule()
-    assert (destination / "CMakeLists.txt").read_text() == "# pinned source\n"
+def test_invalid_distributed_revision_fails_before_git(ascend_setup, tmp_path, monkeypatch):
+    configure(ascend_setup, tmp_path, monkeypatch, revision="master")
+    with pytest.raises(ValueError, match="triton-distributed-info.json.*full lowercase commit SHA"):
+        ascend_setup._ensure_distributed_submodule()

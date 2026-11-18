@@ -111,15 +111,22 @@ BitcastConverter::matchAndRewrite(triton::BitcastOp op, OpAdaptor adaptor,
                                            pointerInfos, rewriter);
     if (failed(source))
       return failure();
-    auto address = materializePointerAddress(*source, loc, rewriter);
-    if (failed(address))
-      return failure();
     Type element = dstPtrTy.getPointeeType();
     if (element.isInteger(1))
       element = rewriter.getI8Type();
-    result = createScalarPointerCast(
-        rewriter, loc, MemRefType::get({ShapedType::kDynamic}, element),
-        *address);
+    auto resultType = MemRefType::get({ShapedType::kDynamic}, element);
+    // Bool and byte pointers lower to the same memref. Preserve its base so
+    // downstream bufferization can trace views back to the kernel argument.
+    // An offset-bearing source still needs its displacement in the address.
+    if (source->getType() == resultType) {
+      rewriter.replaceOp(op, *source);
+      return success();
+    }
+
+    auto address = materializePointerAddress(*source, loc, rewriter);
+    if (failed(address))
+      return failure();
+    result = createScalarPointerCast(rewriter, loc, resultType, *address);
 
   } else {
     // handling normal case: bitcast between tensors/memrefs

@@ -1438,6 +1438,11 @@ void init_tla_builder(py::module &&m) {
              if (!linear.getType().isInteger(64))
                throw std::invalid_argument(
                    "TLA GM view requires an i64 element offset");
+             SmallVector<int64_t> staticStrides;
+             int64_t staticOffset;
+             if (failed(type.getStridesAndOffset(staticStrides, staticOffset)))
+               throw std::invalid_argument(
+                   "TLA GM view requires a strided layout");
              // Put the full signed displacement in the scalar base. Block
              // offsets are i32 and their standard lowering clamps negatives.
              Value base =
@@ -1455,11 +1460,14 @@ void init_tla_builder(py::module &&m) {
                  RankedTensorType::get(type.getShape(), type.getElementType());
              auto blockPtrType = triton::PointerType::get(
                  blockType, ptrType.getAddressSpace());
-             Value block = self.create<triton::MakeTensorPtrOp>(
+             auto block = self.create<triton::MakeTensorPtrOp>(
                  blockPtrType, base, shapeValues, strideValues, offsets,
                  builder.getDenseI32ArrayAttr(order));
+             if (!type.hasStaticShape() ||
+                 llvm::any_of(staticStrides, ShapedType::isDynamic))
+               block->setAttr("tla.gm_view", builder.getUnitAttr());
              auto bridge = self.create<UnrealizedConversionCastOp>(
-                 TypeRange{resultType}, ValueRange{block});
+                 TypeRange{resultType}, ValueRange{block.getResult()});
              bridge->setAttr("tla.gm_view", builder.getUnitAttr());
              return bridge.getResult(0);
            })

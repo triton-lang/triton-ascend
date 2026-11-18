@@ -88,8 +88,9 @@ def _fp32_scalar(x, name, semantic):
     raise TypeError(f"{name} expects a float32 scalar tensor or a Python float")
 
 
-# AICore has no scalar libm expf/logf entry points. Keep these expressions
-# in scalar arithmetic, with no implicit vector function or scratch buffer.
+# On the tested Ascend950PR TLA pipeline, scalar exp and log lower to
+# expf and a vln template call respectively, and both fail to link.
+# Arithmetic expansions keep all intermediates in scalar values.
 _LN2_HI = tl.constexpr(0.693145751953125)
 _LN2_LO = tl.constexpr(1.428606765330187e-6)
 

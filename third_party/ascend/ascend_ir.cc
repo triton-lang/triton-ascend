@@ -41,6 +41,7 @@
 #include "mlir/AsmParser/AsmParser.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -601,6 +602,22 @@ void init_ascend_ir(py::module &&m) {
       return py::none();
     }
     return py::cast(ret.getInt());
+  });
+  m.def("get_kernel_profile_metadata", [](ModuleOp mod) {
+    py::dict attrs;
+    for (auto func : mod.getOps<func::FuncOp>()) {
+      if (!func->hasAttr("global_kernel"))
+        continue;
+      for (const char *name :
+           {"profile_scratch_size", "profile_scratch_align",
+            "profile_num_units", "profile_sections_per_block",
+            "profile_sample_every_n"}) {
+        if (auto attr = func->getAttrOfType<IntegerAttr>(name))
+          attrs[name] = attr.getInt();
+      }
+      break;
+    }
+    return attrs;
   });
   m.def("get_program_grid_transforms", [](OpState &op) -> py::object {
     Attribute attribute =

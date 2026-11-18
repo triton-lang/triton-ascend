@@ -298,6 +298,15 @@ static EffectsTy collectOuterEffects(Operation *op, bool &unknown,
         MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Write::get());
         return {remapEffectValue(scopedWrite, markOp.getSrc())};
       })
+      .Case([&unknown, recursive](hivm::CustomOp custom) -> EffectsTy {
+        if (custom.getNoSideEffect() && custom.hasPureTensorSemantics() &&
+            custom.getTempBuffers().empty()) {
+          auto gmArgs = custom.getGMAddrArgsIndices();
+          if (!gmArgs || gmArgs->empty())
+            return {};
+        }
+        return collectOuterEffectsDefault(custom, unknown, recursive);
+      })
       .Case([](bufferization::AllocTensorOp) { return EffectsTy{}; })
       .Case([](bufferization::ToTensorOp toTensorOp) -> EffectsTy {
         MemoryEffects::EffectInstance scopedRead(MemoryEffects::Read::get());

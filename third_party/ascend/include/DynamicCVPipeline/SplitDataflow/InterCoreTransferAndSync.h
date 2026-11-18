@@ -38,6 +38,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "llvm/ADT/SetVector.h"
 #include <optional>
 
 namespace mlir {
@@ -131,8 +132,9 @@ private:
   handleCubeToVector(mlir::OpBuilder &builder, DependencyInfo &dep,
                      FlagIdManager &flagManager,
                      FlagIdReuseManager &flagIdReuseManager);
-  mlir::LogicalResult handleCubeToCube(mlir::OpBuilder &builder,
-                                       DependencyInfo &dep);
+  mlir::LogicalResult
+  handleCubeToCube(mlir::OpBuilder &builder, DependencyInfo &dep,
+                   llvm::SmallSetVector<Operation *, 4> &foldedCasts);
   mlir::LogicalResult handleMemoryDependency(
       mlir::OpBuilder &builder, DependencyInfo &dep, size_t depIndex,
       llvm::SmallVector<DependencyInfo> memDependencies,

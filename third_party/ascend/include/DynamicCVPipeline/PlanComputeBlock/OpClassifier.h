@@ -99,6 +99,9 @@ private:
 
   // Seed operations for CUBE upstream propagation
   llvm::SmallVector<Operation *> cubeSeeds;
+  // Casts represented by the producer's FIXPIPE must remain CUBE-only. Their
+  // downstream users define the CUBE-to-VECTOR boundary.
+  llvm::DenseSet<Operation *> fixpipeOutputCastOps;
   // if A*B+C's C from broadcast chain, they need to keep for Normalize.
   llvm::DenseSet<Operation *> inBroadcastChain;
 
@@ -126,6 +129,7 @@ private:
   void matchStorePattern(Operation *user);
   void matchExtractSlicePattern(Operation *user);
   void matchMaterializePattern(Operation *user);
+  void matchFixpipeOutputCastPatterns();
 
   // Propagate CUBE core type upstream
   int propagateCubeUpstream();

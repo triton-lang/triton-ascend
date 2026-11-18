@@ -657,6 +657,28 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder,
   SmallVector<int64_t> expectedShape =
       computeExpectedShape(origValue, NzDimWidth);
   int originBlockId = dep.iniProducerBlockId;
+  // A fractal dot operand is already NZ. Reuse its physical tensor instead
+  // of materializing NZ->ND->NZ on Vector before the L1 transfer.
+  if (auto convert = origValue.getDefiningOp<hivm::ConvertLayoutOp>()) {
+    auto sourceType = dyn_cast<RankedTensorType>(convert.getSource().getType());
+    auto ndType = cast<RankedTensorType>(origValue.getType());
+    if (sourceType && ndType.getRank() == 2 &&
+        ndType.getShape() == ArrayRef<int64_t>(expectedShape) &&
+        !convert.getSrcLayout().getTransposeValue().value_or(false) &&
+        !convert.getDstLayout().getTransposeValue().value_or(false) &&
+        convert.getSrcLayout().getFractalSizes() &&
+        convert.getSrcLayout().getFractalSizes().asArrayRef() ==
+            ArrayRef<int64_t>({NzDimWidth, blk}) &&
+        convert.getSrcLayout().getDataLayout() == hivm::DataLayout::Fractal &&
+        convert.getDstLayout().getDataLayout() == hivm::DataLayout::ND &&
+        sourceType.getShape() ==
+            ArrayRef<int64_t>({expectedShape[1] / blk,
+                               expectedShape[0] / NzDimWidth, NzDimWidth,
+                               blk})) {
+      ndnzValueMapping[origValue] = convert.getSource();
+      return;
+    }
+  }
   // Step 2: If shapes match, return original value
   bool isEqualedShape = isExpectedShape(origValue, expectedShape);
   LOG_DEBUG("newValue" << newValue << "\n");
@@ -1146,35 +1168,49 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
   LOG_DEBUG("Inserting [Cube->Vector] transfer for value: " << srcValue
                                                             << "\n");
   auto srcTensorType = cast<RankedTensorType>(srcValue.getType());
-  int64_t M = srcTensorType.getDimSize(0);
-  int64_t N = srcTensorType.getDimSize(1);
   Type elemType = srcTensorType.getElementType();
 
   int cubeBlockId =
       CVPipeline::getOpBlockId(srcValue.getDefiningOp()).value_or(-1);
   int vecBlockId = CVPipeline::getOpBlockId(insertPoint.consStart).value_or(-1);
 
-  auto targetShape = dep.isAllTranspoesd ? std::vector<int64_t>{N, M}
-                                         : std::vector<int64_t>{M, N};
+  auto folded =
+      dep.realValue
+          ? std::nullopt
+          : CVPipeline::matchFixpipeOutputCast(srcValue.getDefiningOp());
+  Value fixpipeSrcValue = dep.realValue ? dep.realValue : srcValue;
+  std::vector<int64_t> targetShape;
+  if (folded) {
+    fixpipeSrcValue = folded->matmulOp.getResult(0);
+    targetShape.assign(srcTensorType.getShape().begin(),
+                       srcTensorType.getShape().end());
+  } else {
+    int64_t M = srcTensorType.getDimSize(0);
+    int64_t N = srcTensorType.getDimSize(1);
+    targetShape = dep.isAllTranspoesd ? std::vector<int64_t>{N, M}
+                                      : std::vector<int64_t>{M, N};
+  }
+
   auto targetTensorType = RankedTensorType::get(targetShape, elemType);
   auto [cubeAllocOp, vecAllocOp] = createTransferAllocs(
       builder, loc, targetShape, elemType, hivm::AddressSpace::UB, insertPoint,
       cubeBlockId, vecBlockId, CVPipeline::kCoreTypeCube,
       CVPipeline::kCoreTypeVector, transferIndex);
-  auto dmaModeAttr = FixpipeDMAModeAttr::get(
-      builder.getContext(),
-      dep.isAllTranspoesd ? FixpipeDMAMode::NZ2DN : FixpipeDMAMode::NZ2ND);
-
-  auto realValue = dep.value;
-  if (dep.realValue) {
-    realValue = dep.realValue;
-  }
+  auto dmaMode =
+      dep.isAllTranspoesd ? FixpipeDMAMode::NZ2DN : FixpipeDMAMode::NZ2ND;
+  if (folded && folded->writesNZ)
+    dmaMode = FixpipeDMAMode::NZ2NZ;
+  auto dmaModeAttr = FixpipeDMAModeAttr::get(builder.getContext(), dmaMode);
+  auto quantModeAttr = folded ? FixpipePreQuantModeAttr::get(
+                                    builder.getContext(), folded->preQuantMode)
+                              : FixpipePreQuantModeAttr{};
   auto fixpipeOp = builder.create<hivm::FixpipeOp>(
       loc, mlir::TypeRange{},    // No return value
-      realValue,                 // src
+      fixpipeSrcValue,           // src
       cubeAllocOp->getResult(0), // dst
-      mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, nullptr, nullptr,
-      nullptr, nullptr, nullptr, mlir::ArrayAttr{}, nullptr);
+      mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, quantModeAttr, nullptr,
+      nullptr, nullptr, folded ? folded->quantScale : Value{},
+      mlir::ArrayAttr{}, nullptr);
   attachTransferTags(fixpipeOp, cubeBlockId, CVPipeline::kCoreTypeCube,
                      transferIndex);
   attachCrossCoreDeps(fixpipeOp, transferIndex, CVPipeline::crossCoreProducerId,
@@ -1227,6 +1263,15 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
 
   if (consumedDataOp) {
     *consumedDataOp = toTensorOp;
+  }
+  if (folded) {
+    for (Operation *op : folded->foldedOps) {
+      if (llvm::all_of(op->getUsers(), CVPipeline::isFixpipeQuantScaleHint)) {
+        for (Operation *hint : llvm::make_early_inc_range(op->getUsers()))
+          hint->erase();
+        op->erase();
+      }
+    }
   }
   return fixpipeOp;
 }
@@ -2079,9 +2124,9 @@ Operation *InterCoreTransferAndSyncPass::createC2CSharedL1Buffer(
 }
 
 // C->C Transfer Logic
-LogicalResult
-InterCoreTransferAndSyncPass::handleCubeToCube(OpBuilder &builder,
-                                               DependencyInfo &dep) {
+LogicalResult InterCoreTransferAndSyncPass::handleCubeToCube(
+    OpBuilder &builder, DependencyInfo &dep,
+    llvm::SmallSetVector<Operation *, 4> &foldedCasts) {
   mlir::Value transferValue = dep.value;
   Location loc = transferValue.getLoc();
 
@@ -2208,10 +2253,8 @@ InterCoreTransferAndSyncPass::handleCubeToCube(OpBuilder &builder,
     }
   }
 
-  // Erase the trunc op after all uses are replaced (dead code elimination).
-  if (truncOp && CVPipeline::getFixpipePreQuantMode(truncOp).has_value()) {
-    truncOp->erase();
-  }
+  if (quantMode)
+    foldedCasts.insert(truncOp);
 
   intraDepsGroupId++;
   LOG_DEBUG("Inserted C->C fixpipe transfer: block "
@@ -2488,6 +2531,7 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
   }
   LOG_DEBUG("Completed C->V transfers and syncs.\n");
 
+  llvm::SmallSetVector<Operation *, 4> foldedCasts;
   // Step 3.1: Handle inter-block C->C dependencies (fixpipe L0C to L1)
   llvm::SmallVector<DependencyInfo> &C2CDependencies =
       info.getC2CDependencies();
@@ -2502,7 +2546,7 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     if (!isValidC2CMatmulDependency(dep.value, dep.consumerBlockId)) {
       continue;
     }
-    if (failed(handleCubeToCube(builder, dep))) {
+    if (failed(handleCubeToCube(builder, dep, foldedCasts))) {
       LOG_DEBUG("[ERROR] Inter C->C failed! producerBlockId = "
                 << dep.producerBlockId
                 << ", consumerBlockId = " << dep.consumerBlockId << "\n");
@@ -2531,7 +2575,7 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
             static_cast<unsigned>(consumerMatmul.getNumDpsInputs())) {
       continue;
     }
-    if (failed(handleCubeToCube(builder, dep))) {
+    if (failed(handleCubeToCube(builder, dep, foldedCasts))) {
       LOG_DEBUG("[ERROR] IntraC2C failed! producer and consumer' BlockId = "
                 << dep.consumerBlockId << "\n");
       return failure();
@@ -2558,6 +2602,11 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     }
   }
   LOG_DEBUG("Completed memory syncs.\n");
+
+  // A cast can be shared by several dependencies or retain other users.
+  for (Operation *castOp : foldedCasts)
+    if (castOp->use_empty())
+      castOp->erase();
   LOG_DEBUG("=====================================================\n");
 
   if (!flagManager.checkCurrentId()) {

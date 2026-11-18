@@ -1,12 +1,12 @@
 // RUN: triton-opt %s --triton-to-unstructure --triton-to-linalg --canonicalize --cse --verify-each | FileCheck %s --implicit-check-not='!tt.ptr' --implicit-check-not=unrealized_conversion_cast
 
 // Boolean elements occupy one byte. Casting the tensor of pointers after
-// addptr must retain its nonzero origin and its stride in bytes.
+// addptr must retain the argument base, nonzero origin and stride in bytes.
 // CHECK-LABEL: func.func @bool_pointer_bitcast
-// CHECK: memref.reinterpret_cast {{.*}} to offset: [3], sizes: [8], strides: [1] : memref<?xi8> to memref<8xi8, strided<[1], offset: 3>>
-// CHECK: memref.reinterpret_cast {{.*}} to offset: [5], sizes: [8], strides: [1] : memref<?xi8> to memref<8xi8, strided<[1], offset: 5>>
-// CHECK: memref.copy
-// CHECK: bufferization.materialize_in_destination
+// CHECK-DAG: %[[SRC:.*]] = memref.reinterpret_cast %{{arg[0-9]+}} to offset: [3], sizes: [8], strides: [1] : memref<?xi8> to memref<8xi8, strided<[1], offset: 3>>
+// CHECK-DAG: %[[DST:.*]] = memref.reinterpret_cast %{{arg[0-9]+}} to offset: [5], sizes: [8], strides: [1] : memref<?xi8> to memref<8xi8, strided<[1], offset: 5>>
+// CHECK-DAG: memref.copy %[[SRC]],
+// CHECK: bufferization.materialize_in_destination {{.*}} in writable %[[DST]]
 // CHECK: return
 module {
   tt.func public @bool_pointer_bitcast(%src: !tt.ptr<i1>, %dst: !tt.ptr<i1>) {
@@ -30,7 +30,7 @@ module {
   }
 
   // index_select retains a dynamic source dimension even with a constant
-  // size operand. Its scalar bool cast must describe all 64 * 128 bytes.
+  // size operand. A base built from an address must cover all 64 * 128 bytes.
   // CHECK-LABEL: func.func @bool_index_select
   // CHECK: %[[CAPACITY:.*]] = arith.constant 8192 : index
   // CHECK: %[[BASE:.*]] = hivm.hir.pointer_cast({{.*}}) [%[[CAPACITY]]] : memref<?xi8>
@@ -39,7 +39,8 @@ module {
   // CHECK: memref.copy {{.*}} {was_bool_to_int8 = true}
   // CHECK: bufferization.materialize_in_destination
   // CHECK: return
-  tt.func public @bool_index_select(%src: !tt.ptr<i1>, %indices: !tt.ptr<i32>, %dst: !tt.ptr<i1>) {
+  tt.func public @bool_index_select(%address: i64, %indices: !tt.ptr<i32>, %dst: !tt.ptr<i1>) {
+    %src = tt.int_to_ptr %address : i64 -> !tt.ptr<i1>
     %zero = arith.constant 0 : index
     %minus_one = arith.constant -1 : index
     %rows = arith.constant 64 : index

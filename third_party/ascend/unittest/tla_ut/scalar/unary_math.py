@@ -44,6 +44,7 @@ def unary_math(out, x, OP: tl.constexpr):
             tl.static_assert(OP == "sigmoid")
             y = tla.sigmoid(x)
         tl.static_assert(y.dtype == tl.float32)
+        tl.static_assert(len(y.shape) == 0)
         with tla.scope.simd():
             tla.simd.vsts(ub[0], tla.simd.vdup(y, tl.float32), dist="NORM_B32")
         tla.store_ub_to_gm(ub, tla.view(out, (64, )))
@@ -52,7 +53,7 @@ def unary_math(out, x, OP: tl.constexpr):
 _SPECIAL = (float("-inf"), -0.0, 0.0, float("inf"), float("nan"))
 _CONFIGS = [
     dict(name="exp", op=tla.exp, ir=("arith.bitcast", "arith.mulf"), divisions=0,
-         values=(-104.0, -100.0, -80.0, -1.5, 1.5, 80.0, 88.7228317, 88.7228393, 100.0)),
+         values=(-104.0, -103.972084, -103.972076, -100.0, -80.0, -1.5, 1.5, 80.0, 88.7228317, 88.7228393, 100.0)),
     dict(
         name="log1p", op=tla.log1p, ir=("arith.bitcast", ), divisions=1, values=(
             -2.0, -1.0, -1.0 + 2.0**-24, -1e-8, 1e-8, 1e-4,
@@ -77,8 +78,16 @@ def test_ir(case):
 
 
 @matrix(_CONFIGS)
+def test_constexpr_input(case):
+    module, ctx = compile_offline(unary_math, {"out": "*fp32"}, {"x": 0.25, "OP": case["name"]})
+    lowered = str(lower_offline(module, ctx))
+    assert "hivm.hir.store" in lowered
+
+
+@matrix(_CONFIGS)
 def test_unsupported_inputs(case):
-    for x in (True, 2, tla.alloc, tl.tensor(None, tl.float16), tl.tensor(None, tl.float64),
+    for x in (True, 2, tla.alloc, tl.tensor(None, tl.float16), tl.tensor(None,
+                                                                         tl.float64), tl.tensor(None, tl.bfloat16),
               tl.tensor(None, tl.block_type(tl.float32, [64]))):
         with pytest.raises(TypeError, match=rf"tla\.{case['name']} expects a float32 scalar"):
             case["op"](x, _semantic=object())
@@ -118,6 +127,7 @@ def main():
     for case in _CONFIGS:
         if do_ir:
             test_ir(case)
+            test_constexpr_input(case)
             test_unsupported_inputs(case)
         if do_compile:
             test_compile(case)

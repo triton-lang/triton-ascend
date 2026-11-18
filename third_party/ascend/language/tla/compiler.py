@@ -37,6 +37,20 @@ from triton.compiler.code_generator import (
 )
 
 
+class _TLACodeGenerator(CodeGenerator):
+    """TLA-only loop extension; ordinary Triton loop lowering stays unchanged."""
+
+    def visit_For(self, node):
+        import ast
+        from triton.language.core import _unwrap_if_constexpr
+        from .scope import pipeline
+        from .code_generator import handle_pipeline_for
+
+        if isinstance(node.iter, ast.Call) and _unwrap_if_constexpr(self.visit(node.iter.func)) is pipeline:
+            return handle_pipeline_for(self, node)
+        return super().visit_For(node)
+
+
 def _stamp_tla_mode(module):
     """Set ``hacc.mode = "tla"`` to select the TLA backend pipeline."""
     from triton._C.libtriton.ascend import ir as ascend_ir
@@ -238,9 +252,9 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
     prototype = ASTFunction([], types, constants, {})
     file_name, begin_line = get_jit_fn_file_line(fn)
     proxy = namedtuple("SpecializationProxy", "constants signature")(constexprs, signature)
-    generator = CodeGenerator(context, prototype, gscope=fn.get_capture_scope(), function_name=fn.repr(proxy),
-                              jit_fn=fn, is_kernel=True, file_name=file_name, begin_line=begin_line, options=options,
-                              codegen_fns={}, module_map={}, module=module, is_gluon=False)
+    generator = _TLACodeGenerator(context, prototype, gscope=fn.get_capture_scope(), function_name=fn.repr(proxy),
+                                  jit_fn=fn, is_kernel=True, file_name=file_name, begin_line=begin_line,
+                                  options=options, codegen_fns={}, module_map={}, module=module, is_gluon=False)
     arch = getattr(options, "arch", None)
     # Mount the TLA builder on the code generator before visiting the AST.
     from triton.language.extra.tla.builder import setup_unified_builder

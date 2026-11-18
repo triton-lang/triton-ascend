@@ -1,44 +1,30 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.while
-//
-// XFAIL: *
-//
-// The shape of the cross core dependency is not a gate of the normal preload
-// scheme any more: it is down for the batch validation, so the kernel takes
-// the scheme now and the checks of this test do not hold. Remove the marker
-// when the gate comes back: lit reports an unexpectedly passing test as a
-// failure.
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.for --implicit-check-not=arith.select
 
-// The normal preload scheme is enabled for the kernels whose pipeline
-// dependency is a single chain of four computation blocks that alternates the
-// cores. A kernel that holds two such chains keeps the conditions of the
-// upstream implementation when only one of the chains carries a condition: the
-// scheme is validated on a single chain.
+// The shape of the cross core dependency does not gate the normal preload
+// scheme: the scheme is the only scheme, every kernel takes it, no operator is
+// filtered out. This test guards that a kernel whose cross core dependency
+// does not have the shape the scheme was validated on still takes it.
 //
 // This kernel has the dependency chain of the test
 // pattern-kernel-conditions.mlir:
 //   cube block 0 -> vector block 1 -> cube block 2 -> vector block 3
 // and a second chain that shares no block with it:
 //   cube block 4 -> vector block 5 -> cube block 6 -> vector block 7
-// Both chains are double buffered, so both of them match the pattern. The
-// blocks of the second chain live outside the main loop, so only the four
-// blocks of the first chain carry a condition: the graph holds two chains
-// and the conditions are computed for the blocks of one of them. The kernel
-// keeps the upstream scheme, the main loop stays an scf.for and the blocks
-// handshake through PIPE_S. The implicit check forbids the scf.while of the
-// normal preload scheme.
-//
-// The test pattern-two-pipelines-kernel-conditions.mlir holds the two chains
-// of a kernel that runs two pipelines at the same time: both of them carry a
-// condition and the kernel uses the normal preload scheme.
-
+// The two chains are two independent pipelines: the scheme is not
+// validated for more than one pipeline.
+// The kernel takes the normal preload scheme: the main loop is an scf.while
+// and the blocks do not handshake through PIPE_S any more. The implicit check
+// forbids the scf.for of the upstream scheme, and the select that computed the
+// flag of the loop, which is not added any more.
 // CHECK-LABEL: func.func @pattern_two_chains_kernel_conditions
 
-// The upstream scheme: the main loop stays an scf.for, the flags of the
-// blocks are published through the PIPE_S handshake.
-// CHECK: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_set[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
+// The normal preload scheme: one scf.while per core.
+// CHECK: scf.while
+// CHECK: ssbuffer.if = 1 : i32}
+// CHECK: ssbuffer.if = 3 : i32}
+// CHECK: scf.while
+// CHECK: ssbuffer.if = 0 : i32}
+// CHECK: ssbuffer.if = 2 : i32}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @pattern_two_chains_kernel_conditions(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {

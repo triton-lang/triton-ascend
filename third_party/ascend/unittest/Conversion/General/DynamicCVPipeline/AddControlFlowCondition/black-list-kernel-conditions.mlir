@@ -1,32 +1,26 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.while --implicit-check-not=arith.select
-//
-// XFAIL: *
-//
-// The black list of the kernel names is down for the batch validation of the
-// normal preload scheme: the kernel takes the scheme now, its main loop is an
-// scf.while and its flags are computed with arith.select, so the checks of
-// this test do not hold. Remove the marker when the black list comes back:
-// lit reports an unexpectedly passing test as a failure.
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.for --implicit-check-not=arith.select
 
-// A kernel whose cross-core dependency is a CUBE -> VECTOR -> CUBE -> VECTOR
-// chain is recognized by the pattern, but the name of the kernel is in the
-// black list of AddControlFlowCondition. The black list has the priority: the
-// kernel keeps the conditions of the upstream implementation, its main loop is
-// an scf.for and the cores are synchronized with PIPE_S. The normal preload
-// scheme is not used, the implicit checks forbid the scf.while loop and the
-// arith.select of the flags.
+// No kernel is filtered out by its name: the black list of the kernel names
+// is gone, the normal preload scheme is the only scheme. This test guards
+// that a kernel whose name used to be in the black list takes it.
 //
 // The dependency chain of this test is:
 //   cube block 0 -> vector block 1 -> cube block 2 -> vector block 3
+//
+// The kernel takes the normal preload scheme: the main loop is an scf.while
+// and the blocks do not handshake through PIPE_S any more. The implicit check
+// forbids the scf.for of the upstream scheme, and the select that computed the
+// flag of the loop, which is not added any more.
 
 // CHECK-LABEL: func.func @paged_decode_fd_kernel
 
-// The upstream scheme: the main loop stays an scf.for and the cores are
-// synchronized with PIPE_S.
-// CHECK: scf.for
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: scf.for
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
+// The normal preload scheme: one scf.while per core.
+// CHECK: scf.while
+// CHECK: ssbuffer.if = 1 : i32}
+// CHECK: ssbuffer.if = 3 : i32}
+// CHECK: scf.while
+// CHECK: ssbuffer.if = 0 : i32}
+// CHECK: ssbuffer.if = 2 : i32}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @paged_decode_fd_kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {

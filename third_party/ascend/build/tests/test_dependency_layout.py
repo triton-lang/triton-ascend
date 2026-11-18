@@ -1,6 +1,6 @@
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[4]
 
 
 def test_dependency_metadata_uses_upstream_layout_without_duplicate_pins():

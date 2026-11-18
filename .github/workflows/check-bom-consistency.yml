@@ -24,7 +24,7 @@ jobs:
       - name: Run metadata regression tests
         run: |
           python -m pip install pytest setuptools wheel
-          python -m pytest -q third_party/ascend/build_tests
+          python -m pytest -q third_party/ascend/build/tests
 
       - name: Run BOM consistency checks
         run: python3 .github/scripts/check_bom_consistency.py

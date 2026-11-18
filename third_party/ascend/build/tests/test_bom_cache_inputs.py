@@ -6,7 +6,7 @@ import shutil
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[4]
 
 
 def fingerprint(root, patterns):

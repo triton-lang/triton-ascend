@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[4]
 
 
 @pytest.mark.parametrize("mode", ["metadata", "override"])

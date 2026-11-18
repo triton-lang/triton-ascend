@@ -10,7 +10,7 @@ import textwrap
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[4]
 
 
 @pytest.mark.parametrize("workflow", ["integration-tests-ascend.yml", "sync-upstream.yml"])

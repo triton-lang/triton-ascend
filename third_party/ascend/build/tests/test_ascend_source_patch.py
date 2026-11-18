@@ -2,7 +2,7 @@ from pathlib import Path
 import shlex
 import subprocess
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[4]
 
 
 def test_build_changes_preserve_the_actual_ascend_source_patch(tmp_path):

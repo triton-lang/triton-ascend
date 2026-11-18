@@ -111,7 +111,7 @@ from .dma import (
 
 from .view import view, subview, reshape
 from .scalar import select, abs, maximum, minimum, cast, max_value, cdiv, infinity, exp, log1p, sigmoid, clamp
-from .aux_ops import annotate_buffer_versions, assume
+from .aux_ops import annotate_buffer_versions, assume, program_id
 
 from . import math
 from .math import compensated_rstd, truncmod, sqrt
@@ -234,6 +234,7 @@ __all__ = [
     # aux ops
     "annotate_buffer_versions",
     "assume",
+    "program_id",
 
     # simd ops
     "simd",

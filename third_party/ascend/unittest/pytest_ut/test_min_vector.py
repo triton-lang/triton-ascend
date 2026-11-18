@@ -66,6 +66,45 @@ shapes = [
 map_for_64_t = {37: 31}
 
 
+@triton.jit
+def triton_min_nan(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
+    idx_block = tl.arange(0, NUMEL)
+    x = tl.load(in_ptr0 + idx_block)
+    ret = tl.min(x, 0)
+    tl.store(out_ptr0, ret)
+
+
+# minnum semantics: an axis whose elements are all NaN reduces to NaN, while
+# an axis containing at least one non-NaN value reduces to the smallest of
+# those values (NaN is ignored).
+@pytest.mark.parametrize('dtype, sigtype', [(torch.float32, 'float32')])
+@pytest.mark.parametrize('nan_ratio', [1.0, 0.5])
+def test_reduce_dim0_nan_min(dtype, sigtype, nan_ratio):
+    numel = 64
+    x0 = test_common.generate_tensor(shape=(numel, ), dtype=sigtype)
+    nan_count = int(numel * nan_ratio)
+    x0[:nan_count] = float('nan')
+    if nan_count < numel:
+        x0[nan_count:] = torch.arange(1, numel - nan_count + 1, dtype=dtype)
+
+    print(f"reduce all-NaN ratio: {nan_ratio} {dtype} {sigtype}")
+
+    # Expected value under minnum semantics: min over the non-NaN elements,
+    # or NaN when every element is NaN. torch.nanmin is not available in this
+    # torch build, so filter the NaNs out manually.
+    valid = x0[~torch.isnan(x0)]
+    if valid.numel() == 0:
+        ans = torch.full((1, ), float('nan'), dtype=dtype)
+    else:
+        ans = torch.min(valid, 0, keepdim=True).values
+    x0 = x0.npu()
+
+    output = torch.zeros((1, ), dtype=dtype).npu()
+    triton_min_nan[1, 1, 1](x0, output, NUMEL=numel)
+
+    test_common.validate_cmp(sigtype, output, ans)
+
+
 @pytest.mark.skip(reason="randomly failed")
 @pytest.mark.parametrize('dtype, sigtype', types)
 @pytest.mark.parametrize('N, NUMEL', shapes)

@@ -51,10 +51,11 @@ def unary_math(out, x, OP: tl.constexpr):
 
 _SPECIAL = (float("-inf"), -0.0, 0.0, float("inf"), float("nan"))
 _CONFIGS = [
-    dict(name="exp", op=tla.exp, ir=("math.exp", ), values=(-100.0, -80.0, -1.5, 1.5, 80.0, 100.0)),
-    dict(name="log1p", op=tla.log1p, ir=("math.log", "arith.select"),
+    dict(name="exp", op=tla.exp, ir=("arith.bitcast", "arith.mulf"),
+         values=(-104.0, -100.0, -80.0, -1.5, 1.5, 80.0, 88.7228317, 88.7228393, 100.0)),
+    dict(name="log1p", op=tla.log1p, ir=("arith.bitcast", "arith.divf"),
          values=(-2.0, -1.0, -1.0 + 2.0**-24, -1e-8, 1e-8, 1e-4, 1.5, 1e30)),
-    dict(name="sigmoid", op=tla.sigmoid, ir=("math.exp", "arith.select"),
+    dict(name="sigmoid", op=tla.sigmoid, ir=("arith.bitcast", "arith.divf"),
          values=(-100.0, -80.0, -1.5, 1.5, 80.0, 100.0)),
 ]
 
@@ -65,6 +66,7 @@ def test_ir(case):
     lowered = str(lower_offline(module, ctx))
     for op in case["ir"]:
         assert op in lowered
+    assert "math.exp" not in lowered and "math.log" not in lowered
     assert lowered.count("memref.alloc()") == 1
     assert "hivm.hir.store" in lowered
     assert "tt." not in lowered and "tensor<" not in lowered

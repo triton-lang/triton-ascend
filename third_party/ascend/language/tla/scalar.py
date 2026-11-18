@@ -21,10 +21,9 @@
 
 import math
 
+import triton
 from triton.language import core as tl
 from triton.language.math import abs as _triton_abs
-from triton.language.math import exp as _triton_exp
-from triton.language.math import log as _triton_log
 
 __all__ = [
     "select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "exp", "log1p", "sigmoid", "clamp"
@@ -89,46 +88,109 @@ def _fp32_scalar(x, name, semantic):
     raise TypeError(f"{name} expects a float32 scalar tensor or a Python float")
 
 
+# AICore has no scalar libm expf/logf entry points. Keep these expressions
+# in scalar arithmetic, with no implicit vector function or scratch buffer.
+_LN2_HI = tl.constexpr(0.693145751953125)
+_LN2_LO = tl.constexpr(1.428606765330187e-6)
+
+
+@triton.jit
+def _normal_power_of_two(exponent):
+    return tl.cast((exponent + 127) << 23, tl.float32, bitcast=True)
+
+
+@triton.jit
+def _exp_fp32(x):
+    overflow = x >= 88.72283935546875
+    underflow = x <= -103.97208404541016
+    in_range = (x == x) & ~overflow & ~underflow
+    value = tl.where(in_range, x, 0.0)
+
+    # Choose the nearest multiple of ln(2). Its split keeps the remainder
+    # accurate, with absolute value at most ln(2)/2.
+    n = tl.cast(value * 1.4426950408889634 + tl.where(value >= 0.0, 0.5, -0.5), tl.int32)
+    n_float = tl.cast(n, tl.float32)
+    r = (value - n_float * _LN2_HI) - n_float * _LN2_LO
+    poly = (1.0 / 5040.0) * r + (1.0 / 720.0)
+    poly = poly * r + (1.0 / 120.0)
+    poly = poly * r + (1.0 / 24.0)
+    poly = poly * r + (1.0 / 6.0)
+    poly = poly * r + 0.5
+    poly = (poly * r + 1.0) * r + 1.0
+
+    # Split the scale so both factors use normal exponents even near the
+    # output's overflow and subnormal boundaries.
+    high = tl.minimum(tl.maximum(n, -126), 127)
+    y = (poly * _normal_power_of_two(n - high)) * _normal_power_of_two(high)
+    return tl.where(overflow, float("inf"), tl.where(underflow, 0.0, tl.where(in_range, y, x)))
+
+
+@triton.jit
+def _log1p_fp32(x):
+    # The smallest positive 1+x from a float32 x > -1 is normal, so extracting
+    # its exponent and mantissa does not require subnormal normalization.
+    u = tl.where((x > -1.0) & (x < float("inf")), 1.0 + x, 1.0)
+    bits = tl.cast(u, tl.uint32, bitcast=True)
+    exponent = tl.cast(bits >> 23, tl.int32) - 127
+    mantissa = tl.cast((bits & 0x007FFFFF) | 0x3F800000, tl.float32, bitcast=True)
+    upper = mantissa > 1.4142135623730951
+    mantissa = tl.where(upper, mantissa * 0.5, mantissa)
+    exponent = tl.cast(exponent + tl.cast(upper, tl.int32), tl.float32)
+
+    # ln(m) = 2 * atanh(z), z = (m-1)/(m+1) and abs(z) <= 0.172.
+    z = (mantissa - 1.0) / (mantissa + 1.0)
+    z2 = z * z
+    poly = (1.0 / 11.0) * z2 + (1.0 / 9.0)
+    poly = poly * z2 + (1.0 / 7.0)
+    poly = poly * z2 + (1.0 / 5.0)
+    poly = poly * z2 + (1.0 / 3.0)
+    log_u = exponent * _LN2_HI + (exponent * _LN2_LO + 2.0 * z * (poly * z2 + 1.0))
+
+    # Correct the rounding of 1+x. When u rounded to 1, return x itself.
+    # The same selection preserves signed zero, +inf and NaN.
+    unit = u == 1.0
+    delta = tl.where(unit, 1.0, u - 1.0)
+    y = tl.where(unit, x, log_u * (x / delta))
+    domain_error = tl.where(x == -1.0, -float("inf"), float("nan"))
+    return tl.where(x <= -1.0, domain_error, y)
+
+
+@triton.jit
+def _sigmoid_fp32(x):
+    # The exponent is always nonpositive, so negative inputs cannot
+    # overflow before division.
+    nonnegative = x >= 0.0
+    z = _exp_fp32(tl.where(nonnegative, -x, x))
+    return tl.where(nonnegative, 1.0, z) / (1.0 + z)
+
+
 @tl.builtin
-def exp(x, _semantic=None):
+def exp(x, _semantic=None, _generator=None):
     """Return the natural exponential of a float32 scalar or Python float.
 
     The result is a float32 scalar. Use the SIMD-specific interface for
     vector registers.
     """
-    return _triton_exp(_fp32_scalar(x, "tla.exp", _semantic), _semantic=_semantic)
+    x = _fp32_scalar(x, "tla.exp", _semantic)
+    return _generator.call_JitFunction(_exp_fp32, [x], {})
 
 
 @tl.builtin
-def log1p(x, _semantic=None):
+def log1p(x, _semantic=None, _generator=None):
     """Return log(1 + x) for a float32 scalar or Python float.
 
     Preserve small inputs, including signed zero. Negative one maps to
     negative infinity and inputs below negative one map to NaN.
     """
     x = _fp32_scalar(x, "tla.log1p", _semantic)
-    rounded = _semantic.add(1.0, x, sanitize_overflow=False)
-    # Correct the rounding in 1 + x. If it rounded to 1, log1p(x) rounds
-    # to x. Handle +inf before applying the correction to avoid inf / inf.
-    unchanged = _semantic.or_(_semantic.equal(rounded, 1.0), _semantic.equal(x, float("inf")))
-    delta = _semantic.sub(rounded, 1.0, sanitize_overflow=False)
-    divisor = tl.where(unchanged, 1.0, delta, _semantic=_semantic)
-    scale = _semantic.truediv(x, divisor)
-    result = _semantic.mul(_triton_log(rounded, _semantic=_semantic), scale, sanitize_overflow=False)
-    return tl.where(unchanged, x, result, _semantic=_semantic)
+    return _generator.call_JitFunction(_log1p_fp32, [x], {})
 
 
 @tl.builtin
-def sigmoid(x, _semantic=None):
+def sigmoid(x, _semantic=None, _generator=None):
     """Return the logistic sigmoid of a float32 scalar or Python float."""
     x = _fp32_scalar(x, "tla.sigmoid", _semantic)
-    # A nonpositive exponent avoids premature overflow for large negative x.
-    magnitude = _triton_abs(x, _semantic=_semantic)
-    exp_neg_abs = _triton_exp(_semantic.minus(magnitude), _semantic=_semantic)
-    nonnegative = _semantic.greater_equal(x, 0.0)
-    numerator = tl.where(nonnegative, 1.0, exp_neg_abs, _semantic=_semantic)
-    denominator = _semantic.add(1.0, exp_neg_abs, sanitize_overflow=False)
-    return _semantic.truediv(numerator, denominator)
+    return _generator.call_JitFunction(_sigmoid_fp32, [x], {})
 
 
 @tl.builtin

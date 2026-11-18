@@ -444,13 +444,26 @@ static void computeProducerBufferCount(ControlFlowConditionInfo *info,
   }
   LDBG("Cross-core buffer count (max): " << info->crossCoreBufferCount);
 
-  // Get intra-core buffer count from module attribute
-  BufferCountManager bcm(module);
-  int intraBufCount =
-      bcm.getBufferCountByType(BufferCountManager::DepType::IntraCore);
-  info->intraCoreBufferCount = intraBufCount;
-  LDBG("Intra-core buffer count (from module attribute): "
+  // Get intra-core buffer count (max size across all main loops)
+  info->intraCoreBufferCount = 0;
+  for (auto &loopEntry : info->intraCoreDependentMap) {
+    auto &intraDepMap = loopEntry.second;
+    for (auto &entry : intraDepMap) {
+      info->intraCoreBufferCount =
+          std::max(info->intraCoreBufferCount, (int)entry.second.size());
+    }
+  }
+  LDBG("Intra-core buffer count (max across all main loops): "
        << info->intraCoreBufferCount);
+
+  // If intra-core map is empty, use BufferCountManager's IntraCore value
+  if (info->intraCoreBufferCount == 0) {
+    BufferCountManager bufferCountMgr(module);
+    info->intraCoreBufferCount = bufferCountMgr.getBufferCountByType(
+        BufferCountManager::DepType::IntraCore);
+    LDBG("Intra-core map is empty, using BufferCountManager IntraCore value: "
+         << info->intraCoreBufferCount);
+  }
 }
 
 // Add an edge to ifBlockDAG if it is not already present

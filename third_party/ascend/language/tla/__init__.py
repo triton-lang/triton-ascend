@@ -110,7 +110,7 @@ from .dma import (
 )
 
 from .view import view, subview, reshape
-from .scalar import select, abs, maximum, minimum, cast, max_value, cdiv, infinity, exp, clamp
+from .scalar import select, abs, maximum, minimum, cast, max_value, cdiv, infinity, exp, log1p, clamp
 from .aux_ops import annotate_buffer_versions, assume
 
 from . import math
@@ -216,6 +216,7 @@ __all__ = [
     "cdiv",
     "infinity",
     "exp",
+    "log1p",
     "clamp",
 
     # core-mode scopes (scope.simd / scope.cube)

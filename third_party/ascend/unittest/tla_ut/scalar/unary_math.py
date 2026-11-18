@@ -46,6 +46,8 @@ def unary_math(out, x, OP: tl.constexpr):
 _SPECIAL = (float("-inf"), -0.0, 0.0, float("inf"), float("nan"))
 _CONFIGS = [
     dict(name="exp", op=tla.exp, ir=("math.exp", ), values=(-100.0, -80.0, -1.5, 1.5, 80.0, 100.0)),
+    dict(name="log1p", op=tla.log1p, ir=("math.log", "arith.select"),
+         values=(-2.0, -1.0, -1.0 + 2.0**-24, -1e-8, 1e-8, 1e-4, 1.5, 1e30)),
 ]
 
 
@@ -93,6 +95,8 @@ def test_run(case):
         actual = out.cpu()
         # The target exponential may flush subnormal results to zero.
         torch.testing.assert_close(actual, expected, rtol=1e-5, atol=torch.finfo(torch.float32).tiny, equal_nan=True)
+        if case["name"] == "log1p" and x == 0.0:
+            torch.testing.assert_close(actual.signbit(), expected.signbit())
 
 
 def main():

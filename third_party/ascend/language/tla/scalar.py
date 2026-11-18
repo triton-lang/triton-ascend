@@ -24,8 +24,9 @@ import math
 from triton.language import core as tl
 from triton.language.math import abs as _triton_abs
 from triton.language.math import exp as _triton_exp
+from triton.language.math import log as _triton_log
 
-__all__ = ["select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "exp", "clamp"]
+__all__ = ["select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "exp", "log1p", "clamp"]
 
 
 def _check_scalar(value, name):
@@ -94,6 +95,25 @@ def exp(x, _semantic=None):
     vector registers.
     """
     return _triton_exp(_fp32_scalar(x, "tla.exp", _semantic), _semantic=_semantic)
+
+
+@tl.builtin
+def log1p(x, _semantic=None):
+    """Return log(1 + x) for a float32 scalar or Python float.
+
+    Preserve small inputs, including signed zero. Negative one maps to
+    negative infinity and inputs below negative one map to NaN.
+    """
+    x = _fp32_scalar(x, "tla.log1p", _semantic)
+    rounded = _semantic.add(1.0, x, sanitize_overflow=False)
+    # Correct the rounding in 1 + x. If it rounded to 1, log1p(x) rounds
+    # to x. Handle +inf before applying the correction to avoid inf / inf.
+    unchanged = _semantic.or_(_semantic.equal(rounded, 1.0), _semantic.equal(x, float("inf")))
+    delta = _semantic.sub(rounded, 1.0, sanitize_overflow=False)
+    divisor = tl.where(unchanged, 1.0, delta, _semantic=_semantic)
+    scale = _semantic.truediv(x, divisor)
+    result = _semantic.mul(_triton_log(rounded, _semantic=_semantic), scale, sanitize_overflow=False)
+    return tl.where(unchanged, x, result, _semantic=_semantic)
 
 
 @tl.builtin

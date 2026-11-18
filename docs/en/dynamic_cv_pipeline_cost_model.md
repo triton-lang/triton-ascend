@@ -578,9 +578,37 @@ That answer is recorded automatically and replayed on request.
 **Recording needs nothing.** Every compilation that ran the CV pipeline puts
 its decision into the compilation metadata, which triton serialises to
 `<cache>/<hash>/<kernel>.json` beside each kernel and hands to
-`triton.knobs.compilation.listener`. Collecting those into a table is left to
-the harness: one file per kernel, written through a temp file and a rename, so
-no two processes ever contend for one path.
+`triton.knobs.compilation.listener`. One file per kernel, written through a
+temp file and a rename, so no two processes ever contend for one path and
+there is nothing to merge.
+
+`third_party/ascend/costmodel/tools/collect_cv_seeds.py` turns those records
+into one table — standard library only, and it does not import triton, so it
+also runs wherever the cache was copied to:
+
+```bash
+python third_party/ascend/costmodel/tools/collect_cv_seeds.py
+```
+
+```
+status         seed  kernel_name     hash          cost       second_bound  ub_peak  pipeline_stages  usable  total
+seed_found     7     attn_fwd        9f2c4e1a77b3  288578196  154792120     180224   3                82      200
+seed_found     13    flash_attn_bwd  41bb90ce2f7a  91003120   70110200      131072   4                12      200
+baseline_best  0     gemm_fp16       cc10ab7733d9  50221000   40118000      2048     1                200     200
+ignored        -1    softmax_rows    77de01fa9b2c  -          -             -        -                0       0
+```
+
+Rows come out with the chosen orderings first and the expensive kernels before
+the cheap ones, which is the order in which measuring them pays off.
+`--only-found` keeps just the kernels where something other than the untouched
+pipeline won, `--status` filters by outcome, and `--format jsonl|csv` writes
+the table instead of printing it. The JSONL it writes is what the replay side
+reads, so collect and replay are the same file with nothing in between:
+
+```bash
+python .../collect_cv_seeds.py --only-found --format jsonl --out seeds.jsonl
+TRITON_ALWAYS_COMPILE=1 TRITON_ASCEND_CV_SEED_TABLE=seeds.jsonl pytest kernels/
+```
 
 | Metadata key | Meaning |
 |---|---|

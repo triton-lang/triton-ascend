@@ -17,7 +17,7 @@ def compensated_rstd_example(SQ_ptr, O_ptr, N: tl.constexpr, HIDDEN: tl.constexp
         square_sum = tla.simd.vlds(sq_ub[0], dist="BRC_B32")
 
         # eps 必须不小于最小 FP32 正规数 2^-126。
-        rstd = tla.compensated_rstd(square_sum, HIDDEN, 1e-6)
+        rstd = tla.simd.compensated_rstd(square_sum, HIDDEN, 1e-6)
         tla.simd.vsts(o_ub[0], rstd, dist="NORM_B32")
 
     tla.copy(o_ub, o)

@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """
-Compiler-hint helpers for the TLA namespace.
+Scheduling queries and compiler hints for the TLA namespace.
 
 Migrated from TLA ``cann/extension/aux_ops.py`` (SIMD VF related subset):
 ``annotate_buffer_versions`` is the frontend declaration consumed by the
@@ -33,7 +33,16 @@ from triton.language.core import (
 
 from triton._C.libtriton import ir
 
-__all__ = ["annotate_buffer_versions", "assume"]
+__all__ = ["annotate_buffer_versions", "assume", "program_id"]
+
+
+@builtin
+def program_id(axis, _semantic=None):
+    """Return the int32 program instance ID along compile-time axis 0, 1, or 2."""
+    axis = _unwrap_if_constexpr(axis)
+    if type(axis) is not int:
+        raise TypeError("tla.program_id axis must be a compile-time integer")
+    return core.program_id(axis, _semantic=_semantic)
 
 
 @builtin

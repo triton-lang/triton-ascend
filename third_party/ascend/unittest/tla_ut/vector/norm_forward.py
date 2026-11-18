@@ -48,7 +48,7 @@ def rmsnorm(X_ptr, W_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.constex
             # SYNC-02: write-after-read barrier.
             tla.simd.membar("VST_VLD")
             v = tla.simd.vlds(rstd_ub[0], dist="BRC_B32")
-            rstd_v = tla.math.compensated_rstd(v, HID, EPS)
+            rstd_v = tla.simd.compensated_rstd(v, HID, EPS)
             for c in tl.static_range(PAD_H // 64):
                 x = tla.simd.vextf(tla.simd.vlds(x_ub[0, c * 64], dist="UNPK_B16"), tl.float32, part="part_even")
                 y = tla.simd.vmul(x, rstd_v)

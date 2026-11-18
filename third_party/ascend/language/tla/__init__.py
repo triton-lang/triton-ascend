@@ -28,7 +28,7 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 ``fill`` (scalar fill of a contiguous UB buffer),
 ``copy`` (GM<->buffer), ``view`` (GM view), ``scope`` (core-mode scopes:
 ``tla.scope.simd()`` / ``tla.scope.cube()``),
-``simd`` (vector-register ops), ``where`` (eager scalar/SIMD select),
+``simd`` (vector-register ops), ``where`` (eager scalar select),
 ``annotate_buffer_versions``, and scalar dtypes.
 
 Scalar types share Triton's dtype protocol, so ``tla.float32`` can be passed
@@ -110,18 +110,18 @@ from .dma import (
 )
 
 from .view import view, subview, reshape
-from .scalar import select, abs, maximum, minimum, cast, max_value, cdiv, infinity, clamp
-from .aux_ops import annotate_buffer_versions, assume
+from .scalar import select, abs, maximum, minimum, cast, max_value, cdiv, infinity, exp, log1p, sigmoid, clamp
+from .aux_ops import annotate_buffer_versions, assume, program_id
 
 from . import math
-from .math import compensated_rstd, truncmod, sqrt
+from .math import truncmod, sqrt
 from .debug import device_assert, device_print
 
 # SIMD vector-register ops.  ``simd`` is exported as a module so its ``cast``
 # (ave.hir.vextf) does not shadow unrelated top-level names.
 from . import simd
 
-# Scalar / SIMD-register selection (eager, unlike TileLang T.if_then_else).
+# Eager scalar selection.
 from .selection import where
 
 # Cube-core ops (``mmad``/``mmad_mx``/``tla.copy`` L1/L0C routes).
@@ -215,6 +215,9 @@ __all__ = [
     "max_value",
     "cdiv",
     "infinity",
+    "exp",
+    "log1p",
+    "sigmoid",
     "clamp",
 
     # core-mode scopes (scope.simd / scope.cube)
@@ -222,7 +225,6 @@ __all__ = [
 
     # math helpers / diagnostics
     "math",
-    "compensated_rstd",
     "truncmod",
     "sqrt",
     "device_assert",
@@ -231,11 +233,12 @@ __all__ = [
     # aux ops
     "annotate_buffer_versions",
     "assume",
+    "program_id",
 
     # simd ops
     "simd",
 
-    # scalar / SIMD selection
+    # scalar selection
     "where",
 
     # cube ops

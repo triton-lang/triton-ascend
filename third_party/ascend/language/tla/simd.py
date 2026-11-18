@@ -89,6 +89,7 @@ pp/pge strings are validated by :mod:`simd_semantic`.
 from __future__ import annotations
 
 import enum
+import struct
 
 import triton.language as tl
 from .core import buffer, buffer_access, vector, vector_type
@@ -141,6 +142,7 @@ __all__ = [
     "vrelu",
     "vsqrt",
     "vrsqrt",
+    "compensated_rstd",
     "vlrelu",
     "vprelu",
     "vexp",
@@ -2701,6 +2703,101 @@ def vsqrt(src, mask=None, mode=MODE.ZEROING, precision=None, _semantic=None) -> 
 def vrsqrt(src, _semantic=None) -> vector:
     """Elementwise reciprocal square root (``ave.hir.vrsqrt``)."""
     return _unary("rsqrt", src, _semantic)
+
+
+_FP32_MIN_NORMAL = 2.0**-126
+
+
+def _split_fp32(value: float) -> tuple:
+    """Split a Python float into two FP32 values whose sum approximates it."""
+    high = struct.unpack('=f', struct.pack('=f', value))[0]
+    low = struct.unpack('=f', struct.pack('=f', value - high))[0]
+    return high, low
+
+
+def _naive_rsqrt(value, _semantic):
+    """1/sqrt(v) from ``rstd.py`` naive_rsqrt (vdiv + vsqrt)."""
+    return vdiv(vsplat(1.0, value.dtype, _semantic=_semantic), vsqrt(value, _semantic=_semantic), _semantic=_semantic)
+
+
+def _compensated_div_add(a, reciprocal_c0_hi, reciprocal_c0_lo, c1_hi, c1_lo, _semantic):
+    """
+    High/low parts of ``a / c0 + c1`` with TwoSum error recovery
+    (``rstd.py`` compensated_div_add; vmuls/vadds/vsub are expressed through
+    splat + mul/add/neg).
+    """
+    r_c0_hi_v = vsplat(reciprocal_c0_hi, a.dtype, _semantic=_semantic)
+    product = vmul(a, r_c0_hi_v, _semantic=_semantic)
+    value = vadd(product, vsplat(c1_hi, a.dtype, _semantic=_semantic), _semantic=_semantic)
+
+    # Error-free TwoSum for product + c1_hi.
+    virtual_c1 = vadd(value, vneg(product, _semantic=_semantic), _semantic=_semantic)
+    product_sum_error = vadd(
+        product, vneg(vadd(value, vneg(virtual_c1, _semantic=_semantic), _semantic=_semantic), _semantic=_semantic),
+        _semantic=_semantic)
+    c1_sum_error = vadd(vneg(virtual_c1, _semantic=_semantic), vsplat(c1_hi, a.dtype, _semantic=_semantic),
+                        _semantic=_semantic)
+    sum_error = vadd(product_sum_error, c1_sum_error, _semantic=_semantic)
+
+    # Recover the multiplication error and add the low parts of both constants.
+    product_error = vfma(vneg(product, _semantic=_semantic), a, r_c0_hi_v, _semantic=_semantic)
+    value_error = vadd(
+        vadd(product_error, sum_error, _semantic=_semantic),
+        vadd(vmul(a, vsplat(reciprocal_c0_lo, a.dtype, _semantic=_semantic), _semantic=_semantic),
+             vsplat(c1_lo, a.dtype, _semantic=_semantic), _semantic=_semantic), _semantic=_semantic)
+    return value, value_error
+
+
+def _compensated_rsqrt(value, value_error, estimate, _semantic):
+    """
+    Refine an rsqrt estimate against the high and low parts of its input
+    (``rstd.py`` compensated_rsqrt; the alloc_local ``vmula`` accumulators are
+    SSA ``fma`` chains).
+    """
+    estimate_squared = vmul(estimate, estimate, _semantic=_semantic)
+    # square_error starts at -estimate_squared, then vmula adds estimate*estimate.
+    square_error = vfma(vneg(estimate_squared, _semantic=_semantic), estimate, estimate, _semantic=_semantic)
+
+    residual = vsplat(1.0, value.dtype, _semantic=_semantic)
+    negative_value = vneg(value, _semantic=_semantic)
+    negative_value_error = vneg(value_error, _semantic=_semantic)
+    residual = vfma(residual, negative_value, estimate_squared, _semantic=_semantic)
+    residual = vfma(residual, negative_value, square_error, _semantic=_semantic)
+    residual = vfma(residual, negative_value_error, estimate_squared, _semantic=_semantic)
+    residual = vfma(residual, negative_value_error, square_error, _semantic=_semantic)
+
+    # refined = estimate + (estimate * 0.5) * residual
+    refined = vfma(estimate, vmul(estimate, vsplat(0.5, value.dtype, _semantic=_semantic), _semantic=_semantic),
+                   residual, _semantic=_semantic)
+    return refined
+
+
+@builtin
+def compensated_rstd(square_sum, hidden, eps, _semantic=None):
+    """
+    Compensated reciprocal standard deviation of ``square_sum / hidden + eps``
+    using TileKernels ``rstd.py`` (``make_rstd_impl``). The high/low
+    correction and Newton refinement preserve the compensated variance.
+
+    :param square_sum: f32 vector register holding ``sum_h x[h]**2`` (one value
+        broadcast across all lanes, e.g. from an ``ONEPT_B32`` + ``BRC_B32``
+        read-back)
+    :param hidden: hidden size (positive Python/constexpr scalar); used to
+        build the exact ``1/hidden`` high/low split
+    :param eps: epsilon (>= 2^-126, ``rstd.py`` bound)
+    :return: f32 vector register with the refined rstd replicated per lane
+    """
+    hidden = float(_unwrap_if_constexpr(hidden))
+    eps = float(_unwrap_if_constexpr(eps))
+    if eps < _FP32_MIN_NORMAL:
+        raise ValueError(f"eps must be at least the smallest normal FP32 value "
+                         f"({_FP32_MIN_NORMAL}), got {eps}")
+    reciprocal_c0_hi, reciprocal_c0_lo = _split_fp32(1.0 / hidden)
+    c1_hi, c1_lo = _split_fp32(eps)
+    variance, variance_error = _compensated_div_add(square_sum, reciprocal_c0_hi, reciprocal_c0_lo, c1_hi, c1_lo,
+                                                    _semantic)
+    estimate = _naive_rsqrt(variance, _semantic)
+    return _compensated_rsqrt(variance, variance_error, estimate, _semantic)
 
 
 @builtin

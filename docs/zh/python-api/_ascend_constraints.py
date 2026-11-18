@@ -1502,7 +1502,7 @@ CONSTRAINTS = {
     # ------------------------------------------------------------------
     # Math / debug
     # ------------------------------------------------------------------
-    f"{_TLA_PREFIX}.compensated_rstd": {
+    f"{_TLA_PREFIX}.simd.compensated_rstd": {
         "constraints": [
             "``square_sum`` 必须是 ``f32`` 向量寄存器，通常为广播到所有 lane 的值。",
             "``hidden`` 必须是正的 Python / constexpr 标量。",

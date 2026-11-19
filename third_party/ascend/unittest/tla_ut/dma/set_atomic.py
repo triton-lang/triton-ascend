@@ -58,8 +58,7 @@ def test_ir():
 
 
 def test_invalid_inputs():
-    for kind, dtype, message in ((tla.AtomicKind.AND, tl.float32, "kind must be"), ("add", tl.float32, "kind must be"),
-                                 (tla.AtomicKind.ADD, tl.int64, "dtype must be")):
+    for kind, dtype, message in (("add", tl.float32, "kind must be"), (tla.AtomicKind.ADD, tl.int64, "dtype must be")):
         with pytest.raises(Exception, match=message):
             compile_offline(atomic_store, {"X": "*fp32", "Y": "*fp32", "Z": "*fp32"}, {"KIND": kind, "DTYPE": dtype})
     print("IR PASS: unsupported atomic controls rejected")

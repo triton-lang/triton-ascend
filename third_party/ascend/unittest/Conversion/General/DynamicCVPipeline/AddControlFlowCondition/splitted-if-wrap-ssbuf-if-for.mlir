@@ -1,18 +1,19 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
 
-// VECTOR and CUBE each have one main scf.for and one intraDeps pair, so the
-// pipeline reaches SplittedIfWrapSsbufIf. The two pairs use different intra
-// groups: one group lists every producer, and calculateFactor looks those
-// producers up inside the current for. Block 5's mulf is inside one
-// splitted_if. The new if's else adds the block counter and the for step.
+// VECTOR and CUBE each have one main scf.for and one intraDeps pair. The two
+// pairs use different intra groups: one group lists every producer, and
+// calculateFactor looks those producers up inside the current for. Block 5's
+// mulf is inside one splitted_if.
 // ProcessArgs appends one shared iter_arg, then UpdateLoopOps appends block
 // counters. The first counter is the third iter_arg, initialized to the for
 // lower bound.
-// UpdateLoopIterTimes runs last and rewrites the main loop into an scf.while:
+// UpdateLoopIterTimes rewrites the main loop into an scf.while before wrapping:
 // the induction variable becomes the first carried value, so the counters move
 // to the fourth and the fifth one. The while keeps the upper bound of the for
 // loop and its condition is the OR of the counters of the ssbuffer.if blocks
-// compared against that upper bound.
+// compared against that upper bound. SplittedIfWrapSsbufIf skips this while,
+// so the payload predicate stays inside ssbuffer.if 5. The block counter only
+// advances when the ready/credit guard runs; its else preserves the counter.
 
 // CHECK-LABEL: func.func @wrap_for_splitted_if
 // CHECK: scf.while (%[[IV:[^ ]+]] = %[[LB:[^ ,]+]], %{{[^ ,]+}} = %{{[^ ,]+}}, %{{[^ ,]+}} = %{{[^ ,]+}}, %[[CTR1:[^ ,]+]] = %[[LB]], %[[CTR2:[^ ,]+]] = %[[LB]], %{{[^ ,]+}} = %{{[^ ,]+}}, %{{[^ ,]+}} = %{{[^ ,]+}}) : (i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32)
@@ -21,12 +22,17 @@
 // CHECK: arith.ori %[[CMP1]], %[[CMP2]] : i1
 // CHECK: scf.condition
 // CHECK: arith.addi %[[IV]], %[[STEP:[^ ]+]] : i32
-// CHECK: %[[SPLIT:[^ ]+]] = arith.cmpi sgt, {{.*}}ssbuffer.block_id = 5 : i32
+// CHECK: %[[BLOCK5:[^ :]+]]:3 = scf.if %{{[^ ]+}} -> (i32, i32, i32) {
+// CHECK: %[[SPLIT:[^ ]+]] = arith.cmpi sgt, %[[CTR1]], {{.*}}ssbuffer.block_id = 5 : i32
 // CHECK: scf.if %[[SPLIT]]
 // CHECK: arith.mulf {{.*}} : tensor<4xf32>
-// CHECK: arith.addi %[[CTR1]], %[[STEP]]
-// CHECK: } {{.*}}ssbuffer.if = 5 : i32}
 // CHECK: } {{.*}}ssbuffer.splitted_if = 0 : i32}
+// CHECK: %[[NEXT_CTR1:[^ ]+]] = arith.addi %[[CTR1]], %[[STEP]] : i32
+// CHECK-NEXT: scf.yield %{{[^ ,]+}}, %{{[^ ,]+}}, %[[NEXT_CTR1]] : i32, i32, i32
+// CHECK-NEXT: } else {
+// CHECK-NEXT: scf.yield %{{[^ ,]+}}, %{{[^ ,]+}}, %[[CTR1]] : i32, i32, i32
+// CHECK-NEXT: } {{.*}}ssbuffer.if = 5 : i32}
+// CHECK: scf.yield %{{[^ ,]+}}, %{{[^ ,]+}}, %{{[^ ,]+}}, %[[BLOCK5]]#2,
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intra_buf_count = 2 : i32} {
   func.func @wrap_for_splitted_if() attributes {global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {

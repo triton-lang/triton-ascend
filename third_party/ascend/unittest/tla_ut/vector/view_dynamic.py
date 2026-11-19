@@ -79,7 +79,7 @@ def dynamic_window(X, O, rows, off, pitch, DTYPE: tl.constexpr, MODE: tl.constex
                 base = tla.view(X, (H, DPAD), strides=(DPAD, 1))
                 src = tla.subview(base, offsets=(0, off), sizes=(rows, D))
             else:  # entry_dyn: runtime shape, stride and offset on the entry.
-                src = tla.view(X, (rows, D), strides=(pitch, 1), offsets=(0, off))
+                src = tla.view(X - D, (rows, D), strides=(pitch, 1), offsets=(0, off + D))
             ub = tla.alloc((H, D), DTYPE, space="ub")
             tile = tla.subview(ub, offsets=(0, 0), sizes=(rows, D))
             tla.load_gm_to_ub(src, tile)
@@ -93,7 +93,8 @@ def test_ir(case, output_dir=None):
     assert "!tt.ptr" in text, "route A entry must keep pointer args at AST stage"
     # Every mode routes exactly two GM pointer entries (source side + store side).
     assert text.count("tt.make_tensor_ptr") == 2
-    assert text.count("tla.gm_view") == 2
+    # Every bridge is marked, along with each entry with a runtime size or stride.
+    assert text.count("tla.gm_view") == (3 if case["mode"] == "gm_subview" else 4)
     assert text.count("memref.alloc()") == 1, "views must share one allocation"
     if case["mode"] == "entry_dyn":
         assert text.count("memref.subview") == 1
@@ -111,15 +112,18 @@ def test_ir(case, output_dir=None):
     lowered = str(lower_offline(module, ctx, output_dir=output_dir))
     check_lowered_ir(lowered, loads=1, stores=1)
     assert "memref.reinterpret_cast" in lowered
+    assert "tla.gm_view" not in lowered
+    if case["mode"] != "gm_subview":
+        assert "strided<[?, 1]" in lowered
     print("IR PASS: view_dynamic", case["name"])
 
 
-def _launch(case, rows, off, compile_only=False):
+def _launch(case, rows, off, pitch=DPAD, *, compile_only=False):
     dtype = DTYPES[case["dtype"]][1]
     generator = torch.Generator().manual_seed(23)
-    x = torch.randint(-127, 128, (H, DPAD), generator=generator).to(dtype)
+    x = torch.randint(-127, 128, (H, pitch), generator=generator).to(dtype)
     out = torch.full((rows, D), float("nan"), dtype=dtype, device="npu")
-    args = (x.npu(), out, rows, off, DPAD)
+    args = (x.npu(), out, rows, off, pitch)
     if compile_only:
         return dynamic_window.warmup(*args, grid=(1, ), **constants(case)), None
     kernel = dynamic_window[(1, )](*args, **constants(case))
@@ -139,7 +143,8 @@ def test_run(case):
     # except the offsets, which are all %16==0), so a single compiled kernel
     # must honor the runtime values.
     for rows, off in ((H, 0), (H, D), (H // 2, D)):
-        _, actual, expected = _launch(case, rows, off)
+        pitch = DPAD + D if off and case["mode"] != "gm_subview" else DPAD
+        _, actual, expected = _launch(case, rows, off, pitch)
         assert torch.equal(actual, expected), \
             f"dynamic window addressed the wrong elements: rows={rows} off={off}"
         print("ACCURACY PASS: view_dynamic", case["name"], f"rows={rows} off={off} exact window match")

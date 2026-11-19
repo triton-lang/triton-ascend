@@ -1486,8 +1486,7 @@ static void readStageResources(ProfileJSONReader &reader,
          {"mte3_store_fill_system_cycles", &profile.mte3StoreFillCycles},
          {"uniform_store_base_system_cycles",
           &profile.simtUniformStoreBaseCycles},
-         {"in_kernel_transfer_scale",
-          &profile.inKernelScalarTransferScale}});
+         {"in_kernel_transfer_scale", &profile.inKernelScalarTransferScale}});
   }
   if (const auto *generated =
           resources->getObject("generated_vector_traffic")) {
@@ -2632,18 +2631,16 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
     if (auto flag = kernelTiming->getBoolean(
             "completion_inclusive_groups_cover_boundary"))
       timing.completionInclusiveGroupsCoverBoundary = *flag;
-    readOptionalIntegers(
-        *kernelTiming,
-        {{"completion_inclusive_minimum_stage_count",
-          &timing.completionInclusiveMinimumStageCount},
-         {"simt_whole_kernel_factor_limit",
-          &timing.simtWholeKernelFactorLimit}});
-    readOptionalNumbers(
-        reader, *kernelTiming,
-        {{"reduction_resident_tile_max_fraction",
-          &timing.reductionResidentTileMaxFraction},
-         {"simt_whole_kernel_completion_scale",
-          &timing.simtWholeKernelCompletionScale}});
+    readOptionalIntegers(*kernelTiming,
+                         {{"completion_inclusive_minimum_stage_count",
+                           &timing.completionInclusiveMinimumStageCount},
+                          {"simt_whole_kernel_factor_limit",
+                           &timing.simtWholeKernelFactorLimit}});
+    readOptionalNumbers(reader, *kernelTiming,
+                        {{"reduction_resident_tile_max_fraction",
+                          &timing.reductionResidentTileMaxFraction},
+                         {"simt_whole_kernel_completion_scale",
+                          &timing.simtWholeKernelCompletionScale}});
     hardware.reductionResidentTileMaxFraction =
         timing.reductionResidentTileMaxFraction;
     readPositiveIntegerNumberCurve(
@@ -4510,22 +4507,19 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
       (completionInclusiveMinStages <= 0 ||
        static_cast<int64_t>(report.stageModel.stages.size()) >=
            completionInclusiveMinStages) &&
-      llvm::any_of(report.stageModel.stages,
-                   [](const LogicalStageCost &stage) {
-                     return llvm::any_of(
-                         stage.implementations,
-                         [](const StageImplementationCost &impl) {
-                           const auto &resources = impl.resources;
-                           return impl.formulaEvidence.find(
-                                      "measured_group_curve") !=
-                                      std::string::npos ||
-                                  resources.recurrenceGroupCriticalPath > 0.0 ||
-                                  resources.continuousLoadGroup > 0.0 ||
-                                  resources.continuousStoreGroup > 0.0 ||
-                                  resources.rowwiseReductionGroupBody > 0.0 ||
-                                  resources.multiResultReductionGroupBody > 0.0;
-                         });
-                   });
+      llvm::any_of(report.stageModel.stages, [](const LogicalStageCost &stage) {
+        return llvm::any_of(
+            stage.implementations, [](const StageImplementationCost &impl) {
+              const auto &resources = impl.resources;
+              return impl.formulaEvidence.find("measured_group_curve") !=
+                         std::string::npos ||
+                     resources.recurrenceGroupCriticalPath > 0.0 ||
+                     resources.continuousLoadGroup > 0.0 ||
+                     resources.continuousStoreGroup > 0.0 ||
+                     resources.rowwiseReductionGroupBody > 0.0 ||
+                     resources.multiResultReductionGroupBody > 0.0;
+            });
+      });
   if (completionInclusiveGroup) {
     prediction.fixedSystemCycles = 0.0;
     prediction.evidence += "+completion_inclusive_group_covers_boundary";
@@ -5072,8 +5066,7 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
     int64_t measuredExtentMin = 0;
     int64_t measuredExtentMax = 0;
     for (const auto &factorEntry :
-         profile.hardware.simt
-             .rowwiseReductionGroupCyclesByFactorRowsAndExtent)
+         profile.hardware.simt.rowwiseReductionGroupCyclesByFactorRowsAndExtent)
       for (const auto &rowsEntry : factorEntry.second)
         for (const auto &extentEntry : rowsEntry.second) {
           if (measuredExtentMin == 0 || extentEntry.first < measuredExtentMin)

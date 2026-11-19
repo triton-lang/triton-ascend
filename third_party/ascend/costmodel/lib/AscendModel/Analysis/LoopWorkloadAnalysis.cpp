@@ -12,8 +12,8 @@
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <limits>
 #include <algorithm>
+#include <limits>
 
 using namespace mlir;
 using namespace mlir::ascend;
@@ -100,9 +100,8 @@ static std::optional<int64_t> knownInteger(Value value, unsigned depth = 0) {
   if (name == "arith.addi" || name == "arith.subi" || name == "arith.muli" ||
       name == "arith.divsi" || name == "arith.divui" ||
       name == "arith.ceildivsi" || name == "arith.ceildivui" ||
-      name == "arith.minsi" || name == "arith.maxsi" ||
-      name == "arith.minui" || name == "arith.maxui" ||
-      name == "arith.remsi" || name == "arith.remui") {
+      name == "arith.minsi" || name == "arith.maxsi" || name == "arith.minui" ||
+      name == "arith.maxui" || name == "arith.remsi" || name == "arith.remui") {
     const auto lhs = operand(0);
     const auto rhs = operand(1);
     if (!lhs || !rhs)
@@ -139,11 +138,11 @@ static std::optional<int64_t> knownInteger(Value value, unsigned depth = 0) {
     } else if (name == "arith.maxsi") {
       result = std::max(a, b);
     } else if (name == "arith.minui") {
-      result = std::min(static_cast<uint64_t>(*lhs),
-                        static_cast<uint64_t>(*rhs));
+      result =
+          std::min(static_cast<uint64_t>(*lhs), static_cast<uint64_t>(*rhs));
     } else if (name == "arith.maxui") {
-      result = std::max(static_cast<uint64_t>(*lhs),
-                        static_cast<uint64_t>(*rhs));
+      result =
+          std::max(static_cast<uint64_t>(*lhs), static_cast<uint64_t>(*rhs));
     } else if (name == "arith.remsi") {
       result = a % b;
     } else if (name == "arith.remui") {
@@ -159,8 +158,7 @@ static std::optional<int64_t> knownInteger(Value value, unsigned depth = 0) {
       name == "arith.trunci" || name == "arith.index_cast" ||
       name == "arith.index_castui") {
     const auto source = operand(0);
-    if (!source || *source < 0 ||
-        *source > std::numeric_limits<int32_t>::max())
+    if (!source || *source < 0 || *source > std::numeric_limits<int32_t>::max())
       return std::nullopt;
     return source;
   }

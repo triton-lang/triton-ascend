@@ -42,10 +42,8 @@ class StageRouteProfileContractTest(unittest.TestCase):
         self.assertTrue((PROFILES / Path(name).name).is_file())
 
     def test_other_arch_defaults_are_unchanged(self):
-        self.assertEqual(_default_profile_name("Ascend950DT"),
-                         "simd_simt/ascend_950dt_simd_simt_v1.json")
-        self.assertEqual(_default_profile_name("david_v100"),
-                         "simd_simt/david_v100_simd_simt_v1.json")
+        self.assertEqual(_default_profile_name("Ascend950DT"), "simd_simt/ascend_950dt_simd_simt_v1.json")
+        self.assertEqual(_default_profile_name("david_v100"), "simd_simt/david_v100_simd_simt_v1.json")
 
     def test_v154_profile_carries_stage_route_calibration(self):
         profile = json.loads((PROFILES / "ascend_950pr_simd_simt_v154.json").read_text())
@@ -56,12 +54,10 @@ class StageRouteProfileContractTest(unittest.TestCase):
         self.assertAlmostEqual(timing["simt_whole_kernel_completion_scale"], 0.55)
         self.assertEqual(timing["simt_whole_kernel_factor_limit"], 4)
         for mode in ("simd", "simt"):
-            self.assertAlmostEqual(
-                profile[mode]["stage_resources"]["scalar_memory"]["in_kernel_transfer_scale"], 0.45)
+            self.assertAlmostEqual(profile[mode]["stage_resources"]["scalar_memory"]["in_kernel_transfer_scale"], 0.45)
 
     def test_v1_profile_keeps_new_calibration_disabled(self):
-        timing = json.loads(
-            (PROFILES / "ascend_950pr_simd_simt_v1.json").read_text()).get("kernel_timing", {})
+        timing = json.loads((PROFILES / "ascend_950pr_simd_simt_v1.json").read_text()).get("kernel_timing", {})
         for key in CALIBRATION_KEYS:
             self.assertNotIn(key, timing)
 

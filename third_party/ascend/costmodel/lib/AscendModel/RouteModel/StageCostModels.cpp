@@ -1334,8 +1334,7 @@ static std::optional<StageResourceCycles>
 mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
             StageMode mode, int64_t superblockFactor, bool wholeSimt,
             std::optional<double> calibratedReduction = std::nullopt,
-            StageMemoryCost fitted = {},
-            bool functionHasProgramLoop = false) {
+            StageMemoryCost fitted = {}, bool functionHasProgramLoop = false) {
   StageResourceCycles resources;
   // Accesses priced by the closed-form strided-direct mechanism.  The masked
   // strided copy floor yields on them and stays in force for everything else.
@@ -1385,8 +1384,8 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
               : simtUniformLoadCycles(work.scalarLoadCount, profile));
   if (work.scalarStoreCount > 0.0)
     resources.store +=
-        scalarTransferScale *
-        (simd ? mte3ScalarStoreCycles(profile) : simtUniformStoreCycles(profile));
+        scalarTransferScale * (simd ? mte3ScalarStoreCycles(profile)
+                                    : simtUniformStoreCycles(profile));
   for (const AtomicWorkload &atomic : work.atomicWorkloads) {
     const llvm::StringRef addressClass =
         atomic.addressDependsOnLoadedIndex
@@ -1437,8 +1436,8 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
       // is the failure mode that hid arith.remsi/remui until #2824.
       // The two reserved classes below are deliberately priced elsewhere
       // (issue bound / folded flat descriptor), so they are not gaps.
-      const bool reservedClass = name == "generic.issue" ||
-                                 name == "simd.folded_flat_address";
+      const bool reservedClass =
+          name == "generic.issue" || name == "simd.folded_flat_address";
       if (!reservedClass) {
         double unpricedElements = 0.0;
         for (const auto &[elements, count] : counts)
@@ -4114,11 +4113,9 @@ bool HardwareProfile::isValid() const {
          scopeHandoff.isValid();
 }
 
-llvm::Expected<StageCostTable>
-StageCostEvaluator::evaluate(const StagePartition &partition,
-                             const HardwareProfile &profile,
-                             bool collectCalibrationEstimates,
-                             int64_t logicalProgramCount) const {
+llvm::Expected<StageCostTable> StageCostEvaluator::evaluate(
+    const StagePartition &partition, const HardwareProfile &profile,
+    bool collectCalibrationEstimates, int64_t logicalProgramCount) const {
   if (partition.stages.empty())
     return llvm::createStringError(
         std::errc::invalid_argument,
@@ -4390,10 +4387,9 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
           std::nullopt, fitted, functionHasProgramLoop);
       if (!resources)
         continue;
-      auto mapping =
-          mapOrdinaryReduction(executionStage, implementation, profile,
-                               modeProfile, *resources, fitted,
-                               functionHasProgramLoop);
+      auto mapping = mapOrdinaryReduction(executionStage, implementation,
+                                          profile, modeProfile, *resources,
+                                          fitted, functionHasProgramLoop);
       if (!mapping)
         return mapping.takeError();
       const auto &calibrated = *mapping;
@@ -4418,13 +4414,11 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
             // A calibrated reduction envelope is measured with its inputs in
             // place, so the feeding tile can explain only the fraction the
             // profile declares (default 1.0 = historical uncapped credit).
-            const double maxFraction =
-                std::max(0.0, std::min(1.0,
-                    profile.reductionResidentTileMaxFraction));
-            const double credit =
-                std::min(std::min(std::max(0.0, resources->reduction),
-                                  load->second),
-                         maxFraction * std::max(0.0, resources->reduction));
+            const double maxFraction = std::max(
+                0.0, std::min(1.0, profile.reductionResidentTileMaxFraction));
+            const double credit = std::min(
+                std::min(std::max(0.0, resources->reduction), load->second),
+                maxFraction * std::max(0.0, resources->reduction));
             if (credit > 0.0) {
               resources->reduction =
                   std::max(0.0, resources->reduction - credit);
@@ -4435,8 +4429,7 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
           }
         }
       }
-      if (transferStartupOwnedOnce &&
-          implementation.mode == StageMode::SIMD) {
+      if (transferStartupOwnedOnce && implementation.mode == StageMode::SIMD) {
         const StageCostModelKind kind = stage.costModelKind;
         const bool directStore =
             kind == StageCostModelKind::ContinuousTileStore ||

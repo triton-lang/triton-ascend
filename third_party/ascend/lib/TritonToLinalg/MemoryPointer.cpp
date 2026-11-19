@@ -512,28 +512,31 @@ getCheckedTileSlice(OpFoldResult coordinate, OpFoldResult parent,
       count = getValueOrCreateConstantIndexOp(
           builder, loc, minOpFoldResult(available, tile, loc, builder));
     }
-    return {zero,
-            builder.create<arith::SelectOp>(loc, active, count, zeroValue)
-                .getResult()};
+    return {zero, builder.create<arith::SelectOp>(loc, active, count, zeroValue)
+                      .getResult()};
   }
 
   auto start = minOpFoldResult(
-      tile, maxOpFoldResult(zero, subOpFoldResult(zero, coordinate, loc, builder),
-                            loc, builder),
+      tile,
+      maxOpFoldResult(zero, subOpFoldResult(zero, coordinate, loc, builder),
+                      loc, builder),
       loc, builder);
   if (useGmStart) {
     // For x=-2, parent=5, tile=32 this copies 5 elements into lanes [2,7).
     auto available = maxOpFoldResult(
-        zero, subOpFoldResult(parent, gmCoordinate, loc, builder), loc, builder);
+        zero, subOpFoldResult(parent, gmCoordinate, loc, builder), loc,
+        builder);
     auto capacity = subOpFoldResult(tile, start, loc, builder);
     return {start, minOpFoldResult(available, capacity, loc, builder)};
   }
   auto end = minOpFoldResult(
-      tile, maxOpFoldResult(zero, subOpFoldResult(parent, coordinate, loc, builder),
-                            loc, builder),
+      tile,
+      maxOpFoldResult(zero, subOpFoldResult(parent, coordinate, loc, builder),
+                      loc, builder),
       loc, builder);
-  return {start, maxOpFoldResult(zero, subOpFoldResult(end, start, loc, builder),
-                                 loc, builder)};
+  return {start,
+          maxOpFoldResult(zero, subOpFoldResult(end, start, loc, builder), loc,
+                          builder)};
 }
 
 FailureOr<MemoryBoundary>
@@ -563,8 +566,8 @@ getMemoryBoundary(Value pointer, ArrayRef<int32_t> checks,
       OpFoldResult coordinate =
           remap(info.block->coordinateOffsets[dim], rewriter);
       OpFoldResult parent = remap(info.block->parentShape[dim], rewriter);
-      std::tie(start, size) = getCheckedTileSlice(coordinate, parent, gmCoordinate,
-                                                  extent, loc, rewriter);
+      std::tie(start, size) = getCheckedTileSlice(
+          coordinate, parent, gmCoordinate, extent, loc, rewriter);
     }
     boundary.tileStarts.push_back(start);
     boundary.gmStarts.push_back(gmCoordinate ? zero : start);

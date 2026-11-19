@@ -184,24 +184,10 @@ private:
   int updateLoopYield(Operation *loopOp);
 
   // loopOp is scf.for or scf.while main_loop.
-  // `blockFlag` is the flag the block takes as an extra condition. On return
-  // it holds the flag computed for this block, the flag of the next block.
-  // The flag is cumulative: the select of a block takes the select of the
-  // previous block as its false value.
-  // `isLastBlock` tells that the block is the last one of the flag chain: its
-  // flag is not consumed by any block, so it does not have to be computed.
-  // `isFirstBlock` tells that the block is the first one of the flag chain: it
-  // reads the flag the loop starts with, a constant zero, so its check is
-  // always true and is left out.
-  // `isPureScalar` tells that the block has neither a cross-core nor an
-  // intra-core interaction: it is a pure scalar computation, it is not part of
-  // the flag chain, it neither checks the flag of the loop nor updates it.
   int combineConditions(ModuleOp module, Value crossCoreCond, Value preloadCond,
                         Value intraCoreCond, Value flowOptCond, scf::IfOp ifOp,
                         Operation *loopOp, size_t &usedCounterNum,
-                        DenseMap<Value, VarUpdateType> &varUpdateTypes,
-                        Value &blockFlag, bool isLastBlock, bool isFirstBlock,
-                        bool isPureScalar);
+                        DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
   int setCrossCoreCondition(scf::IfOp ifOp, Operation *loopOp,
                             SmallVector<SmallVector<Value>> ssbufferPtrs,

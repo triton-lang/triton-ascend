@@ -12,10 +12,8 @@
 
 // CHECK-LABEL: func.func @pattern_vector_cube_kernel_conditions
 
-// The normal preload scheme: one scf.while per core, the flags of the
-// blocks are computed with arith.select after the blocks.
+// The normal preload scheme: one scf.while per core.
 // CHECK: scf.while
-// CHECK: arith.select
 // CHECK: scf.while
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {

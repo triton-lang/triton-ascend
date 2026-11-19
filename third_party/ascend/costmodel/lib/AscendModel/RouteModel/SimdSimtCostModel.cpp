@@ -5316,7 +5316,7 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
                !hasElementwiseMulAdd && totalMemoryBytes <= 12288.0 &&
                report.sourceLogicalProgramCountHint > 0 &&
                report.sourceLogicalProgramCountHint <= 1024)
-        eventCompletionFloor = 12500.0;
+        eventCompletionFloor = 16000.0;
       else
         eventCompletionFloor = semantic.gridLoopSystemCycles;
       eventCompletionEvidence = semantic.evidence;
@@ -5412,7 +5412,7 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
       // completion envelope is below the integer atomic-max envelope.
       if (plan->runtimePhysicalProgramCount <= 2 &&
           totalMemoryBytes <= 4096.0)
-        eventCompletionFloor = 18500.0;
+        eventCompletionFloor = 20500.0;
       else
         eventCompletionFloor = 14500.0;
       eventCompletionEvidence = semantic.evidence;

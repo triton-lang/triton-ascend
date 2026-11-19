@@ -1501,29 +1501,24 @@ void init_tla_builder(py::module &&m) {
       // Each explicit DMA binding materializes one native HIVM operation.
       .def(
           "create_tla_load",
-          [](TLABuilder &self, Value src, Value dst, const py::dict &attrs,
-             std::optional<Value> padValue, std::optional<Value> leftPadding,
-             std::optional<Value> rightPadding) {
+          [](TLABuilder &self, Value src, Value dst,
+             std::optional<Attribute> l2CacheCtrl) {
             checkDmaBuffers(src, dst);
             auto op = self.create<hivm::LoadOp>(
-                TypeRange{}, src, dst, hivm::PadModeAttr{},
-                padValue.value_or(Value{}),
-                dmaIndexOperand(self, leftPadding.value_or(Value{})),
-                dmaIndexOperand(self, rightPadding.value_or(Value{})));
-            setDmaAttrs(op, attrs);
+                TypeRange{}, src, dst, hivm::PadModeAttr{}, Value{}, Value{},
+                Value{});
+            if (l2CacheCtrl)
+              op->setAttr("eviction_policy", *l2CacheCtrl);
           },
-          py::arg("src"), py::arg("dst"), py::arg("attrs"),
-          py::arg("pad_value") = std::nullopt,
-          py::arg("left_padding_num") = std::nullopt,
-          py::arg("right_padding_num") = std::nullopt)
+          py::arg("src"), py::arg("dst"),
+          py::arg("l2_cache_ctrl") = std::nullopt)
       .def(
           "create_tla_store",
-          [](TLABuilder &self, Value src, Value dst, const py::dict &attrs) {
+          [](TLABuilder &self, Value src, Value dst) {
             checkDmaBuffers(src, dst);
-            auto op = self.create<hivm::StoreOp>(TypeRange{}, src, dst);
-            setDmaAttrs(op, attrs);
+            self.create<hivm::StoreOp>(TypeRange{}, src, dst);
           },
-          py::arg("src"), py::arg("dst"), py::arg("attrs"))
+          py::arg("src"), py::arg("dst"))
       .def(
           "create_tla_nd2nz",
           [](TLABuilder &self, Value src, Value dst, const py::dict &attrs) {

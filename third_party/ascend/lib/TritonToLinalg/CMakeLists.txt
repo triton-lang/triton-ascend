@@ -1,6 +1,8 @@
 add_triton_library(TritonToLinalg
         TritonToLinalgPass.cpp
         TLAToLinalgPass.cpp
+        VectorAddressLookahead.cpp
+        ExecutionPolicy.cpp
         LoadStoreConverter.cpp
         FunctionConverter.cpp
         ArgMinMaxConverter.cpp
@@ -27,6 +29,7 @@ add_triton_library(TritonToLinalg
   MLIRTransforms
   MLIRSupport
   BiShengIRHIVMDialect
+  BiShengIRHACCUtils
   BiShengIRScopeDialect
   TritonIR
   TritonTransforms

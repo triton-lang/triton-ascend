@@ -97,10 +97,10 @@ def _entry_func_name(module):
     return m.group(1) if m else "lower"
 
 
-def compile_offline(fn, signature, constexprs, output_dir=None):
-    """AST -> TTIR -> symbol_dce: front-end IR handed to npuir."""
+def compile_offline(fn, signature, constexprs, output_dir=None, options=None):
+    """AST -> TTIR -> symbol_dce; options may override the default test target."""
     ctx = make_context()
-    module = ast_to_ttir(fn, signature, constexprs, ctx, Options())
+    module = ast_to_ttir(fn, signature, constexprs, ctx, Options() if options is None else options)
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "00_ast.mlir").write_text(str(module))

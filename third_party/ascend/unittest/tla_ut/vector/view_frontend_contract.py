@@ -37,6 +37,7 @@ if "view_tla_src" not in sys.modules:
     package.__path__ = [str(TLA_DIR)]
     sys.modules["view_tla_src"] = package
 view = importlib.import_module("view_tla_src.view")
+core = importlib.import_module("view_tla_src.core")
 
 
 class Handle:
@@ -60,6 +61,10 @@ class Recorder:
         self.calls.append(("subview", source, offsets, sizes, strides))
         return Handle()
 
+    def create_tla_pointer_view(self, source, linear, result_type, sizes, strides):
+        self.calls.append(("pointer_view", source, linear, result_type, sizes, strides))
+        return Handle()
+
     def create_tla_collapse_shape(self, source, result_type, reassociation):
         self.calls.append(("collapse", source, result_type, reassociation))
         return Handle()
@@ -78,21 +83,38 @@ class Semantic:
         return value if isinstance(value, tl.tensor) else types.SimpleNamespace(handle=Handle(value))
 
 
+class PtrSemantic(Semantic):
+    """Semantic with scalar integer arithmetic for pointer-entry views."""
+
+    def mul(self, lhs, rhs, _):
+        return tl.tensor(Handle(("mul", lhs, rhs)), tl.int64)
+
+    def add(self, lhs, rhs, _):
+        return tl.tensor(Handle(("add", lhs, rhs)), tl.int64)
+
+    def cast(self, value, dtype):
+        if isinstance(value, tl.tensor) and value.dtype == dtype:
+            return value
+        return tl.tensor(Handle(("cast", value)), dtype)
+
+
 def buf(shape=(8, 2064), strides=None, offset=0):
     return view.buffer(Handle(), view.buffer_type(shape, tl.bfloat16, "ub", strides, offset))
 
 
-def test_subview_preserves_pitch_and_legacy_view_contract():
+def test_subview_preserves_pitch():
     source = buf()
-    explicit = Semantic()
-    legacy = Semantic()
-    sliced = view.subview(source, (0, 0), (8, 1040), _semantic=explicit)
-    compatible = view.view(source, (8, 1040), _semantic=legacy)
-    assert sliced.type == compatible.type
+    sem = Semantic()
+    sliced = view.subview(source, (0, 0), (8, 1040), _semantic=sem)
     assert sliced.shape == (8, 1040) and sliced.strides == (2064, 1)
     assert sliced.dtype == source.dtype and sliced.space == "ub"
     assert sliced.offset is None
-    assert explicit.builder.calls[0][0] == legacy.builder.calls[0][0] == "subview"
+    assert sem.builder.calls[0][0] == "subview"
+
+
+def test_view_rejects_buffer_source():
+    with pytest.raises(TypeError, match="tla.subview"):
+        view.view(buf(), (8, 1040), _semantic=Semantic())
 
 
 def test_relative_subview_strides():
@@ -132,6 +154,67 @@ def test_runtime_offset_is_forwarded_to_subview():
     result = view.subview(buf((16512, )), (offset, ), (8320, ), _semantic=sem)
     assert sem.builder.calls[0][2][0] is offset.handle
     assert result.offset is None
+
+
+def test_runtime_size_and_stride_are_forwarded_to_subview():
+    sem = Semantic()
+    size = tl.tensor(Handle(), tl.int32)
+    stride = tl.tensor(Handle(), tl.int32)
+    result = view.subview(buf((16512, )), (0, ), (size, ), (stride, ), _semantic=sem)
+    call = sem.builder.calls[0]
+    assert call[3][0] is size.handle
+    assert call[4][0] is stride.handle
+    assert result.shape == (None, ) and result.strides == (None, )
+
+
+def test_runtime_gm_entry_forwards_shape_and_strides():
+    sem = PtrSemantic()
+    size = tl.tensor(Handle(), tl.int32)
+    stride = tl.tensor(Handle(), tl.int32)
+    src = tl.tensor(Handle(), tl.pointer_type(tl.bfloat16))
+    result = view.view(src, (128, size), (stride, 1), (0, 0), _semantic=sem)
+    call = sem.builder.calls[0]
+    assert call[0] == "pointer_view"
+    assert call[1] is src.handle
+    # Result type: dynamic dims carry the MLIR sentinel, never -1.
+    assert call[3][0] == (128, core._DYNAMIC) and call[3][3] == (core._DYNAMIC, 1)
+    assert call[4][0] == 128  # static size stays a constant
+    assert call[4][1].value[0] == "cast" and call[4][1].value[1] is size
+    assert call[5][0].value[0] == "cast" and call[5][0].value[1] is stride
+    assert call[5][1] == 1
+    assert result.shape == (128, None) and result.strides == (None, 1)
+
+
+def test_subview_on_gm_view_preserves_space():
+    sem = Semantic()
+    source = view.buffer(Handle(), view.buffer_type((8, 256), tl.bfloat16, "gm", (256, 1)))
+    sliced = view.subview(source, (0, 128), (4, 128), _semantic=sem)
+    assert sliced.space == "gm", "subview must keep the GM address space"
+    assert sliced.shape == (4, 128) and sliced.strides == (256, 1)
+    assert sliced.offset is None
+    assert sem.builder.calls[0][1] is source.handle
+
+
+def test_default_row_major_strides_with_dynamic_extent():
+    sem = PtrSemantic()
+    size = tl.tensor(Handle(), tl.int32)
+    src = tl.tensor(Handle(), tl.pointer_type(tl.bfloat16))
+    result = view.view(src, (128, size), _semantic=sem)
+    call = sem.builder.calls[0]
+    assert call[0] == "pointer_view"
+    # Default row-major: dim0 stride is the runtime product 1 * size.
+    assert call[5][0].value == ("mul", 1, size)
+    assert call[5][1] == 1
+    assert result.strides == (None, 1)
+
+
+def test_dynamic_entries_skip_static_bounds_check():
+    sem = Semantic()
+    rows = tl.tensor(Handle(), tl.int32)
+    # Statically 16 columns would exceed the 16-wide source only together with
+    # the offset; the dynamic size defers the bounds decision to runtime.
+    result = view.subview(buf((8, 16)), (0, 8), (rows, 16), _semantic=sem)
+    assert result.shape == (None, 16)
 
 
 @pytest.mark.parametrize("offsets,sizes,strides,reason", [

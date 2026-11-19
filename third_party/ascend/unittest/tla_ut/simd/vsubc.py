@@ -28,12 +28,12 @@ SIGNATURE = {name: "*u32" for name in ("X", "Y", "D", "B")}
 @tla.jit
 def vsubc(X, Y, D, B, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr,
           BASE_ROWS: tl.constexpr):
-    x = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    y = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    d = tla.alloc_buffer((BASE_ROWS + TILES, N), tl.uint32, space="ub")
-    b = tla.alloc_buffer((BASE_ROWS + TILES, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), x)
-    tla.copy(tla.view(Y, (TILES, N)), y)
+    x = tla.alloc((TILES, N), tl.uint32, space="ub")
+    y = tla.alloc((TILES, N), tl.uint32, space="ub")
+    d = tla.alloc((BASE_ROWS + TILES, N), tl.uint32, space="ub")
+    b = tla.alloc((BASE_ROWS + TILES, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), x)
+    tla.load_gm_to_ub(tla.view(Y, (TILES, N)), y)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0, 0])
         c = tla.simd.vlds(y[0, 0])
@@ -71,8 +71,8 @@ def vsubc(X, Y, D, B, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
                 tile_diff, tile_borrow = tla.simd.vsubc(va, vb)
                 tla.simd.vsts(d[BASE_ROWS + t, 0], tile_diff)
                 tla.simd.vsts(b[BASE_ROWS + t, 0], tla.simd.vsel(tile_borrow, one_u, zero_u))
-    tla.copy(d, tla.view(D, (BASE_ROWS + TILES, N)))
-    tla.copy(b, tla.view(B, (BASE_ROWS + TILES, N)))
+    tla.store_ub_to_gm(d, tla.view(D, (BASE_ROWS + TILES, N)))
+    tla.store_ub_to_gm(b, tla.view(B, (BASE_ROWS + TILES, N)))
 
 
 def constexprs():

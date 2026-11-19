@@ -20,13 +20,13 @@ SIGS = {
 
 @tla.jit
 def vshift_i8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int8, space="ub")
-    r = tla.alloc_buffer((N, ), tl.int8, space="ub")
-    y = tla.alloc_buffer((N, ), tl.int8, space="ub")
-    o = tla.alloc_buffer((9, N), tl.int8, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(R, (N, )), r)
-    tla.copy(tla.view(Y, (N, )), y)
+    x = tla.alloc((N, ), tl.int8, space="ub")
+    r = tla.alloc((N, ), tl.int8, space="ub")
+    y = tla.alloc((N, ), tl.int8, space="ub")
+    o = tla.alloc((9, N), tl.int8, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(R, (N, )), r)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         xv = tla.simd.vlds(x[0])
         rv = tla.simd.vlds(r[0])
@@ -42,18 +42,18 @@ def vshift_i8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(o[6, 0], tla.simd.vshls(xv, 3), dist="NORM_B8")
         tla.simd.vsts(o[7, 0], tla.simd.vshls(xv, 3, prefix), dist="NORM_B8")
         tla.simd.vsts(o[8, 0], tla.simd.vshls(xv, 3, none), dist="NORM_B8")
-    tla.copy(o, tla.view(O, (9, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (9, N)))
 
 
 @tla.jit
 def vshift_u8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint8, space="ub")
-    r = tla.alloc_buffer((N, ), tl.uint8, space="ub")
-    y = tla.alloc_buffer((N, ), tl.uint8, space="ub")
-    o = tla.alloc_buffer((9, N), tl.uint8, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(R, (N, )), r)
-    tla.copy(tla.view(Y, (N, )), y)
+    x = tla.alloc((N, ), tl.uint8, space="ub")
+    r = tla.alloc((N, ), tl.uint8, space="ub")
+    y = tla.alloc((N, ), tl.uint8, space="ub")
+    o = tla.alloc((9, N), tl.uint8, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(R, (N, )), r)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         xv = tla.simd.vlds(x[0])
         rv = tla.simd.vlds(r[0])
@@ -69,18 +69,18 @@ def vshift_u8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(o[6, 0], tla.simd.vshls(xv, 3), dist="NORM_B8")
         tla.simd.vsts(o[7, 0], tla.simd.vshls(xv, 3, prefix), dist="NORM_B8")
         tla.simd.vsts(o[8, 0], tla.simd.vshls(xv, 3, none), dist="NORM_B8")
-    tla.copy(o, tla.view(O, (9, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (9, N)))
 
 
 @tla.jit
 def vshift_i16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    r = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    y = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    o = tla.alloc_buffer((9, N), tl.int16, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(R, (N, )), r)
-    tla.copy(tla.view(Y, (N, )), y)
+    x = tla.alloc((N, ), tl.int16, space="ub")
+    r = tla.alloc((N, ), tl.int16, space="ub")
+    y = tla.alloc((N, ), tl.int16, space="ub")
+    o = tla.alloc((9, N), tl.int16, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(R, (N, )), r)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         xv = tla.simd.vlds(x[0])
         rv = tla.simd.vlds(r[0])
@@ -96,18 +96,18 @@ def vshift_i16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(o[6, 0], tla.simd.vshls(xv, 3), dist="NORM_B16")
         tla.simd.vsts(o[7, 0], tla.simd.vshls(xv, 3, prefix), dist="NORM_B16")
         tla.simd.vsts(o[8, 0], tla.simd.vshls(xv, 3, none), dist="NORM_B16")
-    tla.copy(o, tla.view(O, (9, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (9, N)))
 
 
 @tla.jit
 def vshift_u16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint16, space="ub")
-    r = tla.alloc_buffer((N, ), tl.uint16, space="ub")
-    y = tla.alloc_buffer((N, ), tl.uint16, space="ub")
-    o = tla.alloc_buffer((9, N), tl.uint16, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(R, (N, )), r)
-    tla.copy(tla.view(Y, (N, )), y)
+    x = tla.alloc((N, ), tl.uint16, space="ub")
+    r = tla.alloc((N, ), tl.uint16, space="ub")
+    y = tla.alloc((N, ), tl.uint16, space="ub")
+    o = tla.alloc((9, N), tl.uint16, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(R, (N, )), r)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         xv = tla.simd.vlds(x[0])
         rv = tla.simd.vlds(r[0])
@@ -123,7 +123,7 @@ def vshift_u16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(o[6, 0], tla.simd.vshls(xv, 3), dist="NORM_B16")
         tla.simd.vsts(o[7, 0], tla.simd.vshls(xv, 3, prefix), dist="NORM_B16")
         tla.simd.vsts(o[8, 0], tla.simd.vshls(xv, 3, none), dist="NORM_B16")
-    tla.copy(o, tla.view(O, (9, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (9, N)))
 
 
 KERNELS = {

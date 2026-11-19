@@ -2239,6 +2239,12 @@ class AutoTilingTuner(Autotuner):
                 self._user_config_diagnostics.report()
             self._user_config_diagnostics = None
 
+    def _default_block_batching(self, options):
+        # Apply after Config/caller options are combined, preserving explicit
+        # factors and kernels with a same-named argument.
+        if "block_batching_factor" not in getattr(self, "arg_names", ()):
+            options.setdefault("block_batching_factor", 1)
+
     def _run_autotune(self, *args, **kwargs):
         kwargs = _remove_deprecated_npu_options(kwargs)
         self._inject_grid_num_tiles(kwargs)
@@ -2310,6 +2316,7 @@ class AutoTilingTuner(Autotuner):
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
         final_kwargs = dict(config.all_kwargs(), **kwargs)
         final_kwargs.update(ub_cfg)
+        self._default_block_batching(final_kwargs)
         if single_config_cache_pending:
             self._record_user_config(config, "running", "Single-config execution did not complete.")
         if config.pre_hook is not None:
@@ -2342,6 +2349,8 @@ class AutoTilingTuner(Autotuner):
             # Extract compile options from the current config and forward them
             # to ubtuner as the search starting point.
             compile_opts = config.all_kwargs()
+            if "block_batching_factor" not in kwargs:
+                self._default_block_batching(compile_opts)
             ub_cfg = self.ubtuner.get_best_config(*args, compile_opts=compile_opts, **kwargs)
             if knobs.autotuning.print:
                 print(f"ub_cfg {ub_cfg}")
@@ -2406,6 +2415,7 @@ class AutoTilingTuner(Autotuner):
             ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
             if ub_cfg:
                 current.update(ub_cfg)
+            self._default_block_batching(current)
 
             # Match the first call made by _batch_bench. Heuristics.run sees
             # grid and warmup before forwarding the remaining arguments to
@@ -2427,6 +2437,10 @@ class AutoTilingTuner(Autotuner):
             if not isinstance(jit_fn, triton.runtime.JITFunction):
                 return None
             if getattr(jit_fn, "pre_run_hooks", None):
+                return None
+            # Explicit automatic selection adds a concrete launch contract in
+            # the backend handler, beyond the binder's ordinary cache key.
+            if current.get("block_batching_factor") == "auto":
                 return None
 
             # These two arguments are consumed by JITFunction.run and are not
@@ -2678,6 +2692,7 @@ class AutoTilingTuner(Autotuner):
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
         if ub_cfg:
             current.update(ub_cfg)
+        self._default_block_batching(current)
         full_nargs = {**self.nargs, **current}
 
         def kernel_call(warmup):
@@ -2725,6 +2740,7 @@ class AutoTilingTuner(Autotuner):
             from triton.backends.ascend.reuse.context import exact_request_scope
 
             compile_options = dict(config.all_kwargs(), **kwargs)
+            self._default_block_batching(compile_options)
             with exact_request_scope():
                 return self.fn.warmup(*args, **compile_options)
 

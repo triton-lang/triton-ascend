@@ -37,15 +37,13 @@ except Exception:
     def is_compile_on_910_95(_arch):
         return False
 
+
 pytestmark = pytest.mark.skip(
-    reason=(
-        "Triton 3.8 frontend materializes tl.make_block_ptr into addptr/arange "
-        "loads; TTIR no longer contains tt.make_tensor_ptr. "
-        "rewriteStridedAxisCoalesce therefore collects 0 seeds and the "
-        "MakeTensorPtrOp pattern is ineffective (coalesce_factor stays 1). "
-        "Skip until the Axis matcher is updated for the expanded IR."
-    ),
-)
+    reason=("Triton 3.8 frontend materializes tl.make_block_ptr into addptr/arange "
+            "loads; TTIR no longer contains tt.make_tensor_ptr. "
+            "rewriteStridedAxisCoalesce therefore collects 0 seeds and the "
+            "MakeTensorPtrOp pattern is ineffective (coalesce_factor stays 1). "
+            "Skip until the Axis matcher is updated for the expanded IR."), )
 
 
 @triton.jit

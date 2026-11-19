@@ -245,10 +245,7 @@ def test_math_ops():
     print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
 
 
-
-_MEM_OPS_SKIP_REASON = (
-    "Failing negative mem-op cases removed on main, branch sync pending. Skip temporarily."
-)
+_MEM_OPS_SKIP_REASON = ("Failing negative mem-op cases removed on main, branch sync pending. Skip temporarily.")
 
 
 @pytest.mark.skip(reason=_MEM_OPS_SKIP_REASON)

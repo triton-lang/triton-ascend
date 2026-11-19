@@ -84,7 +84,8 @@ def annotate_multi_buffer(buf, versions, _semantic=None):
 
     ``versions`` must be a positive int; ``1`` opts the buffer out of
     multi-buffering.  The count is attached as an annotation hint consumed by
-    the NPU-IR multi-buffer pass.
+    the NPU-IR multi-buffer pass. Only annotate core-local storage. The kernel
+    must manage the rotation of any buffer shared between cores.
 
     :param buf: the ``tla.buffer`` to annotate
     :param versions: the version count (positive int)
@@ -94,4 +95,6 @@ def annotate_multi_buffer(buf, versions, _semantic=None):
         raise ValueError(f"buffer versions must be a positive int, got {v!r}")
     if v == 1:
         return
+    if buf.space == "gm":
+        raise ValueError("TLA automatic buffer rotation requires a core-local buffer")
     compile_hint_impl(buf, "hivm.multi_buffer", v, _semantic.builder)

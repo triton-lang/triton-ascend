@@ -22,6 +22,7 @@
 
 #include "ascend/include/TritonToLinalg/TLAToLinalgPass.h"
 
+#include "ascend/include/TritonMemoryAccess/OpFoldResultUtils.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -30,6 +31,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -102,6 +104,63 @@ public:
           arg.getArgNumber() >= body->getNumArguments() - 6)
         arg.setLoc(source.getLoc());
     rewriter.eraseOp(source);
+    return success();
+  }
+};
+
+// TLA dynamic views carry their full displacement in the scalar base.
+class TLAMakeTensorPtrConverter final
+    : public TTOpConverters::MakeTensorPtrConverter {
+public:
+  using MakeTensorPtrConverter::MakeTensorPtrConverter;
+
+  LogicalResult
+  matchAndRewrite(triton::MakeTensorPtrOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!op->hasAttr("tla.gm_view"))
+      return MakeTensorPtrConverter::matchAndRewrite(op, adaptor, rewriter);
+
+    auto blockType =
+        cast<RankedTensorType>(triton::getPointeeType(op.getType()));
+    if (adaptor.getShape().size() != static_cast<size_t>(blockType.getRank()))
+      return rewriter.notifyMatchFailure(op,
+                                         "expected one size per GM view axis");
+    if (!llvm::all_of(adaptor.getOffsets(), [](Value offset) {
+          return isConstantIntValue(offset, 0);
+        }))
+      return rewriter.notifyMatchFailure(op,
+                                         "expected zero GM view block offsets");
+
+    Value base = adaptor.getBase();
+    auto baseType = dyn_cast<MemRefType>(base.getType());
+    if (!baseType || baseType.getElementType() != blockType.getElementType())
+      return rewriter.notifyMatchFailure(op, "incompatible converted GM base");
+
+    // reinterpret_cast reuses the underlying pointers and replaces the offset.
+    OpFoldResult offset;
+    if (auto cast = base.getDefiningOp<memref::ReinterpretCastOp>()) {
+      offset = cast.getConstifiedMixedOffset();
+    } else {
+      SmallVector<int64_t> baseStrides;
+      int64_t staticOffset;
+      if (failed(baseType.getStridesAndOffset(baseStrides, staticOffset)) ||
+          ShapedType::isDynamic(staticOffset))
+        return rewriter.notifyMatchFailure(op,
+                                           "expected a known GM base offset");
+      offset = rewriter.getIndexAttr(staticOffset);
+    }
+    if (auto constant = getConstantIntValue(offset); constant && *constant < 0)
+      offset = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), *constant)
+                   .getResult();
+
+    // For a TLA view the shape operands describe the block itself.
+    auto foldLayout = [&](Value value) {
+      return getOpFoldResultOfLayoutInfo(value, rewriter);
+    };
+    auto sizes = llvm::map_to_vector(adaptor.getShape(), foldLayout);
+    auto strides = llvm::map_to_vector(adaptor.getStrides(), foldLayout);
+    rewriter.replaceOpWithNewOp<memref::ReinterpretCastOp>(op, base, offset,
+                                                           sizes, strides);
     return success();
   }
 };
@@ -279,11 +338,10 @@ public:
         &getContext());
     // Reuse descriptor-based pointer lowering without changing the generic
     // adapter's pipeline or registering TLA-specific patterns in it.
-    patterns.add<
-        LoadStoreConverter::AddPtrConverter, LoadStoreConverter::LoadConverter,
-        TTOpConverters::MakeTensorPtrConverter,
-        TTOpConverters::PtrToIntConverter, TTOpConverters::ClampFConverter>(
-        &getContext());
+    patterns.add<LoadStoreConverter::AddPtrConverter,
+                 LoadStoreConverter::LoadConverter, TLAMakeTensorPtrConverter,
+                 TTOpConverters::PtrToIntConverter,
+                 TTOpConverters::ClampFConverter>(&getContext());
 
     ConversionTarget target(getContext());
     // Convert only the operations owned by this pass, not the entire Triton

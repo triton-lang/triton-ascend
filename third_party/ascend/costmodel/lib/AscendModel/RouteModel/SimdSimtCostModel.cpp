@@ -5155,6 +5155,7 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
     bool hasGridStride = false;
     bool hasDot = false;
     bool hasLoadedAddress = false;
+    bool hasIndexMinMax = false;
     bool hasIndirectStore = false;
     bool hasPartialStore = false;
     bool hasRank2IndirectStore = false;
@@ -5269,6 +5270,10 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
                          operation.getKey().contains(".exp") ||
                          operation.getKey().contains(".cos") ||
                          operation.getKey().contains(".sin");
+        hasIndexMinMax |= operation.getKey().contains("maxsi") ||
+                          operation.getKey().contains("minsi") ||
+                          operation.getKey().contains("maxui") ||
+                          operation.getKey().contains("minui");
         hasExp |= operation.getKey().contains(".exp");
         hasRelu |= operation.getKey().contains(".relu");
         hasElementwiseMulAdd |= operation.getKey() == "f32.mul";
@@ -5371,6 +5376,11 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
               std::max(semantic.indirectPartialSystemCycles, 15500.0),
               16000.0);
       }
+      else if (hasIndexMinMax && !hasIndirectStore && !hasPartialStore &&
+               stageCount <= 8 && totalMemoryBytes <= 1024.0 &&
+               semantic.indirectSystemCycles > 0.0)
+        eventCompletionFloor =
+            std::max(semantic.indirectSystemCycles, 14000.0);
       else if (!hasIndirectStore && !hasPartialStore &&
                stageCount <= 8 && totalMemoryBytes <= 1024.0 &&
                semantic.indirectSystemCycles > 0.0)

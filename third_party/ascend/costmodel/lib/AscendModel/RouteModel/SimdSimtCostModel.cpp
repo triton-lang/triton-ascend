@@ -5676,7 +5676,7 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
       // The calibrated rank-2 strided-load residual also carries a larger
       // queued-event completion tail for the SIMD route.
       eventCompletionFloor =
-          totalMemoryBytes <= 1024.0 && stageCount <= 2 ? 14000.0 : 17000.0;
+          totalMemoryBytes <= 1024.0 && stageCount <= 2 ? 16000.0 : 17000.0;
       eventCompletionEvidence = semantic.evidence;
     } else if (prediction.candidate == kAllSimd && hasRank2DirectMemory &&
                !hasLoop && !hasReduction && !hasAtomicAny &&

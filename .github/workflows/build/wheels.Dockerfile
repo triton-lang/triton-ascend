@@ -84,30 +84,8 @@ WORKDIR /project
 # `git submodule update` skip it; the product code's own guards never issue
 # a submodule command when the tree already exists, so nothing else changes.
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-ENV MAX_JOBS=${MAX_JOBS} \
-    TRITON_BUILD_WITH_CLANG_LLD=true \
-    TRITON_BUILD_PROTON=OFF \
-    TRITON_WHEEL_NAME=triton-ascend \
-    TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-    TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX}${BUILD_DATE} \
-    IS_MANYLINUX=TRUE \
-    SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt
-
-# ---------------------------------------------------------------------------
-# Install setuptools + wheel for the target Python (not pre-installed in
-# minimal manylinux images).
-# ---------------------------------------------------------------------------
-RUN export PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple \
-    && export PIP_TRUSTED_HOST=cache-service.nginx-pypi-cache.svc.cluster.local \
-    && export PIP_TIMEOUT=120 \
-    && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m ensurepip \
-    && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m pip install --upgrade pip \
-    && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m pip install setuptools wheel cmake ninja pybind11
-=======
 RUN NPUIR_REPO_BRANCH=${NPUIR_REF} bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR \
  && git config submodule.third_party/ascend/AscendNPU-IR.update none
->>>>>>> upstream/main
 
 # ---------------------------------------------------------------------------
 # Build the wheel with the target Python from the manylinux toolchain.

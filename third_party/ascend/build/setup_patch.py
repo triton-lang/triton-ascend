@@ -117,29 +117,21 @@ def _get_ascend_llvm_package_info(base_dir):
     return {"name": name, "sym_name": sym_name, "url": url}
 
 
-<<<<<<< HEAD
-def _apply_patch(patch_path, *, directory=None, cwd=None):
-    cmd = ["git", "apply"]
-    if directory:
-        cmd.extend(["--directory", directory])
-    cmd.append(patch_path)
+def _apply_patch(patch_path, reverse=False, *, directory=None, cwd=None):
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, cwd=str(cwd or _REPO_ROOT))
-=======
-def _apply_patch(patch_path, reverse=False):
-    try:
-        command = ["git", "apply"] + (["--reverse"] if reverse else []) + [str(patch_path)]
-        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, cwd=str(_REPO_ROOT))
->>>>>>> upstream/main
+        command = ["git", "apply"]
+        if reverse:
+            command.append("--reverse")
+        if directory:
+            command.extend(["--directory", directory])
+        command.append(str(patch_path))
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, cwd=str(cwd or _REPO_ROOT))
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"patch({patch_path}) failed,cmd={e.cmd}, retcode={e.returncode}") from e
     except FileNotFoundError:
         raise RuntimeError(f"patch({patch_path}) not found.")
 
 
-<<<<<<< HEAD
-def checkout_file(files, *, cwd=None):
-=======
 def _apply_proton_patch(enabled):
     """Toggle the Proton patch without resetting local source changes."""
     patch_path = _REPO_ROOT / "third_party" / "ascend" / "patch" / "proton_patch.patch"
@@ -157,8 +149,7 @@ def _apply_proton_patch(enabled):
     _apply_patch(patch_path, reverse=not enabled)
 
 
-def checkout_file(files):
->>>>>>> upstream/main
+def checkout_file(files, *, cwd=None):
     try:
         subprocess.run(["git", "checkout", "--"] + files, check=True, stdout=subprocess.DEVNULL, cwd=str(cwd
                                                                                                          or _REPO_ROOT))
@@ -192,40 +183,11 @@ def _get_patch_files(patch_path):
 
 
 def get_triton_ascend_patch_file():
-<<<<<<< HEAD
     patch_dir = _REPO_ROOT / "third_party" / "ascend" / "patch"
     dev_patch = patch_dir / "triton-ascend-dev-3.7.0.patch"
     patch = patch_dir / "triton-ascend-3.7.0.patch"
     dev_patch_files = _get_patch_files(dev_patch) if dev_patch.is_file() else []
     patch_files = _get_patch_files(patch) if patch.is_file() else []
-=======
-    patch_files = [
-        "CMakeLists.txt",
-        "include/triton/Dialect/Triton/IR/TritonAttrDefs.td",
-        "lib/Dialect/Triton/IR/Traits.cpp",
-        "lib/Dialect/Triton/Transforms/Combine.cpp",
-        "python/src/ir.cc",
-        "python/triton/_utils.py",
-        "python/triton/compiler/code_generator.py",
-        "python/triton/compiler/compiler.py",
-        "python/triton/compiler/errors.py",
-        "python/triton/extension/buffer/src/buffer_ir.cc",
-        "python/triton/language/core.py",
-        "python/triton/language/math.py",
-        "python/triton/language/semantic.py",
-        "python/triton/language/standard.py",
-        "python/triton/runtime/autotuner.py",
-        "python/triton/runtime/interpreter.py",
-        "python/triton/runtime/autotuner.py",
-        "python/triton/runtime/jit.py",
-        "python/triton/tools/compile.py",
-        "python/triton/tools/link.py",
-        "bin/RegisterTritonDialects.h",
-        "bin/triton-opt.cpp",
-        "bin/CMakeLists.txt",
-    ]
-    dev_patch_files = ["python/triton/runtime/autotuner.py"]
->>>>>>> upstream/main
     return patch_files, dev_patch_files
 
 
@@ -561,16 +523,11 @@ def _get_install_requirements():
         "pyyaml",
         "pybind11",
         "pandas",
-<<<<<<< HEAD
-        "pyelftools>=0.29",
-        "triton==3.7.0",
-=======
         "pyelftools",
->>>>>>> upstream/main
     ]
     argv = " ".join(sys.argv).lower()
     if "editable_wheel" not in argv and "dist_info" not in argv:
-        install_requires.append("triton==3.6.0")
+        install_requires.append("triton==3.7.0")
     if os.getenv("TRITON_BUILD_PROTON", "OFF").lower() not in ("0", "false", "off", "no"):
         install_requires.append("llnl-hatchet")
     return [*install_requires]

@@ -55,52 +55,61 @@ pip install -e .
 
 ### Custom LLVM Build (Optional)
 
-If you need to customize the LLVM build process, follow the steps below to compile Triton-Ascend.
+Run all three steps from the root of the Triton-Ascend checkout you want to build, in the same terminal. For offline builds, copy a Git checkout of LLVM to `llvm-project/` first.
 
-1. **Prepare the source code**: Check out the LLVM source code of the specified version with `git checkout` and apply the patch.
+1. **Prepare LLVM source**. Use the revision and patches from the current Triton-Ascend checkout.
 
     ```bash
-    git clone --no-checkout https://github.com/llvm/llvm-project.git
-    cd llvm-project
-    git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-    wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
-    git apply llvm_patch_f6ded0b.patch
+    (
+      set -e
+      LLVM_COMMIT=$(tr -d '\r\n' < cmake/llvm-hash.txt)
+      if [ ! -e llvm-project/.git ]; then
+        git clone --no-checkout https://github.com/llvm/llvm-project.git
+      fi
+      git -C llvm-project checkout --detach "$LLVM_COMMIT"
+      for patch in "$PWD"/third_party/ascend/patch/llvm_patch_*.patch; do
+        [ -f "$patch" ] || continue
+        if ! git -C llvm-project apply --reverse --check "$patch" 2>/dev/null; then
+          git -C llvm-project apply "$patch"
+        fi
+      done
+    )
     ```
 
-2. **Build LLVM**: The path `/path/llvm-install` is the LLVM installation path planned by the user, which needs to be adjusted according to the actual situation; the path `{PATH_TO}` refers to the root directory of the llvm-project source you checked out in step 1.
+2. **Build LLVM**. Set `LLVM_INSTALL_PREFIX` to an absolute installation path.
 
     ```bash
     export LLVM_INSTALL_PREFIX=/path/llvm-install
-    cd {PATH_TO}/llvm-project
-    mkdir build
-    cd build
-    cmake ../llvm \
-        -G Ninja \
-        -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
-        -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
-        -DCMAKE_LINKER=/usr/bin/lld-15 \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DLLVM_ENABLE_ASSERTIONS=ON \
-        -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
-        -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
-        -DLLVM_ENABLE_LLD=ON \
-        -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
-    ninja install
-
-    cp  {PATH_TO}/llvm-project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
+    (
+      set -e
+      cmake -S llvm-project/llvm -B llvm-project/build \
+          -G Ninja \
+          -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
+          -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
+          -DCMAKE_LINKER=/usr/bin/lld-15 \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DLLVM_ENABLE_ASSERTIONS=ON \
+          -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
+          -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
+          -DLLVM_ENABLE_LLD=ON \
+          -DCMAKE_INSTALL_PREFIX="$LLVM_INSTALL_PREFIX"
+      ninja -C llvm-project/build install
+      cp llvm-project/build/bin/FileCheck "$LLVM_INSTALL_PREFIX/bin/FileCheck"
+    )
     ```
 
-3. **Compile Triton-Ascend**
+3. **Build Triton-Ascend**.
 
     ```bash
-    git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
-    LLVM_SYSPATH=${LLVM_INSTALL_PREFIX} \
-    TRITON_BUILD_WITH_CCACHE=true \
-    TRITON_BUILD_WITH_CLANG_LLD=true \
-    TRITON_BUILD_PROTON=OFF \
-    TRITON_WHEEL_NAME="triton_ascend" \
-    TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-    python3 setup.py install
+    (
+      LLVM_SYSPATH="${LLVM_INSTALL_PREFIX:?Set LLVM_INSTALL_PREFIX in step 2 first.}" \
+      TRITON_BUILD_WITH_CCACHE=true \
+      TRITON_BUILD_WITH_CLANG_LLD=true \
+      TRITON_BUILD_PROTON=OFF \
+      TRITON_WHEEL_NAME="triton_ascend" \
+      TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
+      python3 setup.py install
+    )
     ```
 
     **Table 1** Source‑build environment‑variable reference

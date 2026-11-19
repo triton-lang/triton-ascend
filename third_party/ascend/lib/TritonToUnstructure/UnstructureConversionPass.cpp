@@ -911,7 +911,10 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     return success(maskRewritten);
 
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    if (ptrOffsetInfo.isScalarLike() &&
+    // A select after an unconditional scalar load cannot protect an invalid
+    // pointer when every mask lane is false. Keep masked loads on the guarded
+    // scalar-loop path below.
+    if (!op.getMask() && ptrOffsetInfo.isScalarLike() &&
         succeeded(splatAndLoadScenario(op, ptrOffsetInfo, rewriter))) {
       return success();
     }
@@ -1027,11 +1030,71 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   });
 
   Value iterArg = nullptr;
+  Value destinationPadding;
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+    ModuleOp module = op->template getParentOfType<ModuleOp>();
+    auto owner =
+        module ? module->getAttrOfType<StringAttr>("hacc.block_mapping_owner")
+               : StringAttr{};
+    // Preserve the existing padding path for kernels that were not batched.
+    bool isBlockBatched = owner && owner.getValue() == "block_batching";
+    // Prefix masks on partially structured loads can initialize the final
+    // destination directly. Loop bounds protect indirect axes; the sliced
+    // load below protects retained axes and supplies their inactive values.
+    // A fresh destination is essential: reusing the constant `other` tensor
+    // can introduce a copy when bufferization sees multiple padded dot inputs.
+    // LoadConverter carries this fill onto the actual allocation used by DMA.
+    // Keep the existing select path for unknown/non-prefix masks, arbitrary
+    // tensor other values, scalar fallback and nonzero padding.
+    if (isBlockBatched && isLoadLike && op.getMask() && op.getOther() &&
+        mstate && mstate->isMask() &&
+        mstate->dims.size() == resultShape.size() &&
+        mstate->offsets.size() == resultShape.size() &&
+        llvm::any_of(
+            llvm::zip_equal(ptrOffsetInfo.getStructuredRef(), resultShape),
+            [](auto axis) {
+              auto [structured, size] = axis;
+              return structured == PtrOffsetInfo::AxisInfo::structured &&
+                     size > 1;
+            }) &&
+        llvm::all_of(mstate->offsets, [](OpFoldResult offset) {
+          return isConstantIntValue(offset, 0);
+        })) {
+      Value padding = op.getOther();
+      while (auto *def = padding.getDefiningOp()) {
+        if (!isa<triton::SplatOp, triton::BroadcastOp, triton::ExpandDimsOp>(
+                def))
+          break;
+        padding = def->getOperand(0);
+      }
+      Attribute attr;
+      if (matchPattern(padding, m_Constant(&attr)) &&
+          (matchPattern(padding, m_Zero()) ||
+           matchPattern(padding, m_AnyZeroFloat()))) {
+        if (auto dense = dyn_cast<DenseElementsAttr>(attr)) {
+          if (dense.isSplat())
+            attr = dense.getSplatValue<Attribute>();
+        }
+        if (isa<FloatAttr, IntegerAttr>(attr))
+          destinationPadding =
+              rewriter.create<arith::ConstantOp>(loc, cast<TypedAttr>(attr));
+      }
+    }
+  }
 
   // Only load case
   if (isLoadLike) {
-    iterArg =
-        rewriter.create<tensor::EmptyOp>(loc, resultShape, resultElementType);
+    if (destinationPadding) {
+      Value empty =
+          rewriter.create<tensor::EmptyOp>(loc, resultShape, resultElementType);
+      iterArg = rewriter
+                    .create<linalg::FillOp>(loc, ValueRange{destinationPadding},
+                                            ValueRange{empty})
+                    .getResult(0);
+    } else {
+      iterArg =
+          rewriter.create<tensor::EmptyOp>(loc, resultShape, resultElementType);
+    }
   }
   Value newOpResult = nullptr;
 
@@ -1183,9 +1246,20 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       rewriter.setInsertionPoint(accessedOp);
       Value residualMask =
           getResidualLoadMask(op.getMask(), boundedLoopAxes, rewriter);
-      if (residualMask)
+      if (residualMask) {
         accessedOp.getMaskMutable().assign(createExtractOp(
             loc, residualMask, rewriter, offsets, sizes, strides));
+        if (destinationPadding) {
+          Value other = rewriter.create<triton::SplatOp>(loc, extractedType,
+                                                         destinationPadding);
+          accessedOp.getOtherMutable().assign(other);
+        }
+      } else {
+        // The loop bounds enforce the complete mask. Padding for unvisited
+        // elements remains in the destination fill or outer select below.
+        accessedOp.getMaskMutable().clear();
+        accessedOp.getOtherMutable().clear();
+      }
     }
   }
 
@@ -1218,7 +1292,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
                   UnitAttr::get(rewriter.getContext()));
     rewriter.restoreInsertionPoint(insertPoint);
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-      if (op.getMask() && op.getOther()) {
+      if (op.getMask() && op.getOther() && !destinationPadding) {
         rewriter
             .replaceOpWithNewOp<arith::SelectOp>(op, op.getMask(), newOpResult,
                                                  op.getOther())

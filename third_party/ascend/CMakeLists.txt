@@ -125,11 +125,20 @@ else()
   target_compile_definitions(TritonToGraph PRIVATE TRITON_ASCEND_HAS_INPROC_COSTMODEL=0)
 endif()
 
+# MLIR analysis subclasses must match the LLVM library RTTI setting.
+if(NOT LLVM_ENABLE_RTTI)
+  set_source_files_properties(lib/BlockAuto/Analysis.cpp PROPERTIES COMPILE_OPTIONS "-fno-rtti")
+endif()
+
 add_triton_plugin(TritonAscend
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/BlockAuto/Analysis.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/triton_ascend.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/ascend_ir.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/language/tla/cpp/tla_builder.cc
   LINK_LIBS
+  MLIRAnalysis
+  MLIRBytecodeWriter
+  MLIRParser
   TritonToGraph
   TritonToLinalg
   BiShengIRScopeDialect

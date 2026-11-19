@@ -40,16 +40,15 @@
 // CHECK-LABEL: func.func @test_clone_introduces_new_dep
 // CHECK-DAG: memref.alloc() : memref<f32, #hivm.address_space<ub>>
 // CHECK-DAG: memref.alloc() : memref<f32, #hivm.address_space<ub>>
-// Producer intraDeps tag lives on the producer behavior op (the materialize),
-// not on the buffer container (the memory_space_cast).
+// Producer intraDeps tag moved from memref.memory_space_cast to hivm.hir.copy
+// (refactor innerscope): the cast is just a buffer container, the copy is the
+// actual producer behavior op.
 // CHECK-NOT: memref.memory_space_cast{{.+}}intraDeps
-// Producer-side ping-pong via an scf.if dispatch chain (block_id = 13). Every
-// branch materializes into its OWN concrete buffer with `restrict writable`,
-// so the destination is a real memref, never an arith.select result.
-// CHECK: scf.if %{{.+}} {
-// CHECK:   bufferization.materialize_in_destination %{{.+}} in restrict writable %{{.+}} {ssbuffer.block_id = 13 : i32, ssbuffer.intraDeps = [0 : i32, 1 : i32]} : (tensor<f32>, memref<f32>) -> ()
-// CHECK: } else {
-// CHECK:   bufferization.materialize_in_destination %{{.+}} in restrict writable %{{.+}} {ssbuffer.block_id = 13 : i32, ssbuffer.intraDeps = [0 : i32, 1 : i32]} : (tensor<f32>, memref<f32>) -> ()
+// Producer-side ping-pong via select chain (block_id = 13) + a single
+// bufferization.materialize_in_destination that targets the selected buffer.
+// (Producer no longer emits scf.if; refactor innerscope.)
+// CHECK: arith.select {{.+}} {ssbuffer.block_id = 13 : i32} : memref<f32>
+// CHECK: bufferization.materialize_in_destination %{{.+}} in restrict writable %{{.+}} {ssbuffer.block_id = 13 : i32, ssbuffer.intraDeps = [0 : i32, 1 : i32]}
 // Original empty+fill remains in producer block (block_id = 13).
 // CHECK: linalg.fill {ssbuffer.block_id = 13 : i32} ins(%extracted : f32) outs({{.*}} : tensor<32x1xf32>) -> tensor<32x1xf32>
 // Consumer-side multi-buffer selection (block_id = 22 = inner loop body).

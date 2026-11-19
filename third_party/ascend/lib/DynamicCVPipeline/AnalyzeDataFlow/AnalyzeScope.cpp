@@ -31,8 +31,6 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Debug.h"
 
-#include <iostream>
-
 static constexpr const char *DEBUG_TYPE = "analyze-scope";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
@@ -224,21 +222,18 @@ static LogicalResult verifyMainLoop(ModuleOp module) {
   if (!hasMainLoopOp) {
     LDBG("[INFO]: No cycle of multiple iterations, the DynamicCVPipeline pass "
          "will be interrupted, and resumed to the original workflow.");
-    std::cout << "[DEBUG VDV] AnalyzeScope hasMainLoopForOp failed" << std::endl;
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return failure();
   }
 
   if (!checkVecScopeMainLoop(module)) {
     LDBG("[INFO]: No op beside matmul add in vector main loop.");
-    std::cout << "[DEBUG VDV] AnalyzScope checkVecScopeMainLoop failed" << std::endl;
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return failure();
   };
 
   if (isMainLoopOnlyCopyOrFixpipe(module)) {
     LDBG("[INFO]: One-way CV interaction for fallback.");
-    std::cout << "[VDV DEBUG] AnalyzeScope - All main_loop only contains hivm.hir.copy or hivm.hir.fixpipe ops. - FALLBACK" << std::endl;
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return failure();
   }
@@ -258,7 +253,6 @@ void AnalyzeScopePass::runOnOperation() {
   LDBG("Before AnalyzeScope:\n" << module << "\n");
 
   if (failed(verifyMainLoop(module))) {
-    std::cout << "[DEBUG VDV] AnalyzScope verifyMainLoop failed" << std::endl;
     return;
   }
 

@@ -3,6 +3,12 @@
 Find the kernels where the cost model prefers an operation ordering other than
 the compiler's own, then replay exactly those orderings on hardware.
 
+> **Experimental, and you are switching it on.** The cost model ranks IR
+> variants with a model that has no measured acceptance criterion and partly
+> placeholder hardware numbers. A seed it likes is a candidate to measure, not a
+> result: step 3 below is the point of the whole exercise, not a formality.
+> Nothing searches unless one of the variables here is set.
+
 Full reference: `docs/en/dynamic_cv_pipeline_cost_model.md`.
 
 ## 1. Search

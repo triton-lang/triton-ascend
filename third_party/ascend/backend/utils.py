@@ -698,47 +698,6 @@ def _warn_auto_blockify_disabled(kernel_name: str, blacklist_reasons) -> None:
           "The compiler keeps AutoBlockify disabled for this kernel.")
 
 
-def _get_buffer_count_override(kind: str):
-    """Environment override for a dynamic CV pipeline buffer count.
-
-    `kind` is "INTRA", "INTER" or "LOAD", matching the three dependency kinds
-    the pipeline multi-buffers: within one core, across the two cores, and
-    around GM load/store. The corresponding variables are
-
-        TRITON_ASCEND_INTRA_CACHE_NUM
-        TRITON_ASCEND_INTER_CACHE_NUM
-        TRITON_ASCEND_LOAD_CACHE_NUM
-
-    Setting a count to 1 makes that path single-buffered, which is how the
-    pipeline is told not to multi-buffer it -- there is no separate on/off
-    switch. Only INTRA multi-buffers by default (2); the other two are already
-    1, so INTRA=1 is in practice "no multi-buffering at all".
-
-    Meant for experiments: comparing what a kernel costs with and without
-    buffering, without editing the caller. An explicit intra_cache_num /
-    inter_cache_num / load_cache_num option always wins over this.
-
-    Returns None when unset, so the caller can tell "not requested" from a
-    requested value. A non-positive or unparsable value is ignored with a
-    warning, because the C++ side silently drops counts <= 0 and the run would
-    otherwise look like it had taken effect.
-    """
-    raw = os.getenv(f"TRITON_ASCEND_{kind}_CACHE_NUM")
-    if raw is None:
-        return None
-    try:
-        value = int(raw)
-    except ValueError:
-        print(f"[WARNING] TRITON_ASCEND_{kind}_CACHE_NUM='{raw}' is not an "
-              "integer; ignoring.")
-        return None
-    if value < 1:
-        print(f"[WARNING] TRITON_ASCEND_{kind}_CACHE_NUM={value} is not "
-              "positive; ignoring. Use 1 for a single buffer.")
-        return None
-    return value
-
-
 def _enable_print_ub_bits() -> bool:
     return knobs.ascend.print_ub_bits
 

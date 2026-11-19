@@ -38,8 +38,6 @@
 #include "llvm/Support/Debug.h"
 #include <memory>
 
-#include <iostream>
-
 static constexpr const char *DEBUG_TYPE = "AddControlFlowCondition";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << (X) << "\n")
@@ -145,7 +143,6 @@ void AddControlFlowConditionPass::runOnOperation() {
   pm.addPass(std::move(splittedIfWrapSsbufIfPass));
 
   if (failed(runPipeline(pm, module))) {
-    std::cout << "[VDV DEBUG] AddControlFlowCondition failed - FALLBACK" << std::endl;
     LDBG("Pass failed!");
     if (!CVPipeline::hasFallbackAttr(module)) {
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);

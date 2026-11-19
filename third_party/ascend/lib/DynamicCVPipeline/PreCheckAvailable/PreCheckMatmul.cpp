@@ -28,8 +28,6 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PreCheckAvailable.h"
 
-#include <iostream>
-
 using namespace mlir;
 using namespace triton;
 
@@ -52,12 +50,10 @@ void PreCheckMatmul::runOnOperation() {
   });
 
   if (firstMatmulOp) {
-    std::cout << "[VDV DEBUG] matmul found PASSED" << std::endl;
     LDBG("The linalg.matmul operation is found, passed.");
     return;
   }
 
-  std::cout << "[VDV DEBUG] matmul NOT found - FALLBACK" << std::endl;
   LDBG("SSBUFFER will be skipped because no linalg.matmul operation was found, "
        "which indicating that this op is a pure vector computation.");
   CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);

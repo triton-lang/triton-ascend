@@ -29,8 +29,6 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Debug.h"
 
-#include <iostream>
-
 static constexpr const char *DEBUG_TYPE = "analyze-flag";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
@@ -88,7 +86,6 @@ void AnalyzeFlagPass::runOnOperation() {
   }
 
   if (checkFlagIdValidity(module)) {
-    std::cout << "[DEBUG VDV] AnalyzeFlagPass failed" << std::endl;
     setFallbackAttr(module, ERRCODE_IGNORED);
     return;
   }

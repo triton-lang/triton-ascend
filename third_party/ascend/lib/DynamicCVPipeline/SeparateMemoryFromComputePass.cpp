@@ -27,7 +27,6 @@
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
 
-#include <iostream>
 static constexpr const char *DEBUG_TYPE = "separate-memory-from-compute";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << (X) << "\n")
@@ -49,7 +48,6 @@ void SeparateMemoryFromComputePass::runOnOperation() {
   pm.addPass(createUBOverflowCheckerPass());
 
   if (failed(runPipeline(pm, module))) {
-    std::cout << "[VDV DEBUG] SeparateMamoryFromCompute failed - FAILED" << std::endl;
     return;
   }
 

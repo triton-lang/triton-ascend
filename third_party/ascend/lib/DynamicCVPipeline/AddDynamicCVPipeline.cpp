@@ -36,7 +36,6 @@
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/Pass/PassManager.h"
-#include "mlir/Transforms/Passes.h"
 #include "mlir/Support/WalkResult.h"
 #include "llvm/Support/Debug.h"
 #include <atomic>
@@ -50,7 +49,6 @@
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/EstimateCVPipelineCost.h"
-#include "ascend/include/DynamicCVPipeline/MainLoopUnroll.h"
 #include "ascend/include/DynamicCVPipeline/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
@@ -334,17 +332,7 @@ void restoreModuleFromBackup(ModuleOp moduleOp, ModuleOp moduleBackup) {
   moduleOp.getBodyRegion().takeBody(moduleBackup.getBodyRegion());
 }
 
-static inline void addPasses(OpPassManager &pm, int mainLoopUnrollFactor = 0) {
-  // Unroll the main loop once the compute blocks are planned but before the
-  // dataflow is split, so that the inter core transfers, their sync flags and
-  // the multi buffers below are planned for each unrolled copy separately.
-  // The pass is a no-op unless a factor > 1 was requested.
-  if (mainLoopUnrollFactor > 1) {
-    MainLoopUnrollOptions unrollOptions;
-    unrollOptions.unrollFactor = mainLoopUnrollFactor;
-    pm.addPass(createMainLoopUnrollPass(unrollOptions));
-    pm.addPass(createCanonicalizerPass());
-  }
+static inline void addPasses(OpPassManager &pm) {
   pm.addPass(createPreCheckAvailablePass());
   pm.addPass(createStandardizeOpPass());
   pm.addPass(createPlanComputeBlockPass());
@@ -387,10 +375,9 @@ struct VariantScore {
 /// the registry already a superset of its own needs and leaves both
 /// structures alone, and what the trials share is only the context's locked
 /// state.
-void prepareVariantSearchDialects(MLIRContext *context,
-                                 int mainLoopUnrollFactor) {
+void prepareVariantSearchDialects(MLIRContext *context) {
   OpPassManager searchPM(ModuleOp::getOperationName());
-  addPasses(searchPM, mainLoopUnrollFactor);
+  addPasses(searchPM);
   DialectRegistry dependentDialects;
   searchPM.getDependentDialects(dependentDialects);
   context->appendDialectRegistry(dependentDialects);
@@ -409,7 +396,7 @@ void prepareVariantSearchDialects(MLIRContext *context,
 /// serial search took by hand: the total, the bound that decided ties, and
 /// the two figures the baseline guards are written against.
 VariantScore runVariantTrial(MLIRContext *context, ModuleOp moduleBackup,
-                            int mainLoopUnrollFactor, int64_t seed) {
+                            int64_t seed) {
   VariantScore score;
   score.seed = seed;
 
@@ -419,7 +406,7 @@ VariantScore runVariantTrial(MLIRContext *context, ModuleOp moduleBackup,
   attempt->setAttr(mlir::triton::kCVPipelineCostQuiet, builder.getUnitAttr());
 
   PassManager trial(context, attempt.getOperationName());
-  addPasses(trial, mainLoopUnrollFactor);
+  addPasses(trial);
   const bool ran =
       succeeded(trial.run(attempt.getOperation())) &&
       !CVPipeline::hasFallbackAttr(attempt);
@@ -520,7 +507,7 @@ void AddDynamicCVPipelinePass::getDependentDialects(
     DialectRegistry &registry) const {
   Base::getDependentDialects(registry);
   OpPassManager tempPM(ModuleOp::getOperationName());
-  addPasses(tempPM, this->mainLoopUnrollFactor);
+  addPasses(tempPM);
   tempPM.getDependentDialects(registry);
 }
 
@@ -549,15 +536,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     llvm::errs() << "Add-dynamic-cv-pipeline is only supported on 91095 now.\n";
     return;
   }
-  if (this->demoteF32Reduction) {
-    moduleOp->setAttr("triton_ascend.demote_f32_reduction", builder.getUnitAttr());
-  }
-
   ModuleOp moduleBackup(moduleOp->clone());
-
-  auto buildPipeline = [&](PassManager &pm) {
-    addPasses(pm, this->mainLoopUnrollFactor);
-  };
 
   // Try several orderings and keep the cheapest, when asked to. The winning
   // seed is compiled once more at the end with the estimate allowed to speak,
@@ -599,7 +578,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     }
     llvm::errs() << "\n";
   } else if (variantCount > 1) {
-    prepareVariantSearchDialects(&getContext(), this->mainLoopUnrollFactor);
+    prepareVariantSearchDialects(&getContext());
 
     // How many trials to score at once, capped at the number of candidates.
     //
@@ -661,8 +640,8 @@ void AddDynamicCVPipelinePass::runOnOperation() {
               if (seed >= variantCount) {
                 break;
               }
-              scores[seed] = runVariantTrial(&getContext(), moduleBackup,
-                                             this->mainLoopUnrollFactor, seed);
+              scores[seed] =
+                  runVariantTrial(&getContext(), moduleBackup, seed);
             }
           });
         }
@@ -671,9 +650,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
         }
       } else {
         for (int64_t seed = 0; seed < variantCount; ++seed) {
-          scores[seed] =
-              runVariantTrial(&getContext(), moduleBackup,
-                              this->mainLoopUnrollFactor, seed);
+          scores[seed] = runVariantTrial(&getContext(), moduleBackup, seed);
         }
       }
     }
@@ -963,7 +940,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
 
     // Do not reuse pass instances or partially transformed IR on retry.
     PassManager pm(&getContext(), moduleOp.getOperationName());
-    buildPipeline(pm);
+    addPasses(pm);
 
     // run passes in separate pm, instead of the pipeline to suppress reproducer
     auto result = pm.run(moduleOp);
@@ -999,9 +976,6 @@ void AddDynamicCVPipelinePass::runOnOperation() {
 
   int finalErrCode =
       lastErrCode ? static_cast<int>(*lastErrCode) : CVPipeline::ERRCODE_FAILED;
-  std::cout << "[VDV DEBUG] DynamicCVPipeline failed errCode=" << finalErrCode
-            << std::endl;
-
   if (!lastErrCode.has_value()) {
     moduleOp->emitWarning() << "[" << DEBUG_TYPE << "] "
                             << "Unexpected pass failure (no fallback attr "

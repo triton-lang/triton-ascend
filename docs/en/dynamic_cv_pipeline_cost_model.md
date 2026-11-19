@@ -1,25 +1,56 @@
 # Dynamic CV Pipeline Cost Model
 
-This document describes everything added on top of `main-dev` for cost
-estimation inside the dynamic Cube/Vector pipeline, and explains why each
-decision was made. It is written so that someone who has never seen this work
-can pick it up, and so that a decision is not silently reversed later because
-its reason was not written down.
+> ### Experimental feature, enabled by the user
+>
+> Everything described here — the cost estimate, the operation reordering it
+> ranks, and the search over those orderings — is **experimental**. It is
+> switched on by the user, for one run, and the result is not something to
+> build on without measuring:
+>
+> * the estimate ranks IR variants, it does not predict time (§1), and some of
+>   its hardware numbers are **placeholders** (§11);
+> * there is **no measured acceptance criterion** — nothing has been checked
+>   against hardware for rank correlation (§14), so every claim here rests on
+>   argument, not evidence;
+> * the two known-signed biases (§13) are large: cube/vector overlap is assumed
+>   free, and vector work is charged without fusion;
+> * a seed the search likes is a **candidate to measure**, not a result. The
+>   toolchain below this pass can still refuse it, and the guards that try to
+>   predict that (§10) are heuristics.
+>
+> **Nothing searches unless asked.** `TRITON_ASCEND_CV_VARIANTS` or a seed
+> table turns the search on; without either, one ordinary compilation runs. Use
+> it at your own risk, per kernel, and keep the measurement.
+>
+> What does change by default, with nothing set, is listed in §13 so it is not
+> a surprise: one extra reorder pass runs, and every CV-pipelined module pays
+> the estimate's compile time.
 
-The merge base for all of this is `8080c5e98`.
+This document describes everything added on top of `main-dev` for cost
+estimation inside the dynamic Cube/Vector pipeline, together with the operation
+reordering and the variant search the estimate exists to serve, and explains
+why each decision was made. It is written so that someone who has never seen
+this work can pick it up, and so that a decision is not silently reversed later
+because its reason was not written down.
+
+The merge base for all of this is `97f81c947`.
 
 ---
 
 ## 1. Purpose
 
 The dynamic CV pipeline (`AddDynamicCVPipelinePass`, run inside the
-`convert_ttir_to_linalg` stage) will eventually **generate several candidate
-IR variants and pick the cheapest one**. That needs a number to rank them by.
+`convert_ttir_to_linalg` stage) can **generate several candidate IR variants
+and keep the cheapest one**. That needs a number to rank them by.
 
 The cost model exists to produce that number. It is a *ranking* device: only
 relative accuracy between variants matters, not absolute microseconds. A bias
 that hits every variant equally is harmless; a bias that depends on how the
 pipeline partitioned the work is not.
+
+The variants themselves come from one decision: the order the operations are
+linearised in, which `ReorderOpsByBlockId` makes and a seed selects. §10
+describes that side; §3 to §9 describe the number.
 
 ### Why not reuse the existing cost model as-is
 
@@ -327,7 +358,7 @@ exactly where the real barrier is. This is why they must be read, not inferred.
 ### Dataflow edges
 
 From `ssbuffer.blockDeps`, a module attribute newly published by
-`DataDependencyAnalysisPass` (see §11.1).
+`DataDependencyAnalysisPass` (see §12.1).
 
 The first implementation walked SSA operands here. That was a worse
 re-derivation of what `DataDependencyAnalysis` already computes properly: it
@@ -486,16 +517,30 @@ Declared in
 | Attribute | Type | Meaning |
 |---|---|---|
 | `ascend.cv_pipeline_estimated_cycles` | i64 | the estimate; lower is better |
+| `ascend.cv_pipeline_cost_resource` | i64 | the occupancy bound |
+| `ascend.cv_pipeline_cost_recurrence` | i64 | the dependency bound; the estimate is the larger of the two |
 | `ascend.cv_pipeline_cost_roofline` | i64 | same module with unconditional Cube/Vector overlap; the gap is what barriers cost |
 | `ascend.cv_pipeline_cost_hardware` | str | profile name; estimates are only comparable within one profile |
+| `ascend.cv_pipeline_cost_ub_bytes` | i64 | Unified Buffer allocated, summed over allocations |
+| `ascend.cv_pipeline_cost_ub_peak` | i64 | the most Unified Buffer live at one point of the schedule |
+| `ascend.cv_pipeline_cost_ub_capacity` | i64 | what the profile says the part has |
+| `ascend.cv_pipeline_cost_pipeline_depth` | i64 | the buffer rescaling factor (`requiredBuffers`), **not** the stage count |
+| `ascend.cv_pipeline_cost_pipeline_stages` | i64 | predicated stages in the deepest loop's software pipeline |
+| `ascend.cv_pipeline_cost_loop_extension` | i64 | iterations the rewritten bound added past the real trip count |
 | `ascend.cv_pipeline_cost_unknown_ops` | i64 | operations whose own cost could not be computed |
 | `ascend.cv_pipeline_cost_generic_ops` | i64 | operations charged by element count alone |
 | `ascend.cv_pipeline_cost_dynamic_loops` | i64 | loops whose trip count no binding resolved |
 | `ascend.cv_pipeline_blocks` | array of dicts | per-block results |
+| `ascend.cv_pipeline_cost_quiet` | unit | **input**, not output: set by a variant trial to suppress the report |
 
 Each block dictionary carries `id`, `core`, `cycles`, `iter_cycles`,
 `work_cycles`, `iterations`, `iter_start`, `iter_finish`, `segments`, `ops`,
 `bottleneck`, `depends_on`, `sync_depends_on`.
+
+The two bounds are published separately because the total throws away which
+constraint was slack, and the search needs that to order candidates that tie —
+see the next section. The `ub_*` and `pipeline_*` figures exist for the same
+reason: they are what the search's baseline guards compare.
 
 Block results live on the **module**, not on the operations. A block is a set of
 operations sharing an id, not an IR entity; stamping every operation would bury
@@ -521,24 +566,130 @@ the IR in annotations.
 environment variable exists because a debug build plus `-debug-only` is
 impractical when driving compilation from Python.
 
-### Visualisation
-
-`third_party/ascend/costmodel/tools/cv_block_graph.py` parses the verbose log
-and renders it, with no external dependencies:
-
-```bash
-TRITON_ASCEND_CV_COST_VERBOSE=2 python your_script.py 2> cost.log
-python cv_block_graph.py cost.log                       # text summary
-python cv_block_graph.py cost.log --format dot > b.dot  # graphviz
-```
-
-Text mode shows the cost of barriers in cycles and percent and the blocks with
-interior barriers. Dot mode clusters by core, scales border width by share of
-cost, and draws sync edges as solid red against dashed grey dataflow edges.
+---
 
 ---
 
-## 10. Configuration reference
+## 10. Operation reordering and the variant search
+
+The estimate exists to rank something. This section is that something.
+
+### What varies
+
+The pipeline is deterministic apart from one decision: the order the operations
+of a block are linearised in. `ReorderOpsByBlockId`
+(`third_party/ascend/lib/DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.cpp`)
+makes it, and `ssbuffer.reorder_seed` on the module selects which legal order it
+emits. Upstream the pass orders whole compute blocks topologically; the seed
+makes it order *operations* under the same constraints, so a seed produces
+genuinely different IR rather than a cosmetic permutation. Everything downstream
+— where the block boundaries fall, where the barriers land, how deep the
+software pipeline gets, how much Unified Buffer is live — follows from it.
+
+The seed is consumed once. The run of the pass that sees it applies the
+operation-level ordering, records what it used in
+`ssbuffer.reorder_seed_applied`, and overwrites `ssbuffer.reorder_seed` with
+`-1`; later runs of the same pass take the ordinary block-level path, so they do
+not regroup underneath transfers and sync flags that already refer to block ids.
+The two attributes are separate on purpose: the `-1` is a protocol between the
+runs, while `reorder_seed_applied` is the record the cost report and the seed
+table read. Both are stripped with the rest of `ssbuffer.*` before the module
+leaves the pipeline.
+
+`TRITON_ASCEND_REORDER_SEED` selects an ordering by hand, for reproducing one
+candidate without running a search; `0` means the untouched pipeline, which is
+the same thing the search calls seed 0. `TRITON_ASCEND_REORDER_POLICY=fifo`
+switches which of the ready blocks is emitted first (last-ready by default).
+Both rules are legal topological orders and only the result differs, so a
+non-default choice announces itself: a run that silently ignored the variable
+would be indistinguishable from one that honoured it.
+
+### The search
+
+`AddDynamicCVPipelinePass` runs the whole sub-pipeline once per candidate on a
+private clone of the untouched input, reads the estimate back off each clone,
+and then compiles the winner once more — so the module that survives and the
+report that describes it are the same compilation, not two that happen to agree.
+
+* **Cost.** One full pipeline run per candidate. That is why it is off unless
+  `TRITON_ASCEND_CV_VARIANTS` asks for it.
+* **Failures are not errors.** A candidate that trips a downstream assumption
+  sets the fallback attribute; the search treats it as infinitely expensive and
+  moves on. Rejections are counted by error code, because a search that kept
+  nothing has to be distinguishable from one that was never asked to do
+  anything.
+* **Ties.** Two totals within 1/10000 of each other are called equal and decided
+  on the bound the total did *not* come from. The resource bound does not depend
+  on how operations were grouped, so once candidates reach it they score
+  identically and the total has nothing left to say. Measured on flash
+  attention: intra-core buffer depths 2 and 3 gave an identical total,
+  recurrence bounds of 184 465 709 against 154 792 120, and 168 825 us against
+  147 302 us on hardware — the second bound ranked them correctly where the
+  total could not.
+* **Parallel trials.** `TRITON_ASCEND_CV_VARIANT_THREADS` scores several
+  candidates at once; the default of 1 is the serial search and stays the path
+  to debug on. A trial's IR never leaves its thread, so the only shared state is
+  the `MLIRContext`, and the one place a trial would still write to it — a
+  `PassManager` loading dependent dialects — is pre-loaded before the fan-out.
+  Threads additionally need the context's own multithreading enabled, which a
+  pass cannot turn on from the inside; the triton patch therefore enables it in
+  `python/src/ir.cc` exactly when `TRITON_ASCEND_CV_VARIANTS` asks for a search
+  (see §12.6).
+* **Trial output is swallowed** at the file descriptor and restored on the way
+  out, unless the pass option `quiet-variant-trials=false` says otherwise. A
+  trial drives the whole talkative pipeline; times two hundred candidates that
+  is thousands of lines about IR which is being thrown away. Silencing pass by
+  pass would not cover prints this pass does not own.
+
+### Baseline guards
+
+A winner the toolchain then refuses is worse than no winner. Two properties
+predict that refusal, and both are compared **against seed 0** rather than
+against an absolute, so nothing here is fitted to a kernel and the baseline
+always passes its own test:
+
+| Guard | Rejects a candidate that | Slack variable |
+|---|---|---|
+| Unified Buffer | holds more UB live than the baseline plus the allowance | `TRITON_ASCEND_CV_UB_SLACK_BYTES`, default `capacity - peak(baseline)` |
+| Pipeline depth | needs a larger `requiredBuffers` factor than the baseline | `TRITON_ASCEND_CV_STAGE_SLACK`, default 0 |
+
+The UB overrun is diagnosed by the binary compiler, in another process, after
+this compilation has finished — so an unbuildable candidate looks perfectly
+healthy here, and it is the *good* candidates that overrun, because the overlap
+they win is paid for by materialising every value that crosses a new block
+boundary. The absolute figures do not match the binary compiler's, but every
+correction it applies applies to the baseline too and cancels in a difference;
+what is left is the buffers the new cuts created, which this model does know.
+
+The stage **count** is deliberately not guarded: it costs time rather than
+correctness, and the estimate already charges the prologue and epilogue
+directly, so a candidate that buys shorter dependency chains by adding stages
+pays for them in its own score.
+
+### What the search publishes
+
+Four module attributes in the `triton_ascend.dynamic_cv_pipeline.*` namespace —
+`chosen_seed`, `search_status`, `variants_usable`, `variants_total` — written on
+**every** exit from the pass, including the ones that decide nothing. They are
+not read by any pass: the Python driver copies them into the compilation
+metadata and removes them, the way it already handles the return code, which is
+why they are deliberately absent from `RemoveSsbufAttrPass` — that pass runs
+inside the pipeline and would strip them before anyone could read them. They are
+written at the very end because the fallback path replaces the module's whole
+attribute dictionary from a backup.
+
+`search_status` separates outcomes the seed alone cannot: no search was asked
+for, a seed other than the baseline won, the baseline was still cheapest,
+nothing could be scored, the seed was supplied by the caller, or the target was
+not supported. Whether the pipeline then *survived* is a different question that
+the return code answers, and the driver combines the two — see
+`cv_search_status_name` in the next section.
+
+`variants_usable` / `variants_total` are published because a winner means
+something quite different when it beat 199 other orderings than when it was the
+only one that compiled.
+
+## 11. Configuration reference
 
 ### Cost model
 
@@ -568,6 +719,8 @@ is the intended replacement.
 | `TRITON_ASCEND_CV_UB_SLACK_BYTES` | extra Unified Buffer a candidate may hold over the baseline; unset derives it from what the baseline leaves unused |
 | `TRITON_ASCEND_CV_STAGE_SLACK` | extra software-pipeline buffer factor a candidate may carry over the baseline; defaults to 0 |
 | `TRITON_ASCEND_REORDER_SEED` | compile one ordering by hand, for reproducing a candidate; 0 is the untouched pipeline |
+| `TRITON_ASCEND_REORDER_POLICY` | `lifo` (default) or `fifo`: which of the ready blocks `ReorderOpsByBlockId` emits first |
+| `TRITON_ASCEND_REORDER_VERBOSE` | verbosity of that pass's own report; 0 is silent |
 
 ### Seed table
 
@@ -685,11 +838,11 @@ streaming to L2).
 
 ---
 
-## 11. Changes outside the cost model
+## 12. Changes outside the cost model
 
 These are separable from the estimate itself and would stand on their own.
 
-### 11.1 `DataDependencyAnalysis` publishes its block graph to the IR
+### 12.1 `DataDependencyAnalysis` publishes its block graph to the IR
 
 `DataDependencyAnalysisPass` computes a block-level dependency graph
 (`BlockInfo` plus v2c / c2v / memory dependency lists) and then throws it away:
@@ -715,49 +868,101 @@ edges.
 `c2cDependencies` is declared in the analysis but never populated, so it is not
 persisted.
 
-### 11.2 `RemoveSsbufAttrPass` strips the new attribute
+### 12.2 `RemoveSsbufAttrPass` strips the new attributes
 
-`ssbuffer.blockDeps` is removed alongside the other `ssbuffer.*` attributes.
+Four attributes are added to the IR by this work and all four have to go before
+the module leaves the pipeline:
 
-It is removed with an explicit `module->removeAttr` rather than through the
-`kAttrsToRemove` array, because that array is applied inside `module->walk`, and
-whether a walk visits its own root is an MLIR detail this should not depend on.
-Module attributes are handled explicitly.
+| Attribute | On | Written by |
+|---|---|---|
+| `ssbuffer.blockDeps` | module | `DataDependencyAnalysis` (§12.1) |
+| `ssbuffer.reorder_seed` | module | the variant search, and consumed by `ReorderOpsByBlockId` |
+| `ssbuffer.reorder_seed_applied` | module | `ReorderOpsByBlockId`, late, so the report can still read it |
+| `ssbuffer.iter_extension` | `scf.for` | `UpdateLoopIterTimes` (§12.3) |
 
-This also matters downstream: there is precedent that hivmc rejects module
-attributes it does not recognise — `compiler.py` deliberately strips `hacc.*` so
-they "never reach hivmc". Coverage was added to
-`unittest/Conversion/General/DynamicCVPipeline/test-remove-attrs.mlir`.
+`ssbuffer.blockDeps` is removed with an explicit `module->removeAttr` rather than
+through the `kAttrsToRemove` array, because that array is applied inside
+`module->walk` and whether a walk visits its own root is an MLIR detail this
+should not depend on. The others go through the array; the lit test below is
+what keeps that honest.
 
-### 11.3 Environment overrides for the multi-buffer counts
+This matters downstream: there is precedent that hivmc rejects module attributes
+it does not recognise — `compiler.py` deliberately strips `hacc.*` so they
+"never reach hivmc". Coverage was added to
+`unittest/Conversion/General/DynamicCVPipeline/test-remove-attrs.mlir`, with
+`reorder_seed_applied` the one most worth checking: it is written last, by a
+different pass, specifically so something downstream can still read the seed,
+which makes forgetting to strip it the easy mistake.
 
-`_get_buffer_count_override` in `third_party/ascend/backend/utils.py` reads
+The four `triton_ascend.dynamic_cv_pipeline.*` attributes the search publishes
+are deliberately **not** in this list — see the end of §10.
+
+### 12.3 `UpdateLoopIterTimes` records how it extended the loop
+
+Software pipelining rewrites a pipelined loop's bound to
 
 ```
-TRITON_ASCEND_INTRA_CACHE_NUM
-TRITON_ASCEND_INTER_CACHE_NUM
-TRITON_ASCEND_LOAD_CACHE_NUM
+ceildiv(originalIterations * requiredBuffers, x) + ifCount
 ```
 
-and `ttir_to_linalg` consults it when the corresponding option
-(`intra_cache_num` / `inter_cache_num` / `load_cache_num`) was not given. An
-explicit option always wins.
+and the extra iterations are prologue and epilogue in which most stages are
+predicated off. Nothing downstream can tell that from the loop alone: the
+rewritten bound looks like an ordinary trip count, so anything asking how many
+times a stage really runs would over-count it, and by a factor that depends on
+the pipeline rather than on the kernel.
 
-The three `if` blocks that forwarded these to `set_buffer_count` were folded
-into one loop at the same time, since they now share the fallback.
+One `setAttr` at the end of `extendForOpIterationCount` records the three
+numbers as `ssbuffer.iter_extension = [requiredBuffers, x, ifCount]`. The pass
+is otherwise untouched; the cost model undoes the extension from these, and
+publishes `pipeline_depth` / `pipeline_stages` / `loop_extension` out of them
+(§9), which is also what the search's second baseline guard reads (§10).
 
-Why: comparing a kernel with and without multi-buffering previously required
-editing the caller. Setting a count to 1 is how the pipeline is told not to
-multi-buffer that path — there is no separate on/off switch.
+### 12.4 `ReorderOpsByBlockId` learns a seed, and `SplitDataflow` runs it once more
 
-Two guards, both because the C++ side silently drops counts `<= 0`, which would
-make a run look like it had taken effect: a non-integer value warns and is
-ignored, and a non-positive value warns and is ignored.
+The pass itself is upstream; the seed is not. With no seed it behaves as before,
+ordering whole compute blocks topologically. With `ssbuffer.reorder_seed` set it
+orders operations within the same dependency and memory constraints, which is
+the one axis the variant search varies — §10 describes the protocol, including
+why the seed is spent on first use and recorded separately.
 
-Note that the options themselves already existed as `NPUOptions` fields, so they
-can also be passed straight through `backend.parse_options({...})`.
+`SplitDataflow` gains one more run of the pass, at the end, after
+`RefineArgsBlockId`. By then the inter-core transfers and their sync flags refer
+to block ids, so this run takes the block-level path by construction. **This is
+the one default that moves** when nothing is configured: a module that sets no
+seed still gets one block-level reorder that upstream does not do. It is listed
+again in §13.
 
-### 11.4 Shared cost model additions
+### 12.5 `Common/Utils.h`
+
+Attribute-name constants for the four attributes above, the `SearchStatus` enum
+and the four `triton_ascend.dynamic_cv_pipeline.*` names the driver reads, plus
+`getKernelName(ModuleOp)` — used only to label log lines, because a cost report
+in a log holding several hundred kernels is unusable without a subject. It
+matches `func.func` / `tt.func` by name rather than taking the first symbol in
+the body: a module can open with a `memref.global`, and labelling every report
+with a buffer's name would be worse than labelling none.
+
+`ssbuffer.inter_core_buf_downgraded` is declared here and read by the cost model,
+which drops the inter-core depth to 1 when it is present, because
+`AddMultiBufferOuterScope` compiles single-buffered when the double-buffer
+groups would not fit in the flag budget while leaving the count attribute alone.
+**Nothing in this branch writes it**, so that path is inert here; it is listed in
+§14.
+
+### 12.6 Triton patch: the context's multithreading flag
+
+`third_party/ascend/patch/triton-ascend-3.6.0.patch` gains one hunk in
+`python/src/ir.cc`. Upstream triton builds the `MLIRContext` with threading
+disabled, so that async compilation does not spawn a thread pool per context.
+A parallel variant search needs the context's uniquers locked, and MLIR refuses
+to flip that flag from inside a pass — which is where this pass runs. The flag
+therefore follows the search: the context is built with threading enabled
+exactly when `TRITON_ASCEND_CV_VARIANTS` asks for more than one candidate, and
+with it disabled, as upstream, otherwise.
+
+`setup_patch.py` is untouched, so the patch has to apply cleanly as written.
+
+### 12.7 Shared cost model additions
 
 Small, additive changes to `third_party/ascend/costmodel`:
 
@@ -774,7 +979,7 @@ Small, additive changes to `third_party/ascend/costmodel`:
   units. They are zero unless something upstream assigns them, so the standalone
   `-ascend-perf-model` pipeline behaves exactly as before.
 
-### 11.5 Build integration
+### 12.8 Build integration
 
 `third_party/ascend/CMakeLists.txt`: the cost model block was **moved above
 `add_subdirectory(lib)`**. `include_directories()` and target definitions only
@@ -789,10 +994,29 @@ degrades to a no-op when it is not.
 
 ---
 
-## 12. Known biases
+## 13. Known biases
 
 Stated with direction, because a bias of known sign is usable and one of unknown
 sign is not.
+
+### What changes with nothing set
+
+The search and the reordering are opt-in, but two things are not, and they are
+the whole of what a build inherits from this work without asking for anything:
+
+* **One extra reorder pass.** `SplitDataflow` runs `ReorderOpsByBlockId` once
+  more at the end (§12.4). With no seed that is a block-level reorder, legal by
+  construction, but it is IR that upstream would not have produced.
+* **The estimate's compile time.** `EstimateCVPipelineCostPass` runs on every
+  CV-pipelined module. It never mutates compute IR, never fails, and returns
+  immediately if the pipeline has already fallen back — but it does build a
+  schedule, so it is not free. It is not currently possible to switch it off
+  separately from the CV pipeline itself.
+
+Everything else — candidate scoring, the seed table, the threading flag in the
+context — happens only when a variable or a pass option asks for it. The
+attributes this work adds to the IR are all stripped before the module leaves
+the pipeline (§12.2).
 
 ### Over-estimates
 
@@ -820,29 +1044,40 @@ sign is not.
 
 ### Unknown direction
 
-* the placeholder bandwidths (§10);
+* the placeholder bandwidths (§11);
 * whether the inherited `vec_mte2`/`mte3` mutex holds on this target;
 * whether `fixpipe` and `fixpipe_ub` share a pipe;
 * whether the on-chip movers are really independent.
 
 ---
 
-## 13. Open questions
+## 14. Open questions
 
-* **Which axis will variants be generated along?** The model is now sensitive to
-  block partitioning, and also to permuting blocks in the IR — but only through
-  the recurrence bound. If a kernel is resource-bound, every permutation scores
-  identically, which the report makes visible by marking the winning bound.
+* **Is operation order the right axis?** It is the axis that exists (§10), and it
+  is a real one: block boundaries, barrier placement and pipeline depth all
+  follow from it. But the model only distinguishes orderings through the
+  recurrence bound, so on a resource-bound kernel every ordering scores
+  identically — which the report makes visible by marking the winning bound and
+  by counting distinct scores. Buffer depths and block partitioning are the
+  obvious further axes and nothing generates them yet.
+* **`ssbuffer.inter_core_buf_downgraded` has no producer here.** The cost model
+  reads it and would drop the inter-core depth to 1, which is the right answer
+  when `AddMultiBufferOuterScope` ran out of flag budget and compiled
+  single-buffered anyway. Nothing in this branch writes it, so the estimate
+  still credits an overlap that may not be in the IR. Either the producer comes
+  with the flag-budget work or the read should go.
 * **No acceptance criterion exists.** For a ranking model the right metric is
   rank correlation against measurements, not absolute error. Nothing has been
   measured this way, so every improvement so far rests on argument rather than
   evidence. This is the highest-leverage next step.
 * **Passing bindings during autotuning** — process-wide environment variables
   cannot work when every configuration has different sizes.
-* **hivmc and the module attributes** — `ascend.cv_pipeline_*` still travel down
-  the compilation chain and have never been tested end to end, because the
-  validation script stops at `ttir_to_linalg`. The fix if it bites is to read
-  them into `metadata` and strip them, beside `_export_coalesce_metadata`.
+* **hivmc and the module attributes** — the four
+  `triton_ascend.dynamic_cv_pipeline.*` attributes are read into `metadata` and
+  removed by `record_decision`, which is the pattern that works. The
+  `ascend.cv_pipeline_*` estimate attributes are **not**: they still travel down
+  the compilation chain and have never been tested end to end. The fix if it
+  bites is the same one, beside `_export_coalesce_metadata`.
 * **Do the lit tests run?** `bin/RegisterTritonDialects.h` registers no ascend
   passes and the hand-written registration functions are never called, yet the
   existing tests apparently pass. The mechanism was never traced.
@@ -852,7 +1087,7 @@ sign is not.
 
 ---
 
-## 14. Files
+## 15. Files
 
 ### New
 
@@ -861,7 +1096,10 @@ sign is not.
 | `third_party/ascend/include/DynamicCVPipeline/EstimateCVPipelineCost.h` | pass and attribute declarations |
 | `third_party/ascend/lib/DynamicCVPipeline/EstimateCVPipelineCost.cpp` | the whole model |
 | `third_party/ascend/costmodel/configs/ascend_custom.json` | hardware profile for the newer target |
-| `third_party/ascend/costmodel/tools/cv_block_graph.py` | report visualiser |
+| `third_party/ascend/backend/cv_seed_table.py` | records the seed decision into `metadata`; reads a seed table back |
+| `third_party/ascend/costmodel/tools/collect_cv_seeds.py` | turns the per-kernel records into one table |
+| `third_party/ascend/costmodel/tools/cv_seeds_quickstart.md` | the shortest path from a suite run to a replayable table |
+| `docs/en/dynamic_cv_pipeline_cost_model.md` | this document |
 
 ### Modified
 
@@ -869,15 +1107,21 @@ sign is not.
 |---|---|
 | `third_party/ascend/CMakeLists.txt` | cost model configured before `lib` |
 | `third_party/ascend/lib/DynamicCVPipeline/CMakeLists.txt` | link and feature macro |
-| `third_party/ascend/lib/DynamicCVPipeline/AddDynamicCVPipeline.cpp` | pass insertion |
-| `third_party/ascend/include/DynamicCVPipeline/Passes.h`, `Passes.td` | registration |
-| `third_party/ascend/include/DynamicCVPipeline/Common/Utils.h` | `kBlockDeps` |
-| `third_party/ascend/{include,lib}/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.{h,cpp}` | persist the block graph |
-| `third_party/ascend/lib/DynamicCVPipeline/RemoveAttributes.cpp` | strip `ssbuffer.blockDeps` |
+| `third_party/ascend/lib/DynamicCVPipeline/AddDynamicCVPipeline.cpp` | pass insertion, the variant search, the seed report |
+| `third_party/ascend/include/DynamicCVPipeline/Passes.h`, `Passes.td` | registration, and the search's pass options |
+| `third_party/ascend/triton_ascend.cc` | the new pass options on the python binding |
+| `third_party/ascend/include/DynamicCVPipeline/Common/Utils.h` | attribute names, `SearchStatus`, `getKernelName` (§12.5) |
+| `third_party/ascend/{include,lib}/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.{h,cpp}` | persist the block graph (§12.1) |
+| `third_party/ascend/lib/DynamicCVPipeline/SplitDataflow.cpp` | one more `ReorderOpsByBlockId` run (§12.4) |
+| `third_party/ascend/lib/DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.cpp` | seed-driven operation ordering, ready policy, report (§10) |
+| `third_party/ascend/lib/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.cpp` | record `ssbuffer.iter_extension` (§12.3) |
+| `third_party/ascend/lib/DynamicCVPipeline/RemoveAttributes.cpp` | strip the new attributes (§12.2) |
+| `third_party/ascend/patch/triton-ascend-3.6.0.patch` | context multithreading for a parallel search (§12.6) |
+| `third_party/ascend/backend/compiler.py` | pass options, seed lookup, record the decision |
 | `third_party/ascend/costmodel/include/AscendModel/IR/AscendModelBase.td` | three new `HWUnit`s |
 | `third_party/ascend/costmodel/{include,lib}/AscendModel/Analysis/HardwareConfig.{h,cpp}` | vector cycle table |
 | `third_party/ascend/costmodel/lib/AscendModel/Analysis/PipelineAnalysis.cpp` | register new units |
 | `third_party/ascend/costmodel/lib/AscendModel/Transforms/PipelineAnalysisPass.cpp` | account for new units |
-| `third_party/ascend/backend/utils.py` | buffer count overrides |
-| `third_party/ascend/backend/compiler.py` | use them |
-| `third_party/ascend/unittest/.../test-remove-attrs.mlir` | cover the new attribute |
+| `third_party/ascend/unittest/.../DynamicCVPipeline/test-remove-attrs.mlir` | cover the new attributes |
+| `third_party/ascend/unittest/.../AddDynamicCVPipeline/fallback_existing_scope.mlir` | the seed decision a declined module reports |
+| `third_party/ascend/unittest/pytest_ut/test_compiler_layout_memory_contract.py` | stub takes the pass's new options |

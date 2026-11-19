@@ -31,16 +31,6 @@
 
 #include "DynamicCVPipeline/Common/SyncWall.h"
 
-#include <fstream>
-#include <string>
-#include <map>
-#include <set>
-#include <tuple>
-#include "llvm/Support/raw_ostream.h"
-#include "mlir/IR/Operation.h"
-#include "mlir/IR/Value.h"
-#include "mlir/IR/BuiltinAttributes.h"
-
 namespace mlir {
 namespace CVPipeline {
 constexpr int kInitSize = 4;
@@ -120,10 +110,6 @@ private:
   // Per-block sync walls
   DenseMap<Block *, SyncWall> walls;
 };
-
-void dumpMemoryDependenceGraphToDot(const MemoryDependenceGraph &graph, 
-                                    ArrayRef<Operation *> ops, 
-                                    const std::string &filename);
 
 } // namespace CVPipeline
 } // namespace mlir

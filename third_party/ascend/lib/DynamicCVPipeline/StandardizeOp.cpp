@@ -35,7 +35,6 @@
 
 #include "DynamicCVPipeline/StandardizeOp/Passes.h"
 
-#include <iostream>
 using namespace mlir;
 using namespace triton;
 using namespace CVPipeline;
@@ -75,9 +74,6 @@ void StandardizeOpPass::runOnOperation() {
   op->walk([&](linalg::MatmulOp matmulOp) {
     if (matmulOp->hasAttr(CVPipeline::kMayNotExec)) {
       findMayNotExec = true;
-      if (findMayNotExec) {
-        std::cout << "[VDV DEBUG] StadradizeOpPass failed, MM maynot execute" << std::endl;
-      }
     }
   });
 

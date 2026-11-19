@@ -27,15 +27,12 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Support/WalkResult.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Support/Debug.h"
-
-#include <iostream>
 
 using namespace mlir;
 
@@ -171,27 +168,6 @@ static int findFirstUser(Value iterArg, Block *loopBlock,
   return firstUserBlockId;
 }
 
-SmallVector<std::pair<Operation*, int>> findAllUser(Value& iterArg, Block *forBlock, CVPipeline::ComputeBlockIdManager &bm)
-{
-    SmallVector<std::pair<Operation*,int>> ret;
-    for (OpOperand &use : iterArg.getUses()) {
-        Operation *user = use.getOwner();
-        std::cout << "\n[VDV DEBUG] user of arg";
-        user->print(llvm::outs());
-        std::cout << std::endl;
-        auto userInblock = CVPipeline::getAncestorInBlock(user, forBlock);
-        if (!userInblock) {
-            continue;
-        }
-        if (isa<scf::YieldOp>(userInblock)) {
-            continue;
-        }
-        std::cout << "[VDV DEBUG] op added" << std::endl;
-        ret.push_back({userInblock, bm.getBlockIdByOp(userInblock)});
-    }
-    return ret;
-}
-
 static bool
 isDependenceOther(Operation *yieldDefOp, Block *loopBlock, int argsId,
                   const CVPipeline::MemoryDependenceGraph &memGraph) {
@@ -240,7 +216,6 @@ static void processOneLoop(Operation *loopOp,
 
   SmallVector<Value> iterArgs = ml.getIterArgs();
   for (size_t i = 0; i < iterArgs.size(); ++i) {
-    std::cout << "[VDV DEBUG] arg " << i << " 1" << std::endl;
     auto argsi = iterArgs[i];
 
     Value yieldOperand = yieldOp.getOperand(i);
@@ -250,8 +225,6 @@ static void processOneLoop(Operation *loopOp,
                 << yieldOperand << "\n");
       continue;
     }
-    std::cout << "[VDV DEBUG] arg " << i << " 2" << std::endl;
-
     if (llvm::isa<scf::IfOp>(yieldDefOp)) {
       LOG_DEBUG("Yield operand is a if result, skip. Operand: " << yieldOperand
                                                                 << "\n");
@@ -259,36 +232,15 @@ static void processOneLoop(Operation *loopOp,
     }
     LOG_DEBUG("yieldDefOp: " << *yieldDefOp << "\n"
                              << "idx: " << i << "\n");
-
-        int firstUserBlockId = findFirstUser(argsi, loopBlock, bm);
-        LOG_DEBUG("First user block id: " << firstUserBlockId << "\n");
-
-        if (llvm::isa<TensorType>(argsi.getType()))
-        {
-            auto allUsersInBlock = findAllUser(argsi, loopBlock, bm);
-            //Analysis of BlockIds
-            for(auto user: allUsersInBlock)
-            {
-                if(user.second != firstUserBlockId)
-                {
-                    std::cout << "[VDV DEBUG] HERE WE GO requiredBlockId=" << firstUserBlockId << " current op ID=" << user.second << std::endl;
-                    user.first->print(llvm::outs());
-                    std::cout << std::endl;
-                    bm.updateBlockId(user.first, firstUserBlockId);
-                }
-            }
-        }
-
-
-
     if (isDependenceOther(yieldDefOp, loopBlock, i, memGraph)) {
       continue;
     }
-    std::cout << "[VDV DEBUG] arg " << i << " 3" << std::endl;
 
     int updateBlockId = bm.getBlockIdByOp(yieldDefOp);
     LOG_DEBUG("Update block id for yield def op: " << updateBlockId << "\n");
 
+    int firstUserBlockId = findFirstUser(argsi, loopBlock, bm);
+    LOG_DEBUG("First user block id: " << firstUserBlockId << "\n");
 
     if (firstUserBlockId == -1 || updateBlockId == firstUserBlockId) {
       continue;

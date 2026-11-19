@@ -33,8 +33,6 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 #include "llvm/Support/Debug.h"
 
-#include <iostream>
-
 using namespace mlir;
 using namespace triton;
 
@@ -67,7 +65,6 @@ void PlanComputeBlockPass::runOnOperation() {
 
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {
-      std::cout << "[VDV DEBUG] PlanComputeBlock failed - FALLBACK" << std::endl;
       LOG_DEBUG("Pass failed!\n");
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     }

@@ -24,7 +24,6 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/IR/Operation.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/Support/Debug.h"
 
 using namespace mlir;
@@ -36,20 +35,6 @@ static constexpr const char *DEBUG_TYPE = "mark-main-loop";
 using namespace mlir::triton;
 
 // Pass Entry Point
-//
-// A "main loop" is the loop the dynamic CV pipeline is built around: its body is
-// split into cube/vector stages that are then overlapped across iterations.
-//
-// Selection:
-//   1. Candidates are the loops that (transitively) contain inter-core traffic,
-//      i.e. a non-L1 hivm.copy / hivm.fixpipe.
-//   2. `tl.range(..., main_loop=False)` removes a loop from the candidates.
-//   3. By default the innermost candidate of a nest wins (historical behaviour).
-//      `tl.range(..., main_loop=True)` overrides that: the hinted loop wins and
-//      candidates nested inside it are dropped, unless they are hinted as well.
-//      This matters for kernels whose innermost loop runs only a couple of
-//      iterations - there the pipeline degenerates into prologue + epilogue,
-//      while an outer loop would give the stages something to overlap with.
 void MarkMainLoopPass::runOnOperation() {
   LOG_DEBUG("\n--- enter MarkMainLoopPass --->\n");
   ModuleOp module = getOperation();
@@ -58,6 +43,10 @@ void MarkMainLoopPass::runOnOperation() {
     return;
   }
 
+  int mainLoopIdCounter = 0;
+  SmallVector<Operation *> mainLoops;
+
+  // Find all candidate main loops (ForOp + WhileOp)
   auto isL1Fixpipe = [](Operation *op) -> bool {
     auto fixpipeOp = dyn_cast<hivm::FixpipeOp>(op);
     if (!fixpipeOp)
@@ -71,83 +60,51 @@ void MarkMainLoopPass::runOnOperation() {
            addrSpaceAttr.getAddressSpace() == hivm::AddressSpace::L1;
   };
 
-  // Step 1: candidate loops - every loop that encloses inter-core traffic.
-  // All enclosing loops are collected (not just the nearest one) so that an
-  // explicit hint on an outer loop can be honoured.
-  llvm::SetVector<Operation *> candidates;
   module.walk([&](Operation *op) {
     if (!isa<hivm::FixpipeOp, hivm::CopyOp>(op))
       return;
+
     if (isL1Fixpipe(op))
       return;
-    for (Operation *parent = op->getParentOp(); parent;
-         parent = parent->getParentOp()) {
-      if (isa<scf::ForOp, scf::WhileOp>(parent))
-        candidates.insert(parent);
-    }
+
+    if (auto forOp = op->getParentOfType<scf::ForOp>())
+      mainLoops.push_back(forOp);
+    if (auto whileOp = op->getParentOfType<scf::WhileOp>())
+      mainLoops.push_back(whileOp);
   });
 
-  // Step 2: honour `main_loop=False`.
-  llvm::SmallVector<Operation *> kept;
-  for (Operation *loopOp : candidates) {
-    if (CVPipeline::isMainLoopOptOut(loopOp)) {
-      LOG_DEBUG("candidate dropped by main_loop=False hint\n");
-      continue;
+  for (Operation *loopOp : mainLoops) {
+    if (!loopOp->hasAttr(CVPipeline::kMainLoop)) {
+      // Add attribute with integer value (current counter ID)
+      loopOp->setAttr(
+          CVPipeline::kMainLoop,
+          Builder(module.getContext()).getI32IntegerAttr(mainLoopIdCounter));
+      mainLoopIdCounter++;
     }
-    kept.push_back(loopOp);
   }
 
-  // Step 3: resolve nests. At most one loop of a nest may be marked: the rest
-  // of the pipeline relies on it - AddMultiBufferInnerScope rejects a main_loop
-  // that contains another main_loop, and ComputeMainLoopTimes requires every
-  // stage if-block to be a direct child of the main loop. An opted-in loop wins
-  // over everything nested inside it, including a nested opt-in; otherwise the
-  // innermost candidate wins, as before.
-  auto hasKeptDescendant = [&](Operation *loopOp) {
-    for (Operation *other : kept) {
-      if (other != loopOp && loopOp->isProperAncestor(other))
-        return true;
-    }
-    return false;
-  };
-  auto hasOptedInAncestor = [&](Operation *loopOp) {
-    for (Operation *other : kept) {
-      if (other != loopOp && other->isProperAncestor(loopOp) &&
-          CVPipeline::isMainLoopOptIn(other))
-        return true;
-    }
-    return false;
-  };
-
-  llvm::SmallVector<Operation *> selected;
-  for (Operation *loopOp : kept) {
-    // An opted-in ancestor always wins, so a nest never ends up with two main
-    // loops even when several of its loops carry the hint.
-    if (hasOptedInAncestor(loopOp)) {
-      LOG_DEBUG("candidate dropped: enclosing loop is main_loop=True\n");
-      continue;
-    }
-    if (!CVPipeline::isMainLoopOptIn(loopOp) && hasKeptDescendant(loopOp)) {
-      // Historical rule: keep only the innermost candidate.
-      continue;
-    }
-    selected.push_back(loopOp);
-  }
-
-  // Step 4: tag the winners with dense ids in deterministic walk order.
-  llvm::SmallPtrSet<Operation *, 8> selectedSet(selected.begin(),
-                                                selected.end());
-  int mainLoopIdCounter = 0;
+  // Remove main_loop attribute from outer loops if nested loops both have it
+  // Keep only the innermost main_loop
+  SmallVector<Operation *> allMainLoops;
   module.walk([&](Operation *loopOp) {
-    if (!selectedSet.contains(loopOp))
-      return;
-    if (loopOp->hasAttr(CVPipeline::kMainLoop))
-      return;
-    loopOp->setAttr(
-        CVPipeline::kMainLoop,
-        Builder(module.getContext()).getI32IntegerAttr(mainLoopIdCounter));
-    mainLoopIdCounter++;
+    if (CVPipeline::isMainLoopOp(loopOp)) {
+      allMainLoops.push_back(loopOp);
+    }
   });
+
+  for (Operation *loopOp : allMainLoops) {
+    // Check if there's any nested loop with main_loop attribute
+    bool hasNestedMainLoop = false;
+    loopOp->walk([&](Operation *nestedLoopOp) {
+      if (nestedLoopOp != loopOp && CVPipeline::isMainLoopOp(nestedLoopOp)) {
+        hasNestedMainLoop = true;
+      }
+    });
+    // Remove attribute from outer loop if inner loop also has it
+    if (hasNestedMainLoop) {
+      loopOp->removeAttr(CVPipeline::kMainLoop);
+    }
+  }
 
   LOG_DEBUG("--- exit MarkMainLoopPass --->\n");
 }

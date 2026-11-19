@@ -119,7 +119,7 @@ def _get_ascend_llvm_package_info(base_dir):
 
 def _apply_patch(patch_path, reverse=False):
     try:
-        command = ["git", "apply", "--ignore-whitespace"] + (["--reverse"] if reverse else []) + [str(patch_path)]
+        command = ["git", "apply"] + (["--reverse"] if reverse else []) + [str(patch_path)]
         subprocess.run(command, check=True, stdout=subprocess.DEVNULL, cwd=str(_REPO_ROOT))
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"patch({patch_path}) failed,cmd={e.cmd}, retcode={e.returncode}") from e

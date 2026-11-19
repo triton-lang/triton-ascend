@@ -33,8 +33,6 @@
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
 
-#include <iostream>
-
 static constexpr const char *DEBUG_TYPE = "SplitDataflow";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << (X) << "\n")
@@ -79,42 +77,6 @@ void SplitDataflowPass::runOnOperation() {
 
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {
-      std::cout << "[VDV DEBUG] SplitDataFlow failed" << std::endl;
-      module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
-      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
-    }
-    return;
-  }
-
-  LDBG("Process successfully");
-}
-
-// Run the pass
-void SplitDataflowReducedPass::runOnOperation() {
-  ModuleOp module = getOperation();
-
-  if (CVPipeline::hasFallbackAttr(module)) {
-    return;
-  }
-
-  OpPassManager pm(module.getOperationName());
-  LDBG("Enter pass.");
-
-  // Step 1: Add block_id for control flow operations
-  pm.addPass(createAddBlockIdForControlOpsPass());
-
-  // Step 2: Analyze data dependencies between Vector and Cube blocks
-  pm.addPass(createDataDependencyAnalysisPass());
-
-  // Step 3: Run InterCoreTransferAndSync
-  pm.addPass(createInterCoreTransferAndSyncPass());
-
-  // Step 4: Mark the main computation loop
-  pm.addPass(createMarkMainLoopPass());
-
-  if (failed(runPipeline(pm, module))) {
-    if (!CVPipeline::hasFallbackAttr(module)) {
-      std::cout << "[VDV DEBUG] SplitDataFlow failed" << std::endl;
       module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     }
@@ -130,10 +92,5 @@ namespace triton {
 std::unique_ptr<OperationPass<ModuleOp>> createSplitDataflowPass() {
   return std::make_unique<SplitDataflowPass>();
 }
-
-std::unique_ptr<OperationPass<ModuleOp>> createSplitDataflowReducedPass() {
-  return std::make_unique<SplitDataflowReducedPass>();
-}
-
 } // namespace triton
 } // namespace mlir

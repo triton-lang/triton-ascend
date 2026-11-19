@@ -15,12 +15,6 @@ def AddDynamicCVPipeline : Pass<"add_dynamic_cv_pipeline", "mlir::ModuleOp"> {
         Option<"compileOn91095", "compile-on-910-95",
         "bool", /*default*/"false",
         "compile on 910_95">,
-        Option<"mainLoopUnrollFactor", "main-loop-unroll-factor",
-        "int", /*default*/"1",
-        "Unroll factor of the main loop; <= 1 disables the unroll">,
-        Option<"demoteF32Reduction", "demote-f32-reduction",
-        "bool", /*default*/"false",
-        "Demote f32 reduction between extf and truncf to f16">,
         Option<"quietVariantTrials", "quiet-variant-trials",
         "bool", /*default*/"true",
         "Discard what the variant search's trials print; turn off to see why a trial failed">,
@@ -61,38 +55,6 @@ def InterCoreTransferAndSyncPass : Pass<"inter-core-transfer-and-sync", "mlir::M
     let summary = "Insert inter-core transfer operations and PIPE_S synchronization between Vector and Cube cores";
     let constructor = "triton::createInterCoreTransferAndSyncPass()";
     let dependentDialects = ["hivm::HIVMDialect", "bufferization::BufferizationDialect", "scope::ScopeDialect", "annotation::AnnotationDialect"];
-}
-
-def MainLoopUnroll : Pass<"main-loop-unroll", "mlir::ModuleOp"> {
-    let summary = "Unroll the main computation loop by a given factor";
-    let description = [{
-        Unrolls the main loop, i.e. the loop `mark-main-loop` marks with
-        `ssbuffer.main_loop` because it carries the cube <-> vector transfers.
-        Those transfers only exist further down the pipeline, so the loop is
-        located by running `add-block-id-for-control-ops`,
-        `data-dependency-analysis`, `inter-core-transfer-and-sync` and
-        `mark-main-loop` on a throw-away clone of the module.
-
-        Expects compute blocks to be planned (runs after `plan-compute-block`)
-        and must run before `split-dataflow`: the transfers, sync flags and
-        multi buffers are then planned for each unrolled copy separately. The
-        compute block ids of the copies are shifted so that every copy forms
-        blocks of its own. A factor <= 1 leaves the module untouched.
-    }];
-    let constructor = "triton::createMainLoopUnrollPass()";
-    let options = [
-        Option<"unrollFactor", "unroll-factor",
-        "int", /*default*/"1",
-        "Unroll factor of the main loop; <= 1 disables the pass">
-    ];
-    // The probe pipeline runs inter-core-transfer-and-sync, so every dialect it
-    // may create ops from has to be loaded before this pass starts.
-    let dependentDialects = ["hivm::HIVMDialect", "arith::ArithDialect", "scf::SCFDialect",
-        "func::FuncDialect", "linalg::LinalgDialect",
-        "tensor::TensorDialect", "memref::MemRefDialect",
-        "bufferization::BufferizationDialect", "hivm::HIVMDialect",
-        "scope::ScopeDialect", "annotation::AnnotationDialect",
-        "LLVM::LLVMDialect"];
 }
 
 def MarkMainLoopPass : Pass<"mark-main-loop", "mlir::ModuleOp"> {

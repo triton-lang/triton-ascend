@@ -53,16 +53,6 @@ public:
                                       PatternRewriter &rewriter) const override;
 };
 
-struct DemoteExtReduceTruncPattern : public OpRewritePattern<arith::TruncFOp> {
-  DemoteExtReduceTruncPattern(MLIRContext *ctx, bool enabled);
-  LogicalResult matchAndRewrite(arith::TruncFOp truncOp,
-                                PatternRewriter &rewriter) const override;
-private:
-  bool enabled;
-};
-
-std::unique_ptr<OperationPass<ModuleOp>> createPatternMatchRewritePass();
-
 } // namespace mlir::CVPipeline
 
 #endif // TRITON_ADAPTER_DYNAMIC_CVPIPELINE_PATTERN_MATCH_REWRITES_H

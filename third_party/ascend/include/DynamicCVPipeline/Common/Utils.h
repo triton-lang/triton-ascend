@@ -44,11 +44,6 @@ inline constexpr llvm::StringLiteral kVectorFirst = "ssbuffer.vector_first";
 inline constexpr llvm::StringLiteral kAddFromMatmul =
     "ssbuffer.add_from_matmul";
 inline constexpr llvm::StringLiteral kMainLoop = "ssbuffer.main_loop";
-// Author-supplied hint, lowered from Triton `tl.range(..., main_loop=True/False)`
-// onto the scf.for op; it survives the whole triton -> linalg lowering, so the
-// ssbuffer passes can read it. 1 -> pipeline this loop even if it encloses other
-// candidates, 0 -> never treat this loop as the main loop.
-inline constexpr llvm::StringLiteral kMainLoopHint = "tt.main_loop";
 inline constexpr llvm::StringLiteral kTcoreType = "hivm.tcore_type";
 inline constexpr llvm::StringLiteral kIf = "ssbuffer.if";
 inline constexpr llvm::StringLiteral kSplittedIf = "ssbuffer.splitted_if";
@@ -309,30 +304,6 @@ public:
 // True when `op` is a main_loop loop op (forOp / whileOp carrying the tag).
 inline bool isMainLoopOp(Operation *op) {
   return op && isa<scf::ForOp, scf::WhileOp>(op) && op->hasAttr(kMainLoop);
-}
-
-// Author hint on a loop op, if any: true = opt in, false = opt out.
-inline std::optional<bool> getMainLoopHint(Operation *op) {
-  if (!op || !isa<scf::ForOp, scf::WhileOp>(op)) {
-    return std::nullopt;
-  }
-  if (auto hint = op->getAttrOfType<IntegerAttr>(kMainLoopHint)) {
-    return hint.getInt() != 0;
-  }
-  return std::nullopt;
-}
-
-// `tl.range(..., main_loop=True)`: pipeline this loop even if nested loops are
-// also candidates.
-inline bool isMainLoopOptIn(Operation *op) {
-  std::optional<bool> hint = getMainLoopHint(op);
-  return hint.has_value() && *hint;
-}
-
-// `tl.range(..., main_loop=False)`: exclude this loop from the choice.
-inline bool isMainLoopOptOut(Operation *op) {
-  std::optional<bool> hint = getMainLoopHint(op);
-  return hint.has_value() && !*hint;
 }
 
 CoreType getCoreTypeOfSimpleOpOrCf(Operation *op);

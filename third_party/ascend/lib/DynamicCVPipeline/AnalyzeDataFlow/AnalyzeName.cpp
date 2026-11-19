@@ -26,8 +26,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 
-#include <iostream>
-
 static constexpr const char *DEBUG_TYPE = "analyze-name";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
@@ -79,7 +77,6 @@ void AnalyzeNamePass::runOnOperation() {
   LDBG("Before AnalyzeName:\n" << module << "\n");
 
   if (failed(verifyFuncNames(module))) {
-    std::cout << "[DEBUG VDV] AnalyzeNamePass failed" << std::endl;
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return;
   }

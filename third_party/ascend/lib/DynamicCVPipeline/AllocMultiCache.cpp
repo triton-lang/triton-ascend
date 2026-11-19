@@ -28,8 +28,6 @@
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
 
-#include <iostream>
-
 static constexpr const char *DEBUG_TYPE = "AllocMultiCache";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
@@ -60,7 +58,6 @@ void AllocMultiCachePass::runOnOperation() {
   pm.addPass(createAddMultiBufferOuterScopePass());
 
   if (failed(runPipeline(pm, module))) {
-    std::cout << "[VDV DEBUG] AllocMultiCache failed - FALLBACK" << std::endl;
     module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
     if (!CVPipeline::hasFallbackAttr(module)) {
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);

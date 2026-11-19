@@ -2193,8 +2193,7 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
 
   // Clean up dead code and simplify IR.
   PassManager pm(&getContext(), moduleOp.getOperationName());
-  // VDV remove CSE
-  // pm.addPass(createCSEPass());
+  pm.addPass(createCSEPass());
   pm.addPass(createCanonicalizerPass());
   if (failed(runPipeline(pm, getOperation()))) {
     signalPassFailure();

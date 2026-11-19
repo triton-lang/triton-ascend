@@ -39,7 +39,6 @@
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 
-#include <iostream>
 static constexpr const char *DEBUG_TYPE =
     "analyze-cube-control-flow-input-chain";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -169,7 +168,6 @@ void AnalyzeCubeControlFlowInputChainPass::runOnOperation() {
   LDBG("Enter AnalyzeCubeControlFlowInputChainPass.");
 
   if (checkCubeControlFlowInputChain(module)) {
-    std::cout << "[DEBUG VDV] AnalyzeCubeControlFlowInputChainPass failed" << std::endl;
     setFallbackAttr(module, ERRCODE_IGNORED);
     return;
   }

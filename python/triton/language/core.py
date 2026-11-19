@@ -3277,13 +3277,6 @@ class range(base_value):
     :param disable_licm: Tells the compiler it shouldn't hoist loop invariant
         code outside the loop. This is often useful to avoid creating long liveranges
         within a loop.
-    :param main_loop: Ascend only. Tells the compiler which loop of a nest the
-        dynamic CV pipeline (ssbuffer) is built around. ``True`` pipelines this
-        loop even when it encloses other candidate loops; ``False`` excludes it
-        from the choice. Without a hint the compiler always picks the innermost
-        loop carrying cube/vector traffic, which is a poor choice when that loop
-        runs only a couple of iterations, so the pipeline is all prologue and
-        epilogue. The hint is ignored for loops that carry no cube/vector traffic.
 
         Note that warp specialization is only supported on Blackwell GPUs and
         only works on simple matmul loops. Support for arbitrary loops will be
@@ -3291,8 +3284,7 @@ class range(base_value):
     """
 
     def __init__(self, arg1, arg2=None, step=None, num_stages=None, loop_unroll_factor=None,
-                 disallow_acc_multi_buffer=False, flatten=False, warp_specialize=False, disable_licm=False,
-                 main_loop=None):
+                 disallow_acc_multi_buffer=False, flatten=False, warp_specialize=False, disable_licm=False):
         if step is None:
             self.step = constexpr(1)
         else:
@@ -3308,7 +3300,6 @@ class range(base_value):
         self.disallow_acc_multi_buffer = disallow_acc_multi_buffer
         self.flatten = flatten
         self.warp_specialize = warp_specialize
-        self.main_loop = main_loop
         self.disable_licm = disable_licm
 
     def __iter__(self):

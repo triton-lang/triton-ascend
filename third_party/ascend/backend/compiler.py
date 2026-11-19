@@ -28,13 +28,12 @@ import os
 import re
 import shlex
 import subprocess
-import sys
 import tempfile
 import warnings
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 from .debug_line_rewriter import rewrite_debug_line
 from .cv_seed_table import NO_SEED, lookup_seed, record_decision
 
@@ -57,7 +56,6 @@ from triton.backends.ascend.utils import (
     _get_npucompiler_path,
     _get_triton_adapter_opt_path,
     _get_triton_opt_path,
-    _get_buffer_count_override,
     _is_ascend_sanitizer_enabled,
     _is_debug_line_info_disabled,
     _is_auto_map_parallel_blocks_enabled,
@@ -291,8 +289,6 @@ def _with_debug_line(npubin_stage, options):
     return stage
 
 
-
-
 def _graph_optimize_core_num(opt):
     # Physical AI-core blocks the launcher will schedule, so the row-count policy
     # can keep at least one full wave after R-way coalescing.  The launcher picks
@@ -359,9 +355,7 @@ def make_ttir(mod, metadata, opt):
     passes.common.add_inliner(pm)
     # passes.ttir.add_rewrite_tensor_pointer(pm)
     passes.ttir.add_rewrite_tensor_descriptor_to_pointer(pm)
-    diasbaled_opt = os.environ.get('VDV_DISABLE_ADD_COMBINE', '0').lower() in ('1', 'true', 'yes')
-    if not diasbaled_opt:
-        passes.ttir.add_combine(pm)
+    passes.ttir.add_combine(pm)
     passes.common.add_canonicalizer(pm)
     passes.ttir.add_reorder_broadcast(pm)
     passes.common.add_cse(pm)
@@ -476,11 +470,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             # `ssbuffer.insertionOptimization` attribute (set here) at run time.
             # Keep the existing default-on buffer insertion behavior.
             ascend.passes.ttir.set_enable_buffer_insert_optimization(mod)
-            # The main loop unroll runs inside the CV pipeline: the loop to
-            # unroll is the one carrying the cube <-> vector communication,
-            # which only the pipeline itself can point at.
-            main_loop_unroll_factor = metadata.get("main_loop_unroll_factor") or 1
-            demote_f32_reduction = metadata.get("demote_f32_reduction") or False
             # Flip to False to see why a variant trial failed: a trial that
             # dies otherwise takes its diagnostics with it.
             quiet_variant_trials = True
@@ -492,10 +481,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             cv_requested_seed = lookup_seed(cv_kernel_name, metadata["hash"])
             cv_pipeline_added = True
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95,
-                                                           main_loop_unroll_factor,
-                                                           demote_f32_reduction,
-                                                           quiet_variant_trials,
-                                                           cv_requested_seed)
+                                                       quiet_variant_trials,
+                                                       cv_requested_seed)
 
         if AscendBackend.instrumentation:
             if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
@@ -508,27 +495,21 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         if _enable_msdebug():
             ascend.passes.ttir.add_normalize_debug_line_locations(pm)
 
-        # Buffer counts for the dynamic CV pipeline. An explicit option wins;
-        # otherwise the environment may override, which is how a run can be
-        # made single-buffered (count 1) without touching the caller.
-        #
-        # The canonical names came first; the legacy spellings are kept because
-        # parse_options only rewrites what a caller passes to it, and metadata
-        # assembled by hand elsewhere may still carry the old key.
-        for _keys, _kind in ((("buf_slot_num_of_veccore", "intra_cache_num"), "INTRA"),
-                             (("buf_slot_num_of_crosscore", "inter_cache_num"), "INTER"),
-                             (("buf_slot_num_of_gm", "load_cache_num"), "LOAD")):
-            _val = next((metadata[_k] for _k in _keys
-                         if metadata.get(_k) is not None), None)
-            if _val is None:
-                _val = _get_buffer_count_override(_kind)
-            if _val is not None:
-                ascend.passes.ttir.set_buffer_count(mod, _kind, _val)
+        _intra_val = metadata.get("buf_slot_num_of_veccore")
+        if _intra_val is not None:
+            ascend.passes.ttir.set_buffer_count(mod, "INTRA", _intra_val)
 
-        # Written so the triton-opt command printed below reproduces this run.
-        Path(src_path).write_text(str(mod))
+        _inter_val = metadata.get("buf_slot_num_of_crosscore")
+        if _inter_val is not None:
+            ascend.passes.ttir.set_buffer_count(mod, "INTER", _inter_val)
+
+        _load_val = metadata.get("buf_slot_num_of_gm")
+        if _load_val is not None:
+            ascend.passes.ttir.set_buffer_count(mod, "LOAD", _load_val)
 
         if opt.debug:
+            # Written so the triton-opt command printed below reproduces this run.
+            Path(src_path).write_text(str(mod))
             # Print the equivalent triton-opt command line so the pass
             # pipeline can be reproduced and debugged outside of Python.
             print_src_path, print_dst_path = _get_dump_paths(metadata["hash"], src_path, dst_path)
@@ -1395,11 +1376,6 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
-    # Unroll factor of the main loop (the loop carrying the cube <-> vector
-    # communication), applied inside the dynamic CV pipeline. Only takes effect
-    # with enable_dynamic_cv_pipeline; 1 (default) leaves the loop untouched.
-    main_loop_unroll_factor: int = 1
-    demote_f32_reduction: bool = False
     enable_tla_mode: bool = field(default=False, init=False)
     enable_cube_block_merge: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = None

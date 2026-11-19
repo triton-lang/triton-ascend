@@ -131,13 +131,20 @@ from .cube import MxFormat
 from . import sync
 from .sync import sub_block_id
 
+from .jit import TLAJITFunction as _TLAJITFunction
+
 
 def jit(fn=None, **kwargs):
-    """``@tla.jit``: like ``triton.jit``, but lowered via the TLA frontend."""
-    from .jit import TLAJITFunction
+    """JIT-compile a kernel with the TLA frontend.
+
+    At launch, pass ``npuir_extra_options=["--mlir-print-ir-after-all"]``
+    to append raw argv entries to ``bishengir-compile``. Each list or tuple
+    element is one argument. The compiler interprets the flags and values.
+    Nonempty argument sequences specialize the compiled kernel.
+    """
 
     def decorator(f):
-        return TLAJITFunction(f, **kwargs)
+        return _TLAJITFunction(f, **kwargs)
 
     return decorator(fn) if fn is not None else decorator
 

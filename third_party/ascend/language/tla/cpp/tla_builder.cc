@@ -24,6 +24,7 @@
 #include "pybind11/pybind11.h"
 #include <pybind11/stl.h>
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVMAVE/IR/HIVMAVE.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
@@ -516,9 +517,50 @@ Value applySimdMode(TLABuilder &self, Value result, Value mask,
       .getResult();
 }
 
+struct TLAKernelFeatures {
+  bool hasIntraCoreSync = false;
+  bool hasCrossCoreSync = false;
+  bool hasUnitFlag = false;
+  bool hasMultiBuffer = false;
+  bool usesPipeline = false;
+};
+
+TLAKernelFeatures getTLAKernelFeatures(ModuleOp module) {
+  TLAKernelFeatures features;
+  module.walk([&](Operation *op) {
+    features.hasIntraCoreSync |=
+        isa<hivm::SetFlagOp, hivm::WaitFlagOp, hivm::PipeBarrierOp,
+            hivm::GetBufOp, hivm::RlsBufOp>(op);
+    features.hasCrossCoreSync |=
+        isa<hivm::SyncBlockOp, hivm::SyncBlockSetOp, hivm::SyncBlockWaitOp,
+            hivm::SyncIntraBlockSetOp, hivm::SyncIntraBlockWaitOp>(op);
+    features.hasMultiBuffer |=
+        isa<annotation::MarkOp>(op) && op->hasAttr(hivm::MultiBufferAttr::name);
+    features.usesPipeline |=
+        isa<scf::ForOp>(op) && op->hasAttr(hivm::CVPipelinedLoopAttr::name);
+    if (auto flagged = dyn_cast<hivm::UnitFlagEnabledInterface>(op)) {
+      if (auto modes = flagged.getUnitFlagModes())
+        features.hasUnitFlag |=
+            llvm::any_of(*modes, [](hivm::UnitFlagAttr attr) {
+              auto mode = attr.getUnitFlag();
+              return mode == hivm::UNIT_FLAG::ENABLED_WITH_UPDATE ||
+                     mode == hivm::UNIT_FLAG::ENABLED_WITHOUT_UPDATE;
+            });
+    }
+  });
+  return features;
+}
+
 } // namespace
 
 void init_tla_builder(py::module &&m) {
+  py::class_<TLAKernelFeatures>(m, "TLAKernelFeatures", py::module_local())
+      .def_readonly("has_intra_core_sync", &TLAKernelFeatures::hasIntraCoreSync)
+      .def_readonly("has_cross_core_sync", &TLAKernelFeatures::hasCrossCoreSync)
+      .def_readonly("has_unit_flag", &TLAKernelFeatures::hasUnitFlag)
+      .def_readonly("has_multi_buffer", &TLAKernelFeatures::hasMultiBuffer)
+      .def_readonly("uses_pipeline", &TLAKernelFeatures::usesPipeline);
+  m.def("get_tla_kernel_features", &getTLAKernelFeatures, py::arg("module"));
   m.def("lower_tla_sync_all", &lowerTlaSyncAll, py::arg("module"));
   py::class_<TLABuilder, AscendNPUIROpBuilder>(
       m, "tla_builder", py::module_local(), py::dynamic_attr())

@@ -45,6 +45,18 @@ def _stamp_tla_mode(module):
     module.set_attr("hacc.mode", builder.parse_attr('"tla"'))
 
 
+def lower_for_backend(module, options):
+    from triton._C.libtriton.ascend import ir as ascend_ir
+
+    from ._options import infer_sync_options
+
+    extra = options.npuir_extra_options
+    features = ascend_ir.get_tla_kernel_features(module)
+    inferred = infer_sync_options(features, options.disable_auto_inject_block_sync, extra)
+    lower_ttir(module, module.context)
+    return inferred + extra
+
+
 def lower_ttir(module, context, output_dir=None):
     """Run the TLA-specific lowering prefix on a TLA TTIR module.
 

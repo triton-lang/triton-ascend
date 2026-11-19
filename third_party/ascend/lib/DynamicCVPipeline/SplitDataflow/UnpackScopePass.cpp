@@ -27,6 +27,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/LogicalResult.h"
 
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/Pass/Pass.h"
@@ -46,6 +47,31 @@ using namespace CVPipeline;
 
 namespace {
 
+/// Stamps `attrs` on `op` and on every op nested in its regions.
+///
+/// The scope tags describe the packed unit, not one op: `block_id` names the
+/// block it runs in, `core_type` names the core.
+/// Readers look at an op's own attributes, never at an enclosing op's.
+/// Pre: a moved-out loop keeps its own region, so its body must be stamped
+/// too, otherwise later matches read that work as unclassified.
+static void stampUnitAttrs(Operation *op, ArrayRef<NamedAttribute> attrs) {
+  for (const NamedAttribute &attr : attrs) {
+    op->setAttr(attr.getName(), attr.getValue());
+  }
+  // A linalg region holds the op's payload, not a unit of work.
+  // The classifier never tags those nested ops either.
+  if (op->getDialect() && isa<linalg::LinalgDialect>(op->getDialect())) {
+    return;
+  }
+  for (Region &region : op->getRegions()) {
+    for (Block &block : region) {
+      for (Operation &nested : block) {
+        stampUnitAttrs(&nested, attrs);
+      }
+    }
+  }
+}
+
 class UnpackScopePass
     : public PassWrapper<UnpackScopePass, OperationPass<ModuleOp>> {
 public:
@@ -58,43 +84,36 @@ public:
     if (hasFallbackAttr(module)) {
       return;
     }
-    // Collect first, then unpack: `unpackScopeOp` moves the body ops out and
-    // erases the scope, so mutating inside a `walk` callback would invalidate
-    // the walk's own traversal stack. The default post-order visits a nested
-    // scope before its parent, and unpacking the inner one only moves ops out
-    // of the outer body, so every collected pointer stays valid.
+    // Collect first, then unpack: `unpackScopeOp` erases the scope, so
+    // mutating inside a `walk` callback would invalidate its traversal stack.
+    // A post-order walk visits a nested scope before its parent, and unpacking
+    // the inner one only moves ops out of the outer body.
     SmallVector<scope::ScopeOp> scopes;
     module.walk([&](scope::ScopeOp scopeOp) { scopes.push_back(scopeOp); });
 
     for (scope::ScopeOp scopeOp : scopes) {
       llvm::SmallVector<Operation *> unpackedOps;
-      auto attrs = scopeOp->getAttrs();
+      // `ssbuffer.load` marks the packed unit, a property of the scope.
+      // The unpacked ops must not inherit it.
+      SmallVector<NamedAttribute> attrs;
+      for (const NamedAttribute &attr : scopeOp->getAttrs()) {
+        if (attr.getName() == kScopeLoadAttr) {
+          continue;
+        }
+        attrs.push_back(attr);
+      }
       if (unpackScopeOp(scopeOp, &unpackedOps).failed()) {
         LOG_DEBUG("Failed to unpack scopeOp: " << scopeOp << "\n");
         setFallbackAttr(module, ERRCODE_FAILED);
         return;
       }
-      for (auto *op : unpackedOps) {
-        // Nothing stamps `block_id` on the ops inside a scope body, so their
-        // attrs are either empty or exactly the scope's `block_id`. Both are a
-        // subset of the scope's attrs, hence the whole AttributeArray can be
-        // shared instead of copied per attribute. The scope is trusted to carry
-        // `block_id`; a scope without it is an upstream bug and is reported by
-        // the passes that consume `block_id` afterwards.
-        auto canReuseAttrs = op->getAttrs().size() == 0;
-        if (op->getAttrs().size() == 1) {
-          canReuseAttrs = op->hasAttr(kBlockId);
-        }
-        if (canReuseAttrs) {
-          // Empty/reusable attrs: share the global attr list (in MLIRContext).
-          op->setAttrs(attrs);
-        } else {
-          for (const auto attr : attrs) {
-            op->setAttr(attr.getName(), attr.getValue());
-          }
-        }
+      // The scope is trusted to carry `block_id`: a scope without it is an
+      // upstream bug, reported by the passes that consume `block_id` later.
+      for (Operation *op : unpackedOps) {
+        stampUnitAttrs(op, attrs);
       }
     }
+    LOG_DEBUG("After UnpackScopeOp : " << module << "\n");
   }
 
   [[nodiscard]] llvm::StringRef getArgument() const final {

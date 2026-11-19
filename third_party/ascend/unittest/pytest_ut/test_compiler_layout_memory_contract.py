@@ -699,7 +699,7 @@ def _run_make_ttir_with_recorded_graph_options(compiler, monkeypatch, options):
         compiler,
         "ascend",
         SimpleNamespace(passes=SimpleNamespace(ttir=SimpleNamespace(
-            add_graph_optimize=lambda _pm, **kwargs: graph_calls.append(kwargs)))),
+            add_graph_optimize=lambda _pm, **kwargs: (events.append("graph_optimize"), graph_calls.append(kwargs))))),
     )
 
     assert compiler.make_ttir(module, {}, options) is module
@@ -710,6 +710,7 @@ def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_modu
     options = SimpleNamespace(
         enable_graph_optimize=True,
         target_arch="Ascend910B1",
+        compile_on_910_95=False,
         compile_mode="simt_only",
         debug=False,
     )
@@ -719,12 +720,34 @@ def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_modu
     assert graph_calls == [{
         "ub_capacity_bytes": 192 * 1024 * 80 // 100,
         "compile_mode": "simt_only",
+        "compile_on_910_95": False,
         "mapping_l0a_capacity_bytes": 64 * 1024,
         "mapping_l0b_capacity_bytes": 64 * 1024,
         "mapping_l0c_capacity_bytes": 128 * 1024,
         "l0_safety_percent": 80,
+        "core_num": 0,
     }]
     assert events[-1] == "run_row"
+    assert events.index(("loop_unroll", (), {})) < events.index("graph_optimize")
+
+
+def test_make_ttir_disables_graph_pipeline(compiler_module, monkeypatch):
+    options = SimpleNamespace(enable_graph_optimize=False, debug=False)
+    events, graph_calls = _run_make_ttir_with_recorded_graph_options(compiler_module, monkeypatch, options)
+    assert "graph_optimize" not in events
+    assert graph_calls == []
+
+
+@pytest.mark.parametrize(
+    ("arch", "expected_enabled"),
+    (("Ascend910B1", False), ("Ascend910_9581", True), ("Ascend950PR_9579", True)),
+)
+def test_make_ttir_derives_radix_rewrite_gate_from_target(compiler_module, monkeypatch, arch, expected_enabled):
+    options = _parse_options(compiler_module, arch)
+    _, graph_calls = _run_make_ttir_with_recorded_graph_options(compiler_module, monkeypatch, options)
+
+    assert len(graph_calls) == 1
+    assert graph_calls[0]["compile_on_910_95"] is expected_enabled
 
 
 @pytest.mark.skip(reason="The case is not supported on Ascend 950, skipping for now. Will be fixed in future.")
@@ -1039,6 +1062,77 @@ def test_ttir_to_linalg_merge_concat_load_buffer_is_a5_only(
     assert events[-1] == "run_row"
 
 
+@pytest.mark.parametrize(
+    ("arch", "expected_calls"),
+    (
+        ("Ascend910_9581", 1),
+        ("Ascend910_9691", 0),
+        ("Ascend960", 0),
+        ("Ascend910B1", 0),
+    ),
+)
+@pytest.mark.parametrize("target_key", ("target_arch", "arch"))
+def test_ttir_to_linalg_dynamic_cv_pipeline_is_a5_only(
+    compiler_module,
+    monkeypatch,
+    arch,
+    expected_calls,
+    target_key,
+):
+    events = []
+    dynamic_cv_calls = []
+
+    def noop(*_args, **_kwargs):
+        return None
+
+    ttir_passes = SimpleNamespace(
+        add_triton_control_flow_opt=noop,
+        add_triton_to_structure=noop,
+        add_discrete_mask_access_conversion=noop,
+        add_triton_to_annotation=noop,
+        add_triton_to_unstructure=noop,
+        add_triton_to_hivm=noop,
+        add_triton_to_hfusion=noop,
+        add_triton_to_llvm=noop,
+        add_bubble_up_operation=noop,
+        add_triton_to_linalg=noop,
+        add_merge_concat_load_buffer=noop,
+        set_enable_buffer_insert_optimization=noop,
+        add_dynamic_cv_pipeline=lambda _pm, _compile_on_910_95: dynamic_cv_calls.append(arch),
+    )
+    monkeypatch.setattr(
+        compiler_module,
+        "ir",
+        SimpleNamespace(pass_manager=lambda _context: _FakePassManager(events)),
+    )
+    monkeypatch.setattr(
+        compiler_module,
+        "ascend",
+        SimpleNamespace(passes=SimpleNamespace(ttir=ttir_passes)),
+    )
+    monkeypatch.setattr(compiler_module, "distributed", None)
+    monkeypatch.setattr(compiler_module, "_serialize_module", lambda _mod, _opt: "module {}")
+    monkeypatch.setattr(compiler_module, "_is_auto_map_parallel_blocks_enabled", lambda: False)
+    monkeypatch.setattr(compiler_module, "_get_auto_blockify_blacklist_reasons", lambda _ttir: [])
+    monkeypatch.setattr(compiler_module, "_adjust_metadata_by_module_result", noop)
+    monkeypatch.setattr(compiler_module, "_export_program_grid_metadata", noop)
+
+    metadata = {
+        "compile_on_910_95": arch.startswith(("Ascend910_95", "Ascend950", "Ascend910_96", "Ascend960")),
+        "enable_dynamic_cv_pipeline": True,
+        target_key: arch,
+    }
+    options = SimpleNamespace(
+        debug=False,
+        compile_mode="simd",
+        target_arch=arch,
+        enable_tla_mode=False,
+    )
+
+    assert compiler_module.ttir_to_linalg(_FakeModule(events), metadata, options) == "module {}"
+    assert dynamic_cv_calls == [arch] * expected_calls
+
+
 @pytest.mark.parametrize("arch", ["Ascend910B4", "Ascend910_9391", "Ascend950PR"])
 @pytest.mark.parametrize("mode", [
     {"gm": 4, "l1": 2, "l0c": 1, "ub": 2},
@@ -1093,10 +1187,16 @@ def test_multibuffer_legacy_options_are_preserved_without_ta_warnings(compiler_m
     assert options.multibuffer is True
 
 
-def _capture_multibuffer_command(compiler, monkeypatch, is_a5, requested, derived=None):
+def _capture_multibuffer_command(compiler, monkeypatch, is_a5, requested, derived=None, target_object_arch=None,
+                                 metadata_arch_entry=None):
     options = _parse_options(compiler, "Ascend950PR" if is_a5 else "Ascend910B4", requested)
-    metadata = dict(options.__dict__, target=SimpleNamespace(arch=options.target_arch),
+    metadata = dict(options.__dict__, target=SimpleNamespace(arch=target_object_arch or options.target_arch),
                     hash="layout-memory-contract-test", mix_mode="mix", bitcodes=None, auto_blockify_enabled=False)
+    if metadata_arch_entry is not None:
+        metadata.pop("target_arch", None)
+        metadata.pop("arch", None)
+        key, value = metadata_arch_entry
+        metadata[key] = value
     metadata.update(derived or {})
     monkeypatch.setattr(compiler, "_parse_linalg_metadata", lambda source, meta: (source, meta))
     monkeypatch.setattr(compiler, "_finalize_program_launch_policy", lambda *_args: None)
@@ -1125,6 +1225,29 @@ def _capture_multibuffer_command(compiler, monkeypatch, is_a5, requested, derive
         compile_fn("module {}", metadata, options)
     assert len(commands) == 1
     return commands[0]
+
+
+@pytest.mark.parametrize("metadata_arch_key", ("target_arch", "arch"))
+@pytest.mark.parametrize(("metadata_arch", "expected"), (
+    ("Ascend950PR", True),
+    ("Ascend910_9691", False),
+))
+def test_dynamic_cv_bisheng_option_uses_metadata_arch(
+    compiler_module,
+    monkeypatch,
+    metadata_arch_key,
+    metadata_arch,
+    expected,
+):
+    command = _capture_multibuffer_command(
+        compiler_module,
+        monkeypatch,
+        True,
+        {"enable_dynamic_cv_pipeline": True},
+        target_object_arch="Ascend910B4",
+        metadata_arch_entry=(metadata_arch_key, metadata_arch),
+    )
+    assert ("--enable-vf-operand-substitution=True" in command) is expected
 
 
 @pytest.mark.parametrize("is_a5", [False, True])

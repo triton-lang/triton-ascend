@@ -29,9 +29,11 @@
 #include <dlfcn.h>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -519,17 +521,47 @@ extern "C" void *triton_allocate_workspace(uint64_t size, void **handle) {
   return retainTensor(std::move(tensor), handle, "workspace", size);
 }
 
+namespace {
+std::mutex g_raw_workspace_mutex;
+std::unordered_set<void *> g_raw_workspaces;
+} // namespace
+
 extern "C" void *triton_allocate_workspace_on_stream(uint64_t size,
                                                      void *stream) {
   // The caching allocator only reuses a freed block on its allocation stream.
   // Use the launch stream explicitly: it can differ from the submitting
   // thread's current stream, and the owner is released before device
   // completion.
-  return c10_npu::NPUCachingAllocator::raw_alloc_with_stream(
-      size, reinterpret_cast<aclrtStream>(stream));
+  if (c10_npu::NPUCachingAllocator::get()->initialized()) {
+    return c10_npu::NPUCachingAllocator::raw_alloc_with_stream(
+        size, reinterpret_cast<aclrtStream>(stream));
+  }
+  // The AOT C launcher loads npu_utils into a plain C process where the
+  // torch_npu caching allocator was never initialized. Fall back to raw
+  // CANN allocation; the registry lets release pair the matching free.
+  void *data = nullptr;
+  aclError ret = aclrtMalloc(&data, size, ACL_MEM_MALLOC_HUGE_FIRST);
+  if (ret != ACL_SUCCESS || data == nullptr) {
+    return nullptr;
+  }
+  std::lock_guard<std::mutex> lock(g_raw_workspace_mutex);
+  g_raw_workspaces.insert(data);
+  return data;
 }
 
 extern "C" void triton_release_workspace(void *data) {
+  if (data == nullptr) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_raw_workspace_mutex);
+    auto it = g_raw_workspaces.find(data);
+    if (it != g_raw_workspaces.end()) {
+      g_raw_workspaces.erase(it);
+      aclrtFree(data);
+      return;
+    }
+  }
   c10_npu::NPUCachingAllocator::raw_delete(data);
 }
 

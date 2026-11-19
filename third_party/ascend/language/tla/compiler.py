@@ -107,6 +107,8 @@ def lower_ttir(module, context, output_dir=None):
     if not module.verify():
         raise RuntimeError("tla_to_linalg produced invalid IR")
     _infer_tla_kernel_mode(module, context)
+    from triton._C.libtriton.ascend import ir as ascend_ir
+    ascend_ir.lower_tla_sync_all(module)
     if output_dir is not None:
         (output_dir / "01_linalg.mlir").write_text(str(module))
     check_ttadapter(module)
@@ -191,11 +193,13 @@ def check_ttadapter(module):
     # Triton dialect. This does not enable SIMT scopes or a Tile lowering path.
     converted_ops = {
         "tt.func", "tt.call", "tt.return", "tt.addptr", "tt.ptr_to_int", "tt.get_program_id", "tt.get_num_programs",
-        "tt.assert", "tt.load"
+        "tt.assert", "tt.load", "tt.clampf"
     }
     forbidden = [op.get_name() for op in operations if op.get_name() in converted_ops]
     if forbidden:
         raise ValueError(f"unconverted TLA adapter operations: {forbidden}")
+    if any(op.get_name() == "hivm.hir.sync_block" for op in operations):
+        raise ValueError("TLA global barriers must be expanded before npuir")
     entries = _kernel_entries(module)
     if len(entries) != 1:
         raise ValueError("expected exactly one public func.func kernel entry")

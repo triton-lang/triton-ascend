@@ -3,7 +3,7 @@
 Stages are driven by env ``TLA_TEST_STAGE`` (default ``all``):
 - ``ir``      : offline-compile the HIVM IR finally handed to npuir and
                 assert key structure (hivm.hir.load/store, multi_buffer,
-                pointer_cast, ...); no NPU needed.
+                descriptor views, ...); no NPU needed.
 - ``compile`` : on top of ``ir``, full compile and confirm .o/.npubin
                 artifacts; needs Ascend driver (device or op simulator).
 - ``run``     : on top of ``compile``, real-device launch + accuracy; needs NPU.

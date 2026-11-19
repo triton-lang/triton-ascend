@@ -21,12 +21,14 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/SyncAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -59,31 +61,6 @@ static constexpr const char *ssbufferCoreTypeVectorAttr = "VECTOR";
 static constexpr int ND_SHAPE_LENGTH = 2;
 static constexpr int SHAPE_1D_LENGTH = 1;
 static constexpr int constantIntType = 32;
-
-// Helper: ssbuffer.core_type
-llvm::StringRef getSsbufferCoreType(Operation *op) {
-  if (auto attr = op->getAttrOfType<mlir::StringAttr>(CVPipeline::kCoreType)) {
-    return attr.getValue();
-  }
-  return "";
-}
-
-// Helper: Get CoreType from op and index
-llvm::StringRef getCoreTypeWithIndex(Operation *op, int index) {
-  llvm::StringRef typeStr = getSsbufferCoreType(op);
-  if (typeStr.contains(", ")) {
-    llvm::SmallVector<llvm::StringRef> types;
-    typeStr.split(types, ", ", -1, false);
-    if (index < types.size()) {
-      return types[index].trim();
-    }
-    LOG_DEBUG("Warning: Core type string has multiple types but value is not "
-              "an OpResult or index out of range.\n");
-    return "";
-  }
-
-  return typeStr;
-}
 
 void DataDependencyAnalysisPass::updateCoreTypeAtIndex(
     Operation *op, int index, llvm::StringRef newCoreType) {
@@ -132,11 +109,57 @@ bool DataDependencyAnalysisPass::isControlFlowOp(mlir::Operation *op) {
          isa<scf::YieldOp, scf::ConditionOp>(op);
 }
 
+bool DataDependencyAnalysisPass::isUsedByMatmulAB(Operation *op) {
+  SmallVector<Value> worklist(op->getResults().begin(), op->getResults().end());
+  llvm::DenseSet<Value> visited;
+
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!visited.insert(value).second) {
+      continue;
+    }
+
+    for (OpOperand &use : value.getUses()) {
+      Operation *user = use.getOwner();
+
+      if (auto loopOp = dyn_cast<LoopLikeOpInterface>(user)) {
+        Value regionIterArg = loopOp.getTiedLoopRegionIterArg(&use);
+        if (regionIterArg) {
+          worklist.push_back(regionIterArg);
+        }
+        continue;
+      }
+
+      if (getSsbufferCoreType(user) == ssbufferCoreTypeVectorAttr) {
+        continue;
+      }
+
+      if (isa<linalg::MatmulOp>(user)) {
+        if (use.getOperandNumber() < 2) {
+          return true;
+        }
+      }
+
+      for (Value result : user->getResults()) {
+        worklist.push_back(result);
+      }
+    }
+  }
+
+  return false;
+}
+
 bool DataDependencyAnalysisPass::isCubeAndVectorOp(mlir::Operation *op) {
-  if (isa<tensor::EmptyOp, linalg::FillOp>(op)) {
+  if (!isa<tensor::EmptyOp, linalg::FillOp>(op)) {
+    return false;
+  }
+  if (getSsbufferCoreType(op) == ssbufferCoreTypeCubeAttr) {
     return true;
   }
-  return false;
+  if (isUsedByMatmulAB(op)) {
+    return false;
+  }
+  return true;
 }
 
 bool DataDependencyAnalysisPass::isValidShapeForDependency(mlir::Value value) {
@@ -168,6 +191,18 @@ bool DataDependencyAnalysisPass::isValid1DValueForDependency(
     return true;
   }
   return false;
+}
+
+// A FIXPIPE output cast may produce a non-ND tensor. Accept it as a dependency
+// only when the shared capability matcher proves the full producer chain and
+// OpClassifier kept every folded operation on CUBE.
+static bool isFixpipeOutputCastValue(mlir::Value value) {
+  auto info = CVPipeline::matchFixpipeOutputCast(value.getDefiningOp());
+  return info && info->writesNZ &&
+         getSsbufferCoreType(info->matmulOp) == ssbufferCoreTypeCubeAttr &&
+         llvm::all_of(info->foldedOps, [](Operation *op) {
+           return getSsbufferCoreType(op) == ssbufferCoreTypeCubeAttr;
+         });
 }
 
 // Check if a value is only used by transpose ops whose users are all vector
@@ -207,7 +242,7 @@ bool DataDependencyAnalysisPass::isValidValueForDependency(mlir::Value value) {
     return true;
   }
   if (!isValidShapeForDependency(value)) {
-    return false;
+    return isFixpipeOutputCastValue(value);
   }
 
   Operation *defOp = value.getDefiningOp();
@@ -346,6 +381,44 @@ void DataDependencyAnalysisPass::createBlockInfoMap(DataDependencyInfo &info) {
   if (!currentOps.empty()) {
     collectBlockInfo(info, currentId, currentOps);
   }
+
+  if (!hasOuterMainLoop(module))
+    return;
+
+  // An event guard can contain rematerialized scalar operations tagged for
+  // another stage. A postorder walk then sees several runs of the same ID;
+  // retaining only the last run loses its matmul and cross-core edges.
+  module.walk([&](scf::ForOp loop) {
+    if (!loop->hasAttr(kOuterEventControlCount))
+      return;
+    llvm::DenseMap<int, SmallVector<Operation *>> stages;
+    for (Operation &root : loop.getBody()->without_terminator()) {
+      if (auto id = getOpBlockId(&root))
+        stages.try_emplace(*id);
+    }
+    for (Operation &root : loop.getBody()->without_terminator()) {
+      root.walk<WalkOrder::PreOrder>([&](Operation *op) {
+        auto id = getOpBlockId(op);
+        auto it = id ? stages.find(*id) : stages.end();
+        if (it != stages.end())
+          it->second.push_back(op);
+      });
+    }
+    for (auto &[id, ops] : stages) {
+      // A direct root represents the stage's region for sync placement.
+      auto root = llvm::find_if(
+          ops, [&](Operation *op) { return op->getBlock() == loop.getBody(); });
+      assert(root != ops.end());
+      std::iter_swap(ops.begin(), root);
+      collectBlockInfo(info, id, ops);
+      BlockInfo &stage = info.getBlockInfoMap()[id];
+      stage.isCube = llvm::any_of(ops, [](Operation *op) {
+        return getSsbufferCoreType(op).contains(ssbufferCoreTypeCubeAttr);
+      });
+      stage.isControl = llvm::all_of(
+          ops, [this](Operation *op) { return isControlFlowOp(op); });
+    }
+  });
 }
 
 mlir::Operation *DataDependencyAnalysisPass::createBlockInfoConstOp(
@@ -1211,6 +1284,16 @@ void DataDependencyAnalysisPass::sortDependencies(
                 if (aConsOpOrder != bConsOpOrder) {
                   return aConsOpOrder < bConsOpOrder;
                 }
+
+                auto *aProdOp = a.value.getDefiningOp();
+                auto *bProdOp = b.value.getDefiningOp();
+                if (aProdOp && bProdOp) {
+                  unsigned aProdOpOrder = opOrder.lookup(aProdOp);
+                  unsigned bProdOpOrder = opOrder.lookup(bProdOp);
+                  if (aProdOpOrder != bProdOpOrder) {
+                    return aProdOpOrder < bProdOpOrder;
+                  }
+                }
               }
               return false;
             });
@@ -1258,6 +1341,8 @@ void DataDependencyAnalysisPass::runOnOperation() {
   sortDependencies(info.getC2VDependencies(), module);
   sortDependencies(info.getC2CDependencies(), module);
   sortDependencies(info.getIntraC2CDependencies(), module);
+
+  analyzeRedundantEdges(info, module);
   analyzeSyncReuse(info, module);
 
   info.setValid(true);

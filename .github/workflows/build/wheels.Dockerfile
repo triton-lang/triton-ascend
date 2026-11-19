@@ -1,5 +1,5 @@
 # Build triton-ascend wheels inside a manylinux container.
-# Used by wheels.yml via docker/build-push-action@v7 — no Docker daemon needed
+# Used by ascend-wheels.yml via docker/build-push-action@v7 — no Docker daemon needed
 # on the runner; buildx talks to remote buildkitd.
 #
 # Layer order matters for the registry cache used by wheels.yml: everything
@@ -16,6 +16,15 @@ ARG PYTHON_VERSION=cp310
 ARG TRITON_WHEEL_VERSION_SUFFIX=+dev
 ARG BUILD_DATE=00000000
 ARG TRITON_BUILD_NPUIR=OFF
+# TD (Triton-distributed-ascend) defaults to ON for CI wheels: setup_patch.py
+# clones the pinned Triton-distributed-ascend revision and bundles the
+# triton_dist Python package plus the TritonDistributed compiler plugin into
+# the wheel, matching the TRITON_BUILD_TD=ON build in
+# integration-tests-ascend.yml. Without it, installing a CI wheel over an
+# install whose wheel bundled triton_dist deletes the package (pip uninstall
+# follows the old RECORD, leaving empty namespace dirs behind) and breaks
+# downstream imports like triton_dist.language.extra.libshmem_device.
+ARG TRITON_BUILD_TD=ON
 ARG ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.2.0-beta.2
 # AscendNPU-IR revision to build against: "stable" (branch HEAD — nightly /
 # regular PR wheels) or an exact 40-hex commit SHA (the Build-Pinned-Wheels
@@ -43,6 +52,7 @@ RUN export PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local
 # ---------------------------------------------------------------------------
 ENV TRITON_BUILD_WITH_CLANG_LLD=true \
     TRITON_BUILD_PROTON=OFF \
+    TRITON_BUILD_TD=${TRITON_BUILD_TD} \
     TRITON_WHEEL_NAME=triton-ascend \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
     TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX}${BUILD_DATE} \

@@ -31,6 +31,19 @@ from triton.compiler.compiler import make_backend
 
 
 @triton.jit
+def _masked_load(X, M, Y, N, REVERSE: tl.constexpr, BLOCK: tl.constexpr):
+    offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    boundary = offsets < N
+    loaded = tl.load(M + offsets, mask=boundary, other=False)
+    mask = loaded & boundary if REVERSE else boundary & loaded
+    tl.static_assert(loaded.dtype == M.dtype.element_ty)
+    tl.static_assert(mask.dtype == loaded.dtype)
+    value = tl.load(X + offsets, mask=mask, other=0.0)
+    tl.static_assert(mask.dtype == loaded.dtype)
+    tl.store(Y + offsets, value, mask=boundary)
+
+
+@triton.jit
 def _bool_mask_consumer(X, M, Y, N, OP: tl.constexpr, BLOCK: tl.constexpr):
     offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
     boundary = offsets < N
@@ -76,6 +89,24 @@ def _frontend(fn, signature, constexprs, arch="Ascend950PR_9579"):
                             context)
     assert module.verify()
     return module
+
+
+@pytest.mark.parametrize("arch,reverse", [("Ascend910B3", False), ("Ascend950PR_9579", True)])
+def test_integer_and_is_not_a_load_mask(arch, reverse):
+    signature = {"X": "*fp32", "M": "*i8", "Y": "*fp32", "N": "i32", "REVERSE": "constexpr", "BLOCK": "constexpr"}
+    with pytest.raises(RuntimeError, match="error encountered during parsing"):
+        _frontend(_masked_load, signature, {"REVERSE": reverse, "BLOCK": 1024}, arch)
+
+
+@pytest.mark.functiontest
+@pytest.mark.parametrize("size,reverse", [(1024, False), (510, True)])
+def test_bool_and_load_npu(size, reverse):
+    x_cpu = torch.arange(size, dtype=torch.float32) + 0.25
+    mask_cpu = torch.arange(size) % 3 != 1
+    x, mask = x_cpu.npu(), mask_cpu.npu()
+    output = torch.empty_like(x)
+    _masked_load[(triton.cdiv(size, 1024), )](x, mask, output, size, REVERSE=reverse, BLOCK=1024)
+    torch.testing.assert_close(output.cpu(), torch.where(mask_cpu, x_cpu, 0.0), rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("arch", ["Ascend910B3", "Ascend950PR_9579"])

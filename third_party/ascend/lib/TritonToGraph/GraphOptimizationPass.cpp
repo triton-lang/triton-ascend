@@ -20,6 +20,8 @@
  * THE SOFTWARE.
  */
 
+#include "Rules/FoldHistogramParking.h"
+#include "Rules/NarrowUnsignedTensor.h"
 #include "TritonToGraph/GraphOptimizationContext.h"
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/Passes.h"
@@ -31,6 +33,7 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -59,9 +62,10 @@ namespace triton {
 namespace cfg {
 namespace {
 
-constexpr std::array<GraphOptimizationRulePhase, 11> kRulePhases = {
+constexpr std::array<GraphOptimizationRulePhase, 12> kRulePhases = {
     GraphOptimizationRulePhase::DiagonalMaskRemoval,
     GraphOptimizationRulePhase::ConvertModuloToMask,
+    GraphOptimizationRulePhase::SelectedBlockScan,
     GraphOptimizationRulePhase::ProgramMapping,
     GraphOptimizationRulePhase::PersistentTaskMapping,
     GraphOptimizationRulePhase::LoadStoreTranspose,
@@ -100,9 +104,31 @@ bool isRuleEnabled(GraphOptimizationRuleMask ruleMask,
   return (ruleMask & getGraphOptimizationRuleMask(ruleId)) != 0;
 }
 
-constexpr bool requiresProgramMappingCleanup(GraphOptimizationRuleId ruleId) {
+constexpr bool requiresPostRewriteCleanup(GraphOptimizationRuleId ruleId) {
   return ruleId == GraphOptimizationRuleId::IndependentAxisTensorize ||
-         ruleId == GraphOptimizationRuleId::PersistentTaskStripMining;
+         ruleId == GraphOptimizationRuleId::PersistentTaskStripMining ||
+         ruleId == GraphOptimizationRuleId::SelectedBlockScan ||
+         ruleId == GraphOptimizationRuleId::QueryRowBatching;
+}
+
+// Keep the pre-graph canonicalization limited to operations that its two
+// patterns can rewrite. A module-wide greedy driver also folds and erases
+// unrelated dead operations before graph analyses observe them. Some graph
+// rules intentionally use that visibility to reject incompatible IR.
+bool isNarrowUnsignedTensorCandidate(Operation *op) {
+  if (op->getNumResults() != 1 || op->getNumOperands() < 2 ||
+      !isa<arith::SelectOp, arith::AndIOp, arith::OrIOp, arith::XOrIOp,
+           arith::ShRSIOp, arith::ShRUIOp, arith::CmpIOp>(op))
+    return false;
+  auto type = dyn_cast<RankedTensorType>(op->getOperand(0).getType());
+  if (isa<arith::SelectOp>(op))
+    type = dyn_cast<RankedTensorType>(op->getResult(0).getType());
+  return type && type.getElementType().isInteger(64);
+}
+
+bool isFoldHistogramParkingCandidate(Operation *op) {
+  auto sub = dyn_cast<arith::SubIOp>(op);
+  return sub && isa_and_nonnull<HistogramOp>(sub.getLhs().getDefiningOp());
 }
 
 constexpr bool isPlanHigherPriority(unsigned lhsBenefit, unsigned lhsOrder,
@@ -134,11 +160,14 @@ public:
     this->mappingL0BCapacityBytes = options.mappingL0BCapacityBytes;
     this->mappingL0CCapacityBytes = options.mappingL0CCapacityBytes;
     this->l0SafetyPercent = options.l0SafetyPercent;
+    this->coreNum = options.coreNum;
     this->compileMode = options.compileMode;
+    this->compileOn91095 = options.compileOn91095;
   }
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<arith::ArithDialect, tensor::TensorDialect>();
+    registry.insert<arith::ArithDialect, tensor::TensorDialect,
+                    triton::TritonDialect>();
   }
 
   void runOnOperation() override;
@@ -172,6 +201,7 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   const uint64_t cliMappingL0BCapacityBytes = this->mappingL0BCapacityBytes;
   const uint64_t cliMappingL0CCapacityBytes = this->mappingL0CCapacityBytes;
   const uint64_t cliL0SafetyPercent = this->l0SafetyPercent;
+  const uint64_t cliCoreNum = this->coreNum;
 
   if (cliRuleMask > std::numeric_limits<GraphOptimizationRuleMask>::max() ||
       !isValidGraphOptimizationRuleMask(
@@ -233,6 +263,12 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
     return failure();
   }
 
+  if (cliCoreNum > std::numeric_limits<unsigned>::max()) {
+    getOperation().emitError()
+        << "graph-optimize core-num is out of range: " << cliCoreNum;
+    return failure();
+  }
+
   const auto compileMode = triton::ascend::parseCompileMode(this->compileMode);
   if (!compileMode) {
     getOperation().emitError()
@@ -257,7 +293,9 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   options.mappingL0CCapacityBytes =
       static_cast<unsigned>(cliMappingL0CCapacityBytes);
   options.l0SafetyPercent = static_cast<unsigned>(cliL0SafetyPercent);
+  options.coreNum = static_cast<unsigned>(cliCoreNum);
   options.compileMode = this->compileMode;
+  options.compileOn91095 = this->compileOn91095;
   options.independentAxisTensorize.enabledForCompileMode =
       *compileMode != triton::ascend::CompileMode::SimtOnly;
   options.independentAxisTensorize.iatAndPtsmEnabled =
@@ -277,6 +315,32 @@ void GraphOptimizePass::runOnOperation() {
   if (failed(getStableOptions(options))) {
     signalPassFailure();
     return;
+  }
+
+  // The narrowing and parked-histogram templates are valid only for
+  // 910_95/950 lowering. Keep A3 on its established TTIR and constrain the
+  // rewrite scope so unrelated dead operations remain visible to later graph
+  // analyses.
+  if (options.compileOn91095) {
+    SmallVector<Operation *> preGraphRewriteCandidates;
+    getOperation().walk([&](Operation *op) {
+      if (isNarrowUnsignedTensorCandidate(op) ||
+          isFoldHistogramParkingCandidate(op))
+        preGraphRewriteCandidates.push_back(op);
+    });
+    if (!preGraphRewriteCandidates.empty()) {
+      RewritePatternSet patterns(&getContext());
+      patterns.add<narrow_unsigned_tensor::Narrow, FoldHistogramParking>(
+          &getContext());
+      FrozenRewritePatternSet frozenPatterns(std::move(patterns));
+      GreedyRewriteConfig config;
+      config.setStrictness(GreedyRewriteStrictness::ExistingAndNewOps);
+      if (failed(applyOpPatternsGreedily(preGraphRewriteCandidates,
+                                         frozenPatterns, config))) {
+        signalPassFailure();
+        return;
+      }
+    }
   }
 
   ModuleOp module = getOperation();
@@ -309,11 +373,19 @@ void GraphOptimizePass::runOnOperation() {
   }
 
   for (triton::FuncOp function : module.getOps<triton::FuncOp>()) {
-    const ResourceSnapshot resources = ResourceSnapshot::fromExplicit(
+    ResourceSnapshot resources = ResourceSnapshot::fromExplicit(
         options.mappingUBCapacityBytes, options.ubSafetyPercent,
         options.reservedUBBytes, options.mappingL0ACapacityBytes,
         options.mappingL0BCapacityBytes, options.mappingL0CCapacityBytes,
         options.l0SafetyPercent);
+    // The physical core count comes only from the pass option (the backend
+    // injects it per kernel execution mode).  The snapshot stores it so the
+    // row-count policy reads it from there and the rules need no separate
+    // query interface.
+    // The physical core count comes from the pass option (the backend injects
+    // it per kernel execution mode); the snapshot carries it so the row-count
+    // policy reads one resource interface instead of a rule-private query.
+    resources.coreNum = options.coreNum;
     GraphOptimizationContext context(function, resources);
     unsigned rewriteCount = 0;
 
@@ -392,7 +464,7 @@ void GraphOptimizePass::runOnOperation() {
           signalPassFailure();
           return;
         }
-        if (requiresProgramMappingCleanup(appliedRuleId) &&
+        if (requiresPostRewriteCleanup(appliedRuleId) &&
             failed(runStructuralCleanup())) {
           selectedPlan.reset();
           plans.clear();
@@ -582,6 +654,14 @@ void populateBuiltinGraphOptimizationRules(
                     GraphOptimizationRuleId::ContiguousBlockAccessFormation)) {
     rules.push_back(createContiguousBlockAccessFormationRule(
         options.contiguousBlockAccessFormation));
+  }
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::SelectedBlockScan)) {
+    rules.push_back(createSelectedBlockScanRule());
+  }
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::QueryRowBatching)) {
+    rules.push_back(createQueryRowBatchingRule());
   }
   const auto compileMode =
       triton::ascend::parseCompileMode(options.compileMode);

@@ -35,10 +35,9 @@
 
 #define DEBUG_TYPE "triton-to-linalg"
 
+#include "llvm/ADT/APInt.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
-
-#include <limits>
 
 namespace TTOpConverters {
 using namespace mlir;
@@ -135,7 +134,10 @@ class ArgMinMaxBaseConverter : public OpConversionPattern<triton::ReduceOp> {
   }
 
 public:
-  ArgMinMaxBaseConverter(MLIRContext *context) : OpConversionPattern(context) {}
+  // Prefer initialized argmin/argmax outputs over the generic ReduceConverter,
+  // independently of pattern registration and legalization graph traversal.
+  ArgMinMaxBaseConverter(MLIRContext *context)
+      : OpConversionPattern(context, PatternBenefit(2)) {}
 
   LogicalResult
   matchAndRewrite(triton::ReduceOp op, OpAdaptor adaptor,
@@ -239,25 +241,25 @@ public:
     if (isa<mlir::FloatType>(valueType)) {
       valueAttr = rewriter.getFloatAttr(valueType, T::getBaseReductionValue());
     } else if (isa<mlir::IntegerType>(valueType)) {
+      unsigned bitWidth = cast<IntegerType>(valueType).getWidth();
       if (isUnsigned) {
-        valueAttr =
-            rewriter.getIntegerAttr(valueType, T::getBaseReductionUIntValue());
+        valueAttr = rewriter.getIntegerAttr(
+            valueType, T::getBaseReductionUIntValue(bitWidth));
       } else {
-        valueAttr =
-            rewriter.getIntegerAttr(valueType, T::getBaseReductionIntValue());
+        valueAttr = rewriter.getIntegerAttr(
+            valueType, T::getBaseReductionIntValue(bitWidth));
       }
     }
 
     auto reduceWithIndexParams = getReduceWithIndexParams(op);
     auto valuesAccBaseVal =
         rewriter.create<arith::ConstantOp>(loc, valueType, valueAttr);
-    int indicesInitValue =
+    auto indexType = cast<IntegerType>(elemTypes[1]);
+    APInt indicesInitValue =
         (llvm::succeeded(reduceWithIndexParams) &&
          reduceWithIndexParams->tieBreakType == TieBreakType::RIGHT)
-            ? -1
-            : std::numeric_limits<int32_t>::max();
-
-    auto indexType = elemTypes[1];
+            ? APInt::getAllOnes(indexType.getWidth())
+            : APInt::getSignedMaxValue(indexType.getWidth());
     auto indicesAccBaseVal = rewriter.create<arith::ConstantOp>(
         loc, indexType, rewriter.getIntegerAttr(indexType, indicesInitValue));
 
@@ -326,8 +328,8 @@ public:
 
   static float getBaseReductionValue();
 
-  static int8_t getBaseReductionIntValue();
-  static uint8_t getBaseReductionUIntValue();
+  static APInt getBaseReductionIntValue(unsigned bitWidth);
+  static APInt getBaseReductionUIntValue(unsigned bitWidth);
 
   ArgMinConverter(MLIRContext *context) : ArgMinMaxBaseConverter(context) {}
 };
@@ -342,8 +344,8 @@ public:
 
   static float getBaseReductionValue();
 
-  static int8_t getBaseReductionIntValue();
-  static uint8_t getBaseReductionUIntValue();
+  static APInt getBaseReductionIntValue(unsigned bitWidth);
+  static APInt getBaseReductionUIntValue(unsigned bitWidth);
 
   ArgMaxConverter(MLIRContext *context) : ArgMinMaxBaseConverter(context) {}
 };

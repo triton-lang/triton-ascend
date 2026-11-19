@@ -15,6 +15,10 @@ def masks(n, active):
 
 
 def apply(value, mask):
+    # torch.where on CPU is not implemented for the unsigned integer dtypes
+    # (uint16/uint32/uint64); keep the bit pattern via int64 math instead.
+    if value.dtype in (torch.uint16, torch.uint32, torch.uint64):
+        return (value.to(torch.int64) * mask.to(torch.int64)).to(value.dtype)
     return torch.where(mask, value, torch.zeros((), dtype=value.dtype))
 
 
@@ -29,10 +33,19 @@ def ref_rows(value, mask_set):
     ])
 
 
+_SIGNED_TWIN = {torch.uint16: torch.int16, torch.uint32: torch.int32, torch.uint64: torch.int64}
+
+
 def inactive_zero(got, mask_set):
     for row, name in ((1, "prefix"), (2, "arb"), (3, "none"), (4, "prefix"), (5, "arb")):
         keep = mask_set[name]
-        inactive = got[row][~keep] if keep.any() else got[row]
+        # Boolean indexing has no CPU kernel for the unsigned dtypes; the bit
+        # pattern is what we test, so read the row through its signed twin.
+        values = got[row]
+        twin = _SIGNED_TWIN.get(values.dtype)
+        if twin is not None:
+            values = values.view(twin)
+        inactive = values[~keep] if keep.any() else values
         assert (inactive == 0).all(), f"row {row} ({name}) has a non-zero inactive lane"
 
 

@@ -24,11 +24,12 @@ Independent ``tla.*`` programming namespace for Ascend NPU kernels, migrated
 from the TLA repo's SIMD VF additions.  It does **not** reuse the existing
 ``al``/``bl`` general interfaces (different programming paradigm).
 
-Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
-``copy`` (GM<->buffer), ``view`` (GM view), ``scope`` (core-mode scopes:
+Exports: ``alloc`` (on-chip buffer),
+``fill`` (scalar fill of a contiguous UB buffer),
+explicit DMA routes, ``view`` (GM view), ``scope`` (core-mode scopes:
 ``tla.scope.simd()`` / ``tla.scope.cube()``),
 ``simd`` (vector-register ops), ``where`` (eager scalar/SIMD select),
-``annotate_buffer_versions``, and scalar dtypes.
+``annotate_multi_buffer``, and scalar dtypes.
 
 Scalar types share Triton's dtype protocol, so ``tla.float32`` can be passed
 directly to buffer, vector, and cast APIs.  The re-exported names map to the
@@ -66,10 +67,10 @@ from triton.language.core import (
     uint64,
 )
 
-from .core import buffer, buffer_type, vector, vector_type
+from .core import AddressSpace, buffer, buffer_type, vector, vector_type
 from .scope import scope
-from .alloc import alloc_buffer, alloc
-from .copy import copy
+from .alloc import alloc
+from .fill import fill
 from .dma import (
     PadMode,
     EvictionPolicy,
@@ -94,6 +95,7 @@ from .dma import (
     load_gm_to_ub,
     store_ub_to_gm,
     load_gm_to_l1,
+    load_gm_to_l1_mx_scale,
     copy_ub_to_l1,
     copy_l1_to_ub,
     copy_l1_to_bt,
@@ -103,10 +105,12 @@ from .dma import (
     copy_l0c_to_ub,
     copy_l0c_to_l1,
     set_ctrl,
+    set_atomic,
 )
 
 from .view import view, subview, reshape
-from .aux_ops import annotate_buffer_versions, assume
+from .scalar import select, abs, maximum, minimum, cast, max_value, cdiv, infinity, clamp
+from .aux_ops import annotate_multi_buffer, assume
 
 from . import math
 from .math import compensated_rstd, truncmod, sqrt
@@ -119,8 +123,9 @@ from . import simd
 # Scalar / SIMD-register selection (eager, unlike TileLang T.if_then_else).
 from .selection import where
 
-# Cube-core ops (``mmad``/``tla.copy`` L1/L0C routes).
+# Cube-core ops (``mmad``/``mmad_mx``).
 from . import cube
+from .cube import MxFormat
 
 # Explicit pipeline / global synchronization.
 from . import sync
@@ -151,6 +156,7 @@ __all__ = [
     "uint16",
     "uint32",
     "uint64",
+    "AddressSpace",
     "PadMode",
     "EvictionPolicy",
     "AtomicKind",
@@ -174,6 +180,7 @@ __all__ = [
     "load_gm_to_ub",
     "store_ub_to_gm",
     "load_gm_to_l1",
+    "load_gm_to_l1_mx_scale",
     "copy_ub_to_l1",
     "copy_l1_to_ub",
     "copy_l1_to_bt",
@@ -183,18 +190,29 @@ __all__ = [
     "copy_l0c_to_ub",
     "copy_l0c_to_l1",
     "set_ctrl",
+    "set_atomic",
     "buffer",
     "buffer_type",
     "vector",
     "vector_type",
 
-    # buffer alloc / copy / view
-    "alloc_buffer",
+    # buffer alloc / view
     "alloc",
-    "copy",
+    "fill",
     "view",
     "subview",
     "reshape",
+
+    # scalar expressions
+    "select",
+    "abs",
+    "maximum",
+    "minimum",
+    "cast",
+    "max_value",
+    "cdiv",
+    "infinity",
+    "clamp",
 
     # core-mode scopes (scope.simd / scope.cube)
     "scope",
@@ -208,7 +226,7 @@ __all__ = [
     "device_print",
 
     # aux ops
-    "annotate_buffer_versions",
+    "annotate_multi_buffer",
     "assume",
 
     # simd ops
@@ -219,6 +237,7 @@ __all__ = [
 
     # cube ops
     "cube",
+    "MxFormat",
 
     # explicit synchronization
     "sync",

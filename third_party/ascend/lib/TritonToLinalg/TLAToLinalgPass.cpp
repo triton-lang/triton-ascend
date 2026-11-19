@@ -23,12 +23,14 @@
 #include "ascend/include/TritonToLinalg/TLAToLinalgPass.h"
 
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
+#include "ascend/include/TritonToLinalg/TritonOpConverter.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -104,51 +106,39 @@ public:
   }
 };
 
-// TLA views bind a byte address to a GM memref. Translate scalar
-// AddPtr/PtrToInt chains using the generic adapter's byte offset rules.
-// Entry pointers become memrefs; intermediate pointer expressions carry an
-// index-typed byte address through the conversion rewriter's value mapping.
-static Value getPointerAddress(Value pointer, Location loc,
-                               ConversionPatternRewriter &rewriter) {
-  if (isa<MemRefType>(pointer.getType()))
-    return rewriter.create<memref::ExtractAlignedPointerAsIndexOp>(loc,
-                                                                   pointer);
-  if (pointer.getType().isIndex())
-    return pointer;
-  return {};
-}
-
-class TLAAddPtrConversion final : public OpConversionPattern<triton::AddPtrOp> {
+// The frontend's block-pointer-to-buffer bridge carries no address arithmetic.
+// Resolve it only after standard make_tensor_ptr lowering supplies a
+// descriptor.
+class TLABufferBridgeConversion final
+    : public OpConversionPattern<UnrealizedConversionCastOp> {
 public:
   using OpConversionPattern::OpConversionPattern;
 
   LogicalResult
-  matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
+  matchAndRewrite(UnrealizedConversionCastOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (!isa<triton::PointerType>(op.getType()))
+    if (!op->hasAttr("tla.gm_view"))
+      return failure();
+    if (adaptor.getOperands().size() != 1 || op->getNumResults() != 1)
       return rewriter.notifyMatchFailure(
-          op, "TLA pointer offset requires a scalar pointer");
-    Value address = getPointerAddress(adaptor.getPtr(), op.getLoc(), rewriter);
-    Value offset = adaptor.getOffset();
-    if (!address ||
-        (!offset.getType().isIndex() && !isa<IntegerType>(offset.getType())))
+          op, "expected a one-to-one GM view bridge");
+    Value source = adaptor.getOperands().front();
+    auto sourceType = dyn_cast<MemRefType>(source.getType());
+    auto resultType = dyn_cast<MemRefType>(op->getResult(0).getType());
+    if (!sourceType || !resultType ||
+        !memref::CastOp::areCastCompatible(sourceType, resultType))
       return rewriter.notifyMatchFailure(
-          op, "TLA pointer offset requires a base address and scalar integer");
-    if (!offset.getType().isIndex())
-      offset = rewriter.create<arith::IndexCastOp>(
-          op.getLoc(), rewriter.getIndexType(), offset);
-    int64_t elementBytes = (triton::getPointeeBitWidth(op.getType()) + 7) / 8;
-    if (elementBytes != 1) {
-      Value scale =
-          rewriter.create<arith::ConstantIndexOp>(op.getLoc(), elementBytes);
-      offset = rewriter.create<arith::MulIOp>(op.getLoc(), offset, scale);
-    }
-    rewriter.replaceOpWithNewOp<arith::AddIOp>(op, address, offset);
+          op,
+          "block pointer did not lower to a compatible GM buffer descriptor");
+    if (sourceType == resultType)
+      rewriter.replaceOp(op, source);
+    else
+      rewriter.replaceOpWithNewOp<memref::CastOp>(op, resultType, source);
     return success();
   }
 };
 
-class TLAPointerBitcastConversion final
+class TLABitcastConversion final
     : public OpConversionPattern<triton::BitcastOp> {
 public:
   using OpConversionPattern::OpConversionPattern;
@@ -156,28 +146,27 @@ public:
   LogicalResult
   matchAndRewrite(triton::BitcastOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (!isa<triton::PointerType>(op.getSrc().getType()) ||
-        !isa<triton::PointerType>(op.getType()))
+    Type srcType = op.getSrc().getType();
+    Type dstType = op.getType();
+    if (isa<triton::PointerType>(srcType) &&
+        isa<triton::PointerType>(dstType)) {
+      auto descriptor = dyn_cast<MemRefType>(adaptor.getSrc().getType());
+      Type element = cast<triton::PointerType>(dstType).getPointeeType();
+      if (element.isInteger(1))
+        element = rewriter.getI8Type();
+      // Forward only storage-preserving casts (including ABI i1 -> i8).
+      // Reusing a descriptor with a different element size would change addptr.
+      if (!descriptor || descriptor.getElementType() != element)
+        return rewriter.notifyMatchFailure(
+            op, "TLA pointer bitcast must preserve the backing element type");
+      rewriter.replaceOp(op, adaptor.getSrc());
+      return success();
+    }
+    if (!srcType.isIntOrFloat() || !dstType.isIntOrFloat())
       return rewriter.notifyMatchFailure(
-          op, "TLA pointer bitcast requires scalar pointers");
-    rewriter.replaceOp(op, adaptor.getSrc());
-    return success();
-  }
-};
-
-class TLAPtrToIntConversion final
-    : public OpConversionPattern<triton::PtrToIntOp> {
-public:
-  using OpConversionPattern::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(triton::PtrToIntOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    Value address = getPointerAddress(adaptor.getSrc(), op.getLoc(), rewriter);
-    if (!address)
-      return rewriter.notifyMatchFailure(
-          op, "unsupported TLA scalar pointer source");
-    rewriter.replaceOpWithNewOp<arith::IndexCastOp>(op, op.getType(), address);
+          op, "TLA bitcast requires scalar numeric values or scalar pointers");
+    rewriter.replaceOpWithNewOp<arith::BitcastOp>(op, dstType,
+                                                  adaptor.getSrc());
     return success();
   }
 };
@@ -284,11 +273,17 @@ public:
     TLATypeConverter typeConverter;
     RewritePatternSet patterns(&getContext());
     patterns.add<TLAKernelEntryConversion>(typeConverter, &getContext());
-    patterns.add<TLAAddPtrConversion, TLAPointerBitcastConversion,
-                 TLAPtrToIntConversion, TLAProgramIdConversion,
-                 TLANumProgramsConversion, TLAReturnConversion,
-                 TLAOverflowAssertConversion>(&getContext());
-    patterns.add<LoadStoreConverter::LoadConverter>(&getContext());
+    patterns.add<TLABufferBridgeConversion, TLABitcastConversion,
+                 TLAProgramIdConversion, TLANumProgramsConversion,
+                 TLAReturnConversion, TLAOverflowAssertConversion>(
+        &getContext());
+    // Reuse descriptor-based pointer lowering without changing the generic
+    // adapter's pipeline or registering TLA-specific patterns in it.
+    patterns.add<
+        LoadStoreConverter::AddPtrConverter, LoadStoreConverter::LoadConverter,
+        TTOpConverters::MakeTensorPtrConverter,
+        TTOpConverters::PtrToIntConverter, TTOpConverters::ClampFConverter>(
+        &getContext());
 
     ConversionTarget target(getContext());
     // Convert only the operations owned by this pass, not the entire Triton
@@ -297,7 +292,12 @@ public:
     target.addIllegalOp<triton::FuncOp, triton::ReturnOp, triton::AddPtrOp,
                         triton::PtrToIntOp, triton::GetProgramIdOp,
                         triton::GetNumProgramsOp, triton::AssertOp,
-                        triton::LoadOp>();
+                        triton::LoadOp, triton::MakeTensorPtrOp,
+                        triton::BitcastOp, triton::ClampFOp>();
+    target.addDynamicallyLegalOp<UnrealizedConversionCastOp>(
+        [&](Operation *op) {
+          return !op->hasAttr("tla.gm_view") && typeConverter.isLegal(op);
+        });
     // Unsupported pointer uses still need a conversion. No pointer source
     // materialization is provided, so entry pointers cannot leak through.
     target.markUnknownOpDynamicallyLegal(
@@ -306,6 +306,7 @@ public:
       module.emitError(
           "unsupported TTIR or pointer use in TLA affinity module");
       signalPassFailure();
+      return;
     }
   }
 };

@@ -166,19 +166,24 @@ def get_triton_ascend_patch_file():
         "CMakeLists.txt",
         "include/triton/Dialect/Triton/IR/TritonAttrDefs.td",
         "lib/Dialect/Triton/IR/Traits.cpp",
+        "lib/Dialect/Triton/Transforms/Combine.cpp",
         "python/src/ir.cc",
         "python/triton/_utils.py",
         "python/triton/compiler/code_generator.py",
         "python/triton/compiler/compiler.py",
         "python/triton/compiler/errors.py",
         "python/triton/extension/buffer/src/buffer_ir.cc",
+        "python/triton/language/core.py",
         "python/triton/language/math.py",
         "python/triton/language/semantic.py",
         "python/triton/language/standard.py",
         "python/triton/runtime/autotuner.py",
+        "python/triton/runtime/cache.py",
         "python/triton/runtime/interpreter.py",
         "python/triton/runtime/autotuner.py",
         "python/triton/runtime/jit.py",
+        "python/triton/tools/compile.py",
+        "python/triton/tools/link.py",
         "bin/RegisterTritonDialects.h",
         "bin/triton-opt.cpp",
         "bin/CMakeLists.txt",
@@ -352,7 +357,7 @@ def _ensure_distributed_submodule():
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
     distributed_dir = _REPO_ROOT / "third_party" / "ascend" / "Triton-distributed-ascend"
-    commit_id = "82b8c919bc4f82e733e15ded7ea259aa089c9e6a"
+    commit_id = "64e4e09ebf7899514aa7d4e8968db4198c7f0608"
     if not distributed_dir.is_dir():
         try:
             _git_check_call_with_retry([

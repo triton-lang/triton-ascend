@@ -38,6 +38,7 @@
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
@@ -74,6 +75,17 @@
 namespace mlir {
 
 namespace ConverterUtils {
+
+llvm::SmallString<128> generateUniqueFuncName(ModuleOp moduleOp,
+                                              llvm::StringRef funcNameBase) {
+  llvm::SmallString<128> funcName = funcNameBase;
+  int uniqueId = 0;
+  while (SymbolTable::lookupSymbolIn(moduleOp, funcName)) {
+    funcName = funcNameBase;
+    funcName += ("_" + std::to_string(uniqueId++));
+  }
+  return funcName;
+}
 
 std::optional<int64_t>
 getLastStrideOfReinterpretCastOp(memref::ReinterpretCastOp op) {
@@ -897,13 +909,14 @@ void traverseBackwardUpdateOperandChainIf(
                                        builder, handledOperation);
 }
 
-void traverseForwardUpdateUserChainIf(
+static void traverseForwardUpdateUserChainIfImpl(
     Operation *op, std::function<bool(Operation *)> conditionFn,
     std::function<bool(Operation *)> stopFn,
     std::function<void(OpBuilder &, Operation *)> actionFn, OpBuilder &builder,
-    llvm::SmallPtrSet<Operation *, 16> &stopOps) {
+    llvm::SmallPtrSet<Operation *, 16> &stopOps,
+    DenseSet<Operation *> &handledOperations) {
 
-  if (!op) {
+  if (!op || !handledOperations.insert(op).second) {
     return;
   }
 
@@ -918,10 +931,21 @@ void traverseForwardUpdateUserChainIf(
 
   for (auto res : op->getResults()) {
     for (auto userOp : res.getUsers()) {
-      traverseForwardUpdateUserChainIf(userOp, conditionFn, stopFn, actionFn,
-                                       builder, stopOps);
+      traverseForwardUpdateUserChainIfImpl(userOp, conditionFn, stopFn,
+                                           actionFn, builder, stopOps,
+                                           handledOperations);
     }
   }
+}
+
+void traverseForwardUpdateUserChainIf(
+    Operation *op, std::function<bool(Operation *)> conditionFn,
+    std::function<bool(Operation *)> stopFn,
+    std::function<void(OpBuilder &, Operation *)> actionFn, OpBuilder &builder,
+    llvm::SmallPtrSet<Operation *, 16> &stopOps) {
+  DenseSet<Operation *> handledOperations;
+  traverseForwardUpdateUserChainIfImpl(op, conditionFn, stopFn, actionFn,
+                                       builder, stopOps, handledOperations);
 }
 
 // Note: rootOp will also be processed.

@@ -20,18 +20,21 @@
 """
 SIMD vector-register primitives for the engram_fused_weight decode chains.
 
-Each op maps 1:1 onto an AVE dialect op (``ave.hir.*``) built through
-``ascend_ir.cc`` bindings:
+SIMD primitives use AVE dialect ops (``ave.hir.*``) built through
+``tla_builder.cc`` bindings. Some interfaces compose multiple AVE ops:
 
 ============================  ==========================================
 API                           AVE op
 ============================  ==========================================
 ``vlds``                      ``ave.hir.vload``
 ``vsts``                      ``ave.hir.masked_store``
+``pld`` / ``pst``              i1 load/store with explicit predicate density
+``vgather`` / ``vld``          ``ave.hir.vgather`` (16/32-bit elements)
+``vunpack``                   ``ave.hir.vextui`` / ``ave.hir.vextsi``
 ``vextf``                     ``ave.hir.vextf``
 ``vintlv``                    ``ave.hir.vintlv``
 ``vbitcast``                  ``vector.bitcast``
-``vmul``                      ``ave.hir.vmul`` (mask = ``ave.hir.pge <ALL>``)
+``vmul``                      ``ave.hir.vmul`` (optional mask/mode)
 ``vdiv``                      ``ave.hir.vdiv`` (``cast`` selects signedness)
 ``vmax`` / ``vmin``           ``ave.hir.vmax``/``vmin``, ``vumax``/``vumin`` if unsigned
 ``vmaxs``                     ``ave.hir.vmaxs`` / ``ave.hir.vumaxs``
@@ -55,7 +58,9 @@ selects the op's own first vector operand for the inactive lanes with
 ``ave.hir.vsel`` -- for the accumulate ops that operand is ``acc``, which is
 exactly CANN's dst-preserving predicate (CANN itself lowers merging to a vsel
 against the destination on its V920 software-merge path).  ``vcvt`` has no
-same-typed operand and rejects ``MODE.MERGING``.  The remaining register ops
+same-typed operand and rejects ``MODE.MERGING``.  ``vgather``/``vld`` and
+``vunpack`` produce zero inactive results with either mode; their docstrings
+describe memory-access and output-mask semantics. The other register ops
 forward ``MERGING`` to the TLA C++ builder (``tla_builder.cc``
 ``applySimdMode``), whose legacy merge source is a same-typed ``+0`` SSA
 vector: both modes read inactive lanes as zero there; use an explicit
@@ -96,6 +101,11 @@ __all__ = [
     "CMP",
     "POS",
     "vlds",
+    "pld",
+    "pst",
+    "vgather",
+    "vld",
+    "vunpack",
     "vsts",
     "vsstb",
     "vsub",
@@ -109,6 +119,7 @@ __all__ = [
     "vadd",
     "vadds",
     "vaddc",
+    "vsubc",
     "vshl",
     "vshls",
     "vshr",
@@ -232,16 +243,17 @@ class MODE(str, enum.Enum):
     AVE regbase value ops are pure SSA with no mutable destination, so
     ``MERGING`` cannot be CANN's native dst-preserving predicate
     ``OP_m(dst, src0, src1, mask)``.  The accumulate/predicate family
-    (``vand``/``vmuls``/``vmula``/``vmadd``/``vaxpy``/``vln``) instead merges
+    (``vand``/``vmaxs``/``vmuls``/``vmula``/``vmadd``/``vaxpy``/``vln``) instead merges
     with the op's own first vector operand: for the accumulate ops that
     operand is ``acc``, which matches CANN's dst-preserving semantics exactly
     (CANN itself lowers merging to a vsel against the destination on its V920
     software-merge path).  ``vcvt`` changes dtype and has no same-typed
     operand, so it rejects ``MODE.MERGING``; compose
-    ``vsel(mask, vcvt(...), keep)`` explicitly there.  The remaining register
-    ops forward ``MERGING`` to the C++ builder's legacy ``+0`` merge
-    (``tla_builder.cc`` ``applySimdMode``): both modes read inactive lanes as
-    zero there.
+    ``vsel(mask, vcvt(...), keep)`` explicitly there. ``vgather``/``vld``
+    and ``vunpack`` return zero in inactive output lanes under both modes.
+    The other register ops forward ``MERGING`` to the C++ builder's legacy
+    ``+0`` merge (``tla_builder.cc`` ``applySimdMode``): both modes read
+    inactive lanes as zero there.
     """
 
     ZEROING = "MODE_ZEROING"
@@ -253,9 +265,8 @@ class MODE(str, enum.Enum):
 
 _MODE_ZEROING_ALIASES = ("MODE_ZEROING", "ZEROING")
 _MODE_MERGING_ALIASES = ("MODE_MERGING", "MERGING")
-# Builder-side spelling consumed by tla_builder.cc::applySimdMode.  The mode is
-# an actual lowering choice (bare op vs op + zero-init + vsel), never an
-# unconsumed attribute and never rewritten back to zeroing on the way down.
+# Builder-side spelling for wrappers using tla_builder.cc::applySimdMode.
+# Each API defines its merge source and whether the two modes need distinct IR.
 _MODE_BUILDER_NAMES = {MODE.ZEROING: "zeroing", MODE.MERGING: "merging"}
 
 
@@ -616,11 +627,8 @@ def _resolve_pos(pos):
 def _check_mode(mode):
     """Validate ``mode`` and return the normalized ``MODE.*`` constant.
 
-    The two modes are distinct all the way down to the C++ builder: ZEROING
-    emits the bare masked AVE op, MERGING emits the op plus an explicit
-    zero-initialized merge source selected by ``ave.hir.vsel``.  Never rewrite
-    MERGING to ZEROING here -- that would silently discard the caller's
-    request before the backend can lower it.
+    Each operation defines its inactive-lane behavior and lowering. This
+    helper only validates the spelling; it does not choose a merge source.
     """
     mode = _unwrap_if_constexpr(mode)
     name = (mode.value if isinstance(mode, MODE) else str(mode)).upper()
@@ -779,6 +787,130 @@ def _make_scalar(scalar, dtype, tag, op, _semantic):
 
 
 @builtin
+def pld(ptr, offsets=None, *, width=8, dist="NORM", _semantic=None) -> vector:
+    """Load a packed predicate from a contiguous byte UB buffer.
+
+    ``width`` (8/16/32) sets the data-lane density and the returned predicate
+    has 2048/width lanes. Bits are LSB-first within bytes: NORM reads bit i,
+    US reads bit i//2, DS reads bit 2*i. Offsets are in bytes. Reserve 32
+    readable bytes (64 for DS) at the address, aligned to 32 bytes.
+    Dynamic addresses must satisfy the same bounds and alignment constraints.
+    This is an unmasked load with no destination-preserving merging mode.
+    """
+    width = _unwrap_if_constexpr(width)
+    if type(width) is not int or width not in (8, 16, 32):
+        raise ValueError("pld width must be 8, 16 or 32")
+    dist = _unwrap_if_constexpr(dist)
+    ss.check_dist(dist, ("NORM", "US", "DS"), "pld")
+    if isinstance(ptr, buffer_access):
+        ptr, offsets = ptr.buffer, list(ptr.indices)
+    if not isinstance(ptr, buffer) or ptr.space != "ub" or ptr.dtype not in (tl.int8, tl.uint8):
+        raise TypeError("pld requires an int8/uint8 UB buffer of packed bits")
+    if len(ptr.shape) != 1 or ptr.strides != (1, ):
+        raise ValueError("pld requires a contiguous one-dimensional buffer")
+    if offsets is None or len(offsets) != len(ptr.shape):
+        raise ValueError("pld requires one scalar offset per buffer dimension")
+    _check_predicate_address(ptr, offsets, 64 if dist == "DS" else 32, "pld")
+    base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
+    lanes = 2048 // width
+    handle = _semantic.builder.create_simd_pld(base, indices, lanes, dist, f"pb{width}")
+    return vector(handle, vector_type(lanes, tl.int1))
+
+
+def _check_predicate_address(ptr, offsets, size, name):
+    offset = _unwrap_if_constexpr(offsets[0])
+    if type(offset) is int:
+        if offset < 0 or offset + size > ptr.shape[0]:
+            raise ValueError(f"{name} byte range is outside the buffer")
+        if offset % 32:
+            raise ValueError(f"{name} byte offset must be 32-byte aligned")
+    # A static subview must preserve the base alignment as well. Dynamic
+    # addresses remain the caller's responsibility, as for vlds/vsts.
+    if type(ptr.offset) is int and ptr.offset % 32:
+        raise ValueError(f"{name} buffer base must be 32-byte aligned")
+
+
+@builtin
+def pst(ptr, offsets_or_val, val=None, _semantic=None):
+    """Store a predicate as LSB-first packed bits in a byte UB buffer.
+
+    The predicate's 256/128/64 lanes determine PB8/PB16/PB32 density.
+    There is no store mask or merging mode: every predicate bit is stored.
+    Writes exactly 32/16/8 bytes respectively. Offsets are in bytes and
+    must be 32-byte aligned. Dynamic offsets must satisfy the same bounds
+    and alignment requirements as static offsets.
+    """
+    if isinstance(ptr, buffer_access):
+        ptr, offsets, val = ptr.buffer, list(ptr.indices), offsets_or_val
+    else:
+        offsets = offsets_or_val
+    _require_vector(val, "val")
+    if val.dtype != tl.int1 or val.type.lanes not in (256, 128, 64):
+        raise ValueError("pst requires a 256/128/64-lane predicate")
+    if not isinstance(ptr, buffer) or ptr.space != "ub" or ptr.dtype not in (tl.int8, tl.uint8):
+        raise TypeError("pst requires an int8/uint8 UB buffer of packed bits")
+    if len(ptr.shape) != 1 or ptr.strides != (1, ):
+        raise ValueError("pst requires a contiguous one-dimensional buffer")
+    if offsets is None or len(offsets) != 1:
+        raise ValueError("pst requires one byte offset")
+    _check_predicate_address(ptr, offsets, val.type.lanes // 8, "pst")
+    base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
+    _semantic.builder.create_simd_pst(base, indices, val.handle, f"pb{2048 // val.type.lanes}")
+
+
+@builtin
+def vgather(ptr, index, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
+    """Gather a full register from contiguous UB using element indices.
+
+    Supports signed/unsigned 16/32-bit integers and f16/bf16/f32 data.
+    32-bit data requires 64 uint32 indices; 16-bit data requires 128 uint16
+    indices. 8-bit data is not supported by this interface yet.
+
+    ``ptr`` is a 1-D buffer or ``buf[base_offset]``; the base offset and
+    indices are in elements. Active indices must be in bounds. The mask
+    has one predicate lane per result lane and suppresses inactive memory
+    accesses. Both modes return zero for inactive lanes, using the same
+    masked gather without an extra select. Preserve old values with vsel.
+    """
+    if isinstance(ptr, buffer_access):
+        ptr, offsets = ptr.buffer, list(ptr.indices)
+    else:
+        offsets = [0]
+    if not isinstance(ptr, buffer) or ptr.space != "ub":
+        raise TypeError("vgather requires a UB buffer")
+    if len(ptr.shape) != 1 or ptr.strides != (1, ) or len(offsets) != 1:
+        raise ValueError("vgather requires a contiguous one-dimensional buffer")
+    offset = _unwrap_if_constexpr(offsets[0])
+    if type(offset) is int and not 0 <= offset < ptr.shape[0]:
+        raise ValueError("vgather base offset is outside the buffer")
+    tag = _elem_tag(ptr.dtype)
+    if tag not in ("i16", "i32", "f16", "bf16", "f32"):
+        raise ValueError("vgather supports only 16/32-bit elements")
+    bits = _ELEM_SPECS[tag]
+    lanes = _lanes_for(tag)
+    _check_mode(mode)
+    mask = _mask_for(mask, lanes, _semantic)
+    base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
+    _require_vector(index, "index")
+    expected = vector_type(lanes, tl.uint32 if bits == 32 else tl.uint16)
+    if index.type != expected:
+        raise ValueError(f"vgather indices must be {expected}")
+    handle = _semantic.builder.create_simd_vgather(base, indices, index.handle, mask.handle, tag, lanes)
+    return vector(handle, vector_type(lanes, ptr.dtype))
+
+
+@builtin
+def vld(ptr, index, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
+    """Indexed UB load, using :func:`vgather` and its element-index contract.
+
+    This exposes full-register indexed loads without CANN's vector_address
+    object or distribution controls. It does not update address state.
+    Only 16/32-bit data is supported, using one AVE gather.
+    """
+    return vgather(ptr, index, mask=mask, mode=mode, _semantic=_semantic)
+
+
+@builtin
 def vlds(ptr, offsets=None, *, dist="NORM", elem=None, _semantic=None) -> vector:
     """
     Vector-register load from UB (``ave.hir.vload``).
@@ -867,7 +999,7 @@ def vextf(src, target_dtype, mask=None, part="part_even", _semantic=None) -> vec
     if mask is None:
         mask = _all_mask(out_lanes, _semantic)
     _check_mask(mask, out_lanes)
-    handle = _semantic.builder.create_simd_vcvt("vextf", src.handle, mask.handle, out_tag, part)
+    handle = _semantic.builder.create_simd_vcvt("extf", src.handle, mask.handle, out_tag, part)
     return vector(handle, vector_type(out_lanes, target_dtype))
 
 
@@ -952,12 +1084,38 @@ def _binary_op(op, kind, lhs, rhs, _semantic, mask=None, mode=MODE.ZEROING):
 
 
 @builtin
-def vmul(lhs, rhs, _semantic=None) -> vector:
+def vmul(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     """
-    Elementwise vector multiply (``ave.hir.vmul``) under an all-true
-    ``ave.hir.pge <ALL>`` mask.
+    Elementwise vector multiply (``ave.hir.vmul``).
+
+    Each active lane computes ``lhs * rhs``.  Both operands must have the same
+    dtype and lane count.  No broadcasting or implicit dtype conversion is
+    performed.
+
+    :param lhs: First vector register.
+    :type lhs: tla.vector
+    :param rhs: Second vector register with the same dtype and lane count as
+        ``lhs``.
+    :type rhs: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: Product vector with the same dtype and lane count as the inputs.
+    :rtype: tla.vector
+
+    Supported element types in the current AVE regbase lowering are
+    f16/bf16/f32, i8/i16/i32 and u8/u16/u32.  Integer results wrap modulo the
+    element width.  The i64/u64 vector forms are not wired into this lowering
+    path.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve the
+        previous destination lanes.
     """
-    return _binary("mul", lhs, rhs, _semantic)
+    return _masked_binary("mul", lhs, rhs, mask, mode, _semantic)
 
 
 @builtin
@@ -1260,6 +1418,48 @@ def vaddc(src0: vector, src1: vector, mask: vector = None, _semantic=None) -> tu
 
 
 @builtin
+def vsubc(src0: vector, src1: vector, mask: vector = None, _semantic=None) -> tuple[vector, vector]:
+    """
+    Vector subtract with borrow-out (``vsubc``) for i32/u32 registers.
+
+    Returns ``(diff, borrow)`` where ``diff = src0 - src1`` (modulo 2**32) and
+    ``borrow`` is an i1 mask holding the two's-complement borrow-out of each
+    lane, derived as ``src0 <u src1``.  The AVE dialect has no dedicated
+    ``vsubc`` op, so this is composed from a masked ``ave.hir.vsub`` and an
+    unsigned ``ave.hir.vcmp``; the result is always zeroing.
+
+    Both operands must be full 64-lane ``int32`` or ``uint32`` registers with
+    the same dtype.  Inactive lanes produce a zero difference and a false
+    borrow.
+
+    :param src0: Minuend vector register.
+    :type src0: tla.vector
+    :param src1: Subtrahend vector register with the same dtype.
+    :type src1: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane.
+        ``None`` means an all-true mask.
+    :type mask: tla.vector or None
+    :return: ``(diff, borrow)`` vector pair; ``borrow`` is an i1 mask.
+    :rtype: tuple[tla.vector, tla.vector]
+    """
+    _require_vector(src0, "src0")
+    _require_vector(src1, "src1")
+    dtype = str(src0.dtype)
+    if dtype not in ("int32", "uint32"):
+        raise ValueError(f"vsubc only supports int32/uint32, got {dtype}")
+    if src1.dtype != src0.dtype:
+        raise TypeError(f"vsubc operands must have the same dtype, "
+                        f"got {src0.dtype} and {src1.dtype}")
+    lanes = src0.type.lanes
+    if lanes != 64:
+        raise ValueError(f"vsubc requires a full 64-lane register, got {lanes}")
+    mask = _mask_for(mask, lanes, _semantic)
+    diff = _masked_binary("sub", src0, src1, mask, MODE.ZEROING, _semantic)
+    borrow = vcmp(src0, src1, mask=mask, op=CMP.ULT, _semantic=_semantic)
+    return diff, borrow
+
+
+@builtin
 def vdiv(src0, src1, mask=None, mode=MODE.ZEROING, precision=None, _semantic=None) -> vector:
     """
     Elementwise vector divide (``ave.hir.vdiv``).
@@ -1410,12 +1610,10 @@ def vmaxs(src0, scalar, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     :param scalar: constexpr number or scalar tensor, element type of ``src0``
     :param mask: predicate vector; defaults to an all-true mask
     :param mode: ``MODE.ZEROING`` emits the bare masked AVE op;
-        ``MODE.MERGING`` emits the same op plus an ``ave.hir.vsel`` that
-        merges a same-typed ``+0`` SSA vector into the inactive lanes.
-        MERGING is not CANN's native dst-preserving predicate and does not keep
-        the old dst/``src0`` lanes (see :class:`MODE`)
-    Inactive lanes are ``+0`` for both modes: ZEROING relies on the masked AVE
-    op, MERGING explicitly selects a ``+0`` merge source in the C++ builder.
+        ``MODE.MERGING`` appends ``vsel(mask, result, src0)`` so inactive
+        lanes retain their original ``src0`` values. ZEROING leaves inactive
+        lanes zero; because the 64-bit fallback ignores its mask, i64/u64 with
+        an explicit mask additionally select zero.
     Supported element types: f16/f32/i8/i16/i32/i64 (u8/u16/u32/u64); the AVE
     vector-scalar contract has no bf16/f8 scalar slot.
     """
@@ -1425,12 +1623,19 @@ def vmaxs(src0, scalar, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     unsigned = _is_unsigned(src0.dtype)
     _require_elem_support("vmaxs", tag, unsigned)
     lanes = src0.shape[0]
+    explicit_mask = mask is not None
     mask = _resolve_mask(mask, lanes, _semantic)
     scalar_handle = _make_scalar(scalar, src0.dtype, tag, "vmaxs", _semantic)
     kind = "umaxs" if unsigned else "maxs"
     handle = _semantic.builder.create_simd_binary_scalar(kind, src0.handle, scalar_handle, mask.handle,
-                                                         _MODE_BUILDER_NAMES[mode])
-    return vector(handle, src0.type)
+                                                         _MODE_BUILDER_NAMES[MODE.ZEROING])
+    result = vector(handle, src0.type)
+    if mode is MODE.ZEROING and tag == "i64" and explicit_mask:
+        # The 64-bit integer fallback ignores its mask, so restore ZEROING here.
+        # TODO: remove this workaround once AVE i64 mask support is correct.
+        zero = vfull(0, src0.dtype, lanes, _semantic=_semantic)
+        return vsel(mask, result, zero, _semantic=_semantic)
+    return _merge_inactive(result, mask, src0, mode, _semantic)
 
 
 @builtin
@@ -1553,14 +1758,70 @@ def vdupv(src, mask=None, pos=POS.LOWEST, mode=MODE.ZEROING, _semantic=None) -> 
 @builtin
 def vxor(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     """
-    Elementwise bitwise XOR (``ave.hir.vxor``) under an all-true mask.
+    Elementwise bitwise XOR (``ave.hir.vxor``).
+
+    Each active lane computes ``lhs ^ rhs`` on the raw element bit pattern.
+    Both operands must have the same dtype and lane count.  No broadcasting
+    or implicit dtype conversion is performed.
+
+    :param lhs: First vector register.
+    :type lhs: tla.vector
+    :param rhs: Second vector register with the same dtype and lane count as
+        ``lhs``.
+    :type rhs: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: XOR result with the same dtype and lane count as the inputs.
+    :rtype: tla.vector
+
+    Supported element types in the current AVE regbase lowering are
+    f16/bf16/f32, i8/i16/i32 and u8/u16/u32.  Floating-point operands are
+    XORed as bit patterns, not as floating-point logical values.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve the
+        previous destination lanes.
     """
     return _masked_binary("xor", lhs, rhs, mask, mode, _semantic)
 
 
 @builtin
 def vsub(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
-    """Elementwise vector subtract under an optional predicate."""
+    """
+    Elementwise vector subtract (``ave.hir.vsub``).
+
+    Each active lane computes ``lhs - rhs``.  Both operands must have the same
+    dtype and lane count.  No broadcasting or implicit dtype conversion is
+    performed.
+
+    :param lhs: Minuend vector register.
+    :type lhs: tla.vector
+    :param rhs: Subtrahend vector register with the same dtype and lane count
+        as ``lhs``.
+    :type rhs: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: Difference vector with the same dtype and lane count as the
+        inputs.
+    :rtype: tla.vector
+
+    Supported element types in the current AVE regbase lowering are
+    f16/bf16/f32, i8/i16/i32 and u8/u16/u32.  Integer results wrap modulo the
+    element width; unsigned operands use their raw two's-complement bit
+    pattern.  The i64/u64 vector forms are not wired into this lowering path.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve the
+        previous destination lanes or ``lhs`` on inactive lanes.
+    """
     return _masked_binary("sub", lhs, rhs, mask, mode, _semantic)
 
 
@@ -1632,7 +1893,35 @@ def vexpdif(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
 
 @builtin
 def vor(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
-    """Elementwise bitwise OR under an optional predicate."""
+    """
+    Elementwise bitwise OR (``ave.hir.vor``).
+
+    Each active lane computes ``lhs | rhs`` on the raw element bit pattern.
+    Both operands must have the same dtype and lane count.  No broadcasting
+    or implicit dtype conversion is performed.
+
+    :param lhs: First vector register.
+    :type lhs: tla.vector
+    :param rhs: Second vector register with the same dtype and lane count as
+        ``lhs``.
+    :type rhs: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: OR result with the same dtype and lane count as the inputs.
+    :rtype: tla.vector
+
+    Supported element types in the current AVE regbase lowering are
+    f16/bf16/f32, i8/i16/i32 and u8/u16/u32.  Floating-point operands are
+    ORed as bit patterns, not as floating-point logical values.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve the
+        previous destination lanes.
+    """
     return _masked_binary("or", lhs, rhs, mask, mode, _semantic)
 
 
@@ -1978,6 +2267,53 @@ def pset(elem_width: tl.constexpr, dist: tl.constexpr = PAT.ALL, _semantic=None)
 
 
 @builtin
+def vunpack(src: vector, target_dtype, mask=None, part=PART.EVEN, pp="pp0", signed=False, mode=MODE.ZEROING,
+            _semantic=None) -> vector:
+    """Widen selected integer lanes to a full register through AVE extension.
+
+    Supports 8->16, 16->32 and 8->32 bit registers. For factor-two widening,
+    EVEN/ODD selects src[0::2]/src[1::2]. For 8->32, ppN selects src[N::4]
+    and part must remain EVEN. Contiguous LOWER/HIGHER halves and 32->64
+    widening are not supported. ``signed`` chooses sign or zero extension
+    independently of the source and result integer dtype signedness.
+
+    The mask describes output lanes. Both modes produce zero inactive
+    results; preserve an old destination with an explicit vsel. Extension
+    uses an all-true source predicate, followed by a select only when an
+    output mask is supplied.
+    """
+    _require_vector(src, "src")
+    target_dtype = _unwrap_if_constexpr(target_dtype)
+    src_tag, out_tag = _elem_tag(src.dtype), _elem_tag(target_dtype)
+    if (src_tag, out_tag) not in (("i8", "i16"), ("i16", "i32"), ("i8", "i32")):
+        raise ValueError("vunpack supports integer 8->16, 16->32 and 8->32 conversions")
+    if src.type.lanes != _lanes_for(src_tag):
+        raise ValueError("vunpack requires a full source register")
+    signed = _unwrap_if_constexpr(signed)
+    if type(signed) is not bool:
+        raise ValueError("vunpack signed must be a compile-time bool")
+    part = ss.check_part(_unwrap_if_constexpr(part))
+    pp = _unwrap_if_constexpr(pp)
+    if pp not in ("pp0", "pp1", "pp2", "pp3"):
+        raise ValueError("vunpack pp must be pp0/pp1/pp2/pp3")
+    if out_tag == "i32" and src_tag == "i8":
+        if part != PART.EVEN:
+            raise ValueError("8->32 vunpack selects lanes with pp, not part")
+    elif pp != "pp0":
+        raise ValueError("factor-two vunpack selects lanes with part, not pp")
+    _check_mode(mode)
+    lanes = _lanes_for(out_tag)
+    mask = _unwrap_if_constexpr(mask)
+    if mask is not None:
+        _check_mask(mask, lanes)
+    handle = _semantic.builder.create_simd_vunpack(src.handle, out_tag, part, pp, signed)
+    result = vector(handle, vector_type(lanes, target_dtype))
+    if mask is not None:
+        result = vsel(mask, result, vsplat(0, target_dtype, _semantic=_semantic), _semantic=_semantic)
+    return result
+
+
+@builtin
 def vcvt(src: vector, target_dtype, mask: vector = None, round: tl.constexpr = ROUND.R, sat: tl.constexpr = True,
          part: tl.constexpr = PART.EVEN, mode: tl.constexpr = MODE.ZEROING, _semantic=None) -> vector:
     """
@@ -2045,7 +2381,35 @@ def vcvt(src: vector, target_dtype, mask: vector = None, round: tl.constexpr = R
 
 @builtin
 def vmins(src, scalar, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
-    """Vector-scalar minimum, preserving src on inactive MERGING lanes."""
+    """
+    Vector-scalar minimum (``ave.hir.vmins`` / ``ave.hir.vumins``).
+
+    Each active lane computes ``min(src_lane, scalar)``.  Unsigned integer
+    inputs select the unsigned AVE form; signed and floating-point inputs use
+    the signed form.  No vector broadcasting or implicit dtype conversion is
+    performed.
+
+    :param src: Source vector register.
+    :type src: tla.vector
+    :param scalar: Scalar bound as a Python/``tl.constexpr`` number or a
+        scalar tensor.  It is materialized at the vector element type.
+    :type scalar: int, float, tl.constexpr, or scalar tl.tensor
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: Minimum vector with the same dtype and lane count as ``src``.
+    :rtype: tla.vector
+
+    Supported element types are f16/f32, i8/i16/i32 and u8/u16/u32.  bf16,
+    fp8, i64 and u64 are not supported by this vector-scalar path.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve
+        ``src`` or the previous destination lanes.
+    """
     _require_vector(src, "src")
     tag = _elem_tag(src.dtype)
     if tag not in ("i8", "i16", "i32", "f16", "f32"):
@@ -2060,7 +2424,38 @@ def vmins(src, scalar, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
 
 @builtin
 def vsstb(src, dst, stride, mask=None, update=False, _semantic=None):
-    """Store a vector to a 2-D UB buffer in 32-byte blocks at element stride."""
+    """
+    Masked strided store of a vector to a 2-D UB buffer
+    (``ave.hir.store_with_stride``).
+
+    The source vector is written as consecutive 32-byte blocks.  Block ``k``
+    starts ``k * stride`` elements after the destination start offset in
+    row-major order.  The destination start is supplied by the two indices of
+    a ``tla.buffer`` or a subscripted buffer access such as ``dst[row, col]``.
+    This op has no return value.
+
+    :param src: Source vector register.
+    :type src: tla.vector
+    :param dst: Two-dimensional UB buffer, or a subscripted buffer access
+        carrying two indices.  Its element dtype must match ``src``.
+    :type dst: tla.buffer or tla.buffer_access
+    :param stride: Positive compile-time element stride between consecutive
+        32-byte blocks.  It must be a multiple of ``32 / element_bytes``
+        elements, and ``stride // (32 / element_bytes)`` must fit in 16 bits.
+    :type stride: int or tl.constexpr
+    :param mask: Optional predicate with one ``i1`` lane per source lane;
+        ``None`` selects an all-true mask.  Inactive lanes are not written.
+    :type mask: tla.vector or None
+    :param update: Compile-time bool.  Only ``False`` is supported; ``True``
+        raises ``NotImplementedError``.
+    :type update: bool or tl.constexpr
+    :return: This function has no return value.
+    :rtype: None
+
+    Supported element types are i8/i16/i32, u8/u16/u32, bf16/f16/f32,
+    fp8e4nv and fp8e5.  The source and destination element dtypes must match.
+    There is no predication ``mode`` parameter for this store.
+    """
     if isinstance(dst, buffer_access):
         dst, offsets = dst.buffer, list(dst.indices)
     elif isinstance(dst, buffer):

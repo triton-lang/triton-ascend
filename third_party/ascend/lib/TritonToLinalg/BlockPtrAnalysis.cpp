@@ -63,21 +63,6 @@
 namespace mlir {
 namespace triton {
 
-hivm::PointerCastOp createScalarPointerCast(OpBuilder &builder, Location loc,
-                                            MemRefType resultType,
-                                            Value address) {
-  SmallVector<Value> dynamicSizes;
-  if (resultType.getNumDynamicDims() != 0) {
-    Value defaultSize = builder.create<arith::ConstantIndexOp>(loc, 1);
-    dynamicSizes.assign(resultType.getNumDynamicDims(), defaultSize);
-  }
-  auto pointerCast = builder.create<hivm::PointerCastOp>(
-      loc, resultType, ValueRange{address}, ValueRange{dynamicSizes});
-  pointerCast->setAttr(kScalarPointerCarrierAttr,
-                       UnitAttr::get(builder.getContext()));
-  return pointerCast;
-}
-
 // Recognize original scalar-pointer producers whose converted result may act
 // as a memref carrier. The parse site still requires BaseMemRefType, so merely
 // appearing in this list never makes an unconverted pointer an opaque source.
@@ -668,6 +653,11 @@ BlockDataParser::parse(Value operand, BlockData &data, const Location &loc,
     return parseBitcast(bitcastOp, data, loc, rewriter, known);
   } else if (auto extsiOp = operand.getDefiningOp<arith::ExtSIOp>()) {
     return parseExtSI(extsiOp, data, loc, rewriter, known);
+  } else if (auto extuiOp = operand.getDefiningOp<arith::ExtUIOp>()) {
+    // Parse the extended result as numerical data. Forwarding to the input
+    // would lose unsigned semantics, notably true -> 1 for an i1 comparison.
+    parseDynamicOffset<arith::ExtUIOp>(extuiOp, data, loc, rewriter, known);
+    return success();
   } else if (auto truncOp = operand.getDefiningOp<arith::TruncIOp>()) {
     return parseTruncI(truncOp, data, loc, rewriter, known);
   } else if (auto divOp = operand.getDefiningOp<arith::DivSIOp>()) {
@@ -1248,7 +1238,9 @@ void parseDynamicOffset(OpTy op, BlockData &data, const Location &loc,
     // For now, we consider this is UnstrucMemAcc because we have no other info.
     // Visiting other ops may change the type due to more info.
     resShape = shapedResTy.getShape().vec();
-    bool canExtractScalar = false;
+    // A one-element zero-extension result is a dynamic scalar offset.
+    // Extract after the cast to preserve its unsigned semantics.
+    bool canExtractScalar = std::is_same_v<OpTy, arith::ExtUIOp>;
     if constexpr (std::is_same_v<OpTy, triton::LoadOp>) {
       // A single-element tt.load result can extract a scalar when it is
       // unmasked, or masked with an `other` fill value. A mask without

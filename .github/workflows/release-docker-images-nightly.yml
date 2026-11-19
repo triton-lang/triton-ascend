@@ -23,18 +23,41 @@ concurrency:
 
 env:
   # 华为云 SWR 镜像仓库。
-  REGISTRY: swr.cn-north-4.myhuaweicloud.com
   IMAGE_REPOSITORY: swr.cn-north-4.myhuaweicloud.com/opentile/triton
 
-  TRITON_ASCEND_VERSION: "3.6.0"
-  CANN_VERSION: "9.2.0"
-  PYTORCH_VERSION: "2.10.0"
-  TORCH_NPU_VERSION: "2.10.0.post7"
-  PYTHON_VERSION: "3.11.15"
-  PYTHON_SERIES: "3.11"
-
 jobs:
+  deps:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve release image inputs
+        id: image
+        shell: bash
+        run: |
+          image=$(jq -cse '
+            def matches($pattern): type == "string" and test("\\A(" + $pattern + ")\\z");
+            select(length == 1) | .[0] |
+            select(.schema_version == 1 and
+              keys == (["schema_version", "triton_version", "source_hash", "llvm_hash", "patches",
+                        "cann", "python_version", "torch", "torch_npu"] | sort)) |
+            select(all(.source_hash, .llvm_hash; matches("[0-9a-f]{40}"))) |
+            select(all(.triton_version, .cann, .torch, .torch_npu;
+              matches("[0-9]+\\.[0-9]+\\.[0-9]+(\\.post[0-9]+)?"))) |
+            select(.python_version | matches("[0-9]+\\.[0-9]+\\.[0-9]+")) |
+            select(.patches | type == "array") |
+            select(all(.patches[];
+              keys == ["file", "sha256"] and
+              (.file | matches("llvm_patch_[A-Za-z0-9_.-]+\\.patch")) and
+              (.sha256 | matches("[0-9a-f]{64}")))) |
+            select((.patches | map(.file)) == (.patches | map(.file) | sort | unique)) |
+            . + {python_series: (.python_version | split(".") | .[:2] | join("."))}
+          ' cmake/release-image-info.json)
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: deps
     name: Build ${{ matrix.device_type }}-${{ matrix.os.name }}-${{ matrix.platform.arch }}
     runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 360
@@ -42,6 +65,13 @@ jobs:
       contents: read
     env:
       PUSH_IMAGE: ${{ inputs.push_images && 'true' || 'false' }}
+      TRITON_ASCEND_VERSION: ${{ fromJSON(needs.deps.outputs.image).triton_version }}
+      TRITON_ASCEND_SOURCE_SHA: ${{ fromJSON(needs.deps.outputs.image).source_hash }}
+      CANN_VERSION: ${{ fromJSON(needs.deps.outputs.image).cann }}
+      PYTORCH_VERSION: ${{ fromJSON(needs.deps.outputs.image).torch }}
+      TORCH_NPU_VERSION: ${{ fromJSON(needs.deps.outputs.image).torch_npu }}
+      PYTHON_VERSION: ${{ fromJSON(needs.deps.outputs.image).python_version }}
+      PYTHON_SERIES: ${{ fromJSON(needs.deps.outputs.image).python_series }}
     strategy:
       fail-fast: false
       matrix:
@@ -94,7 +124,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/cann9.2.0_npu.Dockerfile
+          file: docker/triton_ascend-cann-torch_npu.Dockerfile
           platforms: linux/${{ matrix.platform.arch }}
           load: false
           no-cache: true
@@ -112,6 +142,7 @@ jobs:
             BASE_IMAGE=${{ matrix.os.base_image }}
             DEVICE_TYPE=${{ matrix.device_type }}
             TRITON_ASCEND_VERSION=${{ env.TRITON_ASCEND_VERSION }}
+            TRITON_ASCEND_SOURCE_SHA=${{ env.TRITON_ASCEND_SOURCE_SHA }}
             CANN_VERSION=${{ env.CANN_VERSION }}
             PYTORCH_VERSION=${{ env.PYTORCH_VERSION }}
             TORCH_NPU_VERSION=${{ env.TORCH_NPU_VERSION }}
@@ -120,7 +151,7 @@ jobs:
 
   merge:
     name: Merge ${{ matrix.device_type }}-${{ matrix.os.name }}
-    needs: build
+    needs: [deps, build]
     if: ${{ inputs.push_images }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -128,6 +159,10 @@ jobs:
       contents: read
     env:
       TAG_SUFFIX: ${{ inputs.tag_suffix }}
+      TRITON_ASCEND_VERSION: ${{ fromJSON(needs.deps.outputs.image).triton_version }}
+      CANN_VERSION: ${{ fromJSON(needs.deps.outputs.image).cann }}
+      TORCH_NPU_VERSION: ${{ fromJSON(needs.deps.outputs.image).torch_npu }}
+      PYTHON_SERIES: ${{ fromJSON(needs.deps.outputs.image).python_series }}
     strategy:
       fail-fast: false
       matrix:
@@ -148,19 +183,15 @@ jobs:
           access-key-id: ${{ secrets.HUAWEI_CLOUD_AK }}
           access-key-secret: ${{ secrets.HUAWEI_CLOUD_SK }}
 
-      - name: Generate image tag
-        id: tags
-        run: |
-          base_tag="${TRITON_ASCEND_VERSION}-cann${CANN_VERSION}-torch_npu${TORCH_NPU_VERSION}-${{ matrix.device_type }}-${{ matrix.os.name }}-py${PYTHON_SERIES}"
-          echo "base_tag=${base_tag}" >> "${GITHUB_OUTPUT}"
-
       - name: Create multi-arch manifest
         shell: bash
         env:
-          BASE_TAG: ${{ steps.tags.outputs.base_tag }}
+          DEVICE_TYPE: ${{ matrix.device_type }}
+          OS_NAME: ${{ matrix.os.name }}
         run: |
           set -euo pipefail
 
+          BASE_TAG="${TRITON_ASCEND_VERSION}-cann${CANN_VERSION}-torch_npu${TORCH_NPU_VERSION}-${DEVICE_TYPE}-${OS_NAME}-py${PYTHON_SERIES}"
           amd64_image="${IMAGE_REPOSITORY}:${BASE_TAG}-amd64"
           arm64_image="${IMAGE_REPOSITORY}:${BASE_TAG}-arm64"
           final_image="${IMAGE_REPOSITORY}:${BASE_TAG}"

@@ -5543,7 +5543,7 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
                hasReduction && hasConversionPack && reductionStageCount >= 2 &&
                stageCount >= 15) {
       eventCompletionFloor =
-          hasAutoBlockifyLoop && stageCount >= 18 ? 17000.0 : 15500.0;
+          hasAutoBlockifyLoop && stageCount >= 18 ? 19000.0 : 15500.0;
       eventCompletionEvidence = semantic.evidence;
     } else if (prediction.candidate == kAllSimd && hasReduction &&
                hasConversionPack && reductionStageCount == 1 &&

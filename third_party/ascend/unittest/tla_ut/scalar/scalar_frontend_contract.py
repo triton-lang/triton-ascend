@@ -193,6 +193,11 @@ def test_abs_composes_in_jit_helper():
     assert not _ops(module, "tt.call")
 
 
+@pytest.mark.parametrize("value", [tl.float32, 4.0, tl.constexpr(4.0)])
+def test_sqrt_matches_triton_frontend(value):
+    assert _scalar_frontend(tla.sqrt, (value, )) == _scalar_frontend(tl.sqrt, (value, ))
+
+
 @pytest.mark.parametrize("condition", SCALAR_TYPES)
 @pytest.mark.parametrize("left", SCALAR_TYPES + ("fp8e5", ))
 @pytest.mark.parametrize("right", SCALAR_TYPES + ("fp8e5", ))
@@ -402,6 +407,8 @@ def test_rejects_non_scalar_values(value):
     cond = tl.tensor(None, tl.int1)
     with pytest.raises(TypeError, match="tla.abs x.*scalar"):
         tla.abs(value, _semantic=object())
+    with pytest.raises(TypeError, match="sqrt"):
+        tla.sqrt(value, _semantic=object())
     for operation in (tla.maximum, tla.minimum):
         for operands in ((value, scalar), (scalar, value)):
             with pytest.raises(TypeError, match="scalar"):
@@ -1161,6 +1168,7 @@ SCALAR_SCOPE_CASES = [
     (tla.cast, (tl.int32, )),
     (tla.cdiv, (3, )),
     (tla.clamp, (1.0, 3.0)),
+    (tla.sqrt, ()),
 ]
 
 
@@ -1176,9 +1184,9 @@ def _scalar_scope_helper(x, OP: tl.constexpr, EXTRA: tl.constexpr):
 
 @tla.jit
 def _scalar_scope_caller(x, OP: tl.constexpr, EXTRA: tl.constexpr, LITERAL: tl.constexpr, HELPER: tl.constexpr,
-                         PRECALL: tl.constexpr):
+                         PRECALL: tl.constexpr, FLOAT: tl.constexpr):
     if LITERAL:
-        x = 2
+        x = 2.0 if FLOAT else 2
     if PRECALL:
         _scalar_scope_helper(x, OP, EXTRA)
     with tla.scope.simd():
@@ -1199,8 +1207,11 @@ def _scalar_scope_caller(x, OP: tl.constexpr, EXTRA: tl.constexpr, LITERAL: tl.c
                          ids=["direct", "helper", "helper_after_outside_call"])
 def test_scalar_operations_reject_simd_scope(operation, extra, literal, helper, precall):
     with pytest.raises(CompilationError) as caught:
-        compile_offline(_scalar_scope_caller, {"x": "i32"},
-                        dict(OP=operation, EXTRA=extra, LITERAL=literal, HELPER=helper, PRECALL=precall))
+        signature = {"x": "fp32" if operation is tla.sqrt else "i32"}
+        compile_offline(
+            _scalar_scope_caller, signature,
+            dict(OP=operation, EXTRA=extra, LITERAL=literal, HELPER=helper, PRECALL=precall, FLOAT=operation
+                 is tla.sqrt))
     error = caught.value
     while error.__cause__ is not None:
         error = error.__cause__
@@ -1271,3 +1282,22 @@ def _scalar_after_simd_scope(x):
 
 def test_scalar_scope_restored_after_simd():
     _lower(_scalar_after_simd_scope, {"x": "i32"})
+
+
+@tr.jit
+def _sqrt_scope_helper(x):
+    return tla.sqrt(x)
+
+
+@tla.jit
+def _sqrt_after_simd_scope(x):
+    before = _sqrt_scope_helper(x)
+    with tla.scope.simd():
+        tla.infinity(tl.float32)
+    tla.device_print("outside", before, _sqrt_scope_helper(x))
+
+
+def test_sqrt_scope_restored_after_simd():
+    module = _lower(_sqrt_after_simd_scope, {"x": "fp32"})
+    assert _ops(module, "math.sqrt")
+    assert "tensor<" not in str(module) and not _ops(module, "memref.alloc")

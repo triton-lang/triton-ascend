@@ -130,7 +130,7 @@ def _scalar_sqrt(out, x):
 def _vector_sqrt(out):
     with tla.scope.simd():
         x = tla.simd.vlds(out[0])
-        tla.simd.vsts(out[0], tla.sqrt(x), dist="NORM_B32")
+        tla.simd.vsts(out[0], tla.simd.vsqrt(x), dist="NORM_B32")
 
 
 def test_sqrt_ir(output_dir=None):

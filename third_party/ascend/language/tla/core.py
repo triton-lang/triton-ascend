@@ -22,6 +22,12 @@ from enum import Enum
 
 from triton.language import core as tl
 
+# MLIR sentinel for a dynamic extent, stride or offset
+# (``ShapedType::kDynamic``). It is INT64_MIN, not -1: -1 is a plain negative
+# number for MemRefType/StridedLayoutAttr verification, which rejects it with
+# "invalid memref size" / "invalid stride".
+_DYNAMIC = -9223372036854775808
+
 
 def _shape(values):
     values = tuple(tl._unwrap_if_constexpr(v) for v in values)
@@ -30,11 +36,21 @@ def _shape(values):
     return values
 
 
+def _maybe_shape(values):
+    """Like :func:`_shape`, but ``None`` entries denote dynamic dims/strides."""
+    values = tuple(tl._unwrap_if_constexpr(v) for v in values)
+    if not values or any(v is not None and (type(v) is not int or v <= 0) for v in values):
+        raise ValueError("buffer shape must contain positive compile-time integers")
+    return values
+
+
 def _row_major_strides(sizes):
+    """Strides of a row-major layout; a ``None`` (dynamic) size makes every
+    stride it feeds dynamic as well."""
     strides, stride = [], 1
     for size in reversed(sizes):
         strides.insert(0, stride)
-        stride *= size
+        stride = None if stride is None or size is None else stride * size
     return tuple(strides)
 
 
@@ -114,16 +130,17 @@ class buffer_type(tl.base_type):
     """Structural type of a TLA buffer.
 
     :param shape: Non-empty sequence of positive compile-time extents in
-        elements.
-    :type shape: tuple[int, ...] or list[int]
+        elements. A ``None`` entry denotes a dynamic (runtime) extent.
+    :type shape: tuple[int or None, ...] or list[int or None]
     :param dtype: Compile-time element type, for example ``tl.float16``.
     :type dtype: triton.language.dtype
     :param space: Compile-time address space name or :class:`AddressSpace`
         member. Defaults to ``"gm"``.
     :type space: tla.AddressSpace, str
     :param strides: Element strides. Defaults to ``None``, which selects
-        row-major strides. Must have the same rank as ``shape``.
-    :type strides: tuple[int, ...] or None
+        row-major strides. Must have the same rank as ``shape``. A ``None``
+        entry denotes a dynamic (runtime) stride.
+    :type strides: tuple[int or None, ...] or None
     :param offset: Linear offset in elements. Defaults to ``0``; ``None``
         denotes a dynamic subview offset.
     :type offset: int or None
@@ -131,22 +148,27 @@ class buffer_type(tl.base_type):
     The type is structural: register-width, layout and operation-specific
     restrictions belong to the DMA and SIMD ops that consume the buffer.
     ``L0A_SF`` and ``L0B_SF`` are reserved and raise ``NotImplementedError``.
+    Dynamic extents/strides map to ``?`` in the underlying memref type; the
+    runtime values are carried by the producing view op, not the type.
     """
 
     def __init__(self, shape, dtype, space="gm", strides=None, offset=0):
-        self.shape = _shape(shape)
+        self.shape = _maybe_shape(shape)
         self.element_ty = tl._unwrap_if_constexpr(dtype)
         self.space = _normalize_space(space)
         if strides is None:
             strides = _row_major_strides(self.shape)
-        self.strides = _shape(strides)
+        self.strides = _maybe_shape(strides)
         if len(self.strides) != len(self.shape):
             raise ValueError("strides must match buffer rank")
         self.offset = offset  # None denotes a dynamic subview offset.
 
     def to_ir(self, builder):
-        return builder.create_tla_buffer_type(list(self.shape), self.element_ty.to_ir(builder), self.space,
-                                              list(self.strides), self.offset)
+        # None -> ShapedType::kDynamic for extents and strides alike; the
+        # offset keeps its optional and is mapped by the builder.
+        shape = [_DYNAMIC if dim is None else dim for dim in self.shape]
+        strides = [_DYNAMIC if stride is None else stride for stride in self.strides]
+        return builder.create_tla_buffer_type(shape, self.element_ty.to_ir(builder), self.space, strides, self.offset)
 
     def _flatten_ir_types(self, builder, out):
         out.append(self.to_ir(builder))

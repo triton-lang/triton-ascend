@@ -18,6 +18,10 @@ The default `all` auto-degrades to `ir` when no NPU is available.
   `scalar_frontend_contract.py` owns host-side parameter validation, type
   promotion, literals, diagnostics, constant folding, scalar-only adapter IR,
   and JIT helper composition (requires a TLA-enabled build, no NPU).
+  Scalar `select/abs/maximum/minimum/cast/cdiv/clamp` calls are rejected inside
+  SIMD VF, including literal inputs and calls through JIT helpers. Use explicit
+  `tla.simd.*` register interfaces there; `max_value/infinity` constant
+  constructors are allowed both inside and outside SIMD VF.
 - `simd/` — SIMD instruction cases: per-interface files (`vadd`, `vsub`,
   `vsubc`, `vor`, `vxor`, `vmins`, `vsstb`, `vdiv`, `vexp`, `vmax`, `vmin`,
   `vmaxs`, `vdup`, `vdups`, `vdupv`), grouped cases (`add_cmp`, `elementwise`,

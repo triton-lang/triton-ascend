@@ -24,9 +24,26 @@ Ascend-specific code generation handlers for 'with' statement context managers.
 __all__ = ["handle_scope_with"]
 
 
+class _TLACallerContext:
+    """Carry the effective core and VF modes into JIT helper specializations."""
+
+    def __init__(self, core_mode, vf_mode):
+        self.core_mode = core_mode
+        self.vf_mode = vf_mode
+
+    def mangle(self):
+        suffix = f"_tla_{self.core_mode}"
+        if self.vf_mode is not None:
+            suffix += f"_{self.vf_mode}"
+        return suffix
+
+    def initialize_callee(self, function, builder):
+        builder._tla_context = self
+
+
 def handle_scope_with(generator, node):
     """
-    Handle 'with tla.scope.simd()/tla.scope.cube():' by emitting an inline
+    Handle 'with tla.scope.*():' by emitting an inline
     ``scope.scope`` carrying the attributes defined by the scope class
     (``mlir_attrs``); the bishengir HFusion pipeline's outline-scope extracts
     the marked SIMD scope into the ``func.func`` + ``func.call`` that the HIVM
@@ -40,13 +57,21 @@ def handle_scope_with(generator, node):
     context_expr = node.items[0].context_expr
     withitem_class = generator.visit(context_expr.func)
 
-    with enter_sub_region(generator):
-        attrs = withitem_class.mlir_attrs(generator.builder)
-        scope_op = generator.builder.create_scope_op(attrs, [])
-        body = generator.builder.get_scope_entry_block(scope_op)
-        generator.builder.set_insertion_point_to_start(body)
-        generator.visit_compound_statement(node.body)
-        generator.builder.set_insertion_point_to_end(body)
-        if not body.has_terminator():
-            generator.builder.scope_return([])
+    previous_context = generator.caller_context
+    previous_tla_context = getattr(generator.builder, "_tla_context", None)
+    generator.caller_context = _TLACallerContext(withitem_class.core_mode, withitem_class.vf_mode)
+    generator.builder._tla_context = generator.caller_context
+    try:
+        with enter_sub_region(generator):
+            attrs = withitem_class.mlir_attrs(generator.builder)
+            scope_op = generator.builder.create_scope_op(attrs, [])
+            body = generator.builder.get_scope_entry_block(scope_op)
+            generator.builder.set_insertion_point_to_start(body)
+            generator.visit_compound_statement(node.body)
+            generator.builder.set_insertion_point_to_end(body)
+            if not body.has_terminator():
+                generator.builder.scope_return([])
+    finally:
+        generator.caller_context = previous_context
+        generator.builder._tla_context = previous_tla_context
     return None

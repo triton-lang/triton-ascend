@@ -34,6 +34,13 @@ class defines ``mlir_attrs``, the attribute set stamped on the emitted
 __all__ = ["scope", "vector", "simd", "cube"]
 
 
+def _check_not_in_simd(name, semantic):
+    """Reject operations that must execute outside a SIMD VF."""
+    context = getattr(getattr(semantic, "builder", None), "_tla_context", None)
+    if context is not None and context.vf_mode == "simd":
+        raise ValueError(f"{name} cannot be used inside SIMD VF")
+
+
 class scope:
     """Base marker for a core-mode region.
 
@@ -46,6 +53,7 @@ class scope:
     """
 
     core_mode = "vector"
+    vf_mode = None
 
     @classmethod
     def mlir_attrs(cls, builder):
@@ -73,9 +81,11 @@ class simd(scope):
     Emitted as a manual vector function: the bishengir ``outline-scope`` pass
     extracts this marked scope into ``func.func`` + ``func.call``. See
     :meth:`mlir_attrs` for the role of each stamped attribute.
+    Pure VV kernels may omit the explicit Vector scope; Vector ownership remains.
     """
 
     core_mode = "vector"
+    vf_mode = "simd"
 
     @classmethod
     def mlir_attrs(cls, builder):

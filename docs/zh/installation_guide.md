@@ -56,96 +56,61 @@ pip install -e .
 
 ### 自定义LLVM构建（可选）
 
-如需自定义构建LLVM，可执行以下步骤编译Triton-Ascend：步骤1–3需在同一终端连续执行，并从准备构建的已有Triton-Ascend仓库根目录开始。离线环境需先从联网机器传入该仓库及LLVM源码。
+在要构建的 Triton-Ascend 仓库根目录下，用同一终端依次执行以下步骤。离线构建时，请先将 LLVM 的 Git 工作副本复制到 `llvm-project/`。
 
-1. **代码准备**：通过`git checkout`检出指定版本的LLVM源码并应用补丁。
+1. **准备 LLVM 源码**。使用当前 Triton-Ascend 仓库中的版本和补丁。
 
     ```bash
-    # 从当前 Triton 仓库读取 LLVM 版本并应用本地补丁。
-    TRITON_ROOT="$(pwd)"
-    [ -f "$TRITON_ROOT/cmake/llvm-hash.txt" ] || { echo "请在 triton-ascend 仓库根目录下执行本代码块：在 $(pwd) 下未找到 cmake/llvm-hash.txt。"; exit 1; }
-    LLVM_COMMIT=$(cat "$TRITON_ROOT/cmake/llvm-hash.txt" | tr -d '\r\n') || exit 1
-    LLVM_COMMIT=$(printf '%s' "$LLVM_COMMIT" | tr 'A-F' 'a-f')
-    if [ "${#LLVM_COMMIT}" -ne 40 ] || [ -n "$(printf '%s' "$LLVM_COMMIT" | tr -d '0-9a-f')" ]; then
-      echo "cmake/llvm-hash.txt 为空或不是单个 40 位 commit 哈希 —— 请检查该文件。" >&2
-      exit 1
-    fi
-    if [ ! -d "$TRITON_ROOT/llvm-project/.git" ]; then
-      if [ -d "$TRITON_ROOT/llvm-project" ] && [ -n "$(ls -A "$TRITON_ROOT/llvm-project" 2>/dev/null)" ]; then
-        echo "llvm-project/ 已存在但不是 git 仓库，请清理该目录或补齐 .git 后再执行。" >&2
-        exit 1
+    (
+      set -e
+      LLVM_COMMIT=$(tr -d '\r\n' < cmake/llvm-hash.txt)
+      if [ ! -e llvm-project/.git ]; then
+        git clone --no-checkout https://github.com/llvm/llvm-project.git
       fi
-      git clone --no-checkout https://github.com/llvm/llvm-project.git || exit 1
-    fi
-    cd llvm-project
-    git checkout "$LLVM_COMMIT" || exit 1
-    export LC_ALL=C
-    for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
-      [ -f "$patch" ] || continue
-      name=$(basename "$patch")
-      token=${name#llvm_patch_}
-      token=${token%.patch}
-      token=$(printf '%s' "$token" | tr 'A-F' 'a-f')
-      case "$token" in
-        ""|*[!0-9a-f]*) ;;
-        *)
-          case "$LLVM_COMMIT" in
-            "$token"*) ;;
-            *)
-              echo "补丁 $name 为纯十六进制名但非 llvm-hash.txt 固定 commit（$LLVM_COMMIT）的前缀；若它是由十六进制字符组成的描述性名称，请重命名以避免误判。" >&2
-              exit 1
-              ;;
-          esac
-          ;;
-      esac
-      if git apply --check "$patch" 2>/dev/null; then
-        git apply "$patch" || exit 1
-      elif git apply -R --check "$patch" 2>/dev/null; then
-        echo "补丁 $name 已应用，跳过。"
-      else
-        echo "补丁 $name 无法干净地应用于当前目录，请重新执行 git apply --check \"$patch\" 查看具体原因。" >&2
-        exit 1
-      fi
-    done
+      git -C llvm-project checkout --detach "$LLVM_COMMIT"
+      for patch in "$PWD"/third_party/ascend/patch/llvm_patch_*.patch; do
+        [ -f "$patch" ] || continue
+        if ! git -C llvm-project apply --reverse --check "$patch" 2>/dev/null; then
+          git -C llvm-project apply "$patch"
+        fi
+      done
+    )
     ```
 
-2. **构建LLVM**：路径`/path/llvm-install`为用户规划的LLVM安装路径，需根据实际调整；后续步骤均使用第一步设置的`TRITON_ROOT`定位同一个仓库。
+2. **构建 LLVM**。将 `LLVM_INSTALL_PREFIX` 设置为绝对安装路径。
 
     ```bash
     export LLVM_INSTALL_PREFIX=/path/llvm-install
-    [ -n "${TRITON_ROOT:-}" ] || { echo "Run step 1 in the same terminal first."; exit 1; }
-    cd "$TRITON_ROOT/llvm-project"
-    mkdir -p build
-    cd build
-    cmake ../llvm \
-        -G Ninja \
-        -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
-        -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
-        -DCMAKE_LINKER=/usr/bin/lld-15 \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DLLVM_ENABLE_ASSERTIONS=ON \
-        -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
-        -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
-        -DLLVM_ENABLE_LLD=ON \
-        -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
-    ninja install
-
-    cp "$TRITON_ROOT/llvm-project/build/bin/FileCheck" "$LLVM_INSTALL_PREFIX/bin/FileCheck"
+    (
+      set -e
+      cmake -S llvm-project/llvm -B llvm-project/build \
+          -G Ninja \
+          -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
+          -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
+          -DCMAKE_LINKER=/usr/bin/lld-15 \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DLLVM_ENABLE_ASSERTIONS=ON \
+          -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
+          -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
+          -DLLVM_ENABLE_LLD=ON \
+          -DCMAKE_INSTALL_PREFIX="$LLVM_INSTALL_PREFIX"
+      ninja -C llvm-project/build install
+      cp llvm-project/build/bin/FileCheck "$LLVM_INSTALL_PREFIX/bin/FileCheck"
+    )
     ```
 
-3. **编译Triton-Ascend**：通过配置LLVM路径定位依赖库，启用ccache加速编译，并关闭Proton和单元测试来减少构建开销。
+3. **构建 Triton-Ascend**。
 
     ```bash
-    [ -n "${TRITON_ROOT:-}" ] || { echo "Run step 1 in the same terminal first."; exit 1; }
-    [ -n "${LLVM_INSTALL_PREFIX:-}" ] || { echo "Set LLVM_INSTALL_PREFIX in step 2 first."; exit 1; }
-    cd "$TRITON_ROOT"
-    LLVM_SYSPATH=${LLVM_INSTALL_PREFIX} \
-    TRITON_BUILD_WITH_CCACHE=true \
-    TRITON_BUILD_WITH_CLANG_LLD=true \
-    TRITON_BUILD_PROTON=OFF \
-    TRITON_WHEEL_NAME="triton_ascend" \
-    TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-    python3 setup.py install
+    (
+      LLVM_SYSPATH="${LLVM_INSTALL_PREFIX:?请先在第 2 步设置 LLVM_INSTALL_PREFIX。}" \
+      TRITON_BUILD_WITH_CCACHE=true \
+      TRITON_BUILD_WITH_CLANG_LLD=true \
+      TRITON_BUILD_PROTON=OFF \
+      TRITON_WHEEL_NAME="triton_ascend" \
+      TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
+      python3 setup.py install
+    )
     ```
 
     **表1**源码编译参数说明表

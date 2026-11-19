@@ -5610,9 +5610,9 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
     } else if (hasExp && hasDirectLoopMemory &&
                prediction.candidate == kAllSimd &&
                totalMemoryBytes <= 12288.0 && !hasReduction) {
-      // Fused exp/div rows with three direct FP32 streams use the short
-      // two-program event envelope rather than the standalone math floor.
-      eventCompletionFloor = 13500.0;
+      // Fused exp/div rows with three direct FP32 streams still pay the
+      // queued event boundary; use the measured short-loop envelope.
+      eventCompletionFloor = 14500.0;
       eventCompletionEvidence = semantic.evidence;
     } else if (hasExp && hasDirectLoopMemory && prediction.candidate == kAllSimd &&
                semantic.scalarMathSystemCycles > 0.0) {

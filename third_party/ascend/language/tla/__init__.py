@@ -67,6 +67,9 @@ from triton.language.core import (
     uint64,
 )
 
+# Use Triton's iterators for runtime and compile-time loops in TLA kernels.
+from triton.language.core import range, static_range
+
 from ._decorator import experimental
 from .core import AddressSpace, buffer, buffer_type, vector, vector_type
 from .scope import pipeline, scope
@@ -163,6 +166,8 @@ __all__ = [
     "uint16",
     "uint32",
     "uint64",
+    "range",
+    "static_range",
     "AddressSpace",
     "PadMode",
     "L2CachePolicy",

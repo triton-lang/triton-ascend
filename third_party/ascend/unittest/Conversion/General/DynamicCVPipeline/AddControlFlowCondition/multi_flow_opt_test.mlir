@@ -172,8 +172,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       arith.cmpi sgt, %[[C4]]
         // CHECK:       %[[C5:.+]] = arith.subi %[[V5C1]], %[[CB1]]
         // CHECK:       arith.cmpi sgt, %[[C5]]
-        // The two vector cores of the producer block must be aligned.
-        // CHECK:       arith.cmpi eq, %[[V5C0]], %[[V5C1]]
+        // The two consumer conditions are combined with the producer side
+        // condition. The cube does not wait for the two vector cores to be
+        // aligned: each of them being one round ahead of the cube is enough
+        // to know that both halves of the slot it reads are ready.
         // CHECK:       arith.andi
         // The cube block 1 is on the second level of the cube core, it has no
         // block above it: it has no preload condition.

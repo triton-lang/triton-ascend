@@ -1,11 +1,10 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=arith.select
 
 // A block that has neither a cross-core nor an intra-core interaction is a
 // pure scalar computation: it does not exchange any data with the other
-// blocks. It is not part of the flag chain of the loop: it neither takes the
-// flag of the loop as a condition nor updates it. The chain passes through it,
-// the block that comes after it still reads the flag of the last block that
-// took part in the chain.
+// blocks. Its condition is the counter condition alone: the loop does not
+// force a single block per iteration any more, the condition of a block does
+// not check the flag of the loop.
 //   block 1 produces attribute group 1 (three producers)
 //   block 2 consumes group 1 and produces group 0
 //   block 3 is a pure scalar computation, it has no dependency at all
@@ -14,34 +13,23 @@
 // CHECK-LABEL: func.func @pure_scalar_block
 // CHECK: scf.while
 // CHECK: ^bb0
-// The flag of the loop starts with a constant zero.
-// CHECK: %[[FLAG:.*]] = arith.constant 0 : i32
-// The first block of the chain reads the flag the loop starts with: its check
-// is always true and is left out.
+// The first block: the cross-core condition and-ed with the counter
+// condition.
 // CHECK: %[[GUARD1:.*]] = arith.andi %{{.*}}, %{{.*}}
 // CHECK: %[[IF1:[0-9]+]]:2 = scf.if %[[GUARD1]]
-// The flag of the loop is computed with a select after the block.
 // CHECK: ssbuffer.if = 1 : i32}
-// CHECK: %[[ONE1:.*]] = arith.constant 1 : i32
-// CHECK: %[[FLAG1:.*]] = arith.select %[[GUARD1]], %[[ONE1]], %[[FLAG]] : i32
-// The second block of the chain checks the flag of the first one.
-// CHECK: %[[FLAGCMP2:.*]] = arith.cmpi eq, %[[FLAG1]], %{{.*}} : i32
-// CHECK: %[[GUARD2:.*]] = arith.andi %{{.*}}, %[[FLAGCMP2]]
-// The flag of the second block is cumulative: it takes the flag of the first
-// block as its false value.
+// The second block: the intra-core condition and-ed with the counter
+// condition.
+// CHECK: %[[GUARD2:.*]] = arith.andi %{{.*}}, %{{.*}}
 // CHECK: ssbuffer.if = 2 : i32}
-// CHECK: %[[ONE2:.*]] = arith.constant 1 : i32
-// CHECK: %[[FLAG2:.*]] = arith.select %[[GUARD2]], %[[ONE2]], %[[FLAG1]] : i32
-// The third block is a pure scalar computation: it does not check the flag of
-// the loop and it does not update it, the chain passes through it.
+// The third block is a pure scalar computation: it has no dependency at all,
+// its condition is the counter condition alone.
 // CHECK: %[[GUARD3:.*]] = arith.cmpi slt, %{{.*}}, %{{.*}} : i32
 // CHECK: %[[IF3:[0-9]+]] = scf.if %[[GUARD3]] -> (i32) {
 // CHECK: hivm.hir.copy {{.*}} {ssbuffer.block_id = 3 : i32}
-// CHECK-NOT: arith.select
-// The fourth block checks the flag of the second one: the pure scalar block
-// did not break the chain.
-// CHECK: %[[FLAGCMP4:.*]] = arith.cmpi eq, %[[FLAG2]], %{{.*}} : i32
-// CHECK: %[[GUARD4:.*]] = arith.andi %{{.*}}, %[[FLAGCMP4]]
+// The fourth block: the intra-core condition and-ed with the counter
+// condition.
+// CHECK: %[[GUARD4:.*]] = arith.andi %{{.*}}, %{{.*}}
 // CHECK: %[[IF4:[0-9]+]]:2 = scf.if %[[GUARD4]]
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {

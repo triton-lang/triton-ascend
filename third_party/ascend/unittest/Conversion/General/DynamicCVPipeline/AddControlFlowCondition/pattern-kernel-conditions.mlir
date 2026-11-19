@@ -1,22 +1,24 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.for
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.for --implicit-check-not=arith.select
 
 // A kernel whose cross-core dependency is a CUBE -> VECTOR -> CUBE -> VECTOR
-// chain is recognized by the pattern and uses the normal preload scheme: the
-// main loop is an scf.while and the flags of the blocks are computed with
-// arith.select. The upstream scheme keeps the scf.for loop, the implicit
-// check forbids it.
+// chain uses the normal preload scheme: the main loop is an scf.while. The
+// upstream scheme keeps the scf.for loop, the implicit check forbids it. The
+// loop does not force a single block per iteration any more: no block
+// computes the flag of the loop, the implicit check forbids the select that
+// computed it.
 //
 // The dependency chain of this test is:
 //   cube block 0 -> vector block 1 -> cube block 2 -> vector block 3
-// The name of the kernel is not in the black list of AddControlFlowCondition.
 
 // CHECK-LABEL: func.func @pattern_kernel_conditions
 
-// The normal preload scheme: one scf.while per core, the flags of the
-// blocks are computed with arith.select after the blocks.
+// The normal preload scheme: one scf.while per core.
 // CHECK: scf.while
-// CHECK: arith.select
+// CHECK: ssbuffer.if = 1 : i32}
+// CHECK: ssbuffer.if = 3 : i32}
 // CHECK: scf.while
+// CHECK: ssbuffer.if = 0 : i32}
+// CHECK: ssbuffer.if = 2 : i32}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @pattern_kernel_conditions(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {

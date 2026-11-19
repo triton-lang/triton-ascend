@@ -466,6 +466,54 @@ def test_legacy_routes_preserve_precedence_and_input(raw, expected):
     assert options.hash() == baseline.hash()
 
 
+def test_canonical_invariant_cache_keys_survive_jit_packing():
+    backend = compiler.AscendBackend(GPUTarget("npu", "Ascend910_9581", 32))
+    requested = {
+        "enable_cvp_persistent_pipeline": True,
+        "enable_cvp_reduction_major_layout": True,
+        "allow_cvp_sum_reassociation": True,
+        "enable_dynamic_cv_pipeline": False,
+        "enable_mixed_cv": True,
+        "enable_preload": True,
+        "enable_vf_operand_substitution": True,
+        "enable_fused_multiply_add": False,
+        "cvp_invariant_cache_mode": "cached",
+        "cvp_invariant_cache_consider_overlapping": True,
+    }
+    original = dict(requested)
+
+    @triton.jit
+    def kernel():
+        pass
+
+    packed = kernel._pack_args(backend, requested, {}, [], None)[0]
+    assert requested == original
+    assert packed.cvp_invariant_cache_mode == "cached"
+    assert packed.cvp_invariant_cache_consider_overlapping is True
+    assert "cvp_q_cache_mode" not in packed.__dict__
+    assert "cvp_q_cache_consider_overlapping" not in packed.__dict__
+
+
+@pytest.mark.parametrize("name", [
+    "cvp_q_cache_mode", "cvp_q_cache_consider_overlapping",
+    "enable_cvp_attention_rows2", "enable_cvp_attention_first_output",
+    "enable_cvp_attention_last_output", "enable_cvp_attention_first_state",
+    "enable_cvp_attention_half_p_stream",
+])
+@pytest.mark.parametrize("value", [None, False, True])
+def test_removed_attention_keywords_are_not_jit_options(name, value):
+    backend = compiler.AscendBackend(GPUTarget("npu", "Ascend910_9581", 32))
+
+    @triton.jit
+    def kernel():
+        pass
+
+    with pytest.raises(KeyError, match=name + " was specified but unrecognised"):
+        kernel._pack_args(backend, {name: value}, {}, [], None)
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        compiler.NPUOptions(arch="Ascend910_9581", **{name: value})
+
+
 def test_simt_alias_obeys_target_and_mode_restrictions(backend):
     raw = {"enable_bishengir_simt_optimization": 101}
 

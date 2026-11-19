@@ -24,6 +24,7 @@
 #include "pybind11/pybind11.h"
 #include <pybind11/stl.h>
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVMAVE/IR/HIVMAVE.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
@@ -516,9 +517,56 @@ Value applySimdMode(TLABuilder &self, Value result, Value mask,
       .getResult();
 }
 
+struct TLAKernelFeatures {
+  bool hasIntraCoreSync = false;
+  bool hasCrossCoreSync = false;
+  bool hasUnitFlag = false;
+  bool hasMultiBuffer = false;
+  bool usesPipeline = false;
+  std::optional<bool> pipelinePreload;
+};
+
+TLAKernelFeatures getTLAKernelFeatures(ModuleOp module) {
+  TLAKernelFeatures features;
+  if (auto mode = module->getAttrOfType<IntegerAttr>("tla.pipeline")) {
+    features.usesPipeline = true;
+    features.pipelinePreload = mode.getInt() != 0;
+  }
+  module.walk([&](Operation *op) {
+    features.hasIntraCoreSync |=
+        isa<hivm::SetFlagOp, hivm::WaitFlagOp, hivm::PipeBarrierOp,
+            hivm::GetBufOp, hivm::RlsBufOp>(op);
+    features.hasCrossCoreSync |=
+        isa<hivm::SyncBlockOp, hivm::SyncBlockSetOp, hivm::SyncBlockWaitOp,
+            hivm::SyncIntraBlockSetOp, hivm::SyncIntraBlockWaitOp>(op);
+    features.hasMultiBuffer |=
+        isa<annotation::MarkOp>(op) && op->hasAttr(hivm::MultiBufferAttr::name);
+    features.usesPipeline |=
+        isa<scf::ForOp>(op) && op->hasAttr(hivm::CVPipelinedLoopAttr::name);
+    if (auto flagged = dyn_cast<hivm::UnitFlagEnabledInterface>(op)) {
+      if (auto modes = flagged.getUnitFlagModes())
+        features.hasUnitFlag |=
+            llvm::any_of(*modes, [](hivm::UnitFlagAttr attr) {
+              auto mode = attr.getUnitFlag();
+              return mode == hivm::UNIT_FLAG::ENABLED_WITH_UPDATE ||
+                     mode == hivm::UNIT_FLAG::ENABLED_WITHOUT_UPDATE;
+            });
+    }
+  });
+  return features;
+}
+
 } // namespace
 
 void init_tla_builder(py::module &&m) {
+  py::class_<TLAKernelFeatures>(m, "TLAKernelFeatures", py::module_local())
+      .def_readonly("has_intra_core_sync", &TLAKernelFeatures::hasIntraCoreSync)
+      .def_readonly("has_cross_core_sync", &TLAKernelFeatures::hasCrossCoreSync)
+      .def_readonly("has_unit_flag", &TLAKernelFeatures::hasUnitFlag)
+      .def_readonly("has_multi_buffer", &TLAKernelFeatures::hasMultiBuffer)
+      .def_readonly("uses_pipeline", &TLAKernelFeatures::usesPipeline)
+      .def_readonly("pipeline_preload", &TLAKernelFeatures::pipelinePreload);
+  m.def("get_tla_kernel_features", &getTLAKernelFeatures, py::arg("module"));
   m.def("lower_tla_sync_all", &lowerTlaSyncAll, py::arg("module"));
   py::class_<TLABuilder, AscendNPUIROpBuilder>(
       m, "tla_builder", py::module_local(), py::dynamic_attr())
@@ -1438,6 +1486,11 @@ void init_tla_builder(py::module &&m) {
              if (!linear.getType().isInteger(64))
                throw std::invalid_argument(
                    "TLA GM view requires an i64 element offset");
+             SmallVector<int64_t> staticStrides;
+             int64_t staticOffset;
+             if (failed(type.getStridesAndOffset(staticStrides, staticOffset)))
+               throw std::invalid_argument(
+                   "TLA GM view requires a strided layout");
              // Put the full signed displacement in the scalar base. Block
              // offsets are i32 and their standard lowering clamps negatives.
              Value base =
@@ -1455,11 +1508,14 @@ void init_tla_builder(py::module &&m) {
                  RankedTensorType::get(type.getShape(), type.getElementType());
              auto blockPtrType = triton::PointerType::get(
                  blockType, ptrType.getAddressSpace());
-             Value block = self.create<triton::MakeTensorPtrOp>(
+             auto block = self.create<triton::MakeTensorPtrOp>(
                  blockPtrType, base, shapeValues, strideValues, offsets,
                  builder.getDenseI32ArrayAttr(order));
+             if (!type.hasStaticShape() ||
+                 llvm::any_of(staticStrides, ShapedType::isDynamic))
+               block->setAttr("tla.gm_view", builder.getUnitAttr());
              auto bridge = self.create<UnrealizedConversionCastOp>(
-                 TypeRange{resultType}, ValueRange{block});
+                 TypeRange{resultType}, ValueRange{block.getResult()});
              bridge->setAttr("tla.gm_view", builder.getUnitAttr());
              return bridge.getResult(0);
            })
@@ -1810,6 +1866,19 @@ void init_tla_builder(py::module &&m) {
              scopeOp->setAttrs(attrs);
              return OpState(scopeOp);
            })
+      .def("create_tla_stage", [](TLABuilder &, std::vector<OpState> tasks) {
+        OpState last = tasks.at(tasks.size() - 1);
+        if (tasks.size() == 1)
+          return last;
+        OpBuilder builder(last.getOperation());
+        auto stage = builder.create<scope::ScopeOp>(last.getLoc(), TypeRange{});
+        Block &body = stage.getRegion().emplaceBlock();
+        for (auto task : tasks)
+          task->moveBefore(&body, body.end());
+        builder.setInsertionPointToEnd(&body);
+        builder.create<scope::ReturnOp>(last.getLoc(), ValueRange{});
+        return OpState(stage);
+      })
       .def("create_tla_pipeline",
            [](TLABuilder &self, Value stop) {
              auto &builder = self.getBuilder();
@@ -1819,18 +1888,14 @@ void init_tla_builder(py::module &&m) {
              Value ub =
                  self.create<arith::IndexCastOp>(builder.getIndexType(), stop);
              Value step = self.create<arith::ConstantIndexOp>(1);
-             auto domain = self.create<scope::ScopeOp>(TypeRange{});
-             domain->setAttr("hivm.pipeline", builder.getUnitAttr());
-             Block *body = builder.createBlock(&domain.getRegion());
              auto loop = self.create<scf::ForOp>(lb, ub, step);
-             builder.setInsertionPointToEnd(body);
-             self.create<scope::ReturnOp>(ValueRange{});
              // Python emits the body and its yield after scope/carry checks.
              loop.getBody()->getTerminator()->erase();
              builder.setInsertionPointToStart(loop.getBody());
              Value iv = self.create<arith::IndexCastOp>(builder.getI64Type(),
                                                         loop.getInductionVar());
-             return std::make_pair(loop, iv);
+             auto bound = stop.getDefiningOp<arith::ConstantIntOp>();
+             return std::make_tuple(loop, iv, !bound || bound.value() > 1);
            })
       // Ensures the TLA scope has its entry block; the cann-shared
       // create_scope_op makes its own, so the emplace stays here to avoid

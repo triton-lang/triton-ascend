@@ -79,14 +79,10 @@ def sync_mmad(A, B, First, Final, Clear, M: tl.constexpr, N: tl.constexpr, K: tl
                     b_tile = b1
                 if MANUAL:
                     tla.sync.wait_flag(tla.sync.PIPE.M, tla.sync.PIPE.MTE1, ki % SLOTS)
-                tla.copy_l1_to_l0(
-                    a_l1, a_tile,
-                    tla.CopyL1ToL0Params(is_transpose=False, k_part_idx=ki, k_part=L0_K, k_part_ceil=L0_K,
-                                         k_part_loop=K // L0_K, k_part_actual=L0_K, m=M))
-                tla.copy_l1_to_l0(
-                    b_l1, b_tile,
-                    tla.CopyL1ToL0Params(is_transpose=False, k_part_idx=ki, k_part=L0_K, k_part_ceil=L0_K,
-                                         k_part_loop=K // L0_K, k_part_actual=L0_K, m=N))
+                a_src = tla.subview(a_l1, (ki * (L0_K // 16), 0, 0, 0), (L0_K // 16, M // 16, 16, 16))
+                b_src = tla.subview(b_l1, (0, ki * (L0_K // 16), 0, 0), (N // 16, L0_K // 16, 16, 16))
+                tla.copy_l1_to_l0(a_src, a_tile)
+                tla.copy_l1_to_l0(b_src, b_tile)
                 if MANUAL:
                     tla.sync.set_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
                     tla.sync.wait_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)

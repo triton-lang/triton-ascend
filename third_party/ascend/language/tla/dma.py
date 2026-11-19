@@ -297,15 +297,16 @@ class CopyL12FBParams:
 
 @dataclass(frozen=True)
 class CopyL1ToL0Params:
-    """Explicit native K-partition fields; actual_batch has no proven mapping."""
+    """Configuration for :func:`copy_l1_to_l0`.
+
+    :param is_transpose: Compile-time bool selecting the native source layout
+        and transpose form. Defaults to ``False``; existing layout hints apply.
+    :type is_transpose: bool
+
+    Views specify the complete matrix region. Select K partitions
+    with ``tla.subview``; there are no public K-partition attributes.
+    """
     is_transpose: bool = False
-    actual_batch: int = None
-    k_part_idx: int = None
-    k_part: int = None
-    k_part_ceil: int = None
-    k_part_loop: int = None
-    k_part_actual: int = None
-    m: int = None
 
 
 @dataclass(frozen=True)
@@ -686,42 +687,52 @@ def copy_l1_to_fb(src, dst, params=None, _semantic=None):
 def copy_l1_to_l0(src, dst, params=None, _semantic=None):
     """Copies L1 data into L0A/L0B using ``hivm.hir.l12l0``.
 
-    :param src: L1 source with ``space="l1"``.
+    :param src: L1 source view of the complete matrix region.
     :type src: tla.buffer
-    :param dst: L0A or L0B destination with ``space="l0a"`` or ``"l0b"``.
+    :param dst: Matching L0A or L0B matrix view.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
-        ``tla.CopyL1ToL0Params()``, which is incomplete for this route. See
-        :class:`CopyL1ToL0Params` for the native K-partition fields.
+        ``tla.CopyL1ToL0Params()`` (no transpose).
     :type params: tla.CopyL1ToL0Params or None
     :return: None. The destination buffer is updated in place.
     :rtype: None
-    :raises ValueError: If a required K-partition field or ``m`` is ``None``.
-    :raises NotImplementedError: If ``actual_batch`` is set, because the native
-        ``L12L0Op`` has no corresponding field.
-
-    ``k_part_idx``, ``k_part``, ``k_part_ceil``, ``k_part_loop``,
-    ``k_part_actual`` and ``m`` must all be compile-time integers. Set
-    ``is_transpose`` to request the native transposed form.
+    Static logical rank-2 and physical rank-4 views are passed through to NPUIR.
+    Logical L0A is ``[M,K]`` and L0B is ``[K,N]``. Physical L0A/L0B is
+    ``[K/C0,MN/16,16,C0]``. Both physical endpoints must have inner dimensions
+    ``(16, C0)``, where ``C0=32/sizeof(dtype)``: 16 for float16/bfloat16 and
+    8 for float32. Partial or oversized inner fractals are rejected,
+    including when ``is_transpose=True``.
+    Both endpoints must have the same float16, bfloat16 or float32 dtype.
+    K and effective M/N must be multiples of 16. No rounding or zero fill
+    is performed. NPUIR interprets source transpose and layout hints, checks
+    matrix compatibility and performs any required layout conversion.
 
     .. note::
-        Emit this Cube transfer in ``tla.scope.cube()``. This interface emits
-        the native operation directly; backend layout, dtype and alignment
-        restrictions still apply.
+        Emit in ``tla.scope.cube()``. Use ``tla.subview`` for matrix origins
+        and sizes. Input view/subview layouts, offsets and strides are retained
+        without copy-specific descriptor rewriting or stride restrictions.
+        NPUIR checks target layout support, alignment, physical address ranges
+        and L0 capacity. This operation does not multiply matrices, allocate
+        L0 slots or synchronize their reuse.
+
+    Examples inside a ``@tla.jit`` cube scope, with compatible views::
+
+        tla.copy_l1_to_l0(src_matrix, dst_matrix)
+        src_tile = tla.subview(src, (0, ki * L0_K), (M, L0_K))
+        tla.copy_l1_to_l0(src_tile, dst_tile)
     """
     _route(src, dst, (("l1", "l0a"), ("l1", "l0b")))
     p = _params(params, CopyL1ToL0Params)
-    if _unwrap_if_constexpr(p.actual_batch) is not None:
-        raise NotImplementedError("actual_batch has no field in L12L0Op; use the native k_part_* and m fields "
-                                  "pending specification review")
-    parts = {}
-    for name in ("k_part_idx", "k_part", "k_part_ceil", "k_part_loop", "k_part_actual", "m"):
-        value = _unwrap_if_constexpr(getattr(p, name))
-        if value is None:
-            raise ValueError(f"CopyL1ToL0Params requires native backend field {name}")
-        parts[name] = _integer(value, name)
-    _semantic.builder.create_tla_l12l0(src.handle, dst.handle, is_transposed=_boolean(p.is_transpose, "is_transpose"),
-                                       **parts)
+    transpose = _boolean(p.is_transpose, "is_transpose")
+    if src.dtype != dst.dtype or src.dtype not in (float16, bfloat16, float32):
+        raise TypeError("copy_l1_to_l0 requires matching float16, bfloat16 or float32 types")
+    c0 = 256 // src.dtype.primitive_bitwidth
+    for view in (src, dst):
+        if len(view.shape) not in (2, 4):
+            raise ValueError("copy_l1_to_l0 requires static logical rank-2 or physical rank-4 views")
+        if len(view.shape) == 4 and view.shape[-2:] != (16, c0):
+            raise ValueError(f"copy_l1_to_l0 physical views require inner dimensions (16, {c0})")
+    _semantic.builder.create_tla_l12l0(src.handle, dst.handle, is_transposed=transpose)
 
 
 def _fixpipe(src, dst, p, semantic):

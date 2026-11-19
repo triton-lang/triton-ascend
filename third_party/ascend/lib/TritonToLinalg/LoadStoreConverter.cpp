@@ -1089,9 +1089,8 @@ AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
         loc, TypeRange{tensorType}, ValueRange{cmpMemref, inputMemref}, ptr);
     rewriter.replaceOp(op, casOp.getOutput());
   } else {
-    rewriter.create<hfusion::AtomicCasOp>(loc, TypeRange(),
-                                          ValueRange{cmpMemref, inputMemref},
-                                          ptr);
+    rewriter.create<hfusion::AtomicCasOp>(
+        loc, TypeRange(), ValueRange{cmpMemref, inputMemref}, ptr);
     rewriter.eraseOp(op);
   }
   return success();

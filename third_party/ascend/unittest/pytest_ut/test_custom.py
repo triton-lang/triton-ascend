@@ -212,6 +212,28 @@ def kernel_cube_address_space(a_ptr, b_ptr, out_ptr, n, BLOCK: tl.constexpr):
     tl.store(out_ptr + i, result, mask=i < n)
 
 
+@al.register_custom_op
+class my_custom_op_memory_effect:
+    core = al.CORE.VECTOR
+    pipe = al.PIPE.PIPE_V
+    mode = al.MODE.SIMD
+    symbol = "my_custom_func_memory_effect"
+    bitcode = os.path.abspath(__file__)
+
+    def __init__(self, x, out=None):
+        # Accumulator output: default for outs is write, so the key is required.
+        self.memory_effect = {"out": "read_write"}
+
+
+@triton.jit
+def kernel_memory_effect(x_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    x = tl.load(x_ptr + i, mask=i < n)
+    y = tl.load(out_ptr + i, mask=i < n)
+    result = al.custom("my_custom_op_memory_effect", x, out=y)
+    tl.store(out_ptr + i, result, mask=i < n)
+
+
 # ============== Pytest tests ==============
 
 
@@ -372,6 +394,20 @@ def test_custom_op_cube_with_address_space():
     assert "#hivm.address_space<cc>" in line
 
 
+def test_custom_op_memory_effect():
+    """An accumulator out emits memory_effect<read_write> on the output operand."""
+    mlir = compile_kernel(
+        kernel_memory_effect,
+        {"x_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
+        {"BLOCK": 256},
+    )
+    assert mlir and len(mlir) > 0
+    lines = _custom_lines(mlir, "my_custom_op_memory_effect")
+    assert lines, "expected hivm.hir.custom for my_custom_op_memory_effect"
+    line = lines[0]
+    assert "arg_attrs = [{}, {memory_effect = #hivm.memory_effect<read_write>}]" in line
+
+
 # ============== Main for manual testing ==============
 
 if __name__ == "__main__":
@@ -382,6 +418,7 @@ if __name__ == "__main__":
     test_custom_op_extra_buffers_single_buffer()
     test_custom_op_cube_with_data_layout()
     test_custom_op_cube_with_address_space()
+    test_custom_op_memory_effect()
     mlir = compile_kernel(my_kernel, {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
                           {"BLOCK": 256})
     print(f"✅ Generated MLIR ({len(mlir)} chars):\n")

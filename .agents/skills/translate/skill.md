@@ -31,7 +31,7 @@ applicable-scope:
 
 > **⚠️ 重要警告：翻译前必须先读取翻译标准！遗漏此步骤会导致翻译不符合规范，需要返工修正！**
 
-**必须在翻译任何内容之前**，读取 <https://developers.google.com/style> 英文风格指南的关键内容。
+**必须在翻译任何内容之前**，读取 [Google 开发者文档风格指南](https://developers.google.com/style) 英文风格指南的关键内容。
 
 ### 2.1 翻译标准核心要点（必须遵守）
 

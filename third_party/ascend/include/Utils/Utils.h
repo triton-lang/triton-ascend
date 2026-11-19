@@ -36,7 +36,6 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/LogicalResult.h"
@@ -59,10 +58,6 @@ const std::string runtimeLoopMaskAttrName = "RuntimeLoopMask";
 const std::string discreteAttrName = "DiscreteMemAccess";
 const std::string continuousAttrName = "ContinuousMemAccess";
 const std::string customSrcPtrIndexAttrName = "SrcPtrIndex";
-
-/// Pick an unused module-level name for a generated runtime function.
-llvm::SmallString<128> generateUniqueFuncName(ModuleOp moduleOp,
-                                              llvm::StringRef funcNameBase);
 
 bool isaPermutedMemRefType(MemRefType);
 

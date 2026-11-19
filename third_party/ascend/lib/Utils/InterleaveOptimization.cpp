@@ -263,12 +263,12 @@ finishDeinterleavedLoad(triton::LoadOp op, Value slice, Value writebackDest,
   return success();
 }
 
-LogicalResult
-DeinterleaveStatusOptimization(triton::LoadOp op, Value ptr,
-                               ConversionPatternRewriter &rewriter,
-                               Value writebackDest) {
+LogicalResult DeinterleaveStatusOptimization(
+    triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
+    ConversionPatternRewriter &rewriter, Value writebackDest) {
   if (!isValidDeinterleaveDestination(op, writebackDest))
     return failure();
+  auto ptr = adaptor.getPtr();
   if (auto reinterpretCast = ptr.getDefiningOp<memref::ReinterpretCastOp>()) {
     auto loc = op.getLoc();
 
@@ -342,8 +342,9 @@ DeinterleaveStatusOptimization(triton::LoadOp op, Value ptr,
 }
 
 LogicalResult DeinterleaveStatusWithMaskOptimization(
-    triton::LoadOp op, Value ptr, ConversionPatternRewriter &rewriter,
-    MaskState &mstate, Value localMem, Value writebackDest) {
+    triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
+    ConversionPatternRewriter &rewriter, MaskState &mstate, Value localMem,
+    Value writebackDest) {
   if (!isValidDeinterleaveDestination(op, writebackDest))
     return failure();
 
@@ -358,6 +359,7 @@ LogicalResult DeinterleaveStatusWithMaskOptimization(
   }
   if (mstate.dims.empty() || !getConstantIntValue(mstate.dims.back()))
     return failure();
+  auto ptr = adaptor.getPtr();
   if (auto reinterpretCast = ptr.getDefiningOp<memref::ReinterpretCastOp>()) {
     auto loc = op.getLoc();
 

@@ -371,21 +371,60 @@ llvm::SmallVector<Value> toIndexValues(TLABuilder &self,
 
 // Zero-offset row-major memrefs stay identity: the canonical form, and the
 // only layout PointerCastOp's LLVM lowering accepts. Subview/reinterpret
-// results keep strided layouts via the dynamic-offset branch below.
+// results keep strided layouts via the dynamic-offset branch below. A dynamic
+// dim or stride can never prove compactness, so it forces a strided layout.
 MemRefLayoutAttrInterface tlaBufferLayout(MLIRContext *ctx,
                                           ArrayRef<int64_t> shape,
                                           ArrayRef<int64_t> strides,
                                           std::optional<int64_t> offset) {
   bool isIdentity = offset.has_value() && *offset == 0;
-  for (int64_t expectedStride = 1, i = shape.size(); i-- > 0;) {
-    if (shape[i] > 1 && strides[i] != expectedStride)
-      isIdentity = false;
-    expectedStride *= shape[i];
+  if (isIdentity) {
+    for (int64_t expectedStride = 1, i = shape.size(); i-- > 0;) {
+      if (ShapedType::isDynamic(shape[i]) ||
+          ShapedType::isDynamic(strides[i])) {
+        isIdentity = false;
+        break;
+      }
+      if (shape[i] > 1 && strides[i] != expectedStride) {
+        isIdentity = false;
+        break;
+      }
+      expectedStride *= shape[i];
+    }
   }
   if (isIdentity)
     return {};
   return StridedLayoutAttr::get(ctx, offset.value_or(ShapedType::kDynamic),
                                 strides);
+}
+
+// Index-typed foldable entry for subview/reinterpret_cast dims: a Python int
+// is a compile-time constant, anything else a runtime scalar.
+OpFoldResult toMixedDim(TLABuilder &self, const py::object &value) {
+  if (py::isinstance<py::int_>(value) && !py::isinstance<py::bool_>(value))
+    return self.getBuilder().getIndexAttr(value.cast<int64_t>());
+  auto dim = value.cast<Value>();
+  if (!dim.getType().isIndex())
+    dim =
+        self.create<arith::IndexCastOp>(self.getBuilder().getIndexType(), dim);
+  return dim;
+}
+
+// Runtime i64 shape/stride operand for tt.make_tensor_ptr: static entries
+// become i64 constants, dynamic entries must already be i64 scalars.
+Value toI64Dim(TLABuilder &self, const py::object &value) {
+  if (py::isinstance<py::int_>(value) && !py::isinstance<py::bool_>(value)) {
+    int64_t dim = value.cast<int64_t>();
+    if (dim <= 0)
+      throw std::invalid_argument(
+          "TLA GM view requires positive sizes and strides");
+    return self.create<arith::ConstantIntOp>(dim, 64);
+  }
+  auto dim = value.cast<Value>();
+  if (!dim.getType().isInteger(64))
+    throw std::invalid_argument(
+        "TLA GM view dynamic sizes and strides must be i64 scalars");
+  return dim;
 }
 
 void checkDmaBuffers(Value src, Value dst) {
@@ -1386,29 +1425,17 @@ void init_tla_builder(py::module &&m) {
             self.create<hivm::VBrcOp>(TypeRange{}, value, dst);
           },
           py::arg("dst"), py::arg("value"))
-      .def("create_tla_bind",
-           [](TLABuilder &self, Value addr, Type type) -> Value {
-             auto memrefType = dyn_cast<MemRefType>(type);
-             if (!memrefType)
-               throw std::invalid_argument("TLA bind requires a memref type");
-             if (!addr.getType().isInteger(64))
-               throw std::invalid_argument(
-                   "TLA bind requires an i64 address operand");
-             return self.create<hivm::PointerCastOp>(memrefType, addr)
-                 .getResult();
-           })
       .def("create_tla_pointer_view",
-           [](TLABuilder &self, Value source, Value linear,
-              Type resultType) -> Value {
+           [](TLABuilder &self, Value source, Value linear, Type resultType,
+              const std::vector<py::object> &sizes,
+              const std::vector<py::object> &strides) -> Value {
              auto type = dyn_cast<MemRefType>(resultType);
              auto ptrType = dyn_cast<triton::PointerType>(source.getType());
-             SmallVector<int64_t> strides;
-             int64_t offset;
-             if (!type || !ptrType || !type.hasStaticShape() ||
-                 type.getRank() == 0 || type.getMemorySpace() ||
+             if (!type || !ptrType || type.getRank() == 0 ||
+                 type.getMemorySpace() ||
                  type.getElementType() != ptrType.getPointeeType() ||
-                 failed(type.getStridesAndOffset(strides, offset)) ||
-                 !ShapedType::isDynamic(offset))
+                 sizes.size() != static_cast<size_t>(type.getRank()) ||
+                 strides.size() != sizes.size())
                throw std::invalid_argument("invalid TLA GM view type");
              if (!linear.getType().isInteger(64))
                throw std::invalid_argument(
@@ -1420,16 +1447,11 @@ void init_tla_builder(py::module &&m) {
              SmallVector<Value> shapeValues, strideValues, offsets;
              SmallVector<int32_t> order;
              auto &builder = self.getBuilder();
-             for (int64_t i = 0; i < type.getRank(); ++i) {
-               if (type.getDimSize(i) <= 0 || strides[i] <= 0)
-                 throw std::invalid_argument(
-                     "TLA GM view requires positive sizes and strides");
-               shapeValues.push_back(
-                   self.create<arith::ConstantIntOp>(type.getDimSize(i), 64));
-               strideValues.push_back(
-                   self.create<arith::ConstantIntOp>(strides[i], 64));
+             for (size_t i = 0; i < sizes.size(); ++i) {
+               shapeValues.push_back(toI64Dim(self, sizes[i]));
+               strideValues.push_back(toI64Dim(self, strides[i]));
                offsets.push_back(self.create<arith::ConstantIntOp>(0, 32));
-               order.push_back(type.getRank() - 1 - i);
+               order.push_back(sizes.size() - 1 - i);
              }
              auto blockType =
                  RankedTensorType::get(type.getShape(), type.getElementType());
@@ -1445,8 +1467,8 @@ void init_tla_builder(py::module &&m) {
            })
       .def("create_tla_subview",
            [](TLABuilder &self, Value source, const std::vector<Value> &offsets,
-              const std::vector<int64_t> &sizes,
-              const std::vector<int64_t> &strides) -> Value {
+              const std::vector<py::object> &sizes,
+              const std::vector<py::object> &strides) -> Value {
              auto type = dyn_cast<MemRefType>(source.getType());
              if (!type || offsets.size() != type.getRank() ||
                  sizes.size() != offsets.size() ||
@@ -1460,37 +1482,13 @@ void init_tla_builder(py::module &&m) {
                      self.getBuilder().getIndexType(), offset);
                mixedOffsets.push_back(offset);
              }
-             for (auto size : sizes)
-               mixedSizes.push_back(self.getBuilder().getIndexAttr(size));
-             for (auto stride : strides)
-               mixedStrides.push_back(self.getBuilder().getIndexAttr(stride));
+             for (const auto &size : sizes)
+               mixedSizes.push_back(toMixedDim(self, size));
+             for (const auto &stride : strides)
+               mixedStrides.push_back(toMixedDim(self, stride));
              return self
                  .create<memref::SubViewOp>(source, mixedOffsets, mixedSizes,
                                             mixedStrides)
-                 .getResult();
-           })
-      .def("create_tla_reinterpret_cast",
-           [](TLABuilder &self, Value source, Value offset,
-              const std::vector<int64_t> &sizes,
-              const std::vector<int64_t> &strides, Type resultType) -> Value {
-             if (!isa<MemRefType>(source.getType()) ||
-                 sizes.size() != strides.size())
-               throw std::invalid_argument(
-                   "TLA reinterpret_cast requires a memref source and matching "
-                   "sizes/strides");
-             if (!offset.getType().isIndex())
-               offset = self.create<arith::IndexCastOp>(
-                   self.getBuilder().getIndexType(), offset);
-             // resultType is strided<strides, offset: ?>: sizes/strides are
-             // static, only the linear offset is dynamic.
-             return self
-                 .create<memref::ReinterpretCastOp>(
-                     resultType, source, ValueRange{offset}, ValueRange{},
-                     ValueRange{},
-                     self.getBuilder().getDenseI64ArrayAttr(
-                         {ShapedType::kDynamic}),
-                     self.getBuilder().getDenseI64ArrayAttr(sizes),
-                     self.getBuilder().getDenseI64ArrayAttr(strides))
                  .getResult();
            })
       // memref.collapse_shape / expand_shape materialization (see

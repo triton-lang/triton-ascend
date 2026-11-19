@@ -317,3 +317,27 @@ def test_debug_command_includes_effective_arguments(compiler_argv, capsys):
     for index in (1, actual.index("-o") + 1):
         printed[index] = actual[index]
     assert printed == actual
+
+
+@pytest.mark.parametrize("single,extra,expected", [
+    (False, (), ("--enable-tla-cv-pipelining=true", )),
+    (True, (), ()),
+    (False, ("--enable-tla-cv-pipelining=false", ), ("--enable-tla-cv-pipelining=false", )),
+])
+def test_pipeline_compiler_options(compiler_argv, single, extra, expected):
+    from scope.pipeline import staged_copy
+
+    ptr = MockTensor(tl.float32)
+    kernel = tla.jit(staged_copy.fn)
+    args = (ptr, ptr, 4)
+    kwargs = dict(MIX=False, SINGLE=single, grid=(1, ), npuir_extra_options=extra)
+    if driver.active.get_current_target().arch == "Ascend910B2":
+        with pytest.raises(triton.TritonError, match="requires a register-based Ascend target"):
+            kernel.warmup(*args, **kwargs)
+        assert not compiler_argv
+        return
+
+    kernel.warmup(*args, **kwargs)
+    argv, = compiler_argv
+    assert tuple(flag for flag in argv if "enable-tla-cv-pipelining" in flag) == expected
+    assert "--disable-auto-inject-block-sync=true" not in argv

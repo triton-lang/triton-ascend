@@ -35,6 +35,9 @@ def normalize_extra_options(value):
 
 _INTRA = "disable-hivm-auto-inject-sync"
 _CROSS = "disable-auto-inject-block-sync"
+_PIPELINE_MODE = "tla.pipeline"
+_PRELOAD_LOOP = "hivm.cv_pipelined_loop"
+_PRELOAD_OPTION = "enable-tla-cv-pipelining"
 
 
 def _flag_override(flag, argv):
@@ -43,6 +46,10 @@ def _flag_override(flag, argv):
         if name in ("-" + flag, "--" + flag):
             return value.lower() not in ("false", "0")
     return None
+
+
+def preload_override(argv):
+    return _flag_override(_PRELOAD_OPTION, argv)
 
 
 def infer_sync_options(features, disable_block_sync, argv):

@@ -523,10 +523,15 @@ struct TLAKernelFeatures {
   bool hasUnitFlag = false;
   bool hasMultiBuffer = false;
   bool usesPipeline = false;
+  std::optional<bool> pipelinePreload;
 };
 
 TLAKernelFeatures getTLAKernelFeatures(ModuleOp module) {
   TLAKernelFeatures features;
+  if (auto mode = module->getAttrOfType<IntegerAttr>("tla.pipeline")) {
+    features.usesPipeline = true;
+    features.pipelinePreload = mode.getInt() != 0;
+  }
   module.walk([&](Operation *op) {
     features.hasIntraCoreSync |=
         isa<hivm::SetFlagOp, hivm::WaitFlagOp, hivm::PipeBarrierOp,
@@ -559,7 +564,8 @@ void init_tla_builder(py::module &&m) {
       .def_readonly("has_cross_core_sync", &TLAKernelFeatures::hasCrossCoreSync)
       .def_readonly("has_unit_flag", &TLAKernelFeatures::hasUnitFlag)
       .def_readonly("has_multi_buffer", &TLAKernelFeatures::hasMultiBuffer)
-      .def_readonly("uses_pipeline", &TLAKernelFeatures::usesPipeline);
+      .def_readonly("uses_pipeline", &TLAKernelFeatures::usesPipeline)
+      .def_readonly("pipeline_preload", &TLAKernelFeatures::pipelinePreload);
   m.def("get_tla_kernel_features", &getTLAKernelFeatures, py::arg("module"));
   m.def("lower_tla_sync_all", &lowerTlaSyncAll, py::arg("module"));
   py::class_<TLABuilder, AscendNPUIROpBuilder>(
@@ -1860,6 +1866,19 @@ void init_tla_builder(py::module &&m) {
              scopeOp->setAttrs(attrs);
              return OpState(scopeOp);
            })
+      .def("create_tla_stage", [](TLABuilder &, std::vector<OpState> tasks) {
+        OpState last = tasks.at(tasks.size() - 1);
+        if (tasks.size() == 1)
+          return last;
+        OpBuilder builder(last.getOperation());
+        auto stage = builder.create<scope::ScopeOp>(last.getLoc(), TypeRange{});
+        Block &body = stage.getRegion().emplaceBlock();
+        for (auto task : tasks)
+          task->moveBefore(&body, body.end());
+        builder.setInsertionPointToEnd(&body);
+        builder.create<scope::ReturnOp>(last.getLoc(), ValueRange{});
+        return OpState(stage);
+      })
       .def("create_tla_pipeline",
            [](TLABuilder &self, Value stop) {
              auto &builder = self.getBuilder();
@@ -1869,18 +1888,14 @@ void init_tla_builder(py::module &&m) {
              Value ub =
                  self.create<arith::IndexCastOp>(builder.getIndexType(), stop);
              Value step = self.create<arith::ConstantIndexOp>(1);
-             auto domain = self.create<scope::ScopeOp>(TypeRange{});
-             domain->setAttr("hivm.pipeline", builder.getUnitAttr());
-             Block *body = builder.createBlock(&domain.getRegion());
              auto loop = self.create<scf::ForOp>(lb, ub, step);
-             builder.setInsertionPointToEnd(body);
-             self.create<scope::ReturnOp>(ValueRange{});
              // Python emits the body and its yield after scope/carry checks.
              loop.getBody()->getTerminator()->erase();
              builder.setInsertionPointToStart(loop.getBody());
              Value iv = self.create<arith::IndexCastOp>(builder.getI64Type(),
                                                         loop.getInductionVar());
-             return std::make_pair(loop, iv);
+             auto bound = stop.getDefiningOp<arith::ConstantIntOp>();
+             return std::make_tuple(loop, iv, !bound || bound.value() > 1);
            })
       // Ensures the TLA scope has its entry block; the cann-shared
       // create_scope_op makes its own, so the emplace stays here to avoid

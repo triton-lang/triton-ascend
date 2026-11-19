@@ -30,11 +30,10 @@ handlers and attaches the TLA builder methods.
 import re
 from collections import namedtuple
 from triton.language import constexpr, str_to_ty
-from triton.compiler.code_generator import (
-    ASTFunction,
-    CodeGenerator,
-    get_jit_fn_file_line,
-)
+from triton.compiler.code_generator import ASTFunction, get_jit_fn_file_line
+
+from ._options import _PIPELINE_MODE, _PRELOAD_OPTION, infer_sync_options, preload_override
+from .code_generator import TLACodeGenerator
 
 
 def _stamp_tla_mode(module):
@@ -48,49 +47,20 @@ def _stamp_tla_mode(module):
 def lower_for_backend(module, options):
     from triton._C.libtriton.ascend import ir as ascend_ir
 
-    from ._options import infer_sync_options
-
-    extra = options.npuir_extra_options
     features = ascend_ir.get_tla_kernel_features(module)
+    preload = features.pipeline_preload
+    if preload is not None and not options.compile_on_register_based:
+        raise ValueError("tla.pipeline requires a register-based Ascend target")
+    extra = options.npuir_extra_options
     inferred = infer_sync_options(features, options.disable_auto_inject_block_sync, extra)
     lower_ttir(module, module.context)
+    if preload and preload_override(extra) is None:
+        inferred += (f"--{_PRELOAD_OPTION}=true", )
     return inferred + extra
 
 
 def lower_ttir(module, context, output_dir=None):
-    """Run the TLA-specific lowering prefix on a TLA TTIR module.
-
-    A standard inliner prefix in the caller first resolves JIT
-    helpers (``tt.func``/``tt.call``) via the Triton inliner interface; TLA
-    SIMD VFs are inline ``scope.scope`` ops at this stage, which the inliner
-    does not touch (outline-scope in bishengir extracts them later).
-    Callers run ``add_ttir_pipeline`` (Inliner and SymbolDCE) before
-    this entry point: ``make_tla_ttir`` at runtime and ``lower_offline`` in
-    offline tests. The remaining kernel must be a single public,
-    single-block, void ``tt.func``.
-
-    The TLA frontend already emits HIVM-HIR-level IR directly (``hivm.hir.*``
-    ops, ``annotation.mark``, ``memref`` ops, ``scf.for``, SIMD VF bodies
-    inside inline ``scope.scope`` regions with ``ave.hir.*`` ops), so the
-    TTIR-oriented stages of the generic runtime
-    chain are skipped: ``triton_control_flow_opt``,
-    ``triton_to_structure``, ``discrete_mask_access_conversion``,
-    ``triton_to_annotation``, ``triton_to_unstructure``, ``triton_to_hivm``,
-    ``triton_to_hfusion``, ``triton_to_llvm``, ``bubble_up_operation`` and
-    ``merge_concat_load_buffer``. Only ``tla_to_linalg`` and local
-    canonicalization run here, producing the ttadapter boundary
-    (``func.func`` entry plus kernel ABI attributes). Scalar GM loads are
-    temporarily lowered using the generic scalar-load conversion. This pass
-    converts its owned operations rather than rejecting the entire Triton
-    dialect; remaining operations still require downstream support. Core/VF
-    attributes are then inferred from
-    explicit scopes and the ttadapter boundary is checked.
-    The only stage dumps written are ``00_inline.mlir`` and ``01_linalg.mlir``
-    when ``output_dir`` is provided; the former records the caller-inlined
-    input after TLA mode stamping.
-    Distributed and dynamic CV pipelines, later backend stages and kernel
-    launch are outside this entry point.
-    """
+    """Lower an inlined TLA TTIR module in place and return it."""
     from triton._C.libtriton import ir
     from triton._C.libtriton import passes
     from triton._C.libtriton import ascend as ascend_binding
@@ -119,8 +89,8 @@ def lower_ttir(module, context, output_dir=None):
     if not module.verify():
         raise RuntimeError("tla_to_linalg produced invalid IR")
     _infer_tla_kernel_mode(module, context)
-    from triton._C.libtriton.ascend import ir as ascend_ir
-    ascend_ir.lower_tla_sync_all(module)
+    ascend_binding.ir.remove_attr(module, _PIPELINE_MODE)
+    ascend_binding.ir.lower_tla_sync_all(module)
     if output_dir is not None:
         (output_dir / "01_linalg.mlir").write_text(str(module))
     check_ttadapter(module)
@@ -250,9 +220,9 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
     prototype = ASTFunction([], types, constants, {})
     file_name, begin_line = get_jit_fn_file_line(fn)
     proxy = namedtuple("SpecializationProxy", "constants signature")(constexprs, signature)
-    generator = CodeGenerator(context, prototype, gscope=fn.get_capture_scope(), function_name=fn.repr(proxy),
-                              jit_fn=fn, is_kernel=True, file_name=file_name, begin_line=begin_line, options=options,
-                              codegen_fns={}, module_map={}, module=module, is_gluon=False)
+    generator = TLACodeGenerator(context, prototype, gscope=fn.get_capture_scope(), function_name=fn.repr(proxy),
+                                 jit_fn=fn, is_kernel=True, file_name=file_name, begin_line=begin_line, options=options,
+                                 codegen_fns={}, module_map={}, module=module, is_gluon=False)
     arch = getattr(options, "arch", None)
     # Mount the TLA builder on the code generator before visiting the AST.
     from triton.language.extra.tla.builder import setup_unified_builder

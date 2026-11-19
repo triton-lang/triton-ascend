@@ -9,5 +9,4 @@ BLACKLIST = {
     "scalar/xor.py",
     "simd/psel.py",
     "sync/buffer_sync.py",
-    "vector/view_dynamic.py",
 }

@@ -1,28 +1,16 @@
-"""A5 standalone MMAD: automatic intra-core sync versus explicit events.
+"""Compare automatic and explicit intra-core synchronization for A5 MMAD L0.
 
-The current A5 TLA pipeline always uses GSS when auto-injection is enabled.
-The launch option sync_solver=False does NOT turn auto-injection off. This
-test uses a scoped subprocess proxy to add the real NPUIR switch to the
-actual compilation, without changing product code. Auto cases contain no
-explicit events; manual cases contain events and disable auto-injection.
-There is no device mode with both sources of synchronization disabled.
-
-TLA_SYNC_DUMP_DIR optionally selects an artifact root. Otherwise artifacts
-are retained in a new system temporary directory. Each invocation gets a
-fresh JIT function and Triton disk cache, so the command cannot be hidden by
-a cache hit. Input IR, post-sync IR, command, logs and binary are retained.
+Each case uses a fresh JIT function and cache. Caches, input IR, post-sync IR
+and binaries are saved under TLA_SYNC_DUMP_DIR or a temporary directory.
 """
 import json
 import os
 import re
-import shlex
-import shutil
 import sys
 import tempfile
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -179,59 +167,10 @@ def _check_input(text, case):
             assert f"hivm.hir.{name}" not in text, "automatic input must not supply sync"
 
 
-class _CompilerProxy:
-    """Delegate all subprocess APIs, modifying only this TLA compiler command."""
-
-    def __init__(self, real, case, directory):
-        self.real, self.case, self.directory = real, case, directory
-        self.commands = []
-
-    def __getattr__(self, name):
-        return getattr(self.real, name)
-
-    def run(self, command, *args, **kwargs):
-        if (not isinstance(command, (list, tuple)) or not command or Path(command[0]).name != "bishengir-compile"
-                or "--enable-tla-mode=true" not in command):
-            return self.real.run(command, *args, **kwargs)
-        # Avoid duplicate LLVM command-line options from debug or future backends.
-        keys = ("--disable-hivm-auto-inject-sync", "--hivm-sync-solver-version", "--enable-hivm-unit-flag-sync",
-                "--save-temps")
-        for key in keys:
-            assert key not in command, f"unexpected separate-value option {key}"
-        command = [arg for arg in command if not any(arg.startswith(key + "=") for key in keys)]
-        manual = self.case["mode"] == "manual"
-        version = "v1" if self.case["mode"] == "auto_v1" else "v2"
-        command += [
-            f"--disable-hivm-auto-inject-sync={str(manual).lower()}", f"--hivm-sync-solver-version={version}",
-            "--enable-hivm-unit-flag-sync=true", f"--save-temps={self.directory / 'temps'}"
-        ]
-        assert not self.commands, "unexpected recompilation of the same test specialization"
-        self.commands.append(command)
-        shutil.copyfile(command[1], self.directory / "input.mlir")
-        _check_input((self.directory / "input.mlir").read_text(), self.case)
-        (self.directory / "command.json").write_text(json.dumps(command, indent=2))
-        (self.directory / "command.txt").write_text(shlex.join(command) + "\n")
-        try:
-            result = self.real.run(command, *args, **kwargs)
-        except self.real.CalledProcessError as error:
-            self._logs(error)
-            raise
-        self._logs(result)
-        return result
-
-    def _logs(self, result):
-        for name in ("stdout", "stderr"):
-            text = getattr(result, name, None) or b""
-            if isinstance(text, bytes):
-                text = text.decode("utf-8", errors="replace")
-            (self.directory / f"compiler.{name}.txt").write_text(text, encoding="utf-8")
-
-
 @contextmanager
 def _compile_session(case, stage):
     import triton.backends.ascend.compiler as backend
     from triton import knobs
-    from triton.language.extra.tla.jit import TLAJITFunction
     from triton.runtime import driver
 
     target = driver.active.get_current_target()
@@ -239,20 +178,28 @@ def _compile_session(case, stage):
     directory = _artifact_dir(case, stage)
     (directory / "temps").mkdir()
     (directory / "case.json").write_text(json.dumps(dict(case, target=str(target)), indent=2))
-    proxy = _CompilerProxy(backend.subprocess, case, directory)
-    # A fresh JIT object avoids in-process reuse; the unique disk cache avoids
-    # reusing a binary compiled under different NPUIR sync options.
-    fn = TLAJITFunction(sync_mmad.fn, do_not_specialize=["Clear"])
-    with knobs.cache.scope(), knobs.compilation.scope(), patch.object(backend, "subprocess", proxy):
+    manual = case["mode"] == "manual"
+    solver = "v1" if case["mode"] == "auto_v1" else "v2"
+    launch_options = dict(
+        _constants(case), unit_flag=True, npuir_extra_options=(
+            f"--disable-hivm-auto-inject-sync={str(manual).lower()}",
+            f"--hivm-sync-solver-version={solver}",
+            f"--save-temps={directory / 'temps'}",
+        ))
+    fn = tla.jit(sync_mmad.fn, do_not_specialize=["Clear"])
+    with knobs.cache.scope(), knobs.compilation.scope():
         knobs.cache.dir = str(directory / "cache")
         knobs.compilation.always_compile = True
         knobs.compilation.override = False
-        yield fn, proxy, directory
+        knobs.compilation.store_binary_only = False
+        yield fn, launch_options, directory
 
 
-def _check_compiled(kernel, proxy, directory):
-    assert len(proxy.commands) == 1, "no real TLA bishengir-compile call observed"
+def _check_compiled(kernel, case, directory):
     check_kernel_binary(kernel)
+    source = kernel.asm["ttadapter"]
+    (directory / "input.mlir").write_text(source)
+    _check_input(source, case)
     (directory / "kernel.npubin").write_bytes(kernel.asm["npubin"])
     path = directory / "temps" / "module.hivm.opt.mlir"
     assert path.is_file(), "missing post-sync IR; check this toolchain's save-temps filenames"
@@ -261,8 +208,7 @@ def _check_compiled(kernel, proxy, directory):
     assert "hivm.hir.mmadL0" not in text
     _check_events(text)
     assert "hivm.hir.pipe_barrier[<PIPE_ALL>]" in text
-    if proxy.case["mode"] == "manual":
-        source = (directory / "input.mlir").read_text()
+    if case["mode"] == "manual":
         for kind in ("set", "wait"):
             assert sorted(_events(source, kind)) == sorted(_events(
                 text, kind)), ("auto-injection disabled: explicit event multiset unexpectedly changed")
@@ -293,9 +239,9 @@ def _buffers(case):
 def test_compile(case):
     import torch_npu  # noqa: F401
     x, y, (first, final), _ = _buffers(case)
-    with _compile_session(case, "compile") as (fn, proxy, directory):
-        kernel = fn.warmup(x, y, first, final, True, grid=(1, ), **_constants(case), unit_flag=True)
-        _check_compiled(kernel, proxy, directory)
+    with _compile_session(case, "compile") as (fn, launch_options, directory):
+        kernel = fn.warmup(x, y, first, final, True, grid=(1, ), **launch_options)
+        _check_compiled(kernel, case, directory)
 
 
 @matrix(CONFIGS)
@@ -303,9 +249,9 @@ def test_run(case):
     import torch
     import torch_npu  # noqa: F401
     x, y, (first, final), parents = _buffers(case)
-    with _compile_session(case, "run") as (fn, proxy, directory):
-        kernel = fn.warmup(x, y, first, final, True, grid=(1, ), **_constants(case), unit_flag=True)
-        _check_compiled(kernel, proxy, directory)
+    with _compile_session(case, "run") as (fn, launch_options, directory):
+        kernel = fn.warmup(x, y, first, final, True, grid=(1, ), **launch_options)
+        _check_compiled(kernel, case, directory)
         # Dyadic FP16 data yields exact FP32 products/sums for these tile sizes.
         # Repeated launches change inputs and runtime clear while sharing a binary.
         for seed in (7, 19, 31):
@@ -319,13 +265,12 @@ def test_run(case):
                 first.fill_(float("nan"))
                 final.fill_(float("nan"))
                 print("RUN:", case["name"], "seed", seed, "clear", clear, flush=True)
-                launched = fn[(1, )](x, y, first, final, clear, **_constants(case), unit_flag=True)
+                launched = fn[(1, )](x, y, first, final, clear, **launch_options)
                 torch.npu.synchronize()
-                assert launched.asm["npubin"] == kernel.asm["npubin"]
+                assert launched is kernel, "runtime clear unexpectedly caused recompilation"
                 torch.testing.assert_close(first.cpu(), product, rtol=0, atol=0)
                 torch.testing.assert_close(final.cpu(), product if clear else 2 * product, rtol=0, atol=0)
                 for parent in parents:
                     host = parent.cpu()
                     assert (host[:256] == -8191.0).all() and (host[-256:] == -8191.0).all()
-        assert len(proxy.commands) == 1, "runtime clear unexpectedly caused recompilation"
         (directory / "run-passed.txt").write_text("12 launches passed both outputs and GM guards\n")

@@ -67,8 +67,9 @@ from triton.language.core import (
     uint64,
 )
 
+from ._decorator import experimental
 from .core import AddressSpace, buffer, buffer_type, vector, vector_type
-from .scope import scope
+from .scope import pipeline, scope
 from .alloc import alloc
 from .fill import fill
 from .dma import (
@@ -130,13 +131,20 @@ from .cube import MxFormat
 from . import sync
 from .sync import sub_block_id
 
+from .jit import TLAJITFunction as _TLAJITFunction
+
 
 def jit(fn=None, **kwargs):
-    """``@tla.jit``: like ``triton.jit``, but lowered via the TLA frontend."""
-    from .jit import TLAJITFunction
+    """JIT-compile a kernel with the TLA frontend.
+
+    At launch, pass ``npuir_extra_options=["--mlir-print-ir-after-all"]``
+    to append raw argv entries to ``bishengir-compile``. Each list or tuple
+    element is one argument. The compiler interprets the flags and values.
+    Nonempty argument sequences specialize the compiled kernel.
+    """
 
     def decorator(f):
-        return TLAJITFunction(f, **kwargs)
+        return _TLAJITFunction(f, **kwargs)
 
     return decorator(fn) if fn is not None else decorator
 
@@ -214,6 +222,7 @@ __all__ = [
 
     # core-mode scopes (scope.simd / scope.cube)
     "scope",
+    "pipeline",
 
     # math helpers / diagnostics
     "math",
@@ -241,6 +250,7 @@ __all__ = [
     "sync",
     "sub_block_id",
 
-    # kernel decorator
+    # decorators
     "jit",
+    "experimental",
 ]

@@ -31,7 +31,13 @@ class defines ``mlir_attrs``, the attribute set stamped on the emitted
 ``scope.scope``.
 """
 
-__all__ = ["scope", "vector", "simd", "cube"]
+from dataclasses import dataclass
+
+from triton.language.core import _unwrap_if_constexpr, builtin
+
+from ._decorator import experimental
+
+__all__ = ["scope", "vector", "simd", "cube", "pipeline"]
 
 
 def _check_not_in_simd(name, semantic):
@@ -61,7 +67,28 @@ class scope:
         return {"hivm.tcore_type": builder.parse_attr("#hivm.tcore_type<VECTOR>")}
 
 
-class vector(scope):
+@dataclass(frozen=True)
+class _TaskScope:
+    kind: type
+    name: str
+    stage: int | None
+
+
+class _TaskScopeKind(scope):
+
+    @classmethod
+    def task(cls, name, *, stage=None):
+        """Create a named core scope, optionally scheduled within a pipeline."""
+        name = _unwrap_if_constexpr(name)
+        if not isinstance(name, str) or not name:
+            raise ValueError("task name must be a nonempty compile-time string")
+        stage = _unwrap_if_constexpr(stage)
+        if stage is not None and (type(stage) is not int or not 0 <= stage < 64):
+            raise ValueError("task stage must be a compile-time integer in [0, 64)")
+        return _TaskScope(cls, name, stage)
+
+
+class vector(_TaskScopeKind):
     """``with tla.scope.vector():`` -- vector-core region for non-SIMD ops.
 
     A vector scope is the vector core's inline region: it hosts non-SIMD
@@ -101,7 +128,7 @@ class simd(scope):
         return attrs
 
 
-class cube(scope):
+class cube(_TaskScopeKind):
     """Selects the Cube core (AIC) for a region in a ``@tla.jit`` kernel.
 
     Use ``with tla.scope.cube():`` without arguments or an ``as`` binding.
@@ -134,3 +161,22 @@ class cube(scope):
 scope.vector = vector
 scope.simd = simd
 scope.cube = cube
+
+
+@dataclass(frozen=True)
+class _PipelineSpec:
+    num_iters: object
+
+
+@experimental
+@builtin
+def pipeline(num_iters, _semantic=None):
+    """Schedule staged Vector and Cube tasks in a @tla.jit kernel entry loop.
+
+    Iteration starts at zero with a unit step. Tasks specify nondecreasing
+    stages. Stage s executes logical iteration n-s at tick n. The compiler
+    manages synchronization and versions scratch allocated in the loop.
+    Pass `npuir_extra_options=["--enable-tla-cv-pipelining=false"]` at
+    launch to run the same tasks without native preload.
+    """
+    return _PipelineSpec(num_iters)

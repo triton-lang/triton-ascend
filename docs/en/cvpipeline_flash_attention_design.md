@@ -245,7 +245,7 @@ The measured production domain is BS128/H8, contiguous FP16 `[BS,H,N,HD]`, nonca
 
 ### 3.3 Persistent scheduling and state limits
 
-`CVPPersistentSchedule` computes coordinates for any positive even stage count and an explicit ring size. It uses checked/widened arithmetic and preserves the original outer-task mapping. Those arithmetic facts do not certify storage handover.
+`CVPStageIndexing` computes coordinates for any positive even stage count and an explicit ring size. It uses checked/widened arithmetic and preserves the original outer-task mapping. Those arithmetic facts do not certify storage handover.
 
 The retained compact recurrence path keeps its numerical and storage proof. Its mathematical roles use discovered stages within the chain; the measured four-stage workload retains its existing path. The public persistent emitter accepts Skew with inner unroll 1 and preload enabled.
 
@@ -473,7 +473,7 @@ For two assigned query tasks with four KV tiles, the logical stage model is:
 | 9 | inactive | inactive | `PV[q1,3]` | `Oacc[q1,2]` |
 | 10 | inactive | inactive | inactive | `Oacc[q1,3]`, final |
 
-These are valid logical coordinates from `CVPPersistentSchedule`, not hardware cycles. In particular, QK and PV columns do not represent simultaneous matrix multiplications on one Cube. Transfers, readiness waits, and result-storage reuse constrain actual execution.
+These are valid logical coordinates from `CVPStageIndexing`, not hardware cycles. In particular, QK and PV columns do not represent simultaneous matrix multiplications on one Cube. Transfers, readiness waits, and result-storage reuse constrain actual execution.
 
 The useful overlap is Cube beginning the next query while Vector finishes the previous query's tail. If L0C is shared, Cube may first wait for FIX to finish reading PV. That does not require waiting for all O work using the resulting UB copy.
 
@@ -876,20 +876,20 @@ Paths are relative to this document and refer to the current working source. The
 | [Passes.td](../../third_party/ascend/AscendNPU-IR/bishengir/include/bishengir/Dialect/HIVM/Transforms/Passes.td) | Current pass names, local options and dependent dialects |
 | [CubeVectorPipelineAnalysis.h](../../third_party/ascend/AscendNPU-IR/bishengir/include/bishengir/Dialect/HIVM/Analysis/CubeVectorPipelineAnalysis.h) | Neutral typed stages, per-matrix geometry, dependency/state edges |
 | [CubeVectorPipelineAnalysis.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Analysis/CubeVectorPipelineAnalysis.cpp) | Structural/memory analysis, scheduled clone analysis and version-2 summary validation |
-| [RunningSoftmaxPattern.h](../../third_party/ascend/AscendNPU-IR/bishengir/include/bishengir/Dialect/HIVM/Analysis/RunningSoftmaxPattern.h) | Independent algebraic pattern descriptors and proofs |
-| [RunningSoftmaxPattern.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Analysis/RunningSoftmaxPattern.cpp) | Exponential/reduction, multiply/accumulate and reduction/rescale recognition |
+| [RunningSoftmaxPattern.h](../../third_party/ascend/AscendNPU-IR/bishengir/include/bishengir/Dialect/HIVM/Analysis/RunningSoftmaxOpt/RunningSoftmaxPattern.h) | Independent algebraic pattern descriptors and proofs |
+| [RunningSoftmaxPattern.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Analysis/RunningSoftmaxOpt/RunningSoftmaxPattern.cpp) | Exponential/reduction, multiply/accumulate and reduction/rescale recognition |
 | [CVPipelinePrepare.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPipelinePrepare.cpp) | Prepare/verify, actual application/count/anchor checks and retained provenance |
 | [HIVMRegbasePipelines.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Pipelines/regbase/HIVMRegbasePipelines.cpp) | Pre/post-bufferization ordering and safe planning policy |
 | [PassPipeline.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Tools/bishengir-compile/regbase/PassPipeline.cpp) | Delayed vector/state insertion and final cache/Cube mutation verification |
 | [BiShengIRCompileMain.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Tools/bishengir-compile/regbase/BiShengIRCompileMain.cpp) | Native semantic dependency validation and capacity/fallback diagnostics |
-| [CVPReductionLayout.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPReductionLayout.cpp) | Complete connected layout rewrite |
-| [CVPVectorPatternRewrite.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPVectorPatternRewrite.cpp) | Retained rematerialization, reduction scaling, fusion, dense operand and two chains |
-| [CVPPersistentSchedule.h](../../third_party/ascend/AscendNPU-IR/bishengir/include/bishengir/Dialect/HIVM/Transforms/regbase/CVPPersistentSchedule.h) | Checked arbitrary even-stage/ring coordinate arithmetic |
-| [CVPPersistentSchedule.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPPersistentSchedule.cpp) | Outer/inner task mapping, stage lag and tails |
-| [CVPPersistentPipeline.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPPersistentPipeline.cpp) | Supported persistent recurrence, stage-local reset/finalization and handover |
-| [CVPOutputStorage.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPOutputStorage.cpp) | Persistent final output/state destinations |
-| [CVPStateStorage.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPStateStorage.cpp) | Accumulator/sum/maximum banks and restricted snapshots |
-| [CVPStateCopyForward.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPStateCopyForward.cpp) | Four forwarding passes and alias/effect/coverage/order proofs |
+| [CVPReductionLayout.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/RunningSoftmaxOpt/CVPReductionLayout.cpp) | Complete connected layout rewrite |
+| [CVPVectorPatternRewrite.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/RunningSoftmaxOpt/CVPVectorPatternRewrite.cpp) | Retained rematerialization, reduction scaling, fusion, dense operand and two chains |
+| [CVPStageIndexing.h](../../third_party/ascend/AscendNPU-IR/bishengir/include/bishengir/Dialect/HIVM/Transforms/regbase/CVPStageIndexing.h) | Checked arbitrary even-stage/ring coordinate arithmetic |
+| [CVPStageIndexing.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPStageIndexing.cpp) | Outer/inner task mapping, stage lag and tails |
+| [CVPLoopCoalescing.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPLoopCoalescing.cpp) · [CVPCompactScheduling.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/RunningSoftmaxOpt/CVPCompactScheduling.cpp) | Supported persistent recurrence, stage-local reset/finalization and handover |
+| [CVPOutputStorage.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPOutputStorage.cpp) · [OutputStorage.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/RunningSoftmaxOpt/OutputStorage.cpp) | Persistent final output/state destinations |
+| [CVPStateStorage.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPStateStorage.cpp) · [StateStorage.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/RunningSoftmaxOpt/StateStorage.cpp) | Accumulator/sum/maximum banks and restricted snapshots |
+| [CVPStateCopyForward.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPStateCopyForward.cpp) · [CVPStateForwarding.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/RunningSoftmaxOpt/CVPStateForwarding.cpp) | Four forwarding passes and alias/effect/coverage/order proofs |
 | [CVPInvariantCache.cpp](../../third_party/ascend/AscendNPU-IR/bishengir/lib/Dialect/HIVM/Transforms/regbase/CVPInvariantCache.cpp) | Retained paired cache, final verification and Cube readiness/overlap/drain |
 | [CVPInvariantCacheContract.h](../../third_party/ascend/AscendNPU-IR/bishengir/include/bishengir/Dialect/HIVM/IR/CVPInvariantCacheContract.h) | Typed cache/resource and synchronization interface |
 | [CVPCubeResourcePlan.h](../../third_party/ascend/AscendNPU-IR/bishengir/include/bishengir/Dialect/Utils/CVPCubeResourcePlan.h) | Checked shared cached-B/co-resident range derivation |

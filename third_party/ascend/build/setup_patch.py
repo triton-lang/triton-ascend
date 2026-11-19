@@ -48,7 +48,7 @@ def _set_default_env_vars():
 
 
 def _is_git_repo():
-    return (_REPO_ROOT / ".git").is_dir()
+    return (_REPO_ROOT / ".git").exists()
 
 
 def _is_linux_os(os_id):
@@ -179,7 +179,26 @@ def _apply_npuir_patch():
     _apply_patch(patch_path, directory=npuir_dir)
 
 
+def _verify_npuir_revision():
+    if not _is_git_repo():
+        return
+
+    relative_path = "third_party/ascend/AscendNPU-IR"
+    entry = subprocess.check_output(["git", "ls-tree", "HEAD", "--", relative_path], cwd=_REPO_ROOT, text=True).split()
+    if len(entry) != 4 or entry[:2] != ["160000", "commit"]:
+        raise RuntimeError(f"HEAD has no AscendNPU-IR gitlink at {relative_path}")
+    expected = entry[2]
+
+    source = _REPO_ROOT / relative_path
+    if not (source / ".git").exists():
+        raise RuntimeError("AscendNPU-IR submodule is not initialized; run git submodule update --init")
+    actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip()
+    if actual != expected:
+        raise RuntimeError(f"AscendNPU-IR HEAD is {actual}, expected {expected}; run git submodule update --init")
+
+
 def _apply_triton_ascend_patch():
+    _verify_npuir_revision()
     patch_path = os.path.join("third_party", "ascend", "patch")
     dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.7.0.patch")
     patch = os.path.join(patch_path, "triton-ascend-3.7.0.patch")

@@ -26,7 +26,7 @@ def roundtrip(X, Y, P: tl.constexpr):
         tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 0)
         # L12UB writes the first AIV's UB; the second AIV must not overwrite GM.
         if tla.sub_block_id() == 0:
-            tla.store_ub_to_gm(out, tla.view(Y, (16, 32)), tla.StoreUB2GMParams())
+            tla.store_ub_to_gm(out, tla.view(Y, (16, 32)))
 
 
 def params(case):

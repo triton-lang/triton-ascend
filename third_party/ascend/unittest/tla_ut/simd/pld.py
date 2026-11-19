@@ -33,14 +33,14 @@ from utils.tla_test_utils import compile_offline, get_stages, check_kernel_binar
 def load_predicate(X, O, W: tl.constexpr, DIST: tl.constexpr, OFFSET: tl.constexpr):
     D: tl.constexpr = 2048 // W
     DT: tl.constexpr = tl.int8 if W == 8 else (tl.int16 if W == 16 else tl.int32)
-    x = tla.alloc_buffer((256, ), tl.uint8, space="ub")
-    o = tla.alloc_buffer((D, ), DT, space="ub")
-    tla.copy(tla.view(X, (256, )), x)
+    x = tla.alloc((256, ), tl.uint8, space="ub")
+    o = tla.alloc((D, ), DT, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (256, )), x)
     with tla.scope.simd():
         p = tla.simd.pld(x[OFFSET], width=W, dist=DIST)
         v = tla.simd.vsel(p, tla.simd.vdup(1, DT), tla.simd.vdup(0, DT))
         tla.simd.vsts(o[0], v, dist="NORM_B8" if W == 8 else ("NORM_B16" if W == 16 else "NORM_B32"))
-    tla.copy(o, tla.view(O, (D, )))
+    tla.store_ub_to_gm(o, tla.view(O, (D, )))
 
 
 CASES = [(w, dist, off) for w in (8, 16, 32) for dist in ("NORM", "US", "DS") for off in (0, 64)]

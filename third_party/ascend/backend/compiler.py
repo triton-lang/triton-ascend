@@ -470,8 +470,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
 
         if AscendBackend.instrumentation:
             if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
-                # NPU-IR emits A5 DFX regions; MSPTI collects them at runtime.
-                metadata["proton_collection"] = "mspti"
+                metadata["proton_collection"] = "perf_monitor"
             else:
                 AscendBackend.instrumentation.patch("ttir_to_linalg", pm, mod.context)
 
@@ -768,7 +767,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         callback_path = os.path.join(tmpdir, "libkernel.so")
         _compile_option_list = get_common_bishengir_compile_options(metadata)
         proton_metadata_path = None
-        if metadata.get("proton_collection") == "mspti":
+        if metadata.get("proton_collection") == "perf_monitor":
             proton_metadata_path = Path(tmpdir) / "proton_metadata.json"
             _compile_option_list.append(f"--proton-metadata-output={proton_metadata_path}")
 
@@ -1301,6 +1300,8 @@ class NPUOptions:
     # driver-side profile scratch path inert.
     profile_scratch_size: int = 0
     enable_graph_optimize: bool = True
+    # Reserved compatibility option; it does not enable block batching.
+    block_batching_factor: Union[int, str] = 1
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
     deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()

@@ -10,6 +10,7 @@ import pytest
 import torch
 import triton.language as tl
 import triton.language.extra.tla as tla
+from triton.language.core import builtin
 from utils.tla_test_utils import (compile_offline, lower_offline, get_stages, check_kernel_binary, matrix)
 
 CONFIGS = [dict(name="ub_l1_" + str(n), n=n) for n in (16, 32, 64)]
@@ -53,8 +54,8 @@ def route(src, dst, P: tl.constexpr, ROUTE: tl.constexpr):
         tl.static_assert(False, "unknown explicit DMA route")
 
 
-def route_ir(src_space, dst_space, p, name, dtype=tl.float16):
-    sig = {"src": tla.buffer_type((16, 64), dtype, src_space), "dst": tla.buffer_type((16, 64), dtype, dst_space)}
+def route_ir(src_space, dst_space, p, name, dtype=tl.float16, src_shape=(16, 64), dst_shape=(16, 64)):
+    sig = {"src": tla.buffer_type(src_shape, dtype, src_space), "dst": tla.buffer_type(dst_shape, dtype, dst_space)}
     mod, ctx = compile_offline(route, sig, {"P": p, "ROUTE": name})
     return str(lower_offline(mod, ctx))
 
@@ -63,9 +64,9 @@ def check_param_contracts():
     # Typed function arguments isolate frontend mapping without fake L0/BT allocations.
     for dst in ("l0a", "l0b"):
         for transpose in (False, True):
-            p = tla.CopyL1ToL0Params(is_transpose=transpose, k_part_idx=0, k_part=64, k_part_ceil=64, k_part_loop=1,
-                                     k_part_actual=64, m=16)
-            text = route_ir("l1", dst, p, "l0")
+            p = tla.CopyL1ToL0Params(is_transpose=transpose)
+            src_shape = (1, 4, 16, 16) if (dst == "l0a") == transpose else (4, 1, 16, 16)
+            text = route_ir("l1", dst, p, "l0", src_shape=src_shape, dst_shape=(4, 1, 16, 16))
             assert "hivm.hir.l12l0 " in text
             for field, value in (("k_part_idx", 0), ("k_part", 64), ("k_part_ceil", 64), ("k_part_loop", 1),
                                  ("k_part_actual", 64), ("m", 16)):
@@ -80,7 +81,6 @@ def check_param_contracts():
     text = route_ir("ub", "l1", tla.CopyUB2L1Params(collapse_reassociation=((0, 1), )), "ub_l1")
     assert "collapse_reassociation = [[0, 1]]" in text
     errors = [("l1", "fb", tla.CopyL12FBParams(), "fb", "no L1->FixBUF"),
-              ("l1", "l0a", tla.CopyL1ToL0Params(actual_batch=1), "l0", "actual_batch"),
               ("gm", "l1", tla.LoadGM2L1Params(enable_nz2nd=True), "l1", "reverse-layout"),
               ("gm", "l1", tla.LoadGM2L1Params(enable_nz2dn=True), "l1", "reverse-layout"),
               ("ub", "l1", tla.LoadGM2UBParams(), "ub_l1", "CopyUB2L1Params"),
@@ -88,6 +88,151 @@ def check_param_contracts():
     for src, dst, p, name, message in errors:
         with pytest.raises(Exception, match=message):
             route_ir(src, dst, p, name)
+
+
+@tla.jit
+def logical_route(DTYPE: tl.constexpr, TO_B: tl.constexpr, TRANSPOSE: tl.constexpr):
+    with tla.scope.cube():
+        if TO_B:
+            rows: tl.constexpr = 64
+            cols: tl.constexpr = 32
+        else:
+            rows: tl.constexpr = 32
+            cols: tl.constexpr = 64
+        if TRANSPOSE:
+            sr: tl.constexpr = cols
+            sc: tl.constexpr = rows
+        else:
+            sr: tl.constexpr = rows
+            sc: tl.constexpr = cols
+        src = tla.alloc((sr, sc), DTYPE, space="l1")
+        dst = tla.alloc((rows, cols), DTYPE, space="l0b" if TO_B else "l0a")
+        tla.copy_l1_to_l0(src, dst, tla.CopyL1ToL0Params(is_transpose=TRANSPOSE))
+
+
+@tla.jit
+def transpose_route(src, dst, transpose):
+    with tla.scope.cube():
+        tla.copy_l1_to_l0(src, dst, tla.CopyL1ToL0Params(is_transpose=transpose))
+
+
+@tla.jit
+def logical_slice_route(src, dst, MATRIX_OFFSET: tl.constexpr, ROW_STEP: tl.constexpr):
+    with tla.scope.cube():
+        s = tla.subview(src, (MATRIX_OFFSET, 16), (32, 64), (ROW_STEP, 1))
+        tla.copy_l1_to_l0(s, dst)
+
+
+@tla.jit
+def alloc_subview_route():
+    with tla.scope.cube():
+        src_parent = tla.alloc((64, 96), tl.float16, space="l1")
+        src = tla.subview(src_parent, (16, 16), (32, 64))
+        dst = tla.alloc((32, 64), tl.float16, space="l0a")
+        tla.copy_l1_to_l0(src, dst)
+
+
+@builtin
+def hinted_buffer(_semantic=None):
+    buf = tla.alloc((32, 64), tl.float16, space="l1", _semantic=_semantic)
+    # Test-only producer hint: nZ axes are already normalized.
+    buf.handle.set_attr("hivm.fractal_layout", _semantic.builder.parse_attr('"nZ"'))
+    return buf
+
+
+@tla.jit
+def hinted_route():
+    with tla.scope.cube():
+        src = hinted_buffer()
+        dst = tla.alloc((32, 64), tl.float16, space="l0a")
+        tla.copy_l1_to_l0(src, dst, tla.CopyL1ToL0Params(is_transpose=True))
+
+
+def check_l12l0_contracts():
+    shape = (4, 2, 16, 16)  # M=32, K=64
+    for dtype in (tl.float16, tl.bfloat16, tl.float32):
+        c0 = 8 if dtype == tl.float32 else 16
+        physical = (64 // c0, 2, 16, c0)
+        for p in (None, tla.CopyL1ToL0Params()):
+            text = route_ir("l1", "l0a", p, "l0", dtype, physical, physical)
+            copy = next(line for line in text.splitlines() if "hivm.hir.l12l0 " in line)
+            assert "k_part_idx = 0" in copy and "k_part_loop = 1" in copy
+            assert "k_part = 64" in copy and "m = 32" in copy
+        # These malformed fractals still yield K and M/N divisible by 16.
+        # Check each endpoint independently; transpose cannot legalize them.
+        malformed = ((64 // c0, 2, 8, c0), (64 // c0, 2, 32, c0), (64 // c0, 2, 16, c0 // 2), (64 // c0, 2, 16, c0 * 2))
+        for bad_shape in malformed:
+            for bad_dst in (False, True):
+                for transpose in (False, True):
+                    with pytest.raises(Exception, match="physical views require inner dimensions"):
+                        route_ir("l1", "l0a", tla.CopyL1ToL0Params(transpose), "l0", dtype,
+                                 bad_shape if not bad_dst else physical, bad_shape if bad_dst else physical)
+    for to_b in (False, True):
+        for transpose in (False, True):
+            dst_shape = (64, 32) if to_b else (32, 64)
+            src_shape = dst_shape[::-1] if transpose else dst_shape
+            text = route_ir("l1", "l0b" if to_b else "l0a", tla.CopyL1ToL0Params(transpose), "l0", src_shape=src_shape,
+                            dst_shape=dst_shape)
+            copy = next(line for line in text.splitlines() if "hivm.hir.l12l0 " in line)
+            assert "x".join(map(str, src_shape)) + "xf16" in copy
+            assert "x".join(map(str, dst_shape)) + "xf16" in copy
+            assert "k_part = 64" in copy and "m = 32" in copy
+    sig = dict(src=tla.buffer_type(shape, tl.float16, "l1"), dst=tla.buffer_type(shape, tl.float16, "l0a"))
+    with pytest.raises(Exception, match="compile-time bool"):
+        compile_offline(transpose_route, {**sig, "transpose": "i1"}, {})
+    with pytest.raises(Exception, match="matching"):
+        compile_offline(route, {**sig, "dst": tla.buffer_type(shape, tl.bfloat16, "l0a")}, {"P": None, "ROUTE": "l0"})
+    with pytest.raises(Exception, match="matching"):
+        route_ir("l1", "l0a", None, "l0", tl.int32, shape, shape)
+    with pytest.raises(Exception, match="DMA interface expects"):
+        route_ir("ub", "l0a", None, "l0", src_shape=shape, dst_shape=shape)
+    with pytest.raises(Exception, match="compile-time bool"):
+        route_ir("l1", "l0a", tla.CopyL1ToL0Params(is_transpose=1), "l0")
+    for strides in ((1024, 256, 16, 1), (1024, 512, 16, 1)):
+        sig = dict(src=tla.buffer_type(shape, tl.float16, "l1", strides=strides),
+                   dst=tla.buffer_type(shape, tl.float16, "l0a"))
+        mod, ctx = compile_offline(route, sig, {"P": None, "ROUTE": "l0"})
+        text = str(lower_offline(mod, ctx))
+        # Target stride legality is checked by NPUIR, after this boundary.
+        assert f"strided<[{', '.join(map(str, strides))}]>" in text
+    for removed in ("k_part_idx", "k_part", "k_part_ceil", "k_part_loop", "k_part_actual", "m"):
+        with pytest.raises(TypeError):
+            tla.CopyL1ToL0Params(**{removed: 1})
+    with pytest.raises(Exception, match="multiples of 16"):
+        route_ir("l1", "l0a", None, "l0", src_shape=(3, 16), dst_shape=(3, 16))
+    for dtype in (tl.float16, tl.bfloat16, tl.float32):
+        for to_b in (False, True):
+            for transpose in (False, True):
+                constants = dict(DTYPE=dtype, TO_B=to_b, TRANSPOSE=transpose)
+                mod, ctx = compile_offline(logical_route, {}, constants)
+                text = str(lower_offline(mod, ctx))
+                copy = next(line for line in text.splitlines() if "hivm.hir.l12l0 " in line)
+                elem = {tl.float16: "f16", tl.bfloat16: "bf16", tl.float32: "f32"}[dtype]
+                rows, cols = (64, 32) if to_b else (32, 64)
+                sr, sc = (cols, rows) if transpose else (rows, cols)
+                assert f"{sr}x{sc}x{elem}" in copy and f"{rows}x{cols}x{elem}" in copy
+                assert "k_part = 64" in copy
+                assert "m = 32" in copy and "scf.for" not in text
+    # The frontend preserves logical parent pitches, slice origins and steps.
+    # These checks stop before NPUIR layout legalization and target validation.
+    sig = dict(src=tla.buffer_type((64, 96), tl.float16, "l1"), dst=tla.buffer_type((32, 64), tl.float16, "l0a"))
+    for origin, step in ((16, 1), (1, 1), (0, 2)):
+        mod, ctx = compile_offline(logical_slice_route, sig, {"MATRIX_OFFSET": origin, "ROW_STEP": step})
+        text = str(lower_offline(mod, ctx))
+        copy = next(line for line in text.splitlines() if "hivm.hir.l12l0 " in line)
+        assert "32x64xf16" in copy
+        assert f"strided<[{96 * step}, 1], offset: {origin * 96 + 16}>" in copy
+        assert "scf.for" not in text
+    mod, ctx = compile_offline(alloc_subview_route, {}, {})
+    text = str(lower_offline(mod, ctx))
+    copy = next(line for line in text.splitlines() if "hivm.hir.l12l0 " in line)
+    assert "32x64xf16" in copy and "strided<[96, 1], offset: 1552>" in copy
+    mod, ctx = compile_offline(hinted_route, {}, {})
+    text = str(lower_offline(mod, ctx))
+    copy = next(line for line in text.splitlines() if "hivm.hir.l12l0 " in line)
+    assert copy.count("32x64xf16") == 2
+    assert 'hivm.fractal_layout = "nZ"' in text
+    assert "is_transposed = true" in copy
 
 
 @matrix(CONFIGS)
@@ -101,6 +246,7 @@ def test_ir(case, output_dir=None):
     assert "hivm.hir.get_sub_block_idx" in text
     if case["n"] == 16:
         check_param_contracts()
+        check_l12l0_contracts()
     print("IR PASS:", case["name"])
 
 

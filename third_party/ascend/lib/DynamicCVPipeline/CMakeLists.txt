@@ -65,6 +65,7 @@ add_triton_library(DynamicCVPipeline
   ${ALLOC_MULTI_CACHE_SRCS_FILES}
   ${ADD_CONTROLFLOW_CONDITION_SRC_FILES}
   RemoveAttributes.cpp
+  EstimateCVPipelineCost.cpp
 
   DEPENDS
   AddDynamicCVPipelinePassIncGen
@@ -80,3 +81,15 @@ add_triton_library(DynamicCVPipeline
   MLIRTransformDialectTransforms
   MLIRTransforms
 )
+
+# EstimateCVPipelineCost reuses the costmodel's HardwareConfig + PipelineScheduler.
+# The costmodel is optional (TRITON_ASCEND_ENABLE_COSTMODEL_INPROC), so the pass
+# degrades to a no-op when it is not built. The parent CMakeLists configures the
+# costmodel before add_subdirectory(lib) so the target and headers are visible here.
+if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
+  add_dependencies(DynamicCVPipeline AscendModelOpsIncGen)
+  target_link_libraries(DynamicCVPipeline PUBLIC AscendModelAnalysis)
+  target_compile_definitions(DynamicCVPipeline PRIVATE TRITON_ASCEND_HAS_INPROC_COSTMODEL=1)
+else()
+  target_compile_definitions(DynamicCVPipeline PRIVATE TRITON_ASCEND_HAS_INPROC_COSTMODEL=0)
+endif()

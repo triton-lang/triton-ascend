@@ -849,6 +849,14 @@ scf::ForOp UpdateLoopIterTimesPassLegacy::extendForOpIterationCount(
     return nullptr;
   }
 
+  // Record how the bound was extended. The new bound counts prologue and
+  // epilogue iterations in which most stages are switched off by their
+  // predicates, so it is not the number of times the body's work runs -- and
+  // nothing downstream can tell the difference by looking at the loop alone.
+  newForOp->setAttr(
+      CVPipeline::kIterExtension,
+      builder.getI32ArrayAttr({requiredBuffers, x, ifCount}));
+
   return newForOp;
 }
 

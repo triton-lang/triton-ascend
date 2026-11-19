@@ -1240,6 +1240,46 @@ void DataDependencyAnalysisPass::deduplicateDependencies(
   dependencies.erase(newEnd, dependencies.end());
 }
 
+void DataDependencyAnalysisPass::persistBlockDependencies(
+    DataDependencyInfo &info) {
+  OpBuilder builder(module.getContext());
+
+  llvm::SmallVector<mlir::Attribute> edges;
+  // Self-edges say nothing, and the same producer/consumer pair shows up once
+  // per dependent value, so the block-level graph is deduplicated here.
+  llvm::DenseSet<std::pair<int, int>> seen;
+
+  auto appendEdges =
+      [&](const llvm::SmallVector<DependencyInfo> &dependencies,
+          llvm::StringRef kind) {
+        for (const DependencyInfo &dep : dependencies) {
+          if (dep.producerBlockId == dep.consumerBlockId) {
+            continue;
+          }
+          if (!seen.insert({dep.producerBlockId, dep.consumerBlockId}).second) {
+            continue;
+          }
+          edges.push_back(builder.getDictionaryAttr({
+              builder.getNamedAttr(
+                  "producer", builder.getI32IntegerAttr(dep.producerBlockId)),
+              builder.getNamedAttr(
+                  "consumer", builder.getI32IntegerAttr(dep.consumerBlockId)),
+              builder.getNamedAttr("kind", builder.getStringAttr(kind)),
+          }));
+        }
+      };
+
+  appendEdges(info.getV2CDependencies(), "v2c");
+  appendEdges(info.getC2VDependencies(), "c2v");
+  appendEdges(info.getMemoryDependencies(), "mem");
+
+  if (edges.empty()) {
+    return;
+  }
+  module->setAttr(CVPipeline::kBlockDeps, builder.getArrayAttr(edges));
+  LOG_DEBUG("  Recorded " << edges.size() << " block dependency edge(s)\n");
+}
+
 void DataDependencyAnalysisPass::sortDependencies(
     llvm::SmallVector<DependencyInfo> &dependencies, mlir::ModuleOp module) {
   if (dependencies.size() <= 1) {
@@ -1346,6 +1386,12 @@ void DataDependencyAnalysisPass::runOnOperation() {
   analyzeSyncReuse(info, module);
 
   info.setValid(true);
+
+  // Step 6: Record the block-level graph on the module. This analysis is
+  // pass-local and holds raw Operation pointers that later passes invalidate
+  // by cloning, so anything downstream that wants the graph has to read it
+  // from the IR rather than from here.
+  persistBlockDependencies(info);
 
   LOG_DEBUG("DataDependencyAnalysisPass: Analysis complete.\n");
   LOG_DEBUG("  V->C dependencies: " << info.getV2CDependencies().size()

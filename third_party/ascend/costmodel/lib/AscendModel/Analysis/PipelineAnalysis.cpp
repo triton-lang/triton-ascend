@@ -153,6 +153,15 @@ void PipelineScheduler::initPipelines() {
   pipelines.emplace(HWUnit::VecMTE2, HWUnitPipeline(HWUnit::VecMTE2));
   pipelines.emplace(HWUnit::MTE3, HWUnitPipeline(HWUnit::MTE3));
   pipelines.emplace(HWUnit::Scalar, HWUnitPipeline(HWUnit::Scalar));
+  // Cube-to-UB write-back and the on-chip UB<->L1 staging. A unit without a
+  // pipeline here is silently dropped by schedule(), so every HWUnit must
+  // appear.
+  pipelines.emplace(HWUnit::FixPipeUB, HWUnitPipeline(HWUnit::FixPipeUB));
+  pipelines.emplace(HWUnit::MTE3ToL1, HWUnitPipeline(HWUnit::MTE3ToL1));
+  pipelines.emplace(HWUnit::MTE1ToUB, HWUnitPipeline(HWUnit::MTE1ToUB));
+  // Cube operand staging (L1 -> L0A/L0B) and the Cube core's own scalar issue.
+  pipelines.emplace(HWUnit::CubeMTE1, HWUnitPipeline(HWUnit::CubeMTE1));
+  pipelines.emplace(HWUnit::ScalarCube, HWUnitPipeline(HWUnit::ScalarCube));
 }
 
 void PipelineScheduler::addOperation(PipelineOp op) {
@@ -316,8 +325,9 @@ void PipelineScheduler::printUtilizationReport(llvm::raw_ostream &os) const {
   os << "All units can execute in parallel (fully pipelined)\n\n";
 
   // Group by path for clarity
-  os << "Cube Path (HBM -> L1 -> L0A/B -> Cube -> L0C -> HBM):\n";
-  for (HWUnit unit : {HWUnit::CubeMTE2, HWUnit::Cube, HWUnit::FixPipe}) {
+  os << "Cube Path (HBM -> L1 -> L0A/B -> Cube -> L0C -> HBM/UB):\n";
+  for (HWUnit unit :
+       {HWUnit::CubeMTE2, HWUnit::Cube, HWUnit::FixPipe, HWUnit::FixPipeUB}) {
     auto it = pipelines.find(unit);
     if (it == pipelines.end())
       continue;
@@ -339,8 +349,9 @@ void PipelineScheduler::printUtilizationReport(llvm::raw_ostream &os) const {
     }
   }
 
-  os << "\nVector Path (HBM -> UB -> Vector -> UB -> HBM):\n";
-  for (HWUnit unit : {HWUnit::VecMTE2, HWUnit::Vector, HWUnit::MTE3}) {
+  os << "\nVector Path (HBM/L1 -> UB -> Vector -> UB -> HBM/L1):\n";
+  for (HWUnit unit : {HWUnit::VecMTE2, HWUnit::Vector, HWUnit::MTE3,
+                      HWUnit::MTE1ToUB, HWUnit::MTE3ToL1}) {
     auto it = pipelines.find(unit);
     if (it == pipelines.end())
       continue;

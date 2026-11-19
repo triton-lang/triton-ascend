@@ -56,10 +56,11 @@ static constexpr llvm::StringLiteral kAttrsToRemove[]{
     kMemCrossDeps,      kClone,
     kIntraBufCount,     kInterCoreBufCount,
     kLoadStoreBufCount, kInsertionOptimization,
-    kDepMark,           kIntraDeps,
+    kIterExtension,     kDepMark,
+    kReorderSeed,       kInterCoreBufDowngraded,
     kSubBlock,          kMergeSmallBlockFirstRunDone,
     kSplittedIf,        kLoopDepthAttr,
-    kLoopRegionAttr};
+    kLoopRegionAttr,    kReorderSeedApplied};
 
 void RemoveSsbufAttrPass::runOnOperation() {
   auto module = getOperation();
@@ -83,6 +84,12 @@ void RemoveSsbufAttrPass::runOnOperation() {
       op->removeAttr(attrName);
     }
   });
+
+  // Attributes that live on the module rather than on an operation inside it.
+  // Removed explicitly so this does not depend on whether the walk above
+  // visits its own root, and because hivmc rejects module attrs it does not
+  // recognise.
+  module->removeAttr(kBlockDeps);
 }
 
 namespace mlir::triton {

@@ -39,17 +39,46 @@ def AscendModel_Dialect : Dialect {
 // Hardware Unit Enum
 //===----------------------------------------------------------------------===//
 
-def HWUnit_Cube     : I32EnumAttrCase<"Cube", 0, "cube">;
-def HWUnit_CubeMTE2 : I32EnumAttrCase<"CubeMTE2", 1, "cube_mte2">;
-def HWUnit_FixPipe  : I32EnumAttrCase<"FixPipe", 2, "fixpipe">;
-def HWUnit_Vector   : I32EnumAttrCase<"Vector", 3, "vector">;
-def HWUnit_VecMTE2  : I32EnumAttrCase<"VecMTE2", 4, "vec_mte2">;
-def HWUnit_MTE3     : I32EnumAttrCase<"MTE3", 5, "mte3">;
-def HWUnit_Scalar   : I32EnumAttrCase<"Scalar", 6, "scalar">;
+def HWUnit_Cube      : I32EnumAttrCase<"Cube", 0, "cube">;
+def HWUnit_CubeMTE2  : I32EnumAttrCase<"CubeMTE2", 1, "cube_mte2">;
+def HWUnit_FixPipe   : I32EnumAttrCase<"FixPipe", 2, "fixpipe">;
+def HWUnit_Vector    : I32EnumAttrCase<"Vector", 3, "vector">;
+def HWUnit_VecMTE2   : I32EnumAttrCase<"VecMTE2", 4, "vec_mte2">;
+def HWUnit_MTE3      : I32EnumAttrCase<"MTE3", 5, "mte3">;
+def HWUnit_Scalar    : I32EnumAttrCase<"Scalar", 6, "scalar">;
+// This target drains the Cube accumulator straight into UB instead of going out to
+// HBM and back. It is a separate engine from the HBM write-back, so it gets
+// its own unit; on a part where the two share one pipe, declaring them a mutex
+// clique in the hardware profile serialises them without a code change.
+// Appended rather than inserted so the existing values stay stable.
+def HWUnit_FixPipeUB : I32EnumAttrCase<"FixPipeUB", 7, "fixpipe_ub">;
+// On-chip staging between UB and L1, which this target can do without a round
+// trip through HBM or L2. These are movers in their own right, not a mode of
+// the off-chip ones: UB can be draining into L1 at the same time as it streams
+// out to L2, so they overlap that traffic rather than queue behind it. Keeping
+// them separate also lets a report tell on-chip staging apart from real
+// off-chip traffic, which is the difference that matters when reading where a
+// kernel spends its time. A part where they do share a pipe is expressed by a
+// mutex clique in the hardware profile, without a code change.
+def HWUnit_MTE3ToL1  : I32EnumAttrCase<"MTE3ToL1", 8, "mte3_ub_l1">;
+def HWUnit_MTE1ToUB  : I32EnumAttrCase<"MTE1ToUB", 9, "mte1_l1_ub">;
+// Staging the Cube's operands from L1 into L0A/L0B. Distinct from CubeMTE2,
+// which brings them into L1 from off chip: the profiler reports the two
+// separately as aic_mte1_time and aic_mte2_time, and on a matmul kernel the
+// first was a third of the Cube's busy time while nothing charged it at all.
+def HWUnit_CubeMTE1  : I32EnumAttrCase<"CubeMTE1", 10, "cube_mte1">;
+// Scalar issue on the Cube core. Scalar work does not belong to one core --
+// each has its own scalar unit and the profiler reports aic_scalar_time and
+// aiv_scalar_time apart -- so a single Scalar unit would put both cores'
+// bookkeeping on one pipe and serialise blocks that in fact run at the same
+// time. Scalar keeps its meaning as the Vector core's; this is the Cube's.
+def HWUnit_ScalarCube : I32EnumAttrCase<"ScalarCube", 11, "scalar_cube">;
 
 def HWUnitAttr : I32EnumAttr<"HWUnit", "Hardware execution unit", [
   HWUnit_Cube, HWUnit_CubeMTE2, HWUnit_FixPipe,
-  HWUnit_Vector, HWUnit_VecMTE2, HWUnit_MTE3, HWUnit_Scalar
+  HWUnit_Vector, HWUnit_VecMTE2, HWUnit_MTE3, HWUnit_Scalar,
+  HWUnit_FixPipeUB, HWUnit_MTE3ToL1, HWUnit_MTE1ToUB,
+  HWUnit_CubeMTE1, HWUnit_ScalarCube
 ]> {
   let cppNamespace = "::mlir::ascend";
 }

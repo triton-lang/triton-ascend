@@ -158,12 +158,21 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
           pm.addPass(mlir::triton::createBubbleUpOperationPass(opts));
         });
 
-  m.def("add_dynamic_cv_pipeline",
-        [](mlir::PassManager &pm, bool compileOn91095) {
-          AddDynamicCVPipelineOptions opts;
-          opts.compileOn91095 = compileOn91095;
-          pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
-        });
+  m.def(
+      "add_dynamic_cv_pipeline",
+      [](mlir::PassManager &pm, bool compileOn91095,
+                                bool quietVariantTrials,
+                                int64_t reorderSeed) {
+        AddDynamicCVPipelineOptions opts;
+        opts.compileOn91095 = compileOn91095;
+        opts.quietVariantTrials = quietVariantTrials;
+        opts.reorderSeed = reorderSeed;
+        pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
+      },
+      py::arg("pm"), py::arg("compile_on_910_95"),
+      py::arg("quiet_variant_trials") = true,
+      // -1 searches as usual; >= 0 compiles that ordering and skips the search.
+      py::arg("reorder_seed") = -1);
 
   m.def(
       "add_graph_optimize",

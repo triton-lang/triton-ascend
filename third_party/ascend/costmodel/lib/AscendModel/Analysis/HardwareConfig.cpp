@@ -951,6 +951,45 @@ bool HardwareConfig::parseJSON(const llvm::json::Value &json,
     }
   }
 
+  // Cost of one synchronisation barrier. Optional and zero by default: a
+  // profile that does not mention it behaves exactly as before.
+  if (const auto *sync = root->getObject("synchronisation")) {
+    if (auto v = sync->getInteger("barrier_cycles"))
+      barrierCycles = *v >= 0 ? *v : 0;
+  }
+
+  // How many vector cores share one compute block's vector work. Optional and
+  // one by default: a profile that does not mention it behaves as before.
+  if (const auto *pairing = root->getObject("core_pairing")) {
+    if (auto v = pairing->getInteger("vector_cores_per_block"))
+      vectorCoresPerBlock = *v >= 1 ? static_cast<int>(*v) : 1;
+  }
+
+  // Vector datapath width. Optional; absent means the migrated tables are
+  // taken at face value, which is what every profile did before this existed.
+  if (const auto *datapath = root->getObject("vector_datapath")) {
+    if (auto v = datapath->getInteger("bytes_per_cycle"))
+      vectorBytesPerCycle =
+          *v >= 1 ? static_cast<int>(*v) : kVecTableBytesPerCycle;
+  }
+
+  // Scalar issue cost. Optional and zero by default: a profile that does not
+  // mention it leaves scalar work uncharged, as before.
+  if (const auto *scalar = root->getObject("scalar_issue")) {
+    if (auto v = scalar->getInteger("cycles_per_instruction"))
+      scalarCyclesPerInstruction = *v >= 0 ? static_cast<int>(*v) : 0;
+  }
+
+  // What a pipeline fill/drain iteration costs relative to a full one.
+  // Optional; the default is the ramp's own geometry (see the header), so a
+  // profile that says nothing still charges the ramp. Clamped to [0, 1]: below
+  // zero is meaningless and above one would make the ramp cost more than the
+  // steady state it is ramping into.
+  if (const auto *pipeline = root->getObject("software_pipeline")) {
+    if (auto v = pipeline->getNumber("prologue_work_fraction"))
+      prologueWorkFraction = std::min(1.0, std::max(0.0, *v));
+  }
+
   return true;
 }
 
@@ -1202,6 +1241,25 @@ int64_t HardwareConfig::estimateVectorCycles(int64_t numElements) const {
   if (width <= 0)
     return std::max<int64_t>(1, numElements);
   return std::max<int64_t>(1, (numElements + width - 1) / width);
+}
+
+int64_t
+HardwareConfig::estimateVectorCyclesFromTable(int64_t numElements,
+                                              int elementBits,
+                                              llvm::StringRef intrinsic) const {
+  int elemBytes = (elementBits + 7) / 8;
+  // 256 B per repeat == 2048 bits / elementBits elements per repeat.
+  int64_t repeats = (numElements * elemBytes + 255) / 256;
+  VecCycleEntry entry = lookupVecCycle(intrinsic, elementBits);
+  // The table's cycles are per repeat on the part it was migrated from, whose
+  // vector datapath is kVecTableBytesPerCycle wide. Rescale by the width ratio
+  // rather than editing the table: what transfers between parts is how much
+  // dearer one intrinsic is than another, not the absolute count. A profile
+  // that declares no width leaves this a no-op.
+  const int width = getVectorBytesPerCycle();
+  int64_t compute = static_cast<int64_t>(entry.compute) * repeats *
+                    kVecTableBytesPerCycle / (width > 0 ? width : 1);
+  return compute + getVectorStartupLatency();
 }
 
 int64_t HardwareConfig::estimateMemoryCycles(llvm::StringRef moverName,

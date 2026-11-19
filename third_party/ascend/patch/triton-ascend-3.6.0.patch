@@ -414,7 +414,7 @@ index 1b72c1376..ee5defb6e 100644
    }
    return success();
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 5af645bc0..011f82d60 100644
+index 5af645bc0..5e0ca585f 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
 @@ -332,6 +332,7 @@ void init_triton_ir(py::module &&m) {
@@ -425,7 +425,25 @@ index 5af645bc0..011f82d60 100644
        .value("BF16x3", InputPrecision::BF16x3)
        .value("BF16x6", InputPrecision::BF16x6)
        .export_values();
-@@ -1790,6 +1791,18 @@ void init_triton_ir(py::module &&m) {
+@@ -348,7 +349,16 @@ void init_triton_ir(py::module &&m) {
+ 
+   py::class_<MLIRContext>(m, "context", py::module_local())
+       .def(py::init<>([]() {
+-        return std::make_unique<MLIRContext>(MLIRContext::Threading::DISABLED);
++        // Ascend: the CV variant search scores candidates on its own threads,
++        // which needs this context's uniquers locked, and MLIR refuses to flip
++        // the flag from inside a pass. Upstream disables threading so async
++        // compilation does not spawn a pool per context (#8255); that only
++        // matters when no search runs, so the flag follows the search.
++        const char *variants = std::getenv("TRITON_ASCEND_CV_VARIANTS");
++        const long count = variants ? std::strtol(variants, nullptr, 10) : 0;
++        return std::make_unique<MLIRContext>(
++            count > 1 ? MLIRContext::Threading::ENABLED
++                      : MLIRContext::Threading::DISABLED);
+       }))
+       .def("printOpOnDiagnostic",
+            [](MLIRContext &self, bool v) { self.printOpOnDiagnostic(v); })
+@@ -1790,6 +1800,18 @@ void init_triton_ir(py::module &&m) {
                                                  llvm::StringRef(message));
               self.create<AssertOp>(condition, messageAttr);
             })

@@ -204,6 +204,10 @@ private:
   void updateCoreTypeAtIndex(Operation *op, int index,
                              llvm::StringRef newCoreType);
   void deduplicateDependencies(llvm::SmallVector<DependencyInfo> &dependencies);
+  /// Record the block-level edges on the module, under CVPipeline::kBlockDeps,
+  /// so they survive this pass. Analysis-only: it adds a module attribute and
+  /// changes nothing else.
+  void persistBlockDependencies(DataDependencyInfo &info);
   void sortDependencies(llvm::SmallVector<DependencyInfo> &dependencies,
                         mlir::ModuleOp module);
   mlir::ModuleOp module;

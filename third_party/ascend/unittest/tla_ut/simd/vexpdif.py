@@ -28,13 +28,13 @@ SIGNATURE = {"X": "*fp32", "Y": "*fp32", "T": "*i32", "O": "*fp32"}
 
 @tla.jit
 def vexpdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    xb = tla.alloc_buffer((TILES, N), tl.float32, space="ub")
-    yb = tla.alloc_buffer((TILES, N), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), xb)
-    tla.copy(tla.view(Y, (TILES, N)), yb)
-    tla.copy(tla.view(T, (N, )), tb)
+    xb = tla.alloc((TILES, N), tl.float32, space="ub")
+    yb = tla.alloc((TILES, N), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((MASK_ROWS_C + TILES, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), xb)
+    tla.load_gm_to_ub(tla.view(Y, (TILES, N)), yb)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0, 0])
         y = tla.simd.vlds(yb[0, 0])
@@ -58,7 +58,7 @@ def vexpdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.con
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vexpdif(vx, vy, mask=tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vexpdif(vx, vy))
-    tla.copy(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
 
 
 def constexprs():

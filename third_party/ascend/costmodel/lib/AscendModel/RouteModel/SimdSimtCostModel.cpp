@@ -5505,7 +5505,8 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
                maximumPrefixScanExtent <= 64 &&
                maximumPrefixScanStride == 1 &&
                prediction.candidate == kAllSimtOnly)
-        eventCompletionFloor = 12500.0;
+        eventCompletionFloor =
+            maximumPrefixScanExtent == 32 ? 14000.0 : 12500.0;
       else if (maximumPrefixScanIndependentSequences >= 256 &&
                maximumPrefixScanStride == 1 &&
                prediction.candidate == kAllSimtOnly)
@@ -5541,7 +5542,8 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
     } else if (hasPredicateSelect && prediction.candidate == kAllSimtOnly &&
                hasReduction && hasConversionPack && reductionStageCount >= 2 &&
                stageCount >= 15) {
-      eventCompletionFloor = 15500.0;
+      eventCompletionFloor =
+          hasAutoBlockifyLoop && stageCount >= 18 ? 17000.0 : 15500.0;
       eventCompletionEvidence = semantic.evidence;
     } else if (prediction.candidate == kAllSimd && hasReduction &&
                hasConversionPack && reductionStageCount == 1 &&

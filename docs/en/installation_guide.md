@@ -55,24 +55,66 @@ pip install -e .
 
 ### Custom LLVM Build (Optional)
 
-If you need to customize the LLVM build process, follow the steps below to compile Triton-Ascend.
+If you need to customize the LLVM build process, follow the steps below to compile Triton-Ascend. Run steps 1–3 consecutively in the same terminal, starting from the root of the existing Triton-Ascend checkout you intend to build. For offline use, transfer that checkout together with the LLVM source tree from a connected machine first.
 
 1. **Prepare the source code**: Check out the LLVM source code of the specified version with `git checkout` and apply the patch.
 
     ```bash
-    git clone --no-checkout https://github.com/llvm/llvm-project.git
+    # Read the LLVM pin and apply patches from this Triton checkout.
+    TRITON_ROOT="$(pwd)"
+    [ -f "$TRITON_ROOT/cmake/llvm-hash.txt" ] || { echo "Run this block from the root of your triton-ascend checkout: cmake/llvm-hash.txt not found under $(pwd)."; exit 1; }
+    LLVM_COMMIT=$(cat "$TRITON_ROOT/cmake/llvm-hash.txt" | tr -d '\r\n') || exit 1
+    LLVM_COMMIT=$(printf '%s' "$LLVM_COMMIT" | tr 'A-F' 'a-f')
+    if [ "${#LLVM_COMMIT}" -ne 40 ] || [ -n "$(printf '%s' "$LLVM_COMMIT" | tr -d '0-9a-f')" ]; then
+      echo "cmake/llvm-hash.txt is empty or not a single 40-character commit hash — please check the file." >&2
+      exit 1
+    fi
+    if [ ! -d "$TRITON_ROOT/llvm-project/.git" ]; then
+      if [ -d "$TRITON_ROOT/llvm-project" ] && [ -n "$(ls -A "$TRITON_ROOT/llvm-project" 2>/dev/null)" ]; then
+        echo "llvm-project/ exists but is not a git repository; clean it or restore .git before continuing." >&2
+        exit 1
+      fi
+      git clone --no-checkout https://github.com/llvm/llvm-project.git || exit 1
+    fi
     cd llvm-project
-    git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-    wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
-    git apply llvm_patch_f6ded0b.patch
+    git checkout "$LLVM_COMMIT" || exit 1
+    export LC_ALL=C
+    for patch in "$TRITON_ROOT"/third_party/ascend/patch/llvm_patch_*.patch; do
+      [ -f "$patch" ] || continue
+      name=$(basename "$patch")
+      token=${name#llvm_patch_}
+      token=${token%.patch}
+      token=$(printf '%s' "$token" | tr 'A-F' 'a-f')
+      case "$token" in
+        ""|*[!0-9a-f]*) ;;
+        *)
+          case "$LLVM_COMMIT" in
+            "$token"*) ;;
+            *)
+              echo "Patch $name is hex-only but is not a prefix of the commit pinned in llvm-hash.txt ($LLVM_COMMIT); if it is a descriptive name made of hex characters, rename it to avoid this check." >&2
+              exit 1
+              ;;
+          esac
+          ;;
+      esac
+      if git apply --check "$patch" 2>/dev/null; then
+        git apply "$patch" || exit 1
+      elif git apply -R --check "$patch" 2>/dev/null; then
+        echo "Patch $name is already applied; skipping."
+      else
+        echo "Patch $name does not apply cleanly to this tree; re-run 'git apply --check \"$patch\"' to see the reason." >&2
+        exit 1
+      fi
+    done
     ```
 
-2. **Build LLVM**: The path `/path/llvm-install` is the LLVM installation path planned by the user, which needs to be adjusted according to the actual situation; the path `{PATH_TO}` refers to the root directory of the llvm-project source you checked out in step 1.
+2. **Build LLVM**: The path `/path/llvm-install` is the LLVM installation path planned by the user, which needs to be adjusted according to the actual situation; the `TRITON_ROOT` variable from step 1 identifies the same checkout throughout these steps.
 
     ```bash
     export LLVM_INSTALL_PREFIX=/path/llvm-install
-    cd {PATH_TO}/llvm-project
-    mkdir build
+    [ -n "${TRITON_ROOT:-}" ] || { echo "Run step 1 in the same terminal first."; exit 1; }
+    cd "$TRITON_ROOT/llvm-project"
+    mkdir -p build
     cd build
     cmake ../llvm \
         -G Ninja \
@@ -87,13 +129,15 @@ If you need to customize the LLVM build process, follow the steps below to compi
         -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
     ninja install
 
-    cp  {PATH_TO}/llvm-project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
+    cp "$TRITON_ROOT/llvm-project/build/bin/FileCheck" "$LLVM_INSTALL_PREFIX/bin/FileCheck"
     ```
 
 3. **Compile Triton-Ascend**
 
     ```bash
-    git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
+    [ -n "${TRITON_ROOT:-}" ] || { echo "Run step 1 in the same terminal first."; exit 1; }
+    [ -n "${LLVM_INSTALL_PREFIX:-}" ] || { echo "Set LLVM_INSTALL_PREFIX in step 2 first."; exit 1; }
+    cd "$TRITON_ROOT"
     LLVM_SYSPATH=${LLVM_INSTALL_PREFIX} \
     TRITON_BUILD_WITH_CCACHE=true \
     TRITON_BUILD_WITH_CLANG_LLD=true \

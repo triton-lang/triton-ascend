@@ -115,27 +115,19 @@ jobs:
       - name: Download and install Bisheng compiler
         shell: bash
         run: |
-          if [ ! -f cmake/bisheng-version.txt ]; then
-            echo "cmake/bisheng-version.txt not found, skipping"
-            exit 0
-          fi
+          set -euo pipefail
           OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
-          BISHENG_FILENAME=$(sed -n '1p' cmake/bisheng-version.txt | xargs)
-          BISHENG_SHA256=$(sed -n '2p' cmake/bisheng-version.txt | sed 's/^sha256://' | xargs)
-          if [ -z "${BISHENG_FILENAME}" ]; then
-            echo "Error: cmake/bisheng-version.txt must contain a Bisheng filename on the first line." >&2
-            exit 1
-          fi
+          ARCH=$(uname -m)
+          BISHENG_FILENAME=$(sed -n "s/^${ARCH}: //p" cmake/bisheng-version.txt | xargs)
+          BISHENG_SHA256=$(sed -n "s/^${ARCH}_sha256: //p" cmake/bisheng-version.txt | xargs)
+          [[ "$BISHENG_FILENAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.run$ ]]
+          [[ "$BISHENG_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]
           echo "Downloading: ${BISHENG_FILENAME}"
           curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
-          if [ -n "${BISHENG_SHA256}" ]; then
-            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
-          else
-            echo "Warning: No SHA256 checksum provided, skipping verification"
-          fi
+          echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
           chmod +x bisheng.run
           ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
-          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
+          echo "/usr/local/bisheng/tools/bishengir/bin" >> "$GITHUB_PATH"
 
       - name: Cache build dependencies
         uses: actions/cache@v4
@@ -145,7 +137,7 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch', 'cmake/bisheng-version.txt') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-
 
       # ── Install the sync workflow package + Claude Code CLI ────────────────

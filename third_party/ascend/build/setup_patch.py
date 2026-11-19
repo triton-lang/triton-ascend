@@ -339,18 +339,31 @@ def _ensure_npuir_submodule():
 
 
 def _ensure_distributed_submodule():
+    import json
+    import re
+
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
     distributed_dir = _REPO_ROOT / "third_party" / "ascend" / "Triton-distributed-ascend"
-    commit_id = "8c1dae1acbb4bcf99c3e473c8ed876f2cd42ba35"
+    metadata_path = _REPO_ROOT / "cmake" / "triton-distributed-info.json"
+    with metadata_path.open(encoding="utf-8") as metadata:
+        info = json.load(metadata)
+    commit_id = info.get("revision") if isinstance(info, dict) else None
+    if not isinstance(commit_id, str) or re.fullmatch(r"[0-9a-f]{40}", commit_id) is None:
+        raise ValueError(f"{metadata_path}: revision must be a full lowercase commit SHA")
     if not distributed_dir.is_dir():
+        repository = info.get("repository")
+        if (not isinstance(repository, str)
+                or re.fullmatch(r"https://[^/\s]+/[A-Za-z0-9_./-]+\.git", repository) is None):
+            raise ValueError(f"{metadata_path}: repository must be an HTTPS Git URL")
         try:
             _git_check_call_with_retry([
                 "git",
                 "clone",
-                "https://gitcode.com/Ascend/Triton-distributed-ascend.git",
+                repository,
                 "-b",
                 "master",
+                distributed_dir.name,
             ], cwd=_REPO_ROOT / "third_party" / "ascend")
         except Exception:
             # A clone interrupted by a network failure leaves a partially
@@ -375,10 +388,10 @@ def _ensure_distributed_submodule():
             "git",
             "rev-parse",
             "HEAD",
-        ], capture_output=True, text=True, cwd=distributed_dir)
+        ], check=True, capture_output=True, text=True, cwd=distributed_dir)
         current_id = result.stdout.strip()
         if current_id != commit_id:
-            raise RuntimeError(f"Triton-Distributed submodule is not {commit_id}")
+            raise RuntimeError(f"Triton-Distributed HEAD is {current_id}, expected {commit_id}")
 
 
 def _copy_ascend_tools(extdir, cmake_dir):
@@ -483,6 +496,14 @@ def patch_module(mod):
         return _orig_get_llvm_package_info()
 
     mod.get_llvm_package_info = get_llvm_package_info
+
+    # Keep the upstream setup.py definitions intact; only Ascend reads this tag.
+    def get_json_package_info():
+        version = (Path(mod.get_base_dir()) / "cmake/json-version.txt").read_text(encoding="utf-8").strip()
+        url = f"https://github.com/nlohmann/json/releases/download/{version}/include.zip"
+        return mod.Package("json", "", url, "JSON_INCLUDE_DIR", "", "JSON_SYSPATH")
+
+    mod.get_json_package_info = get_json_package_info
 
     # 3. Skip downloading NVIDIA proprietary toolchain dependencies
     #    (ptxas/cuobjdump/...); they are irrelevant for the Ascend wheel.

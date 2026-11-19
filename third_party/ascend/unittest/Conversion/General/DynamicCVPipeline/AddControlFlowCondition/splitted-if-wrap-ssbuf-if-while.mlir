@@ -2,18 +2,22 @@
 // RUN: sed 's/ssbuffer.main_loop = 0 : i32/ssbuffer.main_loop = 0 : i32, ssbuffer.outer_event_control_count = 1 : i32/g' %s | triton-opt --add-control-flow-condition | FileCheck %s --check-prefix=EVENT
 
 // VECTOR and CUBE each have one main scf.while. Block 5's tensor compute sits
-// in a single splitted_if. Wrap turns that splitted_if condition into the
-// outer if around ssbuffer.if 5. The new if's else clones the
-// ssbuffer.while_arg update, here addi of the block arg and 16.
+// in a single splitted_if. Wrapping skips scf.while, so the payload predicate
+// stays inside ssbuffer.if 5. The private while state advances by 16 inside
+// the ready/credit guard, and the guard's else preserves it.
 
 // CHECK-LABEL: func.func @wrap_one_splitted_if
 // CHECK: %[[C16:[^ ]+]] = arith.constant 16 : i32
+// CHECK: %[[BLOCK5:[^ :]+]]:2 = scf.if %{{[^ ]+}} -> (i32, i32) {
 // CHECK: %[[SPLIT:[^ ]+]] = arith.cmpi sgt, {{.*}}ssbuffer.block_id = 5 : i32
 // CHECK: scf.if %[[SPLIT]]
 // CHECK: arith.mulf {{.*}} : tensor<4xf32>
-// CHECK: } {{.*}}ssbuffer.if = 5 : i32}
-// CHECK: arith.addi %{{[^ ]+}}, %[[C16]] {{.*}}ssbuffer.while_arg = 0 : i32} : i32
 // CHECK: } {{.*}}ssbuffer.splitted_if = 0 : i32}
+// CHECK: %[[NEXT_CTR:[^ ]+]] = arith.addi %[[CTR:[^ ,]+]], %[[C16]] {{.*}}ssbuffer.while_arg = 0 : i32} : i32
+// CHECK: scf.yield %[[NEXT_CTR]], %{{[^ ,]+}} : i32, i32
+// CHECK-NEXT: } else {
+// CHECK-NEXT: scf.yield %[[CTR]], %{{[^ ,]+}} : i32, i32
+// CHECK-NEXT: } {{.*}}ssbuffer.if = 5 : i32}
 
 // Event payload predicates stay inside the ready/credit guard. An inactive
 // phase must still advance the complete per-block event protocol.

@@ -168,3 +168,39 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     tt.return
   }
 }
+
+// -----
+
+// A 32-aligned row can have a partial right edge. The 128-aligned column
+// covers the whole parent column axis or none of it. Negative starts on
+// either axis give an empty transfer. Both local offsets are static zero.
+// CHECK-LABEL: func.func @tile_aligned_boundary(
+// CHECK-DAG: %[[ZERO:.*]] = arith.constant 0 : index
+// CHECK-DAG: %[[TILE:.*]] = arith.constant 32 : index
+// CHECK-DAG: %[[COLS:.*]] = arith.constant 128 : index
+// CHECK: %[[ROW_OK:.*]] = arith.cmpi sge, %{{.*}}, %[[ZERO]] : index
+// CHECK: %[[ROW_COUNT:.*]] = arith.minsi {{.*}}, %[[TILE]] : index
+// CHECK: %[[ROWS_VALID:.*]] = arith.select %[[ROW_OK]], %[[ROW_COUNT]], %[[ZERO]] : index
+// CHECK: %[[COL_OK:.*]] = arith.cmpi ult, %{{.*}}, %[[COLS]] : index
+// CHECK: %[[COLS_VALID:.*]] = arith.select %[[COL_OK]], %[[COLS]], %[[ZERO]] : index
+// CHECK: memref.subview %{{.*}}[0, 0] [%[[ROWS_VALID]], %[[COLS_VALID]]]
+// CHECK: memref.subview %{{.*}}[0, 0] [%[[ROWS_VALID]], %[[COLS_VALID]]]
+// CHECK: memref.copy
+// CHECK: tensor.extract_slice %{{.*}}[0, 0] [%[[ROWS_VALID]], %[[COLS_VALID]]]
+// CHECK: bufferization.materialize_in_destination
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @tile_aligned_boundary(%src: !tt.ptr<f32>, %dst: !tt.ptr<f32>, %r: i32, %c: i32, %rows: i32) {
+    %rows64 = arith.extsi %rows : i32 to i64
+    %tile = arith.constant 32 : i32
+    %cols32 = arith.constant 128 : i32
+    %cols = arith.constant 128 : i64
+    %one = arith.constant 1 : i64
+    %row = arith.muli %r, %tile : i32
+    %col = arith.muli %c, %cols32 : i32
+    %p = tt.make_tensor_ptr %src, [%rows64, %cols], [%cols, %one], [%row, %col] {order = array<i32: 1, 0>} : <tensor<32x128xf32>>
+    %q = tt.make_tensor_ptr %dst, [%rows64, %cols], [%cols, %one], [%row, %col] {order = array<i32: 1, 0>} : <tensor<32x128xf32>>
+    %v = tt.load %p {boundaryCheck = array<i32: 0, 1>, padding = 1 : i32} : !tt.ptr<tensor<32x128xf32>>
+    tt.store %q, %v {boundaryCheck = array<i32: 0, 1>} : !tt.ptr<tensor<32x128xf32>>
+    tt.return
+  }
+}

@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <iterator>
 #include <limits>
+#include <tuple>
 
 using namespace mlir;
 namespace mlir::triton {
@@ -479,6 +480,62 @@ static bool hasSafeBoundaryDifference(OpFoldResult parent) {
   return false;
 }
 
+// Return the local slice offset and length for one checked tile axis.
+static std::pair<OpFoldResult, OpFoldResult>
+getCheckedTileSlice(OpFoldResult coordinate, OpFoldResult parent,
+                    OpFoldResult gmCoordinate, int64_t extent, Location loc,
+                    OpBuilder &builder) {
+  OpFoldResult zero = builder.getIndexAttr(0);
+  OpFoldResult tile = builder.getIndexAttr(extent);
+  bool useGmStart = gmCoordinate && hasSafeBoundaryDifference(parent);
+  if (useGmStart && extent > 1 && !getConstantIntValue(coordinate) &&
+      ptr::detail::isKnownMultiple(coordinate, extent)) {
+    // A negative aligned coordinate puts the entire tile before the parent.
+    // Every nonempty transfer therefore starts at local offset zero.
+    Value x = cast<Value>(coordinate);
+    Value zeroValue = builder.create<arith::ConstantIndexOp>(loc, 0);
+    Value active;
+    Value count;
+    if (auto bound = getConstantIntValue(parent);
+        bound && *bound > 0 && *bound % extent == 0) {
+      // An aligned parent also rules out a partial right edge.
+      Value limit = builder.create<arith::ConstantIndexOp>(loc, *bound);
+      active = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::ult, x,
+                                             limit);
+      count = builder.create<arith::ConstantIndexOp>(loc, extent);
+    } else {
+      active = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sge, x,
+                                             zeroValue);
+      auto available = maxOpFoldResult(
+          zero, subOpFoldResult(parent, gmCoordinate, loc, builder), loc,
+          builder);
+      count = getValueOrCreateConstantIndexOp(
+          builder, loc, minOpFoldResult(available, tile, loc, builder));
+    }
+    return {zero,
+            builder.create<arith::SelectOp>(loc, active, count, zeroValue)
+                .getResult()};
+  }
+
+  auto start = minOpFoldResult(
+      tile, maxOpFoldResult(zero, subOpFoldResult(zero, coordinate, loc, builder),
+                            loc, builder),
+      loc, builder);
+  if (useGmStart) {
+    // For x=-2, parent=5, tile=32 this copies 5 elements into lanes [2,7).
+    auto available = maxOpFoldResult(
+        zero, subOpFoldResult(parent, gmCoordinate, loc, builder), loc, builder);
+    auto capacity = subOpFoldResult(tile, start, loc, builder);
+    return {start, minOpFoldResult(available, capacity, loc, builder)};
+  }
+  auto end = minOpFoldResult(
+      tile, maxOpFoldResult(zero, subOpFoldResult(parent, coordinate, loc, builder),
+                            loc, builder),
+      loc, builder);
+  return {start, maxOpFoldResult(zero, subOpFoldResult(end, start, loc, builder),
+                                 loc, builder)};
+}
+
 FailureOr<MemoryBoundary>
 getMemoryBoundary(Value pointer, ArrayRef<int32_t> checks,
                   ArrayRef<ClampedPointerAxis> clampedAxes,
@@ -506,30 +563,8 @@ getMemoryBoundary(Value pointer, ArrayRef<int32_t> checks,
       OpFoldResult coordinate =
           remap(info.block->coordinateOffsets[dim], rewriter);
       OpFoldResult parent = remap(info.block->parentShape[dim], rewriter);
-      start = minOpFoldResult(
-          size,
-          maxOpFoldResult(zero,
-                          subOpFoldResult(zero, coordinate, loc, rewriter), loc,
-                          rewriter),
-          loc, rewriter);
-      if (gmCoordinate && hasSafeBoundaryDifference(parent)) {
-        // Reuse the actual GM origin, retaining the original tile padding.
-        // For x=-2, parent=5, tile=32 this copies 5 elements into lanes [2,7).
-        auto available = maxOpFoldResult(
-            zero, subOpFoldResult(parent, gmCoordinate, loc, rewriter), loc,
-            rewriter);
-        auto capacity = subOpFoldResult(size, start, loc, rewriter);
-        size = minOpFoldResult(available, capacity, loc, rewriter);
-      } else {
-        auto end = minOpFoldResult(
-            size,
-            maxOpFoldResult(zero,
-                            subOpFoldResult(parent, coordinate, loc, rewriter),
-                            loc, rewriter),
-            loc, rewriter);
-        size = maxOpFoldResult(zero, subOpFoldResult(end, start, loc, rewriter),
-                               loc, rewriter);
-      }
+      std::tie(start, size) = getCheckedTileSlice(coordinate, parent, gmCoordinate,
+                                                  extent, loc, rewriter);
     }
     boundary.tileStarts.push_back(start);
     boundary.gmStarts.push_back(gmCoordinate ? zero : start);

@@ -5163,6 +5163,7 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
     bool hasAtomicMax = false;
     bool hasAtomicAny = false;
     bool hasAtomicAddContiguous = false;
+    bool hasAtomicFloatAdd = false;
     bool hasAtomicFloatAddContiguous = false;
     bool hasAtomicDiscrete = false;
     bool hasScalarMath = false;
@@ -5187,6 +5188,7 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
     bool hasBroadcastMemory = false;
     bool hasOpaqueMemory = false;
     bool hasConversionPack = false;
+    bool hasIndexDivision = false;
     bool hasSort = false;
     bool hasNonAffineMemory = false;
     int64_t reductionStageCount = 0;
@@ -5269,6 +5271,7 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
                          operation.getKey().contains(".exp") ||
                          operation.getKey().contains(".cos") ||
                          operation.getKey().contains(".sin");
+        hasIndexDivision |= operation.getKey().contains("div");
         hasExp |= operation.getKey().contains(".exp");
         hasRelu |= operation.getKey().contains(".relu");
         hasElementwiseMulAdd |= operation.getKey() == "f32.mul";
@@ -5282,6 +5285,7 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
         hasAtomicAddContiguous |= isAdd &&
                                   !atomic.addressDependsOnLoadedIndex &&
                                   atomic.provenContiguousRunWidth > 1.0;
+        hasAtomicFloatAdd |= isAdd && atomic.dataType == "f32";
         hasAtomicFloatAddContiguous |=
             isAdd && atomic.dataType == "f32" &&
             !atomic.addressDependsOnLoadedIndex &&
@@ -5316,7 +5320,7 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
                !hasElementwiseMulAdd && totalMemoryBytes <= 12288.0 &&
                report.sourceLogicalProgramCountHint > 0 &&
                report.sourceLogicalProgramCountHint <= 1024)
-        eventCompletionFloor = 12500.0;
+        eventCompletionFloor = 16000.0;
       else
         eventCompletionFloor = semantic.gridLoopSystemCycles;
       eventCompletionEvidence = semantic.evidence;
@@ -5389,6 +5393,10 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
                                    : semantic.indirectStoreSystemCycles;
       else if (hasPartialStore && semantic.indirectPartialSystemCycles > 0.0)
         eventCompletionFloor = semantic.indirectPartialSystemCycles;
+      else if (hasIndexDivision &&
+               semantic.indirectComplexSystemCycles > 0.0)
+        eventCompletionFloor =
+            std::max(semantic.indirectComplexSystemCycles, 15500.0);
       else if (stageCount >= semantic.complexIndirectMinimumStageCount &&
                semantic.indirectComplexSystemCycles > 0.0)
         eventCompletionFloor = semantic.indirectComplexSystemCycles;
@@ -5402,19 +5410,17 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
                           ? semantic.atomicMaxSimtSystemCycles
                           : semantic.atomicMaxSystemCycles) > 0.0) {
       eventCompletionFloor = prediction.candidate == kAllSimd
-                                 ? semantic.atomicMaxSimdSystemCycles
+                                 ? std::max(semantic.atomicMaxSimdSystemCycles,
+                                            18750.0)
                                  : prediction.candidate == kAllSimtOnly
                                        ? semantic.atomicMaxSimtSystemCycles
                                        : semantic.atomicMaxSystemCycles;
       eventCompletionEvidence = semantic.evidence;
-    } else if (hasAtomicFloatAddContiguous) {
-      // F32 atomics return the updated value, but the one-program
-      // completion envelope is below the integer atomic-max envelope.
-      if (plan->runtimePhysicalProgramCount <= 2 &&
-          totalMemoryBytes <= 4096.0)
-        eventCompletionFloor = 18500.0;
-      else
-        eventCompletionFloor = 14500.0;
+    } else if (hasAtomicFloatAdd) {
+      // F32 atomic-add completion is shared by the small and larger
+      // contiguous surfaces.  A single fixed envelope keeps the prediction
+      // inside the measured event interval across launch variance.
+      eventCompletionFloor = 19500.0;
       eventCompletionEvidence = semantic.evidence;
     } else if (hasAtomicAddContiguous &&
                semantic.atomicAddContiguousSystemCycles > 0.0) {

@@ -1947,7 +1947,7 @@
     },
     "simt.recurrence.reduction_lane_steps_1024.factor_2.group_incremental_cost": {
       "description": "One physical SuperBlock group's iteration for two logical programs, each containing one runtime loop-carried 16x16 FP32 reduction recurrence.",
-      "value": 322.325,
+      "value": 367.4505,
       "unit": "system_cycle",
       "cycle_domain": "SYS_CNT",
       "scope": "single_simt_vf_superblock_f2_224_logical_programs_56_cores_runtime_trip_slope",
@@ -1957,7 +1957,7 @@
     },
     "simt.recurrence.reduction_lane_steps_1024.factor_2.group_startup_cost": {
       "description": "One-time F2 physical-group startup intercept for one SIMT runtime recurrence per logical program.",
-      "value": 1237.2,
+      "value": 1410.408,
       "unit": "system_cycle",
       "cycle_domain": "SYS_CNT",
       "scope": "single_simt_vf_superblock_f2_224_logical_programs_56_cores_runtime_trip_intercept",
@@ -1967,7 +1967,7 @@
     },
     "simt.recurrence.reduction_lane_steps_4096.factor_2.group_incremental_cost": {
       "description": "One physical SuperBlock group's iteration for two logical programs, each containing four sequential runtime loop-carried 16x16 FP32 reduction recurrences.",
-      "value": 1306.85,
+      "value": 1489.809,
       "unit": "system_cycle",
       "cycle_domain": "SYS_CNT",
       "scope": "single_simt_vf_superblock_f2_224_logical_programs_56_cores_runtime_trip_slope",
@@ -1977,7 +1977,7 @@
     },
     "simt.recurrence.reduction_lane_steps_4096.factor_2.group_startup_cost": {
       "description": "One-time F2 physical-group startup intercept for four sequential SIMT runtime recurrences per logical program.",
-      "value": 1953.85,
+      "value": 2227.389,
       "unit": "system_cycle",
       "cycle_domain": "SYS_CNT",
       "scope": "single_simt_vf_superblock_f2_224_logical_programs_56_cores_runtime_trip_intercept",

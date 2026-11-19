@@ -2498,6 +2498,22 @@
         },
         "superblock_structural_completion": {
             "entries": [
+                {"family":"triangular_recurrence","source_programs":512,"route":"all_simt_only","factor":4,"elapsed_system_cycles":244740.0},
+                {"family":"triangular_recurrence","source_programs":1024,"route":"all_simt_only","factor":4,"elapsed_system_cycles":422660.0},
+                {"family":"triangular_recurrence","source_programs":4096,"route":"all_simt_only","factor":4,"elapsed_system_cycles":1545110.0},
+                {"family":"triangular_recurrence","source_programs":8192,"route":"all_simt_only","factor":4,"elapsed_system_cycles":3230700.0},
+                {"family":"triangular_recurrence","source_programs":16384,"route":"all_simt_only","factor":4,"elapsed_system_cycles":6686340.0},
+                {"family":"triangular_recurrence","source_programs":32768,"route":"all_simt_only","factor":4,"elapsed_system_cycles":13152630.0},
+                {"family":"triangular_recurrence","source_programs":131072,"route":"all_simt_only","factor":4,"elapsed_system_cycles":50989620.0},
+                {"family":"triangular_recurrence","source_programs":262144,"route":"all_simt_only","factor":4,"elapsed_system_cycles":96869540.0},
+                {"family":"triangular_recurrence","source_programs":512,"route":"mixed_simd_simt","factor":4,"elapsed_system_cycles":225560.0},
+                {"family":"triangular_recurrence","source_programs":1024,"route":"mixed_simd_simt","factor":4,"elapsed_system_cycles":380890.0},
+                {"family":"triangular_recurrence","source_programs":4096,"route":"mixed_simd_simt","factor":4,"elapsed_system_cycles":1736510.0},
+                {"family":"triangular_recurrence","source_programs":8192,"route":"mixed_simd_simt","factor":4,"elapsed_system_cycles":3376730.0},
+                {"family":"triangular_recurrence","source_programs":16384,"route":"mixed_simd_simt","factor":4,"elapsed_system_cycles":6708140.0},
+                {"family":"triangular_recurrence","source_programs":32768,"route":"mixed_simd_simt","factor":4,"elapsed_system_cycles":13585310.0},
+                {"family":"triangular_recurrence","source_programs":131072,"route":"mixed_simd_simt","factor":4,"elapsed_system_cycles":53851390.0},
+                {"family":"triangular_recurrence","source_programs":262144,"route":"mixed_simd_simt","factor":4,"elapsed_system_cycles":108568120.0},
                 {
                     "family": "scalar_control",
                     "source_programs": 112,

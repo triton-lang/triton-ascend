@@ -21,8 +21,10 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/SyncAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -58,31 +60,6 @@ static constexpr const char *ssbufferCoreTypeVectorAttr = "VECTOR";
 static constexpr int ND_SHAPE_LENGTH = 2;
 static constexpr int SHAPE_1D_LENGTH = 1;
 static constexpr int constantIntType = 32;
-
-// Helper: ssbuffer.core_type
-llvm::StringRef getSsbufferCoreType(Operation *op) {
-  if (auto attr = op->getAttrOfType<mlir::StringAttr>(CVPipeline::kCoreType)) {
-    return attr.getValue();
-  }
-  return "";
-}
-
-// Helper: Get CoreType from op and index
-llvm::StringRef getCoreTypeWithIndex(Operation *op, int index) {
-  llvm::StringRef typeStr = getSsbufferCoreType(op);
-  if (typeStr.contains(", ")) {
-    llvm::SmallVector<llvm::StringRef> types;
-    typeStr.split(types, ", ", -1, false);
-    if (index < types.size()) {
-      return types[index].trim();
-    }
-    LOG_DEBUG("Warning: Core type string has multiple types but value is not "
-              "an OpResult or index out of range.\n");
-    return "";
-  }
-
-  return typeStr;
-}
 
 void DataDependencyAnalysisPass::updateCoreTypeAtIndex(
     Operation *op, int index, llvm::StringRef newCoreType) {
@@ -131,11 +108,57 @@ bool DataDependencyAnalysisPass::isControlFlowOp(mlir::Operation *op) {
          isa<scf::YieldOp, scf::ConditionOp>(op);
 }
 
+bool DataDependencyAnalysisPass::isUsedByMatmulAB(Operation *op) {
+  SmallVector<Value> worklist(op->getResults().begin(), op->getResults().end());
+  llvm::DenseSet<Value> visited;
+
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!visited.insert(value).second) {
+      continue;
+    }
+
+    for (OpOperand &use : value.getUses()) {
+      Operation *user = use.getOwner();
+
+      if (auto loopOp = dyn_cast<LoopLikeOpInterface>(user)) {
+        Value regionIterArg = loopOp.getTiedLoopRegionIterArg(&use);
+        if (regionIterArg) {
+          worklist.push_back(regionIterArg);
+        }
+        continue;
+      }
+
+      if (getSsbufferCoreType(user) == ssbufferCoreTypeVectorAttr) {
+        continue;
+      }
+
+      if (isa<linalg::MatmulOp>(user)) {
+        if (use.getOperandNumber() < 2) {
+          return true;
+        }
+      }
+
+      for (Value result : user->getResults()) {
+        worklist.push_back(result);
+      }
+    }
+  }
+
+  return false;
+}
+
 bool DataDependencyAnalysisPass::isCubeAndVectorOp(mlir::Operation *op) {
-  if (isa<tensor::EmptyOp, linalg::FillOp>(op)) {
+  if (!isa<tensor::EmptyOp, linalg::FillOp>(op)) {
+    return false;
+  }
+  if (getSsbufferCoreType(op) == ssbufferCoreTypeCubeAttr) {
     return true;
   }
-  return false;
+  if (isUsedByMatmulAB(op)) {
+    return false;
+  }
+  return true;
 }
 
 bool DataDependencyAnalysisPass::isValidShapeForDependency(mlir::Value value) {
@@ -345,6 +368,44 @@ void DataDependencyAnalysisPass::createBlockInfoMap(DataDependencyInfo &info) {
   if (!currentOps.empty()) {
     collectBlockInfo(info, currentId, currentOps);
   }
+
+  if (!hasOuterMainLoop(module))
+    return;
+
+  // An event guard can contain rematerialized scalar operations tagged for
+  // another stage. A postorder walk then sees several runs of the same ID;
+  // retaining only the last run loses its matmul and cross-core edges.
+  module.walk([&](scf::ForOp loop) {
+    if (!loop->hasAttr(kOuterEventControlCount))
+      return;
+    llvm::DenseMap<int, SmallVector<Operation *>> stages;
+    for (Operation &root : loop.getBody()->without_terminator()) {
+      if (auto id = getOpBlockId(&root))
+        stages.try_emplace(*id);
+    }
+    for (Operation &root : loop.getBody()->without_terminator()) {
+      root.walk<WalkOrder::PreOrder>([&](Operation *op) {
+        auto id = getOpBlockId(op);
+        auto it = id ? stages.find(*id) : stages.end();
+        if (it != stages.end())
+          it->second.push_back(op);
+      });
+    }
+    for (auto &[id, ops] : stages) {
+      // A direct root represents the stage's region for sync placement.
+      auto root = llvm::find_if(
+          ops, [&](Operation *op) { return op->getBlock() == loop.getBody(); });
+      assert(root != ops.end());
+      std::iter_swap(ops.begin(), root);
+      collectBlockInfo(info, id, ops);
+      BlockInfo &stage = info.getBlockInfoMap()[id];
+      stage.isCube = llvm::any_of(ops, [](Operation *op) {
+        return getSsbufferCoreType(op).contains(ssbufferCoreTypeCubeAttr);
+      });
+      stage.isControl = llvm::all_of(
+          ops, [this](Operation *op) { return isControlFlowOp(op); });
+    }
+  });
 }
 
 mlir::Operation *DataDependencyAnalysisPass::createBlockInfoConstOp(
@@ -386,6 +447,9 @@ bool DataDependencyAnalysisPass::collectDepInfo(
 
   depInfo.producerBlockId = commonLevelIds.first;
   depInfo.consumerBlockId = commonLevelIds.second;
+
+  analyzeDepLoopInfo(module, depInfo);
+
   if (isAllTranspoesd) {
     depInfo.isAllTranspoesd = true;
   }
@@ -948,7 +1012,8 @@ void DataDependencyAnalysisPass::collectMemDepInfo(
     llvm::StringRef predCoreType, int producerBlockId, int consumerBlockId,
     int predBlockId, int currBlockId,
     llvm::SmallVector<DependencyInfo> &memoryDependencies,
-    mlir::Operation *predOp, mlir::Operation *nextOp) {
+    mlir::Operation *predOp, mlir::Operation *nextOp,
+    DataDependencyInfo &info) {
   DependencyInfo depInfo;
 
   if (predCoreType == ssbufferCoreTypeCubeAttr) {
@@ -964,6 +1029,8 @@ void DataDependencyAnalysisPass::collectMemDepInfo(
   depInfo.predOp = predOp;
   depInfo.nextOp = nextOp;
 
+  analyzeDepLoopInfo(module, depInfo);
+
   memoryDependencies.push_back(depInfo);
 }
 
@@ -978,7 +1045,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
     if (op->getNumRegions() > 0) {
       return WalkResult::advance();
     }
-    if (isa<annotation::MarkOp, gpu::BarrierOp>(op)) {
+    if (isa<annotation::MarkOp, gpu::BarrierOp, LLVM::AssumeOp>(op)) {
       return WalkResult::advance();
     }
     auto currBlockIdOpt = CVPipeline::getOpBlockId(op);
@@ -989,7 +1056,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
     int currBlockId = *currBlockIdOpt;
 
     for (mlir::Operation *predOp : memDepGraph.getExecBefore(op)) {
-      if (isa<annotation::MarkOp, gpu::BarrierOp>(predOp)) {
+      if (isa<annotation::MarkOp, gpu::BarrierOp, LLVM::AssumeOp>(predOp)) {
         continue;
       }
       if (predOp->getNumRegions() > 0) {
@@ -998,7 +1065,8 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
           return WalkResult::advance();
         }
         for (mlir::Operation *realPredOp : realdeps) {
-          if (isa<annotation::MarkOp, gpu::BarrierOp>(realPredOp)) {
+          if (isa<annotation::MarkOp, gpu::BarrierOp, LLVM::AssumeOp>(
+                  realPredOp)) {
             continue;
           }
           auto realPredBlockIdOpt = CVPipeline::getOpBlockId(realPredOp);
@@ -1017,7 +1085,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
           }
           collectMemDepInfo(realPredCoreType, producerBlockId, consumerBlockId,
                             realPredBlockId, currBlockId, memoryDependencies,
-                            realPredOp, op);
+                            realPredOp, op, info);
 
           LOG_DEBUG("\n=op with region mem dep analysis= "
                     << "\nrealpredcoretype" << realPredCoreType
@@ -1048,7 +1116,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
 
       collectMemDepInfo(predCoreType, producerBlockId, consumerBlockId,
                         predBlockId, currBlockId, memoryDependencies, predOp,
-                        op);
+                        op, info);
 
       LOG_DEBUG("\n=mem dep analysis= " << "\npredcoretype" << predCoreType
                                         << "\nproducer Block: " << predBlockId
@@ -1159,6 +1227,65 @@ void DataDependencyAnalysisPass::deduplicateDependencies(
   dependencies.erase(newEnd, dependencies.end());
 }
 
+void DataDependencyAnalysisPass::sortDependencies(
+    llvm::SmallVector<DependencyInfo> &dependencies, mlir::ModuleOp module) {
+  if (dependencies.size() <= 1) {
+    return;
+  }
+
+  // Step 1: Walk the entire module and assign a monotonically increasing order
+  //         to each operation, representing its position in the IR.
+  llvm::DenseMap<mlir::Operation *, unsigned> opOrder;
+  unsigned order = 0;
+  module.walk<WalkOrder::PreOrder>(
+      [&](mlir::Operation *op) { opOrder[op] = order++; });
+
+  // Step 2: Helper lambda — get the earliest user op of dep.value within the
+  //         consumer compute block.
+  auto getFirstConsumerOp =
+      [&](const DependencyInfo &dep) -> mlir::Operation * {
+    mlir::Operation *firstConsumer = nullptr;
+    unsigned firstOrder = std::numeric_limits<unsigned>::max();
+    for (auto *user : dep.value.getUsers()) {
+      auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
+      if (userBlockIdOpt && *userBlockIdOpt == dep.consumerBlockId) {
+        auto it = opOrder.find(user);
+        if (it != opOrder.end() && it->second < firstOrder) {
+          firstOrder = it->second;
+          firstConsumer = user;
+        }
+      }
+    }
+    return firstConsumer;
+  };
+
+  // Step 3: Sort
+  std::sort(dependencies.begin(), dependencies.end(),
+            [&](const DependencyInfo &a, const DependencyInfo &b) {
+              // the dependency whose consumer op appears earlier comes first.
+              auto *aConsOp = getFirstConsumerOp(a);
+              auto *bConsOp = getFirstConsumerOp(b);
+              if (aConsOp && bConsOp) {
+                unsigned aConsOpOrder = opOrder.lookup(aConsOp);
+                unsigned bConsOpOrder = opOrder.lookup(bConsOp);
+                if (aConsOpOrder != bConsOpOrder) {
+                  return aConsOpOrder < bConsOpOrder;
+                }
+
+                auto *aProdOp = a.value.getDefiningOp();
+                auto *bProdOp = b.value.getDefiningOp();
+                if (aProdOp && bProdOp) {
+                  unsigned aProdOpOrder = opOrder.lookup(aProdOp);
+                  unsigned bProdOpOrder = opOrder.lookup(bProdOp);
+                  if (aProdOpOrder != bProdOpOrder) {
+                    return aProdOpOrder < bProdOpOrder;
+                  }
+                }
+              }
+              return false;
+            });
+}
+
 void DataDependencyAnalysisPass::runOnOperation() {
   LOG_DEBUG("\n--- enter DataDependencyAnalysisPass --->\n");
   module = getOperation();
@@ -1197,6 +1324,13 @@ void DataDependencyAnalysisPass::runOnOperation() {
   deduplicateDependencies(info.getC2VDependencies());
   deduplicateDependencies(info.getC2CDependencies());
   deduplicateDependencies(info.getMemoryDependencies());
+  sortDependencies(info.getV2CDependencies(), module);
+  sortDependencies(info.getC2VDependencies(), module);
+  sortDependencies(info.getC2CDependencies(), module);
+  sortDependencies(info.getIntraC2CDependencies(), module);
+
+  analyzeRedundantEdges(info, module);
+  analyzeSyncReuse(info, module);
 
   info.setValid(true);
 

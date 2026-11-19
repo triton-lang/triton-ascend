@@ -1,6 +1,6 @@
-# 层标准化 （Layer Normalization）
+# 层标准化（Layer Normalization）
 
-在本节中，我们将使用 Triton 编写一个高性能层标准化 (Layer Normalization) 内核。通过将均值、方差计算和归一化融合到单个 kernel 中，减少了全局内存的读写次数，相比 PyTorch 的逐操作实现可以获得更好的性能。
+本文档介绍基于Triton实现的高性能层标准化（Layer Normalization）内核，适用于需要在昇腾NPU上开发自定义归一化算子的开发者。通过将均值、方差计算和归一化融合到单个Kernel中，减少了全局内存的读写次数，相比PyTorch的逐操作实现可以获得更好的性能。
 
 ## 计算内核
 
@@ -18,13 +18,13 @@ def _layer_norm_fwd_fused(
     W,  # 权重指针
     B,  # 偏置指针
     Mean,  # 均值指针
-    Rstd,  # 1/std 指针
+    Rstd,  # 1/std指针
     stride,  # 指针每前进一行应增加的元素数
-    N,  # X 的列数
-    eps,  # 用于避免除以 0 的 epsilon
+    N,  # X的列数
+    eps,  # 用于避免除以0的epsilon
     BLOCK_SIZE: tl.constexpr,
 ):
-    # 映射程序 id 到对应计算的 X 和 Y 的行
+    # 映射程序id到对应计算的X和Y的行
     row = tl.program_id(0)
     Y += row * stride
     X += row * stride
@@ -45,7 +45,7 @@ def _layer_norm_fwd_fused(
         _var += x * x
     var = tl.sum(_var, axis=0) / N
     rstd = 1 / tl.sqrt(var + eps)
-    # 写入 mean / rstd
+    # 写入mean / rstd
     tl.store(Mean + row, mean)
     tl.store(Rstd + row, rstd)
     # 归一化并应用线性变换
@@ -61,7 +61,7 @@ def _layer_norm_fwd_fused(
         tl.store(Y + cols, y, mask=mask)
 ```
 
-## 使用 Triton 自定义的 LayerNorm 实现方式
+## 自定义LayerNorm实现方式
 
 ```python
 @torch.inference_mode()
@@ -69,7 +69,7 @@ def layer_norm(x, weight, bias, eps=1e-5):
     # 分配与输入相同形状和数据类型的输出张量
     y = torch.empty_like(x)
 
-    # 将输入 x 展平成二维形状 [-1, feature_dim] 以便处理最后一个维度
+    # 将输入x展平成二维形状 [-1, feature_dim] 以便处理最后一个维度
     x_arg = x.reshape(-1, x.shape[-1])
     M, N = x_arg.shape
 
@@ -79,7 +79,7 @@ def layer_norm(x, weight, bias, eps=1e-5):
     BLOCK_SIZE = 1024
 
     # enqueue kernel
-    kernel = _layer_norm_fwd_fused[(M, )](  # M 表示 block 数目，launch grid=(M,)
+    kernel = _layer_norm_fwd_fused[(M, )](  # M表示block数目，launch grid=(M,)
         x_arg, y, weight, bias, mean, rstd,  # 输入输出及中间量
         x_arg.stride(0), N, eps,
         BLOCK_SIZE=BLOCK_SIZE)
@@ -114,7 +114,7 @@ if __name__ == '__main__':
 
 ## 输出结果
 
-```text
+```output
 y_tri: tensor([[ 0.2512,  0.0647,  0.8389,  ...,  2.3652,  1.5039,  1.1904],
         [ 1.0908,  1.5391,  0.2269,  ...,  1.6846,  1.0996,  0.9614],
         [-0.2974,  0.5918,  0.3225,  ...,  2.2891, -0.8418,  0.6885],
@@ -170,4 +170,4 @@ Layer Normalization 128,128 torch.float32 PASSED!
 
 “Layer Normalization 128,128 torch.float16 PASSED!”、\
 “Layer Normalization 128,128 torch.bfloat16 PASSED!”、\
-“Layer Normalization 128,128 torch.float32 PASSED!” 表明Triton和PyTorch上float16、bfloat16、float32数据类型的输出结果完全一致。
+“Layer Normalization 128,128 torch.float32 PASSED!” 表明Triton和PyTorch上float16、bfloat16、float32数据类型的输出结果在误差允许范围内一致（atol=1e-2）。

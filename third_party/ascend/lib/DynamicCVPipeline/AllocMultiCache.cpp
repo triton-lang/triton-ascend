@@ -23,8 +23,11 @@
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferOuterScope.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
 
@@ -40,6 +43,38 @@ static constexpr const char *DEBUG_TYPE = "AllocMultiCache";
 using namespace mlir;
 using namespace triton;
 
+// Pure tensor seeds used only by the serial fallback do not need to be live
+// on the scheduled path. Sink them after Cube/Vector scope separation.
+static void sinkOuterFallbackFills(ModuleOp module) {
+  module.walk([](scf::ForOp loop) {
+    if (!loop->hasAttr(CVPipeline::kOuterEventControlCount))
+      return;
+    auto branch = loop->getParentOfType<scf::IfOp>();
+    if (!branch || branch.getElseRegion().empty() ||
+        loop->getParentRegion() != &branch.getThenRegion())
+      return;
+    auto &fallback = branch.getElseRegion();
+    if (!llvm::any_of(fallback.front().getOps<scf::ForOp>(), [](scf::ForOp op) {
+          return op->hasAttr(CVPipeline::kOuterEventFallback);
+        }))
+      return;
+    for (auto fill : llvm::make_early_inc_range(
+             branch->getBlock()->getOps<linalg::FillOp>())) {
+      if (!fill->isBeforeInBlock(branch) || !fill.hasPureTensorSemantics() ||
+          fill->getNumResults() != 1)
+        continue;
+      auto empty = fill.getDpsInits()[0].getDefiningOp<tensor::EmptyOp>();
+      Value result = fill->getResult(0);
+      if (!empty || !empty.getDynamicSizes().empty() || result.use_empty() ||
+          !llvm::all_of(result.getUsers(), [&](Operation *user) {
+            return fallback.isAncestor(user->getParentRegion());
+          }))
+        continue;
+      fill->moveBefore(&fallback.front(), fallback.front().begin());
+    }
+  });
+}
+
 // Run the pass
 void AllocMultiCachePass::runOnOperation() {
   ModuleOp module = getOperation();
@@ -48,6 +83,8 @@ void AllocMultiCachePass::runOnOperation() {
     return;
   }
 
+  if (CVPipeline::hasOuterMainLoop(module))
+    sinkOuterFallbackFills(module);
   OpPassManager pm(module.getOperationName());
   LDBG("Enter pass.");
   LDBG("before innerscope:\n" << module << "\n");

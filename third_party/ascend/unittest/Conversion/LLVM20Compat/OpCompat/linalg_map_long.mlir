@@ -1,5 +1,9 @@
 // RUN: triton-opt %s | FileCheck %s
+<<<<<<< HEAD
 // Input: LLVM 23 memory (3 bbargs, unused init). Output: LLVM 20 long form (2 bbargs).
+=======
+// LLVM 22 already has two region arguments; no init-argument adaptation is needed.
+>>>>>>> upstream/main
 // CHECK-LABEL: func.func @map_long
 // CHECK: %{{.*}} = linalg.map
 // CHECK-SAME: ins(%{{.*}} : tensor<64xf32>, tensor<64xf32>)
@@ -14,7 +18,11 @@ func.func @map_long(%lhs: tensor<64xf32>, %rhs: tensor<64xf32>, %init: tensor<64
   %0 = linalg.map
       ins(%lhs, %rhs : tensor<64xf32>, tensor<64xf32>)
       outs(%init : tensor<64xf32>)
+<<<<<<< HEAD
       (%a: f32, %b: f32, %init_arg: f32) {
+=======
+      (%a: f32, %b: f32) {
+>>>>>>> upstream/main
         %c = arith.addf %a, %b : f32
         %d = arith.addf %c, %c : f32
         linalg.yield %d : f32

@@ -31,6 +31,14 @@ from triton.runtime.autotuner import Config
 from triton.runtime.errors import OutOfResources
 
 
+@pytest.fixture(autouse=True)
+def _autotune_print_off():
+    """Printing follows knobs.autotuning.print. These stub tuners do not expect diagnostics."""
+    with triton.knobs.autotuning.scope():
+        triton.knobs.autotuning.print = False
+        yield
+
+
 @triton.jit
 def _compile_key_kernel(
     x,
@@ -194,7 +202,6 @@ def _make_batch_bench_tuner():
     tuner = object.__new__(AutoTilingTuner)
     tuner.compile_parallel = False
     tuner.enable_ubtuner = False
-    tuner.print_autotuning = False
     tuner.user_defined_do_bench = True
     tuner._compile_failure_cache = {}
     tuner._compile_failure_cache_lock = threading.Lock()

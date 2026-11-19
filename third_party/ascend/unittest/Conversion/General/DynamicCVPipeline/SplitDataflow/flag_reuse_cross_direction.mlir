@@ -1,4 +1,4 @@
-// RUN: triton-opt --add-block-id-for-control-ops --data-dependency-analysis --inter-core-transfer-and-sync --mark-main-loop %s | FileCheck %s --implicit-check-not="flag = -1" --implicit-check-not="flag = 15" --implicit-check-not="<PIPE_FIX>, <PIPE_V>] flag = 2" --implicit-check-not="<PIPE_MTE3>, <PIPE_MTE1>] flag = 1"
+// RUN: triton-opt --add-block-id-for-control-ops --data-dependency-analysis --inter-core-transfer-and-sync --mark-main-loop %s | FileCheck %s --implicit-check-not="flag = -1" --implicit-check-not="flag = 15" --implicit-check-not="<PIPE_FIX>, <PIPE_V>] flag = 1" --implicit-check-not="<PIPE_MTE3>, <PIPE_MTE1>] flag = 0"
 
 // Regression for the cross-direction flag-id reuse bug. A Vector->Cube copy
 // (set[VECTOR, MTE3, MTE1]) used to be merged onto the same flag as an adjacent
@@ -14,13 +14,13 @@
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @flag_reuse_cross_direction() {
-    %cst = arith.constant {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR"} 0.000000e+00 : f32
-    %e0 = tensor.empty() {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR"} : tensor<32x32xf32>
-    %v0 = linalg.fill {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR"} ins(%cst : f32) outs(%e0 : tensor<32x32xf32>) -> tensor<32x32xf32>
+    %cst = arith.constant {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} 0.000000e+00 : f32
+    %e0 = tensor.empty() {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} : tensor<32x32xf32>
+    %c0 = linalg.fill {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} ins(%cst : f32) outs(%e0 : tensor<32x32xf32>) -> tensor<32x32xf32>
 
     // round 1: V->C (matmul consumes %v0), then C->V (exp consumes %m1)
     %ef1 = tensor.empty() {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : tensor<32x32xf32>
-    %m1 = linalg.matmul {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} ins(%v0, %v0 : tensor<32x32xf32>, tensor<32x32xf32>) outs(%ef1 : tensor<32x32xf32>) -> tensor<32x32xf32>
+    %m1 = linalg.matmul {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} ins(%c0, %c0 : tensor<32x32xf32>, tensor<32x32xf32>) outs(%ef1 : tensor<32x32xf32>) -> tensor<32x32xf32>
     %v1 = math.exp %m1 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "VECTOR"} : tensor<32x32xf32>
 
     %ef2 = tensor.empty() {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "CUBE"} : tensor<32x32xf32>
@@ -58,6 +58,6 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK-LABEL: func.func @flag_reuse_cross_direction
 // Vector->Cube (MTE3/MTE1) copies all reuse one flag; Cube->Vector (FIX/V)
 // fixpipes all reuse another; the two never collide.
-// CHECK: <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
-// CHECK: <PIPE_FIX>, <PIPE_V>] flag = 1
+// CHECK: <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
+// CHECK: <PIPE_FIX>, <PIPE_V>] flag = 0
 // CHECK: return

@@ -1,4 +1,4 @@
-// RUN: triton-opt '--triton-to-linalg=global-kernel=False named-ops=True enable-nd2nz-on-vector=False enable-select-analysis=True compile-on-910-95=True' --split-input-file %s | FileCheck %s
+// RUN: triton-opt '--triton-to-structured=compile-on-910-95=true' '--triton-to-linalg=global-kernel=False named-ops=True enable-nd2nz-on-vector=False enable-select-analysis=True compile-on-910-95=True' --split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: func.func @addptr_implicit_perm_load_2d(
 // CHECK: %[[IN_STRIDE0:[A-Za-z0-9_]+]] = arith.index_cast %arg6 : i32 to index

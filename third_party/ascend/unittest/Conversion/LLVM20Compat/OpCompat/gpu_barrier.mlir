@@ -7,7 +7,11 @@
 
 gpu.module @m {
   gpu.func @barrier() kernel {
+<<<<<<< HEAD
     "gpu.barrier"() {address_spaces = [#gpu.address_space<workgroup>]} : () -> ()
+=======
+    gpu.barrier
+>>>>>>> upstream/main
     gpu.return
   }
 }

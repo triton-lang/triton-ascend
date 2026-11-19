@@ -20,6 +20,7 @@
 
 import functools
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -29,11 +30,101 @@ import warnings
 from pathlib import Path
 import logging
 import platform
+from enum import IntEnum, auto
+from triton import knobs
 from triton.backends.ascend.backend_register import backend_strategy_registry
 
 import pybind11
 
+# --- Ascend target-architecture classification -------------------------------
+# Single source of truth for generation membership, UB / RF capacities, and the
+# FFTS policy.  A6 devices reuse the A5 register-based pipeline, so they are
+# described as a sibling generation rather than hardcoded inline everywhere.
+
+
+class AscendArchGen(IntEnum):
+    """Compiler backend generations that need distinct lowering or policy."""
+
+    LEGACY = auto()  # A2 / A3: 910A/B/D, 910_93, 310B
+    GEN5 = auto()  # A5: Ascend 950 / 910_95
+    GEN6 = auto()  # A6: Ascend 960 / 910_96
+
+
+# Ordered table -- longer/more-specific prefixes must come first so that
+# e.g. "Ascend910_96" does not shadow "Ascend910A".
+# Tuple shape: (prefixes, gen, ub_kb, rf_kb)
+_ARCH_TABLE = (
+    (("Ascend910_96", "Ascend960"), AscendArchGen.GEN6, 320, 128),
+    (("Ascend910_95", "Ascend950"), AscendArchGen.GEN5, 256, 128),
+    (("Ascend910A", "Ascend310B4", "Ascend910B", "Ascend910D", "Ascend910_93", "Ascend310B"), AscendArchGen.LEGACY, 192,
+     None),
+)
+
+# Legacy SOC names without FFTS support.  Compared *exactly*, not by prefix:
+# the predicate historically tested ``arch in ["Ascend910A", "Ascend310B4"]``,
+# so a distinct SOC that merely shares a prefix (e.g. "Ascend910A2") keeps
+# FFTS.  Register-based targets (A5 / A6) lack FFTS by generation and are
+# covered by ``is_register_based_arch`` instead.
+_FFTS_UNSUPPORTED_ARCHS = ("Ascend910A", "Ascend310B4")
+
+
+def _match_arch_entry(arch):
+    """Return the (gen, ub_kb, rf_kb) entry for *arch*, or None.
+
+    Matching is case-insensitive so this works with both the uppercase arch
+    prefixes used in compiler options (e.g. "Ascend910_96") and the lowercase
+    SOC names returned by ``acl.get_soc_name()``.
+    """
+    if not isinstance(arch, str) or not arch:
+        return None
+    arch_lower = arch.lower()
+    for prefixes, gen, ub_kb, rf_kb in _ARCH_TABLE:
+        if any(arch_lower.startswith(prefix.lower()) for prefix in prefixes):
+            return gen, ub_kb, rf_kb
+    return None
+
+
+def arch_generation(arch: str = None) -> AscendArchGen:
+    """Resolve the target generation for a (possibly partial) arch string.
+
+    Unknown / empty / non-string targets resolve to ``AscendArchGen.LEGACY``.
+    """
+    entry = _match_arch_entry(arch)
+    return entry[0] if entry is not None else AscendArchGen.LEGACY
+
+
+def is_register_based_arch(arch: str = None) -> bool:
+    """Return whether the target uses the register-based (A5/A6) compile pipeline."""
+    entry = _match_arch_entry(arch)
+    return entry is not None and entry[0] in (AscendArchGen.GEN5, AscendArchGen.GEN6)
+
+
+def rf_size_in_kbytes_for_arch(arch: str = None):
+    """Return the raw RF capacity (KiB) for *arch*, or None when not applicable."""
+    entry = _match_arch_entry(arch)
+    return entry[2] if entry is not None else None
+
+
+# Cached result of the runtime SOC detection used by is_compile_on_910_95().
+# Must be initialized here: the accessor below declares it ``global`` and reads
+# it before assigning, so a missing module-level binding raises NameError.
 _is_compile_on_910_95 = None
+
+# Deprecated helpers warn at most once per process to avoid spamming callers
+# that still use them from a loop or from every test module.
+_WARNED_DEPRECATED_ARCH_HELPERS = set()
+
+
+def _warn_deprecated_arch_helper(name: str, replacement: str) -> None:
+    if name in _WARNED_DEPRECATED_ARCH_HELPERS:
+        return
+    _WARNED_DEPRECATED_ARCH_HELPERS.add(name)
+    warnings.warn(
+        f"Ascend helper '{name}' is deprecated and will be removed in a future release; "
+        f"use '{replacement}' instead.",
+        FutureWarning,
+        stacklevel=3,
+    )
 
 
 def _multibuffer_mode_to_tuple(value):
@@ -180,7 +271,11 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "it is ignored; this option has been moved into the first digit of simt_optimization_mode.",
     "storage_align": "it is ignored; the removed vendor compiler control has no replacement.",
     "stream": "it is ignored; launch streams are managed by the runtime and driver.",
+<<<<<<< HEAD
     "use_bytecode": "it is ignored; the bytecode pipeline is disabled on Triton Ascend 3.7.",
+=======
+    "use_bytecode": "it is ignored; BishengIR compatible text is emitted directly.",
+>>>>>>> upstream/main
     "warp_size": "it is ignored; the Ascend backend fixes warp_size to 32.",
 }
 
@@ -302,17 +397,20 @@ def _warn_deprecated_ascend_env_vars() -> None:
 
 
 def is_compile_on_910_95(arch: str = None) -> bool:
-    """Return whether the compilation target belongs to the Ascend 950 generation."""
+    """Deprecated; use is_register_based_arch instead.
+
+    Retains runtime SOC detection when called without an explicit arch.
+    """
+    _warn_deprecated_arch_helper("is_compile_on_910_95", "is_register_based_arch")
     if arch is not None:
-        return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
+        return is_register_based_arch(arch)
 
     global _is_compile_on_910_95
     if _is_compile_on_910_95 is None:
         try:
             import acl
             name_lower = acl.get_soc_name().lower()
-            _is_compile_on_910_95 = ("ascend910_95" in name_lower or "ascend950" in name_lower
-                                     or "910_958b" in name_lower)
+            _is_compile_on_910_95 = is_register_based_arch(name_lower)
         except (ImportError, AttributeError):
             _is_compile_on_910_95 = False
     return _is_compile_on_910_95
@@ -486,32 +584,6 @@ def _get_triton_opt_path() -> str:
     return _get_tool_path("triton-opt")
 
 
-def _get_triton_mlir_opt_path() -> str:
-    """
-    Get the path to triton-mlir-opt tool.
-    This tool is used to convert MLIR to Bytecode format, supporting both
-    MLIR native ops and AscendNPU-IR custom ops.
-    """
-    return _get_tool_path("triton-mlir-opt")
-
-
-def _get_bishengir_opt_path() -> str:
-    ascend_dir = os.path.dirname(os.path.abspath(__file__))
-    env = os.environ.copy()
-    bishengir_opt_path = os.path.join(ascend_dir, "bishengir", "bin", "bishengir-opt")
-    if os.path.exists(bishengir_opt_path):
-        npuir_env_path = os.path.dirname(bishengir_opt_path)
-        env["PATH"] = npuir_env_path + ":" + env["PATH"]
-    else:
-        bishengir_opt_path = shutil.which("bishengir-opt")
-        if bishengir_opt_path is None:
-            bishengir_opt_root = os.getenv("TRITON_NPU_COMPILER_PATH", "")
-            if bishengir_opt_root is None:
-                raise EnvironmentError("Couldn't find executable bishengir-opt or TRITON_NPU_COMPILER_PATH")
-            bishengir_opt_path = os.path.join(bishengir_opt_root, "bishengir-opt")
-    return bishengir_opt_path, env
-
-
 def _get_npucompiler_path() -> str:
     ascend_dir = os.path.dirname(os.path.abspath(__file__))
     env = os.environ.copy()
@@ -522,7 +594,7 @@ def _get_npucompiler_path() -> str:
     else:
         npu_compiler_path = shutil.which("bishengir-compile")
         if npu_compiler_path is None:
-            npu_compiler_root = os.getenv("TRITON_NPU_COMPILER_PATH", None)
+            npu_compiler_root = knobs.ascend.npu_compiler_path
             if npu_compiler_root is None:
                 raise EnvironmentError("Couldn't find executable bishengir-compile or TRITON_NPU_COMPILER_PATH.")
             npu_compiler_path = os.path.join(npu_compiler_root, "npuc")
@@ -532,7 +604,7 @@ def _get_npucompiler_path() -> str:
 def _get_bisheng_path() -> str:
     bisheng_path = shutil.which("bisheng")
     if bisheng_path is None:
-        npu_compiler_root = os.getenv("TRITON_NPU_COMPILER_PATH", None)
+        npu_compiler_root = knobs.ascend.npu_compiler_path
         if npu_compiler_root is None:
             raise EnvironmentError("Couldn't find executable bisheng or TRITON_NPU_COMPILER_PATH")
         bisheng_path = os.path.join(npu_compiler_root, "ccec")
@@ -549,56 +621,53 @@ def _is_valid_bishengir_path(path: str) -> bool:
     return True
 
 
+@functools.lru_cache(None)
+def _get_bishengir_compile_help(bishengir_path: str) -> str:
+    """Return bishengir-compile --help stdout, cached per compiler path.
+
+    All feature probes (api change, reg-based, full-row-copy inlining) parse the
+    same help text. Forking the compiler once per probe dominated per-kernel
+    compile latency, so the subprocess result is memoized by compiler path.
+    """
+    result = subprocess.run(
+        [bishengir_path, "--help"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def _probe_bishengir_compile_help() -> str:
+    """Validate the resolved compiler path and return its cached help text."""
+    bishengir_path, _ = _get_npucompiler_path()
+    if not _is_valid_bishengir_path(bishengir_path):
+        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
+        return ""
+    try:
+        return _get_bishengir_compile_help(bishengir_path)
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return ""
+
+
 # grep bishengir-compile's option limit-auto-multi-buffer-buffer to check
 # if bishengir-compile is a newer version which does not generate kernel_reloc.o
 # any more.
 def _check_bishengir_api_change() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'limit-auto-multi-buffer-buffer' in result.stdout:
-            # bishengir-compile is newer version
-            return True
-        else:
-            # bishengir-compile is older version
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    # newer version emits the option, older version does not.
+    return bool(help_text) and 'limit-auto-multi-buffer-buffer' in help_text
 
 
 def _check_bishengir_is_regbased() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'reg-based' in result.stdout:
-            # bishengir-compile is regbased version
-            return True
-        else:
-            # bishengir-compile is membased version
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    # regbased version emits 'reg-based', membased version does not.
+    return bool(help_text) and 'reg-based' in help_text
 
 
-@functools.lru_cache(None)
 def _get_ascend_path() -> Path:
     path = os.getenv("ASCEND_HOME_PATH", "")
     if path == "":
@@ -607,7 +676,7 @@ def _get_ascend_path() -> Path:
 
 
 def _is_ascend_sanitizer_enabled() -> bool:
-    return os.getenv("TRITON_ENABLE_SANITIZER", "false").lower() in ("true", "1")
+    return knobs.ascend.enable_sanitizer
 
 
 def _is_debug_line_info_disabled() -> bool:
@@ -634,11 +703,11 @@ def _warn_auto_blockify_disabled(kernel_name: str, blacklist_reasons) -> None:
 
 
 def _enable_print_ub_bits() -> bool:
-    return os.getenv("ENABLE_PRINT_UB_BITS", "false").lower() in ("true", "1")
+    return knobs.ascend.print_ub_bits
 
 
 def _enable_dump_memory_info() -> bool:
-    return os.getenv("TRITON_MEMORY_DISPLAY", "false").lower() in ("true", "1")
+    return knobs.ascend.memory_display
 
 
 def _enable_msdebug() -> bool:
@@ -656,8 +725,8 @@ def _get_cxx():
     return cxx
 
 
-def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch",
-                   precompile=False) -> str:
+def _npu_ext_build_command(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch",
+                           precompile=False, extra_cflags=()):
     header_path = None
     if src_path is None:
         src_path = header_or_src_path
@@ -668,8 +737,27 @@ def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_l
     src_dir = os.path.dirname(src_path)
     so_path = os.path.join(src_dir, f"{obj_name}{suffix}")
     cxx = _get_cxx()
-    cc_cmd = [cxx, src_path]
-    cc_cmd += [f"-w"]
+    asc_path = str(_get_ascend_path())
+    has_runtime_header = os.path.exists(os.path.join(asc_path, "include/experiment/runtime/runtime/rt.h"))
+    policy = backend_policy or "torch_npu"
+    cc_cmd = [cxx, src_path, *_npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_header, policy)]
+    if header_path is not None:
+        # Preserve the position of this optional include in the original command.
+        cc_cmd.insert(5, f"-I{os.path.dirname(header_path)}")
+    cc_cmd += list(extra_cflags)
+    cc_cmd += cann_version_compile_args()
+    cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", so_path]
+    return cc_cmd, so_path
+
+
+@functools.lru_cache(maxsize=32)
+def _npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_header, policy):
+    """Process-stable Python/framework include and ABI options for a CANN root.
+
+    Loaded framework packages are not hot-swappable. Compiler selection, CANN
+    version and caller flags remain outside this cache and are checked per use.
+    """
+    cc_cmd = ["-w"]
     if hasattr(sysconfig, "get_default_scheme"):
         scheme = sysconfig.get_default_scheme()
     else:
@@ -679,12 +767,7 @@ def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_l
     py_include_dir = sysconfig.get_paths(scheme=scheme)["include"]
     cc_cmd += [f"-I{py_include_dir}"]
     cc_cmd += [f"-I{os.path.dirname(os.path.realpath(__file__))}"]
-    asc_path = _get_ascend_path()
-    if header_path is not None:
-        cc_cmd += [f"-I{os.path.dirname(header_path)}"]
-
-    rt_path = os.path.join(asc_path, "include/experiment/runtime/runtime/rt.h")
-    if not os.path.exists(rt_path):
+    if not has_runtime_header:
         cc_cmd += [
             f"-I{os.path.join(asc_path, 'pkg_inc')}",
             f"-I{os.path.join(asc_path, 'pkg_inc/profiling')}",
@@ -699,21 +782,197 @@ def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_l
         "-lruntime",
         "-lascendcl",
     ]
+    if obj_name == "npu_utils":
+        cc_cmd.append("-ldl")
     if kernel_launcher == "torch":
         if obj_name == "npu_utils":
             cc_cmd += get_backend_func("get_cc_cmd_npu_utils")
         else:
             cc_cmd += get_backend_func("get_cc_cmd")
 
-    cc_cmd += cann_version_compile_args()
-    cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", so_path]
+    return tuple(cc_cmd)
 
+
+def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch", precompile=False,
+                   extra_cflags=()) -> str:
+    cc_cmd, so_path = _npu_ext_build_command(obj_name, header_or_src_path, src_path, kernel_launcher=kernel_launcher,
+                                             precompile=precompile, extra_cflags=extra_cflags)
     result = subprocess.run(cc_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to compile {header_or_src_path}, error: {result.stderr},cmd={cc_cmd}")
+    return so_path
 
-    if result.returncode == 0:
-        return so_path
-    else:
-        raise RuntimeError(f"Failed to compile {src_path}, error: {result.stderr},cmd={cc_cmd}")
+
+def _is_elf_file(path):
+    """Distinguish a real ELF compiler from a shell wrapper using only the magic.
+
+    No program-header or note parsing, so this works across glibc/musl and other
+    ELF loaders without invoking the dynamic linker.
+    """
+    with open(path, "rb") as stream:
+        return stream.read(4) == b"\x7fELF"
+
+
+def _npu_compiler_environment():
+    names = {"CC", "PATH", "HOME", "LANG", "LANGUAGE", "COMPILER_PATH", "GCC_EXEC_PREFIX", "CCC_OVERRIDE_OPTIONS"}
+    return tuple(sorted((k, v) for k, v in os.environ.items() if k in names or k.startswith(("LD_", "LC_", "CLANG_"))))
+
+
+def _npu_compiler_identity(compiler):
+    """Identify a normally installed ELF compiler; unknown setups query live.
+
+    A portable, loader-independent identity: the resolved compiler path plus its
+    stat identity, sampled twice to reject a binary that is replaced mid-flight.
+    Normal package updates change the realpath inode or mtime; manually patched
+    binaries that preserve every stat attribute are unsupported. Source files
+    continue to use content hashes in the extension cache keys.
+    """
+    if not re.fullmatch(r"(?:.*-)?(?:clang(?:\+\+)?|gcc|g\+\+)(?:-\d+(?:\.\d+)*)?", os.path.basename(compiler)):
+        return None
+    environment = _npu_compiler_environment()
+    for name, value in environment:
+        if value and (name.startswith("LD_") and name != "LD_LIBRARY_PATH"
+                      or name in ("LANGUAGE", "CCC_OVERRIDE_OPTIONS") or name.startswith("CLANG_")):
+            return None
+        if (name == "LANG" or name.startswith("LC_")) and value not in ("", "C", "POSIX", "C.UTF-8", "C.utf8"):
+            return None
+    try:
+        resolved = os.path.realpath(compiler)
+        if not _is_elf_file(resolved):
+            return None
+        identity = _file_identity(resolved)
+        if identity != _file_identity(resolved):
+            return None
+        return {"schema": 2, "path": resolved, "stat": identity, "environment": environment}
+    except OSError:
+        return None
+
+
+def _read_npu_compiler_version(path, key):
+    with open(path) as stream:
+        data = stream.read(65537)
+    if len(data) > 65536:
+        raise ValueError("oversized compiler version record")
+    record = json.loads(data)
+    if not isinstance(record, dict) or record.get("key") != key:
+        raise ValueError("invalid compiler version record")
+    version = record.get("version")
+    if not isinstance(version, str) or not version or record.get("sha256") != hashlib.sha256(
+            version.encode()).hexdigest():
+        raise ValueError("invalid compiler version checksum")
+    return version
+
+
+@functools.lru_cache()
+def _npu_compiler_version(compiler, identity):
+    from triton import knobs
+    from triton.runtime.cache import FileCacheManager, get_cache_manager
+
+    def query():
+        return subprocess.check_output([compiler, "--version"], text=True).strip()
+
+    # This auxiliary cache must not add operations to a custom manager's contract.
+    if knobs.cache.manager_class not in (None, FileCacheManager):
+        return query()
+    installation = _npu_compiler_identity(compiler)
+    if installation is None:
+        return query()
+    key = hashlib.sha256(json.dumps(["host-compiler-version-v2", installation], sort_keys=True).encode()).hexdigest()
+    version = None
+    try:
+        cache = get_cache_manager(key)
+
+        def valid(path):
+            try:
+                _read_npu_compiler_version(path, key)
+                return True
+            except (OSError, ValueError):
+                return False
+
+        def build():
+            nonlocal version
+            version = query()
+            if installation != _npu_compiler_identity(compiler):
+                raise ValueError("compiler installation changed during version query")
+            return json.dumps({"key": key, "version": version, "sha256": hashlib.sha256(version.encode()).hexdigest()})
+
+        path = _get_or_build_npu_artifact(cache, "compiler-version.json", build, validate=valid)
+        return _read_npu_compiler_version(path, key)
+    except (OSError, ValueError):
+        # Unavailable storage or unstable installations must not prevent a build.
+        # A successful query can still be reused in this process; failures escape
+        # the LRU and never become persistent successful results.
+        return version if version is not None else query()
+
+
+def _file_identity(path):
+    """Detect replacement as well as normal edits without rereading contents."""
+    stat = os.stat(path)
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+
+@functools.lru_cache(maxsize=2)
+def _npu_package_versions(policy):
+    import importlib.metadata
+    names = ("mindspore", ) if policy == "mindspore" else ("torch", "torch_npu")
+    return tuple((name, importlib.metadata.version(name)) for name in names)
+
+
+@functools.lru_cache(maxsize=32)
+def _npu_fingerprint(command, compiler, identity, cann, policy):
+    return {
+        "command": list(command),
+        "compiler": compiler,
+        "compiler_version": _npu_compiler_version(compiler, identity),
+        "cann": cann,
+        "packages": dict(_npu_package_versions(policy)),
+        "python_abi": sysconfig.get_config_var("SOABI"),
+    }
+
+
+def npu_extension_fingerprint(obj_name, *, extra_cflags=()):
+    """Fingerprint the command actually used to build a host extension.
+
+    Temporary source/output paths use deterministic placeholders. Runtime source
+    and generated configuration are hashed separately by the cache owner.
+    """
+    command, _ = _npu_ext_build_command(obj_name, "/__triton_build__/source.cpp", extra_cflags=extra_cflags)
+    compiler = os.path.realpath(shutil.which(command[0]) or command[0])
+    info = _npu_fingerprint(tuple(command), compiler, _file_identity(compiler), get_cann_version(), backend_policy
+                            or "torch_npu")
+    # Keep the existing dictionary contract without exposing cached mutable data.
+    return {
+        **info,
+        "command": list(info["command"]),
+        "packages": dict(info["packages"]),
+    }
+
+
+def _get_or_build_npu_artifact(cache, filename, build, *, validate=None):
+    """Coordinate default file-cache misses; preserve custom manager queries."""
+    from triton.runtime.cache import FileCacheManager
+
+    def cached():
+        path = cache.get_file(filename)
+        return path if path is not None and (validate is None or validate(path)) else None
+
+    path = cached()
+    if path is not None:
+        return path
+    # Subclasses and remote managers may have different materialization and
+    # access-accounting contracts. Do not infer file locking from attributes.
+    if type(cache) is not FileCacheManager:
+        return cache.put(build(), filename, binary=True)
+
+    import fcntl
+    os.makedirs(cache.cache_dir, exist_ok=True)
+    # Keep this inode after unlocking: another process may already be waiting.
+    with open(cache.lock_path, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        path = cached()
+        if path is not None:
+            return path
+        return cache.put(build(), filename, binary=True)
 
 
 def _get_kernel_target(metadata: dict):
@@ -774,24 +1033,8 @@ def convert_dtype_to_numpy(dtype):
 
 
 def _check_bishengir_able_save_ir() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'save-linked-ir' in result.stdout:
-            return True
-        else:
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    return bool(help_text) and 'save-linked-ir' in help_text
 
 
 def get_ascend_arch_from_env():
@@ -802,17 +1045,31 @@ def get_ascend_arch_from_env():
 def ub_size_in_kbytes_for_arch(arch: str) -> int:
     """Return the raw UB capacity for a supported Ascend target architecture.
 
-    This resolver is deliberately independent of the active runtime device so
-    compiler options can be normalized for an explicit compilation target.
-    Unknown and empty targets fail closed instead of guessing a UB capacity.
+    Resolved from the module-level ``_ARCH_TABLE`` so per-generation capacities
+    live in exactly one place.  Unknown and empty targets fail closed instead
+    of guessing a UB capacity.
+    """
+    entry = _match_arch_entry(arch)
+    return entry[1] if entry is not None else 0
+
+
+def l0_size_in_kbytes_for_arch(arch: str) -> tuple:
+    """Return the raw (L0A, L0B, L0C) cube-buffer capacities in KiB.
+
+    L0A holds the cube lhs tile, L0B the cube rhs tile, and L0C the
+    accumulator. Known targets: Ascend950/Ascend910_95 (A5) provide
+    64/64/256 KiB; the Ascend910 (A3) family provides 64/64/128 KiB.
+    Unknown and empty targets fail closed (zero capacities) so the
+    graph-optimization L0A/L0B/L0C checks stay disabled rather than
+    guessing a capacity.
     """
     if not isinstance(arch, str) or not arch:
-        return 0
+        return (0, 0, 0)
     if arch.startswith(("Ascend910_95", "Ascend950")):
-        return 256
+        return (64, 64, 256)
     if arch.startswith(("Ascend910A", "Ascend910B", "Ascend910D", "Ascend910_93", "Ascend310B")):
-        return 192
-    return 0
+        return (64, 64, 128)
+    return (0, 0, 0)
 
 
 def graph_ub_budget_bytes_for_arch(arch: str) -> int:
@@ -824,19 +1081,37 @@ def graph_ub_budget_bytes_for_arch(arch: str) -> int:
     return ub_size_in_kbytes_for_arch(arch) * 1024 * 80 // 100
 
 
-def is_ffts_supported(arch: str):
-    """Return whether the specified compilation target supports FFTS."""
+def is_ffts_supported(arch: str) -> bool:
+    """Return whether the specified compilation target supports FFTS.
+
+    This is a *capability* query and is deliberately not the same question as
+    ``force_disable_ffts``, which is a *policy* query ("do we pass
+    ``--disable-ffts``?").  They disagree on Ascend910A / Ascend310B4: those
+    targets have no FFTS support but keep their historical command line, so
+    they are not force-disabled.
+
+    Non-string and empty targets report no FFTS support.  Any other target
+    that is not known to lack FFTS defaults to supported, so a SOC missing
+    from ``_ARCH_TABLE`` keeps the launch-time FFTS flag.
+    """
     if not isinstance(arch, str) or not arch:
         return False
-    if is_compile_on_910_95(arch) or arch in ["Ascend910A", "Ascend310B4"]:
-        return False
-    return True
+    return not (is_register_based_arch(arch) or arch in _FFTS_UNSUPPORTED_ARCHS)
 
 
 def force_disable_ffts(arch: str) -> bool:
-    """Return whether the selected target requires FFTS to be disabled."""
+    """Return whether the selected target requires FFTS to be disabled.
+
+    Only the register-based (A5/A6) pipeline forces FFTS off.  Legacy targets
+    such as Ascend910A / Ascend310B4 report FFTS as unsupported via
+    ``is_ffts_supported`` but must not be forced to pass ``--disable-ffts``;
+    keeping that distinction preserves the pre-refactor compile options.
+
+    Invariant: every register-based generation also lacks FFTS support, so
+    ``force_disable_ffts(arch)`` implies ``not is_ffts_supported(arch)``.
+    """
     _warn_deprecated_ascend_env_var("TRITON_DISABLE_FFTS")
-    return is_compile_on_910_95(arch)
+    return is_register_based_arch(arch)
 
 
 def _parse_cann_version(line: str):
@@ -862,25 +1137,27 @@ def _find_cann_version_file():
     return None
 
 
-@functools.lru_cache(None)
 def get_cann_version():
-    _cann_version = None
     try:
         version_file = _find_cann_version_file()
         if version_file is None:
-            _cann_version = None
             return None
-        with open(version_file, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                line = line.strip()
-                if "version" in line.lower():
-                    parsed = _parse_cann_version(line)
-                    if parsed is not None:
-                        _cann_version = parsed
-                        return _cann_version
-        _cann_version = None
+        # Some filesystems coalesce same-size writes into one timestamp tick.
+        # Read this small file so an in-place version edit cannot stay stale.
+        text = Path(version_file).read_text(encoding="utf-8", errors="ignore")
+        return _read_cann_version(text)
     except Exception:
         raise EnvironmentError("Could not parse CANN version file")
+
+
+@functools.lru_cache(maxsize=16)
+def _read_cann_version(text):
+    for line in text.splitlines():
+        if "version" in line.lower():
+            parsed = _parse_cann_version(line.strip())
+            if parsed is not None:
+                return parsed
+    return None
 
 
 def is_cann_version_at_least(major: int, minor: int = 0, patch: int = 0) -> bool:
@@ -894,11 +1171,6 @@ def cann_version_compile_args():
     if is_cann_version_at_least(9, 1, 0):
         return ["-DTRITON_CANN_910"]
     return []
-
-
-def triton_enable_libdevice_simt(arch: str = None) -> bool:
-    """Return whether the environment switch selects SIMT libdevice."""
-    return bool(os.getenv("TRITON_ENABLE_LIBDEVICE_SIMT", False)) and is_compile_on_910_95(arch)
 
 
 def get_cann_version_file_hash():

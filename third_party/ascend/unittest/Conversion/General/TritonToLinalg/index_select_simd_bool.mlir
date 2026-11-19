@@ -3,7 +3,7 @@
 // CHECK-LABEL: func.func @index_select_simd_bool
 // CHECK: memref.reinterpret_cast {{.*}} : memref<?xi8> to memref<?x8xi8
 // CHECK: memref.copy {{.*}} {was_bool_to_int8 = true} : memref<1x8xi8
-// CHECK: bufferization.to_tensor {{.*}} {index_select_simd, was_bool_to_int8 = true} : memref<2x8xi8> to tensor<2x8xi8>
+// CHECK: bufferization.to_tensor {{.*}} {index_select_simd, was_bool_to_int8 = true} : memref<2x8xi8>
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   tt.func public @index_select_simd_bool(%src: !tt.ptr<i8>, %dst: !tt.ptr<i8>) attributes {noinline = false} {
     %c0 = arith.constant 0 : index

@@ -23,18 +23,31 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CloneOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CrossCorePattern.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/SplittedIfWrapSsbufIf.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfoLegacy.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimesLegacy.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopOpsLegacy.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "llvm/Support/Debug.h"
+#include <iterator>
 #include <memory>
 
 static constexpr const char *DEBUG_TYPE = "AddControlFlowCondition";
@@ -63,6 +76,236 @@ static LogicalResult verifyControlFlowPrerequisites(ModuleOp module) {
   }
 
   return success();
+}
+
+// The main loops of the module: the loops that carry the ssbuffer.main_loop
+// attribute. The normal preload scheme merges the main loop of every core
+// into one scf.while, so it needs one main loop per core: two loops that
+// carry the same main loop id, one on each core. A kernel with a single main
+// loop runs on one core, and a kernel with more than two of them, or with
+// two different main loop ids, has a shape the scheme does not model.
+// The number of the main loops is reported through `count`.
+static bool hasCorePairMainLoop(ModuleOp module, unsigned &count) {
+  count = 0;
+  int64_t id = 0;
+  bool sameId = true;
+  module.walk([&](Operation *op) {
+    if (!CVPipeline::isMainLoopOp(op))
+      return;
+    auto attr = op->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
+    int64_t value = attr ? attr.getInt() : 0;
+    if (count == 0)
+      id = value;
+    else if (value != id)
+      sameId = false;
+    ++count;
+  });
+  return count == 2 && sameId;
+}
+
+static bool isOuterVectorPayload(Operation *op) {
+  auto loop = op->getParentOfType<scf::ForOp>();
+  auto scopeOp = op->getParentOfType<scope::ScopeOp>();
+  auto core =
+      scopeOp ? scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type")
+              : hivm::TCoreTypeAttr();
+  return loop && loop->hasAttr(CVPipeline::kOuterEventControlCount) && core &&
+         core.getTcoretype() == hivm::TCoreType::VECTOR;
+}
+
+// Keep a full tile multiplication inside its mutually exclusive consumers.
+// This lets the backend fuse score scaling with mask/select and reduction.
+static void sinkOuterScoreMultiplication(ModuleOp module) {
+  SmallVector<arith::MulFOp> candidates;
+  module.walk([&](arith::MulFOp mul) {
+    auto type = dyn_cast<RankedTensorType>(mul.getType());
+    if (isOuterVectorPayload(mul) && type && type.getRank() == 2 &&
+        !mul.getResult().use_empty())
+      candidates.push_back(mul);
+  });
+
+  for (arith::MulFOp mul : candidates) {
+    Block *block = mul->getBlock();
+    auto branch = dyn_cast_or_null<scf::IfOp>(
+        block->findAncestorOpInBlock(**mul.getResult().getUsers().begin()));
+    if (!branch || branch.getElseRegion().empty())
+      continue;
+
+    SmallVector<OpOperand *> thenUses, elseUses;
+    bool feedsReduction = false;
+    for (OpOperand &use : mul.getResult().getUses()) {
+      Operation *owner = use.getOwner();
+      if (branch.getThenRegion().isAncestor(owner->getParentRegion()))
+        thenUses.push_back(&use);
+      else if (branch.getElseRegion().isAncestor(owner->getParentRegion()))
+        elseUses.push_back(&use);
+      feedsReduction |= isa<linalg::ReduceOp>(owner);
+    }
+    if (!feedsReduction || thenUses.empty() || elseUses.empty() ||
+        thenUses.size() + elseUses.size() !=
+            static_cast<size_t>(std::distance(mul.getResult().use_begin(),
+                                              mul.getResult().use_end())))
+      continue;
+
+    auto sink = [&](Block &dest, ArrayRef<OpOperand *> uses) {
+      OpBuilder builder = OpBuilder::atBlockBegin(&dest);
+      Value result = builder.clone(*mul.getOperation())->getResult(0);
+      for (OpOperand *use : uses)
+        use->set(result);
+    };
+    sink(branch.getThenRegion().front(), thenUses);
+    sink(branch.getElseRegion().front(), elseUses);
+    mul.erase();
+  }
+}
+
+// Keep row recurrence initialization in the consuming VF instead of forcing
+// a tensor-storage join at every event. A select preserves the chosen bits.
+static void selectOuterRowSeeds(ModuleOp module) {
+  SmallVector<scf::IfOp> candidates;
+  module.walk([&](scf::IfOp branch) {
+    if (!isOuterVectorPayload(branch) || branch.getNumResults() == 0 ||
+        branch.getElseRegion().empty() ||
+        !llvm::hasSingleElement(branch.getElseRegion().front()))
+      return;
+    bool valid = llvm::all_of(branch.getResultTypes(), [](Type type) {
+      auto tensor = dyn_cast<RankedTensorType>(type);
+      return tensor && tensor.hasStaticShape() && tensor.getRank() == 1 &&
+             tensor.getNumElements() > 0 && tensor.getElementType().isF32();
+    });
+    valid &= llvm::all_of(branch.getThenRegion().front(), [](Operation &op) {
+      return isa<tensor::EmptyOp, arith::ConstantOp, scf::YieldOp>(op) ||
+             (isa<linalg::FillOp>(op) && isMemoryEffectFree(&op));
+    });
+    for (Value value : branch.thenYield().getOperands()) {
+      auto fill = value.getDefiningOp<linalg::FillOp>();
+      if (!fill || !fill.hasPureTensorSemantics() ||
+          !fill.getOutputs()[0].getDefiningOp<tensor::EmptyOp>()) {
+        valid = false;
+        break;
+      }
+      auto scalar = fill.getInputs()[0].getDefiningOp<arith::ConstantOp>();
+      if (!scalar || !isa<FloatAttr>(scalar.getValue()))
+        valid = false;
+    }
+    if (valid)
+      candidates.push_back(branch);
+  });
+  for (scf::IfOp branch : candidates) {
+    OpBuilder builder(branch);
+    SmallVector<Value> replacements;
+    for (auto [initial, previous] :
+         llvm::zip(branch.thenYield().getOperands(),
+                   branch.elseYield().getOperands())) {
+      auto type = cast<RankedTensorType>(initial.getType());
+      auto fill = initial.getDefiningOp<linalg::FillOp>();
+      auto scalar = fill.getInputs()[0].getDefiningOp<arith::ConstantOp>();
+      auto dense =
+          DenseElementsAttr::get(type, ArrayRef<Attribute>{scalar.getValue()});
+      Value seed =
+          builder.create<arith::ConstantOp>(branch.getLoc(), type, dense);
+      auto maskType =
+          RankedTensorType::get(type.getShape(), builder.getI1Type());
+      Value mask = builder.create<tensor::SplatOp>(branch.getLoc(), maskType,
+                                                   branch.getCondition());
+      replacements.push_back(builder.create<arith::SelectOp>(
+          branch.getLoc(), mask, seed, previous));
+    }
+    branch.replaceAllUsesWith(replacements);
+    branch.erase();
+  }
+}
+
+// Publish a packed tile from its producing branch. Returning it through an
+// scf.if storage join otherwise adds a full UB-to-UB copy before the L1 copy.
+static void sinkOuterTilePublication(ModuleOp module) {
+  SmallVector<scf::IfOp> branches;
+  module.walk([&](scf::IfOp branch) { branches.push_back(branch); });
+  for (scf::IfOp branch : llvm::reverse(branches)) {
+    if (!isOuterVectorPayload(branch) || branch.getElseRegion().empty())
+      continue;
+    Operation *wait = branch->getNextNode();
+    Operation *copy = wait ? wait->getNextNode() : nullptr;
+    Operation *publish = copy ? copy->getNextNode() : nullptr;
+    if (!publish)
+      continue;
+    for (auto indexed : llvm::enumerate(branch.getResults())) {
+      unsigned index = indexed.index();
+      Value result = indexed.value();
+      auto type = dyn_cast<RankedTensorType>(result.getType());
+      if (!type || !type.hasStaticShape() || type.getRank() < 2 ||
+          !type.getElementType().isBF16() || result.use_empty())
+        continue;
+      unsigned copies = 0;
+      auto valid = [&](Operation *root, unsigned kind) {
+        unsigned effects = 0;
+        return !root->walk([&](Operation *op) {
+                      if (auto guard = dyn_cast<scf::IfOp>(op))
+                        return guard.getNumResults() == 0
+                                   ? WalkResult::advance()
+                                   : WalkResult::interrupt();
+                      if (auto yield = dyn_cast<scf::YieldOp>(op))
+                        return yield.getNumOperands() == 0
+                                   ? WalkResult::advance()
+                                   : WalkResult::interrupt();
+                      if ((kind == 0 && isa<hivm::SyncBlockWaitOp>(op)) ||
+                          (kind == 2 && isa<hivm::SyncBlockSetOp>(op))) {
+                        ++effects;
+                        return WalkResult::advance();
+                      }
+                      if (kind == 1) {
+                        if (auto transfer = dyn_cast<hivm::CopyOp>(op)) {
+                          auto dest =
+                              dyn_cast<MemRefType>(transfer.getDst().getType());
+                          auto space =
+                              dest ? dyn_cast_or_null<hivm::AddressSpaceAttr>(
+                                         dest.getMemorySpace())
+                                   : hivm::AddressSpaceAttr();
+                          if (transfer.getSrc() != result ||
+                              transfer.getNumResults() || !space ||
+                              space.getAddressSpace() != hivm::AddressSpace::L1)
+                            return WalkResult::interrupt();
+                          ++copies;
+                          ++effects;
+                          return WalkResult::advance();
+                        }
+                      }
+                      return isMemoryEffectFree(op) && op->getNumRegions() == 0
+                                 ? WalkResult::advance()
+                                 : WalkResult::interrupt();
+                    })
+                    .wasInterrupted() &&
+               effects > 0;
+      };
+      if (!valid(wait, 0) || !valid(copy, 1) || !valid(publish, 2) ||
+          copies != static_cast<unsigned>(
+                        std::distance(result.use_begin(), result.use_end())))
+        continue;
+      bool otherResultUsed = false;
+      for (Operation *root : {wait, copy, publish})
+        root->walk([&](Operation *op) {
+          for (Value operand : op->getOperands())
+            if (auto definition = dyn_cast<OpResult>(operand))
+              if (definition.getOwner() == branch && operand != result)
+                otherResultUsed = true;
+        });
+      if (otherResultUsed)
+        continue;
+      for (Region *region :
+           {&branch.getThenRegion(), &branch.getElseRegion()}) {
+        auto yield = cast<scf::YieldOp>(region->front().getTerminator());
+        OpBuilder builder(yield);
+        IRMapping mapping;
+        mapping.map(result, yield.getOperand(index));
+        for (Operation *root : {wait, copy, publish})
+          builder.clone(*root, mapping);
+      }
+      publish->erase();
+      copy->erase();
+      wait->erase();
+      break;
+    }
+  }
 }
 
 void AddControlFlowConditionPass::runOnOperation() {
@@ -105,41 +348,125 @@ void AddControlFlowConditionPass::runOnOperation() {
   initDependentMapPass->setConditionInfo(&info);
   pm.addPass(std::move(initDependentMapPass));
 
-  // Step4: Update for ops with block counters and inner dependency conditions,
-  // and insert PIPE_S inter-core synchronization
-  std::unique_ptr<UpdateLoopOpsPass> updateLoopOpsPass(new UpdateLoopOpsPass());
-  updateLoopOpsPass->setConditionInfo(&info);
-  pm.addPass(std::move(updateLoopOpsPass));
-
-  // Step5:Update the conditions of ifOp based on the intraCoreDependentMap and
-  // crossCoreDependentMap
-
+  // The kernels of legacyKernel keep the control flow conditions of the
+  // upstream implementation: they are not rewritten by the normal preload
+  // scheme.
   constexpr llvm::StringLiteral legacyKernel[] = {
-      "chunk_gated_delta_rule_fwd_kernel_h_blockdim128"};
-  bool useLegacyConditions = false;
+      "paged_decode_fd_kernel",
+      "fwd_kernel",
+      "merge_fwd_bwd_kernel",
+      "_swa_fwd_kernel"
+      "_sdpa_infer_kernel",
+      "paged_prefill_kernel",
+  };
+  // The normal preload scheme is only enabled for the kernels whose pipeline
+  // dependency is a chain of four computation blocks that alternates the
+  // cores: CUBE -> VECTOR -> CUBE -> VECTOR or VECTOR -> CUBE -> VECTOR ->
+  // CUBE. Every transfer of the chain has to carry the tightly coupled
+  // buffers of the validated pipeline: two buffers per transfer and no
+  // buffer shared by two transfers, so the chain carries six of them. A
+  // direction that several cross core groups carry holds the buffers of all
+  // of them, so a direction that holds more than the two buffers of a single
+  // transfer does not fit the scheme.
+  // The scheme is validated on two pipelines: the mla pipeline holds four
+  // computation blocks and the paged decode pipeline five. The conditions are
+  // computed for the blocks that carry a condition, so the kernel has to
+  // hold exactly four cross core blocks that carry a condition for the mla
+  // pipeline and exactly five of them for the paged decode pipeline.
+  // The scheme merges the main loop of every core into one scf.while, so the
+  // kernel has to have one main loop per core: two loops carrying the same
+  // main loop id.
+  // A kernel that holds more than one such pipeline keeps the conditions of
+  // the upstream implementation: the scheme is only validated for a single
+  // pipeline. The pipeline also has to be a linear chain, so it has a single
+  // entry block: two blocks feeding the same block is a merge, and the
+  // conditions of the scheme do not model a merge.
+  bool blacklisted = false;
   for (auto &op : module.getOps()) {
     auto funcOp = llvm::dyn_cast<func::FuncOp>(&op);
-    if (funcOp && llvm::is_contained(legacyKernel, funcOp.getSymName())) {
-      useLegacyConditions = true;
-      break;
-    }
+    if (!funcOp)
+      continue;
+    if (llvm::is_contained(legacyKernel, funcOp.getSymName()))
+      blacklisted = true;
+  }
+  unsigned mainLoopCount = 0;
+  const bool corePairMainLoop = hasCorePairMainLoop(module, mainLoopCount);
+  const CrossCorePattern pattern = analyzeCrossCorePattern(module);
+  const bool patternMatched = pattern.pipelines == 1 && pattern.entries == 1;
+  const bool enableNormalPreload =
+      !blacklisted && corePairMainLoop && patternMatched;
+  LLVM_DEBUG({
+    DBGS() << "blacklisted: " << blacklisted
+           << ", main loops: " << mainLoopCount
+           << ", core pair main loop: " << corePairMainLoop
+           << ", pipelines: " << pattern.pipelines
+           << ", entries: " << pattern.entries
+           << ", pattern matched: " << patternMatched << "\n";
+  });
+  // The outer main loop scheduling feature is built on the control flow
+  // scheme of the upstream implementation: its static ordinal schedule and its
+  // native credit handshake are not modelled by the normal preload scheme.
+  // A module with an outer main loop keeps the upstream conditions.
+  const bool useLegacyConditions =
+      !enableNormalPreload || CVPipeline::hasOuterMainLoop(module);
+
+  if (useLegacyConditions) {
+    // Step4: Update for ops with block counters and inner dependency
+    // conditions, and insert PIPE_S inter-core synchronization
+    std::unique_ptr<UpdateLoopOpsPassLegacy> legacyUpdateLoopOpsPass(
+        new UpdateLoopOpsPassLegacy());
+    legacyUpdateLoopOpsPass->setConditionInfo(&info);
+    pm.addPass(std::move(legacyUpdateLoopOpsPass));
+
+    // Step5:Update the conditions of ifOp based on the intraCoreDependentMap
+    // and crossCoreDependentMap
+    std::unique_ptr<UpdateConditionInfoPassLegacy> legacyUpdatePass(
+        new UpdateConditionInfoPassLegacy());
+    legacyUpdatePass->setConditionInfo(&info);
+    pm.addPass(std::move(legacyUpdatePass));
+
+    // Step6: Update for loop iteration times based on intraCoreDependentMap
+    std::unique_ptr<UpdateLoopIterTimesPassLegacy>
+        legacyUpdateLoopIterTimesPass(new UpdateLoopIterTimesPassLegacy());
+    legacyUpdateLoopIterTimesPass->setConditionInfo(&info);
+    pm.addPass(std::move(legacyUpdateLoopIterTimesPass));
+  } else {
+    // Step4: Update for ops with block counters and inner dependency
+    // conditions, and insert PIPE_S inter-core synchronization
+    std::unique_ptr<UpdateLoopOpsPass> updateLoopOpsPass(
+        new UpdateLoopOpsPass());
+    updateLoopOpsPass->setConditionInfo(&info);
+    pm.addPass(std::move(updateLoopOpsPass));
+
+    // Step5:Update the conditions of ifOp based on the intraCoreDependentMap
+    // and crossCoreDependentMap
+    auto updatePass = std::make_unique<UpdateConditionInfoPass>();
+    updatePass->setConditionInfo(&info);
+    pm.addPass(std::move(updatePass));
+
+    // Step6: Update for loop iteration times based on intraCoreDependentMap
+    std::unique_ptr<UpdateLoopIterTimesPass> updateLoopIterTimesPass(
+        new UpdateLoopIterTimesPass());
+    updateLoopIterTimesPass->setConditionInfo(&info);
+    pm.addPass(std::move(updateLoopIterTimesPass));
   }
 
-  auto updatePass = std::make_unique<UpdateConditionInfoPass>();
-  updatePass->setConditionInfo(&info);
-  pm.addPass(std::move(updatePass));
-
-  // Step6: Update for loop iteration times based on intraCoreDependentMap
-  std::unique_ptr<UpdateLoopIterTimesPass> updateLoopIterTimesPass(
-      new UpdateLoopIterTimesPass());
-  updateLoopIterTimesPass->setConditionInfo(&info);
-  pm.addPass(std::move(updateLoopIterTimesPass));
+  // Step7: Use the splitted_if condition to wrap each ssbuffer.if.
+  std::unique_ptr<SplittedIfWrapSsbufIfPass> splittedIfWrapSsbufIfPass(
+      new SplittedIfWrapSsbufIfPass());
+  splittedIfWrapSsbufIfPass->setConditionInfo(&info);
+  pm.addPass(std::move(splittedIfWrapSsbufIfPass));
 
   if (failed(runPipeline(pm, module))) {
     LDBG("Pass failed!");
     if (!CVPipeline::hasFallbackAttr(module)) {
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     }
+  } else if (CVPipeline::hasOuterMainLoop(module)) {
+    issueOuterProducerBeforeWait(module);
+    sinkOuterScoreMultiplication(module);
+    selectOuterRowSeeds(module);
+    sinkOuterTilePublication(module);
   }
 
   LDBG("Exit add controlflow condition pass.");
@@ -157,6 +484,7 @@ void registerAddControlFlowConditionPasses() {
   registerPass(createCreateIfOpsPass);
   registerPass(createProcessArgsPass);
   registerPass(createUpdateLoopOpsPass);
+  registerPass(createUpdateLoopIterTimesPass);
   registerPass(createAddControlFlowConditionPass);
 }
 } // namespace triton

@@ -23,13 +23,22 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
+#include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/OuterEventLoop.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/IRMapping.h"
+#include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/TypeUtilities.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "mlir/Transforms/RegionUtils.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/Support/Debug.h"
 
 static constexpr const char *DEBUG_TYPE = "ProcessArgs";
@@ -455,9 +464,14 @@ LogicalResult ProcessArgsPass::processSharedArgsInWhileOp(
 
 // Single entry point for processing shared iter_args in a main-loop op
 // (scf.for or scf.while). whileOp builds new scf.condition, transfers indices.
+static LogicalResult processOuterEventControl(scf::ForOp loopOp,
+                                              ControlFlowConditionInfo *info);
+
 LogicalResult
 ProcessArgsPass::processSharedIterArgsInLoop(Operation *op,
                                              ControlFlowConditionInfo *info) {
+  if (isa<scf::ForOp>(op) && op->hasAttr(kOuterEventControlCount))
+    return processOuterEventControl(cast<scf::ForOp>(op), info);
   Block *inspectBody = nullptr;
   unsigned ivOffset = 0;
   if (!getOpIterParams(op, inspectBody, ivOffset)) {
@@ -765,6 +779,348 @@ static LogicalResult cloneWhileBlockChains(scf::WhileOp newWhileOp,
 
 // Per (block_id, cond-used iter_arg) pair: clone the update chain into the
 // new after body, extend the scf.while, and record the new arg mapping.
+
+// Event control is a coupled state machine: updating task may read phase,
+// while updating phase may read j and the current task's bounds. Cloning each
+// argument independently would mix different compute blocks' event positions.
+// Collect the complete scalar update graph before changing any of its uses.
+static LogicalResult
+collectOuterEventControlChain(scf::ForOp loopOp, unsigned stateCount,
+                              SmallVectorImpl<Operation *> &orderedOps) {
+  Block *body = loopOp.getBody();
+  llvm::DenseSet<Value> visited;
+  llvm::DenseSet<Operation *> roots;
+  SmallVector<Value> worklist(loopOp.getYieldedValues().take_front(stateCount));
+
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!visited.insert(value).second)
+      continue;
+    if (auto arg = dyn_cast<BlockArgument>(value)) {
+      if (arg.getOwner() == body && arg.getArgNumber() > stateCount)
+        return loopOp->emitError("outer event control update captures a "
+                                 "payload loop argument");
+      continue;
+    }
+    Operation *def = value.getDefiningOp();
+    if (!loopOp->isProperAncestor(def))
+      continue;
+    Operation *root = body->findAncestorOpInBlock(*def);
+    if (!root)
+      return failure();
+    if (!roots.insert(root).second)
+      continue;
+    bool readsMemory;
+    if (!isOuterEventScalarControl(root, readsMemory))
+      return root->emitError("outer event control must have a separate scalar "
+                             "update graph containing only pure operations "
+                             "and metadata loads");
+    llvm::append_range(worklist, root->getOperands());
+    llvm::SetVector<Value> captures;
+    getUsedValuesDefinedAbove(root->getRegions(), captures);
+    llvm::append_range(worklist, captures);
+  }
+  for (Operation &op : body->without_terminator())
+    if (roots.contains(&op))
+      orderedOps.push_back(&op);
+  return success();
+}
+
+static bool isReusableEventControl(Operation *root, bool &readsMemory) {
+  return (root->hasAttr(kOuterEventControl) || root->hasAttr(kArg) ||
+          root->hasAttr(kWhileArg)) &&
+         isOuterEventScalarControl(root, readsMemory);
+}
+
+// SeparateCVScope preserves the event-control template on both cores. After
+// CloneOps has made each payload group independent, that template can remain
+// as an otherwise empty group. Keep it as the source for state cloning, but do
+// not give it an actor of its own. This first version applies only to counted
+// event loops; the legacy paths and while termination contract are unchanged.
+static llvm::DenseSet<int> findControlOnlyEventGroups(scf::ForOp loopOp,
+                                                      ArrayRef<int> blockIds,
+                                                      unsigned stateCount) {
+  llvm::DenseSet<int> removable;
+  if (blockIds.size() < 2 ||
+      llvm::any_of(loopOp.getResults().take_front(stateCount),
+                   [](Value result) { return !result.use_empty(); }))
+    return removable;
+
+  Block *body = loopOp.getBody();
+  Operation *yield = body->getTerminator();
+  // CloneOps can leave the original slot-selection arithmetic behind after
+  // cloning it into every real consumer. A transfer_id on this dead integer
+  // chain is provenance, but a transfer/dependency tag on live control must
+  // still reject removal. Recognize only a same-group, wholly unused arith
+  // closure; do not erase or ignore any load, region or protocol operation.
+  llvm::DenseSet<Operation *> deadTransferArithmetic;
+  for (Operation &op : llvm::reverse(body->without_terminator())) {
+    auto blockId = getOpBlockId(&op);
+    auto integer = [](Type type) { return type.isIntOrIndex(); };
+    if (!blockId || !op.hasAttr(kTransferId) ||
+        !isa<arith::ArithDialect>(op.getDialect()) || op.getNumRegions() ||
+        !isMemoryEffectFree(&op) ||
+        !llvm::all_of(op.getOperandTypes(), integer) ||
+        !llvm::all_of(op.getResultTypes(), integer))
+      continue;
+    bool knownAttrs = llvm::all_of(op.getAttrs(), [](NamedAttribute attr) {
+      StringRef name = attr.getName().getValue();
+      return !name.starts_with("ssbuffer.") || name == kBlockId ||
+             name == kCoreType || name == kClone || name == kTransferId;
+    });
+    if (knownAttrs && llvm::all_of(op.getUsers(), [&](Operation *user) {
+          return getOpBlockId(user) == blockId &&
+                 deadTransferArithmetic.contains(user);
+        }))
+      deadTransferArithmetic.insert(&op);
+  }
+  for (int blockId : blockIds) {
+    bool safe = true, hasControlRoot = false;
+    for (Operation &op : body->without_terminator()) {
+      if (getOpBlockId(&op) != blockId)
+        continue;
+      if (deadTransferArithmetic.contains(&op))
+        continue;
+      hasControlRoot |= op.hasAttr(kOuterEventControl);
+      bool readsMemory = false;
+      if (!isOuterEventScalarControl(&op, readsMemory)) {
+        safe = false;
+        break;
+      }
+      // Reject any protocol annotation, including on nested operations. Only
+      // known scalar-control provenance is allowed; unknown ssbuffer tags keep
+      // the group rather than risking a dropped dependency or flag update.
+      // dep_mark is diagnostic provenance written by AddMultiBufferInnerScope;
+      // its generated channels use intraDeps, which remains disallowed here.
+      auto protocol = op.walk([](Operation *nested) -> WalkResult {
+        for (NamedAttribute attr : nested->getAttrs()) {
+          StringRef name = attr.getName().getValue();
+          if (name.starts_with("ssbuffer.") && name != kBlockId &&
+              name != kCoreType && name != kOuterEventControl &&
+              name != kClone && name != kArg && name != kWhileArg &&
+              name != kDepMark)
+            return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      });
+      if (protocol.wasInterrupted()) {
+        safe = false;
+        break;
+      }
+      for (Value result : op.getResults()) {
+        for (OpOperand &use : result.getUses()) {
+          if (use.getOwner() == yield && use.getOperandNumber() < stateCount)
+            continue;
+          Operation *user = body->findAncestorOpInBlock(*use.getOwner());
+          if (!user || getOpBlockId(user) != blockId) {
+            safe = false;
+            break;
+          }
+        }
+        if (!safe)
+          break;
+      }
+      if (!safe)
+        break;
+    }
+    if (safe && hasControlRoot)
+      removable.insert(blockId);
+  }
+  // A control-only function still needs an owner for its state transition.
+  if (removable.size() == blockIds.size())
+    removable.clear();
+  return removable;
+}
+
+static bool isEventControlReadBarrier(Operation *root) {
+  bool syncOrVolatile = false;
+  root->walk([&](Operation *op) {
+    syncOrVolatile |= isSyncOp(op) || op->hasAttr(kMemrefExtVolatile);
+  });
+  if (syncOrVolatile)
+    return true;
+  auto effects = getEffectsRecursively(root);
+  return !effects || llvm::any_of(*effects, [](const auto &effect) {
+    return !isa<MemoryEffects::Read>(effect.getEffect());
+  });
+}
+
+static bool equivalentEventControl(Operation *lhs, Operation *rhs) {
+  if (lhs->getName() != rhs->getName() ||
+      !llvm::equal(lhs->getOperands(), rhs->getOperands()) ||
+      !llvm::equal(lhs->getResultTypes(), rhs->getResultTypes()))
+    return false;
+
+  // Scheduling provenance can differ between the payload and update copies.
+  // Compare detached copies so no live scheduling annotations are changed.
+  auto normalizedClone = [](Operation *op) {
+    Operation *clone = op->clone();
+    clone->walk([](Operation *nested) {
+      for (StringRef attr :
+           {kBlockId, kClone, kArg, kWhileArg, kOuterEventControl})
+        nested->removeAttr(attr);
+    });
+    return clone;
+  };
+  Operation *left = normalizedClone(lhs);
+  Operation *right = normalizedClone(rhs);
+  IRMapping values;
+  bool equivalent = OperationEquivalence::isEquivalentTo(
+      left, right,
+      [&](Value a, Value b) {
+        return success(a == b || (values.contains(a) && values.lookup(a) == b));
+      },
+      [&](Value a, Value b) { values.map(a, b); },
+      OperationEquivalence::IgnoreLocations);
+  left->destroy();
+  right->destroy();
+  return equivalent;
+}
+
+// Run after all block-local old-state arguments have been remapped. Reuse only
+// a dominating result in the same stage; never substitute a different stage's
+// cursor or a next-state value. Writes, sync and unknown effects invalidate all
+// available reads, including reads nested in a scalar if.
+static void deduplicateOuterEventControl(Block *body) {
+  struct Available {
+    Operation *op;
+    int blockId;
+    bool readsMemory;
+  };
+  SmallVector<Available> available;
+  for (Operation &op : llvm::make_early_inc_range(body->without_terminator())) {
+    if (isEventControlReadBarrier(&op))
+      llvm::erase_if(available,
+                     [](const Available &entry) { return entry.readsMemory; });
+    auto blockId = getOpBlockId(&op);
+    bool readsMemory = false;
+    if (!blockId || !isReusableEventControl(&op, readsMemory))
+      continue;
+    auto same = llvm::find_if(available, [&](const Available &entry) {
+      return entry.blockId == *blockId && equivalentEventControl(entry.op, &op);
+    });
+    if (same == available.end()) {
+      available.push_back({&op, *blockId, readsMemory});
+      continue;
+    }
+    op.replaceAllUsesWith(same->op->getResults());
+    op.erase();
+  }
+}
+
+static LogicalResult processOuterEventControl(scf::ForOp loopOp,
+                                              ControlFlowConditionInfo *info) {
+  Block *oldBody = loopOp.getBody();
+  ValueRange inits = loopOp.getInitArgs();
+  auto iterArgs = loopOp.getRegionIterArgs();
+  auto oldYield = cast<scf::YieldOp>(oldBody->getTerminator());
+  auto countAttr = loopOp->getAttrOfType<IntegerAttr>(kOuterEventControlCount);
+  int64_t count = countAttr ? countAttr.getInt() : 0;
+  if (count <= 0 || count > static_cast<int64_t>(inits.size()))
+    return loopOp->emitError("invalid outer event control argument prefix");
+
+  unsigned stateCount = count;
+  auto stateIndices = llvm::seq<unsigned>(0, stateCount);
+  if (!llvm::all_of(iterArgs.take_front(stateCount),
+                    [](Value arg) { return arg.getType().isIntOrIndex(); }))
+    return loopOp->emitError("outer event control arguments must be integer "
+                             "or index values");
+
+  SmallVector<int> blockIds = getBlockIdsInOrder(loopOp);
+  if (blockIds.empty())
+    return loopOp->emitError("outer event loop has no compute blocks");
+  SmallVector<Operation *> chain;
+  if (failed(collectOuterEventControlChain(loopOp, stateCount, chain)))
+    return failure();
+
+  // Other scalar carries must already belong to one block. The generic
+  // shared-argument path cannot clone a mixed scalar/tensor payload if as a
+  // scalar state update, nor may it reuse another block's task cursor.
+  llvm::DenseMap<int, llvm::DenseSet<int>> users;
+  if (failed(collectArgIndexToBlockIds(oldBody, 1, users)))
+    return failure();
+  for (auto &[index, ids] : users)
+    if (static_cast<unsigned>(index) >= stateCount && ids.size() > 1)
+      return loopOp->emitError("outer event shared scalar payload must be "
+                               "rematerialized from the block's control state");
+
+  llvm::DenseSet<int> controlOnlyGroups =
+      findControlOnlyEventGroups(loopOp, blockIds, stateCount);
+  llvm::erase_if(blockIds,
+                 [&](int id) { return controlOnlyGroups.contains(id); });
+
+  SmallVector<Value> extraInits;
+  for (unsigned i = 0; i < blockIds.size(); ++i)
+    llvm::append_range(extraInits, inits.take_front(stateCount));
+  unsigned originalCount = inits.size();
+  Operation *newLoop = createMainLoopOpWithExtras(loopOp, extraInits);
+  Block *body = MainLoop(newLoop).getBody();
+  migrateBody(oldBody, body);
+  SmallVector<Value> originalYields(oldYield.getOperands());
+  SmallVector<Value> extraYields;
+  llvm::DenseMap<int, IRMapping> blockMappings;
+
+  for (auto [blockPosition, blockId] : llvm::enumerate(blockIds)) {
+    IRMapping &mapping = blockMappings[blockId];
+    for (unsigned index : stateIndices) {
+      unsigned newIndex = originalCount + blockPosition * stateCount + index;
+      mapping.map(body->getArgument(index + 1),
+                  body->getArgument(newIndex + 1));
+    }
+    OpBuilder builder(body, body->end());
+    if (Operation *last = findLastOpWithBlockId(body, blockId))
+      builder.setInsertionPointAfter(last);
+    for (Operation *op : chain) {
+      // Pass the complete mapping, including captures inside scalar scf.if
+      // regions. OpBuilder::clone records every result, not just result(0).
+      Operation *cloned = builder.clone(*op, mapping);
+      cloned->setAttr(kBlockId, builder.getI32IntegerAttr(blockId));
+      cloned->setAttr(kArg, builder.getI32IntegerAttr(0));
+    }
+    for (unsigned index : stateIndices)
+      extraYields.push_back(mapping.lookupOrDefault(originalYields[index]));
+  }
+
+  // Payload guards, addresses and slot calculations must read their own
+  // block's task/j/phase, including operands captured by nested ops.
+  for (unsigned index : stateIndices) {
+    Value arg = body->getArgument(index + 1);
+    for (OpOperand &use : llvm::make_early_inc_range(arg.getUses())) {
+      auto blockId = getLoopDirectChildBlockId(use.getOwner());
+      if (blockId && blockMappings.count(*blockId))
+        use.set(blockMappings[*blockId].lookup(arg));
+    }
+  }
+  // Keep the original result slots coherent with the first block. They are
+  // not a global scheduling cursor: conditions and buffer slots use the
+  // existing per-block for counter.
+  // The for IV is deliberately not part of the state group. Its uses will be
+  // remapped by replaceForOpCounterInIfOps after scheduling is constructed.
+  oldYield->setOperands(0, stateCount,
+                        ArrayRef<Value>(extraYields).take_front(stateCount));
+  if (failed(buildNewYieldOp(oldBody, body, newLoop, extraYields)))
+    return failure();
+  for (Operation *op : llvm::reverse(chain))
+    if (isOpTriviallyDead(op))
+      op->erase();
+  // The original prefix now yields the first real actor's state. The strict
+  // use check above guarantees that the template has no remaining observers.
+  // Do not move or erase any write or synchronization from another group.
+  SmallVector<Operation *> controlOnlyOps;
+  for (Operation &op : body->without_terminator()) {
+    auto blockId = getOpBlockId(&op);
+    if (blockId && controlOnlyGroups.contains(*blockId))
+      controlOnlyOps.push_back(&op);
+  }
+  for (Operation *op : llvm::reverse(controlOnlyOps)) {
+    if (!op->use_empty())
+      return op->emitError("control-only event group still has a live user");
+    op->erase();
+  }
+  deduplicateOuterEventControl(body);
+  return replaceMainLoopOpAndErase(loopOp, newLoop, info);
+}
+
 LogicalResult
 ProcessArgsPass::processWhileIterArgsInWhileOp(scf::WhileOp whileOp,
                                                ControlFlowConditionInfo *info) {

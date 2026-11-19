@@ -1,0 +1,125 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+"""
+Ascend-specific builder utilities for code generation.
+"""
+
+# The wrapper helpers are shared verbatim with the cann extension; only the
+# method list below is TLA-specific.
+from triton.language.extra.cann.extension.builder import (
+    create_builder_method_wrapper,
+    attach_builder_methods,
+)
+
+__all__ = [
+    "create_builder_method_wrapper",
+    "attach_builder_methods",
+    "setup_unified_builder",
+]
+
+
+def setup_unified_builder(main_builder, ascend_builder):
+    """Set up a unified builder interface by attaching methods from specialized builders."""
+    # Register scope 'with' handlers here so TLA needs no build-time patch.
+    from .dispatch import register_with_dispatch
+
+    register_with_dispatch()
+    # Only attach TLA-specific methods.  The cann setup_unified_builder owns
+    # _ascend_builder and the shared methods; re-attaching or reassigning them
+    # here would shadow the cann versions for every kernel.
+    ascend_methods = [
+        'create_tla_barrier',
+        'create_tla_set_flag',
+        'create_tla_wait_flag',
+        'create_tla_sync_all',
+        'create_tla_block_set_flag',
+        'create_tla_block_wait_flag',
+        'create_tla_mutex_lock',
+        'create_tla_mutex_unlock',
+        'create_tla_buffer_type',
+        'create_tla_vector_type',
+        'create_tla_alloc',
+        'create_tla_fill',
+        'create_tla_bind',
+        'create_tla_pointer_view',
+        'create_tla_subview',
+        'create_tla_reinterpret_cast',
+        'create_tla_collapse_shape',
+        'create_tla_expand_shape',
+        'create_tla_load',
+        'create_tla_store',
+        'create_tla_nd2nz',
+        'create_tla_copy',
+        'create_tla_l12ub',
+        'create_tla_l12bt',
+        'create_tla_l12l0',
+        'create_tla_fixpipe',
+        'create_tla_set_ctrl',
+        'create_tla_set_atomic',
+        'create_tla_get_sub_block_idx',
+        'create_hivm_load',
+        'create_hivm_store',
+        'create_hivm_debug',
+        'create_hivm_nd2nz',
+        'create_hivm_fixpipe',
+        'create_hivm_mmadl1',
+        'create_hivm_mmadmx',
+        'create_hivm_load_mx_scale',
+        # Shared helpers the TLA frontend calls directly.
+        'create_annotation_mark',
+        'create_scope_op',
+        # TLA-only helpers; the cann extension does not mount parse_attr.
+        'get_scope_entry_block',
+        'parse_attr',
+        'create_simd_vlds',
+        'create_simd_pld',
+        'create_simd_pst',
+        'create_simd_vgather',
+        'create_simd_vunpack',
+        'create_simd_vsts',
+        'create_simd_vsstb',
+        'create_simd_binary',
+        'create_simd_vec_scalar',
+        'create_simd_binary_scalar',
+        'create_simd_shift',
+        'create_simd_shift_scalar',
+        'create_simd_unary',
+        'create_simd_vfma',
+        'create_simd_vreduce',
+        'create_simd_vci',
+        'create_simd_vmembar',
+        'create_simd_vcmp',
+        'create_simd_vbroadcast',
+        'create_simd_scalar',
+        'create_simd_scalar_int',
+        'create_simd_vsplat',
+        'create_simd_vdup',
+        'create_simd_vcvt',
+        'create_simd_vpack',
+        'create_simd_pge',
+        'create_simd_vsel',
+        'create_simd_vintlv',
+        'create_simd_vdintlv',
+        'create_simd_bitcast',
+        'create_simd_preg_binary',
+        'create_simd_preg_unary',
+        'create_simd_vmull',
+    ]
+    attach_builder_methods(main_builder, ascend_builder, ascend_methods)

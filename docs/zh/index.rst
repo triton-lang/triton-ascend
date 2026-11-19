@@ -21,6 +21,7 @@ Triton Ascend
    :titlesonly:
    :caption: 从这里开始
 
+   最新动态 <doc_updates>
    版本说明 <release_note>
    快速入门 <quick_start>
    安装指南 <installation_guide>

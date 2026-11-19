@@ -57,10 +57,8 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_tla_vector_type',
         'create_tla_alloc',
         'create_tla_fill',
-        'create_tla_bind',
         'create_tla_pointer_view',
         'create_tla_subview',
-        'create_tla_reinterpret_cast',
         'create_tla_collapse_shape',
         'create_tla_expand_shape',
         'create_tla_load',
@@ -80,6 +78,7 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_hivm_nd2nz',
         'create_hivm_fixpipe',
         'create_hivm_mmadl1',
+        'create_hivm_mmadl0',
         'create_hivm_mmadmx',
         'create_hivm_load_mx_scale',
         # Shared helpers the TLA frontend calls directly.

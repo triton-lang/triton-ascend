@@ -842,22 +842,14 @@ bool budgetOverflow(triton::FuncOp sandboxFunction,
                     triton::FuncOp liveFunction) {
   if (std::optional<uint64_t> safeUB = resources.getSafeUBBudget()) {
     LiveByteEstimate estimate = estimatePeakLiveBytes(sandboxFunction);
-    // The static peak counts one copy of each UB tensor, but the backend
-    // multi-buffers loop-carried UB buffers, so the check scales it by the
-    // replication factor (see the measured data in kUBBufferReplication).
-    // The static peak counts one copy of each UB tensor while the backend
-    // multi-buffers loop-carried UB buffers, so the predicate budgets the
-    // replicated demand (see the measured numbers on kUBBufferReplication).
-    // Fail closed and divide, like QueryRowBatchingRule's fitsQueryRowBudgets:
-    // an unknown or overflowing estimate is not proof that the rewrite fits,
-    // and the division form cannot wrap the product.
     const bool fits = estimate.known && !estimate.overflow &&
-                      estimate.peakLiveBytes <= *safeUB / kUBBufferReplication;
+                      estimate.peakPipelinedLiveBytes <= *safeUB;
     const uint64_t demand =
-        estimate.known ? estimate.peakLiveBytes * kUBBufferReplication : 0;
+        estimate.known ? estimate.peakPipelinedLiveBytes : 0;
     if (::getenv("TRITON_GRAPH_UB_DEBUG"))
       llvm::errs() << "graph-ub[rule]: form=" << form
                    << " liftedPeak=" << estimate.peakLiveBytes
+                   << " pipelinedPeak=" << estimate.peakPipelinedLiveBytes
                    << " known=" << estimate.known
                    << " overflow=" << estimate.overflow << " demand=" << demand
                    << " ubBudget=" << *safeUB << "\n";

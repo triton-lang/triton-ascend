@@ -375,11 +375,19 @@ def make_ttir(mod, metadata, opt):
     return mod
 
 
+def _export_profile_metadata(mod, metadata):
+    metadata["profile_scratch_size"] = 0
+    metadata["profile_scratch_align"] = 1
+    if AscendBackend.instrumentation:
+        metadata.update(ascend.ir.get_kernel_profile_metadata(mod))
+
+
 def tla_to_ttadapter(mod, metadata, opt):
     from triton.language.extra.tla.compiler import lower_ttir
 
     metadata["has_auto_blockify_blacklist_op"] = False
     lower_ttir(mod, mod.context)
+    _export_profile_metadata(mod, metadata)
     _export_program_grid_metadata(mod, metadata)
     text = _serialize_module(mod, opt)
     if opt.debug:
@@ -486,9 +494,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
 
         if AscendBackend.instrumentation:
             if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
-                # NPU-IR emits A5 DFX regions; MSPTI collects them at runtime.
-                metadata["proton_collection"] = "mspti"
-                metadata["profile_scratch_size"] = 0
+                metadata["proton_collection"] = "perf_monitor"
             else:
                 AscendBackend.instrumentation.patch("ttir_to_linalg", pm, mod.context)
 
@@ -506,6 +512,10 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         _load_val = metadata.get("buf_slot_num_of_gm")
         if _load_val is not None:
             ascend.passes.ttir.set_buffer_count(mod, "LOAD", _load_val)
+
+        enable_outer_main_loop = metadata.get("enable_outer_main_loop", False)
+        if enable_outer_main_loop:
+            ascend.passes.ttir.set_enable_outer_main_loop(mod)
 
         if opt.debug:
             # Written so the triton-opt command printed below reproduces this run.
@@ -540,13 +550,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
                                           set_workspace_multibuffer=set_workspace_multibuffer)
         _export_program_grid_metadata(mod, metadata)
 
+        _export_profile_metadata(mod, metadata)
         linalg_text = _serialize_module(mod, opt)
-        if AscendBackend.instrumentation:
-            for key in ("profile_scratch_size", "profile_scratch_align", "profile_num_units",
-                        "profile_sections_per_block", "profile_sample_every_n"):
-                match = re.search(rf"\b{key}\s*=\s*(\d+)", linalg_text)
-                if match:
-                    metadata[key] = int(match.group(1))
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
             dump_manager.put(linalg_text, "kernel.ttadapter.mlir", binary=False)
@@ -622,8 +627,6 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     # Note: Compiled Kernel requires to estimate size of shared memory to occupy
     # Currently, NPU backend does not limit on shared memory
     metadata["shared"] = 1
-    metadata["profile_scratch_size"] = 0
-    metadata["profile_scratch_align"] = 1
     module_attrs = re.search(r'\bmodule(?:\s+@\w+)?\s+attributes\s*\{([^}]*)\}', linalg)
     metadata["has_full_row_copy"] = bool(module_attrs and re.search(r'\btt\.full_row_copy\b', module_attrs.group(1)))
     # Force disable auto tile and bind subblock if attribute is present in module
@@ -789,7 +792,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     _finalize_program_launch_policy(metadata, opt)
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_file_name = "kernel.mlir"
+        tmp_file_name = "kernel.ttadapter.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
         Path(ttadapter_path).write_text(linalg)
         bin_file = os.path.join(tmpdir, "kernel")
@@ -801,7 +804,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         callback_path = os.path.join(tmpdir, "libkernel.so")
         _compile_option_list = get_common_bishengir_compile_options(metadata)
         proton_metadata_path = None
-        if metadata.get("proton_collection") == "mspti":
+        if metadata.get("proton_collection") == "perf_monitor":
             proton_metadata_path = Path(tmpdir) / "proton_metadata.json"
             _compile_option_list.append(f"--proton-metadata-output={proton_metadata_path}")
 
@@ -1035,7 +1038,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     _finalize_program_launch_policy(metadata, opt)
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_file_name = "kernel.mlir"
+        tmp_file_name = "kernel.ttadapter.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
         Path(ttadapter_path).write_text(linalg)
         bin_file = os.path.join(tmpdir, "kernel")
@@ -1334,6 +1337,8 @@ class NPUOptions:
     # driver-side profile scratch path inert.
     profile_scratch_size: int = 0
     enable_graph_optimize: bool = True
+    # Reserved compatibility option; it does not enable block batching.
+    block_batching_factor: Union[int, str] = 1
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
     deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()
@@ -1376,6 +1381,7 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
+    enable_outer_main_loop: bool = False
     enable_tla_mode: bool = field(default=False, init=False)
     enable_cube_block_merge: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = None

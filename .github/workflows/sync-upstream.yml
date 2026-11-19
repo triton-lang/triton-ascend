@@ -116,14 +116,35 @@ jobs:
             exit 1
           fi
           echo "Downloading: ${BISHENG_FILENAME}"
-          curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
+          curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.pkg
           if [ -n "${BISHENG_SHA256}" ]; then
-            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
+            echo "${BISHENG_SHA256}  bisheng.pkg" | sha256sum -c -
           else
             echo "Warning: No SHA256 checksum provided, skipping verification"
           fi
-          chmod +x bisheng.run
-          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
+          case "${BISHENG_FILENAME}" in
+            *.run)
+              chmod +x bisheng.pkg
+              ./bisheng.pkg --quiet --install --install-path=/usr/local/bisheng
+              ;;
+            *.tar.gz)
+              # Payload tarballs contain bin/, lib/, ... at the archive root.
+              mkdir -p /usr/local/bisheng/tools/bishengir
+              tar xzf bisheng.pkg -C /usr/local/bisheng/tools/bishengir
+              if [ -d /usr/local/bisheng/tools/bishengir/bin ]; then
+                chmod -R a+x /usr/local/bisheng/tools/bishengir/bin
+              fi
+              ;;
+            *)
+              echo "Error: unsupported Bisheng package format: ${BISHENG_FILENAME} (expected .run or .tar.gz)" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ ! -x /usr/local/bisheng/tools/bishengir/bin/bishengir-compile ]; then
+            echo "Error: bishengir-compile not found under /usr/local/bisheng/tools/bishengir/bin after install" >&2
+            exit 1
+          fi
           echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
 
       - name: Cache build dependencies

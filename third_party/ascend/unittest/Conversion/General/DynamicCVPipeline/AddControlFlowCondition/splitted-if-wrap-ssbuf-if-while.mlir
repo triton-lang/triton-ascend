@@ -1,4 +1,5 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
+// RUN: sed 's/ssbuffer.main_loop = 0 : i32/ssbuffer.main_loop = 0 : i32, ssbuffer.outer_event_control_count = 1 : i32/g' %s | triton-opt --add-control-flow-condition | FileCheck %s --check-prefix=EVENT
 
 // VECTOR and CUBE each have one main scf.while. Block 5's tensor compute sits
 // in a single splitted_if. Wrap turns that splitted_if condition into the
@@ -13,6 +14,16 @@
 // CHECK: } {{.*}}ssbuffer.if = 5 : i32}
 // CHECK: arith.addi %{{[^ ]+}}, %[[C16]] {{.*}}ssbuffer.while_arg = 0 : i32} : i32
 // CHECK: } {{.*}}ssbuffer.splitted_if = 0 : i32}
+
+// Event payload predicates stay inside the ready/credit guard. An inactive
+// phase must still advance the complete per-block event protocol.
+// EVENT-LABEL: func.func @wrap_one_splitted_if
+// EVENT: scf.if
+// EVENT: %[[EVENT_SPLIT:[^ ]+]] = arith.cmpi sgt,
+// EVENT: scf.if %[[EVENT_SPLIT]]
+// EVENT: arith.mulf
+// EVENT: } {{.*}}ssbuffer.splitted_if = 0 : i32}
+// EVENT: } {{.*}}ssbuffer.if = 5 : i32}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intra_buf_count = 2 : i32} {
   func.func @wrap_one_splitted_if(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {

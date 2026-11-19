@@ -1,3 +1,4 @@
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
@@ -119,6 +120,12 @@ ScalarClosure::capture(int blockId) {
   builder.setInsertionPoint(firstOp);
 
   SmallVector<Operation *> newOps;
+  auto module = firstOp->getParentOfType<ModuleOp>();
+  auto outerLoop = CVPipeline::hasOuterMainLoop(module)
+                       ? firstOp->getParentOfType<scf::ForOp>()
+                       : scf::ForOp();
+  const bool outerEvent =
+      outerLoop && outerLoop->hasAttr(CVPipeline::kOuterEventControlCount);
 
   LDBG("Collecting scalar closures for blockId: " << blockId);
   for (Operation *scalarOp : opsToClone) {
@@ -132,8 +139,19 @@ ScalarClosure::capture(int blockId) {
     LDBG("Clone: " << *scalarOp);
 
     Operation *cloned = builder.clone(*scalarOp, mapper);
-    cloned->setAttr(CVPipeline::kBlockId,
-                    Builder(scalarOp->getContext()).getI32IntegerAttr(blockId));
+    auto destinationId =
+        Builder(scalarOp->getContext()).getI32IntegerAttr(blockId);
+    cloned->setAttr(CVPipeline::kBlockId, destinationId);
+    if (outerEvent && cloned->getNumRegions() &&
+        scalarOp->hasAttr(CVPipeline::kBlockId)) {
+      auto sourceId = scalarOp->getAttr(CVPipeline::kBlockId);
+      // Keep a cloned scalar region in its consumer's scheduling group.
+      // Differently tagged nested groups still retain their own identity.
+      cloned->walk([&](Operation *nested) {
+        if (nested->getAttr(CVPipeline::kBlockId) == sourceId)
+          nested->setAttr(CVPipeline::kBlockId, destinationId);
+      });
+    }
     newOps.push_back(cloned);
   }
 

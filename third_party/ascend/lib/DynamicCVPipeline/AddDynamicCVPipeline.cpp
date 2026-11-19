@@ -47,6 +47,7 @@
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/EstimateCVPipelineCost.h"
 #include "ascend/include/DynamicCVPipeline/Passes.h"
@@ -69,6 +70,7 @@
 #include <unistd.h>
 #endif
 #include "DynamicCVPipeline/Common/FallbackHelper.h"
+#include "DynamicCVPipeline/Common/TcbPoolUtils.h"
 
 static constexpr const char *DEBUG_TYPE = "add-dynamic-cv-pipeline";
 static constexpr unsigned MAX_RETRY_TIMES = 2;
@@ -332,9 +334,11 @@ void restoreModuleFromBackup(ModuleOp moduleOp, ModuleOp moduleBackup) {
   moduleOp.getBodyRegion().takeBody(moduleBackup.getBodyRegion());
 }
 
-static inline void addPasses(OpPassManager &pm) {
+static inline void addPasses(OpPassManager &pm, bool outerMainLoop) {
   pm.addPass(createPreCheckAvailablePass());
   pm.addPass(createStandardizeOpPass());
+  if (outerMainLoop)
+    pm.addPass(createNormalizeOuterLoopPass(/*discoverMainLoop=*/true));
   pm.addPass(createPlanComputeBlockPass());
   pm.addPass(createComputeBlockOptPass());
   pm.addPass(createSplitDataflowPass());
@@ -375,9 +379,9 @@ struct VariantScore {
 /// the registry already a superset of its own needs and leaves both
 /// structures alone, and what the trials share is only the context's locked
 /// state.
-void prepareVariantSearchDialects(MLIRContext *context) {
+void prepareVariantSearchDialects(MLIRContext *context, bool outerMainLoop) {
   OpPassManager searchPM(ModuleOp::getOperationName());
-  addPasses(searchPM);
+  addPasses(searchPM, outerMainLoop);
   DialectRegistry dependentDialects;
   searchPM.getDependentDialects(dependentDialects);
   context->appendDialectRegistry(dependentDialects);
@@ -396,7 +400,7 @@ void prepareVariantSearchDialects(MLIRContext *context) {
 /// serial search took by hand: the total, the bound that decided ties, and
 /// the two figures the baseline guards are written against.
 VariantScore runVariantTrial(MLIRContext *context, ModuleOp moduleBackup,
-                            int64_t seed) {
+                            bool outerMainLoop, int64_t seed) {
   VariantScore score;
   score.seed = seed;
 
@@ -406,7 +410,7 @@ VariantScore runVariantTrial(MLIRContext *context, ModuleOp moduleBackup,
   attempt->setAttr(mlir::triton::kCVPipelineCostQuiet, builder.getUnitAttr());
 
   PassManager trial(context, attempt.getOperationName());
-  addPasses(trial);
+  addPasses(trial, outerMainLoop);
   const bool ran =
       succeeded(trial.run(attempt.getOperation())) &&
       !CVPipeline::hasFallbackAttr(attempt);
@@ -507,7 +511,8 @@ void AddDynamicCVPipelinePass::getDependentDialects(
     DialectRegistry &registry) const {
   Base::getDependentDialects(registry);
   OpPassManager tempPM(ModuleOp::getOperationName());
-  addPasses(tempPM);
+  // StandardizeOp registers the dialects needed by NormalizeOuterLoop.
+  addPasses(tempPM, /*outerMainLoop=*/false);
   tempPM.getDependentDialects(registry);
 }
 
@@ -519,6 +524,8 @@ void AddDynamicCVPipelinePass::runOnOperation() {
   auto moduleOp = getOperation();
   OpBuilder builder(moduleOp.getContext());
   compileOn91095Flag = this->compileOn91095;
+  const bool enableOuterMainLoop =
+      static_cast<bool>(moduleOp->removeAttr(CVPipeline::kEnableOuterMainLoop));
 
   LDBG("Enter pass");
   moduleOp->removeAttr(CVPipeline::ERRCODE_ATTR);
@@ -578,7 +585,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     }
     llvm::errs() << "\n";
   } else if (variantCount > 1) {
-    prepareVariantSearchDialects(&getContext());
+    prepareVariantSearchDialects(&getContext(), enableOuterMainLoop);
 
     // How many trials to score at once, capped at the number of candidates.
     //
@@ -640,8 +647,8 @@ void AddDynamicCVPipelinePass::runOnOperation() {
               if (seed >= variantCount) {
                 break;
               }
-              scores[seed] =
-                  runVariantTrial(&getContext(), moduleBackup, seed);
+              scores[seed] = runVariantTrial(
+                  &getContext(), moduleBackup, enableOuterMainLoop, seed);
             }
           });
         }
@@ -650,7 +657,8 @@ void AddDynamicCVPipelinePass::runOnOperation() {
         }
       } else {
         for (int64_t seed = 0; seed < variantCount; ++seed) {
-          scores[seed] = runVariantTrial(&getContext(), moduleBackup, seed);
+          scores[seed] = runVariantTrial(&getContext(), moduleBackup,
+                                         enableOuterMainLoop, seed);
         }
       }
     }
@@ -940,7 +948,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
 
     // Do not reuse pass instances or partially transformed IR on retry.
     PassManager pm(&getContext(), moduleOp.getOperationName());
-    addPasses(pm);
+    addPasses(pm, enableOuterMainLoop);
 
     // run passes in separate pm, instead of the pipeline to suppress reproducer
     auto result = pm.run(moduleOp);
@@ -953,6 +961,10 @@ void AddDynamicCVPipelinePass::runOnOperation() {
       if (tuplePreloadFailed) {
         CVPipeline::setFallbackAttr(moduleOp,
                                     CVPipeline::ERRCODE_TUPLE_PRELOAD_FAILED);
+      }
+      if (CVPipeline::canEnableDynamicPlan(moduleOp)) {
+        moduleOp->setAttr("hivm.dynamic_plan", builder.getBoolAttr(true));
+        moduleOp->setAttr("hivm.load_buffer_pool", builder.getBoolAttr(true));
       }
       LDBG("Process successfully");
       return;

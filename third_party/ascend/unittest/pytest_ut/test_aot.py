@@ -123,6 +123,12 @@ def is_npu():
     return target is not None and target.backend == "npu"
 
 
+def _torch_npu_library_dir():
+    import torch_npu
+
+    return os.path.join(os.path.dirname(torch_npu.__file__), "lib")
+
+
 def _npu_toolchain():
     """Reuse the ascend backend's own NPU extension compile/link flags.
 
@@ -147,7 +153,7 @@ def _npu_toolchain():
     # torch's library dirs.
     from torch.utils.cpp_extension import library_paths
 
-    lib_dirs += [lib_dir for lib_dir in library_paths() if lib_dir not in lib_dirs]
+    lib_dirs += [lib_dir for lib_dir in [*library_paths(), _torch_npu_library_dir()] if lib_dir not in lib_dirs]
     python_libdir = sysconfig.get_config_var("LIBDIR")
     python_lib = f"python{sys.version_info.major}.{sys.version_info.minor}"
     ld_library_path = [*lib_dirs] + ([python_libdir] if python_libdir else [])
@@ -255,7 +261,8 @@ int main(int argc, char **argv) {{
 def _npu_run_env(tmp_dir):
     _, _, _, _, _, ld_library_path = _npu_toolchain()
     env = os.environ.copy()
-    env["LD_LIBRARY_PATH"] = os.pathsep.join([tmp_dir, *ld_library_path, env.get("LD_LIBRARY_PATH", "")])
+    paths = [tmp_dir] + ld_library_path + [env.get("LD_LIBRARY_PATH", "")]
+    env["LD_LIBRARY_PATH"] = os.pathsep.join(path for path in paths if path)
     return env
 
 
@@ -277,6 +284,8 @@ def _compile_kernel(dir, signature, kernel_name, out_name, out_path, num_warps, 
     subprocess.run(
         [
             sys.executable,
+            "-c",
+            "import torch_npu, runpy, sys; sys.argv = [sys.argv[1]] + sys.argv[2:]; runpy.run_path(sys.argv[0], run_name='__main__')",
             compiler_path,
             "-n",
             kernel_name,
@@ -292,6 +301,7 @@ def _compile_kernel(dir, signature, kernel_name, out_name, out_path, num_warps, 
             grid,
             kernel_path,
         ],
+        env=_npu_run_env(dir),
         check=True,
         cwd=dir,
     )

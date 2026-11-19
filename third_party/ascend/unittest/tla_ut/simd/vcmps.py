@@ -22,11 +22,11 @@ SIGNATURE = {"X": "*u32", "Y": "*i32", "O": "*u32"}
 
 @tla.jit
 def vcmps(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((3, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(Y, (N, )), y)
+    x = tla.alloc((N, ), tl.uint32, space="ub")
+    y = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((3, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         xv = tla.simd.vlds(x[0])
         yv = tla.simd.vlds(y[0])
@@ -37,7 +37,7 @@ def vcmps(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(o[1, 0], tla.simd.vsel(tla.simd.vcmps(yv, -1, op=tla.simd.CMP.LT), ones, zeros))
         tla.simd.vsts(o[2, 0],
                       tla.simd.vsel(tla.simd.vcmps(xv, 0x80000000, mask=prefix, op=tla.simd.CMP.ULT), ones, zeros))
-    tla.copy(o, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (3, N)))
 
 
 def constexprs():

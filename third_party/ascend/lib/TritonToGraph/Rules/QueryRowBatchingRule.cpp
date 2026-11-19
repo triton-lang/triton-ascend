@@ -369,11 +369,12 @@ static bool fitsQueryRowBudgets(ModuleOp module, triton::FuncOp function,
     if (::getenv("TRITON_GRAPH_UB_DEBUG"))
       llvm::errs() << "graph-ub[query-row]: R=" << factor
                    << " liftedPeak=" << estimate.peakLiveBytes
+                   << " pipelinedPeak=" << estimate.peakPipelinedLiveBytes
                    << " known=" << estimate.known
-                   << " replication=" << kUBBufferReplication
+                   << " replication=" << kUBMultiBufferReplication
                    << " ubBudget=" << *budget << "\n";
     if (!estimate.known || estimate.overflow ||
-        estimate.peakLiveBytes > *budget / kUBBufferReplication)
+        estimate.peakPipelinedLiveBytes > *budget)
       return false;
   }
   return !exceedsCubeBudgets(function, resources);

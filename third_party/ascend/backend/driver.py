@@ -82,11 +82,7 @@ class NPUUtils(object):
         fingerprint = json.dumps(_ascend_utils.npu_extension_fingerprint("npu_utils", extra_cflags=_NPU_UTILS_CFLAGS),
                                  sort_keys=True)
         key = _npu_utils_key(src, fingerprint)
-        # The helper lands under the backend's in-package bin/ directory, not
-        # TRITON_CACHE_DIR: PyTorch Inductor repoints that directory to a fresh
-        # temporary root around every test case, which would strand the helper
-        # (and any launcher runtime that baked its path) under earlier roots.
-        cache = _ascend_utils.bin_cache_manager(key, Path(dirname) / "bin")
+        cache = get_cache_manager(key)
         fname = "npu_utils.so"
 
         def build():
@@ -184,11 +180,11 @@ class NPUUtils(object):
         return cube_core_num, vector_core_num
 
     def get_device_limit(self):
+        num_aic, num_aiv = self.get_device_core()
         try:
             limited_aic, limited_aiv = self._get_npu_device_limit_form_env()
         except ValueError:
-            return False, None, None
-        num_aic, num_aiv = self.get_device_core()
+            return False, num_aic, num_aiv
         return num_aic != limited_aic or num_aiv != limited_aiv, limited_aic, limited_aiv
 
     def get_device_properties(self, device):

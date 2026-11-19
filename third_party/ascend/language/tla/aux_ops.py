@@ -21,7 +21,7 @@
 Compiler-hint helpers for the TLA namespace.
 
 Migrated from TLA ``cann/extension/aux_ops.py`` (SIMD VF related subset):
-``annotate_buffer_versions`` is the frontend declaration consumed by the
+``annotate_multi_buffer`` is the frontend declaration consumed by the
 NPU-IR multi-buffer pass (``annotation.mark {hivm.multi_buffer = N : i32}``).
 """
 
@@ -33,7 +33,7 @@ from triton.language.core import (
 
 from triton._C.libtriton import ir
 
-__all__ = ["annotate_buffer_versions", "assume"]
+__all__ = ["annotate_multi_buffer", "assume"]
 
 
 @builtin
@@ -78,7 +78,7 @@ def compile_hint_impl(ptr, hint_name: str, hint_val, builder: ir.builder):
 
 
 @builtin
-def annotate_buffer_versions(buf, versions, _semantic=None):
+def annotate_multi_buffer(buf, versions, _semantic=None):
     """
     Declare the multi-buffer version count for one storage buffer.
 

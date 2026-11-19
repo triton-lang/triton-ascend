@@ -29,6 +29,7 @@
 #include <set>
 
 #include "ascend/include/DynamicCVPipeline/Common/FlagIdManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
@@ -48,8 +49,10 @@
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Dominance.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Visitors.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/DenseSet.h"
@@ -288,6 +291,20 @@ InterCoreTransferAndSyncPass::getBlockStartEnd(int targetId,
       knownOpInBlock = op;
     }
   });
+
+  if (knownOpInBlock && CVPipeline::hasOuterMainLoop(module)) {
+    auto loop = knownOpInBlock->getParentOfType<scf::ForOp>();
+    if (loop && loop->hasAttr(CVPipeline::kOuterEventControlCount)) {
+      // A rematerialized scalar may carry another event stage's ID.
+      // Anchor transfers at the direct stage root where its result is visible.
+      for (Operation &root : loop.getBody()->without_terminator()) {
+        if (CVPipeline::getOpBlockId(&root) == targetId) {
+          knownOpInBlock = &root;
+          break;
+        }
+      }
+    }
+  }
 
   if (!knownOpInBlock) {
     return {nullptr, nullptr};
@@ -640,6 +657,28 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder,
   SmallVector<int64_t> expectedShape =
       computeExpectedShape(origValue, NzDimWidth);
   int originBlockId = dep.iniProducerBlockId;
+  // A fractal dot operand is already NZ. Reuse its physical tensor instead
+  // of materializing NZ->ND->NZ on Vector before the L1 transfer.
+  if (auto convert = origValue.getDefiningOp<hivm::ConvertLayoutOp>()) {
+    auto sourceType = dyn_cast<RankedTensorType>(convert.getSource().getType());
+    auto ndType = cast<RankedTensorType>(origValue.getType());
+    if (sourceType && ndType.getRank() == 2 &&
+        ndType.getShape() == ArrayRef<int64_t>(expectedShape) &&
+        !convert.getSrcLayout().getTransposeValue().value_or(false) &&
+        !convert.getDstLayout().getTransposeValue().value_or(false) &&
+        convert.getSrcLayout().getFractalSizes() &&
+        convert.getSrcLayout().getFractalSizes().asArrayRef() ==
+            ArrayRef<int64_t>({NzDimWidth, blk}) &&
+        convert.getSrcLayout().getDataLayout() == hivm::DataLayout::Fractal &&
+        convert.getDstLayout().getDataLayout() == hivm::DataLayout::ND &&
+        sourceType.getShape() ==
+            ArrayRef<int64_t>({expectedShape[1] / blk,
+                               expectedShape[0] / NzDimWidth, NzDimWidth,
+                               blk})) {
+      ndnzValueMapping[origValue] = convert.getSource();
+      return;
+    }
+  }
   // Step 2: If shapes match, return original value
   bool isEqualedShape = isExpectedShape(origValue, expectedShape);
   LOG_DEBUG("newValue" << newValue << "\n");
@@ -712,6 +751,124 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder,
   LOG_DEBUG("[reshape4DOp]: " << *reshape4DOp << "\n");
   ndnzValueMapping[origValue] = reshape4DOp.getResult();
 }
+
+namespace {
+
+struct EventLayoutSinkPlan {
+  SmallVector<OpResult> results;
+  SmallVector<OpOperand *> leaves;
+};
+
+// Only cross an if-result/yield chain owned by the same VECTOR stage. In
+// particular, an unused-event branch must produce a defined tensor: a bare
+// tensor.empty (or a captured placeholder whose origin is unknown here) is not
+// a valid leaf. Inspect every branch before changing any type or yield.
+static bool planEventLayoutSink(OpResult result, int blockId,
+                                EventLayoutSinkPlan &plan) {
+  auto ifOp = dyn_cast<scf::IfOp>(result.getOwner());
+  if (!ifOp || !result.hasOneUse() || ifOp.getElseRegion().empty() ||
+      CVPipeline::getOpBlockId(ifOp) != blockId ||
+      CVPipeline::getValueCoreType(result) != CVPipeline::VECTOR_ONLY)
+    return false;
+
+  for (Region *region : {&ifOp.getThenRegion(), &ifOp.getElseRegion()}) {
+    auto yield = dyn_cast<scf::YieldOp>(region->front().getTerminator());
+    if (!yield || result.getResultNumber() >= yield.getNumOperands())
+      return false;
+    OpOperand &operand = yield->getOpOperand(result.getResultNumber());
+    Value value = operand.get();
+    Operation *def = value.getDefiningOp();
+    if (value.getType() != result.getType() || !def ||
+        def->getBlock() != yield->getBlock())
+      return false;
+    if (isa<scf::IfOp>(def)) {
+      if (!planEventLayoutSink(cast<OpResult>(value), blockId, plan))
+        return false;
+      continue;
+    }
+    // A local pure tensor producer or a fully initialized filler is enough;
+    // do not move a memref read, allocation, transfer or sync into a branch.
+    if (isa<tensor::EmptyOp>(def) || !isMemoryEffectFree(def) ||
+        CVPipeline::getOpBlockId(def) != blockId ||
+        (CVPipeline::getValueCoreType(value) != CVPipeline::VECTOR_ONLY &&
+         !isa<linalg::FillOp, arith::ConstantOp>(def)))
+      return false;
+    plan.leaves.push_back(&operand);
+  }
+  plan.results.push_back(result);
+  return true;
+}
+
+// ND->NZ is pure, but leaving it after a payload if prevents vector fusion
+// with the producer. Sink only the exact unpadded chain created above, and
+// only after dependency analysis and transfer/sync insertion have finished.
+// The transfer itself remains outside the payload predicate, so empty events
+// still publish their initialized placeholder and return the same credits.
+static void sinkOuterEventLayout(OpResult source, Value normalized) {
+  auto ifOp = cast<scf::IfOp>(source.getOwner());
+  auto sourceType = dyn_cast<RankedTensorType>(source.getType());
+  if (!sourceType || !sourceType.hasStaticShape() || sourceType.getRank() != 2)
+    return;
+
+  auto last = normalized.getDefiningOp<tensor::ReshapeOp>();
+  if (!last)
+    return;
+  auto transpose = last->getOperand(0).getDefiningOp<linalg::TransposeOp>();
+  if (!transpose || !transpose->hasOneUse())
+    return;
+  auto first = transpose->getOperand(0).getDefiningOp<tensor::ReshapeOp>();
+  auto empty = transpose->getOperand(1).getDefiningOp<tensor::EmptyOp>();
+  if (!first || !empty || first->getOperand(0) != source ||
+      !first->hasOneUse() || !empty->hasOneUse())
+    return;
+  auto firstShape = first->getOperand(1).getDefiningOp<arith::ConstantOp>();
+  auto lastShape = last->getOperand(1).getDefiningOp<arith::ConstantOp>();
+  if (!firstShape || !lastShape || !firstShape->hasOneUse() ||
+      !lastShape->hasOneUse())
+    return;
+
+  SmallVector<Operation *> chain = {firstShape, first,     empty,
+                                    transpose,  lastShape, last};
+  auto blockId = CVPipeline::getOpBlockId(ifOp);
+  if (!blockId)
+    return;
+  for (Operation *op : chain) {
+    if (op->getBlock() != ifOp->getBlock() ||
+        CVPipeline::getOpBlockId(op) != blockId ||
+        CVPipeline::getOpCoreType(op) != CVPipeline::VECTOR_ONLY ||
+        !isMemoryEffectFree(op) || op->hasAttr(CVPipeline::kTransferId) ||
+        op->hasAttr(CVPipeline::kCrossCoreDeps) ||
+        op->hasAttr(CVPipeline::kMemCrossDeps) ||
+        op->hasAttr(CVPipeline::kIntraDeps))
+      return;
+  }
+
+  EventLayoutSinkPlan plan;
+  if (!planEventLayoutSink(source, *blockId, plan))
+    return;
+
+  LOG_DEBUG("[outer-event-layout] sink stage "
+            << *blockId << " result " << source.getResultNumber() << " into "
+            << plan.leaves.size() << " initialized branches\n");
+  OpBuilder builder(ifOp.getContext());
+  for (OpOperand *leaf : plan.leaves) {
+    builder.setInsertionPoint(leaf->getOwner());
+    IRMapping mapping;
+    mapping.map(source, leaf->get());
+    for (Operation *op : chain)
+      builder.clone(*op, mapping);
+    leaf->set(mapping.lookup(normalized));
+  }
+  // Keep the original if operations, result numbers and all their attributes.
+  // Other results, predicates, readiness and transfer ownership are unchanged.
+  for (OpResult forwarded : plan.results)
+    forwarded.setType(normalized.getType());
+  normalized.replaceAllUsesWith(source);
+  for (Operation *op : llvm::reverse(chain))
+    op->erase();
+}
+
+} // namespace
 
 // mark memref.alloc
 mlir::Operation *InterCoreTransferAndSyncPass::annotateTightlyCoupledBuffer(
@@ -1011,35 +1168,49 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
   LOG_DEBUG("Inserting [Cube->Vector] transfer for value: " << srcValue
                                                             << "\n");
   auto srcTensorType = cast<RankedTensorType>(srcValue.getType());
-  int64_t M = srcTensorType.getDimSize(0);
-  int64_t N = srcTensorType.getDimSize(1);
   Type elemType = srcTensorType.getElementType();
 
   int cubeBlockId =
       CVPipeline::getOpBlockId(srcValue.getDefiningOp()).value_or(-1);
   int vecBlockId = CVPipeline::getOpBlockId(insertPoint.consStart).value_or(-1);
 
-  auto targetShape = dep.isAllTranspoesd ? std::vector<int64_t>{N, M}
-                                         : std::vector<int64_t>{M, N};
+  auto folded =
+      dep.realValue
+          ? std::nullopt
+          : CVPipeline::matchFixpipeOutputCast(srcValue.getDefiningOp());
+  Value fixpipeSrcValue = dep.realValue ? dep.realValue : srcValue;
+  std::vector<int64_t> targetShape;
+  if (folded) {
+    fixpipeSrcValue = folded->matmulOp.getResult(0);
+    targetShape.assign(srcTensorType.getShape().begin(),
+                       srcTensorType.getShape().end());
+  } else {
+    int64_t M = srcTensorType.getDimSize(0);
+    int64_t N = srcTensorType.getDimSize(1);
+    targetShape = dep.isAllTranspoesd ? std::vector<int64_t>{N, M}
+                                      : std::vector<int64_t>{M, N};
+  }
+
   auto targetTensorType = RankedTensorType::get(targetShape, elemType);
   auto [cubeAllocOp, vecAllocOp] = createTransferAllocs(
       builder, loc, targetShape, elemType, hivm::AddressSpace::UB, insertPoint,
       cubeBlockId, vecBlockId, CVPipeline::kCoreTypeCube,
       CVPipeline::kCoreTypeVector, transferIndex);
-  auto dmaModeAttr = FixpipeDMAModeAttr::get(
-      builder.getContext(),
-      dep.isAllTranspoesd ? FixpipeDMAMode::NZ2DN : FixpipeDMAMode::NZ2ND);
-
-  auto realValue = dep.value;
-  if (dep.realValue) {
-    realValue = dep.realValue;
-  }
+  auto dmaMode =
+      dep.isAllTranspoesd ? FixpipeDMAMode::NZ2DN : FixpipeDMAMode::NZ2ND;
+  if (folded && folded->writesNZ)
+    dmaMode = FixpipeDMAMode::NZ2NZ;
+  auto dmaModeAttr = FixpipeDMAModeAttr::get(builder.getContext(), dmaMode);
+  auto quantModeAttr = folded ? FixpipePreQuantModeAttr::get(
+                                    builder.getContext(), folded->preQuantMode)
+                              : FixpipePreQuantModeAttr{};
   auto fixpipeOp = builder.create<hivm::FixpipeOp>(
       loc, mlir::TypeRange{},    // No return value
-      realValue,                 // src
+      fixpipeSrcValue,           // src
       cubeAllocOp->getResult(0), // dst
-      mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, nullptr, nullptr,
-      nullptr, nullptr, nullptr, mlir::ArrayAttr{}, nullptr);
+      mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, quantModeAttr, nullptr,
+      nullptr, nullptr, folded ? folded->quantScale : Value{},
+      mlir::ArrayAttr{}, nullptr);
   attachTransferTags(fixpipeOp, cubeBlockId, CVPipeline::kCoreTypeCube,
                      transferIndex);
   attachCrossCoreDeps(fixpipeOp, transferIndex, CVPipeline::crossCoreProducerId,
@@ -1092,6 +1263,15 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
 
   if (consumedDataOp) {
     *consumedDataOp = toTensorOp;
+  }
+  if (folded) {
+    for (Operation *op : folded->foldedOps) {
+      if (llvm::all_of(op->getUsers(), CVPipeline::isFixpipeQuantScaleHint)) {
+        for (Operation *hint : llvm::make_early_inc_range(op->getUsers()))
+          hint->erase();
+        op->erase();
+      }
+    }
   }
   return fixpipeOp;
 }
@@ -1944,9 +2124,9 @@ Operation *InterCoreTransferAndSyncPass::createC2CSharedL1Buffer(
 }
 
 // C->C Transfer Logic
-LogicalResult
-InterCoreTransferAndSyncPass::handleCubeToCube(OpBuilder &builder,
-                                               DependencyInfo &dep) {
+LogicalResult InterCoreTransferAndSyncPass::handleCubeToCube(
+    OpBuilder &builder, DependencyInfo &dep,
+    llvm::SmallSetVector<Operation *, 4> &foldedCasts) {
   mlir::Value transferValue = dep.value;
   Location loc = transferValue.getLoc();
 
@@ -2073,10 +2253,8 @@ InterCoreTransferAndSyncPass::handleCubeToCube(OpBuilder &builder,
     }
   }
 
-  // Erase the trunc op after all uses are replaced (dead code elimination).
-  if (truncOp && CVPipeline::getFixpipePreQuantMode(truncOp).has_value()) {
-    truncOp->erase();
-  }
+  if (quantMode)
+    foldedCasts.insert(truncOp);
 
   intraDepsGroupId++;
   LOG_DEBUG("Inserted C->C fixpipe transfer: block "
@@ -2353,6 +2531,7 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
   }
   LOG_DEBUG("Completed C->V transfers and syncs.\n");
 
+  llvm::SmallSetVector<Operation *, 4> foldedCasts;
   // Step 3.1: Handle inter-block C->C dependencies (fixpipe L0C to L1)
   llvm::SmallVector<DependencyInfo> &C2CDependencies =
       info.getC2CDependencies();
@@ -2367,7 +2546,7 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     if (!isValidC2CMatmulDependency(dep.value, dep.consumerBlockId)) {
       continue;
     }
-    if (failed(handleCubeToCube(builder, dep))) {
+    if (failed(handleCubeToCube(builder, dep, foldedCasts))) {
       LOG_DEBUG("[ERROR] Inter C->C failed! producerBlockId = "
                 << dep.producerBlockId
                 << ", consumerBlockId = " << dep.consumerBlockId << "\n");
@@ -2396,7 +2575,7 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
             static_cast<unsigned>(consumerMatmul.getNumDpsInputs())) {
       continue;
     }
-    if (failed(handleCubeToCube(builder, dep))) {
+    if (failed(handleCubeToCube(builder, dep, foldedCasts))) {
       LOG_DEBUG("[ERROR] IntraC2C failed! producer and consumer' BlockId = "
                 << dep.consumerBlockId << "\n");
       return failure();
@@ -2423,6 +2602,11 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     }
   }
   LOG_DEBUG("Completed memory syncs.\n");
+
+  // A cast can be shared by several dependencies or retain other users.
+  for (Operation *castOp : foldedCasts)
+    if (castOp->use_empty())
+      castOp->erase();
   LOG_DEBUG("=====================================================\n");
 
   if (!flagManager.checkCurrentId()) {
@@ -2472,6 +2656,25 @@ void InterCoreTransferAndSyncPass::runOnOperation() {
     LOG_DEBUG("Error: Inter-core transfer and sync failed.\n");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
+  }
+
+  // No DataDependencyInfo consumer may run after changing these if-result
+  // types. All generated transfer and synchronization operations stay put.
+  // Collect live event-domain results. Removing matmul pseudo-ops above can
+  // invalidate keys belonging to ordinary dataflow in ndnzValueMapping.
+  if (CVPipeline::hasOuterMainLoop(module)) {
+    SmallVector<std::pair<OpResult, Value>> layouts;
+    module.walk([&](scf::IfOp branch) {
+      auto loop = branch->getParentOfType<scf::ForOp>();
+      if (!loop || !loop->hasAttr(CVPipeline::kOuterEventControlCount))
+        return;
+      for (OpResult result : branch.getResults())
+        if (auto entry = ndnzValueMapping.find(result);
+            entry != ndnzValueMapping.end())
+          layouts.emplace_back(result, entry->second);
+    });
+    for (auto [source, normalized] : layouts)
+      sinkOuterEventLayout(source, normalized);
   }
 
   LOG_DEBUG("Module after InterCoreTransferAndSyncPass:\n" << module << "\n");

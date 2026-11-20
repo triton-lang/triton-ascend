@@ -606,10 +606,11 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
         mix_mode = re.search(MIX_MODE_REGEX, linalg).group(1)
         if mix_mode != "mix":
             metadata["auto_tile_and_bind_subblock"] = False
-        # One metadata cache line for runtime participant_num, plus one
-        # choosing and one ticket cache line per participant. Each cache line is
-        # 8 i64. This fallback is for one lock; the bishengir callback supplies
-        # the exact total after lowering.
+        # Yang-Anderson arbitration-tree lock: one metadata cache line for
+        # runtime participant_num, plus the T/C tree arrays and per-(level,
+        # participant) spin lines. Each cache line is 8 i64. This fallback is
+        # for one lock; the bishengir callback supplies the exact total after
+        # lowering, and prepareLocks applies the 3*Np - 2 + L*N line formula.
         metadata["sync_block_lock_layout"] = 1 << 32
         metadata["lock_init_val"] = 0
     # the mix mode is also encoded into metadata['name'] for runtime to distinguish

@@ -1,9 +1,9 @@
-// RUN: triton-opt --split-input-file --verify-each %s -graph-optimize='rule-mask=131072' -canonicalize -cse -o %t
+// RUN: triton-opt --split-input-file --verify-each %s -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t
 // RUN: FileCheck %s < %t
 // A second rule run must not lift rows twice.  The canonicalizer needs its own
 // second round to fold the duplicated scf.if, which is unrelated to the row lift, so
 // the idempotency check drives the rule and CSE only.
-// RUN: triton-opt --split-input-file --verify-each %t -graph-optimize='rule-mask=131072' -cse -o %t.twice
+// RUN: triton-opt --split-input-file --verify-each %t -graph-optimize='rule-mask=196608' -cse -o %t.twice
 // RUN: diff %t %t.twice
 // RUN: triton-opt --split-input-file --verify-each %s -graph-optimize='rule-mask=0' -canonicalize -cse -o %t.disabled
 // RUN: triton-opt --split-input-file %s -canonicalize -cse -o %t.control
@@ -12,16 +12,16 @@
 // The row lift is Ascend 950 only: the same candidates must stay untouched elsewhere.
 // RUN: sed 's/Ascend950PR_9579/Ascend910B2/g' %s > %t.a2.mlir
 // RUN: triton-opt --split-input-file %t.a2.mlir -canonicalize -cse -o %t.a2.control
-// RUN: triton-opt --split-input-file --verify-each %t.a2.mlir -graph-optimize='rule-mask=131072' -canonicalize -cse -o %t.a2
+// RUN: triton-opt --split-input-file --verify-each %t.a2.mlir -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.a2
 // RUN: diff %t.a2.control %t.a2
 // Missing target information must not enable the rule either.
 // RUN: sed 's/hacc.target = #hacc.target<"Ascend950PR_9579">, //g' %s > %t.no-target.mlir
 // RUN: triton-opt --split-input-file %t.no-target.mlir -canonicalize -cse -o %t.no-target.control
-// RUN: triton-opt --split-input-file --verify-each %t.no-target.mlir -graph-optimize='rule-mask=131072' -canonicalize -cse -o %t.no-target
+// RUN: triton-opt --split-input-file --verify-each %t.no-target.mlir -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.no-target
 // RUN: diff %t.no-target.control %t.no-target
 // The row-count policy keeps one full wave: a static 64-program grid may only
 // coalesce to 64/R >= 28, so R drops from 8 to 2.
-// RUN: triton-opt --split-input-file --verify-each %s -graph-optimize='rule-mask=131072 core-num=28' -canonicalize -cse -o %t.corenum
+// RUN: triton-opt --split-input-file --verify-each %s -graph-optimize='rule-mask=196608 core-num=28' -canonicalize -cse -o %t.corenum
 // RUN: FileCheck %s --check-prefix=CORENUM < %t.corenum
 // CORENUM-NOT: hacc.coalesce_factor = 8 : i32
 // CORENUM: hacc.coalesce_factor = 2 : i32

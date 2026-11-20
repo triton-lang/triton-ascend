@@ -1187,13 +1187,15 @@ void init_tla_builder(py::module &&m) {
               // bf16/f16 (128) -> f8 (256), lane count = total_bits / out_bits.
               result = self.create<hivmave::VFTruncFOp>(
                                outVecTy, src, mask, roundAttr,
-                               builder.getBoolAttr(sat), partAttr)
+                               builder.getBoolAttr(sat), partAttr,
+                               hivmave::VCVT_ModeTypeAttr{})
                            .getResult();
             } else if (kind == "extf") {
               // vextf widens to a full register: 2048 / out_bits lanes.
-              result =
-                  self.create<hivmave::VFExtFOp>(outVecTy, src, mask, partAttr)
-                      .getResult();
+              result = self.create<hivmave::VFExtFOp>(
+                               outVecTy, src, mask, partAttr,
+                               hivmave::VCVT_ModeTypeAttr{})
+                           .getResult();
             } else if (kind == "s2f" || kind == "u2f") {
               // int -> fp conversion, sign chosen by the source dtype.
               // ISA attribute rules (VFSIntToFpOp/VFUIntToFpOp::verify):

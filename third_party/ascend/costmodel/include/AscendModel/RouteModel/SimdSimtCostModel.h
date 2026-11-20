@@ -128,24 +128,26 @@ struct SimdSimtCostReport {
     std::string reason = "no_structural_route_elapsed_calibration";
     std::string calibrationName;
     std::string candidate;
-    std::string dotUseSignature;
+    std::string launchExecutionDomain;
     std::string formula;
     std::string evidence;
     int64_t superblockFactor = 1;
     int64_t baseWarpCount = 0;
     int64_t runtimeSchedulingSlotCount = 0;
-    int64_t minimumRuntimeSchedulingSlotCount = 0;
-    int64_t maximumRuntimeSchedulingSlotCount = 0;
-    int64_t minimumRuntimeLoopIterations = 0;
-    int64_t maximumRuntimeLoopIterations = 0;
-    double minimumSelectionScore = 0.0;
-    double maximumSelectionScore = 0.0;
-    double selectionScoreScale = 0.0;
-    double schedulingSlotScale = 0.0;
+    int64_t runtimePhysicalProgramCount = 0;
+    double effectiveKernelLaunchSystemCycles = 0.0;
+    double firstDispatchSystemCycles = 0.0;
+    double lastParentStartOffsetSystemCycles = 0.0;
+    double criticalParentStartOffsetSystemCycles = 0.0;
+    double criticalParentBodyAdjustmentSystemCycles = 0.0;
+    double taskResponseSystemCycles = 0.0;
+    double parentBodyPressureSystemCycles = 0.0;
+    bool hasExplicitLaunchPhases = false;
+    double globalLoadCompletionSystemCycles = 0.0;
     double fixedSystemCycles = 0.0;
     int64_t runtimeKernelArgumentCount = 0;
     double runtimeArgumentSetupSystemCycles = 0.0;
-    /// Accounting split of the measured route-independent kernel boundary.
+    /// Fitted scalar phases, available with explicit launch calibration.
     double scalarPrologueSystemCycles = 0.0;
     double scalarEpilogueSystemCycles = 0.0;
     double systemCounterFrequencyMHz = 0.0;

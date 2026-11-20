@@ -22,6 +22,37 @@
 using namespace mlir;
 using namespace mlir::ascend;
 
+bool KernelLaunchCost::isValid() const {
+  const std::array costs{firstDispatch,
+                         multiParentFirstDispatch,
+                         parentStartInterval,
+                         scalarPrologue,
+                         scalarEpilogue,
+                         taskResponse,
+                         parentBodyPressure,
+                         pipelinedParentBodyPressure,
+                         scalarStoreParentPressure,
+                         scalarStorePressureCap};
+  return !evidence.empty() && llvm::all_of(costs, [](double value) {
+    return std::isfinite(value) && value >= 0.0;
+  });
+}
+
+double KernelLaunchCost::dispatchStart(int64_t physicalProgramCount) const {
+  return physicalProgramCount > 1 ? multiParentFirstDispatch : firstDispatch;
+}
+
+double KernelLaunchCost::lastParentOffset(int64_t physicalProgramCount) const {
+  return static_cast<double>(std::max<int64_t>(0, physicalProgramCount - 1)) *
+         parentStartInterval;
+}
+
+double KernelLaunchCost::estimate(int64_t physicalProgramCount) const {
+  return dispatchStart(physicalProgramCount) +
+         lastParentOffset(physicalProgramCount) + scalarPrologue +
+         scalarEpilogue + taskResponse;
+}
+
 namespace {
 
 static constexpr double StageWorkload::*workloadScalarFields[] = {
@@ -221,8 +252,10 @@ struct SingleReductionFacts {
 };
 
 static std::optional<SingleReductionFacts>
-singleReductionFacts(const LogicalStageCost &stage, bool requireSingleAdd) {
-  if (stage.model != "rowwise_reduction" || stage.iterationCount != 1 ||
+singleReductionFacts(const LogicalStageCost &stage, bool requireSingleAdd,
+                     bool allowRepeated = false) {
+  if (stage.model != "rowwise_reduction" ||
+      (!allowRepeated && stage.iterationCount != 1) ||
       stage.workload.reductionGeometryCounts.size() != 1)
     return std::nullopt;
   if (requireSingleAdd &&
@@ -335,15 +368,24 @@ findImplementationCost(const LogicalStageCost &stage,
   return nullptr;
 }
 
-static bool fittedScanOwnsCompletion(const MinmaxScanFacts &facts,
+static bool fittedScanOwnsCompletion(size_t stageIndex,
                                      const StageCostTable &table,
                                      const StageRoutePlan &plan) {
-  if (!facts.exact || facts.stageIndex >= plan.implementations.size())
+  if (stageIndex >= plan.implementations.size())
     return false;
-  const auto *selected = findImplementationCost(
-      table.stages[facts.stageIndex], plan.implementations[facts.stageIndex]);
-  // A fitted scan already owns its full completion cost.
-  return selected && selected->resources.scanCompletionCycles > 0.0;
+  const LogicalStageCost &stage = table.stages[stageIndex];
+  const auto *selected =
+      findImplementationCost(stage, plan.implementations[stageIndex]);
+  if (!selected || selected->resources.scanCompletionCycles <= 0.0)
+    return false;
+  // A partial fit still needs the kernel helper for the uncovered scans.
+  const auto sumCount = [](double count, const auto &entry) {
+    return count + entry.second;
+  };
+  const auto &fitted = selected->resources.scanFormulaCounts;
+  const auto &scans = stage.workload.prefixScanCounts;
+  return std::accumulate(fitted.begin(), fitted.end(), 0.0, sumCount) >=
+         std::accumulate(scans.begin(), scans.end(), 0.0, sumCount);
 }
 
 /// AutoBlockify V1 is a route-conditional execution schedule.
@@ -2015,6 +2057,10 @@ StageCostModelSummary::toJSON(bool includeDiagnosticImplementations) const {
   for (const auto &[factor, plan] : allSimtFactorPlans)
     simtFactors[std::to_string(factor)] = plan.toJSON();
   result["all_simt_factor_routes"] = std::move(simtFactors);
+  llvm::json::Array mixedFactors;
+  for (const StageRoutePlan &plan : mixedFactorPlans)
+    mixedFactors.push_back(plan.toJSON());
+  result["mixed_factor_routes"] = std::move(mixedFactors);
   return result;
 }
 
@@ -2168,6 +2214,38 @@ static void rescaleStage(StageRoutePlan &plan, size_t index, double scale) {
 static double sumStages(const StageRoutePlan &plan, size_t begin, size_t end) {
   return std::accumulate(plan.logicalStageCycles.begin() + begin,
                          plan.logicalStageCycles.begin() + end, 0.0);
+}
+
+/// Estimate the bytes touched by one Stage iteration from its affine access
+/// geometry. Logical tensor bytes overcount overlapping rows, for example a
+/// 256-wide tile with a 150-element row stride.
+static double workingSetBytesPerIteration(const StageWorkload &workload) {
+  double bytes = 0.0;
+  for (const StageMemoryAccess &access : workload.memoryAccesses) {
+    const int64_t rows = access.rowCount();
+    const int64_t rowBytes = access.rowBytes();
+    if (rows <= 0 || rowBytes <= 0 || access.elementBits <= 0 ||
+        access.elementBits % 8 != 0 || !std::isfinite(access.count) ||
+        access.count < 0.0)
+      return workload.loadBytes + workload.storeBytes;
+
+    const int64_t elementBytes = access.elementBits / 8;
+    const double activeRatio =
+        access.masked ? std::clamp(access.activeElementRatio, 0.0, 1.0) : 1.0;
+    const int64_t activeElements = static_cast<int64_t>(
+        std::ceil(static_cast<double>(rowBytes / elementBytes) * activeRatio));
+    const int64_t activeRowBytes = activeElements * elementBytes;
+    if (activeRowBytes == 0)
+      continue;
+
+    const int64_t strideBytes = std::abs(access.rowStrideBytes());
+    const int64_t additionalRowBytes = std::min(strideBytes, activeRowBytes);
+    const double accessBytes =
+        static_cast<double>(activeRowBytes) +
+        static_cast<double>(rows - 1) * additionalRowBytes;
+    bytes += access.count * accessBytes;
+  }
+  return bytes > 0.0 ? bytes : workload.loadBytes + workload.storeBytes;
 }
 
 /// Apply a bounded whole-SIMD completion curve after runtime replay.
@@ -2578,14 +2656,19 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
   const int64_t wholeKernelGroupIterations = parentSchedule.wholeIterations;
   const int64_t mixedLoopIterations = parentSchedule.mixedIterations;
 
-  // A whole-kernel SIMT SuperBlock materializes F logical programs in one
-  // physical block.
-  const int64_t launchedPhysicalPrograms =
-      plan.candidate == StageKernelRouteKind::AllSIMT
-          ? ceilDivNonNegative(logicalPrograms, factor)
-          : logicalPrograms;
-  plan.runtimePhysicalProgramCount =
-      std::min(launchedPhysicalPrograms, launchCores);
+  // A pure-SIMT SuperBlock requires at least one complete F-wide group on the
+  // most-loaded parent slot.  A masked tail with Q<F executes no aggregated
+  // logical-program work; admitting it lets an uncalibrated wide-tail body win
+  // even though the backend reports an effective runtime factor of one.
+  if (plan.candidate == StageKernelRouteKind::AllSIMT && factor > 1 &&
+      fullGroups == 0)
+    return false;
+
+  // SuperBlock changes the number of logical programs executed by each
+  // parent block; it does not divide the NPUIR V1 launch block count.  The
+  // runtime launches one parent block per active scheduling slot and advances
+  // that block through any remaining groups.
+  plan.runtimePhysicalProgramCount = std::min(logicalPrograms, launchCores);
   plan.runtimeSchedulingSlotCount = std::min(logicalPrograms, schedulingSlots);
   plan.runtimeLogicalProgramsPerSchedulingSlot = programsPerSchedulingSlot;
   plan.runtimeFullGroupCount = fullGroups;
@@ -2611,6 +2694,20 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       llvm::any_of(costTable.stages, [](const LogicalStageCost &stage) {
         return stage.features.isGridStrideLoopShell;
       });
+  const bool priceParentClasses =
+      hasV1Schedule && !hasGridStrideLoop && !usesCubeExecution &&
+      plan.candidate == StageKernelRouteKind::AllSIMD && factor == 1 &&
+      programsPerSchedulingSlot > 1 &&
+      llvm::none_of(costTable.stages, [](const LogicalStageCost &stage) {
+        const auto &f = stage.features;
+        return f.hasPrefixScan || f.hasReduction || f.hasIndirectMemory ||
+               f.hasAtomicMemory || stage.model == "independent_pipelined_loop";
+      });
+  if (priceParentClasses) {
+    plan.fullPhysicalParentCount = logicalPrograms / programsPerSchedulingSlot;
+    plan.partialPhysicalParentPrograms =
+        logicalPrograms % programsPerSchedulingSlot;
+  }
   std::vector<double> unscaledStageCycles = plan.logicalStageCycles;
   std::vector<double> unscaledHandoffCycles = plan.scopeHandoffCycles;
   plan.totalCycles = 0.0;
@@ -2697,7 +2794,7 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
             0 &&
         costTable.logicalProgramCountHint > 0) {
       const double bytesPerIteration =
-          stage.workload.loadBytes + stage.workload.storeBytes;
+          workingSetBytesPerIteration(stage.workload);
       const double workingSetBytes =
           bytesPerIteration *
           static_cast<double>(std::max<int64_t>(1, stage.iterationCount)) *
@@ -2995,10 +3092,93 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       }
     }
 
+    if (priceParentClasses && (stage.features.insideAutoBlockifyV1Loop ||
+                               stage.model == "auto_blockify_loop"))
+      plan.cyclesPerLogicalProgram += fullBody + unscaledHandoffCycles[index];
     scaledStageCycles += scaledHandoffCycles;
     plan.logicalStageCycles[index] = scaledStageCycles;
     plan.scopeHandoffCycles[index] = scaledHandoffCycles;
     plan.totalCycles += scaledStageCycles;
+  }
+  if (plan.candidate == StageKernelRouteKind::AllSIMD &&
+      costTable.simdIndependentLoadGroupKernelStartupCycles > 0.0) {
+    for (size_t index = 0; index < costTable.stages.size(); ++index) {
+      const LogicalStageCost &stage = costTable.stages[index];
+      const StageImplementationCost *selected =
+          findImplementationCost(stage, plan.implementations[index]);
+      if (!selected || stage.model != "independent_pipelined_loop" ||
+          selected->resources.stridedShortLoadCompletion <= 0.0)
+        continue;
+      const double startup =
+          costTable.simdIndependentLoadGroupKernelStartupCycles;
+      plan.logicalStageCycles[index] += startup;
+      plan.totalCycles += startup;
+      plan.diagnostic<bool>("strided_loop_load_group_startup_applied") = true;
+      plan.diagnostic<double>("strided_loop_load_group_startup_system_cycles") =
+          startup;
+      plan.diagnostic<std::string>("strided_loop_load_group_startup_evidence") =
+          "strided completion curves are steady-state marginals; the measured "
+          "SIMD independent-load group startup is charged once per kernel";
+      break;
+    }
+  }
+  if (plan.candidate == StageKernelRouteKind::AllSIMD &&
+      (costTable.simdIndependentLoopExpDivPairCyclesPerElement > 0.0 ||
+       costTable.simdIndependentLoopPredicateSelectCyclesPerElement > 0.0)) {
+    const auto operationElements = [](const StageWorkload &work,
+                                      llvm::StringRef operation) {
+      const auto found = work.operationCounts.find(operation);
+      if (found == work.operationCounts.end())
+        return 0.0;
+      double elements = 0.0;
+      for (const auto &[width, count] : found->second)
+        elements += static_cast<double>(width) * count;
+      return elements;
+    };
+    for (size_t index = 0; index < costTable.stages.size(); ++index) {
+      const LogicalStageCost &stage = costTable.stages[index];
+      if (stage.model != "independent_pipelined_loop")
+        continue;
+      const double expDivElements =
+          std::min(operationElements(stage.workload, "f32.exp"),
+                   operationElements(stage.workload, "f32.div"));
+      const double selectElements =
+          operationElements(stage.workload, "predicate.select");
+      const double perIteration =
+          expDivElements *
+              costTable.simdIndependentLoopExpDivPairCyclesPerElement +
+          selectElements *
+              costTable.simdIndependentLoopPredicateSelectCyclesPerElement;
+      const double completion =
+          static_cast<double>(std::max<int64_t>(1, stage.iterationCount)) *
+          perIteration;
+      if (completion <= 0.0)
+        continue;
+      plan.logicalStageCycles[index] += completion;
+      plan.totalCycles += completion;
+      plan.diagnostic<double>(
+          "independent_loop_composition_completion_system_cycles") +=
+          completion;
+    }
+  }
+  if (plan.candidate == StageKernelRouteKind::AllSIMT &&
+      costTable.simtMaskedStridedStoreKernelStartupCycles > 0.0) {
+    for (size_t index = 0; index < costTable.stages.size(); ++index) {
+      const LogicalStageCost &stage = costTable.stages[index];
+      const StageImplementationCost *selected =
+          findImplementationCost(stage, plan.implementations[index]);
+      if (!selected || stage.model != "independent_pipelined_loop" ||
+          selected->resources.stridedShortStoreCompletion <= 0.0)
+        continue;
+      const double startup =
+          costTable.simtMaskedStridedStoreKernelStartupCycles;
+      plan.logicalStageCycles[index] += startup;
+      plan.totalCycles += startup;
+      plan.diagnostic<bool>("simt_strided_store_kernel_startup_applied") = true;
+      plan.diagnostic<double>(
+          "simt_strided_store_kernel_startup_system_cycles") = startup;
+      break;
+    }
   }
   // The P=1 straight-line SIMT scan lowers to one external helper.
   if (plan.candidate == StageKernelRouteKind::AllSIMT &&
@@ -3007,11 +3187,12 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
     bool hasStraightLineScan = false;
     for (size_t index = 0; index < costTable.stages.size(); ++index) {
       const LogicalStageCost &stage = costTable.stages[index];
-      hasStraightLineScan |=
+      const bool matches =
           plan.implementations[index].mode == StageMode::SIMT &&
           stage.model == "prefix_scan" && !stage.features.hasLoop &&
           !stage.features.isGridStrideLoopShell &&
           !stage.features.insideGridStrideLoopBody;
+      hasStraightLineScan |= matches;
     }
     if (hasStraightLineScan) {
       for (size_t index = 0; index < costTable.stages.size(); ++index) {
@@ -3050,6 +3231,61 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
             "straight_line_simt_scan_completion_evidence") =
             costTable.simtStraightLinePrefixScanCompletionEvidence;
       }
+    }
+  }
+  if (plan.candidate == StageKernelRouteKind::AllSIMT &&
+      costTable.simtStraightLinePrefixScanKernelCompletionCycles > 0.0) {
+    std::optional<size_t> scanOwner;
+    for (size_t index = 0; index < costTable.stages.size(); ++index) {
+      const LogicalStageCost &stage = costTable.stages[index];
+      if (plan.implementations[index].mode == StageMode::SIMT &&
+          stage.model == "prefix_scan" && !stage.features.hasLoop &&
+          !stage.features.isGridStrideLoopShell &&
+          !stage.features.insideGridStrideLoopBody) {
+        if (scanOwner) {
+          scanOwner.reset();
+          break;
+        }
+        scanOwner = index;
+      }
+    }
+    if (scanOwner && !fittedScanOwnsCompletion(*scanOwner, costTable, plan)) {
+      const double completion =
+          static_cast<double>(
+              std::max<int64_t>(1, plan.runtimePhysicalProgramCount)) *
+          costTable.simtStraightLinePrefixScanKernelCompletionCycles;
+      plan.logicalStageCycles[*scanOwner] += completion;
+      plan.totalCycles += completion;
+      plan.diagnostic<double>(
+          "straight_line_simt_scan_kernel_completion_system_cycles") =
+          completion;
+    }
+  }
+  if (plan.candidate == StageKernelRouteKind::AllSIMD &&
+      costTable.simdNonUnitPrefixScanKernelCompletionCycles > 0.0) {
+    std::optional<size_t> scanOwner;
+    for (size_t index = 0; index < costTable.stages.size(); ++index) {
+      const LogicalStageCost &stage = costTable.stages[index];
+      const bool nonUnitScan =
+          llvm::any_of(stage.workload.prefixScanCounts, [](const auto &entry) {
+            return entry.second > 0.0 && std::get<2>(entry.first) > 1 &&
+                   std::get<3>(entry.first) == 1;
+          });
+      if (!nonUnitScan)
+        continue;
+      if (scanOwner) {
+        scanOwner.reset();
+        break;
+      }
+      scanOwner = index;
+    }
+    if (scanOwner && !fittedScanOwnsCompletion(*scanOwner, costTable, plan)) {
+      const double completion =
+          costTable.simdNonUnitPrefixScanKernelCompletionCycles;
+      plan.logicalStageCycles[*scanOwner] += completion;
+      plan.totalCycles += completion;
+      plan.diagnostic<double>(
+          "non_unit_simd_scan_kernel_completion_system_cycles") = completion;
     }
   }
   if (plan.candidate == StageKernelRouteKind::AllSIMD &&
@@ -3637,7 +3873,8 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       costTable.routeCompletions.largeSequenceMinmaxScan.enabled) {
     const auto facts = minmaxScanFacts(costTable);
     const auto &fit = costTable.routeCompletions.largeSequenceMinmaxScan;
-    if (facts.exact && !fittedScanOwnsCompletion(facts, costTable, plan) &&
+    if (facts.exact &&
+        !fittedScanOwnsCompletion(facts.stageIndex, costTable, plan) &&
         facts.sequences >= fit.minimumIndependentSequences &&
         facts.sequences <= fit.maximumIndependentSequences &&
         facts.extent >= fit.minimumExtent &&
@@ -3673,7 +3910,8 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
         facts.sequences <= fit.largeMaximumIndependentSequences &&
         facts.extent >= fit.largeMinimumExtent &&
         facts.extent <= fit.largeMaximumExtent;
-    if (facts.exact && !fittedScanOwnsCompletion(facts, costTable, plan) &&
+    if (facts.exact &&
+        !fittedScanOwnsCompletion(facts.stageIndex, costTable, plan) &&
         (baseDomain || largeDomain)) {
       const double reduction =
           largeDomain
@@ -3701,8 +3939,6 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
     }
   }
   if (plan.candidate == StageKernelRouteKind::AllSIMD && factor == 1 &&
-      plan.runtimePhysicalProgramCount == 1 &&
-      costTable.logicalProgramCountHint == 1 &&
       costTable.routeCompletions.straightLineAddReduction.enabled) {
     bool exactStructure = true;
     int64_t matchingReductions = 0;
@@ -3711,7 +3947,11 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
     int64_t loads = 0;
     int64_t stores = 0;
     for (const LogicalStageCost &stage : costTable.stages) {
-      if (hasUnsupportedStraightLineCompletion(stage))
+      const bool independentReductionLoop =
+          stage.features.hasReduction && stage.features.hasLoop &&
+          !stage.features.hasLoopCarriedDataDependency;
+      if (hasUnsupportedStraightLineCompletion(stage) &&
+          !independentReductionLoop)
         exactStructure = false;
       for (const StageMemoryAccess &access : stage.workload.memoryAccesses) {
         if (access.store)
@@ -3721,7 +3961,7 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       }
       if (!stage.features.hasReduction)
         continue;
-      const auto reduction = singleReductionFacts(stage, true);
+      const auto reduction = singleReductionFacts(stage, true, true);
       if (!reduction || reduction->elementBits != 32) {
         exactStructure = false;
         continue;
@@ -3730,27 +3970,29 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       rows = reduction->rows;
       extent = reduction->extent;
     }
-    exactStructure &=
-        matchingReductions == 1 && loads == 1 && stores == 1 &&
-        rows >=
-            costTable.routeCompletions.straightLineAddReduction.minimumRows &&
-        rows <=
-            costTable.routeCompletions.straightLineAddReduction.maximumRows &&
-        extent >=
-            costTable.routeCompletions.straightLineAddReduction.minimumExtent &&
-        extent <=
-            costTable.routeCompletions.straightLineAddReduction.maximumExtent;
-    if (exactStructure) {
-      const double target =
-          std::max(0.0, plan.totalCycles -
-                            costTable.routeCompletions.straightLineAddReduction
-                                .sharedCompletionSystemCycles);
+    const auto &fit = costTable.routeCompletions.straightLineAddReduction;
+    exactStructure &= matchingReductions == 1 && stores == 1;
+    const bool baseDomain =
+        plan.runtimePhysicalProgramCount == 1 &&
+        costTable.logicalProgramCountHint == 1 && loads == 1 &&
+        rows >= fit.minimumRows && rows <= fit.maximumRows &&
+        extent >= fit.minimumExtent && extent <= fit.maximumExtent;
+    const bool largeDomain =
+        fit.largeMinimumRows > 0 && loads == 2 &&
+        rows >= fit.largeMinimumRows && rows <= fit.largeMaximumRows &&
+        extent >= fit.largeMinimumExtent && extent <= fit.largeMaximumExtent;
+    if (exactStructure && (baseDomain || largeDomain)) {
+      const double target = std::max(
+          0.0, plan.totalCycles +
+                   (largeDomain ? fit.largeAdditionalCompletionSystemCycles
+                                : -fit.sharedCompletionSystemCycles));
       const double adjustment = retargetRoute(plan, target);
       setDiagnostics(
           plan,
           {{"simd_straight_line_add_reduction_completion_applied", true},
            {"simd_straight_line_add_reduction_rows", rows},
            {"simd_straight_line_add_reduction_extent", extent},
+           {"simd_straight_line_add_reduction_large_domain", largeDomain},
            {"simd_straight_line_add_reduction_adjustment_system_cycles",
             adjustment},
            {"simd_straight_line_add_reduction_evidence",
@@ -4427,7 +4669,8 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
     return plan;
   };
 
-  auto bestFactoredPlan = [&](StageKernelRouteKind kind) {
+  auto bestFactoredPlan = [&](StageKernelRouteKind kind,
+                              std::vector<StageRoutePlan> *candidates) {
     StageRoutePlan best;
     best.candidate = kind;
     for (int64_t factor : mixedFactors) {
@@ -4435,6 +4678,8 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
           kind == StageKernelRouteKind::Mixed ? costTable.cvAivSubblocks : 1;
       for (int64_t subblocks = 1; subblocks <= maximumSubblocks; ++subblocks) {
         StageRoutePlan candidate = buildPlan(kind, factor, subblocks);
+        if (candidate.legal && candidates)
+          candidates->push_back(candidate);
         if (candidate.legal &&
             (!best.legal || candidate.totalCycles < best.totalCycles))
           best = std::move(candidate);
@@ -4463,7 +4708,8 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
   for (const auto &[factor, plan] : result.allSimtFactorPlans)
     if (!result.allSimt.legal || plan.totalCycles < result.allSimt.totalCycles)
       result.allSimt = plan;
-  result.mixed = bestFactoredPlan(StageKernelRouteKind::Mixed);
+  result.mixed =
+      bestFactoredPlan(StageKernelRouteKind::Mixed, &result.mixedFactorPlans);
   const bool cubeContext =
       llvm::any_of(costTable.stages,
                    [](const auto &stage) { return stage.features.hasDot; });

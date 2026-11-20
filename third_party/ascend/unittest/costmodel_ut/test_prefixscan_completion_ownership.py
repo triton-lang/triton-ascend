@@ -43,11 +43,15 @@ def test_minmax_completion_ownership_is_per_implementation(tmp_path, fitted_mode
                                                       False, False, 1, 1, 1, '', capabilities, str(report_path))
     pm.run(parsed, 'scan_completion_ownership')
     report = json.loads(report_path.read_text().splitlines()[-1])
-    for mode, route, flag in (
-        ('simd', 'all_simd', 'simd_large_sequence_minmax_scan_completion_applied'),
-        ('simt', 'all_simt_only', 'simt_multi_sequence_minmax_scan_completion_applied'),
+    for mode, route, flag, legacy, cycles in (
+        ('simd', 'all_simd', 'simd_large_sequence_minmax_scan_completion_applied',
+         'non_unit_simd_scan_kernel_completion_system_cycles', 150),
+        ('simt', 'all_simt_only', 'simt_multi_sequence_minmax_scan_completion_applied',
+         'straight_line_simt_scan_kernel_completion_system_cycles', 370),
     ):
-        assert report['stage_model']['routes'][route][flag] == (mode not in fitted_modes)
+        plan = report['stage_model']['routes'][route]
+        assert plan[flag] == (mode not in fitted_modes)
+        assert plan.get(legacy, 0) == (0 if mode in fitted_modes else cycles)
         scans = [
             impl['resource_system_cycles']
             for stage in report['stage_model']['logical_stages']

@@ -655,12 +655,13 @@ void populateBuiltinGraphOptimizationRules(
     rules.push_back(createContiguousBlockAccessFormationRule(
         options.contiguousBlockAccessFormation));
   }
-  if (isRuleEnabled(options.enabledRuleMask,
-                    GraphOptimizationRuleId::SelectedBlockScan)) {
+  // Bits 16 and 17 form one joint contract
+  const bool selectedBlockScanEnabled = isRuleEnabled(
+      options.enabledRuleMask, GraphOptimizationRuleId::SelectedBlockScan);
+  const bool queryRowBatchingEnabled = isRuleEnabled(
+      options.enabledRuleMask, GraphOptimizationRuleId::QueryRowBatching);
+  if (selectedBlockScanEnabled && queryRowBatchingEnabled) {
     rules.push_back(createSelectedBlockScanRule());
-  }
-  if (isRuleEnabled(options.enabledRuleMask,
-                    GraphOptimizationRuleId::QueryRowBatching)) {
     rules.push_back(createQueryRowBatchingRule());
   }
   const auto compileMode =

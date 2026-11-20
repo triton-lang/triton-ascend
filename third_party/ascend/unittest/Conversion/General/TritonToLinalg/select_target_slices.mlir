@@ -544,3 +544,61 @@ module {
 // A2-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
 // A2-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [%[[END]]] [1]
 // COMMON-NEXT: scf.yield %[[INSERT]]
+
+// -----
+
+// On 950 a full leading prefix needs no copy. For a partial prefix, write the
+// remaining constant rows into the single-use result of the elementwise op.
+module {
+  func.func @computed_row_prefix(%x: tensor<16x32xf32>, %end: i32) -> tensor<16x32xf32> {
+    %rows = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
+    %ends = tt.splat %end : i32 -> tensor<16xi32>
+    %active = arith.cmpi slt, %rows, %ends : tensor<16xi32>
+    %expanded = tt.expand_dims %active {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+    %mask = tt.broadcast %expanded : tensor<16x1xi1> -> tensor<16x32xi1>
+    %zero = arith.constant dense<0.0> : tensor<16x32xf32>
+    %computed = math.exp2 %x : tensor<16x32xf32>
+    %result = arith.select %mask, %computed, %zero : tensor<16x32xi1>, tensor<16x32xf32>
+    return %result : tensor<16x32xf32>
+  }
+}
+// COMMON-LABEL: func.func @computed_row_prefix(
+// A5-DAG: %[[HEIGHT:.*]] = arith.constant 16 : index
+// COMMON-DAG: %[[ZERO:.*]] = linalg.fill {{.*}} -> tensor<16x32xf32>
+// COMMON-DAG: %[[VALUE:.*]] = math.exp2
+// A5: %[[TAIL:.*]] = arith.subi %[[HEIGHT]], %[[ROWS:.*]] : index
+// A5: %[[PART:.*]] = tensor.extract_slice %[[ZERO]][%[[ROWS]], 0] [%[[TAIL]], 32]
+// A5: %[[OUT:.*]] = tensor.insert_slice %[[PART]] into %[[VALUE]][%[[ROWS]], 0] [%[[TAIL]], 32]
+// A2: %[[PART:.*]] = tensor.extract_slice %[[VALUE]][0, 0] [%[[ROWS:.*]], 32]
+// A2: %[[OUT:.*]] = tensor.insert_slice %[[PART]] into %[[ZERO]][0, 0] [%[[ROWS]], 32]
+// COMMON: return %[[OUT]]
+
+// -----
+
+// A rectangular prefix also leaves invalid columns in otherwise valid rows.
+// Its complement cannot be filled by replacing a suffix of whole rows.
+module {
+  func.func @computed_rectangular_prefix(%x: tensor<16x32xf32>, %rowEnd: i32, %colEnd: i32) -> tensor<16x32xf32> {
+    %rows = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
+    %rowEnds = tt.splat %rowEnd : i32 -> tensor<16xi32>
+    %activeRows = arith.cmpi slt, %rows, %rowEnds : tensor<16xi32>
+    %expandedRows = tt.expand_dims %activeRows {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+    %rowMask = tt.broadcast %expandedRows : tensor<16x1xi1> -> tensor<16x32xi1>
+    %cols = tt.make_range {start = 0 : i32, end = 32 : i32} : tensor<32xi32>
+    %colEnds = tt.splat %colEnd : i32 -> tensor<32xi32>
+    %activeCols = arith.cmpi slt, %cols, %colEnds : tensor<32xi32>
+    %expandedCols = tt.expand_dims %activeCols {axis = 0 : i32} : tensor<32xi1> -> tensor<1x32xi1>
+    %colMask = tt.broadcast %expandedCols : tensor<1x32xi1> -> tensor<16x32xi1>
+    %mask = arith.andi %rowMask, %colMask : tensor<16x32xi1>
+    %zero = arith.constant dense<0.0> : tensor<16x32xf32>
+    %computed = math.exp2 %x : tensor<16x32xf32>
+    %result = arith.select %mask, %computed, %zero : tensor<16x32xi1>, tensor<16x32xf32>
+    return %result : tensor<16x32xf32>
+  }
+}
+// COMMON-LABEL: func.func @computed_rectangular_prefix(
+// COMMON-DAG: %[[ZERO:.*]] = linalg.fill {{.*}} -> tensor<16x32xf32>
+// COMMON-DAG: %[[VALUE:.*]] = math.exp2
+// COMMON: %[[PART:.*]] = tensor.extract_slice %[[VALUE]][0, 0] [%[[ROWS:.*]], %[[COLS:.*]]]
+// COMMON: %[[OUT:.*]] = tensor.insert_slice %[[PART]] into %[[ZERO]][0, 0] [%[[ROWS]], %[[COLS]]]
+// COMMON: return %[[OUT]]

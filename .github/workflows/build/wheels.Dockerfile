@@ -49,7 +49,7 @@ RUN export PIP_TIMEOUT=120 \
 # Environment matching the original CIBW_ENVIRONMENT
 # ---------------------------------------------------------------------------
 ENV TRITON_BUILD_WITH_CLANG_LLD=true \
-    TRITON_BUILD_PROTON=OFF \
+    TRITON_BUILD_PROTON=ON \
     TRITON_BUILD_TD=${TRITON_BUILD_TD} \
     TRITON_WHEEL_NAME=triton-ascend \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \

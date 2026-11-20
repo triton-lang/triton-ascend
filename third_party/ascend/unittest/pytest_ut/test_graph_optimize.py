@@ -937,9 +937,8 @@ def test_graph_optimize_options_contribute_to_npu_hash():
 #     enforced by NPUOptions and normalize_graph_optimization_rule_mask.
 # Both layers also carry the default mask (3071), which keeps bits 16 and 17
 # out so the pair stays opt-in; the cases below pin that default-off contract,
-# the "unknown bits stay rejected" contract, and that Rule A's bit alone
-# already produces the same IR as bit 16|17 (Rule A has no separate Rule B
-# enable flag; it always calls Rule B's materialize entry).
+# the "unknown bits stay rejected" contract, and that the scan rule only
+# registers when both bits are set (16 alone and 17 alone are no-ops).
 
 RULE_A_CASES_DIR = Path(__file__).resolve().parent.parent / "Conversion" / "General" / "TritonToGraph"
 RULE_A_CASES = RULE_A_CASES_DIR / "nsa_selected_block_scan.mlir"
@@ -997,15 +996,14 @@ def test_add_graph_optimize_accepts_selected_block_scan(tmp_path):
     assert_reparseable(module, tmp_path, "selected-block-scan-mask")
 
 
-def test_rule_a_bit_alone_matches_a_plus_b(tmp_path):
-    """Rule A has no separate Rule B gate.
+def test_rule_a_bit_alone_is_noop(tmp_path):
+    """The scan rule is registered only when both rule bits are set.
 
-    Rule A always runs Rule B's real implementation (the QueryRowBatching.h
-    materialize entry) inside its own sandbox and lets Rule B decide, so bit 16
-    alone must produce exactly the same IR as bit 16|17: the 131072 bit only
-    decides whether Rule B is ALSO scheduled as a standalone rule, where it
-    finds nothing left to lift.  This mirrors the `-graph-optimize
-    'rule-mask=65536'` vs `'rule-mask=196608'` equality pinned by
+    Bit 16 alone and bit 17 alone must leave the IR exactly as the rule-off run
+    leaves it: the driver ANDs the two bits before it pushes
+    SelectedBlockScanRule, whose sandbox carries Rule B's row lift anyway.  This
+    mirrors the `-graph-optimize 'rule-mask=65536'` / `'rule-mask=131072'`
+    no-op and the `'rule-mask=196608'` rewrite pinned by
     `unittest/Conversion/General/TritonToGraph/nsa_selected_block_scan.mlir`.
 
     Shared input: that lit file embeds the same kernel as its positive module,
@@ -1020,5 +1018,8 @@ def test_rule_a_bit_alone_matches_a_plus_b(tmp_path):
     baseline = DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & ~(SELECTED_BLOCK_SCAN_RULE_BIT | QUERY_ROW_BATCHING_RULE_BIT)
     assert baseline == 3071
     a_only = baseline | SELECTED_BLOCK_SCAN_RULE_BIT
-    assert _render_graph_optimize(fixture, a_only) == _render_graph_optimize(fixture,
-                                                                             a_only | QUERY_ROW_BATCHING_RULE_BIT)
+    b_only = baseline | QUERY_ROW_BATCHING_RULE_BIT
+    control = _render_graph_optimize(fixture, baseline)
+    assert _render_graph_optimize(fixture, a_only) == control
+    assert _render_graph_optimize(fixture, b_only) == control
+    assert _render_graph_optimize(fixture, a_only | QUERY_ROW_BATCHING_RULE_BIT) != control

@@ -587,5 +587,50 @@ void rewriteDevicePrintOffsets(ModuleOp moduleOp) {
   });
 }
 
+void normalizeDevicePrintTensorRanks(ModuleOp moduleOp) {
+  moduleOp.walk([&](func::CallOp callOp) {
+    if (!callOp.getCallee().starts_with("triton_print"))
+      return;
+    auto printFunc = dyn_cast_or_null<func::FuncOp>(
+        SymbolTable::lookupSymbolIn(moduleOp, callOp.getCalleeAttr()));
+    if (!printFunc || !printFunc.isPrivate() || !printFunc.isExternal() ||
+        !printFunc->hasAttr("prefix") || !printFunc->hasAttr("hex"))
+      return;
+
+    OpBuilder builder(callOp);
+    SmallVector<Value> printArgs;
+    bool changed = false;
+    for (Value arg : callOp.getArgOperands()) {
+      auto tensorType = dyn_cast<RankedTensorType>(arg.getType());
+      if (tensorType && tensorType.hasStaticShape() &&
+          tensorType.getRank() > 3) {
+        // Dot operands can reside in L1, whose debug copy to UB only supports
+        // matrices and batched matrices. Match tl.dot's batch flattening while
+        // preserving the printed element order and the last two dimensions.
+        int64_t rank = tensorType.getRank();
+        int64_t batch = 1;
+        for (int64_t dim = 0; dim < rank - 2; ++dim)
+          batch *= tensorType.getDimSize(dim);
+        SmallVector<int64_t> shape{batch, tensorType.getDimSize(rank - 2),
+                                   tensorType.getDimSize(rank - 1)};
+        Value shapeValue = builder.create<arith::ConstantOp>(
+            callOp.getLoc(), builder.getI64TensorAttr(shape));
+        // Use the same reshape representation as ReshapeConverter so the
+        // print and dot views can fold and CSE together before bufferization.
+        arg = builder.createOrFold<tensor::ReshapeOp>(
+            callOp.getLoc(), tensorType.clone(shape), arg, shapeValue);
+        changed = true;
+      }
+      printArgs.push_back(arg);
+    }
+    if (!changed)
+      return;
+
+    callOp.getArgOperandsMutable().assign(printArgs);
+    printFunc.setFunctionType(builder.getFunctionType(
+        callOp.getOperandTypes(), printFunc.getResultTypes()));
+  });
+}
+
 } // namespace triton
 } // namespace mlir

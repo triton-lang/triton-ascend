@@ -30,6 +30,9 @@ namespace triton {
 
 void rewriteDevicePrintOffsets(ModuleOp moduleOp);
 
+// Run after offset scalarization so its iteration space remains unchanged.
+void normalizeDevicePrintTensorRanks(ModuleOp moduleOp);
+
 } // namespace triton
 } // namespace mlir
 

@@ -435,7 +435,7 @@ applicable-scope:
 
 ## 9. codespell 白名单同步
 
-当本技能文档或翻译流程引入新的专有名词（如 `Volcengine`）时，必须同步更新 `.github/docs-ci/codespell.whitelist.json`，否则文档门禁会因拼写检查失败而阻止 PR 合入。
+当本技能文档或翻译流程引入新的专有名词（如 `glm-5.2` 中的 `glm`）时，必须同步更新 `.github/docs-ci/codespell.whitelist.json`，否则文档门禁会因拼写检查失败而阻止 PR 合入。
 
 检查流程：
 1. 确认新词是否已在 `.github/docs-ci/codespell.whitelist.json` 中

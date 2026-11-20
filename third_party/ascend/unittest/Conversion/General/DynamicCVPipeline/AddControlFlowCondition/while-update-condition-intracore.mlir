@@ -15,7 +15,7 @@
 // Producer if=5: skip cross memref.load/slt, then intra control_var < 1.
 // CHECK: memref.load %{{.*}}[] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: arith.cmpi slt, %{{.*}}, %{{.*}} : i32
-// CHECK: %[[LIM:.*]] = arith.constant 2 : i32
+// CHECK: %[[LIM:.*]] = arith.constant 1 : i32
 // CHECK: %[[SLT:.*]] = arith.cmpi slt, %{{.*}}, %[[LIM]] : i32
 // CHECK: %[[AND_P0:.*]] = arith.andi %{{.*}}, %[[SLT]]
 // CHECK: %[[COND5:.*]] = arith.andi %[[AND_P0]], %{{.*}}
@@ -35,7 +35,7 @@
 
 // CHECK: scf.yield
 
-module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intra_buf_count = 2 : i32, ssbuffer.inter_core_buf_count = 1 : i32, ssbuffer.load_store_buf_conut = 1 : i32} {
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intra_buf_count = 2 : i32} {
   func.func @while_update_condition_intracore(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {
     %c0_i32 = arith.constant 0 : i32
     %c16_i32 = arith.constant 16 : i32

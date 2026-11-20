@@ -14,10 +14,7 @@
 // CHECK: scf.while
 // CHECK-SAME: %[[TINIT]]
 
-// The flag of the loop starts as the constant zero at the head of the loop
-// body: it is the false value of the select that computes the flag.
 // CHECK: ^bb0
-// CHECK: %[[ZERO5:.*]] = arith.constant 0 : i32
 
 // Consumer if=5: after cross sgt, eq 1 is and-ed into cond; then -1 inside if.
 // The block 5 is on the second level of the vector core, it has no preload
@@ -31,15 +28,9 @@
 // the counter condition is added.
 // CHECK: arith.andi
 // CHECK: %[[COND5:.*]] = arith.andi
-// The block is the first one of the loop: the flag it reads is the constant
-// zero the loop starts with, its check is left out.
 // CHECK: scf.if %[[COND5]]
 // CHECK: arith.subi
 // CHECK: } {{.*}}ssbuffer.if = 5
-// The flag of the loop is not yielded by the block: it is computed with a
-// select on the condition of the block, after the block.
-// CHECK: %[[ONE5:.*]] = arith.constant 1 : i32
-// CHECK: %[[FLAG5:.*]] = arith.select %[[COND5]], %[[ONE5]], %[[ZERO5]] : i32
 
 // Producer if=6: after cross slt, eq 0 is and-ed into cond; then +1 inside if.
 // The block 6 is on the first level of the vector core, the block 5 is on the
@@ -57,10 +48,7 @@
 // CHECK: %[[PRE_AND6:.*]] = arith.andi %{{.*}}, %[[SLE6]]
 // CHECK: %[[TAND6:.*]] = arith.andi %[[PRE_AND6]], %{{.*}}
 // CHECK: %[[COND6:.*]] = arith.andi %[[TAND6]], %{{.*}}
-// The flag of the previous block gates this one.
-// CHECK: %[[FLAGCMP6:.*]] = arith.cmpi eq, %[[FLAG5]], %{{.*}} : i32
-// CHECK: %[[AND6F:.*]] = arith.andi %[[COND6]], %[[FLAGCMP6]]
-// CHECK: scf.if %[[AND6F]]
+// CHECK: scf.if %[[COND6]]
 // CHECK: arith.addi
 // CHECK: } {{.*}}ssbuffer.if = 6
 

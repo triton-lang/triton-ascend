@@ -485,6 +485,9 @@ static bool checkCanWrap(
     if (!isMainLoopOp(loopOp)) {
       return WalkResult::advance();
     }
+    if (isa<scf::WhileOp>(loopOp)) {
+      return WalkResult::skip();
+    }
     // An inactive phase is still one logical event. Every block must execute
     // its normal ready/credit protocol and advance its private state once;
     // hoisting the payload guard would bypass that protocol for empty phases.

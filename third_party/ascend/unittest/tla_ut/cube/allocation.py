@@ -20,7 +20,8 @@ from utils.tla_test_utils import get_stages, compile_offline, lower_offline, che
 @tla.jit
 def _allocate_only(SPACE: tl.constexpr, VERSIONS: tl.constexpr):
     with tla.scope.cube():
-        tla.alloc((16, 16), tl.float32, scope=SPACE, versions=VERSIONS)
+        buf = tla.alloc((16, 16), tl.float32, space=SPACE)
+        tla.annotate_multi_buffer(buf, VERSIONS)
 
 
 @tla.jit
@@ -30,7 +31,7 @@ def _copy_two_tiles(X, Y):
         tla.load_gm_to_ub(tla.view(X, (16, 32)), first)
         tla.store_ub_to_gm(first, tla.view(Y, (16, 32)))
         # Separate logical buffers do not force distinct physical storage.
-        second = tla.alloc_buffer((16, 32), tl.float32, scope=tla.AddressSpace.UB)
+        second = tla.alloc((16, 32), tl.float32, space=tla.AddressSpace.UB)
         tla.load_gm_to_ub(tla.view(X + 512, (16, 32)), second)
         tla.store_ub_to_gm(second, tla.view(Y + 512, (16, 32)))
 
@@ -38,9 +39,9 @@ def _copy_two_tiles(X, Y):
 @tla.jit
 def _cube_product(A, B, C):
     with tla.scope.cube():
-        a = tla.alloc((2, 1, 16, 16), tl.float16, scope=tla.AddressSpace.L1)
-        b = tla.alloc_buffer((4, 2, 16, 16), tl.float16, space=tla.AddressSpace.L1)
-        acc = tla.alloc((4, 1, 16, 16), tl.float32, scope=tla.AddressSpace.L0C)
+        a = tla.alloc((2, 1, 16, 16), tl.float16, space=tla.AddressSpace.L1)
+        b = tla.alloc((4, 2, 16, 16), tl.float16, space=tla.AddressSpace.L1)
+        acc = tla.alloc((4, 1, 16, 16), tl.float32, space=tla.AddressSpace.L0C)
         tla.load_gm_to_l1(tla.view(A, (16, 32)), a)
         tla.load_gm_to_l1(tla.view(B, (32, 64)), b)
         tla.cube.mmad(a, b, acc, clear_accum=True)
@@ -92,12 +93,10 @@ def test_enum_and_legacy_types_agree():
 def test_invalid_allocation_arguments():
     # Errors must precede builder access; these calls need no native builder.
     semantic = object()
-    with pytest.raises(ValueError, match="only one of space and scope"):
-        tla.alloc((16, 16), tl.float32, "ub", scope=tla.AddressSpace.L1, _semantic=semantic)
     with pytest.raises(ValueError, match="kernel arguments"):
-        tla.alloc((16, 16), tl.float32, scope=tla.AddressSpace.GM, _semantic=semantic)
-    with pytest.raises(ValueError, match="positive integer"):
-        tla.alloc((16, 16), tl.float32, versions=0, _semantic=semantic)
+        tla.alloc((16, 16), tl.float32, space=tla.AddressSpace.GM, _semantic=semantic)
+    with pytest.raises(ValueError, match="positive int"):
+        tla.annotate_multi_buffer(object(), 0, _semantic=semantic)
 
 
 def _launch(compile_only=False, seed=7):

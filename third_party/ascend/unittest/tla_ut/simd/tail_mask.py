@@ -22,14 +22,14 @@ SIGNATURE = {"O": "*u32"}
 
 @tla.jit
 def tail_mask(O, N: tl.constexpr):
-    o = tla.alloc_buffer((3, N), tl.uint32, space="ub")
+    o = tla.alloc((3, N), tl.uint32, space="ub")
     with tla.scope.simd():
         ones = tla.simd.vsplat(1, tl.uint32)
         zeros = tla.simd.vsplat(0, tl.uint32)
         tla.simd.vsts(o[0, 0], tla.simd.vsel(tla.simd.tail_mask(20), ones, zeros))
         tla.simd.vsts(o[1, 0], tla.simd.vsel(tla.simd.tail_mask(0), ones, zeros))
         tla.simd.vsts(o[2, 0], tla.simd.vsel(tla.simd.tail_mask(64), ones, zeros))
-    tla.copy(o, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (3, N)))
 
 
 def constexprs():

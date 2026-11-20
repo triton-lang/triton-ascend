@@ -351,14 +351,8 @@ void AddControlFlowConditionPass::runOnOperation() {
   // The kernels of legacyKernel keep the control flow conditions of the
   // upstream implementation: they are not rewritten by the normal preload
   // scheme.
-  constexpr llvm::StringLiteral legacyKernel[] = {
-      "paged_decode_fd_kernel",
-      "fwd_kernel",
-      "merge_fwd_bwd_kernel",
-      "_swa_fwd_kernel"
-      "_sdpa_infer_kernel",
-      "paged_prefill_kernel",
-  };
+  constexpr llvm::StringLiteral legacyKernel[] = {"_sdpa_infer_kernel",
+                                                  "fwd_kernel"};
   // The normal preload scheme is only enabled for the kernels whose pipeline
   // dependency is a chain of four computation blocks that alternates the
   // cores: CUBE -> VECTOR -> CUBE -> VECTOR or VECTOR -> CUBE -> VECTOR ->

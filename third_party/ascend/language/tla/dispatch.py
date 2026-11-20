@@ -17,6 +17,8 @@ TLA_WITH_DISPATCH = {
     vector: handle_scope_with,
     simd: handle_scope_with,
     cube: handle_scope_with,
+    vector.task: handle_scope_with,
+    cube.task: handle_scope_with,
 }
 
 

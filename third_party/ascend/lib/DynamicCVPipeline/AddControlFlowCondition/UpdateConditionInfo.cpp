@@ -2592,12 +2592,11 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
 }
 
 // Combine the conditions: crossCore condition + intraCore condition + counter
-// condition + flowOpt condition + the flag of the loop
+// condition + flowOpt condition
 int UpdateConditionInfoPass::combineConditions(
     ModuleOp module, Value crossCoreCond, Value preloadCond,
     Value intraCoreCond, Value flowOptCond, scf::IfOp ifOp, Operation *loopOp,
-    size_t &usedCounterNum, DenseMap<Value, VarUpdateType> &varUpdateTypes,
-    Value &blockFlag, bool isLastBlock, bool isFirstBlock, bool isPureScalar) {
+    size_t &usedCounterNum, DenseMap<Value, VarUpdateType> &varUpdateTypes) {
   Location loc = ifOp.getLoc();
   SmallVector<Value> validConditions;
   Value counter;
@@ -2697,40 +2696,9 @@ int UpdateConditionInfoPass::combineConditions(
         builder.create<arith::AndIOp>(loc, combinedCond, validConditions[i]);
   }
 
-  // The flag of the loop is the last condition: the block only runs when no
-  // other block of the iteration has run yet. The first block of the flag
-  // chain reads the flag the loop starts with, a constant zero: its check is
-  // always true and is left out. A pure scalar block has no interaction with
-  // the other blocks, it is not part of the flag chain: it does not take the
-  // flag as a condition.
-  Value guardCond = combinedCond;
-  if (blockFlag && !isFirstBlock && !isPureScalar) {
-    Value zero = builder.create<arith::ConstantIntOp>(loc, 0, CONST_INT_TYPE);
-    Value flagCond = builder.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::eq, blockFlag, zero);
-    guardCond = builder.create<arith::AndIOp>(loc, combinedCond, flagCond);
-    LDBG("Add the flag condition of the loop." << "\n");
-  }
-
   Value step = updateCounterArg ? forOp.getStep() : Value();
-  scf::IfOp newIfOp = createNewIfOpWithBlocks(ifOp, guardCond, varUpdateTypes,
-                                              updateCounterArg, counter, step);
-
-  if (blockFlag && !isLastBlock && !isPureScalar) {
-    // The flag of the loop is not yielded by the block, it is computed here
-    // with a select on the condition of the block: the block has run, the flag
-    // of the loop becomes 1, the block did not run, the flag of the loop keeps
-    // the value it had. The flag is cumulative: the select of the previous
-    // block is the false value of this one, so the flag of the loop is 1 as
-    // soon as one block has run. The select is placed after the block, so that
-    // the flag of the next block is read after the body of this block has run.
-    OpBuilder flagBuilder(ifOp);
-    Value one =
-        flagBuilder.create<arith::ConstantIntOp>(loc, 1, CONST_INT_TYPE);
-    blockFlag =
-        flagBuilder.create<arith::SelectOp>(loc, guardCond, one, blockFlag);
-    LDBG("Compute the flag of the loop with a select." << "\n");
-  }
+  scf::IfOp newIfOp = createNewIfOpWithBlocks(
+      ifOp, combinedCond, varUpdateTypes, updateCounterArg, counter, step);
 
   // Update DAG nodes
   updateDAGAfterIfOpReplacement(ifOp, newIfOp);
@@ -2810,23 +2778,6 @@ int UpdateConditionInfoPass::updateIfConds(
     // share the values.
     loadedCounters.clear();
 
-    // The flag of the loop. It is 0 at the beginning of an iteration and
-    // becomes 1 as soon as a compute block has run. Every compute block takes
-    // it as an extra condition (flag == 0), so that at most one block runs per
-    // iteration. The flag is not yielded by the block, it is computed with a
-    // select on the condition of the block: the block that ran makes it 1, a
-    // block that did not run keeps the flag of the previous block. The first
-    // block keeps the constant zero the loop starts with.
-    Value blockFlag;
-    if (counterLoadBlock) {
-      OpBuilder flagBuilder(counterLoadBlock, counterLoadBlock->begin());
-      auto flagOp = flagBuilder.create<arith::ConstantIntOp>(loopOp->getLoc(),
-                                                             0, CONST_INT_TYPE);
-      blockFlag = flagOp.getResult();
-      // The counter loads are placed after the flag.
-      counterLoadTail = flagOp.getOperation();
-    }
-
     // Step1: Get intraCoreBuffers from pre-collected map
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         intraCoreBuffers;
@@ -2861,18 +2812,8 @@ int UpdateConditionInfoPass::updateIfConds(
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
-    // The blocks that exchange data with the other blocks form the flag chain
-    // of the loop: at most one of them runs per iteration. A block that has
-    // neither a cross-core nor an intra-core interaction is a pure scalar
-    // computation: it is not part of the chain, it neither checks the flag of
-    // the loop nor updates it.
-    //
-    // The chain index of a block is its position in the chain, -1 for a pure
-    // scalar block.
-    SmallVector<int> chainIdx(ifOps.size(), -1);
     SmallVector<SmallVector<int>> intraCoreInputValuesList(ifOps.size());
     SmallVector<SmallVector<int>> intraCoreOutputValuesList(ifOps.size());
-    int chainNum = 0;
     for (size_t ifIdx = 0; ifIdx < ifOps.size(); ++ifIdx) {
       scf::IfOp ifOp = ifOps[ifIdx];
       if (getInputOutputValues(ifOp, intraCoreBuffers,
@@ -2882,35 +2823,11 @@ int UpdateConditionInfoPass::updateIfConds(
                                                   << *loopOp << "\n");
         return UPDATE_CONDITION_INFO_FAILED;
       }
-      // A cross-core interaction: the block takes part in a dependency that
-      // crosses the cores, it owns a counter slot.
-      bool hasCrossCoreInteraction = info->blockCounterSlots.count(ifOp) > 0;
-      // An intra-core interaction: the block reads or writes a buffer of
-      // another block of the same core, or a tensor of the loop.
-      bool hasIntraCoreInteraction =
-          !intraCoreInputValuesList[ifIdx].empty() ||
-          !intraCoreOutputValuesList[ifIdx].empty() ||
-          tensorIterArgIfOpVars.count(ifOp) > 0;
-      if (hasCrossCoreInteraction || hasIntraCoreInteraction) {
-        chainIdx[ifIdx] = chainNum++;
-      } else {
-        LDBG("Block " << ifIdx
-                      << " is a pure scalar computation, it is not part of the "
-                      << "flag chain of the loop." << "\n");
-      }
     }
 
     // Update the conditions of ifOp in this loop op.
     for (size_t ifIdx = 0; ifIdx < ifOps.size(); ++ifIdx) {
       scf::IfOp ifOp = ifOps[ifIdx];
-      // A pure scalar block is not part of the flag chain of the loop.
-      bool isPureScalar = (chainIdx[ifIdx] < 0);
-      // The last block of the chain yields a flag that no block reads: the
-      // flag of the loop ends with it.
-      bool isLastBlock = (!isPureScalar && chainIdx[ifIdx] == chainNum - 1);
-      // The first block of the chain reads the flag the loop starts with, a
-      // constant zero: its check is always true.
-      bool isFirstBlock = (!isPureScalar && chainIdx[ifIdx] == 0);
       SmallVector<int> &intraCoreInputValues = intraCoreInputValuesList[ifIdx];
       SmallVector<int> &intraCoreOutputValues =
           intraCoreOutputValuesList[ifIdx];
@@ -2940,12 +2857,10 @@ int UpdateConditionInfoPass::updateIfConds(
         return UPDATE_CONDITION_INFO_FAILED;
       }
       // Step6:Combine the conditions: crossCore + preload + intraCore +
-      // counter + flowOpt + the flag of the loop
+      // counter + flowOpt
       if (combineConditions(module, crossCoreCond, preloadCond, intraCoreCond,
                             flowOptCond, ifOp, loopOp, usedCounterNum,
-                            varUpdateTypes, blockFlag, isLastBlock,
-                            isFirstBlock,
-                            isPureScalar) == UPDATE_CONDITION_INFO_FAILED) {
+                            varUpdateTypes) == UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }
     }

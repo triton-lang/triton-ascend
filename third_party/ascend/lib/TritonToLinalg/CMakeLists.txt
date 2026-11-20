@@ -9,7 +9,7 @@ add_triton_library(TritonToLinalg
         BlockPtrAnalysis.cpp
         DescriptorConverter.cpp
         MarkTensorKindPass.cpp
-        DevicePrintOffsetRewrite.cpp
+        DevicePrintRewrite.cpp
         DeduplicateDebugNopsPass.cpp
         CanonicalizeDebugLocationsPass.cpp
 

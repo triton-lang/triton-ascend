@@ -31,7 +31,7 @@
 #include "ascend/include/TritonToLinalg/CanonicalizeDebugLocationsPass.h"
 #include "ascend/include/TritonToLinalg/DeduplicateDebugNopsPass.h"
 #include "ascend/include/TritonToLinalg/DescriptorConverter.h"
-#include "ascend/include/TritonToLinalg/DevicePrintOffsetRewrite.h"
+#include "ascend/include/TritonToLinalg/DevicePrintRewrite.h"
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
@@ -1941,6 +1941,11 @@ void TritonToLinalgPass::runOnOperation() {
   // depending on the call ABI.
   inlinePointerCarryingCallees(moduleOp);
 
+  if (failed(triton::prepareDevicePrintOperands(moduleOp))) {
+    signalPassFailure();
+    return;
+  }
+
   // CUBE requirements affect normalization itself. SIMT requirements must also
   // account for indirect accesses introduced by that normalization.
   bool hasCubeOps = collectCubeRequirements(moduleOp);
@@ -2188,7 +2193,7 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
     this->convertTTFunc(func, hasCubeOps, hasSimtOps);
   });
 
-  rewriteDevicePrintOffsets(moduleOp);
+  triton::postprocessDevicePrints(moduleOp);
 
   // Clean up dead code and simplify IR.
   PassManager pm(&getContext(), moduleOp.getOperationName());

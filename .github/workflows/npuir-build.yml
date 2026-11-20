@@ -209,7 +209,8 @@ jobs:
           # warnings trip -Werror on LLVM 19 code. Verified still required
           # on the manylinux_2_34 image (trial run hit the int64_t error
           # without it).
-          printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error\n' > /tmp/clang++-cstdint
+          # Google Benchmark uses __COUNTER__ with -pedantic-errors on Clang 22.
+          printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error -Wno-error=c2y-extensions\n' > /tmp/clang++-cstdint
           chmod +x /tmp/clang++-cstdint
           build-tools/build.sh -o build -j "${JOBS}" \
             --cxx-compiler=/tmp/clang++-cstdint \

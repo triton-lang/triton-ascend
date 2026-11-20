@@ -22,7 +22,8 @@ def scan_module(shape, axis, copies=1):
         body) + f'\ntt.return %s{copies-1} : {ty}\n}} }}'
 
 
-def evaluate(tmp_path, shape, axis=0, copies=1, warps=4, profile=PROFILE, module_text=None):
+def evaluate(tmp_path, shape, axis=0, copies=1, warps=4, profile=PROFILE, module_text=None, capabilities=None,
+             programs=1):
     report = tmp_path / 'report.jsonl'
     if report.exists():
         report.unlink()
@@ -35,7 +36,8 @@ def evaluate(tmp_path, shape, axis=0, copies=1, warps=4, profile=PROFILE, module
     module = ir.parse_mlir_module(str(module_path), context)
     pm = ir.pass_manager(context)
     ascend.passes.ttir.add_select_simd_simt_costmodel(pm, 'report', str(profile), 'Ascend950PR_9579', warps, True,
-                                                      False, False, 1, 1, 1, '', '{}', str(report))
+                                                      False, False, 1, 1, programs, '', json.dumps(capabilities or {}),
+                                                      str(report))
     pm.run(module, "prefixscan_migration")
     assert report.is_file()
     return json.loads(report.read_text().splitlines()[-1])

@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -29,6 +30,7 @@ from triton.backends.ascend.compiler import (
     _can_materialize_scope_superblock,
     _publish_route_transform_capability,
     _resolve_auto_blockify_v1_policy,
+    _select_backend_resource_aware_factor,
     _selected_npuir_superblock_factor,
 )
 
@@ -218,3 +220,98 @@ def test_costmodel_analysis_view_materializes_v1_only_on_clone():
     assert metadata["auto_simt_costmodel_analysis_v1_materialized"]
     assert metadata["auto_simt_costmodel_analysis_ir"] == "post_auto_blockify_v1_f1_ttir"
     assert result == str(analysis)
+
+
+def test_backend_reranking_refreshes_elapsed_breakdown():
+    report = {
+        "selected_route_elapsed_prediction": {
+            "candidate": "all_simt_only",
+            "scalar_prologue_system_cycles": 250.0,
+            "scalar_epilogue_system_cycles": 250.0,
+            "system_counter_frequency_mhz": 1000,
+        },
+        "stage_model": {
+            "all_simt_factor_routes": {
+                "1": {
+                    "legal": True,
+                    "total_system_cycles": 200.0,
+                    "complete_kernel_system_cycles": 335.0,
+                    "complete_fixed_system_cycles": 135.0,
+                    "effective_kernel_launch_system_cycles": 120.0,
+                    "scalar_boundary_model": "simulator_partition_of_fitted_scalar_budget",
+                    "first_dispatch_system_cycles": 30.0,
+                    "last_parent_start_offset_system_cycles": 10.0,
+                    "scalar_prologue_system_cycles": 15.0,
+                    "scalar_epilogue_system_cycles": 5.0,
+                    "task_response_system_cycles": 60.0,
+                    "global_load_completion_system_cycles": 10.0,
+                    "runtime_argument_setup_system_cycles": 5.0,
+                },
+                "2": {"legal": True, "total_system_cycles": 150.0, "complete_kernel_system_cycles": 650.0},
+            },
+        },
+    }
+    factor, _, updated = _select_backend_resource_aware_factor(report, {1: {}, 2: {}}, 2)
+    elapsed = json.loads(updated)["selected_route_elapsed_prediction"]
+
+    assert factor == 1
+    assert elapsed["effective_kernel_launch_system_cycles"] == 120.0
+    assert elapsed["global_load_completion_system_cycles"] == 10.0
+    assert elapsed["runtime_argument_setup_system_cycles"] == 5.0
+    assert elapsed["fixed_system_cycles"] == 135.0
+    assert elapsed["scalar_boundary_model"] == "simulator_partition_of_fitted_scalar_budget"
+    assert elapsed["first_dispatch_system_cycles"] == 30.0
+    assert elapsed["last_parent_start_offset_system_cycles"] == 10.0
+    assert elapsed["scalar_prologue_system_cycles"] == 15.0
+    assert elapsed["scalar_epilogue_system_cycles"] == 5.0
+    assert elapsed["task_response_system_cycles"] == 60.0
+    assert (elapsed["base_selection_score"] +
+            elapsed["fixed_system_cycles"] == elapsed["predicted_system_counter_cycles"])
+
+
+@pytest.mark.parametrize("programs,critical_offset,working_parents", [(97, 235, 49), (112, 275, 56)])
+def test_v1_wave_uses_last_full_parent_start(tmp_path, programs, critical_offset, working_parents):
+    from triton._C.libtriton import ascend, ir
+    from triton.backends.ascend.compiler import _costmodel_profiles_dir
+
+    source = tmp_path / "input.ttir"
+    source.write_text("""module {
+      tt.func public @copy_tile(%src: !tt.ptr<f32>, %dst: !tt.ptr<f32>) {
+        %pid = tt.get_program_id x : i32
+        %width = arith.constant 1024 : i32
+        %base = arith.muli %pid, %width : i32
+        %range = tt.make_range {start = 0 : i32, end = 1024 : i32} : tensor<1024xi32>
+        %offset = tt.splat %base : i32 -> tensor<1024xi32>
+        %index = arith.addi %range, %offset : tensor<1024xi32>
+        %srcs = tt.splat %src : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>>
+        %dsts = tt.splat %dst : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>>
+        %in = tt.addptr %srcs, %index : tensor<1024x!tt.ptr<f32>>, tensor<1024xi32>
+        %out = tt.addptr %dsts, %index : tensor<1024x!tt.ptr<f32>>, tensor<1024xi32>
+        %v = tt.load %in : tensor<1024x!tt.ptr<f32>>
+        tt.store %out, %v : tensor<1024x!tt.ptr<f32>>
+        tt.return
+      }
+    }""")
+    context = ir.context()
+    ir.load_dialects(context)
+    ascend.load_dialects(context)
+    module = ir.parse_mlir_module(str(source), context)
+    transform = ir.pass_manager(context)
+    ascend.passes.ttir.add_auto_blockify_v1(transform, 56, 1)
+    transform.run(module, "auto_blockify_v1")
+    profile = _costmodel_profiles_dir() / "simd_simt" / "ascend_950pr_simd_simt_v1.json"
+    report = tmp_path / "report.jsonl"
+    caps = json.dumps({"physical_vector_core_count_hint": 56, "physical_aicore_count_hint": 28})
+    pm = ir.pass_manager(context)
+    ascend.passes.ttir.add_select_simd_simt_costmodel(pm, "report", str(profile), "Ascend950PR_9579", 4, True, False,
+                                                      False, 1, 1, programs, "", caps, str(report))
+    pm.run(module, "critical_parent")
+    route = json.loads(report.read_text().splitlines()[-1])["stage_model"]["routes"]["all_simd"]
+
+    # With 97 tiles, only 48 parents get two tiles. With 112, all 56 do.
+    assert route["runtime_physical_program_count"] == 56
+    assert route["last_parent_start_offset_system_cycles"] == 275
+    assert route["critical_parent_start_offset_system_cycles"] == critical_offset
+    assert route["critical_parent_body_adjustment_system_cycles"] == 0
+    assert route["parent_body_pressure_system_cycles"] == pytest.approx((working_parents - 1) * 1.997)
+    assert route["scalar_prologue_system_cycles"] == 264

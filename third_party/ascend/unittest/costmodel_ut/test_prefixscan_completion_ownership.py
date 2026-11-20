@@ -3,11 +3,26 @@ import json
 
 import pytest
 
-from test_prefixscan_profile_migration import local_profile, scan_module
+from test_prefixscan_profile_migration import evaluate, local_profile, scan_costs, scan_module
+
+CAPABILITIES = {'physical_vector_core_count_hint': 56, 'physical_aicore_count_hint': 28}
+
+
+@pytest.mark.parametrize('stride,legacy_completion', [(7, 0), (9, 150)])
+def test_non_unit_simd_scan_keeps_one_completion_owner(tmp_path, stride, legacy_completion):
+    profile, _, _ = local_profile(tmp_path)
+    shape = (3, 5, stride)
+    module = scan_module(shape, 1).replace('arith.addf', 'arith.minimumf')
+    report = evaluate(tmp_path, shape, axis=1, profile=profile, module_text=module, capabilities=CAPABILITIES)
+    route = report['stage_model']['routes']['all_simd']
+    assert route.get('non_unit_simd_scan_kernel_completion_system_cycles', 0) == legacy_completion
+    if stride == 7:
+        assert scan_costs(report, 'simd') == pytest.approx(200.857818)
 
 
 @pytest.mark.parametrize('fitted_modes', [(), ('simd', ), ('simt', ), ('simd', 'simt')])
-def test_minmax_completion_ownership_is_per_implementation(tmp_path, fitted_modes):
+@pytest.mark.parametrize('programs', [1, 2])
+def test_minmax_completion_ownership_is_per_implementation(tmp_path, fitted_modes, programs):
     profile_path, asset_path, asset = local_profile(tmp_path)
     for mode in ('simd', 'simt'):
         asset[mode]['formulas'] = []
@@ -28,26 +43,19 @@ def test_minmax_completion_ownership_is_per_implementation(tmp_path, fitted_mode
                 'terms': {'one': 1000 if mode == 'simd' else 1200},
             })
     asset_path.write_text(json.dumps(asset))
-    module = scan_module((16, 8, 32), 0).replace('arith.addf', 'arith.minsi').replace('f32', 'i32')
-    from triton._C.libtriton import ir, ascend
-    context = ir.context()
-    ir.load_dialects(context)
-    ascend.load_dialects(context)
-    module_path = tmp_path / 'scan.mlir'
-    module_path.write_text(module)
-    parsed = ir.parse_mlir_module(str(module_path), context)
-    report_path = tmp_path / 'report.jsonl'
-    capabilities = json.dumps({'physical_vector_core_count_hint': 56, 'physical_aicore_count_hint': 28})
-    pm = ir.pass_manager(context)
-    ascend.passes.ttir.add_select_simd_simt_costmodel(pm, 'report', str(profile_path), 'Ascend950PR_9579', 4, True,
-                                                      False, False, 1, 1, 1, '', capabilities, str(report_path))
-    pm.run(parsed, 'scan_completion_ownership')
-    report = json.loads(report_path.read_text().splitlines()[-1])
-    for mode, route, flag in (
-        ('simd', 'all_simd', 'simd_large_sequence_minmax_scan_completion_applied'),
-        ('simt', 'all_simt_only', 'simt_multi_sequence_minmax_scan_completion_applied'),
+    shape = (16, 8, 32)
+    module = scan_module(shape, 0).replace('arith.addf', 'arith.minsi').replace('f32', 'i32')
+    report = evaluate(tmp_path, shape, profile=profile_path, module_text=module, capabilities=CAPABILITIES,
+                      programs=programs)
+    for mode, route, flag, legacy, cycles in (
+        ('simd', 'all_simd', 'simd_large_sequence_minmax_scan_completion_applied',
+         'non_unit_simd_scan_kernel_completion_system_cycles', 150),
+        ('simt', 'all_simt_only', 'simt_multi_sequence_minmax_scan_completion_applied',
+         'straight_line_simt_scan_kernel_completion_system_cycles', 370),
     ):
-        assert report['stage_model']['routes'][route][flag] == (mode not in fitted_modes)
+        plan = report['stage_model']['routes'][route]
+        assert plan[flag] == (mode not in fitted_modes and programs == 1)
+        assert plan.get(legacy, 0) == (0 if mode in fitted_modes else cycles)
         scans = [
             impl['resource_system_cycles']
             for stage in report['stage_model']['logical_stages']

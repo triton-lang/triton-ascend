@@ -249,3 +249,5 @@ __all__ = [
     # kernel decorator
     "jit",
 ]
+
+# CI smoke test marker: this comment is intentionally a no-op.

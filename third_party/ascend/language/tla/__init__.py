@@ -67,8 +67,8 @@ from triton.language.core import (
     uint64,
 )
 
-# Use Triton's iterators for runtime and compile-time loops in TLA kernels.
-from triton.language.core import range, static_range
+# Shared kernel control flow and compile-time values.
+from triton.language.core import constexpr, program_id, range, static_assert, static_range
 
 from ._decorator import experimental
 from .core import AddressSpace, buffer, buffer_type, vector, vector_type
@@ -166,7 +166,10 @@ __all__ = [
     "uint16",
     "uint32",
     "uint64",
+    "constexpr",
+    "program_id",
     "range",
+    "static_assert",
     "static_range",
     "AddressSpace",
     "PadMode",

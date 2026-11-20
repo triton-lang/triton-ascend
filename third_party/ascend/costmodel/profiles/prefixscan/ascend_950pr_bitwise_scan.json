@@ -1605,6 +1605,13 @@
         "duplicate_warp_values": 3.0426767676767676,
         "scan_instruction_work": 6.060606060606061e-05
       }
+    },
+    {
+      "id": "*_T1_*_*_compact8_one_element_per_thread",
+      "terms": {
+        "data_shuffle_issue_groups": 56.10663220043413,
+        "scan_instruction_work": 1.0
+      }
     }
   ],
   "dispatch": [
@@ -3884,7 +3891,17 @@
               "right": {
                 "feature": "independent_blocks",
                 "threshold": 4.0,
-                "left": "*_T1_*_*_compact8",
+                "left": {
+                  "feature": "axis_elements_per_thread",
+                  "threshold": 1,
+                  "left": {
+                    "feature": "dead_shuffle_issue_groups",
+                    "threshold": 0,
+                    "left": "*_T1_*_*_compact8",
+                    "right": "*_T1_*_*_compact8_one_element_per_thread"
+                  },
+                  "right": "*_T1_*_*_compact8"
+                },
                 "right": "*_T1_*_*_compact10"
               }
             },
@@ -3907,7 +3924,17 @@
                 },
                 "right": "*_T1_*_*_compact25"
               },
-              "right": "*_T1_*_*_compact8"
+              "right": {
+                "feature": "axis_elements_per_thread",
+                "threshold": 1,
+                "left": {
+                  "feature": "dead_shuffle_issue_groups",
+                  "threshold": 0,
+                  "left": "*_T1_*_*_compact8",
+                  "right": "*_T1_*_*_compact8_one_element_per_thread"
+                },
+                "right": "*_T1_*_*_compact8"
+              }
             },
             "right": "*_T1_*_*_compact57"
           }

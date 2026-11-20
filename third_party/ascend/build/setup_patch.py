@@ -134,7 +134,7 @@ def _apply_patch(patch_path, reverse=False, *, directory=None, cwd=None):
 
 def _apply_proton_patch(enabled):
     """Toggle the Proton patch without resetting local source changes."""
-    patch_path = _REPO_ROOT / "third_party" / "ascend" / "patch" / "proton_patch.patch"
+    patch_path = _REPO_ROOT / "third_party" / "ascend" / "patch" / "proton_patch-3.7.0.patch"
     command = ["git", "apply", "--check"]
     # Check the opposite direction to detect the desired state already exists.
     already_applied = ["--reverse"] if enabled else []

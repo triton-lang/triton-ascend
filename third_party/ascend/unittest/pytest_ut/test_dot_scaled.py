@@ -36,6 +36,7 @@ import triton.language as tl
 
 from numpy.random import RandomState
 from triton.language.extra import libdevice
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 
 @pytest.mark.parametrize("M, N, K, rhs_scale, normal_type, acc_num, num_warps",
@@ -222,3 +223,88 @@ def test_scaled_dot_fast_math(normal_type):
 
     torch.testing.assert_close(out_fast_math, ref_fast_math, atol=1e-3, rtol=1e-2, equal_nan=True)
     torch.testing.assert_close(out_precise, ref_precise, atol=1e-3, rtol=1e-2, equal_nan=True)
+
+
+@triton.jit
+def _batched_scaled_dot_masked(a_base, stride_a0, stride_a1, a_scale, b_base, stride_b0, stride_b1, b_scale, out,
+                               stride_out0, stride_out1, BATCH: tl.constexpr, M: tl.constexpr, N: tl.constexpr,
+                               K: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+                               FORMAT: tl.constexpr):
+    batch = tl.program_id(0)
+    rows = tl.program_id(1) * BLOCK_M + tl.arange(0, BLOCK_M)
+    cols = tl.program_id(2) * BLOCK_N + tl.arange(0, BLOCK_N)
+    batch_mask = batch < BATCH
+    row_mask = rows < M
+    col_mask = cols < N
+    accumulator = tl.zeros((BLOCK_M, BLOCK_N), tl.float32)
+    for k_offset in range(0, K, BLOCK_K):
+        ks = k_offset + tl.arange(0, BLOCK_K)
+        k_mask = ks < K
+        a_ptr = a_base + batch * stride_a0 + rows[:, None] * stride_a1 + ks[None, :]
+        b_ptr = b_base + batch * stride_b0 + ks[:, None] * stride_b1 + cols[None, :]
+        a = tl.load(a_ptr, batch_mask & row_mask[:, None] & k_mask[None, :], other=0.)
+        b = tl.load(b_ptr, batch_mask & k_mask[:, None] & col_mask[None, :], other=0.)
+        scale_ks = k_offset // 32 + tl.arange(0, BLOCK_K // 32)
+        scale_mask = scale_ks < K // 32
+        # Keep the scale-address division that triggered the scalar-load
+        # fallback and dynamic select slices in the original reproducer.
+        a_scale_ptr = a_scale + rows[:, None] * K // 32 + scale_ks[None, :]
+        sa = tl.load(a_scale_ptr, row_mask[:, None] & scale_mask[None, :], other=0)
+        sb = None
+        if b_scale is not None:
+            b_scale_ptr = b_scale + cols[:, None] * K // 32 + scale_ks[None, :]
+            sb = tl.load(b_scale_ptr, col_mask[:, None] & scale_mask[None, :], other=0)
+        accumulator = tl.dot_scaled(a, sa, FORMAT, b, sb, FORMAT, acc=accumulator, out_dtype=tl.float32)
+    out_ptr = out + batch * stride_out0 + rows[:, None] * stride_out1 + cols[None, :]
+    tl.store(out_ptr, accumulator, batch_mask & row_mask[:, None] & col_mask[None, :])
+
+
+@pytest.mark.parametrize("shape", [(32, 32, 128, 512), (2, 17, 35, 128)])
+@pytest.mark.parametrize("block_k", [32, 64])
+@pytest.mark.parametrize("normal_type", ["bf16", "fp16"])
+@pytest.mark.parametrize("rhs_scale", [False, True])
+@pytest.mark.skipif(
+    is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
+    reason="uniform-mask dot_scaled regression targets A2/A3",
+)
+def test_scaled_dot_batched_uniform_mask(shape, block_k, normal_type, rhs_scale):
+    batch, m, n, k = shape
+    dtype = torch.bfloat16 if normal_type == "bf16" else torch.float16
+    rng = torch.Generator().manual_seed(42)
+    # Small integers and powers of two keep scaling and FP32 sums exact.
+    x_cpu = torch.randint(-4, 5, (batch, m, k), generator=rng).to(dtype)
+    y_cpu = torch.randint(-4, 5, (batch, k, n), generator=rng).to(dtype)
+    sa_cpu = torch.randint(120, 128, (m, k // 32), generator=rng, dtype=torch.int8)
+    sb_cpu = torch.randint(120, 128, (n, k // 32), generator=rng, dtype=torch.int8) if rhs_scale else None
+    scaled_x = x_cpu.float() * torch.exp2(sa_cpu.float() - 127).repeat_interleave(32, dim=1)
+    scaled_y = y_cpu.float()
+    if sb_cpu is not None:
+        scaled_y = scaled_y * torch.exp2(sb_cpu.float() - 127).repeat_interleave(32, dim=1).T
+    expected = torch.matmul(scaled_x, scaled_y)
+    x, y, sa = x_cpu.npu(), y_cpu.npu(), sa_cpu.npu()
+    sb = sb_cpu.npu() if sb_cpu is not None else None
+    output = torch.full((batch, m, n), float("nan"), dtype=torch.float32, device="npu")
+    # Include an inactive batch to also exercise a false whole-tile mask.
+    grid = (batch + 1, triton.cdiv(m, 16), triton.cdiv(n, 32))
+    _batched_scaled_dot_masked[grid](
+        x,
+        x.stride(0),
+        x.stride(1),
+        sa,
+        y,
+        y.stride(0),
+        y.stride(1),
+        sb,
+        output,
+        output.stride(0),
+        output.stride(1),
+        batch,
+        m,
+        n,
+        k,
+        16,
+        32,
+        block_k,
+        normal_type,
+    )
+    torch.testing.assert_close(output.cpu(), expected, rtol=0, atol=0)

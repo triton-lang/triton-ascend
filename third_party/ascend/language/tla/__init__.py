@@ -73,7 +73,6 @@ from .scope import pipeline, scope
 from .alloc import alloc
 from .fill import fill
 from .dma import (
-    PadMode,
     L2CachePolicy,
     AtomicKind,
     UnitFlagMode,
@@ -84,8 +83,6 @@ from .dma import (
     FixpipePreReluMode,
     LoadGM2UBParams,
     LoadGM2L1Params,
-    CopyUB2L1Params,
-    CopyL12UBParams,
     CopyL12BTParams,
     CopyL12FBParams,
     CopyL1ToL0Params,
@@ -164,7 +161,6 @@ __all__ = [
     "uint32",
     "uint64",
     "AddressSpace",
-    "PadMode",
     "L2CachePolicy",
     "AtomicKind",
     "UnitFlagMode",
@@ -175,8 +171,6 @@ __all__ = [
     "FixpipePreReluMode",
     "LoadGM2UBParams",
     "LoadGM2L1Params",
-    "CopyUB2L1Params",
-    "CopyL12UBParams",
     "CopyL12BTParams",
     "CopyL12FBParams",
     "CopyL1ToL0Params",

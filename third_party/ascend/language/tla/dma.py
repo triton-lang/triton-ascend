@@ -13,22 +13,6 @@ from triton.language.core import (builtin, dtype as triton_dtype, float32, float
 from .core import buffer
 
 
-class PadMode(Enum):
-    """Padding mode for UB->L1 copies.
-
-    - ``PadNull``: no padding.
-    - ``PadFirstElem``: pad using the first element.
-    - ``PadValue``: pad using the configured pad value.
-
-    Whether a mode is valid with the supplied pad value or padding counts is
-    checked by the backend.
-    """
-
-    PadNull = "PadNull"
-    PadFirstElem = "PadFirstElem"
-    PadValue = "PadValue"
-
-
 class L2CachePolicy(Enum):
     """L2 eviction hint for GM loads.
 
@@ -226,52 +210,17 @@ class LoadGM2UBParams:
 class LoadGM2L1Params:
     """Configuration for :func:`load_gm_to_l1`.
 
-    :param l2_cache_ctrl: Raw compile-time MTE2 cache-control field, encoded as
-        a signed 32-bit ``l2_cache_mode`` attribute. ``None`` (default) omits
-        it, selecting the backend default. This is not an eviction-policy enum.
+    :param l2_cache_ctrl: Compile-time MTE2 cache mode encoded as a signed
+        32-bit attribute. ``None`` omits the attribute, selecting mode 0.
     :type l2_cache_ctrl: int or None
-    :param enable_nz2nd: Reserved reverse-layout flag. Must be ``False``
-        (default); ``True`` raises ``NotImplementedError``.
-    :type enable_nz2nd: bool
-    :param enable_nz2dn: Reserved reverse-layout flag. Must be ``False``
-        (default); ``True`` raises ``NotImplementedError``.
-    :type enable_nz2dn: bool
+    :param enable_nd2nz: Compile-time flag for ND-to-NZ conversion.
+        ``True`` (default) emits ND2NZ. ``False`` raises
+        ``NotImplementedError`` because a transfer without conversion is
+        unsupported.
+    :type enable_nd2nz: bool
     """
     l2_cache_ctrl: int = None
-    enable_nz2nd: bool = False
-    enable_nz2dn: bool = False
-
-
-@dataclass(frozen=True)
-class CopyUB2L1Params:
-    """Configuration for :func:`copy_ub_to_l1`.
-
-    :param pad_mode: Compile-time ``tla.PadMode`` member. ``None`` omits the
-        padding-mode attribute.
-    :type pad_mode: tla.PadMode or None
-    :param pad_value: Scalar padding value converted to the source element
-        type. ``None`` omits the operand.
-    :type pad_value: int, float, scalar tl.tensor or None
-    :param collapse_reassociation: Compile-time groups of source dimension
-        indices to collapse, for example ``((0, 1), (2, 3))`` for a rank-four
-        source. Each group contains integer axis indices; the backend checks
-        validity. ``None`` omits the attribute.
-    :type collapse_reassociation: tuple[tuple[int, ...], ...] or None
-
-    All fields default to ``None``.
-    """
-    pad_mode: PadMode = None
-    pad_value: object = None
-    collapse_reassociation: tuple = None
-
-
-@dataclass(frozen=True)
-class CopyL12UBParams:
-    """Configuration for :func:`copy_l1_to_ub`.
-
-    This immutable configuration has no fields. Pass ``tla.CopyL12UBParams()``
-    or omit the operation's ``params`` argument.
-    """
+    enable_nd2nz: bool = True
 
 
 @dataclass(frozen=True)
@@ -519,22 +468,23 @@ def load_gm_to_l1(src, dst, params=None, _semantic=None):
         ``(N // 16, M // 16, 16, 16)``.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
-        ``tla.LoadGM2L1Params()``. See :class:`LoadGM2L1Params` for cache control.
+        ``tla.LoadGM2L1Params()`` and enables ND-to-NZ conversion.
     :type params: tla.LoadGM2L1Params or None
     :return: None. The destination buffer is updated in place.
     :rtype: None
+    :raises TypeError: If ``enable_nd2nz`` is not a compile-time bool.
+    :raises NotImplementedError: If ``enable_nd2nz`` is ``False``.
 
     .. note::
         Emit this Cube transfer in ``tla.scope.cube()``. The two views must
         describe the same logical tile in their respective layouts. The
-        backend checks dtype and layout alignment. Reverse-layout flags
-        ``enable_nz2nd`` and ``enable_nz2dn`` must remain ``False``.
+        backend checks dtype and layout alignment.
     """
     _route(src, dst, (("gm", "l1"), ))
     p = _params(params, LoadGM2L1Params)
-    if _boolean(p.enable_nz2nd, "enable_nz2nd") or _boolean(p.enable_nz2dn, "enable_nz2dn"):
-        raise NotImplementedError("GM->L1 ND2NZOp has no enable_nz2nd/enable_nz2dn fields; "
-                                  "reverse-layout flags require specification review")
+    if not _boolean(p.enable_nd2nz, "enable_nd2nz"):
+        raise NotImplementedError("tla.load_gm_to_l1 does not support enable_nd2nz=False; "
+                                  "GM->L1 transfers require ND-to-NZ conversion")
     cache = _unwrap_if_constexpr(p.l2_cache_ctrl)
     attrs = {}
     if cache is not None:
@@ -575,7 +525,7 @@ def load_gm_to_l1_mx_scale(src, dst, params=None, _semantic=None):
 
 
 @builtin
-def copy_ub_to_l1(src, dst, params=None, _semantic=None):
+def copy_ub_to_l1(src, dst, *, _semantic=None):
     """Copies UB data into L1 using ``hivm.hir.copy``.
 
     :param src: UB source with ``space="ub"``.
@@ -583,10 +533,6 @@ def copy_ub_to_l1(src, dst, params=None, _semantic=None):
     :param dst: L1 destination with ``space="l1"`` and a backend-compatible
         shape and element type.
     :type dst: tla.buffer
-    :param params: Configuration object. ``None`` (default) constructs
-        ``tla.CopyUB2L1Params()``. See :class:`CopyUB2L1Params` for padding
-        and dimension-reassociation formats.
-    :type params: tla.CopyUB2L1Params or None
     :return: None. The destination buffer is updated in place.
     :rtype: None
 
@@ -596,29 +542,17 @@ def copy_ub_to_l1(src, dst, params=None, _semantic=None):
         produced by a Vector scope, explicitly synchronize the handoff.
     """
     _route(src, dst, (("ub", "l1"), ))
-    p = _params(params, CopyUB2L1Params)
-    attrs = {"pad_mode": _enum_attr(p.pad_mode, PadMode, "padmode", _semantic)}
-    groups = _unwrap_if_constexpr(p.collapse_reassociation)
-    if groups is not None:
-        indices = [[_integer(axis, "collapse_reassociation")
-                    for axis in _unwrap_if_constexpr(group)]
-                   for group in groups]
-        attrs["collapse_reassociation"] = _semantic.builder.parse_attr(str(indices))
-    _semantic.builder.create_tla_copy(src.handle, dst.handle, attrs,
-                                      pad_value=_scalar(p.pad_value, _semantic, src.dtype))
+    _semantic.builder.create_tla_copy(src.handle, dst.handle, {})
 
 
 @builtin
-def copy_l1_to_ub(src, dst, params=None, _semantic=None):
+def copy_l1_to_ub(src, dst, *, _semantic=None):
     """Copies L1 NZ data into UB ND layout using ``hivm.hir.l12ub``.
 
     :param src: L1 source with ``space="l1"`` in NZ layout.
     :type src: tla.buffer
     :param dst: UB destination with ``space="ub"`` in the corresponding ND layout.
     :type dst: tla.buffer
-    :param params: Empty configuration object. ``None`` (default) is equivalent
-        to ``tla.CopyL12UBParams()``; this native operation has no options.
-    :type params: tla.CopyL12UBParams or None
     :return: None. The destination buffer is updated in place.
     :rtype: None
 
@@ -628,7 +562,6 @@ def copy_l1_to_ub(src, dst, params=None, _semantic=None):
         sub-block that owns the written UB. The backend checks layout and dtype.
     """
     _route(src, dst, (("l1", "ub"), ))
-    _params(params, CopyL12UBParams)
     _semantic.builder.create_tla_l12ub(src.handle, dst.handle)
 
 
@@ -724,6 +657,14 @@ def copy_l1_to_l0(src, dst, params=None, _semantic=None):
                                        **parts)
 
 
+def _fixpipe_extent_matches(tiles, block, dst_extent, split=1, alignment=1):
+    """Check known NZ and UB extents along one logical axis."""
+    if tiles is None or block is None:
+        return dst_extent is None or (dst_extent * split) % alignment == 0
+    extent = tiles * block
+    return extent % alignment == 0 and (dst_extent is None or extent == dst_extent * split)
+
+
 def _fixpipe(src, dst, p, semantic):
     attrs = {
         "dma_mode": _enum_attr(p.dma_mode, FixpipeDMAMode, "dma_mode", semantic),
@@ -732,11 +673,32 @@ def _fixpipe(src, dst, p, semantic):
     }
     if isinstance(p, FixpipeL0C2UBParams):
         dual = _unwrap_if_constexpr(p.dual_dst_mode)
+        sub_block = _unwrap_if_constexpr(p.sub_block_idx)
+        if not isinstance(dual, FixpipeDualDstMode):
+            raise TypeError("Fixpipe dual_dst_mode must be a FixpipeDualDstMode")
         # Native single-target lowering selects sub_block_idx only when the
         # optional dual-mode attribute is absent; NO_DUAL is its default.
-        if dual != FixpipeDualDstMode.NO_DUAL:
+        if dual == FixpipeDualDstMode.NO_DUAL:
+            if sub_block is None:
+                raise ValueError("Fixpipe NO_DUAL requires sub_block_idx")
+        else:
+            if _unwrap_if_constexpr(p.dma_mode) != FixpipeDMAMode.NZ2ND:
+                raise ValueError("Fixpipe dual destinations require NZ2ND")
+            if sub_block is not None:
+                raise ValueError("Fixpipe dual destinations require sub_block_idx=None")
+            if len(src.shape) != 4 or len(dst.shape) != 2:
+                raise ValueError("Fixpipe dual destinations require a 4D NZ source and a 2D destination")
+            n_tiles, m_tiles, m_block, n_block = src.shape
+            dst_m, dst_n = dst.shape
+            if dual == FixpipeDualDstMode.ROW_SPLIT:
+                if not (_fixpipe_extent_matches(m_tiles, m_block, dst_m, split=2, alignment=2)
+                        and _fixpipe_extent_matches(n_tiles, n_block, dst_n)):
+                    raise ValueError("Fixpipe ROW_SPLIT requires an even M and destination shape (M/2, N)")
+            elif not (_fixpipe_extent_matches(m_tiles, m_block, dst_m)
+                      and _fixpipe_extent_matches(n_tiles, n_block, dst_n, split=2, alignment=32)):
+                raise ValueError("Fixpipe COLUMN_SPLIT requires N divisible by 32 and destination shape (M, N/2)")
             attrs["dual_dst_mode"] = _enum_attr(dual, FixpipeDualDstMode, "fixpipe_dual_dst_mode", semantic)
-        attrs["sub_block_idx"] = _enum_attr(p.sub_block_idx, FixpipeSubBlock, "fixpipe_sub_block", semantic)
+        attrs["sub_block_idx"] = _enum_attr(sub_block, FixpipeSubBlock, "fixpipe_sub_block", semantic)
     if isinstance(p, FixpipeL0C2L1Params):
         attrs["channel_split"] = semantic.builder.get_bool_attr(_boolean(p.channel_split, "channel_split"))
         attrs["c0_pad_en"] = semantic.builder.get_bool_attr(_boolean(p.c0_pad_en, "c0_pad_en"))

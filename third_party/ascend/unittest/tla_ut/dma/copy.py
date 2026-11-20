@@ -23,11 +23,11 @@ def transfer(X, Y, N: tl.constexpr):
         if tla.sub_block_id() == 0:
             src = tla.alloc((N // 16, 1, 16, 16), tl.float16)
             tla.load_gm_to_ub(tla.view(X, (N // 16, 1, 16, 16)), src)
-            tla.copy_ub_to_l1(src, l1, tla.CopyUB2L1Params())
+            tla.copy_ub_to_l1(src, l1)
         tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, 0)
     with tla.scope.cube():
         tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 0)
-        tla.copy_l1_to_ub(l1, out, tla.CopyL12UBParams())
+        tla.copy_l1_to_ub(l1, out)
         tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE1, 1)
     with tla.scope.vector():
         tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 1)
@@ -48,7 +48,7 @@ def route(src, dst, P: tl.constexpr, ROUTE: tl.constexpr):
     elif ROUTE == "l1":
         tla.load_gm_to_l1(src, dst, P)
     elif ROUTE == "ub_l1":
-        tla.copy_ub_to_l1(src, dst, P)
+        tla.copy_ub_to_l1(src, dst)
     else:
         tl.static_assert(False, "unknown explicit DMA route")
 
@@ -77,14 +77,14 @@ def check_param_contracts():
         text = route_ir("l1", "bt", tla.CopyL12BTParams(n=48), "bt", dtype)
         assert "hivm.hir.l12bt " in text and "48 : index" in text
         assert "memref.alloc" not in text and "pointer_cast" not in text
-    text = route_ir("ub", "l1", tla.CopyUB2L1Params(collapse_reassociation=((0, 1), )), "ub_l1")
-    assert "collapse_reassociation = [[0, 1]]" in text
+    text = route_ir("ub", "l1", None, "ub_l1")
+    assert "hivm.hir.copy " in text
     errors = [("l1", "fb", tla.CopyL12FBParams(), "fb", "no L1->FixBUF"),
               ("l1", "l0a", tla.CopyL1ToL0Params(actual_batch=1), "l0", "actual_batch"),
-              ("gm", "l1", tla.LoadGM2L1Params(enable_nz2nd=True), "l1", "reverse-layout"),
-              ("gm", "l1", tla.LoadGM2L1Params(enable_nz2dn=True), "l1", "reverse-layout"),
-              ("ub", "l1", tla.LoadGM2UBParams(), "ub_l1", "CopyUB2L1Params"),
-              ("gm", "ub", tla.CopyUB2L1Params(), "ub_l1", "DMA interface expects")]
+              ("gm", "l1", tla.LoadGM2L1Params(enable_nd2nz=False), "l1", "enable_nd2nz=False"),
+              ("gm", "l1", tla.LoadGM2L1Params(enable_nd2nz=1), "l1", "enable_nd2nz must be a compile-time bool"),
+              ("gm", "l1", tla.LoadGM2UBParams(), "l1", "expected LoadGM2L1Params"),
+              ("gm", "ub", None, "ub_l1", "DMA interface expects")]
     for src, dst, p, name, message in errors:
         with pytest.raises(Exception, match=message):
             route_ir(src, dst, p, name)

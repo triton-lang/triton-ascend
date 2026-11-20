@@ -2566,11 +2566,8 @@ LogicalResult DevicePrintConverter::matchAndRewrite(
   auto moduleOp = op->getParentOfType<ModuleOp>();
   rewriter.setInsertionPoint(moduleOp.getBody(),
                              std::prev(moduleOp.getBody()->end()));
-  SmallVector<Type, 4> inputTypes;
-  for (auto arg : op.getArgs()) {
-    inputTypes.push_back(arg.getType());
-  }
-  auto libFnType = rewriter.getFunctionType(inputTypes, {});
+  ValueRange args = adaptor.getArgs();
+  auto libFnType = rewriter.getFunctionType(args.getTypes(), {});
   // See ScanConverter: the name is uniqued before the op is created so that a
   // kernel named "triton_print" cannot make SymbolTable assert.
   auto funcName =
@@ -2582,9 +2579,10 @@ LogicalResult DevicePrintConverter::matchAndRewrite(
   funcOp->setAttr(prefixAttrName, prefixAttr);
   auto hexAttr = op.getHexAttr();
   funcOp->setAttr(hexAttrName, hexAttr);
+  funcOp->setAttr("isSigned", op.getIsSignedAttr());
 
   rewriter.setInsertionPoint(op);
-  rewriter.create<func::CallOp>(op.getLoc(), funcOp, op.getArgs());
+  rewriter.create<func::CallOp>(op.getLoc(), funcOp, args);
 
   rewriter.eraseOp(op);
   return success();

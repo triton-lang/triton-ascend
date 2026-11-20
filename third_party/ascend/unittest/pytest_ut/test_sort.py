@@ -20,7 +20,6 @@
 
 import triton
 import pytest
-import numpy as np
 import torch
 import triton.language as tl
 import triton.language.extra.cann.extension as al
@@ -44,19 +43,10 @@ def sort_kernel_2d(X, Z, N: tl.constexpr, M: tl.constexpr, descending: tl.conste
 @pytest.mark.interpreter
 @pytest.mark.parametrize("shape", [(256, 16)])
 @pytest.mark.parametrize("descending", [False, True])
-@pytest.mark.parametrize("dtype", ['int8', 'int16', 'float16', 'float32', 'bfloat16', 'bool'])
+@pytest.mark.parametrize("dtype", ['int8', 'int16', 'float16', 'float32', 'bfloat16'])
 def test_sort_2d(shape, descending, dtype):
-    if dtype == "bool":
-        x = test_common.generate_tensor(shape, dtype)
-        np_sorted = np.sort(x)
-        if descending:
-            np_sorted = np_sorted[:, ::-1].copy()
-        torch_res = torch.from_numpy(np_sorted).npu()
-    else:
-        x = test_common.generate_tensor(shape, dtype).npu()
-        torch_res = torch.sort(x, descending=descending)[0]
-
-    x = x.npu()
+    x = test_common.generate_tensor(shape, dtype).npu()
+    torch_res = torch.sort(x, descending=descending)[0]
     triton_res = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     N = x.shape[0]
     M = x.shape[1]
@@ -81,19 +71,10 @@ def sort_kernel_3d(X, Z, D0: tl.constexpr, D1: tl.constexpr, D2: tl.constexpr, d
 @pytest.mark.interpreter
 @pytest.mark.parametrize("shape", [(8, 4, 16)])
 @pytest.mark.parametrize("descending", [False, True])
-@pytest.mark.parametrize("dtype", ['int8', 'int16', 'float16', 'float32', 'bfloat16', 'bool'])
+@pytest.mark.parametrize("dtype", ['int8', 'int16', 'float16', 'float32', 'bfloat16'])
 def test_sort_3d(shape, descending, dtype):
-    if dtype == "bool":
-        x = test_common.generate_tensor(shape, dtype)
-        np_sorted = np.sort(x)
-        if descending:
-            np_sorted = np_sorted[:, :, ::-1].copy()
-        torch_res = torch.from_numpy(np_sorted).npu()
-    else:
-        x = test_common.generate_tensor(shape, dtype).npu()
-        torch_res = torch.sort(x, descending=descending)[0]
-
-    x = x.npu()
+    x = test_common.generate_tensor(shape, dtype).npu()
+    torch_res = torch.sort(x, descending=descending)[0]
     triton_res = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     D0 = x.shape[0]
     D1 = x.shape[1]

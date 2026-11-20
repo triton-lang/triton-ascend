@@ -20,17 +20,21 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ASCEND_TRITONTOLINALG_DEVICEPRINTOFFSETREWRITE_H
-#define TRITON_ASCEND_TRITONTOLINALG_DEVICEPRINTOFFSETREWRITE_H
+#ifndef TRITON_ASCEND_TRITONTOLINALG_DEVICEPRINTREWRITE_H
+#define TRITON_ASCEND_TRITONTOLINALG_DEVICEPRINTREWRITE_H
 
 #include "mlir/IR/BuiltinOps.h"
 
 namespace mlir {
 namespace triton {
 
-void rewriteDevicePrintOffsets(ModuleOp moduleOp);
+/// Materialize full byte addresses for tt.print before memory conversion.
+LogicalResult prepareDevicePrintOperands(ModuleOp moduleOp);
+
+/// Apply post-lowering rewrites to triton_print calls in Adapter IR.
+void postprocessDevicePrints(ModuleOp moduleOp);
 
 } // namespace triton
 } // namespace mlir
 
-#endif // TRITON_ASCEND_TRITONTOLINALG_DEVICEPRINTOFFSETREWRITE_H
+#endif // TRITON_ASCEND_TRITONTOLINALG_DEVICEPRINTREWRITE_H

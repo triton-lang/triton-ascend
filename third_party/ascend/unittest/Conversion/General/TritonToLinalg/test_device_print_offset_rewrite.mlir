@@ -30,6 +30,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
 // -----
 
 // CHECK-LABEL:  func.func private @triton_print{{[_0-9]*}}(i32)
+// CHECK-SAME:   isSigned = array<i32: 1>
 // CHECK-LABEL:  func.func @triton_max_6d_dimm1
 // CHECK-DAG:    %[[C31744:.*]] = arith.constant 31744 : index
 // CHECK-DAG:    %[[C1024:.*]] = arith.constant 1024 : index

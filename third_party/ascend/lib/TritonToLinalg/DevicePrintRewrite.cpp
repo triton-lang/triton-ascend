@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/TritonToLinalg/DevicePrintOffsetRewrite.h"
+#include "ascend/include/TritonToLinalg/DevicePrintRewrite.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -33,7 +33,10 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dominance.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/TypeUtilities.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
@@ -46,6 +49,177 @@
 namespace mlir {
 namespace triton {
 namespace {
+
+class PrintAddressBuilder {
+public:
+  explicit PrintAddressBuilder(OpBuilder &builder) : builder(builder) {}
+
+  FailureOr<Value> get(Value pointer) {
+    if (Value known = addresses.lookup(pointer))
+      return known;
+    auto type = dyn_cast<PointerType>(getElementTypeOrSelf(pointer.getType()));
+    if (!type || isa<ShapedType>(type.getPointeeType()))
+      return failure();
+
+    auto address = build(pointer, type.getPointeeType());
+    if (succeeded(address))
+      addresses[pointer] = *address;
+    return address;
+  }
+
+private:
+  Type addressType(Value value) const {
+    if (auto tensor = dyn_cast<RankedTensorType>(value.getType()))
+      return tensor.clone(builder.getI64Type());
+    return builder.getI64Type();
+  }
+
+  Value splatLike(Value value, Type type, Location loc) {
+    if (value.getType() == type)
+      return value;
+    return builder.create<SplatOp>(loc, type, value);
+  }
+
+  // addptr takes a signed increment in units of its *own* pointee. Scale each
+  // increment before looking through any pointer bitcast in the chain.
+  FailureOr<Value> addOffset(Value base, Value offset, Type pointee,
+                             Type resultType, Location loc) {
+    int64_t bytes;
+    if (pointee.isIntOrFloat())
+      bytes = (pointee.getIntOrFloatBitWidth() + 7) / 8;
+    else if (isa<PointerType>(pointee))
+      bytes = 8;
+    else
+      return failure();
+
+    if (offset.getType() != resultType)
+      offset = builder.create<arith::ExtSIOp>(loc, resultType, offset);
+    if (bytes != 1) {
+      Value scale = builder.create<arith::ConstantIntOp>(loc, bytes, 64);
+      offset = builder.create<arith::MulIOp>(loc, offset,
+                                             splatLike(scale, resultType, loc));
+    }
+    return builder
+        .create<arith::AddIOp>(loc, splatLike(base, resultType, loc), offset)
+        .getResult();
+  }
+
+  // These operations only rearrange or select lanes. Reapply exactly their
+  // indices, attributes and result encodings to the corresponding i64 values.
+  FailureOr<Value> mapLanes(OpResult result) {
+    Operation *op = result.getOwner();
+    IRMapping mapping;
+    for (Value operand : op->getOperands()) {
+      if (!isa<PointerType>(getElementTypeOrSelf(operand.getType())))
+        continue;
+      auto address = get(operand);
+      if (failed(address))
+        return failure();
+      mapping.map(operand, *address);
+    }
+    Operation *copy = builder.clone(*op, mapping);
+    for (auto [original, address] :
+         llvm::zip(op->getResults(), copy->getResults())) {
+      address.setType(addressType(original));
+      addresses[original] = address;
+    }
+    return copy->getResult(result.getResultNumber());
+  }
+
+  FailureOr<Value> build(Value pointer, Type pointee) {
+    Location loc = pointer.getLoc();
+    Type type = addressType(pointer);
+    if (auto cast = pointer.getDefiningOp<IntToPtrOp>())
+      return cast.getSrc();
+    if (auto cast = pointer.getDefiningOp<BitcastOp>())
+      return get(cast.getSrc());
+    if (auto add = pointer.getDefiningOp<AddPtrOp>()) {
+      auto address = get(add.getPtr());
+      if (failed(address))
+        return failure();
+      return addOffset(*address, add.getOffset(), pointee, type, loc);
+    }
+
+    Operation *op = pointer.getDefiningOp();
+    if (op &&
+        isa<SplatOp, UnsplatOp, BroadcastOp, ExpandDimsOp, ReshapeOp, TransOp,
+            CatOp, JoinOp, SplitOp, GatherOp, arith::SelectOp,
+            tensor::ExtractOp, tensor::InsertOp, tensor::ExtractSliceOp,
+            tensor::InsertSliceOp, tensor::CastOp, tensor::CollapseShapeOp,
+            tensor::ExpandShapeOp, tensor::FromElementsOp>(op))
+      return mapLanes(cast<OpResult>(pointer));
+
+    if (!isa<RankedTensorType>(pointer.getType()))
+      return builder.create<PtrToIntOp>(loc, type, pointer).getResult();
+
+    // An opaque tensor of per-lane pointers cannot use the scalar ptr_to_int
+    // lowering. Report the operand at the print that requested its addresses.
+    return failure();
+  }
+
+  OpBuilder &builder;
+  llvm::DenseMap<Value, Value> addresses;
+};
+
+// Expand each printed pointer while addptr still carries its pointee type.
+// Keep consecutive numeric operands together with their signedness entries.
+static WalkResult preparePointerOperands(PrintOp op) {
+  auto isPointer = [](Value value) {
+    return isa<PointerType>(getElementTypeOrSelf(value.getType()));
+  };
+  if (llvm::none_of(op.getArgs(), isPointer))
+    return WalkResult::advance();
+  if (op.getIsSigned().size() != op.getNumOperands()) {
+    op.emitOpError("expected one signedness entry per print operand");
+    return WalkResult::interrupt();
+  }
+
+  OpBuilder builder(op);
+  PrintAddressBuilder addresses(builder);
+  Location loc = op.getLoc();
+  auto print = [&](OpBuilder &b, ValueRange args, unsigned first) {
+    b.create<PrintOp>(
+        loc, op.getPrefixAttr(), op.getHexAttr(), args,
+        b.getDenseI32ArrayAttr(op.getIsSigned().slice(first, args.size())));
+  };
+  unsigned begin = 0;
+  for (unsigned i = 0; i < op.getNumOperands(); ++i) {
+    Value arg = op.getOperand(i);
+    if (!isPointer(arg))
+      continue;
+    if (begin < i)
+      print(builder, op.getArgs().slice(begin, i - begin), begin);
+    FailureOr<Value> address = addresses.get(arg);
+    if (failed(address)) {
+      op.emitOpError("cannot materialize byte addresses for pointer operand ")
+          << i << " of type " << arg.getType();
+      return WalkResult::interrupt();
+    }
+    if (auto type = dyn_cast<RankedTensorType>(address->getType())) {
+      Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
+      Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
+      SmallVector<Value> lower(type.getRank(), zero),
+          steps(type.getRank(), one);
+      SmallVector<Value> upper;
+      for (int64_t dim = 0; dim < type.getRank(); ++dim)
+        upper.push_back(
+            builder.createOrFold<tensor::DimOp>(loc, *address, dim));
+      scf::buildLoopNest(builder, loc, lower, upper, steps,
+                         [&](OpBuilder &b, Location loc, ValueRange indices) {
+                           Value lane = b.create<tensor::ExtractOp>(
+                               loc, *address, indices);
+                           print(b, lane, i);
+                         });
+    } else {
+      print(builder, *address, i);
+    }
+    begin = i + 1;
+  }
+  if (begin < op.getNumOperands())
+    print(builder, op.getArgs().drop_front(begin), begin);
+  op.erase();
+  return WalkResult::advance();
+}
 
 static bool hasOnlyPrintUsers(Value v) {
   if (v.use_empty())
@@ -551,7 +725,7 @@ static void rewriteCandidate(RewriteCandidate &cand, ModuleOp moduleOp) {
   cand.callOp.erase();
 }
 
-static void rewriteOneFunc(func::FuncOp funcOp) {
+static void rewriteOffsetPrints(func::FuncOp funcOp) {
   auto moduleOp = funcOp->getParentOfType<ModuleOp>();
   if (!moduleOp)
     return;
@@ -579,11 +753,15 @@ static void rewriteOneFunc(func::FuncOp funcOp) {
 
 } // namespace
 
-void rewriteDevicePrintOffsets(ModuleOp moduleOp) {
+LogicalResult prepareDevicePrintOperands(ModuleOp moduleOp) {
+  return failure(moduleOp.walk(preparePointerOperands).wasInterrupted());
+}
+
+void postprocessDevicePrints(ModuleOp moduleOp) {
   moduleOp.walk([&](func::FuncOp funcOp) {
     if (funcOp.isPrivate())
       return;
-    rewriteOneFunc(funcOp);
+    rewriteOffsetPrints(funcOp);
   });
 }
 

@@ -217,6 +217,9 @@ class buffer(tl.base_value):
         self.handle, self.type = handle, ty
         self.shape, self.dtype, self.space, self.strides = ty.shape, ty.element_ty, ty.space, ty.strides
         self.offset = ty.offset
+        # Track a known element displacement even when the IR type has a
+        # dynamic offset (e.g. an entry view or a rank-preserving subview).
+        self._static_offset = ty.offset
 
     def _flatten_ir(self, handles):
         handles.append(self.handle)

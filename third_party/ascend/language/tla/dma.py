@@ -10,7 +10,7 @@ from enum import Enum, IntEnum
 
 from triton.language.core import (builtin, dtype as triton_dtype, float32, float16, bfloat16, int8, int16, int32,
                                   _unwrap_if_constexpr)
-from .core import buffer
+from .core import buffer, _row_major_strides
 
 
 class L2CachePolicy(Enum):
@@ -457,15 +457,41 @@ def store_ub_to_gm(src, dst, _semantic=None):
     _semantic.builder.create_tla_store(src.handle, dst.handle)
 
 
+def _check_dma_offset(buf, row_elements, route):
+    offset = buf._static_offset
+    if offset is not None and (offset < 0 or offset % row_elements):
+        raise ValueError(f"{route} {buf.space} offset must be nonnegative and 32B-aligned")
+
+
+def _check_dma_rows(buf, row_elements, route):
+    _check_dma_offset(buf, row_elements, route)
+    if buf.shape[-1] % row_elements or buf.strides[-1] != 1:
+        raise ValueError(f"{route} requires a contiguous last dimension with a 32B-aligned width")
+    # Each row must start on a 32B boundary and rows must not overlap.
+    span = buf.shape[-1]
+    for extent, stride in zip(reversed(buf.shape[:-1]), reversed(buf.strides[:-1])):
+        if stride is None or stride < span or stride % row_elements:
+            raise ValueError(f"{route} requires 32B-aligned, non-overlapping row strides")
+        span += (extent - 1) * stride
+
+
+def _check_dma_f32(src, dst, route):
+    if src.dtype != float32 or dst.dtype != float32:
+        raise TypeError(f"{route} requires matching float32 source and destination")
+    if None in src.shape or None in dst.shape:
+        raise ValueError(f"{route} requires static shapes")
+
+
 @builtin
 def load_gm_to_l1(src, dst, params=None, _semantic=None):
     """Loads GM data into L1 with ND-to-NZ conversion using ``hivm.hir.nd2nz``.
 
     :param src: GM source with ``space="gm"`` in ND layout.
     :type src: tla.buffer
-    :param dst: L1 destination with ``space="l1"`` in the corresponding NZ
-        layout. For an aligned fp16 ``(M, N)`` tile, a physical NZ shape is
-        ``(N // 16, M // 16, 16, 16)``.
+    :param dst: L1 destination with ``space="l1"`` in NZ layout. For
+        a logical source shape ``(M, N)``, the physical shape is
+        ``(N // C, M // 16, 16, C)`` with C=8 for float32 and C=16 for
+        float16 and bfloat16.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
         ``tla.LoadGM2L1Params()`` and enables ND-to-NZ conversion.
@@ -485,6 +511,18 @@ def load_gm_to_l1(src, dst, params=None, _semantic=None):
     if not _boolean(p.enable_nd2nz, "enable_nd2nz"):
         raise NotImplementedError("tla.load_gm_to_l1 does not support enable_nd2nz=False; "
                                   "GM->L1 transfers require ND-to-NZ conversion")
+    if float32 in (src.dtype, dst.dtype):
+        route = "GM->L1 FP32 ND2NZ"
+        _check_dma_f32(src, dst, route)
+        if len(src.shape) != 2:
+            raise ValueError(f"{route} requires a 2D ND source")
+        m, n = src.shape
+        if m % 16 or n % 8 or max(m, n) > 65535:
+            raise ValueError(f"{route} requires M divisible by 16 and N divisible by 8, both <= 65535")
+        if dst.shape != (n // 8, m // 16, 16, 8) or dst.strides != _row_major_strides(dst.shape):
+            raise ValueError(f"{route} requires a contiguous NZ destination with inner shape (16, 8)")
+        _check_dma_rows(src, 8, route)
+        _check_dma_offset(dst, 8, route)
     cache = _unwrap_if_constexpr(p.l2_cache_ctrl)
     attrs = {}
     if cache is not None:
@@ -542,6 +580,21 @@ def copy_ub_to_l1(src, dst, *, _semantic=None):
         produced by a Vector scope, explicitly synchronize the handoff.
     """
     _route(src, dst, (("ub", "l1"), ))
+    if float32 in (src.dtype, dst.dtype):
+        route = "UB->L1 FP32 copy"
+        _check_dma_f32(src, dst, route)
+        if src.shape != dst.shape or len(src.shape) not in (2, 4):
+            raise ValueError(f"{route} requires matching 2D or 4D physical shapes")
+        if len(src.shape) == 4 and (src.shape[-2:] != (16, 8) or
+                                    src.strides[-2:] != (8, 1) or dst.strides[-2:] != (8, 1)):
+            raise ValueError(f"{route} requires contiguous (16, 8) NZ blocks")
+        _check_dma_rows(src, 8, route)
+        _check_dma_rows(dst, 8, route)
+        if len(src.shape) == 2:
+            rows, width = src.shape
+            if src.strides[0] != width or dst.strides[0] != width:
+                if rows > 8189 or max(src.strides[0], dst.strides[0]) > 65535:
+                    raise ValueError(f"{route} strided 2D copies require <= 8189 rows and strides <= 65535 elements")
     _semantic.builder.create_tla_copy(src.handle, dst.handle, {})
 
 
@@ -562,6 +615,16 @@ def copy_l1_to_ub(src, dst, *, _semantic=None):
         sub-block that owns the written UB. The backend checks layout and dtype.
     """
     _route(src, dst, (("l1", "ub"), ))
+    if float32 in (src.dtype, dst.dtype):
+        route = "L1->UB FP32 NZ2ND"
+        _check_dma_f32(src, dst, route)
+        if len(src.shape) != 4 or src.shape[-2:] != (16, 8) or src.strides[-2:] != (8, 1):
+            raise ValueError(f"{route} requires contiguous (16, 8) NZ source blocks")
+        n_tiles, m_tiles, _, _ = src.shape
+        if dst.shape != (m_tiles * 16, n_tiles * 8):
+            raise ValueError(f"{route} requires the matching 2D ND destination shape")
+        _check_dma_rows(src, 8, route)
+        _check_dma_rows(dst, 8, route)
     _semantic.builder.create_tla_l12ub(src.handle, dst.handle)
 
 

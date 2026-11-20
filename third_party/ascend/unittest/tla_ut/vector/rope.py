@@ -47,8 +47,8 @@ def rope(X_ptr, CS_ptr, B: tl.constexpr, S: tl.constexpr, NH: tl.constexpr, RD: 
                 for head in tl.static_range(NH):
                     x0 = tla.simd.vlds(x_ub[0, row, head, 0], dist="NORM")
                     x1 = tla.simd.vlds(x_ub[0, row, head, 64], dist="NORM")
-                    y0 = tla.simd.vfma(tla.simd.vmul(x1, tla.simd.vneg(s)), x0, c)
-                    y1 = tla.simd.vfma(tla.simd.vmul(x1, c), x0, s)
+                    y0 = tla.simd.vmula(tla.simd.vmul(x1, tla.simd.vneg(s)), x0, c)
+                    y1 = tla.simd.vmula(tla.simd.vmul(x1, c), x0, s)
                     tla.simd.vsts(x_ub[0, row, head, 0], y0, dist="NORM_B32")
                     tla.simd.vsts(x_ub[0, row, head, 64], y1, dist="NORM_B32")
         tla.store_ub_to_gm(x_ub, x_blk)  # in-place write-back

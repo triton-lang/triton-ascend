@@ -363,19 +363,20 @@ def test_vdiv_unsigned_selects_the_unsigned_cast():
 
 
 def test_vdiv_unsigned_masked_appends_explicit_zeroing_select():
-    for dtype, tag in ((tl.uint16, "i16"), (tl.uint32, "i32")):
+    for dtype in (tl.uint16, tl.uint32):
         sem = _Semantic()
         m = _mask(64)
-        simd.vdiv(_vec(64, dtype), _vec(64, dtype), mask=m, _semantic=sem)
+        lhs = _vec(64, dtype)
+        simd.vdiv(lhs, _vec(64, dtype), mask=m, _semantic=sem)
         calls = sem.builder.calls
         assert calls[0][0] == "binary" and calls[0][1][0] == "divu", dtype
         assert calls[0][1][3] is m.handle, dtype
         assert calls[0][1][4] == "zeroing", dtype
         assert calls[-1][0] == "vsel", (dtype, calls)
         assert calls[-1][1][0] is m.handle, dtype
-        # false operand is an explicit zero vector (vsplat of integer zero)
-        assert calls[-2][0] == "vsplat", (dtype, calls)
-        assert calls[-2][1][1:] == (tag, 64), (dtype, calls)
+        # XOR with itself supplies the zero value for inactive lanes.
+        assert calls[-2][0] == "binary", (dtype, calls)
+        assert calls[-2][1][:3] == ("xor", lhs.handle, lhs.handle), (dtype, calls)
         # MERGING is forwarded to the builder, and the Python zeroing
         # workaround must NOT stack a second select on top of the builder's
         # zero-init + vsel merge.
@@ -1045,16 +1046,6 @@ def test_dtype_support_is_enforced_per_op():
     assert _last(sem)[1][0] == "max"
 
 
-def test_existing_internal_callers_still_work():
-    """math.compensated_rstd calls vdiv/vmul/vfma/vsplat with keyword _semantic."""
-    src = (_TLA_DIR / "math.py").read_text()
-    assert "S.vdiv(" in src
-    # the call shape used there must still bind: vdiv(a, b, _semantic=...)
-    sem = _Semantic()
-    simd.vdiv(_vec(64, tl.float32), _vec(64, tl.float32), _semantic=sem)
-    assert _last(sem)[0] == "binary"
-
-
 # --------------------------------------------------------------------------
 # tla.truncmod (math.py)
 # --------------------------------------------------------------------------
@@ -1631,8 +1622,10 @@ def test_vunpack_result_mask_and_selectors(signed, mode, masked):
     assert len(selects) == int(masked)
     if masked:
         assert selects[0][0] is mask.handle
-        assert ("scalar", ("i32", 0.0)) in sem.builder.calls
-        assert sem.builder.calls[-2][0] == "vsplat"
+        name, (kind, lhs, rhs, _, mode) = sem.builder.calls[-2]
+        assert (name, kind, mode) == ("binary", "xor", "zeroing")
+        assert lhs is rhs is selects[0][1]
+        assert lhs.ty == "vunpack"
 
 
 @pytest.mark.parametrize("kwargs", [

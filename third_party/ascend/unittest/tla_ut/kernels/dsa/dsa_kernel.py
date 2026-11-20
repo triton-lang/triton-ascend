@@ -142,8 +142,8 @@ def _sparse_mla(
             tla.load_gm_to_l1(tla.view(QR + (token * H + head) * 64, (BM, 64)), q_rope)
         with tla.scope.vector():
             with tla.scope.simd():
-                zero = tla.simd.vfull(0.0, tla.float32, 64)
-                neg = tla.simd.vfull(-3.4028234663852886e38, tla.float32, 64)
+                zero = tla.simd.vdup(0.0, tla.float32)
+                neg = tla.simd.vdup(-3.4028234663852886e38, tla.float32)
                 tla.simd.vsts(maximum[0], neg)
                 tla.simd.vsts(denominator[0], zero)
                 for row in tla.range(VM):
@@ -300,9 +300,9 @@ def _sparse_mla(
                 ids_cur = tla.subview(ids, offsets=((t % 2) * BN, ), sizes=(BN, ))
                 corr_view = tla.subview(corrections, offsets=((t % 2) * 64, ), sizes=(64, ))
                 with tla.scope.simd():
-                    neg = tla.simd.vfull(float('-inf'), tla.float32, 64)
-                    scale = tla.simd.vsplat(1.0 / 24.0, tla.float32)
-                    limit = tla.simd.vsplat(L, tla.int32)
+                    neg = tla.simd.vdup(float('-inf'), tla.float32)
+                    scale = tla.simd.vdup(1.0 / 24.0, tla.float32)
+                    limit = tla.simd.vdup(L, tla.int32)
                     i0 = tla.simd.vlds(ids_cur, (0, ))
                     i1 = tla.simd.vlds(ids_cur, (64, ))
                     # One unsigned compare rejects both index < 0 and index >= L.
@@ -315,19 +315,19 @@ def _sparse_mla(
                         x1 = tla.simd.vsel(valid1, x1, neg)
                         tile_max = tla.simd.vmax(x0, x1)
                         old_max = tla.simd.vlds(maximum[row], dist='BRC_B32')
-                        new_max = tla.simd.vmax(tla.simd.vreduce_max(tile_max), old_max)
+                        new_max = tla.simd.vmax(tla.simd.vdupv(tla.simd.vcmax(tile_max)), old_max)
                         alpha = tla.simd.vexp(tla.simd.vsub(old_max, new_max))
                         p0 = tla.simd.vexp(tla.simd.vsub(x0, new_max))
                         p1 = tla.simd.vexp(tla.simd.vsub(x1, new_max))
                         partial_sum = tla.simd.vadd(p0, p1)
-                        total = tla.simd.vbroadcast(tla.simd.vreduce_sum(partial_sum))
+                        total = tla.simd.vdupv(tla.simd.vcadd(partial_sum))
                         total = tla.simd.vadd(total,
                                               tla.simd.vmul(tla.simd.vlds(denominator[row], dist='BRC_B32'), alpha))
                         tla.simd.vsts(maximum[row], new_max, dist='ONEPT_B32')
                         tla.simd.vsts(denominator[row], total, dist='ONEPT_B32')
                         tla.simd.vsts(corr_view[row], alpha, dist='ONEPT_B32')
-                        packed, unused = tla.simd.vdintlv(tla.simd.vtruncf(p0, tla.bfloat16),
-                                                          tla.simd.vtruncf(p1, tla.bfloat16))
+                        packed, unused = tla.simd.vdintlv(tla.simd.vcvt(p0, tla.bfloat16, round=tla.simd.ROUND.A),
+                                                          tla.simd.vcvt(p1, tla.bfloat16, round=tla.simd.ROUND.A))
                         tla.simd.vsstb(packed, prob[0, row * 16], (VM + 1) * 16)
                 if t < TILES - 1:
                     tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, FLAG_SCORE_FREE)
@@ -346,7 +346,7 @@ def _sparse_mla(
                         for row in tla.range(VM):
                             alpha = tla.simd.vlds(corr_prev[row], dist='BRC_B32')
                             for col in tla.static_range(8):
-                                value = tla.simd.vfma(
+                                value = tla.simd.vmula(
                                     tla.simd.vlds(pv[row, col * 64]),
                                     tla.simd.vlds(acc[row, col * 64]),
                                     alpha,
@@ -376,7 +376,7 @@ def _sparse_mla(
                 for row in tla.range(VM):
                     alpha = tla.simd.vlds(tla.subview(corrections, offsets=(64, ), sizes=(64, ))[row], dist='BRC_B32')
                     for col in tla.static_range(8):
-                        value = tla.simd.vfma(
+                        value = tla.simd.vmula(
                             tla.simd.vlds(pv[row, col * 64]),
                             tla.simd.vlds(acc[row, col * 64]),
                             alpha,
@@ -389,13 +389,15 @@ def _sparse_mla(
                         row = row_block * OUT_ROWS + local_row
                         den = tla.simd.vlds(denominator[row], dist='BRC_B32')
                         for col in tla.static_range(4):
-                            b0 = tla.simd.vtruncf(
+                            b0 = tla.simd.vcvt(
                                 tla.simd.vdiv(tla.simd.vlds(acc[row, col * 128]), den),
                                 tla.bfloat16,
+                                round=tla.simd.ROUND.A,
                             )
-                            b1 = tla.simd.vtruncf(
+                            b1 = tla.simd.vcvt(
                                 tla.simd.vdiv(tla.simd.vlds(acc[row, col * 128 + 64]), den),
                                 tla.bfloat16,
+                                round=tla.simd.ROUND.A,
                             )
                             packed, unused = tla.simd.vdintlv(b0, b1)
                             tla.simd.vsts(output[local_row, col * 128], packed)

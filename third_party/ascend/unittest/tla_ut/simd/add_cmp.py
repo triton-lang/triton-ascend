@@ -106,8 +106,8 @@ def add_cmp(A_ptr, B_ptr, C_ptr, S_ptr, MX_ptr, MN_ptr, M_ptr, C2_ptr, I_ptr, J_
         tla.simd.vsts(mn_ub[0], tla.simd.vcmin(av), dist="ONEPT_B32")
 
         # vcmp: CMP enum + mask, materialize the predicate as i32 0/1.
-        one = tla.simd.vsplat(1.0, tl.int32)
-        zero = tla.simd.vsplat(0.0, tl.int32)
+        one = tla.simd.vdup(1, tl.int32)
+        zero = tla.simd.vdup(0, tl.int32)
         gt = tla.simd.vcmp(av, bv, op=tla.simd.CMP.GT)
         # tla.where(mask, x, y) is the vector form of vsel; keep the other
         # selects below on the explicit tla.simd.vsel spelling.

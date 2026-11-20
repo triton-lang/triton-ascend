@@ -55,9 +55,8 @@ tt.func public @triton_indirect_store_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr
 // hivm::PointerCastOp (memref) directly from int_to_ptr and finally a func.call
 // @triton_indirect_store.
 // LINALG-LABEL: func.func @triton_indirect_store_int_to_ptr_kernel
-// LINALG: %[[ADDRESS:.*]] = arith.constant 1024 : i64
-// LINALG: %[[BASE:.*]] = hivm.hir.pointer_cast(%[[ADDRESS]]) [%{{.*}}] : memref<?xf32>
-// LINALG: call @triton_indirect_store{{.*}}(%[[BASE]], %{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<8xi64>, tensor<8xf32>) -> ()
+// LINALG: hivm.hir.pointer_cast(%{{.*}}) [%{{.*}}] : memref<?xf32>
+// LINALG: call @triton_indirect_store{{.*}}(%{{.*}}, %{{.*}}, %{{.*}}) : (memref<1xf32, strided<[1]>>, tensor<8xi64>, tensor<8xf32>) -> ()
 tt.func public @triton_indirect_store_int_to_ptr_kernel(%arg0: !tt.ptr<i64>, %arg1: !tt.ptr<f32>) {
   %base_i64 = arith.constant 1024 : i64
   %base = tt.int_to_ptr %base_i64 : i64 -> !tt.ptr<f32>

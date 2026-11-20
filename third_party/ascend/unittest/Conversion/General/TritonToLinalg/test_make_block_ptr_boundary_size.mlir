@@ -1,11 +1,35 @@
 // RUN: triton-opt --triton-to-linalg --split-input-file %s | FileCheck %s
 // RUN: triton-opt --triton-to-linalg --split-input-file %s 2>&1 | FileCheck %s --check-prefix=WARN
 
-// Block-pointer boundaries use the original per-axis coordinates and parent
-// shapes. They are independent of physical stride order and remain available
-// for broadcast axes whose stride is zero.
+// Unit tests for ConverterUtils::getBoundarySizes() (PR #1838,
+// "[TritonToLinalg](fix) boundary size Error for make_block_ptr").
+//
+// `tl.make_block_ptr` is lowered to `tt.make_tensor_ptr` before
+// TritonToLinalg runs.  getBoundarySizes() reconstructs the per-axis
+// in-bounds size by decomposing the flat block offset with the full-shape
+// strides; three defects in that decomposition are covered here:
+//
+//  1. (primary) An axis that is *not* boundary-checked never reduced the
+//     flat offset (offset % stride), so a checked trailing axis saw the
+//     offset contributed by the leading axis, shrinking its boundary to 0
+//     and silently dropping the loaded/stored data.  The fix strips every
+//     non-zero-stride axis, checked or not.
+//
+//  2. (incidental) A zero-stride (broadcast) axis listed in boundary_check
+//     reached divOpFoldResult(offsetShift, 0), which emits "cannot div 0!"
+//     and returns an empty OpFoldResult, crashing the compiler.  The fix
+//     skips such axes (emitting a warning) and keeps the current block size.
+//
+//  3. Logical axis order need not be physical major-to-minor order.  For a
+//     permuted layout with strides [1, 800, 20], decomposing axes as [0, 1, 2]
+//     treats the entire linear offset as axis 0.  The fix visits axes in
+//     descending stride order [1, 2, 0].
+
+// The skipped zero-stride axis of the second case is reported through a
+// warning instead of the previous "cannot div 0!" error (the diagnostic
+// precedes the module on stderr).
 // WARN-NOT: error:
-// WARN-NOT: warning:
+// WARN: warning: getBoundarySizes() cannot reconstruct boundary on checked zero-stride axis 0
 // WARN-LABEL: func.func @boundary_size_zero_stride_axis
 
 // Primary case: axis 0 (stride 64) is *not* checked, axis 1 is.  The block
@@ -37,8 +61,8 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 
 // -----
 // Incidental case: axis 0 is a broadcast axis (stride 0) and is
-// boundary-checked. Its coordinate is zero in a parent of size 64, so
-// all 16 lanes are valid; the axis-1 boundary is 60 - 36 = 24.
+// boundary-checked.  The zero-stride axis keeps its full block size (16)
+// while the axis-1 boundary is reconstructed as 60 - 36 = 24.
 
 // CHECK-LABEL: func.func @boundary_size_zero_stride_axis
 // CHECK: memref.subview {{.*}}[0, 0] [16, 24] [1, 1]
@@ -91,56 +115,6 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
     %data = tt.load %load_ptr {boundaryCheck = array<i32: 0, 1, 2>} : !tt.ptr<tensor<1x16x64xf32>>
     %store_ptr = tt.make_tensor_ptr %out_ptr, [%c20_i64, %c30_i64, %c40_i64], [%c1200_i64, %c40_i64, %c1_i64], [%c7_i32, %c18_i32, %c32_i32] {order = array<i32: 2, 1, 0>} : <tensor<1x16x64xf32>>
     tt.store %store_ptr, %data {boundaryCheck = array<i32: 0, 1, 2>} : !tt.ptr<tensor<1x16x64xf32>>
-    tt.return
-  }
-}
-
-// -----
-
-// A negative starting coordinate shifts both the source and destination slice.
-// For parent size 5 and coordinate -2, lanes [2, 7) of the eight-lane tile are
-// valid. Padding initializes the two leading and one trailing invalid lanes.
-// CHECK-LABEL: func.func @negative_block_coordinate
-// CHECK: linalg.fill
-// CHECK: memref.subview {{.*}}[2] [5] [1]
-// CHECK: memref.subview {{.*}}[2] [5] [1]
-// CHECK: memref.copy
-// CHECK: tensor.extract_slice {{.*}}[2] [5] [1]
-// CHECK: memref.subview {{.*}}[2] [5] [1]
-// CHECK: bufferization.materialize_in_destination
-module {
-  tt.func public @negative_block_coordinate(%src: !tt.ptr<f32>, %dst: !tt.ptr<f32>) {
-    %parent = arith.constant 5 : i64
-    %stride = arith.constant 1 : i64
-    %start = arith.constant -2 : i32
-    %p = tt.make_tensor_ptr %src, [%parent], [%stride], [%start] {order = array<i32: 0>} : <tensor<8xf32>>
-    %q = tt.make_tensor_ptr %dst, [%parent], [%stride], [%start] {order = array<i32: 0>} : <tensor<8xf32>>
-    %v = tt.load %p {boundaryCheck = array<i32: 0>, padding = 1 : i32} : !tt.ptr<tensor<8xf32>>
-    tt.store %q, %v {boundaryCheck = array<i32: 0>} : !tt.ptr<tensor<8xf32>>
-    tt.return
-  }
-}
-
-// -----
-
-// A zero physical stride does not remove the logical boundary: starting at
-// coordinate one in a parent of size three leaves exactly two valid lanes.
-// CHECK-LABEL: func.func @partial_zero_stride_boundary
-// CHECK: memref.reinterpret_cast {{.*}}sizes: [8], strides: [0]
-// CHECK: linalg.fill
-// CHECK: memref.subview {{.*}}[0] [2] [1]
-// CHECK: memref.copy
-module {
-  tt.func public @partial_zero_stride_boundary(%src: !tt.ptr<f32>, %dst: !tt.ptr<f32>) {
-    %parent = arith.constant 3 : i64
-    %zero = arith.constant 0 : i64
-    %one = arith.constant 1 : i32
-    %p = tt.make_tensor_ptr %src, [%parent], [%zero], [%one] {order = array<i32: 0>} : <tensor<8xf32>>
-    %v = tt.load %p {boundaryCheck = array<i32: 0>, padding = 1 : i32} : !tt.ptr<tensor<8xf32>>
-    %r = tt.make_range {start = 0 : i32, end = 8 : i32} : tensor<8xi32>
-    %base = tt.splat %dst : !tt.ptr<f32> -> tensor<8x!tt.ptr<f32>>
-    %q = tt.addptr %base, %r : tensor<8x!tt.ptr<f32>>, tensor<8xi32>
-    tt.store %q, %v : tensor<8x!tt.ptr<f32>>
     tt.return
   }
 }

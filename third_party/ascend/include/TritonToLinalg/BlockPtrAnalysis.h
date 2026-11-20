@@ -22,7 +22,6 @@
 
 #ifndef TRITON_ANALYSIS_BLOCKPTRANALYSIS_H
 #define TRITON_ANALYSIS_BLOCKPTRANALYSIS_H
-#include "TritonToLinalg/MemoryPointer.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -45,6 +44,13 @@ class ConversionPatternRewriter;
 
 namespace triton {
 
+/// Temporary provenance for memref carriers materialized from complete scalar
+/// pointer addresses. Address round-trip folding is valid only for casts with
+/// this marker; ordinary HIVM PointerCast operations retain their baseline
+/// descriptor semantics. TritonToLinalg removes the marker after conversion.
+inline constexpr llvm::StringLiteral kScalarPointerCarrierAttr =
+    "ScalarPointerCarrier";
+
 /// Returns true when a loop still carries Triton pointer state, or when a
 /// loop-carried integer tensor participates in legacy address computation.
 /// Ordinary memrefs, including fixed-layout memrefs created by
@@ -53,6 +59,16 @@ namespace triton {
 bool needsLegacyBlockDataLoopRewrite(LoopLikeOpInterface loopOp);
 
 enum class MemAccVal { Undefined = 0, StrucMemAcc = 1, UnstrucMemAcc = 2 };
+
+/// Creates a verifier-valid HIVM pointer cast for a scalar Triton pointer
+/// represented by an integer address. Triton scalar pointers do not carry an
+/// extent, while their downstream carrier is normally `memref<?xT>` and every
+/// dynamic memref dimension requires a size operand. Use one element as the
+/// conservative carrier extent; reinterpret-cast lowering replaces it with a
+/// precise access range when a larger descriptor is materialized.
+hivm::PointerCastOp createScalarPointerCast(OpBuilder &builder, Location loc,
+                                            MemRefType resultType,
+                                            Value address);
 
 struct MemAccType {
 

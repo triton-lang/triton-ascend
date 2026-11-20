@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="372"
+     viewBox="0 0 780 372" role="img" aria-labelledby="title desc">
+  <title id="title">Cube and FIX before and after the overlap pass</title>
+  <desc id="desc">Both timelines start with PV inputs ready. FIX reads QK from
+    L0C range A and Cube writes PV to a separate range B. Before the pass, Cube
+    waits for FIX to finish. After the pass, Cube can start PV while FIX reads
+    QK. Bar lengths are illustrative.</desc>
+  <defs>
+    <pattern id="wait" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#fff4d6"/>
+      <path d="M-2 2l4-4 M0 8l8-8 M6 10l4-4" stroke="#eed39a"/>
+    </pattern>
+  </defs>
+  <style>
+    text { font-family: Arial, Helvetica, sans-serif; fill: #172f43; }
+    .heading { font-size: 21px; font-weight: bold; }
+    .engine { font-size: 18px; font-weight: bold; }
+    .activity { font-size: 17px; font-weight: bold; fill: white; }
+    .event { font-size: 15px; }
+    .release { stroke: #536675; stroke-width: 1.5; stroke-dasharray: 4 3; }
+  </style>
+  <rect width="780" height="372" rx="8" fill="white"/>
+  <text x="24" y="32" class="engine">Time</text>
+  <path d="M110 26h635" fill="none" stroke="#536675" stroke-width="2"/>
+  <path d="m745 21 10 5-10 5z" fill="#536675"/>
+
+  <g aria-label="Before the pass">
+    <rect x="12" y="48" width="756" height="149" rx="8" fill="#f2f7f9"/>
+    <text x="24" y="77" class="heading">Before · Cube waits for FIX to finish</text>
+    <text x="24" y="120" class="engine">FIX</text>
+    <rect x="110" y="97" width="296" height="36" rx="5" fill="#20568a"/>
+    <text x="258" y="120" text-anchor="middle" class="activity">Read QK from A</text>
+    <text x="417" y="120" class="event">Transfer complete</text>
+    <path d="M406 133v12" class="release"/>
+    <text x="24" y="168" class="engine">Cube</text>
+    <rect x="110" y="145" width="296" height="36" rx="5" fill="url(#wait)" stroke="#b78d46"/>
+    <text x="258" y="168" text-anchor="middle" class="engine">Wait for FIX</text>
+    <rect x="406" y="145" width="322" height="36" rx="5" fill="#166656"/>
+    <text x="567" y="168" text-anchor="middle" class="activity">Compute PV and write to B</text>
+  </g>
+
+  <g aria-label="After the pass">
+    <rect x="12" y="209" width="756" height="150" rx="8" fill="#f2f7f9"/>
+    <text x="24" y="238" class="heading">After · Cube can start while FIX reads A</text>
+    <text x="24" y="281" class="engine">FIX</text>
+    <rect x="110" y="258" width="296" height="36" rx="5" fill="#20568a"/>
+    <text x="258" y="281" text-anchor="middle" class="activity">Read QK from A</text>
+    <text x="417" y="281" class="event">Transfer complete</text>
+    <text x="24" y="329" class="engine">Cube</text>
+    <rect x="110" y="306" width="322" height="36" rx="5" fill="#166656"/>
+    <text x="271" y="329" text-anchor="middle" class="activity">Compute PV and write to B</text>
+  </g>
+</svg>

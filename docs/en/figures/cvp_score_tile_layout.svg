@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="267" viewBox="0 0 860 267" role="img" aria-labelledby="title desc">
+  <title id="title">Query-major and key-major layouts of the same score tile</title>
+  <desc id="desc">Query-major · Q @ Kᵀ                    Key-major · K @ Qᵀ
+Reduce across each row →                Reduce down each lane ↓
+
+       K0   K1   K2    max                     Q0      Q1
+ Q0     1    2    3  →   3                   lane 0  lane 1
+ Q1    10   20   30  →  30               K0      1      10   ← first Vector read
+                                         K1      2      20
+                                         K2      3      30
+                                                 ↓       ↓
+                                        max      3      30</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="860" height="267" rx="6" fill="#ffffff" />
+  <rect x="8" y="8" width="418.0" height="251" rx="8" fill="#f2f7f9" />
+  <rect x="8" y="18" width="4" height="27" rx="2" fill="#20568a" />
+  <text x="21" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">Query-major · Q @ Kᵀ</text>
+  <rect x="434.0" y="8" width="418.0" height="251" rx="8" fill="#f2f7f9" />
+  <rect x="434.0" y="18" width="4" height="27" rx="2" fill="#166656" />
+  <text x="447.0" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">Key-major · K @ Qᵀ</text>
+  <text x="22" y="68" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="start">Reduce across each row →</text>
+  <text x="448" y="68" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="start">Reduce down each lane ↓</text>
+  <text x="105" y="103" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">K0</text>
+  <text x="183" y="103" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">K1</text>
+  <text x="261" y="103" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">K2</text>
+  <text x="339" y="103" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">max</text>
+  <text x="32" y="141" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="start">Q0</text>
+  <rect x="76" y="116" width="58" height="37" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="105.0" y="140.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">1</text>
+  <rect x="154" y="116" width="58" height="37" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="183.0" y="140.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">2</text>
+  <rect x="232" y="116" width="58" height="37" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="261.0" y="140.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">3</text>
+  <rect x="310" y="116" width="58" height="37" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="339.0" y="140.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="middle">3</text>
+  <polyline points="293,134 308,134" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <text x="32" y="192" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="start">Q1</text>
+  <rect x="76" y="167" width="58" height="37" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="105.0" y="191.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">10</text>
+  <rect x="154" y="167" width="58" height="37" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="183.0" y="191.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">20</text>
+  <rect x="232" y="167" width="58" height="37" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="261.0" y="191.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">30</text>
+  <rect x="310" y="167" width="58" height="37" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="339.0" y="191.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="middle">30</text>
+  <polyline points="293,185 308,185" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <text x="563" y="96" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Q0</text>
+  <text x="563" y="114" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="14" font-weight="normal" text-anchor="middle">lane 0</text>
+  <text x="651" y="96" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Q1</text>
+  <text x="651" y="114" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="14" font-weight="normal" text-anchor="middle">lane 1</text>
+  <text x="462" y="139" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="start">K0</text>
+  <rect x="537" y="121" width="53" height="25" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="563.5" y="138.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">1</text>
+  <rect x="625" y="121" width="53" height="25" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="651.5" y="138.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">10</text>
+  <text x="462" y="167" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="start">K1</text>
+  <rect x="537" y="149" width="53" height="25" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="563.5" y="166.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">2</text>
+  <rect x="625" y="149" width="53" height="25" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="651.5" y="166.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">20</text>
+  <text x="462" y="195" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="start">K2</text>
+  <rect x="537" y="177" width="53" height="25" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="563.5" y="194.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">3</text>
+  <rect x="625" y="177" width="53" height="25" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="651.5" y="194.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">30</text>
+  <text x="717" y="139" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="14" font-weight="normal" text-anchor="start">← first Vector read</text>
+  <text x="461" y="245" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="start">max</text>
+  <polyline points="563,204 563,216" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="537" y="220" width="53" height="35" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="563.5" y="243.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="middle">3</text>
+  <polyline points="651,204 651,216" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="625" y="220" width="53" height="35" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="651.5" y="243.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="middle">30</text>
+</svg>

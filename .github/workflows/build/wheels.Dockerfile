@@ -136,7 +136,8 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     # BSPUB_DAVINCI_BISHENGIR_A5 while this image's libstdc++ no longer
     # provides stdint.h transitively, and clang 21's new -Wall warnings
     # trip -Werror on LLVM 19 code.
-    && printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error\n' > /tmp/clang++-cstdint \
+    # Google Benchmark uses __COUNTER__ with -pedantic-errors on Clang 22.
+    && printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error -Wno-error=c2y-extensions\n' > /tmp/clang++-cstdint \
     && chmod +x /tmp/clang++-cstdint \
     && export NPUIR_CXX_COMPILER=/tmp/clang++-cstdint \
     && python3 ${SETUP_PY} bdist_wheel \

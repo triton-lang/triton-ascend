@@ -499,6 +499,9 @@ static std::string classifyScanCombine(Operation *scan) {
           kind = "add";
         else if (name == "arith.mulf" || name == "arith.muli")
           kind = "mul";
+        else if (name == "arith.ori" || name == "arith.andi" ||
+                 name == "arith.xori")
+          kind = "bitwise";
         else if (name == "arith.maximumf" || name == "arith.minimumf" ||
                  name == "arith.maxnumf" || name == "arith.minnumf" ||
                  name == "arith.maxsi" || name == "arith.maxui" ||

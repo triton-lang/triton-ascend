@@ -115,7 +115,7 @@ def test_simd_multidimensional_hinge(tmp_path):
 def local_profile(tmp_path):
     profile = json.loads(PROFILE.read_text())
     # Keep unrelated assets valid when relocating the selection profile.
-    for key in ('microbenchmark_profile', 'indirect_memory_profile', 'reduction_profile'):
+    for key in ('microbenchmark_profile', 'indirect_memory_profile', 'reduction_profile', 'bitwise_scan_profile'):
         if key in profile:
             profile[key] = str((PROFILE.parent / profile[key]).resolve())
     calibration = json.loads((PROFILE.parent / profile['prefixscan_profile']).read_text())

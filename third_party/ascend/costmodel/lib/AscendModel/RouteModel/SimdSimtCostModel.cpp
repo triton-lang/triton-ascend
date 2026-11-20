@@ -1739,7 +1739,7 @@ static void readStageResources(ProfileJSONReader &reader,
   if (const auto *scan = resources->getObject("calibrated_prefix_scan")) {
     auto &calibration = profile.calibratedPrefixScan;
     calibration.enabled = true;
-    if (const auto *formulas = scan->getArray("formulas")) {
+    if (const auto *formulas = scan->get("formulas")) {
       auto parsed = parsePrefixScanFormulas(*formulas);
       if (!parsed)
         reader.setError(llvm::toString(parsed.takeError()));
@@ -3357,6 +3357,47 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
     return llvm::createStringError(std::errc::invalid_argument,
                                    "SIMD/SIMT profile must reference "
                                    "microbenchmark_profile");
+  // Load OR/AND/XOR fits into the common prefixscan calibration container.
+  if (auto reference = root->getString("bitwise_scan_profile")) {
+    const std::string resolved = resolveProfileReference(path, *reference);
+    if (dependencies)
+      dependencies->push_back(resolved);
+    auto bytes = llvm::MemoryBuffer::getFile(resolved);
+    if (!bytes)
+      return llvm::createStringError(bytes.getError(),
+                                     "failed to read bitwise scan profile '%s'",
+                                     resolved.c_str());
+    auto document = llvm::json::parse(bytes.get()->getBuffer());
+    if (!document)
+      return document.takeError();
+    auto *object = document->getAsObject();
+    if (!object)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "bitwise scan profile must be an object");
+    auto formulas = parsePrefixScanFormulas(*document);
+    if (!formulas)
+      return formulas.takeError();
+    // S1 is SIMD and T1/T2 are SIMT, as validated by the common reader.
+    for (bool simd : {true, false}) {
+      auto &target =
+          (simd ? hardware.simd : hardware.simt).calibratedPrefixScan.formulas;
+      std::set<std::string> ids;
+      for (const auto &formula : target)
+        ids.insert(formula.id);
+      for (const auto &formula : *formulas) {
+        auto selected = formula;
+        llvm::erase_if(selected.domains, [simd](const auto &domain) {
+          return (domain.branch == "S1") != simd;
+        });
+        if (selected.domains.empty())
+          continue;
+        if (!ids.insert(selected.id).second)
+          return llvm::createStringError(std::errc::invalid_argument,
+                                         "duplicate prefixscan formula ID");
+        target.push_back(std::move(selected));
+      }
+    }
+  }
   if (!hardware.isValid())
     return llvm::createStringError(
         std::errc::invalid_argument,

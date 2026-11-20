@@ -92,12 +92,18 @@ def _subview(src, sizes, steps, offsets, semantic):
     static_view = not any(_is_dynamic(v) for v in offsets + sizes + steps)
     offset_handles, size_dims, step_dims = [], [], []
     result_shape, result_strides = [], []
+    static_offset = src._static_offset
     for offset, size, step, extent, src_stride in zip(offsets, sizes, steps, src.shape, src.strides):
         offset = _check_scalar_int(offset)
         size = _check_dim(size, "sizes")
         step = _check_dim(step, "strides")
         if (static_view and extent is not None and (offset < 0 or offset + (size - 1) * step >= extent)):
             raise ValueError("static view is outside the source buffer")
+        if static_offset is not None:
+            if _is_dynamic(offset) or (offset != 0 and src_stride is None):
+                static_offset = None
+            elif offset != 0:
+                static_offset += offset * src_stride
         offset_handles.append(semantic.to_tensor(offset).handle)
         size_dims.append(_to_ir_dim(semantic, size))
         step_dims.append(_to_ir_dim(semantic, step))
@@ -105,7 +111,9 @@ def _subview(src, sizes, steps, offsets, semantic):
         result_strides.append(None if (src_stride is None or _is_dynamic(step)) else src_stride * step)
     ty = buffer_type(tuple(result_shape), src.dtype, src.space, tuple(result_strides), offset=None)
     handle = semantic.builder.create_tla_subview(src.handle, offset_handles, size_dims, step_dims)
-    return buffer(handle, ty)
+    result = buffer(handle, ty)
+    result._static_offset = static_offset
+    return result
 
 
 def _entry(src, sizes, strides, offsets, semantic):
@@ -118,9 +126,15 @@ def _entry(src, sizes, strides, offsets, semantic):
     if strides is None:
         strides = _runtime_row_major(sizes, semantic)
     linear = 0
+    static_offset = 0
     for off, stride in zip(offsets, strides):
         off = _check_scalar_int(off)
         stride = _check_scalar_int(stride)
+        if static_offset is not None:
+            if _is_dynamic(off) or (off != 0 and _is_dynamic(stride)):
+                static_offset = None
+            elif off != 0:
+                static_offset += off * stride
         # Widen before multiplication: a later index cast cannot undo i32 overflow.
         off = semantic.cast(semantic.to_tensor(off), int64)
         if _is_dynamic(stride):
@@ -134,7 +148,9 @@ def _entry(src, sizes, strides, offsets, semantic):
     handle = semantic.builder.create_tla_pointer_view(src.handle,
                                                       semantic.to_tensor(linear).handle, ty.to_ir(semantic.builder),
                                                       size_dims, stride_dims)
-    return buffer(handle, ty)
+    result = buffer(handle, ty)
+    result._static_offset = static_offset
+    return result
 
 
 @builtin
@@ -251,4 +267,6 @@ def reshape(src, shape, _semantic=None):
         handle = b.create_tla_collapse_shape(handle, flat_ty, [list(range(len(src.shape)))])
     if len(sizes) > 1:  # unflatten from 1-D to the target shape
         handle = b.create_tla_expand_shape(handle, dst_ty, [list(range(len(sizes)))])
-    return buffer(handle, ty)
+    result = buffer(handle, ty)
+    result._static_offset = src._static_offset
+    return result

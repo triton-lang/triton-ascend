@@ -280,7 +280,8 @@ def _last(sem):
 
 def test_exports_and_module_mode_constants():
     for name in ("MODE", "POS", "vdiv", "vmax", "vmin", "vmaxs", "vexp", "vdup", "vdups", "vdupv", "vabs", "vneg",
-                 "vnot", "vrelu", "vsqrt", "vabsdif", "vexpdif", "vpack", "vshl", "vshls", "vshr", "vlrelu", "vprelu"):
+                 "vnot", "vrelu", "vsqrt", "vabsdif", "vexpdif", "vpack", "vshl", "vshls", "vshr", "vshrs", "vlrelu",
+                 "vprelu"):
         assert name in simd.__all__, f"{name} missing from simd.__all__"
         assert hasattr(simd, name), f"{name} missing from simd"
     assert simd.MODE.ZEROING == "MODE_ZEROING"
@@ -322,8 +323,9 @@ def test_signatures_match_api_list():
     assert list(p) == ["src0", "src1", "mask", "mode", "_semantic"]
     assert p["mode"].default == simd.MODE.ZEROING
 
-    p = inspect.signature(simd.vshls).parameters
-    assert list(p) == ["src", "scalar", "mask", "mode", "_semantic"]
+    for op in (simd.vshls, simd.vshrs):
+        p = inspect.signature(op).parameters
+        assert list(p) == ["src", "scalar", "mask", "mode", "_semantic"]
 
     p = inspect.signature(simd.vlrelu).parameters
     assert list(p) == ["src", "alpha", "mask", "_semantic"]
@@ -589,18 +591,19 @@ def test_phase1_extended_ops_use_expected_builder_calls():
     simd.vshr(_vec(64, tl.uint32), _vec(64, tl.uint32), _semantic=sem)
     assert _last(sem)[1][4] is False
 
-    sem = _Semantic()
-    simd.vshls(_vec(64, tl.int32), 3, _semantic=sem)
-    name, args = _last(sem)
-    assert (name, args[0], args[4]) == ("shift_scalar", "shls", True)
-
-    for value in (32767, -32768):
-        sem = _Semantic()
-        simd.vshls(_vec(64, tl.int32), value, _semantic=sem)
-        assert _last(sem)[0] == "shift_scalar"
-    for value in (32768, -32769):
-        with pytest.raises(ValueError, match="does not fit int16"):
-            simd.vshls(_vec(64, tl.int32), value, _semantic=_Semantic())
+    for op, kind in ((simd.vshls, "shls"), (simd.vshrs, "shrs")):
+        for dtype, sign in ((tl.int32, True), (tl.uint32, False)):
+            sem = _Semantic()
+            op(_vec(64, dtype), 3, _semantic=sem)
+            name, args = _last(sem)
+            assert (name, args[0], args[4]) == ("shift_scalar", kind, sign)
+        for value in (32767, -32768):
+            sem = _Semantic()
+            op(_vec(64, tl.int32), value, _semantic=sem)
+            assert _last(sem)[0] == "shift_scalar"
+        for value in (32768, -32769):
+            with pytest.raises(ValueError, match="does not fit int16"):
+                op(_vec(64, tl.int32), value, _semantic=_Semantic())
 
     sem = _Semantic()
     simd.vlrelu(_vec(64, tl.float32), 0.25, _semantic=sem)
@@ -615,6 +618,8 @@ def test_phase1_extended_ops_use_expected_builder_calls():
     for call in (
             lambda s: simd.vshl(_vec(64, tl.int64), _vec(64, tl.int64), _semantic=s),
             lambda s: simd.vshr(_vec(64, tl.float32), _vec(64, tl.float32), _semantic=s),
+            lambda s: simd.vshrs(_vec(32, tl.int64), 3, _semantic=s),
+            lambda s: simd.vshrs(_vec(64, tl.float32), 3, _semantic=s),
             lambda s: simd.vlrelu(_vec(64, tl.bfloat16), 0.25, _semantic=s),
             lambda s: simd.vprelu(_vec(64, tl.int32), _vec(64, tl.int32), _semantic=s),
     ):

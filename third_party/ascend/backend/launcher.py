@@ -98,11 +98,18 @@ class LaunchSpec:
     task_type: int
     mix_ratio: int
     shared_mem_dynamic_size: int
+    grid_contract_version: int = 0
+    batch_axis: int = -1
+    batch_factor: int = 1
 
     profile_scratch_size: int = 0
 
     def as_dict(self):
-        return asdict(self)
+        result = asdict(self)
+        if not self.grid_contract_version:
+            for key in ("grid_contract_version", "batch_axis", "batch_factor"):
+                result.pop(key)
+        return result
 
 
 def _program_grid_config(metadata):
@@ -160,6 +167,9 @@ def _program_grid_config(metadata):
     }
     sequence = tuple((t["axis"], t["factor"], t["persistent_coverage"], t["grid_stride_abi_verified"])
                      for t in transforms["transforms"])
+    if transforms["version"] == 3:
+        # Independent V2 fields carry this mapping; legacy flags stay clear.
+        return 0, 1, -1
     if transforms["version"] != 2 or sequence not in modes:
         raise RuntimeError("unsupported native launcher program-grid transforms")
     return modes[sequence]
@@ -198,8 +208,14 @@ def make_launch_spec(metadata, npu_utils):
         if candidate in (1, 2, 3, 4):
             task_type = candidate
     physical = npu_utils.get_aivector_core_num() if metadata.mix_mode == "aiv" else npu_utils.get_aicore_num()
+    batch = getattr(metadata, "program_grid_transforms", None)
+    batch = normalize_program_grid_transforms(batch) if batch is not None else None
+    batch = batch if batch and batch["version"] == 3 else None
     return LaunchSpec(
         profile_scratch_size=int(getattr(metadata, "profile_scratch_size", 0) or 0),
+        grid_contract_version=3 if batch else 0,
+        batch_axis=batch["transforms"][0]["axis"] if batch else -1,
+        batch_factor=batch["transforms"][0]["factor"] if batch else 1,
         flags=flags,
         workspace_size=max(int(getattr(metadata, "workspace_size", 0)), 0),
         ordered_locks=ordered,
@@ -371,6 +387,8 @@ def get_runtime(npu_utils_path, debug=False):
 
 def export_launcher(spec, types, runtime_path, debug=False):
     """Bind the legacy C ABI using constants and a fixed export adapter."""
+    if spec.grid_contract_version:
+        raise RuntimeError("guarded block batching bundles require baseline export")
     fields = ", ".join(str(value) for value in spec.as_dict().values())
     initializers = ", ".join(f"{{{kind}, {dtype}}}" for kind, dtype in types) or "{0, -1}"
     config = (f"#define TRITON_EXPORT_RUNTIME_PATH {json.dumps(runtime_path)}\n"

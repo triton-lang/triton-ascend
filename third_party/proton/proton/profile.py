@@ -14,12 +14,7 @@ DEFAULT_PROFILE_NAME = "proton"
 
 def _select_backend() -> str:
     backend = triton.runtime.driver.active.get_current_target().backend
-    if backend == "cuda":
-        return "cupti"
-    elif backend == "hip":
-        return "roctracer"
-    else:
-        raise ValueError("No backend is available for the current target.")
+    return libproton.select_profiler_from_triton_backend(backend)
 
 
 def _get_mode_str(backend: str, mode: Optional[Union[str, BaseMode]]) -> str:
@@ -30,7 +25,7 @@ def _get_mode_str(backend: str, mode: Optional[Union[str, BaseMode]]) -> str:
 
 
 def _check_env(backend: str) -> None:
-    if backend == "roctracer":
+    if backend in ("rocprofiler", "roctracer"):
         hip_device_envs = ["HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"]
         for env in hip_device_envs:
             if getenv(env, None) is not None:
@@ -38,10 +33,16 @@ def _check_env(backend: str) -> None:
                     f"Proton does not work when the environment variable {env} is set on AMD GPUs. Please unset it and use `ROCR_VISIBLE_DEVICES` instead"
                 )
 
+    use_blackwell_cupti = backend == "cupti" and triton.runtime.driver.active.get_current_target().arch >= 100
+
     # Ensure default envs are set for Proton knobs if not already set by the user.
     for attr, desc in triton.knobs.proton.knob_descriptors.items():
         key = desc.key
         if getenv(key, None) is None:
+            if key == "TRITON_CUPTI_LIB_PATH" and use_blackwell_cupti:
+                # For Blackwell+ GPUs, use the cupti library built for Blackwell.
+                triton.knobs.setenv(key, triton.knobs.proton.cupti_lib_blackwell_dir)
+                continue
             val = getattr(triton.knobs.proton, attr)
             if val is not None:
                 if env_val := triton.knobs.toenv(val):
@@ -79,13 +80,16 @@ def start(
                               Available options are ["tree", "trace"].
                               Defaults to "tree".
         backend (str, optional): The backend to use for profiling.
-                                 Available options are [None, "cupti", "roctracer", "instrumentation"].
+                                 Available options are [None, "cupti", "rocprofiler", "roctracer", "instrumentation"].
                                  Defaults to None, which automatically selects the backend matching the current active runtime.
+                                 On AMD GPUs, "rocprofiler" is preferred and will fall back to "roctracer" if
+                                 rocprofiler-sdk is not available.
         mode (Union[str, BaseMode], optional): The "mode" to use for profiling, which is specific to the backend.
                                                Can be a string or an instance of BaseMode (or any subclass thereof).
                                                Defaults to None.
                                                For "cupti", available options are [None, "pcsampling", "periodic_flushing"].
-                                               For "roctracer", available options are ["periodic_flushing"].
+                                               For "rocprofiler", available options are [None, "periodic_flushing"].
+                                               For "roctracer", available options are [None, "periodic_flushing"].
                                                For "instrumentation", available options are [None].
                                                Each mode has a set of control knobs following with the mode name.
                                                For example, "periodic_flushing" mode has a knob:

@@ -19,8 +19,8 @@ long as the libtriton.so is linked to the plugin and the Triton include passes a
 ## Example 1: Developing a custom pass and running triton-opt to inspect the modified IR
 
 ``` bash
-export LLVM_BUILD_SHARED_LIBS=1;  make dev-install-llvm
-TRITON_PASS_PLUGIN_PATH=/home/triton/python/triton/plugins/libTritonPluginsTestLib.so triton-opt -tritongpu-plugin test/Plugins/test-plugin.mlir
+export TRITON_EXT_ENABLED=1;  make dev-install-llvm
+TRITON_PLUGIN_PATHS=/home/triton/python/triton/plugins/libTritonPluginsTestLib.so triton-opt -tritongpu-plugin test/Plugins/test-plugin.mlir
 ```
 
 ``` MLIR
@@ -94,7 +94,7 @@ Running same code but loading the plugin library also produces the same results 
 pass manager it is not inserted into the compiler pass pipeline:
 
 ``` bash
-TRITON_PASS_PLUGIN_PATH=/home/triton/python/triton/plugins/libTritonPluginsTestLib.so python test.py
+TRITON_PLUGIN_PATHS=/home/triton/python/triton/plugins/libTritonPluginsTestLib.so python test.py
 ```
 
 ``` MLIR
@@ -160,7 +160,7 @@ if __name__ == '__main__':
     h = kernel[grid](BLOCK_SIZE=1024)
     print(h.asm["ttgir"])
 
-    if "TRITON_PASS_PLUGIN_PATH" in os.environ:
+    if "TRITON_PLUGIN_PATHS" in os.environ:
       knobs.runtime.add_stages_inspection_hook = inspect_stages_hook
     h = kernel[grid](BLOCK_SIZE=1024)
     print(h.asm["ttgir"])
@@ -172,7 +172,7 @@ if __name__ == '__main__':
 ```
 
 ``` bash
-TRITON_PASS_PLUGIN_PATH=/home/triton/python/triton/plugins/libTritonPluginsTestLib.so python test.py
+TRITON_PLUGIN_PATHS=/home/triton/python/triton/plugins/libTritonPluginsTestLib.so python test.py
 ```
 
 Shows the pass ran and modified the kernel name but only after the hook is set. Any kernels before the hook or after the hook is unset are left unchanged.
@@ -340,7 +340,7 @@ if __name__ == '__main__':
             if "add_loop_unroll" in line:
                 outfile.write("\n        passes.plugin.add_plugin(pm)\n")
             outfile.write(line)
-    if "TRITON_PASS_PLUGIN_PATH" in os.environ:
+    if "TRITON_PLUGIN_PATHS" in os.environ:
       knobs.runtime.add_stages_inspection_hook = override_stages
     h = kernel2[grid](BLOCK_SIZE=1024)
     print(h.asm["ttgir"])

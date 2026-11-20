@@ -16,7 +16,8 @@ from triton._C.libtriton import getenv, getenv_bool  # type: ignore
 
 if TYPE_CHECKING:
     from .runtime.cache import CacheManager, RemoteCacheBackend
-    from .runtime.jit import JitFunctionInfo, KernelParam
+    from .runtime.jit import JitFunctionInfo, KernelParam, JITFunction
+    from .runtime.autotuner import Config
     from .compiler.compiler import ASTSource, LazyDict, IRSource
 
 
@@ -371,9 +372,17 @@ class compilation_knobs(base_knobs):
     listener: Union[CompilationListener, None] = None
 
 
+class AutotuneListener(Protocol):
+
+    def __call__(self, *, fn: JITFunction, key: tuple, best_config: Config, configs_timings: dict[Config, list[float]],
+                 duration: Optional[float], cache_hit: bool) -> None:
+        ...
+
+
 class autotuning_knobs(base_knobs):
     cache: env_bool = env_bool("TRITON_CACHE_AUTOTUNING")
     print: env_bool = env_bool("TRITON_PRINT_AUTOTUNING")
+    listener: Union[AutotuneListener, None] = None
 
 
 class LaunchHook(Protocol):
@@ -470,6 +479,9 @@ class runtime_knobs(base_knobs):
     kernel_load_start_hook: HookChain[InitHandleHook] = HookChain()
     kernel_load_end_hook: HookChain[InitHandleHook] = HookChain(reversed=True)
 
+    # hook to unload module when kernel is freed
+    kernel_unload_hook: HookChain[InitHandleHook] = HookChain()
+
     # Hook for inspecting compiled functions and modules
     jit_cache_hook: Optional[JITHook] = None
     # Hook to signal that a kernel is done compiling and inspect compiled function.
@@ -514,6 +526,7 @@ class amd_knobs(base_knobs):
     use_block_pingpong: env_opt_bool = env_opt_bool("TRITON_HIP_USE_BLOCK_PINGPONG")
     use_in_thread_transpose: env_opt_bool = env_opt_bool("TRITON_HIP_USE_IN_THREAD_TRANSPOSE")
     use_async_copy: env_opt_bool = env_opt_bool("TRITON_HIP_USE_ASYNC_COPY")
+    use_expert_scheduling: env_opt_bool = env_opt_bool("TRITON_HIP_USE_EXPERT_SCHEDULING")
 
     scalarize_packed_fops: env_bool = env_bool("AMDGCN_SCALARIZE_PACKED_FOPS")
 
@@ -521,6 +534,8 @@ class amd_knobs(base_knobs):
     dump_mir: env_opt_str = env_opt_str("TRITON_DUMP_MIR")
     # Path to externally-provided MIR files to use instead of generated ones
     swap_mir: env_opt_str = env_opt_str("TRITON_SWAP_MIR")
+    # Enable machine instruction scheduler in MIR swap mode
+    swap_mir_enable_misched: env_bool = env_bool("TRITON_SWAP_MIR_ENABLE_MISCHED", False)
 
 
 class proton_knobs(base_knobs):
@@ -528,7 +543,13 @@ class proton_knobs(base_knobs):
     cupti_lib_dir: env_str = env_str(
         "TRITON_CUPTI_LIB_PATH",
         str(pathlib.Path(__file__).parent.absolute() / "backends" / "nvidia" / "lib" / "cupti"))
+    cupti_lib_blackwell_dir: env_str = env_str(
+        "TRITON_CUPTI_LIB_BLACKWELL_PATH",
+        str(pathlib.Path(__file__).parent.absolute() / "backends" / "nvidia" / "lib" / "cupti-blackwell"))
+    rocprofiler_sdk_include_path: env_opt_str = env_opt_str("TRITON_ROCPROFILER_SDK_INCLUDE_PATH")
+    rocprofiler_sdk_lib_path: env_opt_str = env_opt_str("TRITON_ROCPROFILER_SDK_LIB_PATH")
     profile_buffer_size: env_int = env_int("TRITON_PROFILE_BUFFER_SIZE", 64 * 1024 * 1024)
+    profile_metric_buffer_size: env_int = env_int("TRITON_PROFILE_METRIC_BUFFER_SIZE", 64 * 1024 * 1024)
     enable_nvtx: env_bool = env_bool("TRITON_ENABLE_NVTX", True)
     # This knob is effective only on Blackwell+ GPUs.
     #

@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 03a51acaa..98a95f3f4 100644
+index 03a51acaa..cf3d8c23f 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -34,6 +34,21 @@ if(LLVM_MAJOR_VERSION_20_COMPATIBLE)
@@ -50,10 +50,10 @@ index 8a5188721..3af6c42b1 100644
  mlir_tablegen(HFusionOpsTypes.cpp.inc -gen-typedef-defs -typedefs-dialect=hfusion)
  mlir_tablegen(HFusionOpsDialect.h.inc -gen-dialect-decls -dialect=hfusion ${tblgen_feat_list})
 diff --git a/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td b/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
-index c27ce733c..f599e84f0 100644
+index c27ce733c..9afad8ce4 100644
 --- a/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
 +++ b/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
-@@ -153,13 +153,21 @@ def MulExtUiOp : HFusion_Op<"mulextui", [Pure, Commutative,
+@@ -153,13 +153,24 @@ def MulExtUiOp : HFusion_Op<"mulextui", [Pure, Commutative,
  
  }
  
@@ -61,8 +61,11 @@ index c27ce733c..f599e84f0 100644
 +// declaration, so out-of-line definitions need an explicit extraClassDeclaration.
 +#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
 +defvar ReifyShapesTrait = ReifyRankedShapedTypeOpInterface;
++// LLVM 23+: keep defaulted bool attrs non-optional for property codegen.
++defvar BoolDefaultFalse = DefaultValuedAttr<BoolAttr, "false">;
 +#else
 +defvar ReifyShapesTrait = DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>;
++defvar BoolDefaultFalse = DefaultValuedOptionalAttr<BoolAttr, "false">;
 +#endif
 +
  //===----------------------------------------------------------------------===//
@@ -76,7 +79,7 @@ index c27ce733c..f599e84f0 100644
                                               AllTypesMatch<["input"]>]> {
    let summary = [{
        Constructs one tensor by interleaving n input tensors.
-@@ -174,9 +182,16 @@ def InterleaveOp : HFusion_Op<"interleave", [Pure, Commutative,
+@@ -174,9 +185,16 @@ def InterleaveOp : HFusion_Op<"interleave", [Pure, Commutative,
  
    let arguments = (ins Variadic<AnyTypeOf<[AnyRankedTensor]>>:$input);
    let results = (outs AnyTypeOf<[AnyRankedTensor]>:$output);
@@ -93,7 +96,7 @@ index c27ce733c..f599e84f0 100644
    let assemblyFormat = "$input attr-dict `:` type($input) `->` type($output)";
    let hasVerifier = 1;
  }
-@@ -187,7 +202,7 @@ def InterleaveOp : HFusion_Op<"interleave", [Pure, Commutative,
+@@ -187,7 +205,7 @@ def InterleaveOp : HFusion_Op<"interleave", [Pure, Commutative,
  
  def DeinterleaveOp : HFusion_Op<"deinterleave", [Pure, Commutative,
                                                   SameOperandsAndResultRank,
@@ -102,7 +105,7 @@ index c27ce733c..f599e84f0 100644
                                                   AllTypesMatch<["output"]>]> {
    let summary = [{
      Constructs two tensors by deinterleaving an input tensor
-@@ -206,10 +221,18 @@ def DeinterleaveOp : HFusion_Op<"deinterleave", [Pure, Commutative,
+@@ -206,10 +224,18 @@ def DeinterleaveOp : HFusion_Op<"deinterleave", [Pure, Commutative,
      * 1: Output only channel 1 (odd indexes)
    }];
  
@@ -121,6 +124,33 @@ index c27ce733c..f599e84f0 100644
  
    let arguments = (ins AnyTypeOf<[AnyRankedTensor]>:$input,
                         I64Attr:$channelIndex);
+@@ -320,7 +346,7 @@ def CumsumOp : HFusion_Op<"cumsum",
+   let arguments = (ins RankedTensorOf<[BF16, F16, F32, I8, I16, I32, I64, F8E4M3FN, F8E5M2]>:$input,
+                        ConfinedAttr<DenseI64ArrayAttr,
+                       [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
+-                       DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse);
++                       BoolDefaultFalse:$reverse);
+   let results = (outs RankedTensorOf<[BF16, F16, F32, I8, I16, I32, I64, F8E4M3FN, F8E5M2]>:$output);
+   let assemblyFormat = "$input attr-dict `:` type($input) `cum_dims` `=` $cum_dims `reverse` `=` $reverse `->` type($output)";
+   let hasVerifier = 1;
+@@ -344,7 +370,7 @@ def CumprodOp : HFusion_Op<"cumprod",
+   let arguments = (ins RankedTensorOf<[BF16, F16, F32, I8, I16, I32, I64]>:$input,
+                        ConfinedAttr<DenseI64ArrayAttr,
+                       [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
+-                       DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse);
++                       BoolDefaultFalse:$reverse);
+   let results = (outs RankedTensorOf<[BF16, F16, F32, I8, I16, I32, I64]>:$output);
+   let assemblyFormat = "$input attr-dict `:` type($input) `cum_dims` `=` $cum_dims `reverse` `=` $reverse `->` type($output)";
+   let hasVerifier = 1;
+@@ -615,7 +641,7 @@ def SortOp : HFusion_Op<"sort",
+       ```
+   }];
+   let arguments = (ins TensorOrMemref:$src,
+-                       DefaultValuedOptionalAttr<BoolAttr, "false">:$descending,
++                       BoolDefaultFalse:$descending,
+                        I64Attr:$sort_axis);
+   let results = (outs Variadic<AnyRankedTensor>:$result);
+   let assemblyFormat = [{
 diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/CMakeLists.txt b/bishengir/include/bishengir/Dialect/HIVM/IR/CMakeLists.txt
 index fd663b8b0..928721531 100644
 --- a/bishengir/include/bishengir/Dialect/HIVM/IR/CMakeLists.txt
@@ -152,11 +182,38 @@ index fd663b8b0..928721531 100644
  add_public_tablegen_target(BiShengIRHIVMVectorOpsIncGen)
  add_dependencies(mlir-headers BiShengIRHIVMVectorOpsIncGen)
  
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
+index 755b371f6..ad4e9457b 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
++++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMOps.td
+@@ -130,7 +130,7 @@ def SetAtomicOp : HIVM_Op<"set_atomic"> {
+   }];
+   let arguments = (ins HIVM_AtomicKindAttr:$kind,
+                        OptionalAttr<TypeAttr>:$type);
+-  let assemblyFormat = "`kind` `=` $kind `[` `type` `=` $type `]` attr-dict";
++  let assemblyFormat = "`kind` `=` $kind `[` `type` `=` ($type^)? `]` attr-dict";
+ }
+ 
+ def SetCtrlOp : HIVM_Op<"set_ctrl"> {
 diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
-index ffb66a4fa..886a02f0f 100644
+index aae958960..a4af57c2d 100644
 --- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
 +++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMVectorOps.td
-@@ -86,9 +86,19 @@ class HIVM_ElementwiseNaryOp<string mnemonic, list<Trait> traits = [], Type srcT
+@@ -26,6 +26,13 @@ include "bishengir/Dialect/HIVM/IR/HIVMBase.td"
+ include "bishengir/Dialect/HIVM/IR/HIVMAttrs.td"
+ include "bishengir/Dialect/HIVM/IR/HIVMTraits.td"
+ 
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++// LLVM 23+: keep defaulted bool attrs non-optional for property codegen.
++defvar BoolDefaultFalse = DefaultValuedAttr<BoolAttr, "false">;
++#else
++defvar BoolDefaultFalse = DefaultValuedOptionalAttr<BoolAttr, "false">;
++#endif
++
+ //===----------------------------------------------------------------------===//
+ // HIVM Vector Operations.
+ //===----------------------------------------------------------------------===//
+@@ -86,9 +93,19 @@ class HIVM_ElementwiseNaryOp<string mnemonic, list<Trait> traits = [], Type srcT
        (`transpose` `=` $transpose^)?
        (`->` type($result)^)?
    }];
@@ -177,6 +234,33 @@ index ffb66a4fa..886a02f0f 100644
        return mlir::hivm::detail::getFlattenedElementwise(*this, options);
      }
      SmallVector<int64_t> getLimitedAxes() {
+@@ -1975,7 +1992,7 @@ def VCumprodOp : HIVM_VectorOp<"vcumprod",
+                        Optional<AnyMemRef>:$temp_buffer,
+                        ConfinedAttr<DenseI64ArrayAttr,
+                        [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
+-                       DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse
++                       BoolDefaultFalse:$reverse
+   );
+   let builders = [
+     OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+@@ -2045,7 +2062,7 @@ def VCumsumOp : HIVM_VectorOp<"vcumsum",
+                        Optional<AnyMemRef>:$temp_buffer,
+                        ConfinedAttr<DenseI64ArrayAttr,
+                        [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
+-                       DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse
++                       BoolDefaultFalse:$reverse
+   );
+   let builders = [
+     OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+@@ -2256,7 +2273,7 @@ def VSortOp : HIVM_VectorOp<"vsort",
+   let arguments = (ins TensorOrMemref:$src,
+                        Variadic<TensorOrMemref>:$dst,
+                        Optional<AnyMemRef>:$temp_buffer,
+-                       DefaultValuedOptionalAttr<BoolAttr, "false">:$descending,
++                       BoolDefaultFalse:$descending,
+                        DefaultValuedAttr<I64Attr, "-1">:$sort_axis
+   );
+   let results = (outs Variadic<AnyRankedTensor>:$result);
 diff --git a/bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt b/bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt
 index e01fb87be..98f8c14f3 100644
 --- a/bishengir/include/bishengir/Dialect/Scope/IR/CMakeLists.txt
@@ -232,10 +316,10 @@ index 14063506d..f83416d88 100644
      SingleBlockImplicitTerminator<"scope::ReturnOp">,
      SingleBlock,
 diff --git a/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp b/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
-index f96bfdb8f..b4e19e8c0 100644
+index c2dde7710..1c3244056 100644
 --- a/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
 +++ b/bishengir/lib/Dialect/HIVM/IR/HIVMImpl.cpp
-@@ -99,7 +99,12 @@ getTerminatorSuccessorRegions(Operation *terminator,
+@@ -106,7 +106,12 @@ getTerminatorSuccessorRegions(Operation *terminator,
      termIface.getSuccessorRegions(operandAttrs, successors);
      return;
    }
@@ -248,7 +332,7 @@ index f96bfdb8f..b4e19e8c0 100644
  }
  
  static bool userCanReachMatmulOuts(Value current,
-@@ -131,7 +136,12 @@ static bool userCanReachMatmulOuts(Value current,
+@@ -146,7 +151,12 @@ static bool userCanReachMatmulOuts(Value current,
        SmallVector<RegionSuccessor> successors;
        getTerminatorSuccessorRegions(user, branchOp, successors);
        for (const RegionSuccessor &successor : successors) {
@@ -261,11 +345,48 @@ index f96bfdb8f..b4e19e8c0 100644
          if (idx.value() >= inputs.size())
            continue;
          if (userCanReachMatmulOuts(inputs[idx.value()], visited))
+diff --git a/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp b/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
+index 2003df659..25d1b585f 100644
+--- a/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
++++ b/bishengir/lib/Dialect/HIVM/IR/HIVMOps.cpp
+@@ -853,7 +853,12 @@ void ScatterTOp::getEffects(
+ 
+ struct AnchorResource
+     : public mlir::SideEffects::Resource::Base<AnchorResource> {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  // LLVM 23+: SideEffects::Resource::getName() is const-qualified.
++  mlir::StringRef getName() const final { return "<Anchor>"; }
++#else
+   mlir::StringRef getName() final { return "<Anchor>"; }
++#endif
+ };
+ 
+ void mlir::hivm::AnchorOp::getEffects(
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp b/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp
+index a8766aaa4..dcf6af084 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/ConstantizeBufferSize.cpp
+@@ -397,7 +397,14 @@ public:
+       FailureOr<int64_t> upperBound =
+           ValueBoundsConstraintSet::computeConstantBound(
+               presburger::BoundType::UB, dynSize,
+-              /*stopCondition=*/nullptr, /*closedUB=*/true);
++              /*stopCondition=*/nullptr,
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++              // LLVM 62b7cf9: closedUB moved into ValueBoundsOptions.
++              ValueBoundsOptions{/*closedUB=*/true}
++#else
++              /*closedUB=*/true
++#endif
++          );
+       if (failed(upperBound)) {
+         upperBound = resolveDynamicDimToBound(dynSize);
+       }
 diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
-index 3d733988a..a76aeed4b 100644
+index eb833a261..1005b5295 100644
 --- a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
 +++ b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/Utils.cpp
-@@ -423,8 +423,13 @@ static void collectRegionFlowEdges(RegionBranchOpInterface branch,
+@@ -402,8 +402,13 @@ static void collectRegionFlowEdges(RegionBranchOpInterface branch,
    SmallVector<RegionSuccessor, 2> entrySuccessors;
    branch.getSuccessorRegions(RegionBranchPoint::parent(), entrySuccessors);
    for (RegionSuccessor &entrySuccessor : entrySuccessors) {
@@ -280,7 +401,7 @@ index 3d733988a..a76aeed4b 100644
    }
  
    for (Region &region : branch->getRegions()) {
-@@ -436,8 +441,13 @@ static void collectRegionFlowEdges(RegionBranchOpInterface branch,
+@@ -415,8 +420,13 @@ static void collectRegionFlowEdges(RegionBranchOpInterface branch,
              block.getTerminator());
          if (!terminator)
            continue;
@@ -296,7 +417,7 @@ index 3d733988a..a76aeed4b 100644
      }
    }
 diff --git a/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp b/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
-index da5a9b5d3..f6d774eec 100644
+index 129de3b46..1b87f5556 100644
 --- a/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
 +++ b/bishengir/lib/Dialect/Scope/IR/ScopeOps.cpp
 @@ -68,13 +68,25 @@ void ScopeOp::print(OpAsmPrinter &p) {
@@ -325,6 +446,205 @@ index da5a9b5d3..f6d774eec 100644
  void ScopeOp::getEntrySuccessorRegions(
      ArrayRef<Attribute> operands, SmallVectorImpl<RegionSuccessor> &regions) {
    // Scope always enters its region (no operands flow in due to NoRegionArguments trait)
+diff --git a/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp b/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp
+index dcb47d297..5ef249224 100644
+--- a/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp
++++ b/bishengir/lib/Dialect/Utils/IndexBoundAnalyzer.cpp
+@@ -32,7 +32,13 @@ static std::optional<int64_t> computeConstantBound(OpFoldResult value,
+   auto bound = ValueBoundsConstraintSet::computeConstantBound(
+       type, ValueBoundsConstraintSet::Variable(value),
+       /*stopCondition=*/nullptr,
+-      /*closedUB=*/type == presburger::BoundType::UB);
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++      // LLVM 23+: closedUB moved into ValueBoundsOptions.
++      ValueBoundsOptions{/*closedUB=*/type == presburger::BoundType::UB}
++#else
++      /*closedUB=*/type == presburger::BoundType::UB
++#endif
++  );
+   if (succeeded(bound)) {
+     return *bound;
+   }
+diff --git a/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp b/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp
+index 71ddcbdcf..b793fb4a9 100644
+--- a/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp
++++ b/bishengir/lib/Transforms/AffineMinMaxValueBounds.cpp
+@@ -42,7 +42,12 @@ static std::optional<int64_t> getCollapsedConstantIndexValue(Value v) {
+   auto ub = ValueBoundsConstraintSet::computeConstantBound(
+       presburger::BoundType::UB, v,
+       /*stopCondition=*/nullptr,
+-      /*closedUB=*/true);
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++      ValueBoundsOptions{/*closedUB=*/true}
++#else
++      /*closedUB=*/true
++#endif
++  );
+   if (failed(ub) || *lb != *ub)
+     return std::nullopt;
+   return *lb;
+@@ -109,7 +114,12 @@ static FailureOr<bool> getSingleIterationTripCount(scf::ForOp forOp,
+   auto ivUB = ValueBoundsConstraintSet::computeConstantBound(
+       presburger::BoundType::UB, iv,
+       /*stopCondition=*/nullptr,
+-      /*closedUB=*/true);
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++      ValueBoundsOptions{/*closedUB=*/true}
++#else
++      /*closedUB=*/true
++#endif
++  );
+   if (failed(ivLB) || failed(ivUB))
+     return false;
+   if (*ivLB != *ivUB)
+@@ -263,11 +273,21 @@ static IndexValueConstantBounds computeIndexValueConstantBounds(Value value) {
+       ValueBoundsConstraintSet::computeConstantBound(
+           presburger::BoundType::LB, value,
+           /*stopCondition=*/nullptr,
+-          /*closedUB=*/true),
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++          ValueBoundsOptions{/*closedUB=*/true}
++#else
++          /*closedUB=*/true
++#endif
++          ),
+       ValueBoundsConstraintSet::computeConstantBound(
+           presburger::BoundType::UB, value,
+           /*stopCondition=*/nullptr,
+-          /*closedUB=*/true),
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++          ValueBoundsOptions{/*closedUB=*/true}
++#else
++          /*closedUB=*/true
++#endif
++          ),
+   };
+ }
+ 
+diff --git a/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp b/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp
+index 0da48dffb..cdab217b8 100644
+--- a/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp
++++ b/bishengir/tools/bishengir-options-tblgen/CompileConfigGen.cpp
+@@ -50,7 +50,7 @@ public:
+ 
+ /// Main entry to emit compile configs.
+ bool emitCompileConfigs(const RecordKeeper &records, raw_ostream &OS) {
+-  std::vector<Record *> specs =
++  ArrayRef<const Record *> specs =
+       records.getAllDerivedDefinitions(kOptionClassName);
+   for (const Record *R : specs) {
+     ConfigOption cfgOpt(R);
+diff --git a/bishengir/tools/bishengir-options-tblgen/CompileOptionsGen.cpp b/bishengir/tools/bishengir-options-tblgen/CompileOptionsGen.cpp
+index 91ab82ab3..44f9c1974 100644
+--- a/bishengir/tools/bishengir-options-tblgen/CompileOptionsGen.cpp
++++ b/bishengir/tools/bishengir-options-tblgen/CompileOptionsGen.cpp
+@@ -106,7 +106,7 @@ bool emitCompileOption(const ConfigOption &option, raw_ostream &OS) {
+ }
+ 
+ bool emitCollectConfigs(const RecordKeeper &records, raw_ostream &OS) {
+-  std::vector<Record *> specs =
++  ArrayRef<const Record *> specs =
+       records.getAllDerivedDefinitions(kOptionClassName);
+   OS << "#ifdef GEN_OPTION_COLLECTION\n";
+   for (const Record *R : specs) {
+@@ -143,7 +143,7 @@ if ({2}optStr.str() == "{0}") {
+ 
+ /// Main entry to emit compile tool's command line option registration.
+ bool emitCompileOptions(const RecordKeeper &records, raw_ostream &OS) {
+-  std::vector<Record *> specs =
++  ArrayRef<const Record *> specs =
+       records.getAllDerivedDefinitions(kOptionClassName);
+   OS << "#ifdef GEN_OPTION_REGISTRATIONS\n";
+ 
+diff --git a/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp b/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp
+index 61ad98ce9..467d310d5 100644
+--- a/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp
++++ b/bishengir/tools/bishengir-options-tblgen/ConfigsToOptionsConversionGen.cpp
+@@ -72,7 +72,7 @@ void genConfigsAndOptionsConversionForGroups(
+ /// options.
+ bool emitConfigsAndOptionsConversion(const RecordKeeper &records,
+                                      raw_ostream &OS) {
+-  std::vector<Record *> specs =
++  ArrayRef<const Record *> specs =
+       records.getAllDerivedDefinitions(kOptionClassName);
+   StringMap<SmallVector<ConfigOption>> passGroup2Options;
+   for (const Record *R : specs) {
+diff --git a/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp b/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
+index 2777735c1..3c7adcf97 100644
+--- a/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
++++ b/bishengir/tools/bishengir-options-tblgen/PassOptionsGen.cpp
+@@ -92,7 +92,7 @@ static void genPassOptionsForGroups(
+ /// Main entry to emit target spec decls.
+ static bool emitPassOptions(const RecordKeeper &records, raw_ostream &OS,
+                             bool isPipeline = false) {
+-  std::vector<Record *> specs =
++  ArrayRef<const Record *> specs =
+       records.getAllDerivedDefinitions(kOptionClassName);
+   StringMap<SmallVector<ConfigOption>> passGroup2Options;
+   for (const Record *R : specs) {
+diff --git a/bishengir/tools/bishengir-options-tblgen/bishengir-options-tblgen.cpp b/bishengir/tools/bishengir-options-tblgen/bishengir-options-tblgen.cpp
+index b916fc5a5..576f90a6d 100644
+--- a/bishengir/tools/bishengir-options-tblgen/bishengir-options-tblgen.cpp
++++ b/bishengir/tools/bishengir-options-tblgen/bishengir-options-tblgen.cpp
+@@ -40,7 +40,8 @@ static GenRegistration
+                    return false;
+                  });
+ 
+-static bool bishengirOptionsGenMain(raw_ostream &os, RecordKeeper &records) {
++static bool bishengirOptionsGenMain(raw_ostream &os,
++                                    const RecordKeeper &records) {
+   if (!generator) {
+     os << records;
+     return false;
+diff --git a/bishengir/triton/include/triton/Dialect/Triton/IR/Dialect.h b/bishengir/triton/include/triton/Dialect/Triton/IR/Dialect.h
+index 59a8d020d..d617f95e3 100644
+--- a/bishengir/triton/include/triton/Dialect/Triton/IR/Dialect.h
++++ b/bishengir/triton/include/triton/Dialect/Triton/IR/Dialect.h
+@@ -25,7 +25,12 @@ namespace mlir {
+ namespace triton {
+ 
+ struct GlobalMemory : public SideEffects::Resource::Base<GlobalMemory> {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  // LLVM 62b7cf9: SideEffects::Resource::getName() is const-qualified.
++  StringRef getName() const final { return "<GlobalMemory>"; }
++#else
+   StringRef getName() final { return "<GlobalMemory>"; }
++#endif
+ };
+ 
+ class DialectInferLayoutInterface
+diff --git a/bishengir/triton/include/triton/Dialect/TritonGPU/IR/Dialect.h b/bishengir/triton/include/triton/Dialect/TritonGPU/IR/Dialect.h
+index 88dbf0129..3054b3575 100644
+--- a/bishengir/triton/include/triton/Dialect/TritonGPU/IR/Dialect.h
++++ b/bishengir/triton/include/triton/Dialect/TritonGPU/IR/Dialect.h
+@@ -93,7 +93,11 @@ using LinearEncodingCache = Cache<CacheKey, LinearEncodingAttr>;
+ 
+ namespace mlir::triton::gpu {
+ struct SharedMemory : public SideEffects::Resource::Base<SharedMemory> {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  StringRef getName() const final { return "<SharedMemory>"; }
++#else
+   StringRef getName() final { return "<SharedMemory>"; }
++#endif
+ };
+ 
+ // Convert a distributed layout to a linear encoding
+diff --git a/bishengir/triton/include/triton/Dialect/TritonNvidiaGPU/IR/Dialect.h b/bishengir/triton/include/triton/Dialect/TritonNvidiaGPU/IR/Dialect.h
+index 8bb0a59f7..6f533a60e 100644
+--- a/bishengir/triton/include/triton/Dialect/TritonNvidiaGPU/IR/Dialect.h
++++ b/bishengir/triton/include/triton/Dialect/TritonNvidiaGPU/IR/Dialect.h
+@@ -51,7 +51,11 @@ LogicalResult verifyMMAv5Op(Operation *op);
+ namespace mlir::triton::nvidia_gpu {
+ 
+ struct TensorMemory : public SideEffects::Resource::Base<TensorMemory> {
++#ifdef __LLVM_MAJOR_VERSION_23_COMPATIBLE__
++  StringRef getName() const final { return "<TensorMemory>"; }
++#else
+   StringRef getName() final { return "<TensorMemory>"; }
++#endif
+ };
+ 
+ struct TMemAllocation {
 diff --git a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp b/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp
 index b3f5cf9a2..5afeb482c 100644
 --- a/bishengir/triton/lib/Dialect/TritonGPU/IR/Ops.cpp

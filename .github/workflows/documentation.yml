@@ -24,8 +24,8 @@ jobs:
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
     steps:
-      - name: Checkout branch
-        uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           # Full history is required for PR runs: the checker diffs <base>...HEAD
           # to find the changed docs. (Harmless for full scans.)
@@ -140,8 +140,8 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {name: a3, runs_on: linux-aarch64-a3-4, cann_version: '8.5.0', chip_type: a3, os: ubuntu22.04, python_version: '3.10'}
-          - {name: a5, runs_on: linux-amd64-a5-4, cann_version: '9.1.0', chip_type: '950', os: ubuntu22.04, python_version: '3.12'}
+          - {name: a3, runs_on: ["linux-aarch64-a3-800i-4", "cn12-001"], cann_version: '8.5.0', chip_type: a3, os: ubuntu22.04, python_version: '3.10'}
+          - {name: a5, runs_on: linux-amd64-a5-2, cann_version: '9.1.0', chip_type: '950', os: ubuntu22.04, python_version: '3.12'}
     env:
       PYTHON: "python${{ matrix.config.python_version }}"
       PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
@@ -165,7 +165,7 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-info.json', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-
 
       - name: Download and install Bisheng compiler

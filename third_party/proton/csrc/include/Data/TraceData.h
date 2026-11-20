@@ -3,6 +3,7 @@
 
 #include "Data.h"
 #include <memory>
+#include <thread>
 #include <unordered_map>
 
 namespace proton {
@@ -16,17 +17,11 @@ public:
 
   std::vector<uint8_t> toMsgPack(size_t phase) const override;
 
-  DataEntry addOp(const std::string &name) override;
-
   DataEntry addOp(size_t phase, size_t eventId,
                   const std::vector<Context> &contexts) override;
 
   void
   addMetrics(size_t scopeId,
-             const std::map<std::string, MetricValueType> &metrics) override;
-
-  void
-  addMetrics(size_t phase, size_t entryId,
              const std::map<std::string, MetricValueType> &metrics) override;
 
   class Trace;
@@ -47,10 +42,14 @@ private:
   }
 
   void dumpChromeTrace(std::ostream &os, size_t phase) const;
+  size_t getCurrentThreadTraceId();
 
   PhaseStore<Trace> tracePhases;
   // ScopeId -> EventId
   std::unordered_map<size_t, size_t> scopeIdToEventId;
+  // ThreadId -> TraceId
+  std::unordered_map<std::thread::id, uint64_t> threadIdToTraceId;
+  uint64_t nextThreadTraceId = 0;
 };
 
 } // namespace proton

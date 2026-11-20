@@ -253,5 +253,6 @@
   "manylinux",
   "shmem",
   "SHMEM",
-  "msdebug"
+  "msdebug",
+  "oilist"
 ]

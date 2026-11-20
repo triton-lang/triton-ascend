@@ -2,6 +2,8 @@
 build/
 build-*/
 
+!.github/workflows/build/
+
 llvm-project/
 llvm-project-*/
 .llvm-project/
@@ -14,6 +16,7 @@ python/triton_kernels/triton*.egg-info/
 
 python/triton/_C/*.pyd
 python/triton/_C/*.so
+python/triton/_C/*.so.*
 python/triton/_C/*.dylib
 python/triton/_C/*.pdb
 python/triton/_C/*.exe
@@ -70,11 +73,16 @@ ptxas-blackwell
 # Third-party include
 third_party/nvidia/backend/include
 third_party/nvidia/backend/lib/cupti
+third_party/nvidia/backend/lib/cupti-blackwell
+third_party/nvidia/backend/lib/gsan.ll
 
 # Docs
 docs/_build/
-docs/*/python-api/generated/
+docs/_generated/
+docs/gluon/api/generated/
+docs/python-api/generated/
 docs/dialects/
+docs/getting-started/examples
 docs/getting-started/tutorials
 docs/sg_execution_times.rst
 !python/tutorials/*.py
@@ -93,3 +101,5 @@ docs/sg_execution_times.rst
 
 # macOS
 .DS_Store
+
+AGENTS.override.md

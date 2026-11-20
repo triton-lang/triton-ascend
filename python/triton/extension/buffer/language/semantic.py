@@ -73,6 +73,10 @@ def to_tensor(memref: bl.buffer, writable: bool, builder: ir.builder, target_sha
     if not isinstance(memref, bl.buffer):
         raise TypeError("memref must be bl.buffer")
 
+    # Inside a jit function the code generator wraps the default as constexpr;
+    # the C++ binding expects a plain bool.
+    writable = tl._unwrap_if_constexpr(writable)
+
     need_convert_layout = False
     shape = memref.shape
     if target_shape:

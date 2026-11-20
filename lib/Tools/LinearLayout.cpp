@@ -163,7 +163,6 @@ LinearLayout::LinearLayout(BasesT bases,
 
 std::optional<std::string>
 LinearLayout::checkInvariants(bool requireSurjective) {
-  LDBG("checkInvariants: " << toString());
   // Check that basis values are non-negative.
   for (const auto &[inDim, inDimBases] : bases) {
     for (const auto &basis : inDimBases) {
@@ -766,9 +765,9 @@ LinearLayout operator*(LinearLayout inner, LinearLayout outer) {
 
 bool LinearLayout::isTrivialOver(ArrayRef<StringAttr> dimNames) const {
   for (StringAttr dim : dimNames) {
-    if (!llvm::is_contained(getInDimNames(), dim) &&
-        !llvm::is_contained(getOutDimNames(), dim)) {
-      return false;
+    if (!hasInDim(dim) || !hasOutDim(dim)) {
+      llvm::report_fatal_error(
+          ("dim " + dim.str() + " must be present in the layout").c_str());
     }
   }
 
@@ -798,8 +797,24 @@ bool LinearLayout::isTrivialOver(ArrayRef<StringAttr> dimNames) const {
          sublayoutIsZero(dimNames, remainingOutDimNames);
 }
 
+bool LinearLayout::isIdentityOnOutDim(StringAttr dim) const {
+  if (!hasInDim(dim) || !hasOutDim(dim))
+    return false;
+  SmallVector<StringAttr> otherInDims;
+  for (StringAttr inDim : getInDimNames()) {
+    if (inDim != dim)
+      otherInDims.push_back(inDim);
+  }
+  return squareSublayoutIsIdentity(*this, {dim}) &&
+         sublayoutIsZero(otherInDims, {dim});
+}
+
 std::optional<LinearLayout>
 LinearLayout::quotient(ArrayRef<StringAttr> dimNames) const {
+  if (llvm::any_of(dimNames,
+                   [this](StringAttr dim) { return !hasInDim(dim); })) {
+    return std::nullopt;
+  }
   if (!isTrivialOver(dimNames)) {
     return std::nullopt;
   }
@@ -1058,9 +1073,11 @@ LinearLayout LinearLayout::invertAndCompose(const LinearLayout &outer) const {
   // this dimension.
   SmallVector<StringAttr> identityDims;
   for (auto dim : A.getInDimNames()) {
-    if (B.hasInDim(dim) &&
-        A.sublayout(dim, outDims) == B.sublayout(dim, outDims)) {
-      identityDims.push_back(dim);
+    if (B.hasInDim(dim)) {
+      auto aSub = A.sublayout(dim, outDims);
+      auto bSub = B.sublayout(dim, outDims);
+      if (aSub.equalIgnoringOutDimSizes(bSub))
+        identityDims.push_back(dim);
     }
   }
   SmallVector<StringAttr> ANonIdentityInDims;
@@ -1113,7 +1130,7 @@ LinearLayout LinearLayout::pseudoinvert() const {
   return identity.invertAndCompose(*this);
 }
 
-LinearLayout LinearLayout::unsqueezeIn(StringAttr dim) const {
+LinearLayout LinearLayout::squeezeIns(StringAttr dim) const {
   assert(getInDimSize(dim) == 1);
   SmallVector<std::pair<StringAttr, int32_t>> newInDims;
   for (auto inDim : getInDimNames()) {
@@ -1124,7 +1141,7 @@ LinearLayout LinearLayout::unsqueezeIn(StringAttr dim) const {
   return reshapeIns(newInDims);
 }
 
-LinearLayout LinearLayout::unsqueezeOut(StringAttr dim) const {
+LinearLayout LinearLayout::squeezeOuts(StringAttr dim) const {
   assert(getOutDimSize(dim) == 1);
   SmallVector<std::pair<StringAttr, int32_t>> newOutDims;
   for (auto [outDim, outDimSize] : getOutDims()) {
@@ -1132,7 +1149,7 @@ LinearLayout LinearLayout::unsqueezeOut(StringAttr dim) const {
       newOutDims.push_back({outDim, outDimSize});
     }
   }
-  return LinearLayout(bases, newOutDims, isSurjective());
+  return reshapeOuts(newOutDims);
 }
 
 llvm::MapVector<StringAttr, int32_t>

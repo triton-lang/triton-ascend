@@ -86,11 +86,15 @@ pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/asce
 
 ```bash
 apt update
-# 支持的 clang 版本：clang-15、clang-17、clang-20.1.8
-apt install zlib1g-dev clang-15 lld-15
+# 支持的 clang 版本：clang-15、clang-17、clang-20（推荐 clang-20）
+# Ubuntu 22.04 (jammy) 默认源最高只提供 clang-15，需添加 LLVM 官方 apt 源安装 clang-20：
+curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" > /etc/apt/sources.list.d/llvm-toolchain.list
+apt update
+apt install zlib1g-dev clang-20 lld-20
 apt install ccache # optional
-update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
-update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100
+update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
+update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
 pip install ninja cmake wheel pybind11 # build-time dependencies
 ```
 
@@ -109,9 +113,9 @@ pip install -e .
 # 检出指定版本的LLVM源码并应用补丁
 git clone --no-checkout https://github.com/llvm/llvm-project.git
 cd llvm-project
-git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
-git apply llvm_patch_f6ded0b.patch
+git checkout 62b7cf9623fc310525f39ed69aaecc318a909731
+wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_62b7cf9.patch
+git apply llvm_patch_62b7cf9.patch
 
 export LLVM_INSTALL_PREFIX=/path/to/llvm-install
 
@@ -121,9 +125,9 @@ mkdir build
 cd build
 cmake ../llvm \
     -G Ninja \
-    -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
-    -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
-    -DCMAKE_LINKER=/usr/bin/lld-15 \
+    -DCMAKE_C_COMPILER=/usr/bin/clang-20 \
+    -DCMAKE_CXX_COMPILER=/usr/bin/clang++-20 \
+    -DCMAKE_LINKER=/usr/bin/lld-20 \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_ENABLE_ASSERTIONS=ON \
     -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \

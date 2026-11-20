@@ -8,20 +8,17 @@
 #include "triton/Tools/StrUtil.h"
 #include "llvm/Support/Signals.h"
 
-namespace {
-
-template <typename T> std::string stringifyLLVMType(const T &t) {
+template <typename T> static std::string stringifyLLVMType(const T &t) {
   std::string str;
   llvm::raw_string_ostream ros(str);
   ros << t;
   return str;
 }
-} // namespace
 
 namespace mlir {
 // gtest printer for mlir::Attribute.  This must live in namespace mlir in order
 // for it to be found via ADL.
-void PrintTo(const Attribute &attr, std::ostream *os) {
+static void PrintTo(const Attribute &attr, std::ostream *os) {
   *os << stringifyLLVMType(attr);
 }
 } // namespace mlir
@@ -107,32 +104,6 @@ std::string expandTyStr(std::string s) {
   return s;
 }
 
-// Advances a multidimensional index.  Returns true if we wrapped around to the
-// beginning.
-bool advance(MutableArrayRef<unsigned> idx, ArrayRef<unsigned> shape,
-             ArrayRef<unsigned> order) {
-  for (int dim : order) {
-    if (idx[dim] < shape[dim] - 1) {
-      idx[dim]++;
-      return false;
-    }
-    idx[dim] = 0;
-  }
-  return true;
-}
-
-// Gets a flat index from a multidimensional index.
-int64_t getFlatIdx(ArrayRef<unsigned> idx, ArrayRef<unsigned> shape,
-                   ArrayRef<unsigned> order) {
-  int64_t flatIdx = 0;
-  int64_t stride = 1;
-  for (int i = 0; i < idx.size(); i++) {
-    flatIdx += idx[order[i]] * stride;
-    stride *= shape[order[i]];
-  }
-  return flatIdx;
-}
-
 class InferLayoutTest : public ::testing::Test {
 public:
   InferLayoutTest()
@@ -165,7 +136,7 @@ void testReshape(RankedTensorType srcTy, RankedTensorType dstTy,
         ctx, [&](Diagnostic &diag) { diags.push_back("  - " + diag.str()); });
     result = inferLayout->inferReshapeOpEncoding(
         srcTy.getShape(), srcTy.getEncoding(), dstTy.getShape(), inferredEnc,
-        UnknownLoc::get(ctx));
+        /*allowReorder=*/false, UnknownLoc::get(ctx));
   }
 
   // We expect the reshape to succeed as long as the inputs have the same
@@ -190,7 +161,7 @@ void testReshape(RankedTensorType srcTy, RankedTensorType dstTy,
     Attribute inferredSrcEnc;
     auto result = inferLayout->inferReshapeOpEncoding(
         dstTy.getShape(), inferredEnc, srcTy.getShape(), inferredSrcEnc,
-        UnknownLoc::get(ctx));
+        /*allowReorder=*/false, UnknownLoc::get(ctx));
     EXPECT_TRUE(succeeded(result))
         << "Inverse encoding inference (" << triton::join(dstTy.getShape(), "x")
         << " " << stringifyLLVMType(inferredEnc) << " -> "
@@ -465,7 +436,8 @@ TEST_F(JoinOpTest, JoinOpLayoutPropagation) {
       }
       Attribute reshapedEnc;
       result = inferLayout->inferReshapeOpEncoding(
-          transShape, transEnc, newShape, reshapedEnc, std::nullopt);
+          transShape, transEnc, newShape, reshapedEnc,
+          /*allowReorder=*/false, std::nullopt);
       assert(succeeded(result));
       // The layouts should be structurally the same
       // but reshapeEnc will likely be a LinearEncodingAttr
@@ -474,49 +446,6 @@ TEST_F(JoinOpTest, JoinOpLayoutPropagation) {
     }
   }
 }
-
-class AMDLayoutTest : public ::testing::Test {
-public:
-  AMDLayoutTest() {
-    ctx.getOrLoadDialect<TritonGPUDialect>();
-    cgaLayout = triton::gpu::CGAEncodingAttr::fromSplitParams(
-        &ctx, ctaPerCGA, ctaSplit, ctaOrder);
-    f16Ty = Float16Type::get(&ctx);
-  }
-
-  triton::gpu::DotOperandEncodingAttr
-  createDotOperand(int idx, Attribute parent, int kWidth) {
-    return triton::gpu::DotOperandEncodingAttr::get(&ctx, idx, parent, kWidth);
-  }
-
-protected:
-  MLIRContext ctx;
-  const SmallVector<unsigned> ctaPerCGA{1, 1, 1};
-  const SmallVector<unsigned> ctaSplit{1, 1, 1};
-  const SmallVector<unsigned> ctaOrder{2, 1, 0};
-  triton::gpu::CGAEncodingAttr cgaLayout;
-  Type f16Ty;
-};
-
-class AMDMfmaLayoutTest : public AMDLayoutTest {
-public:
-  AMDMfmaLayoutTest() = default;
-
-  triton::gpu::AMDMfmaEncodingAttr createMFMA(ArrayRef<unsigned> instrShape,
-                                              ArrayRef<unsigned> warpsPerCTA) {
-    return triton::gpu::AMDMfmaEncodingAttr::get(
-        &ctx, /*version=*/2, warpsPerCTA, instrShape,
-        /*isTransposed=*/false, cgaLayout);
-  }
-
-  triton::gpu::AMDMfmaEncodingAttr
-  createTransposedMFMA(ArrayRef<unsigned> instrShape,
-                       ArrayRef<unsigned> warpsPerCTA) {
-    return triton::gpu::AMDMfmaEncodingAttr::get(
-        &ctx, /*version=*/2, warpsPerCTA, instrShape,
-        /*isTransposed=*/true, cgaLayout);
-  }
-};
 
 class LinearEncodingTest : public ::testing::Test {
 public:
@@ -568,8 +497,6 @@ TEST_F(LinearEncodingTest, DistributedEncodingToLinearEncoding) {
       ASSERT_EQ(linearLayout, expandedLL);
 
       // Test that methods of DistributedEncoding return the same values
-      Type eltTy = Float32Type::get(&ctx);
-
       ASSERT_EQ(distributedEncoding.getTotalElemsPerThread(shape),
                 linearEncoding.getTotalElemsPerThread(shape));
       ASSERT_EQ(distributedEncoding.getElemsPerThread(shape),

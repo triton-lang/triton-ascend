@@ -8,7 +8,12 @@ ADD "${llvm_dir}" /source/llvm-project
 ENV SCCACHE_DIR="/sccache"
 ENV SCCACHE_CACHE_SIZE="2G"
 
-RUN dnf install --assumeyes llvm-toolset
+# Pin a modern clang: the unversioned 'llvm-toolset' on EL8 resolves to an
+# ancient default stream whose clang ICEs on current MLIR sources
+# (e.g. BuiltinDialectBytecode.cpp).  The community llvm-build workflow
+# uses llvm-toolset-20.1.8 from the AlmaLinux 8 AppStream for the same
+# baseline era.
+RUN dnf install --assumeyes llvm-toolset-20.1.8
 RUN dnf install --assumeyes python39-pip python39-devel git
 RUN alternatives --set python3 /usr/bin/python3.9
 
@@ -18,8 +23,9 @@ ENV PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/s
 RUN python3 -m pip install --upgrade pip
 RUN python3 -m pip install --upgrade cmake ninja sccache lit nanobind
 
-# Install MLIR's Python Dependencies
-RUN python3 -m pip install -r /source/llvm-project/mlir/python/requirements.txt
+# NOTE: MLIR Python bindings are disabled (-DMLIR_ENABLE_BINDINGS_PYTHON=OFF),
+# so mlir/python/requirements.txt (numpy>=2.1, needs Python>=3.10) is neither
+# needed nor installable on this image's Python 3.9.
 
 # Configure, Build, Test, and Install LLVM
 RUN cmake -GNinja -Bbuild \

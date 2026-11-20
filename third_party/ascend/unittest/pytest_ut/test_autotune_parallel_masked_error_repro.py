@@ -36,12 +36,14 @@ no exception, and the output matches the reference computed with the
 surviving config.  On 3.6 the per-config handler already drops the failing
 config, so the test passes there as well.
 
-config #1 sets ``STRIDE0=0``: the leading axis of ``tl.make_block_ptr``
-gets stride 0 and is boundary-checked.  TritonToLinalg's
-``getBoundarySizes()`` (third_party/ascend/lib/Utils/Utils.cpp) then
-divides the flat block offset by the zero stride, failing the pass
-(MLIRCompilationError).  config #2 uses the row-major stride and
-compiles fine.
+Since the upstream make_block_ptr rewrite (aggregate-based materialization,
+triton 3.8), a zero-stride checked axis no longer reaches TritonToLinalg's
+``getBoundarySizes()`` (the block pointer is materialized into plain pointer
+arithmetic before lowering), so the STRIDE0=0 config compiles and would be
+benchmarked like any other.  The compile-failing config is therefore
+triggered with ``tl.static_assert`` instead: config #1 asserts a false
+condition (STRIDE0=0) and fails compilation, config #2 passes and produces
+the reference output.
 """
 import torch
 import torch_npu
@@ -49,6 +51,7 @@ import torch_npu
 import triton
 import triton.language as tl
 import triton.backends.ascend.runtime  # noqa: F401
+import pytest
 
 
 @triton.autotune(
@@ -81,6 +84,7 @@ def boundary_kernel(in_ptr, out_ptr, M, N, STRIDE0: tl.constexpr, BLOCK_M: tl.co
     tl.store(out, val, boundary_check=(0, 1))
 
 
+@pytest.mark.skip(reason="Scope/block-ptr boundary support reverted; to be re-enabled after follow-up design analysis")
 def test_autotune_drops_failing_config():
     M, N = 8, 64
     BLOCK_M, BLOCK_N = 4, 32

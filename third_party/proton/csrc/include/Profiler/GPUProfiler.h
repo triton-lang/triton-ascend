@@ -27,7 +27,6 @@ namespace detail {
 
 void flushDataPhasesImpl(
     const bool periodicFlushEnabled, const std::string &periodicFlushingFormat,
-    std::map<Data *, size_t> &dataFlushedPhases,
     const std::map<Data *,
                    std::pair</*start_phase=*/size_t, /*end_phase=*/size_t>>
         &dataPhases,
@@ -69,35 +68,8 @@ public:
     // kernel activity records. We track the expected fanout here and keep
     // updating it when we have processed each kernel activity record.
     size_t numNodes{1};
-
-    struct GraphNodeState {
-      // If the node is launched as a metric kernel, ignore it's timing data.
-      bool isMetricNode{false};
-      bool isMissingName{true};
-
-      void setEntry(Data *data, const DataEntry &entry) {
-        dataToEntry.insert_or_assign(data, entry);
-      }
-
-      const DataEntry *findEntry(Data *data) const {
-        auto it = dataToEntry.find(data);
-        if (it == dataToEntry.end())
-          return nullptr;
-        return &it->second;
-      }
-
-      template <typename FnT> void forEachEntry(FnT &&fn) {
-        for (auto &[data, entry] : dataToEntry)
-          fn(data, entry);
-      }
-
-      DataToEntryMap dataToEntry;
-    };
-
-    using GraphNodeStateTable = RangeTable<GraphNodeState>;
-
-    // graphNodeId -> (per-Data entry)
-    GraphNodeStateTable graphNodeIdToState;
+    DataToEntryMap dataToGraphEntry;
+    GraphState::NodeIdToStateMap *nodeIdToState{nullptr};
   };
 
   using ExternIdToStateMap =
@@ -120,21 +92,19 @@ protected:
   }
 
   void flushDataPhases(
-      std::map<Data *, size_t> &dataFlushedPhases,
       const std::map<Data *,
                      std::pair</*start_phase=*/size_t, /*end_phase=*/size_t>>
           &dataPhases,
       PendingGraphPool *pendingGraphPool) {
     detail::flushDataPhasesImpl(periodicFlushingEnabled, periodicFlushingFormat,
-                                dataFlushedPhases, dataPhases,
-                                pendingGraphPool);
+                                dataPhases, pendingGraphPool);
   }
 
   // Profiler
   virtual void doStart() override { pImpl->doStart(); }
   virtual void doFlush() override { pImpl->doFlush(); }
   virtual void doStop() override { pImpl->doStop(); }
-  virtual void doAddMetrics(
+  virtual void addMetrics(
       size_t scopeId,
       const std::map<std::string, MetricValueType> &scalarMetrics,
       const std::map<std::string, TensorMetric> &tensorMetrics) override {
@@ -149,8 +119,12 @@ protected:
     bool isApiExternOp{false};
     bool isStreamCapturing{false};
     bool isMetricKernelLaunching{false};
-    std::deque<size_t> metricKernelNumWordsQueue;
-
+    struct MetricKernelLaunchInfo {
+      uint64_t seqId{};
+      uint64_t metricId{};
+      size_t numWords{};
+    };
+    std::deque<MetricKernelLaunchInfo> metricKernelLaunchInfoQueue;
     ThreadState(ConcreteProfilerT &profiler) : profiler(profiler) {}
 
     void enterOp(const Scope &scope) {
@@ -222,6 +196,13 @@ protected:
         --retries;
       }
     }
+
+    void clear() {
+      corrIdToExternId.clear();
+      externIdToState.clear();
+      maxCompletedCorrelationId.store(0);
+      maxSubmittedCorrelationId.store(0);
+    }
   };
 
   static thread_local ThreadState threadState;
@@ -250,25 +231,21 @@ protected:
                  const std::map<std::string, MetricValueType> &scalarMetrics,
                  const std::map<std::string, TensorMetric> &tensorMetrics) {
       if (threadState.isStreamCapturing) { // Graph capture mode
-        threadState.isMetricKernelLaunching = true;
-        for (const auto &[_, metric] : tensorMetrics) {
-          threadState.metricKernelNumWordsQueue.push_back(
-              /*metric_id=*/1 + metric.size); // metric_id + num_values
-        }
-        for (const auto &[_, metric] : scalarMetrics) {
-          threadState.metricKernelNumWordsQueue.push_back(
-              /*metric_id=*/1 + 1); // scalar metric has 1 value
-        }
         // Launch metric kernels
+        auto &metricKernelLaunchState = profiler.metricKernelLaunchState;
+        threadState.isMetricKernelLaunching = true;
         profiler.metricBuffer->receive(
-            tensorMetrics, scalarMetrics, profiler.tensorMetricKernel,
-            profiler.scalarMetricKernel, profiler.metricKernelStream);
+            tensorMetrics, scalarMetrics, metricKernelLaunchState,
+            [&](uint64_t seqId, uint64_t metricId, size_t numWords) {
+              threadState.metricKernelLaunchInfoQueue.push_back(
+                  {seqId, metricId, numWords});
+            });
         threadState.isMetricKernelLaunching = false;
       } else { // Eager mode, directly copy
         // Populate tensor metrics
-        auto tensorMetricsHost =
-            collectTensorMetrics(profiler.metricBuffer->getRuntime(),
-                                 tensorMetrics, profiler.metricKernelStream);
+        auto tensorMetricsHost = collectTensorMetrics(
+            profiler.metricBuffer->getRuntime(), tensorMetrics,
+            profiler.metricKernelLaunchState.tensor.stream);
         auto &dataToEntry = threadState.dataToEntry;
         if (dataToEntry.empty()) {
           // Add metrics to a specific scope
@@ -278,9 +255,10 @@ protected:
           }
         } else {
           // Add metrics to the current op
-          for (auto [data, entry] : dataToEntry) {
-            data->addMetrics(entry.phase, entry.id, scalarMetrics);
-            data->addMetrics(entry.phase, entry.id, tensorMetricsHost);
+          for (const auto &entryIt : dataToEntry) {
+            const auto &entry = entryIt.second;
+            entry.upsertFlexibleMetrics(scalarMetrics);
+            entry.upsertFlexibleMetrics(tensorMetricsHost);
           }
         }
       }

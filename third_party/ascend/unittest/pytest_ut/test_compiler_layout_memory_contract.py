@@ -223,12 +223,14 @@ def compiler_module():
             sys.modules.pop(cache_name, None)
         else:
             sys.modules[cache_name] = previous_cache
+    # Command-construction tests use fake compiler paths. Capability discovery
+    # is tested independently; keep these cases focused on emitted options.
     return module
 
 
 @pytest.mark.parametrize("arch",
                          ["Ascend950PR_9579", "Ascend950DT_9579", "Ascend910_9581", "Ascend910B4", "Ascend910_9363"])
-@pytest.mark.parametrize("device_limit", [None, "14,28"])
+@pytest.mark.parametrize("device_limit", [None, "14,28", "bad-limit"])
 @pytest.mark.parametrize("pure_simt", [False, True])
 def test_npuir_device_options(compiler_module, monkeypatch, arch, device_limit, pure_simt):
     compiler = compiler_module
@@ -247,9 +249,14 @@ def test_npuir_device_options(compiler_module, monkeypatch, arch, device_limit, 
     else:
         monkeypatch.setenv("NPU_DEVICE_LIMIT", device_limit)
 
-    expected_cores = (28, 56) if device_limit is None else (14, 28)
+    expected_cores = (14, 28) if device_limit == "14,28" else (28, 56)
     assert npu_utils.get_device_core() == (28, 56)
-    assert (npu_utils.get_aicore_num(), npu_utils.get_aivector_core_num()) == expected_cores
+    if device_limit == "bad-limit":
+        with pytest.raises(ValueError):
+            npu_utils.get_aicore_num()
+        assert npu_utils.get_device_limit() == (False, 28, 56)
+    else:
+        assert (npu_utils.get_aicore_num(), npu_utils.get_aivector_core_num()) == expected_cores
 
     options = _parse_options(compiler, arch)
     metadata = dict(options.__dict__, target=SimpleNamespace(arch=arch), hash="device-info-test", mix_mode="aiv",
@@ -284,12 +291,28 @@ def test_npuir_device_options(compiler_module, monkeypatch, arch, device_limit, 
     is_a5 = arch.startswith(("Ascend950", "Ascend910_95"))
     expected = [f"--target={'Ascend950' if is_a5 else arch}"]
     if is_a5:
-        aic, aiv = (28, 56) if device_limit is None else (14, 28)
+        aic, aiv = expected_cores
         expected += [f"--custom-aic-number={aic}", f"--custom-aiv-number={aiv}"]
     assert len(commands) == 1
     assert [
         arg for arg in commands[0] if arg.startswith(("--target=", "--custom-aic-number=", "--custom-aiv-number="))
     ] == expected
+
+    # The parent resolves the existing device/config policy; lowering consumes
+    # exactly the same inputs without re-entering the runtime in the worker.
+    cores = compiler._graph_optimize_core_num(options)
+    assert cores == (0 if device_limit == "bad-limit" else expected_cores[int(pure_simt)])
+    context = (arch, cores, npu_utils.get_device_limit() if options.compile_on_910_95 else None,
+               1152 if pure_simt else None)
+    captured = SimpleNamespace(**{**options.__dict__, "block_compile_context": context})
+    monkeypatch.setattr(compiler, "NPUUtils", lambda: pytest.fail("worker queried device limits"))
+    monkeypatch.setattr(compiler, "get_simt_stack_limit", lambda: pytest.fail("worker reopened runtime config"))
+    assert compiler._graph_optimize_core_num(captured) == cores
+    with pytest.raises(CommandCaptured):
+        compile_fn("module {}", metadata, captured)
+    # Input/output paths are private for each compile; all flags must match.
+    flags = lambda command: [arg for arg in command if arg.startswith("--")]
+    assert flags(commands[0]) == flags(commands[1])
 
 
 def _parse_options(compiler, arch, opts=None):
@@ -709,6 +732,7 @@ def _run_make_ttir_with_recorded_graph_options(compiler, monkeypatch, options):
 def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_module, monkeypatch):
     options = SimpleNamespace(
         enable_graph_optimize=True,
+        block_batching_factor=1,
         target_arch="Ascend910B1",
         compile_on_910_95=False,
         compile_mode="simt_only",

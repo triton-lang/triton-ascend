@@ -26,7 +26,7 @@ from triton.language.math import abs as _triton_abs
 
 from .scope import _check_not_in_simd
 
-__all__ = ["select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "clamp"]
+__all__ = ["load", "select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "clamp"]
 
 
 def _check_scalar(value, name):
@@ -40,6 +40,20 @@ def _check_scalar(value, name):
     if type(value) not in (bool, int, float):
         raise TypeError(f"{name} must be a boolean, integer, or floating-point scalar; got {type(value).__name__}")
     return value
+
+
+@tl.builtin
+def load(ptr, _semantic=None):
+    """Load one byte-addressable scalar from a global-memory pointer."""
+    ptr = tl._unwrap_if_constexpr(ptr)
+    if not isinstance(ptr, tl.tensor) or not isinstance(ptr.type, tl.pointer_type):
+        raise TypeError("tla.load expects a scalar GM pointer")
+    if ptr.type.address_space != 1:
+        raise TypeError("tla.load expects a scalar GM pointer in address space 1")
+    element_ty = ptr.type.element_ty
+    if not (element_ty.is_int() or element_ty.is_floating()) or element_ty.primitive_bitwidth % 8:
+        raise TypeError("tla.load requires a byte-addressable integer or floating-point element type")
+    return tl.load(ptr, _semantic=_semantic)
 
 
 @tl.builtin

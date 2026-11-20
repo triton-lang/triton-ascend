@@ -112,7 +112,7 @@ from .dma import (
 )
 
 from .view import view, subview, reshape
-from .scalar import select, abs, maximum, minimum, cast, max_value, cdiv, infinity, clamp
+from .scalar import load, select, abs, maximum, minimum, cast, max_value, cdiv, infinity, clamp
 from .aux_ops import annotate_multi_buffer, assume
 
 from . import math
@@ -215,6 +215,7 @@ __all__ = [
     "reshape",
 
     # scalar expressions
+    "load",
     "select",
     "abs",
     "maximum",

@@ -20,27 +20,35 @@
  * THE SOFTWARE.
  */
 
+#include <memory>
+
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
-#include <memory>
 
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 
+#include "DynamicCVPipeline/StandardizeOp/SplitMatmul.h"
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
-#include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
+
+#include "DynamicCVPipeline/StandardizeOp/Passes.h"
 
 using namespace mlir;
 using namespace triton;
-using namespace CVSplit;
+using namespace CVPipeline;
 
 static constexpr const char *DEBUG_TYPE = "StandardizeOp";
 #define LOG_DEBUG(...)                                                         \
   LLVM_DEBUG(llvm::dbgs() << "\n[" << DEBUG_TYPE << "] " << __VA_ARGS__ << "\n")
 
 namespace mlir::triton {
+
+void StandardizeOpPass::getDependentDialects(DialectRegistry &registry) const {
+  createPatternMatchRewritePass()->getDependentDialects(registry);
+  createSplitMatmulPass()->getDependentDialects(registry);
+}
 
 void StandardizeOpPass::runOnOperation() {
   auto op = getOperation();
@@ -51,7 +59,10 @@ void StandardizeOpPass::runOnOperation() {
 
   LOG_DEBUG("Input mlir:\n" << op);
   OpPassManager pm(op.getOperationName());
+
   pm.addPass(createPatternMatchRewritePass());
+  pm.addPass(createSplitMatmulPass());
+  pm.addPass(createPackMemrefPass());
 
   if (llvm::failed(runPipeline(pm, op))) {
     LOG_DEBUG("Pipeline Failed!");
@@ -68,8 +79,6 @@ void StandardizeOpPass::runOnOperation() {
 
   if (findMayNotExec) {
     LOG_DEBUG("Matmul may not execute!");
-    CVPipeline::setFallbackAttr(op, CVPipeline::ERRCODE_IGNORED);
-    return;
   }
 }
 
@@ -80,6 +89,8 @@ std::unique_ptr<OperationPass<ModuleOp>> createStandardizeOpPass() {
 void registerStandardizeOpPasses() {
   registerPass(createStandardizeOpPass);
   registerPass(createPatternMatchRewritePass);
+  registerPass(createPackMemrefPass);
+  registerPass(createSplitMatmulPass);
 }
 
 } // namespace mlir::triton

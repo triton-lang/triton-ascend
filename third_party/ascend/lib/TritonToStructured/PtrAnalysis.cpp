@@ -128,6 +128,10 @@ void PtrState::dump() const {
   llvm::dbgs() << "PtrState: \n";
   llvm::dbgs() << "source:" << source << "\n";
   llvm::dbgs() << "scalar:" << offset << "\n";
+  llvm::dbgs() << "dynamicOffsets: [";
+  for (auto data : dynamicOffsets)
+    llvm::dbgs() << data << ", ";
+  llvm::dbgs() << "]\n";
   llvm::dbgs() << "size: [";
   for (auto size : sizes)
     llvm::dbgs() << size << ", ";
@@ -155,10 +159,12 @@ void PtrState::dump() const {
 }
 
 bool PtrState::isEmpty() const {
-  return (stateInfo.empty() && !source && !offset);
+  return (stateInfo.empty() && !source && !offset && dynamicOffsets.empty());
 }
 
 bool PtrState::isScalar() const {
+  if (!dynamicOffsets.empty())
+    return false;
   bool scalar = true;
   for (auto info : stateInfo) {
     auto staticStride = getIntAttr(info.stride);
@@ -275,6 +281,69 @@ LogicalResult PtrAnalysis::visitOperandAddptr(triton::AddPtrOp addptrOp,
   return state.addState(ptrState, offsetState, addptrOp, builder);
 }
 
+// i1 is stored as one byte in the Ascend ABI, so pointer arithmetic over
+// ptr<i1> uses byte units just like ptr<i8>.
+static std::optional<unsigned> getPointerStorageBits(Type pointeeType) {
+  if (auto intType = dyn_cast<IntegerType>(pointeeType))
+    return intType.getWidth() == 1 ? 8u : intType.getWidth();
+  if (auto floatType = dyn_cast<FloatType>(pointeeType))
+    return floatType.getWidth();
+  return std::nullopt;
+}
+
+// Continue the analysis through a pointer element-type cast when the pointee
+// storage width is unchanged. Such a cast is a pure reinterpretation: the
+// offsets before the cast stay valid after it, only the base pointer element
+// type changes. Recursing into the cast source keeps the broadcast/addptr
+// structure visible instead of treating the whole pointer tensor as an opaque
+// base. The frontend emits `ptr<i1> -> ptr<i8>` this way for bool load/store.
+LogicalResult PtrAnalysis::visitOperandBitcast(triton::BitcastOp bitcastOp,
+                                               PtrState &state,
+                                               const Location loc,
+                                               OpBuilder &builder) {
+  Type sourceType = bitcastOp.getSrc().getType();
+  Type resultType = bitcastOp.getType();
+
+  if (auto sourceTensor = dyn_cast<RankedTensorType>(sourceType)) {
+    auto resultTensor = dyn_cast<RankedTensorType>(resultType);
+    if (!resultTensor || sourceTensor.getShape() != resultTensor.getShape())
+      return failure();
+  } else if (!isa<triton::PointerType>(sourceType) ||
+             !isa<triton::PointerType>(resultType)) {
+    return failure();
+  }
+
+  auto scalarPointerType = [](Type type) -> Type {
+    if (auto tensorType = dyn_cast<RankedTensorType>(type))
+      return tensorType.getElementType();
+    return type;
+  };
+  auto sourcePtrType =
+      dyn_cast<triton::PointerType>(scalarPointerType(sourceType));
+  auto resultPtrType =
+      dyn_cast<triton::PointerType>(scalarPointerType(resultType));
+  if (!sourcePtrType || !resultPtrType ||
+      sourcePtrType.getAddressSpace() != resultPtrType.getAddressSpace())
+    return failure();
+
+  auto sourceBits = getPointerStorageBits(sourcePtrType.getPointeeType());
+  auto resultBits = getPointerStorageBits(resultPtrType.getPointeeType());
+  if (!sourceBits || !resultBits || *sourceBits != *resultBits)
+    return failure();
+
+  PtrState inner;
+  if (visitOperand(bitcastOp.getSrc(), inner, loc, builder).failed())
+    return failure();
+  if (!inner.source || !isa<triton::PointerType>(inner.source.getType()))
+    return failure();
+
+  if (inner.source.getType() != resultPtrType)
+    inner.source =
+        builder.create<triton::BitcastOp>(loc, resultPtrType, inner.source);
+  state = std::move(inner);
+  return success();
+}
+
 LogicalResult
 PtrAnalysis::visitOperandMakeTensorPtr(triton::MakeTensorPtrOp makeTPtrOp,
                                        PtrState &state, const Location loc,
@@ -379,6 +448,8 @@ LogicalResult PtrAnalysis::initStateByPointer(Value operand, PtrState &state,
       return visitOperandAddptr(cast<triton::AddPtrOp>(op), state, loc,
                                 builder);
     } else if (auto bitCastOp = dyn_cast<triton::BitcastOp>(op)) {
+      if (succeeded(visitOperandBitcast(bitCastOp, state, loc, builder)))
+        return success();
       newSource = operand;
     } else if (auto makeTensorOp = dyn_cast<triton::MakeTensorPtrOp>(op)) {
       LLVM_DEBUG({
@@ -441,17 +512,52 @@ LogicalResult PtrState::mulState(const PtrState &lhsState,
     std::swap(lhs, rhs);
   }
 
+  SmallVector<Value> newDynamicOffsets;
   SmallVector<StateInfo> newStateInfo;
+  if (!lhs->dynamicOffsets.empty()) {
+    Value coeff = materializeValue(builder, loc, rhs->offset);
+    for (Value data : lhs->dynamicOffsets) {
+      auto dataType = cast<RankedTensorType>(data.getType());
+      Value coeffCast = coeff;
+      if (coeffCast.getType() != dataType.getElementType()) {
+        if (coeffCast.getType().isIndex()) {
+          coeffCast = builder.create<arith::IndexCastOp>(
+              loc, dataType.getElementType(), coeffCast);
+        } else {
+          coeffCast = builder.create<arith::ExtSIOp>(
+              loc, dataType.getElementType(), coeffCast);
+        }
+      }
+      auto splatType =
+          RankedTensorType::get(dataType.getShape(), dataType.getElementType());
+      Value splatCoeff =
+          builder.create<triton::SplatOp>(loc, splatType, coeffCast);
+      Value dataAfterMul =
+          builder.create<arith::MulIOp>(loc, data, splatCoeff).getResult();
+      newDynamicOffsets.push_back(dataAfterMul);
+    }
+  }
+
   for (auto info : lhs->stateInfo) {
+    // Tensor strides mark data-dependent axes; their actual offsets were
+    // multiplied above. Do not multiply the marker or insert a second axis.
+    if (auto stride = dyn_cast<Value>(info.stride);
+        stride && isa<RankedTensorType>(stride.getType())) {
+      newStateInfo.push_back(info);
+      continue;
+    }
     OpFoldResult newStride = mulOpFoldResult(info.stride, rhs->offset, loc,
                                              builder, builder.getIndexType());
     newStateInfo.emplace_back(newStride, info.shape, info.dimIndex);
   }
 
-  auto newOffset = mulOpFoldResult(lhsState.offset, rhsState.offset, loc,
-                                   builder, builder.getIndexType());
+  OpFoldResult newOffset;
+  if (lhsState.offset && rhsState.offset)
+    newOffset = mulOpFoldResult(lhsState.offset, rhsState.offset, loc, builder,
+                                builder.getIndexType());
   updatePtrState(newStateInfo, lhs->sizes, lhs->source, newOffset, loc, builder,
                  lhs->shouldLinearize);
+  this->dynamicOffsets = newDynamicOffsets;
 
   LLVM_DEBUG({
     llvm::dbgs() << "After mulState: \n";
@@ -561,8 +667,36 @@ LogicalResult PtrState::addState(PtrState &lhsState, PtrState &rhsState,
       return failure();
     }
 
-    auto newStride = addOpFoldResult(lIt->stride, rIt->stride, loc, builder,
-                                     builder.getIndexType());
+    auto lhsStrideValue = dyn_cast<Value>(lIt->stride);
+    auto rhsStrideValue = dyn_cast<Value>(rIt->stride);
+    bool lhsIsDataStride =
+        lhsStrideValue && isa<RankedTensorType>(lhsStrideValue.getType());
+    bool rhsIsDataStride =
+        rhsStrideValue && isa<RankedTensorType>(rhsStrideValue.getType());
+    // FIXME: Preserve the affine contribution on a data-dependent axis before
+    // accepting mixed strides, e.g. 16 * idx[j] + 2 * j. Keeping only the
+    // tensor marker drops 2 * j when createAddPtrOp skips this axis's affine
+    // range.
+    if ((lhsIsDataStride && !rhsIsDataStride && !isZero(rIt->stride)) ||
+        (rhsIsDataStride && !lhsIsDataStride && !isZero(lIt->stride))) {
+      LLVM_DEBUG({
+        op->emitRemark("PtrAnalysis: cannot combine data-dependent and nonzero "
+                       "or unknown affine strides on the same axis");
+      });
+      return failure();
+    }
+
+    OpFoldResult newStride;
+    if (lhsIsDataStride) {
+      // The other stride is zero or another data marker. Both sides' actual
+      // data contributions are retained in dynamicOffsets below.
+      newStride = lIt->stride;
+    } else if (rhsIsDataStride) {
+      newStride = rIt->stride;
+    } else {
+      newStride = addOpFoldResult(lIt->stride, rIt->stride, loc, builder,
+                                  builder.getIndexType());
+    }
     newStateInfo.emplace_back(newStride, newShape, lIt->dimIndex);
 
     if (isEqual(lIt->shape, newShape))
@@ -583,14 +717,30 @@ LogicalResult PtrState::addState(PtrState &lhsState, PtrState &rhsState,
   }
 
   auto newSource = source = lhsState.source ? lhsState.source : rhsState.source;
-  auto newOffset = addOpFoldResult(lhsState.offset, rhsState.offset, loc,
-                                   builder, builder.getIndexType());
+  // One side may carry no scalar offset (e.g. a data-dependent state), in
+  // which case the other side's offset is used as is.
+  OpFoldResult newOffset;
+  if (lhsState.offset && rhsState.offset) {
+    newOffset = addOpFoldResult(lhsState.offset, rhsState.offset, loc, builder,
+                                builder.getIndexType());
+  } else if (lhsState.offset) {
+    newOffset = lhsState.offset;
+  } else {
+    newOffset = rhsState.offset;
+  }
   auto newShouldLinearize =
       lhsState.shouldLinearize || rhsState.shouldLinearize;
   auto newSizes = lhsState.sizes;
 
+  SmallVector<Value> newDynamicOffsets;
+  newDynamicOffsets.append(lhsState.dynamicOffsets.begin(),
+                           lhsState.dynamicOffsets.end());
+  newDynamicOffsets.append(rhsState.dynamicOffsets.begin(),
+                           rhsState.dynamicOffsets.end());
+
   updatePtrState(newStateInfo, newSizes, newSource, newOffset, loc, builder,
                  newShouldLinearize);
+  this->dynamicOffsets = newDynamicOffsets;
 
   LLVM_DEBUG({
     llvm::dbgs() << "After addState: \n";
@@ -602,11 +752,40 @@ LogicalResult PtrState::addState(PtrState &lhsState, PtrState &rhsState,
 }
 
 triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
+  const bool hasDynamicOffsets = !dynamicOffsets.empty();
+
+  // Dynamic tensors use logical dimensions. Split affine dimensions cannot
+  // be indexed as tensor axes, so leave such layouts to the fallback path.
+  if (hasDynamicOffsets) {
+    if (stateInfo.size() != sizes.size())
+      return nullptr;
+    for (size_t i = 0; i < stateInfo.size(); ++i)
+      if (stateInfo[i].dimIndex != i)
+        return nullptr;
+    for (Value data : dynamicOffsets) {
+      auto type = dyn_cast<RankedTensorType>(data.getType());
+      if (!type || type.getRank() != sizes.size())
+        return nullptr;
+      // Moving singleton axes preserves element order under reshape. Multiple
+      // non-singleton axes may require a transpose, which is not supported yet.
+      auto shape = type.getShape();
+      if (std::count_if(shape.begin(), shape.end(),
+                        [](int64_t dim) { return dim != 1; }) > 1)
+        return nullptr;
+    }
+  }
+
   SmallVector<int64_t> tensorSizes;
   SmallVector<OpFoldResult> tensorStrides;
 
-  auto zeroAttr = builder.getIndexAttr(0);
-  auto oneAttr = builder.getIndexAttr(1);
+  auto emitDynamicSizeError = [&]() -> triton::AddPtrOp {
+    LLVM_DEBUG({
+      InFlightDiagnostic diag = emitError(loc)
+                                << "PtrAnalysis: dynamic block size is not "
+                                   "supported when rebuilding the addptr";
+    });
+    return nullptr;
+  };
 
   for (auto id : permuteIds) {
     auto info = stateInfo[id];
@@ -628,30 +807,32 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
     return addptrOp;
   }
 
-  SmallVector<Value> cachedRange;
   auto ptrType = cast<triton::PointerType>(source.getType());
   auto ptrTensorType = RankedTensorType::get({tensorSizes}, ptrType);
   auto broadCastType =
       RankedTensorType::get({tensorSizes}, builder.getI32Type());
 
-  if (tensorSizes.size() != tensorStrides.size()) {
-    LLVM_DEBUG(
-        {
-          InFlightDiagnostic diag =
-              emitError(loc)
-              << "PtrAnalysis: inconsistent tensor sizes and strides";
-        });
-    return nullptr;
-  }
-  for (size_t i = 0; i < tensorSizes.size(); ++i) {
+  // Build the stride * arange ranges for the affine axes. Zero-stride axes
+  // (pure broadcast) and data-dependent axes (tensor stride, rebuilt from
+  // dynamicOffsets below) are skipped.
+  SmallVector<Value> cachedRange;
+  auto emitAffineRange = [&](const OpFoldResult &stride,
+                             size_t tilePos) -> void {
+    if (isZero(stride))
+      return;
+    if (auto strideVal = dyn_cast<Value>(stride)) {
+      if (isa<RankedTensorType>(strideVal.getType()))
+        return; // data axis
+    }
+
     // make range
     auto indexI32RowType =
-        RankedTensorType::get({tensorSizes[i]}, builder.getI32Type());
+        RankedTensorType::get({tensorSizes[tilePos]}, builder.getI32Type());
     Value makeRangeOp = builder.create<triton::MakeRangeOp>(
-        loc, indexI32RowType, 0, tensorSizes[i]);
+        loc, indexI32RowType, 0, tensorSizes[tilePos]);
 
     // multiply stride
-    Value strideValue = materializeValue(builder, loc, tensorStrides[i]);
+    Value strideValue = materializeValue(builder, loc, stride);
     if (strideValue.getType().isIndex()) {
       strideValue = builder.create<arith::IndexCastOp>(
           loc, builder.getI32Type(), strideValue);
@@ -661,10 +842,10 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
     auto rangeAfterMul =
         builder.create<arith::MulIOp>(loc, makeRangeOp, splatStride);
 
-    // reshape
+    // reshape to the tile rank at position tilePos
     Value expandedValue = rangeAfterMul;
     for (size_t j = 0; j < tensorSizes.size(); ++j) {
-      if (j == i)
+      if (j == tilePos)
         continue;
       expandedValue =
           builder.create<triton::ExpandDimsOp>(loc, expandedValue, j);
@@ -674,25 +855,94 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
     auto broadcastValue =
         builder.create<triton::BroadcastOp>(loc, broadCastType, expandedValue);
     cachedRange.push_back(broadcastValue);
+  };
+
+  // Use reduced tile positions after removing zero-stride axes.
+  for (size_t i = 0; i < tensorStrides.size(); ++i)
+    emitAffineRange(tensorStrides[i], i);
+
+  Value rangeAfterCombine;
+  if (cachedRange.empty()) {
+    Value zeroValue =
+        builder.create<arith::ConstantOp>(loc, builder.getI32IntegerAttr(0));
+    rangeAfterCombine =
+        builder.create<triton::SplatOp>(loc, broadCastType, zeroValue);
+  } else {
+    rangeAfterCombine = cachedRange[0];
+    for (size_t i = 1; i < cachedRange.size(); ++i) {
+      rangeAfterCombine =
+          builder.create<arith::AddIOp>(loc, rangeAfterCombine, cachedRange[i]);
+    }
   }
 
-  // combine the cachedRange
-  Value rangeAfterCombine = cachedRange[0];
-  for (size_t i = 1; i < cachedRange.size(); ++i) {
-    rangeAfterCombine =
-        builder.create<arith::AddIOp>(loc, rangeAfterCombine, cachedRange[i]);
+  // addDynamicOffsets
+  if (hasDynamicOffsets) {
+    bool identityPermute = true;
+    for (size_t i = 0; i < permuteIds.size(); ++i) {
+      if (permuteIds[i] != i) {
+        identityPermute = false;
+        break;
+      }
+    }
+    // Reorder data axes and remove singleton zero-stride axes before
+    // broadcasting to the reduced tile layout.
+    for (Value data : dynamicOffsets) {
+      auto dataType = cast<RankedTensorType>(data.getType());
+      Value dataTile = data;
+      if (dataType.getElementType() != builder.getI32Type()) {
+        // align the element type to the i32 address domain
+        auto i32DataType =
+            RankedTensorType::get(dataType.getShape(), builder.getI32Type());
+        if (dataType.getElementType().isIndex()) {
+          dataTile =
+              builder.create<arith::IndexCastOp>(loc, i32DataType, dataTile);
+        } else if (auto intTy =
+                       dyn_cast<IntegerType>(dataType.getElementType())) {
+          if (intTy.getWidth() < 32) {
+            dataTile =
+                builder.create<arith::ExtSIOp>(loc, i32DataType, dataTile);
+          } else {
+            dataTile =
+                builder.create<arith::TruncIOp>(loc, i32DataType, dataTile);
+          }
+        }
+      }
+      if (!identityPermute || dataType.getRank() != tensorSizes.size()) {
+        SmallVector<int64_t> permutedSizes;
+        for (size_t id : permuteIds) {
+          if (isZero(stateInfo[id].stride)) {
+            if (dataType.getDimSize(id) != 1)
+              return nullptr;
+            continue;
+          }
+          permutedSizes.push_back(dataType.getShape()[id]);
+        }
+
+        // The check above guarantees that only singleton axes move or are
+        // removed, so the data's element order must be preserved.
+        dataTile = builder.create<triton::ReshapeOp>(
+            loc, permutedSizes, dataTile, /*allowReorder=*/false);
+      }
+      dataTile =
+          builder.create<triton::BroadcastOp>(loc, broadCastType, dataTile);
+      rangeAfterCombine =
+          builder.create<arith::AddIOp>(loc, rangeAfterCombine, dataTile);
+    }
   }
 
   // addOffset
-  Value addValue = materializeValue(builder, loc, offset);
-  if (addValue.getType().isIndex()) {
-    addValue =
-        builder.create<arith::IndexCastOp>(loc, builder.getI32Type(), addValue);
+  Value rangeAfterAdd = rangeAfterCombine;
+  if (offset) {
+    Value addValue = materializeValue(builder, loc, offset);
+    if (addValue.getType().isIndex()) {
+      addValue = builder.create<arith::IndexCastOp>(loc, builder.getI32Type(),
+                                                    addValue);
+    }
+    Value splatOffset =
+        builder.create<triton::SplatOp>(loc, broadCastType, addValue);
+    rangeAfterAdd =
+        builder.create<arith::AddIOp>(loc, rangeAfterCombine, splatOffset);
   }
-  Value splatOffset =
-      builder.create<triton::SplatOp>(loc, broadCastType, addValue);
-  auto rangeAfterAdd =
-      builder.create<arith::AddIOp>(loc, rangeAfterCombine, splatOffset);
 
   // addPtr
   Value splatPtr = builder.create<triton::SplatOp>(loc, ptrTensorType, source);
@@ -896,6 +1146,45 @@ PtrAnalysis::visitOperandBroadcast(triton::BroadcastOp broadcastOp,
   return success();
 }
 
+LogicalResult PtrAnalysis::visitOperandDataTensor(Value operand,
+                                                  PtrState &state,
+                                                  const Location loc,
+                                                  OpBuilder &builder) {
+  if (!state.isEmpty()) {
+    LLVM_DEBUG({
+      if (auto op = operand.getDefiningOp())
+        op->emitError(
+            "PtrAnalysis: PtrState should be empty when visiting data tensor");
+    });
+    return failure();
+  }
+
+  auto tensorType = cast<RankedTensorType>(operand.getType());
+  SmallVector<OpFoldResult> newSizes;
+  for (int64_t dim : tensorType.getShape())
+    newSizes.emplace_back(builder.getIndexAttr(dim));
+
+  // Record the data axes before visiting expand_dims/broadcast. A tensor
+  // stride is an opaque marker, not an affine stride to materialize.
+  SmallVector<StateInfo> newStateInfo;
+  for (size_t dim = 0; dim < newSizes.size(); ++dim) {
+    OpFoldResult stride = tensorType.getDimSize(dim) == 1
+                              ? OpFoldResult(builder.getIndexAttr(0))
+                              : OpFoldResult(operand);
+    newStateInfo.emplace_back(stride, newSizes[dim], dim);
+  }
+  state.updatePtrState(newStateInfo, newSizes, nullptr, builder.getIndexAttr(0),
+                       loc, builder);
+  state.dynamicOffsets.push_back(operand);
+
+  LLVM_DEBUG({
+    llvm::dbgs() << "After visitOperandDataTensor: \n";
+    state.dump();
+    llvm::dbgs() << "----------------------------------------------\n";
+  });
+  return success();
+}
+
 LogicalResult PtrAnalysis::visitOperandSplat(triton::SplatOp splatOp,
                                              PtrState &state,
                                              const Location loc,
@@ -993,6 +1282,11 @@ PtrAnalysis::visitOperandExpandDims(triton::ExpandDimsOp expandDimsOp,
 
   newStateInfo.insert(newStateInfo.begin() + insertPos, insertInfo);
   newSizes.insert(newSizes.begin() + axis, oneAttr);
+
+  // Keep offset tensors in the same logical rank as sizes. In particular,
+  // token[:, None] and token[None, :] must retain different varying axes.
+  for (Value &data : state.dynamicOffsets)
+    data = builder.create<triton::ExpandDimsOp>(loc, data, axis);
 
   state.updatePtrState(newStateInfo, newSizes, state.source, state.offset, loc,
                        builder, state.shouldLinearize);
@@ -1347,6 +1641,8 @@ LogicalResult PtrAnalysis::visitOperand(Value operand, PtrState &state,
     return visitOperandExpandDims(op, state, loc, builder);
   } else if (auto op = operand.getDefiningOp<triton::AddPtrOp>()) {
     return visitOperandAddptr(op, state, loc, builder);
+  } else if (auto op = operand.getDefiningOp<triton::BitcastOp>()) {
+    return visitOperandBitcast(op, state, loc, builder);
   } else if (auto op = operand.getDefiningOp<arith::ConstantOp>()) {
     return visitOperandConstSplat(op, state, loc, builder);
   } else if (auto op = operand.getDefiningOp<arith::RemSIOp>()) {
@@ -1356,10 +1652,26 @@ LogicalResult PtrAnalysis::visitOperand(Value operand, PtrState &state,
   } else if (auto op = operand.getDefiningOp<arith::ExtSIOp>()) {
     return visitOperandExtSI(op, state, loc, builder);
   } else if (auto op = operand.getDefiningOp<triton::LoadOp>()) {
+    auto tensorType = dyn_cast<RankedTensorType>(operand.getType());
+    if (enableDataTensorOffset && tensorType &&
+        tensorType.getElementType().isIntOrIndex()) {
+      return visitOperandDataTensor(operand, state, loc, builder);
+    }
     LLVM_DEBUG({
       op.emitRemark("TritonToStructured: Invalid dynamic offset"
                     "The load operation's offset cannot be derived from "
                     "another load result.");
+    });
+    return failure();
+  } else if (auto op = operand.getDefiningOp<arith::SelectOp>()) {
+    auto tensorType = dyn_cast<RankedTensorType>(operand.getType());
+    if (enableDataTensorOffset && tensorType &&
+        tensorType.getElementType().isIntOrIndex()) {
+      return visitOperandDataTensor(operand, state, loc, builder);
+    }
+    LLVM_DEBUG({
+      op.emitRemark("TritonToStructured: Invalid dynamic offset"
+                    "The select result cannot be used as a dynamic offset.");
     });
     return failure();
   } else if (auto op = operand.getDefiningOp<arith::FPToSIOp>()) {
@@ -1464,8 +1776,15 @@ void PtrState::analyzePermute() {
     return true;
   };
 
+  // Broadcast-only axes have no place in the affine stride ordering:
+  // Treat them as the largest stride so they sort to the outermost
+  // position instead.
   std::stable_sort(permuteIds.begin(), permuteIds.end(),
                    [&](size_t a, size_t b) {
+                     bool za = isZero(stateInfo[a].stride);
+                     bool zb = isZero(stateInfo[b].stride);
+                     if (za || zb)
+                       return za && !zb;
                      return isGreater(stateInfo[a].stride, stateInfo[b].stride);
                    });
 

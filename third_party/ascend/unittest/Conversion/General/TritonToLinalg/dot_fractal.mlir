@@ -65,7 +65,7 @@ module {
 // CHECK-SAME:    mix_mode = "mix"
 // CHECK:         hivm.hir.convert_layout %{{.*}} output_shape [160, 320] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>} : (tensor<20x10x16x16xf16>) -> tensor<160x320xf16>
 // CHECK:         %[[ACC:.*]] = tensor.empty() : tensor<160x80xf32>
-// CHECK:         linalg.matmul {input_precision = "ieee"} ins(%{{.*}}, %{{.*}} : tensor<160x320xf16>, tensor<320x80xf16>) outs(%[[ACC]] : tensor<160x80xf32>) -> tensor<160x80xf32>
+// CHECK:         linalg.matmul {indexing_maps = [{{.*}}], input_precision = "ieee"} ins(%{{.*}}, %{{.*}} : tensor<160x320xf16>, tensor<320x80xf16>) outs(%[[ACC]] : tensor<160x80xf32>) -> tensor<160x80xf32>
 // ND result: no ND->Fractal convert afterwards.
 // CHECK-NOT:     hivm.hir.convert_layout
 
@@ -152,7 +152,7 @@ module {
 // CHECK:         hivm.hir.convert_layout %{{.*}} output_shape [160, 320] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>} : (tensor<20x10x16x16xf16>) -> tensor<160x320xf16>
 // CHECK:         hivm.hir.convert_layout %{{.*}} output_shape [320, 80] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>} : (tensor<5x20x16x16xf16>) -> tensor<320x80xf16>
 // CHECK:         tensor.empty() : tensor<160x80xf32>
-// CHECK:         %[[MM:.*]] = linalg.matmul {input_precision = "ieee"} ins(%{{.*}}, %{{.*}} : tensor<160x320xf16>, tensor<320x80xf16>) outs(%{{.*}} : tensor<160x80xf32>) -> tensor<160x80xf32>
+// CHECK:         %[[MM:.*]] = linalg.matmul {indexing_maps = [{{.*}}], input_precision = "ieee"} ins(%{{.*}}, %{{.*}} : tensor<160x320xf16>, tensor<320x80xf16>) outs(%{{.*}} : tensor<160x80xf32>) -> tensor<160x80xf32>
 // fractal_c: ND [M,N] -> [N/16, M/16, 16, 16], carrying the f32 accumulator dtype.
 // CHECK:         hivm.hir.convert_layout %[[MM]] output_shape [5, 10, 16, 16] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>, srcLayout = #hivm.data_layout<ND>} : (tensor<160x80xf32>) -> tensor<5x10x16x16xf32>
 
@@ -225,7 +225,7 @@ module {
 // ND operands: no Fractal->ND convert is emitted before the matmul.
 // CHECK-NOT:     hivm.hir.convert_layout
 // CHECK:         tensor.empty() : tensor<160x80xf32>
-// CHECK:         %[[MM:.*]] = linalg.matmul {input_precision = "ieee"} ins(%{{.*}}, %{{.*}} : tensor<160x320xf16>, tensor<320x80xf16>) outs(%{{.*}} : tensor<160x80xf32>) -> tensor<160x80xf32>
+// CHECK:         %[[MM:.*]] = linalg.matmul {indexing_maps = [{{.*}}], input_precision = "ieee"} ins(%{{.*}}, %{{.*}} : tensor<160x320xf16>, tensor<320x80xf16>) outs(%{{.*}} : tensor<160x80xf32>) -> tensor<160x80xf32>
 // CHECK:         hivm.hir.convert_layout %[[MM]] output_shape [5, 10, 16, 16] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>, srcLayout = #hivm.data_layout<ND>} : (tensor<160x80xf32>) -> tensor<5x10x16x16xf32>
 
 // -----
@@ -297,7 +297,7 @@ module {
 // CHECK-SAME:    mix_mode = "mix"
 // CHECK:         hivm.hir.convert_layout %{{.*}} output_shape [160, 320] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>} : (tensor<40x10x16x8xf32>) -> tensor<160x320xf32>
 // CHECK:         tensor.empty() : tensor<160x80xf32>
-// CHECK:         linalg.matmul {input_precision = "ieee"} ins(%{{.*}}, %{{.*}} : tensor<160x320xf32>, tensor<320x80xf32>) outs(%{{.*}} : tensor<160x80xf32>) -> tensor<160x80xf32>
+// CHECK:         linalg.matmul {indexing_maps = [{{.*}}], input_precision = "ieee"} ins(%{{.*}}, %{{.*}} : tensor<160x320xf32>, tensor<320x80xf32>) outs(%{{.*}} : tensor<160x80xf32>) -> tensor<160x80xf32>
 
 // -----
 
@@ -393,6 +393,6 @@ module {
 // CHECK:         hivm.hir.convert_layout %{{.*}} output_shape [320, 64] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<Fractal, fractalSizes = [32, 32]>} : (tensor<2x10x32x32xi8>) -> tensor<320x64xi8>
 // i32 accumulator for an int8 input.
 // CHECK:         tensor.empty() : tensor<160x64xi32>
-// CHECK:         %[[MM:.*]] = linalg.matmul {input_precision = "ieee"} ins(%{{.*}}, %{{.*}} : tensor<160x320xi8>, tensor<320x64xi8>) outs(%{{.*}} : tensor<160x64xi32>) -> tensor<160x64xi32>
+// CHECK:         %[[MM:.*]] = linalg.matmul {indexing_maps = [{{.*}}], input_precision = "ieee"} ins(%{{.*}}, %{{.*}} : tensor<160x320xi8>, tensor<320x64xi8>) outs(%{{.*}} : tensor<160x64xi32>) -> tensor<160x64xi32>
 // fractal_c block stays [16, 16] even though the int8 input block is [16, 32].
 // CHECK:         hivm.hir.convert_layout %[[MM]] output_shape [4, 10, 16, 16] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>, srcLayout = #hivm.data_layout<ND>} : (tensor<160x64xi32>) -> tensor<4x10x16x16xi32>

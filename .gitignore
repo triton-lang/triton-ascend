@@ -2,6 +2,8 @@
 build/
 build-*/
 
+!.github/workflows/build/
+
 llvm-project/
 llvm-project-*/
 .llvm-project/

@@ -52,10 +52,10 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
-/// Materialize pointer tensor expressions directly instead of routing them
-/// through a synthetic AddPtrOp with a zero offset. A higher benefit than the
-/// generic value converters ensures pointer layout is handled by
-/// BlockDataParser.
+/// Materialize scalar and tensor pointer expressions directly instead of
+/// routing them through a synthetic AddPtrOp with a zero offset. A higher
+/// benefit than the generic value converters ensures pointer layout is handled
+/// by BlockDataParser.
 template <typename OpTy>
 class MemoryPointerConverter : public OpConversionPattern<OpTy> {
 public:
@@ -65,9 +65,26 @@ public:
   LogicalResult
   matchAndRewrite(OpTy op, typename OpTy::Adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    auto resultTy = dyn_cast<RankedTensorType>(op->getResult(0).getType());
-    if (!resultTy || !isa<triton::PointerType>(resultTy.getElementType()))
+    Type resultType = op->getResult(0).getType();
+    auto tensorType = dyn_cast<RankedTensorType>(resultType);
+    bool isPointerExpression =
+        isa<triton::PointerType>(resultType) ||
+        (tensorType && isa<triton::PointerType>(tensorType.getElementType()));
+    if (!isPointerExpression)
       return failure();
+
+    // Preserve the dedicated scalar ptr<i1> -> ptr<i8> forwarding path. Both
+    // pointer types normalize to the same memref<?xi8>, so materializing a new
+    // reinterpret cast here would discard that canonical identity conversion.
+    if (auto bitcast = dyn_cast<triton::BitcastOp>(op.getOperation())) {
+      auto sourceType =
+          dyn_cast<triton::PointerType>(bitcast.getSrc().getType());
+      auto destinationType = dyn_cast<triton::PointerType>(bitcast.getType());
+      if (sourceType && destinationType &&
+          sourceType.getPointeeType().isInteger(1) &&
+          destinationType.getPointeeType().isInteger(8))
+        return failure();
+    }
 
     llvm::SmallDenseMap<Value, BlockData> known;
     FailureOr<Value> memref =

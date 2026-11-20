@@ -97,4 +97,80 @@ module {
     memref.store %result, %outv[%idxv] {ssbuffer.core_type = "VECTOR"} : memref<1xi32>
     func.return
   }
+
+  // All loop result slots are VECTOR, but the scalar iter_arg is used by CUBE.
+  // The if result updates that iter_arg, so its load must survive in CUBE too.
+  // CUBE has no external result users: only the next iteration needs the carry.
+  // CHECK-LABEL: func.func @for_scalar_carry_without_cube_sibling(
+  // CHECK-SAME: %[[LB:[^:]+]]: index, %[[UB:[^:]+]]: index, %[[STEP:[^:]+]]: index, %[[COND:[^:]+]]: i1, %[[SRC:[^:]+]]: memref<?xi32>, %[[DST:[^:]+]]: memref<?xi32>
+  // CHECK: hivm.tcore_type = #hivm.tcore_type<VECTOR>
+  // CHECK: scope.scope
+  // CHECK: scf.for %[[IV:[^ ]+]] = %[[LB]] to %[[UB]] step %[[STEP]] iter_args(%[[ACC:[^ ]+]] = %{{[^)]+}})
+  // CHECK: %[[NEXT:[^ ]+]] = scf.if %[[COND]] -> (i32) {
+  // CHECK-NEXT: %[[LOAD:[^ ]+]] = memref.load %[[SRC]][%[[IV]]]
+  // CHECK-NEXT: scf.yield{{.*}} %[[LOAD]] : i32
+  // CHECK-NEXT: } else {
+  // CHECK-NEXT: scf.yield{{.*}} %[[ACC]] : i32
+  // CHECK: %[[SUM:[^ ]+]] = arith.addi %[[ACC]], %[[NEXT]]
+  // CHECK: memref.store %[[ACC]], %[[DST]][%[[IV]]]
+  // CHECK: scf.yield{{.*}} %[[SUM]] : i32
+  // CHECK: hivm.tcore_type = #hivm.tcore_type<CUBE>
+  func.func @for_scalar_carry_without_cube_sibling(
+      %lb: index, %ub: index, %step: index, %cond: i1,
+      %src: memref<?xi32>, %dst: memref<?xi32>, %outv: memref<1xi32>) {
+    %idx = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
+    %zero = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : i32
+    %result = scf.for %i = %lb to %ub step %step
+        iter_args(%acc = %zero) -> (i32) {
+      %next = scf.if %cond -> (i32) {
+        %value = memref.load %src[%i] {ssbuffer.core_type = "VECTOR"} : memref<?xi32>
+        scf.yield %value : i32
+      } else {
+        scf.yield %acc : i32
+      } {ssbuffer.core_type = "VECTOR"}
+      %sum = arith.addi %acc, %next {ssbuffer.core_type = "VECTOR"} : i32
+      memref.store %acc, %dst[%i] {ssbuffer.core_type = "CUBE"} : memref<?xi32>
+      scf.yield %sum : i32
+    } {ssbuffer.core_type = "VECTOR"}
+    memref.store %result, %outv[%idx] {ssbuffer.core_type = "VECTOR"} : memref<1xi32>
+    return
+  }
+
+  // CHECK-LABEL: func.func @while_scalar_carry_without_cube_sibling(
+  // CHECK-SAME: %[[COND:[^:]+]]: i1, %[[BRANCH:[^:]+]]: i1, %[[SRC:[^:]+]]: memref<1xindex>, %[[DST:[^:]+]]: memref<1xindex>
+  // CHECK: hivm.tcore_type = #hivm.tcore_type<VECTOR>
+  // CHECK: scope.scope
+  // CHECK: scf.while (%[[BEFORE:[^ ]+]] = %{{[^)]+}}) : (index) -> index {
+  // CHECK: scf.condition(%[[COND]]) %[[BEFORE]] : index
+  // CHECK: ^bb0(%[[ACC:[^:]+]]: index):
+  // CHECK: %[[NEXT:[^ ]+]] = scf.if %[[BRANCH]] -> (index) {
+  // CHECK-NEXT: %[[LOAD:[^ ]+]] = memref.load %[[SRC]]
+  // CHECK-NEXT: scf.yield{{.*}} %[[LOAD]] : index
+  // CHECK-NEXT: } else {
+  // CHECK-NEXT: scf.yield{{.*}} %[[ACC]] : index
+  // CHECK: %[[SUM:[^ ]+]] = arith.addi %[[ACC]], %[[NEXT]]
+  // CHECK: memref.store %[[ACC]], %[[DST]]
+  // CHECK: scf.yield{{.*}} %[[SUM]] : index
+  // CHECK: hivm.tcore_type = #hivm.tcore_type<CUBE>
+  func.func @while_scalar_carry_without_cube_sibling(
+      %cond: i1, %branch: i1, %src: memref<1xindex>, %dst: memref<1xindex>,
+      %outv: memref<1xindex>) {
+    %zero = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
+    %result = scf.while (%acc = %zero) : (index) -> index {
+      scf.condition(%cond) %acc : index
+    } do {
+    ^bb0(%acc: index):
+      %next = scf.if %branch -> (index) {
+        %value = memref.load %src[%zero] {ssbuffer.core_type = "VECTOR"} : memref<1xindex>
+        scf.yield %value : index
+      } else {
+        scf.yield %acc : index
+      } {ssbuffer.core_type = "VECTOR"}
+      %sum = arith.addi %acc, %next {ssbuffer.core_type = "VECTOR"} : index
+      memref.store %acc, %dst[%zero] {ssbuffer.core_type = "CUBE"} : memref<1xindex>
+      scf.yield %sum : index
+    } attributes {ssbuffer.core_type = "VECTOR"}
+    memref.store %result, %outv[%zero] {ssbuffer.core_type = "VECTOR"} : memref<1xindex>
+    return
+  }
 }

@@ -66,9 +66,9 @@ def _apply_ascend_patch():
                 module = _ir.parse_mlir_module(full_name, context)
                 module.context = context
                 return module
-            if ext in ("llir", "ptx", "amdgcn", "ttadapter", "bcmlir"):
+            if ext in ("llir", "ptx", "amdgcn", "ttadapter"):
                 return _Path(full_name).read_text()
-            if ext in ("cubin", "hsaco", "mlirbc", "npubin"):
+            if ext in ("cubin", "hsaco", "npubin"):
                 return _Path(full_name).read_bytes()
 
         _compiler_module.parse = _patched_parse
@@ -119,5 +119,9 @@ def _apply_ascend_patch():
         except Exception as e:
             logging.warning(f"[Ascend Patch] Failed to install dtype guard: {e}")
 
+
+from .knobs import install_ascend_knobs as _install_ascend_knobs
+
+_install_ascend_knobs()
 
 __all__ = ["do_bench_npu"]

@@ -31,7 +31,6 @@ set_property(DIRECTORY PROPERTY RULE_LAUNCH_LINK ${_saved_launch_link})
 include_directories(${ASCENDNPU_IR_SRC_DIR}/bishengir/include)
 include_directories(${ASCENDNPU_IR_BINARY_DIR}/bishengir/include) # Tablegen'd files
 
-add_subdirectory(bin)
 add_subdirectory(include)
 add_subdirectory(lib)
 
@@ -129,11 +128,13 @@ endif()
 add_triton_plugin(TritonAscend
   ${CMAKE_CURRENT_SOURCE_DIR}/triton_ascend.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/ascend_ir.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/language/tla/cpp/tla_builder.cc
   LINK_LIBS
   TritonToGraph
   TritonToLinalg
   BiShengIRScopeDialect
   BiShengIRHIVMDialect
+  MLIRAVEDialect
 )
 
 option(TRITON_ENABLE_COVERAGE_LLVM_COV "Enable code llvm-cov coverage tool for Ascend plugin " OFF)
@@ -194,4 +195,8 @@ if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
   )
 else()
   target_compile_definitions(TritonAscend PRIVATE TRITON_ASCEND_HAS_INPROC_COSTMODEL=0)
+endif()
+
+if(TRITON_BUILD_PROTON)
+  target_compile_definitions(TritonAscend PRIVATE TRITON_ASCEND_ENABLE_PROTON=1)
 endif()

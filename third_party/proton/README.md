@@ -103,7 +103,7 @@ By default, Proton automatically selects either `cupti` or `roctracer` as the ba
 #### Instruction sampling
 
 Proton supports instruction sampling on NVIDIA GPUs.
-You may experience ~20x end-to-end overhead when using instruction sampling, although the overhead for each individual GPU kernel is negligible.
+You may experience ~20× end-to-end overhead when using instruction sampling, although the overhead for each individual GPU kernel is negligible.
 The overhead is mostly caused by data transfer and processing on the CPU.
 Additionally, the proton-viewer options `-i <regex> -d <depth> -t <threshold>` can be helpful for filtering out GPU kernels that are not of interest.
 The following example demonstrates how to use instruction sampling:
@@ -144,7 +144,7 @@ proton.start(
 **Kernel-side usage:**
 
 **Caution**: For DSL level instrumentation, **only Gluon** semantic is enabled by default.
-Instrumenting kernels written in Triton DSL is disable because Triton's higher-level IR undergoes
+Instrumenting kernels written in Triton DSL is disabled because Triton's higher-level IR undergoes
 aggressive compiler rewrites (loop pipelining, instruction re-ordering, IR duplication, etc.).
 These transformations can invalidate naïve instrumentation and lead to misleading results.
 To enable instrumentation for Triton DSL, call `pl.enable_semantic("triton")` before `proton.start`.
@@ -171,6 +171,8 @@ Advanced users can instrument either the `ttir` or `ttgir` intermediate represen
 ### Hook
 
 ```python
+import triton
+import triton.language as tl
 import triton.profiler as proton
 from typing import NamedTuple
 

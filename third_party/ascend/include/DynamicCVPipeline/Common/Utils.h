@@ -22,16 +22,12 @@
 
 #ifndef ADD_AUTO_SCHEDULING_COMMON_UTILS_H
 #define ADD_AUTO_SCHEDULING_COMMON_UTILS_H
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/Support/Casting.h"
-#include <cstdint>
-#include <optional>
-#include <string_view>
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -60,15 +56,19 @@ inline constexpr llvm::StringLiteral kLoadStoreBufCount =
     "ssbuffer.load_store_buf_count";
 inline constexpr llvm::StringLiteral kAnalyzeFlagId =
     "ssbuffer.analyze_flag_id";
-inline constexpr llvm::StringLiteral kLoopId = "ssbuffer.loop_id";
-inline constexpr llvm::StringLiteral kLoopCarriedL0C =
-    "ssbuffer.loop_carried_l0c";
+static constexpr llvm::StringLiteral kLoopDepthAttr = "ssbuffer.loop_depth";
+inline constexpr llvm::StringLiteral kLoopRegionAttr = "ssbuffer.loop_region";
 inline constexpr llvm::StringLiteral kCrossCoreDeps = "ssbuffer.crossCoreDeps";
 inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
 inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kDepMark = "ssbuffer.dep_mark";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kMayNotExecNPU = "may_not_exec";
+inline constexpr llvm::StringLiteral kLoopCarriedL0C =
+    "ssbuffer.loop_carried_l0c";
+inline constexpr llvm::StringLiteral kCoupledMatmulAndStore =
+    "ssbuffer.coupled_matmul_and_store";
+inline constexpr llvm::StringLiteral kMNEStore0 = "ssbuffer.mne_store0";
 inline constexpr llvm::StringLiteral kIterCounter = "ssbuffer.iterCounter";
 inline constexpr llvm::StringLiteral kForMayNotExec =
     "ssbuffer.for_may_not_exec";
@@ -81,8 +81,11 @@ static constexpr llvm::StringLiteral kInlinableQuantScaleAttr =
     "enable_fast_tf32_mul";
 inline constexpr llvm::StringLiteral kGMLoadMultiBufferHintAttr = "gm_load";
 inline constexpr llvm::StringLiteral kGMLoadHintAttr = "gm_load_hint";
+inline constexpr llvm::StringLiteral kMatmulAtLeastOnceHint =
+    "matmul_at_least_once";
 inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr =
     "hivm.matmul_limited_in_cube";
+// NOTE: This attribute is used by downstream passes, do not remove.
 inline constexpr llvm::StringLiteral kTightlyCoupledBufferAttr =
     "hivm.tightly_coupled_buffer";
 inline constexpr llvm::StringLiteral kCoreTypeCube = "CUBE";
@@ -99,6 +102,7 @@ inline constexpr const char *ERRCODE_ATTR =
 static constexpr const int ERRCODE_FAILED = 1;
 static constexpr const int ERRCODE_IGNORED = 2;
 static constexpr const int ERRCODE_TUPLE_PRELOAD_FAILED = 3;
+constexpr int WHILE_LOOP_LIMIT = 100000;
 constexpr int64_t CACHE_TABLE_BUFFER_SIZE = 4096;
 constexpr int64_t BYTE_SIZE = 8;
 static constexpr int crossCoreProducerId = 1;
@@ -189,28 +193,34 @@ inline bool isVectorSimpleOpOrCf(Operation *op) {
 // ============================================================================
 // Get the body block of a loop (ForOp's body or WhileOp's after-body block)
 inline Block *getLoopBodyBlock(Operation *loop) {
-  if (auto forOp = dyn_cast<scf::ForOp>(loop))
+  if (auto forOp = dyn_cast<scf::ForOp>(loop)) {
     return forOp.getBody();
-  if (auto whileOp = dyn_cast<scf::WhileOp>(loop))
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loop)) {
     return whileOp.getAfterBody()->getNextNode();
+  }
   return nullptr;
 }
 
 // Get the init values of a loop (ForOp's initArgs or WhileOp's inits)
 inline ValueRange getLoopInitValues(Operation *loop) {
-  if (auto forOp = dyn_cast<scf::ForOp>(loop))
+  if (auto forOp = dyn_cast<scf::ForOp>(loop)) {
     return forOp.getInitArgs();
-  if (auto whileOp = dyn_cast<scf::WhileOp>(loop))
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loop)) {
     return whileOp.getInits();
+  }
   return {};
 }
 
 // Get the yield terminator of a loop's body
 inline Operation *getLoopYieldOp(Operation *loop) {
-  if (auto forOp = dyn_cast<scf::ForOp>(loop))
+  if (auto forOp = dyn_cast<scf::ForOp>(loop)) {
     return forOp.getBody()->getTerminator();
-  if (auto whileOp = dyn_cast<scf::WhileOp>(loop))
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loop)) {
     return whileOp.getAfterBody()->getTerminator();
+  }
   return nullptr;
 }
 
@@ -218,10 +228,12 @@ inline Operation *getLoopYieldOp(Operation *loop) {
 // after-body)
 inline bool isLoopIterArg(BlockArgument blockArg) {
   Operation *parentOp = blockArg.getOwner()->getParentOp();
-  if (isa<scf::ForOp>(parentOp))
+  if (isa<scf::ForOp>(parentOp)) {
     return true;
-  if (auto whileOp = dyn_cast<scf::WhileOp>(parentOp))
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(parentOp)) {
     return blockArg.getOwner() == whileOp.getAfterBody()->getNextNode();
+  }
   return false;
 }
 
@@ -233,10 +245,12 @@ inline bool isScalarType(Value value) {
 // Helper: Check if a value is a scalar iter_arg from scf.for or scf.while
 inline bool isScalarIterArgOp(Value iterArg) {
   auto blockArg = dyn_cast<BlockArgument>(iterArg);
-  if (!blockArg)
+  if (!blockArg) {
     return false;
-  if (!isLoopIterArg(blockArg))
+  }
+  if (!isLoopIterArg(blockArg)) {
     return false;
+  }
   return isScalarType(iterArg);
 }
 
@@ -263,10 +277,18 @@ std::optional<int> getTightlyCoupledBufferId(Value allocVal);
 // such cast is found.
 Value traceBackToMemrefAlloc(Value v);
 bool allResultHasOneUser(Operation *op);
+Operation *getCommonAncestor(Operation *lhs, Operation *rhs);
+
+// Follow SCF forwarding edges, stopping at ordinary defining operations.
+Operation *getLoopCarriedOrigin(Value incoming);
 
 int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
-int getLoopCarriedArgIndex(Value operand, Block *block);
+// Returns the carried-argument index within the given loop block.
+// For scf.for, yield OperationIndex.
+// For scf.while, yield OperationIndex in AfterBody. ps. in BeforeBody, will
+// return -1. Returns -1 for other values.
+int getLoopCarriedArgIndex(Value argValue, Block *block);
 
 // Returns the index of `v` in `iterArgs` when `v` is a tensor-type iter_arg,
 // or -1 otherwise.
@@ -288,32 +310,45 @@ inline llvm::StringRef coreTypeToString(CoreType ct) {
 
 CoreType getValueCoreType(Value value);
 
-inline OpOperand *getTiedYieldOperand(Value value, Block *block) {
-  int argIdx = getLoopCarriedArgIndex(value, block);
-  if (argIdx == -1) {
-    return nullptr;
-  }
-  auto *terminator = block->getTerminator();
-  return &terminator->getOpOperand(argIdx);
-}
+/// Finds the nearest enclosing scf::ForOp or scf::WhileOp and returns
+/// the block in that loop's region that contains the input block.
+///
+/// @param block The block from which to start walking up the parent hierarchy.
+///              May be nullptr.
+/// @return The enclosing loop's body block. For scf::WhileOp, this is the
+///         block in either the before or after region, depending on where
+///         the input block is nested. Returns std::nullopt if block is nullptr
+///         or no enclosing loop is found.
+Block *getFirstLoopBlock(Block *block);
 
-inline Operation *getLoopCarriedDefOp(Value value, Block *block) {
-  auto *yieldOperand = getTiedYieldOperand(value, block);
-  if (yieldOperand && yieldOperand->get()) {
-    return yieldOperand->get().getDefiningOp();
-  }
-  return nullptr;
-}
+/// Returns the operand supplying the updated value of a loop-carried argument.
+/// For scf.for arguments and scf.while before-region arguments, returns the
+/// corresponding scf.yield operand. For scf.while after-region arguments,
+/// returns the corresponding scf.condition forwarded operand.
+/// @param value A carried block argument owned by loopBlock.
+/// @param loopBlock The for body or while before/after block owning value.
+/// @return The update operand, or nullptr for an unsupported argument/mapping.
+OpOperand *getLoopCarriedUpdateOperand(Value value, Block *loopBlock);
+
+/// Finds the producer of a loop-carried argument through nested SCF forwarding.
+/// @param argValue A carried block argument of the nearest enclosing loop.
+/// @param block The target block in which the returned operation must reside.
+/// @return The producer (or the nearest common ancestor of multiple producers),
+///         lifted into block; nullptr if no producer can be represented there.
+Operation *getLoopCarriedDefOp(Value argValue, Block *block);
 
 inline bool isTensorComputeOp(Operation *op) {
   if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
-    if (linalg::isaCopyOpInterface(linalgOp))
+    if (linalg::isaCopyOpInterface(linalgOp)) {
       return false;
+    }
     auto genericOp = dyn_cast<linalg::GenericOp>(op);
-    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value())
+    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value()) {
       return false;
-    if (isa<linalg::FillOp>(op))
+    }
+    if (isa<linalg::FillOp>(op)) {
       return false;
+    }
     return true;
   }
 
@@ -323,6 +358,17 @@ inline bool isTensorComputeOp(Operation *op) {
   }
 
   return false;
+}
+
+// Arithmetic/reduction on tensors. isTensorComputeOp already drops
+// copy/broadcast/fill. Transpose is only a permutation, and arith.select is
+// control-flow glue around ssbuffer.splitted_if, so neither counts.
+inline bool isRealTensorComputeOp(Operation *op) {
+  if (!isTensorComputeOp(op))
+    return false;
+  if (isa<linalg::TransposeOp, arith::SelectOp>(op))
+    return false;
+  return true;
 }
 
 // Determine FixpipePreQuantMode from a trunc op.
@@ -336,6 +382,21 @@ getFixpipePreQuantMode(Operation *truncOp);
 // Trace an operand's defining op back through C2C intermediate ops to find the
 // underlying producing op. Returns null when the operand has no defining op.
 Operation *getSourceThroughCIntermediateOps(Value operand);
+
+/// Resolves `val` one step towards the memory it aliases: through a view-like
+/// op (`getViewSource`) or `bufferization.to_tensor` (`getBuffer`). Returns
+/// null when there is no such source (`func.func` block arguments included).
+Value getAliasSource(Value val);
+
+/// Walks `getAliasSource` until it stops, yielding the root memref behind
+/// `val` (e.g. the `memref.alloc` it came from, or the function argument
+/// itself).
+inline Value traceMemDef(Value val) {
+  while (auto source = getAliasSource(val)) {
+    val = source;
+  }
+  return val;
+}
 
 } // namespace CVPipeline
 } // namespace mlir

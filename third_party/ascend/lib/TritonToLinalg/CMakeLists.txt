@@ -1,13 +1,12 @@
 add_triton_library(TritonToLinalg
         TritonToLinalgPass.cpp
+        TLAToLinalgPass.cpp
         LoadStoreConverter.cpp
         FunctionConverter.cpp
         ArgMinMaxConverter.cpp
         TritonOpConverter.cpp
         HoistBroadcast.cpp
         BlockPtrAnalysis.cpp
-        UseAnalysis.cpp
-        ImplicitPermute.cpp
         DescriptorConverter.cpp
         MarkTensorKindPass.cpp
         DevicePrintOffsetRewrite.cpp

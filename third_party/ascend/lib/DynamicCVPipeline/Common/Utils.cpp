@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -9,7 +10,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -29,10 +29,13 @@
 #include "mlir/IR/Visitors.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
+#include "mlir/Support/LLVM.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 static constexpr const char *DEBUG_TYPE = "dynamic-cv-pipeline-utils";
 #define DBGS(...) LLVM_DEBUG(llvm::dbgs() << __VA_ARGS__)
@@ -213,6 +216,11 @@ static CoreType getCoreTypeOfSimpleOpOrCfImpl(Operation *op) {
 CoreType getCoreTypeOfSimpleOpOrCf(Operation *op) {
   if (op == nullptr) {
     return CoreType::UNDETERMINED;
+  }
+  // A packed scope is an atomic unit carrying its authoritative core type;
+  // never re-derive it by walking the (deliberately unclassified) body.
+  if (llvm::isa<scope::ScopeOp>(op)) {
+    return getOpCoreType(op);
   }
   if (!llvm::isa<RegionBranchOpInterface>(op)) {
     return getOpCoreType(op);
@@ -435,26 +443,29 @@ SmallVector<Value> MainLoop::getBeforeIterArgs() const {
 
 MainLoop::MainLoop(Operation *loopOp) {
   op = loopOp;
-  if (auto f = dyn_cast<scf::ForOp>(loopOp))
+  if (auto f = dyn_cast<scf::ForOp>(loopOp)) {
     body = f.getBody();
-  else if (auto w = dyn_cast<scf::WhileOp>(loopOp))
+  } else if (auto w = dyn_cast<scf::WhileOp>(loopOp)) {
     body = w.getAfterBody();
+  }
 }
 
 scf::YieldOp MainLoop::getLoopYieldOp(Operation *loopOp) {
-  if (auto forOp = dyn_cast<scf::ForOp>(loopOp))
+  if (auto forOp = dyn_cast<scf::ForOp>(loopOp)) {
     return dyn_cast<scf::YieldOp>(forOp.getBody()->getTerminator());
-  if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp))
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp)) {
     return dyn_cast<scf::YieldOp>(whileOp.getAfter().front().getTerminator());
+  }
   return {};
 }
 
-int getLoopCarriedArgIndex(Value operand, Block *block) {
+int getLoopCarriedArgIndex(Value argValue, Block *block) {
   if (!block || !block->mightHaveTerminator()) {
     return -1;
   }
 
-  auto barg = dyn_cast_if_present<BlockArgument>(operand);
+  auto barg = dyn_cast_if_present<BlockArgument>(argValue);
   if (!barg || barg.getOwner() != block) {
     return -1;
   }
@@ -481,6 +492,18 @@ int getLoopCarriedArgIndex(Value operand, Block *block) {
   return argIdx;
 }
 
+OpOperand *getLoopCarriedUpdateOperand(Value value, Block *loopBlock) {
+  int index = getLoopCarriedArgIndex(value, loopBlock);
+  if (index == -1) {
+    return nullptr;
+  }
+  auto *yieldOp = loopBlock->getTerminator();
+  if (yieldOp == nullptr || !isa<scf::YieldOp>(yieldOp)) {
+    return nullptr;
+  }
+  return &yieldOp->getOpOperand(index);
+}
+
 int getTensorIterArgIndex(Value v, ArrayRef<Value> iterArgs) {
   for (unsigned i = 0; i < iterArgs.size(); ++i) {
     if (v == iterArgs[i] && isa<RankedTensorType>(iterArgs[i].getType())) {
@@ -491,24 +514,29 @@ int getTensorIterArgIndex(Value v, ArrayRef<Value> iterArgs) {
 }
 
 std::optional<hivm::FixpipePreQuantMode> getFixpipePreQuantMode(Operation *op) {
-  if (!isa<arith::TruncFOp, arith::TruncIOp>(op))
+  if (!isa<arith::TruncFOp, arith::TruncIOp>(op)) {
     return std::nullopt;
+  }
 
   // Exclude scalars: only shaped types are valid for fixpipe pre_quant.
   auto resultType = dyn_cast<ShapedType>(op->getResult(0).getType());
-  if (!resultType)
+  if (!resultType) {
     return std::nullopt;
+  }
 
   Type inElemType =
       cast<ShapedType>(op->getOperand(0).getType()).getElementType();
   Type outElemType = resultType.getElementType();
 
-  if (isa<Float32Type>(inElemType) && isa<BFloat16Type>(outElemType))
+  if (isa<Float32Type>(inElemType) && isa<BFloat16Type>(outElemType)) {
     return hivm::FixpipePreQuantMode::F322BF16;
-  if (isa<Float32Type>(inElemType) && isa<Float16Type>(outElemType))
+  }
+  if (isa<Float32Type>(inElemType) && isa<Float16Type>(outElemType)) {
     return hivm::FixpipePreQuantMode::F322F16;
-  if (inElemType.isInteger(32) && outElemType.isInteger(8))
+  }
+  if (inElemType.isInteger(32) && outElemType.isInteger(8)) {
     return hivm::FixpipePreQuantMode::S322I8;
+  }
   return std::nullopt;
 }
 
@@ -543,6 +571,130 @@ CoreType getValueCoreType(Value value) {
     return UNDETERMINED;
   }
   return fromStrCoreType(coreTypeStrs[resultIdx]);
+}
+
+Value getAliasSource(Value value) {
+  if (auto barg = dyn_cast<BlockArgument>(value)) {
+    auto parentOp = barg.getOwner()->getParentOp();
+    if (isa<func::FuncOp>(parentOp)) {
+      return nullptr;
+    }
+    LOG_DEBUG("Warning: " << *parentOp << " carries memref bargs!" << "\n");
+    return nullptr;
+  }
+  return llvm::TypeSwitch<Operation *, Value>(value.getDefiningOp())
+      .Case([](ViewLikeOpInterface viewOp) { return viewOp.getViewSource(); })
+      .Case([](bufferization::ToTensorOp toTensor) {
+        return toTensor.getBuffer();
+      })
+      .Default([](auto) { return nullptr; });
+}
+
+Block *getFirstLoopBlock(Block *block) {
+  while (block) {
+    Region *parentRegion = block->getParent();
+    if (!parentRegion) {
+      return nullptr;
+    }
+    Operation *parentOp = parentRegion->getParentOp();
+    if (!parentOp) {
+      return nullptr;
+    }
+    if (isa<scf::ForOp, scf::WhileOp>(parentOp)) {
+      return block;
+    }
+    // Move to the block containing the parent operation.
+    block = parentOp->getBlock();
+  }
+
+  return nullptr;
+}
+
+// op's index-th operation operand is in the same loop block as op, then push it
+// to work.
+static bool appendOperand(Operation *op, unsigned index, Block *block,
+                          SmallVectorImpl<Value> &work) {
+  if (!op || index >= op->getNumOperands()) {
+    // index errors!
+    return false;
+  }
+  auto nextValue = op->getOperand(index);
+  if (auto def = nextValue.getDefiningOp()) {
+    if (def->getBlock() == block) {
+      work.push_back(nextValue);
+      return true;
+    }
+  }
+  return true;
+}
+
+Operation *getCommonAncestor(Operation *lhs, Operation *rhs) {
+  for (Operation *ancestor = lhs; ancestor;
+       ancestor = ancestor->getParentOp()) {
+    for (Operation *other = rhs; other; other = other->getParentOp()) {
+      if (ancestor == other) {
+        return ancestor;
+      }
+    }
+  }
+  return nullptr;
+}
+
+// Follow SCF forwarding edges, stopping at ordinary defining operations.
+Operation *getLoopCarriedOrigin(Value incoming) {
+  SmallVector<Value> work{incoming};
+  Operation *origin = nullptr;
+  while (!work.empty()) {
+    Value current = work.pop_back_val();
+    auto result = dyn_cast<OpResult>(current);
+    if (!result) {
+      return nullptr;
+    }
+    Operation *def = result.getOwner();
+    unsigned index = result.getResultNumber();
+    if (auto ifOp = dyn_cast<scf::IfOp>(def)) {
+      for (Region &region : ifOp->getRegions()) {
+        if (region.empty() || !appendOperand(region.front().getTerminator(),
+                                             index, &region.front(), work)) {
+          return nullptr;
+        }
+      }
+    } else if (auto forOp = dyn_cast<scf::ForOp>(def)) {
+      if (!appendOperand(forOp.getBody()->getTerminator(), index,
+                         forOp.getBody(), work)) {
+        return nullptr;
+      }
+    } else if (auto whileOp = dyn_cast<scf::WhileOp>(def)) {
+      auto condition =
+          dyn_cast<scf::ConditionOp>(whileOp.getBeforeBody()->getTerminator());
+      if (!condition || index >= condition.getArgs().size()) {
+        return nullptr;
+      }
+      work.push_back(condition.getArgs()[index]);
+    } else {
+      origin = origin ? getCommonAncestor(origin, def) : def;
+      if (!origin) {
+        return nullptr;
+      }
+    }
+  }
+  return origin;
+}
+
+Operation *getLoopCarriedDefOp(Value argValue, Block *block) {
+  auto arg = dyn_cast_if_present<BlockArgument>(argValue);
+  auto loopBlock = getFirstLoopBlock(block);
+  if (!arg || !loopBlock || arg.getOwner() != loopBlock) {
+    return nullptr;
+  }
+
+  OpOperand *updateOperand = getLoopCarriedUpdateOperand(argValue, loopBlock);
+  if (!updateOperand) {
+    return nullptr;
+  }
+
+  Operation *origin = getLoopCarriedOrigin(updateOperand->get());
+  return origin ? getAncestorInBlock(origin, block) : nullptr;
 }
 
 } // namespace CVPipeline

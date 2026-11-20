@@ -123,9 +123,6 @@ from .debug import device_assert, device_print
 # (ave.hir.vextf) does not shadow unrelated top-level names.
 from . import simd
 
-# Scalar / SIMD-register selection (eager, unlike TileLang T.if_then_else).
-from .selection import where
-
 # Cube-core ops (``mmad``/``mmad_mx``).
 from . import cube
 from .cube import MxFormat
@@ -246,9 +243,6 @@ __all__ = [
 
     # simd ops
     "simd",
-
-    # scalar / SIMD selection
-    "where",
 
     # cube ops
     "cube",

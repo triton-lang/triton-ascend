@@ -393,6 +393,26 @@ LogicalResult PreciseDivConverter::matchAndRewrite(
   return success();
 }
 
+static bool canOverwriteRowSuffix(arith::SelectOp op, const MaskState &mask,
+                                  ArrayRef<int64_t> shape) {
+  Operation *producer = op.getTrueValue().getDefiningOp();
+  auto constant = op.getFalseValue().getDefiningOp<arith::ConstantOp>();
+  if (!producer || !producer->hasTrait<OpTrait::Elementwise>() ||
+      !op.getTrueValue().hasOneUse() || !constant ||
+      !isa<SplatElementsAttr>(constant.getValue()))
+    return false;
+
+  // The complement of a head mask is a single row suffix only if every
+  // trailing dimension is covered in full.
+  if (shape.size() < 2 || llvm::is_contained(shape, ShapedType::kDynamic) ||
+      getConstantIntValue(mask.dims.front()))
+    return false;
+  for (size_t i = 1; i < shape.size(); ++i)
+    if (!isConstantIntValue(mask.dims[i], shape[i]))
+      return false;
+  return true;
+}
+
 LogicalResult
 SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
                                      PatternRewriter &rewriter) const {
@@ -448,12 +468,21 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
 
   // 3. Slice and insert out the masked part
   if (maskPos == MaskPosition::Head) {
-    // Slice out the masked part of true tensor
-    auto extractSliceOp = mstate.getExtractSlice(trueTensor, loc, rewriter);
-
-    // Insert out the sliced true tensor into false tensor
+    Value source = trueTensor;
+    Value dest = falseTensor;
+    if (useDirectSelectSlices &&
+        canOverwriteRowSuffix(op, mstate, tensorShape)) {
+      // Keep the computed rows in place. A full tile has no false rows to copy.
+      source = falseTensor;
+      dest = trueTensor;
+      mstate.offsets.front() = mstate.dims.front();
+      mstate.dims.front() =
+          subOpFoldResult(rewriter.getIndexAttr(tensorShape.front()),
+                          mstate.offsets.front(), loc, rewriter);
+    }
+    auto extractSliceOp = mstate.getExtractSlice(source, loc, rewriter);
     auto insertSliceOp =
-        mstate.getInsertSlice(extractSliceOp, falseTensor, loc, rewriter);
+        mstate.getInsertSlice(extractSliceOp, dest, loc, rewriter);
 
     LLVM_DEBUG({
       llvm::dbgs() << "  -> Created ExtractSlice: "

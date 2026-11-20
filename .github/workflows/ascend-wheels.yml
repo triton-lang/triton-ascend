@@ -2,11 +2,6 @@ name: Wheels
 
 on:
   workflow_dispatch:
-    inputs:
-      pinned_wheel:
-        description: Also build the pinned-submodule verification wheel (Build-Pinned-Wheels)
-        type: boolean
-        default: false
   push:
     branches: [release/**]
   pull_request:
@@ -19,9 +14,6 @@ on:
       - version.txt
       - cmake/llvm-hash.txt
       - cmake/json-version.txt
-      # AscendNPU-IR submodule pin bumps: trigger the Build-Pinned-Wheels job
-      # so the PR that moves the pin proves the pinned combination builds.
-      - third_party/ascend/AscendNPU-IR
   schedule:
     - cron: "0 8 * * *"
 

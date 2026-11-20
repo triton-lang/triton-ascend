@@ -26,10 +26,6 @@ ARG TRITON_BUILD_NPUIR=OFF
 # downstream imports like triton_dist.language.extra.libshmem_device.
 ARG TRITON_BUILD_TD=ON
 ARG ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.2.0-beta.2
-# AscendNPU-IR revision to build against: "stable" (branch HEAD — nightly /
-# regular PR wheels) or an exact 40-hex commit SHA (the Build-Pinned-Wheels
-# job passes the submodule gitlink so the wheel matches what local users get).
-ARG NPUIR_REF=stable
 
 # ---------------------------------------------------------------------------
 # Build dependencies (matching CIBW_BEFORE_ALL)
@@ -72,8 +68,7 @@ WORKDIR /project
 # the CI workflow scripts itself. Needed both for the C++ plugin build
 # (add_subdirectory(third_party/ascend/AscendNPU-IR)) and for the
 # TRITON_BUILD_NPUIR=ON in-image fallback. Includes the nested third-party
-# submodules (llvm-project / torch-mlir / shmem). NPUIR_REF overrides the
-# branch with an exact SHA for the pinned-submodule verification wheel.
+# submodules (llvm-project / torch-mlir / shmem).
 #
 # Then freeze the gitlink for the rest of the image build: the root setup.py
 # (BackendInstaller.prepare) runs `git submodule update --init ascend` from
@@ -84,6 +79,9 @@ WORKDIR /project
 # `git submodule update` skip it; the product code's own guards never issue
 # a submodule command when the tree already exists, so nothing else changes.
 # ---------------------------------------------------------------------------
+# Build-Wheels passes the resolved stable SHA. Build-Pinned-Wheels passes the
+# submodule SHA. Direct Docker builds default to stable.
+ARG NPUIR_REF=stable
 RUN NPUIR_REPO_BRANCH=${NPUIR_REF} bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR \
  && git config submodule.third_party/ascend/AscendNPU-IR.update none
 
@@ -124,7 +122,10 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
          exit 1; \
        fi \
     && cd "$SETUP_DIR" \
-    && if [ -d /project/.npuir-payload/bin ] && [ -d /project/.npuir-payload/lib ]; then \
+    && if [ "${TRITON_BUILD_NPUIR}" = ON ]; then \
+         unset TRITON_ASCEND_BISHENGIR_PATH; \
+         echo "Building BishengIR from NPUIR_REF=${NPUIR_REF}"; \
+       elif [ -d /project/.npuir-payload/bin ] && [ -d /project/.npuir-payload/lib ]; then \
          export TRITON_ASCEND_BISHENGIR_PATH=/project/.npuir-payload; \
          echo "Bundling BishengIR payload from ${TRITON_ASCEND_BISHENGIR_PATH}"; \
        else \

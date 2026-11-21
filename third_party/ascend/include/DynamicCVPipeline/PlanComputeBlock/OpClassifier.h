@@ -198,6 +198,11 @@ private:
                                  Operation *thenYieldForElse, Value &operand,
                                  Operation *elseYieldOp);
 
+  // Upgrade fill guards on shared (CUBE_AND_VECTOR) buffers so the split
+  // clones them for the VECTOR side as well. Must run after VECTOR upstream
+  // propagation (marks are final) and before handleCubeAndVector.
+  int markSharedFillGuardsForSplit();
+
   // Step 6: Handle CUBE_AND_VECTOR operations
   int handleCubeAndVector();
 

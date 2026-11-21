@@ -213,14 +213,8 @@ std::optional<Match> match(FuncOp function) {
       if (!plainLoad(load))
         return std::nullopt;
     } else if (auto reduce = dyn_cast<ReduceOp>(&op)) {
-      auto add = dyn_cast_or_null<arith::AddFOp>(reduce.getSingleCombiner());
-      if (!add || reduce.getAxis() != 0 || reduce->getNumOperands() != 1 ||
-          reduce->getNumResults() != 1 ||
-          !reduce->getResult(0).getType().isF32() ||
-          add.getLhs() != add->getBlock()->getArgument(0) ||
-          add.getRhs() != add->getBlock()->getArgument(1) ||
-          cast<ReduceReturnOp>(add->getBlock()->getTerminator())
-                  ->getOperand(0) != add.getResult())
+      if (!isa_and_nonnull<arith::AddFOp>(reduce.getSingleCombiner()) ||
+          reduce.getAxis() != 0 || !reduce->getResult(0).getType().isF32())
         return std::nullopt;
       m.reductions.push_back(reduce);
     } else if (auto acquire = dyn_cast<scf::WhileOp>(&op)) {
@@ -256,8 +250,6 @@ std::optional<Match> match(FuncOp function) {
     return std::nullopt;
 
   if (m.acquire->getNumOperands() || m.acquire->getNumResults() ||
-      !llvm::hasSingleElement(m.acquire.getBefore()) ||
-      !llvm::hasSingleElement(m.acquire.getAfter()) ||
       !llvm::hasSingleElement(m.acquire.getAfter().front()))
     return std::nullopt;
   Block &test = m.acquire.getBefore().front();
@@ -285,7 +277,7 @@ std::optional<Match> match(FuncOp function) {
   auto branch =
       cmp ? dyn_cast_or_null<scf::IfOp>(cmp->getNextNode()) : scf::IfOp();
   if (!equalTo(cmp, count, 0) || !branch || branch.getCondition() != cmp ||
-      branch->getNumResults() != 2 || branch.getElseRegion().empty() ||
+      branch->getNumResults() != 2 ||
       branch.getThenRegion().front().getOperations().size() != 2 ||
       !isExchange(dyn_cast<AtomicRMWOp>(branch.getThenRegion().front().front()),
                   count.getPtr(), 1))
@@ -305,8 +297,7 @@ std::optional<Match> match(FuncOp function) {
     if (!result.hasOneUse())
       return std::nullopt;
     Operation *user = *result.getUsers().begin();
-    if (isCast(user) && user->getNumResults() == 1 &&
-        user->getResult(0).hasOneUse() && user == next) {
+    if (isCast(user) && user->getResult(0).hasOneUse() && user == next) {
       next = user->getNextNode();
       user = *user->getResult(0).getUsers().begin();
     }

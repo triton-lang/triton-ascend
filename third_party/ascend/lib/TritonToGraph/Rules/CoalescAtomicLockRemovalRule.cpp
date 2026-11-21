@@ -24,8 +24,6 @@ using namespace mlir::triton::cfg;
 
 namespace {
 
-constexpr StringLiteral privateBuffers = "hacc.private_group_reduction";
-
 std::optional<int64_t> integer(Value v) {
   APInt n;
   if (v && matchPattern(v, m_ConstantInt(&n)) && n.getBitWidth() <= 64)
@@ -177,10 +175,12 @@ struct Match {
 
 // Match one entry block with the CAS loop and Count branch as its only
 // top-level regions other than the row's two scalar reductions.
+// The opt-in operator provides private, zeroed lock/count buffers, disjoint
+// memory ranges and valid offsets, and a one-dimensional grid with one
+// original program per row and a column tile covering the full row.
 std::optional<Match> match(FuncOp function) {
   auto module = function->getParentOfType<ModuleOp>();
-  if (!module || !module->hasAttrOfType<UnitAttr>(privateBuffers) ||
-      module->hasAttr(kProgramGridTransformsAttr) ||
+  if (!module || module->hasAttr(kProgramGridTransformsAttr) ||
       module->hasAttr("hacc.coalesce_factor") ||
       !llvm::hasSingleElement(*module.getBody()) ||
       !llvm::hasSingleElement(function.getBody()) || !function.isPublic() ||

@@ -501,12 +501,7 @@ def make_ttir(mod, metadata, opt):
         ascend.passes.ttir.add_graph_optimize(pm, **graph_kwargs)
     if AscendBackend.instrumentation:
         AscendBackend.instrumentation.patch("ttir", pm, mod.context)
-    if opt.private_group_reduction:
-        builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.target_arch)
-        mod.set_attr("hacc.private_group_reduction", builder.parse_attr("unit"))
     pm.run(mod, 'make_ttir')
-    if opt.private_group_reduction:
-        ascend.ir.remove_attr(mod, "hacc.private_group_reduction")
     if opt.debug:
         dump_manager = get_dump_manager(metadata["hash"])
         print(f"Dumping intermediate results to {dump_manager.cache_dir}")
@@ -1537,10 +1532,6 @@ class NPUOptions:
     # driver-side profile scratch path inert.
     profile_scratch_size: int = 0
     enable_graph_optimize: bool = True
-    # Caller guarantees zeroed, private lock/count storage with no observers,
-    # disjoint inputs and writable buffers, valid i32 offsets, and a full row
-    # within the original tile. Grid X is the row count; Y and Z are singleton.
-    private_group_reduction: bool = False
     block_auto_contract: Optional[str] = None
     # Parent-resolved (architecture, graph core count, effective core limit,
     # SIMT stack bytes). Included in the normal option hash and worker request.

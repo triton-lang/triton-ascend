@@ -1,14 +1,15 @@
 // RUN: triton-opt %s --verify-each '-graph-optimize=rule-mask=262144 ub-capacity-bytes=253952 mapping-ub-capacity-bytes=253952 ub-safety-percent=100 reserved-ub-bytes=0' | FileCheck %s --check-prefix=RETILE
-// RUN: sed 's/"tt.reduce"(%dy)/"tt.reduce"(%dy_with_sum)/' %s | triton-opt --verify-each '-graph-optimize=rule-mask=262144 ub-capacity-bytes=253952 mapping-ub-capacity-bytes=253952 ub-safety-percent=100 reserved-ub-bytes=0' | FileCheck %s --check-prefix=DEPENDENT
+// RUN: sed 's/"tt.reduce"(%dy)/"tt.reduce"(%dy_with_sum)/' %s | triton-opt --verify-each '-graph-optimize=rule-mask=262144 ub-capacity-bytes=253952 mapping-ub-capacity-bytes=253952 ub-safety-percent=100 reserved-ub-bytes=0' | FileCheck %s --check-prefix=LOCKED
+// RUN: triton-opt %s --verify-each -graph-optimize | FileCheck %s --check-prefix=LOCKED
 
 // RETILE: hacc.program_grid_transforms
 // RETILE-SAME: kind = "cap"
 // RETILE: tt.make_range {end = 4096
 // RETILE-NOT: tt.atomic
-// DEPENDENT-NOT: hacc.program_grid_transforms
-// DEPENDENT: tt.make_range {end = 8192
-// DEPENDENT: tt.atomic_cas
-module attributes {hacc.private_group_reduction} {
+// LOCKED-NOT: hacc.program_grid_transforms
+// LOCKED: tt.make_range {end = 8192
+// LOCKED: tt.atomic_cas
+module {
   tt.func public @grouped_update(%dx: !tt.ptr<f32>, %x: !tt.ptr<f32>, %dy_in: !tt.ptr<f32>,
                                 %dw: !tt.ptr<f32>, %db: !tt.ptr<f32>, %locks: !tt.ptr<i32>,
                                 %n: i32, %stride: i32) {

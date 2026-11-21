@@ -13,10 +13,11 @@ ARMS = ("cvpipeline", "ascendc")
 TARGET_FRACTION = 0.9
 PRODUCTION_SHAPES = tuple(
     (128, 8, n, hd)
-    for n, dimensions in [(32768, (64,)), (16384, (64, 128)), (8192, (64, 128)),
-                          (4096, (64, 128)), (2048, (64, 128)), (1024, (64, 128))]
-    for hd in dimensions
-)
+    for n, dimensions in [(32768,
+                           (64, )), (16384,
+                                     (64, 128)), (8192, (64, 128)), (4096, (64, 128)), (2048, (64,
+                                                                                               128)), (1024, (64, 128))]
+    for hd in dimensions)
 ACCEPTED_EXCEPTION_SHAPE = (128, 8, 2048, 128)
 
 
@@ -29,8 +30,8 @@ def _validate_case(case):
     bn = case.get("block_n")
     if type(bn) is not int or bn <= 0 or bn % 16 or shape[2] % bn:
         raise ValueError("BN must be a positive multiple of 16 dividing N")
-    if (case.get("dtype") != "float16" or case.get("layout") != "BNSD"
-            or case.get("causal") is not False or case.get("scale") != 0.5):
+    if (case.get("dtype") != "float16" or case.get("layout") != "BNSD" or case.get("causal") is not False
+            or case.get("scale") != 0.5):
         raise ValueError("Expected FP16 BNSD, noncausal attention at scale 0.5")
     return shape
 
@@ -108,17 +109,40 @@ def summarize_paired_rounds(case, rounds):
     strict_met = median_met and all(paired)
     headroom = 100 * (1 - medians["cvpipeline"] / (medians["ascendc"] / TARGET_FRACTION))
     return {
-        "case": copy.deepcopy(case), "timing_unit": "us", "round_count": 6,
-        "sample_representation": representation,
-        "selected_tasks_per_arm_per_round": 10, "block_means_us": means,
-        "median_us": medians, "ascendc_over_cvp_percent": 100 * medians["ascendc"] / medians["cvpipeline"],
-        "paired_target_met": paired, "paired_target_wins": sum(paired),
-        "median_target_met": median_met, "strict_target_met": strict_met,
-        "target_headroom_percent": headroom,
-        "independent_repeat_needed": strict_met and headroom < 2,
-        "accepted_exception_case": shape == ACCEPTED_EXCEPTION_SHAPE,
-        "exception_caveat": "Exception label does not turn a failed strict target into a pass; report current-parent regression separately.",
-        "scope": "Reported cohort consistency and statistics only; collector/correctness evidence must be audited separately.",
+        "case":
+        copy.deepcopy(case),
+        "timing_unit":
+        "us",
+        "round_count":
+        6,
+        "sample_representation":
+        representation,
+        "selected_tasks_per_arm_per_round":
+        10,
+        "block_means_us":
+        means,
+        "median_us":
+        medians,
+        "ascendc_over_cvp_percent":
+        100 * medians["ascendc"] / medians["cvpipeline"],
+        "paired_target_met":
+        paired,
+        "paired_target_wins":
+        sum(paired),
+        "median_target_met":
+        median_met,
+        "strict_target_met":
+        strict_met,
+        "target_headroom_percent":
+        headroom,
+        "independent_repeat_needed":
+        strict_met and headroom < 2,
+        "accepted_exception_case":
+        shape == ACCEPTED_EXCEPTION_SHAPE,
+        "exception_caveat":
+        "Exception label does not turn a failed strict target into a pass; report current-parent regression separately.",
+        "scope":
+        "Reported cohort consistency and statistics only; collector/correctness evidence must be audited separately.",
     }
 
 
@@ -131,6 +155,8 @@ def summarize_matrix(cohorts):
         raise ValueError("Missing or duplicate production shape")
     rows = [summarize_paired_rounds(cohort["case"], cohort["rounds"]) for cohort in cohorts]
     rows.sort(key=lambda row: PRODUCTION_SHAPES.index(tuple(row["case"]["shape"])))
-    return {"cases": rows, "strict_target_count": sum(row["strict_target_met"] for row in rows),
-            "all_strict_targets_met": all(row["strict_target_met"] for row in rows),
-            "repeat_required_cases": [row["case"] for row in rows if row["independent_repeat_needed"]]}
+    return {
+        "cases": rows, "strict_target_count": sum(row["strict_target_met"] for row in rows), "all_strict_targets_met":
+        all(row["strict_target_met"] for row in rows), "repeat_required_cases":
+        [row["case"] for row in rows if row["independent_repeat_needed"]]
+    }

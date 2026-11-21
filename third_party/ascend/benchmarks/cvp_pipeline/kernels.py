@@ -4,8 +4,7 @@ import triton.language as tl
 
 
 @triton.jit
-def stage_chain(A, B0, B1, B2, Output, SEGMENTS: tl.constexpr,
-                REPEATS: tl.constexpr):
+def stage_chain(A, B0, B1, B2, Output, SEGMENTS: tl.constexpr, REPEATS: tl.constexpr):
     rows = tl.arange(0, 16)
     inner0 = tl.arange(0, 16)
     cols0 = tl.arange(0, 32)

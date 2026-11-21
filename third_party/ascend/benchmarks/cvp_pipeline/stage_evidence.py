@@ -10,7 +10,6 @@ from pathlib import Path
 import re
 import subprocess
 
-
 CAPTURE_FLAGS = (
     '--mlir-print-ir-before=hivm-verify-cvp-plan',
     '--mlir-print-ir-after=hivm-cvp-plan-prepare,hivm-verify-cvp-plan',
@@ -62,8 +61,7 @@ def _read(reader, source, passes, folder):
     result = subprocess.run(argv, capture_output=True)
     (folder / 'stdout.txt').write_bytes(result.stdout)
     (folder / 'stderr.txt').write_bytes(result.stderr)
-    row = {'argv': argv, 'exit_code': result.returncode,
-           'reader_sha256': sha(reader), 'input_sha256': sha(source)}
+    row = {'argv': argv, 'exit_code': result.returncode, 'reader_sha256': sha(reader), 'input_sha256': sha(source)}
     (folder / 'command.json').write_text(json.dumps(row, indent=2) + '\n')
     result.check_returncode()
     return row, (result.stdout + result.stderr).decode(errors='replace')
@@ -76,21 +74,18 @@ def certify_stage_plan(diagnostics, folder, reader, segments):
     for name, text in snapshots.items():
         paths[name] = folder / (name + '.mlir')
         paths[name].write_text(text)
-    recognition, remarks = _read(
-        reader, paths['prepared'], ['--hivm-cvp-plan-prepare'], folder / 'reader-recognition')
-    recognized = [int(value) for value in re.findall(
-        r'CVP stage plan recognized: (\d+) Cube/Vector segments', remarks)]
+    recognition, remarks = _read(reader, paths['prepared'], ['--hivm-cvp-plan-prepare'], folder / 'reader-recognition')
+    recognized = [int(value) for value in re.findall(r'CVP stage plan recognized: (\d+) Cube/Vector segments', remarks)]
     assert recognized == [segments], recognized
-    verification, remarks = _read(
-        reader, paths['scheduled'],
-        ['--hivm-verify-cvp-plan=drop-annotations=false retain-provenance=true'],
-        folder / 'reader-verification')
-    verified = [int(value) for value in re.findall(
-        r'CVP stage plan verified: (\d+) ordered Skew stages', remarks)]
+    verification, remarks = _read(reader, paths['scheduled'],
+                                  ['--hivm-verify-cvp-plan=drop-annotations=false retain-provenance=true'],
+                                  folder / 'reader-verification')
+    verified = [int(value) for value in re.findall(r'CVP stage plan verified: (\d+) ordered Skew stages', remarks)]
     assert verified == [2 * segments], verified
     completed, _ = _read(reader, paths['verified'], [], folder / 'reader-completed')
-    return {'recognized_segments': recognized, 'verified_stages': verified,
-            'origin': 'actual normal-frontend module snapshots; pinned native analysis/verification',
-            'snapshots': {name: {'path': str(path), 'sha256': sha(path)}
-                          for name, path in paths.items()},
-            'reader_commands': [recognition, verification, completed]}
+    return {
+        'recognized_segments': recognized, 'verified_stages': verified, 'origin':
+        'actual normal-frontend module snapshots; pinned native analysis/verification', 'snapshots':
+        {name: {'path': str(path), 'sha256': sha(path)}
+         for name, path in paths.items()}, 'reader_commands': [recognition, verification, completed]
+    }

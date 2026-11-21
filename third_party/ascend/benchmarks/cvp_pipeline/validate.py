@@ -43,8 +43,8 @@ def pinned_tools(compiler, utils, libtriton, args):
         'frontend_input_stage': 'bcmlir' if normal_reader else 'ttadapter',
         'normal_compile_reader': normal_reader,
         'in_process_ir': {'path': str(core), 'sha256': sha(core)},
-        'stage_evidence_reader': {'path': str(reader), 'sha256': sha(reader),
-                                  'role': 'independent snapshot analysis and verification'},
+        'stage_evidence_reader':
+        {'path': str(reader), 'sha256': sha(reader), 'role': 'independent snapshot analysis and verification'},
     }
     return frontend, reader, provenance
 
@@ -61,8 +61,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--frontend', type=Path, required=True)
     parser.add_argument('--frontend-sha256', required=True)
-    parser.add_argument('--reader', type=Path, required=True,
-                        help='Pinned independent CPU stage-evidence reader')
+    parser.add_argument('--reader', type=Path, required=True, help='Pinned independent CPU stage-evidence reader')
     parser.add_argument('--reader-sha256', required=True)
     parser.add_argument('--libtriton-sha256', help='Optional pin for the loaded in-process IR library')
     parser.add_argument('--repeats', type=int, default=32)
@@ -80,18 +79,15 @@ def main():
     frontend, reader, provenance = pinned_tools(compiler, utils, libtriton, args)
     torch.set_num_threads(4)
     torch.npu.set_device(0)
-    options = dict(enable_mixed_cv=True, multibuffer=True,
-                   enable_auto_bind_sub_block=True, sync_solver=True,
-                   enable_preload=True, enable_dynamic_cv_pipeline=False,
-                   enable_cvp_plan_analysis=True, enable_fused_multiply_add=False,
-                   disable_tightly_coupled_buffer_reuse=True)
+    options = dict(enable_mixed_cv=True, multibuffer=True, enable_auto_bind_sub_block=True, sync_solver=True,
+                   enable_preload=True, enable_dynamic_cv_pipeline=False, enable_cvp_plan_analysis=True,
+                   enable_fused_multiply_add=False, disable_tightly_coupled_buffer_reuse=True)
     real_run = subprocess.run
     observations = []
 
     def observe(command, *positional, **kwargs):
         argv = command if isinstance(command, (tuple, list)) else []
-        selected = bool(argv and Path(str(argv[0])).resolve() == args.frontend.resolve()
-                        and '--help' not in argv)
+        selected = bool(argv and Path(str(argv[0])).resolve() == args.frontend.resolve() and '--help' not in argv)
         if not selected:
             return real_run(command, *positional, **kwargs)
         index = len(observations)
@@ -100,12 +96,11 @@ def main():
         captured_argv = [*argv, *CAPTURE_FLAGS]
         input_file = folder / 'input.mlir'
         input_file.write_bytes(Path(argv[1]).read_bytes())
-        row = {'argv': [str(x) for x in captured_argv],
-               'original_argv': [str(x) for x in argv],
-               'input_path': str(input_file), 'input_sha256': sha(input_file),
-               'input_stage': provenance['frontend_input_stage'], 'cwd': str(kwargs.get('cwd')),
-               'frontend_sha256': sha(frontend),
-               'started': datetime.now(timezone.utc).isoformat()}
+        row = {
+            'argv': [str(x) for x in captured_argv], 'original_argv': [str(x) for x in argv], 'input_path':
+            str(input_file), 'input_sha256': sha(input_file), 'input_stage': provenance['frontend_input_stage'], 'cwd':
+            str(kwargs.get('cwd')), 'frontend_sha256': sha(frontend), 'started': datetime.now(timezone.utc).isoformat()
+        }
         try:
             result = real_run(captured_argv, *positional, **kwargs)
         except subprocess.CalledProcessError as error:
@@ -139,8 +134,7 @@ def main():
         output = torch.empty((16, [32, 64, 16][segments - 1]), device='npu', dtype=torch.float16)
         start = len(observations)
         with patch.object(subprocess, 'run', side_effect=observe):
-            compiled = stage_chain[(1,)](device_left, *device_weights, output,
-                                         segments, args.repeats, **options)
+            compiled = stage_chain[(1, )](device_left, *device_weights, output, segments, args.repeats, **options)
         torch.npu.synchronize()
         actual = output.cpu()
         torch.testing.assert_close(actual, reference, atol=0.005, rtol=0.005)
@@ -151,36 +145,32 @@ def main():
         assert metadata.get('bitcodes') in (None, (), [])
         commands = observations[start:]
         assert commands, 'use a fresh private cache for validation'
-        diagnostics = ''.join((Path(row['diagnostics']) / 'stderr.txt').read_text(errors='replace')
-                              + (Path(row['diagnostics']) / 'stdout.txt').read_text(errors='replace')
-                              for row in commands)
+        diagnostics = ''.join((Path(row['diagnostics']) / 'stderr.txt').read_text(errors='replace') +
+                              (Path(row['diagnostics']) / 'stdout.txt').read_text(errors='replace') for row in commands)
         assert len(commands) == 1, 'expected one normal native compilation per case'
         validate_frontend_input(compiled.asm, commands[0], provenance['frontend_input_stage'])
-        evidence = certify_stage_plan(diagnostics, Path(commands[0]['diagnostics']),
-                                      reader, segments)
+        evidence = certify_stage_plan(diagnostics, Path(commands[0]['diagnostics']), reader, segments)
         native = compiled.asm['npubin']
         assert native[:4] == b'\x7fELF'
         binary = args.output / f'chain-{segments}.npubin'
         binary.write_bytes(native)
-        row = {'segments': segments, 'repeats': args.repeats,
-               'recognized_segments': evidence['recognized_segments'],
-               'verified_stages': evidence['verified_stages'],
-               'stage_evidence': evidence,
-               'maximum_absolute_error': (actual.float() - reference.float()).abs().max().item(),
-               'atol': 0.005, 'rtol': 0.005, 'options': options,
-               'compiler_commands': commands,
-               'frontend_input_stage': provenance['frontend_input_stage'],
-               'native_sha256': sha(binary), 'metadata': metadata}
+        row = {
+            'segments': segments, 'repeats': args.repeats, 'recognized_segments': evidence['recognized_segments'],
+            'verified_stages': evidence['verified_stages'], 'stage_evidence': evidence, 'maximum_absolute_error':
+            (actual.float() - reference.float()).abs().max().item(), 'atol': 0.005, 'rtol': 0.005, 'options': options,
+            'compiler_commands': commands, 'frontend_input_stage': provenance['frontend_input_stage'], 'native_sha256':
+            sha(binary), 'metadata': metadata
+        }
         results.append(row)
         (args.output / f'chain-{segments}.json').write_text(json.dumps(row, indent=2, default=str) + '\n')
-    report = {'passed': True, 'cases': results, 'frontend_sha256': sha(frontend),
-              'compiler_provenance': provenance,
-              'reader_sha256': sha(reader), 'kernel_source_sha256': sha(Path(__file__).with_name('kernels.py')),
-              'validator_source_sha256': sha(Path(__file__)),
-              'stage_evidence_source_sha256': sha(Path(__file__).with_name('stage_evidence.py')),
-              'triton_file': triton.__file__, 'torch_version': torch.__version__,
-              'torch_npu_version': torch_npu.__version__,
-              'timing': 'not measured by this correctness runner'}
+    report = {
+        'passed': True, 'cases': results, 'frontend_sha256': sha(frontend), 'compiler_provenance': provenance,
+        'reader_sha256': sha(reader), 'kernel_source_sha256': sha(Path(__file__).with_name('kernels.py')),
+        'validator_source_sha256': sha(Path(__file__)), 'stage_evidence_source_sha256':
+        sha(Path(__file__).with_name('stage_evidence.py')), 'triton_file': triton.__file__, 'torch_version':
+        torch.__version__, 'torch_npu_version': torch_npu.__version__, 'timing':
+        'not measured by this correctness runner'
+    }
     (args.output / 'SUMMARY.json').write_text(json.dumps(report, indent=2, default=str) + '\n')
 
 

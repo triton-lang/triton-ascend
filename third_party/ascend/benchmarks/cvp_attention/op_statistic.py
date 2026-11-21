@@ -79,10 +79,9 @@ def parse_op_statistic_bytes(data, *, source_path, device_id, op_type, core_type
     count = int(row['Count'])
     if count != expected_count:
         raise ValueError('Unexpected attention operation count')
-    block = dict(representation=REPRESENTATION, device_id=device_id, op_type=op_type,
-                 core_type=core_type, task_count=count, total_duration_us=total,
-                 mean_duration_us=total / count, reported_avg_duration_us=average,
-                 min_duration_us=minimum, max_duration_us=maximum,
+    block = dict(representation=REPRESENTATION, device_id=device_id, op_type=op_type, core_type=core_type,
+                 task_count=count, total_duration_us=total, mean_duration_us=total / count,
+                 reported_avg_duration_us=average, min_duration_us=minimum, max_duration_us=maximum,
                  source_path=str(source_path), source_sha256=hashlib.sha256(data).hexdigest(),
                  source_record_index=index, source_row=dict(row))
     validate_op_statistic_block(block, expected_count)
@@ -91,5 +90,5 @@ def parse_op_statistic_bytes(data, *, source_path, device_id, op_type, core_type
 
 def read_op_statistic(path, *, device_id, op_type, core_type, expected_count=10):
     path = Path(path).resolve(strict=True)
-    return parse_op_statistic_bytes(path.read_bytes(), source_path=str(path), device_id=device_id,
-                                    op_type=op_type, core_type=core_type, expected_count=expected_count)
+    return parse_op_statistic_bytes(path.read_bytes(), source_path=str(path), device_id=device_id, op_type=op_type,
+                                    core_type=core_type, expected_count=expected_count)

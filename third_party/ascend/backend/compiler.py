@@ -850,31 +850,26 @@ _NATIVE_COMPILER_OPTION_SPECS = {
     "enable_vf_operand_substitution": ("--enable-vf-operand-substitution", bool, None),
     "enable_fused_multiply_add": ("--enable-fused-multiply-add", bool, None),
     "enable_cvp_plan_analysis": ("--enable-cvp-plan-analysis", bool, None),
-    "enable_cvp_rematerialization": (
-        "--enable-cvp-rematerialization", bool, None),
+    "enable_cvp_rematerialization": ("--enable-cvp-rematerialization", bool, None),
     "enable_cvp_reduction_scaling": ("--enable-cvp-reduction-scaling", bool, None),
     "enable_cvp_reduction_major_layout": ("--enable-cvp-reduction-major-layout", bool, None),
     "enable_cvp_dense_operand": ("--enable-cvp-dense-operand", bool, None),
     "allow_cvp_sum_reassociation": ("--allow-cvp-sum-reassociation", bool, None),
-    "cvp_stage_fusion": (
-        "--cvp-stage-fusion", str, ("none", "reduce-exp-state")),
+    "cvp_stage_fusion": ("--cvp-stage-fusion", str, ("none", "reduce-exp-state")),
     "cvp_reduction_chains": ("--cvp-reduction-chains", int, (1, 2)),
     "enable_cvp_persistent_pipeline": ("--enable-cvp-persistent-pipeline", bool, None),
     "enable_cvp_state_copy_forward": ("--enable-cvp-state-copy-forward", bool, None),
     "enable_cvp_final_output_forward": ("--enable-cvp-final-output-forward", bool, None),
     "enable_cvp_output_copy_forward": ("--enable-cvp-output-copy-forward", bool, None),
     "enable_cvp_scalar_input_forward": ("--enable-cvp-scalar-input-forward", bool, None),
-    "cvp_persistent_pipeline_mode": ("--cvp-persistent-pipeline-mode", str, ("skew",)),
-    "cvp_inner_unroll": ("--cvp-inner-unroll", int, (1,)),
-    "cvp_invariant_cache_mode": (
-        "--cvp-invariant-cache-mode", str, ("none", "cached", "auto")),
-    "cvp_invariant_cache_consider_overlapping": (
-        "--cvp-invariant-cache-consider-overlapping", bool, None),
+    "cvp_persistent_pipeline_mode": ("--cvp-persistent-pipeline-mode", str, ("skew", )),
+    "cvp_inner_unroll": ("--cvp-inner-unroll", int, (1, )),
+    "cvp_invariant_cache_mode": ("--cvp-invariant-cache-mode", str, ("none", "cached", "auto")),
+    "cvp_invariant_cache_consider_overlapping": ("--cvp-invariant-cache-consider-overlapping", bool, None),
     "enable_cvp_cube_banked_ready": ("--enable-cvp-cube-banked-ready", bool, None),
     "enable_cvp_cube_overlap": ("--enable-cvp-cube-overlap", bool, None),
     "enable_cvp_cube_derived_drain": ("--enable-cvp-cube-derived-drain", bool, None),
 }
-
 
 # These controls changed names with the versioned stage contract. Reject them
 # before option filtering so an old spelling cannot silently disable a feature.
@@ -936,8 +931,8 @@ def _resolve_persistent_buffer_policy(options):
 
 def _probe_compiler_help(compiler_path, env):
     try:
-        result = subprocess.run([compiler_path, "--help"], env=env, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, timeout=10, check=False)
+        result = subprocess.run([compiler_path, "--help"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError) as error:
         return None, None, error
     return result.returncode, result.stdout or "", None
@@ -1900,8 +1895,7 @@ class NPUOptions:
         _validate_native_compiler_options(self.__dict__)
         object.__setattr__(self, "disable_tightly_coupled_buffer_reuse",
                            _resolve_persistent_buffer_policy(self.__dict__))
-        if _uses_native_compiler_options(self.__dict__) and (
-                not _is_a5_target_arch(arch) or self.is_pure_simt):
+        if _uses_native_compiler_options(self.__dict__) and (not _is_a5_target_arch(arch) or self.is_pure_simt):
             raise ValueError("native compiler controls require an Ascend 950/910_95 SIMD compilation")
 
         if self.is_pure_simt:

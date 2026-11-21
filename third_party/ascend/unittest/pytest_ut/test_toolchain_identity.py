@@ -20,10 +20,13 @@ def toolchain_module():
 def toolchain(tmp_path):
     paths = {}
     for role, relative in {
-        "compiler": "frontend/bin/bishengir-compile", "reader": "frontend/bin/bishengir-opt",
-        "emitter": "triton/triton-mlir-opt", "optimizer": "triton/triton-opt",
-        "libdevice": "triton/lib/libdevice.bc", "template": "frontend/lib/cube.bc",
-        "downstream": "downstream/bisheng",
+            "compiler": "frontend/bin/bishengir-compile",
+            "reader": "frontend/bin/bishengir-opt",
+            "emitter": "triton/triton-mlir-opt",
+            "optimizer": "triton/triton-opt",
+            "libdevice": "triton/lib/libdevice.bc",
+            "template": "frontend/lib/cube.bc",
+            "downstream": "downstream/bisheng",
     }.items():
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -35,8 +38,8 @@ def toolchain(tmp_path):
 
 
 def fingerprint(module, chain):
-    return module.toolchain_fingerprint(chain["compiler"], chain["reader"],
-                                        (chain["emitter"], chain["optimizer"]), chain["libdevice"], chain["env"])
+    return module.toolchain_fingerprint(chain["compiler"], chain["reader"], (chain["emitter"], chain["optimizer"]),
+                                        chain["libdevice"], chain["env"])
 
 
 def test_unchanged_toolchain_is_stable(toolchain_module, toolchain):
@@ -44,9 +47,10 @@ def test_unchanged_toolchain_is_stable(toolchain_module, toolchain):
 
 
 def test_direct_frontend_uses_only_its_selected_tools(toolchain_module, toolchain):
+
     def direct_key():
-        return toolchain_module.toolchain_fingerprint(toolchain["compiler"], None, (),
-                                                      toolchain["libdevice"], toolchain["env"])
+        return toolchain_module.toolchain_fingerprint(toolchain["compiler"], None, (), toolchain["libdevice"],
+                                                      toolchain["env"])
 
     original = direct_key()
     for role in ("reader", "emitter", "optimizer"):
@@ -143,9 +147,9 @@ def test_explicit_downstream_directory_is_fingerprinted(toolchain_module, toolch
     assert fingerprint(toolchain_module, toolchain) != before
 
 
-
-@pytest.mark.parametrize("role", ["compiler", "reader", "emitter", "optimizer", "libdevice", "template",
-                                  "downstream", "explicit-downstream"])
+@pytest.mark.parametrize(
+    "role",
+    ["compiler", "reader", "emitter", "optimizer", "libdevice", "template", "downstream", "explicit-downstream"])
 def test_same_stat_same_size_rewrite_invalidates_key(toolchain_module, toolchain, tmp_path, monkeypatch, role):
     if role == "explicit-downstream":
         directory = tmp_path / "explicit-downstream"

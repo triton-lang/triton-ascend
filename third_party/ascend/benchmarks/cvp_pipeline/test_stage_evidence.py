@@ -14,11 +14,11 @@ def capture():
               ('Before', 'VerifyCVPipeline', 'hivm-verify-cvp-plan'),
               ('After', 'VerifyCVPipeline', 'hivm-verify-cvp-plan')]
     return ''.join(f'// -----// IR Dump {when} {name} ({flag}) '
-                   "('func.func' operation: @stage_chain) //----- //\n"
-                   + module for when, name, flag in phases)
+                   "('func.func' operation: @stage_chain) //----- //\n" + module for when, name, flag in phases)
 
 
 class StageEvidenceTest(unittest.TestCase):
+
     def test_complete_snapshots_exclude_trailing_compiler_messages(self):
         snapshots = pipeline_snapshots(capture() + 'compiler: completed\n')
         self.assertEqual(set(snapshots), {'prepared', 'scheduled', 'verified'})

@@ -495,9 +495,12 @@ def test_canonical_invariant_cache_keys_survive_jit_packing():
 
 
 @pytest.mark.parametrize("name", [
-    "cvp_q_cache_mode", "cvp_q_cache_consider_overlapping",
-    "enable_cvp_attention_rows2", "enable_cvp_attention_first_output",
-    "enable_cvp_attention_last_output", "enable_cvp_attention_first_state",
+    "cvp_q_cache_mode",
+    "cvp_q_cache_consider_overlapping",
+    "enable_cvp_attention_rows2",
+    "enable_cvp_attention_first_output",
+    "enable_cvp_attention_last_output",
+    "enable_cvp_attention_first_state",
     "enable_cvp_attention_half_p_stream",
 ])
 @pytest.mark.parametrize("value", [None, False, True])

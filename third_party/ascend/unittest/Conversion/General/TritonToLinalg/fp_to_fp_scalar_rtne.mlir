@@ -2,9 +2,13 @@
 
 // CHECK-LABEL: func.func @scalar_fp32_to_fp8_rtne
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: %[[CAST:.*]] = arith.truncf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: %[[CAST:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return %[[CAST]] : f8E4M3FN
+// CHECK-LABEL: func.func @scalar_fp32_to_f8e5m2_default
+// CHECK: arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E5M2
+// CHECK-LABEL: func.func @scalar_fp16_to_f8e5m2_rtne
+// CHECK: arith.truncf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f16 to f8E5M2
 // CHECK-LABEL: func.func @scalar_fp8_to_fp32_rtne
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: %[[FP8_TO_F32:.*]] = arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E4M3FN to f32
@@ -45,6 +49,16 @@ module {
   tt.func @scalar_fp32_to_fp8_rtne(%arg0: f32) -> f8E4M3FN {
     %0 = tt.fp_to_fp %arg0, rounding = rtne : f32 -> f8E4M3FN
     tt.return %0 : f8E4M3FN
+  }
+
+  tt.func @scalar_fp32_to_f8e5m2_default(%arg0: f32) -> f8E5M2 {
+    %0 = tt.fp_to_fp %arg0 : f32 -> f8E5M2
+    tt.return %0 : f8E5M2
+  }
+
+  tt.func @scalar_fp16_to_f8e5m2_rtne(%arg0: f16) -> f8E5M2 {
+    %0 = tt.fp_to_fp %arg0, rounding = rtne : f16 -> f8E5M2
+    tt.return %0 : f8E5M2
   }
 
   tt.func @scalar_fp8_to_fp32_rtne(%arg0: f8E4M3FN) -> f32 {

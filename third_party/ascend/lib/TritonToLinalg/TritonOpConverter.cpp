@@ -780,6 +780,9 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
     // Downcast: use arith.truncf with round_mode=rint
     auto truncOp = rewriter.create<arith::TruncFOp>(loc, resultType, input);
     truncOp->setAttr("round_mode", roundModeAttr);
+    if (srcElemType.isF32() &&
+        isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType))
+      truncOp->setAttr("enable_saturate", rewriter.getBoolAttr(true));
     rewriter.replaceOp(op, truncOp.getResult());
   } else {
     // Upcast: use arith.extf with round_mode=rint

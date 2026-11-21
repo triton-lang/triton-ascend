@@ -2667,11 +2667,20 @@ def nextafter(arg0: core.tensor, arg1: core.tensor, _semantic=None):
         bits_next = _semantic.add(bits_x, dir_xy, True)
         next_val = _semantic.bitcast(bits_next, x.dtype)
 
-        need_min_pos = _semantic.logical_and(x_is_0, next_pos)
-        need_max_neg = _semantic.logical_and(x_is_0, next_neg)
-        next_val = _semantic.where(need_min_pos, min_pos, next_val)
-        next_val = _semantic.where(need_max_neg, max_neg, next_val)
-        return _semantic.where(x_eq_y, x, next_val)
+        # ``x_gt_0`` is False for both ``+0.0`` and ``-0.0``, so for a zero ``x``
+        # the direction above is meaningless; the sign of the result must follow
+        # ``y`` instead of the sign of ``x``.
+        y_gt_0 = _semantic.greater_than(y, 0)
+        y_lt_0 = _semantic.less_than(y, 0)
+        next_val = _semantic.where(_semantic.logical_and(x_is_0, y_gt_0), min_pos, next_val)
+        next_val = _semantic.where(_semantic.logical_and(x_is_0, y_lt_0), max_neg, next_val)
+        # ``x == y`` also covers ``+0.0``/``-0.0``, which compare equal but have
+        # different signs: return ``y`` so the zero keeps its sign. NaN is
+        # propagated unchanged instead of by bumping its bit pattern.
+        x_is_nan = _semantic.not_equal(x, x)
+        y_is_nan = _semantic.not_equal(y, y)
+        passthrough = _semantic.or_(_semantic.or_(x_eq_y, x_is_nan), y_is_nan)
+        return _semantic.where(passthrough, _semantic.where(x_is_nan, x, y), next_val)
 
 
 @core.builtin

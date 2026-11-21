@@ -8,7 +8,6 @@ import triton.language as tl
 import torch_npu
 
 from block_batching_test_utils import assert_applied, require_batching_target
-from triton.backends.ascend.block_batching import uses_grouping_policy
 
 
 @triton.jit
@@ -230,10 +229,10 @@ class TestVV:
         assert kernel is warmed
         torch.npu.synchronize()
         torch.testing.assert_close(out, x * 2 + 1, rtol=0, atol=0)
-        if uses_grouping_policy(str(kernel.metadata.target.arch)):
-            assert kernel.block_auto_selection['model'] == 'ttir-legacy-grouping-v1'
-            assert_applied(kernel, 2)
-            assert kernel.block_auto_selection['reason'] == 'LEGACY_TTIR_GROUPING'
+        assert kernel.block_auto_selection['model'] == 'ttir-relative-v3'
+        assert kernel.block_auto_selection['reason'] == 'LOWEST_TTIR_SCORE'
+        assert kernel.block_auto_selection['selected_factor'] in (2, 4)
+        assert_applied(kernel, kernel.block_auto_selection['selected_factor'])
 
     @pytest.mark.parametrize('explicit', [None, 'auto', 2])
     @pytest.mark.parametrize('generic', [False, True])
@@ -328,8 +327,7 @@ class TestVV:
         selection = automatic.block_auto_selection
         assert selection['selected_factor'] in (1, 2, 4)
         assert selection['candidate_plan']['candidates']
-        if blocks == 128 and str(automatic.metadata.target.arch).startswith('Ascend910_93'):
-            assert_applied(automatic, 2)
+        assert selection['model'] == 'ttir-relative-v3'
 
     def test_graph_capture_uses_baseline(self):
         x = torch.arange(1024, device='npu', dtype=torch.float32)

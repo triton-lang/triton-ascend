@@ -78,10 +78,6 @@ inline void update(O &o, O values) {
   for (auto &v : values)
     o[v.first] = std::move(v.second);
 }
-// Keep this list in step with uses_grouping_policy in block_batching.py.
-inline bool usesGroupingPolicy(StringRef arch) {
-  return arch.starts_with("Ascend910_93") || arch.starts_with("Ascend910B");
-}
 inline int64_t product(const A &values) {
   int64_t n = 1;
   for (const V &v : values) {
@@ -109,7 +105,9 @@ struct Profile {
   double localBandwidth = 32, globalBandwidth = 512;
 
   explicit Profile(bool cv) {
-    // A5 assumptions: 56 Vector cores, 1650 MHz, 16 GB/s per Vector core.
+    // Shared relative weights calibrated on A5: 56 Vector cores, 1650 MHz,
+    // 16 GB/s per Vector core. Actual target cores determine occupancy;
+    // these weights do not replace backend resource validation.
     if (!cv) {
       localBandwidth = 16.0 * 1e9 / (1650.0 * 1e6);
       globalBandwidth = localBandwidth * 56;
@@ -231,11 +229,6 @@ O planCV(const O &request) {
           slot = &o;
       }
     }
-  if (flag(sub(request, "contract"), "legacy_resource_policy")) {
-    auto reason = spatial.empty() ? "CV_NO_ADMITTED_SPATIAL_MERGE"
-                                  : "LEGACY_CV_SPATIAL_CANDIDATES";
-    return result(reason, std::move(spatial));
-  }
   if (m && n)
     return result("CV_M4_N4", A{O(*m), O(*n)});
   if (m || n) {
@@ -747,30 +740,10 @@ std::string scoreBlockTtir(ModuleOp module, llvm::StringRef request) {
     }
     int64_t blocks = product(grid);
     StringRef arch = input.getString("arch").value_or("");
-    if (usesGroupingPolicy(arch)) {
-      // The earlier generation uses TTIR legality and occupancy, not the A5
-      // instruction costs priced below against an A5 register file and
-      // unified buffer. Final allocation and launcher validation still run
-      // on the selected binary.
-      bool allowed =
-          factor == 1 ||
-          (!preserve && axis >= 0 && axis < 3 && (factor == 2 || factor == 4) &&
-           integer(array(contract, "grid")[axis]) % factor == 0 &&
-           blocks >= cores &&
-           (!cv || str(input, "merge_kind") == "M" ||
-            str(input, "merge_kind") == "N"));
-      update(output, O{{"status", allowed ? "TTIR_COST_ESTIMATED"
-                                          : "TTIR_MODEL_UNSUPPORTED"},
-                       {"model", "ttir-legacy-grouping-v1"},
-                       {"score", factor == 1 ? 5 : factor},
-                       {"blocks", blocks},
-                       {"cores", cores}});
-      std::string result;
-      llvm::raw_string_ostream stream(result);
-      stream << json::Value(std::move(output));
-      return result;
-    }
-    check(arch.starts_with("Ascend950") || arch.starts_with("Ascend910_95"),
+    // Keep target admission in step with supports_target in block_batching.py.
+    check(arch.starts_with("Ascend950") || arch.starts_with("Ascend910_95") ||
+              arch.starts_with("Ascend910_93") ||
+              arch.starts_with("Ascend910B"),
           "unsupported automatic selection target");
     Profile profile(cv);
     auto specialized = specializeTtir(module, input);

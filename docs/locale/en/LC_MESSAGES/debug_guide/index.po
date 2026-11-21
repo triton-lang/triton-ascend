@@ -1,0 +1,48 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-11-11 15:04+0800\n"
+"PO-Revision-Date: 2026-11-11 15:04+0800\n"
+
+"X-Source-Commit: d14a0b1d811a6257bc531e6a8b2eefc5f7ad727b\n"
+
+"X-Skill-Version: 2.0.0\\n"
+
+"Last-Translator: Auto Translation (glm-5.2)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Triton-Ascend算子调试与调优"
+msgstr "Triton-Ascend Operator Debugging and Tuning"
+
+msgid "概述：本文档介绍Triton-Ascend算子的调试方法、性能调优技术和Warmup预热方法，帮助开发者定位和解决算子开发过程中的问题。"
+msgstr "Overview: This document introduces debugging methods, performance tuning techniques, and warmup methods for Triton-Ascend operators to help developers locate and resolve issues during operator development."
+
+msgid "文档组织"
+msgstr "Documentation Organization"
+
+msgid "[调试指南](./debugging.md) — Triton-Ascend算子调试方法"
+msgstr "[Debugging Guide](./debugging.md) — Triton-Ascend operator debugging method"
+
+msgid "[性能分析](./profiling.md) — 使用性能分析工具定位性能瓶颈"
+msgstr "[Profiling](./profiling.md) — Use profiling tools to locate performance bottlenecks"
+
+msgid "[精度分析](./precision.md) — 算子精度问题分析与解决"
+msgstr "[Precision Analysis](./precision.md) — Analysis and resolution of operator precision issues"
+
+msgid "[msDebug使用指南](./triton_msdebug_user_guide.md) — 使用 msDebug调试Triton Kernel"
+msgstr "[msDebug User Guide](./triton_msdebug_user_guide.md) — Debugging Triton kernels using msDebug"
+
+msgid "[do_bench_npu使用指南](./do_bench_npu_guide.md) — 在昇腾NPU上测量kernel的纯Device侧执行时间"
+msgstr "[do_bench_npu usage guide](./do_bench_npu_guide.md) — Measure the pure Device-side execution time of a kernel on the Ascend NPU"
+
+msgid "[Warmup使用指南](./warmup_guide.md) — 在服务启动或CI阶段提前编译普通JIT和Autotune算子"
+msgstr "[Warmup Guide](./warmup_guide.md) — Pre-compile regular JIT and Autotune operators during service startup or the CI phase"

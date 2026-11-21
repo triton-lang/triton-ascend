@@ -1,0 +1,129 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-10-27 00:05+0800\n"
+"PO-Revision-Date: 2026-10-27 00:05+0800\n"
+
+"X-Source-Commit: a6f4ada78a850f3c3edcfc0661605996ce530e55\n"
+
+"X-Skill-Version: 2.0.0\\n"
+
+"Last-Translator: Auto Translation (glm-5.2)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "CV融合算子开发"
+msgstr "CV Fusion Operator Development"
+
+msgid "CV融合算子指同一个算子中同时使用Cube Core和Vector Core：Cube Core通常负责 `tl.dot`、矩阵乘或卷积式主计算，Vector Core负责bias、activation、softmax、归约、mask、layout重排或跨块同步。CV融合的目标是减少kernel边界和GM往返，但需要同时控制Cube tile、Vector tile、UB/L1占用和同步关系。"
+msgstr "CV fusion operators use both the Cube Core and the Vector Core in the same operator: The Cube Core typically handles `tl.dot`, matrix multiplication, or convolution-style main computation. The Vector Core handles bias, activation, softmax, reduction, mask, layout rearrangement, or cross-block synchronization. The goal of CV fusion is to reduce kernel boundaries and GM round trips. However, you must simultaneously control the Cube tile, Vector tile, UB/L1 occupancy, and synchronization relationships."
+
+msgid "CV融合简单算子开发"
+msgstr "CV Fusion Simple Operator Development"
+
+msgid "简单CV融合建议先从本仓 [矩阵乘法样例](../examples/05_matrix_multiplication_example.md) 抽出稳定的 `tl.dot` 主计算，再在写回前加入Vector后处理；更复杂的切片更新可参考 [融合注意力样例](../examples/04_fused_attention_example.md)。最小路径如下："
+msgstr "For simple CV fusion, first extract the stable `tl.dot` main computation from the [matrix multiplication sample](../examples/05_matrix_multiplication_example.md) in this repository. Then, add Vector post-processing before the write-back. For more complex slice updates, refer to the [fused attention sample](../examples/04_fused_attention_example.md). The minimum path is as follows:"
+
+msgid "先实现稳定的Cube主计算，例如 `acc = tl.dot(a, b, acc)`。"
+msgstr "First, implement the stable main Cube computation, for example, `acc = tl.dot(a, b, acc)`."
+
+msgid "在accumulator写回前融合轻量Vector后处理，例如bias、scale、activation或dtype cast。"
+msgstr "Fuse lightweight Vector post-processing, for example, bias, scale, activation, or dtype cast, before writing back the accumulator."
+
+msgid "对较大的accumulator，可使用 `range` 配合 `extension.extract_slice`/`extension.insert_slice` 做普通子块切分，避免Vector后处理阶段UB overflow。"
+msgstr "For large accumulators, you can use `range` with `extension.extract_slice`/`extension.insert_slice` for regular sub-block tiling to avoid UB overflow in the Vector post-processing stage."
+
+msgid "`extension.parallel(..., bind_sub_block=True)` 属于更强的显式多Vector子块绑定路径，目标硬件和编译配置存在差异时可能不可用，不建议作为简单示例的默认写法。"
+msgstr "`extension.parallel(..., bind_sub_block=True)` belongs to a stronger explicit multi-Vector sub-block binding path. It may be unavailable if the target hardware and compilation configurations vary. Do not use it as the default approach for simple samples."
+
+msgid "示例结构："
+msgstr "Sample structure:"
+
+msgid ""
+"# 在matmul kernel内部，K循环完成后得到fp32 accumulator。\n"
+"acc = tl.dot(a, b, acc)  # 通常位于K维循环内，这里仅展示结构。\n"
+"\n"
+"# 在写回前融合轻量Vector后处理。\n"
+"acc = tl.where(acc >= 0, acc, 0.01 * acc)\n"
+"c = acc.to(tl.float16)\n"
+"\n"
+"offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)\n"
+"offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)\n"
+"c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn\n"
+"c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)\n"
+"tl.store(c_ptrs, c, mask=c_mask)\n"
+msgstr ""
+"# Inside the matmul kernel, after the K loop completes, an fp32 accumulator is obtained.\n"
+"acc = tl.dot(a, b, acc)  # Typically located inside the K-dimension loop; here only the structure is shown.\n"
+"\n"
+"# Fuse lightweight Vector post-processing before writeback.\n"
+"acc = tl.where(acc >= 0, acc, 0.01 * acc)\n"
+"c = acc.to(tl.float16)\n"
+"\n"
+"offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)\n"
+"offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)\n"
+"c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn\n"
+"c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)\n"
+"tl.store(c_ptrs, c, mask=c_mask)\n"
+
+msgid "简单CV融合开发时要保持边界清晰：Cube负责产生较大的二维accumulator，Vector负责同一tile内的逐元素或小规模归约。若Vector部分需要跨多个Cube tile共享状态，就需要引入同步、workspace或拆分kernel。"
+msgstr "When developing simple CV fusion, keep boundaries clear: Cube generates large 2D accumulators, and Vector handles element-wise operations or small-scale reductions within the same tile. If the Vector part needs to share state across multiple Cube tiles, you must introduce synchronization, a workspace, or split the kernel."
+
+msgid "CV融合复杂算子开发"
+msgstr "CV Fusion Complex Operator Development"
+
+msgid "复杂CV融合可参考 [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops) 中的best practice："
+msgstr "For complex CV fusion, refer to the best practices in [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops):"
+
+msgid "[`tutorial/best_practice/002-decode_grouped_attention.py`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/002-decode_grouped_attention.py)：Decode attention中QK/PV使用Cube，softmax、mask、指数、归一化和离散KV访存重排使用Vector。"
+msgstr "[`tutorial/best_practice/002-decode_grouped_attention.py`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/002-decode_grouped_attention.py): In Decode attention, QK/PV use Cube, and softmax, mask, exponentiation, normalization, and discrete KV memory access rearrangement use Vector."
+
+msgid "[`tutorial/best_practice/003-fused-cat-slice-conv1d.zh.md`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/003-fused-cat-slice-conv1d.zh.md)：展示融合cat、slice、conv1d update时如何用 `extension.insert_slice`、转置和分核优化减少离散访存与padding开销。"
+msgstr "[`tutorial/best_practice/003-fused-cat-slice-conv1d.zh.md`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/003-fused-cat-slice-conv1d.zh.md): Demonstrates how to use `extension.insert_slice`, transposition, and core partitioning optimization to reduce discrete memory access and padding overhead when fusing cat, slice, and conv1d update."
+
+msgid "复杂CV融合建议按数据流分层组织："
+msgstr "For complex CV fusion, organize by data flow in layers:"
+
+msgid "**主计算层**：识别哪些步骤必须走Cube，例如QK、PV、GEMM、batched matmul。"
+msgstr "**Main compute layer**: Identify which steps must use the Cube core, for example, QK, PV, GEMM, and batched matmul."
+
+msgid "**Vector后处理层**：识别softmax、activation、mask、scale、normalization、cat/slice、layout transform等是否能在同一tile内完成。"
+msgstr "**Vector post-processing layer**: Identifies whether operations such as softmax, activation, mask, scale, normalization, cat/slice, and layout transform can be completed within the same tile."
+
+msgid "**访存重排层**：对离散KV cache、MoE token重排、短尾轴（最后一个维度）tensor，优先在UB中用 `extension.insert_slice`、`extension.extract_slice`、转置或借轴转置形成硬件友好的连续访问。"
+msgstr "**Memory access rearrangement layer**: For discrete KV cache, MoE token rearrangement, and short-tail axis (last dimension) tensors, prioritize using `extension.insert_slice`, `extension.extract_slice`, transposition, or borrowed-axis transposition in the UB to achieve hardware-friendly contiguous memory access."
+
+msgid "**流水和同步层**：通过 `multibuffer`、`set_workspace_multibuffer`、`tile_mix_vector_loop`、`tile_mix_cube_loop` 等编译选项探索Cube与Vector的重叠执行。"
+msgstr "**Pipeline and synchronization layer**: Explore overlapping execution of Cube and Vector using compilation options such as `multibuffer`, `set_workspace_multibuffer`, `tile_mix_vector_loop`, and `tile_mix_cube_loop`."
+
+msgid "**分核层**：CV融合算子通常按Cube Core数量发射grid；运行时会以约1:2的比例协同Vector Core。不要简单沿用GPU上的大grid。"
+msgstr "**Core-level**: CV fusion operators typically launch grids based on the number of Cube Cores; at runtime, Vector Cores are coordinated at an approximately 1:2 ratio. Do not simply reuse the large grid approach from GPUs."
+
+msgid "对于attention类CV融合，推荐先让非causal、短序列、小head_dim的case跑通，再逐步加入："
+msgstr "For attention-type CV fusion, first get non-causal, short-sequence, and small head_dim cases running, and then gradually add:"
+
+msgid "causal mask分阶段处理。"
+msgstr "The causal mask is processed in stages."
+
+msgid "长序列K/V block循环。"
+msgstr "Long sequence K/V block loop."
+
+msgid "`m_i`/`l_i` 的数值稳定softmax更新。"
+msgstr "Numerically stable softmax update for `m_i`/`l_i`."
+
+msgid "HEAD_DIM较大时的accumulator workspace和子块切分。"
+msgstr "Accumulator workspace and sub-block tiling when HEAD_DIM is large."
+
+msgid "KV cache离散索引下的load重排。"
+msgstr "Load reordering under discrete KV cache indices."
+
+msgid "复杂CV融合调优时，优先观察profiling中Cube、Vector、MTE2的时间占比。如果Cube等待Vector，考虑减少Vector后处理粒度或打开CV balance相关选项；如果Vector等待搬运，优先检查离散访存、tail-axis padding和multibuffer配置。"
+msgstr "When tuning complex CV fusion, first observe the time proportions of Cube, Vector, and MTE2 in the profiling. If Cube waits for Vector, consider reducing the Vector post-processing granularity or enabling CV balance-related options. If Vector waits for data movement, first check the discrete memory access, tail-axis padding, and multibuffer configurations."

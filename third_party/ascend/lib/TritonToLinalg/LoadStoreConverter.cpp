@@ -295,6 +295,87 @@ void LoadConverter::fillTensorWithOtherForMaskScenario(
                 UnitAttr::get(rewriter.getContext()));
 }
 
+// [TAIL-FILL] A deferred tail fill writes the subview [valid_k, padded_k).
+// The vectorized fill skips a non-32B-aligned head chunk, so only defer when
+// every valid extent is a whole number of 32B vectors; otherwise keep the
+// legacy whole-buffer fill before the copy.
+static bool tailFillDimsAligned(MemRefType bufTy,
+                                ArrayRef<OpFoldResult> maskDim) {
+  Type elem = bufTy.getElementType();
+  if (!elem.isIntOrFloat())
+    return false;
+  unsigned bits = elem.getIntOrFloatBitWidth();
+  if (bits < 8 || bits % 8 != 0)
+    return false;
+  int64_t elemsPer32B = 32 / (bits / 8);
+  for (const auto &d : maskDim) {
+    auto v = getConstantIntValue(d);
+    if (!v || *v % elemsPer32B != 0)
+      return false;
+  }
+  return true;
+}
+
+// [TAIL-FILL] Fill only the pad complement of a prefix-masked buffer,
+// generalized to rank-N. For each dim k where valid_k < padded_k, emit one
+// strip fill: dims < k keep their valid length, dim k covers
+// [valid_k, padded_k), dims > k span the full extent. Strips are pairwise
+// disjoint and disjoint from the copy region [0, valid_0) x ... , so a
+// preceding memref::CopyOp into that region is order-independent (disjoint
+// writes) and the downstream sync solver may overlap MTE2(copy) with V(fill).
+// Rank-1 reduces to the single tail [valid, padded); a fully-valid dim
+// contributes no strip (legacy emitted a dead scf.if(false) fill there).
+static void
+fillTailWithOtherForMaskScenario(Value other, Value localMem,
+                                 ArrayRef<OpFoldResult> maskDim,
+                                 ConversionPatternRewriter &rewriter) {
+  auto loc = localMem.getLoc();
+  auto memRefType = cast<MemRefType>(localMem.getType());
+  unsigned rank = memRefType.getRank();
+
+  // Defensive: all dims statically known and in range (eligibility is
+  // re-checked by the caller).
+  llvm::SmallVector<int64_t> valid;
+  valid.reserve(rank);
+  for (unsigned k = 0; k < rank; ++k) {
+    auto v = getConstantIntValue(maskDim[k]);
+    if (!v || *v < 0 || *v > memRefType.getDimSize(k))
+      return;
+    valid.push_back(*v);
+  }
+
+  for (unsigned k = 0; k < rank; ++k) {
+    if (valid[k] == memRefType.getDimSize(k))
+      continue; // dim not clipped: no strip needed
+
+    llvm::SmallVector<OpFoldResult> offsets, sizes, strides;
+    offsets.reserve(rank);
+    sizes.reserve(rank);
+    strides.reserve(rank);
+    for (unsigned d = 0; d < rank; ++d) {
+      strides.push_back(rewriter.getIndexAttr(1));
+      if (d < k) { // keep valid prefix of earlier dims
+        offsets.push_back(rewriter.getIndexAttr(0));
+        sizes.push_back(rewriter.getIndexAttr(valid[d]));
+      } else if (d == k) { // the clipped dim: [valid_k, padded_k)
+        offsets.push_back(rewriter.getIndexAttr(valid[k]));
+        sizes.push_back(
+            rewriter.getIndexAttr(memRefType.getDimSize(k) - valid[k]));
+      } else { // later dims span the full extent (covers the corner)
+        offsets.push_back(rewriter.getIndexAttr(0));
+        sizes.push_back(rewriter.getIndexAttr(memRefType.getDimSize(d)));
+      }
+    }
+    // inferResultType bakes static offsets into the type, e.g.
+    // memref<6x64xf16, strided<[64, 1], offset: 640>>
+    auto stripType = cast<MemRefType>(memref::SubViewOp::inferResultType(
+        memRefType, offsets, sizes, strides));
+    auto strip = rewriter.create<memref::SubViewOp>(loc, stripType, localMem,
+                                                    offsets, sizes, strides);
+    rewriter.create<linalg::FillOp>(loc, ValueRange{other}, ValueRange{strip});
+  }
+}
+
 LoadConverter::LoadConverter(MLIRContext *context)
     : OpConversionPattern<triton::LoadOp>(context) {}
 
@@ -652,6 +733,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     } else {
       dstOffsets = srcOffsets;
     }
+    Value deferredBoundaryTailFill;
     if (padding.has_value()) {
       TypedAttr padAttr = rewriter.getZeroAttr(memRefElementType);
       // triton already ensure only NAN and ZERO are passed in
@@ -664,8 +746,29 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
       }
       auto padVal = rewriter.create<arith::ConstantOp>(loc, padAttr);
 
-      fillTensorWithOtherForMaskScenario(padVal, allocOp, boundarySizes,
-                                         rewriter);
+      // [TAIL-FILL-BC] boundaryCheck path: defer fill when eligible
+      bool bcTailFillEligible = false;
+      {
+        bool allStaticSizes = true;
+        bool allZeroOffsets = true;
+        for (const auto &sz : boundarySizes)
+          allStaticSizes =
+              allStaticSizes && getConstantIntValue(sz).has_value();
+        for (const auto &off : dstOffsets)
+          allZeroOffsets = allZeroOffsets && isConstantIntValue(off, 0);
+        if (auto bcTy = dyn_cast<MemRefType>(allocOp.getType())) {
+          if (allStaticSizes && allZeroOffsets && bcTy.hasStaticShape() &&
+              static_cast<size_t>(bcTy.getRank()) == boundarySizes.size() &&
+              tailFillDimsAligned(bcTy, boundarySizes))
+            bcTailFillEligible = true;
+        }
+      }
+      if (bcTailFillEligible) {
+        deferredBoundaryTailFill = padVal;
+      } else {
+        fillTensorWithOtherForMaskScenario(padVal, allocOp, boundarySizes,
+                                           rewriter);
+      }
     }
     auto srcSubView = mlir::ConverterUtils::makeSubViewOp(
         ptr, srcOffsets, boundarySizes, loc, rewriter);
@@ -674,6 +777,11 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     auto copyOp = rewriter.create<memref::CopyOp>(loc, srcSubView, dstSubview);
     propagateWasBoolToInt8Attr(op.getOperation(), copyOp.getOperation(),
                                rewriter);
+    // [TAIL-FILL-BC] strip fills AFTER the copy
+    if (deferredBoundaryTailFill) {
+      fillTailWithOtherForMaskScenario(deferredBoundaryTailFill, allocOp,
+                                       boundarySizes, rewriter);
+    }
     if (mayImplicitTransposeWithLastAxis) {
       auto markOp = rewriter.create<annotation::MarkOp>(loc, dstSubview);
       markOp->setAttr(MayImplicitTransposeWithLastAxisTAG,
@@ -731,12 +839,37 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   }
 
   Value tensorOtherBase;
+  Value deferredTailFillOther; // [TAIL-FILL] non-null => fill deferred to
+                               // after the copy op
   if (other) {
     auto scalarOther =
         mlir::ConverterUtils::getScalarValue(other, loc, rewriter);
     if (scalarOther) {
-      fillTensorWithOtherForMaskScenario(scalarOther, allocOp, mstate.dims,
-                                         rewriter);
+      // [TAIL-FILL] rank-N static zero-offset prefix + switch on =>
+      // defer the fill: emit strip-only fills AFTER the copy instead of a
+      // whole-buffer fill BEFORE it. Disjoint write regions remove the
+      // ordering dependency between MTE2(copy) and V(fill).
+      bool tailFillEligible = false;
+      {
+        bool allZeroOffset = true;
+        bool allStaticDims = true;
+        for (const auto &off : mstate.offsets)
+          allZeroOffset = allZeroOffset && isConstantIntValue(off, 0);
+        for (const auto &dim : mstate.dims)
+          allStaticDims = allStaticDims && getConstantIntValue(dim).has_value();
+        if (auto bufTy = dyn_cast<MemRefType>(allocOp.getType())) {
+          if (allZeroOffset && allStaticDims && bufTy.hasStaticShape() &&
+              mstate.getRank() == static_cast<int64_t>(bufTy.getRank()) &&
+              tailFillDimsAligned(bufTy, mstate.dims))
+            tailFillEligible = true;
+        }
+      }
+      if (tailFillEligible) {
+        deferredTailFillOther = scalarOther;
+      } else {
+        fillTensorWithOtherForMaskScenario(scalarOther, allocOp, mstate.dims,
+                                           rewriter);
+      }
     } else if (isa<RankedTensorType>(other.getType())) {
       tensorOtherBase = other;
     } else {
@@ -784,6 +917,19 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
       auto copyOp = rewriter.create<memref::CopyOp>(loc, srcSubView, castOp);
       propagateWasBoolToInt8Attr(op.getOperation(), copyOp.getOperation(),
                                  rewriter);
+      // [TAIL-FILL] tail-only fill AFTER the copy: [0, valid) and
+      // [valid, padded) are disjoint, so MTE2(copy) and V(fill) carry no
+      // ordering dependency and the downstream sync solver may overlap
+      // them.
+      if (deferredTailFillOther) {
+        fillTailWithOtherForMaskScenario(deferredTailFillOther, allocOp,
+                                         mstate.dims, rewriter);
+      }
+    } else if (deferredTailFillOther) {
+      // [TAIL-FILL] fallback: subview invalid => no copy will be emitted;
+      // keep the legacy whole-buffer fill so semantics are unchanged.
+      fillTensorWithOtherForMaskScenario(deferredTailFillOther, allocOp,
+                                         mstate.dims, rewriter);
     }
 
     if (mayImplicitTransposeWithLastAxis &&

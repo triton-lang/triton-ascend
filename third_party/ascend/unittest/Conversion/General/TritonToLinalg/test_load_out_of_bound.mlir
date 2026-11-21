@@ -3,7 +3,8 @@
 // CHECK-LABEL: func.func @_triton_mrope_forward
 // CHECK: %[[CST:.*]] = arith.constant 0.000000e+00 : f32
 // CHECK: %[[ALLOC_5:.*]] = memref.alloc() : memref<64xf32>
-// CHECK: linalg.fill ins(%[[CST]] : f32) outs(%[[ALLOC_5]] : memref<64xf32>)
+// CHECK: memref.copy
+// CHECK: linalg.fill ins(%[[CST]] : f32) outs(%[[STRIP:.*]] : memref<32xf32, strided<[1], offset: 32>>)
 // CHECK: bufferization.to_tensor %[[ALLOC_5]] restrict writable : memref<64xf32>
 
 module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {

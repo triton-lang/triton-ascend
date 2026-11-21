@@ -98,8 +98,8 @@ def test_nextafter_zero_sign(dtype):
     triton_nextafter_zero[(1, )](x, y, out, BLOCK=n)
 
     # Compare the raw bit patterns so the sign of a zero result is checked too.
-    assert torch.equal(out.cpu().view(torch.int32), expect.view(torch.int32)), (
-        f"nextafter zero sign mismatch: got {out.cpu()}, expect {expect}")
+    assert torch.equal(out.cpu().view(torch.int32),
+                       expect.view(torch.int32)), (f"nextafter zero sign mismatch: got {out.cpu()}, expect {expect}")
 
 
 @pytest.mark.parametrize('dtype', ['float32'])
@@ -117,5 +117,5 @@ def test_nextafter_equal_zero_and_nonzero(dtype):
     out = torch.zeros(n, dtype=eval('torch.' + dtype)).npu()
     triton_nextafter_zero[(1, )](x, y, out, BLOCK=n)
 
-    assert torch.equal(out.cpu().view(torch.int32), expect.view(torch.int32)), (
-        f"nextafter equal-input mismatch: got {out.cpu()}, expect {expect}")
+    assert torch.equal(out.cpu().view(torch.int32),
+                       expect.view(torch.int32)), (f"nextafter equal-input mismatch: got {out.cpu()}, expect {expect}")

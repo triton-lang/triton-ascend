@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="234" viewBox="0 0 880 234" role="img" aria-labelledby="title desc">
+  <title id="title">One chain and two chains for a row sum</title>
+  <desc id="desc">One chain                                  Two chains
+0.5 + 0.25 → 0.75                          A: 0.5 + 0.25 → 0.75 ─┐
+             0.75 + 1 → 1.75               B: 1   + 0.25 → 1.25 ─┴─ add → 2
+                        1.75 + 0.25 → 2</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="880" height="234" rx="6" fill="#ffffff" />
+  <rect x="8" y="8" width="428.0" height="218" rx="8" fill="#f2f7f9" />
+  <rect x="8" y="18" width="4" height="27" rx="2" fill="#20568a" />
+  <text x="21" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">One chain</text>
+  <rect x="444.0" y="8" width="428.0" height="218" rx="8" fill="#f2f7f9" />
+  <rect x="444.0" y="18" width="4" height="27" rx="2" fill="#166656" />
+  <text x="457.0" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">Two chains</text>
+  <rect x="63" y="55" width="289" height="37" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="207.5" y="79.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">0.5 + 0.25 → 0.75</text>
+  <polyline points="207,92 207,108" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="63" y="111" width="289" height="37" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="207.5" y="135.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">0.75 + 1 → 1.75</text>
+  <polyline points="207,148 207,164" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="63" y="167" width="289" height="37" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="207.5" y="191.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">1.75 + 0.25 → 2</text>
+  <rect x="459" y="75" width="235" height="42" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="576.5" y="101.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">A: 0.5 + 0.25 → 0.75</text>
+  <polyline points="694,96 717,96 717,130" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+  <rect x="459" y="143" width="235" height="42" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="576.5" y="169.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">B: 1 + 0.25 → 1.25</text>
+  <polyline points="694,164 717,164 717,130" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+  <polyline points="717,130 733,130" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="735" y="109" width="114" height="42" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="792.0" y="135.78" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="middle">add → 2</text>
+</svg>

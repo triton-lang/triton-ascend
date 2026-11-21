@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="807" height="196" viewBox="0 0 807 196" role="img" aria-labelledby="title desc">
+  <title id="title">P stage and output stage using the query slots at iterations 4, 5 and 6</title>
+  <desc id="desc">Iteration   P stage writes                          Output stage
+4           Q0 tile 3 → sum[0], max[0]              Update Q0 tile 1
+5           Q1 tile 0 → sum[1], max[1]              Update Q0 tile 2
+6           Q1 tile 1 → sum[1], max[1]              Finish Q0 tile 3 using sum[0], max[0]</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="807" height="196" rx="6" fill="#ffffff" />
+  <rect x="8" y="8" width="98" height="39" rx="4" fill="#172f43" />
+  <text x="57.0" y="32.94" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Iteration</text>
+  <rect x="108" y="8" width="293" height="39" rx="4" fill="#172f43" />
+  <text x="254.5" y="32.94" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">P stage writes</text>
+  <rect x="403" y="8" width="394" height="39" rx="4" fill="#172f43" />
+  <text x="600.0" y="32.94" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Output stage</text>
+  <rect x="8" y="51" width="98" height="42" rx="4" fill="#f2f7f9" />
+  <text x="57.0" y="77.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">4</text>
+  <rect x="108" y="51" width="293" height="42" rx="4" fill="#e3eff8" />
+  <text x="254.5" y="77.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 3 → sum[0], max[0]</text>
+  <rect x="403" y="51" width="394" height="42" rx="4" fill="#e0f1ec" />
+  <text x="600.0" y="77.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Update Q0 tile 1</text>
+  <rect x="8" y="96" width="98" height="42" rx="4" fill="#f2f7f9" />
+  <text x="57.0" y="122.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">5</text>
+  <rect x="108" y="96" width="293" height="42" rx="4" fill="#e3eff8" />
+  <text x="254.5" y="122.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 0 → sum[1], max[1]</text>
+  <rect x="403" y="96" width="394" height="42" rx="4" fill="#e0f1ec" />
+  <text x="600.0" y="122.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Update Q0 tile 2</text>
+  <rect x="8" y="141" width="98" height="42" rx="4" fill="#f2f7f9" />
+  <text x="57.0" y="167.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">6</text>
+  <rect x="108" y="141" width="293" height="42" rx="4" fill="#e3eff8" />
+  <text x="254.5" y="167.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 1 → sum[1], max[1]</text>
+  <rect x="403" y="141" width="394" height="42" rx="4" fill="#e0f1ec" />
+  <text x="600.0" y="167.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Finish Q0 tile 3 using sum[0], max[0]</text>
+</svg>

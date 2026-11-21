@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="822" height="212" viewBox="0 0 822 212" role="img" aria-labelledby="title desc">
+  <title id="title">Reading the sum and maximum before and after scalar-input forwarding</title>
+  <desc id="desc">Before                                       After
+sum[1] → copy → copy → copy → VF reads l     sum[1] → VF reads l
+max[1] → copy → copy → copy → VF reads m     max[1] → VF reads m</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="822" height="212" rx="6" fill="#ffffff" />
+  <rect x="6" y="7" width="810" height="94" rx="7" fill="#f2f7f9" />
+  <text x="19" y="59" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="start">Before</text>
+  <rect x="97" y="15" width="110" height="34" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="152.0" y="37.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">sum[1]</text>
+  <polyline points="208,32 244,32" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="246" y="15" width="95" height="34" rx="5" fill="#fff1ce" stroke="#c7d6df" />
+  <text x="293.5" y="37.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">copy</text>
+  <polyline points="342,32 376,32" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="378" y="15" width="95" height="34" rx="5" fill="#fff1ce" stroke="#c7d6df" />
+  <text x="425.5" y="37.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">copy</text>
+  <polyline points="474,32 508,32" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="510" y="15" width="95" height="34" rx="5" fill="#fff1ce" stroke="#c7d6df" />
+  <text x="557.5" y="37.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">copy</text>
+  <polyline points="606,32 650,32" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="653" y="15" width="147" height="34" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="726.5" y="37.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">VF reads l</text>
+  <rect x="97" y="56" width="110" height="34" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="152.0" y="78.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">max[1]</text>
+  <polyline points="208,73 244,73" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="246" y="56" width="95" height="34" rx="5" fill="#fff1ce" stroke="#c7d6df" />
+  <text x="293.5" y="78.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">copy</text>
+  <polyline points="342,73 376,73" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="378" y="56" width="95" height="34" rx="5" fill="#fff1ce" stroke="#c7d6df" />
+  <text x="425.5" y="78.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">copy</text>
+  <polyline points="474,73 508,73" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="510" y="56" width="95" height="34" rx="5" fill="#fff1ce" stroke="#c7d6df" />
+  <text x="557.5" y="78.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">copy</text>
+  <polyline points="606,73 650,73" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="653" y="56" width="147" height="34" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="726.5" y="78.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">VF reads m</text>
+  <rect x="6" y="108" width="810" height="94" rx="7" fill="#f2f7f9" />
+  <text x="19" y="160" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="start">After</text>
+  <rect x="97" y="116" width="110" height="34" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="152.0" y="138.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">sum[1]</text>
+  <polyline points="208,133 650,133" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="653" y="116" width="147" height="34" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="726.5" y="138.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">VF reads l</text>
+  <rect x="97" y="157" width="110" height="34" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="152.0" y="179.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">max[1]</text>
+  <polyline points="208,174 650,174" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="653" y="157" width="147" height="34" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="726.5" y="179.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">VF reads m</text>
+</svg>

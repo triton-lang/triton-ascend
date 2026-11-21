@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="254" viewBox="0 0 960 254" role="img" aria-labelledby="title desc">
+  <title id="title">Flash Attention dataflow for one key tile</title>
+  <desc id="desc">Cube · Q × Kᵀ → Vector · scale, max, exp. Vector · scale, max, exp → Update FP32 row sum. Vector · scale, max, exp → Cast P to FP16. Cast P to FP16 → Cube · P × V. Vector · scale, max, exp → Rescale factor. Rescale factor → Update FP32 row sum. Rescale factor → Vector · update accumulator. Cube · P × V → Vector · update accumulator. Vector · update accumulator → Final tile · normalize O. Update FP32 row sum → Final tile · normalize O.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="254" rx="6" fill="#ffffff" />
+  <polyline points="133,120 158,120" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="234,90 234,39 545,39" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="234,150 234,209 354,209" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="496,209 545,209" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="308,120 354,120" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="496,110 518,110 518,56 545,56" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="496,130 711,130" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="695,209 769,209 769,165" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="769,99 769,53 839,53" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="695,32 839,32" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="8" y="90" width="125" height="60" rx="5" fill="#e3eff8" stroke="#20568a" />
+  <text x="70.5" y="125.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Cube · Q × Kᵀ</text>
+  <rect x="160" y="90" width="148" height="60" rx="5" fill="#e0f1ec" stroke="#166656" />
+  <text x="234.0" y="115.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Vector · scale,</text>
+  <text x="234.0" y="134.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">max, exp</text>
+  <rect x="356" y="90" width="140" height="60" rx="5" fill="#e0f1ec" stroke="#166656" />
+  <text x="426.0" y="125.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Rescale factor</text>
+  <rect x="356" y="181" width="140" height="55" rx="5" fill="#e0f1ec" stroke="#166656" />
+  <text x="426.0" y="213.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Cast P to FP16</text>
+  <rect x="547" y="10" width="148" height="58" rx="5" fill="#e0f1ec" stroke="#166656" />
+  <text x="621.0" y="34.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Update FP32</text>
+  <text x="621.0" y="53.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">row sum</text>
+  <rect x="547" y="181" width="148" height="55" rx="5" fill="#e3eff8" stroke="#20568a" />
+  <text x="621.0" y="213.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Cube · P × V</text>
+  <rect x="713" y="99" width="112" height="64" rx="5" fill="#e0f1ec" stroke="#166656" />
+  <text x="769.0" y="117.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Vector ·</text>
+  <text x="769.0" y="136.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">update</text>
+  <text x="769.0" y="155.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">accumulator</text>
+  <rect x="841" y="10" width="111" height="58" rx="5" fill="#e0f1ec" stroke="#166656" />
+  <text x="896.5" y="25.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Final tile ·</text>
+  <text x="896.5" y="44.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">normalize</text>
+  <text x="896.5" y="63.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">O</text>
+</svg>

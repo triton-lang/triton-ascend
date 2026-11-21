@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="834" height="156" viewBox="0 0 834 156" role="img" aria-labelledby="title desc">
+  <title id="title">Final output write before and after forwarding</title>
+  <desc id="desc">Before   VF → UB temporary → copy to UB O[1] → store to Q1’s rows of O in GM
+After    VF ───────────────────────→ UB O[1] → store to Q1’s rows of O in GM</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="834" height="156" rx="6" fill="#ffffff" />
+  <rect x="4" y="8" width="826" height="66" rx="6" fill="#f2f7f9" />
+  <text x="50.5" y="46.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Before</text>
+  <rect x="117" y="16" width="68" height="50" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="151.0" y="46.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">VF</text>
+  <rect x="213" y="16" width="150" height="50" rx="5" fill="#fff1ce" stroke="#c7d6df" />
+  <text x="288.0" y="46.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">UB temporary</text>
+  <polyline points="187,41 210,41" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="391" y="16" width="161" height="50" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="471.5" y="46.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">copy to UB O[1]</text>
+  <polyline points="365,41 388,41" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="580" y="16" width="242" height="50" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="701.0" y="36.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">store to Q1’s rows of O in</text>
+  <text x="701.0" y="56.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">GM</text>
+  <polyline points="554,41 577,41" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="4" y="78" width="826" height="66" rx="6" fill="#f2f7f9" />
+  <text x="50.5" y="116.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">After</text>
+  <rect x="117" y="86" width="68" height="50" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="151.0" y="116.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">VF</text>
+  <rect x="391" y="86" width="161" height="50" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="471.5" y="116.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">UB O[1]</text>
+  <polyline points="187,111 388,111" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="580" y="86" width="242" height="50" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="701.0" y="106.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">store to Q1’s rows of O in</text>
+  <text x="701.0" y="126.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">GM</text>
+  <polyline points="554,111 577,111" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+</svg>

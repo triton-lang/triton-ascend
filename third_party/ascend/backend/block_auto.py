@@ -52,7 +52,7 @@ class _SelectionCache:
     def __init__(self, body):
         from triton.runtime.cache import get_cache_manager
         from .block_batching_worker import _digest, _PROTOCOL
-        self.identity = _digest(["ttir_selection", 1, _PROTOCOL, body])
+        self.identity = _digest(["ttir_selection", 2, _PROTOCOL, body])
         self.cache = get_cache_manager(self.identity)
 
     def load(self):
@@ -162,11 +162,6 @@ def _select_ttir(backend, frozen, options, env_vars, contract, scalar_arguments,
     arch, _, limit, _ = backend.parse_options(options).block_compile_context
     if limit is None:
         raise ValueError("automatic TTIR selection requires explicit AIC/AIV core counts")
-    from .block_batching import uses_grouping_policy
-    legacy = uses_grouping_policy(arch)
-    contract = dict(contract, legacy_resource_policy=legacy)
-    if legacy:
-        contract['cv_empirical_short_batch'] = False
     axis = options.get("block_batching_axis", -1)
     if cv:
         plan = candidate_plan(contract, axis=axis, probe=frontend)
@@ -194,9 +189,6 @@ def _select_ttir(backend, frozen, options, env_vars, contract, scalar_arguments,
         rows.append(row)
         prepared["unmerged" if factor == 1 else f"a{selected_axis}_f{factor}"] = module, metadata
     selection = _native("rank_ttir", contract, candidates=rows)
-    if legacy:
-        selection.update(model="ttir-legacy-grouping-v1",
-                         reason="LEGACY_TTIR_GROUPING" if selection['factor'] > 1 else "LEGACY_KEEP_BASELINE")
     chosen = selection["selected_key"]
     snapshot = _pack_ttir(*prepared[chosen], output) if chosen != "unmerged" else None
     plan["declines"] = [dict(axis=a, factor=f, **decline) for (a, f), decline in declines.items()]

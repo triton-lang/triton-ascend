@@ -160,7 +160,7 @@ struct ArgLayout {
     if (spec.gridContractVersion == 3)
       originalGrid = reserve(3 * sizeof(uint32_t), 4);
     else if (spec.flags & (TRITON_NPU_IAT | TRITON_NPU_PTSM |
-                           TRITON_NPU_DOT_ROW | TRITON_NPU_GROUP_CAP))
+                           TRITON_NPU_DOT_ROW | TRITON_NPU_ATOMIC_REMOVE))
       originalGrid = reserve(2 * sizeof(uint32_t), 4);
     grid = reserve(3 * sizeof(int32_t), 4);
     if (spec.flags & TRITON_NPU_PURE_SIMT) {
@@ -231,7 +231,7 @@ inline LaunchSpec decodeSpecV2(const TritonNpuLaunchSpecV2 &spec) {
   validateSpec(spec.base);
   if (spec.base.flags & (TRITON_NPU_IAT | TRITON_NPU_PTSM | TRITON_NPU_DOT_ROW |
                          TRITON_NPU_COALESCE_CEIL | TRITON_NPU_PURE_SIMT |
-                         TRITON_NPU_GROUP_CAP) ||
+                         TRITON_NPU_ATOMIC_REMOVE) ||
       spec.base.coalesce_factor != 1 || spec.base.coalesce_axis != -1)
     throw std::invalid_argument(
         "block batching conflicts with another mapping or SIMT");
@@ -275,7 +275,7 @@ inline LaunchGrid prepareGrid(const LaunchSpec &spec, const int32_t *input) {
     result.grid[0] =
         std::min((uint64_t(input[0]) + factor - 1) / factor, axisCap);
   }
-  if (spec.flags & TRITON_NPU_GROUP_CAP) {
+  if (spec.flags & TRITON_NPU_ATOMIC_REMOVE) {
     if (result.grid[1] != 1 || result.grid[2] != 1 || spec.coalesce_axis != 0 ||
         (spec.flags & (TRITON_NPU_IAT | TRITON_NPU_PTSM | TRITON_NPU_DOT_ROW |
                        TRITON_NPU_COALESCE_CEIL)) ||

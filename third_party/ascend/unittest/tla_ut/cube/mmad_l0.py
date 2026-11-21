@@ -102,32 +102,12 @@ def catlass_mmad_l0_expected(
                 a_tile = a1
                 b_tile = b1
             tla.sync.wait_flag(tla.sync.PIPE.M, tla.sync.PIPE.MTE1, ki % 2)
-            tla.copy_l1_to_l0(
-                a_l1,
-                a_tile,
-                tla.CopyL1ToL0Params(
-                    is_transpose=False,
-                    k_part_idx=ki,
-                    k_part=L0_K,
-                    k_part_ceil=L0_K,
-                    k_part_loop=K // L0_K,
-                    k_part_actual=L0_K,
-                    m=M,
-                ),
-            )
-            tla.copy_l1_to_l0(
-                b_l1,
-                b_tile,
-                tla.CopyL1ToL0Params(
-                    is_transpose=False,
-                    k_part_idx=ki,
-                    k_part=L0_K,
-                    k_part_ceil=L0_K,
-                    k_part_loop=K // L0_K,
-                    k_part_actual=L0_K,
-                    m=N,
-                ),
-            )
+            # K is physical axis 0 for A/zN and axis 1 for B/zN.
+            # Subviews retain the parents' pitch and carry the sole K offset.
+            a_src = tla.subview(a_l1, (ki * (L0_K // 16), 0, 0, 0), (L0_K // 16, M // 16, 16, 16))
+            b_src = tla.subview(b_l1, (0, ki * (L0_K // 16), 0, 0), (N // 16, L0_K // 16, 16, 16))
+            tla.copy_l1_to_l0(a_src, a_tile)
+            tla.copy_l1_to_l0(b_src, b_tile)
             tla.sync.set_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
             tla.sync.wait_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
             tla.cube.mmad_l0(
@@ -204,7 +184,16 @@ def test_ir(case, output_dir=None):
     assert len(set(accumulators)) == 1, "all K partitions must update the same accumulator"
     assert len(set(pairs)) == min(2, iterations), "explicit L0 slots must stay distinct"
     assert all(pair == pairs[index % 2] for index, pair in enumerate(pairs)), "wrong ping-pong slot"
-    assert text.count("hivm.hir.l12l0 ") == 2 * iterations
+    copies = re.findall(r"hivm\.hir\.l12l0[^\n]*", text)
+    assert len(copies) == 2 * iterations
+    for ki in range(iterations):
+        a_copy, b_copy = copies[2 * ki:2 * ki + 2]
+        for copy in (a_copy, b_copy):
+            assert "k_part_idx = 0" in copy and "k_part_loop = 1" in copy
+            assert f"k_part = {case['L0_K']}" in copy
+        if ki:
+            assert f"offset: {ki * case['M'] * case['L0_K']}" in a_copy
+            assert f"offset: {ki * case['L0_K'] * 16}" in b_copy
     assert "hivm.hir.l12bt " not in text
     assert text.count("hivm.hir.fixpipe ") == 1
     assert "hivm.hir.mmadL1" not in text

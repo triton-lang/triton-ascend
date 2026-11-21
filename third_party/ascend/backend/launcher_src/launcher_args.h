@@ -197,6 +197,10 @@ inline void validateSpec(const TritonNpuLaunchSpecV1 &spec) {
   if (!spec.coalesce_factor || spec.coalesce_axis < -1 ||
       spec.coalesce_axis > 2)
     throw std::invalid_argument("invalid launcher coalescing configuration");
+  if ((spec.flags & TRITON_NPU_ATOMIC_REMOVE) &&
+      (spec.coalesce_axis != 0 || spec.coalesce_factor > INT32_MAX ||
+       (spec.flags & TRITON_NPU_COALESCE_CEIL)))
+    throw std::invalid_argument("invalid grouped reduction launch spec");
   if ((spec.flags & TRITON_NPU_DOT_ROW) &&
       ((spec.flags & (TRITON_NPU_IAT | TRITON_NPU_PTSM)) ||
        spec.coalesce_axis != 0 || !(spec.flags & TRITON_NPU_COALESCE_CEIL) ||
@@ -230,8 +234,7 @@ inline LaunchSpec decodeSpecV2(const TritonNpuLaunchSpecV2 &spec) {
     throw std::invalid_argument("invalid V2 block batching launch contract");
   validateSpec(spec.base);
   if (spec.base.flags & (TRITON_NPU_IAT | TRITON_NPU_PTSM | TRITON_NPU_DOT_ROW |
-                         TRITON_NPU_COALESCE_CEIL | TRITON_NPU_PURE_SIMT |
-                         TRITON_NPU_ATOMIC_REMOVE) ||
+                         TRITON_NPU_COALESCE_CEIL | TRITON_NPU_PURE_SIMT) ||
       spec.base.coalesce_factor != 1 || spec.base.coalesce_axis != -1)
     throw std::invalid_argument(
         "block batching conflicts with another mapping or SIMT");
@@ -276,10 +279,7 @@ inline LaunchGrid prepareGrid(const LaunchSpec &spec, const int32_t *input) {
         std::min((uint64_t(input[0]) + factor - 1) / factor, axisCap);
   }
   if (spec.flags & TRITON_NPU_ATOMIC_REMOVE) {
-    if (result.grid[1] != 1 || result.grid[2] != 1 || spec.coalesce_axis != 0 ||
-        (spec.flags & (TRITON_NPU_IAT | TRITON_NPU_PTSM | TRITON_NPU_DOT_ROW |
-                       TRITON_NPU_COALESCE_CEIL)) ||
-        spec.coalesce_factor > INT32_MAX)
+    if (result.grid[1] != 1 || result.grid[2] != 1)
       throw std::invalid_argument("invalid grouped reduction launch");
     result.grid[0] = std::min(uint32_t(result.grid[0]), spec.coalesce_factor);
   } else if (spec.coalesce_factor > 1 && spec.coalesce_axis >= 0) {

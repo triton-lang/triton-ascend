@@ -237,7 +237,7 @@ std::optional<Match> match(FuncOp function) {
       !llvm::isPowerOf2_64(m.width) || m.reductions.size() != 2)
     return std::nullopt;
   auto groups = integer(m.group.getRhs());
-  if (!groups || *groups <= 0 || *groups > INT32_MAX)
+  if (!groups || *groups <= 0)
     return std::nullopt;
   m.groups = *groups;
 
@@ -613,8 +613,7 @@ public:
   Operation *getAnchor() const override { return function; }
   unsigned getCreationEpoch() const override { return epoch; }
   LogicalResult revalidate(GraphOptimizationContext &context) const override {
-    return success(context.getFunction() == function &&
-                   match(function).has_value());
+    return success(context.getFunction() == function);
   }
   LogicalResult apply(IRRewriter &) override {
     auto replacement = cast<FuncOp>(&prepared->getBody()->front());
@@ -651,11 +650,15 @@ public:
     if (!candidate || !budget || !slotWidthsAreSupported(*candidate))
       return success();
     auto module = function->getParentOfType<ModuleOp>();
+    bool checkedRetile = false;
     for (int64_t width = candidate->width; width > 0; width /= 2) {
-      if (width < candidate->width && !reductionsCanBeRetiled(*candidate))
-        break;
       if (estimateStagingBytes(*candidate, width) > *budget)
         continue;
+      if (width < candidate->width && !checkedRetile) {
+        if (!reductionsCanBeRetiled(*candidate))
+          break;
+        checkedRetile = true;
+      }
       OwningOpRef<ModuleOp> sandbox(ModuleOp::create(function.getLoc()));
       sandbox->getOperation()->setAttrs(module->getAttrs());
       sandbox->getBody()->push_back(function->clone());

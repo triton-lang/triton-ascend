@@ -69,6 +69,30 @@ def test_address_mask_and_control_scalars_keep_their_values(tmp_path):
 
 class TestTtirAnalysis(unittest.TestCase):
 
+    def test_cv_frontend_budget_retains_both_spatial_factors(self):
+        from triton.backends.ascend import block_auto
+        for batch_axis in range(3):
+            calls = []
+            spatial = [axis for axis in range(3) if axis != batch_axis]
+
+            def probe(axis, factor):
+                calls.append((axis, factor))
+                report = dict(compile_status="REWRITTEN", selected_axis=axis, requested_factor=factor)
+                if axis == batch_axis:
+                    return dict(report, cv_mode="independent_batch_v1")
+                lowering = ("spatial_m_v1", "spatial_n_v1")[spatial.index(axis)]
+                return dict(report, cv_mode="spatial_concat_v1", cv_lowering=lowering)
+
+            for legacy in (False, True):
+                with self.subTest(batch_axis=batch_axis, legacy=legacy):
+                    calls.clear()
+                    plan = block_auto.candidate_plan(dict(grid=[8, 8, 8], legacy_resource_policy=legacy), probe=probe)
+                    self.assertEqual(len(calls), 5)
+                    self.assertEqual({(c["axis"], c["factor"])
+                                      for c in plan["candidates"]}, {(axis, factor)
+                                                                     for axis in spatial
+                                                                     for factor in (2, 4)})
+
     def score(self, text, scalar_arguments=None, **options):
         context = ir.context()
         ir.load_dialects(context)
@@ -264,6 +288,19 @@ for _ in range(20):
             ])
         result = json.loads(ascend.select_block_candidates(json.dumps(request)))
         self.assertEqual(result["factor"], 4)
+
+    def test_cv_batch_dispatch_requires_reuse_in_every_merged_candidate(self):
+        contract = dict(grid=[28, 1, 1])
+        rows = [
+            dict(factor=f, axis=-1 if f == 1 else 0, cv=True, merge_kind="unmerged" if f == 1 else "batch",
+                 status="TTIR_COST_ESTIMATED", score=score, cores=28, blocks=28 // f, memory_requests=2, scalar_work=0,
+                 bytes_per_program=traffic) for f, score, traffic in ((1, 100, 64), (2, 180, 96), (4, 230, 160))
+        ]
+        for f4_bytes, expected in ((160, 4), (256, 2)):
+            rows[-1]["bytes_per_program"] = f4_bytes
+            request = dict(action="rank_ttir", contract=contract, candidates=rows)
+            result = json.loads(ascend.select_block_candidates(json.dumps(request)))
+            self.assertEqual(result["factor"], expected)
 
     def test_missing_baseline_cost_forces_f1(self):
         request = dict(
@@ -519,7 +556,8 @@ class TestRankedRecovery(unittest.TestCase):
             events.append("f1")
             return baseline
 
-        plan = dict(candidates=[dict(axis=0, factor=2), dict(axis=0, factor=4)])
+        factors = (2, 4) if batching.uses_grouping_policy(arch) else (2, 3, 4, 8, 16)
+        plan = dict(candidates=[dict(axis=0, factor=f) for f in factors])
         key = "unmerged" if selected == 1 else f"a0_f{selected}"
         selection = dict(
             factor=selected, selected_axis=-1 if selected == 1 else 0, selected_key=key,
@@ -538,7 +576,7 @@ class TestRankedRecovery(unittest.TestCase):
 
         def compile_candidate(baseline, options, request, positions, *, allow_layout_retry=True, cached_only=False):
             self.assertFalse(allow_layout_retry)
-            self.assertIn(request.factor, (2, 4))
+            self.assertIn(request.factor, factors)
             events.append("binary-hit" if cached_only else request.factor)
             if cached_only and not binary_hit:
                 return None
@@ -563,9 +601,11 @@ class TestRankedRecovery(unittest.TestCase):
         return result.block_auto_selection, events
 
     def test_only_winner_and_f1_enter_backend(self):
-        result, events = self.run_selection()
-        self.assertEqual(events, ["ttir", "f1", 4])
-        self.assertEqual(result["selected_factor"], 4)
+        for selected in (2, 3, 4, 8, 16):
+            with self.subTest(selected=selected):
+                result, events = self.run_selection(selected=selected)
+                self.assertEqual(events, ["ttir", "f1", selected])
+                self.assertEqual(result["selected_factor"], selected)
 
     def test_cached_binary_does_not_start_worker_or_read_ttir(self):
         saved = Mock()

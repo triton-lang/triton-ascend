@@ -1,5 +1,7 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "BlockAuto/Analysis.h"
+#include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"
+#include "TritonMemoryAccess/PtrAnalysis.h"
 #include "TritonToGraph/ResourceCostModel.h"
 #include "mlir/Analysis/DataFlow/DeadCodeAnalysis.h"
 #include "mlir/Analysis/DataFlow/IntegerRangeAnalysis.h"
@@ -21,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -220,41 +223,17 @@ O planCV(const O &request) {
     std::sort(candidates.begin(), candidates.end(),
               [&](const V &a, const V &b) { return order(a) < order(b); });
   A spatial;
-  const O *m = nullptr, *n = nullptr;
   for (const std::string kind : {"M", "N"})
-    for (const V &v : admitted[kind]) {
-      const O &o = object(v);
+    for (const V &v : admitted[kind])
       spatial.push_back(v);
-      if (integer(o, "factor") == 4) {
-        auto &slot = kind == "M" ? m : n;
-        if (!slot)
-          slot = &o;
-      }
-    }
   if (flag(sub(request, "contract"), "legacy_resource_policy")) {
     auto reason = spatial.empty() ? "CV_NO_ADMITTED_SPATIAL_MERGE"
                                   : "LEGACY_CV_SPATIAL_CANDIDATES";
     return result(reason, std::move(spatial));
   }
-  if (m && n)
-    return result("CV_M4_N4", A{O(*m), O(*n)});
-  if (m || n) {
-    A candidates;
-    for (const V &v : spatial)
-      if (integer(object(v), "axis") == integer(m ? *m : *n, "axis"))
-        candidates.push_back(v);
-    return result("CV_ONE_SPATIAL_AXIS_F2_F4", std::move(candidates));
-  }
-  if (!spatial.empty()) {
-    while (spatial.size() > 2)
-      spatial.pop_back();
-    return result("CV_SPATIAL_F2_ONLY", std::move(spatial));
-  }
-  A batch;
-  for (const V &v : admitted["batch"])
-    if (batch.empty() ||
-        integer(object(v), "axis") == integer(object(batch.front()), "axis"))
-      batch.push_back(v);
+  if (!spatial.empty())
+    return result("CV_SPATIAL_CANDIDATES", std::move(spatial));
+  A &batch = admitted["batch"];
   StringRef reason = batch.empty() ? "CV_NO_ADMITTED_MERGE" : "CV_BATCH_F2_F4";
   return result(reason, std::move(batch));
 }
@@ -265,6 +244,7 @@ O rankTtir(const O &request) {
   O records;
   std::vector<const O *> ready;
   bool baselineReady = false;
+  double baselineBytes = 0;
   for (const V &value : candidates) {
     const O &candidate = object(value);
     std::string name = key(candidate);
@@ -273,6 +253,8 @@ O rankTtir(const O &request) {
       continue;
     int64_t factor = integer(candidate, "factor");
     baselineReady |= factor == 1;
+    if (factor == 1)
+      baselineBytes = candidate.getNumber("bytes_per_program").value_or(0);
     if (!flag(candidate, "cv") && factor > 1) {
       const V &floor = get(contract, "core_floor");
       int64_t minimum =
@@ -285,10 +267,50 @@ O rankTtir(const O &request) {
     }
     ready.push_back(&candidate);
   }
-  std::sort(ready.begin(), ready.end(), [](const O *a, const O *b) {
-    return std::make_tuple(number(*a, "score"), integer(*a, "factor"),
+  // Independent batch programs still issue scalar setup and DMA requests.
+  // Price the other active programs in the initial launch wave; the TTIR
+  // per-wave score already includes the first program's service time.
+  // Compare only families whose merged TTIRs all prove less traffic per
+  // original program. A partial or unknown saving cannot justify changing
+  // comparisons against another candidate with no demonstrated reuse.
+  bool batchDispatch =
+      baselineBytes > 0 &&
+      contract.getBoolean("cv_empirical_short_batch").value_or(true) &&
+      llvm::any_of(
+          ready,
+          [](const O *row) { return str(*row, "merge_kind") == "batch"; }) &&
+      llvm::all_of(ready,
+                   [&](const O *row) {
+                     int64_t factor = integer(*row, "factor");
+                     double bytes =
+                         row->getNumber("bytes_per_program").value_or(0);
+                     return flag(*row, "cv") &&
+                            (factor == 1 ||
+                             (str(*row, "merge_kind") == "batch" && bytes > 0 &&
+                              bytes / factor < baselineBytes)) &&
+                            row->getInteger("blocks") &&
+                            row->getInteger("cores") &&
+                            row->getNumber("memory_requests") &&
+                            row->getNumber("scalar_work");
+                   }) &&
+      llvm::count_if(array(contract, "grid"),
+                     [](const V &v) { return integer(v) > 1; }) == 1;
+  auto rankScore = [&](const O &row) {
+    double score = number(row, "score");
+    if (!batchDispatch)
+      return score;
+    int64_t active = std::min(integer(row, "blocks"), integer(row, "cores"));
+    double setup = 32 * number(row, "memory_requests") +
+                   Rate{}.latency * number(row, "scalar_work");
+    return score + (active - 1) * setup;
+  };
+  if (batchDispatch)
+    for (const O *row : ready)
+      (*records.getObject(key(*row)))["rank_score"] = rankScore(*row);
+  std::sort(ready.begin(), ready.end(), [&](const O *a, const O *b) {
+    return std::make_tuple(rankScore(*a), integer(*a, "factor"),
                            integer(*a, "axis")) <
-           std::make_tuple(number(*b, "score"), integer(*b, "factor"),
+           std::make_tuple(rankScore(*b), integer(*b, "factor"),
                            integer(*b, "axis"));
   });
   const O *selected = baselineReady && !ready.empty() ? ready.front() : nullptr;
@@ -300,11 +322,12 @@ O rankTtir(const O &request) {
            {"selected_key", "unmerged"},
            {"reason", "TTIR_BASELINE_MODEL_UNSUPPORTED"}};
   if (selected) {
-    std::string reason = "LOWEST_TTIR_SCORE";
+    std::string reason =
+        batchDispatch ? "CV_BATCH_DISPATCH_SCORE" : "LOWEST_TTIR_SCORE";
     bool spatial = llvm::any_of(ready, [](const O *row) {
       return str(*row, "merge_kind") == "M" || str(*row, "merge_kind") == "N";
     });
-    if (!spatial &&
+    if (!batchDispatch && !spatial &&
         contract.getBoolean("cv_empirical_short_batch").value_or(true))
       for (const O *row : ready)
         if (str(*row, "merge_kind") == "batch" &&
@@ -342,6 +365,7 @@ struct TtirWork {
   double vector = 0, vectorPath = 0, cube = 0, scalar = 0;
   double simt = 0;
   double loads = 0, stores = 0, readBytes = 0, writeBytes = 0;
+  double readRowBreaks = 0, writeRowBreaks = 0;
   bool boundedLoops = false;
 };
 
@@ -431,6 +455,41 @@ static Type ttirElement(Type type) {
   return type;
 }
 
+// A scalar carried by an SCF loop may be broadcast into a vector tile and
+// reduced back into the carried state. Charge the dependent scalar handoff
+// at the loop backedge once, irrespective of the number of unrolled tiles.
+static bool carriesTileReduction(scf::ForOp loop) {
+  enum { Carried = 1, Broadcast = 2, Reduced = 4 };
+  DenseMap<Value, unsigned> dependencies;
+  for (Value arg : loop.getRegionIterArgs())
+    if (isa<FloatType>(arg.getType()))
+      dependencies[arg] = Carried;
+  if (dependencies.empty())
+    return false;
+  for (Operation &op : *loop.getBody()) {
+    if (isa<scf::YieldOp>(op))
+      return llvm::any_of(op.getOperands(), [&](Value value) {
+        return (dependencies.lookup(value) & Reduced) != 0;
+      });
+    if (op.getNumResults() != 1 ||
+        !isa<FloatType>(getElementTypeOrSelf(op.getResult(0).getType())))
+      continue;
+    unsigned flags = 0;
+    for (Value operand : op.getOperands())
+      flags |= dependencies.lookup(operand);
+    if (!flags)
+      continue;
+    if (isa<triton::SplatOp>(op))
+      flags |= Broadcast;
+    else if (isa<triton::ReduceOp>(op) && (flags & Broadcast))
+      flags |= Reduced;
+    else if (op.getNumRegions() || !isMemoryEffectFree(&op))
+      continue;
+    dependencies[op.getResult(0)] = flags;
+  }
+  return false;
+}
+
 static double ttirIterations(Operation *op, DataFlowSolver &solver,
                              bool &bounded) {
   auto bounds = [&](mlir::Value value) {
@@ -465,11 +524,391 @@ static double ttirIterations(Operation *op, DataFlowSolver &solver,
   return count;
 }
 
-static TtirWork ttirWork(ModuleOp module, const Profile &profile,
-                         const A &grid) {
+static bool isUniformTileValue(Value value) {
+  if (value.getDefiningOp<triton::SplatOp>())
+    return true;
+  auto constant = value.getDefiningOp<arith::ConstantOp>();
+  auto dense = constant ? dyn_cast<DenseElementsAttr>(constant.getValue())
+                        : DenseElementsAttr();
+  return dense && dense.isSplat();
+}
+
+// A contiguous DMA tile uses a base and an extent. Its per-lane iota plus
+// uniform offset does not need a separate vector add when all uses describe
+// that tile's address or boundary mask.
+static bool isDmaTileOffset(arith::AddIOp add) {
+  Value range = add.getLhs(), offset = add.getRhs();
+  if (!range.getDefiningOp<triton::MakeRangeOp>())
+    std::swap(range, offset);
+  if (!range.getDefiningOp<triton::MakeRangeOp>() ||
+      !isUniformTileValue(offset) || add->use_empty())
+    return false;
+  bool hasAddress = false;
+  for (OpOperand &use : add.getResult().getUses()) {
+    Operation *user = use.getOwner();
+    auto ptr = dyn_cast<triton::AddPtrOp>(user);
+    if (ptr && use.getOperandNumber() == 1 &&
+        isUniformTileValue(ptr.getPtr())) {
+      hasAddress = true;
+    } else {
+      auto cmp = dyn_cast<arith::CmpIOp>(user);
+      if (!cmp || use.getOperandNumber() != 0 ||
+          !isUniformTileValue(cmp.getRhs()) ||
+          (cmp.getPredicate() != arith::CmpIPredicate::slt &&
+           cmp.getPredicate() != arith::CmpIPredicate::ult))
+        return false;
+    }
+    for (OpOperand &terminal : user->getResult(0).getUses()) {
+      unsigned operand = terminal.getOperandNumber();
+      if (!(isa<triton::LoadOp>(terminal.getOwner()) &&
+            operand == (ptr ? 0u : 1u)) &&
+          !(isa<triton::StoreOp>(terminal.getOwner()) &&
+            operand == (ptr ? 0u : 2u)))
+        return false;
+    }
+  }
+  return hasAddress;
+}
+
+// The structured lowering represents a rectangular DMA transfer with scalar
+// subview offsets and extents. Count its payload, but skip affine coordinates
+// and prefix masks whose every use only constructs the DMA descriptor.
+static void simplifyDmaLiveness(ModuleOp module,
+                                triton::ModuleAxisInfoAnalysis &axes) {
+  DenseSet<Value> affine, bounds, descriptor;
+  SmallVector<Operation *> candidates;
+  auto contiguous = [&](Value v) {
+    auto type = dyn_cast<RankedTensorType>(v.getType());
+    auto *info = axes.getAxisInfo(v);
+    return type && type.getRank() && type.getShape().back() > 1 && info &&
+           !info->getContiguity().empty() &&
+           info->getContiguity().back() == type.getShape().back();
+  };
+  module.walk<WalkOrder::PreOrder>([&](Operation *op) {
+    if (op->getNumResults() != 1)
+      return;
+    Value value = op->getResult(0);
+    auto type = dyn_cast<RankedTensorType>(value.getType());
+    if (!type || !isa<IntegerType>(type.getElementType()) || type.getRank() > 2)
+      return;
+    if (type.getElementType().isInteger(1)) {
+      if (isUniformTileValue(value)) {
+        bounds.insert(value);
+        return;
+      }
+      if (auto cmp = dyn_cast<arith::CmpIOp>(op)) {
+        // A one-dimensional prefix can be broadcast along another dimension.
+        // A comparison over a matrix may instead produce a triangular mask.
+        if (type.getRank() != 1 || !affine.contains(cmp.getLhs()) ||
+            !contiguous(cmp.getLhs()) || !isUniformTileValue(cmp.getRhs()) ||
+            (cmp.getPredicate() != arith::CmpIPredicate::slt &&
+             cmp.getPredicate() != arith::CmpIPredicate::ult))
+          return;
+      } else if (!isa<triton::ExpandDimsOp, triton::BroadcastOp, arith::AndIOp>(
+                     op) ||
+                 !llvm::all_of(op->getOperands(),
+                               [&](Value v) { return bounds.contains(v); })) {
+        return;
+      }
+      bounds.insert(value);
+    } else {
+      if (isa<triton::MakeRangeOp>(op) || isUniformTileValue(value)) {
+        affine.insert(value);
+        return;
+      }
+      if (!llvm::all_of(op->getOperands(),
+                        [&](Value v) { return affine.contains(v); }))
+        return;
+      if (auto mul = dyn_cast<arith::MulIOp>(op)) {
+        if (!isUniformTileValue(mul.getLhs()) &&
+            !isUniformTileValue(mul.getRhs()))
+          return;
+      } else if (!isa<arith::AddIOp, arith::ExtSIOp, arith::ExtUIOp,
+                      triton::ExpandDimsOp, triton::BroadcastOp>(op)) {
+        return;
+      }
+      affine.insert(value);
+    }
+    candidates.push_back(op);
+  });
+  // Triton represents a boolean GM load as a byte load through a pointer
+  // bitcast. The byte pointer keeps the original tile coordinates and mask.
+  auto byteLoadAddress = [](triton::LoadOp load) -> Value {
+    Value ptr = load.getPtr();
+    auto cast = ptr.getDefiningOp<triton::BitcastOp>();
+    auto marker = load->getAttrOfType<BoolAttr>("was_bool_to_int8");
+    if (cast && marker && marker.getValue() &&
+        ttirElement(cast.getSrc().getType()).isInteger(1) &&
+        ttirElement(ptr.getType()).isInteger(8))
+      return cast.getSrc();
+    return ptr;
+  };
+  auto transfer = [&](Operation *op) {
+    auto load = dyn_cast<triton::LoadOp>(op);
+    auto store = dyn_cast<triton::StoreOp>(op);
+    if (!load && !store)
+      return false;
+    Value ptr = load ? byteLoadAddress(load) : store.getPtr();
+    Value mask = load ? load.getMask() : store.getMask();
+    auto add = ptr.getDefiningOp<triton::AddPtrOp>();
+    return add && isUniformTileValue(add.getPtr()) &&
+           affine.contains(add.getOffset()) && contiguous(ptr) &&
+           (!mask || bounds.contains(mask));
+  };
+  for (Operation *op : llvm::reverse(candidates)) {
+    Value value = op->getResult(0);
+    if (value.use_empty())
+      continue;
+    if (llvm::all_of(value.getUses(), [&](OpOperand &use) {
+          Operation *user = use.getOwner();
+          unsigned index = use.getOperandNumber();
+          if (auto add = dyn_cast<triton::AddPtrOp>(user))
+            return index == 1 && !add.getResult().use_empty() &&
+                   llvm::all_of(
+                       add.getResult().getUses(), [&](OpOperand &dest) {
+                         if (dest.getOperandNumber() != 0)
+                           return false;
+                         if (auto cast =
+                                 dyn_cast<triton::BitcastOp>(dest.getOwner()))
+                           return !cast.getResult().use_empty() &&
+                                  llvm::all_of(
+                                      cast.getResult().getUses(),
+                                      [&](OpOperand &u) {
+                                        auto load = dyn_cast<triton::LoadOp>(
+                                            u.getOwner());
+                                        return load &&
+                                               u.getOperandNumber() == 0 &&
+                                               byteLoadAddress(load) ==
+                                                   add.getResult() &&
+                                               transfer(load);
+                                      });
+                         return transfer(dest.getOwner());
+                       });
+          if (isa<triton::LoadOp, triton::StoreOp>(user))
+            return index == (isa<triton::LoadOp>(user) ? 1u : 2u) &&
+                   transfer(user);
+          return user->getNumResults() == 1 &&
+                 descriptor.contains(user->getResult(0));
+        }))
+      descriptor.insert(value);
+  }
+  // Work and memory traffic have already been scored. Only UB liveness reads
+  // this specialization clone from here on.
+  for (Operation *op : llvm::reverse(candidates)) {
+    Value value = op->getResult(0);
+    if (!descriptor.contains(value))
+      continue;
+    OpBuilder builder(op);
+    if (!value.use_empty())
+      value.replaceAllUsesWith(builder.create<arith::ConstantOp>(
+          op->getLoc(), builder.getZeroAttr(value.getType())));
+    op->erase();
+  }
+}
+
+// A scalar integer reduction that feeds scalar ALU work and returns to a tile
+// crosses the vector/scalar boundary twice. Batched row reductions can keep
+// this chain vector-valued and avoid both transfers.
+static bool hasIntegerReductionRoundTrip(Value value) {
+  if (!value.getType().isIntOrIndex())
+    return false;
+  SmallVector<Value> pending{value};
+  DenseSet<Value> visited;
+  while (!pending.empty()) {
+    Value current = pending.pop_back_val();
+    if (!visited.insert(current).second)
+      continue;
+    for (Operation *user : current.getUsers()) {
+      if (current != value && isa<triton::SplatOp>(user))
+        return true;
+      if (user->getName().getDialectNamespace() == "arith" &&
+          user->getNumResults() == 1 &&
+          user->getResult(0).getType().isIntOrFloat() &&
+          (current != value || user->getResult(0).getType().isIntOrIndex()))
+        pending.push_back(user->getResult(0));
+    }
+  }
+  return false;
+}
+
+// MaskState accepts scalar bounds and one-dimensional ranges. Restrict the
+// estimator to this grammar before asking it to materialize rectangle extents.
+static bool isDmaPrefix(Value value, unsigned depth = 0) {
+  Operation *op = value.getDefiningOp();
+  if (!op || depth > 16)
+    return false;
+  auto type = dyn_cast<RankedTensorType>(value.getType());
+  if (!type || type.getRank() > 2 || !isa<IntegerType>(type.getElementType()) ||
+      type.getElementTypeBitWidth() > 64)
+    return false;
+  if (type.getElementType().isInteger(1)) {
+    if (auto constant = dyn_cast<arith::ConstantOp>(op)) {
+      auto dense = dyn_cast<DenseIntElementsAttr>(constant.getValue());
+      return dense && dense.isSplat() && !dense.getSplatValue<APInt>().isZero();
+    }
+    if (auto cmp = dyn_cast<arith::CmpIOp>(op))
+      return cmp.getPredicate() == arith::CmpIPredicate::slt &&
+             llvm::count_if(type.getShape(), [](int64_t n) { return n > 1; }) ==
+                 1 &&
+             isUniformTileValue(cmp.getRhs()) &&
+             isDmaPrefix(cmp.getLhs(), depth + 1);
+    if (isa<triton::BroadcastOp, triton::ExpandDimsOp, arith::AndIOp>(op))
+      return llvm::all_of(op->getOperands(),
+                          [&](Value v) { return isDmaPrefix(v, depth + 1); });
+    return false;
+  }
+  if (isa<triton::MakeRangeOp>(op))
+    return type.getNumElements() > 1;
+  if (isa<arith::ExtSIOp, triton::ExpandDimsOp>(op))
+    return isDmaPrefix(op->getOperand(0), depth + 1);
+  if (auto add = dyn_cast<arith::AddIOp>(op)) {
+    if (isUniformTileValue(add.getLhs()))
+      return isDmaPrefix(add.getRhs(), depth + 1);
+    if (isUniformTileValue(add.getRhs()))
+      return isDmaPrefix(add.getLhs(), depth + 1);
+  }
+  return false;
+}
+
+// The row after a gap starts a separate burst. Prove a positive outer gap
+// and unit inner stride, and require a rectangle for masked transfers.
+static void countStridedRows(ArrayRef<std::pair<Operation *, double>> ops,
+                             TtirWork &work) {
+  if (ops.empty())
+    return;
+  // Pointer and mask analysis may materialize numeric helpers. Remove them
+  // before UB liveness reads this scoring clone.
+  struct Helpers : OpBuilder::Listener {
+    SmallVector<Operation *> inserted;
+    void notifyOperationInserted(Operation *op,
+                                 OpBuilder::InsertPoint) override {
+      inserted.push_back(op);
+    }
+    ~Helpers() {
+      for (Operation *op : llvm::reverse(inserted))
+        op->erase();
+    }
+  } helpers;
+  OpBuilder builder(ops.front().first->getContext(), &helpers);
+  triton::ptr::PtrAnalysis analysis(builder);
+  for (auto [op, iterations] : ops) {
+    Value ptr = op->getOperand(0);
+    auto type = cast<RankedTensorType>(ptr.getType());
+    builder.setInsertionPoint(op);
+    auto info = analysis.analyze(ptr);
+    if (failed(info) || !info->hasScalarBase() ||
+        !info->offsets.hasStructuredForm())
+      continue;
+    const auto &axes = info->offsets.axes;
+    if (axes.size() != 2)
+      continue;
+    auto inner = getConstantIntValue(axes[1].stride);
+    auto outer = getConstantIntValue(axes[0].stride);
+    if (inner != 1 || !outer || *outer <= type.getDimSize(1))
+      continue;
+    auto load = dyn_cast<triton::LoadOp>(op);
+    Value mask = load ? load.getMask() : cast<triton::StoreOp>(op).getMask();
+    int64_t rows = type.getDimSize(0);
+    if (mask) {
+      if (!isDmaPrefix(mask))
+        continue;
+      auto rectangle = triton::runMaskAnalysis(op, builder);
+      if (!rectangle || !rectangle->isMask() || rectangle->getRank() != 2)
+        continue;
+      if (auto count = getConstantIntValue(rectangle->dims[0]))
+        rows = std::clamp<int64_t>(*count, 0, rows);
+      if (getConstantIntValue(rectangle->dims[1]) == 0)
+        continue;
+    }
+    double breaks = iterations * std::max<int64_t>(0, rows - 1);
+    if (load)
+      work.readRowBreaks += breaks;
+    else
+      work.writeRowBreaks += breaks;
+  }
+}
+
+// Strip integer casts that preserve the low address bits used by a DMA packet.
+static Value stripIndexCasts(Value value) {
+  while (Operation *op = value.getDefiningOp()) {
+    if (!isa<arith::ExtSIOp, arith::ExtUIOp, arith::TruncIOp>(op) ||
+        getElementTypeOrSelf(value.getType()).getIntOrFloatBitWidth() < 32 ||
+        getElementTypeOrSelf(op->getOperand(0).getType())
+                .getIntOrFloatBitWidth() < 32)
+      break;
+    value = op->getOperand(0);
+  }
+  return value;
+}
+
+// Recognize consecutive groups of lanes indexed by pid * width + arange(width).
+static std::optional<unsigned> packedIndexAxis(Value value, int64_t width) {
+  auto add = stripIndexCasts(value).getDefiningOp<arith::AddIOp>();
+  if (!add)
+    return std::nullopt;
+  for (unsigned i = 0; i < 2; ++i) {
+    auto range = stripIndexCasts(add->getOperand(i))
+                     .getDefiningOp<triton::MakeRangeOp>();
+    auto splat = stripIndexCasts(add->getOperand(1 - i))
+                     .getDefiningOp<triton::SplatOp>();
+    if (!range || range.getStart() != 0 || range.getEnd() != width || !splat)
+      continue;
+    auto stride =
+        stripIndexCasts(splat.getSrc()).getDefiningOp<arith::MulIOp>();
+    if (!stride)
+      continue;
+    for (unsigned j = 0; j < 2; ++j) {
+      auto pid = stripIndexCasts(stride->getOperand(j))
+                     .getDefiningOp<triton::GetProgramIdOp>();
+      APInt scale;
+      if (pid &&
+          matchPattern(stride->getOperand(1 - j), m_ConstantInt(&scale)) &&
+          scale == width)
+        return pid.getAxisAsInt();
+    }
+  }
+  return std::nullopt;
+}
+
+static bool spansStorePacket(triton::StoreOp store, const A &grid,
+                             int64_t width, int64_t bytes) {
+  if (bytes <= 0 || bytes >= 32 || 32 % bytes == 0 || width <= 1)
+    return false;
+  auto ptr = store.getPtr().getDefiningOp<triton::AddPtrOp>();
+  if (!ptr || !isa<RankedTensorType>(ptr.getType()) ||
+      cast<RankedTensorType>(ptr.getType()).getRank() != 1)
+    return false;
+  auto splat = ptr.getPtr().getDefiningOp<triton::SplatOp>();
+  auto base = splat ? dyn_cast<BlockArgument>(splat.getSrc()) : BlockArgument{};
+  if (!base || !isa<triton::FuncOp>(base.getOwner()->getParentOp()))
+    return false;
+  auto axis = packedIndexAxis(ptr.getOffset(), width);
+  if (!axis)
+    return false;
+  int64_t fullGroups = integer(grid[*axis]);
+  if (Value mask = store.getMask()) {
+    auto cmp = mask.getDefiningOp<arith::CmpIOp>();
+    DenseIntElementsAttr limit;
+    if (!cmp || cmp.getPredicate() != arith::CmpIPredicate::slt ||
+        packedIndexAxis(cmp.getLhs(), width) != axis ||
+        !matchPattern(cmp.getRhs(), m_Constant(&limit)) || !limit.isSplat())
+      return false;
+    APInt bound = limit.getSplatValue<APInt>();
+    if (bound.getSignificantBits() > 64)
+      return false;
+    fullGroups = std::min(fullGroups, bound.getSExtValue() / width);
+  }
+  // Over a full address period at least one whole store straddles a packet,
+  // irrespective of the starting alignment. Charge its second transaction
+  // to the per-core worst-case wave time, with no additional payload bytes.
+  return fullGroups >= 32 / std::gcd<int64_t>(32, bytes);
+}
+
+static TtirWork ttirWork(ModuleOp module, const Profile &profile, const A &grid,
+                         bool cv, triton::ModuleAxisInfoAnalysis &axes) {
   TtirWork work;
+  SmallVector<std::pair<Operation *, double>> rectangles;
   DenseMap<mlir::Value, double> ready;
-  mlir::triton::ModuleAxisInfoAnalysis axes(module);
   DataFlowSolver solver;
   solver.load<dataflow::DeadCodeAnalysis>();
   solver.load<TtirRanges>(grid);
@@ -477,8 +916,16 @@ static TtirWork ttirWork(ModuleOp module, const Profile &profile,
         "TTIR integer range analysis failed");
   module.walk<WalkOrder::PreOrder>([&](Operation *op) {
     StringRef name = op->getName().getStringRef();
-    if (name == "builtin.module" || name == "tt.func" || name == "scf.for" ||
-        name == "scf.if")
+    if (auto loop = dyn_cast<scf::ForOp>(op)) {
+      if (!cv && carriesTileReduction(loop)) {
+        double bodies = ttirIterations(loop.getBody()->getTerminator(), solver,
+                                       work.boundedLoops);
+        double entries = ttirIterations(op, solver, work.boundedLoops);
+        work.scalar += Rate{}.latency * std::max(0.0, bodies - entries);
+      }
+      return WalkResult::advance();
+    }
+    if (name == "builtin.module" || name == "tt.func" || name == "scf.if")
       return WalkResult::advance();
     if (op->hasTrait<OpTrait::IsTerminator>())
       return WalkResult::skip();
@@ -519,8 +966,24 @@ static TtirWork ttirWork(ModuleOp module, const Profile &profile,
       // Account for fragmented transactions, without pretending unknown
       // pointer strides are a contiguous full-bandwidth DMA.
       double packet = contiguous * std::max(8u, bits) / 8.0;
+      if (!cv && name == "tt.store" &&
+          spansStorePacket(cast<triton::StoreOp>(op), grid, elements, bytes))
+        work.stores += iterations;
       bytes *= std::max(1.0, 32.0 / packet);
+      auto tile = dyn_cast<RankedTensorType>(op->getOperand(0).getType());
+      if (!cv && tile && tile.getRank() == 2 && tile.getDimSize(0) > 1 &&
+          tile.getDimSize(1) > 1 && info && info->getRank() == 2 &&
+          info->getContiguity(1) == tile.getDimSize(1))
+        rectangles.emplace_back(op, iterations);
       if (name == "tt.load") {
+        // A scalar GM load used as a tile coefficient becomes a scalar
+        // memref.load feeding the vector computation. The common DMA startup
+        // already includes 32 cycles of the davidV100 HBM latency estimate.
+        if (!cv && !isa<RankedTensorType>(type) &&
+            llvm::any_of(op->getResult(0).getUsers(), [](Operation *user) {
+              return isa<triton::SplatOp>(user);
+            }))
+          work.scalar += iterations * (200 - 32);
         work.readBytes += iterations * bytes;
         work.loads += iterations;
       } else {
@@ -560,6 +1023,9 @@ static TtirWork ttirWork(ModuleOp module, const Profile &profile,
            std::ceil(std::log2(double(std::min<int64_t>(extent, lanes)))));
       double latency =
           combines * (steps * Rate{}.latency + std::max(0.0, groups - 1));
+      if (!cv && name == "tt.reduce" &&
+          llvm::any_of(op->getResults(), hasIntegerReductionRoundTrip))
+        latency += 2 * 32;
       if (name == "tt.scan") {
         // A prefix scan retains every lane at every shuffle/combine step;
         // reduction shrinks the active domain and cannot share this cost.
@@ -613,6 +1079,11 @@ static TtirWork ttirWork(ModuleOp module, const Profile &profile,
             elements *= (shaped.getDimSize(i) + info->getConstancy(i) - 1) /
                         info->getConstancy(i);
         }
+    if (!cv)
+      if (auto add = dyn_cast<arith::AddIOp>(op); add && isDmaTileOffset(add)) {
+        record(0, 0);
+        return WalkResult::skip();
+      }
     std::string opcode =
         llvm::StringSwitch<std::string>(name)
             .Cases("arith.addf", "arith.addi", "tt.addptr", "vadd")
@@ -670,6 +1141,7 @@ static TtirWork ttirWork(ModuleOp module, const Profile &profile,
     record(throughput, latency);
     return WalkResult::advance();
   });
+  countStridedRows(rectangles, work);
   return work;
 }
 } // namespace mlir::triton::ascend::blockauto
@@ -774,14 +1246,23 @@ std::string scoreBlockTtir(ModuleOp module, llvm::StringRef request) {
           "unsupported automatic selection target");
     Profile profile(cv);
     auto specialized = specializeTtir(module, input);
-    TtirWork work = ttirWork(*specialized, profile, grid);
+    triton::ModuleAxisInfoAnalysis axes(*specialized);
+    TtirWork work = ttirWork(*specialized, profile, grid, cv, axes);
+    if (!cv)
+      simplifyDmaLiveness(*specialized, axes);
     auto live = mlir::triton::cfg::estimatePeakLiveBytes(*specialized);
     // TTIR tensor liveness is a pressure estimate, never an actual UB proof.
     double pressure =
         live.known ? double(live.peakLiveBytes) / (248 * 1024) : 0;
     // Reuse the A5 lowered model's 32-cycle DMA and 8-cycle VF dispatch
     // costs. Do not assume loads, their dependent compute, and stores overlap.
+    // Use one 32-byte transaction-equivalent of local service per burst
+    // restart. The payload still contributes only its actual GM traffic.
+    double rowService = 32.0 / profile.localBandwidth;
+    double firstRestart =
+        (work.readRowBreaks + work.writeRowBreaks) * rowService;
     double memory =
+        firstRestart +
         (work.readBytes + work.writeBytes) / profile.localBandwidth +
         (work.loads + work.stores) * 32;
     double compute =
@@ -799,10 +1280,19 @@ std::string scoreBlockTtir(ModuleOp module, llvm::StringRef request) {
       double bandwidth =
           std::min(profile.globalBandwidth,
                    std::min(blocks, cores) * profile.localBandwidth);
-      score = blocks * (work.readBytes + work.writeBytes) / bandwidth +
-              waves * (32 * (work.loads + work.stores) + compute + work.scalar);
+      // Read and write bursts of the first wave start in sequence. On later
+      // waves the MTE2 and MTE3 issue paths can serve opposite directions
+      // concurrently.
+      double sustainedRestart =
+          std::max(work.readRowBreaks, work.writeRowBreaks) * rowService;
+      score =
+          blocks * (work.readBytes + work.writeBytes) / bandwidth +
+          waves * (32 * (work.loads + work.stores) + compute + work.scalar) +
+          firstRestart + (waves - 1) * sustainedRestart;
     }
     score *= 1 + std::pow(std::max(0.0, pressure - 0.5), 2);
+    if (firstRestart > 0)
+      output["strided_row_breaks"] = work.readRowBreaks + work.writeRowBreaks;
     update(output, O{{"status", "TTIR_COST_ESTIMATED"},
                      {"score", score},
                      {"blocks", blocks},

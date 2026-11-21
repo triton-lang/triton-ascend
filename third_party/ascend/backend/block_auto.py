@@ -5,6 +5,9 @@ import hashlib
 from pathlib import Path
 import tempfile
 
+_A5_VV_FACTORS = (2, 3, 4, 8, 16)
+_MAX_MERGED_TTIRS = 5
+
 
 class _NotApplicable(ValueError):
     """A modeled compiler decline, not an unexpected frontend error."""
@@ -109,11 +112,27 @@ def _native(action, contract, **inputs):
 def candidate_plan(contract, *, probe, axis=-1):
     requested = _native("plan", contract, axis=axis)["probes"]
     reports = []
-    for item in requested:
-        try:
-            reports.append(dict(item, report=probe(item["axis"], item["factor"])))
-        except _NotApplicable:
-            continue
+
+    def collect(items):
+        for item in items:
+            try:
+                reports.append(dict(item, report=probe(item["axis"], item["factor"])))
+            except _NotApplicable:
+                continue
+
+    if len(requested) > _MAX_MERGED_TTIRS:
+        # All three axes admit both sizes. Discover axis roles with the
+        # preferred size for this target, then prioritize spatial or unknown
+        # axes over another independent batch rewrite.
+        first_factor = 2 if contract.get("legacy_resource_policy") else 4
+        first = [item for item in requested if item["factor"] == first_factor]
+        collect(first)
+        batch_axes = {r["axis"] for r in reports if r["report"].get("cv_mode") == "independent_batch_v1"}
+        remaining = [item for item in requested if item["factor"] != first_factor]
+        remaining.sort(key=lambda item: item["axis"] in batch_axes)
+        collect(remaining[:_MAX_MERGED_TTIRS - len(first)])
+    else:
+        collect(requested)
     return _native("plan", contract, axis=axis, reports=reports)
 
 
@@ -172,8 +191,9 @@ def _select_ttir(backend, frozen, options, env_vars, contract, scalar_arguments,
         plan = candidate_plan(contract, axis=axis, probe=frontend)
     else:
         extents = contract["grid"] if axis == -1 else [contract["grid"][axis]]
-        plan = dict(candidates=[dict(axis=axis, factor=f) for f in (2, 4) if max(extents) >= f],
-                    reason="VV_F2_F4_AUTOMATIC_AXIS")
+        factors = (2, 4) if legacy else _A5_VV_FACTORS
+        plan = dict(candidates=[dict(axis=axis, factor=f) for f in factors if max(extents) >= f],
+                    reason="VV_F2_F4_AUTOMATIC_AXIS" if legacy else "VV_TTIR_CANDIDATES")
     cores = limit[1 if cv else 2]
     rows, prepared = [], {}
     for spec in [dict(axis=-1, factor=1), *plan["candidates"]]:
@@ -284,7 +304,7 @@ def _compile_selected(backend, frozen, common, baseline_options, compile_variant
                            for k, v in decline.items()
                            if k not in ("axis", "factor")})
     factor, axis = selection["factor"], selection["selected_axis"]
-    if type(factor) is not int or factor not in (1, 2, 4) or (factor > 1 and axis not in (0, 1, 2)):
+    if type(factor) is not int or factor not in (1, *_A5_VV_FACTORS) or (factor > 1 and axis not in (0, 1, 2)):
         raise BatchCompileError("invalid TTIR selection", kind="ProtocolError", stage="select")
     # The frozen source exists to give the candidate a byte-identical reference,
     # and it carries a cache identity of its own. Without a candidate to compare

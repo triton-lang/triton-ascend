@@ -1434,8 +1434,12 @@ def fast_expf(arg0, _semantic=None):
             (core.dtype("fp32"), ): ("__hmf_fast_exp_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
     arg0 = _semantic.to_tensor(arg0)
-    ret = core.tensor(_semantic.builder.create_exp(arg0.handle), arg0.type)
-    return ret
+    # Same subnormal-result flush as exp(); see the note there.
+    is_subnormal_result = _semantic.less_than(arg0, -87.3365447505531)
+    half_exp = core.tensor(_semantic.builder.create_exp(_semantic.mul(arg0, 0.5, True).handle), arg0.type)
+    squared = _semantic.mul(half_exp, half_exp, True)
+    exact = core.tensor(_semantic.builder.create_exp(arg0.handle), arg0.type)
+    return _semantic.where(is_subnormal_result, squared, exact)
 
 
 @core.builtin
@@ -3913,7 +3917,15 @@ def exp(arg0, _semantic=None):
             (core.dtype("fp32"), ): ("__hmf_exp_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
     arg0 = _semantic.to_tensor(arg0)
-    return core.tensor(_semantic.builder.create_exp(arg0.handle), arg0.type)
+    # The vector unit flushes a subnormal *result* to zero, so exp(-88.0)
+    # returned 0 instead of 6.05e-39. exp(x) = exp(x/2)^2 keeps both the
+    # intermediate and the square representable, so evaluate that form for
+    # arguments whose result is subnormal.
+    is_subnormal_result = _semantic.less_than(arg0, -87.3365447505531)
+    half_exp = core.tensor(_semantic.builder.create_exp(_semantic.mul(arg0, 0.5, True).handle), arg0.type)
+    squared = _semantic.mul(half_exp, half_exp, True)
+    exact = core.tensor(_semantic.builder.create_exp(arg0.handle), arg0.type)
+    return _semantic.where(is_subnormal_result, squared, exact)
 
 
 @core.extern

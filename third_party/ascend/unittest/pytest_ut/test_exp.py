@@ -87,3 +87,16 @@ def test_elementwsie_common(dtype, sigtype, N, NUMEL):
     triton_elementwise_unary[1, 1, 1](x0, out, N=N, NUMEL=NUMEL, debug=True)
 
     test_common.validate_cmp(sigtype, out, ans)
+
+
+# Subnormal results are flushed to zero on the vector unit, so exp(-88)
+# returned 0; exp(x/2)^2 keeps the value representable.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_exp_subnormal_result(dtype):
+    values = [-88.0, -89.0, -87.5, -87.34]
+    x0 = torch.tensor(values, dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.exp(x0)
+    y_cal = torch.zeros_like(y_ref)
+    triton_exp[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
+    assert (y_cal.cpu() > 0).all(), f"exp flushed a subnormal result to zero: {y_cal.cpu()}"
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-5, atol=0.0)

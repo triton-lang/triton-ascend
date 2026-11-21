@@ -75,3 +75,27 @@ def test_atanh_special(param_list, input_val):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_atanh[ncore, 1, 1](x0, y_cal, xblock, xblock_sub)
     test_common.validate_cmp(dtype, y_cal, y_ref)
+
+
+# Tiny inputs: 0.5*(log(1+x) - log(1-x)) cancels and used to return 0.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_atanh_tiny_inputs(dtype):
+    values = [1e-8, -1e-8, 1e-6, -1e-6, 1e-4, -1e-4, 0.0, -0.0]
+    x0 = torch.tensor(values, dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.atanh(x0)
+    y_cal = torch.zeros_like(y_ref)
+    triton_atanh[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-6, atol=0.0, equal_nan=True)
+    assert torch.equal(torch.signbit(y_cal.cpu()), torch.signbit(y_ref.cpu()))
+
+
+# Near +/-1 the two logarithms straddle 0; the sign-symmetric form keeps both
+# the positive and the negative branch accurate.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_atanh_near_one(dtype):
+    values = [0.99, -0.99, 0.999999, -0.999999]
+    x0 = torch.tensor(values, dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.atanh(x0)
+    y_cal = torch.zeros_like(y_ref)
+    triton_atanh[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-5, atol=0.0)

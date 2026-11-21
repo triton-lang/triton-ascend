@@ -2591,12 +2591,18 @@ def atanh(arg0: core.tensor, _semantic=None):
         }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
     else:
         arg0 = _semantic.to_tensor(arg0)
-        a = _semantic.add(1.0, arg0, True)
-        b = _semantic.sub(1.0, arg0, True)
-        lna = core.tensor(_semantic.builder.create_log(a.handle), a.type)
-        lnb = core.tensor(_semantic.builder.create_log(b.handle), b.type)
-        tmp = _semantic.sub(lna, lnb, True)
-        return _semantic.mul(tmp, 0.5, True)
+        # ``0.5 * (log(1 + x) - log(1 - x))`` loses the leading term for
+        # |x| << 1: both logs round to 0 and the difference cancels, so
+        # atanh(1e-8) returned 0. ``0.5 * log1p(2x / (1 - x))`` is
+        # algebraically identical and keeps it.
+        # Use the denominator that keeps both terms positive: 1 - x for
+        # x >= 0, 1 + x for x < 0, so the log1p argument is 2|x| / (1 - |x|)
+        # either way and the negative branch stays accurate near -1.
+        is_neg = _semantic.less_than(arg0, 0)
+        denom = _semantic.where(is_neg, _semantic.add(1.0, arg0, True), _semantic.sub(1.0, arg0, True))
+        ratio = _semantic.truediv(_semantic.mul(math.abs(arg0, _semantic=_semantic), 2.0, True), denom)
+        magnitude = _semantic.mul(log1p(ratio, _semantic=_semantic), 0.5, True)
+        return _semantic.where(is_neg, _semantic.mul(magnitude, -1.0, True), magnitude)
 
 
 @core.builtin

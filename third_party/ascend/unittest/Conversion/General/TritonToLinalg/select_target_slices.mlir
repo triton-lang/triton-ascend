@@ -1,6 +1,7 @@
 // RUN: triton-opt --triton-to-linalg="compile-on-910-95=false" --split-input-file --verify-each %s | FileCheck %s --check-prefixes=COMMON,A2 --enable-var-scope
 // RUN: triton-opt --triton-to-linalg="compile-on-910-95=true" --split-input-file --verify-each %s | FileCheck %s --check-prefixes=COMMON,A5 --enable-var-scope
 
+// The A2 prefix also represents A3, which uses the false setting.
 // An arbitrary runtime point retains direct slices on 950. Only loop
 // induction positions use the single-element prefix fallback there.
 module {
@@ -154,6 +155,96 @@ module {
 // COMMON-NOT: tensor.insert_slice
 // COMMON: arith.select
 // COMMON: return
+
+// -----
+
+// A scalar boolean gates the whole tile. Slicing it must not introduce a
+// runtime extent into a subsequent elementwise conversion.
+module {
+  func.func @uniform_scalar_mask(%true: tensor<16xi8>, %false: tensor<16xi8>, %cond: i1) -> tensor<16xi16> {
+    %mask = tt.splat %cond : i1 -> tensor<16xi1>
+    %selected = arith.select %mask, %true, %false : tensor<16xi1>, tensor<16xi8>
+    %result = arith.extui %selected : tensor<16xi8> to tensor<16xi16>
+    return %result : tensor<16xi16>
+  }
+}
+// COMMON-LABEL: func.func @uniform_scalar_mask(
+// COMMON-SAME: %[[T:[^ :]+]]: tensor<16xi8>, %[[F:[^ :]+]]: tensor<16xi8>, %[[C:[^ :]+]]: i1
+// A2-NOT: tensor.extract_slice
+// A2-NOT: tensor.insert_slice
+// A2: linalg.fill ins(%[[C]] : i1)
+// A2-NOT: tensor.extract_slice
+// A2-NOT: tensor.insert_slice
+// A2: %[[SELECTED:.*]] = arith.select %{{.*}}, %[[T]], %[[F]]
+// A2-NOT: tensor.extract_slice
+// A2-NOT: tensor.insert_slice
+// A2-NEXT: %[[RESULT:.*]] = arith.extui %[[SELECTED]] : tensor<16xi8> to tensor<16xi16>
+// A2-NEXT: return %[[RESULT]]
+// A5: tensor.extract_slice %[[T]][0] [%{{.*}}] [1]
+// A5: tensor.insert_slice {{.*}} into %[[F]][0] [%{{.*}}] [1]
+// A5: arith.extui {{.*}} : tensor<16xi8> to tensor<16xi16>
+
+// -----
+
+// The scale load in a BLOCK_K=32 dot_scaled loop combines a row bound with a
+// splatted scalar K bound. The whole-tile gate survives andi and expand_dims.
+module {
+  func.func @uniform_scale_bound(%true: tensor<16x1xi8>, %false: tensor<16x1xi8>, %k_offset: i32, %rows: i32) -> tensor<16x1xi16> {
+    %c32 = arith.constant 32 : i32
+    %c16 = arith.constant 16 : i32
+    %scale_k = arith.divsi %k_offset, %c32 : i32
+    %valid_k = arith.cmpi slt, %scale_k, %c16 : i32
+    %range = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
+    %bounds = tt.splat %rows : i32 -> tensor<16xi32>
+    %valid_rows = arith.cmpi slt, %range, %bounds : tensor<16xi32>
+    %gate = tt.splat %valid_k : i1 -> tensor<16xi1>
+    %combined = arith.andi %valid_rows, %gate : tensor<16xi1>
+    %mask = tt.expand_dims %combined {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+    %selected = arith.select %mask, %true, %false : tensor<16x1xi1>, tensor<16x1xi8>
+    %result = arith.extui %selected : tensor<16x1xi8> to tensor<16x1xi16>
+    return %result : tensor<16x1xi16>
+  }
+}
+// COMMON-LABEL: func.func @uniform_scale_bound(
+// A2-NOT: tensor.extract_slice
+// A2-NOT: tensor.insert_slice
+// A2: %[[SELECTED:.*]] = arith.select {{.*}} : tensor<16x1xi1>, tensor<16x1xi8>
+// A2-NOT: tensor.extract_slice
+// A2-NOT: tensor.insert_slice
+// A2-NEXT: %[[RESULT:.*]] = arith.extui %[[SELECTED]] : tensor<16x1xi8> to tensor<16x1xi16>
+// A2-NEXT: return %[[RESULT]]
+// A5: tensor.extract_slice {{.*}}[0, 0] [%{{.*}}, 1] [1, 1] : tensor<16x1xi8> to tensor<?x1xi8>
+// A5: tensor.insert_slice {{.*}} into {{.*}}[0, 0] [%{{.*}}, 1] [1, 1] : tensor<?x1xi8> into tensor<16x1xi8>
+// A5: arith.extui {{.*}} : tensor<16x1xi8> to tensor<16x1xi16>
+// A5: return
+
+// -----
+
+// Put the uniform gate on the other side of a nested andi, then broadcast it
+// across columns. Both operand orders and the broadcast retain the gate.
+module {
+  func.func @broadcast_uniform_bounds(%true: tensor<16x32xf32>, %false: tensor<16x32xf32>, %cond: i1, %cond2: i1, %rows: i32) -> tensor<16x32xf32> {
+    %range = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
+    %bounds = tt.splat %rows : i32 -> tensor<16xi32>
+    %valid_rows = arith.cmpi slt, %range, %bounds : tensor<16xi32>
+    %gate = tt.splat %cond : i1 -> tensor<16xi1>
+    %gate2 = tt.splat %cond2 : i1 -> tensor<16xi1>
+    %combined = arith.andi %gate, %valid_rows : tensor<16xi1>
+    %combined2 = arith.andi %combined, %gate2 : tensor<16xi1>
+    %expanded = tt.expand_dims %combined2 {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+    %mask = tt.broadcast %expanded : tensor<16x1xi1> -> tensor<16x32xi1>
+    %result = arith.select %mask, %true, %false : tensor<16x32xi1>, tensor<16x32xf32>
+    return %result : tensor<16x32xf32>
+  }
+}
+// COMMON-LABEL: func.func @broadcast_uniform_bounds(
+// A2-NOT: tensor.extract_slice
+// A2-NOT: tensor.insert_slice
+// A2: %[[RESULT:.*]] = arith.select {{.*}} : tensor<16x32xi1>, tensor<16x32xf32>
+// A2-NEXT: return %[[RESULT]]
+// A5: tensor.extract_slice {{.*}}[0, 0] [%{{.*}}, 32] [1, 1] : tensor<16x32xf32> to tensor<?x32xf32>
+// A5: tensor.insert_slice {{.*}} into {{.*}}[0, 0] [%{{.*}}, 32] [1, 1] : tensor<?x32xf32> into tensor<16x32xf32>
+// A5: return
 
 // -----
 

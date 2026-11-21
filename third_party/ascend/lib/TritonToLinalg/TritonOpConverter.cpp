@@ -455,6 +455,16 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
         op, "Cannot lower continuous masked selects");
   }
 
+  // On A2/A3, a splatted boolean gate gives the slice a runtime extent,
+  // including when intersected with lane bounds. Subsequent conversions can
+  // then allocate dynamic UB buffers that PlanMemory cannot size. Keep the
+  // static select on those targets; A5 retains its direct-slice behavior.
+  if (!useDirectSelectSlices && mstate.hasUniformBoolMask) {
+    mstate.eraseInsertedOps(op, rewriter);
+    return rewriter.notifyMatchFailure(
+        op, "uniform boolean mask requires a static select extent");
+  }
+
   // 2. Get mask position
   MaskPosition maskPos = mstate.getMaskPosition(tensorShape);
   LLVM_DEBUG({

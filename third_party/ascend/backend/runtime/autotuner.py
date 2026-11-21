@@ -2754,6 +2754,8 @@ class AutoTilingTuner(Autotuner):
             ):
                 for config in pruned_configs:
                     ret.append(warmup_config(config))
+            # Resolve handles only after all parallel compilations have completed.
+            ret = [kernel.result() if isinstance(kernel, triton.FutureKernel) else kernel for kernel in ret]
         else:
             for config in pruned_configs:
                 ret.append(warmup_config(config))

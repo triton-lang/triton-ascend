@@ -2618,8 +2618,18 @@ def expm1(arg0: core.tensor, _semantic=None):
         }, is_pure=True, _semantic=_semantic)
     else:
         arg0 = _semantic.to_tensor(arg0)
-        tmp = core.tensor(_semantic.builder.create_exp(arg0.handle), arg0.type)
-        return _semantic.sub(tmp, 1, True)
+        # ``exp(x) - 1`` rounds to exactly 0 once |x| is below half an ulp of
+        # 1, so expm1(1e-8) returned 0. For small |x| evaluate the Taylor
+        # series 1 + x + x^2/2 + x^3/6 + x^4/24 instead, which keeps the
+        # leading term to within float32 rounding on that interval.
+        x_sq = _semantic.mul(arg0, arg0, True)
+        poly = _semantic.add(_semantic.mul(x_sq, 1.0 / 24.0, True), 1.0 / 6.0, True)
+        poly = _semantic.add(_semantic.mul(poly, arg0, True), 0.5, True)
+        poly = _semantic.add(_semantic.mul(poly, arg0, True), 1.0, True)
+        series = _semantic.mul(arg0, poly, True)
+        approx = core.tensor(_semantic.builder.create_exp(arg0.handle), arg0.type)
+        exact = _semantic.sub(approx, 1, True)
+        return _semantic.where(_semantic.less_than(math.abs(arg0, _semantic=_semantic), 0.01), series, exact)
 
 
 @core.builtin

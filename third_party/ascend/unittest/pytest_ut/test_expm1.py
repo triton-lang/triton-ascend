@@ -60,3 +60,27 @@ def test_expm1(param_list):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_expm1[ncore, 1, 1](x0, y_cal, xblock, xblock_sub)
     test_common.validate_cmp(dtype, y_cal, y_ref)
+
+
+# exp(x) - 1 rounds to exactly 0 for |x| below half an ulp of 1; the small
+# branch evaluates a Taylor series instead.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_expm1_tiny_inputs(dtype):
+    values = [1e-8, -1e-8, 1e-6, -1e-6, 1e-3, -1e-3, 0.009, -0.009, 0.0, -0.0]
+    x0 = torch.tensor(values, dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.expm1(x0)
+    y_cal = torch.zeros_like(y_ref)
+    triton_expm1[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-5, atol=0.0, equal_nan=True)
+    assert not torch.equal(y_cal.cpu()[0:6], torch.zeros(6)), f"expm1 flushed {y_cal.cpu()}"
+
+
+# The series has to blend into exp(x) - 1 without a discontinuity at the cut.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_expm1_cut_point(dtype):
+    values = [0.00999, 0.010001, -0.00999, -0.010001]
+    x0 = torch.tensor(values, dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.expm1(x0)
+    y_cal = torch.zeros_like(y_ref)
+    triton_expm1[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-5, atol=0.0)

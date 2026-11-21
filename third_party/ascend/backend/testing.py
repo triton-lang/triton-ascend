@@ -204,6 +204,11 @@ def _collect_prof_result(
     expected_rows = num_funcs * (num_warmup + num_active)
     actual_rows = len(filter_df)
 
+    if actual_rows == 0:
+        if target_kernel_name is not None and _raise_on_mismatch:
+            raise ProfilerResultMismatchError(target_kernel_name, expected_rows, actual_rows)
+        return _error(f"No profiling rows matched the requested filters (expected {expected_rows} rows, got 0).")
+
     mul = 1
     if num_funcs == 1:
         if actual_rows % expected_rows != 0:

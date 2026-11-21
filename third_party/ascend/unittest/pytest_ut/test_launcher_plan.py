@@ -846,42 +846,36 @@ def test_native_grid_matches_compiler_reference(native_grid_probe, sequence, mod
 @pytest.fixture
 def host_compiler(tmp_path, monkeypatch):
     """A native driver whose version comes from a replaceable shared library."""
-    cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
-    if cc is None:
-        pytest.skip("a C compiler is required for the native driver fixture")
-    # The fixture only needs libc. A C++ driver can inherit Conda's libstdc++
-    # and libgcc without GNU build IDs, correctly disabling identity caching
-    # before the cache behavior under test is reached.
-    source = tmp_path / "driver.c"
+    cxx = utils._get_cxx()
+    source = tmp_path / "driver.cpp"
     source.write_text('''
-#include <stdio.h>
-#include <stdlib.h>
-const char *tool_version(void);
+#include <cstdio>
+#include <cstdlib>
+extern "C" const char *tool_version();
 int main() {
-  const char *log = getenv("TRITON_TEST_VERSION_LOG");
-  if (log) {
-    FILE *f = fopen(log, "a");
+  if (const char *log = std::getenv("TRITON_TEST_VERSION_LOG")) {
+    FILE *f = std::fopen(log, "a");
     if (!f) return 1;
-    fputs("query\\n", f);
-    fclose(f);
+    std::fputs("query\\n", f);
+    std::fclose(f);
   }
-  puts(tool_version());
+  std::puts(tool_version());
 }
 ''')
     library = tmp_path / "libversion.so"
 
     def replace_version(version):
-        lib_source = tmp_path / "version.c"
-        lib_source.write_text('const char *tool_version(void) { return "' + version + '"; }')
+        lib_source = tmp_path / "version.cpp"
+        lib_source.write_text('extern "C" const char *tool_version() { return "' + version + '"; }')
         replacement = tmp_path / "libversion.new.so"
-        subprocess.run([cc, str(lib_source), "-shared", "-fPIC", "-Wl,--build-id=sha1", "-o",
+        subprocess.run([cxx, str(lib_source), "-shared", "-fPIC", "-Wl,--build-id=sha1", "-o",
                         str(replacement)], check=True)
         replacement.replace(library)
 
     replace_version("test-compiler-v1")
     compiler = tmp_path / "clang"
     subprocess.run([
-        cc,
+        cxx,
         str(source), "-L" + str(tmp_path), "-lversion", "-Wl,-rpath,$ORIGIN", "-Wl,--build-id=sha1", "-o",
         str(compiler)
     ], check=True)

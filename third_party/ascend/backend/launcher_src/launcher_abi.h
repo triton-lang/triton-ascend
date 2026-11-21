@@ -94,6 +94,19 @@ typedef struct {
   uint64_t profile_scratch_size;
 } TritonNpuLaunchSpecV1;
 
+/* V2 is an independent envelope; the published V1 layout is unchanged.
+ * The request layout remains TritonNpuLaunchRequestV1. Original G[3] is
+ * appended before the transformed launch grid in the kernel argument buffer. */
+typedef struct {
+  uint32_t version;
+  uint32_t struct_size;
+  TritonNpuLaunchSpecV1 base;
+  uint32_t grid_contract_version;
+  int32_t batch_axis;
+  uint32_t batch_factor;
+  uint32_t reserved;
+} TritonNpuLaunchSpecV2;
+
 typedef struct {
   uint32_t version;
   uint32_t struct_size;
@@ -125,6 +138,16 @@ int triton_npu_launch_v1(const TritonNpuLaunchPlan *plan,
                          const TritonNpuLaunchRequestV1 *request,
                          const void *const *args, const size_t *arg_sizes,
                          size_t num_args, char *error, size_t error_size);
+
+TritonNpuLaunchPlan *
+triton_npu_create_plan_v2(const TritonNpuLaunchSpecV2 *spec,
+                          const TritonNpuArgTypeV1 *types, size_t num_types,
+                          char *error, size_t error_size);
+int triton_npu_launch_v2(const TritonNpuLaunchPlan *plan,
+                         const TritonNpuLaunchRequestV1 *request,
+                         const void *const *args, const size_t *arg_sizes,
+                         size_t num_args, char *error, size_t error_size);
+uint32_t triton_npu_program_grid_contract_version(void);
 
 #ifdef __cplusplus
 }

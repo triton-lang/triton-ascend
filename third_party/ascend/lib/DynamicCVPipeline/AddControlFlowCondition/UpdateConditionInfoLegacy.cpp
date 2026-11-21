@@ -1208,6 +1208,23 @@ int UpdateConditionInfoPassLegacy::setIntraCoreCondition(
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
+// Return true when `sourceIfOp` and `currentIfOp` are one producer/consumer
+// pair in `relations`.
+static bool isTensorIterArgIfPair(ArrayRef<TensorIterArgIfOpRelation> relations,
+                                  scf::IfOp sourceIfOp, scf::IfOp currentIfOp) {
+  for (const TensorIterArgIfOpRelation &relation : relations) {
+    bool sourceIsProducer = relation.producer == sourceIfOp;
+    bool currentIsProducer = relation.producer == currentIfOp;
+    bool sourceIsConsumer = llvm::is_contained(relation.consumers, sourceIfOp);
+    bool currentIsConsumer =
+        llvm::is_contained(relation.consumers, currentIfOp);
+    if ((sourceIsProducer && currentIsConsumer) ||
+        (currentIsProducer && sourceIsConsumer))
+      return true;
+  }
+  return false;
+}
+
 // Set the FlowOpt extra condition for the third if block in the DAG
 int UpdateConditionInfoPassLegacy::setFlowOptCondition(scf::IfOp currentIfOp,
                                                        Operation *loopOp,
@@ -1236,6 +1253,15 @@ int UpdateConditionInfoPassLegacy::setFlowOptCondition(scf::IfOp currentIfOp,
 
   // Get the start node
   scf::IfOp sourceIfOp = info->flowOptIfOpPairs[currentIfOp];
+  // Same-iteration tensor iter-arg pairs cannot add flowopt condition.
+  auto depsIt = info->tensorIterArgDepsMap.find(loopOp);
+  if (depsIt != info->tensorIterArgDepsMap.end() &&
+      isTensorIterArgIfPair(depsIt->second, sourceIfOp, currentIfOp)) {
+    LDBG("Flowopt pair is a tensor iter-arg pair, skip flowopt. currentIfOp="
+         << currentIfOp << ", sourceIfOp=" << sourceIfOp << "\n");
+    flowOptCond = nullptr;
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
   if (!info->cntArgs.count(sourceIfOp)) {
     LDBG("[Error] Start node has no counter in cntArgs, cannot build flowOpt "
          "condition. currentIfOp="

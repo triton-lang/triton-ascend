@@ -34,7 +34,7 @@ from types import MappingProxyType
 from triton import knobs
 from triton.runtime.cache import get_cache_manager, get_dump_manager
 from . import utils
-from .program_grid import (ProgramGridContractError, get_persistent_transform, normalize_program_grid_transforms)
+from .program_grid import ProgramGridContractError, normalize_program_grid_transforms
 
 # Host optimization for the shared runtime and lazy C export adapter.
 _LAUNCHER_CFLAGS = ("-O2", )
@@ -42,8 +42,8 @@ _LAUNCHER_CFLAGS = ("-O2", )
 # Keep these values in sync with launcher_abi.h. These are data tags, not C++
 # spellings: a signature is decoded once when a native plan is constructed.
 CONSTEXPR, POINTER, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F16, BF16 = range(14)
-FFTS, PURE_SIMT, TASKQUEUE, AUTO_MAP, GRID_WARNING, COALESCE_CEIL, DYNAMIC_SHARED, DEVICE_PRINT, IAT, PTSM, DOT_ROW, IAT64 = (
-    1 << i for i in range(12))
+FFTS, PURE_SIMT, TASKQUEUE, AUTO_MAP, GRID_WARNING, COALESCE_CEIL, DYNAMIC_SHARED, DEVICE_PRINT, IAT, PTSM, DOT_ROW, IAT64, ATOMIC_REMOVE = (
+    1 << i for i in range(13))
 
 _KINDS = {
     "constexpr": CONSTEXPR,
@@ -129,12 +129,12 @@ def _program_grid_config(metadata):
         transforms = normalize_program_grid_transforms(raw) if mapping else None
     except ProgramGridContractError as error:
         raise RuntimeError(f"invalid program_grid_transforms launcher metadata: {error}") from error
-    persistent = get_persistent_transform(transforms) if transforms is not None else None
+    persistent = transforms is not None and any(t["persistent_coverage"] for t in transforms["transforms"])
     if transforms is not None and metadata.row_coalescing_applied:
         raise RuntimeError("program-grid transforms conflict with legacy RowCoalescing")
     if metadata.auto_blockify_enabled and metadata.ptsm_cap_authorized:
         raise RuntimeError("auto_blockify_enabled and ptsm_cap_authorized cannot both be true")
-    if persistent is None:
+    if not persistent:
         if metadata.ptsm_cap_authorized:
             raise RuntimeError("ptsm_cap_authorized requires a persistent transform")
     elif not metadata.ptsm_cap_authorized:
@@ -153,10 +153,15 @@ def _program_grid_config(metadata):
     elif factor != 1 or axis != -1 or ceil_div:
         raise RuntimeError("unmatched RowCoalescing must retain default coalesce metadata")
     if transforms is None:
-        return COALESCE_CEIL if ceil_div else 0, factor, axis
+        return (COALESCE_CEIL if ceil_div else 0, factor, axis), transforms
+    if transforms["version"] == 3:
+        # Independent V2 fields carry this mapping; legacy flags stay clear.
+        return (0, 1, -1), transforms
     # Encode the compiler's v2 sequences using the existing C spec fields.
     # DOT_ROW uses X-axis ceil division like legacy coalescing, but also
     # requires the originalGridX/Y hidden arguments of dynamic mappings.
+    if transforms["transforms"][0]["kind"] == "cap":
+        return (ATOMIC_REMOVE, transforms["transforms"][0]["factor"], 0), transforms
     modes = {
         ((1, 16, False, False), ): (IAT, 1, -1),
         ((1, 64, False, False), ): (IAT | IAT64, 1, -1),
@@ -167,18 +172,15 @@ def _program_grid_config(metadata):
     }
     sequence = tuple((t["axis"], t["factor"], t["persistent_coverage"], t["grid_stride_abi_verified"])
                      for t in transforms["transforms"])
-    if transforms["version"] == 3:
-        # Independent V2 fields carry this mapping; legacy flags stay clear.
-        return 0, 1, -1
-    if transforms["version"] != 2 or sequence not in modes:
+    if sequence not in modes:
         raise RuntimeError("unsupported native launcher program-grid transforms")
-    return modes[sequence]
+    return modes[sequence], transforms
 
 
 def make_launch_spec(metadata, npu_utils):
     """Translate compiler metadata without emitting native source code."""
     arch = metadata.target.arch
-    flags, coalesce_factor, coalesce_axis = _program_grid_config(metadata)
+    (flags, coalesce_factor, coalesce_axis), transforms = _program_grid_config(metadata)
     if utils.is_ffts_supported(arch) and not utils.force_disable_ffts(arch):
         flags |= FFTS
     if metadata.is_pure_simt:
@@ -208,9 +210,7 @@ def make_launch_spec(metadata, npu_utils):
         if candidate in (1, 2, 3, 4):
             task_type = candidate
     physical = npu_utils.get_aivector_core_num() if metadata.mix_mode == "aiv" else npu_utils.get_aicore_num()
-    batch = getattr(metadata, "program_grid_transforms", None)
-    batch = normalize_program_grid_transforms(batch) if batch is not None else None
-    batch = batch if batch and batch["version"] == 3 else None
+    batch = transforms if transforms is not None and transforms["version"] == 3 else None
     return LaunchSpec(
         profile_scratch_size=int(getattr(metadata, "profile_scratch_size", 0) or 0),
         grid_contract_version=3 if batch else 0,

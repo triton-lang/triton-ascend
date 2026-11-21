@@ -46,6 +46,7 @@ struct ProgramGridTransform {
   int64_t factor = 1;
   bool persistentCoverage = false;
   bool gridStrideAbiVerified = false;
+  bool capToFactor = false;
 };
 
 struct ProgramGridTransformContract {

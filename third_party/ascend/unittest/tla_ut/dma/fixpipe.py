@@ -6,6 +6,7 @@ from pathlib import Path
 _CASE_DIR = Path(__file__).resolve().parent
 sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != _CASE_DIR]
 sys.path.insert(0, str(_CASE_DIR.parent))
+import pytest
 import torch
 import triton.language as tl
 import triton.language.extra.tla as tla
@@ -88,28 +89,52 @@ def config_ir(src, dst, P: tl.constexpr, TARGET: tl.constexpr):
         tla.copy_l0c_to_ub(src, dst, P)
 
 
+def config_module(target, params, shape, dtype=tl.float32, src_shape=(2, 1, 16, 16)):
+    signature = {
+        "src": tla.buffer_type(src_shape, tl.float32, "l0c"),
+        "dst": tla.buffer_type(shape, dtype, target),
+    }
+    mod, _ = compile_offline(config_ir, signature, {"P": params, "TARGET": target})
+    return str(mod)
+
+
 def check_params():
-    cases = [
-        ("l1", tla.FixpipeL0C2L1Params(channel_split=True,
-                                       c0_pad_en=False), ("channel_split = true", "c0_pad_en = false")),
-        ("gm", tla.FixpipeL0C2GMParams(unit_flag_ctrl=tla.UnitFlagMode.ENABLED_WITH_UPDATE, unit_flag_group_id=7),
-         ("unit_flag<ENABLED_WITH_UPDATE>", "unit_flag_group_id = 7")),
-        ("ub", tla.FixpipeL0C2UBParams(sub_block_idx=tla.FixpipeSubBlock.SUB_BLOCK_1), ("sub_block_1", )),
-        ("ub", tla.FixpipeL0C2UBParams(dual_dst_mode=tla.FixpipeDualDstMode.ROW_SPLIT,
-                                       sub_block_idx=None), ("ROW_SPLIT", )),
-        ("ub", tla.FixpipeL0C2UBParams(dual_dst_mode=tla.FixpipeDualDstMode.COLUMN_SPLIT,
-                                       sub_block_idx=None), ("COLUMN_SPLIT", )),
+    layout, split, quant = tla.FixpipeDMAMode, tla.FixpipeDualDstMode, tla.FixpipePreQuantMode
+    ub, l1, gm = tla.FixpipeL0C2UBParams, tla.FixpipeL0C2L1Params, tla.FixpipeL0C2GMParams
+    text = config_module("l1", l1(channel_split=True, c0_pad_en=False), (2, 1, 16, 16))
+    assert "channel_split = true" in text and "c0_pad_en = false" in text
+    for target, cls in (("gm", gm), ("l1", l1), ("ub", ub)):
+        p = cls(unit_flag_ctrl=tla.UnitFlagMode.ENABLED_WITH_UPDATE, unit_flag_group_id=7)
+        text = config_module(target, p, (2, 1, 16, 16))
+        assert "unit_flag<ENABLED_WITH_UPDATE>" in text and "unit_flag_group_id = 7" in text
+    text = config_module("ub", ub(sub_block_idx=tla.FixpipeSubBlock.SUB_BLOCK_1), (2, 1, 16, 16))
+    assert "sub_block_1" in text and "dual_dst_mode" not in text
+    for dual, shape in ((split.ROW_SPLIT, (8, 32)), (split.COLUMN_SPLIT, (16, 16))):
+        text = config_module("ub", ub(dma_mode=layout.NZ2ND, dual_dst_mode=dual, sub_block_idx=None), shape)
+        assert dual.name in text and "sub_block_idx" not in text
+    row_split = ub(dma_mode=layout.NZ2ND, dual_dst_mode=split.ROW_SPLIT, sub_block_idx=None)
+    assert "ROW_SPLIT" in config_module("ub", row_split, (None, 32), src_shape=(2, None, 16, 16))
+    with pytest.raises(Exception, match="ROW_SPLIT requires"):
+        config_module("ub", row_split, (None, 16), src_shape=(2, None, 16, 16))
+    text = config_module("l1", l1(dma_mode=layout.NZ2DN, pre_quant=quant.F322BF16), (32, 16), tl.bfloat16)
+    assert "nz2dn" in text and "F322BF16" in text
+
+    invalid = [
+        ("ub", ub(dual_dst_mode=split.ROW_SPLIT,
+                  sub_block_idx=None), (2, 1, 16, 16), "dual destinations require NZ2ND"),
+        ("ub", ub(dma_mode=layout.NZ2DN, dual_dst_mode=split.COLUMN_SPLIT,
+                  sub_block_idx=None), (32, 16), "dual destinations require NZ2ND"),
+        ("ub", ub(dma_mode=layout.NZ2ND,
+                  dual_dst_mode=split.ROW_SPLIT), (8, 32), "dual destinations require sub_block_idx=None"),
+        ("ub", ub(dma_mode=layout.NZ2ND, dual_dst_mode=split.ROW_SPLIT,
+                  sub_block_idx=None), (16, 32), "ROW_SPLIT requires"),
+        ("ub", ub(dma_mode=layout.NZ2ND, dual_dst_mode=split.COLUMN_SPLIT,
+                  sub_block_idx=None), (16, 32), "COLUMN_SPLIT requires"),
+        ("ub", ub(sub_block_idx=None), (2, 1, 16, 16), "NO_DUAL requires sub_block_idx"),
     ]
-    for target, p, probes in cases:
-        signature = {
-            "src": tla.buffer_type((2, 1, 16, 16), tl.float32, "l0c"), "dst": tla.buffer_type((2, 1, 16, 16),
-                                                                                              tl.float32, target)
-        }
-        mod, _ = compile_offline(config_ir, signature, {"P": p, "TARGET": target})
-        for probe in probes:
-            assert probe in str(mod), probe
-        if target == "ub" and p.dual_dst_mode == tla.FixpipeDualDstMode.NO_DUAL:
-            assert "dual_dst_mode" not in str(mod)
+    for target, p, shape, message in invalid:
+        with pytest.raises(Exception, match=message):
+            config_module(target, p, shape)
 
 
 def constants(case):

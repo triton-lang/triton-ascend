@@ -49,6 +49,7 @@ constexpr llvm::StringLiteral kPersistentCoverage = "persistent_coverage";
 constexpr llvm::StringLiteral kGridStrideAbiVerified =
     "grid_stride_abi_verified";
 constexpr llvm::StringLiteral kCeilDiv = "ceil_div";
+constexpr llvm::StringLiteral kCap = "cap";
 constexpr llvm::StringLiteral kRuntimeOriginalGrid = "runtime_original_grid";
 constexpr llvm::StringLiteral kOriginalGridX = "originalGridX";
 constexpr llvm::StringLiteral kOriginalGridY = "originalGridY";
@@ -142,6 +143,12 @@ bool isDotRowTransform(const ProgramGridTransform &transform) {
 }
 
 bool isSupportedSequence(ArrayRef<ProgramGridTransform> transforms) {
+  if (llvm::any_of(transforms,
+                   [](const ProgramGridTransform &t) { return t.capToFactor; }))
+    return transforms.size() == 1 && transforms.front().axis == 0 &&
+           !transforms.front().persistentCoverage &&
+           !transforms.front().gridStrideAbiVerified &&
+           transforms.front().factor <= INT32_MAX;
   if (transforms.size() == 1)
     return isIAT16(transforms.front()) ||
            (transforms.front().axis == 1 && transforms.front().factor == 64 &&
@@ -278,15 +285,17 @@ mlir::triton::cfg::parseProgramGridTransformContract(Attribute attribute) {
         getBoolean(transform, kGridStrideAbiVerified);
     if (!order || !kind || !axis || !factor || !persistent || !gridStride ||
         *order != static_cast<int64_t>(expectedOrder) ||
-        kind.getValue() != kCeilDiv || *axis < 0 || *axis > (batch ? 2 : 1) ||
-        *factor < 2 ||
-        (batch && (*factor > INT32_MAX || *persistent || *gridStride)) ||
+        (kind.getValue() != kCeilDiv && kind.getValue() != kCap) || *axis < 0 ||
+        *axis > (batch ? 2 : 1) ||
+        *factor < (kind.getValue() == kCap ? 1 : 2) ||
+        (batch && (kind.getValue() != kCeilDiv || *factor > INT32_MAX ||
+                   *persistent || *gridStride)) ||
         *persistent != *gridStride || seenAxis[*axis])
       return failure();
     seenAxis[*axis] = true;
     parsed.transforms.push_back(ProgramGridTransform{
         static_cast<int32_t>(*order), static_cast<int32_t>(*axis), *factor,
-        *persistent, *gridStride});
+        *persistent, *gridStride, kind.getValue() == kCap});
   }
   if (!batch && !isSupportedSequence(parsed.transforms))
     return failure();
@@ -303,7 +312,8 @@ DictionaryAttr mlir::triton::cfg::serializeProgramGridTransformContract(
         context,
         {{builder.getStringAttr(kOrder),
           builder.getI64IntegerAttr(transform.order)},
-         {builder.getStringAttr(kKind), builder.getStringAttr(kCeilDiv)},
+         {builder.getStringAttr(kKind),
+          builder.getStringAttr(transform.capToFactor ? kCap : kCeilDiv)},
          {builder.getStringAttr(kAxis),
           builder.getI64IntegerAttr(transform.axis)},
          {builder.getStringAttr(kFactor),

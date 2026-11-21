@@ -20,7 +20,7 @@ I32_MAX = (1 << 31) - 1
 PROGRAM_GRID_TRANSFORMS_ATTR = "hacc.program_grid_transforms"
 PROGRAM_GRID_TRANSFORMS_VERSION = 2
 
-GRAPH_OPTIMIZATION_KNOWN_RULE_MASK = 0x3FBFF
+GRAPH_OPTIMIZATION_KNOWN_RULE_MASK = 0x7FBFF
 INDEPENDENT_AXIS_TENSORIZE_RULE_BIT = 1 << 9
 PERSISTENT_TASK_STRIP_MINING_RULE_BIT = 1 << 11
 SELECTED_BLOCK_SCAN_RULE_BIT = 1 << 16
@@ -162,19 +162,21 @@ def normalize_program_grid_transforms(raw: Any) -> dict[str, Any]:
         order = _integer(transform["order"], f"transforms[{expected_order}].order", minimum=0)
         if order != expected_order:
             raise ProgramGridContractError("transform order must be contiguous from zero")
-        if transform["kind"] != "ceil_div":
-            raise ProgramGridContractError(f"transforms[{expected_order}].kind must be 'ceil_div'")
+        kind = transform["kind"]
+        if kind not in ("ceil_div", "cap"):
+            raise ProgramGridContractError(f"invalid program-grid transform kind {kind!r}")
         axis = _integer(transform["axis"], f"transforms[{expected_order}].axis", minimum=0)
         if axis not in axes:
             raise ProgramGridContractError("dynamic program-grid transforms support only axes 0 and 1")
         if axis in seen_axes:
             raise ProgramGridContractError("dynamic program-grid transforms may not repeat an axis")
         seen_axes.add(axis)
-        factor = _integer(transform["factor"], f"transforms[{expected_order}].factor", minimum=2)
+        factor = _integer(transform["factor"], f"transforms[{expected_order}].factor",
+                          minimum=1 if kind == "cap" else 2)
         persistent = _boolean(transform["persistent_coverage"], f"transforms[{expected_order}].persistent_coverage")
         grid_stride = _boolean(transform["grid_stride_abi_verified"],
                                f"transforms[{expected_order}].grid_stride_abi_verified")
-        if batch and (factor > I32_MAX or persistent or grid_stride):
+        if batch and (kind != "ceil_div" or factor > I32_MAX or persistent or grid_stride):
             raise ProgramGridContractError("v3 requires one non-persistent i32 ceil-div transform")
         if persistent != grid_stride:
             raise ProgramGridContractError("persistent coverage and grid-stride ABI verification must agree")
@@ -184,14 +186,18 @@ def normalize_program_grid_transforms(raw: Any) -> dict[str, Any]:
         sequence.append((axis, factor, persistent, grid_stride))
         transforms.append({
             "order": order,
-            "kind": "ceil_div",
+            "kind": kind,
             "axis": axis,
             "factor": factor,
             "persistent_coverage": persistent,
             "grid_stride_abi_verified": grid_stride,
         })
 
-    if not batch and tuple(sequence) not in _SUPPORTED_SEQUENCES:
+    if any(t["kind"] == "cap" for t in transforms):
+        if len(transforms) != 1 or transforms[0]["axis"] != 0 or transforms[0]["factor"] > I32_MAX or transforms[0][
+                "persistent_coverage"]:
+            raise ProgramGridContractError("cap requires a standalone nonpersistent X-axis transform")
+    elif not batch and tuple(sequence) not in _SUPPORTED_SEQUENCES:
         raise ProgramGridContractError("unsupported dynamic IAT/PTSM transform sequence")
     return {
         "version": version,
@@ -229,7 +235,12 @@ def apply_program_grid_transforms(
         raise ProgramGridContractError("v3 original grid extent exceeds i32")
     for transform in normalized["transforms"]:
         axis = transform["axis"]
-        launch_grid[axis] = (launch_grid[axis] + transform["factor"] - 1) // transform["factor"]
+        if transform["kind"] == "cap":
+            if launch_grid[1:] != [1, 1]:
+                raise ProgramGridContractError("grouped reduction requires a one-dimensional launch")
+            launch_grid[axis] = min(launch_grid[axis], transform["factor"])
+        else:
+            launch_grid[axis] = (launch_grid[axis] + transform["factor"] - 1) // transform["factor"]
     persistent = get_persistent_transform(normalized)
     if persistent is not None:
         cores = _integer(physical_core_count, "physical_core_count", minimum=1)

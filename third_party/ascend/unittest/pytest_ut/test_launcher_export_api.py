@@ -319,6 +319,12 @@ def test_python_request_accepts_valid_sentinels(python_launcher_factory):
     (launcher.PTSM, {"coalesce_axis": 0}),
     (launcher.IAT | launcher.COALESCE_CEIL, {}),
     (launcher.PTSM, {"physical_blocks": 0}),
+    (launcher.ATOMIC_REMOVE, {"coalesce_axis": 1, "coalesce_factor": 256}),
+    (launcher.ATOMIC_REMOVE, {"coalesce_axis": 0, "coalesce_factor": 1 << 31}),
+    (launcher.ATOMIC_REMOVE | launcher.COALESCE_CEIL, {"coalesce_axis": 0, "coalesce_factor": 256}),
+    (launcher.ATOMIC_REMOVE | launcher.IAT, {"coalesce_axis": 0}),
+    (launcher.ATOMIC_REMOVE | launcher.PTSM, {"coalesce_axis": 0}),
+    (launcher.ATOMIC_REMOVE | launcher.DOT_ROW, {"coalesce_axis": 0, "coalesce_factor": 8}),
 ])
 def test_c_api_rejects_conflicting_program_grid_configuration(native_api, flags, changes):
     config = spec()

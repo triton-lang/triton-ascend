@@ -95,7 +95,7 @@ FMA and max scaling regress this HD64 case while improving the two completed HD1
 
 The cache/readiness group is only +0.150% with Cube overlap and drain held off in both arms. Cache/readiness are also prerequisites for the separately measured overlap path, whose gain is +13.166%; the small direct group gain does not establish that those prerequisites can be removed.
 
-The query switch alone regresses on its deliberately unforwarded/cache-off parent. The predeclared query-family group—common versus query-off, including dependent forwarding/cache/Cube controls—improves this case by +12.256% and wins six of six pairs. Corresponding audited derived groups are +11.808% for N16384/HD128 and +5.534% for N8192/HD128. These are group effects, not isolated query-pipeline gains.
+The query switch alone regresses on a parent with forwarding and caching disabled. The predeclared query-family group—common versus query-off, including dependent forwarding/cache/Cube controls—improves this case by +12.256% and wins six of six pairs. Corresponding audited derived groups are +11.808% for N16384/HD128 and +5.534% for N8192/HD128. These are group effects, not isolated query-pipeline gains.
 
 Interim raw-audit evidence: `feature-ablation-20261112/parent-interim-n8192-hd64-audit.json`; derived calculation: `parent-interim-query-family-derived.json`. Full-matrix results remain pending.
 
@@ -237,7 +237,7 @@ Retained optimization removal remains a later decision after the timing screen. 
 
 ## Evidence map
 
-All S entries refer to exact `result_key` records in the preserved [experiment/evidence index](/home/ebraheema/dev/windows-orders/no-stage6-handoff-win/documentation-20261108/EXPERIMENT_AND_EVIDENCE_INDEX.json), revision660. Selected original records, evidence hashes and the index SHA256 are copied to [feature-gain-source-excerpts.json](/home/ebraheema/bz-workflow/fa-02-cleanup-cde9-20261111/canonical-only-20261112/feature-gain-source-excerpts.json). The source's status reflects the historical experiment, not this cleanup goal.
+All S entries refer to exact `result_key` records in the preserved experiment/evidence index, revision660. Selected original records, evidence hashes and the index SHA256 are copied to feature-gain-source-excerpts.json. The source's status reflects the historical experiment, not this cleanup goal.
 
 | Label | Exact record or file |
 | --- | --- |
@@ -253,6 +253,6 @@ All S entries refer to exact `result_key` records in the preserved [experiment/e
 | S54 | `source250-ordinary-cvp-boundary-fma-small3-independent-validation-v1` |
 | S55 | `source250-n1024-hd128-vector-family-no-promoted-candidate-v1` |
 | S64 | `source257v3-wheel19-full11-normal-jit-hardware-comparison-v1` |
-| P | [Original integration design](/home/ebraheema/dev/windows-orders/no-stage6-handoff-win/docs/original-integration-plan/DESIGN.md), section2; [simple guide](/home/ebraheema/dev/windows-orders/no-stage6-handoff-win/docs/original-integration-plan/OPTIMIZATIONS_SIMPLE_GUIDE.md), Cube-tail measurement caveat |
-| BZ10 | [November 10 paired full-eleven summary](/home/ebraheema/bz-workflow/fa-0.2-build-timing-20261110T0815Z/results-server113-timing05-final-20261110T1429Z/audit/SUMMARY.md) and its retained raw/audit files |
+| P | Original integration design, section2; simple guide, Cube-tail measurement caveat |
+| BZ10 | November 10 paired full-eleven summary and its retained raw/audit files |
 | BZ11 | [Cleanup preservation and timing record](cvpipeline_cleanup.md) |

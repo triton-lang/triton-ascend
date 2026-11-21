@@ -236,8 +236,8 @@ On NPU 1, Source13's four-stage zero/random checks and all three cache cases
 uncached and cached, with changed B on a second invocation and actual cached
 IR bound to the executed native bytes.
 All 66 generic hardware checks passed. The paired eleven-shape run on NPU 7 measured a geometric-mean change of +0.036%. Section 6.1.2 of the [design](en/cvpipeline_flash_attention_design.md) gives every median and the two changed-binary results. The
-[0.6 review copy](/home/ebraheema/dev/triton-ascend-fa-production-review-notes/compiler-review-0.6.work.md)
-and [CPU acceptance record](/home/ebraheema/bz-workflow/compiler-review06-20261116T141149Z/validation-0.6/SOURCE13-PARENT-CPU-VERIFIED.json)
+0.6 review copy
+and CPU acceptance record
 identify the current evidence. These results do not replace the retained
 reference qualification below.
 
@@ -287,7 +287,7 @@ three generic kernels are byte-identical to the executed native programs.
 Parser fields, UB metadata, effective optional callbacks and launch policy are
 bound to the qualified metadata. The host launch binary is unchanged. This
 carries the recorded hardware correctness and accepted paired-timing evidence
-forward; it is compiler-only requalification, not a new hardware run.
+forward; it repeats compiler qualification using the existing hardware evidence.
 
 The current-source build/test report is
 `validation-source12/SOURCE12-STAGE-SUMMARY.json`; the fourteen-case equivalence

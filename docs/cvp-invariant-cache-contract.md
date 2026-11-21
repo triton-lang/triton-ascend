@@ -126,5 +126,5 @@ For every cached case, both executed native artifacts match the normal-AST
 compiler proof. The verified IR contains one/three actual cached consumers as
 requested; the M256/K128/N128 case uses K chunk 64 and two pieces, filling the
 existing 32 KiB B half-bank. Maximum absolute error was approximately 3.34e-6
-for that case and 1.8e-7 for the other two. The broader history matrix also passed. The production timing results appear in section 6.1.2 of the [design](en/cvpipeline_flash_attention_design.md). The [review work copy](/home/ebraheema/dev/triton-ascend-fa-production-review-notes/compiler-review-0.6.work.md)
+for that case and 1.8e-7 for the other two. The broader history matrix also passed. The production timing results appear in section 6.1.2 of the [design](en/cvpipeline_flash_attention_design.md). The review work copy
 tracks the current results without extending an earlier pass to unfinished cases.

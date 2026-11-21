@@ -17,6 +17,7 @@ The module does not collect timings or certify the caller's evidence. The
 hardware collector, normal compiler path, full O/M checks, 64-forward stress and
 input/binary identity still need separate verification. The tests use synthetic
 samples to check these statistics; they are not measured performance results.
+
 # Aggregate hardware CSV input
 
 `op_statistic.py` selects exactly one row by physical device ID, full operator
@@ -48,8 +49,8 @@ recipe and fresh AscendC on identical seeded Q/K/V. Each block uses exactly one
 initialization and thirteen profiled-loop calls: wait1, warmup1, active10,
 skip_first1, repeat1, with synchronization and a one-second sleep after each
 call. Collection uses NPU activity only, Level1/PipeUtilization and l2_cache=False.
-One additional untimed AscendC call prepares the shared O/M reference before
-the cohort; it is explicitly recorded and never counted as a timing sample.
+One additional AscendC call prepares the shared O/M reference before the
+cohort. The collector records that call separately from the timing samples.
 
 Every timed block receives complete finite O/M and unchanged-input checks after
 the profiler exits. Its CSV must contain exactly ten operations in one exact

@@ -3652,6 +3652,9 @@ def log10(arg0: core.tensor, _semantic=None):
 
         Returns NaN for x < 0, -inf for x = 0, and +0 for x = 1.
         log10(x) = log(x) / log(10)
+
+        Delegates to log(), which rescales subnormal arguments, so log10 of a
+        subnormal returns a finite value instead of -inf.
         """
         arg0 = _semantic.to_tensor(arg0)
 
@@ -4084,7 +4087,16 @@ def log(arg0, _semantic=None):
             (core.dtype("fp32"), ): ("__hmf_log_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
     arg0 = _semantic.to_tensor(arg0)
-    return core.tensor(_semantic.builder.create_log(arg0.handle), arg0.type)
+    # Arguments in the subnormal range are flushed to zero on the vector unit,
+    # so log(1e-38) returned -inf although the true value (-87.5) is finite.
+    # Scale subnormals by 2^25 first and subtract 25*log(2); the scaling is
+    # exact and the arithmetic identity keeps the result representable.
+    is_subnormal = _semantic.logical_and(_semantic.greater_than(arg0, 0),
+                                         _semantic.less_than(arg0, 1.1754943508222875e-38))
+    scaled = _semantic.mul(arg0, 33554432.0, True)
+    scaled_log = core.tensor(_semantic.builder.create_log(scaled.handle), scaled.type)
+    adjusted = _semantic.sub(scaled_log, 17.328679513998633, True)
+    return _semantic.where(is_subnormal, adjusted, core.tensor(_semantic.builder.create_log(arg0.handle), arg0.type))
 
 
 @core.extern
@@ -4104,7 +4116,13 @@ def log2(arg0, _semantic=None):
             (core.dtype("fp32"), ): ("__hmf_log2_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
     arg0 = _semantic.to_tensor(arg0)
-    return core.tensor(_semantic.builder.create_log2(arg0.handle), arg0.type)
+    # Same subnormal flush as log(): scale by 2^25 and subtract 25 exactly.
+    is_subnormal = _semantic.logical_and(_semantic.greater_than(arg0, 0),
+                                         _semantic.less_than(arg0, 1.1754943508222875e-38))
+    scaled = _semantic.mul(arg0, 33554432.0, True)
+    scaled_log = core.tensor(_semantic.builder.create_log2(scaled.handle), scaled.type)
+    adjusted = _semantic.sub(scaled_log, 25.0, True)
+    return _semantic.where(is_subnormal, adjusted, core.tensor(_semantic.builder.create_log2(arg0.handle), arg0.type))
 
 
 @core.extern

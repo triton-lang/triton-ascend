@@ -56,3 +56,16 @@ def test_log2(param_list):
     triton_log2[ncore, 1, 1](x0, triton_res, xblock, xblock_sub)
     # 比较结果
     test_common.validate_cmp(dtype, triton_res, torch_res)
+
+
+# Subnormal arguments are flushed to zero on the vector unit, so log2 returned
+# -inf; the rescaled path keeps the finite result.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_log2_subnormal_inputs(dtype):
+    values = [1e-38, 1e-40, 1.4e-45, 1e-36]
+    x0 = torch.tensor(values, dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.log2(x0)
+    y_cal = torch.zeros_like(y_ref)
+    triton_log2[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
+    assert torch.isfinite(y_cal.cpu()).all(), f"log2 of subnormal returned non-finite: {y_cal.cpu()}"
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-6, atol=0.0)

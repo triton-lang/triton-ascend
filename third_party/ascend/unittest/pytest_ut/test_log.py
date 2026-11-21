@@ -66,3 +66,17 @@ def test_elementwsie_common(dtype, sigtype, N, NUMEL):
     triton_elementwise_unary[1, 1, 1](x0, out, N=N, NUMEL=NUMEL, debug=True)
 
     test_common.validate_cmp(sigtype, out, ans)
+
+
+# Subnormal arguments are flushed to zero on the vector unit, so log returned
+# -inf; the rescaled path keeps the finite result.
+@pytest.mark.parametrize('sigtype', ['float32'])
+def test_log_subnormal_inputs(sigtype):
+    values = [1e-38, 1e-40, 1.4e-45, 1e-36]
+    x0 = torch.tensor(values, dtype=torch.float32)
+    ans = torch.log(x0)
+    x0 = x0.npu()
+    out = torch.zeros((len(values), ), dtype=torch.float32).npu()
+    triton_elementwise_unary[1, 1, 1](x0, out, N=len(values), NUMEL=len(values))
+    assert torch.isfinite(out.cpu()).all(), f"log of subnormal returned non-finite: {out.cpu()}"
+    torch.testing.assert_close(out.cpu(), ans, rtol=1e-6, atol=0.0)

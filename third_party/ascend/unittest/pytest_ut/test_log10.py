@@ -88,3 +88,16 @@ def test_log10(shape, dtype):
         assert torch.all(torch.isinf(zero_y) & (zero_y < 0)), "Zero inputs should return -inf"
 
     print("✓ LOG10 test PASSED!")
+
+
+# Subnormal arguments are flushed to zero on the vector unit, so log10
+# returned -inf; the rescaled log keeps the finite result.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_log10_subnormal_inputs(dtype):
+    values = [1e-38, 1e-40, 1.4e-45, 1e-36]
+    x0 = torch.tensor(values, dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.log10(x0)
+    y_cal = torch.zeros_like(y_ref)
+    triton_log10[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
+    assert torch.isfinite(y_cal.cpu()).all(), f"log10 of subnormal returned non-finite: {y_cal.cpu()}"
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-6, atol=0.0)

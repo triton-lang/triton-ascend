@@ -168,6 +168,7 @@ def get_triton_ascend_patch_file():
         "lib/Dialect/Triton/IR/Traits.cpp",
         "lib/Dialect/Triton/Transforms/Combine.cpp",
         "python/src/ir.cc",
+        "python/test/unit/language/test_line_info.py",
         "python/triton/_utils.py",
         "python/triton/compiler/code_generator.py",
         "python/triton/compiler/compiler.py",

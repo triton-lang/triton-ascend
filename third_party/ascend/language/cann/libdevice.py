@@ -2697,10 +2697,22 @@ def hypot(arg0: core.tensor, arg1: core.tensor, _semantic=None):
     else:
         arg0 = _semantic.to_tensor(arg0)
         arg1 = _semantic.to_tensor(arg1)
-        x2 = _semantic.mul(arg0, arg0, True)
-        y2 = _semantic.mul(arg1, arg1, True)
-        sum_res = _semantic.add(x2, y2, True)
-        return core.tensor(_semantic.builder.create_sqrt(sum_res.handle), sum_res.type)
+        # ``sqrt(x*x + y*y)`` overflows when either square exceeds the float32
+        # range and loses everything when both operands are tiny. Rescale both
+        # by a power of two before squaring and undo it afterwards, so the
+        # intermediate sum stays representable.
+        peak = _semantic.maximum(math.abs(arg0, _semantic=_semantic), math.abs(arg1, _semantic=_semantic),
+                                 core.PropagateNan.NONE)
+        # 2^-64 for large inputs (squaring above 2^64 overflows), 2^64 for tiny
+        # ones (squaring below 2^-64 flushes to zero), 1.0 in between.
+        scale = _semantic.where(_semantic.greater_equal(peak, 1e19), 5.421010862427522e-20,
+                                _semantic.where(_semantic.less_than(peak, 1e-19), 1.8446744073709552e19, 1.0))
+        arg0_scaled = _semantic.mul(arg0, scale, True)
+        arg1_scaled = _semantic.mul(arg1, scale, True)
+        x2 = _semantic.mul(arg0_scaled, arg0_scaled, True)
+        y2 = _semantic.mul(arg1_scaled, arg1_scaled, True)
+        root = core.tensor(_semantic.builder.create_sqrt(_semantic.add(x2, y2, True).handle), x2.type)
+        return _semantic.where(_semantic.not_equal(scale, 1.0), _semantic.truediv(root, scale), root)
 
 
 @core.extern

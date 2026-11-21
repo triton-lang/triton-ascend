@@ -59,3 +59,17 @@ def test_hypot(param_list):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_hypot[ncore, 1, 1](x0, x1, y_cal, xblock, xblock_sub)
     test_common.validate_cmp(dtype, y_cal, y_ref)
+
+
+# sqrt(x*x + y*y) overflows for large operands and underflows for tiny ones.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_hypot_overflow_underflow(dtype):
+    cases = [(1e20, 1e20), (-1e20, 1e20), (1e-20, 1e-20), (1e-38, 1e-38), (3e38, 1e38), (0.0, 0.0), (1e20, 1e-20),
+             (3.0, 4.0)]
+    x = torch.tensor([c[0] for c in cases], dtype=eval("torch." + dtype)).npu()
+    y = torch.tensor([c[1] for c in cases], dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.hypot(x, y)
+    y_cal = torch.zeros_like(y_ref)
+    triton_hypot[1, 1, 1](x, y, y_cal, x.shape[0], x.shape[0])
+    assert torch.isfinite(y_cal.cpu()).all(), f"hypot overflowed: {y_cal.cpu()}"
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-6, atol=0.0)

@@ -44,6 +44,7 @@ add_triton_library(TritonToGraph
   LegacyMemoryAccess/StridedAxisCoalescing.cpp
   LegacyMemoryAccess/StridedLoadStoreRewrite.cpp
   Rules/ConvertModuloToMaskRule.cpp
+  Rules/CoalescAtomicLockRemovalRule.cpp
   Rules/ReservedGraphOptimizationRule.cpp
   Rules/DiagonalMaskRemovalRule.cpp
   Rules/IndependentAxisTensorizeRule.cpp
@@ -67,6 +68,7 @@ add_triton_library(TritonToGraph
 
   LINK_LIBS PUBLIC
   BiShengIRHACCUtils
+  MLIRAnalysis
   MLIRArithDialect
   MLIRBufferizationDialect
   MLIRControlFlowDialect

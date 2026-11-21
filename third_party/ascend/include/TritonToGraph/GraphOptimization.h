@@ -77,6 +77,7 @@ enum class GraphOptimizationRuleId : GraphOptimizationRuleMask {
   // rules stay independently gated; RFC #2686 places it in the ProgramMapping
   // phase, alongside IAT.
   QueryRowBatching = 131072,
+  CoalescAtomicLockRemoval = 262144,
 };
 
 enum class GraphOptimizationRulePhase : uint8_t {
@@ -133,6 +134,8 @@ getGraphOptimizationRuleName(GraphOptimizationRuleId rule) {
     return "SelectedBlockScanRule";
   case GraphOptimizationRuleId::QueryRowBatching:
     return "QueryRowBatchingRule";
+  case GraphOptimizationRuleId::CoalescAtomicLockRemoval:
+    return "CoalescAtomicLockRemovalRule";
   }
   return "Unknown";
 }
@@ -169,6 +172,7 @@ getGraphOptimizationRulePhase(GraphOptimizationRuleId rule) {
     return GraphOptimizationRulePhase::ContiguousBlockAccessFormation;
   case GraphOptimizationRuleId::SelectedBlockScan:
     return GraphOptimizationRulePhase::SelectedBlockScan;
+  case GraphOptimizationRuleId::CoalescAtomicLockRemoval:
   case GraphOptimizationRuleId::QueryRowBatching:
     return GraphOptimizationRulePhase::ProgramMapping;
   case GraphOptimizationRuleId::RowCoalescing:
@@ -181,7 +185,7 @@ getGraphOptimizationRulePhase(GraphOptimizationRuleId rule) {
   return GraphOptimizationRulePhase::Compatibility;
 }
 
-constexpr std::array<GraphOptimizationRuleId, 17>
+constexpr std::array<GraphOptimizationRuleId, 18>
     kGraphOptimizationRuleRegistry = {
         GraphOptimizationRuleId::LoadStoreTranspose,
         GraphOptimizationRuleId::TransposePointwiseReorder,
@@ -200,6 +204,7 @@ constexpr std::array<GraphOptimizationRuleId, 17>
         GraphOptimizationRuleId::ContiguousBlockAccessFormation,
         GraphOptimizationRuleId::SelectedBlockScan,
         GraphOptimizationRuleId::QueryRowBatching,
+        GraphOptimizationRuleId::CoalescAtomicLockRemoval,
 };
 
 constexpr bool hasUniqueSingleBitGraphOptimizationRuleIds() {
@@ -251,7 +256,9 @@ constexpr GraphOptimizationRuleMask kKnownGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::ContiguousBlockAccessFormation) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::SelectedBlockScan) |
-    getGraphOptimizationRuleMask(GraphOptimizationRuleId::QueryRowBatching);
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::QueryRowBatching) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::CoalescAtomicLockRemoval);
 
 constexpr GraphOptimizationRuleMask kDefaultEligibleGraphOptimizationRuleMask =
     kLegacyGraphOptimizationRuleMask |
@@ -276,7 +283,9 @@ constexpr GraphOptimizationRuleMask kFixedDefaultOffGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::ContiguousBlockAccessFormation) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::SelectedBlockScan) |
-    getGraphOptimizationRuleMask(GraphOptimizationRuleId::QueryRowBatching);
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::QueryRowBatching) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::CoalescAtomicLockRemoval);
 
 constexpr GraphOptimizationRuleMask kDefaultGraphOptimizationRuleMask =
     kDefaultEligibleGraphOptimizationRuleMask;

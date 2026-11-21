@@ -655,7 +655,7 @@ void init_ascend_ir(py::module &&m) {
          contract->transforms) {
       py::dict item;
       item["order"] = transform.order;
-      item["kind"] = "ceil_div";
+      item["kind"] = transform.capToFactor ? "cap" : "ceil_div";
       item["axis"] = transform.axis;
       item["factor"] = transform.factor;
       item["persistent_coverage"] = transform.persistentCoverage;

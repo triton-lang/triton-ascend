@@ -2566,10 +2566,20 @@ def asinh(arg0: core.tensor, _semantic=None):
         }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
     else:
         arg0 = _semantic.to_tensor(arg0)
-        tmp = _semantic.add(_semantic.mul(arg0, arg0, True), 1.0, True)
-        sqrt_res = core.tensor(_semantic.builder.create_sqrt(tmp.handle), tmp.type)
-        sum_res = _semantic.add(arg0, sqrt_res, True)
-        return core.tensor(_semantic.builder.create_log(sum_res.handle), sum_res.type)
+        # ``log(x + sqrt(x*x + 1))`` cancels catastrophically for |x| << 1: the
+        # sum rounds to 1 and log returns 0. Use the equivalent
+        # ``log1p(|x| + x^2 / (1 + sqrt(1 + x^2)))`` on the magnitude and copy
+        # the sign back, which keeps the leading term. Above 1e19, x*x
+        # overflows float32, so fall back to ``log|x| + log 2``.
+        x_abs = math.abs(arg0, _semantic=_semantic)
+        is_huge = _semantic.greater_equal(x_abs, 1e19)
+        x_sq = _semantic.mul(x_abs, x_abs, True)
+        root = core.tensor(_semantic.builder.create_sqrt(_semantic.add(x_sq, 1.0, True).handle), x_sq.type)
+        frac = _semantic.truediv(x_sq, _semantic.add(root, 1.0, True))
+        small = log1p(_semantic.add(x_abs, frac, True), _semantic=_semantic)
+        huge = _semantic.add(log(x_abs, _semantic=_semantic), 0.6931471805599453, True)
+        magnitude = _semantic.where(is_huge, huge, small)
+        return _semantic.where(_semantic.less_than(arg0, 0), _semantic.mul(magnitude, -1.0, True), magnitude)
 
 
 @core.builtin

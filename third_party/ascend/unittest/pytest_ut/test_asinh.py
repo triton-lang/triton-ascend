@@ -56,3 +56,53 @@ def test_asinh_special(param_list):
     y_cal = torch.zeros_like(y_ref)
     triton_asinh[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
     test_common.validate_cmp(dtype, y_cal, y_ref)
+
+
+# Tiny inputs: log(x + sqrt(x*x + 1)) cancels and used to return 0.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_asinh_tiny_inputs(dtype):
+    values = [1e-8, -1e-8, 1e-6, -1e-6, 1e-4, -1e-4, 0.0, -0.0]
+    x0 = torch.tensor(values, dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.asinh(x0)
+    y_cal = torch.zeros_like(y_ref)
+    triton_asinh[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-6, atol=0.0, equal_nan=True)
+    # The sign of a tiny input must survive, not collapse to +0.
+    assert torch.equal(torch.signbit(y_cal.cpu()), torch.signbit(y_ref.cpu()))
+
+
+# Large inputs: x*x overflows float32 above ~1.8e19.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_asinh_large_inputs(dtype):
+    values = [1e19, -1e19, 1e20, -3e38]
+    x0 = torch.tensor(values, dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.asinh(x0)
+    y_cal = torch.zeros_like(y_ref)
+    triton_asinh[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
+    assert torch.isfinite(y_cal.cpu()).all(), f"asinh overflowed: {y_cal.cpu()}"
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-6, atol=0.0)
+
+
+# Tiny inputs: log(x + sqrt(x*x + 1)) cancels and used to return 0.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_asinh_tiny_inputs(dtype):
+    values = [1e-8, -1e-8, 1e-6, -1e-6, 1e-4, -1e-4, 0.0, -0.0]
+    x0 = torch.tensor(values, dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.asinh(x0)
+    y_cal = torch.zeros_like(y_ref)
+    triton_asinh[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-6, atol=0.0, equal_nan=True)
+    # The sign of a tiny input must survive, not collapse to +0.
+    assert torch.equal(torch.signbit(y_cal.cpu()), torch.signbit(y_ref.cpu()))
+
+
+# Large inputs: x*x overflows float32 above ~1.8e19.
+@pytest.mark.parametrize('dtype', ['float32'])
+def test_asinh_large_inputs(dtype):
+    values = [1e19, -1e19, 1e20, -3e38]
+    x0 = torch.tensor(values, dtype=eval("torch." + dtype)).npu()
+    y_ref = torch.asinh(x0)
+    y_cal = torch.zeros_like(y_ref)
+    triton_asinh[1, 1, 1](x0, y_cal, x0.shape[0], x0.shape[0])
+    assert torch.isfinite(y_cal.cpu()).all(), f"asinh overflowed: {y_cal.cpu()}"
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=1e-6, atol=0.0)

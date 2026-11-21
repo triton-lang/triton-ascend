@@ -78,7 +78,7 @@ class CVTileGenerator:
     CV Tile configuration generator.
 
     Builds the search space from ``CvParseResult`` and enumerates valid
-    configurations with a BFS-style traversal.
+    configurations with a depth-first traversal.
 
     Core logic:
     1. Extract M/N/K tunable parameters from ``cv_parse_result.dot_sites``.
@@ -345,7 +345,7 @@ class CVTileGenerator:
 
     def generate_configs(self) -> List[Config]:
         """
-        Generate the full tile-config space recursively and prune afterward.
+        Generate configs, pruning each dot site once its dependencies are bound.
 
         Returns:
             List[Config]: Valid ``Config`` objects after pruning.
@@ -354,48 +354,61 @@ class CVTileGenerator:
         if not self.params:
             return []
 
-        # Step 1: generate the full Cartesian product without pruning.
-        raw_configs: List[Dict[str, int]] = []
-        self._generate_all_recursive(param_idx=0, partial={}, result=raw_configs)
+        name_to_index = {param.name: i for i, param in enumerate(self.params)}
+        # Later aliases can override a site's dimensions during normalization.
+        dimension_aliases = {
+            name
+            for name in name_to_index
+            if self.pruner.normalizer.normalize_param_name(name) in {"BLOCK_M", "BLOCK_N", "BLOCK_K"}
+        }
+        ready_sites = [[] for _ in range(len(self.params) + 1)]
+        for site in self.cv_parse_result.dot_sites:
+            dependencies = {
+                axis.tunable_param
+                for axis in (site.m, site.n, site.k)
+                if axis.tunable_param in name_to_index
+            } | dimension_aliases
+            bound_count = max((name_to_index[name] + 1 for name in dependencies), default=0)
+            ready_sites[bound_count].append(site)
+
+        suffix_counts = [1] * (len(self.params) + 1)
+        for i in range(len(self.params) - 1, -1, -1):
+            suffix_counts[i] = self.params[i].count_values() * suffix_counts[i + 1]
 
         configs = []
-        for cfg_dict in raw_configs:
-            is_valid = True
-            for site in self.cv_parse_result.dot_sites:
-                site_full_config = cfg_dict.copy()
-                for role, axis_info in [("M", site.m), ("N", site.n), ("K", site.k)]:
-                    target_key = f"standard_block_{role.lower()}"
-
-                    if target_key in site_full_config:
-                        continue
-
-                    resolved_val = None
-
-                    if axis_info.tunable_param and axis_info.tunable_param in cfg_dict:
-                        resolved_val = cfg_dict[axis_info.tunable_param]
-                    elif axis_info.const_value is not None:
-                        resolved_val = axis_info.const_value
-                    # TODO: replace this fallback with a parser-derived default.
-                    else:
-                        resolved_val = 128 if role != "K" else 64
-
-                    site_full_config[target_key] = resolved_val
-
-                should_prune, reason = self.pruner.should_prune(site_full_config, self.dtype)
-
-                if should_prune:
-                    is_valid = False
-                    self.stats['pruned'] += 1
-                    break
-            if is_valid:
-                configs.append(Config(kwargs=cfg_dict, num_warps=1, num_stages=1))
-
+        self._generate_all_recursive(0, {}, configs, ready_sites, suffix_counts)
         return configs
 
-    def _generate_all_recursive(self, param_idx: int, partial: Dict[str, int], result: List[Dict[str, int]]):
-        """Recursively enumerate all parameter combinations without pruning."""
+    def _generate_all_recursive(self, param_idx: int, partial: Dict[str, int], result: List[Config], ready_sites,
+                                suffix_counts: List[int]):
+        """Skip rejected subtrees and materialize only accepted leaf configs."""
+        for site in ready_sites[param_idx]:
+            site_full_config = partial.copy()
+            for role, axis_info in [("M", site.m), ("N", site.n), ("K", site.k)]:
+                target_key = f"standard_block_{role.lower()}"
+
+                if target_key in site_full_config:
+                    continue
+
+                resolved_val = None
+
+                if axis_info.tunable_param and axis_info.tunable_param in partial:
+                    resolved_val = partial[axis_info.tunable_param]
+                elif axis_info.const_value is not None:
+                    resolved_val = axis_info.const_value
+                # TODO: replace this fallback with a parser-derived default.
+                else:
+                    resolved_val = 128 if role != "K" else 64
+
+                site_full_config[target_key] = resolved_val
+
+            should_prune, reason = self.pruner.should_prune(site_full_config, self.dtype)
+            if should_prune:
+                self.stats['pruned'] += suffix_counts[param_idx]
+                return
+
         if param_idx >= len(self.params):
-            result.append(partial.copy())
+            result.append(Config(kwargs=partial.copy(), num_warps=1, num_stages=1))
             return
 
         param = self.params[param_idx]
@@ -403,20 +416,20 @@ class CVTileGenerator:
             value = param.min
             while value <= param.max:
                 partial[param.name] = value
-                self._generate_all_recursive(param_idx + 1, partial, result)
+                self._generate_all_recursive(param_idx + 1, partial, result, ready_sites, suffix_counts)
                 value += param.stride
             del partial[param.name]
 
         elif param.type == "ENUM":
             for value in param.values:
                 partial[param.name] = value
-                self._generate_all_recursive(param_idx + 1, partial, result)
+                self._generate_all_recursive(param_idx + 1, partial, result, ready_sites, suffix_counts)
             del partial[param.name]
 
         elif param.type == "BOOL":
             for value in [True, False]:
                 partial[param.name] = value
-                self._generate_all_recursive(param_idx + 1, partial, result)
+                self._generate_all_recursive(param_idx + 1, partial, result, ready_sites, suffix_counts)
             del partial[param.name]
 
     def estimate_search_space_size(self) -> Dict[str, int]:

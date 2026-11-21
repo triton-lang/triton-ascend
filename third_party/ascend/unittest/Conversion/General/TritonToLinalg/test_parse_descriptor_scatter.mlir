@@ -7,7 +7,7 @@
 // CHECK: %[[XOFFSET:.*]] = tensor.extract %{{.*}}[%{{.*}}] : tensor<32xi32>
 // CHECK: %[[BASE:.*]] = arith.muli %{{.*}}, %[[C128]] : index
 // CHECK: %[[ROW:.*]] = tensor.extract_slice %{{.*}}[%{{.*}}, 0] [1, 32] [1, 1] : tensor<32x32xf32> to tensor<1x32xf32>
-// CHECK: %[[VIEW:.*]] = memref.reinterpret_cast %{{.*}} to offset: [%{{.*}}], sizes: [1, 32], strides: [1, 1]
+// CHECK: %[[VIEW:.*]] = memref.reinterpret_cast %{{.*}} to offset: [%{{.*}}], sizes: [1, 32], strides: [128, 1]
 // CHECK: %[[SUBVIEW:.*]] = memref.subview %[[VIEW]]
 // CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[SUBVIEW]]
 

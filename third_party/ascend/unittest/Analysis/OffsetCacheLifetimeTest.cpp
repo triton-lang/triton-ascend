@@ -68,14 +68,16 @@ TEST(PointerBoundaryLifetime, ReleasesReplacedArguments) {
                       triton::TritonDialect>();
   auto module = parseSourceString<ModuleOp>(R"mlir(
     module {
-      tt.func @cache_lifetime(%base: !tt.ptr<i32>, %n: i32) {
+      tt.func @cache_lifetime(%base: !tt.ptr<i32>, %other: !tt.ptr<i32>, %n: i32) {
         %zero = arith.constant 0 : i32
         %one = arith.constant 1 : i32
         %p0 = tt.addptr %base, %n : !tt.ptr<i32>, i32
-        %result = scf.for %i = %zero to %n step %one
-            iter_args(%p = %p0) -> (!tt.ptr<i32>) : i32 {
+        // The cursor can carry an offset in place. The second slot switches
+        // bases, forcing the loop and its original arguments to be replaced.
+        %result:2 = scf.for %i = %zero to %n step %one
+            iter_args(%p = %p0, %q = %base) -> (!tt.ptr<i32>, !tt.ptr<i32>) : i32 {
           %next = tt.addptr %p, %one : !tt.ptr<i32>, i32
-          scf.yield %next : !tt.ptr<i32>
+          scf.yield %next, %other : !tt.ptr<i32>, !tt.ptr<i32>
         }
         tt.return
       }

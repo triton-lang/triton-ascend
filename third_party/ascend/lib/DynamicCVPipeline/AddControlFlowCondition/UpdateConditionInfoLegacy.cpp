@@ -51,6 +51,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
+#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
@@ -975,7 +976,7 @@ void UpdateConditionInfoPassLegacy::collectIntraCoreInputConditions(
 
 // Collect the conditions for intra-core producer values.
 int UpdateConditionInfoPassLegacy::collectIntraCoreOutputConditions(
-    OpBuilder &builder, Location loc,
+    ModuleOp module, OpBuilder &builder, Location loc,
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &intraCoreBuffers,
     SmallVector<int> &intraCoreOutputValues, DenseMap<int, Value> &idxToVar,
@@ -992,8 +993,13 @@ int UpdateConditionInfoPassLegacy::collectIntraCoreOutputConditions(
                         outputGroups) == UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;
   }
+  // Get intra-core buffer count from module attribute
+  BufferCountManager bcm(module);
+  int intraBufCount =
+      bcm.getBufferCountByType(BufferCountManager::DepType::IntraCore);
+
   for (auto &group : outputGroups) {
-    int size = group.outputs.size();
+    int size = intraBufCount;
     Value limitVal =
         builder.create<arith::ConstantIntOp>(loc, size, CONST_INT_TYPE);
     for (Value var : group.inputVars) {
@@ -1178,8 +1184,8 @@ int UpdateConditionInfoPassLegacy::setIntraCoreCondition(
                                   conditions, usedVarsSet, varUpdateTypes);
   // Collect the conditions for intra-core producer values.
   if (collectIntraCoreOutputConditions(
-          builder, loc, intraCoreBuffers, intraCoreOutputValues, idxToVar,
-          conditions, usedVarsSet,
+          module, builder, loc, intraCoreBuffers, intraCoreOutputValues,
+          idxToVar, conditions, usedVarsSet,
           varUpdateTypes) == UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;
   }

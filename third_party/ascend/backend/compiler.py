@@ -664,8 +664,12 @@ def get_common_bishengir_compile_options(metadata):
     bishengir_target = metadata['target'].arch
     if _is_a5_target_arch(bishengir_target):
         bishengir_target = "Ascend950"
-    bishengir_target_opt = f"--target={bishengir_target}"
-    return [bishengir_target_opt]
+    options = [f"--target={bishengir_target}"]
+    if _is_a6_target_arch(bishengir_target):
+        # AutoBlockify must use the same effective core counts as the launcher.
+        _, aic, aiv = NPUUtils().get_device_limit()
+        options.extend([f"--custom-aic-number={aic}", f"--custom-aiv-number={aiv}"])
+    return options
 
 
 @functools.lru_cache()
@@ -811,14 +815,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 
         _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
 
-        has_limit, aic, aiv = NPUUtils().get_device_limit()
-        if _is_a5_target_arch(metadata["target"].arch) or has_limit:
-            _compile_option_list += [
-                f"--custom-aic-number={aic}",
-            ]
-            _compile_option_list += [
-                f"--custom-aiv-number={aiv}",
-            ]
+        if not _is_a6_target_arch(metadata["target"].arch):
+            has_limit, aic, aiv = NPUUtils().get_device_limit()
+            if _is_a5_target_arch(metadata["target"].arch) or has_limit:
+                _compile_option_list += [f"--custom-aic-number={aic}", f"--custom-aiv-number={aiv}"]
 
         if force_disable_ffts(opt.target_arch):
             _compile_option_list += ["--disable-ffts"]
@@ -1234,6 +1234,12 @@ def _is_a5_target_arch(arch: str) -> bool:
     return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
 
 
+def _is_a6_target_arch(arch: str) -> bool:
+    from triton.backends.ascend.utils import AscendArchGen, arch_generation
+
+    return arch_generation(arch) == AscendArchGen.GEN6
+
+
 def _get_libdevice_compile_state() -> bool:
     return bool(os.getenv("TRITON_ENABLE_LIBDEVICE", False))
 
@@ -1484,6 +1490,9 @@ class NPUOptions:
     def hash(self):
         key = "_".join([f"{name}-{val}" for name, val in self.__dict__.items()])
         key = "_".join([key, get_cann_version_file_hash()])
+        if _is_a6_target_arch(self.target_arch):
+            _, aic, aiv = NPUUtils().get_device_limit()
+            key += f"_a6_aic{aic}_aiv{aiv}"
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
@@ -1576,7 +1585,7 @@ def ttir_to_npubin(mod, metadata, opt):
                 _compile_option_list += [f"--shared-mem-dynamic-size={opt.shared_mem_dynamic_size}"]
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
-            if opt.compile_on_910_95:
+            if opt.compile_on_910_95 and not _is_a6_target_arch(metadata["target"].arch):
                 has_limit, aic, aiv = NPUUtils().get_device_limit()
                 if _is_a5_target_arch(metadata["target"].arch) or has_limit:
                     _compile_option_list += [

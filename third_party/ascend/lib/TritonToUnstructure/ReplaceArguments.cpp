@@ -37,8 +37,116 @@ bool isScalarPointer(Type type) {
   return pointer && !isa<ShapedType>(pointer.getPointeeType());
 }
 
-// Use the same complete address on every SCF edge. This works for changing
-// bases and selected pointers as well as base-plus-offset recurrences.
+// PtrAnalysis can express an edge relative to the current region argument
+// (an increment) or directly to the invariant outer base (a replacement).
+// A fresh opaque base, including the outgoing pointer itself, supplies neither.
+struct ScalarPointerOffset {
+  Value offset;
+  bool fromArgument;
+};
+
+FailureOr<ScalarPointerOffset>
+getScalarEdgeOffset(OpOperand &outgoing, BlockArgument argument, Value initial,
+                    Value base, mlir::triton::ptr::PtrAnalysis &analysis) {
+  auto info = analysis.analyze(outgoing.get());
+  if (failed(info))
+    return failure();
+  if (info->base != base) {
+    if (info->base != argument)
+      return failure();
+    auto changes = analysis.analyzeChanges(outgoing.get(), argument, initial);
+    if (failed(changes) || changes->base)
+      return failure();
+  }
+  auto &builder = analysis.getBuilder();
+  builder.setInsertionPoint(outgoing.getOwner());
+  auto offset = mlir::triton::ptr::detail::materializeFullOffset(
+      info->offsets, builder.getI64Type(), builder,
+      outgoing.getOwner()->getLoc());
+  if (failed(offset))
+    return failure();
+  return ScalarPointerOffset{*offset, info->base == argument};
+}
+
+void replaceScalarEdge(BlockArgument argument, OpOperand &outgoing, Value base,
+                       ScalarPointerOffset edge, IRRewriter &rewriter) {
+  Type pointerType = argument.getType();
+  argument.setType(rewriter.getI64Type());
+  rewriter.setInsertionPointToStart(argument.getOwner());
+  auto pointer = rewriter.create<triton::AddPtrOp>(argument.getLoc(),
+                                                   pointerType, base, argument);
+  rewriter.replaceAllUsesExcept(argument, pointer.getResult(), pointer);
+  Value offset = edge.offset;
+  if (edge.fromArgument) {
+    rewriter.setInsertionPoint(outgoing.getOwner());
+    offset = rewriter.createOrFold<arith::AddIOp>(outgoing.getOwner()->getLoc(),
+                                                  argument, offset);
+  }
+  outgoing.set(offset);
+}
+
+void carryScalarPointerOffsets(LoopLikeOpInterface loop, IRRewriter &rewriter) {
+  auto whileOp = dyn_cast<scf::WhileOp>(loop.getOperation());
+  if (whileOp &&
+      !llvm::equal(whileOp.getOperandTypes(), whileOp.getResultTypes()))
+    return;
+  auto owned = loop->getAttrOfType<DenseI32ArrayAttr>(
+      controlflow::kPointerDescriptorBoundaryAttr);
+  for (unsigned i = 0; i < loop.getInits().size(); ++i) {
+    Value initial = loop.getInits()[i];
+    if (!isScalarPointer(initial.getType()) ||
+        (owned &&
+         llvm::is_contained(owned.asArrayRef(), static_cast<int32_t>(i))))
+      continue;
+    BlockArgument before = loop.getRegionIterArgs()[i];
+    BlockArgument after = whileOp ? whileOp.getAfterArguments()[i] : before;
+    OpOperand &yield = after.getOwner()->getTerminator()->getOpOperand(i);
+    OpOperand *condition =
+        whileOp ? &whileOp.getConditionOp()->getOpOperand(i + 1) : nullptr;
+    Value base, initialOffset;
+    ScalarPointerOffset backedge, forwarded;
+    {
+      mlir::triton::ptr::PtrAnalysis analysis(rewriter);
+      auto layout = analysis.analyze(initial);
+      if (failed(layout) || !layout->hasScalarBase())
+        continue;
+      base = layout->base;
+      auto next = getScalarEdgeOffset(yield, after, initial, base, analysis);
+      if (failed(next))
+        continue;
+      backedge = *next;
+      if (condition) {
+        auto exit =
+            getScalarEdgeOffset(*condition, before, initial, base, analysis);
+        if (failed(exit))
+          continue;
+        forwarded = *exit;
+      }
+      rewriter.setInsertionPoint(loop);
+      auto offset = mlir::triton::ptr::detail::materializeFullOffset(
+          layout->offsets, rewriter.getI64Type(), rewriter, loop.getLoc());
+      if (failed(offset))
+        continue;
+      initialOffset = *offset;
+    }
+    loop.getTiedLoopInit(before)->set(initialOffset);
+    if (condition)
+      replaceScalarEdge(before, *condition, base, forwarded, rewriter);
+    replaceScalarEdge(after, yield, base, backedge, rewriter);
+
+    Value result = loop->getResult(i);
+    result.setType(rewriter.getI64Type());
+    if (!result.use_empty()) {
+      rewriter.setInsertionPointAfter(loop);
+      auto pointer = rewriter.create<triton::AddPtrOp>(
+          loop.getLoc(), initial.getType(), base, result);
+      rewriter.replaceAllUsesExcept(result, pointer.getResult(), pointer);
+    }
+  }
+}
+
+// Remaining scalar pointer slots carry the complete address on every SCF edge,
+// including pointers whose base can change.
 SmallVector<Value> addressOperands(ValueRange values, IRMapping &mapping,
                                    OpBuilder &builder, Location loc) {
   SmallVector<Value> result;
@@ -336,6 +444,8 @@ LogicalResult replacePtrArguments(triton::FuncOp funcOp) {
   funcOp.walk([&](Operation *op) {
     if (!isa<scf::ForOp, scf::WhileOp, scf::IfOp>(op))
       return;
+    if (auto loop = dyn_cast<LoopLikeOpInterface>(op))
+      carryScalarPointerOffsets(loop, rewriter);
     bool needed = llvm::any_of(op->getResultTypes(), isScalarPointer);
     if (auto loop = dyn_cast<LoopLikeOpInterface>(op))
       needed |= llvm::any_of(loop.getInits(), [](Value v) {

@@ -395,6 +395,12 @@ LogicalResult PreciseDivConverter::matchAndRewrite(
 
 static bool canOverwriteRowSuffix(arith::SelectOp op, const MaskState &mask,
                                   ArrayRef<int64_t> shape) {
+  // A private fill can receive the active rows, releasing the computed
+  // tile after the copy. Prefer overwriting the computed tile only when
+  // other uses need the original fill.
+  if (op.getFalseValue().hasOneUse())
+    return false;
+
   Operation *producer = op.getTrueValue().getDefiningOp();
   auto constant = op.getFalseValue().getDefiningOp<arith::ConstantOp>();
   if (!producer || !producer->hasTrait<OpTrait::Elementwise>() ||

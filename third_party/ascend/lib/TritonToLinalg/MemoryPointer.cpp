@@ -257,7 +257,15 @@ materializeMemoryPointer(const ptr::PtrInfo &info, Value base,
     if (ShapedType::isDynamic(size))
       return failure();
     sizes.push_back(rewriter.getIndexAttr(size));
-    strides.push_back(size == 1 ? rewriter.getIndexAttr(1) : stride);
+    if (size == 1) {
+      // DMA uses the physical pitch to select a transfer for block views,
+      // even when the tile touches only one position along this axis.
+      OpFoldResult one = rewriter.getIndexAttr(1);
+      strides.push_back(info.block ? maxOpFoldResult(stride, one, loc, rewriter)
+                                   : one);
+    } else {
+      strides.push_back(stride);
+    }
   }
   if (sizes.empty()) {
     sizes.push_back(rewriter.getIndexAttr(1));

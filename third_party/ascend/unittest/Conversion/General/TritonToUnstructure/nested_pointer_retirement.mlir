@@ -5,22 +5,22 @@
 // Retired copies must not remain in the function and duplicate its stores.
 //
 // CHECK-LABEL: tt.func public @nested_pointer_retirement(
-// CHECK: %[[BASE:.*]] = tt.ptr_to_int %{{.*}} : !tt.ptr<i32> -> i64
-// CHECK: scf.for {{.*}} iter_args(%[[OUTER_ADDR:.*]] = %[[BASE]], %[[OUTER_OFFSET:.*]] = {{.*}}) -> (i64, i32)
-// CHECK: %[[OUTER_PTR:.*]] = tt.int_to_ptr %[[OUTER_ADDR]] : i64 -> !tt.ptr<i32>
-// CHECK: %[[INNER_ADDR:.*]] = tt.ptr_to_int %[[OUTER_PTR]] : !tt.ptr<i32> -> i64
-// CHECK: %[[INNER:.*]]:2 = scf.for {{.*}} iter_args(%[[ADDR:.*]] = %[[INNER_ADDR]], %[[OFFSET:.*]] = %[[OUTER_OFFSET]]) -> (i64, i32)
-// CHECK: %[[POINTER:.*]] = tt.int_to_ptr %[[ADDR]] : i64 -> !tt.ptr<i32>
+// CHECK-SAME: %[[BASE:[^:]+]]: !tt.ptr<i32>
+// CHECK-DAG: %[[ZERO:.*]] = arith.constant 0 : i64
+// CHECK-DAG: %[[ONE:.*]] = arith.constant 1 : i64
+// CHECK: scf.for {{.*}} iter_args(%[[OUTER:.*]] = %[[ZERO]], %[[OUTER_OFFSET:.*]] = {{.*}}) -> (i64, i32)
+// CHECK: %[[OUTER_PTR:.*]] = tt.addptr %[[BASE]], %[[OUTER]] : !tt.ptr<i32>, i64
+// CHECK: %[[INNER:.*]]:2 = scf.for {{.*}} iter_args(%[[CURSOR:.*]] = %[[ZERO]], %[[OFFSET:.*]] = %[[OUTER_OFFSET]]) -> (i64, i32)
+// CHECK: %[[POINTER:.*]] = tt.addptr %[[OUTER_PTR]], %[[CURSOR]] : !tt.ptr<i32>, i64
 // CHECK: tt.splat %[[OFFSET]] : i32 -> tensor<4xi32>
 // CHECK: tt.addptr {{.*}}PointerDescriptorRebuild
 // CHECK: tt.load %[[POINTER]] : !tt.ptr<i32>
 // CHECK: tt.store
-// CHECK: %[[NEXT_PTR:.*]] = tt.addptr %[[POINTER]], %{{.*}} : !tt.ptr<i32>, i32
-// CHECK: %[[NEXT_OFFSET:.*]] = arith.addi %[[OFFSET]], %{{.*}} : i32
-// CHECK: %[[NEXT_ADDR:.*]] = tt.ptr_to_int %[[NEXT_PTR]] : !tt.ptr<i32> -> i64
-// CHECK: scf.yield %[[NEXT_ADDR]], %[[NEXT_OFFSET]] : i64, i32
-// CHECK: tt.int_to_ptr %[[INNER]]#0
-// CHECK: scf.yield {{.*}}, %[[INNER]]#1 : i64, i32
+// CHECK-DAG: %[[NEXT_CURSOR:.*]] = arith.addi %[[CURSOR]], %[[ONE]] : i64
+// CHECK-DAG: %[[NEXT_OFFSET:.*]] = arith.addi %[[OFFSET]], %{{.*}} : i32
+// CHECK: scf.yield %[[NEXT_CURSOR]], %[[NEXT_OFFSET]] : i64, i32
+// CHECK: %[[TOTAL:.*]] = arith.addi %[[OUTER]], %[[INNER]]#0 : i64
+// CHECK: scf.yield %[[TOTAL]], %[[INNER]]#1 : i64, i32
 // CHECK: tt.return
 //
 // COUNT-LABEL: tt.func public @nested_pointer_retirement(

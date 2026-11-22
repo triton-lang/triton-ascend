@@ -133,8 +133,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 
 // -----
 
-// A one-row memref can use normalized stride 1 on its unit axis, but its
-// absolute origin must retain the descriptor's row stride of 4096.
+// A one-row block view retains the descriptor stride of 4096 both in its
+// absolute origin and in the memref layout consumed by DMA.
 // The existing size==1 guard must still protect the complete static store.
 // CHECK-LABEL: func.func @unit_row_keeps_descriptor_stride(
 // CHECK-SAME: %[[BASE:[^ ,]+]]: memref<?xf32>
@@ -144,7 +144,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK: %[[CLAMPED32:.*]] = arith.maxsi %[[ROW]], %[[ZERO32]] : i32
 // CHECK: %[[CLAMPED:.*]] = arith.index_cast %[[CLAMPED32]] : i32 to index
 // CHECK: %[[OFFSET:.*]] = arith.muli %[[CLAMPED]], %[[STRIDE]] : index
-// CHECK: %[[VIEW:.*]] = memref.reinterpret_cast %[[BASE]] to offset: [%[[OFFSET]]], sizes: [1, 4096]
+// CHECK: %[[VIEW:.*]] = memref.reinterpret_cast %[[BASE]] to offset: [%[[OFFSET]]], sizes: [1, 4096], strides: [4096, 1]
 // CHECK: %[[ACTIVE:.*]] = arith.cmpi eq,
 // CHECK: scf.if %[[ACTIVE]] {
 // CHECK-NOT: tensor.extract_slice
@@ -160,6 +160,30 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %data = arith.constant dense<7.0> : tensor<1x4096xf32>
     %p = tt.make_tensor_ptr %base, [%rows, %cols], [%cols, %one], [%row, %zero] {order = array<i32: 1, 0>} : <tensor<1x4096xf32>>
     tt.store %p, %data {boundaryCheck = array<i32: 0, 1>} : !tt.ptr<tensor<1x4096xf32>>
+    tt.return
+  }
+}
+
+// -----
+
+// The plane coordinate still scales by the original pitch. A positive
+// memref stride describes the same single plane even for nonpositive pitches.
+// CHECK-LABEL: func.func @unit_plane_dma_pitch(
+// CHECK-SAME: %[[Q:[^ ,]+]]: memref<?xbf16>
+// CHECK-SAME: %[[PITCH:[^ ,]+]]: i64
+// CHECK-DAG: %[[ONE:.*]] = arith.constant 1 : index
+// CHECK-DAG: %[[PITCH_IDX:.*]] = arith.index_cast %[[PITCH]] : i64 to index
+// CHECK: %[[SAFE_PITCH:.*]] = arith.maxsi %[[PITCH_IDX]], %[[ONE]] : index
+// CHECK: memref.reinterpret_cast %[[Q]] to offset: [{{.*}}], sizes: [1, 16, 128], strides: [%[[SAFE_PITCH]], 128, 1]
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @unit_plane_dma_pitch(%base: !tt.ptr<bf16>, %pitch: i64, %row: i32, %rows: i64) {
+    %zero = arith.constant 0 : i32
+    %one = arith.constant 1 : i64
+    %heads = arith.constant 16 : i64
+    %width = arith.constant 128 : i64
+    %data = arith.constant dense<2.0> : tensor<1x16x128xbf16>
+    %p = tt.make_tensor_ptr %base, [%rows, %heads, %width], [%pitch, %width, %one], [%row, %zero, %zero] {order = array<i32: 2, 1, 0>} : <tensor<1x16x128xbf16>>
+    tt.store %p, %data {boundaryCheck = array<i32: 0, 1, 2>} : !tt.ptr<tensor<1x16x128xbf16>>
     tt.return
   }
 }

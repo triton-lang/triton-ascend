@@ -28,6 +28,18 @@
 namespace mlir {
 namespace triton {
 
+/// The shape of the cross-core dependency graph of the blocks that carry a
+/// condition.
+enum class CrossCoreShape {
+  /// The graph does not hold a shape the normal preload scheme models.
+  None,
+  /// A single linear chain of computation blocks: the mla pipeline.
+  LinearChain,
+  /// Two linear chains of computation blocks that share no block and no
+  /// buffer: two independent pipelines.
+  TwoChains,
+};
+
 /// The shape of the cross-core dependency graph of a module.
 struct CrossCorePattern {
   /// The number of independent pipelines of the graph.
@@ -37,6 +49,8 @@ struct CrossCorePattern {
   /// that is a single linear chain has one entry; two blocks feeding the
   /// same block is a merge, and the merge has two entries.
   unsigned entries = 0;
+  /// The shape the graph holds.
+  CrossCoreShape shape = CrossCoreShape::None;
 };
 
 /// Analyzes the cross-core dependency graph of `module` and reports its
@@ -67,6 +81,11 @@ struct CrossCorePattern {
 ///
 /// Two chains that share a block are two views of the same pipeline and count
 /// once; the chains that share no block are independent pipelines.
+///
+/// A module that runs two pipelines at the same time holds eight cross-core
+/// blocks that carry a condition: the four blocks of each of the two chains.
+/// The chains have to be independent: they share no block, they share no
+/// buffer and no block of a chain is fed by a block of the other chain.
 CrossCorePattern analyzeCrossCorePattern(ModuleOp module,
                                          unsigned chainLength = 4);
 

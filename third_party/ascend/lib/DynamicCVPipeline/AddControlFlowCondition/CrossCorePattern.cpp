@@ -65,6 +65,13 @@ struct Edge {
   SmallVector<int> buffers;
 };
 
+// A chain of computation blocks: the blocks of the chain and the tightly
+// coupled buffers the chain carries.
+struct Chain {
+  SmallVector<unsigned> nodes;
+  SmallVector<int> buffers;
+};
+
 // Every cross-core transfer of the validated pipeline is double buffered: the
 // producer writes two tightly coupled buffers and the consumer reads them in
 // turn. A chain of `chainLength` blocks has `chainLength - 1` transfers, so it
@@ -177,18 +184,30 @@ void collectTransferBuffers(Operation *producer,
 // pipeline: every transfer of the path is double buffered and no buffer is
 // shared by two transfers of the path. `buffers` counts how many times each
 // buffer is used by the path so far.
+//
+// The search only walks the blocks of `allowed` when it is given: a chain
+// that leaves them is not a chain of the blocks that carry a condition.
 void collectChains(const llvm::SmallVector<llvm::SmallVector<Edge>> &succs,
                    unsigned node, unsigned depth, unsigned chainLength,
                    llvm::SmallVector<unsigned> &path,
                    llvm::SmallDenseMap<int, unsigned> &buffers,
-                   llvm::SmallVector<llvm::SmallVector<unsigned>> &chains) {
+                   llvm::SmallVector<Chain> &chains,
+                   const llvm::SmallDenseSet<unsigned> *allowed = nullptr) {
   if (depth == chainLength) {
-    if (buffers.size() == kBuffersPerTransfer * (chainLength - 1))
-      chains.push_back(path);
+    if (buffers.size() == kBuffersPerTransfer * (chainLength - 1)) {
+      Chain chain;
+      chain.nodes = path;
+      for (const auto &entry : buffers)
+        chain.buffers.push_back(entry.first);
+      llvm::sort(chain.buffers);
+      chains.push_back(std::move(chain));
+    }
     return;
   }
   for (const Edge &edge : succs[node]) {
     if (edge.buffers.size() != kBuffersPerTransfer)
+      continue;
+    if (allowed && !allowed->contains(edge.consumer))
       continue;
     if (llvm::is_contained(path, edge.consumer))
       continue;
@@ -196,7 +215,7 @@ void collectChains(const llvm::SmallVector<llvm::SmallVector<Edge>> &succs,
     for (int buffer : edge.buffers)
       ++buffers[buffer];
     collectChains(succs, edge.consumer, depth + 1, chainLength, path, buffers,
-                  chains);
+                  chains, allowed);
     // Drop the buffers the path does not carry any more, so that the size of
     // the map stays the number of distinct buffers of the path.
     for (int buffer : edge.buffers) {
@@ -206,6 +225,63 @@ void collectChains(const llvm::SmallVector<llvm::SmallVector<Edge>> &succs,
     }
     path.pop_back();
   }
+}
+
+// The chains of the graph that stay inside `blocks`: the chains the blocks
+// that carry a condition form.
+llvm::SmallVector<Chain>
+collectChainsOf(const llvm::SmallVector<llvm::SmallVector<Edge>> &succs,
+                const llvm::SmallDenseSet<unsigned> &blocks,
+                unsigned chainLength) {
+  llvm::SmallVector<Chain> chains;
+  for (unsigned id = 0; id < succs.size(); ++id) {
+    if (!blocks.contains(id))
+      continue;
+    llvm::SmallVector<unsigned> path{id};
+    llvm::SmallDenseMap<int, unsigned> buffers;
+    collectChains(succs, id, 1, chainLength, path, buffers, chains, &blocks);
+  }
+  return chains;
+}
+
+// Whether the chains are `count` independent pipelines of the blocks: they
+// hold every block of `blocks` once, they share no buffer and no block of a
+// chain is fed by a block of another chain.
+bool areIndependentChains(
+    const llvm::SmallVector<Chain> &chains,
+    const llvm::SmallDenseSet<unsigned> &blocks,
+    const llvm::SmallVector<llvm::SmallVector<Edge>> &succs,
+    unsigned chainLength) {
+  if (chains.size() != 2)
+    return false;
+  llvm::SmallDenseSet<unsigned> covered;
+  llvm::SmallDenseSet<int> buffers;
+  for (const Chain &chain : chains) {
+    for (unsigned node : chain.nodes) {
+      // A block that is held by two chains belongs to a single pipeline.
+      if (!covered.insert(node).second)
+        return false;
+    }
+    for (int buffer : chain.buffers) {
+      // Two pipelines that share a buffer are not independent.
+      if (!buffers.insert(buffer).second)
+        return false;
+    }
+  }
+  // Every block that carries a condition has to belong to a chain.
+  if (covered.size() != blocks.size())
+    return false;
+  // The chains have to be the only edges of the blocks: an edge that joins
+  // two chains makes them a single pipeline with a merge.
+  unsigned edges = 0;
+  for (unsigned node : blocks) {
+    for (const Edge &edge : succs[node]) {
+      if (!blocks.contains(edge.consumer))
+        continue;
+      ++edges;
+    }
+  }
+  return edges == chains.size() * (chainLength - 1);
 }
 
 // The blocks of the chains that belong to one pipeline. Two chains that share
@@ -336,17 +412,15 @@ triton::CrossCorePattern triton::analyzeCrossCorePattern(ModuleOp module,
   // for the blocks that carry a condition, so the cross core blocks of the
   // kernel that carry a condition have to be the blocks of one of the two
   // pipelines: four of them for the mla pipeline and five of them for the
-  // paged decode pipeline. A kernel that holds more of them is not a
-  // pipeline the scheme is validated on.
+  // paged decode pipeline. A kernel that runs two pipelines at the same time
+  // holds the blocks of both of them: eight of them.
   llvm::DenseSet<BlockNode> conditionedBlocks;
   collectMainLoopBlocks(module, conditionedBlocks);
-  unsigned conditionedCrossCoreBlocks = 0;
+  llvm::SmallDenseSet<unsigned> conditionedCrossCore;
   for (unsigned id : crossCoreBlocks)
     if (conditionedBlocks.contains(blockNodes[id]))
-      ++conditionedCrossCoreBlocks;
-  if (conditionedCrossCoreBlocks != chainLength &&
-      conditionedCrossCoreBlocks != chainLength + 1)
-    return pattern;
+      conditionedCrossCore.insert(id);
+  unsigned conditionedCrossCoreBlocks = conditionedCrossCore.size();
   LLVM_DEBUG({
     DBGS() << "The kernel holds " << conditionedCrossCoreBlocks
            << " cross core blocks that carry a condition\n";
@@ -356,7 +430,7 @@ triton::CrossCorePattern triton::analyzeCrossCorePattern(ModuleOp module,
   // joins two different cores, so the chain alternates the cores: it is
   // CUBE -> VECTOR -> CUBE -> VECTOR when it starts on the cube core and
   // VECTOR -> CUBE -> VECTOR -> CUBE when it starts on the vector core.
-  llvm::SmallVector<llvm::SmallVector<unsigned>> chains;
+  llvm::SmallVector<Chain> chains;
   for (unsigned id = 0; id < cores.size(); ++id) {
     if (cores[id] == CoreKind::Unknown)
       continue;
@@ -370,8 +444,8 @@ triton::CrossCorePattern triton::analyzeCrossCorePattern(ModuleOp module,
   // pipelines, one of them each.
   ChainGroups pipelines;
   for (const auto &chain : chains) {
-    for (unsigned i = 1; i < chain.size(); ++i)
-      pipelines.unite(chain[i - 1], chain[i]);
+    for (unsigned i = 1; i < chain.nodes.size(); ++i)
+      pipelines.unite(chain.nodes[i - 1], chain.nodes[i]);
   }
   pattern.pipelines = pipelines.size();
 
@@ -382,7 +456,7 @@ triton::CrossCorePattern triton::analyzeCrossCorePattern(ModuleOp module,
   // validated on.
   llvm::SmallDenseSet<unsigned> blocks;
   for (const auto &chain : chains)
-    blocks.insert(chain.begin(), chain.end());
+    blocks.insert(chain.nodes.begin(), chain.nodes.end());
   llvm::SmallDenseSet<unsigned> fed;
   for (unsigned node = 0; node < succs.size(); ++node) {
     if (!blocks.contains(node))
@@ -397,6 +471,34 @@ triton::CrossCorePattern triton::analyzeCrossCorePattern(ModuleOp module,
     DBGS() << "Found " << chains.size() << " chains of " << chainLength
            << " blocks in " << pattern.pipelines << " pipelines with "
            << pattern.entries << " entries\n";
+  });
+
+  // The shape of the graph.
+  if (conditionedCrossCoreBlocks == chainLength ||
+      conditionedCrossCoreBlocks == chainLength + 1) {
+    // A single pipeline: the mla pipeline holds four computation blocks and
+    // the paged decode pipeline five. The pipeline has to be a linear chain,
+    // so it has a single entry: two blocks feeding the same block is a
+    // merge, and the conditions of the scheme do not model a merge.
+    if (pattern.pipelines == 1 && pattern.entries == 1)
+      pattern.shape = CrossCoreShape::LinearChain;
+  } else if (conditionedCrossCoreBlocks == 2 * chainLength) {
+    // Two pipelines that run at the same time: the blocks that carry a
+    // condition are the four blocks of each of the two chains. The chains
+    // have to be independent: they share no block, they share no buffer and
+    // no block of a chain is fed by a block of the other chain.
+    llvm::SmallVector<Chain> conditionedChains =
+        collectChainsOf(succs, conditionedCrossCore, chainLength);
+    if (areIndependentChains(conditionedChains, conditionedCrossCore, succs,
+                             chainLength))
+      pattern.shape = CrossCoreShape::TwoChains;
+  }
+  LLVM_DEBUG({
+    DBGS() << "The shape of the graph is "
+           << (pattern.shape == CrossCoreShape::LinearChain ? "linear chain"
+               : pattern.shape == CrossCoreShape::TwoChains ? "two chains"
+                                                            : "unknown")
+           << "\n";
   });
   return pattern;
 }

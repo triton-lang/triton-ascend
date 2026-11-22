@@ -46,6 +46,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/Debug.h"
 #include <iterator>
 #include <memory>
@@ -101,6 +102,44 @@ static bool hasCorePairMainLoop(ModuleOp module, unsigned &count) {
     ++count;
   });
   return count == 2 && sameId;
+}
+
+// Whether the operation runs on the core `core`: the core of the scope that
+// holds it.
+static bool isOnCore(Operation *op, hivm::TCoreType core) {
+  auto scopeOp = op->getParentOfType<scope::ScopeOp>();
+  if (!scopeOp)
+    return false;
+  auto attr = scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
+  return attr && attr.getTcoretype() == core;
+}
+
+// The main loops of the module, grouped by their main loop id. The normal
+// preload scheme needs one main loop per core for every pipeline: the two
+// cores run a pipeline in lockstep, so the main loops of a pipeline carry the
+// same main loop id, one loop on each core. The number of the groups that
+// hold such a pair is returned.
+static unsigned countCorePairMainLoops(ModuleOp module) {
+  llvm::DenseMap<int64_t, llvm::SmallVector<Operation *>> groups;
+  module.walk([&](Operation *op) {
+    if (!CVPipeline::isMainLoopOp(op))
+      return;
+    auto attr = op->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
+    groups[attr ? attr.getInt() : 0].push_back(op);
+  });
+  unsigned pairs = 0;
+  for (auto &entry : groups) {
+    llvm::SmallVector<Operation *> &loops = entry.second;
+    if (loops.size() != 2)
+      continue;
+    bool firstCube = isOnCore(loops[0], hivm::TCoreType::CUBE);
+    bool firstVector = isOnCore(loops[0], hivm::TCoreType::VECTOR);
+    bool secondCube = isOnCore(loops[1], hivm::TCoreType::CUBE);
+    bool secondVector = isOnCore(loops[1], hivm::TCoreType::VECTOR);
+    if ((firstCube && secondVector) || (firstVector && secondCube))
+      ++pairs;
+  }
+  return pairs;
 }
 
 static bool isOuterVectorPayload(Operation *op) {
@@ -375,6 +414,17 @@ void AddControlFlowConditionPass::runOnOperation() {
   // pipeline. The pipeline also has to be a linear chain, so it has a single
   // entry block: two blocks feeding the same block is a merge, and the
   // conditions of the scheme do not model a merge.
+  // A kernel that runs two pipelines at the same time holds the blocks of
+  // both of them: eight cross core blocks that carry a condition. The two
+  // chains have to be independent: they share no block, they share no buffer
+  // and no block of a chain is fed by a block of the other chain. Such a
+  // kernel needs one main loop per core for each of the two pipelines: two
+  // pairs of main loops, every pair carrying the same main loop id, one loop
+  // on each core.
+  // A kernel that holds two chains but computes the conditions of a single one
+  // of them keeps the conditions of the upstream implementation as well: the
+  // graph holds more than one pipeline and the blocks that carry a condition
+  // are the blocks of one of them.
   bool blacklisted = false;
   for (auto &op : module.getOps()) {
     auto funcOp = llvm::dyn_cast<func::FuncOp>(&op);
@@ -385,17 +435,26 @@ void AddControlFlowConditionPass::runOnOperation() {
   }
   unsigned mainLoopCount = 0;
   const bool corePairMainLoop = hasCorePairMainLoop(module, mainLoopCount);
+  const unsigned mainLoopPairs = countCorePairMainLoops(module);
   const CrossCorePattern pattern = analyzeCrossCorePattern(module);
-  const bool patternMatched = pattern.pipelines == 1 && pattern.entries == 1;
+  const bool patternMatched = pattern.shape != CrossCoreShape::None;
+  // The main loops have to run the pipelines of the pattern in lockstep: one
+  // pair of main loops, one loop on each core, for every pipeline.
+  const bool mainLoopsMatched =
+      pattern.shape == CrossCoreShape::LinearChain
+          ? corePairMainLoop
+          : (pattern.shape == CrossCoreShape::TwoChains && mainLoopPairs == 2);
   const bool enableNormalPreload =
-      !blacklisted && corePairMainLoop && patternMatched;
+      !blacklisted && patternMatched && mainLoopsMatched;
   LLVM_DEBUG({
     DBGS() << "blacklisted: " << blacklisted
            << ", main loops: " << mainLoopCount
            << ", core pair main loop: " << corePairMainLoop
+           << ", main loop pairs: " << mainLoopPairs
            << ", pipelines: " << pattern.pipelines
            << ", entries: " << pattern.entries
-           << ", pattern matched: " << patternMatched << "\n";
+           << ", pattern matched: " << patternMatched
+           << ", main loops matched: " << mainLoopsMatched << "\n";
   });
   // The outer main loop scheduling feature is built on the control flow
   // scheme of the upstream implementation: its static ordinal schedule and its

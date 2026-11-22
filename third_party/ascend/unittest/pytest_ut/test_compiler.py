@@ -64,6 +64,29 @@ def test_get_libdevice_rejects_unsupported_architecture():
         compiler.get_libdevice("unknown")
 
 
+@pytest.mark.parametrize("core_limit", [(False, 64, 64), (True, 32, 32)])
+def test_a6_bishengir_receives_effective_launcher_core_counts(monkeypatch, core_limit):
+    get_device_limit = MagicMock(return_value=core_limit)
+    monkeypatch.setattr(compiler, "NPUUtils", lambda: SimpleNamespace(get_device_limit=get_device_limit))
+    arch = "Ascend960DT_968B7"
+    options = compiler.get_common_bishengir_compile_options({"target": GPUTarget("npu", arch, 32)})
+
+    _, aic, aiv = core_limit
+    assert options == [f"--target={arch}", f"--custom-aic-number={aic}", f"--custom-aiv-number={aiv}"]
+    get_device_limit.assert_called_once_with()
+
+
+def test_a6_options_hash_includes_effective_core_counts(monkeypatch):
+    get_device_limit = MagicMock(return_value=(False, 64, 64))
+    monkeypatch.setattr(compiler, "NPUUtils", lambda: SimpleNamespace(get_device_limit=get_device_limit))
+    monkeypatch.setattr(compiler, "get_cann_version_file_hash", lambda: "test-cann-version")
+    options = compiler.AscendBackend(GPUTarget("npu", "Ascend960DT_968B7", 32)).parse_options({})
+    full_device_hash = options.hash()
+    get_device_limit.return_value = (True, 32, 32)
+
+    assert options.hash() != full_device_hash
+
+
 def test_get_simt_stack_limit_default(monkeypatch):
     """Without torch_npu installed, should return default 1152."""
     monkeypatch.setitem(sys.modules, "torch_npu", None)

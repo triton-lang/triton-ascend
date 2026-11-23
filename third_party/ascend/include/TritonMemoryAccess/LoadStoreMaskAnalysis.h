@@ -29,6 +29,7 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "llvm/ADT/ArrayRef.h"
 
 #include <optional>
 #include <utility>
@@ -241,6 +242,15 @@ struct MaskDecomposition {
 MaskDecomposition decomposeAndMask(Operation *op, Value mask,
                                    const Location &loc,
                                    PatternRewriter &rewriter);
+
+// Conservatively checks whether `expr` is constant along `axis`; unknown
+// producers are treated as varying.
+bool isInvariantAlongAxis(Value expr, int64_t axis);
+
+// True when the mask has a discrete part constant along at least one axis and
+// ptr/mask describe the same tile.
+bool isAxisDiscreteMaskAccess(Operation *op, Value ptr, Value mask,
+                              PatternRewriter &rewriter);
 
 std::optional<MaskState> runMaskAnalysis(Operation *op, OpBuilder &builder);
 

@@ -1099,6 +1099,70 @@ MaskDecomposition decomposeAndMask(Operation *op, Value mask,
   return {contMask, discMask};
 }
 
+// Conservatively checks whether `expr` is constant along `axis`; unknown
+// producers are treated as varying.
+bool isInvariantAlongAxis(Value expr, int64_t axis) {
+  auto type = dyn_cast<RankedTensorType>(expr.getType());
+  if (!type)
+    return true; // scalar: uniform along every axis
+  if (axis < 0 || axis >= type.getRank())
+    return false;
+  if (type.getDimSize(axis) == 1)
+    return true;
+
+  Operation *producer = expr.getDefiningOp();
+  if (!producer)
+    return false; // block argument: unknown
+
+  // Invariant iff every operand is invariant.
+  if (isa<triton::SplatOp, arith::SelectOp, arith::AndIOp, arith::OrIOp,
+          arith::CmpIOp>(producer))
+    return llvm::all_of(producer->getOperands(), [&](Value operand) {
+      return isInvariantAlongAxis(operand, axis);
+    });
+
+  if (auto broadcast = dyn_cast<triton::BroadcastOp>(producer)) {
+    auto srcType = cast<RankedTensorType>(broadcast.getSrc().getType());
+    int64_t leading = type.getRank() - srcType.getRank();
+    if (axis < leading)
+      return true; // dimension created by the broadcast
+    return isInvariantAlongAxis(broadcast.getSrc(), axis - leading);
+  }
+  if (auto expand = dyn_cast<triton::ExpandDimsOp>(producer)) {
+    int64_t inserted = expand.getAxis();
+    if (axis == inserted)
+      return true;
+    return isInvariantAlongAxis(expand.getSrc(),
+                                axis > inserted ? axis - 1 : axis);
+  }
+  if (isa<arith::ExtSIOp>(producer))
+    return isInvariantAlongAxis(producer->getOperand(0), axis);
+  return false;
+}
+
+bool isAxisDiscreteMaskAccess(Operation *op, Value ptr, Value mask,
+                              PatternRewriter &rewriter) {
+  auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
+  auto maskType = dyn_cast<RankedTensorType>(mask.getType());
+  if (!ptrType || !maskType || ptrType.getRank() < 1)
+    return false;
+  // Keep singleton axes on the general masked-access path.
+  if (llvm::any_of(ptrType.getShape(), [](int64_t size) { return size <= 1; }))
+    return false;
+  if (maskType.getShape() != ptrType.getShape())
+    return false;
+
+  auto [contMask, discMask] =
+      decomposeAndMask(op, mask, op->getLoc(), rewriter);
+  if (!discMask)
+    return false;
+
+  for (int64_t axis = 0; axis < maskType.getRank(); ++axis)
+    if (isInvariantAlongAxis(discMask, axis))
+      return true;
+  return false;
+}
+
 std::optional<MaskState> runMaskAnalysis(Operation *op, OpBuilder &builder) {
   if (auto loadOp = dyn_cast<triton::LoadOp>(op)) {
     return runMaskAnalysisImpl(loadOp, builder);

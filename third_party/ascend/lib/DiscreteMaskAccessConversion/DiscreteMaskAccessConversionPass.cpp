@@ -24,6 +24,7 @@
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 
 #include "TritonControlFlowOpt/ControlFlowRewrite.h"
+#include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToStructured/MemOpConverter.h"
@@ -388,44 +389,6 @@ LogicalResult isDiscreteMask(Operation *op, Value mask,
   return success();
 }
 
-static bool isAxisDiscreteMask(Value mask, PatternRewriter &rewriter) {
-  if (auto andOp = mask.getDefiningOp<arith::AndIOp>()) {
-    auto isContinuousMask = [&](Value operand) {
-      MaskState mstate;
-      bool isContinuous =
-          succeeded(mstate.parse(operand, andOp.getLoc(), rewriter));
-      // Analysis can insert temporary ops even when parsing fails.
-      if (!isContinuous)
-        mstate.eraseInsertedOps(andOp, rewriter);
-      return isContinuous;
-    };
-    bool lhsIsContinuous = isContinuousMask(andOp.getLhs());
-    bool rhsIsContinuous = isContinuousMask(andOp.getRhs());
-    if (lhsIsContinuous == rhsIsContinuous)
-      return false;
-    mask = lhsIsContinuous ? andOp.getRhs() : andOp.getLhs();
-  }
-  return isa_and_nonnull<triton::BroadcastOp>(mask.getDefiningOp());
-}
-
-static bool isAxisDiscreteMaskLoad(triton::LoadOp op,
-                                   PatternRewriter &rewriter) {
-  auto ptrType = dyn_cast<RankedTensorType>(op.getPtr().getType());
-  auto maskType = dyn_cast<RankedTensorType>(op.getMask().getType());
-
-  // FIXME: Only 2D pointers and masks are currently supported. The
-  // axis-discrete mask optimization needs generalizing to other ranks.
-  if (!ptrType || !maskType || ptrType.getRank() != 2)
-    return false;
-  auto shape = ptrType.getShape();
-  // Keep singleton axes on the general masked-load path.
-  if (shape[0] <= 1 || shape[1] <= 1)
-    return false;
-  if (maskType.getShape() != shape)
-    return false;
-  return isAxisDiscreteMask(op.getMask(), rewriter);
-}
-
 struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
   using OpRewritePattern<triton::StoreOp>::OpRewritePattern;
 
@@ -533,7 +496,8 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
     bool rankWithinIndirectFastPathLimit =
         ptrType && ptrType.getShape().size() <= 5;
-    bool isAxisDiscreteMask = isAxisDiscreteMaskLoad(op, rewriter);
+    bool isAxisDiscreteMask =
+        isAxisDiscreteMaskAccess(op, op.getPtr(), op.getMask(), rewriter);
     bool canUseSimtTemplate =
         compileOn91095Flag &&
         triton::ascend::isSimtTemplateMode(compileModeFlag) &&

@@ -887,6 +887,7 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
   if (predicate != arith::CmpIPredicate::slt &&
       predicate != arith::CmpIPredicate::sle &&
       predicate != arith::CmpIPredicate::sge &&
+      predicate != arith::CmpIPredicate::sgt &&
       predicate != arith::CmpIPredicate::eq &&
       predicate != arith::CmpIPredicate::ne && !isTaggedUnsignedUpperBound) {
     LLVM_DEBUG({ llvm::dbgs() << "Unsupported cmpi predicate\n"; });
@@ -962,6 +963,17 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
       return bound;
     return subOpFoldResult(bound, lhsState.division.postScalar, loc, builder);
   };
+  if (predicate == arith::CmpIPredicate::sle ||
+      predicate == arith::CmpIPredicate::sgt) {
+    auto rhsPlusOne = addOpFoldResult(rhsState.scalar, builder.getIndexAttr(1),
+                                      loc, builder, builder.getIndexType());
+    if (!rhsPlusOne)
+      return failure();
+    rhsState.scalar = rhsPlusOne;
+    predicate = predicate == arith::CmpIPredicate::sle
+                    ? arith::CmpIPredicate::slt
+                    : arith::CmpIPredicate::sge;
+  }
   switch (predicate) {
   case arith::CmpIPredicate::slt:
   case arith::CmpIPredicate::sge: {
@@ -994,33 +1006,6 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
       this->offsets[cmpDim] = newOffset;
       this->dims[cmpDim] = clampedNewDim;
     }
-    break;
-  }
-  case arith::CmpIPredicate::sle: {
-    // lhs <= rhs  <=>  lhs < rhs + 1.
-    auto rhsPlusOne = addOpFoldResult(rhsState.scalar, builder.getIndexAttr(1),
-                                      loc, builder, builder.getIndexType());
-    if (!rhsPlusOne)
-      return failure();
-    OpFoldResult bound;
-    if (!hasDivision) {
-      bound = rhsPlusOne;
-    } else {
-      auto quotientBound = toQuotientBound(rhsPlusOne);
-      if (!quotientBound)
-        return failure();
-      bound = quotientBoundToNumeratorBound(
-          quotientBound, divisor, QuotientBoundary::Lower, loc, builder);
-    }
-    if (!bound)
-      return failure();
-
-    auto realBound = maxOpFoldResult(lhsState.start, bound, loc, builder);
-    auto newEnd = minOpFoldResult(lhsState.end, realBound, loc, builder);
-    auto newDim = subOpFoldResult(newEnd, lhsState.start, loc, builder);
-    auto clampedNewDim = clampToNonNegativeIndex(newDim, loc, builder);
-
-    this->dims[cmpDim] = clampedNewDim;
     break;
   }
   case arith::CmpIPredicate::eq: {

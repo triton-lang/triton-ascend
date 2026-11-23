@@ -101,8 +101,10 @@ def _trunc_mask_reference(offs_num, divnum, shift, pred, bound):
         mask = q <= bound
     elif pred == 2:
         mask = q >= bound
-    else:
+    elif pred == 3:
         mask = q == bound
+    else:
+        mask = q > bound
     return torch.where(mask, torch.tensor(1, dtype=torch.int32), torch.tensor(0, dtype=torch.int32))
 
 
@@ -118,113 +120,110 @@ def _assert_continuous_mask(compiled):
     assert not _has_tensor_select(compiled), compiled.asm["ttadapter"]
 
 
+def _assert_discrete_mask(compiled):
+    assert _has_tensor_select(compiled), compiled.asm["ttadapter"]
+
+
+# The bound is either a compile-time constant or loaded at runtime; the rest
+# of the expression is identical, so both variants share one kernel.
 @triton.jit
-def divsiop_negative_constant_kernel(out_ptr, offs_num: tl.constexpr, divnum: tl.constexpr, shift: tl.constexpr,
-                                     bound: tl.constexpr, pred: tl.constexpr):
+def divsiop_bound_kernel(bound_ptr, out_ptr, offs_num: tl.constexpr, divnum: tl.constexpr, shift: tl.constexpr,
+                         bound: tl.constexpr, pred: tl.constexpr, runtime_bound: tl.constexpr):
+    if runtime_bound:
+        bound_val = tl.load(bound_ptr)
+    else:
+        bound_val = bound
     offs_m = tl.arange(0, offs_num)
     q = (offs_m - shift) // divnum
     if pred == 0:
-        mask = q < bound
+        mask = q < bound_val
     elif pred == 1:
-        mask = q <= bound
+        mask = q <= bound_val
     elif pred == 2:
-        mask = q >= bound
+        mask = q >= bound_val
+    elif pred == 3:
+        mask = q == bound_val
     else:
-        mask = q == bound
+        mask = q > bound_val
     tl.store(out_ptr + offs_m, tl.where(mask, 1, 0))
 
 
-@pytest.mark.parametrize('pred,bound', [(0, -1), (0, 0), (0, 2), (1, 1), (2, 1), (3, 0), (3, -1)])
-def test_divsiop_negative_constant(pred, bound):
+@pytest.mark.parametrize('pred,bound', [
+    (0, -1), (0, 0), (0, 2),
+    (1, 1),
+    (2, 1),
+    (3, 0), (3, -1),
+    (4, -2147483648), (4, -1), (4, 0), (4, 2), (4, 2147483647),
+])
+def test_divsiop_bound_constant(pred, bound):
     offs_num, divnum, shift = 16, 4, 5
+    bound_ptr = torch.tensor([bound], dtype=torch.int32).npu()
     y_ref = _trunc_mask_reference(offs_num, divnum, shift, pred, bound).npu()
     y_cal = torch.full((offs_num, ), 2, dtype=torch.int32).npu()
-    compiled = divsiop_negative_constant_kernel[(1, )](y_cal, offs_num, divnum, shift, bound, pred)
+    compiled = divsiop_bound_kernel[(1, )](bound_ptr, y_cal, offs_num, divnum, shift, bound, pred, False)
     test_common.validate_cmp('int32', y_cal, y_ref)
     _assert_continuous_mask(compiled)
 
 
-@triton.jit
-def divsiop_negative_masked_load_kernel(x_ptr, out_ptr, offs_num: tl.constexpr, divnum: tl.constexpr,
-                                        shift: tl.constexpr, bound: tl.constexpr):
-    offs_m = tl.arange(0, offs_num)
-    q = (offs_m - shift) // divnum
-    x = tl.load(x_ptr + offs_m, mask=q < bound, other=0)
-    tl.store(out_ptr + offs_m, x)
-
-
-def test_divsiop_negative_masked_load():
-    offs_num, divnum, shift, bound = 16, 4, 5, 2
-    x = torch.arange(1, offs_num + 1, dtype=torch.int32).npu()
-    mask = _trunc_mask_reference(offs_num, divnum, shift, 0, bound).bool()
-    y_ref = torch.where(mask, x.cpu(), torch.tensor(0, dtype=torch.int32)).npu()
-    y_cal = torch.full((offs_num, ), -1, dtype=torch.int32).npu()
-    compiled = divsiop_negative_masked_load_kernel[(1, )](x, y_cal, offs_num, divnum, shift, bound)
-    test_common.validate_cmp('int32', y_cal, y_ref)
-    _assert_continuous_mask(compiled)
-
-
-@triton.jit
-def divsiop_negative_runtime_bound_kernel(nr_ptr, out_ptr, offs_num: tl.constexpr, divnum: tl.constexpr,
-                                          shift: tl.constexpr):
-    nr = tl.load(nr_ptr)
-    offs_m = tl.arange(0, offs_num)
-    q = (offs_m - shift) // divnum
-    tl.store(out_ptr + offs_m, tl.where(q < nr, 1, 0))
-
-
-@pytest.mark.parametrize('nr', [2, -1])
-def test_divsiop_negative_runtime_bound(nr):
+@pytest.mark.parametrize('bound', [2, -1])
+def test_divsiop_bound_runtime(bound):
     offs_num, divnum, shift = 16, 4, 5
-    nr_ptr = torch.tensor([nr], dtype=torch.int32).npu()
-    y_ref = _trunc_mask_reference(offs_num, divnum, shift, 0, nr).npu()
+    bound_ptr = torch.tensor([bound], dtype=torch.int32).npu()
+    y_ref = _trunc_mask_reference(offs_num, divnum, shift, 0, bound).npu()
     y_cal = torch.full((offs_num, ), 2, dtype=torch.int32).npu()
-    compiled = divsiop_negative_runtime_bound_kernel[(1, )](nr_ptr, y_cal, offs_num, divnum, shift)
+    compiled = divsiop_bound_kernel[(1, )](bound_ptr, y_cal, offs_num, divnum, shift, 0, 0, True)
     test_common.validate_cmp('int32', y_cal, y_ref)
     # The runtime bound adds a scalar quotient-edge select but the mask stays an interval.
     _assert_continuous_mask(compiled)
 
 
 @triton.jit
-def divsiop_post_division_scalar_kernel(out_ptr, offs_num: tl.constexpr, divnum: tl.constexpr, shift: tl.constexpr,
-                                        bound: tl.constexpr, post: tl.constexpr):
+def divsiop_masked_load_kernel(x_ptr, out_ptr, offs_num: tl.constexpr, divnum: tl.constexpr, shift: tl.constexpr,
+                               bound: tl.constexpr):
     offs_m = tl.arange(0, offs_num)
-    q = (offs_m - shift) // divnum - post
-    tl.store(out_ptr + offs_m, tl.where(q < bound, 1, 0))
+    q = (offs_m - shift) // divnum
+    x = tl.load(x_ptr + offs_m, mask=q < bound, other=0)
+    tl.store(out_ptr + offs_m, x)
 
 
-@pytest.mark.parametrize('post', [0, 3])
-def test_divsiop_post_division_scalar(post):
+def test_divsiop_masked_load():
     offs_num, divnum, shift, bound = 16, 4, 5, 2
-    offs = torch.arange(offs_num, dtype=torch.int32)
-    q = _trunc_div(offs - shift, divnum) - post
-    y_ref = torch.where(q < bound, torch.tensor(1, dtype=torch.int32), torch.tensor(0, dtype=torch.int32)).npu()
-    y_cal = torch.full((offs_num, ), 2, dtype=torch.int32).npu()
-    compiled = divsiop_post_division_scalar_kernel[(1, )](y_cal, offs_num, divnum, shift, bound, post)
+    x = torch.arange(1, offs_num + 1, dtype=torch.int32).npu()
+    mask = _trunc_mask_reference(offs_num, divnum, shift, 0, bound).bool()
+    y_ref = torch.where(mask, x.cpu(), torch.tensor(0, dtype=torch.int32)).npu()
+    y_cal = torch.full((offs_num, ), -1, dtype=torch.int32).npu()
+    compiled = divsiop_masked_load_kernel[(1, )](x, y_cal, offs_num, divnum, shift, bound)
     test_common.validate_cmp('int32', y_cal, y_ref)
-    # post == 0 must degenerate to the plain quotient mask; post == 3 shifts the bound.
     _assert_continuous_mask(compiled)
 
 
+# The post-division scalar is either a compile-time constant or loaded at
+# runtime; both variants share one kernel.
 @triton.jit
-def divsiop_post_division_runtime_scalar_kernel(post_ptr, out_ptr, offs_num: tl.constexpr, divnum: tl.constexpr,
-                                                shift: tl.constexpr, bound: tl.constexpr):
-    post = tl.load(post_ptr)
+def divsiop_post_division_scalar_kernel(post_ptr, out_ptr, offs_num: tl.constexpr, divnum: tl.constexpr,
+                                        shift: tl.constexpr, bound: tl.constexpr, post: tl.constexpr,
+                                        runtime_post: tl.constexpr):
+    if runtime_post:
+        post_val = tl.load(post_ptr)
+    else:
+        post_val = post
     offs_m = tl.arange(0, offs_num)
-    q = (offs_m - shift) // divnum - post
+    q = (offs_m - shift) // divnum - post_val
     tl.store(out_ptr + offs_m, tl.where(q < bound, 1, 0))
 
 
-@pytest.mark.parametrize('post', [0, 3])
-def test_divsiop_post_division_runtime_scalar(post):
+@pytest.mark.parametrize('post,runtime_post', [(0, False), (3, False), (0, True), (3, True)])
+def test_divsiop_post_division_scalar(post, runtime_post):
     offs_num, divnum, shift, bound = 16, 4, 5, 2
     post_ptr = torch.tensor([post], dtype=torch.int32).npu()
     offs = torch.arange(offs_num, dtype=torch.int32)
     q = _trunc_div(offs - shift, divnum) - post
     y_ref = torch.where(q < bound, torch.tensor(1, dtype=torch.int32), torch.tensor(0, dtype=torch.int32)).npu()
     y_cal = torch.full((offs_num, ), 2, dtype=torch.int32).npu()
-    compiled = divsiop_post_division_runtime_scalar_kernel[(1, )](post_ptr, y_cal, offs_num, divnum, shift, bound)
+    compiled = divsiop_post_division_scalar_kernel[(1, )](post_ptr, y_cal, offs_num, divnum, shift, bound, post,
+                                                          runtime_post)
     test_common.validate_cmp('int32', y_cal, y_ref)
+    # post == 0 must degenerate to the plain quotient mask; post == 3 shifts the bound.
     _assert_continuous_mask(compiled)
 
 
@@ -273,40 +272,62 @@ def test_divsiop_nested_division():
     _assert_continuous_mask(compiled)
 
 
-# #2865 shape: `c + q // num_rows < total_blocks` with runtime `c`. With
-# blocks_per_iter == 1 the quotient is uniformly 0, so the runtime scalar is
-# never added to a non-zero quotient and the mask must stay an interval.
+# Runtime scalar added to the quotient, compared with a runtime bound. Over
+# `arange(0, num_rows)`, `// num_rows` is uniformly 0, so the scalar is never
+# added to a non-zero quotient. `<`, `>=`, and `>` stay continuous.
 @triton.jit
-def divsiop_issue2865_kernel(c_ptr, total_ptr, out_ptr, num_rows: tl.constexpr):
+def divsiop_runtime_scalar_quotient_kernel(c_ptr, total_ptr, out_ptr, num_rows: tl.constexpr, pred: tl.constexpr):
     c = tl.load(c_ptr)
     total = tl.load(total_ptr)
     q = tl.arange(0, num_rows)
     b = q // num_rows
     blk = c + b
-    mask = blk < total
+    if pred == 0:
+        mask = blk < total
+    elif pred == 1:
+        mask = blk >= total
+    else:
+        mask = blk > total
     tl.store(out_ptr + tl.arange(0, num_rows), tl.where(mask, 1, 0))
 
 
-@pytest.mark.parametrize('c,total', [(0, 2), (2, 2), (2147483647, 2)])
-def test_divsiop_issue2865_prefix_continuous(c, total):
+@pytest.mark.parametrize('c,total,pred', [
+    (0, 2, 0),
+    (2, 2, 0),
+    (2147483647, 2, 0),
+    (0, 2, 1),
+    (2, 2, 1),
+    (2147483647, 2, 1),
+    (0, 2, 2),
+    (0, -1, 2),
+    (0, 2147483647, 2),
+])
+def test_divsiop_runtime_scalar_quotient(c, total, pred):
     num_rows = 4
     offs = torch.arange(num_rows, dtype=torch.int32)
     b = _trunc_div(offs, num_rows)
     blk = torch.tensor(c, dtype=torch.int32) + b
-    y_ref = torch.where(blk < total, torch.tensor(1, dtype=torch.int32), torch.tensor(0, dtype=torch.int32)).npu()
+    if pred == 0:
+        mask = blk < total
+    elif pred == 1:
+        mask = blk >= total
+    else:
+        mask = blk > total
+    y_ref = torch.where(mask, torch.tensor(1, dtype=torch.int32), torch.tensor(0, dtype=torch.int32)).npu()
     y_cal = torch.full((num_rows, ), 2, dtype=torch.int32).npu()
     c_ptr = torch.tensor([c], dtype=torch.int32).npu()
     total_ptr = torch.tensor([total], dtype=torch.int32).npu()
-    compiled = divsiop_issue2865_kernel[(1, )](c_ptr, total_ptr, y_cal, num_rows)
+    compiled = divsiop_runtime_scalar_quotient_kernel[(1, )](c_ptr, total_ptr, y_cal, num_rows, pred)
     test_common.validate_cmp('int32', y_cal, y_ref)
     _assert_continuous_mask(compiled)
 
 
-# #3043 shape: the numerator starts at `program_id * block`, so the division
-# input bounds are runtime values. The mask must still become an interval;
-# otherwise the load keeps the unbounded discrete form.
+# The numerator starts at `program_id * block`, so the division input bounds
+# are runtime values. The mask must still become an interval; otherwise the
+# load keeps the unbounded discrete form.
 @triton.jit
-def divsiop_issue3043_kernel(x_ptr, n_rows_ptr, out_ptr, start: tl.constexpr, width: tl.constexpr, block: tl.constexpr):
+def divsiop_runtime_extent_masked_load_kernel(x_ptr, n_rows_ptr, out_ptr, start: tl.constexpr, width: tl.constexpr,
+                                              block: tl.constexpr):
     pid = tl.program_id(0)
     n_rows = tl.load(n_rows_ptr)
     offs = pid * block + tl.arange(0, block)
@@ -316,7 +337,7 @@ def divsiop_issue3043_kernel(x_ptr, n_rows_ptr, out_ptr, start: tl.constexpr, wi
 
 
 @pytest.mark.parametrize('n_rows', [16, 0])
-def test_divsiop_issue3043_prefix_continuous(n_rows):
+def test_divsiop_runtime_extent_masked_load(n_rows):
     block, width, start = 16, 8, 1
     x = torch.arange(1, 64, dtype=torch.int32).npu()
     offs = torch.arange(block, dtype=torch.int32)
@@ -325,6 +346,56 @@ def test_divsiop_issue3043_prefix_continuous(n_rows):
     y_ref = torch.where(mask, x.cpu()[rows.long()], torch.tensor(0, dtype=torch.int32)).npu()
     y_cal = torch.full((block, ), 2, dtype=torch.int32).npu()
     n_rows_ptr = torch.tensor([n_rows], dtype=torch.int32).npu()
-    compiled = divsiop_issue3043_kernel[(1, )](x, n_rows_ptr, y_cal, start, width, block)
+    compiled = divsiop_runtime_extent_masked_load_kernel[(1, )](x, n_rows_ptr, y_cal, start, width, block)
     test_common.validate_cmp('int32', y_cal, y_ref)
     _assert_continuous_mask(compiled)
+
+
+# Re-dividing a quotient that has a non-zero post-division scalar is unsupported:
+# trunc((q + C) / e) cannot be folded into the cumulative divisor, so the mask
+# must fall back to the discrete path.
+@triton.jit
+def divsiop_redivide_shifted_quotient_kernel(out_ptr, offs_num: tl.constexpr, divnum: tl.constexpr, shift: tl.constexpr,
+                                             post: tl.constexpr, divnum2: tl.constexpr, bound: tl.constexpr):
+    offs_m = tl.arange(0, offs_num)
+    q = ((offs_m - shift) // divnum - post) // divnum2
+    tl.store(out_ptr + offs_m, tl.where(q < bound, 1, 0))
+
+
+def test_divsiop_redivide_shifted_quotient_falls_back():
+    offs_num, divnum, shift, post, divnum2, bound = 16, 4, 5, 1, 2, 1
+    offs = torch.arange(offs_num, dtype=torch.int32)
+    q = _trunc_div(_trunc_div(offs - shift, divnum) - post, divnum2)
+    y_ref = torch.where(q < bound, torch.tensor(1, dtype=torch.int32), torch.tensor(0, dtype=torch.int32)).npu()
+    y_cal = torch.full((offs_num, ), 2, dtype=torch.int32).npu()
+    compiled = divsiop_redivide_shifted_quotient_kernel[(1, )](y_cal, offs_num, divnum, shift, post, divnum2, bound)
+    test_common.validate_cmp('int32', y_cal, y_ref)
+    _assert_discrete_mask(compiled)
+
+
+# Negative and runtime divisors are unsupported by continuous mask analysis.
+# Both must preserve the original division semantics and use the discrete path.
+@triton.jit
+def divsiop_unsupported_divisor_kernel(div_ptr, out_ptr, offs_num: tl.constexpr, divnum: tl.constexpr,
+                                       shift: tl.constexpr, bound: tl.constexpr, runtime_divisor: tl.constexpr):
+    if runtime_divisor:
+        divisor = tl.load(div_ptr)
+    else:
+        divisor = divnum
+    offs_m = tl.arange(0, offs_num)
+    q = (offs_m - shift) // divisor
+    tl.store(out_ptr + offs_m, tl.where(q < bound, 1, 0))
+
+
+@pytest.mark.parametrize('divnum,runtime_divisor', [(-4, False), (4, True)])
+def test_divsiop_unsupported_divisor_falls_back(divnum, runtime_divisor):
+    offs_num, shift, bound = 16, 5, 2
+    div_ptr = torch.tensor([divnum], dtype=torch.int32).npu()
+    offs = torch.arange(offs_num, dtype=torch.int32)
+    q = _trunc_div(offs - shift, divnum)
+    y_ref = torch.where(q < bound, torch.tensor(1, dtype=torch.int32), torch.tensor(0, dtype=torch.int32)).npu()
+    y_cal = torch.full((offs_num, ), 2, dtype=torch.int32).npu()
+    compiled = divsiop_unsupported_divisor_kernel[(1, )](div_ptr, y_cal, offs_num, divnum, shift, bound,
+                                                         runtime_divisor)
+    test_common.validate_cmp('int32', y_cal, y_ref)
+    _assert_discrete_mask(compiled)

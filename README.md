@@ -22,6 +22,8 @@ Triton-Ascend
 
 ## 🔥 Latest News
 
+Compiler investigation: [reduction-position feedback and vector select](docs/reduction_position_feedback.md) (Chinese; evidence, implementation boundaries and validation).
+
 - [2026.10.29] Triton-Ascend 3.6.0.post2 official releases are now available
 - [2026.10.15] Triton-Ascend 3.2.2.post2 and 3.6.0 official releases are now available
 - [2026.07.31] Triton-Ascend 3.2.2 official release is now available

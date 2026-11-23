@@ -39,7 +39,23 @@ def test_fmod():
     torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
+def test_fmod_simd():
+    param_list = [(2, 256, 4), 2, 2048, 1024]
+    shape, ncore, xblock, xblock_sub = param_list
+    x0 = torch.randn(size=shape, dtype=torch.float32).npu() * 0.5
+    x1 = (torch.randn(size=shape, dtype=torch.float32) * 0.5 + 1).npu()
+
+    torch_res = torch.fmod(x0, x1)
+    triton_res = torch.empty_like(x0)
+    triton_kernel[ncore, 1, 1](x0, x1, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simd')
+
+    torch_res = torch_res.cpu()
+    triton_res = triton_res.cpu()
+    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+
+
 if __name__ == "__main__":
+    test_fmod_simd()
     if not triton_enable_libdevice_simt():
         print(_SIMT_SKIP_MSG)
     else:

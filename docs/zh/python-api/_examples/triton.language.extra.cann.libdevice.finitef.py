@@ -40,7 +40,19 @@ def test_finitef():
     torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04)
 
 
+def test_finitef_simd():
+    x0 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32)
+    expected = (torch_finitef_reference(x0)).npu()
+    x0 = x0.npu()
+    output = torch.empty(8, dtype=torch.bool, device='npu')
+    triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simd')
+    output = output.cpu()
+    expected = expected.cpu()
+    torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04)
+
+
 if __name__ == "__main__":
+    test_finitef_simd()
     if not triton_enable_libdevice_simt():
         print(_SIMT_SKIP_MSG)
     else:

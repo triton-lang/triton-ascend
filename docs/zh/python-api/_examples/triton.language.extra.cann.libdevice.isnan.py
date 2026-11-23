@@ -40,7 +40,25 @@ def test_isnan():
     torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04)
 
 
+def test_isnan_simd():
+    param_list = [(2, 256, 4), 2, 2048, 1024]
+    shape, ncore, xblock, xblock_sub = param_list
+    x0 = torch.randn(size=shape, dtype=torch.float32)
+    x0.view(-1)[0] = float("nan")
+    x0.view(-1)[1] = float("inf")
+    x0 = x0.npu()
+
+    torch_res = torch.isnan(x0).to(torch.int32)
+    triton_res = torch.empty(shape, dtype=torch.int32, device='npu')
+    triton_kernel[ncore, 1, 1](x0, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simd')
+
+    torch_res = torch_res.cpu()
+    triton_res = triton_res.cpu()
+    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04)
+
+
 if __name__ == "__main__":
+    test_isnan_simd()
     if not triton_enable_libdevice_simt():
         print(_SIMT_SKIP_MSG)
     else:

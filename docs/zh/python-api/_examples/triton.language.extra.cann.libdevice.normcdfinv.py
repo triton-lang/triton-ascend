@@ -41,7 +41,19 @@ def test_normcdfinv():
     torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
+def test_normcdfinv_simd():
+    x0 = (torch.rand((8, )) * 0.9 + 0.05).to(torch.float32)
+    expected = (torch_normcdfinv_reference(x0)).npu()
+    x0 = x0.npu()
+    output = torch.empty(8, dtype=torch.float32, device='npu')
+    triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simd')
+    output = output.cpu()
+    expected = expected.cpu()
+    torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04, equal_nan=True)
+
+
 if __name__ == "__main__":
+    test_normcdfinv_simd()
     if not triton_enable_libdevice_simt():
         print(_SIMT_SKIP_MSG)
     else:

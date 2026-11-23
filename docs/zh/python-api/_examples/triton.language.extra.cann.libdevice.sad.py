@@ -52,7 +52,23 @@ def test_sad():
     torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04)
 
 
+def test_sad_simd():
+    x0 = (torch.randint(1, 16, (8, ))).to(torch.int32)
+    x1 = (torch.randint(1, 16, (8, ))).to(torch.int32)
+    x2 = (torch.randint(1, 16, (8, ))).to(torch.uint32)
+    expected = (torch_sad_reference(x0, x1, x2)).npu()
+    x0 = x0.npu()
+    x1 = x1.npu()
+    x2 = x2.npu()
+    output = torch.empty(8, dtype=torch.int32, device='npu')
+    triton_kernel[(1, )](x0, x1, x2, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simd')
+    output = output.cpu()
+    expected = expected.cpu()
+    torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04)
+
+
 if __name__ == "__main__":
+    test_sad_simd()
     if not triton_enable_libdevice_simt():
         print(_SIMT_SKIP_MSG)
     else:

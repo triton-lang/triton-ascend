@@ -49,7 +49,25 @@ def test_ldexp():
     torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
+def test_ldexp_simd():
+    shape = (2, 256)
+    ncore, xblock, xblock_sub = 2, 1024, 512
+    x0 = torch.randn(size=shape, dtype=torch.float32)
+    x1 = torch.randint(-126, 128, size=shape, dtype=torch.int32)
+    torch_res = torch_ldexp_reference(x0, x1)
+    x0 = x0.npu()
+    x1 = x1.npu()
+
+    triton_res = torch.empty_like(x0)
+    triton_ldexp[ncore, 1, 1](x0, x1, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simd')
+
+    torch_res = torch_res.cpu()
+    triton_res = triton_res.cpu()
+    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+
+
 if __name__ == "__main__":
+    test_ldexp_simd()
     if not triton_enable_libdevice_simt():
         print(_SIMT_SKIP_MSG)
     else:

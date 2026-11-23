@@ -650,7 +650,9 @@ struct HardwareProfile {
   ScopeHandoffCost scopeHandoff;
   /// A calibrated reduction envelope is measured with its inputs already in
   /// place; the feeding tile can explain at most this fraction of it.
-  double reductionResidentTileMaxFraction = 1.0;
+  /// 0.0 disables the credit and keeps the historical behaviour; the 950PR
+  /// v154 profile opts in with 0.6.
+  double reductionResidentTileMaxFraction = 0.0;
 
   bool isValid() const;
 };

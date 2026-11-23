@@ -382,9 +382,9 @@ struct KernelTimingProfile {
   /// keeps the historical behaviour (no stage-count condition).
   int64_t completionInclusiveMinimumStageCount = 0;
   /// A calibrated reduction envelope is measured with its inputs already in
-  /// place, so the feeding tile can explain only this fraction of it.  1.0
-  /// keeps the historical uncapped credit.
-  double reductionResidentTileMaxFraction = 1.0;
+  /// place, so the feeding tile can explain only this fraction of it.  0.0
+  /// keeps the historical behaviour (no credit); v154 opts in with 0.6.
+  double reductionResidentTileMaxFraction = 0.0;
   std::map<int64_t, double> boundaryResidualSystemCyclesByPhysicalProgramCount;
   std::map<std::string, std::map<int64_t, std::map<int64_t, double>>>
       boundaryResidualSystemCyclesByRouteFactorAndPhysicalProgramCount;

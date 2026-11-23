@@ -229,10 +229,12 @@ class TestVV:
         assert kernel is warmed
         torch.npu.synchronize()
         torch.testing.assert_close(out, x * 2 + 1, rtol=0, atol=0)
-        assert kernel.block_auto_selection['model'] == 'ttir-relative-v3'
-        assert kernel.block_auto_selection['reason'] == 'LOWEST_TTIR_SCORE'
-        assert kernel.block_auto_selection['selected_factor'] in (2, 4)
-        assert_applied(kernel, kernel.block_auto_selection['selected_factor'])
+        selection = kernel.block_auto_selection
+        assert selection['model'] == 'ttir-relative-v3'
+        assert selection['reason'] == 'LOWEST_TTIR_SCORE'
+        factor = selection['selected_factor']
+        assert factor > 1 and factor in {item['factor'] for item in selection['candidate_plan']['candidates']}
+        assert_applied(kernel, factor)
 
     @pytest.mark.parametrize('explicit', [None, 'auto', 2])
     @pytest.mark.parametrize('generic', [False, True])

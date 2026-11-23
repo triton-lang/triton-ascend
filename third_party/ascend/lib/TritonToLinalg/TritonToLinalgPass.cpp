@@ -31,7 +31,7 @@
 #include "ascend/include/TritonToLinalg/CanonicalizeDebugLocationsPass.h"
 #include "ascend/include/TritonToLinalg/DeduplicateDebugNopsPass.h"
 #include "ascend/include/TritonToLinalg/DescriptorConverter.h"
-#include "ascend/include/TritonToLinalg/DevicePrintOffsetRewrite.h"
+#include "ascend/include/TritonToLinalg/DevicePrintRewrite.h"
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
@@ -55,6 +55,7 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -1602,57 +1603,56 @@ void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
       patterns.getContext());
   patterns.add<LoadStoreConverter::AtomicMaxMinCanonicalizer>(
       patterns.getContext());
-  patterns.add<
-      TTOpConverters::ScalarMathCanonicalizer<math::AbsFOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AcosOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AcoshOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AsinOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AsinhOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AtanOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::Atan2Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::AtanhOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::CeilOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::CosOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::CoshOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::ErfOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::ExpOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::Exp2Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::ExpM1Op>,
-      TTOpConverters::ScalarMathCanonicalizer<math::FloorOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::FmaOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::LogOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::Log10Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::Log1pOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::Log2Op>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::PowFOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::RoundOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::RsqrtOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::SinOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::SinhOp>,
-      TTOpConverters::ScalarMathCanonicalizer<math::SqrtOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::TanOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::TanhOp>,
-      // TTOpConverters::ScalarMathCanonicalizer<math::TruncOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::AddFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::SubFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<
-          arith::
-              MulFOp>, // TTOpConverters::ScalarMathCanonicalizer<arith::DivFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::NegFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::RemFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MaxNumFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MaximumFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MinNumFOp>,
-      TTOpConverters::ScalarMathCanonicalizer<arith::MinimumFOp>
-      // By test, the following ops do not need canonicalization.
-      // TTOpConverters::ScalarMathCanonicalizer<arith::CmpFOp>
-      // TTOpConverters::ScalarMathCanonicalizer<arith::ExtFOp>
-      // TTOpConverters::ScalarMathCanonicalizer<arith::TruncFOp>
-      >(patterns.getContext());
+  patterns.add<TTOpConverters::ScalarMathCanonicalizer<math::AbsFOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AcosOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AcoshOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AsinOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AsinhOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AtanOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::Atan2Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::AtanhOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::CeilOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::CosOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::CoshOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::ErfOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::ExpOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::Exp2Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::ExpM1Op>,
+               TTOpConverters::ScalarMathCanonicalizer<math::FloorOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::FmaOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::LogOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::Log10Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::Log1pOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::Log2Op>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::PowFOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::RoundOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::RsqrtOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::SinOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::SinhOp>,
+               TTOpConverters::ScalarMathCanonicalizer<math::SqrtOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::TanOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::TanhOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<math::TruncOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::AddFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::SubFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MulFOp>,
+               // TTOpConverters::ScalarMathCanonicalizer<arith::DivFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::NegFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::RemFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MaxNumFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MaximumFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MinNumFOp>,
+               TTOpConverters::ScalarMathCanonicalizer<arith::MinimumFOp>
+               // By test, the following ops do not need canonicalization.
+               // TTOpConverters::ScalarMathCanonicalizer<arith::CmpFOp>
+               // TTOpConverters::ScalarMathCanonicalizer<arith::ExtFOp>
+               // TTOpConverters::ScalarMathCanonicalizer<arith::TruncFOp>
+               >(patterns.getContext());
   patterns.add<TTOpConverters::ReduceSingleCanonicalizer>(
       patterns.getContext());
   if (this->enableSelectAnalysis) {
-    patterns.add<TTOpConverters::SelectCanonicalizer>(patterns.getContext());
+    patterns.add<TTOpConverters::SelectCanonicalizer>(patterns.getContext(),
+                                                      this->compileOn91095);
   }
 }
 
@@ -1913,6 +1913,22 @@ void TritonToLinalgPass::runOnOperation() {
 
   auto moduleOp = getOperation();
 
+  // Remember whether the input carries concrete source locations before
+  // conversion creates helper operations with synthetic NameLocs. If Triton
+  // intentionally omitted file/line/column information
+  // (TRITON_DISABLE_LINE_INFO), there is no source location to recover at the
+  // end of this pass.
+  bool inputHasSourceLocation = false;
+  if (!triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO")) {
+    moduleOp.walk([&](Operation *op) {
+      if (op->getLoc()->findInstanceOf<FileLineColLoc>()) {
+        inputHasSourceLocation = true;
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+  }
+
   // Validate the CFO handoff before any rewrite can erase malformed metadata.
   if (failed(validatePointerDescriptorHandoffMetadata(moduleOp))) {
     moduleOp->emitError("invalid pointer descriptor handoff metadata");
@@ -1924,6 +1940,11 @@ void TritonToLinalgPass::runOnOperation() {
   // provenance is opaque there. Inline them first, before any rewrite starts
   // depending on the call ABI.
   inlinePointerCarryingCallees(moduleOp);
+
+  if (failed(triton::prepareDevicePrintOperands(moduleOp))) {
+    signalPassFailure();
+    return;
+  }
 
   // CUBE requirements affect normalization itself. SIMT requirements must also
   // account for indirect accesses introduced by that normalization.
@@ -1964,6 +1985,9 @@ void TritonToLinalgPass::runOnOperation() {
     signalPassFailure();
     return;
   }
+  // Without input source locations, there is nothing useful to recover.
+  if (inputHasSourceLocation)
+    repairUnknownLocations(moduleOp);
 }
 
 // Initialize the existing target flags before any target-dependent analysis.
@@ -2169,7 +2193,7 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
     this->convertTTFunc(func, hasCubeOps, hasSimtOps);
   });
 
-  rewriteDevicePrintOffsets(moduleOp);
+  triton::postprocessDevicePrints(moduleOp);
 
   // Clean up dead code and simplify IR.
   PassManager pm(&getContext(), moduleOp.getOperationName());
@@ -2179,6 +2203,7 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
     signalPassFailure();
   }
 
+  optimizeDiscreteDeinterleavedLoads(moduleOp);
   specializeFullRowCopies(moduleOp);
 
   // 10. Collapses call-site locations whose callee is an inlined Triton stdlib
@@ -2208,7 +2233,6 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
 
   optimizeInterleavedStores(moduleOp);
   addRuntimeWorkspaceArguments(moduleOp);
-  repairUnknownLocations(moduleOp);
   return success();
 }
 

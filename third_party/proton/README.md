@@ -144,7 +144,7 @@ proton.start(
 **Kernel-side usage:**
 
 **Caution**: For DSL level instrumentation, **only Gluon** semantic is enabled by default.
-Instrumenting kernels written in Triton DSL is disable because Triton's higher-level IR undergoes
+Instrumenting kernels written in Triton DSL is disabled because Triton's higher-level IR undergoes
 aggressive compiler rewrites (loop pipelining, instruction re-ordering, IR duplication, etc.).
 These transformations can invalidate naïve instrumentation and lead to misleading results.
 To enable instrumentation for Triton DSL, call `pl.enable_semantic("triton")` before `proton.start`.

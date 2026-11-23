@@ -41,6 +41,7 @@
 #include "mlir/AsmParser/AsmParser.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -601,6 +602,22 @@ void init_ascend_ir(py::module &&m) {
       return py::none();
     }
     return py::cast(ret.getInt());
+  });
+  m.def("get_kernel_profile_metadata", [](ModuleOp mod) {
+    py::dict attrs;
+    for (auto func : mod.getOps<func::FuncOp>()) {
+      if (!func->hasAttr("global_kernel"))
+        continue;
+      for (const char *name :
+           {"profile_scratch_size", "profile_scratch_align",
+            "profile_num_units", "profile_sections_per_block",
+            "profile_sample_every_n"}) {
+        if (auto attr = func->getAttrOfType<IntegerAttr>(name))
+          attrs[name] = attr.getInt();
+      }
+      break;
+    }
+    return attrs;
   });
   m.def("get_program_grid_transforms", [](OpState &op) -> py::object {
     Attribute attribute =
@@ -1404,7 +1421,18 @@ void init_ascend_ir(py::module &&m) {
              ValueRange inputs{ins};
              ValueRange outputs{outs};
              ValueRange temp_buffers{};
-             TypeRange res_types{outputs};
+             // An out that is already a buffer is written in place, so a result
+             // would only hand back that same buffer. Keeping it makes the
+             // library call return a memref, which reaches the template as an
+             // sret pointer ahead of the real arguments and shifts every one of
+             // them by a position. Tensor outs still need the result;
+             // bufferization folds it away later.
+             const bool bufferSemantics =
+                 !outs.empty() && llvm::all_of(outs, [](Value v) {
+                   return isa<MemRefType>(v.getType());
+                 });
+             TypeRange res_types =
+                 bufferSemantics ? TypeRange{} : TypeRange{outputs};
              auto op = self.create<hivm::CustomOp>(res_types, name, inputs,
                                                    outputs, temp_buffers);
              for (auto &attr : attrs) {

@@ -22,6 +22,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/SplittedIfWrapSsbufIf.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -291,8 +292,7 @@ static void moveDefChainBefore(Value cond, Operation *fromAnchor,
   }
 }
 
-// Create newIfOp on splittedIf's condition, move ssbufIf into its then, and
-// pack ssbufIf's condition there.
+// Create newIfOp on splittedIf's condition and move ssbufIf into its then.
 static void wrapSsbufIf(scf::IfOp ssbufIf, scf::IfOp splittedIf,
                         scf::IfOp &newIfOp) {
   Location loc = ssbufIf.getLoc();
@@ -311,7 +311,17 @@ static void wrapSsbufIf(scf::IfOp ssbufIf, scf::IfOp splittedIf,
   } else {
     ssbufIf->moveBefore(thenBlock, thenBlock->end());
   }
+}
 
+// Pack ssbufIf's condition there, next to the ssbufIf.
+//
+// The def-chain of the condition is moved inside the wrapper, next to the
+// ssbufIf. The ops that are used outside of the wrapper, e.g. the flag of the
+// loop that the else block of the wrapper yields, have to stay where they
+// are: opHasOnlyLocalUses checks that, so the else block of the wrapper must
+// be filled before the def-chain is moved.
+static void packSsbufIfCondition(scf::IfOp ssbufIf, scf::IfOp splittedIf,
+                                 scf::IfOp newIfOp) {
   DenseSet<Operation *> splitCondOps;
   collectConditionDefOpsBefore(splittedIf.getCondition(),
                                newIfOp.getOperation(), splitCondOps);
@@ -387,6 +397,12 @@ static int splittedIfWrapSsbufIf(scf::IfOp ssbufIf, scf::IfOp splittedIf,
                      elsePassthrough, loc) != WRAP_SSBUF_IF_SUCCESS) {
     return WRAP_SSBUF_IF_FAILED;
   }
+
+  // The condition is packed once the else block is filled: the else block
+  // yields the flag of the loop, the flag must not be moved inside the
+  // wrapper.
+  packSsbufIfCondition(ssbufIf, splittedIf, newIfOp);
+
   unwrapSplittedIf(splittedIf);
   Block *thenBlock = newIfOp.thenBlock();
   if (thenBlock->mightHaveTerminator()) {
@@ -469,6 +485,14 @@ static bool checkCanWrap(
     if (!isMainLoopOp(loopOp)) {
       return WalkResult::advance();
     }
+    if (isa<scf::WhileOp>(loopOp)) {
+      return WalkResult::skip();
+    }
+    // An inactive phase is still one logical event. Every block must execute
+    // its normal ready/credit protocol and advance its private state once;
+    // hoisting the payload guard would bypass that protocol for empty phases.
+    if (loopOp->hasAttr(kOuterEventControlCount))
+      return WalkResult::skip();
     // ssbuffer.if sits directly in the main loop body. for uses getBody();
     // while uses the after body. Nested ifs are not ops of this block.
     Block *body = MainLoop(loopOp).getBody();

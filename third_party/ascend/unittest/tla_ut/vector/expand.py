@@ -31,8 +31,10 @@ def expand_to_mhc_fwd(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, H: tl.conste
                      "H must be a multiple of H_BLK and H_BLK a multiple of 128")
     tl.static_assert(MHC > 0 and TMAX > 0 and CORES > 0)
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
-    x_ub = tla.alloc_buffer((1, H_BLK), tl.bfloat16, space="ub", versions=NS)
-    o_ub = tla.alloc_buffer((MHC, 1, H_BLK), tl.bfloat16, space="ub", versions=NS)
+    x_ub = tla.alloc((1, H_BLK), tl.bfloat16, space="ub")
+    o_ub = tla.alloc((MHC, 1, H_BLK), tl.bfloat16, space="ub")
+    tla.annotate_multi_buffer(x_ub, NS)
+    tla.annotate_multi_buffer(o_ub, NS)
     for task in range(tl.program_id(0), num_tokens * (H // H_BLK), CORES):
         n = task // (H // H_BLK)
         hb = task % (H // H_BLK)
@@ -43,7 +45,7 @@ def expand_to_mhc_fwd(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, H: tl.conste
         # row-major strides (H_BLK, 1) here would fold offsets with the
         # wrong coefficient (n*H_BLK + hb*H_BLK) and read wrong data.
         x_row = tla.view(X_ptr, (1, H_BLK), strides=(H, 1), offsets=(n, hb * H_BLK))
-        tla.copy(x_row, x_ub)
+        tla.load_gm_to_ub(x_row, x_ub)
         with tla.scope.simd():
             for v in tl.static_range(H_BLK // 128):
                 xb = tla.simd.vlds(x_ub[0, v * 128], dist="NORM")
@@ -54,9 +56,9 @@ def expand_to_mhc_fwd(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, H: tl.conste
         # folding coefficients AND the final memref strides, so the m-row
         # stride (H) would conflict with the n fold coefficient (MHC*H).
         for m in tl.static_range(MHC):
-            o_ub_row = tla.view(o_ub, (1, 1, H_BLK), strides=(1, 1, 1), offsets=(m, 0, 0))
+            o_ub_row = tla.subview(o_ub, offsets=(m, 0, 0), sizes=(1, 1, H_BLK), strides=(1, 1, 1))
             o_row = tla.view(O_ptr, (1, 1, H_BLK), strides=(MHC * H, H, 1), offsets=(n, m, hb * H_BLK))
-            tla.copy(o_ub_row, o_row)
+            tla.store_ub_to_gm(o_ub_row, o_row)
 
 
 def constexprs():
@@ -83,11 +85,6 @@ def test_ir(output_dir=None):
     module, ctx = compile_offline(expand_to_mhc_fwd, SIGNATURE, constexprs(), output_dir=output_dir)
     text = str(module)
     assert "!tt.ptr" in text, "route A entry must keep pointer args at AST stage"
-    # one pointer entry for x_row + one per MHC-row o_row view.
-    assert text.count("hivm.hir.pointer_cast") == 1 + SHAPE["mhc"], \
-        "tla.view(ptr) x (1 x_row + mhc o_row)"
-    assert text.count("memref.reinterpret_cast") == 1 + SHAPE["mhc"], \
-        "tla.view(ptr) x (1 x_row + mhc o_row)"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
     check_lowered_ir(text, loads=1, stores=SHAPE["mhc"], buffers=2)

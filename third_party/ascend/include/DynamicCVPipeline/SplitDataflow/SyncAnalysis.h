@@ -30,6 +30,7 @@ namespace triton {
 
 void analyzeDepLoopInfo(ModuleOp module, DependencyInfo &dep);
 void analyzeSyncReuse(DataDependencyInfo &info, ModuleOp module);
+void analyzeRedundantEdges(DataDependencyInfo &info, ModuleOp module);
 
 } // namespace triton
 } // namespace mlir

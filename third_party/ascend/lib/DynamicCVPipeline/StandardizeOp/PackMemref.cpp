@@ -21,7 +21,10 @@
  */
 
 #include <memory>
+#include <utility>
+#include <variant>
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
@@ -100,28 +103,31 @@ static void packAllCustomOpUnits(ModuleOp moduleOp) {
 /// carrying the analysed core type.
 static void packCustomOpUnit(hivm::CustomOp customOp) {
   auto anaRes = CustomOpAnalysis::get(customOp);
-  if (llvm::failed(anaRes)) {
-    LDBG("warning: failed to analyze " << customOp);
-    return;
-  }
-  auto &ana = anaRes.value();
-  LDBG("packing " << ana.customOp);
+  auto [opToMark, coreType] = std::visit(
+      llvm::makeVisitor(
+          [&customOp](CoreType ct) -> std::pair<Operation *, CoreType> {
+            return std::make_pair(customOp, ct);
+          },
+          [](CustomOpAnalysis ana) -> std::pair<Operation *, CoreType> {
+            LDBG("packing " << ana.customOp);
 
-  auto scopeOp = packScopeOp(ana.relevantOps);
-  if (!scopeOp) {
-    // Leaving the custom op unpacked is safe: its buffers keep the raw
-    // `bufferization.to_tensor` chain that
-    // OpClassifierPass::matchToTensorPattern already recognises.
-    LDBG("failed to pack scope: " << customOp << "; fallback to default");
-    return;
-  }
-  // Stamping is not a hint: OpClassifierPass treats any `ssbuffer.core_type` as
-  // authoritative and never re-colours it, so an undetermined core type must be
-  // left off for the op to be classified by its data flow.
-  if (ana.coreType != UNDETERMINED) {
-    scopeOp->setAttr(
-        kCoreType,
-        StringAttr::get(scopeOp->getContext(), coreTypeToString(ana.coreType)));
+            auto scopeOp = packScopeOp(ana.relevantOps);
+            if (!scopeOp) {
+              // Leaving the custom op unpacked is safe: its buffers keep the
+              // raw `bufferization.to_tensor` chain that
+              // OpClassifierPass::matchToTensorPattern already recognises.
+              LDBG("failed to pack scope: " << ana.customOp
+                                            << "; fallback to default");
+              return std::make_pair(ana.customOp, ana.coreType);
+            }
+
+            return std::make_pair(scopeOp, ana.coreType);
+          }),
+      anaRes);
+
+  if (coreType != UNDETERMINED) {
+    opToMark->setAttr(kCoreType, StringAttr::get(opToMark->getContext(),
+                                                 coreTypeToString(coreType)));
   }
 }
 

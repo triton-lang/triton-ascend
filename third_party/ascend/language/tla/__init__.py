@@ -24,11 +24,12 @@ Independent ``tla.*`` programming namespace for Ascend NPU kernels, migrated
 from the TLA repo's SIMD VF additions.  It does **not** reuse the existing
 ``al``/``bl`` general interfaces (different programming paradigm).
 
-Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
-``copy`` (GM<->buffer), ``view`` (GM view), ``scope`` (core-mode scopes:
+Exports: ``alloc`` (on-chip buffer),
+``fill`` (scalar fill of a contiguous UB buffer),
+explicit DMA routes, ``view`` (GM view), ``scope`` (core-mode scopes:
 ``tla.scope.simd()`` / ``tla.scope.cube()``),
 ``simd`` (vector-register ops), ``where`` (eager scalar/SIMD select),
-``annotate_buffer_versions``, and scalar dtypes.
+``annotate_multi_buffer``, and scalar dtypes.
 
 Scalar types share Triton's dtype protocol, so ``tla.float32`` can be passed
 directly to buffer, vector, and cast APIs.  The re-exported names map to the
@@ -66,13 +67,14 @@ from triton.language.core import (
     uint64,
 )
 
-from .core import buffer, buffer_type, vector, vector_type
-from .scope import scope
-from .alloc import alloc_buffer, alloc
-from .copy import copy
+from ._decorator import experimental
+from .core import AddressSpace, buffer, buffer_type, vector, vector_type
+from .scope import pipeline, scope
+from .alloc import alloc
+from .fill import fill
 from .dma import (
     PadMode,
-    EvictionPolicy,
+    L2CachePolicy,
     AtomicKind,
     UnitFlagMode,
     FixpipeDMAMode,
@@ -81,7 +83,6 @@ from .dma import (
     FixpipePreQuantMode,
     FixpipePreReluMode,
     LoadGM2UBParams,
-    StoreUB2GMParams,
     LoadGM2L1Params,
     CopyUB2L1Params,
     CopyL12UBParams,
@@ -94,6 +95,7 @@ from .dma import (
     load_gm_to_ub,
     store_ub_to_gm,
     load_gm_to_l1,
+    load_gm_to_l1_mx_scale,
     copy_ub_to_l1,
     copy_l1_to_ub,
     copy_l1_to_bt,
@@ -103,10 +105,12 @@ from .dma import (
     copy_l0c_to_ub,
     copy_l0c_to_l1,
     set_ctrl,
+    set_atomic,
 )
 
 from .view import view, subview, reshape
-from .aux_ops import annotate_buffer_versions, assume
+from .scalar import select, abs, maximum, minimum, cast, max_value, cdiv, infinity, clamp
+from .aux_ops import annotate_multi_buffer, assume
 
 from . import math
 from .math import compensated_rstd, truncmod, sqrt
@@ -119,20 +123,28 @@ from . import simd
 # Scalar / SIMD-register selection (eager, unlike TileLang T.if_then_else).
 from .selection import where
 
-# Cube-core ops (``mmad``/``tla.copy`` L1/L0C routes).
+# Cube-core ops (``mmad``/``mmad_mx``).
 from . import cube
+from .cube import MxFormat
 
 # Explicit pipeline / global synchronization.
 from . import sync
 from .sync import sub_block_id
 
+from .jit import TLAJITFunction as _TLAJITFunction
+
 
 def jit(fn=None, **kwargs):
-    """``@tla.jit``: like ``triton.jit``, but lowered via the TLA frontend."""
-    from .jit import TLAJITFunction
+    """JIT-compile a kernel with the TLA frontend.
+
+    At launch, pass ``npuir_extra_options=["--mlir-print-ir-after-all"]``
+    to append raw argv entries to ``bishengir-compile``. Each list or tuple
+    element is one argument. The compiler interprets the flags and values.
+    Nonempty argument sequences specialize the compiled kernel.
+    """
 
     def decorator(f):
-        return TLAJITFunction(f, **kwargs)
+        return _TLAJITFunction(f, **kwargs)
 
     return decorator(fn) if fn is not None else decorator
 
@@ -151,8 +163,9 @@ __all__ = [
     "uint16",
     "uint32",
     "uint64",
+    "AddressSpace",
     "PadMode",
-    "EvictionPolicy",
+    "L2CachePolicy",
     "AtomicKind",
     "UnitFlagMode",
     "FixpipeDMAMode",
@@ -161,7 +174,6 @@ __all__ = [
     "FixpipePreQuantMode",
     "FixpipePreReluMode",
     "LoadGM2UBParams",
-    "StoreUB2GMParams",
     "LoadGM2L1Params",
     "CopyUB2L1Params",
     "CopyL12UBParams",
@@ -174,6 +186,7 @@ __all__ = [
     "load_gm_to_ub",
     "store_ub_to_gm",
     "load_gm_to_l1",
+    "load_gm_to_l1_mx_scale",
     "copy_ub_to_l1",
     "copy_l1_to_ub",
     "copy_l1_to_bt",
@@ -183,21 +196,33 @@ __all__ = [
     "copy_l0c_to_ub",
     "copy_l0c_to_l1",
     "set_ctrl",
+    "set_atomic",
     "buffer",
     "buffer_type",
     "vector",
     "vector_type",
 
-    # buffer alloc / copy / view
-    "alloc_buffer",
+    # buffer alloc / view
     "alloc",
-    "copy",
+    "fill",
     "view",
     "subview",
     "reshape",
 
+    # scalar expressions
+    "select",
+    "abs",
+    "maximum",
+    "minimum",
+    "cast",
+    "max_value",
+    "cdiv",
+    "infinity",
+    "clamp",
+
     # core-mode scopes (scope.simd / scope.cube)
     "scope",
+    "pipeline",
 
     # math helpers / diagnostics
     "math",
@@ -208,7 +233,7 @@ __all__ = [
     "device_print",
 
     # aux ops
-    "annotate_buffer_versions",
+    "annotate_multi_buffer",
     "assume",
 
     # simd ops
@@ -219,11 +244,13 @@ __all__ = [
 
     # cube ops
     "cube",
+    "MxFormat",
 
     # explicit synchronization
     "sync",
     "sub_block_id",
 
-    # kernel decorator
+    # decorators
     "jit",
+    "experimental",
 ]

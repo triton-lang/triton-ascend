@@ -149,11 +149,18 @@ def divsiop_bound_kernel(bound_ptr, out_ptr, offs_num: tl.constexpr, divnum: tl.
 
 
 @pytest.mark.parametrize('pred,bound', [
-    (0, -1), (0, 0), (0, 2),
+    (0, -1),
+    (0, 0),
+    (0, 2),
     (1, 1),
     (2, 1),
-    (3, 0), (3, -1),
-    (4, -2147483648), (4, -1), (4, 0), (4, 2), (4, 2147483647),
+    (3, 0),
+    (3, -1),
+    (4, -2147483648),
+    (4, -1),
+    (4, 0),
+    (4, 2),
+    (4, 2147483647),
 ])
 def test_divsiop_bound_constant(pred, bound):
     offs_num, divnum, shift = 16, 4, 5

@@ -31,8 +31,8 @@ def vcmps(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         xv = tla.simd.vlds(x[0])
         yv = tla.simd.vlds(y[0])
         prefix = tla.simd.pge(ACTIVE, N)
-        ones = tla.simd.vsplat(1, tl.uint32)
-        zeros = tla.simd.vsplat(0, tl.uint32)
+        ones = tla.simd.vdup(1, tl.uint32)
+        zeros = tla.simd.vdup(0, tl.uint32)
         tla.simd.vsts(o[0, 0], tla.simd.vsel(tla.simd.vcmps(xv, 0x80000000, op=tla.simd.CMP.ULT), ones, zeros))
         tla.simd.vsts(o[1, 0], tla.simd.vsel(tla.simd.vcmps(yv, -1, op=tla.simd.CMP.LT), ones, zeros))
         tla.simd.vsts(o[2, 0],
@@ -48,7 +48,7 @@ def test_ir(output_dir=None):
     module, ctx = compile_offline(vcmps, SIGNATURE, constexprs(), output_dir=output_dir)
     text = str(module)
     assert text.count("ave.hir.vcmp") == 3
-    assert text.count("ave.hir.broadcast") == 3, "vcmps broadcasts the scalar per row"
+    assert text.count("ave.hir.broadcast") == 5, "two constants and one scalar per vcmps"
     text = str(lower_offline(module, ctx, output_dir=output_dir))
     check_lowered_ir(text, loads=2, stores=1, buffers=None, extra=("ave.hir.vcmp", ))
     print("IR PASS: vcmps broadcast + vcmp composition")

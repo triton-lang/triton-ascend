@@ -45,11 +45,11 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
             flag = tla.view(FLAG_ptr, (1, ), strides=(1, ), offsets=(row, ))
             tla.load_gm_to_ub(scr, scores_ub)
             with tla.scope.simd():
-                neg_inf = tla.simd.vsplat(float("-inf"), tl.float32)
-                zero32 = tla.simd.vsplat(0.0, tl.float32)
-                one32 = tla.simd.vsplat(1.0, tl.float32)
-                zero_i32 = tla.simd.vsplat(0, tl.int32)
-                sentinel = tla.simd.vsplat(E, tl.int32)
+                neg_inf = tla.simd.vdup(float("-inf"), tl.float32)
+                zero32 = tla.simd.vdup(0.0, tl.float32)
+                one32 = tla.simd.vdup(1.0, tl.float32)
+                zero_i32 = tla.simd.vdup(0, tl.int32)
+                sentinel = tla.simd.vdup(E, tl.int32)
                 s_raw = ()
                 idx_lane = ()
                 pad_ok = ()
@@ -64,14 +64,20 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
                     nf_mask = tla.simd.vcmp(d, zero32, op=tla.simd.CMP.NE)
                     nf_raw = tla.simd.vsel(nf_mask, one32, zero32)
                     nf = nf + (tla.simd.vsel(pad_ok[i], nf_raw, zero32), )
-                any_nf = tla.simd.vreduce_max(nf)
+                nf_max = nf[0]
+                for i in tl.static_range(1, (E + 63) // 64):
+                    nf_max = tla.simd.vmax(nf_max, nf[i])
+                any_nf = tla.simd.vcmax(nf_max)
                 tla.simd.vsts(flag_ub[0], any_nf, dist="ONEPT_B32")
                 # padding lane -> -inf。
                 sc = ()
                 for i in tl.static_range((E + 63) // 64):
                     sc = sc + (tla.simd.vsel(pad_ok[i], s_raw[i], neg_inf), )
                 for k in tl.static_range(K):
-                    m = tla.simd.vreduce_max(sc)
+                    score_max = sc[0]
+                    for i in tl.static_range(1, (E + 63) // 64):
+                        score_max = tla.simd.vmax(score_max, sc[i])
+                    m = tla.simd.vdupv(tla.simd.vcmax(score_max))
                     cand = ()
                     for i in tl.static_range((E + 63) // 64):
                         cand = cand + (tla.simd.vsel(tla.simd.vcmp(sc[i], m, op=tla.simd.CMP.EQ), idx_lane[i],

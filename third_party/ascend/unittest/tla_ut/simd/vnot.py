@@ -49,7 +49,7 @@ def vnot_i32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
         tla.simd.vsts(ob[3, 0], tla.simd.vnot(x, mask=none))
         tla.simd.vsts(ob[4, 0], tla.simd.vnot(x, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vnot(x, mask=arb, mode=tla.simd.MODE.MERGING))
-        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vsplat(SENTINEL_IC, tl.int32))
+        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vdup(SENTINEL_IC, tl.int32))
         for tile in tl.static_range(TILES):
             v = tla.simd.vlds(xb[tile, 0])
             if tile == TILES - 1:
@@ -80,7 +80,7 @@ def vnot_u32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
         tla.simd.vsts(ob[3, 0], tla.simd.vnot(x, mask=none))
         tla.simd.vsts(ob[4, 0], tla.simd.vnot(x, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vnot(x, mask=arb, mode=tla.simd.MODE.MERGING))
-        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vsplat(SENTINEL_UC, tl.uint32))
+        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vdup(SENTINEL_UC, tl.uint32))
         for tile in tl.static_range(TILES):
             v = tla.simd.vlds(xb[tile, 0])
             if tile == TILES - 1:

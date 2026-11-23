@@ -42,10 +42,10 @@ def rmsnorm(X_ptr, W_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.constex
             tla.load_gm_to_ub(w_blk, w_ub)
         with tla.scope.simd():
             # UNPK_B16 reads 64 contiguous bf16 values into even sublanes.
-            ss = tla.simd.vsplat(0.0, tl.float32)
+            ss = tla.simd.vdup(0.0, tl.float32)
             for c in tl.static_range(PAD_H // 64):
                 a = tla.simd.vextf(tla.simd.vlds(x_ub[0, c * 64], dist="UNPK_B16"), tl.float32, part="part_even")
-                ss = tla.simd.vadd(ss, tla.simd.vreduce_sum(tla.simd.vmul(a, a)))
+                ss = tla.simd.vadd(ss, tla.simd.vcadd(tla.simd.vmul(a, a)))
             tla.simd.vsts(rstd_ub[0], ss, dist="ONEPT_B32")
             # SYNC-02: write-after-read barrier.
             tla.simd.membar("VST_VLD")

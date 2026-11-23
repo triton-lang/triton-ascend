@@ -9,14 +9,15 @@ def buffer_example(X_ptr, O_ptr, N: tl.constexpr):
     x = tla.view(X_ptr, (N, ), strides=(1, ), offsets=(0, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ), offsets=(0, ))
 
-    # 在 UB 上分配 buffer；versions=2 声明双缓冲。
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub", versions=2)
+    # 在 UB 上分配 buffer；annotate_multi_buffer 声明双缓冲。
+    x_ub = tla.alloc((N, ), tl.float32, space="ub")
+    o_ub = tla.alloc((N, ), tl.float32, space="ub")
+    tla.annotate_multi_buffer(o_ub, 2)
 
-    tla.copy(x, x_ub)
+    tla.load_gm_to_ub(x, x_ub)
 
     with tla.scope.simd():
         v = tla.simd.vlds(x_ub[0])
         tla.simd.vsts(o_ub[0], v)
 
-    tla.copy(o_ub, o)
+    tla.store_ub_to_gm(o_ub, o)

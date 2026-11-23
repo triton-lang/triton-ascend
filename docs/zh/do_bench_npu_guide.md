@@ -15,17 +15,29 @@
 ```python
 import torch
 import torch_npu
+import triton
+import triton.language as tl
 from triton.backends.ascend.testing import do_bench_npu
 
+BLOCK_SIZE = 128
+x = torch.randn(BLOCK_SIZE, device="npu")
+y = torch.randn(BLOCK_SIZE, device="npu")
+out = torch.empty_like(x)
+
+
 @triton.jit
-def kernel(
-    x_ptr,
-    y_ptr,
-    out_ptr
-):
+def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(axis=0)
+    offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offs < n_elements
+    tl.store(out_ptr + offs,
+             tl.load(x_ptr + offs, mask=mask) + tl.load(y_ptr + offs, mask=mask),
+             mask=mask)
+
 
 def fn():
-    kernel[grid](x, y, out)
+    grid = (triton.cdiv(x.numel(), BLOCK_SIZE),)
+    add_kernel[grid](x, y, out, x.numel(), BLOCK_SIZE=BLOCK_SIZE)
 
 ms = do_bench_npu(fn)
 print(f"Kernel execution time: {ms} ms")
@@ -42,7 +54,7 @@ print(f"Kernel execution time: {ms} ms")
 
 社区 `triton.testing.do_bench` 使用`Event`来测量时间，记录的开始和结束时间会包含 Host 侧启动开销。
 
-`do_bench_npu` 利用 NPU 性能分析工具（`MSPTI` 或 `torch_npu.profiler`）,保证返回的时间严格是 Device 侧执行时间。
+`do_bench_npu` 利用 NPU 性能分析工具（`MSPTI` 或 `torch_npu.profiler`），保证返回的时间严格是 Device 侧执行时间。
 
 ### 2. 快速路径（`mspti`）的环境要求
 

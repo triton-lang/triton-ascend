@@ -15,17 +15,29 @@ On Triton-Ascend, the recommended usage is to import and use `do_bench_npu` when
 ```python
 import torch
 import torch_npu
+import triton
+import triton.language as tl
 from triton.backends.ascend.testing import do_bench_npu
 
+BLOCK_SIZE = 128
+x = torch.randn(BLOCK_SIZE, device="npu")
+y = torch.randn(BLOCK_SIZE, device="npu")
+out = torch.empty_like(x)
+
+
 @triton.jit
-def kernel(
-    x_ptr,
-    y_ptr,
-    out_ptr
-):
+def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(axis=0)
+    offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offs < n_elements
+    tl.store(out_ptr + offs,
+             tl.load(x_ptr + offs, mask=mask) + tl.load(y_ptr + offs, mask=mask),
+             mask=mask)
+
 
 def fn():
-    kernel[grid](x, y, out)
+    grid = (triton.cdiv(x.numel(), BLOCK_SIZE),)
+    add_kernel[grid](x, y, out, x.numel(), BLOCK_SIZE=BLOCK_SIZE)
 
 ms = do_bench_npu(fn)
 print(f"Kernel execution time: {ms} ms")
@@ -101,7 +113,7 @@ Setting either `prof_dir` or `keep_res=True` will force the `torch_npu.profiler`
 
 ### 5. Set warmup and active times
 
-Can autonomously input preheating and actual running times:
+You can specify the warmup and active iteration counts:
 
 ```python
 ms = do_bench_npu(fn, warmup=1, active=1)

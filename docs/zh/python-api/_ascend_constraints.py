@@ -1155,41 +1155,60 @@ CONSTRAINTS = {
     },
 
     # ------------------------------------------------------------------
-    # Allocation / view / copy
+    # Allocation / view / DMA
     # ------------------------------------------------------------------
     f"{_TLA_PREFIX}.alloc": {
         "constraints": [
             "``space`` 默认 ``\"ub\"``，不能为 ``\"gm\"``；GM buffer 必须由内核指针经 ``tla.view`` 获得。",
-            "``versions`` 必须是正整数；``1`` 表示关闭多缓冲。",
+            "当前后端分配支持覆盖 UB、L1 和 L0C；多缓冲请使用 ``tla.annotate_multi_buffer``。",
         ],
         "example":
         "buffer",
     },
-    f"{_TLA_PREFIX}.alloc_buffer": {
+    f"{_TLA_PREFIX}.annotate_multi_buffer": {
         "constraints": [
-            "``space`` 默认 ``\"ub\"``，不能为 ``\"gm\"``；GM buffer 必须由内核指针经 ``tla.view`` 获得。",
-            "``versions`` 必须是正整数；``1`` 表示关闭多缓冲。",
-        ],
-        "example":
-        "buffer",
-    },
-    f"{_TLA_PREFIX}.annotate_buffer_versions": {
-        "constraints": [
+            "``buf`` 必须是核内 core-local 存储的 ``tla.buffer``；GM buffer 不支持。",
             "``versions`` 必须是正整数，``1`` 表示关闭多缓冲。",
             "版本数通过 ``hivm.multi_buffer`` 注解交给 NPU-IR 多缓冲 pass。",
         ],
-        "example": "buffer",
+        "example":
+        "buffer",
     },
-    f"{_TLA_PREFIX}.copy": {
+    f"{_TLA_PREFIX}.load_gm_to_ub": {
         "constraints": [
-            "``src`` 和 ``dst`` 都必须是 ``tla.buffer``，不接受指针或 tensor。",
-            "源和目标元素类型必须一致。",
-            "支持的地址空间组合：``gm->ub``、``ub->gm``、``gm->l1``、``l0c->*``。",
-            "除 ``gm->l1`` 的 ND->NZ 和 ``l0c`` Fixpipe 的 fractal 关系外，源和目标形状必须一致。",
-            "其他地址空间组合会报错。",
+            "``src`` 必须是 ``space=\"gm\"`` 的 GM buffer（通常经 ``tla.view`` 获得），``dst`` 必须是 ``space=\"ub\"`` 的 UB buffer。",
+            "源和目标元素类型必须一致，形状须与后端兼容。",
+            "``params`` 默认 ``None``，等价于 ``tla.LoadGM2UBParams()``。",
         ],
         "example":
         "copy",
+    },
+    f"{_TLA_PREFIX}.store_ub_to_gm": {
+        "constraints": [
+            "``src`` 必须是 ``space=\"ub\"`` 的 UB buffer，``dst`` 必须是 ``space=\"gm\"`` 的 GM buffer（通常经 ``tla.view`` 获得）。",
+            "源和目标元素类型必须一致，形状须与后端兼容。",
+            "GM 写模式（原子操作等）由 ``tla.set_atomic`` 控制，完成后须显式复位。",
+        ],
+        "example":
+        "copy",
+    },
+    f"{_TLA_PREFIX}.load_gm_to_l1": {
+        "constraints": [
+            "``src`` 为 ND 布局的 GM buffer，``dst`` 为对应 NZ 布局的 L1 buffer（对齐 fp16 ``(M, N)`` 块的物理 NZ 形状为 ``(N // 16, M // 16, 16, 16)``）。",
+            "须在 ``tla.scope.cube()`` 内发射。",
+            "``params`` 默认 ``None``，等价于 ``tla.LoadGM2L1Params()``。",
+        ],
+        "example":
+        "cube_mmad",
+    },
+    f"{_TLA_PREFIX}.store_l0c_to_gm": {
+        "constraints": [
+            "``src`` 为 L0C fractal 累加器（通常来自 ``tla.cube.mmad``），``dst`` 为 GM buffer。",
+            "须在 ``tla.scope.cube()`` 内发射；``NZ2ND`` 输出行主序，``NZ2DN`` 输出转置 ND，``NZ2NZ`` 保持 fractal 布局。",
+            "``params`` 默认 ``None``，等价于 ``tla.FixpipeL0C2GMParams()``；类型转换由 ``pre_quant`` 控制。",
+        ],
+        "example":
+        "cube_mmad",
     },
     f"{_TLA_PREFIX}.view": {
         "constraints": [
@@ -1222,10 +1241,11 @@ CONSTRAINTS = {
     },
     f"{_TLA_PREFIX}.scope.vector": {
         "constraints": [
-            "承载 ``tla.copy``、控制流等非 SIMD 操作。",
+            "承载 DMA 搬运（如 ``tla.load_gm_to_ub``、``tla.store_ub_to_gm``）、控制流等非 SIMD 操作。",
             "可以嵌套 ``tla.scope.simd()``。",
         ],
-        "example": "scope",
+        "example":
+        "scope",
     },
     f"{_TLA_PREFIX}.scope.simd": {
         "constraints": [

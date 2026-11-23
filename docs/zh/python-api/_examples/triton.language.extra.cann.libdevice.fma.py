@@ -3,10 +3,10 @@ import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
 import torch
-from triton.backends.ascend.utils import triton_enable_libdevice_simt
+from triton.backends.ascend.compiler import _is_a5_target_arch
+from triton.backends.ascend.driver import NPUUtils
 
-_SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950PR&950DT products target "
-                  "with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+_SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950PR&950DT products target; skipping.")
 
 
 def torch_fma_reference(x0, x1, x2):
@@ -36,7 +36,7 @@ def triton_kernel(input0, input1, input2, output, n_elements, XBLOCK: tl.constex
         tl.store(output + (x0), tmp3, mask=mask)
 
 
-@pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
+@pytest.mark.skipif(not _is_a5_target_arch(NPUUtils().get_arch()), reason=_SIMT_SKIP_MSG)
 def test_fma():
     x0 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32)
     x1 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32)
@@ -69,7 +69,7 @@ def test_fma_simd():
 
 if __name__ == "__main__":
     test_fma_simd()
-    if not triton_enable_libdevice_simt():
+    if not _is_a5_target_arch(NPUUtils().get_arch()):
         print(_SIMT_SKIP_MSG)
     else:
         test_fma()

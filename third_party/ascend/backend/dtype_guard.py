@@ -104,10 +104,10 @@ DTYPE_DISPLAY_NAMES = {
     "bf16": "bfloat16",
     "fp32": "float32",
     "fp64": "float64",
-    "fp8e4m3": "float8e4m3",
-    "fp8e5m2": "float8e5m2",
+    "fp8e4": "float8e4m3",
+    "fp8e5": "float8e5m2",
     "bool": "bool",
-    "int1": "int1",
+    "int1": "bool",
     "fp8e4nv": "float8e4m3fn",
     "fp8e4b8": "float8e4m3fnuz",
     "fp8e4b15": "float8e4m3b11us",
@@ -123,14 +123,14 @@ def _canonical_token(name):
     """Map an extracted runtime dtype name onto a rule token.
 
     ``bool`` arrives as ``int1`` and the concrete fp8 variants collapse onto
-    their documented column (``fp8e4m3`` / ``fp8e5m2``).
+    their documented column (``fp8e4`` / ``fp8e5``).
     """
     if name == "int1":
         return "bool"
     if name in FP8E4_DTYPES:
-        return "fp8e4m3"
+        return "fp8e4"
     if name in FP8E5_DTYPES:
-        return "fp8e5m2"
+        return "fp8e5"
     return name
 
 
@@ -200,47 +200,27 @@ def _unsupported_tokens(rule, bucket):
     return unsupported[bucket]
 
 
-def _whitelist_tokens(rule, bucket):
-    """Return the accepted-dtype whitelist for a bucket, or ``None``.
-
-    Whitelist mode applies when the rule spells out ``supported`` for a
-    bucket and has no ``unsupported`` blacklist for it: every dtype NOT
-    listed is rejected. Used by the math operators whose frontend carries an
-    ``@_check_dtype`` whitelist (``exp``/``sqrt``/...). Rules that combine
-    ``unsupported`` with ``supported`` (``dot_scaled``) stay in blacklist
-    mode; their ``supported`` only narrows the error message.
-    """
-    unsupported = rule.get("unsupported")
-    if isinstance(unsupported, dict) and bucket in unsupported:
-        return None
-    supported = rule.get("supported")
-    if isinstance(supported, dict) and bucket in supported:
-        return supported[bucket]
-    return None
-
-
 def _supported_tokens(rule, bucket):
     """Return the accepted-dtype list for a bucket as rule tokens.
 
-    Used to build the user-facing error message. For blacklist rules the
-    list is derived as the complement of the bucket's ``unsupported``
+    Used only to build the user-facing error message. By default the list is
+    NOT stored: it is derived as the complement of the bucket's ``unsupported``
     blacklist over ``ALL_SCALAR_DTYPES``, preserving universe order, which is
     exactly the whitelist the configuration used to carry by hand.
 
-    An explicit ``supported`` list takes precedence: for whitelist rules
-    (``supported`` without ``unsupported``, see ``_whitelist_tokens``) it IS
-    the restriction; for blacklist rules (currently ``dot_scaled``) it
-    advertises dtypes intentionally narrower than the blacklist complement.
+    A rule may still spell out an explicit ``supported`` list when its
+    advertised dtypes are intentionally narrower than the blacklist complement
+    (currently only ``dot_scaled``); that explicit value takes precedence.
 
-    A missing bucket means "no dtype restriction on that architecture", so
-    every dtype is accepted there.
+    A missing bucket in ``unsupported`` means "no dtype restriction on that
+    architecture", so every dtype is accepted there.
     """
-    explicit = rule.get("supported")
-    if isinstance(explicit, dict) and bucket in explicit:
-        return explicit[bucket]
     unsupported = _unsupported_tokens(rule, bucket)
     if unsupported is None:
         return list(ALL_SCALAR_DTYPES)
+    explicit = rule.get("supported")
+    if isinstance(explicit, dict) and bucket in explicit:
+        return explicit[bucket]
     blocked = set(unsupported)
     return [token for token in ALL_SCALAR_DTYPES if token not in blocked]
 
@@ -296,16 +276,10 @@ def validate(rule_id, args, bucket, op_label=None, kws=None, fn=None):
     """
     rule = OP_DTYPE_RULES[rule_id]
     tokens = _unsupported_tokens(rule, bucket)
-    # Blacklist mode (or "no dtype restriction" -> both are None).
-    blocked = set(tokens) if tokens is not None else None
-    if blocked is None:
-        # Whitelist mode: "supported" without "unsupported" -- every dtype
-        # NOT listed is rejected (math ops with a frontend @_check_dtype).
-        allowed = _whitelist_tokens(rule, bucket)
-        if allowed is None:
-            # A missing bucket means "no dtype restriction" on this arch.
-            return
-        allowed_set = set(allowed)
+    # A missing bucket means "no dtype restriction" for this architecture.
+    if tokens is None:
+        return
+    blocked = set(tokens)
 
     operands = _align_operands(fn, args, kws) if fn is not None else list(args)
 
@@ -317,9 +291,9 @@ def validate(rule_id, args, bucket, op_label=None, kws=None, fn=None):
     # Operator symbol (``>>`` for a dunder) or the concise rule/function name.
     label = op_label or rule_id
     arch_name = "Ascend 950PR&950DT / Ascend 960" if bucket in ("a5", "a6") else "Atlas A2 products/Atlas A3 products"
-    # The message tells the user which dtypes ARE supported: for a whitelist
-    # rule that is the whitelist itself, for a blacklist rule the complement
-    # of the blacklist (both resolved by ``_supported_tokens``).
+    # The interception decision uses the blacklist above; the message tells
+    # the user which dtypes ARE supported, so it is built from the complement
+    # of that blacklist derived on the fly.
     supported_list = _format_supported_list(_supported_tokens(rule, bucket))
 
     for index in positions:
@@ -329,8 +303,7 @@ def validate(rule_id, args, bucket, op_label=None, kws=None, fn=None):
         if name is None:
             continue
         token = _canonical_token(name)
-        rejected = (token in blocked) if blocked is not None else (token not in allowed_set)
-        if rejected:
+        if token in blocked:
             raise UnsupportedDtypeError(
                 f"operator '{label}' does not support dtype '{_display_dtype(name)}'"
                 f" (operand #{index + 1}); supported dtypes on {arch_name}: {supported_list}."

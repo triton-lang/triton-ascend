@@ -2569,7 +2569,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.abs",
+        "example":
+        "triton.language.extra.cann.libdevice.abs",
     },
     "triton.language.extra.cann.libdevice.acos": {
         "constraints": [
@@ -2595,7 +2596,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.add_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.add_rd",
     },
     "triton.language.extra.cann.libdevice.add_rn": {
         "constraints": [
@@ -2603,7 +2605,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.add_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.add_rn",
     },
     "triton.language.extra.cann.libdevice.add_ru": {
         "constraints": [
@@ -2611,7 +2614,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.add_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.add_ru",
     },
     "triton.language.extra.cann.libdevice.add_rz": {
         "constraints": [
@@ -2619,7 +2623,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.add_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.add_rz",
     },
     "triton.language.extra.cann.libdevice.asin": {
         "constraints": [
@@ -2672,7 +2677,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.brev",
+        "example":
+        "triton.language.extra.cann.libdevice.brev",
     },
     "triton.language.extra.cann.libdevice.byte_perm": {
         "constraints": [
@@ -2680,7 +2686,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.byte_perm",
+        "example":
+        "triton.language.extra.cann.libdevice.byte_perm",
     },
     "triton.language.extra.cann.libdevice.cbrt": {
         "constraints": [
@@ -2688,7 +2695,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.cbrt",
+        "example":
+        "triton.language.extra.cann.libdevice.cbrt",
     },
     "triton.language.extra.cann.libdevice.ceil": {
         "constraints": [
@@ -2696,7 +2704,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.ceil",
+        "example":
+        "triton.language.extra.cann.libdevice.ceil",
     },
     "triton.language.extra.cann.libdevice.clz": {
         "constraints": [
@@ -2704,7 +2713,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.clz",
+        "example":
+        "triton.language.extra.cann.libdevice.clz",
     },
     "triton.language.extra.cann.libdevice.copysign": {
         "constraints": [
@@ -2721,7 +2731,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.cos",
+        "example":
+        "triton.language.extra.cann.libdevice.cos",
     },
     "triton.language.extra.cann.libdevice.cosh": {
         "constraints": [
@@ -2738,7 +2749,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.cospi",
+        "example":
+        "triton.language.extra.cann.libdevice.cospi",
     },
     "triton.language.extra.cann.libdevice.cyl_bessel_i0": {
         "constraints": [
@@ -2755,7 +2767,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.cyl_bessel_i1",
+        "example":
+        "triton.language.extra.cann.libdevice.cyl_bessel_i1",
     },
     "triton.language.extra.cann.libdevice.div_rd": {
         "constraints": [
@@ -2763,7 +2776,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.div_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.div_rd",
     },
     "triton.language.extra.cann.libdevice.div_rn": {
         "constraints": [
@@ -2771,7 +2785,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.div_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.div_rn",
     },
     "triton.language.extra.cann.libdevice.div_ru": {
         "constraints": [
@@ -2779,7 +2794,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.div_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.div_ru",
     },
     "triton.language.extra.cann.libdevice.div_rz": {
         "constraints": [
@@ -2796,7 +2812,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.erf",
+        "example":
+        "triton.language.extra.cann.libdevice.erf",
     },
     "triton.language.extra.cann.libdevice.erfc": {
         "constraints": [
@@ -2804,7 +2821,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.erfc",
+        "example":
+        "triton.language.extra.cann.libdevice.erfc",
     },
     "triton.language.extra.cann.libdevice.erfcinv": {
         "constraints": [
@@ -2812,7 +2830,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.erfcinv",
+        "example":
+        "triton.language.extra.cann.libdevice.erfcinv",
     },
     "triton.language.extra.cann.libdevice.erfcx": {
         "constraints": [
@@ -2820,7 +2839,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.erfcx",
+        "example":
+        "triton.language.extra.cann.libdevice.erfcx",
     },
     "triton.language.extra.cann.libdevice.erfinv": {
         "constraints": [
@@ -2837,7 +2857,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.exp",
+        "example":
+        "triton.language.extra.cann.libdevice.exp",
     },
     "triton.language.extra.cann.libdevice.exp10": {
         "constraints": [
@@ -2845,7 +2866,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.exp10",
+        "example":
+        "triton.language.extra.cann.libdevice.exp10",
     },
     "triton.language.extra.cann.libdevice.exp2": {
         "constraints": [
@@ -2853,7 +2875,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.exp2",
+        "example":
+        "triton.language.extra.cann.libdevice.exp2",
     },
     "triton.language.extra.cann.libdevice.expm1": {
         "constraints": [
@@ -2870,7 +2893,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fast_cosf",
+        "example":
+        "triton.language.extra.cann.libdevice.fast_cosf",
     },
     "triton.language.extra.cann.libdevice.fast_dividef": {
         "constraints": [
@@ -2887,7 +2911,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fast_exp10f",
+        "example":
+        "triton.language.extra.cann.libdevice.fast_exp10f",
     },
     "triton.language.extra.cann.libdevice.fast_expf": {
         "constraints": [
@@ -2904,7 +2929,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fast_log10f",
+        "example":
+        "triton.language.extra.cann.libdevice.fast_log10f",
     },
     "triton.language.extra.cann.libdevice.fast_log2f": {
         "constraints": [
@@ -2912,7 +2938,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fast_log2f",
+        "example":
+        "triton.language.extra.cann.libdevice.fast_log2f",
     },
     "triton.language.extra.cann.libdevice.fast_logf": {
         "constraints": [
@@ -2920,7 +2947,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fast_logf",
+        "example":
+        "triton.language.extra.cann.libdevice.fast_logf",
     },
     "triton.language.extra.cann.libdevice.fast_powf": {
         "constraints": [
@@ -2928,7 +2956,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fast_powf",
+        "example":
+        "triton.language.extra.cann.libdevice.fast_powf",
     },
     "triton.language.extra.cann.libdevice.fast_sinf": {
         "constraints": [
@@ -2936,7 +2965,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fast_sinf",
+        "example":
+        "triton.language.extra.cann.libdevice.fast_sinf",
     },
     "triton.language.extra.cann.libdevice.fast_tanf": {
         "constraints": [
@@ -2944,7 +2974,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fast_tanf",
+        "example":
+        "triton.language.extra.cann.libdevice.fast_tanf",
     },
     "triton.language.extra.cann.libdevice.fast_tanhf": {
         "constraints": [
@@ -2952,7 +2983,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fast_tanhf",
+        "example":
+        "triton.language.extra.cann.libdevice.fast_tanhf",
     },
     "triton.language.extra.cann.libdevice.fdim": {
         "constraints": [
@@ -2960,7 +2992,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fdim",
+        "example":
+        "triton.language.extra.cann.libdevice.fdim",
     },
     "triton.language.extra.cann.libdevice.ffs": {
         "constraints": [
@@ -2968,7 +3001,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.ffs",
+        "example":
+        "triton.language.extra.cann.libdevice.ffs",
     },
     "triton.language.extra.cann.libdevice.finitef": {
         "constraints": [
@@ -2976,7 +3010,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.finitef",
+        "example":
+        "triton.language.extra.cann.libdevice.finitef",
     },
     "triton.language.extra.cann.libdevice.float2half_rn": {
         "constraints": [
@@ -2984,7 +3019,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2half_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.float2half_rn",
     },
     "triton.language.extra.cann.libdevice.float2int_rd": {
         "constraints": [
@@ -2992,7 +3028,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2int_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.float2int_rd",
     },
     "triton.language.extra.cann.libdevice.float2int_rn": {
         "constraints": [
@@ -3000,7 +3037,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2int_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.float2int_rn",
     },
     "triton.language.extra.cann.libdevice.float2int_ru": {
         "constraints": [
@@ -3008,7 +3046,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2int_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.float2int_ru",
     },
     "triton.language.extra.cann.libdevice.float2int_rz": {
         "constraints": [
@@ -3016,7 +3055,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2int_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.float2int_rz",
     },
     "triton.language.extra.cann.libdevice.float2ll_rd": {
         "constraints": [
@@ -3024,7 +3064,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2ll_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.float2ll_rd",
     },
     "triton.language.extra.cann.libdevice.float2ll_rn": {
         "constraints": [
@@ -3032,7 +3073,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2ll_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.float2ll_rn",
     },
     "triton.language.extra.cann.libdevice.float2ll_ru": {
         "constraints": [
@@ -3040,7 +3082,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2ll_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.float2ll_ru",
     },
     "triton.language.extra.cann.libdevice.float2ll_rz": {
         "constraints": [
@@ -3048,7 +3091,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2ll_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.float2ll_rz",
     },
     "triton.language.extra.cann.libdevice.float2uint_rd": {
         "constraints": [
@@ -3056,7 +3100,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2uint_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.float2uint_rd",
     },
     "triton.language.extra.cann.libdevice.float2uint_rn": {
         "constraints": [
@@ -3064,7 +3109,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2uint_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.float2uint_rn",
     },
     "triton.language.extra.cann.libdevice.float2uint_ru": {
         "constraints": [
@@ -3072,7 +3118,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2uint_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.float2uint_ru",
     },
     "triton.language.extra.cann.libdevice.float2uint_rz": {
         "constraints": [
@@ -3080,7 +3127,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2uint_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.float2uint_rz",
     },
     "triton.language.extra.cann.libdevice.float2ull_rd": {
         "constraints": [
@@ -3088,7 +3136,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2ull_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.float2ull_rd",
     },
     "triton.language.extra.cann.libdevice.float2ull_rn": {
         "constraints": [
@@ -3096,7 +3145,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2ull_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.float2ull_rn",
     },
     "triton.language.extra.cann.libdevice.float2ull_ru": {
         "constraints": [
@@ -3104,7 +3154,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2ull_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.float2ull_ru",
     },
     "triton.language.extra.cann.libdevice.float2ull_rz": {
         "constraints": [
@@ -3112,7 +3163,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float2ull_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.float2ull_rz",
     },
     "triton.language.extra.cann.libdevice.float_as_int": {
         "constraints": [
@@ -3129,7 +3181,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.float_as_uint",
+        "example":
+        "triton.language.extra.cann.libdevice.float_as_uint",
     },
     "triton.language.extra.cann.libdevice.floor": {
         "constraints": [
@@ -3137,7 +3190,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.floor",
+        "example":
+        "triton.language.extra.cann.libdevice.floor",
     },
     "triton.language.extra.cann.libdevice.fma": {
         "constraints": [
@@ -3145,7 +3199,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fma",
+        "example":
+        "triton.language.extra.cann.libdevice.fma",
     },
     "triton.language.extra.cann.libdevice.fma_rd": {
         "constraints": [
@@ -3153,7 +3208,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fma_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.fma_rd",
     },
     "triton.language.extra.cann.libdevice.fma_rn": {
         "constraints": [
@@ -3161,7 +3217,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fma_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.fma_rn",
     },
     "triton.language.extra.cann.libdevice.fma_ru": {
         "constraints": [
@@ -3169,7 +3226,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fma_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.fma_ru",
     },
     "triton.language.extra.cann.libdevice.fma_rz": {
         "constraints": [
@@ -3177,7 +3235,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.fma_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.fma_rz",
     },
     "triton.language.extra.cann.libdevice.fmod": {
         "constraints": [
@@ -3203,7 +3262,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.hadd",
+        "example":
+        "triton.language.extra.cann.libdevice.hadd",
     },
     "triton.language.extra.cann.libdevice.half2float": {
         "constraints": [
@@ -3211,7 +3271,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.half2float",
+        "example":
+        "triton.language.extra.cann.libdevice.half2float",
     },
     "triton.language.extra.cann.libdevice.hypot": {
         "constraints": [
@@ -3237,7 +3298,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.int2float_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.int2float_rd",
     },
     "triton.language.extra.cann.libdevice.int2float_rn": {
         "constraints": [
@@ -3245,7 +3307,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.int2float_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.int2float_rn",
     },
     "triton.language.extra.cann.libdevice.int2float_ru": {
         "constraints": [
@@ -3253,7 +3316,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.int2float_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.int2float_ru",
     },
     "triton.language.extra.cann.libdevice.int2float_rz": {
         "constraints": [
@@ -3261,7 +3325,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.int2float_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.int2float_rz",
     },
     "triton.language.extra.cann.libdevice.int_as_float": {
         "constraints": [
@@ -3269,7 +3334,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.int_as_float",
+        "example":
+        "triton.language.extra.cann.libdevice.int_as_float",
     },
     "triton.language.extra.cann.libdevice.isinf": {
         "constraints": [
@@ -3295,7 +3361,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.j0",
+        "example":
+        "triton.language.extra.cann.libdevice.j0",
     },
     "triton.language.extra.cann.libdevice.j1": {
         "constraints": [
@@ -3303,7 +3370,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.j1",
+        "example":
+        "triton.language.extra.cann.libdevice.j1",
     },
     "triton.language.extra.cann.libdevice.jn": {
         "constraints": [
@@ -3311,7 +3379,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.jn",
+        "example":
+        "triton.language.extra.cann.libdevice.jn",
     },
     "triton.language.extra.cann.libdevice.ldexp": {
         "constraints": [
@@ -3337,7 +3406,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.ll2float_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.ll2float_rd",
     },
     "triton.language.extra.cann.libdevice.ll2float_rn": {
         "constraints": [
@@ -3345,7 +3415,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.ll2float_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.ll2float_rn",
     },
     "triton.language.extra.cann.libdevice.ll2float_ru": {
         "constraints": [
@@ -3353,7 +3424,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.ll2float_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.ll2float_ru",
     },
     "triton.language.extra.cann.libdevice.ll2float_rz": {
         "constraints": [
@@ -3361,7 +3433,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.ll2float_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.ll2float_rz",
     },
     "triton.language.extra.cann.libdevice.llrint": {
         "constraints": [
@@ -3369,7 +3442,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.llrint",
+        "example":
+        "triton.language.extra.cann.libdevice.llrint",
     },
     "triton.language.extra.cann.libdevice.llround": {
         "constraints": [
@@ -3377,7 +3451,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.llround",
+        "example":
+        "triton.language.extra.cann.libdevice.llround",
     },
     "triton.language.extra.cann.libdevice.log": {
         "constraints": [
@@ -3385,7 +3460,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.log",
+        "example":
+        "triton.language.extra.cann.libdevice.log",
     },
     "triton.language.extra.cann.libdevice.log10": {
         "constraints": [
@@ -3411,7 +3487,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.log2",
+        "example":
+        "triton.language.extra.cann.libdevice.log2",
     },
     "triton.language.extra.cann.libdevice.logb": {
         "constraints": [
@@ -3419,7 +3496,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.logb",
+        "example":
+        "triton.language.extra.cann.libdevice.logb",
     },
     "triton.language.extra.cann.libdevice.max": {
         "constraints": [
@@ -3427,7 +3505,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.max",
+        "example":
+        "triton.language.extra.cann.libdevice.max",
     },
     "triton.language.extra.cann.libdevice.min": {
         "constraints": [
@@ -3435,7 +3514,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.min",
+        "example":
+        "triton.language.extra.cann.libdevice.min",
     },
     "triton.language.extra.cann.libdevice.mul24": {
         "constraints": [
@@ -3443,7 +3523,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.mul24",
+        "example":
+        "triton.language.extra.cann.libdevice.mul24",
     },
     "triton.language.extra.cann.libdevice.mul_rd": {
         "constraints": [
@@ -3451,7 +3532,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.mul_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.mul_rd",
     },
     "triton.language.extra.cann.libdevice.mul_rn": {
         "constraints": [
@@ -3459,7 +3541,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.mul_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.mul_rn",
     },
     "triton.language.extra.cann.libdevice.mul_ru": {
         "constraints": [
@@ -3467,7 +3550,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.mul_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.mul_ru",
     },
     "triton.language.extra.cann.libdevice.mul_rz": {
         "constraints": [
@@ -3475,7 +3559,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.mul_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.mul_rz",
     },
     "triton.language.extra.cann.libdevice.mulhi": {
         "constraints": [
@@ -3483,7 +3568,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.mulhi",
+        "example":
+        "triton.language.extra.cann.libdevice.mulhi",
     },
     "triton.language.extra.cann.libdevice.nan": {
         "constraints": [
@@ -3491,7 +3577,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.nan",
+        "example":
+        "triton.language.extra.cann.libdevice.nan",
     },
     "triton.language.extra.cann.libdevice.nearbyint": {
         "constraints": [
@@ -3517,7 +3604,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.norm3d",
+        "example":
+        "triton.language.extra.cann.libdevice.norm3d",
     },
     "triton.language.extra.cann.libdevice.norm4d": {
         "constraints": [
@@ -3525,7 +3613,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.norm4d",
+        "example":
+        "triton.language.extra.cann.libdevice.norm4d",
     },
     "triton.language.extra.cann.libdevice.normcdf": {
         "constraints": [
@@ -3533,7 +3622,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.normcdf",
+        "example":
+        "triton.language.extra.cann.libdevice.normcdf",
     },
     "triton.language.extra.cann.libdevice.normcdfinv": {
         "constraints": [
@@ -3541,7 +3631,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.normcdfinv",
+        "example":
+        "triton.language.extra.cann.libdevice.normcdfinv",
     },
     "triton.language.extra.cann.libdevice.popc": {
         "constraints": [
@@ -3549,7 +3640,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.popc",
+        "example":
+        "triton.language.extra.cann.libdevice.popc",
     },
     "triton.language.extra.cann.libdevice.pow": {
         "constraints": [
@@ -3566,7 +3658,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.rcbrt",
+        "example":
+        "triton.language.extra.cann.libdevice.rcbrt",
     },
     "triton.language.extra.cann.libdevice.rcp_rd": {
         "constraints": [
@@ -3574,7 +3667,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.rcp_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.rcp_rd",
     },
     "triton.language.extra.cann.libdevice.rcp_rn": {
         "constraints": [
@@ -3582,7 +3676,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.rcp_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.rcp_rn",
     },
     "triton.language.extra.cann.libdevice.rcp_ru": {
         "constraints": [
@@ -3590,7 +3685,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.rcp_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.rcp_ru",
     },
     "triton.language.extra.cann.libdevice.rcp_rz": {
         "constraints": [
@@ -3598,7 +3694,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.rcp_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.rcp_rz",
     },
     "triton.language.extra.cann.libdevice.reciprocal": {
         "constraints": [
@@ -3624,7 +3721,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.remainder",
+        "example":
+        "triton.language.extra.cann.libdevice.remainder",
     },
     "triton.language.extra.cann.libdevice.rhadd": {
         "constraints": [
@@ -3632,7 +3730,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.rhadd",
+        "example":
+        "triton.language.extra.cann.libdevice.rhadd",
     },
     "triton.language.extra.cann.libdevice.rhypot": {
         "constraints": [
@@ -3640,7 +3739,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.rhypot",
+        "example":
+        "triton.language.extra.cann.libdevice.rhypot",
     },
     "triton.language.extra.cann.libdevice.rint": {
         "constraints": [
@@ -3657,7 +3757,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.rnorm3d",
+        "example":
+        "triton.language.extra.cann.libdevice.rnorm3d",
     },
     "triton.language.extra.cann.libdevice.rnorm4d": {
         "constraints": [
@@ -3665,7 +3766,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.rnorm4d",
+        "example":
+        "triton.language.extra.cann.libdevice.rnorm4d",
     },
     "triton.language.extra.cann.libdevice.round": {
         "constraints": [
@@ -3682,7 +3784,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.rsqrt",
+        "example":
+        "triton.language.extra.cann.libdevice.rsqrt",
     },
     "triton.language.extra.cann.libdevice.rsqrt_rn": {
         "constraints": [
@@ -3690,7 +3793,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.rsqrt_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.rsqrt_rn",
     },
     "triton.language.extra.cann.libdevice.sad": {
         "constraints": [
@@ -3698,7 +3802,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sad",
+        "example":
+        "triton.language.extra.cann.libdevice.sad",
     },
     "triton.language.extra.cann.libdevice.saturatef": {
         "constraints": [
@@ -3706,7 +3811,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.saturatef",
+        "example":
+        "triton.language.extra.cann.libdevice.saturatef",
     },
     "triton.language.extra.cann.libdevice.scalbn": {
         "constraints": [
@@ -3714,7 +3820,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.scalbn",
+        "example":
+        "triton.language.extra.cann.libdevice.scalbn",
     },
     "triton.language.extra.cann.libdevice.signbit": {
         "constraints": [
@@ -3731,7 +3838,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sin",
+        "example":
+        "triton.language.extra.cann.libdevice.sin",
     },
     "triton.language.extra.cann.libdevice.sinh": {
         "constraints": [
@@ -3748,7 +3856,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sinpi",
+        "example":
+        "triton.language.extra.cann.libdevice.sinpi",
     },
     "triton.language.extra.cann.libdevice.sqrt": {
         "constraints": [
@@ -3756,7 +3865,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sqrt",
+        "example":
+        "triton.language.extra.cann.libdevice.sqrt",
     },
     "triton.language.extra.cann.libdevice.sqrt_rd": {
         "constraints": [
@@ -3764,7 +3874,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sqrt_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.sqrt_rd",
     },
     "triton.language.extra.cann.libdevice.sqrt_rn": {
         "constraints": [
@@ -3772,7 +3883,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sqrt_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.sqrt_rn",
     },
     "triton.language.extra.cann.libdevice.sqrt_ru": {
         "constraints": [
@@ -3780,7 +3892,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sqrt_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.sqrt_ru",
     },
     "triton.language.extra.cann.libdevice.sqrt_rz": {
         "constraints": [
@@ -3788,7 +3901,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sqrt_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.sqrt_rz",
     },
     "triton.language.extra.cann.libdevice.sub_rd": {
         "constraints": [
@@ -3796,7 +3910,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sub_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.sub_rd",
     },
     "triton.language.extra.cann.libdevice.sub_rn": {
         "constraints": [
@@ -3804,7 +3919,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sub_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.sub_rn",
     },
     "triton.language.extra.cann.libdevice.sub_ru": {
         "constraints": [
@@ -3812,7 +3928,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sub_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.sub_ru",
     },
     "triton.language.extra.cann.libdevice.sub_rz": {
         "constraints": [
@@ -3820,7 +3937,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.sub_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.sub_rz",
     },
     "triton.language.extra.cann.libdevice.tan": {
         "constraints": [
@@ -3846,7 +3964,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.tgamma",
+        "example":
+        "triton.language.extra.cann.libdevice.tgamma",
     },
     "triton.language.extra.cann.libdevice.trunc": {
         "constraints": [
@@ -3863,7 +3982,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.uint2float_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.uint2float_rd",
     },
     "triton.language.extra.cann.libdevice.uint2float_rn": {
         "constraints": [
@@ -3871,7 +3991,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.uint2float_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.uint2float_rn",
     },
     "triton.language.extra.cann.libdevice.uint2float_ru": {
         "constraints": [
@@ -3879,7 +4000,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.uint2float_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.uint2float_ru",
     },
     "triton.language.extra.cann.libdevice.uint2float_rz": {
         "constraints": [
@@ -3887,7 +4009,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.uint2float_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.uint2float_rz",
     },
     "triton.language.extra.cann.libdevice.uint_as_float": {
         "constraints": [
@@ -3895,7 +4018,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.uint_as_float",
+        "example":
+        "triton.language.extra.cann.libdevice.uint_as_float",
     },
     "triton.language.extra.cann.libdevice.ull2float_rd": {
         "constraints": [
@@ -3903,7 +4027,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.ull2float_rd",
+        "example":
+        "triton.language.extra.cann.libdevice.ull2float_rd",
     },
     "triton.language.extra.cann.libdevice.ull2float_rn": {
         "constraints": [
@@ -3911,7 +4036,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.ull2float_rn",
+        "example":
+        "triton.language.extra.cann.libdevice.ull2float_rn",
     },
     "triton.language.extra.cann.libdevice.ull2float_ru": {
         "constraints": [
@@ -3919,7 +4045,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.ull2float_ru",
+        "example":
+        "triton.language.extra.cann.libdevice.ull2float_ru",
     },
     "triton.language.extra.cann.libdevice.ull2float_rz": {
         "constraints": [
@@ -3927,7 +4054,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.ull2float_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.ull2float_rz",
     },
     "triton.language.extra.cann.libdevice.y0": {
         "constraints": [
@@ -3935,7 +4063,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.y0",
+        "example":
+        "triton.language.extra.cann.libdevice.y0",
     },
     "triton.language.extra.cann.libdevice.y1": {
         "constraints": [
@@ -3943,7 +4072,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.y1",
+        "example":
+        "triton.language.extra.cann.libdevice.y1",
     },
     "triton.language.extra.cann.libdevice.yn": {
         "constraints": [
@@ -3951,6 +4081,7 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example": "triton.language.extra.cann.libdevice.yn",
+        "example":
+        "triton.language.extra.cann.libdevice.yn",
     },
 }

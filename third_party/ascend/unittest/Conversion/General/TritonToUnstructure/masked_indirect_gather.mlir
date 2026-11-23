@@ -1,23 +1,48 @@
 // RUN: triton-opt %s --discrete-mask-access-conversion --triton-to-unstructure --verify-each | FileCheck %s --check-prefix=MASK
 // RUN: triton-opt %s --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s
+// RUN: sed 's/, %active, %other/, %rowmask, %other/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s --check-prefix=FULL
+// RUN: sed 's/cmpi slt, %columns/cmpi ne, %columns/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s --check-prefix=SCALAR
+// RUN: sed 's/%blockWidth = arith.constant 8/%blockWidth = arith.constant 1/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s --check-prefix=SCALAR
 
-// The selected row determines both the address and whether it may be read.
-// Each scalar access must also respect the independent column limit.
+// Guard each contiguous row before the copy and clip it at the column bound.
 // MASK-LABEL: tt.func public @masked_indirect_gather(
-// MASK: %[[MASK:.*]] = arith.andi %{{.*}}, %{{.*}} : tensor<4x8xi1>
-// MASK: %[[ACTIVE:.*]] = tensor.extract %[[MASK]][
-// MASK: tt.load %{{[^,]+}}, %[[ACTIVE]], %{{.*}} {{.*}}: !tt.ptr<f32>
+// MASK: %[[OTHER:.*]] = arith.constant dense<-7.000000e+00> : tensor<4x8xf32>
+// MASK: %[[COL:.*]] = arith.cmpi slt, %{{.*}}, %{{.*}} : tensor<8xi32>
+// MASK: %[[PREFIX:.*]] = tt.expand_dims %[[COL]]
+// MASK: scf.for %{{.*}} = {{.*}} iter_args(%[[ACC:[a-zA-Z0-9_]+]] = %[[OTHER]])
+// MASK-NOT: scf.for
+// MASK: scf.if
+// MASK: tt.load %{{[^,]+}}, %[[PREFIX]], %{{.*}} : tensor<1x8x!tt.ptr<f32>>
+// MASK: } else {
+// MASK-NEXT: scf.yield %[[ACC]] : tensor<4x8xf32>
 // CHECK-LABEL: func.func @masked_indirect_gather(
-// CHECK: %[[OTHER:.*]] = arith.constant -7.000000e+00 : f32
-// CHECK-DAG: %[[ROW:.*]] = arith.cmpi ne, %{{.*}}, %{{.*}} : i32
-// CHECK-DAG: %[[COL:.*]] = arith.cmpi slt, %{{.*}}, %{{.*}} : i32
-// CHECK: %[[ACTIVE:.*]] = arith.andi %[[ROW]], %[[COL]] : i1
-// CHECK: scf.if %[[ACTIVE]] -> (f32) {
-// CHECK-NEXT: %[[VALUE:.*]] = memref.load
-// CHECK-NEXT: scf.yield %[[VALUE]] : f32
-// CHECK-NEXT: } else {
-// CHECK-NEXT: scf.yield %[[OTHER]] : f32
-tt.func public @masked_indirect_gather(%src: !tt.ptr<f32>, %indices: !tt.ptr<i32>, %width: i32) -> tensor<4x8xf32> {
+// CHECK: scf.for
+// CHECK: %[[ROW:.*]] = arith.cmpi ne, %{{.*}}, %{{.*}} : i32
+// CHECK: scf.if %[[ROW]]
+// CHECK: %[[END:.*]] = arith.addi %[[START:[a-zA-Z0-9_]+]], %{{.*}} : index
+// CHECK: %[[LOW:.*]] = arith.maxsi %[[START]], %{{.*}} : index
+// CHECK: %[[HIGH:.*]] = arith.minsi %[[END]], %[[LOW]] : index
+// CHECK: %[[WIDTH:.*]] = arith.subi %[[HIGH]], %[[START]] : index
+// CHECK: %[[SRC:.*]] = memref.subview %{{.*}}[0, 0] [1, %[[WIDTH]]] [1, 1]
+// CHECK: %[[DST:.*]] = memref.subview %{{.*}}[0, 0] [1, %[[WIDTH]]] [1, 1]
+// CHECK: memref.copy %[[SRC]], %[[DST]] : memref<1x?xf32,
+// CHECK: scf.yield
+// FULL-LABEL: func.func @masked_indirect_gather(
+// FULL: scf.for
+// FULL: %[[ROW:.*]] = arith.cmpi ne, %{{.*}}, %{{.*}} : i32
+// FULL: scf.if %[[ROW]]
+// FULL: memref.copy %{{.*}}, %{{.*}} : memref<1x8xf32,
+// FULL: scf.yield
+// A hole in the mask or a column start that can wrap within this tile needs
+// elementwise checks. Only the mask uses the start; addresses stay in bounds.
+// SCALAR-LABEL: func.func @masked_indirect_gather(
+// SCALAR: scf.for
+// SCALAR: scf.for
+// SCALAR: %[[ACTIVE:.*]] = arith.andi %{{.*}}, %{{.*}} : i1
+// SCALAR: scf.if %[[ACTIVE]] -> (f32) {
+// SCALAR-NEXT: %[[VALUE:.*]] = memref.load
+// SCALAR-NEXT: scf.yield %[[VALUE]] : f32
+tt.func public @masked_indirect_gather(%src: !tt.ptr<f32>, %indices: !tt.ptr<i32>, %width: i32, %tile: i32) -> tensor<4x8xf32> {
   %r = tt.make_range {start = 0 : i32, end = 4 : i32} : tensor<4xi32>
   %c = tt.make_range {start = 0 : i32, end = 8 : i32} : tensor<8xi32>
   %ibase = tt.splat %indices : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
@@ -38,12 +63,35 @@ tt.func public @masked_indirect_gather(%src: !tt.ptr<f32>, %indices: !tt.ptr<i32
   %rpred = tt.expand_dims %validrow {axis = 1 : i32} : tensor<4xi1> -> tensor<4x1xi1>
   %rowmask = tt.broadcast %rpred : tensor<4x1xi1> -> tensor<4x8xi1>
   %widths = tt.splat %width : i32 -> tensor<8xi32>
-  %validcol = arith.cmpi slt, %c, %widths : tensor<8xi32>
+  %blockWidth = arith.constant 8 : i32
+  %start = arith.muli %tile, %blockWidth : i32
+  %starts = tt.splat %start : i32 -> tensor<8xi32>
+  %columns = arith.addi %starts, %c : tensor<8xi32>
+  %validcol = arith.cmpi slt, %columns, %widths : tensor<8xi32>
   %cpred = tt.expand_dims %validcol {axis = 0 : i32} : tensor<8xi1> -> tensor<1x8xi1>
   %colmask = tt.broadcast %cpred : tensor<1x8xi1> -> tensor<4x8xi1>
   %active = arith.andi %rowmask, %colmask : tensor<4x8xi1>
   %other = arith.constant dense<-7.0> : tensor<4x8xf32>
   %value = tt.load %ptr, %active, %other : tensor<4x8x!tt.ptr<f32>>
+  tt.return %value : tensor<4x8xf32>
+}
+
+// A uniform row predicate alone does not make per-lane addresses contiguous.
+// CHECK-LABEL: func.func @opaque_row_offsets(
+// CHECK: scf.for
+// CHECK: scf.for
+// CHECK: scf.if %{{.*}} -> (f32) {
+// CHECK-NEXT: %[[DATA:.*]] = memref.load
+// CHECK-NEXT: scf.yield %[[DATA]] : f32
+tt.func public @opaque_row_offsets(%src: !tt.ptr<f32>, %offsets: tensor<4x8xi32>, %rows: tensor<4x1xi32>) -> tensor<4x8xf32> {
+  %bound = arith.constant dense<31> : tensor<4x8xi32>
+  %index = arith.andi %offsets, %bound : tensor<4x8xi32>
+  %base = tt.splat %src : !tt.ptr<f32> -> tensor<4x8x!tt.ptr<f32>>
+  %ptr = tt.addptr %base, %index : tensor<4x8x!tt.ptr<f32>>, tensor<4x8xi32>
+  %zero = arith.constant dense<0> : tensor<4x1xi32>
+  %valid = arith.cmpi ne, %rows, %zero : tensor<4x1xi32>
+  %mask = tt.broadcast %valid : tensor<4x1xi1> -> tensor<4x8xi1>
+  %value = tt.load %ptr, %mask : tensor<4x8x!tt.ptr<f32>>
   tt.return %value : tensor<4x8xf32>
 }
 

@@ -10,7 +10,7 @@ One register per output row (64 f32 lanes):
   5 vdup(1.5, f32, arb, MERGING)
 
 ``vdup`` must lower to the masked ``ave.hir.broadcast`` (vdups form), never to
-the unmasked ``ave.hir.scalar_broadcast`` that ``vsplat`` emits.  A bf16 kernel
+the unmasked ``ave.hir.scalar_broadcast``. A bf16 kernel
 pins the 128-lane 16-bit register, and an IR-only kernel covers every
 documented dtype spelling (``i8``/``u8``/``i32``/``u32``/``f16``/``f32``/
 ``bf16``/``fp8e4nv`` plus the canonical ``int*``/``uint*``/``fp*``/``float*``
@@ -75,7 +75,7 @@ def vdup_bf16(O, N: tl.constexpr, ACTIVE: tl.constexpr):
     ob = tla.alloc((3, N), tl.bfloat16, space="ub")
     with tla.scope.simd():
         prefix = tla.simd.pge(ACTIVE, N)
-        zero = tla.simd.vsplat(0.0, tl.bfloat16)
+        zero = tla.simd.vdup(0.0, tl.bfloat16)
         none = tla.simd.vcmp(zero, zero, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdup(1.5, tl.bfloat16), dist="NORM_B16")
         tla.simd.vsts(ob[1, 0], tla.simd.vdup(1.5, tl.bfloat16, mask=prefix), dist="NORM_B16")
@@ -113,7 +113,7 @@ def test_ir(output_dir=None):
 
     module, ctx = compile_offline(vdup_bf16, BF16_SIGNATURE, constexprs(BF16_LANES, BF16_LANES // 2))
     btext = str(module)
-    assert btext.count("ave.hir.broadcast") == 3
+    assert btext.count("ave.hir.broadcast") == 4
     assert "ave.hir.pge <VL64>" in btext
     btext = str(lower_offline(module, ctx))
     check_lowered_ir(btext, loads=0, stores=1, buffers=None, extra=("ave.hir.broadcast", "vector<128xbf16>"))

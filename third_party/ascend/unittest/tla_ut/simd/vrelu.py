@@ -53,7 +53,7 @@ def vrelu_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexp
         tla.simd.vsts(ob[3, 0], tla.simd.vrelu(x, mask=none))
         tla.simd.vsts(ob[4, 0], tla.simd.vrelu(x, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vrelu(x, mask=arb, mode=tla.simd.MODE.MERGING))
-        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vsplat(SENTINEL_FC, tl.float32))
+        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vdup(SENTINEL_FC, tl.float32))
         for tile in tl.static_range(TILES):
             v = tla.simd.vlds(xb[tile, 0])
             if tile == TILES - 1:
@@ -84,7 +84,7 @@ def vrelu_i32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexp
         tla.simd.vsts(ob[3, 0], tla.simd.vrelu(x, mask=none))
         tla.simd.vsts(ob[4, 0], tla.simd.vrelu(x, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vrelu(x, mask=arb, mode=tla.simd.MODE.MERGING))
-        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vsplat(SENTINEL_IC, tl.int32))
+        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vdup(SENTINEL_IC, tl.int32))
         for tile in tl.static_range(TILES):
             v = tla.simd.vlds(xb[tile, 0])
             if tile == TILES - 1:

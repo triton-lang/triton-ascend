@@ -24,8 +24,8 @@ SIGNATURE = {"O": "*u32"}
 def tail_mask(O, N: tl.constexpr):
     o = tla.alloc((3, N), tl.uint32, space="ub")
     with tla.scope.simd():
-        ones = tla.simd.vsplat(1, tl.uint32)
-        zeros = tla.simd.vsplat(0, tl.uint32)
+        ones = tla.simd.vdup(1, tl.uint32)
+        zeros = tla.simd.vdup(0, tl.uint32)
         tla.simd.vsts(o[0, 0], tla.simd.vsel(tla.simd.tail_mask(20), ones, zeros))
         tla.simd.vsts(o[1, 0], tla.simd.vsel(tla.simd.tail_mask(0), ones, zeros))
         tla.simd.vsts(o[2, 0], tla.simd.vsel(tla.simd.tail_mask(64), ones, zeros))
@@ -40,7 +40,7 @@ def test_ir(output_dir=None):
     module, ctx = compile_offline(tail_mask, SIGNATURE, constexprs(), output_dir=output_dir)
     text = str(module)
     assert text.count("ave.hir.vci") == 3
-    assert text.count("ave.hir.broadcast") == 3
+    assert text.count("ave.hir.broadcast") == 5
     assert text.count("ave.hir.vcmp") == 3
     text = str(lower_offline(module, ctx, output_dir=output_dir))
     check_lowered_ir(text, loads=0, stores=1, buffers=None, extra=("ave.hir.vcmp", ))

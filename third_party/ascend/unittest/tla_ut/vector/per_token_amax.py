@@ -37,7 +37,7 @@ def per_token_amax(X_ptr, OUT_ptr, M: tl.constexpr, N: tl.constexpr):
 
     tla.load_gm_to_ub(x, x_ub)
     with tla.scope.simd():
-        zero = tla.simd.vfull(0.0, tl.float32, N)
+        zero = tla.simd.vdup(0.0, tl.float32)
         for r in tl.static_range(M):
             v = tla.simd.vlds(x_ub[r, 0], dist="NORM")
             abs_v = tla.simd.vsel(tla.simd.vcmp(v, zero, op=tla.simd.CMP.GT), v, tla.simd.vneg(v))

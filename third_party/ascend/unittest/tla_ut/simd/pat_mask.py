@@ -48,7 +48,7 @@ def pat_mask(X, Y, A, P, O, F, N: tl.constexpr):
         tla.simd.vsts(o[1, 0], tla.simd.vand(xv, yv, mask=m4, mode=tla.simd.MODE.MERGING))
         acc = tla.simd.vlds(a[0])
         prod = tla.simd.vlds(p[0])
-        two = tla.simd.vsplat(2.0, tl.float32)
+        two = tla.simd.vdup(2.0, tl.float32)
         tla.simd.vsts(f[0, 0], tla.simd.vmula(acc, prod, two, m4))
         tla.simd.vsts(f[1, 0], tla.simd.vmula(acc, prod, two, mask=m4, mode=tla.simd.MODE.MERGING))
     tla.store_ub_to_gm(o, tla.view(O, (2, N)))

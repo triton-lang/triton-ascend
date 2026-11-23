@@ -49,7 +49,7 @@ def indexed_load(X, I, M, O, DT: tl.constexpr, W: tl.constexpr, BASE: tl.constex
         a = tla.simd.vgather(x[BASE], idx, mask)
         b = tla.simd.vld(x[BASE], idx, mask, mode=tla.simd.MODE.MERGING)
         if MASKED:
-            c = tla.simd.vsel(mask, a, tla.simd.vsplat(7, DT))
+            c = tla.simd.vsel(mask, a, tla.simd.vdup(7, DT))
         else:
             c = a
         tla.simd.vsts(o[0, 0], a, dist="NORM_B16" if W == 16 else "NORM_B32")

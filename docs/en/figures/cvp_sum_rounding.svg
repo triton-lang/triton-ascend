@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="898" height="260" viewBox="0 0 898 260" role="img" aria-labelledby="title desc">
+  <title id="title">FP32 row sum with sequential additions and dense-P pairs</title>
+  <desc id="desc">One key at a time                   Dense-P pairs across the two key halves
+K0         → 1                      K0 + K2 → 1 + t → 1
+Add K1 (t) → 1                      K1 + K3 → t + t → 2⁻²³
+Add K2 (t) → 1                      Add the pairs   → 1 + 2⁻²³
+Add K3 (t) → 1</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="898" height="260" rx="6" fill="#ffffff" />
+  <rect x="8" y="8" width="437.0" height="244" rx="8" fill="#f2f7f9" />
+  <rect x="8" y="18" width="4" height="27" rx="2" fill="#20568a" />
+  <text x="21" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">One key at a time</text>
+  <rect x="453.0" y="8" width="437.0" height="244" rx="8" fill="#f2f7f9" />
+  <rect x="453.0" y="18" width="4" height="27" rx="2" fill="#166656" />
+  <text x="466.0" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">Dense-P pairs across the two key halves</text>
+  <rect x="46" y="51" width="344" height="31" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="218.0" y="71.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">K0 → 1</text>
+  <polyline points="218,82 218,97" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="46" y="100" width="344" height="31" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="218.0" y="120.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">Add K1 (t) → 1</text>
+  <polyline points="218,131 218,146" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="46" y="149" width="344" height="31" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="218.0" y="169.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">Add K2 (t) → 1</text>
+  <polyline points="218,180 218,195" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="46" y="198" width="344" height="31" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="218.0" y="218.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Add K3 (t) → 1</text>
+  <rect x="482" y="57" width="373" height="34" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="668.5" y="79.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">K0 + K2 → 1 + t → 1</text>
+  <rect x="482" y="107" width="373" height="34" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="668.5" y="129.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">K1 + K3 → t + t → 2⁻²³</text>
+  <rect x="482" y="186" width="373" height="43" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="668.5" y="213.28" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="middle">Add the pairs → 1 + 2⁻²³</text>
+  <polyline points="482,74 465,74 465,207 479,207" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="668,142 668,183" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+</svg>

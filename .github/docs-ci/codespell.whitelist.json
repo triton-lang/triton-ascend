@@ -234,5 +234,21 @@
   "atol",
   "ffts",
   "ctypes",
-  "xdist"
+  "xdist",
+  "BCMLIR",
+  "Bisheng",
+  "BNSD",
+  "DCVP",
+  "initializers",
+  "matmuls",
+  "Mmad",
+  "reassociate",
+  "remat",
+  "Rematerialization",
+  "rematerialization",
+  "Unbanked",
+  "unbanked",
+  "unfused",
+  "unshifted",
+  "venv"
 ]

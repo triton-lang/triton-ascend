@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="890" height="234" viewBox="0 0 890 234" role="img" aria-labelledby="title desc">
+  <title id="title">Separate and fused Vector functions for exponential weights</title>
+  <desc id="desc">Separate Vector functions                 Fused Vector function
+exp → write FP32 tile to UB                exp ─┬─ add to FP32 row sum
+      read tile ─┬─ add to FP32 row sum         └─ cast to FP16 for PV
+                 └─ cast to FP16 for PV</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="890" height="234" rx="6" fill="#ffffff" />
+  <rect x="8" y="8" width="433.0" height="218" rx="8" fill="#f2f7f9" />
+  <rect x="8" y="18" width="4" height="27" rx="2" fill="#20568a" />
+  <text x="21" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">Separate Vector functions</text>
+  <rect x="449.0" y="8" width="433.0" height="218" rx="8" fill="#f2f7f9" />
+  <rect x="449.0" y="18" width="4" height="27" rx="2" fill="#166656" />
+  <text x="462.0" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">Fused Vector function</text>
+  <rect x="28" y="61" width="74" height="37" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="65.0" y="84.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">exp</text>
+  <polyline points="102,79 130,79" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="132" y="61" width="270" height="37" rx="5" fill="#fff1ce" stroke="#c7d6df" />
+  <text x="267.0" y="84.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">write FP32 tile to UB</text>
+  <polyline points="164,98 164,116 113,116 113,131" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="30" y="134" width="166" height="45" rx="5" fill="#fff1ce" stroke="#c7d6df" />
+  <text x="113.0" y="161.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">read tile</text>
+  <rect x="228" y="113" width="192" height="42" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="324.0" y="139.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">add to FP32 row sum</text>
+  <rect x="228" y="170" width="192" height="42" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="324.0" y="196.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">cast to FP16 for PV</text>
+  <polyline points="196,156 210,156 210,134 226,134" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="196,156 210,156 210,191 226,191" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="474" y="120" width="66" height="41" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="507.0" y="145.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">exp</text>
+  <polyline points="540,140 564,140 564,98 580,98" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="583" y="76" width="275" height="44" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="720.5" y="103.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">add to FP32 row sum</text>
+  <polyline points="540,140 564,140 564,182 580,182" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="583" y="160" width="275" height="44" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="720.5" y="187.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">cast to FP16 for PV</text>
+</svg>

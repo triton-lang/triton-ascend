@@ -1,0 +1,366 @@
+{
+  "status": "cleanup_common_policy_unqualified",
+  "stage6_excluded": true,
+  "kernel_sha256": "33faa144cbdde5bad8ec8a05bffab664130b9a285bec8985d5635f0cf38f0ac1",
+  "input_policy": {
+    "dtype": "float16",
+    "layout": "BNSD",
+    "causal": false,
+    "scale": 0.5,
+    "dropout": false
+  },
+  "presets": {
+    "baseline_hd64": {
+      "enable_cvp_plan_analysis": true,
+      "enable_cvp_rematerialization": false,
+      "enable_cvp_reduction_scaling": false,
+      "enable_cvp_reduction_major_layout": false,
+      "enable_cvp_dense_operand": false,
+      "allow_cvp_sum_reassociation": false,
+      "cvp_stage_fusion": "none",
+      "cvp_reduction_chains": 1,
+      "enable_cvp_persistent_pipeline": false,
+      "cvp_persistent_pipeline_mode": "skew",
+      "cvp_inner_unroll": 1,
+      "cvp_invariant_cache_mode": "none",
+      "enable_cvp_cube_banked_ready": false,
+      "enable_cvp_cube_overlap": false,
+      "enable_cvp_cube_derived_drain": false,
+      "enable_dynamic_cv_pipeline": false,
+      "enable_mixed_cv": true,
+      "enable_preload": true,
+      "enable_vf_operand_substitution": true,
+      "enable_fused_multiply_add": false
+    },
+    "baseline_hd128": {
+      "enable_cvp_plan_analysis": true,
+      "enable_cvp_rematerialization": false,
+      "enable_cvp_reduction_scaling": false,
+      "enable_cvp_reduction_major_layout": false,
+      "enable_cvp_dense_operand": false,
+      "allow_cvp_sum_reassociation": false,
+      "cvp_stage_fusion": "none",
+      "cvp_reduction_chains": 1,
+      "enable_cvp_persistent_pipeline": false,
+      "cvp_persistent_pipeline_mode": "skew",
+      "cvp_inner_unroll": 1,
+      "cvp_invariant_cache_mode": "none",
+      "enable_cvp_cube_banked_ready": false,
+      "enable_cvp_cube_overlap": false,
+      "enable_cvp_cube_derived_drain": false,
+      "enable_dynamic_cv_pipeline": false,
+      "enable_mixed_cv": true,
+      "enable_preload": true,
+      "enable_vf_operand_substitution": false,
+      "enable_fused_multiply_add": false,
+      "enable_cvp_state_copy_forward": false,
+      "enable_cvp_final_output_forward": false,
+      "enable_cvp_output_copy_forward": false,
+      "enable_cvp_scalar_input_forward": false
+    },
+    "common": {
+      "enable_cvp_plan_analysis": true,
+      "enable_cvp_rematerialization": true,
+      "enable_cvp_reduction_scaling": true,
+      "enable_cvp_reduction_major_layout": true,
+      "enable_cvp_dense_operand": true,
+      "allow_cvp_sum_reassociation": true,
+      "cvp_stage_fusion": "reduce-exp-state",
+      "cvp_reduction_chains": 2,
+      "enable_cvp_persistent_pipeline": true,
+      "cvp_persistent_pipeline_mode": "skew",
+      "cvp_inner_unroll": 1,
+      "cvp_invariant_cache_mode": "auto",
+      "enable_cvp_cube_banked_ready": true,
+      "enable_cvp_cube_overlap": true,
+      "enable_cvp_cube_derived_drain": true,
+      "enable_dynamic_cv_pipeline": false,
+      "enable_mixed_cv": true,
+      "enable_preload": true,
+      "enable_vf_operand_substitution": true,
+      "enable_fused_multiply_add": true,
+      "unit_flag": false,
+      "disable_auto_inject_block_sync": false,
+      "disable_tightly_coupled_buffer_reuse": true,
+      "enable_cvp_state_copy_forward": true,
+      "enable_cvp_final_output_forward": true,
+      "enable_cvp_output_copy_forward": true,
+      "enable_cvp_scalar_input_forward": true
+    }
+  },
+  "cases": [
+    {
+      "case_id": "n32768-hd64",
+      "shape": [
+        128,
+        8,
+        32768,
+        64
+      ],
+      "block_m": 128,
+      "block_n": 256,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd64",
+      "accepted_exception": false,
+      "qualified": false
+    },
+    {
+      "case_id": "n16384-hd64",
+      "shape": [
+        128,
+        8,
+        16384,
+        64
+      ],
+      "block_m": 128,
+      "block_n": 256,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd64",
+      "accepted_exception": false,
+      "qualified": false
+    },
+    {
+      "case_id": "n16384-hd128",
+      "shape": [
+        128,
+        8,
+        16384,
+        128
+      ],
+      "block_m": 128,
+      "block_n": 128,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd128",
+      "accepted_exception": false,
+      "qualified": false
+    },
+    {
+      "case_id": "n8192-hd64",
+      "shape": [
+        128,
+        8,
+        8192,
+        64
+      ],
+      "block_m": 128,
+      "block_n": 256,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd64",
+      "accepted_exception": false,
+      "qualified": false
+    },
+    {
+      "case_id": "n8192-hd128",
+      "shape": [
+        128,
+        8,
+        8192,
+        128
+      ],
+      "block_m": 128,
+      "block_n": 128,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd128",
+      "accepted_exception": false,
+      "qualified": false
+    },
+    {
+      "case_id": "n4096-hd64",
+      "shape": [
+        128,
+        8,
+        4096,
+        64
+      ],
+      "block_m": 128,
+      "block_n": 256,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd64",
+      "accepted_exception": false,
+      "qualified": false
+    },
+    {
+      "case_id": "n4096-hd128",
+      "shape": [
+        128,
+        8,
+        4096,
+        128
+      ],
+      "block_m": 128,
+      "block_n": 128,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd128",
+      "accepted_exception": false,
+      "qualified": false
+    },
+    {
+      "case_id": "n2048-hd64",
+      "shape": [
+        128,
+        8,
+        2048,
+        64
+      ],
+      "block_m": 128,
+      "block_n": 256,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd64",
+      "accepted_exception": false,
+      "qualified": false
+    },
+    {
+      "case_id": "n2048-hd128",
+      "shape": [
+        128,
+        8,
+        2048,
+        128
+      ],
+      "block_m": 128,
+      "block_n": 128,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd128",
+      "accepted_exception": true,
+      "qualified": false
+    },
+    {
+      "case_id": "n1024-hd64",
+      "shape": [
+        128,
+        8,
+        1024,
+        64
+      ],
+      "block_m": 128,
+      "block_n": 256,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd64",
+      "accepted_exception": false,
+      "qualified": false
+    },
+    {
+      "case_id": "n1024-hd128",
+      "shape": [
+        128,
+        8,
+        1024,
+        128
+      ],
+      "block_m": 128,
+      "block_n": 128,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd128",
+      "accepted_exception": false,
+      "qualified": false
+    },
+    {
+      "case_id": "native-even-key-tail",
+      "shape": [
+        1,
+        1,
+        4096,
+        64
+      ],
+      "block_m": 128,
+      "block_n": 256,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd64",
+      "mode": "boundary",
+      "qualified": false
+    },
+    {
+      "case_id": "native-odd-key-tail",
+      "shape": [
+        1,
+        1,
+        3840,
+        64
+      ],
+      "block_m": 128,
+      "block_n": 256,
+      "initial_candidate": "common",
+      "feature_off_control": "baseline_hd64",
+      "mode": "boundary",
+      "qualified": false
+    }
+  ],
+  "validation": {
+    "atol": 0.005,
+    "rtol": 0.005,
+    "stress_forwards": 64,
+    "full_O_M": true,
+    "fresh_AscendC": true
+  },
+  "performance": {
+    "rounds": 6,
+    "collector": "existing Ascend operation profiler workflow; installed help and output schema must be verified before execution",
+    "metric": "device attention kernel/operator duration; not host elapsed or simulated duration",
+    "target": "CVP < AscendC / 0.9, median and all6 paired rounds",
+    "exception": "N2048 HD128 accepted approximately89.8% case stays separately labelled",
+    "collector_scope": "The existing repository collector remains six paired rounds. The preservation reference used eight balanced four-way rounds; this data cleanup does not change or introduce a collection protocol."
+  },
+  "note": "One common compiler policy from the latest BZ eleven-case comparison. BM128; BN256 for HD64 and BN128 for HD128. Cleanup requalification is pending. Historical per-case profiles and obsolete Unroll/neutral/Rows2/boundary/V8 presets are preserved in original Git/evidence, not selected here.",
+  "synchronization_policy": "The common candidate explicitly requests unit_flag=False, cross-core synchronization and protected query buffer reuse. Baseline presets retain their original requested values/defaults.",
+  "qualification_route": "Require fresh qualification of the cleanup artifacts and all declared numerical/stress scopes. Do not transfer qualification from historical source or wheel identities.",
+  "additional_state_regression_cases": [
+    {
+      "case_id": "small-state-query-only-hd64",
+      "mode": "small",
+      "shape": [
+        2,
+        8,
+        512,
+        64
+      ],
+      "block_m": 128,
+      "block_n": 256,
+      "feature_off_control": "baseline_hd64",
+      "initial_candidate": "common",
+      "qualified": false
+    },
+    {
+      "case_id": "small-state-query-single-hd64",
+      "mode": "small",
+      "shape": [
+        1,
+        1,
+        512,
+        64
+      ],
+      "block_m": 128,
+      "block_n": 256,
+      "feature_off_control": "baseline_hd64",
+      "initial_candidate": "common",
+      "qualified": false
+    },
+    {
+      "case_id": "small-state-combined-single-hd64",
+      "mode": "small",
+      "shape": [
+        1,
+        1,
+        512,
+        64
+      ],
+      "block_m": 128,
+      "block_n": 256,
+      "feature_off_control": "baseline_hd64",
+      "initial_candidate": "common",
+      "qualified": false
+    }
+  ],
+  "preservation_reference": {
+    "recipe_sha256": "ffe620bc4bb60f6ad6f58e6b989751c27008691c23f042be1210124e3d0def37",
+    "candidate_switches": 31,
+    "production_cases": 11,
+    "rounds": 8,
+    "comparison_versions": [
+      "baseline",
+      "prior",
+      "compiler",
+      "ascendc"
+    ],
+    "selected_version": "compiler"
+  }
+}

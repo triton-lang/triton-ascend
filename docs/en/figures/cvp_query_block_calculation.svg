@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="424"
+     viewBox="0 0 780 424" role="img" aria-labelledby="title desc">
+  <title id="title">Flash Attention calculation for one query block</title>
+  <desc id="desc">The indented equations run for each key/value tile.
+    After the loop, O and M are computed once for this query block.</desc>
+  <rect width="780" height="424" rx="8" fill="white"/>
+  <rect x="8" y="49" width="764" height="258" rx="8" fill="#f2f7f9"/>
+  <path d="M38 93v204" fill="none" stroke="#b1c8d9" stroke-width="2"/>
+  <rect x="8" y="318" width="764" height="98" rx="8" fill="#e0f1ec"/>
+  <g font-family="DejaVu Sans Mono, monospace" font-size="17" fill="#172f43">
+    <text x="24" y="33" xml:space="preserve">m = -infinity, l = 1.0, Oacc = 0.0</text>
+    <text x="24" y="77" xml:space="preserve" font-weight="bold" fill="#20568a">for each key/value tile k:</text>
+    <text x="24" y="104" xml:space="preserve">    scores = scale * (Q @ transpose(K[k]))</text>
+    <text x="24" y="127" xml:space="preserve">    m_new  = max(m, row_max(scores))</text>
+    <text x="24" y="150" xml:space="preserve">    alpha  = exp(m - m_new)</text>
+    <text x="24" y="173" xml:space="preserve">    P32    = exp(scores - m_new)</text>
+    <text x="24" y="196" xml:space="preserve">    l      = alpha * l + row_sum(P32)</text>
+    <text x="24" y="219" xml:space="preserve">    P16    = convert_fp16(P32)</text>
+    <text x="24" y="242" xml:space="preserve">    PV     = P16 @ V[k]</text>
+    <text x="24" y="265" xml:space="preserve">    Oacc   = alpha * Oacc + PV</text>
+    <text x="24" y="288" xml:space="preserve">    m      = m_new</text>
+    <text x="24" y="345" xml:space="preserve" font-size="15" fill="#345e52"># After the key/value loop, compute the outputs once for this query block.</text>
+    <text x="24" y="373" xml:space="preserve" fill="#134f41">O = convert_fp16(Oacc / l)</text>
+    <text x="24" y="398" xml:space="preserve" fill="#134f41">M = m + log(l)</text>
+  </g>
+</svg>

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="749" height="156" viewBox="0 0 749 156" role="img" aria-labelledby="title desc">
+  <title id="title">Reading the old accumulator before and after forwarding</title>
+  <desc id="desc">Before   Oacc bank (10) → copy to snapshot → VF reads 10
+After    Oacc bank (10) ──────────────────→ VF reads 10</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="749" height="156" rx="6" fill="#ffffff" />
+  <rect x="4" y="8" width="741" height="66" rx="6" fill="#f2f7f9" />
+  <text x="55.5" y="46.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Before</text>
+  <rect x="127" y="16" width="177" height="50" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="215.5" y="46.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">Oacc bank (10)</text>
+  <rect x="332" y="16" width="197" height="50" rx="5" fill="#fff1ce" stroke="#c7d6df" />
+  <text x="430.5" y="46.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">copy to snapshot</text>
+  <polyline points="306,41 329,41" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="557" y="16" width="180" height="50" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="647.0" y="46.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">VF reads 10</text>
+  <polyline points="531,41 554,41" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="4" y="78" width="741" height="66" rx="6" fill="#f2f7f9" />
+  <text x="55.5" y="116.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">After</text>
+  <rect x="127" y="86" width="177" height="50" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="215.5" y="116.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">Oacc bank (10)</text>
+  <rect x="557" y="86" width="180" height="50" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="647.0" y="116.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">VF reads 10</text>
+  <polyline points="306,111 554,111" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+</svg>

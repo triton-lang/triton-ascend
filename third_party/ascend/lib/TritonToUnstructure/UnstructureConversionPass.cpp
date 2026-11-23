@@ -888,7 +888,12 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   bool maskRewritten = false;
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    if (simdDiscreteMask || (axisDiscreteMask && isStructured())) {
+    if (simdDiscreteMask &&
+        (!info.hasScalarBase() || !info.offsets.hasStructuredForm())) {
+      // An indirect address can be valid only where the discrete mask is true.
+      // Keep the full predicate on each scalar load, including column tails.
+      llvm::fill(structuredAxes, false);
+    } else if (simdDiscreteMask || (axisDiscreteMask && isStructured())) {
       op = rewriteSimdDiscreteMaskLoad(op, rewriter);
       rewriter.setInsertionPoint(op);
       maskRewritten = true;

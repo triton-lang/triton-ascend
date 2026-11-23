@@ -34,6 +34,7 @@ Triton Ascend
    Cube Operator <programming_guide/cube_operator>
    CV Fusion Operator <programming_guide/cv_fusion_operator>
    Triton-Ascend Autotune <autotune_guide>
+   Triton-Ascend AOT Compile <aot_guide>
    Example Operators <examples/index>
 
 .. toctree::

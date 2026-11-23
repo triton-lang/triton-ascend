@@ -47,8 +47,6 @@ jobs:
     env:
       PYTHON: "python3.10"
       PROTON_SKIP_PC_SAMPLING_TEST: 1
-      PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
-      PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
       PIP_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
     steps:
       # ── Checkout triton-ascend (full history + tags + submodules) ──────────

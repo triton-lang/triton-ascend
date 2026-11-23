@@ -434,8 +434,6 @@ jobs:
     timeout-minutes: 120
     env:
       PYTHON: python3
-      PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
-      PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
       PIP_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
     strategy:
       fail-fast: false

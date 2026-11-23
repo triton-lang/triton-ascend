@@ -9,7 +9,9 @@ Triton adopts the following hierarchical technical governance structure:
 All contributions are expected to follow Triton’s design principles, as enforced by module and core maintainers. While high-quality pull requests are appreciated and encouraged, all maintainers reserve the right to prioritize their own work over code reviews at-will, hence contributors should not expect their work to be reviewed promptly.
 
 Contributors can maximize the chances of their work being accepted by maintainers by meeting a high quality bar before sending a PR to maintainers.  We encourage maintainers who contribute to Triton on behalf of a company to get reviews from senior developers within their company before sending to maintainers.
+
 ## Module maintainers
+
 We aim to make the Triton codebase as modular as possible, such that different components (e.g., subdirectories) can be improved in parallel under the supervision of different module maintainers.
 
 What constitutes (or not) a module is up to the core maintainers. Core maintainers also reserve the right to decide whether the development of a module should happen – or keep happening – in-tree or not.
@@ -27,13 +29,12 @@ Note: Some important parts of the Triton eco-system (e.g., Intel XPU backend) ma
 * CPU backend (Bert Maher, Ilya Enkovich)
 * Intel backend (Ettore Tiotto, Whitney Tsang)
 
-
 ## Core maintainers
+
 The core maintainers drive the development of Triton at large and set the roadmap for the project. As such, they have the following responsibilities:
 * Proposing, implementing and reviewing profound changes to user-facing APIs, IR specifications and/or pass infrastructures
 * Enforcing code quality standards and adherence to core design principles
 * Drawing module boundaries and resolving disputes between module maintainers
-
 
 The core maintainers as a group have the power to veto any decision made at a Module maintainer level.
 
@@ -50,6 +51,7 @@ The core maintainers should publicly articulate their decision-making, and share
 * Zahi Moudallal
 
 ## Lead core maintainer
+
 When core maintainers cannot come to a consensus, a publicly declared lead maintainer is expected to settle the debate and make executive decisions.
 
 The Lead Core Maintainer should publicly articulate their decision-making, and give a clear reasoning for their decisions.

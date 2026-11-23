@@ -587,14 +587,16 @@ mlir::ascend::estimateFittedScan(const StageWorkload::PrefixScanKey &shape,
   if (std::get<0>(shape) <= 1 || std::get<1>(shape) <= 0 ||
       !std::get<12>(shape))
     return std::nullopt;
+  // A SuperBlock adds independent programs, not cooperating warps to one
+  // scan. Keep scan geometry separate from occupancy-sensitive resource rates.
+  const int64_t scanWarps = profile.prefixScanWarpCount > 0
+                                ? profile.prefixScanWarpCount
+                                : profile.activeWarpCount;
   const auto &combine = std::get<11>(shape);
   if (combine != "arith.addf" && combine != "arith.addi") {
     if (allowTableFormulas)
       return estimatePrefixScanFormula(
-          shape,
-          profile.prefixScanWarpCount > 0 ? profile.prefixScanWarpCount
-                                          : profile.activeWarpCount,
-          simd, profile.calibratedPrefixScan.formulas);
+          shape, scanWarps, simd, profile.calibratedPrefixScan.formulas);
     return std::nullopt;
   }
   const auto &calibration = profile.calibratedPrefixScan;
@@ -650,13 +652,13 @@ mlir::ascend::estimateFittedScan(const StageWorkload::PrefixScanKey &shape,
   } else if (independentSequences == 1 &&
              !calibration.prefixScan1dWarpSegments.empty()) {
     auto result =
-        simtPrefixScan1dSegmentCost(calibration, profile.activeWarpCount, n);
+        simtPrefixScan1dSegmentCost(calibration, scanWarps, n);
     formulaId = std::move(result.formulaId);
     completion = result.cycles;
   } else if (independentSequences > 1 &&
              !calibration.prefixScan2dWarpSegments.empty()) {
     auto result = simtPrefixScan2dSegmentCost(
-        calibration, profile.activeWarpCount, extent, n);
+        calibration, scanWarps, extent, n);
     formulaId = std::move(result.formulaId);
     completion = result.cycles;
   }

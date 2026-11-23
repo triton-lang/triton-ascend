@@ -22,7 +22,7 @@ def scan_module(shape, axis, copies=1):
         body) + f'\ntt.return %s{copies-1} : {ty}\n}} }}'
 
 
-def evaluate(tmp_path, shape, axis=0, copies=1, warps=4, profile=PROFILE, module_text=None):
+def evaluate(tmp_path, shape, axis=0, copies=1, warps=4, profile=PROFILE, module_text=None, factors=(1, )):
     report = tmp_path / 'report.jsonl'
     if report.exists():
         report.unlink()
@@ -34,8 +34,10 @@ def evaluate(tmp_path, shape, axis=0, copies=1, warps=4, profile=PROFILE, module
     module_path.write_text(module_text or scan_module(shape, axis, copies))
     module = ir.parse_mlir_module(str(module_path), context)
     pm = ir.pass_manager(context)
+    capability = json.dumps({'whole_kernel_superblock_factors': list(factors)})
     ascend.passes.ttir.add_select_simd_simt_costmodel(pm, 'report', str(profile), 'Ascend950PR_9579', warps, True,
-                                                      False, False, 1, 1, 1, '', '{}', str(report))
+                                                      max(factors) > 1, False, max(factors), 1, max(factors), '',
+                                                      capability, str(report))
     pm.run(module, "prefixscan_migration")
     assert report.is_file()
     return json.loads(report.read_text().splitlines()[-1])
@@ -271,3 +273,72 @@ def test_high_rank_table_uses_canonical_geometry(tmp_path, shape, axis, folded, 
     assert actual.get('scan_formula_instances_per_iteration')
     assert actual['scan_formula_instances_per_iteration'] == expected['scan_formula_instances_per_iteration']
     assert actual['scan_completion_per_iteration'] == pytest.approx(expected['scan_completion_per_iteration'])
+
+
+@pytest.mark.parametrize('shape,axis,warps', [
+    ((32, ), 0, 1),
+    ((128, ), 0, 1),
+    ((2048, ), 0, 1),
+    ((128, ), 0, 4),
+    ((2048, ), 0, 4),
+    ((2048, ), 0, 8),
+    ((32, 64), 0, 4),
+    ((8, 32), 1, 4),
+    ((32, 64), 0, 8),
+])
+@pytest.mark.parametrize('integer', [False, True])
+def test_superblock_keeps_per_program_cumsum_calibration(tmp_path, shape, axis, warps, integer):
+    profile, _, _ = local_profile(tmp_path)
+    text = scan_module(shape, axis)
+    if integer:
+        text = text.replace('f32', 'i32').replace('arith.addf', 'arith.addi')
+    report = evaluate(tmp_path, shape, axis=axis, warps=warps, profile=profile, module_text=text, factors=(1, 2, 4))
+    scans = [
+        stage for stage in report['stage_model']['logical_stages']
+        if stage['workload'].get('prefix_scan_instances_per_iteration')
+    ]
+    assert len(scans) == 1
+    implementations = {
+        impl['implementation']['superblock_factor']: impl
+        for impl in scans[0]['implementations']
+        if impl['implementation']['mode'] == 'simt' and impl['implementation']['materialization'] == 'whole_kernel'
+    }
+    assert set(implementations) == {1, 2, 4}
+    costs, formulas = [], []
+    for factor in (1, 2, 4):
+        resources = implementations[factor]['resource_system_cycles']
+        costs.append(resources['scan_completion_per_iteration'] + resources['prefix_scan_critical_path_per_iteration'])
+        formulas.append(resources['scan_formula_instances_per_iteration'])
+    # F changes concurrent programs, not the algorithm/calibration of each
+    # program's scan. The complete group price can still vary with F.
+    assert costs[1:] == pytest.approx([costs[0], costs[0]])
+    assert formulas[1:] == [formulas[0], formulas[0]]
+
+
+@pytest.mark.parametrize('shape,axis', [((128, ), 0), ((2048, ), 0), ((32, 64), 0), ((8, 32), 1)])
+@pytest.mark.parametrize('warps', [1, 4])
+@pytest.mark.parametrize('integer', [False, True])
+def test_superblock_scan_completion_is_one_group_envelope(tmp_path, shape, axis, warps, integer):
+    profile, _, _ = local_profile(tmp_path)
+    text = scan_module(shape, axis)
+    if integer:
+        text = text.replace('f32', 'i32').replace('arith.addf', 'arith.addi')
+    report = evaluate(tmp_path, shape, axis=axis, warps=warps, profile=profile, module_text=text, factors=(1, 2, 4, 8))
+    stages = [
+        s for s in report['stage_model']['logical_stages'] if s['workload'].get('prefix_scan_instances_per_iteration')
+    ]
+    assert len(stages) == 1
+    implementations = [
+        i for i in stages[0]['implementations']
+        if i['implementation']['mode'] == 'simt' and i['implementation']['materialization'] == 'whole_kernel'
+    ]
+    assert {i['implementation']['superblock_factor'] for i in implementations} == {1, 2, 4, 8}
+    for impl in implementations:
+        resource = impl['resource_system_cycles']
+        factor = impl['implementation']['superblock_factor']
+        completion = resource['scan_completion_per_iteration']
+        assert completion > 0
+        # A pure fitted scan has no residual resource body. Grouping must not
+        # replicate its elapsed completion envelope, but issue remains a bound.
+        assert impl['total_system_cycles'] == pytest.approx(resource['setup'] +
+                                                            max(completion, factor * resource['issue_per_iteration']))

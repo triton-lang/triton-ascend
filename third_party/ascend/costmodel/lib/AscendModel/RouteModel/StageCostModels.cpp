@@ -3015,8 +3015,17 @@ static double applySuperBlock(const LogicalStage &stage,
   }
   const double body = std::max(0.0, stageCycles - fixed);
   // Resource rates describe aggregate throughput of the selected VF (already
-  // resolved at baseWarps * F).
-  return std::max(issueFloor, fixed + factor * body);
+  // resolved at baseWarps * F). Fitted scan completion is an elapsed-time
+  // envelope, rather than throughput-normalized resource work. Charge that
+  // envelope once per group; keep F copies of the remaining work and the
+  // aggregate issue lower bound. Runtime scheduling still counts the groups.
+  const double scanCompletion =
+      stage.costModelKind == StageCostModelKind::PrefixScan
+          ? iterations(stage) * resources.scanCompletionCycles
+          : 0.0;
+  const double resourceBody = std::max(0.0, body - scanCompletion);
+  return std::max(issueFloor,
+                  fixed + factor * resourceBody + scanCompletion);
 }
 
 static double estimateStageBase(const LogicalStage &stage,

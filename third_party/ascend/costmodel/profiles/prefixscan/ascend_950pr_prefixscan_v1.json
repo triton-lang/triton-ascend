@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "profile_version": "ascend-950pr-prefixscan-pr2474-v1",
+  "profile_version": "ascend-950pr-prefixscan-pr2474-v1-single-warp-20261123",
   "target": "Ascend950PR",
   "source_commit": "1164ad184f38786181d928df7bb83cf35e098983",
   "scope": "Static-shape tt.scan workloads, priced from the first operand geometry and element width without direction, combine or result-count restrictions.",
@@ -26,6 +26,13 @@
     "startup_system_cycles_1d": 135.4,
     "startup_system_cycles_1d_small": 72.7,
     "simt_1d_warp_segments": {
+      "1": {
+        "c_local": 70.97610617887848,
+        "c_fixed": 0.0,
+        "c_round": 0.0,
+        "c_gen": 0.0,
+        "serial_rate": 2.5161728528875833
+      },
       "4": {
         "c_local": 96.8,
         "c_fixed": 144.8,
@@ -100,6 +107,6 @@
         "b_subwarp": 0.716093
       }
     },
-    "description": "SIMT tt.scan pricing. Multi-dim scans use the warp-shape-aware additive table simt_2d_warp_segments (cost = a + b*N + c*(N*k)/T + d*max(0, N/T - r0), with a_subwarp / b_subwarp for extent < 32); 1D scans use the three-segment table simt_1d_warp_segments. dependency_factor and dependency_factor_1d remain the fallback when a table is absent and for the LoopCarriedRecurrence scan path."
+    "description": "SIMT tt.scan pricing. Multi-dim scans use the warp-shape-aware additive table simt_2d_warp_segments (cost = a + b*N + c*(N*k)/T + d*max(0, N/T - r0), with a_subwarp / b_subwarp for extent < 32); 1D scans use the three-segment table simt_1d_warp_segments. dependency_factor and dependency_factor_1d remain the fallback when a table is absent and for the LoopCarriedRecurrence scan path. Single-warp 1D cumsum coefficients use independent CLOCK64 scan/identity controls; training extents 64,256,512,1024 and held-out extents 128,2048. Residual held-out errors and measurement boundaries are preserved in data_provider/ascend_950pr_single_warp_scan_20261123.json. Existing multi-warp coefficients are unchanged."
   }
 }

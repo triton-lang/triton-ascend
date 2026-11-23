@@ -1,0 +1,185 @@
+{
+  "profile_version": "ascend-950pr-prefixscan-pr2474-v1-single-warp-20261123",
+  "measurement": {
+    "physical_device": "4",
+    "frequency_mhz": 1648.4420785937339,
+    "results": [
+      {
+        "n": 32,
+        "session_net_ticks": [
+          117.0,
+          117.0,
+          117.0
+        ],
+        "net_ticks": 117.0,
+        "time_us": 0.07097610617887848,
+        "relative_session_span": 0.0,
+        "stable": true,
+        "method": "isolated scan increment with corrected CLOCK64 native windows"
+      },
+      {
+        "n": 64,
+        "session_net_ticks": [
+          231.0,
+          230.5,
+          231.0
+        ],
+        "net_ticks": 231.0,
+        "time_us": 0.14013231219932418,
+        "relative_session_span": 0.0021645021645021645,
+        "stable": true,
+        "method": "isolated scan increment with corrected CLOCK64 native windows"
+      },
+      {
+        "n": 128,
+        "session_net_ticks": [
+          443.0,
+          443.0,
+          443.0
+        ],
+        "net_ticks": 443.0,
+        "time_us": 0.2687385900619074,
+        "relative_session_span": 0.0,
+        "stable": true,
+        "method": "isolated scan increment with corrected CLOCK64 native windows"
+      },
+      {
+        "n": 256,
+        "session_net_ticks": [
+          1007.0,
+          1031.0,
+          1020.0
+        ],
+        "net_ticks": 1020.0,
+        "time_us": 0.6187660538671457,
+        "relative_session_span": 0.023529411764705882,
+        "stable": true,
+        "method": "isolated scan increment with corrected CLOCK64 native windows"
+      },
+      {
+        "n": 512,
+        "session_net_ticks": [
+          2077.0,
+          2079.5,
+          2081.0
+        ],
+        "net_ticks": 2079.5,
+        "time_us": 1.2614941264869897,
+        "relative_session_span": 0.0019235393123346958,
+        "stable": true,
+        "method": "isolated scan increment with corrected CLOCK64 native windows"
+      },
+      {
+        "n": 1024,
+        "session_net_ticks": [
+          4282.0,
+          4282.0,
+          4282.0
+        ],
+        "net_ticks": 4282.0,
+        "time_us": 2.5976041594697237,
+        "relative_session_span": 0.0,
+        "stable": true,
+        "method": "isolated scan increment with corrected CLOCK64 native windows"
+      },
+      {
+        "n": 2048,
+        "session_net_ticks": [
+          8829.5,
+          8812.0,
+          8829.0
+        ],
+        "net_ticks": 8829.0,
+        "time_us": 5.3559661662676765,
+        "relative_session_span": 0.001982104428587609,
+        "stable": true,
+        "method": "isolated scan increment with corrected CLOCK64 native windows"
+      }
+    ]
+  },
+  "parameters": {
+    "c_local": 70.97610617887848,
+    "c_fixed": 0.0,
+    "c_round": 0.0,
+    "c_gen": 0.0,
+    "serial_rate": 2.5161728528875833
+  },
+  "train_extents": [
+    64,
+    256,
+    512,
+    1024
+  ],
+  "heldout_extents": [
+    128,
+    2048
+  ],
+  "unconstrained_intercept": -34.57750475244575,
+  "checks": [
+    {
+      "n": 32,
+      "role": "local_anchor",
+      "measured_system_cycles": 70.97610617887848,
+      "before_system_cycles": 96.8,
+      "after_system_cycles": 70.97610617887848,
+      "after_ape_percent": 0.0
+    },
+    {
+      "n": 64,
+      "role": "train",
+      "measured_system_cycles": 140.1323121993242,
+      "before_system_cycles": 170.3,
+      "after_system_cycles": 161.03506258480533,
+      "after_ape_percent": 14.916438655311048
+    },
+    {
+      "n": 128,
+      "role": "heldout",
+      "measured_system_cycles": 268.7385900619074,
+      "before_system_cycles": 195.8,
+      "after_system_cycles": 322.07012516961066,
+      "after_ape_percent": 19.84513466987292
+    },
+    {
+      "n": 256,
+      "role": "train",
+      "measured_system_cycles": 618.7660538671456,
+      "before_system_cycles": 217.90699999999998,
+      "after_system_cycles": 644.1402503392213,
+      "after_ape_percent": 4.100773840693561
+    },
+    {
+      "n": 512,
+      "role": "train",
+      "measured_system_cycles": 1261.4941264869897,
+      "before_system_cycles": 254.387,
+      "after_system_cycles": 1288.2805006784426,
+      "after_ape_percent": 2.123384772789061
+    },
+    {
+      "n": 1024,
+      "role": "train",
+      "measured_system_cycles": 2597.6041594697235,
+      "before_system_cycles": 327.347,
+      "after_system_cycles": 2576.5610013568853,
+      "after_ape_percent": 0.8100987225526324
+    },
+    {
+      "n": 2048,
+      "role": "heldout",
+      "measured_system_cycles": 5355.966166267676,
+      "before_system_cycles": 473.26699999999994,
+      "after_system_cycles": 5153.122002713771,
+      "after_ape_percent": 3.7872562532496046
+    }
+  ],
+  "fit": "two-parameter nonnegative least squares general-path envelope",
+  "target": "Ascend950PR/dav-c310",
+  "base_warps": 1,
+  "backend_scheduling_disabled_for_measurement": true,
+  "original_kernel_exclusive_stage_time_claimed": false,
+  "source_asset": "/home/m00951283/costmodel/q4_deviation_mxh_20261115_12cases/profile/profile_dependencies/prefixscan/ascend_950pr_prefixscan_v1.json",
+  "source_asset_sha256": "804c0d79a088e84c10707266dccfb30a20da4923de39469dfa58b1bf324628d4",
+  "fixed_asset_sha256": "47f05050e1c2588067d4be7bda4d0240c6c60e8ed665f5bb7eb31e98fd3ab405",
+  "effective_change": "add exact num_warps=1 key; existing compiled lookup now selects 1 and uses 32-thread geometry"
+}

@@ -3024,8 +3024,7 @@ static double applySuperBlock(const LogicalStage &stage,
           ? iterations(stage) * resources.scanCompletionCycles
           : 0.0;
   const double resourceBody = std::max(0.0, body - scanCompletion);
-  return std::max(issueFloor,
-                  fixed + factor * resourceBody + scanCompletion);
+  return std::max(issueFloor, fixed + factor * resourceBody + scanCompletion);
 }
 
 static double estimateStageBase(const LogicalStage &stage,

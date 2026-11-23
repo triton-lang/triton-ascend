@@ -595,8 +595,8 @@ mlir::ascend::estimateFittedScan(const StageWorkload::PrefixScanKey &shape,
   const auto &combine = std::get<11>(shape);
   if (combine != "arith.addf" && combine != "arith.addi") {
     if (allowTableFormulas)
-      return estimatePrefixScanFormula(
-          shape, scanWarps, simd, profile.calibratedPrefixScan.formulas);
+      return estimatePrefixScanFormula(shape, scanWarps, simd,
+                                       profile.calibratedPrefixScan.formulas);
     return std::nullopt;
   }
   const auto &calibration = profile.calibratedPrefixScan;
@@ -651,14 +651,13 @@ mlir::ascend::estimateFittedScan(const StageWorkload::PrefixScanKey &shape,
     }
   } else if (independentSequences == 1 &&
              !calibration.prefixScan1dWarpSegments.empty()) {
-    auto result =
-        simtPrefixScan1dSegmentCost(calibration, scanWarps, n);
+    auto result = simtPrefixScan1dSegmentCost(calibration, scanWarps, n);
     formulaId = std::move(result.formulaId);
     completion = result.cycles;
   } else if (independentSequences > 1 &&
              !calibration.prefixScan2dWarpSegments.empty()) {
-    auto result = simtPrefixScan2dSegmentCost(
-        calibration, scanWarps, extent, n);
+    auto result =
+        simtPrefixScan2dSegmentCost(calibration, scanWarps, extent, n);
     formulaId = std::move(result.formulaId);
     completion = result.cycles;
   }

@@ -1289,14 +1289,13 @@ SplatConverter::matchAndRewrite(triton::SplatOp op, OpAdaptor adaptor,
             op, op.getType(), reducedTensor,
             SmallVector<ReassociationIndices>{});
       } else {
-        auto init = rewriter.create<tensor::EmptyOp>(loc, shape,
-                                                    type.getElementType());
+        auto init =
+            rewriter.create<tensor::EmptyOp>(loc, shape, type.getElementType());
         SmallVector<int64_t> dimensions;
         for (int64_t i = 0; i < static_cast<int64_t>(shape.size()); ++i)
           dimensions.push_back(i);
         rewriter.replaceOpWithNewOp<linalg::BroadcastOp>(
-            op, reducedTensor, init,
-            rewriter.getDenseI64ArrayAttr(dimensions));
+            op, reducedTensor, init, rewriter.getDenseI64ArrayAttr(dimensions));
       }
       return success();
     }

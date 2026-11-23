@@ -1,19 +1,27 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.while
 
-// The normal preload scheme is only enabled for the kernels whose pipeline
+// The normal preload scheme is enabled for the kernels whose pipeline
 // dependency is a single chain of four computation blocks that alternates the
 // cores. A kernel that holds two such chains keeps the conditions of the
-// upstream implementation: the scheme is only validated for a single chain.
+// upstream implementation when only one of the chains carries a condition: the
+// scheme is validated on a single chain.
 //
 // This kernel has the dependency chain of the test
 // pattern-kernel-conditions.mlir:
 //   cube block 0 -> vector block 1 -> cube block 2 -> vector block 3
 // and a second chain that shares no block with it:
 //   cube block 4 -> vector block 5 -> cube block 6 -> vector block 7
-// Both chains are double buffered, so both of them match the pattern, but
-// they are two independent pipelines: the kernel keeps the upstream scheme,
-// the main loop stays an scf.for and the blocks handshake through PIPE_S. The
-// implicit check forbids the scf.while of the normal preload scheme.
+// Both chains are double buffered, so both of them match the pattern. The
+// blocks of the second chain live outside the main loop, so only the four
+// blocks of the first chain carry a condition: the graph holds two chains
+// and the conditions are computed for the blocks of one of them. The kernel
+// keeps the upstream scheme, the main loop stays an scf.for and the blocks
+// handshake through PIPE_S. The implicit check forbids the scf.while of the
+// normal preload scheme.
+//
+// The test pattern-two-pipelines-kernel-conditions.mlir holds the two chains
+// of a kernel that runs two pipelines at the same time: both of them carry a
+// condition and the kernel uses the normal preload scheme.
 
 // CHECK-LABEL: func.func @pattern_two_chains_kernel_conditions
 

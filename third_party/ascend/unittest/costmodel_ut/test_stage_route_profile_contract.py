@@ -51,7 +51,7 @@ class StageRouteProfileContractTest(unittest.TestCase):
         self.assertTrue(timing["completion_inclusive_groups_cover_boundary"])
         self.assertEqual(timing["completion_inclusive_minimum_stage_count"], 12)
         self.assertAlmostEqual(timing["reduction_resident_tile_max_fraction"], 0.6)
-        self.assertAlmostEqual(timing["simt_whole_kernel_completion_scale"], 0.55)
+        self.assertAlmostEqual(timing["simt_whole_kernel_completion_scale"], 0.44)
         self.assertEqual(timing["simt_whole_kernel_factor_limit"], 4)
         for mode in ("simd", "simt"):
             self.assertAlmostEqual(profile[mode]["stage_resources"]["scalar_memory"]["in_kernel_transfer_scale"], 0.45)

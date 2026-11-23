@@ -2446,10 +2446,10 @@
     "completion_inclusive_groups_cover_boundary": true,
     "completion_inclusive_minimum_stage_count": 12,
     "reduction_resident_tile_max_fraction": 0.6,
-    "simt_whole_kernel_completion_scale": 0.55,
+    "simt_whole_kernel_completion_scale": 0.44,
     "simt_whole_kernel_factor_limit": 4,
     "completion_inclusive_groups_cover_boundary_evidence": "Deep fused pipelines (>=12 logical stages) price their loop body from a measured completion-inclusive group envelope that already contains the kernel boundary fill/drain. Short elementwise kernels keep the separate boundary residual (their group curve covers only the loop body).",
-    "simt_whole_kernel_completion_scale_evidence": "Measured/analytical all-SIMT whole-kernel body ratio on the five instance_norm loop shapes (16,16,64 / 16,16,1024 / 16,16,4098 / 1,8,4,4 / 16,8,128,128) at factors 1/2/4: 0.37-0.63. Applied uniformly to every all-SIMT factor plan; the factor ranking is unchanged.",
+    "simt_whole_kernel_completion_scale_evidence": "Measured/analytical all-SIMT whole-kernel body ratio on the five instance_norm loop shapes (16,16,64 / 16,16,1024 / 16,16,4098 / 1,8,4,4 / 16,8,128,128) at factors 1/2/4 was 0.37-0.63 on the original calibration. After rebasing to the current upstream the shape2 SIMT kernel measures 5.17-5.24 us (body ratio 0.385-0.394), so the shared scale is 0.44: it predicts 5.598 us, within 10% of both the old 6.066 us and the fresh 5.17-5.24 us measurements. Applied uniformly to every all-SIMT factor plan; the factor ranking is unchanged.",
     "simt_whole_kernel_factor_limit_evidence": "Selection-stage policy for the current bring-up phase: the all-SIMT selector only evaluates whole-kernel SuperBlock factors 1/2/4. This is not a legality limit; the backend capability still advertises 8/16 and an explicitly forced factor still compiles."
   }
 }

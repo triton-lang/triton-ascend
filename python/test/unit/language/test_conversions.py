@@ -416,7 +416,13 @@ def test_typeconvert_downcast_clamping(src_dtype, dst_dtype, mode, device, round
         BLOCK_SIZE
     )
 
-    if mode == 'nan':
+    if dst.device.type == "npu":
+        # Ascend's saturating conversion maps NaN to zero. Compare in FP32
+        # on the host because the device FP8 fill and comparison are unsupported.
+        actual = dst.cpu().float()
+        expected = torch.full_like(actual, 0.0 if mode == 'nan' else expected_result)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    elif mode == 'nan':
         assert(torch.all(torch.isnan(dst)))
     else:
         torch.testing.assert_close(dst, torch.full_like(dst, expected_result))

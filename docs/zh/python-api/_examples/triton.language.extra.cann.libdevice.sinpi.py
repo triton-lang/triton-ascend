@@ -1,7 +1,3 @@
-import os
-
-os.environ.setdefault("TRITON_ENABLE_LIBDEVICE_SIMT", "1")
-
 import pytest
 from scipy.special._ufuncs import _sinpi as scipy_sinpi
 import triton

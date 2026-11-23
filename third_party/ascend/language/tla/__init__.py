@@ -67,6 +67,9 @@ from triton.language.core import (
     uint64,
 )
 
+# Shared kernel control flow and compile-time values.
+from triton.language.core import constexpr, program_id, range, static_assert, static_range
+
 from ._decorator import experimental
 from .core import AddressSpace, buffer, buffer_type, vector, vector_type
 from .scope import pipeline, scope
@@ -109,7 +112,7 @@ from .dma import (
 )
 
 from .view import view, subview, reshape
-from .scalar import select, abs, maximum, minimum, cast, max_value, cdiv, infinity, clamp
+from .scalar import load, select, abs, maximum, minimum, cast, max_value, cdiv, infinity, clamp
 from .aux_ops import annotate_multi_buffer, assume
 
 from . import math
@@ -119,9 +122,6 @@ from .debug import device_assert, device_print
 # SIMD vector-register ops.  ``simd`` is exported as a module so its ``cast``
 # (ave.hir.vextf) does not shadow unrelated top-level names.
 from . import simd
-
-# Scalar / SIMD-register selection (eager, unlike TileLang T.if_then_else).
-from .selection import where
 
 # Cube-core ops (``mmad``/``mmad_mx``).
 from . import cube
@@ -163,6 +163,11 @@ __all__ = [
     "uint16",
     "uint32",
     "uint64",
+    "constexpr",
+    "program_id",
+    "range",
+    "static_assert",
+    "static_range",
     "AddressSpace",
     "PadMode",
     "L2CachePolicy",
@@ -210,6 +215,7 @@ __all__ = [
     "reshape",
 
     # scalar expressions
+    "load",
     "select",
     "abs",
     "maximum",
@@ -238,9 +244,6 @@ __all__ = [
 
     # simd ops
     "simd",
-
-    # scalar / SIMD selection
-    "where",
 
     # cube ops
     "cube",

@@ -50,7 +50,7 @@ def vsqrt_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexp
         tla.simd.vsts(ob[3, 0], tla.simd.vsqrt(x, mask=none))
         tla.simd.vsts(ob[4, 0], tla.simd.vsqrt(x, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vsqrt(x, mask=arb, mode=tla.simd.MODE.MERGING))
-        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vsplat(SENTINEL_FC, tl.float32))
+        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vdup(SENTINEL_FC, tl.float32))
         for tile in tl.static_range(TILES):
             v = tla.simd.vlds(xb[tile, 0])
             if tile == TILES - 1:
@@ -83,7 +83,7 @@ def vsqrt_f16(X, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.const
         tla.simd.vsts(ob[3, 0], tla.simd.vsqrt(x, mask=none), dist="NORM_B16")
         tla.simd.vsts(ob[4, 0], tla.simd.vsqrt(x, mask=prefix, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
         tla.simd.vsts(ob[5, 0], tla.simd.vsqrt(x, mask=arb, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
-        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vsplat(SENTINEL_FC, tl.float16), dist="NORM_B16")
+        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vdup(SENTINEL_FC, tl.float16), dist="NORM_B16")
         for tile in tl.static_range(TILES):
             v = tla.simd.vlds(xb[tile, 0])
             if tile == TILES - 1:

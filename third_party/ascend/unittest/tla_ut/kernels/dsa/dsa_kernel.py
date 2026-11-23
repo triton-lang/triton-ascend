@@ -69,15 +69,15 @@ def _pack_kv(KV, KR, PACKED):
 
 # Cross-core event ids (0-15). Single ids are semaphores: producers and
 # consumers walk the tiles in order, so one id carries the whole sequence.
-FLAG_KV_READY = tl.constexpr(0)  # a gathered key tile is in L1
-FLAG_SCORE_TILE = tl.constexpr(1)  # qk fixpipe produced the score tile
-FLAG_SCORE_FREE = tl.constexpr(13)  # vector finished reading the score tile
-FLAG_P_TILE = tl.constexpr(2)  # BF16 P tile landed in L1
-FLAG_P_FREE = tl.constexpr(6)  # BMM2 finished reading the P tile
-FLAG_PV_TILE = tl.constexpr(3)  # pv fixpipe produced the accumulator tile
-FLAG_PV_FREE = tl.constexpr(4)  # vector folded the previous pv tile into acc
-FLAG_JOB_DONE = tl.constexpr(10)  # vector stores finished
-FLAG_JOB_ACK = tl.constexpr(11)  # cube observed them
+FLAG_KV_READY = tla.constexpr(0)  # a gathered key tile is in L1
+FLAG_SCORE_TILE = tla.constexpr(1)  # qk fixpipe produced the score tile
+FLAG_SCORE_FREE = tla.constexpr(13)  # vector finished reading the score tile
+FLAG_P_TILE = tla.constexpr(2)  # BF16 P tile landed in L1
+FLAG_P_FREE = tla.constexpr(6)  # BMM2 finished reading the P tile
+FLAG_PV_TILE = tla.constexpr(3)  # pv fixpipe produced the accumulator tile
+FLAG_PV_FREE = tla.constexpr(4)  # vector folded the previous pv tile into acc
+FLAG_JOB_DONE = tla.constexpr(10)  # vector stores finished
+FLAG_JOB_ACK = tla.constexpr(11)  # cube observed them
 
 
 @tla.jit
@@ -90,51 +90,51 @@ def _sparse_mla(
     MAX,
     SUM,
     PACKED_KV,
-    SQ: tl.constexpr,
-    H: tl.constexpr,
-    L: tl.constexpr,
-    TOPK: tl.constexpr,
-    BM: tl.constexpr,
-    GR: tl.constexpr,
-    CORES: tl.constexpr,
+    SQ: tla.constexpr,
+    H: tla.constexpr,
+    L: tla.constexpr,
+    TOPK: tla.constexpr,
+    BM: tla.constexpr,
+    GR: tla.constexpr,
+    CORES: tla.constexpr,
 ):
-    BN: tl.constexpr = 128
-    VM: tl.constexpr = BM // 2
-    HEAD_TILES: tl.constexpr = H // BM
-    TILES: tl.constexpr = TOPK // BN
-    OUT_ROWS: tl.constexpr = 8
-    GRP: tl.constexpr = GR + 1  # padded row stride used by the NZ packers
+    BN: tla.constexpr = 128
+    VM: tla.constexpr = BM // 2
+    HEAD_TILES: tla.constexpr = H // BM
+    TILES: tla.constexpr = TOPK // BN
+    OUT_ROWS: tla.constexpr = 8
+    GRP: tla.constexpr = GR + 1  # padded row stride used by the NZ packers
     # Cyclic jobs cover tails for any runtime core count; no H/core divisibility is required.
-    for job in tl.range(tl.program_id(0), SQ * HEAD_TILES, CORES):
+    for job in tla.range(tla.program_id(0), SQ * HEAD_TILES, CORES):
         token = job // HEAD_TILES
         head = job % HEAD_TILES * BM
         # L1: three 512-wide latent slots, two 64-wide RoPE slots, Q, one P tile.
-        q_lat = tla.alloc((32, BM // 16, 16, 16), tl.bfloat16, space='l1')
-        q_rope = tla.alloc((4, BM // 16, 16, 16), tl.bfloat16, space='l1')
-        kv_lat = tla.alloc((3 * 32, BN // 16, 16, 16), tl.bfloat16, space='l1')
+        q_lat = tla.alloc((32, BM // 16, 16, 16), tla.bfloat16, space='l1')
+        q_rope = tla.alloc((4, BM // 16, 16, 16), tla.bfloat16, space='l1')
+        kv_lat = tla.alloc((3 * 32, BN // 16, 16, 16), tla.bfloat16, space='l1')
         kv_lat_flat = tla.reshape(kv_lat, (3 * 32, BN * 16))
-        kv_rope = tla.alloc((2 * 4, BN // 16, 16, 16), tl.bfloat16, space='l1')
+        kv_rope = tla.alloc((2 * 4, BN // 16, 16, 16), tla.bfloat16, space='l1')
         kv_rope_flat = tla.reshape(kv_rope, (2 * 4, BN * 16))
-        p = tla.alloc((BN // 16, BM // 16, 16, 16), tl.bfloat16, space='l1')
+        p = tla.alloc((BN // 16, BM // 16, 16, 16), tla.bfloat16, space='l1')
         pflat = tla.reshape(p, (BN // 16, BM * 16))
-        qk_l0c = tla.alloc((BN // 16, BM // 16, 16, 16), tl.float32, space='l0c')
-        pv_l0c = tla.alloc((512 // 16, BM // 16, 16, 16), tl.float32, space='l0c')
-        score = tla.alloc((VM, BN), tl.float32, space='ub')
-        pv = tla.alloc((VM, 512), tl.float32, space='ub')
-        acc = tla.alloc((VM, 512), tl.float32, space='ub')
-        output = tla.alloc((OUT_ROWS, 512), tl.bfloat16, space='ub')
-        prob = tla.alloc((BN // 16, VM * 16 + 16), tl.bfloat16, space='ub')
-        ids = tla.alloc((2 * BN, ), tl.int32, space='ub')
-        maximum = tla.alloc((64, ), tl.float32, space='ub')
-        denominator = tla.alloc((64, ), tl.float32, space='ub')
-        corrections = tla.alloc((128, ), tl.float32, space='ub')
+        qk_l0c = tla.alloc((BN // 16, BM // 16, 16, 16), tla.float32, space='l0c')
+        pv_l0c = tla.alloc((512 // 16, BM // 16, 16, 16), tla.float32, space='l0c')
+        score = tla.alloc((VM, BN), tla.float32, space='ub')
+        pv = tla.alloc((VM, 512), tla.float32, space='ub')
+        acc = tla.alloc((VM, 512), tla.float32, space='ub')
+        output = tla.alloc((OUT_ROWS, 512), tla.bfloat16, space='ub')
+        prob = tla.alloc((BN // 16, VM * 16 + 16), tla.bfloat16, space='ub')
+        ids = tla.alloc((2 * BN, ), tla.int32, space='ub')
+        maximum = tla.alloc((64, ), tla.float32, space='ub')
+        denominator = tla.alloc((64, ), tla.float32, space='ub')
+        corrections = tla.alloc((128, ), tla.float32, space='ub')
         # Pad each gathered row to a full 128-BF16 SIMD load for its RoPE tail.
-        key0 = tla.alloc((GR, 640), tl.bfloat16, space='ub')
-        key1 = tla.alloc((GR, 640), tl.bfloat16, space='ub')
+        key0 = tla.alloc((GR, 640), tla.bfloat16, space='ub')
+        key1 = tla.alloc((GR, 640), tla.bfloat16, space='ub')
         rope0 = tla.subview(key0, offsets=(0, 512), sizes=(GR, 128))
         rope1 = tla.subview(key1, offsets=(0, 512), sizes=(GR, 128))
-        packed0 = tla.alloc((36, GRP * 16), tl.bfloat16, space='ub')
-        packed1 = tla.alloc((36, GRP * 16), tl.bfloat16, space='ub')
+        packed0 = tla.alloc((36, GRP * 16), tla.bfloat16, space='ub')
+        packed1 = tla.alloc((36, GRP * 16), tla.bfloat16, space='ub')
         ids_view0 = tla.subview(ids, offsets=(0, ), sizes=(BN, ))
 
         with tla.scope.cube():
@@ -142,12 +142,12 @@ def _sparse_mla(
             tla.load_gm_to_l1(tla.view(QR + (token * H + head) * 64, (BM, 64)), q_rope)
         with tla.scope.vector():
             with tla.scope.simd():
-                zero = tla.simd.vfull(0.0, tl.float32, 64)
-                neg = tla.simd.vfull(-3.4028234663852886e38, tl.float32, 64)
+                zero = tla.simd.vdup(0.0, tla.float32)
+                neg = tla.simd.vdup(-3.4028234663852886e38, tla.float32)
                 tla.simd.vsts(maximum[0], neg)
                 tla.simd.vsts(denominator[0], zero)
-                for row in tl.range(VM):
-                    for col in tl.static_range(8):
+                for row in tla.range(VM):
+                    for col in tla.static_range(8):
                         tla.simd.vsts(acc[row, col * 64], zero)
         # Prologue: gather tile 0; the loop's first iteration gathers tile 1
         # while the cube runs BMM1(0). The job-end handshake already drained
@@ -156,18 +156,18 @@ def _sparse_mla(
             sub = tla.sub_block_id()
             tla.load_gm_to_ub(tla.view(IDS + token * TOPK, (BN, )), ids_view0)
             gather_start = 0
-            for chunk in tl.range(BN // (4 * GR)):
-                for stage in tl.static_range(2):
+            for chunk in tla.range(BN // (4 * GR)):
+                for stage in tla.static_range(2):
                     if stage == 0:
                         keys, ropes, packed = key0, rope0, packed0
                     else:
                         keys, ropes, packed = key1, rope1, packed1
                     position = sub * (BN // 2) + (chunk * 2 + stage) * GR
-                    for pair in tl.static_range(GR // 2):
-                        idx2 = tl.load(IDS64 + (token * TOPK + gather_start + position) // 2 + pair)
+                    for pair in tla.static_range(GR // 2):
+                        idx2 = tla.load(IDS64 + (token * TOPK + gather_start + position) // 2 + pair)
                         # Wrap addresses safely; softmax masks invalid indices using the original int32 values.
-                        safe0 = (idx2 & 0xFFFFFFFF).to(tl.int32) & (L - 1)
-                        safe1 = (idx2 >> 32).to(tl.int32) & (L - 1)
+                        safe0 = (idx2 & 0xFFFFFFFF).to(tla.int32) & (L - 1)
+                        safe1 = (idx2 >> 32).to(tla.int32) & (L - 1)
                         row = pair * 2
                         tla.load_gm_to_ub(
                             tla.view(PACKED_KV + safe0 * 576, (1, 576)),
@@ -180,8 +180,8 @@ def _sparse_mla(
                     with tla.scope.simd():
                         # Only the first 64 BF16 lanes of the RoPE tail are valid.
                         half = tla.simd.pge(64, 128)
-                        for local_row in tl.range(GR):
-                            for col in tl.static_range(4):
+                        for local_row in tla.range(GR):
+                            for col in tla.static_range(4):
                                 value = tla.simd.vlds(keys[local_row, col * 128])
                                 tla.simd.vsstb(value, packed[col * 8, local_row * 16], GRP * 16)
                             rope = tla.simd.vlds(ropes[local_row, 0])
@@ -204,7 +204,7 @@ def _sparse_mla(
                     )
             tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, FLAG_KV_READY)
 
-        for t in tl.range(TILES):
+        for t in tla.range(TILES):
             lat_cur = tla.subview(kv_lat, offsets=((t % 3) * 32, 0, 0, 0), sizes=(32, BN // 16, 16, 16))
             rope_cur = tla.subview(kv_rope, offsets=((t % 2) * 4, 0, 0, 0), sizes=(4, BN // 16, 16, 16))
             with tla.scope.cube():
@@ -255,7 +255,7 @@ def _sparse_mla(
                     # the previous group is packed into nZ and copied to L1.
                     # Compile-time stages preserve the rolling two-buffer schedule:
                     # load 0, load 1, pack 0/load 2, pack 1/load 3, pack 2, pack 3.
-                    for step in tl.static_range(6):
+                    for step in tla.static_range(6):
                         if step % 2 == 0:
                             keys, ropes, packed = key0, rope0, packed0
                         else:
@@ -264,8 +264,8 @@ def _sparse_mla(
                             position = sub * (BN // 2) + (step - 2) * GR
                             with tla.scope.simd():
                                 half = tla.simd.pge(64, 128)
-                                for local_row in tl.range(GR):
-                                    for col in tl.static_range(4):
+                                for local_row in tla.range(GR):
+                                    for col in tla.static_range(4):
                                         value = tla.simd.vlds(keys[local_row, col * 128])
                                         tla.simd.vsstb(value, packed[col * 8, local_row * 16], GRP * 16)
                                     rope = tla.simd.vlds(ropes[local_row, 0])
@@ -282,10 +282,10 @@ def _sparse_mla(
                             )
                         if step < 4:
                             position = sub * (BN // 2) + step * GR
-                            for pair in tl.static_range(GR // 2):
-                                idx2 = tl.load(IDS64 + (token * TOPK + gather_start + position) // 2 + pair)
-                                safe0 = (idx2 & 0xFFFFFFFF).to(tl.int32) & (L - 1)
-                                safe1 = (idx2 >> 32).to(tl.int32) & (L - 1)
+                            for pair in tla.static_range(GR // 2):
+                                idx2 = tla.load(IDS64 + (token * TOPK + gather_start + position) // 2 + pair)
+                                safe0 = (idx2 & 0xFFFFFFFF).to(tla.int32) & (L - 1)
+                                safe1 = (idx2 >> 32).to(tla.int32) & (L - 1)
                                 row = pair * 2
                                 tla.load_gm_to_ub(
                                     tla.view(PACKED_KV + safe0 * 576, (1, 576)),
@@ -300,34 +300,34 @@ def _sparse_mla(
                 ids_cur = tla.subview(ids, offsets=((t % 2) * BN, ), sizes=(BN, ))
                 corr_view = tla.subview(corrections, offsets=((t % 2) * 64, ), sizes=(64, ))
                 with tla.scope.simd():
-                    neg = tla.simd.vfull(float('-inf'), tl.float32, 64)
-                    scale = tla.simd.vsplat(1.0 / 24.0, tl.float32)
-                    limit = tla.simd.vsplat(L, tl.int32)
+                    neg = tla.simd.vdup(float('-inf'), tla.float32)
+                    scale = tla.simd.vdup(1.0 / 24.0, tla.float32)
+                    limit = tla.simd.vdup(L, tla.int32)
                     i0 = tla.simd.vlds(ids_cur, (0, ))
                     i1 = tla.simd.vlds(ids_cur, (64, ))
                     # One unsigned compare rejects both index < 0 and index >= L.
                     valid0 = tla.simd.vcmp(i0, limit, op=tla.simd.CMP.ULT)
                     valid1 = tla.simd.vcmp(i1, limit, op=tla.simd.CMP.ULT)
-                    for row in tl.range(VM):
+                    for row in tla.range(VM):
                         x0 = tla.simd.vmul(tla.simd.vlds(score[row, 0]), scale)
                         x1 = tla.simd.vmul(tla.simd.vlds(score[row, 64]), scale)
                         x0 = tla.simd.vsel(valid0, x0, neg)
                         x1 = tla.simd.vsel(valid1, x1, neg)
                         tile_max = tla.simd.vmax(x0, x1)
                         old_max = tla.simd.vlds(maximum[row], dist='BRC_B32')
-                        new_max = tla.simd.vmax(tla.simd.vreduce_max(tile_max), old_max)
+                        new_max = tla.simd.vmax(tla.simd.vdupv(tla.simd.vcmax(tile_max)), old_max)
                         alpha = tla.simd.vexp(tla.simd.vsub(old_max, new_max))
                         p0 = tla.simd.vexp(tla.simd.vsub(x0, new_max))
                         p1 = tla.simd.vexp(tla.simd.vsub(x1, new_max))
                         partial_sum = tla.simd.vadd(p0, p1)
-                        total = tla.simd.vbroadcast(tla.simd.vreduce_sum(partial_sum))
+                        total = tla.simd.vdupv(tla.simd.vcadd(partial_sum))
                         total = tla.simd.vadd(total,
                                               tla.simd.vmul(tla.simd.vlds(denominator[row], dist='BRC_B32'), alpha))
                         tla.simd.vsts(maximum[row], new_max, dist='ONEPT_B32')
                         tla.simd.vsts(denominator[row], total, dist='ONEPT_B32')
                         tla.simd.vsts(corr_view[row], alpha, dist='ONEPT_B32')
-                        packed, unused = tla.simd.vdintlv(tla.simd.vtruncf(p0, tl.bfloat16),
-                                                          tla.simd.vtruncf(p1, tl.bfloat16))
+                        packed, unused = tla.simd.vdintlv(tla.simd.vcvt(p0, tla.bfloat16, round=tla.simd.ROUND.A),
+                                                          tla.simd.vcvt(p1, tla.bfloat16, round=tla.simd.ROUND.A))
                         tla.simd.vsstb(packed, prob[0, row * 16], (VM + 1) * 16)
                 if t < TILES - 1:
                     tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, FLAG_SCORE_FREE)
@@ -343,10 +343,10 @@ def _sparse_mla(
                     corr_prev = tla.subview(corrections, offsets=(((t - 1) % 2) * 64, ), sizes=(64, ))
                     with tla.scope.simd():
                         # In-place FP32 accumulator: acc = pv + alpha * acc.
-                        for row in tl.range(VM):
+                        for row in tla.range(VM):
                             alpha = tla.simd.vlds(corr_prev[row], dist='BRC_B32')
-                            for col in tl.static_range(8):
-                                value = tla.simd.vfma(
+                            for col in tla.static_range(8):
+                                value = tla.simd.vmula(
                                     tla.simd.vlds(pv[row, col * 64]),
                                     tla.simd.vlds(acc[row, col * 64]),
                                     alpha,
@@ -373,29 +373,31 @@ def _sparse_mla(
             sub = tla.sub_block_id()
             tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_PV_TILE)
             with tla.scope.simd():
-                for row in tl.range(VM):
+                for row in tla.range(VM):
                     alpha = tla.simd.vlds(tla.subview(corrections, offsets=(64, ), sizes=(64, ))[row], dist='BRC_B32')
-                    for col in tl.static_range(8):
-                        value = tla.simd.vfma(
+                    for col in tla.static_range(8):
+                        value = tla.simd.vmula(
                             tla.simd.vlds(pv[row, col * 64]),
                             tla.simd.vlds(acc[row, col * 64]),
                             alpha,
                         )
                         tla.simd.vsts(acc[row, col * 64], value)
             tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, FLAG_PV_FREE)
-            for row_block in tl.range(VM // OUT_ROWS):
+            for row_block in tla.range(VM // OUT_ROWS):
                 with tla.scope.simd():
-                    for local_row in tl.range(OUT_ROWS):
+                    for local_row in tla.range(OUT_ROWS):
                         row = row_block * OUT_ROWS + local_row
                         den = tla.simd.vlds(denominator[row], dist='BRC_B32')
-                        for col in tl.static_range(4):
-                            b0 = tla.simd.vtruncf(
+                        for col in tla.static_range(4):
+                            b0 = tla.simd.vcvt(
                                 tla.simd.vdiv(tla.simd.vlds(acc[row, col * 128]), den),
-                                tl.bfloat16,
+                                tla.bfloat16,
+                                round=tla.simd.ROUND.A,
                             )
-                            b1 = tla.simd.vtruncf(
+                            b1 = tla.simd.vcvt(
                                 tla.simd.vdiv(tla.simd.vlds(acc[row, col * 128 + 64]), den),
-                                tl.bfloat16,
+                                tla.bfloat16,
+                                round=tla.simd.ROUND.A,
                             )
                             packed, unused = tla.simd.vdintlv(b0, b1)
                             tla.simd.vsts(output[local_row, col * 128], packed)

@@ -53,7 +53,7 @@ def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.con
         tla.simd.vsts(ob[3, 0], tla.simd.vabsdif(x, y, mask=none))
         tla.simd.vsts(ob[4, 0], tla.simd.vabsdif(x, y, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vabsdif(x, y, mask=arb, mode=tla.simd.MODE.MERGING))
-        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vsplat(SENTINEL_FC, tl.float32))
+        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vdup(SENTINEL_FC, tl.float32))
         for tile in tl.static_range(TILES):
             vx = tla.simd.vlds(xb[tile, 0])
             vy = tla.simd.vlds(yb[tile, 0])
@@ -90,7 +90,7 @@ def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.
         tla.simd.vsts(ob[3, 0], tla.simd.vabsdif(x, y, mask=none), dist="NORM_B16")
         tla.simd.vsts(ob[4, 0], tla.simd.vabsdif(x, y, mask=prefix, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
         tla.simd.vsts(ob[5, 0], tla.simd.vabsdif(x, y, mask=arb, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
-        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vsplat(SENTINEL_FC, tl.float16), dist="NORM_B16")
+        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vdup(SENTINEL_FC, tl.float16), dist="NORM_B16")
         for tile in tl.static_range(TILES):
             vx = tla.simd.vlds(xb[tile, 0])
             vy = tla.simd.vlds(yb[tile, 0])

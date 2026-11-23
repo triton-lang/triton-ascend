@@ -59,14 +59,14 @@ def test_operand_validation():
         with pytest.raises(ValueError, match="mask must be"):
             tla.simd.vsel(mask, vec, vec, _semantic=sem)
     with pytest.raises(TypeError, match="tla.vector"):
-        tla.simd.vreduce_max([vec, vec, tensor], _semantic=sem)
+        tla.simd.vreduce_min([vec, vec, tensor], _semantic=sem)
 
 
 @tr.jit
 def _vector_control_flow(out, n):
     with tla.scope.simd():
-        acc = tla.simd.vfull(0.0, tl.float32, 64)
-        step = tla.simd.vfull(1.0, tl.float32, 64)
+        acc = tla.simd.vdup(0.0, tl.float32)
+        step = tla.simd.vdup(1.0, tl.float32)
         for i in range(n):
             acc, mask = tla.simd.vadd(acc, step), tla.simd.vcmp(acc, step, op=tla.simd.CMP.GE)
             acc = tla.simd.vsel(mask, acc, step)
@@ -82,20 +82,20 @@ def _vector_control_flow(out, n):
             acc = tla.simd.vmul(acc, step)
         else:
             acc = tla.simd.vneg(acc)
-        narrow = tla.simd.vtruncf(acc, tl.bfloat16)
+        narrow = tla.simd.vcvt(acc, tl.bfloat16, round=tla.simd.ROUND.A)
         acc = tla.simd.vextf(narrow, tl.float32)
         bits = tla.simd.vbitcast(acc, "bf16")
         acc = tla.simd.vbitcast(bits, "f32")
         lo, hi = tla.simd.vintlv(acc, step)
         lo, hi = tla.simd.vdintlv(lo, hi)
-        acc = tla.simd.vreduce_max([lo, hi])
+        acc = tla.simd.vdupv(tla.simd.vcmax(tla.simd.vmax(lo, hi)))
         tla.simd.vsts(out[0], acc)
 
 
 @tr.jit
-def _scalar_where(out, cond):
+def _scalar_select(out, cond):
+    base = tla.select(cond, 0, 32)
     with tla.scope.simd():
-        base = tla.where(cond, 0, 32)  # scalar int1 cond -> arith.select
         tla.simd.vsts(out[0], tla.simd.vci(base), dist="NORM_B32")
 
 
@@ -144,10 +144,10 @@ def test_sqrt_ir(output_dir=None):
         lower_offline(module, ctx, output_dir)
 
 
-def test_scalar_where_ir(output_dir=None):
+def test_scalar_select_ir(output_dir=None):
     # vci materializes an i32 vector, so the UB view must be int32 (f32 here
     # made the vsts dtype mismatch).
-    module, ctx = compile_offline(_scalar_where, {"out": tla.buffer_type((64, ), tl.int32, "ub"), "cond": "i1"}, {},
+    module, ctx = compile_offline(_scalar_select, {"out": tla.buffer_type((64, ), tl.int32, "ub"), "cond": "i1"}, {},
                                   output_dir)
     text = str(module)
     assert "arith.select" in text, text

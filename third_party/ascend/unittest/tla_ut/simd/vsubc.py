@@ -38,8 +38,8 @@ def vsubc(X, Y, D, B, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
         a = tla.simd.vlds(x[0, 0])
         c = tla.simd.vlds(y[0, 0])
         mask = tla.simd.pge(ACTIVE, N)
-        one_u = tla.simd.vsplat(1, tl.uint32)
-        zero_u = tla.simd.vsplat(0, tl.uint32)
+        one_u = tla.simd.vdup(1, tl.uint32)
+        zero_u = tla.simd.vdup(0, tl.uint32)
 
         full, full_borrow = tla.simd.vsubc(a, c)
         zeroed, zeroed_borrow = tla.simd.vsubc(a, c, mask)
@@ -51,14 +51,14 @@ def vsubc(X, Y, D, B, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
         signed = tla.simd.vbitcast(a, "int32")
         signed_subtrahend = tla.simd.vbitcast(c, "int32")
         signed_diff, signed_borrow = tla.simd.vsubc(signed, signed_subtrahend)
-        one_i = tla.simd.vsplat(1, tl.int32)
-        zero_i = tla.simd.vsplat(0, tl.int32)
+        one_i = tla.simd.vdup(1, tl.int32)
+        zero_i = tla.simd.vdup(0, tl.int32)
         tla.simd.vsts(d[2, 0], tla.simd.vbitcast(signed_diff, "uint32"))
         tla.simd.vsts(b[2, 0], tla.simd.vsel(signed_borrow, one_i, zero_i))
 
         # Seed only the tail rows; full tiles overwrite their rows entirely.
-        tla.simd.vsts(d[BASE_ROWS + TILES - 1, 0], tla.simd.vsplat(SENTINEL_C, tl.uint32))
-        tla.simd.vsts(b[BASE_ROWS + TILES - 1, 0], tla.simd.vsplat(SENTINEL_C, tl.uint32))
+        tla.simd.vsts(d[BASE_ROWS + TILES - 1, 0], tla.simd.vdup(SENTINEL_C, tl.uint32))
+        tla.simd.vsts(b[BASE_ROWS + TILES - 1, 0], tla.simd.vdup(SENTINEL_C, tl.uint32))
         for t in tl.static_range(TILES):
             va = tla.simd.vlds(x[t, 0])
             vb = tla.simd.vlds(y[t, 0])

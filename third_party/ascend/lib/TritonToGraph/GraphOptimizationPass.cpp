@@ -108,7 +108,8 @@ constexpr bool requiresPostRewriteCleanup(GraphOptimizationRuleId ruleId) {
   return ruleId == GraphOptimizationRuleId::IndependentAxisTensorize ||
          ruleId == GraphOptimizationRuleId::PersistentTaskStripMining ||
          ruleId == GraphOptimizationRuleId::SelectedBlockScan ||
-         ruleId == GraphOptimizationRuleId::QueryRowBatching;
+         ruleId == GraphOptimizationRuleId::QueryRowBatching ||
+         ruleId == GraphOptimizationRuleId::CoalescAtomicLockRemoval;
 }
 
 // Keep the pre-graph canonicalization limited to operations that its two
@@ -664,6 +665,9 @@ void populateBuiltinGraphOptimizationRules(
     rules.push_back(createSelectedBlockScanRule());
     rules.push_back(createQueryRowBatchingRule());
   }
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::CoalescAtomicLockRemoval))
+    rules.push_back(createCoalescAtomicLockRemovalRule());
   const auto compileMode =
       triton::ascend::parseCompileMode(options.compileMode);
   if (compileMode && isRuleEnabled(options.enabledRuleMask,

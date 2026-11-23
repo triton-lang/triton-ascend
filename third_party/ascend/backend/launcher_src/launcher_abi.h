@@ -67,6 +67,7 @@ enum TritonNpuLaunchFlag {
   // Requires IAT and cannot be combined with PTSM. The argument ABI is
   // unchanged.
   TRITON_NPU_IAT64 = 1 << 11,
+  TRITON_NPU_ATOMIC_REMOVE = 1 << 12,
 };
 
 typedef struct {

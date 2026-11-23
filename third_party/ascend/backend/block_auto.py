@@ -9,6 +9,11 @@ _A5_VV_FACTORS = (2, 3, 4, 8, 16)
 _MAX_MERGED_TTIRS = 5
 
 
+def _vv_factors(arch):
+    from .utils import AscendArchGen, arch_generation
+    return _A5_VV_FACTORS if arch_generation(arch) == AscendArchGen.GEN5 else (2, 4)
+
+
 class _NotApplicable(ValueError):
     """A modeled compiler decline, not an unexpected frontend error."""
 
@@ -55,7 +60,7 @@ class _SelectionCache:
     def __init__(self, body):
         from triton.runtime.cache import get_cache_manager
         from .block_batching_worker import _digest, _PROTOCOL
-        self.identity = _digest(["ttir_selection", 1, _PROTOCOL, body])
+        self.identity = _digest(["ttir_selection", 3, _PROTOCOL, body])
         self.cache = get_cache_manager(self.identity)
 
     def load(self):
@@ -121,14 +126,12 @@ def candidate_plan(contract, *, probe, axis=-1):
                 continue
 
     if len(requested) > _MAX_MERGED_TTIRS:
-        # All three axes admit both sizes. Discover axis roles with the
-        # preferred size for this target, then prioritize spatial or unknown
-        # axes over another independent batch rewrite.
-        first_factor = 2 if contract.get("legacy_resource_policy") else 4
-        first = [item for item in requested if item["factor"] == first_factor]
+        # Discover the three axis roles with F4, then use the remaining
+        # probes for spatial or unknown axes before independent batch axes.
+        first = [item for item in requested if item["factor"] == 4]
         collect(first)
         batch_axes = {r["axis"] for r in reports if r["report"].get("cv_mode") == "independent_batch_v1"}
-        remaining = [item for item in requested if item["factor"] != first_factor]
+        remaining = [item for item in requested if item["factor"] == 2]
         remaining.sort(key=lambda item: item["axis"] in batch_axes)
         collect(remaining[:_MAX_MERGED_TTIRS - len(first)])
     else:
@@ -181,19 +184,14 @@ def _select_ttir(backend, frozen, options, env_vars, contract, scalar_arguments,
     arch, _, limit, _ = backend.parse_options(options).block_compile_context
     if limit is None:
         raise ValueError("automatic TTIR selection requires explicit AIC/AIV core counts")
-    from .block_batching import uses_grouping_policy
-    legacy = uses_grouping_policy(arch)
-    contract = dict(contract, legacy_resource_policy=legacy)
-    if legacy:
-        contract['cv_empirical_short_batch'] = False
     axis = options.get("block_batching_axis", -1)
     if cv:
         plan = candidate_plan(contract, axis=axis, probe=frontend)
     else:
         extents = contract["grid"] if axis == -1 else [contract["grid"][axis]]
-        factors = (2, 4) if legacy else _A5_VV_FACTORS
+        factors = _vv_factors(arch)
         plan = dict(candidates=[dict(axis=axis, factor=f) for f in factors if max(extents) >= f],
-                    reason="VV_F2_F4_AUTOMATIC_AXIS" if legacy else "VV_TTIR_CANDIDATES")
+                    reason="VV_TTIR_CANDIDATES" if factors == _A5_VV_FACTORS else "VV_F2_F4_AUTOMATIC_AXIS")
     cores = limit[1 if cv else 2]
     rows, prepared = [], {}
     for spec in [dict(axis=-1, factor=1), *plan["candidates"]]:
@@ -214,9 +212,6 @@ def _select_ttir(backend, frozen, options, env_vars, contract, scalar_arguments,
         rows.append(row)
         prepared["unmerged" if factor == 1 else f"a{selected_axis}_f{factor}"] = module, metadata
     selection = _native("rank_ttir", contract, candidates=rows)
-    if legacy:
-        selection.update(model="ttir-legacy-grouping-v1",
-                         reason="LEGACY_TTIR_GROUPING" if selection['factor'] > 1 else "LEGACY_KEEP_BASELINE")
     chosen = selection["selected_key"]
     snapshot = _pack_ttir(*prepared[chosen], output) if chosen != "unmerged" else None
     plan["declines"] = [dict(axis=a, factor=f, **decline) for (a, f), decline in declines.items()]

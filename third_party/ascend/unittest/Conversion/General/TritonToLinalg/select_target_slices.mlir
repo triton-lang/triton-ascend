@@ -547,10 +547,9 @@ module {
 
 // -----
 
-// On 950 a full leading prefix needs no copy. For a partial prefix, write the
-// remaining constant rows into the single-use result of the elementwise op.
+// A fill used only by the select is available as the prefix destination.
 module {
-  func.func @computed_row_prefix(%x: tensor<16x32xf32>, %end: i32) -> tensor<16x32xf32> {
+  func.func @private_fill_row_prefix(%x: tensor<16x32xf32>, %end: i32) -> tensor<16x32xf32> {
     %rows = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
     %ends = tt.splat %end : i32 -> tensor<16xi32>
     %active = arith.cmpi slt, %rows, %ends : tensor<16xi32>
@@ -562,7 +561,30 @@ module {
     return %result : tensor<16x32xf32>
   }
 }
-// COMMON-LABEL: func.func @computed_row_prefix(
+// COMMON-LABEL: func.func @private_fill_row_prefix(
+// COMMON-DAG: %[[ZERO:.*]] = linalg.fill {{.*}} -> tensor<16x32xf32>
+// COMMON-DAG: %[[VALUE:.*]] = math.exp2
+// COMMON: %[[PART:.*]] = tensor.extract_slice %[[VALUE]][0, 0] [%[[ROWS:.*]], 32]
+// COMMON: %[[OUT:.*]] = tensor.insert_slice %[[PART]] into %[[ZERO]][0, 0] [%[[ROWS]], 32]
+// COMMON: return %[[OUT]]
+
+// -----
+
+// The fill is also returned. A single-use computed tile can receive the suffix.
+module {
+  func.func @shared_fill_row_prefix(%x: tensor<16x32xf32>, %end: i32) -> (tensor<16x32xf32>, tensor<16x32xf32>) {
+    %rows = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
+    %ends = tt.splat %end : i32 -> tensor<16xi32>
+    %active = arith.cmpi slt, %rows, %ends : tensor<16xi32>
+    %expanded = tt.expand_dims %active {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+    %mask = tt.broadcast %expanded : tensor<16x1xi1> -> tensor<16x32xi1>
+    %zero = arith.constant dense<0.0> : tensor<16x32xf32>
+    %computed = math.exp2 %x : tensor<16x32xf32>
+    %result = arith.select %mask, %computed, %zero : tensor<16x32xi1>, tensor<16x32xf32>
+    return %result, %zero : tensor<16x32xf32>, tensor<16x32xf32>
+  }
+}
+// COMMON-LABEL: func.func @shared_fill_row_prefix(
 // A5-DAG: %[[HEIGHT:.*]] = arith.constant 16 : index
 // COMMON-DAG: %[[ZERO:.*]] = linalg.fill {{.*}} -> tensor<16x32xf32>
 // COMMON-DAG: %[[VALUE:.*]] = math.exp2
@@ -571,14 +593,14 @@ module {
 // A5: %[[OUT:.*]] = tensor.insert_slice %[[PART]] into %[[VALUE]][%[[ROWS]], 0] [%[[TAIL]], 32]
 // A2: %[[PART:.*]] = tensor.extract_slice %[[VALUE]][0, 0] [%[[ROWS:.*]], 32]
 // A2: %[[OUT:.*]] = tensor.insert_slice %[[PART]] into %[[ZERO]][0, 0] [%[[ROWS]], 32]
-// COMMON: return %[[OUT]]
+// COMMON: return %[[OUT]], %[[ZERO]]
 
 // -----
 
 // A rectangular prefix also leaves invalid columns in otherwise valid rows.
 // Its complement cannot be filled by replacing a suffix of whole rows.
 module {
-  func.func @computed_rectangular_prefix(%x: tensor<16x32xf32>, %rowEnd: i32, %colEnd: i32) -> tensor<16x32xf32> {
+  func.func @computed_rectangular_prefix(%x: tensor<16x32xf32>, %rowEnd: i32, %colEnd: i32) -> (tensor<16x32xf32>, tensor<16x32xf32>) {
     %rows = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
     %rowEnds = tt.splat %rowEnd : i32 -> tensor<16xi32>
     %activeRows = arith.cmpi slt, %rows, %rowEnds : tensor<16xi32>
@@ -593,7 +615,7 @@ module {
     %zero = arith.constant dense<0.0> : tensor<16x32xf32>
     %computed = math.exp2 %x : tensor<16x32xf32>
     %result = arith.select %mask, %computed, %zero : tensor<16x32xi1>, tensor<16x32xf32>
-    return %result : tensor<16x32xf32>
+    return %result, %zero : tensor<16x32xf32>, tensor<16x32xf32>
   }
 }
 // COMMON-LABEL: func.func @computed_rectangular_prefix(
@@ -601,4 +623,4 @@ module {
 // COMMON-DAG: %[[VALUE:.*]] = math.exp2
 // COMMON: %[[PART:.*]] = tensor.extract_slice %[[VALUE]][0, 0] [%[[ROWS:.*]], %[[COLS:.*]]]
 // COMMON: %[[OUT:.*]] = tensor.insert_slice %[[PART]] into %[[ZERO]][0, 0] [%[[ROWS]], %[[COLS]]]
-// COMMON: return %[[OUT]]
+// COMMON: return %[[OUT]], %[[ZERO]]

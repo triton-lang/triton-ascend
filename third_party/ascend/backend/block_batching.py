@@ -17,18 +17,8 @@ IMPLEMENTATION_VERSION = 56
 
 
 # Requests and the execution state owned by each compiled candidate.
-def uses_grouping_policy(arch):
-    """Whether the target selects on TTIR legality and occupancy alone.
-
-    The A5 model prices individual instructions against an A5 register file
-    and unified buffer, so it does not transfer to the earlier generation.
-    A2 and A3 share that generation and therefore share the simpler policy.
-    """
-    return isinstance(arch, str) and arch.startswith(('Ascend910_93', 'Ascend910B'))
-
-
 def supports_target(arch):
-    return isinstance(arch, str) and (arch.startswith(('Ascend950', 'Ascend910_95')) or uses_grouping_policy(arch))
+    return isinstance(arch, str) and arch.startswith(('Ascend950', 'Ascend910_95', 'Ascend910_93', 'Ascend910B'))
 
 
 def _is_cv_report(report):
@@ -187,8 +177,6 @@ def _prepare_launch(fn, args, kwargs, grid, warmup, device, backend, binding=Non
             _generalize_data_arguments(arguments, known)
     contract = dict(grid=extents, arguments=arguments, argument_order=list(arguments),
                     core_floor=os.getenv("TA_BLOCK_BATCHING_CORE_FLOOR"), device_limit=os.getenv("NPU_DEVICE_LIMIT"))
-    if uses_grouping_policy(str(backend.target.arch)):
-        contract["cv_empirical_short_batch"] = False
     # Inject the public default before JIT cache selection and the bundle hook.
     # Concrete compilation stages still receive numeric factors only.
     # Raw option order participates in the in-memory JIT key. Canonicalize our

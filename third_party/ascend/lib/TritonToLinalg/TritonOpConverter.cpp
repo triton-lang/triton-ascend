@@ -395,6 +395,12 @@ LogicalResult PreciseDivConverter::matchAndRewrite(
 
 static bool canOverwriteRowSuffix(arith::SelectOp op, const MaskState &mask,
                                   ArrayRef<int64_t> shape) {
+  // A private fill can receive the active rows, releasing the computed
+  // tile after the copy. Prefer overwriting the computed tile only when
+  // other uses need the original fill.
+  if (op.getFalseValue().hasOneUse())
+    return false;
+
   Operation *producer = op.getTrueValue().getDefiningOp();
   auto constant = op.getFalseValue().getDefiningOp<arith::ConstantOp>();
   if (!producer || !producer->hasTrait<OpTrait::Elementwise>() ||
@@ -710,6 +716,32 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
   return failure();
 }
 
+// arith.truncf's generic constant folder does not interpret enable_saturate.
+static TypedAttr foldNativeFp8Constant(Value input, FloatType dstType) {
+  auto constant = input.getDefiningOp<arith::ConstantOp>();
+  if (!constant)
+    return {};
+
+  const auto &semantics = dstType.getFloatSemantics();
+  auto convert = [&](APFloat value) {
+    if (value.isNaN())
+      return APFloat::getZero(semantics);
+    bool negative = value.isNegative();
+    bool losesInfo;
+    value.convert(semantics, APFloat::rmNearestTiesToEven, &losesInfo);
+    if (!value.isFinite())
+      return APFloat::getLargest(semantics, negative);
+    return value;
+  };
+  if (auto scalar = dyn_cast<FloatAttr>(constant.getValue()))
+    return FloatAttr::get(dstType, convert(scalar.getValue()));
+  if (auto dense = dyn_cast<DenseFPElementsAttr>(constant.getValue()))
+    return dense.mapValues(dstType, [&](const APFloat &value) {
+      return convert(value).bitcastToAPInt();
+    });
+  return {};
+}
+
 LogicalResult
 FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
                                      PatternRewriter &rewriter) const {
@@ -778,8 +810,19 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
     rewriter.replaceOp(op, truncOp.getResult());
   } else if (srcBitwidth > dstBitwidth) {
     // Downcast: use arith.truncf with round_mode=rint
+    bool saturate = srcElemType.isF32() &&
+                    isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType);
+    if (saturate) {
+      if (auto value =
+              foldNativeFp8Constant(input, cast<FloatType>(dstElemType))) {
+        rewriter.replaceOpWithNewOp<arith::ConstantOp>(op, value);
+        return success();
+      }
+    }
     auto truncOp = rewriter.create<arith::TruncFOp>(loc, resultType, input);
     truncOp->setAttr("round_mode", roundModeAttr);
+    if (saturate)
+      truncOp->setAttr("enable_saturate", rewriter.getBoolAttr(true));
     rewriter.replaceOp(op, truncOp.getResult());
   } else {
     // Upcast: use arith.extf with round_mode=rint

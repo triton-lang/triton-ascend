@@ -148,7 +148,7 @@ void BufferCountManager::buildBufferCountMap(
 int BufferCountManager::getBufferCountByType(DepType type) const {
   auto attr = module_->getAttrOfType<IntegerAttr>(getAttrName(type));
   if (!attr) {
-    int defaultCount = getBufferCountByType(type);
+    int defaultCount = getDefaultCount(type);
     LOG_DEBUG("getBufferCountByType(" << static_cast<int>(type)
                                       << ") returns default buffer count "
                                       << defaultCount);

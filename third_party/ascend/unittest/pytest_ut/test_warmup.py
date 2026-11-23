@@ -59,9 +59,11 @@ def _make_autotuned_add():
     return kernel_add
 
 
-def test_autotune_warmup_with_tensors(fresh_triton_cache) -> None:
+@pytest.mark.parametrize("compile_parallel", [False, True])
+def test_autotune_warmup_with_tensors(fresh_triton_cache, compile_parallel) -> None:
     """Autotuned warmup returns one CompiledKernel per config and stays correct."""
     kernel_add = _make_autotuned_add()
+    kernel_add.compile_parallel = compile_parallel
     n = 1024
     a = torch.randn(n, dtype=torch.float32, device="npu")
     b = torch.randn(n, dtype=torch.float32, device="npu")
@@ -72,10 +74,10 @@ def test_autotune_warmup_with_tensors(fresh_triton_cache) -> None:
     torch.npu.synchronize()
     assert isinstance(handles, list)
     assert len(handles) == 2
-    # The Ascend autotuner compiles configs in parallel by default, so warmup
-    # returns FutureKernel handles; resolving them must yield CompiledKernels.
-    kernels = [handle.result() if hasattr(handle, "result") else handle for handle in handles]
-    assert all(isinstance(k, CompiledKernel) for k in kernels)
+    assert all(isinstance(k, CompiledKernel) and k.asm["ttir"] for k in handles)
+    cached = kernel_add.warmup(a, b, out, N=n, grid=(1, ))
+    assert len(cached) == len(handles)
+    assert all(current is previous for current, previous in zip(cached, handles))
     assert torch.all(out == sentinel), "autotuned warmup executed the kernel"
 
     kernel_add[lambda meta: (triton.cdiv(n, meta["BLOCK"]), )](a, b, out, N=n)
@@ -83,14 +85,15 @@ def test_autotune_warmup_with_tensors(fresh_triton_cache) -> None:
     assert torch.allclose(out, a + b)
 
 
-def test_autotune_warmup_dtype_only(fresh_triton_cache) -> None:
+@pytest.mark.parametrize("compile_parallel", [False, True])
+def test_autotune_warmup_dtype_only(fresh_triton_cache, compile_parallel) -> None:
     """Autotuned warmup accepts torch.dtype placeholders, matching upstream."""
     kernel_add = _make_autotuned_add()
+    kernel_add.compile_parallel = compile_parallel
     handles = kernel_add.warmup(torch.float32, torch.float32, torch.float32, N=1024, grid=(1, ))
     assert isinstance(handles, list)
     assert len(handles) == 2
-    kernels = [handle.result() if hasattr(handle, "result") else handle for handle in handles]
-    assert all(isinstance(k, CompiledKernel) for k in kernels)
+    assert all(isinstance(k, CompiledKernel) and k.asm["ttir"] for k in handles)
 
 
 def _make_autotuned_add_auto_configs():
@@ -112,5 +115,4 @@ def test_autotune_warmup_dtype_only_auto_configs(fresh_triton_cache) -> None:
     handles = kernel_add.warmup(torch.float32, torch.float32, torch.float32, N=1024, grid=(1, ))
     assert isinstance(handles, list)
     assert len(handles) > 0
-    kernels = [handle.result() if hasattr(handle, "result") else handle for handle in handles]
-    assert all(isinstance(k, CompiledKernel) for k in kernels)
+    assert all(isinstance(k, CompiledKernel) and k.asm["ttir"] for k in handles)

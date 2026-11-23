@@ -17,7 +17,7 @@ compose in one SIMD scope and that the runtime launch matches the reference.
 The per-interface contracts (mask matrix, MODE_ZEROING/MERGING merge source,
 unsigned zeroing, exact tier, dtype aliases, 64-lane wide registers, scalar
 bounds) live in ``vector/vdiv.py``, ``vexp.py``, ``vmax.py``, ``vmin.py``,
-``vmaxs.py``, ``vdup.py``, ``vdups.py`` and ``vdupv.py``; the runtime-N tail /
+``vmaxs.py``, ``vdup.py`` and ``vdupv.py``; the runtime-N tail /
 multi-chunk / multi-core matrix lives in ``vector/simd_tail.py``.  Keeping that
 detail out of this file avoids two copies of the same IR assertions.
 
@@ -81,7 +81,7 @@ def test_ir(output_dir=None):
     for probe in ("ave.hir.vdiv", "ave.hir.vmax", "ave.hir.vmin", "ave.hir.vmaxs", "ave.hir.vexp", "ave.hir.broadcast"):
         assert probe in text, f"missing {probe} in lowered IR"
     # vdup must be the masked broadcast, never the unmasked scalar_broadcast
-    assert "ave.hir.scalar_broadcast" not in text, "vdup must not degrade to vsplat"
+    assert "ave.hir.scalar_broadcast" not in text, "vdup must emit a masked broadcast"
     # The combined chain ends in an explicit vsel, which is the only select here.
     assert text.count("ave.hir.vsel") == 1
     print("IR PASS: combined vdiv/vmax/vmin/vmaxs/vexp/vdup chain plus vsel")

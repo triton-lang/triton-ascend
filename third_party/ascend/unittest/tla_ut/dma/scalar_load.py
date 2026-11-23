@@ -1,4 +1,4 @@
-"""Temporary scalar tl.load conversion in the dedicated TLA adapter."""
+"""Scalar GM loads in the TLA adapter."""
 import sys
 from pathlib import Path
 
@@ -17,14 +17,14 @@ from utils.tla_test_utils import compile_offline, lower_offline, make_context, c
 
 
 @tla.jit
-def gather_scalar_index(IDS, X, Y, first, second, enabled, MASKED: tl.constexpr):
+def gather_scalar_index(IDS, X, Y, first, second, enabled, MASKED: tla.constexpr):
     with tla.scope.vector():
         # Model DSA's packed i64 index read and its subsequent GM DMA address.
         address = (IDS + first) + second
         if MASKED:
             packed = tl.load(address, enabled, 0)
         else:
-            packed = tl.load(address)
+            packed = tla.load(address)
         index = (packed & 0xFFFFFFFF).to(tl.int32)
         ub = tla.alloc((64, ), tl.float32)
         tla.load_gm_to_ub(tla.view(X + index * 64, (64, )), ub)
@@ -47,6 +47,18 @@ def test_ir(masked, output_dir=None):
         then_body, else_body = text.split("scf.if", 1)[1].split("} else {", 1)
         assert "memref.load" in then_body
         assert "memref.load" not in else_body
+
+
+@pytest.mark.parametrize("ptr_type,match", [
+    (tl.int32, "scalar GM pointer"),
+    (tl.block_type(tl.pointer_type(tl.int32), [4]), "scalar GM pointer"),
+    (tl.pointer_type(tl.block_type(tl.int32, [4])), "byte-addressable"),
+    (tl.pointer_type(tl.int32, address_space=3), "address space 1"),
+    (tl.pointer_type(tl.int1), "byte-addressable"),
+])
+def test_load_rejects_unsupported_pointer(ptr_type, match):
+    with pytest.raises(TypeError, match=match):
+        tla.load(tl.tensor(None, ptr_type), _semantic=object())
 
 
 def _convert_ir(tmp_path, body):

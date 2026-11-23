@@ -126,8 +126,8 @@ def hardware_spec(A_ptr, B_ptr, C_ptr, C2_ptr, S_ptr, S2_ptr, MX_ptr, MN_ptr, I_
         iv = tla.simd.vlds(i_ub[0], dist="NORM")
         jv = tla.simd.vlds(j_ub[0], dist="NORM")
         half = tla.simd.pge(32, N)
-        one = tla.simd.vsplat(1.0, tl.int32)
-        zero = tla.simd.vsplat(0.0, tl.int32)
+        one = tla.simd.vdup(1, tl.int32)
+        zero = tla.simd.vdup(0, tl.int32)
 
         # vadd: zeroing and merging under the pge(32, 64) half mask.
         tla.simd.vsts(c_ub[0], tla.simd.vadd(av, bv), dist="NORM_B32")

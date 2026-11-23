@@ -40,7 +40,7 @@ def gemm_bias(A, B, Y, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, BIAS: 
     with tla.scope.vector():
         tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 0)
         with tla.scope.simd():
-            bias = tla.simd.vfull(BIAS, tl.float32, 64)
+            bias = tla.simd.vdup(BIAS, tl.float32)
             for row in tl.static_range(M // 2):
                 values = tla.simd.vlds(product_ub[row, 0])
                 tla.simd.vsts(product_ub[row, 0], tla.simd.vadd(values, bias))

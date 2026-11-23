@@ -42,7 +42,7 @@ def vsub(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TA
         tla.simd.vsts(o[2, 0], tla.simd.vreduce(full, "add"))
         tla.simd.vsts(o[3, 0], tla.simd.vreduce(zeroed, "add"))
         # Seed only the tail row; full tiles overwrite their rows entirely.
-        tla.simd.vsts(o[4 + TILES - 1, 0], tla.simd.vsplat(SENTINEL_C, tl.uint32))
+        tla.simd.vsts(o[4 + TILES - 1, 0], tla.simd.vdup(SENTINEL_C, tl.uint32))
         for t in tl.static_range(TILES):
             va = tla.simd.vlds(x[t, 0])
             vb = tla.simd.vlds(y[t, 0])

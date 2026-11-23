@@ -56,7 +56,7 @@ def grad_w_reduce(P_ptr, WH_ptr, WE_ptr, GH_ptr, GE_ptr, H: tl.constexpr, HC: tl
         with tla.scope.simd():
             # per register block: serially accumulate NP partials, fma back to gh/ge.
             for c in tl.static_range(BW // 64):
-                acc = tla.simd.vsplat(0.0, tl.float32)
+                acc = tla.simd.vdup(0.0, tl.float32)
                 for q in tl.static_range(NP):
                     pq = tla.simd.vlds(p_ub[q, 0, c * 64], dist="NORM")
                     acc = tla.simd.vadd(acc, pq)
@@ -64,9 +64,9 @@ def grad_w_reduce(P_ptr, WH_ptr, WE_ptr, GH_ptr, GE_ptr, H: tl.constexpr, HC: tl
                 b = tla.simd.vlds(ge_ub[0, c * 64], dist="NORM")
                 w_he = tla.simd.vextf(tla.simd.vlds(we_ub[0, c * 64], dist="UNPK_B16"), tl.float32, part="part_even")
                 w_hh = tla.simd.vextf(tla.simd.vlds(wh_ub[0, c * 64], dist="UNPK_B16"), tl.float32, part="part_even")
-                # simd.vfma(x, y, z) = x + y*z -> grad_new = grad_old + acc*w。
-                tla.simd.vsts(gh_ub[0, c * 64], tla.simd.vfma(a, acc, w_he), dist="NORM_B32")
-                tla.simd.vsts(ge_ub[0, c * 64], tla.simd.vfma(b, acc, w_hh), dist="NORM_B32")
+                # vmula computes grad_old + acc * w.
+                tla.simd.vsts(gh_ub[0, c * 64], tla.simd.vmula(a, acc, w_he), dist="NORM_B32")
+                tla.simd.vsts(ge_ub[0, c * 64], tla.simd.vmula(b, acc, w_hh), dist="NORM_B32")
         tla.store_ub_to_gm(gh_ub, gh)
         tla.store_ub_to_gm(ge_ub, ge)
 

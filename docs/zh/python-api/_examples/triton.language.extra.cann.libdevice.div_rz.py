@@ -4,10 +4,11 @@ import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
 import torch
-from triton.backends.ascend.utils import triton_enable_libdevice_simt
+from triton.backends.ascend.compiler import _is_a5_target_arch
+from triton.backends.ascend.driver import NPUUtils
 
 _SIMT_SKIP_MSG = ("SIMT libdevice ops are not supported on A3; "
-                  "only runs on Ascend 950PR&950DT products with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+                  "only runs on Ascend 950PR&950DT products; skipping.")
 
 
 @triton.jit
@@ -24,7 +25,7 @@ def triton_kernel(input, input2, output, n_elements, XBLOCK: tl.constexpr, XBLOC
         tl.store(output + (x0), tmp2, mask=mask)
 
 
-@pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
+@pytest.mark.skipif(not _is_a5_target_arch(NPUUtils().get_arch()), reason=_SIMT_SKIP_MSG)
 def test_div_rz():
     x0 = torch.tensor([10.0, -10.0, 7.5, -7.5], dtype=torch.float32, device='npu')
     x1 = torch.tensor([3.0, 3.0, 2.0, 2.0], dtype=torch.float32, device='npu')
@@ -55,7 +56,7 @@ def test_div_rz_simd():
 
 if __name__ == "__main__":
     test_div_rz_simd()
-    if not triton_enable_libdevice_simt():
+    if not _is_a5_target_arch(NPUUtils().get_arch()):
         print(_SIMT_SKIP_MSG)
     else:
         test_div_rz()

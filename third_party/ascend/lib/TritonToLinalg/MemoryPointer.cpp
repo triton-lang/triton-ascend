@@ -33,6 +33,7 @@
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/Support/MathExtras.h"
 #include <algorithm>
 #include <iterator>
 #include <limits>
@@ -265,6 +266,19 @@ materializeMemoryPointer(const ptr::PtrInfo &info, Value base,
                                    : one);
     } else {
       strides.push_back(stride);
+    }
+  }
+  // A tensor of pointers has no descriptor pitch. Give unit axes the
+  // natural stride of their contiguous suffix so DMA can flatten the view.
+  if (!info.block) {
+    int64_t pitch = 1;
+    for (auto [size, stride] : llvm::zip_equal(
+             llvm::reverse(info.offsets.getShape()), llvm::reverse(strides))) {
+      if (size == 1)
+        stride = rewriter.getIndexAttr(pitch);
+      else if (size == 0 || !isConstantIntValue(stride, pitch) ||
+               llvm::MulOverflow(pitch, size, pitch))
+        break;
     }
   }
   if (sizes.empty()) {

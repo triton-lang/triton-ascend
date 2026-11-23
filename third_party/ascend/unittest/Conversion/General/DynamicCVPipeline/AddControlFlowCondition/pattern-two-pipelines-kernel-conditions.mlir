@@ -1,18 +1,15 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.for
 
-// A kernel that runs two pipelines at the same time holds two chains of
-// four computation blocks that alternate the cores:
-//   cube block 0 -> vector block 1 -> cube block 2 -> vector block 3
-//   cube block 4 -> vector block 5 -> cube block 6 -> vector block 7
+// A kernel that runs two pipelines at the same time holds two chains of four
+// computation blocks that alternate the cores:
+//   cube 0 -> vector 1 -> cube 2 -> vector 3
+//   cube 4 -> vector 5 -> cube 6 -> vector 7
 // The two chains share no block and no buffer, so they are two independent
 // pipelines. Every chain runs in its own pair of main loops. The pattern
-// recognizes the shape and the kernel uses the normal preload scheme: every
-// main loop is an scf.while. The upstream scheme keeps the scf.for loops, the
-// implicit check forbids them.
+// recognizes the shape, so the kernel uses the normal preload scheme: every
+// main loop is an scf.while.
 
 // CHECK-LABEL: func.func @pattern_two_pipelines_kernel_conditions
-
-// The normal preload scheme: one scf.while per main loop.
 // CHECK: scf.while
 // CHECK: scf.while
 // CHECK: scf.while

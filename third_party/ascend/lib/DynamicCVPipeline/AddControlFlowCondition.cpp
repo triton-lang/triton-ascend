@@ -393,38 +393,16 @@ void AddControlFlowConditionPass::runOnOperation() {
   constexpr llvm::StringLiteral legacyKernel[] = {"_sdpa_infer_kernel",
                                                   "fwd_kernel"};
   // The normal preload scheme is only enabled for the kernels whose pipeline
-  // dependency is a chain of four computation blocks that alternates the
-  // cores: CUBE -> VECTOR -> CUBE -> VECTOR or VECTOR -> CUBE -> VECTOR ->
-  // CUBE. Every transfer of the chain has to carry the tightly coupled
-  // buffers of the validated pipeline: two buffers per transfer and no
-  // buffer shared by two transfers, so the chain carries six of them. A
-  // direction that several cross core groups carry holds the buffers of all
-  // of them, so a direction that holds more than the two buffers of a single
-  // transfer does not fit the scheme.
-  // The scheme is validated on two pipelines: the mla pipeline holds four
-  // computation blocks and the paged decode pipeline five. The conditions are
-  // computed for the blocks that carry a condition, so the kernel has to
-  // hold exactly four cross core blocks that carry a condition for the mla
-  // pipeline and exactly five of them for the paged decode pipeline.
+  // dependency matches one of the validated shapes of the cross core pattern:
+  // a linear chain of four or five blocks, two independent chains of four
+  // blocks, a chain of three blocks, a tree of six or seven blocks, or a
+  // forest of four chains of three blocks. Every shape carries its own
+  // constraints on the buffers of the transfers and on the number of the
+  // blocks that carry a condition, so that no other kernel matches it by
+  // accident. The shapes and their constraints are described in
+  // CrossCorePattern.h.
   // The scheme merges the main loop of every core into one scf.while, so the
-  // kernel has to have one main loop per core: two loops carrying the same
-  // main loop id.
-  // A kernel that holds more than one such pipeline keeps the conditions of
-  // the upstream implementation: the scheme is only validated for a single
-  // pipeline. The pipeline also has to be a linear chain, so it has a single
-  // entry block: two blocks feeding the same block is a merge, and the
-  // conditions of the scheme do not model a merge.
-  // A kernel that runs two pipelines at the same time holds the blocks of
-  // both of them: eight cross core blocks that carry a condition. The two
-  // chains have to be independent: they share no block, they share no buffer
-  // and no block of a chain is fed by a block of the other chain. Such a
-  // kernel needs one main loop per core for each of the two pipelines: two
-  // pairs of main loops, every pair carrying the same main loop id, one loop
-  // on each core.
-  // A kernel that holds two chains but computes the conditions of a single one
-  // of them keeps the conditions of the upstream implementation as well: the
-  // graph holds more than one pipeline and the blocks that carry a condition
-  // are the blocks of one of them.
+  // kernel has to have one main loop per core for every pipeline it runs.
   bool blacklisted = false;
   for (auto &op : module.getOps()) {
     auto funcOp = llvm::dyn_cast<func::FuncOp>(&op);
@@ -441,9 +419,13 @@ void AddControlFlowConditionPass::runOnOperation() {
   // The main loops have to run the pipelines of the pattern in lockstep: one
   // pair of main loops, one loop on each core, for every pipeline.
   const bool mainLoopsMatched =
-      pattern.shape == CrossCoreShape::LinearChain
+      (pattern.shape == CrossCoreShape::LinearChain ||
+       pattern.shape == CrossCoreShape::ShortChain ||
+       pattern.shape == CrossCoreShape::Tree)
           ? corePairMainLoop
-          : (pattern.shape == CrossCoreShape::TwoChains && mainLoopPairs == 2);
+          : ((pattern.shape == CrossCoreShape::TwoChains ||
+              pattern.shape == CrossCoreShape::ShortChainForest) &&
+             mainLoopPairs == 2);
   const bool enableNormalPreload =
       !blacklisted && patternMatched && mainLoopsMatched;
   LLVM_DEBUG({

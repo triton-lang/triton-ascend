@@ -46,3 +46,31 @@ tt.func public @masked_indirect_gather(%src: !tt.ptr<f32>, %indices: !tt.ptr<i32
   %value = tt.load %ptr, %active, %other : tensor<4x8x!tt.ptr<f32>>
   tt.return %value : tensor<4x8xf32>
 }
+
+// A branch can produce a materialized vector of predicates. Its lane value
+// must survive conversion to the scalar guard on the indirect read.
+// CHECK-LABEL: func.func @branch_selected_mask(
+// CHECK: %[[SELECTED:.*]] = scf.if %{{.*}} -> (tensor<16xi1>)
+// CHECK: %[[BYTES:.*]] = arith.extui %[[SELECTED]] : tensor<16xi1> to tensor<16xi8>
+// CHECK: scf.for
+// CHECK: %[[LANE:.*]] = tensor.extract %[[BYTES]][%{{.*}}] : tensor<16xi8>
+// CHECK: %[[PRED:.*]] = arith.cmpi ne, %[[LANE]], %{{.*}} : i8
+// CHECK: scf.if %[[PRED]] -> (i32) {
+// CHECK-NEXT: %[[DATA:.*]] = memref.load
+// CHECK-NEXT: scf.yield %[[DATA]] : i32
+tt.func public @branch_selected_mask(%src: !tt.ptr<i32>, %offsets: tensor<16xi32>, %first: i1) -> tensor<16xi32> {
+  %seven = arith.constant dense<7> : tensor<16xi32>
+  %two = arith.constant dense<2> : tensor<16xi32>
+  %rows = arith.andi %offsets, %seven : tensor<16xi32>
+  %base = tt.splat %src : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+  %ptr = tt.addptr %base, %rows : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+  %mask = scf.if %first -> (tensor<16xi1>) {
+    %low = arith.cmpi slt, %rows, %two : tensor<16xi32>
+    scf.yield %low : tensor<16xi1>
+  } else {
+    %high = arith.cmpi sge, %rows, %two : tensor<16xi32>
+    scf.yield %high : tensor<16xi1>
+  }
+  %value = tt.load %ptr, %mask : tensor<16x!tt.ptr<i32>>
+  tt.return %value : tensor<16xi32>
+}

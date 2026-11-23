@@ -616,8 +616,32 @@ void BubbleUpOperationPass::runOnOperation() {
 
   if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
     moduleOp->emitError("failed to apply Patterns");
-    signalPassFailure();
+    return signalPassFailure();
   }
+
+  // Comparisons that bubble to scalars already produce an i1 register. For
+  // remaining discrete extractions, read a byte per lane: vector predicates
+  // are packed and cannot be addressed as scalar i1 elements on Ascend.
+  IRRewriter rewriter(ctx);
+  moduleOp.walk([&](tensor::ExtractOp op) {
+    if (!op.getType().isInteger(1) ||
+        !op->hasAttr(ConverterUtils::discreteAttrName))
+      return;
+    auto loop = op->getParentOfType<scf::ForOp>();
+    if (!loop || !loop->hasAttr("ExtractedLoadOrStore"))
+      return;
+    Value mask = op.getTensor();
+    rewriter.setInsertionPointAfterValue(mask);
+    auto byteType =
+        cast<RankedTensorType>(mask.getType()).clone(rewriter.getI8Type());
+    Value bytes = rewriter.create<arith::ExtUIOp>(op.getLoc(), byteType, mask);
+    rewriter.setInsertionPoint(op);
+    Value lane =
+        rewriter.create<tensor::ExtractOp>(op.getLoc(), bytes, op.getIndices());
+    Value zero = rewriter.create<arith::ConstantIntOp>(op.getLoc(), 0, 8);
+    rewriter.replaceOpWithNewOp<arith::CmpIOp>(op, arith::CmpIPredicate::ne,
+                                               lane, zero);
+  });
 
   PassManager pm(&getContext(), moduleOp.getOperationName());
   pm.addPass(createCSEPass());

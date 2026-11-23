@@ -1,16 +1,16 @@
 // RUN: triton-opt %s --triton-to-linalg="compile-on-910-95=false" --verify-each --mlir-print-op-generic | FileCheck %s
 
-// The GM view uses unit-axis stride 1 and a dynamic origin. The loaded value
-// lives in a dense local buffer whose unit-axis stride is 4. Atomic conversion
-// must reuse that buffer through the A2/A3 XCHG view, preserving the distinct
-// GM destination descriptor. The view prevents backend dead-store elimination
-// from erasing XCHG when its input is a directly allocated local buffer.
+// Each four-element GM row has pitch 8 and a dynamic origin. The local
+// buffer packs the rows at pitch 4. Atomic conversion must reuse this buffer
+// through the A2/A3 XCHG view and preserve the GM destination descriptor.
+// The view prevents backend dead-store elimination from erasing XCHG when
+// its input is a directly allocated local buffer.
 // CHECK-LABEL: sym_name = "atomic_xchg_local_value"
 // CHECK: %[[LOCAL:.*]] = "memref.alloc"() {{.*}} : () -> memref<2x1x4xf32>
 // CHECK-NEXT: "memref.copy"(%{{.*}}, %[[LOCAL]])
 // CHECK-NOT: "memref.alloc"
 // CHECK-NOT: "memref.copy"
-// CHECK: %[[DEST:.*]] = "memref.reinterpret_cast"({{.*}}) {{.*}} -> memref<2x1x4xf32, strided<[4, 1, 1], offset: ?>>
+// CHECK: %[[DEST:.*]] = "memref.reinterpret_cast"({{.*}}) {{.*}} -> memref<2x1x4xf32, strided<[8, 4, 1], offset: ?>>
 // CHECK-NOT: "memref.alloc"
 // CHECK-NOT: "memref.copy"
 // CHECK: %[[VIEW:.*]] = "memref.cast"(%[[LOCAL]]) : (memref<2x1x4xf32>) -> memref<2x1x4xf32, strided<[4, 4, 1], offset: ?>>
@@ -23,7 +23,7 @@
 
 module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
   tt.func public @atomic_xchg_local_value(%input: !tt.ptr<f32>, %output: !tt.ptr<f32>, %origin: i32) {
-    %four = arith.constant dense<4> : tensor<2x1x1xi32>
+    %eight = arith.constant dense<8> : tensor<2x1x1xi32>
     %zero = arith.constant 0 : i32
     %one = arith.constant 1 : i32
     %three = arith.constant 3 : i32
@@ -31,7 +31,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
     %rows = tt.make_range {start = 0 : i32, end = 2 : i32} : tensor<2xi32>
     %rows_2d = tt.expand_dims %rows {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
     %rows_3d = tt.expand_dims %rows_2d {axis = 2 : i32} : tensor<2x1xi32> -> tensor<2x1x1xi32>
-    %row_offsets = arith.muli %rows_3d, %four : tensor<2x1x1xi32>
+    %row_offsets = arith.muli %rows_3d, %eight : tensor<2x1x1xi32>
     %cols = tt.make_range {start = 0 : i32, end = 4 : i32} : tensor<4xi32>
     %cols_2d = tt.expand_dims %cols {axis = 0 : i32} : tensor<4xi32> -> tensor<1x4xi32>
     %cols_3d = tt.expand_dims %cols_2d {axis = 0 : i32} : tensor<1x4xi32> -> tensor<1x1x4xi32>

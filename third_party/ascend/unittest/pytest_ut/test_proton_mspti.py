@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+import warnings
 
 import pytest
 import torch
@@ -18,22 +19,40 @@ import triton.language as tl
 import triton.profiler as proton
 
 
+def _default_mspti_library(home):
+    if home:
+        active = Path(home)
+        # The A3 CI image uses CANN 8.5. Try a side-by-side 9.1 MSPTI when available.
+        roots = (active.with_name("cann-9.1.0"), active) if active.name == "cann-8.5.0" else (active, )
+        for root in roots:
+            for directory in ("lib64", "tools/mspti/lib64"):
+                library = root / directory / "libmspti.so"
+                if library.is_file():
+                    if root != active:
+                        warnings.warn(f"Testing {library} with active CANN at {active}", RuntimeWarning, stacklevel=2)
+                    return str(library)
+    return "libmspti.so"
+
+
 def test_mspti(tmp_path):
     env = os.environ.copy()
     preloads = env.get("LD_PRELOAD", "").replace(":", " ").split()
     library = next((p for p in preloads if Path(p).name == "libmspti.so" or Path(p).name.startswith("libmspti.so.")),
                    None)
     if not library:
-        home = env.get("ASCEND_HOME_PATH")
-        candidates = (Path(home) / d / "libmspti.so" for d in ("lib64", "tools/mspti/lib64")) if home else ()
-        library = env.get("PROTON_MSPTI_LIBRARY_PATH") or next(
-            (str(p) for p in candidates if p.is_file()), "libmspti.so")
+        library = env.get("PROTON_MSPTI_LIBRARY_PATH") or _default_mspti_library(env.get("ASCEND_HOME_PATH"))
         env["LD_PRELOAD"] = " ".join([library, *preloads])
     # Do not inherit e.g. -n auto: the parent fixture already assigned a device.
     env.pop("PYTEST_ADDOPTS", None)
-    subprocess.run(
+    result = subprocess.run(
         [sys.executable, __file__, str(torch.npu.current_device()),
-         str(tmp_path), library], env=env, check=True, timeout=600)
+         str(tmp_path), library], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        errors="replace", timeout=600)
+    selected = f"MSPTI: {library} (ASCEND_HOME_PATH={env.get('ASCEND_HOME_PATH')})"
+    if result.returncode:
+        pytest.fail(f"{selected}; child exited with {result.returncode}\n{result.stdout}", pytrace=False)
+    print(selected)
+    print(result.stdout, end="")
 
 
 @triton.jit

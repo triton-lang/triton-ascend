@@ -98,7 +98,11 @@ def _subview(src, sizes, steps, offsets, semantic):
         step = _check_dim(step, "strides")
         if (static_view and extent is not None and (offset < 0 or offset + (size - 1) * step >= extent)):
             raise ValueError("static view is outside the source buffer")
-        offset_handles.append(semantic.to_tensor(offset).handle)
+        index = semantic.to_tensor(offset)
+        if isinstance(index, tensor) and index.dtype.is_int_unsigned():
+            # The native index cast widens signless integers as signed.
+            index = semantic.cast(index, int64)
+        offset_handles.append(index.handle)
         size_dims.append(_to_ir_dim(semantic, size))
         step_dims.append(_to_ir_dim(semantic, step))
         result_shape.append(None if _is_dynamic(size) else size)
@@ -112,6 +116,8 @@ def _entry(src, sizes, strides, offsets, semantic):
     """GM views preserve pointer provenance through tt.make_tensor_ptr."""
     if src.shape:
         raise TypeError("view expects a scalar pointer")
+    if src.dtype.address_space != 1:
+        raise TypeError("tla.view expects a GM pointer in address space 1")
     elem_ty = src.dtype.element_ty
     if not (elem_ty.is_int() or elem_ty.is_floating()) or elem_ty.primitive_bitwidth % 8:
         raise TypeError("GM view requires a byte-addressable integer or float element type")

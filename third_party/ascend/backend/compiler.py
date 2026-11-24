@@ -565,6 +565,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         compile_on_910_95 = metadata["compile_on_910_95"]
         compile_mode = opt.compile_mode
         metadata["compile_mode"] = compile_mode
+        enable_packed_load_rewrite = getattr(
+            opt, "enable_packed_load_rewrite", True
+        )
         enable_mixed_cv = metadata.get("enable_mixed_cv")
         disable_auto_inject_block_sync = metadata.get("disable_auto_inject_block_sync")
         set_workspace_multibuffer = metadata.get("set_workspace_multibuffer")
@@ -586,7 +589,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
-        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95)
+        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95, enable_packed_load_rewrite)
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, compile_mode)
         ascend.passes.ttir.add_triton_to_annotation(pm)
         ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, compile_mode)
@@ -594,7 +597,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         ascend.passes.ttir.add_triton_to_hfusion(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm, compile_on_910_95)
-        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95)
+        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95, enable_packed_load_rewrite)
         ascend.passes.ttir.add_triton_to_hfusion(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis, compile_on_910_95,
                                                 compile_mode)
@@ -1544,6 +1547,7 @@ class NPUOptions:
     # Deprecated constructor-only compatibility input.  The supplied value is
     # ignored and replaced with the lowering selector derived from GPUTarget.arch.
     compile_on_910_95: Optional[bool] = field(default=None, repr=False, kw_only=True)
+    enable_packed_load_rewrite: bool = True
     enable_warp_specialization: bool = False
     enable_persistent: bool = False
     optimize_epilogue: bool = False

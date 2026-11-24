@@ -2,6 +2,7 @@ add_triton_library(TritonToStructured
         TritonToStructuredPass.cpp
         PtrAnalysis.cpp
         CannonicalizerConverter.cpp
+        PackedLoadRewrite.cpp
         MemOpConverter.cpp
         ImplicitPermute.cpp
         MaskAnalysis.cpp

@@ -21,6 +21,7 @@
  */
 
 #include "TritonToStructured/TritonToStructuredPass.h"
+#include "TritonToStructured/PackedLoadRewrite.h"
 
 #include <cassert>
 #include <cstdint>
@@ -166,8 +167,14 @@ TritonToStructuredPass::processSplatBinaryOperations(ModuleOp moduleOp) {
 
 void TritonToStructuredPass::runOnOperation() {
   auto moduleOp = getOperation();
-  ConversionTarget target(getContext());
   RewritePatternSet canonicalizerPatterns(&getContext());
+
+  if (enablePackedLoadRewrite) {
+    RewritePatternSet coalescePatterns(&getContext());
+    coalescePatterns.add<SubElementLoadCoalesce>(&getContext());
+    if (failed(applyPatternsGreedily(moduleOp, std::move(coalescePatterns))))
+      moduleOp.emitWarning("SubElementLoadCoalesce failed");
+  }
 
   this->populateTritonToStructuredCanonicalizationPatterns(
       canonicalizerPatterns);
@@ -220,7 +227,9 @@ triton::createTritonToStructuredPass() {
 std::unique_ptr<OperationPass<ModuleOp>>
 triton::createTritonToStructuredPass(bool enableMaskFallbackConversion,
                                      bool optimizeDynamicOffset,
-                                     bool compileOn91095) {
+                                     bool compileOn91095,
+                                     bool enablePackedLoadRewrite) {
   return std::make_unique<TritonToStructuredPass>(
-      enableMaskFallbackConversion, optimizeDynamicOffset, compileOn91095);
+      enableMaskFallbackConversion, optimizeDynamicOffset, compileOn91095,
+      enablePackedLoadRewrite);
 }

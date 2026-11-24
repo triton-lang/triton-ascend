@@ -16,7 +16,10 @@ def TritonToStructured : Pass<"triton-to-structured", "mlir::ModuleOp"> {
         Option<"compileOn91095", "compile-on-910-95",
             "bool", /*default*/"false",
             "If true, skip ImplicitPermute on loads when the module has no dot/cube ops "
-            "(historical 91095 SIMT behavior).">
+            "(historical 91095 SIMT behavior).">,
+        Option<"enablePackedLoadRewrite", "enable-packed-load-rewrite",
+            "bool", /*default*/"true",
+            "Coalesce sub-element replicated tensor loads into compact loads">
     ];
 }
 

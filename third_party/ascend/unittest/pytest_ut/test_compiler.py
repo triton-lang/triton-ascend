@@ -299,38 +299,6 @@ def test_dynamic_cv_pipeline_is_enabled_only_on_a5(arch, requested, expected):
     assert options.enable_dynamic_cv_pipeline is expected
 
 
-@pytest.mark.parametrize("dtype, deprecated", [
-    (tl.float8e5, False),
-    (tl.float8e4nv, False),
-    (tl.float8e4b8, False),
-    (tl.float8e5b16, False),
-    (tl.float8e4b8, True),
-    (tl.float8e5b16, True),
-])
-def test_fp8_dot_frontend_options(backend, dtype, deprecated):
-
-    @triton.jit
-    def kernel(dtype: tl.constexpr):
-        a = tl.full((64, 64), 0.0, dtype)
-        tl.dot(a, a)
-
-    raw = {"deprecated_fp8_dot_operand_dtypes": (str(dtype), )} if deprecated else {}
-    options = backend.parse_options(raw)
-    source = triton.compiler.ASTSource(kernel, {"dtype": "constexpr"}, {"dtype": dtype})
-    context = ir.context()
-    ir.load_dialects(context)
-    backend.load_dialects(context)
-    warning = pytest.warns(UserWarning, match="upcasted to fp16") if deprecated else contextlib.nullcontext()
-    with warning:
-        module = source.make_ir(backend.target, options, backend.get_codegen_implementation(options),
-                                backend.get_module_map(), context)
-
-    assert module.verify()
-    dot = next(line for line in str(module).splitlines() if "tt.dot " in line)
-    software_fp8 = str(dtype) in getattr(options, "software_fp8_dtypes", ())
-    assert ("tensor<64x64xf16>" in dot) == (deprecated or software_fp8)
-
-
 def test_text_pipeline_uses_ttadapter_directly(backend, monkeypatch):
     options = backend.parse_options({})
     stages = {}

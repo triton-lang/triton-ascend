@@ -69,7 +69,6 @@ from .core import (
     float32,
     float64,
     float8e4b15,
-    hifloat8,
     float8e4nv,
     float8e4b8,
     float8e5,
@@ -194,7 +193,6 @@ __all__ = [
     "float32",
     "float64",
     "float8e4b15",
-    "hifloat8",
     "float8e4nv",
     "float8e4b8",
     "float8e5",
@@ -328,7 +326,6 @@ def str_to_ty(name, c):
         return constexpr_type(c)
 
     tys = {
-        "hif8": hifloat8,
         "fp8e4nv": float8e4nv,
         "fp8e4b8": float8e4b8,
         "fp8e5": float8e5,

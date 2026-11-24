@@ -1,16 +1,13 @@
-import os
-
-os.environ.setdefault("TRITON_ENABLE_LIBDEVICE_SIMT", "1")
-
 import pytest
 import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
 import torch
-from triton.backends.ascend.utils import triton_enable_libdevice_simt
+from triton.backends.ascend.compiler import _is_a5_target_arch
+from triton.backends.ascend.driver import NPUUtils
 
 _SIMT_SKIP_MSG = ("SIMT libdevice ops are not supported on A3; "
-                  "only runs on Ascend 950PR&950DT products with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+                  "only runs on Ascend 950PR&950DT products; skipping.")
 
 
 @triton.jit
@@ -27,7 +24,7 @@ def triton_kernel(input, input2, output, n_elements, XBLOCK: tl.constexpr, XBLOC
         tl.store(output + (x0), tmp2, mask=mask)
 
 
-@pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
+@pytest.mark.skipif(not _is_a5_target_arch(NPUUtils().get_arch()), reason=_SIMT_SKIP_MSG)
 def test_copysign():
     param_list = [(2, 256, 4), 2, 2048, 1024]
     shape, ncore, xblock, xblock_sub = param_list
@@ -43,8 +40,24 @@ def test_copysign():
     torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
+def test_copysign_simd():
+    param_list = [(2, 256, 4), 2, 2048, 1024]
+    shape, ncore, xblock, xblock_sub = param_list
+    x0 = torch.randn(size=shape, dtype=torch.float32).npu() * 0.5
+    x1 = (torch.randn(size=shape, dtype=torch.float32) * 0.5 + 1).npu()
+
+    torch_res = torch.copysign(x0, x1)
+    triton_res = torch.empty_like(x0)
+    triton_kernel[ncore, 1, 1](x0, x1, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simd')
+
+    torch_res = torch_res.cpu()
+    triton_res = triton_res.cpu()
+    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+
+
 if __name__ == "__main__":
-    if not triton_enable_libdevice_simt():
+    test_copysign_simd()
+    if not _is_a5_target_arch(NPUUtils().get_arch()):
         print(_SIMT_SKIP_MSG)
     else:
         test_copysign()

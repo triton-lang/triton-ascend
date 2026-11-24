@@ -1,17 +1,13 @@
-import os
-
-os.environ.setdefault("TRITON_ENABLE_LIBDEVICE_SIMT", "1")
-
 import pytest
 from scipy.special import cbrt
 import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
 import torch
-from triton.backends.ascend.utils import triton_enable_libdevice_simt
+from triton.backends.ascend.compiler import _is_a5_target_arch
+from triton.backends.ascend.driver import NPUUtils
 
-_SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950PR&950DT products target "
-                  "with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+_SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950PR&950DT products target; skipping.")
 
 
 def torch_rcbrt_reference(x0):
@@ -33,7 +29,7 @@ def triton_kernel(input0, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: 
         tl.store(output + (x0), tmp1, mask=mask)
 
 
-@pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
+@pytest.mark.skipif(not _is_a5_target_arch(NPUUtils().get_arch()), reason=_SIMT_SKIP_MSG)
 def test_rcbrt():
     x0 = (torch.rand((8, )) + 0.1).to(torch.float32)
     expected = (torch_rcbrt_reference(x0)).npu()
@@ -45,8 +41,20 @@ def test_rcbrt():
     torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
+def test_rcbrt_simd():
+    x0 = (torch.rand((8, )) + 0.1).to(torch.float32)
+    expected = (torch_rcbrt_reference(x0)).npu()
+    x0 = x0.npu()
+    output = torch.empty(8, dtype=torch.float32, device='npu')
+    triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simd')
+    output = output.cpu()
+    expected = expected.cpu()
+    torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04, equal_nan=True)
+
+
 if __name__ == "__main__":
-    if not triton_enable_libdevice_simt():
+    test_rcbrt_simd()
+    if not _is_a5_target_arch(NPUUtils().get_arch()):
         print(_SIMT_SKIP_MSG)
     else:
         test_rcbrt()

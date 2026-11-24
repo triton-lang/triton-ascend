@@ -175,7 +175,7 @@ struct Match {
 
 // Match one entry block with the CAS loop and Count branch as its only
 // top-level regions other than the row's two scalar reductions.
-// The opt-in operator provides private, zeroed lock/count buffers, disjoint
+// The operator provides private, zeroed lock/count buffers, disjoint
 // memory ranges and valid offsets, and a one-dimensional grid with one
 // original program per row and a column tile covering the full row.
 std::optional<Match> match(FuncOp function) {

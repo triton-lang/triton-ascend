@@ -1,7 +1,7 @@
 {
   "$schema": "./microbenchmark_profile_schema.json",
   "schema_version": 1,
-  "profile_version": "ascend-950pr-shared-microbench-20261026-v32-factor-scoped-grid-dot-controls",
+  "profile_version": "ascend-950pr-shared-microbench-20261026-v32-factor-scoped-grid-dot-controls-fp16-segmented-load",
   "target": "Ascend950PR/dav-c310",
   "description": "Model-neutral target facts and microbenchmark evidence. Model-specific scale, penalties, coverage, gates, and fallback priors are intentionally excluded.",
   "measurements": {
@@ -3474,6 +3474,36 @@
       "source_kind": "isolated_microbenchmark",
       "source": "Triton kernel slope fit: grid=1, 4 independent chains, chain=1 vs chain=8 work points, healthy card; see data_provider/arithmetic/measured_20261027.json",
       "confidence": "medium"
+    },
+    "simd.segmented_indirect_load.fp16.segments_16.contiguous_64.factor_1.incremental_cost": {
+      "description": "Incremental SIMD service of one masked FP16 loaded-index-plus-remainder row read; paired two-load minus one-load profiler medians. The extra FP32 accumulation remains in the difference.",
+      "value": 379,
+      "scope": "32_physical_programs_num_warps_32_fp16_masked_loaded_index_modulo_rows_16_contiguous_64_factor_1",
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "source_kind": "isolated_microbenchmark",
+      "confidence": "medium",
+      "source": "data_provider/950pr_fp16_segmented_load_20261022.json; 16-row paired medians"
+    },
+    "simd.segmented_indirect_load.fp16.segments_32.contiguous_64.factor_1.incremental_cost": {
+      "description": "Incremental SIMD service of one masked FP16 loaded-index-plus-remainder row read; paired two-load minus one-load profiler medians. The extra FP32 accumulation remains in the difference.",
+      "value": 660,
+      "scope": "32_physical_programs_num_warps_32_fp16_masked_loaded_index_modulo_rows_32_contiguous_64_factor_1",
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "source_kind": "isolated_microbenchmark",
+      "confidence": "medium",
+      "source": "data_provider/950pr_fp16_segmented_load_20261022.json; 32-row paired medians"
+    },
+    "simd.segmented_indirect_load.fp16.segments_128.contiguous_64.factor_1.incremental_cost": {
+      "description": "Incremental SIMD service of one masked FP16 loaded-index-plus-remainder row read; paired two-load minus one-load profiler medians. The extra FP32 accumulation remains in the difference.",
+      "value": 2572,
+      "scope": "32_physical_programs_num_warps_32_fp16_masked_loaded_index_modulo_rows_128_contiguous_64_factor_1",
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "source_kind": "isolated_microbenchmark",
+      "confidence": "medium",
+      "source": "data_provider/950pr_fp16_segmented_load_20261022.json; 128-row paired medians"
     }
   }
 }

@@ -524,7 +524,8 @@ class TestCompileContextCache(unittest.TestCase):
 
 class TestRankedRecovery(unittest.TestCase):
 
-    def run_selection(self, *, selected=4, decline=False, failure=None, arch="Ascend950", saved=None, binary_hit=True):
+    def run_selection(self, *, selected=4, decline=False, failure=None, arch="Ascend950", saved=None, binary_hit=True,
+                      baseline_error=None):
         from triton.backends.ascend import block_auto as dispatch, block_batching_worker as worker
         backend = Mock(target=GPUTarget("npu", arch, 32))
         backend.parse_options.side_effect = lambda options: SimpleNamespace(block_batching_backend_revision="test", **
@@ -536,6 +537,8 @@ class TestRankedRecovery(unittest.TestCase):
 
         def compile_f1(*args):
             events.append("f1")
+            if baseline_error is not None:
+                raise baseline_error
             return baseline
 
         plan = dict(candidates=[dict(axis=0, factor=2), dict(axis=0, factor=4)])
@@ -561,8 +564,9 @@ class TestRankedRecovery(unittest.TestCase):
             events.append("binary-hit" if cached_only else request.factor)
             if cached_only and not binary_hit:
                 return None
-            return SimpleNamespace(candidate=None if decline else object(),
-                                   block_batching=dict(reason="VV_TARGET_RESOURCE_REJECTED"))
+            return SimpleNamespace(
+                candidate=None if decline else object(),
+                block_batching=decline if isinstance(decline, dict) else dict(reason="VV_TARGET_RESOURCE_REJECTED"))
 
         contract = dict(grid=[256, 1, 1], arguments=dict(X=dict(kind="tensor")))
         options = dict(block_auto_contract=json.dumps(contract), block_batching_factor="auto")
@@ -641,6 +645,25 @@ class TestRankedRecovery(unittest.TestCase):
         self.assertEqual(events, ["ttir", "f1", 4])
         self.assertEqual(result["selected_factor"], 1)
         self.assertEqual(result["reason"], "BASELINE_AFTER_CANDIDATE_REJECTION")
+
+    def test_candidate_failure_preserves_diagnostics_without_caching_selection(self):
+        decline = dict(reason="CANDIDATE_COMPILATION_FAILED", failure_kind="InternalError", stage="npubin",
+                       backend_diagnostic="ub overflow; operations cannot be fused")
+        for cached in (False, True):
+            with self.subTest(cached=cached):
+                saved = Mock(load=lambda: selection_report() if cached else None)
+                result, events = self.run_selection(decline=decline, saved=saved)
+                self.assertEqual(events, ["f1", "binary-hit"] if cached else ["ttir", "f1", 4])
+                self.assertEqual(result["selected_factor"], 1)
+                self.assertEqual(result["compile_rejections"], [dict(key="a0_f2" if cached else "a0_f4", **decline)])
+                saved.store.assert_not_called()
+                saved.restore_ttir.assert_not_called()
+
+    def test_baseline_failure_is_not_a_candidate_fallback(self):
+        error = RuntimeError("F1 compilation failed")
+        with self.assertRaises(RuntimeError) as caught:
+            self.run_selection(baseline_error=error)
+        self.assertIs(caught.exception, error)
 
     def test_supported_targets_use_the_selection_worker(self):
         for arch in ("Ascend950", "Ascend910_9391", "Ascend910B1", "Ascend910B4"):

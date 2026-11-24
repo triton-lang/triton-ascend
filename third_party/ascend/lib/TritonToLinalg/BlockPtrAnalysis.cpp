@@ -33,8 +33,10 @@
 #include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -359,13 +361,16 @@ void BlockData::mulBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
 
 void BlockData::divBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
                          ConversionPatternRewriter &rewriter) {
-  assert(this->isEmpty() && lBlock.getRank() == rBlock.getRank());
+  assert(this->isEmpty() &&
+         (lBlock.getRank() == rBlock.getRank() || rBlock.getRank() == 0));
 
   assert(!(lBlock.hasSource() && rBlock.hasSource()));
-  assert(lBlock.isScalar() && rBlock.isScalar());
+  assert(rBlock.isScalar());
 
   auto rScalar = rBlock.getScalar();
-  this->scalar = divOpFoldResult(lBlock.getScalar(), rScalar, loc, rewriter);
+  if (lBlock.isScalar()) {
+    this->scalar = divOpFoldResult(lBlock.getScalar(), rScalar, loc, rewriter);
+  }
 
   for (auto lOffset : lBlock.getOffsetsRef()) {
     this->offsets.push_back(divOpFoldResult(lOffset, rScalar, loc, rewriter));
@@ -662,6 +667,15 @@ BlockDataParser::parse(Value operand, BlockData &data, const Location &loc,
     return parseTruncI(truncOp, data, loc, rewriter, known);
   } else if (auto divOp = operand.getDefiningOp<arith::DivSIOp>()) {
     return parseDiv(divOp, data, loc, rewriter, known);
+  } else if (auto shrOp = operand.getDefiningOp<arith::ShRSIOp>()) {
+    return parseShR(shrOp.getLhs(), shrOp.getRhs(), data, loc, rewriter, known);
+  } else if (auto shruOp = operand.getDefiningOp<arith::ShRUIOp>()) {
+    return parseShR(shruOp.getLhs(), shruOp.getRhs(), data, loc, rewriter,
+                    known);
+  } else if (auto shlOp = operand.getDefiningOp<arith::ShLIOp>()) {
+    return parseShL(shlOp.getLhs(), shlOp.getRhs(), data, loc, rewriter, known);
+  } else if (auto andOp = operand.getDefiningOp<arith::AndIOp>()) {
+    return parseAnd(andOp.getLhs(), andOp.getRhs(), data, loc, rewriter, known);
   } else if (auto makeRangeOp = operand.getDefiningOp<triton::MakeRangeOp>()) {
     parseMakeRange(makeRangeOp, data, loc, rewriter, known);
     return success();
@@ -812,14 +826,191 @@ BlockDataParser::parseDiv(arith::DivSIOp op, BlockData &data,
   return success();
 }
 
-// TODO : support modulos
 LogicalResult
 BlockDataParser::parseRem(arith::RemSIOp op, BlockData &data,
                           const Location &loc,
                           ConversionPatternRewriter &rewriter,
                           const llvm::SmallDenseMap<Value, BlockData> &known) {
+  BlockData lBlock, rBlock;
+  if (failed(parse(op.getLhs(), lBlock, loc, rewriter, known)) ||
+      failed(parse(op.getRhs(), rBlock, loc, rewriter, known)))
+    return failure();
+
+  if (lBlock.isScalar() && rBlock.isScalar()) {
+    data.setScalar(
+        remOpFoldResult(lBlock.getScalar(), rBlock.getScalar(), loc, rewriter));
+    return success();
+  }
+
   return op.emitOpError(
-      "address expressions with modulo are not supported by BlockDataParser");
+      "address expressions with tensor modulo are not supported by BlockDataParser");
+}
+
+static int64_t getBlockElemIntWidth(Type ty) {
+  Type elemTy = getElementTypeOrSelf(ty);
+  if (elemTy.isIndex())
+    return 64;
+  return elemTy.getIntOrFloatBitWidth();
+}
+
+static bool isKnownNonNegativeBlockInt(Value v, unsigned depth = 0) {
+  if (!v || depth > 8)
+    return false;
+  APInt apVal;
+  if (matchPattern(v, m_ConstantInt(&apVal)))
+    return !apVal.isNegative();
+  if (auto cst = v.getDefiningOp<arith::ConstantOp>()) {
+    if (auto dense = dyn_cast<DenseIntElementsAttr>(cst.getValue()))
+      return llvm::all_of(dense.getValues<APInt>(),
+                          [](const APInt &x) { return !x.isNegative(); });
+  }
+  if (auto range = v.getDefiningOp<triton::MakeRangeOp>())
+    return range.getStart() >= 0 && range.getEnd() >= range.getStart();
+  if (isa<triton::GetProgramIdOp, triton::GetNumProgramsOp>(v.getDefiningOp()))
+    return true;
+  if (auto bArg = dyn_cast<BlockArgument>(v)) {
+    if (auto forOp =
+            dyn_cast_or_null<scf::ForOp>(bArg.getOwner()->getParentOp())) {
+      if (bArg == forOp.getInductionVar()) {
+        APInt lb, step;
+        if (matchPattern(forOp.getLowerBound(), m_ConstantInt(&lb)) &&
+            matchPattern(forOp.getStep(), m_ConstantInt(&step)))
+          return !lb.isNegative() && !step.isNegative();
+      }
+    }
+    return false;
+  }
+  Operation *def = v.getDefiningOp();
+  if (!def)
+    return false;
+  if (isa<arith::ExtUIOp, arith::IndexCastUIOp>(def))
+    return true;
+  if (isa<arith::ExtSIOp, arith::IndexCastOp, triton::SplatOp,
+          triton::ExpandDimsOp, triton::BroadcastOp>(def))
+    return isKnownNonNegativeBlockInt(def->getOperand(0), depth + 1);
+  if (auto shrui = dyn_cast<arith::ShRUIOp>(def)) {
+    APInt s;
+    int64_t bw = getBlockElemIntWidth(shrui.getType());
+    if (matchPattern(shrui.getRhs(), m_ConstantInt(&s)) &&
+        s.sgt(0) && s.slt(bw))
+      return true;
+    return isKnownNonNegativeBlockInt(shrui.getLhs(), depth + 1);
+  }
+  if (auto shrsi = dyn_cast<arith::ShRSIOp>(def))
+    return isKnownNonNegativeBlockInt(shrsi.getLhs(), depth + 1);
+  if (auto andOp = dyn_cast<arith::AndIOp>(def)) {
+    APInt m;
+    if ((matchPattern(andOp.getRhs(), m_ConstantInt(&m)) && !m.isNegative()) ||
+        (matchPattern(andOp.getLhs(), m_ConstantInt(&m)) && !m.isNegative()))
+      return true;
+    return isKnownNonNegativeBlockInt(andOp.getLhs(), depth + 1) &&
+           isKnownNonNegativeBlockInt(andOp.getRhs(), depth + 1);
+  }
+  if (isa<arith::AddIOp, arith::MulIOp>(def))
+    return isKnownNonNegativeBlockInt(def->getOperand(0), depth + 1) &&
+           isKnownNonNegativeBlockInt(def->getOperand(1), depth + 1);
+  return false;
+}
+
+LogicalResult
+BlockDataParser::parseShR(Value lhs, Value rhs, BlockData &data,
+                          const Location &loc,
+                          ConversionPatternRewriter &rewriter,
+                          const llvm::SmallDenseMap<Value, BlockData> &known) {
+  if (!isKnownNonNegativeBlockInt(lhs))
+    return emitError(loc, "shift right dividend must be provably non-negative");
+
+  BlockData lBlock, rBlock;
+  if (failed(parse(lhs, lBlock, loc, rewriter, known)) ||
+      failed(parse(rhs, rBlock, loc, rewriter, known)))
+    return failure();
+
+  if (!rBlock.isScalar())
+    return emitError(loc, "shift right amount must be a scalar");
+
+  int64_t maxShift =
+      std::min<int64_t>(getBlockElemIntWidth(lhs.getType()) - 1, 62);
+  auto shiftVal = getIntAttr(rBlock.getScalar());
+  if (!shiftVal.has_value() || shiftVal.value() < 0 ||
+      shiftVal.value() >= maxShift)
+    return emitError(loc, "unsupported shift right amount");
+
+  int64_t divisor = 1LL << shiftVal.value();
+  BlockData divBlockData = rBlock;
+  divBlockData.setScalar(rewriter.getIndexAttr(divisor));
+  if (!divBlockData.getOffsetsRef().empty()) {
+    divBlockData.getOffsetsRef()[0] = rewriter.getIndexAttr(divisor);
+  }
+  data.divBlock(lBlock, divBlockData, loc, rewriter);
+  return success();
+}
+
+LogicalResult
+BlockDataParser::parseShL(Value lhs, Value rhs, BlockData &data,
+                          const Location &loc,
+                          ConversionPatternRewriter &rewriter,
+                          const llvm::SmallDenseMap<Value, BlockData> &known) {
+  BlockData lBlock, rBlock;
+  if (failed(parse(lhs, lBlock, loc, rewriter, known)) ||
+      failed(parse(rhs, rBlock, loc, rewriter, known)))
+    return failure();
+
+  if (!rBlock.isScalar())
+    return emitError(loc, "shift left amount must be a scalar");
+
+  int64_t maxShift =
+      std::min<int64_t>(getBlockElemIntWidth(lhs.getType()) - 1, 62);
+  auto shiftVal = getIntAttr(rBlock.getScalar());
+  if (!shiftVal.has_value() || shiftVal.value() < 0 ||
+      shiftVal.value() >= maxShift)
+    return emitError(loc, "unsupported shift left amount");
+
+  int64_t mult = 1LL << shiftVal.value();
+  BlockData mulBlockData = rBlock;
+  mulBlockData.setScalar(rewriter.getIndexAttr(mult));
+  if (!mulBlockData.getOffsetsRef().empty()) {
+    mulBlockData.getOffsetsRef()[0] = rewriter.getIndexAttr(mult);
+  }
+  data.mulBlock(lBlock, mulBlockData, loc, rewriter);
+  return success();
+}
+
+LogicalResult
+BlockDataParser::parseAnd(Value lhs, Value rhs, BlockData &data,
+                          const Location &loc,
+                          ConversionPatternRewriter &rewriter,
+                          const llvm::SmallDenseMap<Value, BlockData> &known) {
+  if (!isKnownNonNegativeBlockInt(lhs))
+    return emitError(loc, "bitwise AND operand must be provably non-negative");
+
+  BlockData lBlock, rBlock;
+  if (failed(parse(lhs, lBlock, loc, rewriter, known)) ||
+      failed(parse(rhs, rBlock, loc, rewriter, known)))
+    return failure();
+
+  if (!rBlock.isScalar())
+    return emitError(loc, "bitwise AND mask must be a scalar");
+  if (!lBlock.isScalar())
+    return emitError(
+        loc,
+        "address expressions with tensor bitwise AND are not supported by BlockDataParser");
+
+  int64_t maxShift =
+      std::min<int64_t>(getBlockElemIntWidth(lhs.getType()) - 1, 62);
+  auto maskVal = getIntAttr(rBlock.getScalar());
+  if (!maskVal.has_value() || maskVal.value() <= 0 ||
+      maskVal.value() >= (1LL << maxShift))
+    return emitError(loc, "unsupported bitwise AND mask");
+
+  int64_t m = maskVal.value();
+  if ((m & (m + 1)) != 0)
+    return emitError(loc, "bitwise AND mask is not of the form 2^k - 1");
+
+  int64_t divisor = m + 1;
+  data.setScalar(remOpFoldResult(lBlock.getScalar(),
+                                 rewriter.getIndexAttr(divisor), loc,
+                                 rewriter));
+  return success();
 }
 
 void BlockDataParser::parseMakeRange(

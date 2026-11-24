@@ -128,6 +128,9 @@ struct MaskState {
   LogicalResult parseDiv(arith::DivSIOp divOp, const Location loc,
                          OpBuilder &builder);
 
+  LogicalResult parseShR(Value lhs, Value rhs, const Location loc,
+                         OpBuilder &builder);
+
   LogicalResult parseAnd(arith::AndIOp andOp, const Location loc,
                          OpBuilder &builder);
 

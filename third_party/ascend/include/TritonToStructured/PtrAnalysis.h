@@ -171,6 +171,24 @@ public:
   LogicalResult visitOperandDiv(arith::DivSIOp divOp, PtrState &state,
                                 const Location loc, OpBuilder &builder);
 
+  LogicalResult applyDivisorToState(OpFoldResult divisorAttr, PtrState &state,
+                                    Operation *op, const Location loc,
+                                    OpBuilder &builder);
+
+  LogicalResult applyRemainderToState(OpFoldResult divisorAttr, PtrState &state,
+                                      Operation *op, const Location loc,
+                                      OpBuilder &builder);
+
+  LogicalResult visitOperandShR(Value lhs, Value rhs, PtrState &state,
+                                Operation *op, const Location loc,
+                                OpBuilder &builder);
+
+  LogicalResult visitOperandShL(arith::ShLIOp shlOp, PtrState &state,
+                                const Location loc, OpBuilder &builder);
+
+  LogicalResult visitOperandAnd(arith::AndIOp andOp, PtrState &state,
+                                const Location loc, OpBuilder &builder);
+
   LogicalResult visitOperandAdd(arith::AddIOp addOp, PtrState &state,
                                 const Location loc, OpBuilder &builder);
 

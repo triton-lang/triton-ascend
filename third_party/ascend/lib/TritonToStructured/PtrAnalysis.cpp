@@ -40,6 +40,7 @@
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/IR/Visitors.h"
@@ -1383,25 +1384,31 @@ LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
     return failure();
   }
 
+  return applyRemainderToState(rhsState.offset, state, remOp, loc, builder);
+}
+
+LogicalResult PtrAnalysis::applyRemainderToState(OpFoldResult divisorAttr,
+                                                 PtrState &state, Operation *op,
+                                                 const Location loc,
+                                                 OpBuilder &builder) {
   bool hasAnnotation = optimizeDynamicOffset;
 
   auto zeroAttr = builder.getIndexAttr(0);
   auto oneAttr = builder.getIndexAttr(1);
-  auto divisorAttr = rhsState.offset;
 
   auto staticOffset = getIntAttr(state.offset);
   if ((!staticOffset.has_value() || !isMultiple(state.offset, divisorAttr)) &&
       !hasAnnotation) {
     LLVM_DEBUG({
-      remOp.emitRemark(
-          "PtrAnalysis: dynamic offset before REMSI, adding annotation");
+      op->emitRemark(
+          "PtrAnalysis: dynamic offset before remainder, adding annotation");
     });
     return failure();
   }
 
   if (!getIntAttr(divisorAttr).has_value()) {
     LLVM_DEBUG({
-      remOp.emitError("PtrAnalysis: do not support dynamix divisor in REMSI.");
+      op->emitError("PtrAnalysis: do not support dynamix divisor in remainder.");
     });
     return failure();
   }
@@ -1410,8 +1417,8 @@ LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
   for (auto info : state.stateInfo) {
     if (!getIntAttr(info.stride).has_value()) {
       LLVM_DEBUG({
-        remOp.emitError(
-            "PtrAnalysis: do not support dynamix stride before REMSI.");
+        op->emitError(
+            "PtrAnalysis: do not support dynamix stride before remainder.");
       });
       return failure();
     }
@@ -1419,8 +1426,8 @@ LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
     if (!isMultiple(divisorAttr, info.shape) &&
         !isMultiple(info.shape, divisorAttr)) {
       LLVM_DEBUG({
-        remOp.emitError(
-            "PtrAnalysis: do not support dynamix stride before REMSI.");
+        op->emitError(
+            "PtrAnalysis: do not support dynamix stride before remainder.");
       });
     }
 
@@ -1437,8 +1444,8 @@ LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
       auto staticNonContiguousSize = getIntAttr(nonContiguousSize);
       if (!staticNonContiguousSize.has_value()) {
         LLVM_DEBUG({
-          remOp.emitError(
-              "PtrAnalysis: do not support dynamix size before REMSI.");
+          op->emitError(
+              "PtrAnalysis: do not support dynamix size before remainder.");
         });
         return failure();
       }
@@ -1449,9 +1456,9 @@ LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
       newStateInfo.emplace_back(info.stride, contiguousSize, info.dimIndex);
     } else {
       LLVM_DEBUG({
-        remOp.emitError("PtrAnalysis: stride that are not divisible by REMSI "
-                        "are not allowed "
-                        "to precede REMSI");
+        op->emitError("PtrAnalysis: stride that are not divisible by remainder "
+                      "are not allowed "
+                      "to precede remainder");
       });
       return failure();
     }
@@ -1466,6 +1473,103 @@ LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
     state.dump();
   });
 
+  return success();
+}
+
+LogicalResult PtrAnalysis::applyDivisorToState(OpFoldResult divisorAttr,
+                                               PtrState &state, Operation *op,
+                                               const Location loc,
+                                               OpBuilder &builder) {
+  bool hasAnnotation = optimizeDynamicOffset;
+
+  auto staticMultipleOf = extractDivisibilityFromOpFoldResult(state.offset);
+  if (!hasAnnotation && staticMultipleOf.has_value()) {
+    auto attr = builder.getIndexAttr(staticMultipleOf.value());
+    hasAnnotation = isMultiple(attr, divisorAttr);
+  }
+
+  // add divState
+  auto zeroAttr = builder.getIndexAttr(0);
+  auto oneAttr = builder.getIndexAttr(1);
+
+  auto staticOffset = getIntAttr(state.offset);
+  if ((!staticOffset.has_value() || !isMultiple(state.offset, divisorAttr)) &&
+      !hasAnnotation) {
+    LLVM_DEBUG({
+      op->emitRemark(
+          "PtrAnalysis: dynamic offset before division, adding annotation");
+    });
+    return failure();
+  }
+
+  if (!getIntAttr(divisorAttr).has_value()) {
+    LLVM_DEBUG({
+      op->emitError("PtrAnalysis: do not support dynamix divisor in division.");
+    });
+    return failure();
+  }
+
+  SmallVector<StateInfo> newStateInfo;
+  for (auto info : state.stateInfo) {
+    auto staticStride = getIntAttr(info.stride);
+    if (!staticStride.has_value()) {
+      LLVM_DEBUG({
+        op->emitError(
+            "PtrAnalysis: do not support dynamix stride before division.");
+      });
+      return failure();
+    }
+
+    if (!isMultiple(divisorAttr, info.shape) &&
+        !isMultiple(info.shape, divisorAttr)) {
+      LLVM_DEBUG({
+        op->emitError(
+            "PtrAnalysis: do not support dynamix stride before division.");
+      });
+    }
+
+    if (isMultiple(info.stride, divisorAttr)) {
+      auto newStride = divOpFoldResult(info.stride, divisorAttr, loc, builder);
+      newStateInfo.emplace_back(newStride, info.shape, info.dimIndex);
+    } else if (isMultiple(divisorAttr, info.stride)) {
+      auto nonContiguousSize =
+          divOpFoldResult(divisorAttr, info.stride, loc, builder);
+      nonContiguousSize =
+          minOpFoldResult(nonContiguousSize, info.shape, loc, builder);
+      auto contiguousSize =
+          divOpFoldResult(info.shape, nonContiguousSize, loc, builder);
+
+      auto staticContiguousSize = getIntAttr(contiguousSize);
+      if (!staticContiguousSize.has_value()) {
+        LLVM_DEBUG({
+          op->emitError(
+              "PtrAnalysis: do not support dynamix size before division.");
+        });
+        return failure();
+      }
+
+      if (staticContiguousSize.value() != 0)
+        newStateInfo.emplace_back(oneAttr, contiguousSize, info.dimIndex);
+
+      newStateInfo.emplace_back(zeroAttr, nonContiguousSize, info.dimIndex);
+    } else {
+      LLVM_DEBUG({
+        op->emitError("PtrAnalysis: stride that are not divisible by division "
+                      "are not allowed "
+                      "to precede division");
+      });
+      return failure();
+    }
+  }
+
+  auto newOffset = divOpFoldResult(state.offset, divisorAttr, loc, builder);
+  state.updatePtrState(newStateInfo, state.sizes, state.source, newOffset, loc,
+                       builder, true);
+
+  LLVM_DEBUG({
+    llvm::dbgs() << "after VisitDivOperands \n";
+    state.dump();
+  });
   return success();
 }
 
@@ -1501,98 +1605,168 @@ LogicalResult PtrAnalysis::visitOperandDiv(arith::DivSIOp divOp,
     return failure();
   }
 
-  bool hasAnnotation = optimizeDynamicOffset;
+  return applyDivisorToState(rhsState.offset, state, divOp, loc, builder);
+}
 
-  auto staticMultipleOf = extractDivisibilityFromOpFoldResult(state.offset);
-  if (!hasAnnotation && staticMultipleOf.has_value()) {
-    auto attr = builder.getIndexAttr(staticMultipleOf.value());
-    hasAnnotation = isMultiple(attr, rhsState.offset);
+static int64_t getPtrElemIntWidth(Type ty) {
+  Type elemTy = getElementTypeOrSelf(ty);
+  if (elemTy.isIndex())
+    return 64;
+  return elemTy.getIntOrFloatBitWidth();
+}
+
+static bool isKnownNonNegativePtrInt(Value v, unsigned depth = 0) {
+  if (!v || depth > 8)
+    return false;
+  APInt apVal;
+  if (matchPattern(v, m_ConstantInt(&apVal)))
+    return !apVal.isNegative();
+  if (auto cst = v.getDefiningOp<arith::ConstantOp>()) {
+    if (auto dense = dyn_cast<DenseIntElementsAttr>(cst.getValue()))
+      return llvm::all_of(dense.getValues<APInt>(),
+                          [](const APInt &x) { return !x.isNegative(); });
   }
-
-  // add divState
-  auto zeroAttr = builder.getIndexAttr(0);
-  auto oneAttr = builder.getIndexAttr(1);
-  auto divisorAttr = rhsState.offset;
-
-  auto staticOffset = getIntAttr(state.offset);
-  if ((!staticOffset.has_value() || !isMultiple(state.offset, divisorAttr)) &&
-      !hasAnnotation) {
-    LLVM_DEBUG({
-      divOp.emitRemark(
-          "PtrAnalysis: dynamic offset before DIVSI, adding annotation");
-    });
-    return failure();
-  }
-
-  if (!getIntAttr(divisorAttr).has_value()) {
-    LLVM_DEBUG({
-      divOp.emitError("PtrAnalysis: do not support dynamix divisor in DIVSI.");
-    });
-    return failure();
-  }
-
-  SmallVector<StateInfo> newStateInfo;
-  for (auto info : state.stateInfo) {
-    auto staticStride = getIntAttr(info.stride);
-    if (!staticStride.has_value()) {
-      LLVM_DEBUG({
-        divOp.emitError(
-            "PtrAnalysis: do not support dynamix stride before DIVSI.");
-      });
-      return failure();
-    }
-
-    if (!isMultiple(divisorAttr, info.shape) &&
-        !isMultiple(info.shape, divisorAttr)) {
-      LLVM_DEBUG({
-        divOp.emitError(
-            "PtrAnalysis: do not support dynamix stride before DivSI.");
-      });
-    }
-
-    if (isMultiple(info.stride, divisorAttr)) {
-      auto newStride = divOpFoldResult(info.stride, divisorAttr, loc, builder);
-      newStateInfo.emplace_back(newStride, info.shape, info.dimIndex);
-    } else if (isMultiple(divisorAttr, info.stride)) {
-      auto nonContiguousSize =
-          divOpFoldResult(divisorAttr, info.stride, loc, builder);
-      nonContiguousSize =
-          minOpFoldResult(nonContiguousSize, info.shape, loc, builder);
-      auto contiguousSize =
-          divOpFoldResult(info.shape, nonContiguousSize, loc, builder);
-
-      auto staticContiguousSize = getIntAttr(contiguousSize);
-      if (!staticContiguousSize.has_value()) {
-        LLVM_DEBUG({
-          divOp.emitError(
-              "PtrAnalysis: do not support dynamix size before DIVSI.");
-        });
-        return failure();
+  if (auto range = v.getDefiningOp<triton::MakeRangeOp>())
+    return range.getStart() >= 0 && range.getEnd() >= range.getStart();
+  if (isa<triton::GetProgramIdOp, triton::GetNumProgramsOp>(v.getDefiningOp()))
+    return true;
+  if (auto bArg = dyn_cast<BlockArgument>(v)) {
+    if (auto forOp =
+            dyn_cast_or_null<scf::ForOp>(bArg.getOwner()->getParentOp())) {
+      if (bArg == forOp.getInductionVar()) {
+        APInt lb, step;
+        if (matchPattern(forOp.getLowerBound(), m_ConstantInt(&lb)) &&
+            matchPattern(forOp.getStep(), m_ConstantInt(&step)))
+          return !lb.isNegative() && !step.isNegative();
       }
-
-      if (staticContiguousSize.value() != 0)
-        newStateInfo.emplace_back(oneAttr, contiguousSize, info.dimIndex);
-
-      newStateInfo.emplace_back(zeroAttr, nonContiguousSize, info.dimIndex);
-    } else {
-      LLVM_DEBUG({
-        divOp.emitError("PtrAnalysis: stride that are not divisible by DIVSI "
-                        "are not allowed "
-                        "to precede DIVSI");
-      });
-      return failure();
     }
+    return false;
   }
+  Operation *def = v.getDefiningOp();
+  if (!def)
+    return false;
+  if (isa<arith::ExtUIOp, arith::IndexCastUIOp>(def))
+    return true;
+  if (isa<arith::ExtSIOp, arith::IndexCastOp, triton::SplatOp,
+          triton::ExpandDimsOp, triton::BroadcastOp>(def))
+    return isKnownNonNegativePtrInt(def->getOperand(0), depth + 1);
+  if (auto shrui = dyn_cast<arith::ShRUIOp>(def)) {
+    APInt s;
+    int64_t bw = getPtrElemIntWidth(shrui.getType());
+    if (matchPattern(shrui.getRhs(), m_ConstantInt(&s)) &&
+        s.sgt(0) && s.slt(bw))
+      return true;
+    return isKnownNonNegativePtrInt(shrui.getLhs(), depth + 1);
+  }
+  if (auto shrsi = dyn_cast<arith::ShRSIOp>(def))
+    return isKnownNonNegativePtrInt(shrsi.getLhs(), depth + 1);
+  if (auto andOp = dyn_cast<arith::AndIOp>(def)) {
+    APInt m;
+    if ((matchPattern(andOp.getRhs(), m_ConstantInt(&m)) && !m.isNegative()) ||
+        (matchPattern(andOp.getLhs(), m_ConstantInt(&m)) && !m.isNegative()))
+      return true;
+    return isKnownNonNegativePtrInt(andOp.getLhs(), depth + 1) &&
+           isKnownNonNegativePtrInt(andOp.getRhs(), depth + 1);
+  }
+  if (isa<arith::AddIOp, arith::MulIOp>(def))
+    return isKnownNonNegativePtrInt(def->getOperand(0), depth + 1) &&
+           isKnownNonNegativePtrInt(def->getOperand(1), depth + 1);
+  return false;
+}
 
-  auto newOffset = divOpFoldResult(state.offset, divisorAttr, loc, builder);
-  state.updatePtrState(newStateInfo, state.sizes, state.source, newOffset, loc,
-                       builder, true);
+LogicalResult PtrAnalysis::visitOperandShR(Value lhs, Value rhs,
+                                           PtrState &state, Operation *op,
+                                           const Location loc,
+                                           OpBuilder &builder) {
+  if (!state.isEmpty() || !isKnownNonNegativePtrInt(lhs))
+    return failure();
 
-  LLVM_DEBUG({
-    llvm::dbgs() << "after VisitDivOperands \n";
-    state.dump();
-  });
-  return success();
+  PtrState rhsState;
+  if (visitOperand(rhs, rhsState, loc, builder).failed())
+    return failure();
+
+  if (!rhsState.isScalar() || rhsState.hasSource())
+    return failure();
+
+  int64_t maxShift =
+      std::min<int64_t>(getPtrElemIntWidth(lhs.getType()) - 1, 62);
+  auto shiftInt = getIntAttr(rhsState.offset);
+  if (!shiftInt.has_value() || shiftInt.value() < 0 ||
+      shiftInt.value() >= maxShift)
+    return failure();
+
+  int64_t divisor = 1LL << shiftInt.value();
+  auto divisorAttr = builder.getIndexAttr(divisor);
+
+  if (visitOperand(lhs, state, loc, builder).failed())
+    return failure();
+
+  return applyDivisorToState(divisorAttr, state, op, loc, builder);
+}
+
+LogicalResult PtrAnalysis::visitOperandShL(arith::ShLIOp shlOp,
+                                           PtrState &state, const Location loc,
+                                           OpBuilder &builder) {
+  if (!state.isEmpty())
+    return failure();
+
+  PtrState rhsState;
+  if (visitOperand(shlOp.getRhs(), rhsState, loc, builder).failed())
+    return failure();
+
+  if (!rhsState.isScalar() || rhsState.hasSource())
+    return failure();
+
+  int64_t maxShift =
+      std::min<int64_t>(getPtrElemIntWidth(shlOp.getType()) - 1, 62);
+  auto shiftInt = getIntAttr(rhsState.offset);
+  if (!shiftInt.has_value() || shiftInt.value() < 0 ||
+      shiftInt.value() >= maxShift)
+    return failure();
+
+  int64_t mult = 1LL << shiftInt.value();
+  auto multAttr = builder.getIndexAttr(mult);
+
+  PtrState lhsState;
+  if (visitOperand(shlOp.getLhs(), lhsState, loc, builder).failed())
+    return failure();
+
+  PtrState multState;
+  multState.updatePtrState({}, {}, nullptr, multAttr, loc, builder);
+  return state.mulState(lhsState, multState, shlOp, builder);
+}
+
+LogicalResult PtrAnalysis::visitOperandAnd(arith::AndIOp andOp,
+                                           PtrState &state, const Location loc,
+                                           OpBuilder &builder) {
+  if (!state.isEmpty() || !isKnownNonNegativePtrInt(andOp.getLhs()))
+    return failure();
+
+  PtrState rhsState;
+  if (visitOperand(andOp.getRhs(), rhsState, loc, builder).failed())
+    return failure();
+
+  if (!rhsState.isScalar() || rhsState.hasSource())
+    return failure();
+
+  int64_t maxShift =
+      std::min<int64_t>(getPtrElemIntWidth(andOp.getType()) - 1, 62);
+  auto maskInt = getIntAttr(rhsState.offset);
+  if (!maskInt.has_value() || maskInt.value() <= 0 ||
+      maskInt.value() >= (1LL << maxShift))
+    return failure();
+
+  int64_t m = maskInt.value();
+  if ((m & (m + 1)) != 0)
+    return failure();
+
+  int64_t divisor = m + 1;
+  auto divisorAttr = builder.getIndexAttr(divisor);
+
+  if (visitOperand(andOp.getLhs(), state, loc, builder).failed())
+    return failure();
+
+  return applyRemainderToState(divisorAttr, state, andOp, loc, builder);
 }
 
 LogicalResult PtrAnalysis::visitOperandAdd(arith::AddIOp addOp, PtrState &state,
@@ -1649,6 +1823,14 @@ LogicalResult PtrAnalysis::visitOperand(Value operand, PtrState &state,
     return visitOperandRem(op, state, loc, builder);
   } else if (auto op = operand.getDefiningOp<arith::DivSIOp>()) {
     return visitOperandDiv(op, state, loc, builder);
+  } else if (auto op = operand.getDefiningOp<arith::ShRSIOp>()) {
+    return visitOperandShR(op.getLhs(), op.getRhs(), state, op, loc, builder);
+  } else if (auto op = operand.getDefiningOp<arith::ShRUIOp>()) {
+    return visitOperandShR(op.getLhs(), op.getRhs(), state, op, loc, builder);
+  } else if (auto op = operand.getDefiningOp<arith::ShLIOp>()) {
+    return visitOperandShL(op, state, loc, builder);
+  } else if (auto op = operand.getDefiningOp<arith::AndIOp>()) {
+    return visitOperandAnd(op, state, loc, builder);
   } else if (auto op = operand.getDefiningOp<arith::ExtSIOp>()) {
     return visitOperandExtSI(op, state, loc, builder);
   } else if (auto op = operand.getDefiningOp<triton::LoadOp>()) {

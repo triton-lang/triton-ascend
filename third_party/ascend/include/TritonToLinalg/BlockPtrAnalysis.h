@@ -194,6 +194,21 @@ public:
            ConversionPatternRewriter &rewriter,
            const llvm::SmallDenseMap<Value, BlockData> &known);
 
+  static LogicalResult
+  parseShR(Value lhs, Value rhs, BlockData &data, const Location &loc,
+           ConversionPatternRewriter &rewriter,
+           const llvm::SmallDenseMap<Value, BlockData> &known);
+
+  static LogicalResult
+  parseShL(Value lhs, Value rhs, BlockData &data, const Location &loc,
+           ConversionPatternRewriter &rewriter,
+           const llvm::SmallDenseMap<Value, BlockData> &known);
+
+  static LogicalResult
+  parseAnd(Value lhs, Value rhs, BlockData &data, const Location &loc,
+           ConversionPatternRewriter &rewriter,
+           const llvm::SmallDenseMap<Value, BlockData> &known);
+
   static void
   parseUnrealizedCast(UnrealizedConversionCastOp op, BlockData &data,
                       const Location &loc, ConversionPatternRewriter &rewriter,

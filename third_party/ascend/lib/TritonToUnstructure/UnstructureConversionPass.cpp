@@ -958,6 +958,9 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
     if (simdDiscreteMask &&
         (!info.hasScalarBase() || !info.offsets.hasStructuredForm())) {
+      // Only keep row copies for live, nonvolatile 2D gathers with indirect
+      // rows and unit-stride columns. The mask must split into a row guard and
+      // an optional column prefix. Otherwise scalarize and keep the full mask.
       if (rank != 2 || structuredAxes[0] || !structuredAxes[1] ||
           ptrType.getDimSize(1) <= 1 ||
           !isConstantIntValue(info.offsets.axes[1].stride, 1) ||

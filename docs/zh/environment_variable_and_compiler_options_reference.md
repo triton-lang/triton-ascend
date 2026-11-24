@@ -210,7 +210,7 @@ triton.knobs.propagate_env = False  # 之后的赋值不再写回os.environ
 | 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
 |------|----------|--------|----------|------|
 | `fp32_default` | `TRITON_F32_DEFAULT` | `None` | `None`、`"ieee"`、`"hf32"`、`"tf32"`（映射为 `hf32`） | `tl.dot` 的默认FP32输入精度；`None` 时使用后端默认值 `ieee`。 |
-| `default_fp_fusion` | `TRITON_DEFAULT_FP_FUSION` | `True` | `True` / `False` | 设置上游GPU后端的浮点运算融合默认值，Ascend后端不读取此项。Ascend 950纯SIMT的FMA控制见 `disable_fma`。 |
+| `default_fp_fusion` | `TRITON_DEFAULT_FP_FUSION` | `True` | `True` / `False` | 仅NVIDIA和AMD后端读取此项，用于设置 `enable_fp_fusion` 的默认值。Ascend接收 `enable_fp_fusion` 作为兼容字段，其值不控制浮点运算融合。Ascend 950纯SIMT的FMA控制见 `disable_fma`。 |
 
 <a id="knobs-build"></a>
 

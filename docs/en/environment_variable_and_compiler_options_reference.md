@@ -211,7 +211,7 @@ The table below lists each configuration group by purpose; the fields of each gr
 | Field | Environment variable | Default | Value range | Description |
 |-------|----------------------|---------|-------------|-------------|
 | `fp32_default` | `TRITON_F32_DEFAULT` | `None` | `None`, `"ieee"`, `"hf32"`, `"tf32"` (mapped to `hf32`) | Default FP32 input precision for `tl.dot`; `None` uses the backend default `ieee`. |
-| `default_fp_fusion` | `TRITON_DEFAULT_FP_FUSION` | `True` | `True` / `False` | Sets the floating-point fusion default for upstream GPU backends. The Ascend backend does not read this setting. For pure-SIMT FMA control on Ascend 950, see `disable_fma`. |
+| `default_fp_fusion` | `TRITON_DEFAULT_FP_FUSION` | `True` | `True` / `False` | Only the NVIDIA and AMD backends read this setting as the default for `enable_fp_fusion`. Ascend accepts `enable_fp_fusion` as a compatibility field with no effect on floating-point fusion. For pure-SIMT FMA control on Ascend 950, see `disable_fma`. |
 
 <a id="knobs-build"></a>
 

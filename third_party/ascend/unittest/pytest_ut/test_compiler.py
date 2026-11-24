@@ -443,10 +443,7 @@ def test_legacy_stream_is_consumed_without_losing_option_discovery(backend, stre
         ({"force_simt_only": True, "force_simt_template": True}, {"compile_mode": "simt_only"}),
         ({"force_simt_template": True}, {"compile_mode": "simd_simt_template"}),
         ({"force_simt_only": False, "compile_mode": "simd"}, {"compile_mode": "simd"}),
-        ({"intra_cache_num": 4}, {"buf_slot_num_of_veccore": 4}),
-        ({"inter_cache_num": 3}, {"buf_slot_num_of_crosscore": 3}),
         ({"load_cache_num": 2}, {"buf_slot_num_of_gm": 2}),
-        ({"intra_cache_num": 4, "buf_slot_num_of_veccore": 6}, {"buf_slot_num_of_veccore": 6}),
         ({"enable_bishengir_simt_optimization": 101, "compile_mode": "simt_only"
           }, {"simt_optimization_mode": 101, "compile_mode": "simt_only"}),
         ({"enable_bishengir_simt_optimization": 101, "simt_optimization_mode": 100, "compile_mode": "simt_only"

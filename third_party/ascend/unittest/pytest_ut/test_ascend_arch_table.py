@@ -106,8 +106,12 @@ class AscendArchTableTest(unittest.TestCase):
         with patch("builtins.__import__", side_effect=fail_runtime_import):
             self.assertEqual(self.mod["arch_generation"](), legacy)
 
-        for target in (None, SimpleNamespace(), SimpleNamespace(arch=None)):
-            with self.subTest(target=target):
+        for label, target in (
+            ("missing-target", None),
+            ("missing-arch", SimpleNamespace()),
+            ("none-arch", SimpleNamespace(arch=None)),
+        ):
+            with self.subTest(target=label):
                 get_current_target = Mock(return_value=target)
                 triton, runtime = self._mock_driver(get_current_target)
                 with patch.dict(sys.modules, {"triton": triton, "triton.runtime": runtime}):

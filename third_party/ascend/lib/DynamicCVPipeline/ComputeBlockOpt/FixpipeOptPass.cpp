@@ -207,7 +207,7 @@ bool FixpipeOptPass::isStoreToGM(Operation *storeOp,
         ↓
     arith.truncf(f32->bf16, f32->f16, i32->i8)
         ↓
-    tensor.extract_slice
+    tensor.extract_slice (optional)
         ↓
     bufferization.materialize_in_destination memref.subview(gm)
     After optimization, all these ops will be in same block with matmul and set
@@ -221,10 +221,7 @@ bool FixpipeOptPass::isFixpipeCastPattern(Operation *truncOp,
     return false;
   }
   auto maybeExtract = *truncResult.getUsers().begin();
-  tensor::ExtractSliceOp extractSliceOp = nullptr;
-  if (auto extract = dyn_cast<tensor::ExtractSliceOp>(maybeExtract)) {
-    extractSliceOp = extract;
-  } else if (auto consumerMatmul = dyn_cast<linalg::MatmulOp>(maybeExtract)) {
+  if (auto consumerMatmul = dyn_cast<linalg::MatmulOp>(maybeExtract)) {
     // matmul -> trunc -> matmul pattern
     for (Value input : consumerMatmul.getDpsInputs()) {
       if (input == truncResult) {
@@ -234,30 +231,25 @@ bool FixpipeOptPass::isFixpipeCastPattern(Operation *truncOp,
     }
     LOG_DEBUG("Trunc result is not a DPS input of consumer matmul, NOT match.");
     return false;
-  } else {
-    LOG_DEBUG("Cannot find extract slice op or matmul, NOT match");
-    return false;
   }
 
-  Value extractResult = extractSliceOp.getResult();
-  if (!extractResult.hasOneUse()) {
-    LOG_DEBUG("Extract Slice not only one user, NOT match.");
-    return false;
-  }
-  auto maybeMaterialize = *extractResult.getUsers().begin();
-  bufferization::MaterializeInDestinationOp materializeOp = nullptr;
-
-  if (auto materialize = dyn_cast<bufferization::MaterializeInDestinationOp>(
-          maybeMaterialize)) {
-    materializeOp = materialize;
+  tensor::ExtractSliceOp extractSliceOp =
+      dyn_cast<tensor::ExtractSliceOp>(maybeExtract);
+  Operation *storeOp = nullptr;
+  if (extractSliceOp) {
+    Value extractResult = extractSliceOp.getResult();
+    if (!extractResult.hasOneUse()) {
+      LOG_DEBUG("Extract Slice not only one user, NOT match.");
+      return false;
+    }
+    storeOp = *extractResult.getUsers().begin();
+    matchedOps.insert(extractSliceOp);
   } else {
-    LOG_DEBUG("Cannot find materialize op, NOT match");
-    return false;
+    storeOp = maybeExtract;
   }
 
   matchedOps.insert(truncOp);
-  matchedOps.insert(extractSliceOp);
-  if (!isStoreToGM(materializeOp, matchedOps)) {
+  if (!isStoreToGM(storeOp, matchedOps)) {
     LOG_DEBUG("Not store to GM pattern, NOT match.");
     return false;
   }

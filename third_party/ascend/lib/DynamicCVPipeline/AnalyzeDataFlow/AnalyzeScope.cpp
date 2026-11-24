@@ -55,6 +55,15 @@ static bool isVectorScope(scope::ScopeOp scopeOp) {
   return coreTypeAttr.getTcoretype() == hivm::TCoreType::VECTOR;
 }
 
+static bool isCubeScope(scope::ScopeOp scopeOp) {
+  auto coreTypeAttr =
+      scopeOp->getAttrOfType<hivm::TCoreTypeAttr>(hivm::TCoreTypeAttr::name);
+  if (!coreTypeAttr) {
+    return false;
+  }
+  return coreTypeAttr.getTcoretype() == hivm::TCoreType::CUBE;
+}
+
 static bool checkTransferInteraction(mlir::Operation *op) {
   bool hasCVInteraction = false;
   // check v->c data interaction
@@ -160,7 +169,10 @@ static bool isFixpipeToUB(Operation *op) {
 // Nested regions inside the main_loop op are also walked, and scf.yield
 // terminators are skipped.
 static bool isMainLoopOnlyCopyOrFixpipe(ModuleOp module) {
-  // main_loop id -> (countCopy, countFixpipe)
+  // main_loop id -> (countVecComm, countCubeComm)
+  // Include Vector StoreOp and Cube MmadL1Op alongside CopyOp and UB FixpipeOp
+  // so reduction main loops whose FixpipeOp sits outside the loop are
+  // recognized as valid bidirectional CV loops.
   llvm::DenseMap<int, std::pair<int, int>> idToCounts;
 
   module.walk([&](Operation *op) -> WalkResult {
@@ -176,17 +188,17 @@ static bool isMainLoopOnlyCopyOrFixpipe(ModuleOp module) {
     auto &counts = idToCounts[id];
 
     op->walk([&](mlir::Operation *innerOp) -> WalkResult {
-      // Skip the loop op itself (the walk visits it first)
-      if (innerOp == op) {
+      if (innerOp == op || isa<scf::YieldOp>(innerOp)) {
         return WalkResult::advance();
       }
-      // Skip yield terminators (they are not real ops)
-      if (isa<scf::YieldOp>(innerOp)) {
-        return WalkResult::advance();
-      }
-      if (isa<hivm::CopyOp>(innerOp)) {
+      auto enclosingScope = innerOp->getParentOfType<scope::ScopeOp>();
+      if (isa<hivm::CopyOp>(innerOp) ||
+          (isa<hivm::StoreOp>(innerOp) && enclosingScope &&
+           isVectorScope(enclosingScope))) {
         ++counts.first;
-      } else if (isFixpipeToUB(innerOp)) {
+      } else if (isFixpipeToUB(innerOp) ||
+                 (isa<hivm::MmadL1Op>(innerOp) && enclosingScope &&
+                  isCubeScope(enclosingScope))) {
         ++counts.second;
       }
       return WalkResult::advance();

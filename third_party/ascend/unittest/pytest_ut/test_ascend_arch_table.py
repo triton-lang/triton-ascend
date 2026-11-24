@@ -52,10 +52,12 @@ class AscendArchTableTest(unittest.TestCase):
     def test_register_based_generations(self):
         gen5 = self.mod["AscendArchGen"].GEN5
         gen6 = self.mod["AscendArchGen"].GEN6
-        for arch in ("Ascend910_95", "Ascend950", "Ascend910_958b", "Ascend910_96", "Ascend960", "Ascend960DT_9691"):
+        kirin = self.mod["AscendArchGen"].KIRIN
+        for arch in ("Ascend910_95", "Ascend950", "Ascend910_958b", "Ascend910_96", "Ascend960", "Ascend960DT_9691",
+                     "Kirin9020"):
             with self.subTest(arch=arch):
                 gen = self.mod["arch_generation"](arch)
-                self.assertIn(gen, (gen5, gen6))
+                self.assertIn(gen, (gen5, gen6, kirin))
                 self.assertTrue(self.mod["is_register_based_arch"](arch))
 
     def test_legacy_not_register_based(self):
@@ -69,6 +71,7 @@ class AscendArchTableTest(unittest.TestCase):
             "Ascend910_96": (320, 128),
             "Ascend950": (256, 128),
             "Ascend910_95": (256, 128),
+            "Kirin9020": (120, None),
             "Ascend910B1": (192, None),
             "Ascend910A": (192, None),
             "Ascend910_97": (0, None),
@@ -80,8 +83,8 @@ class AscendArchTableTest(unittest.TestCase):
                 self.assertEqual(self.mod["rf_size_in_kbytes_for_arch"](arch), rf)
 
     def test_ffts_policy(self):
-        # Register-based targets (A5 / A6) do not support FFTS.
-        for arch in ("Ascend960", "Ascend910_96", "Ascend910_95", "Ascend950"):
+        # Register-based targets (A5 / A6 / Kirin) do not support FFTS.
+        for arch in ("Ascend960", "Ascend910_96", "Ascend910_95", "Ascend950", "Kirin9020"):
             with self.subTest(arch=arch):
                 self.assertFalse(self.mod["is_ffts_supported"](arch))
         # Ascend910A and Ascend310B4 are legacy but have FFTS disabled.

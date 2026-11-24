@@ -66,6 +66,26 @@ constexpr llvm::StringLiteral kCoalesceAxisAttr = "hacc.coalesce_axis";
 constexpr llvm::StringLiteral kCoalesceGridCeilDivAttr =
     "hacc.coalesce_grid_ceil_div";
 
+static bool isKirinTargetName(llvm::StringRef target) {
+  return target.equals_insensitive("kirin9020") ||
+         target.equals_insensitive("dav-l310") ||
+         target.equals_insensitive("l310");
+}
+
+static bool isKirinNPU(ModuleOp module) {
+  if (!module)
+    return false;
+  if (auto targetAttr =
+          module->getAttrOfType<hacc::TargetAttr>(hacc::TargetAttr::name))
+    return isKirinTargetName(targetAttr.getTarget());
+  for (llvm::StringRef attrName : {"hacc.target", "target"}) {
+    if (auto strAttr = module->getAttrOfType<StringAttr>(attrName))
+      if (isKirinTargetName(strAttr.getValue()))
+        return true;
+  }
+  return false;
+}
+
 static std::optional<int64_t> getConstantIntValue(Value v) {
   APInt value;
   if (matchPattern(v, m_ConstantInt(&value)))
@@ -303,6 +323,20 @@ static std::optional<RowCandidate> matchDotRows(triton::FuncOp fn,
 
   RowCountPolicy policy;
   policy.targetDotRows = 128;
+  if (module) {
+    if (auto spec = hacc::utils::getNPUTargetSpec(module)) {
+      if (auto ubEntry =
+              spec->getSpecForIdentifierEnum(hacc::DeviceSpec::UB_SIZE)) {
+        int64_t ubBytes = hacc::utils::getIntegerSpecValue(ubEntry) / 8;
+        if (ubBytes > 0 && ubBytes < 256 * 1024)
+          policy.maxLiftedValueBytes = 64 * 1024;
+      }
+    } else if (isKirinNPU(module)) {
+      // The pinned AscendNPU-IR submodule predates Kirin9020Spec; apply the
+      // <256 KiB UB tier (64 KiB lifted-value cap) when targeting Kirin NPU.
+      policy.maxLiftedValueBytes = 64 * 1024;
+    }
+  }
   policy.maxL0ABytes = maxL0ABytes;
   policy.maxL0CBytes = maxL0CBytes;
   policy.l0ABudgetBytes = l0aBudgetBytes;
@@ -436,9 +470,9 @@ public:
 std::unique_ptr<RewritePlan>
 cfg::createDotRowCoalescingPlan(triton::FuncOp function, unsigned epoch,
                                 const ResourceSnapshot &resources) {
-  // Dot row coalescing is supported only on Ascend 950.
+  // Dot row coalescing is supported on Ascend 950 and Kirin9020 (dav-l310).
   auto module = function->getParentOfType<ModuleOp>();
-  if (!module || !hacc::utils::isAscend950(module))
+  if (!module || (!hacc::utils::isAscend950(module) && !isKirinNPU(module)))
     return nullptr;
 
   // Zero budgets (unknown cube capacities) leave the factor unconstrained.

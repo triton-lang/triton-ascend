@@ -635,3 +635,28 @@ def test_failing_dlclose_warns_without_failing_the_compilation(monkeypatch):
         _load_metadata_by_callback("/nonexistent/libkernel.so", metadata)
 
     assert metadata == {"kernel_name": "triton_add", **_CALLBACK_METADATA}
+
+
+def test_kirin9020_uses_register_based_path_without_simt():
+    from triton.backends.ascend import dtype_guard
+
+    backend = compiler.AscendBackend(GPUTarget("npu", "Kirin9020", 32))
+    options = backend.parse_options({})
+
+    assert options.compile_on_910_95
+    assert options.compile_on_register_based
+    assert not options.is_pure_simt
+    assert not options.force_simt_only
+    assert not options.force_simt_template
+    assert options.parallel_mode == "simd"
+    assert options.compile_mode == "simd"
+    assert options.supported_fp8_dtypes == ()
+    assert Path(compiler.get_libdevice("Kirin9020")).name == "libdevice.10.bc"
+    assert options.bisheng_options == "-cce-link-aicore-ll-module " + compiler.get_libdevice("Kirin9020")
+    assert dtype_guard.arch_bucket("Kirin9020") == "a5"
+    assert compiler._graph_optimize_core_num(options) == 1
+    assert compiler._compile_device_limit(options) == (False, 1, 1)
+
+    with pytest.raises(ValueError, match="not supported on Kirin9020"):
+        backend.parse_options({"compile_mode": "simt_only"})
+

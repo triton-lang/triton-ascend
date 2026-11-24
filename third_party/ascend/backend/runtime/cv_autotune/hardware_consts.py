@@ -28,12 +28,14 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
 from .. import utils as runtime_utils
-from triton.backends.ascend.utils import is_register_based_arch
+from triton.backends.ascend.utils import is_kirin_arch, is_register_based_arch
 
 
-def _arch_default(legacy_value: int, register_based_value: int) -> int:
+def _arch_default(legacy_value: int, register_based_value: int, kirin_value: Optional[int] = None) -> int:
     # Only called for an omitted constructor argument, never during import.
     arch = runtime_utils.target.arch
+    if is_kirin_arch(arch):
+        return kirin_value if kirin_value is not None else legacy_value
     if is_register_based_arch(arch):
         return register_based_value
     return legacy_value
@@ -58,15 +60,15 @@ class HardwareConstraints:
     """
 
     # Default ArchType : A2/A3
-    l0a_size: int = 64 * 1024  # 64 KB - for matrix A
-    l0b_size: int = 64 * 1024  # 64 KB - for matrix B
-    l0c_size: int = field(default_factory=lambda: _arch_default(128 * 1024, 256 * 1024))
+    l0a_size: int = field(default_factory=lambda: _arch_default(64 * 1024, 64 * 1024, 32 * 1024))
+    l0b_size: int = field(default_factory=lambda: _arch_default(64 * 1024, 64 * 1024, 32 * 1024))
+    l0c_size: int = field(default_factory=lambda: _arch_default(128 * 1024, 256 * 1024, 32 * 1024))
 
     # Memory limits (in bytes)
-    max_l0_size: int = 128 * 1024  # 128 KB
+    max_l0_size: int = field(default_factory=lambda: _arch_default(128 * 1024, 128 * 1024, 64 * 1024))
     max_l1_size: int = 512 * 1024  # 512 KB
-    max_l2_size: int = field(default_factory=lambda: _arch_default(192 * 1024 * 1024, 128 * 1024 * 1024))
-    ub_size: int = field(default_factory=lambda: _arch_default(192 * 1024, 248 * 1024))
+    max_l2_size: int = field(default_factory=lambda: _arch_default(192 * 1024 * 1024, 128 * 1024 * 1024, 8 * 1024 * 1024))
+    ub_size: int = field(default_factory=lambda: _arch_default(192 * 1024, 248 * 1024, 120 * 1024))
 
     def __post_init__(self):
         """Validate hardware constraints after initialization."""

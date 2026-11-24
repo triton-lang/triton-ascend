@@ -66,15 +66,15 @@ class UnsupportedDtypeError(TypeError):
 def arch_bucket(arch):
     """Classify an options.arch value into an "a2" / "a5" / "a6" bucket.
 
-    A5 and A6 share the register-based pipeline; they are distinguished
-    by generation only for bucket-specific tuning heuristics.
+    A5, Kirin (dav-l310), and A6 share the register-based pipeline; A6 is
+    distinguished by generation only for bucket-specific tuning heuristics.
     """
     try:
         from triton.backends.ascend.utils import AscendArchGen, arch_generation
         gen = arch_generation(arch)
         if gen == AscendArchGen.GEN6:
             return "a6"
-        return "a5" if gen == AscendArchGen.GEN5 else "a2"
+        return "a5" if gen in (AscendArchGen.GEN5, AscendArchGen.KIRIN) else "a2"
     except Exception:
         return "a2"
 

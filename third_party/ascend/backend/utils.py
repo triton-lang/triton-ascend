@@ -48,6 +48,7 @@ class AscendArchGen(IntEnum):
     LEGACY = auto()  # A2 / A3: 910A/B/D, 910_93, 310B
     GEN5 = auto()  # A5: Ascend 950 / 910_95
     GEN6 = auto()  # A6: Ascend 960 / 910_96
+    KIRIN = auto()  # Kirin NPU: Kirin9020 (dav-l310)
 
 
 # Ordered table -- longer/more-specific prefixes must come first so that
@@ -56,6 +57,7 @@ class AscendArchGen(IntEnum):
 _ARCH_TABLE = (
     (("Ascend910_96", "Ascend960"), AscendArchGen.GEN6, 320, 128),
     (("Ascend910_95", "Ascend950"), AscendArchGen.GEN5, 256, 128),
+    (("Kirin", ), AscendArchGen.KIRIN, 120, None),
     (("Ascend910A", "Ascend310B4", "Ascend910B", "Ascend910D", "Ascend910_93", "Ascend310B"), AscendArchGen.LEGACY, 192,
      None),
 )
@@ -94,9 +96,35 @@ def arch_generation(arch: str = None) -> AscendArchGen:
 
 
 def is_register_based_arch(arch: str = None) -> bool:
-    """Return whether the target uses the register-based (A5/A6) compile pipeline."""
+    """Return whether the target uses the register-based (A5/A6/Kirin) compile pipeline."""
     entry = _match_arch_entry(arch)
-    return entry is not None and entry[0] in (AscendArchGen.GEN5, AscendArchGen.GEN6)
+    return entry is not None and entry[0] in (AscendArchGen.GEN5, AscendArchGen.GEN6, AscendArchGen.KIRIN)
+
+
+KIRIN_9020_ARCH = "Kirin9020"
+
+
+def is_kirin_arch(arch: str) -> bool:
+    """Return whether an architecture belongs to the Kirin NPU family."""
+    return isinstance(arch, str) and arch_generation(arch) == AscendArchGen.KIRIN
+
+
+def is_910_95_family_arch(arch: str) -> bool:
+    """Return whether an architecture belongs to the Ascend 910_95/950 family."""
+    if not isinstance(arch, str):
+        return False
+    arch_lower = arch.lower()
+    return ("ascend910_95" in arch_lower or "ascend950" in arch_lower or "910_958b" in arch_lower)
+
+
+def is_v310_arch(arch: str) -> bool:
+    """Return whether an architecture uses the V310/A5 compiler pipeline."""
+    return is_910_95_family_arch(arch) or is_kirin_arch(arch)
+
+
+def is_simt_supported(arch: str) -> bool:
+    """Return whether the architecture provides hardware SIMT support."""
+    return not is_kirin_arch(arch)
 
 
 def rf_size_in_kbytes_for_arch(arch: str = None):
@@ -1061,6 +1089,8 @@ def l0_size_in_kbytes_for_arch(arch: str) -> tuple:
     """
     if not isinstance(arch, str) or not arch:
         return (0, 0, 0)
+    if is_kirin_arch(arch):
+        return (32, 32, 32)
     if arch.startswith(("Ascend910_95", "Ascend950")):
         return (64, 64, 256)
     if arch.startswith(("Ascend910A", "Ascend910B", "Ascend910D", "Ascend910_93", "Ascend310B")):
@@ -1167,6 +1197,18 @@ def cann_version_compile_args():
     if is_cann_version_at_least(9, 1, 0):
         return ["-DTRITON_CANN_910"]
     return []
+
+
+def triton_enable_libdevice_simt(arch: str = None) -> bool:
+    """Return whether the environment switch selects SIMT libdevice."""
+    if not arch:
+        try:
+            import acl
+            arch = acl.get_soc_name()
+        except (ImportError, AttributeError):
+            arch = ""
+    return (bool(os.getenv("TRITON_ENABLE_LIBDEVICE_SIMT", False))
+            and is_compile_on_910_95(arch) and is_simt_supported(arch))
 
 
 def get_cann_version_file_hash():

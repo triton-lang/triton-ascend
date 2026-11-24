@@ -297,6 +297,7 @@ def test_npu_utils_cache_key_uses_build_fingerprint_and_source(monkeypatch, tmp_
         ("Ascend910B1", 192, 192 * 1024 * 80 // 100),
         ("Ascend910_9581", 256, 256 * 1024 * 80 // 100),
         ("Ascend950A3", 256, 256 * 1024 * 80 // 100),
+        ("Kirin9020", 120, 120 * 1024 * 80 // 100),
         ("", 0, 0),
         ("unknown-arch", 0, 0),
         (None, 0, 0),

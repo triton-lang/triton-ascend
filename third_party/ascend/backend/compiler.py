@@ -71,6 +71,11 @@ from triton.backends.ascend.utils import (
     ub_size_in_kbytes_for_arch,
     get_cann_version_file_hash,
     is_cann_version_at_least,
+    is_910_95_family_arch,
+    is_kirin_arch,
+    is_simt_supported,
+    is_v310_arch,
+    KIRIN_9020_ARCH,
 )
 from triton.backends.ascend.driver import (NPUUtils)
 from triton.backends.ascend.block_batching import BatchRequest, IMPLEMENTATION_VERSION
@@ -314,6 +319,8 @@ def _with_debug_line(npubin_stage, options):
 def _graph_optimize_core_num(opt):
     if getattr(opt, "block_compile_context", None) is not None:
         return opt.block_compile_context[1]
+    if is_kirin_arch(getattr(opt, "target_arch", "")):
+        return 1
     # Physical AI-core blocks the launcher will schedule, so the row-count policy
     # can keep at least one full wave after R-way coalescing.  The launcher picks
     # AIV for pure-SIMT kernels (final mix_mode "aiv") and AIC otherwise, so the
@@ -331,6 +338,8 @@ def _graph_optimize_core_num(opt):
 def _compile_device_limit(opt):
     if getattr(opt, "block_compile_context", None) is not None:
         return opt.block_compile_context[2]
+    if is_kirin_arch(getattr(opt, "target_arch", "")):
+        return False, 1, 1
     return NPUUtils().get_device_limit()
 
 
@@ -592,7 +601,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
             ascend.passes.ttir.add_merge_concat_load_buffer(pm)
         target_arch = metadata.get("target_arch", metadata.get("arch", ""))
-        if metadata["enable_dynamic_cv_pipeline"] and _is_a5_target_arch(target_arch):
+        if metadata["enable_dynamic_cv_pipeline"] and (_is_a5_target_arch(target_arch) or is_kirin_arch(target_arch)):
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
             metadata["disable_auto_inject_block_sync"] = True
@@ -1002,10 +1011,21 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             mode_arg = "[" + ",".join(f"({level},{count})" for level, count in multibuffer_mode) + "]"
             _compile_option_list.append(f"--multibuffer-mode={mode_arg}")
 
+        target_arch = getattr(opt, "target_arch", "") or getattr(metadata.get("target"), "arch", "")
         multibuffer = metadata.get("multibuffer")
         num_stages = metadata.get("num_stages")
 
-        if multibuffer is not None or num_stages is not None:
+        if is_kirin_arch(target_arch):
+            multi_buffer_value = True
+            if multibuffer is not None and not multibuffer:
+                multi_buffer_value = False
+            elif num_stages is not None and num_stages == 1:
+                multi_buffer_value = False
+            _compile_option_list += [
+                f"--enable-auto-multi-buffer={multi_buffer_value}",
+                "--set-cv-pipeline-mode=off",
+            ]
+        elif multibuffer is not None or num_stages is not None:
             multi_buffer_value = True
             if multibuffer is not None and not multibuffer:
                 multi_buffer_value = False
@@ -1440,7 +1460,7 @@ def get_libdevice(arch: str):
 
     if arch.startswith(("Ascend910_96", "Ascend960")):
         filename = "libdevice.9201.bc"
-    elif arch.startswith(("Ascend910_95", "Ascend950")):
+    elif arch.startswith(("Ascend910_95", "Ascend950")) or is_kirin_arch(arch):
         filename = "libdevice.10.bc"
     elif arch.startswith(("Ascend910B", "Ascend910_93")):
         filename = "libdevice.220.bc"
@@ -1463,7 +1483,7 @@ def _is_register_based_target_arch(arch: str) -> bool:
 
 
 def _is_a5_target_arch(arch: str) -> bool:
-    return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
+    return isinstance(arch, str) and is_910_95_family_arch(arch)
 
 
 def _get_libdevice_compile_state() -> bool:
@@ -1492,6 +1512,8 @@ def _normalize_compile_mode(compile_mode, arch: str) -> str:
         raise ValueError(f"invalid compile_mode={compile_mode!r}; expected one of: " +
                          ", ".join(_CANONICAL_COMPILE_MODES))
 
+    if canonical_mode == "simt_only" and not is_simt_supported(arch):
+        raise ValueError(f"compile_mode='simt_only' is not supported on {arch}")
     if canonical_mode == "simt_only" and not _is_register_based_target_arch(arch):
         raise ValueError('compile_mode="simt_only" is supported only on Ascend 950/960 targets.')
     return canonical_mode
@@ -1718,6 +1740,8 @@ class NPUOptions:
             "compile_on_910_95",
             _is_register_based_target_arch(arch),
         )
+        if is_kirin_arch(arch):
+            object.__setattr__(self, "supported_fp8_dtypes", ())
         try:
             normalized_rule_mask = normalize_graph_optimization_rule_mask(rule_mask)
         except ProgramGridContractError as error:
@@ -1728,7 +1752,13 @@ class NPUOptions:
         compile_mode = str(_normalize_compile_mode(self.compile_mode, arch))
         object.__setattr__(self, "compile_mode", compile_mode)
 
-        if compile_mode == "simt_only":
+        if not is_simt_supported(arch):
+            object.__setattr__(self, "force_simt_only", False)
+            object.__setattr__(self, "force_simt_template", False)
+            object.__setattr__(self, "is_pure_simt", False)
+            object.__setattr__(self, "parallel_mode", "simd")
+            object.__setattr__(self, "compile_mode", "simd")
+        elif compile_mode == "simt_only":
             object.__setattr__(self, "is_pure_simt", True)
             object.__setattr__(self, "parallel_mode", "simt")
         else:
@@ -1965,9 +1995,9 @@ class AscendBackend(BaseBackend):
             # Frontend identity comes from the source.
             # A launch keyword alone cannot select TLA.
             object.__setattr__(options, "enable_tla_mode", frontend_kind == "tla")
-            # DynamicCV is A5-only. A6 remains register-based but must not
-            # enter the DynamicCV lowering or pass its compiler flags.
-            if not _is_a5_target_arch(self.target.arch):
+            # DynamicCV is supported on A5 and Kirin targets. A6 remains
+            # register-based but must not enter DynamicCV lowering.
+            if not (_is_a5_target_arch(self.target.arch) or is_kirin_arch(self.target.arch)):
                 object.__setattr__(options, "enable_dynamic_cv_pipeline", False)
             elif options.enable_dynamic_cv_pipeline is None:
                 object.__setattr__(options, "enable_dynamic_cv_pipeline", options.compile_on_910_95)

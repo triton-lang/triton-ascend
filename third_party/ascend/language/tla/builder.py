@@ -56,6 +56,8 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_tla_buffer_type',
         'create_tla_vector_type',
         'create_tla_alloc',
+        'create_tla_load_scalar',
+        'create_tla_store_scalar',
         'create_tla_pipeline',
         'create_tla_stage',
         'create_tla_fill',

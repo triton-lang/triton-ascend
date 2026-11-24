@@ -1449,6 +1449,21 @@ void init_tla_builder(py::module &&m) {
                    "TLA alloc requires a static memref");
              return self.create<memref::AllocOp>(memrefType).getResult();
            })
+      .def("create_tla_load_scalar",
+           [](TLABuilder &self, Value source) {
+             Value zero = self.create<arith::ConstantIndexOp>(0);
+             SmallVector<Value> indices(
+                 cast<MemRefType>(source.getType()).getRank(), zero);
+             return self.create<memref::LoadOp>(source, ValueRange(indices))
+                 .getResult();
+           })
+      .def("create_tla_store_scalar",
+           [](TLABuilder &self, Value dest, Value value) {
+             Value zero = self.create<arith::ConstantIndexOp>(0);
+             SmallVector<Value> indices(
+                 cast<MemRefType>(dest.getType()).getRank(), zero);
+             self.create<memref::StoreOp>(value, dest, ValueRange(indices));
+           })
       // Scalar broadcast into one buffer: hivm.hir.vbrc with an empty
       // broadcast_dims array, which the verifier requires for scalar sources.
       // Only UB is enabled: InferCoreType maps UB to VECTOR and rejects other

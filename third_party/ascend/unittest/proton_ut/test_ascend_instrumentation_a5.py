@@ -1,5 +1,6 @@
 import json
 import math
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -24,6 +25,43 @@ pl.enable_semantic("triton")
 def plain_add(x, y, out, BLOCK: tl.constexpr):
     offsets = tl.arange(0, BLOCK)
     tl.store(out + offsets, tl.load(x + offsets) + tl.load(y + offsets))
+
+
+@triton.jit
+def restart_add(x, y, out, BLOCK: tl.constexpr):
+    with pl.scope("add"):
+        plain_add(x, y, out, BLOCK)
+
+
+def test_restart_with_loaded_kernel(tmp_path, monkeypatch):
+    from triton.profiler import ascend_perf_monitor
+
+    # Isolate hook routing from channel availability: one interval for scope 0.
+    collector = Mock(active=False)
+    collector.stop.return_value = [(12, 0, 0, 100, 117, 1650)]
+    monkeypatch.setattr(ascend_perf_monitor, "PerfMonitorCollector", lambda: collector)
+    monkeypatch.delenv("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES", raising=False)
+    x = torch.randn(256, device="npu")
+    out = torch.empty_like(x)
+    handles = []
+    for run in range(2):
+        output = tmp_path / f"restart_{run}"
+        session = proton.start(str(output), backend="instrumentation")
+        try:
+            compiled = restart_add[(1, )](x, x, out, BLOCK=256, block_batching_factor=1)
+            handles.append(compiled.function)
+            torch.npu.synchronize()
+        finally:
+            proton.finalize(session)
+        root = json.loads(output.with_suffix(".hatchet").read_text())[0]
+        kernel, = root["children"]
+        scope, = kernel["children"]
+        assert scope["frame"]["name"] == "add"
+        assert scope["metrics"]["cycles"] == 17
+        assert scope["metrics"]["normalized_cycles"] == 17
+    assert handles[0] == handles[1]
+    assert collector.start.call_count == collector.stop.call_count == 2
+    torch.testing.assert_close(out, x + x)
 
 
 @pytest.mark.parametrize(("data", "suffix"), [("tree", ".hatchet"), ("trace", ".chrome_trace")])

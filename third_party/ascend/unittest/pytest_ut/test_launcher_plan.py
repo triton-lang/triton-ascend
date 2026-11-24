@@ -1109,6 +1109,7 @@ def test_proton_exit_drains_framework_queue_before_collecting(monkeypatch, enabl
                         SimpleNamespace(get=lambda: lambda size, alignment, stream: scratch))
     instance = object.__new__(driver.NPULauncher)
     instance.compile_only = False
+    instance._proton_collection = None
     instance.profile_scratch_size = 16 if enabled else 0
     instance.profile_scratch_align = 64
 

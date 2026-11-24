@@ -229,9 +229,9 @@ def test_decline_cache_reuses_exact_attempt_and_retries_stale_entries(decline_co
 
 @pytest.mark.parametrize('failure', ['resource', 'budget', 'wrong_stage', 'Timeout', 'Signal', 'InternalError'])
 def test_non_static_failures_are_never_cached(decline_compiler, monkeypatch, failure):
-    from contextlib import ExitStack
     compiler, caches = decline_compiler
     calls = []
+    baseline = SimpleNamespace(hash='f1', metadata=SimpleNamespace(_asdict=lambda: dict(name='kernel')))
 
     def attempt(*args):
         calls.append(1)
@@ -246,14 +246,13 @@ def test_non_static_failures_are_never_cached(decline_compiler, monkeypatch, fai
 
     monkeypatch.setattr(worker, '_attempt', attempt)
     for _ in range(2):
-        with ExitStack() as pending:
-            if failure in ('Timeout', 'Signal', 'InternalError'):
-                with pytest.raises(worker.BatchCompileError):
-                    compiler._variant({}, pending)
-            else:
-                assert compiler._variant({}, pending)[1] is None
+        result = compiler.compile(baseline, {}, batching.BatchRequest(2, 0), ())
+        assert result.candidate is None and result._primary is baseline
+        if failure in ('Timeout', 'Signal', 'InternalError'):
+            assert result.block_batching['failure_kind'] == failure
     assert len(calls) == 2
     assert all(cache.get_file(worker._DECLINE) is None for cache in caches.values())
+    assert not list((Path(next(iter(caches.values())).cache_dir).parent / '.block-staging').iterdir())
 
 
 def test_failed_binding_does_not_publish(bundle_environment, monkeypatch):  # noqa: F811
@@ -267,8 +266,9 @@ def test_failed_binding_does_not_publish(bundle_environment, monkeypatch):  # no
     candidate_compiler = worker.CandidateCompiler(SimpleNamespace(target='npu'), object(), {})
     monkeypatch.setattr(candidate_compiler, '_variant', lambda opts, pending:
                         (None, (cache, {'generation': 'test'}, {}, 'v', None)))
-    with pytest.raises(worker.BatchCompileError, match='InvalidArtifact'):
-        candidate_compiler.compile(env.base, {}, batching.BatchRequest(4, 0), (0, ))
+    result = candidate_compiler.compile(env.base, {}, batching.BatchRequest(4, 0), (0, ))
+    assert result.candidate is None and result._primary is env.base
+    assert (result.block_batching['failure_kind'], result.block_batching['stage']) == ('InvalidArtifact', 'bind')
     assert not published
 
 
@@ -353,11 +353,22 @@ def test_binding_before_index_publish_and_listener_afterwards(bundle_environment
     record = None
     compiler.compile(env.base, dict(block_batching_factor=3), batching.BatchRequest(3, 0), [0, 1, 2, 3])
     assert events == ['read released', ('bundle', True), ('listener', True)]
+    for error in (RuntimeError('listener failed'), worker.BatchCompileError('listener failed')):
+        events.clear()
+
+        def fail_listener(**kwargs):
+            raise error
+
+        env.knobs.compilation.listener = fail_listener
+        with pytest.raises(type(error)) as caught:
+            compiler.compile(env.base, dict(block_batching_factor=3), batching.BatchRequest(3, 0), [0, 1, 2, 3])
+        assert caught.value is error
+        assert events == ['read released', ('bundle', True)]
     events.clear()
     candidate.metadata = candidate.metadata._replace(block_compile_context=('Ascend950', 12, (True, 12, 24), None))
-    with pytest.raises(worker.BatchCompileError, match='InvalidArtifact'):
-        compiler.compile(env.base, dict(block_batching_factor=3), batching.BatchRequest(3, 0), [0, 1, 2, 3])
-    assert events == ['read released']
+    fallback = compiler.compile(env.base, dict(block_batching_factor=3), batching.BatchRequest(3, 0), [0, 1, 2, 3])
+    assert fallback.candidate is None and fallback.block_batching['failure_kind'] == 'InvalidArtifact'
+    assert events == ['read released', ('bundle', False)]
 
 
 def test_worker_spawn_failure_is_structured(tmp_path):
@@ -366,26 +377,55 @@ def test_worker_spawn_failure_is_structured(tmp_path):
     assert (failure.value.kind, failure.value.stage) == ('InternalError', 'startup')
 
 
-def test_failed_attempt_removes_its_generation_only(tmp_path, monkeypatch):
+@pytest.mark.parametrize('kind', ['InternalError', 'Timeout', 'Signal', 'ProtocolError', 'InvalidArtifact'])
+@pytest.mark.parametrize('cached_only', [False, True])
+def test_failed_candidate_cleans_up_and_runs_baseline(bundle_environment, tmp_path, monkeypatch, kind,
+                                                      cached_only):  # noqa: F811
+    env = bundle_environment
     compiler = worker.CandidateCompiler(None, None, {})
     old = tmp_path / 'known-good'
     old.write_text('previous generation')
-    monkeypatch.setitem(sys.modules, 'triton', SimpleNamespace(knobs=object()))
     monkeypatch.setitem(sys.modules, 'triton.compiler.compiler',
                         SimpleNamespace(CompiledKernel=object, _notify_compilation_listener=object))
+    attempts = []
 
-    def fail(options, pending):
+    def fail(options, pending, **kwargs):
         import shutil
+        attempts.append(kwargs.get('cached_only', False))
         staging = tmp_path / 'unique'
         staging.mkdir()
         pending.callback(shutil.rmtree, staging)
         (staging / 'kernel.npubin').write_bytes(b'half')
-        raise worker.BatchCompileError('worker timed out', kind='Timeout')
+        raise worker.BatchCompileError('candidate failed', kind=kind, stage='npubin')
 
     monkeypatch.setattr(compiler, '_variant', fail)
-    with pytest.raises(worker.BatchCompileError, match='Timeout'):
-        compiler.compile(None, {}, batching.BatchRequest(2, 0), ())
-    assert list(tmp_path.iterdir()) == [old]
+    for _ in range(2):
+        result = compiler.compile(env.base, {}, batching.BatchRequest(2, 0), (), cached_only=cached_only)
+        assert list(tmp_path.iterdir()) == [old]
+        assert result.candidate is None and result.hash == env.base.hash
+        assert result.block_batching['reason'] == 'CANDIDATE_COMPILATION_FAILED'
+        assert (result.block_batching['failure_kind'], result.block_batching['stage']) == (kind, 'npubin')
+        assert 'candidate failed' in result.block_batching['backend_diagnostic']
+        result.run(*env.launch)
+        name, launch = env.launches[-1]
+        assert name == 'baseline' and launch[:3] == env.launch[:3]
+        assert result.last_launch['applied_factor'] == 1
+    assert attempts == [cached_only, cached_only]
+    assert env.candidate.initializations == 0
+
+
+@pytest.mark.parametrize('error', [RuntimeError, KeyboardInterrupt, SystemExit])
+def test_candidate_recovery_does_not_swallow_parent_errors(bundle_environment, monkeypatch, error):  # noqa: F811
+    compiler = worker.CandidateCompiler(None, None, {})
+    monkeypatch.setitem(sys.modules, 'triton.compiler.compiler',
+                        SimpleNamespace(CompiledKernel=object, _notify_compilation_listener=object))
+
+    def fail(*args):
+        raise error('parent interrupted')
+
+    monkeypatch.setattr(compiler, '_variant', fail)
+    with pytest.raises(error, match='parent interrupted'):
+        compiler.compile(bundle_environment.base, {}, batching.BatchRequest(2, 0), ())
 
 
 @pytest.mark.parametrize('abi_mismatch', [True, False])
@@ -833,6 +873,34 @@ def test_a3_resource_retry_rejects_unknown_prefixed_diagnostic():
     err = subprocess.CalledProcessError(1, ['vendor'], output=A3_PIPELINE_WARNING,
                                         stderr=b'[ERROR] unexpected compiler failure\n' + A3_LAYOUT)
     assert vendor.classify_vendor_failure(err, dict(cv_mode='disabled'), OPTIONS, cv_resources=True) is None
+
+
+def test_a3_mixed_ub_and_fusion_failure_falls_back(bundle_environment, monkeypatch):  # noqa: F811
+    diagnostic = A3_LAYOUT.replace(b'2621440', b'2885632').replace(
+        b'[ERROR]', b'loc("/tmp/build/kernel.ttadapter.mlir":5:1): error: Failed to apply transform\n'
+        b'loc("/tmp/build/kernel.ttadapter.mlir":187:13): error: operations cannot be fused\n'
+        b'loc("/tmp/build/kernel.ttadapter.mlir":151:5): error: \'scf.for\' op Failed to resolve axis and grouping\n'
+        b'[ERROR]')
+    error = subprocess.CalledProcessError(1, ['vendor'], output=A3_LOCATIONS, stderr=diagnostic)
+    assert vendor.classify_vendor_failure(error, dict(cv_mode='spatial_concat_v1'), OPTIONS, cv_resources=True) is None
+    status, payload = worker._classify(error, 'npubin')
+    assert status == 'InternalError'
+    assert not worker._cacheable_decline(payload)
+    compiler = worker.CandidateCompiler(None, None, {})
+    monkeypatch.setitem(sys.modules, 'triton.compiler.compiler',
+                        SimpleNamespace(CompiledKernel=object, _notify_compilation_listener=object))
+
+    def fail(*args):
+        request = dict(protocol=worker._PROTOCOL, id='request', identity='hash', operation='compile')
+        worker.CompileOutcome(request, dict(request, status=status, payload=payload))
+
+    monkeypatch.setattr(compiler, '_variant', fail)
+    result = compiler.compile(bundle_environment.base, vars(OPTIONS), batching.BatchRequest(4, -1), ())
+    assert result.candidate is None and result._primary is bundle_environment.base
+    assert result.block_batching['failure_kind'] == 'InternalError'
+    assert result.block_batching['stage'] == 'npubin'
+    assert diagnostic.decode() in result.block_batching['backend_diagnostic']
+    assert A3_LOCATIONS.decode() in result.block_batching['backend_diagnostic']
 
 
 @pytest.mark.parametrize('filename', [b'kernel.mlir', b'kernel.ttadapter.mlir'])

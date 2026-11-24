@@ -26,7 +26,7 @@ The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilatio
 | Category | Environment variable | Description | Default | A2/A3 | 950 |
 |----------|----------------------|-------------|---------|-------|-----|
 | Debugging | `TRITON_DEBUG` | Enables JIT debugging and device assertions and saves TTIR; the normal path also logs compilation and saves backend IR and binaries. | Off | Yes | Yes |
-| Debugging | `USE_IR_LOC` | Rebuilds locations from an IR file. For AST compilation, `ttir` supports this; IR inputs also support source-file location snapshots. | Unset | Yes | Yes |
+| Debugging | `USE_IR_LOC` | Set to `ttir` when compiling a Python kernel to rebuild locations from TTIR file line numbers. Compiling directly from a text IR file can create a location snapshot for the input file. The values `ttadapter` and `npubin` are unsupported. | Unset | Yes | Yes |
 | Debugging | `TRITON_FRONT_END_DEBUGGING` | Preserves the original Python traceback for frontend errors. | Off | Yes | Yes |
 | Debugging | `TRITON_KERNEL_DUMP` | Saves compilation artifacts and the final `npubin` when a compilation runs. | Off | Yes | Yes |
 | Debugging | `TRITON_DUMP_DIR` | Sets the output directory for `TRITON_KERNEL_DUMP`. | `$TRITON_HOME/.triton/dump` | Yes | Yes |
@@ -36,13 +36,12 @@ The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilatio
 | Debugging | `TRITON_MEMORY_DISPLAY` | Requests compiler memory-usage output. | Off | Yes | — |
 | Debugging | `ENABLE_PRINT_UB_BITS` | Requests the number of occupied UB bits from the compiler. | Off | Yes | Normal path |
 | Debugging | `TRITON_INTERPRET` | Runs supported Triton operations in the CPU interpreter for Python breakpoint debugging. | Off | Yes | Yes |
-| Debugging | `TRITON_ENABLE_SANITIZER` | Passes the sanitizer switch to the Ascend NPU compiler. | Off | Yes | Normal path |
+| Debugging | `TRITON_ENABLE_SANITIZER` | Passes the sanitizer switch to the Ascend NPU compiler. On A2/A3, use `mssanitizer python3 run_kernel.py` to launch the script when running a statically instrumented kernel. | Off | Yes | Normal path |
 | Compilation | `TRITON_ALWAYS_COMPILE` | Ignores compilation cache hits and recompiles kernels. | Off | Yes | Yes |
 | Compilation | `TRITON_KERNEL_OVERRIDE` | Loads an external IR or binary with a matching stage filename. | Off | Yes | Yes |
 | Compilation | `TRITON_OVERRIDE_DIR` | Sets the directory containing override files. | `$TRITON_HOME/.triton/override` | Yes | Yes |
 | Compilation | `TRITON_F32_DEFAULT` | Sets the default F32 input precision for `tl.dot`; Ascend uses `ieee` or `hf32`, and maps compatibility input `tf32` to `hf32`. | Unset; backend uses `ieee` | Yes | Yes |
 | Compilation | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | Allows non-`constexpr` globals in the JIT frontend. | Off | Yes | Yes |
-| Compilation | `TRITON_ENABLE_LIBDEVICE` | Adds a libdevice link on the A2/A3 compiler path. Any nonempty value, including `"0"`, enables it. | Unset | Yes | — |
 | Compilation | `TRITON_ENABLE_LIBDEVICE_SIMT` | Selects SIMT libdevice extern symbols on Ascend 950. Any nonempty value, including `"0"`, enables it. | Unset | — | Yes |
 | Cache and autotuning | `TRITON_ASCEND_ENABLE_DYNAMIC_REUSE` | Controls automatic reuse of kernels across changes to eligible `constexpr` parameters: `0` disables reuse, `1` enables dynamic reuse, and `2` also enables tile reuse and background compilation. | `0` | Yes | Yes; tile reuse excludes `simt_only` |
 | Cache and autotuning | `TRITON_HOME` | Sets the base for cache, dump, and override directories. | User home | Yes | Yes |
@@ -54,11 +53,12 @@ The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilatio
 | Cache and autotuning | `TRITON_ENABLE_UBTUNER` | Selects the UB tuning mode, `compile` or `run`. | Unset | Yes | Normal path |
 | Cache and autotuning | `TRITON_AUTOTUNE_PARALLEL_COMPILE` | Controls parallel compilation in Ascend autotune; `0` disables it. | `1` | Yes | Yes |
 | Cache and autotuning | `TRITON_BENCH_METHOD` | `npu` selects Ascend's `do_bench_npu`; `default` uses the shared benchmark path. | `default` | Yes | Yes |
-| Runtime | `TRITON_COMPILE_ONLY` | Set to `1/true` to skip kernel launches; compilation and launcher extension loading still run. | Off | Yes | Yes |
+| Runtime | `TRITON_COMPILE_ONLY` | Set to `1`, `y`, `on`, `yes`, or `true` to skip kernel launches. The value is case-insensitive. Compilation and launcher extension loading still run. | Off | Yes | Yes |
 | Runtime | `TRITON_ENABLE_TASKQUEUE` | Controls the Ascend launcher's task queue. | On | Yes | Yes |
 | Runtime | `TRITON_GRID_WARN_PRINT` | Prints Ascend launcher warnings about grid size. | Off | Yes | Yes |
 | Runtime | `NPU_DEVICE_LIMIT` | Caps AI Core and Vector Core counts with `AIcores,VectorCores`, for example `14,28`; the device ratio must be valid. | Unset; device counts | Yes | Yes |
 | Toolchain selection | `CC` | Sets the C/C++ compiler for the CPU launcher extension. | Unset; system default compiler | Yes | Yes |
+| Toolchain selection | `ASCEND_HOME_PATH` | Points to the CANN Toolkit root. Source the toolkit's `set_env.sh` before starting Python. Triton-Ascend uses this directory to locate headers and libraries for building launcher extensions and to find CANN version files. | Set by `set_env.sh` | Yes | Yes |
 | Toolchain selection | `TRITON_NPU_COMPILER_PATH` | Supplies a fallback NPU compiler tool directory when packaged tools and `PATH` lookup fail. | Unset | Yes | Yes |
 | Toolchain selection | `TRITON_BUILD_DIR` | Searches this directory's `bin/` for `triton-opt` and `triton-mlir-opt`, after packaged tools and before `PATH`. | Unset | Yes | Yes |
 
@@ -134,7 +134,7 @@ The table below lists each configuration group by purpose; the fields of each gr
 
 | Field | Environment variable | Default | Value range | Description |
 |-------|----------------------|---------|-------------|-------------|
-| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | Passes the sanitizer switch to the Ascend NPU compiler. |
+| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | Passes the sanitizer switch to the Ascend NPU compiler. On A2/A3, launch the script with `mssanitizer` when running a statically instrumented kernel. |
 | `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | `True` / `False` | Requests the number of occupied UB bits from the compiler. |
 | `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | `True` / `False` | Requests compiler memory-usage output. |
 | `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | Directory path / `None` | Fallback NPU compiler tool directory used only when packaged tools and `PATH` lookup fail. |
@@ -157,7 +157,7 @@ The table below lists each configuration group by purpose; the fields of each gr
 | `dump_ir_extract_di_local_variables` | `LLVM_EXTRACT_DI_LOCAL_VARIABLES` | `False` | `True` / `False` | Requests debug-variable information from the BiSheng compiler. |
 | `store_binary_only` | `TRITON_STORE_BINARY_ONLY` | `False` | `True` / `False` | Writes only `cubin`/`hsaco`/`json` artifacts, not intermediate IR; the Ascend binary extension is `npubin`, which is not in that list. |
 | `always_compile` | `TRITON_ALWAYS_COMPILE` | `False` | `True` / `False` | Ignores compilation cache hits and recompiles kernels. |
-| `use_ir_loc` | `USE_IR_LOC` | `None` | `None`, a stage name (such as `"ttir"`), or a source-location snapshot | Rebuilds locations from the line numbers of the specified stage's IR file. |
+| `use_ir_loc` | `USE_IR_LOC` | `None` | `None` or `"ttir"` | Rebuilds locations from TTIR file line numbers. Compiling directly from a text IR file can also create an input-file location snapshot. The values `ttadapter` and `npubin` are unsupported. |
 | `enable_asan` | `TRITON_ENABLE_ASAN` | `False` | `True` / `False` | Not supported on Ascend. |
 | `disable_line_info` | `TRITON_DISABLE_LINE_INFO` | `False` | `True` / `False` | Omits line information from the BiSheng request. The Ascend backend reads this variable directly and treats it as `True` when unset. |
 | `front_end_debugging` | `TRITON_FRONT_END_DEBUGGING` | `False` | `True` / `False` | Preserves the original Python traceback for frontend errors. |
@@ -211,7 +211,7 @@ The table below lists each configuration group by purpose; the fields of each gr
 | Field | Environment variable | Default | Value range | Description |
 |-------|----------------------|---------|-------------|-------------|
 | `fp32_default` | `TRITON_F32_DEFAULT` | `None` | `None`, `"ieee"`, `"hf32"`, `"tf32"` (mapped to `hf32`) | Default FP32 input precision for `tl.dot`; `None` uses the backend default `ieee`. |
-| `default_fp_fusion` | `TRITON_DEFAULT_FP_FUSION` | `True` | `True` / `False` | Whether floating-point operation fusion is allowed by default. |
+| `default_fp_fusion` | `TRITON_DEFAULT_FP_FUSION` | `True` | `True` / `False` | Sets the floating-point fusion default for upstream GPU backends. The Ascend backend does not read this setting. For pure-SIMT FMA control on Ascend 950, see `disable_fma`. |
 
 <a id="knobs-build"></a>
 
@@ -301,12 +301,12 @@ The table lists Ascend backend defaults and notes any different `triton.Config` 
 | Operator optimization | `enable_vf_stack_limit` | Limits fusion based on vector function (VF) stack-usage estimates during BiShengIR compilation to reduce the risk of stack overflow. | `False`; boolean | — | Normal path |
 | Operator optimization | `hfusion_enable_multiple_consumer_fusion` | Controls multiple-consumer HFusion. | `None`; boolean | — | Normal path |
 | Operator optimization | `enable_hivm_batch_matmul` | Enables batch matmul in BiShengIR compilation. | `False`; boolean | — | Normal path |
-| Operator optimization | `auto_vectorize_v2_max_fused_ops_num` | Sets the AutoVectorizeV2 fused-op limit. | `None`; integer | — | Normal path |
-| Operator optimization | `prevec_max_fused_ops_num` | Sets the pre-vectorization fused-op limit. | `None`; integer | — | Normal path |
+| Operator optimization | `auto_vectorize_v2_max_fused_ops_num` | Sets the maximum number of operations fused by AutoVectorizeV2. | `None` (default) or a signed 32-bit integer. `None` and negative values use the pass default. Values of `0` or greater set the limit explicitly. | — | Normal path |
+| Operator optimization | `prevec_max_fused_ops_num` | Limits the number of elementwise operations fused during pre-vectorization. | `None` (default) or a signed 32-bit integer. Positive values set the limit. `None`, `0`, and negative values leave this limit unset. | — | Normal path |
 | Pure SIMT | `simt_optimization_mode` | Sets the pure-SIMT multi-digit optimization mode. Explicit values on A2/A3 or the 950 normal path emit a `UserWarning` and are ignored. | `0`; toolchain-defined integer | — | Pure SIMT only |
-| Pure SIMT | `shared_mem_dynamic_size` | Sets pure-SIMT dynamic shared memory size. | `122880` bytes; integer byte count | — | Pure SIMT only |
+| Pure SIMT | `shared_mem_dynamic_size` | Sets pure-SIMT dynamic shared memory size. | Uses `122880` bytes when omitted or set to `None`. Explicit values must be integers from `122880` to `221184` bytes, inclusive. | — | Pure SIMT only |
 | Pure SIMT | `disable_fma` | Disables FMA optimization on the pure-SIMT path. | `False`; boolean | — | Pure SIMT only |
-| Pure SIMT | `superblock_factor` | Sets the pure-SIMT superblock factor when automatic block mapping is active and row coalescing has not applied. | `1`; passed when greater than `1` | — | Pure SIMT only |
+| Pure SIMT | `superblock_factor` | Sets the pure-SIMT superblock factor. The backend forwards values greater than `1` when automatic block mapping is active and row coalescing has not applied. | A power of two greater than or equal to `1`. The default `1` disables superblocking. | — | Pure SIMT only |
 
 <a id="compiler-option-cleanup-and-compatibility"></a>
 
@@ -408,3 +408,5 @@ Remove the following variables from launch scripts or the runtime environment; t
 | `TRITON_BACKEND` | The variable no longer selects Ascend backend policy. |
 | `TRITON_DISABLE_FFTS` | The compilation target determines FFTS policy. |
 | `TRITON_REGISTER_TENSOR_MSPROF` | Environment variables no longer control tensor-shape registration with msprof. |
+
+A2/A3 compilation always links the default libdevice. `TRITON_ENABLE_LIBDEVICE` only affects the compilation cache key and can be removed from launch scripts.

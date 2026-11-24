@@ -87,15 +87,13 @@ OP_DTYPE_RULES = {
     "abs": {
         "names": ["triton.language.abs"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "add": {
@@ -103,38 +101,34 @@ OP_DTYPE_RULES = {
         "dunder": ["__add__", "__radd__"],
         "dunder_label": '+',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "advance": {
         "names": ["triton.language.advance"],
         "pointer_args": [0],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["fp64", "bool"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2"],
         },
     },
     "and": {
         "dunder": ["__and__", "__rand__"],
         "dunder_label": '&',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -143,6 +137,12 @@ OP_DTYPE_RULES = {
     },
     "arange": {
         "names": ["triton.language.arange"],
+        "unsupported": {
+            "a2a3": ["uint16", "uint32", "uint64", "int64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3",
+                 "fp8e5m2", "bool"],
+            "a5": ["uint32", "uint64", "int64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2",
+                 "bool"],
+        },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32"],
             "a5": ["uint8", "int8", "uint16", "int16", "int32"],
@@ -151,40 +151,47 @@ OP_DTYPE_RULES = {
     "argmax": {
         "names": ["triton.language.argmax"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
         },
     },
     "argmin": {
         "names": ["triton.language.argmin"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
         },
     },
     "associative_scan": {
         "names": ["triton.language.associative_scan"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bool"],
         },
     },
     "assume": {
         "names": ["triton.language.assume"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+        },
         "supported": {
             "a2a3": ["bool"],
             "a5": ["bool"],
@@ -194,6 +201,11 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.atomic_add"],
         "tensor_args": [0, 1],
         "pointer_args": [0],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2",
+                 "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "fp64", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["int32", "int64", "fp16", "fp32", "bf16"],
             "a5": ["uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16"],
@@ -203,6 +215,12 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.atomic_and"],
         "tensor_args": [0, 1],
         "pointer_args": [0],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "uint64", "fp16", "fp32", "fp64",
+                 "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "fp16", "fp32", "fp64", "bf16", "fp8e4m3",
+                 "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["int32", "int64"],
             "a5": ["uint32", "int32", "uint64", "int64"],
@@ -212,6 +230,10 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.atomic_cas"],
         "tensor_args": [0, 1, 2],
         "pointer_args": [0],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "fp64", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["int16", "int32", "int64", "fp16", "fp32", "bf16"],
             "a5": ["uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16"],
@@ -221,6 +243,12 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.atomic_max"],
         "tensor_args": [0, 1],
         "pointer_args": [0],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "uint64", "fp16", "fp64", "bf16",
+                 "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "fp16", "fp64", "bf16", "fp8e4m3", "fp8e5m2",
+                 "bool"],
+        },
         "supported": {
             "a2a3": ["int32", "int64", "fp32"],
             "a5": ["uint32", "int32", "uint64", "int64", "fp32"],
@@ -230,6 +258,12 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.atomic_min"],
         "tensor_args": [0, 1],
         "pointer_args": [0],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "uint64", "fp16", "fp64", "bf16",
+                 "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "fp16", "fp64", "bf16", "fp8e4m3", "fp8e5m2",
+                 "bool"],
+        },
         "supported": {
             "a2a3": ["int32", "int64", "fp32"],
             "a5": ["uint32", "int32", "uint64", "int64", "fp32"],
@@ -239,6 +273,12 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.atomic_or"],
         "tensor_args": [0, 1],
         "pointer_args": [0],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "uint64", "fp16", "fp32", "fp64",
+                 "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "fp16", "fp32", "fp64", "bf16", "fp8e4m3",
+                 "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["int32", "int64"],
             "a5": ["uint32", "int32", "uint64", "int64"],
@@ -248,6 +288,12 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.atomic_xchg"],
         "tensor_args": [0, 1],
         "pointer_args": [0],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "uint64", "fp16", "fp64", "bf16",
+                 "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "fp16", "fp64", "bf16", "fp8e4m3", "fp8e5m2",
+                 "bool"],
+        },
         "supported": {
             "a2a3": ["int32", "int64", "fp32"],
             "a5": ["uint32", "int32", "uint64", "int64", "fp32"],
@@ -257,6 +303,12 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.atomic_xor"],
         "tensor_args": [0, 1],
         "pointer_args": [0],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "uint64", "fp16", "fp32", "fp64",
+                 "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "fp16", "fp32", "fp64", "bf16", "fp8e4m3",
+                 "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["int32", "int64"],
             "a5": ["uint32", "int32", "uint64", "int64"],
@@ -265,12 +317,13 @@ OP_DTYPE_RULES = {
     "bitonic_merge": {
         "names": ["triton.language.bitonic_merge"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint16", "uint32", "uint64", "fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "fp8e4m3",
+                 "fp8e5m2", "bool"],
         },
     },
     "broadcast": {
@@ -280,12 +333,10 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "broadcast_to": {
@@ -295,27 +346,23 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "cast": {
         "names": ["triton.language.cast"],
         "tensor_args": [1],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "cat": {
@@ -325,19 +372,18 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "cdiv": {
         "names": ["triton.language.cdiv"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2",
+                 "bool"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64"],
@@ -346,6 +392,12 @@ OP_DTYPE_RULES = {
     },
     "ceil": {
         "names": ["triton.language.ceil"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -353,6 +405,12 @@ OP_DTYPE_RULES = {
     },
     "clamp": {
         "names": ["triton.language.clamp"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "bool"],
+        },
         "supported": {
             "a2a3": ["fp16", "fp32", "bf16"],
             "a5": ["fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2"],
@@ -361,8 +419,8 @@ OP_DTYPE_RULES = {
     "condition": {
         "names": ["triton.language.condition"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
@@ -371,6 +429,12 @@ OP_DTYPE_RULES = {
     },
     "cos": {
         "names": ["triton.language.cos"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -379,32 +443,36 @@ OP_DTYPE_RULES = {
     "cumprod": {
         "names": ["triton.language.cumprod"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
         },
     },
     "cumsum": {
         "names": ["triton.language.cumsum"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "device_assert": {
         "names": ["triton.language.device_assert"],
         "tensor_args": [0],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+        },
         "supported": {
             "a2a3": ["bool"],
             "a5": ["bool"],
@@ -413,34 +481,36 @@ OP_DTYPE_RULES = {
     "device_print": {
         "names": ["triton.language.device_print"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "div": {
         "dunder": ["__truediv__", "__rtruediv__"],
         "dunder_label": '/',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "div_rn": {
         "names": ["triton.language.div_rn"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -450,8 +520,8 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.dot"],
         "tensor_args": [0, 1],
         "unsupported": {
-            "a2a3":
-            ["uint8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64", "fp8e4m3", "fp8e5m2", "bool"],
+            "a2a3": ["uint8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64", "fp8e4m3",
+                 "fp8e5m2", "bool"],
             "a5": ["uint8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64", "bool"],
         },
         "supported": {
@@ -463,8 +533,10 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.dot_scaled"],
         "tensor_args": [0, 3],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp32",
+                 "fp64", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp32",
+                 "fp64", "bool"],
         },
         "supported": {
             "a2a3": ["fp16", "bf16"],
@@ -475,19 +547,23 @@ OP_DTYPE_RULES = {
         "dunder": ["__eq__", "__req__"],
         "dunder_label": '==',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "erf": {
         "names": ["triton.language.erf"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -495,6 +571,12 @@ OP_DTYPE_RULES = {
     },
     "exp": {
         "names": ["triton.language.exp"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp16", "fp32"],
             "a5": ["fp16", "fp32"],
@@ -502,6 +584,12 @@ OP_DTYPE_RULES = {
     },
     "exp2": {
         "names": ["triton.language.exp2"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -510,19 +598,24 @@ OP_DTYPE_RULES = {
     "expand_dims": {
         "names": ["triton.language.expand_dims"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "int64", "fp16", "fp32",
+                 "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "fdiv": {
         "names": ["triton.language.fdiv"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "bool"],
+        },
         "supported": {
             "a2a3": ["fp16", "fp32", "bf16"],
             "a5": ["fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2"],
@@ -532,17 +625,23 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.flip"],
         "unsupported": {
             "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
         },
     },
     "floor": {
         "names": ["triton.language.floor"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -552,8 +651,8 @@ OP_DTYPE_RULES = {
         "dunder": ["__floordiv__", "__rfloordiv__"],
         "dunder_label": '//',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -562,6 +661,12 @@ OP_DTYPE_RULES = {
     },
     "fma": {
         "names": ["triton.language.fma"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "bool"],
+        },
         "supported": {
             "a2a3": ["fp16", "fp32", "bf16"],
             "a5": ["fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2"],
@@ -571,21 +676,22 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.full"],
         "tensor_args": [1, 2],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
         },
     },
     "gather": {
         "names": ["triton.language.gather"],
         "tensor_args": [0],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64"],
         },
         "supported": {
             "a2a3": ["fp16", "fp32", "bf16", "bool"],
@@ -596,36 +702,35 @@ OP_DTYPE_RULES = {
         "dunder": ["__ge__", "__rge__"],
         "dunder_label": '>=',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "gt": {
         "dunder": ["__gt__", "__rgt__"],
         "dunder_label": '>',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
         },
     },
     "histogram": {
         "names": ["triton.language.histogram"],
         "tensor_args": [0],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2",
+                 "bool"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64"],
@@ -636,8 +741,8 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.inline_asm_elementwise"],
         "tensor_args": [3],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["fp16", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp32"],
@@ -651,20 +756,18 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "invert": {
         "dunder": ["__invert__"],
         "dunder_label": '~',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -678,27 +781,23 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "le": {
         "dunder": ["__le__", "__rle__"],
         "dunder_label": '<=',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "load": {
@@ -710,30 +809,33 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "load_tensor_descriptor": {
         "names": ["triton.language.load_tensor_descriptor"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["fp64", "bool"],
         },
         "supported": {
-            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2"],
         },
     },
     "log": {
         "names": ["triton.language.log"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -741,6 +843,12 @@ OP_DTYPE_RULES = {
     },
     "log2": {
         "names": ["triton.language.log2"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -749,8 +857,8 @@ OP_DTYPE_RULES = {
     "logical_and": {
         "names": ["triton.language.tensor.logical_and"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -760,8 +868,8 @@ OP_DTYPE_RULES = {
     "logical_or": {
         "names": ["triton.language.tensor.logical_or"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -772,8 +880,8 @@ OP_DTYPE_RULES = {
         "dunder": ["__lshift__", "__rlshift__"],
         "dunder_label": '<<',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -784,15 +892,13 @@ OP_DTYPE_RULES = {
         "dunder": ["__lt__", "__rlt__"],
         "dunder_label": '<',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "make_block_ptr": {
@@ -803,122 +909,109 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "make_tensor_descriptor": {
         "names": ["triton.language.make_tensor_descriptor"],
         "pointer_args": [0],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["fp64", "bool"],
         },
         "supported": {
-            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2"],
         },
     },
     "max": {
         "names": ["triton.language.max"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
         },
     },
     "max_constancy": {
         "names": ["triton.language.max_constancy"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "max_contiguous": {
         "names": ["triton.language.max_contiguous"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "maximum": {
         "names": ["triton.language.maximum"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint16", "uint32", "fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "int16", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2",
-                "bool"
-            ],
+            "a5": ["uint8", "int8", "int16", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
+                 "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "min": {
         "names": ["triton.language.min"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
         },
     },
     "minimum": {
         "names": ["triton.language.minimum"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint16", "uint32", "fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "int16", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2",
-                "bool"
-            ],
+            "a5": ["uint8", "int8", "int16", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
+                 "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "mod": {
         "dunder": ["__mod__", "__rmod__"],
         "dunder_label": '%',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "mul": {
@@ -926,52 +1019,46 @@ OP_DTYPE_RULES = {
         "dunder": ["__mul__", "__rmul__"],
         "dunder_label": '*',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "multiple_of": {
         "names": ["triton.language.multiple_of"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "ne": {
         "dunder": ["__ne__", "__rne__"],
         "dunder_label": '!=',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "neg": {
         "dunder": ["__neg__"],
         "dunder_label": 'unary -',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint8", "uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2", "bool"],
         },
         "supported": {
             "a2a3": ["int8", "int16", "int32", "int64", "fp16", "fp32", "bf16"],
@@ -981,6 +1068,11 @@ OP_DTYPE_RULES = {
     "not": {
         "dunder": ["__not__"],
         "dunder_label": 'not',
+        "unsupported": {
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+        },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
             "a5": ["bool"],
@@ -990,8 +1082,8 @@ OP_DTYPE_RULES = {
         "dunder": ["__or__", "__ror__"],
         "dunder_label": '|',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -1005,19 +1097,17 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "rand": {
         "names": ["triton.language.rand"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "bool"],
@@ -1027,8 +1117,8 @@ OP_DTYPE_RULES = {
     "randint": {
         "names": ["triton.language.randint"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "bool"],
@@ -1038,8 +1128,8 @@ OP_DTYPE_RULES = {
     "randint4x": {
         "names": ["triton.language.randint4x"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "bool"],
@@ -1049,8 +1139,8 @@ OP_DTYPE_RULES = {
     "randn": {
         "names": ["triton.language.randn"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "bool"],
@@ -1060,8 +1150,9 @@ OP_DTYPE_RULES = {
     "range": {
         "names": ["triton.language.range"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2",
+                 "bool"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64"],
@@ -1075,31 +1166,30 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "reduce": {
         "names": ["triton.language.reduce"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
         },
     },
     "reduce_or": {
         "names": ["triton.language.reduce_or"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "int64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3",
+                 "fp8e5m2", "bool"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32"],
@@ -1113,20 +1203,18 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "rshift": {
         "dunder": ["__rshift__", "__rrshift__"],
         "dunder_label": '>>',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -1135,6 +1223,12 @@ OP_DTYPE_RULES = {
     },
     "rsqrt": {
         "names": ["triton.language.rsqrt"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -1142,6 +1236,12 @@ OP_DTYPE_RULES = {
     },
     "sigmoid": {
         "names": ["triton.language.sigmoid"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp16", "fp32"],
             "a5": ["fp16", "fp32"],
@@ -1149,6 +1249,12 @@ OP_DTYPE_RULES = {
     },
     "sin": {
         "names": ["triton.language.sin"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -1156,6 +1262,12 @@ OP_DTYPE_RULES = {
     },
     "softmax": {
         "names": ["triton.language.softmax"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64",
+                 "bool"],
+        },
         "supported": {
             "a2a3": ["fp16", "fp32", "bf16"],
             "a5": ["fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2"],
@@ -1164,12 +1276,14 @@ OP_DTYPE_RULES = {
     "sort": {
         "names": ["triton.language.sort"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint8", "uint16", "uint32", "int32", "uint64", "int64", "fp64", "fp8e4m3", "fp8e5m2",
+                 "bool"],
+            "a5": ["uint8", "uint16", "uint32", "uint64", "fp64"],
         },
         "supported": {
             "a2a3": ["int8", "int16", "fp16", "fp32", "bf16"],
-            "a5": ["int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2",
+                 "bool"],
         },
     },
     "split": {
@@ -1179,16 +1293,20 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "sqrt": {
         "names": ["triton.language.sqrt"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -1196,6 +1314,12 @@ OP_DTYPE_RULES = {
     },
     "sqrt_rn": {
         "names": ["triton.language.sqrt_rn"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["fp32"],
             "a5": ["fp32"],
@@ -1203,6 +1327,12 @@ OP_DTYPE_RULES = {
     },
     "static_assert": {
         "names": ["triton.language.static_assert"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+        },
         "supported": {
             "a2a3": ["bool"],
             "a5": ["bool"],
@@ -1211,8 +1341,8 @@ OP_DTYPE_RULES = {
     "static_print": {
         "names": ["triton.language.static_print"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint8", "uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint8", "uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
@@ -1222,8 +1352,8 @@ OP_DTYPE_RULES = {
     "static_range": {
         "names": ["triton.language.static_range"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64"],
@@ -1239,26 +1369,23 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "store_tensor_descriptor": {
         "names": ["triton.language.store_tensor_descriptor"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["fp64", "bool"],
         },
         "supported": {
-            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2"],
         },
     },
     "sub": {
@@ -1266,30 +1393,35 @@ OP_DTYPE_RULES = {
         "dunder": ["__sub__", "__rsub__"],
         "dunder_label": '-',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "sum": {
         "names": ["triton.language.sum"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint8", "uint16", "uint32", "fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": ["int8", "int16", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["int8", "int16", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "fp8e4m3",
+                 "fp8e5m2", "bool"],
         },
     },
     "swizzle2d": {
         "names": ["triton.language.swizzle2d"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "uint64", "fp16", "fp32", "fp64",
+                 "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "uint64", "fp16", "fp32", "fp64",
+                 "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["int32", "int64"],
             "a5": ["int32", "int64"],
@@ -1298,12 +1430,14 @@ OP_DTYPE_RULES = {
     "topk": {
         "names": ["triton.language.topk"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint8", "uint16", "uint32", "int32", "uint64", "int64", "fp64", "fp8e4m3", "fp8e5m2",
+                 "bool"],
+            "a5": ["uint8", "uint16", "uint32", "uint64", "fp64"],
         },
         "supported": {
             "a2a3": ["int8", "int16", "fp16", "fp32", "bf16"],
-            "a5": ["int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "fp8e4m3", "fp8e5m2",
+                 "bool"],
         },
     },
     "trans": {
@@ -1313,16 +1447,20 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "umulhi": {
         "names": ["triton.language.umulhi"],
+        "unsupported": {
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "uint64", "int64", "fp16", "fp32",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "uint64", "int64", "fp16", "fp32",
+                 "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+        },
         "supported": {
             "a2a3": ["int32"],
             "a5": ["int32"],
@@ -1335,32 +1473,30 @@ OP_DTYPE_RULES = {
             "a5": ["fp64"],
         },
         "supported": {
-            "a2a3":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5": [
-                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16",
-                "fp8e4m3", "fp8e5m2", "bool"
-            ],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
         },
     },
     "where": {
         "names": ["triton.language.where"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
-            "a5":
-            ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16", "bool"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16", "bool"],
         },
     },
     "xor": {
         "dunder": ["__xor__", "__rxor__"],
         "dunder_label": '^',
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -1370,8 +1506,9 @@ OP_DTYPE_RULES = {
     "xor_sum": {
         "names": ["triton.language.xor_sum"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["uint8", "uint16", "uint32", "uint64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3",
+                 "fp8e5m2"],
+            "a5": ["uint8", "uint16", "uint32", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["int8", "int16", "int32", "int64", "bool"],
@@ -1382,23 +1519,27 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.zeros"],
         "tensor_args": [1],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2", "bool"],
         },
         "supported": {
-            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16"],
-            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16"],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16"],
         },
     },
     "zeros_like": {
         "names": ["triton.language.zeros_like"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2", "bool"],
+            "a5": ["fp64", "fp8e4m3", "fp8e5m2", "bool"],
         },
         "supported": {
-            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16"],
-            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16", "fp32", "bf16"],
+            "a2a3": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16"],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp16",
+                 "fp32", "bf16"],
         },
     },
 }

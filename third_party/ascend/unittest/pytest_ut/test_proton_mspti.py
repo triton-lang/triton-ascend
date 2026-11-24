@@ -4,6 +4,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import threading
@@ -50,9 +51,82 @@ def test_mspti(tmp_path):
         errors="replace", timeout=600)
     selected = f"MSPTI: {library} (ASCEND_HOME_PATH={env.get('ASCEND_HOME_PATH')})"
     if result.returncode:
-        pytest.fail(f"{selected}; child exited with {result.returncode}\n{result.stdout}", pytrace=False)
+        details = ""
+        if Path(env.get("ASCEND_HOME_PATH", "")).name == "cann-8.5.0":
+            details = _probe_failure(env, library, tmp_path)
+        pytest.fail(f"{selected}; child exited with {result.returncode}\n{details}\n{result.stdout}", pytrace=False)
     print(selected)
     print(result.stdout, end="")
+
+
+def _probe_failure(env, library, tmp):
+    home = Path(env["ASCEND_HOME_PATH"])
+    so = tmp / "mspti_probe.so"
+    includes = [home / "tools/mspti/include", home / "include"]
+    if env.get("MSPTI_INCLUDE_DIR"):
+        includes.insert(0, Path(env["MSPTI_INCLUDE_DIR"]))
+    build = [
+        "c++", "-std=c++17", "-shared", "-fPIC", "-pthread", *(f"-I{d}" for d in includes),
+        str(Path(__file__).with_name("proton_mspti_probe.cpp")), "-o",
+        str(so)
+    ]
+    cmd = [sys.executable, __file__, str(torch.npu.current_device()), str(tmp), library, "--raw"]
+    lines = []
+    try:
+        r = subprocess.run(build + ([library] if Path(library).is_absolute() else ["-lmspti"]), capture_output=True,
+                           text=True, timeout=45)
+        if r.returncode:
+            return f"MSPTI-PROBE compile failed: {r.stderr[-2000:]}"
+        for mode in ("late-triton", "late-torch", "early-triton"):
+            logdir = tmp / mode
+            logdir.mkdir()
+            probe_env = dict(env, ASCEND_PROCESS_LOG_PATH=str(logdir), ASCEND_GLOBAL_LOG_LEVEL="0",
+                             ASCEND_SLOG_PRINT_TO_STDOUT="0")
+            r = subprocess.run([*cmd, mode], env=probe_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                               errors="replace", timeout=90)
+            lines.append(f"MSPTI-PROBE mode={mode} rc={r.returncode}")
+            lines.extend(line for line in r.stdout.splitlines() if line.startswith("MSPTI-PROBE"))
+            if r.returncode:
+                lines.extend(r.stdout.splitlines()[-3:])
+            # Summarize only failure locations, not raw machine logs.
+            failures = set()
+            for path in logdir.rglob("*.log"):
+                with path.open(errors="replace") as f:
+                    for line in f:
+                        if ("[ERROR]" in line or "[WARN]" in line) and re.search(r"profil|mspti|prof_task|prof_drv",
+                                                                                 line, re.I):
+                            failures.update(re.findall(r"\[([\w./-]+\.(?:cpp|cc|c|h):\d+)\]", line))
+            lines.append(f"MSPTI-PROBE warning/error sites: {sorted(failures)[:24]}")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        lines.append(f"MSPTI-PROBE diagnostic did not finish: {exc}")
+    return "\n".join(lines)
+
+
+def _run_raw(device, tmp, mode):
+    probe = ctypes.CDLL(str(tmp / "mspti_probe.so"))
+    print(f"MSPTI-PROBE mode={mode} initialized_at_entry={torch.npu.is_initialized()}", flush=True)
+    if mode.startswith("early"):
+        assert probe.probe_start() == 0
+    torch.npu.set_device(device)
+    x = torch.arange(1024, device="npu", dtype=torch.float32)
+    y = torch.empty_like(x)
+
+    def add():
+        if mode.endswith("torch"):
+            torch.add(x, 1, out=y)
+        else:
+            lifecycle_add_kernel[(4, )](x, y, n=1024, block=256)
+        torch.npu.synchronize()
+
+    add()
+    if mode.startswith("late"):
+        assert probe.probe_start() == 0
+    probe.probe_mark(1)
+    for _ in range(3):
+        add()
+    probe.probe_mark(0)
+    assert probe.probe_stop() == 0
+    torch.testing.assert_close(y.cpu(), x.cpu() + 1)
 
 
 @triton.jit
@@ -369,6 +443,9 @@ def case_mspti_unavailable_device_clocks(tmp_path, monkeypatch):
 if __name__ == "__main__":
     # The ELF loader ignores missing LD_PRELOAD entries; do not silently test dlopen instead.
     ctypes.CDLL(sys.argv[3], mode=os.RTLD_NOLOAD)
+    if sys.argv[4:5] == ["--raw"]:
+        _run_raw(int(sys.argv[1]), Path(sys.argv[2]), sys.argv[5])
+        sys.exit(0)
     torch.npu.set_device(int(sys.argv[1]))
     sys.exit(
         pytest.main([

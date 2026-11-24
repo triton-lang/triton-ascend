@@ -27,7 +27,9 @@ RUN cmake -GNinja -Bbuild \
   -DCMAKE_C_COMPILER=clang \
   -DCMAKE_CXX_COMPILER=clang++ \
   -DCMAKE_ASM_COMPILER=clang \
-  -DCMAKE_CXX_FLAGS="-Wno-everything" \
+  -DCMAKE_C_FLAGS="-DBSPUB_DAVINCI_BISHENGIR=0" \
+  -DCMAKE_CXX_FLAGS="-Wno-everything -DBSPUB_DAVINCI_BISHENGIR=0" \
+  -DLLVM_TABLEGEN_FLAGS=-DBSPUB_DAVINCI_BISHENGIR \
   -DCMAKE_LINKER=lld \
   -DCMAKE_INSTALL_PREFIX="/install" \
   -Dnanobind_DIR="/usr/local/lib/python3.9/site-packages/nanobind/cmake" \

@@ -1,0 +1,167 @@
+diff --git a/mlir/include/mlir/IR/BuiltinTypes.td b/mlir/include/mlir/IR/BuiltinTypes.td
+index 08847dd11c68..ed09f8fc40ec 100644
+--- a/mlir/include/mlir/IR/BuiltinTypes.td
++++ b/mlir/include/mlir/IR/BuiltinTypes.td
+@@ -142,6 +142,16 @@ def Builtin_Float8E4M3 : Builtin_FloatType<"Float8E4M3", "f8E4M3"> {
+ // Float8E4M3FNType
+ //===----------------------------------------------------------------------===//
+ 
++#ifdef BSPUB_DAVINCI_BISHENGIR
++def Builtin_HiFloat8 : Builtin_FloatType<"HiFloat8", "f8HIF"> {
++  let summary = "Ascend HiFloat8 storage and intrinsic operand type";
++  let description = [{
++    An eight-bit tapered-precision format. Numerical conversions use target
++    intrinsics; generic floating constants and APFloat arithmetic are unsupported.
++  }];
++}
++#endif
++
+ def Builtin_Float8E4M3FN : Builtin_FloatType<"Float8E4M3FN", "f8E4M3FN"> {
+   let summary = "8-bit floating point with 3 bit mantissa";
+   let description = [{
+diff --git a/mlir/include/mlir/IR/CommonTypeConstraints.td b/mlir/include/mlir/IR/CommonTypeConstraints.td
+index 6b4e3dd60319..49e033a28411 100644
+--- a/mlir/include/mlir/IR/CommonTypeConstraints.td
++++ b/mlir/include/mlir/IR/CommonTypeConstraints.td
+@@ -336,6 +336,11 @@ def BF16 : Type<CPred<"::llvm::isa<::mlir::BFloat16Type>($_self)">, "bfloat16 ty
+            BuildableType<"$_builder.getType<BFloat16Type>()">;
+ def TF32 : Type<CPred<"::llvm::isa<::mlir::FloatTF32Type>($_self)">, "tf32 type">,
+            BuildableType<"$_builder.getType<FloatTF32Type>()">;
++#ifdef BSPUB_DAVINCI_BISHENGIR
++def HiF8 : Type<CPred<"::llvm::isa<::mlir::HiFloat8Type>($_self)">, "Ascend HiFloat8 type">,
++           BuildableType<"$_builder.getType<::mlir::HiFloat8Type>()">;
++#endif
++
+ def F8E4M3FN : Type<CPred<"::llvm::isa<::mlir::Float8E4M3FNType>($_self)">, "f8E4M3FN type">,
+                BuildableType<"$_builder.getType<Float8E4M3FNType>()">;
+ def F8E5M2 : Type<CPred<"::llvm::isa<::mlir::Float8E5M2Type>($_self)">, "f8E5M2 type">,
+diff --git a/mlir/lib/AsmParser/TokenKinds.def b/mlir/lib/AsmParser/TokenKinds.def
+index fe7c53753e15..253a45eb4c83 100644
+--- a/mlir/lib/AsmParser/TokenKinds.def
++++ b/mlir/lib/AsmParser/TokenKinds.def
+@@ -97,6 +97,9 @@ TOK_KEYWORD(f64)
+ TOK_KEYWORD(f80)
+ TOK_KEYWORD(f8E5M2)
+ TOK_KEYWORD(f8E4M3)
++#ifdef BSPUB_DAVINCI_BISHENGIR
++TOK_KEYWORD(f8HIF)
++#endif
+ TOK_KEYWORD(f8E4M3FN)
+ TOK_KEYWORD(f8E5M2FNUZ)
+ TOK_KEYWORD(f8E4M3FNUZ)
+diff --git a/mlir/lib/AsmParser/TypeParser.cpp b/mlir/lib/AsmParser/TypeParser.cpp
+index a461ebed967a..3f9ca6b1af5a 100644
+--- a/mlir/lib/AsmParser/TypeParser.cpp
++++ b/mlir/lib/AsmParser/TypeParser.cpp
+@@ -43,6 +43,9 @@ OptionalParseResult Parser::parseOptionalType(Type &type) {
+   case Token::kw_f6E3M2FN:
+   case Token::kw_f8E5M2:
+   case Token::kw_f8E4M3:
++#ifdef BSPUB_DAVINCI_BISHENGIR
++  case Token::kw_f8HIF:
++#endif
+   case Token::kw_f8E4M3FN:
+   case Token::kw_f8E5M2FNUZ:
+   case Token::kw_f8E4M3FNUZ:
+@@ -321,6 +324,11 @@ Type Parser::parseNonFunctionType() {
+   case Token::kw_f8E4M3:
+     consumeToken(Token::kw_f8E4M3);
+     return builder.getType<Float8E4M3Type>();
++#ifdef BSPUB_DAVINCI_BISHENGIR
++  case Token::kw_f8HIF:
++    consumeToken(Token::kw_f8HIF);
++    return builder.getType<HiFloat8Type>();
++#endif
+   case Token::kw_f8E4M3FN:
+     consumeToken(Token::kw_f8E4M3FN);
+     return builder.getType<Float8E4M3FNType>();
+diff --git a/mlir/lib/Dialect/Arith/IR/ArithOps.cpp b/mlir/lib/Dialect/Arith/IR/ArithOps.cpp
+index 7cfd6d3a98df..d32c013d3d90 100644
+--- a/mlir/lib/Dialect/Arith/IR/ArithOps.cpp
++++ b/mlir/lib/Dialect/Arith/IR/ArithOps.cpp
+@@ -1508,6 +1508,12 @@ LogicalResult arith::ExtSIOp::verify() {
+ /// Fold extension of float constants when there is no information loss due the
+ /// difference in fp semantics.
+ OpFoldResult arith::ExtFOp::fold(FoldAdaptor adaptor) {
++#ifdef BSPUB_DAVINCI_BISHENGIR
++  // HiFloat8 has no fixed IEEE APFloat semantics. Preserve target casts.
++  if (isa<HiFloat8Type>(getElementTypeOrSelf(getType())) ||
++      isa<HiFloat8Type>(getElementTypeOrSelf(getOperand().getType())))
++    return {};
++#endif
+   if (auto truncFOp = getOperand().getDefiningOp<TruncFOp>()) {
+     if (truncFOp.getOperand().getType() == getType()) {
+       arith::FastMathFlags truncFMF =
+@@ -1618,6 +1624,12 @@ LogicalResult arith::TruncIOp::verify() {
+ /// Perform safe const propagation for truncf, i.e., only propagate if FP value
+ /// can be represented without precision loss.
+ OpFoldResult arith::TruncFOp::fold(FoldAdaptor adaptor) {
++#ifdef BSPUB_DAVINCI_BISHENGIR
++  // HiFloat8 has no fixed IEEE APFloat semantics. Preserve target casts.
++  if (isa<HiFloat8Type>(getElementTypeOrSelf(getType())) ||
++      isa<HiFloat8Type>(getElementTypeOrSelf(getOperand().getType())))
++    return {};
++#endif
+   auto resElemType = cast<FloatType>(getElementTypeOrSelf(getType()));
+   if (auto extOp = getOperand().getDefiningOp<arith::ExtFOp>()) {
+     Value src = extOp.getIn();
+@@ -1889,6 +1901,12 @@ bool arith::BitcastOp::areCastCompatible(TypeRange inputs, TypeRange outputs) {
+ }
+ 
+ OpFoldResult arith::BitcastOp::fold(FoldAdaptor adaptor) {
++#ifdef BSPUB_DAVINCI_BISHENGIR
++  // HiFloat8 has no fixed IEEE APFloat semantics. Preserve target casts.
++  if (isa<HiFloat8Type>(getElementTypeOrSelf(getType())) ||
++      isa<HiFloat8Type>(getElementTypeOrSelf(getOperand().getType())))
++    return {};
++#endif
+   auto resType = getType();
+   auto operand = adaptor.getIn();
+   if (!operand)
+diff --git a/mlir/lib/IR/AsmPrinter.cpp b/mlir/lib/IR/AsmPrinter.cpp
+index 3d19c5ad8fbc..9751c3a49325 100644
+--- a/mlir/lib/IR/AsmPrinter.cpp
++++ b/mlir/lib/IR/AsmPrinter.cpp
+@@ -2728,6 +2728,9 @@ void AsmPrinter::Impl::printTypeImpl(Type type) {
+       .Case<Float6E3M2FNType>([&](Type) { os << "f6E3M2FN"; })
+       .Case<Float8E5M2Type>([&](Type) { os << "f8E5M2"; })
+       .Case<Float8E4M3Type>([&](Type) { os << "f8E4M3"; })
++#ifdef BSPUB_DAVINCI_BISHENGIR
++      .Case<HiFloat8Type>([&](Type) { os << "f8HIF"; })
++#endif
+       .Case<Float8E4M3FNType>([&](Type) { os << "f8E4M3FN"; })
+       .Case<Float8E5M2FNUZType>([&](Type) { os << "f8E5M2FNUZ"; })
+       .Case<Float8E4M3FNUZType>([&](Type) { os << "f8E4M3FNUZ"; })
+diff --git a/mlir/lib/IR/BuiltinTypeInterfaces.cpp b/mlir/lib/IR/BuiltinTypeInterfaces.cpp
+index ce076a3b4ac5..8e83ba4b1841 100644
+--- a/mlir/lib/IR/BuiltinTypeInterfaces.cpp
++++ b/mlir/lib/IR/BuiltinTypeInterfaces.cpp
+@@ -23,6 +23,10 @@ using namespace mlir::detail;
+ //===----------------------------------------------------------------------===//
+ 
+ unsigned FloatType::getWidth() {
++#ifdef BSPUB_DAVINCI_BISHENGIR
++  if (llvm::isa<HiFloat8Type>(*this))
++    return 8;
++#endif
+   return APFloat::semanticsSizeInBits(getFloatSemantics());
+ }
+ 
+diff --git a/mlir/lib/IR/BuiltinTypes.cpp b/mlir/lib/IR/BuiltinTypes.cpp
+index ce47c60c9b93..6b6a2e042d57 100644
+--- a/mlir/lib/IR/BuiltinTypes.cpp
++++ b/mlir/lib/IR/BuiltinTypes.cpp
+@@ -89,6 +89,13 @@ IntegerType IntegerType::scaleElementBitwidth(unsigned scale) {
+ //===----------------------------------------------------------------------===//
+ 
+ // Mapping from MLIR FloatType to APFloat semantics.
++#ifdef BSPUB_DAVINCI_BISHENGIR
++const llvm::fltSemantics &HiFloat8Type::getFloatSemantics() const {
++  llvm::report_fatal_error(
++      "HiFloat8 requires target conversions, not APFloat arithmetic");
++}
++#endif
++
+ #define FLOAT_TYPE_SEMANTICS(TYPE, SEM)                                        \
+   const llvm::fltSemantics &TYPE::getFloatSemantics() const {                  \
+     return APFloat::SEM();                                                     \

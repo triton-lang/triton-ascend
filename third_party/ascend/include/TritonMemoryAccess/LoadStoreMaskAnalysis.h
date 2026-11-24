@@ -243,12 +243,10 @@ MaskDecomposition decomposeAndMask(Operation *op, Value mask,
                                    const Location &loc,
                                    PatternRewriter &rewriter);
 
-// Conservatively checks whether `expr` is constant along `axis`; unknown
-// producers are treated as varying.
+// Conservative axis check: unknown producers count as varying.
 bool isInvariantAlongAxis(Value expr, int64_t axis);
 
-// True when the mask has a discrete part constant along at least one axis and
-// ptr/mask describe the same tile.
+// Axis-discrete mask: discrete part constant along some axis.
 bool isAxisDiscreteMaskAccess(Operation *op, Value ptr, Value mask,
                               PatternRewriter &rewriter);
 

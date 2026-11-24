@@ -1099,8 +1099,7 @@ MaskDecomposition decomposeAndMask(Operation *op, Value mask,
   return {contMask, discMask};
 }
 
-// Conservatively checks whether `expr` is constant along `axis`; unknown
-// producers are treated as varying.
+// Conservative axis check: unknown producers count as varying.
 bool isInvariantAlongAxis(Value expr, int64_t axis) {
   auto type = dyn_cast<RankedTensorType>(expr.getType());
   if (!type)

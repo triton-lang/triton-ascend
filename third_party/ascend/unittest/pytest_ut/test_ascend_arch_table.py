@@ -6,9 +6,12 @@ triton internals, so this test execs just the classification block with
 or an NPU runtime.
 """
 import ast
+import sys
+import types
 import unittest
 from enum import IntEnum, auto
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 BACKEND = Path(__file__).resolve().parents[2] / "backend"
 
@@ -58,6 +61,53 @@ class AscendArchTableTest(unittest.TestCase):
                 self.assertIn(gen, (gen5, gen6))
                 self.assertTrue(self.mod["is_register_based_arch"](arch))
 
+    def test_generation_queries_runtime_soc(self):
+        generations = self.mod["AscendArchGen"]
+        for soc_name, expected in (
+            ("Ascend910_958b", generations.GEN5),
+            ("ascend950DT_9571", generations.GEN5),
+            ("Ascend910_9691", generations.GEN6),
+            ("ascend960DT_9691", generations.GEN6),
+            ("Ascend910_9391", generations.LEGACY),
+            ("ascend910b1", generations.LEGACY),
+        ):
+            for args in ((), (None, )):
+                with self.subTest(soc_name=soc_name, args=args):
+                    acl = types.ModuleType("acl")
+                    acl.get_soc_name = Mock(return_value=soc_name)
+                    with patch.dict(sys.modules, {"acl": acl}):
+                        self.assertEqual(self.mod["arch_generation"](*args), expected)
+                    acl.get_soc_name.assert_called_once_with()
+
+    def test_explicit_generation_without_runtime(self):
+        generations = self.mod["AscendArchGen"]
+        with patch.dict(sys.modules, {"acl": None}):
+            for arch, expected in (
+                ("Ascend950", generations.GEN5),
+                ("Ascend960", generations.GEN6),
+                ("Ascend910_9391", generations.LEGACY),
+                ("Ascend910_9791", generations.LEGACY),
+                ("", generations.LEGACY),
+                (123, generations.LEGACY),
+                ([], generations.LEGACY),
+                ({}, generations.LEGACY),
+            ):
+                with self.subTest(arch=arch):
+                    self.assertEqual(self.mod["arch_generation"](arch), expected)
+
+    def test_generation_runtime_errors_are_propagated(self):
+        with patch.dict(sys.modules, {"acl": None}), self.assertRaises(ImportError):
+            self.mod["arch_generation"]()
+
+        acl = types.ModuleType("acl")
+        with patch.dict(sys.modules, {"acl": acl}), self.assertRaises(AttributeError):
+            self.mod["arch_generation"]()
+
+        acl.get_soc_name = Mock(side_effect=RuntimeError("SOC query failed"))
+        with patch.dict(sys.modules, {"acl": acl}), self.assertRaisesRegex(RuntimeError, "SOC query failed"):
+            self.mod["arch_generation"]()
+        acl.get_soc_name.assert_called_once_with()
+
     def test_legacy_not_register_based(self):
         for arch in ("Ascend910A", "Ascend910B1", "Ascend910_93", "Ascend310B", "Ascend910_97", ""):
             with self.subTest(arch=arch):
@@ -94,14 +144,12 @@ class AscendArchTableTest(unittest.TestCase):
                 self.assertTrue(self.mod["is_ffts_supported"](arch))
 
     def test_non_string_and_none_inputs(self):
-        legacy = self.mod["AscendArchGen"].LEGACY
         for bad in (None, 123, [], {}):
             with self.subTest(bad=bad):
                 self.assertFalse(self.mod["is_register_based_arch"](bad))
                 self.assertEqual(self.mod["ub_size_in_kbytes_for_arch"](bad), 0)
                 self.assertEqual(self.mod["rf_size_in_kbytes_for_arch"](bad), None)
                 self.assertFalse(self.mod["is_ffts_supported"](bad))
-                self.assertEqual(self.mod["arch_generation"](bad), legacy)
 
 
 if __name__ == "__main__":

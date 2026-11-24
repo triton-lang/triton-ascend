@@ -87,8 +87,13 @@ def _match_arch_entry(arch):
 def arch_generation(arch: str = None) -> AscendArchGen:
     """Resolve the target generation for a (possibly partial) arch string.
 
-    Unknown / empty / non-string targets resolve to ``AscendArchGen.LEGACY``.
+    When *arch* is None, query the current SOC via ``acl.get_soc_name()``.
+    Unknown / empty / non-string SOC names resolve to ``AscendArchGen.LEGACY``.
+    Errors loading or querying the runtime propagate to the caller.
     """
+    if arch is None:
+        import acl
+        arch = acl.get_soc_name()
     entry = _match_arch_entry(arch)
     return entry[0] if entry is not None else AscendArchGen.LEGACY
 

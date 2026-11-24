@@ -141,6 +141,7 @@ struct StageOperationRate {
 /// Applied independently to each scan geometry and occurrence.
 struct CalibratedPrefixScanProfile {
   bool enabled = false;
+  /// Common formula storage for arithmetic and OR/AND/XOR scans.
   std::vector<PrefixScanFormula> formulas;
   double prefixScanDependencyFactor = 1.0;
   double prefixScanDependencyFactor1d = 1.0;

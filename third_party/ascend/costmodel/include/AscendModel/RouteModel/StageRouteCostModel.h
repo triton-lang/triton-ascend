@@ -567,6 +567,13 @@ struct StageResourceCycles {
   double swideStoreCompletion = 0.0;
   double criticalPath = 0.0;
   bool indirectMemoryAnalyticalFallback = false;
+  /// Tensor operations present in this Stage for which the active profile has
+  /// no measured rate (or a zero throughput).  Such operations currently
+  /// contribute nothing to `compute`; recording them keeps a silent zero
+  /// visible in route.json instead of hiding it (see the remainder issue
+  /// fixed in #2824).  Value = logical element instances priced at zero.
+  /// Diagnostics only: never additive.
+  std::map<std::string, double> unpricedOperationElements;
 
   std::array<std::pair<llvm::StringRef, double>, 56> keyedValues() const;
   bool isFiniteAndNonNegative() const;

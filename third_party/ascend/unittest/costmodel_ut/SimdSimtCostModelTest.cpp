@@ -2011,6 +2011,41 @@ TEST(SimdSimtCostModelTest, LaunchBoundLoopTripCountMatchesStageWorkload) {
   }
 }
 
+TEST(SimdSimtCostModelTest, LaunchBoundExpressionTripCountIsEvaluated) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  // (n + 1023) / 1024 - 1 with n = 16384 evaluates to 15.
+  std::string source = R"mlir(
+    module {
+      func.func @kernel(%n: i32 {ascend.costmodel.runtime_value = 16384 : i64}) {
+        %zero = arith.constant 0 : i32
+        %one = arith.constant 1 : i32
+        %bias = arith.constant 1023 : i32
+        %block = arith.constant 1024 : i32
+        %sum = arith.addi %n, %bias : i32
+        %div = arith.divsi %sum, %block : i32
+        %upper = arith.subi %div, %one : i32
+        scf.for %i = %zero to %upper step %one : i32 {
+        }
+        return
+      }
+    }
+  )mlir";
+  auto module = mlir::parseSourceString<mlir::ModuleOp>(source, &context);
+  ASSERT_TRUE(module);
+  auto counts = analyzeLoopTripCountInfos(*module);
+  ASSERT_EQ(counts.size(), 1u);
+  EXPECT_FALSE(counts[0].constantTripCount);
+  ASSERT_TRUE(counts[0].launchBoundTripCount);
+  EXPECT_EQ(*counts[0].launchBoundTripCount, 15);
+  EXPECT_EQ(counts[0].workloadTripCount, 15);
+  EXPECT_FALSE(counts[0].workloadUsesFallback);
+  EXPECT_EQ(counts[0].description.getString("workload_count_kind"),
+            "exact_launch_bound");
+}
+
 TEST(SimdSimtCostModelTest, InvalidOrMissingLaunchBoundRemainsUnknown) {
   mlir::MLIRContext context;
   context.getOrLoadDialect<mlir::arith::ArithDialect>();

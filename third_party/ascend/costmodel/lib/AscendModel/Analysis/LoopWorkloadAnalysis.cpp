@@ -12,6 +12,7 @@
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <algorithm>
 #include <limits>
 
 using namespace mlir;
@@ -77,6 +78,91 @@ static std::optional<int64_t> integerConstant(Value value) {
   if (!attr || attr.getValue().getBitWidth() > 64)
     return std::nullopt;
   return attr.getValue().getSExtValue();
+}
+
+// Evaluate an integer expression over launch-bound scalars.  The unified
+// trip-count analysis records the launch binding inside the expression AST,
+// but a bound such as (n + block - 1) / block is not a direct launch argument,
+// so integerConstant alone leaves it unknown.  Evaluate the arithmetic here so
+// these loops keep their exact launch-bound trip count.
+static std::optional<int64_t> knownInteger(Value value, unsigned depth = 0) {
+  if (depth > 16)
+    return std::nullopt;
+  if (auto constant = integerConstant(value))
+    return constant;
+  Operation *definition = value.getDefiningOp();
+  if (!definition)
+    return std::nullopt;
+  const llvm::StringRef name = definition->getName().getStringRef();
+  const auto operand = [&](unsigned index) {
+    return knownInteger(definition->getOperand(index), depth + 1);
+  };
+  if (name == "arith.addi" || name == "arith.subi" || name == "arith.muli" ||
+      name == "arith.divsi" || name == "arith.divui" ||
+      name == "arith.ceildivsi" || name == "arith.ceildivui" ||
+      name == "arith.minsi" || name == "arith.maxsi" || name == "arith.minui" ||
+      name == "arith.maxui" || name == "arith.remsi" || name == "arith.remui") {
+    const auto lhs = operand(0);
+    const auto rhs = operand(1);
+    if (!lhs || !rhs)
+      return std::nullopt;
+    const __int128 a = *lhs;
+    const __int128 b = *rhs;
+    if ((name == "arith.divsi" || name == "arith.divui" ||
+         name == "arith.ceildivsi" || name == "arith.ceildivui" ||
+         name == "arith.remsi" || name == "arith.remui") &&
+        b == 0)
+      return std::nullopt;
+    __int128 result = 0;
+    if (name == "arith.addi") {
+      result = a + b;
+    } else if (name == "arith.subi") {
+      result = a - b;
+    } else if (name == "arith.muli") {
+      result = a * b;
+    } else if (name == "arith.divsi") {
+      result = a / b;
+    } else if (name == "arith.divui") {
+      result = static_cast<__int128>(static_cast<uint64_t>(*lhs)) /
+               static_cast<__int128>(static_cast<uint64_t>(*rhs));
+    } else if (name == "arith.ceildivsi") {
+      if (b <= 0)
+        return std::nullopt;
+      result = a <= 0 ? 0 : (a + b - 1) / b;
+    } else if (name == "arith.ceildivui") {
+      if (b <= 0)
+        return std::nullopt;
+      result = (static_cast<__int128>(static_cast<uint64_t>(*lhs)) + b - 1) / b;
+    } else if (name == "arith.minsi") {
+      result = std::min(a, b);
+    } else if (name == "arith.maxsi") {
+      result = std::max(a, b);
+    } else if (name == "arith.minui") {
+      result =
+          std::min(static_cast<uint64_t>(*lhs), static_cast<uint64_t>(*rhs));
+    } else if (name == "arith.maxui") {
+      result =
+          std::max(static_cast<uint64_t>(*lhs), static_cast<uint64_t>(*rhs));
+    } else if (name == "arith.remsi") {
+      result = a % b;
+    } else if (name == "arith.remui") {
+      result = static_cast<__int128>(static_cast<uint64_t>(*lhs)) %
+               static_cast<__int128>(static_cast<uint64_t>(*rhs));
+    }
+    if (result < std::numeric_limits<int64_t>::min() ||
+        result > std::numeric_limits<int64_t>::max())
+      return std::nullopt;
+    return static_cast<int64_t>(result);
+  }
+  if (name == "arith.extsi" || name == "arith.extui" ||
+      name == "arith.trunci" || name == "arith.index_cast" ||
+      name == "arith.index_castui") {
+    const auto source = operand(0);
+    if (!source || *source < 0 || *source > std::numeric_limits<int32_t>::max())
+      return std::nullopt;
+    return source;
+  }
+  return std::nullopt;
 }
 
 // A signed minimum supplies a proven upper bound even when its other operand
@@ -452,6 +538,17 @@ LoopTripCountInfo mlir::ascend::analyzeLoopTripCount(
   if (extractor.usesLaunchBounds) {
     info.launchBoundTripCount = info.constantTripCount;
     info.constantTripCount.reset();
+  }
+  // A loop bound can be arithmetic over the launch scalars rather than a
+  // direct argument.  Evaluate it so such loops stay exact instead of
+  // falling back to a single iteration.
+  if (!info.constantTripCount && !info.launchBoundTripCount) {
+    const auto runtimeLower = knownInteger(loop->getOperand(0));
+    const auto runtimeUpper = knownInteger(loop->getOperand(1));
+    const auto runtimeStep = knownInteger(loop->getOperand(2));
+    if (runtimeLower && runtimeUpper && runtimeStep)
+      info.launchBoundTripCount =
+          tripCountFromBounds(*runtimeLower, *runtimeUpper, *runtimeStep);
   }
   llvm::StringRef workloadKind = "fallback";
   if (info.constantTripCount) {

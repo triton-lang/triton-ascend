@@ -321,6 +321,12 @@ struct StageModeProfile {
   double mte3StorePrepCycles = 0.0;
   double mte3StoreFillCycles = 0.0;
   double simtUniformStoreBaseCycles = 0.0;
+  /// Isolated scalar-transfer coefficients assume the MTE pipeline is idle.
+  /// Inside a kernel the same transfer overlaps with the vector pipeline; this
+  /// is the effective in-kernel fraction, measured as the full-kernel minus
+  /// normalization-only increment on the target.  1.0 keeps the isolated
+  /// coefficients (backward compatible).  Not a per-kernel or per-shape key.
+  double inKernelScalarTransferScale = 1.0;
   /// Zero means no declared limit. A positive value is a compiler/target
   /// legality bound for reverse scans in this mode.
   int64_t maximumReversePrefixScanExtent = 0;
@@ -642,6 +648,11 @@ struct HardwareProfile {
   StageModeProfile simd;
   StageModeProfile simt;
   ScopeHandoffCost scopeHandoff;
+  /// A calibrated reduction envelope is measured with its inputs already in
+  /// place; the feeding tile can explain at most this fraction of it.
+  /// 0.0 disables the credit and keeps the historical behaviour; the 950PR
+  /// v154 profile opts in with 0.6.
+  double reductionResidentTileMaxFraction = 0.0;
 
   bool isValid() const;
 };
@@ -650,7 +661,8 @@ class StageCostEvaluator {
 public:
   llvm::Expected<StageCostTable>
   evaluate(const StagePartition &partition, const HardwareProfile &profile,
-           bool collectCalibrationEstimates = true) const;
+           bool collectCalibrationEstimates = true,
+           int64_t logicalProgramCount = 0) const;
 };
 
 } // namespace mlir::ascend

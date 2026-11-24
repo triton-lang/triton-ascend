@@ -964,7 +964,12 @@ def _default_auto_simt_profile_name(arch: str) -> str:
     """
     normalized = (arch or "").lower().replace("-", "_")
     if "950pr" in normalized:
-        return "simd_simt/ascend_950pr_simd_simt_v1.json"
+        # The v154 profile carries the stage-route de-duplication calibration
+        # (scalar in-kernel scale, resident-tile reduction credit,
+        # completion-inclusive boundary gate, runtime loop trip, selector
+        # factor policy 1/2/4, domain-gated all-SIMT completion).  Roll back
+        # to v1 by reverting this one line.
+        return "simd_simt/ascend_950pr_simd_simt_v154.json"
     if "950dt" in normalized:
         return "simd_simt/ascend_950dt_simd_simt_v1.json"
     return "simd_simt/david_v100_simd_simt_v1.json"

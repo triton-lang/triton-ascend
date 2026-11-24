@@ -1334,7 +1334,7 @@ static std::optional<StageResourceCycles>
 mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
             StageMode mode, int64_t superblockFactor, bool wholeSimt,
             std::optional<double> calibratedReduction = std::nullopt,
-            StageMemoryCost fitted = {}) {
+            StageMemoryCost fitted = {}, bool functionHasProgramLoop = false) {
   StageResourceCycles resources;
   // Accesses priced by the closed-form strided-direct mechanism.  The masked
   // strided copy floor yields on them and stays in force for everything else.
@@ -1370,13 +1370,22 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
                      });
     mapSimdIrregularTileCompletion(completionWork, profile, resources);
   }
+  // Scalar transfers are issued by the same MTE pipeline that carries the
+  // tile traffic, so their in-kernel cost is lower than the isolated
+  // white-box coefficient.  The profile supplies the measured fraction.
+  const double scalarTransferScale =
+      functionHasProgramLoop
+          ? 1.0
+          : std::max(0.0, profile.inKernelScalarTransferScale);
   if (work.scalarLoadCount > 0.0)
     resources.load +=
-        simd ? mainScalarLoadCycles(work.scalarLoadCount, profile)
-             : simtUniformLoadCycles(work.scalarLoadCount, profile);
+        scalarTransferScale *
+        (simd ? mainScalarLoadCycles(work.scalarLoadCount, profile)
+              : simtUniformLoadCycles(work.scalarLoadCount, profile));
   if (work.scalarStoreCount > 0.0)
     resources.store +=
-        simd ? mte3ScalarStoreCycles(profile) : simtUniformStoreCycles(profile);
+        scalarTransferScale * (simd ? mte3ScalarStoreCycles(profile)
+                                    : simtUniformStoreCycles(profile));
   for (const AtomicWorkload &atomic : work.atomicWorkloads) {
     const llvm::StringRef addressClass =
         atomic.addressDependsOnLoadedIndex
@@ -1421,8 +1430,23 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
       summarizeSegmentedSimdInstructions(work, profile.vectorWidthBits);
   for (const auto &[name, counts] : work.operationCounts) {
     const StageOperationRate *rate = findOperationRate(profile, name);
-    if (!rate || rate->throughput <= 0.0)
+    if (!rate || rate->throughput <= 0.0) {
+      // A tensor operation with no measured rate contributes zero compute.
+      // Record it so route.json shows the gap instead of a silent zero; this
+      // is the failure mode that hid arith.remsi/remui until #2824.
+      // The two reserved classes below are deliberately priced elsewhere
+      // (issue bound / folded flat descriptor), so they are not gaps.
+      const bool reservedClass =
+          name == "generic.issue" || name == "simd.folded_flat_address";
+      if (!reservedClass) {
+        double unpricedElements = 0.0;
+        for (const auto &[elements, count] : counts)
+          unpricedElements += static_cast<double>(elements) * count;
+        if (unpricedElements > 0.0)
+          resources.unpricedOperationElements[name.str()] += unpricedElements;
+      }
       continue;
+    }
     if (rate->gridStrideKernelStartupCycles > 0.0)
       resources.gridStrideStartup = std::max(
           resources.gridStrideStartup, rate->gridStrideKernelStartupCycles);
@@ -2715,7 +2739,8 @@ mapOrdinaryReduction(const LogicalStage &stage,
                      const HardwareProfile &hardware,
                      const StageModeProfile &modeProfile,
                      const StageResourceCycles &legacy,
-                     const StageMemoryCost &fitted) {
+                     const StageMemoryCost &fitted,
+                     bool functionHasProgramLoop = false) {
   if (!hardware.reductionProfile || !stage.reductionExternalWorkload ||
       implementation.aivSubblocks != 1 ||
       stage.costModelKind != StageCostModelKind::RowwiseReduction ||
@@ -2800,7 +2825,7 @@ mapOrdinaryReduction(const LogicalStage &stage,
                             implementation.superblockFactor,
                             implementation.mode == StageMode::SIMT &&
                                 !implementation.localScope,
-                            cycles, fitted);
+                            cycles, fitted, functionHasProgramLoop);
   if (!mapped)
     return std::nullopt;
   result.resources = *mapped;
@@ -4088,10 +4113,9 @@ bool HardwareProfile::isValid() const {
          scopeHandoff.isValid();
 }
 
-llvm::Expected<StageCostTable>
-StageCostEvaluator::evaluate(const StagePartition &partition,
-                             const HardwareProfile &profile,
-                             bool collectCalibrationEstimates) const {
+llvm::Expected<StageCostTable> StageCostEvaluator::evaluate(
+    const StagePartition &partition, const HardwareProfile &profile,
+    bool collectCalibrationEstimates, int64_t logicalProgramCount) const {
   if (partition.stages.empty())
     return llvm::createStringError(
         std::errc::invalid_argument,
@@ -4182,6 +4206,92 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
   table.mixedParentMemoryCompletionEvidence =
       profile.simd.mixedParentMemoryCompletionEvidence;
   llvm::StringSet<> stageIds;
+  // The MTE2/MTE3 transfer pipe is established once per kernel.  With more
+  // than one logical program the second and later transfer Stages of the same
+  // direction overlap that establishment, so only the first one owns it.
+  const bool transferStartupOwnedOnce = logicalProgramCount > 1;
+  bool loadStartupOwned = false;
+  bool storeStartupOwned = false;
+  // A function-level, read-only sequence fact: does any Stage execute a
+  // program loop?  Scalar transfers overlap with the vector pipeline only in
+  // kernels whose critical path is not a loop body; loop kernels keep the
+  // isolated scalar coefficients.
+  const bool functionHasProgramLoop =
+      llvm::any_of(partition.stages, [](const LogicalStage &s) {
+        // The empty auto-blockify control shell is not a data loop: it has a
+        // backedge but moves no tensor bytes.  Only loop Stages that own
+        // memory traffic keep the isolated scalar coefficients.
+        const bool movesTensors =
+            s.workload.loadBytes > 0.0 || s.workload.storeBytes > 0.0;
+        return s.costModelKind ==
+                   StageCostModelKind::IndependentPipelinedLoop ||
+               s.costModelKind == StageCostModelKind::LoopCarriedRecurrence ||
+               (movesTensors &&
+                (s.features.hasLoop || s.features.isGridStrideLoopShell ||
+                 s.features.insideGridStrideLoopBody));
+      });
+
+  // Read-only dependency fact: a row reduction that consumes a tile already
+  // materialized by a preceding continuous-memory Stage must not pay that
+  // tile's load again inside its own Stage.  The edge comes from the
+  // partitioner's SSA-derived intra-iteration dependency, not from a name or
+  // shape key.
+  llvm::StringMap<StageCostModelKind> stageKindById;
+  for (const LogicalStage &s : partition.stages)
+    stageKindById[s.id] = s.costModelKind;
+  // A target can be reachable from several sources; the partitioner's vector
+  // order is not guaranteed to be stable.  Keep all of them and resolve with a
+  // deterministic breadth-first walk so the same IR always yields the same
+  // credit.
+  llvm::StringMap<llvm::SmallVector<std::string, 2>> feedingSourcesByTarget;
+  for (const StageDependency &dependency : partition.dependencies) {
+    if (dependency.kind != StageDependencyKind::IntraIterationData ||
+        dependency.sourceStage.empty() || dependency.targetStage.empty())
+      continue;
+    auto &sources = feedingSourcesByTarget[dependency.targetStage];
+    if (llvm::find(sources, dependency.sourceStage) == sources.end())
+      sources.push_back(dependency.sourceStage);
+  }
+  // A reduction can consume an intermediate conversion Stage whose own input
+  // is the materialized tile; walk back a few read-only SSA hops.
+  const auto resolveFeedingMemoryStage =
+      [&](llvm::StringRef target) -> std::string {
+    std::vector<std::string> frontier{target.str()};
+    llvm::StringSet<> seen;
+    seen.insert(target);
+    for (int depth = 0; depth < 4 && !frontier.empty(); ++depth) {
+      std::vector<std::string> next;
+      llvm::SmallVector<std::string, 4> candidates;
+      for (const std::string &node : frontier) {
+        const auto it = feedingSourcesByTarget.find(node);
+        if (it == feedingSourcesByTarget.end())
+          continue;
+        for (const std::string &source : it->second)
+          if (seen.insert(source).second)
+            candidates.push_back(source);
+      }
+      llvm::sort(candidates);
+      for (const std::string &source : candidates) {
+        const auto kind = stageKindById.find(source);
+        if (kind != stageKindById.end() &&
+            kind->second == StageCostModelKind::ContinuousTileMemory)
+          return source;
+        next.push_back(source);
+      }
+      frontier = std::move(next);
+    }
+    return "";
+  };
+  // The scalar in-kernel scale and the tile-resident reduction credit both
+  // describe overlap on the same MTE pipeline.  Applying both in one kernel
+  // double-counts it, so the tile credit yields when the function also owns
+  // scalar transfers (the measured scalar scale already covers that overlap).
+  const bool functionHasScalarTransfers =
+      llvm::any_of(partition.stages, [](const LogicalStage &s) {
+        return s.workload.scalarLoadCount > 0.0 ||
+               s.workload.scalarStoreCount > 0.0;
+      });
+  std::map<std::pair<std::string, int>, double> loadPerIterationByStageMode;
 
   for (const LogicalStage &stage : partition.stages) {
     if (stage.id.empty() || !stageIds.insert(stage.id).second)
@@ -4274,12 +4384,12 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
           executionStage, modeProfile, implementation.mode,
           implementation.superblockFactor,
           implementation.mode == StageMode::SIMT && !implementation.localScope,
-          std::nullopt, fitted);
+          std::nullopt, fitted, functionHasProgramLoop);
       if (!resources)
         continue;
-      auto mapping =
-          mapOrdinaryReduction(executionStage, implementation, profile,
-                               modeProfile, *resources, fitted);
+      auto mapping = mapOrdinaryReduction(executionStage, implementation,
+                                          profile, modeProfile, *resources,
+                                          fitted, functionHasProgramLoop);
       if (!mapping)
         return mapping.takeError();
       const auto &calibrated = *mapping;
@@ -4294,6 +4404,62 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
           calibrated ? calibrated->fallbackInstances : 0;
       if (calibrated)
         cost.fittedReductionInstances = calibrated->fittedInstances;
+      if (!functionHasScalarTransfers &&
+          stage.costModelKind == StageCostModelKind::RowwiseReduction) {
+        const std::string feeding = resolveFeedingMemoryStage(stage.id);
+        if (!feeding.empty()) {
+          const auto load = loadPerIterationByStageMode.find(
+              {feeding, static_cast<int>(implementation.mode)});
+          if (load != loadPerIterationByStageMode.end()) {
+            // A calibrated reduction envelope is measured with its inputs in
+            // place, so the feeding tile can explain only the fraction the
+            // profile declares (default 1.0 = historical uncapped credit).
+            const double maxFraction = std::max(
+                0.0, std::min(1.0, profile.reductionResidentTileMaxFraction));
+            const double credit = std::min(
+                std::min(std::max(0.0, resources->reduction), load->second),
+                maxFraction * std::max(0.0, resources->reduction));
+            if (credit > 0.0) {
+              resources->reduction =
+                  std::max(0.0, resources->reduction - credit);
+              resources->criticalPath =
+                  std::max(0.0, resources->criticalPath - credit);
+              cost.formulaEvidence += "+feeding_tile_resident";
+            }
+          }
+        }
+      }
+      if (transferStartupOwnedOnce && implementation.mode == StageMode::SIMD) {
+        const StageCostModelKind kind = stage.costModelKind;
+        const bool directStore =
+            kind == StageCostModelKind::ContinuousTileStore ||
+            kind == StageCostModelKind::CachePolicyStore;
+        const bool directLoad =
+            kind == StageCostModelKind::ContinuousTileMemory ||
+            kind == StageCostModelKind::PartialContinuousTileMemory ||
+            kind == StageCostModelKind::ContinuousShortLoad ||
+            kind == StageCostModelKind::IndirectGatherMemory ||
+            kind == StageCostModelKind::IndirectScalarMemory;
+        if (directStore && resources->store > 0.0) {
+          if (storeStartupOwned)
+            resources->store = std::max(
+                0.0, resources->store - modeProfile.storeOperationSetupCycles);
+          else
+            storeStartupOwned = true;
+        }
+        if (directLoad && resources->load > 0.0) {
+          if (loadStartupOwned)
+            resources->load = std::max(
+                0.0, resources->load - modeProfile.loadOperationSetupCycles);
+          else
+            loadStartupOwned = true;
+        }
+      }
+      if (stage.costModelKind == StageCostModelKind::ContinuousTileMemory &&
+          resources->load > 0.0)
+        loadPerIterationByStageMode.emplace(
+            std::make_pair(stage.id, static_cast<int>(implementation.mode)),
+            resources->load);
       cost.resources = *resources;
       if (fitted.load)
         cost.indirectLoadPricing = implementation.mode == StageMode::SIMD

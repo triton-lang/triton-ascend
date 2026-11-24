@@ -366,6 +366,25 @@ struct KernelTimingProfile {
 
   double scalarPrologueSystemCycles = 0.0;
   double scalarEpilogueSystemCycles = 0.0;
+  /// Achieved GM bandwidth by working-set tier, in bytes per system cycle.
+  /// Zero disables the memory-traffic roofline floor.
+  double hbmBytesPerSystemCycle = 0.0;
+  double l2BytesPerSystemCycle = 0.0;
+  int64_t l2CapacityBytes = 0;
+  std::string memoryRooflineEvidence;
+  /// A measured completion-inclusive group envelope already contains the
+  /// kernel's own boundary fill/drain, so the boundary residual must not be
+  /// added a second time.  Declared by the profile, default off.
+  bool completionInclusiveGroupsCoverBoundary = false;
+  /// The measured completion-inclusive envelope only spans the whole kernel
+  /// for deep fused pipelines.  In a short elementwise kernel a group curve
+  /// covers just the loop body, so the boundary must still be paid.  Zero
+  /// keeps the historical behaviour (no stage-count condition).
+  int64_t completionInclusiveMinimumStageCount = 0;
+  /// A calibrated reduction envelope is measured with its inputs already in
+  /// place, so the feeding tile can explain only this fraction of it.  0.0
+  /// keeps the historical behaviour (no credit); v154 opts in with 0.6.
+  double reductionResidentTileMaxFraction = 0.0;
   std::map<int64_t, double> boundaryResidualSystemCyclesByPhysicalProgramCount;
   std::map<std::string, std::map<int64_t, std::map<int64_t, double>>>
       boundaryResidualSystemCyclesByRouteFactorAndPhysicalProgramCount;
@@ -393,6 +412,14 @@ struct KernelTimingProfile {
   SimtNonAffineRank1MemoryCompletion simtNonAffineRank1MemoryCompletion;
   Rank2InterleavedPrefixScanCompletion rank2InterleavedPrefixScanCompletion;
   SimtStaticLoopDirectMemoryCompletion simtStaticLoopDirectMemoryCompletion;
+  /// Measured completion calibration for the all-SIMT whole-kernel body when
+  /// its Stages fall back to analytical layout/compute estimates.  1.0 keeps
+  /// the analytical body unchanged.
+  double simtWholeKernelCompletionScale = 1.0;
+  /// Highest whole-kernel SuperBlock factor the selector may consider.  Zero
+  /// keeps the backend capability unchanged; this is a selection-stage policy,
+  /// not a legality limit, so an explicitly forced factor still compiles.
+  int64_t simtWholeKernelFactorLimit = 0;
   StageDependencyCompletion stageDependencyCompletion;
   double systemCounterFrequencyMHz = 0.0;
   std::string evidence;
@@ -1458,7 +1485,8 @@ static void readStageResources(ProfileJSONReader &reader,
          {"mte3_store_prep_system_cycles", &profile.mte3StorePrepCycles},
          {"mte3_store_fill_system_cycles", &profile.mte3StoreFillCycles},
          {"uniform_store_base_system_cycles",
-          &profile.simtUniformStoreBaseCycles}});
+          &profile.simtUniformStoreBaseCycles},
+         {"in_kernel_transfer_scale", &profile.inKernelScalarTransferScale}});
   }
   if (const auto *generated =
           resources->getObject("generated_vector_traffic")) {
@@ -2592,6 +2620,29 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
     timing.scalarEpilogueSystemCycles =
         reader.number(*kernelTiming, "scalar_epilogue_system_cycles",
                       "profile.kernel_timing");
+    readOptionalNumbers(
+        reader, *kernelTiming,
+        {{"hbm_bytes_per_system_cycle", &timing.hbmBytesPerSystemCycle},
+         {"l2_bytes_per_system_cycle", &timing.l2BytesPerSystemCycle}});
+    readOptionalIntegers(*kernelTiming,
+                         {{"l2_capacity_bytes", &timing.l2CapacityBytes}});
+    if (auto evidence = kernelTiming->getString("memory_roofline_evidence"))
+      timing.memoryRooflineEvidence = evidence->str();
+    if (auto flag = kernelTiming->getBoolean(
+            "completion_inclusive_groups_cover_boundary"))
+      timing.completionInclusiveGroupsCoverBoundary = *flag;
+    readOptionalIntegers(*kernelTiming,
+                         {{"completion_inclusive_minimum_stage_count",
+                           &timing.completionInclusiveMinimumStageCount},
+                          {"simt_whole_kernel_factor_limit",
+                           &timing.simtWholeKernelFactorLimit}});
+    readOptionalNumbers(reader, *kernelTiming,
+                        {{"reduction_resident_tile_max_fraction",
+                          &timing.reductionResidentTileMaxFraction},
+                         {"simt_whole_kernel_completion_scale",
+                          &timing.simtWholeKernelCompletionScale}});
+    hardware.reductionResidentTileMaxFraction =
+        timing.reductionResidentTileMaxFraction;
     readPositiveIntegerNumberCurve(
         *kernelTiming,
         "boundary_residual_system_cycles_by_physical_program_count", reader,
@@ -3883,7 +3934,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
           : 1;
   StageCostEvaluator evaluator;
   auto costTable = evaluator.evaluate(*partition, hardwareProfile,
-                                      options.collectCalibrationEstimates);
+                                      options.collectCalibrationEstimates,
+                                      logicalProgramCountHint);
   if (!costTable)
     return costTable.takeError();
   costTable->logicalProgramCountHint = logicalProgramCountHint;
@@ -4445,6 +4497,33 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
   prediction.fixedSystemCycles =
       routeFixedSystemCycles(profile, prediction.candidate, *plan,
                              kernelArgumentCount, routeHasGlobalLoad);
+  // A measured completion-inclusive group envelope already contains the
+  // kernel's own boundary fill/drain.  Adding the boundary residual again
+  // would count it twice; the profile opts into this accounting explicitly.
+  const int64_t completionInclusiveMinStages =
+      profile.kernelTiming.completionInclusiveMinimumStageCount;
+  const bool completionInclusiveGroup =
+      profile.kernelTiming.completionInclusiveGroupsCoverBoundary &&
+      (completionInclusiveMinStages <= 0 ||
+       static_cast<int64_t>(report.stageModel.stages.size()) >=
+           completionInclusiveMinStages) &&
+      llvm::any_of(report.stageModel.stages, [](const LogicalStageCost &stage) {
+        return llvm::any_of(
+            stage.implementations, [](const StageImplementationCost &impl) {
+              const auto &resources = impl.resources;
+              return impl.formulaEvidence.find("measured_group_curve") !=
+                         std::string::npos ||
+                     resources.recurrenceGroupCriticalPath > 0.0 ||
+                     resources.continuousLoadGroup > 0.0 ||
+                     resources.continuousStoreGroup > 0.0 ||
+                     resources.rowwiseReductionGroupBody > 0.0 ||
+                     resources.multiResultReductionGroupBody > 0.0;
+            });
+      });
+  if (completionInclusiveGroup) {
+    prediction.fixedSystemCycles = 0.0;
+    prediction.evidence += "+completion_inclusive_group_covers_boundary";
+  }
   if (report.decision == SimdSimtCandidateKind::AllSIMTOnly) {
     if (auto adjustment = tinyStraightLineSimtMemoryAdjustment(
             report.stageModel, *plan,
@@ -4939,15 +5018,93 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
 
   const int64_t numWarps =
       std::max<int64_t>(1, static_cast<int64_t>(options.numWarps));
+  // Selection-stage factor policy: the profile may restrict which
+  // whole-kernel SuperBlock factors the cost model evaluates, without changing
+  // the backend capability (an explicitly forced factor still compiles).
+  SimdSimtCostModelOptions stageOptions = options;
+  const int64_t factorLimit = profile.kernelTiming.simtWholeKernelFactorLimit;
+  if (factorLimit > 0) {
+    auto &factors = stageOptions.wholeKernelSuperblockFactors;
+    factors.erase(std::remove_if(factors.begin(), factors.end(),
+                                 [factorLimit](int64_t factor) {
+                                   return factor > factorLimit;
+                                 }),
+                  factors.end());
+    if (stageOptions.wholeKernelSuperblockFactors.empty())
+      stageOptions.wholeKernelSuperblockFactors = {1};
+    stageOptions.maximumWholeKernelSuperblockFactor =
+        std::min(stageOptions.maximumWholeKernelSuperblockFactor, factorLimit);
+  }
   auto stageModel = evaluateStageModel(
       features, profile, static_cast<unsigned>(numWarps),
-      options.wholeKernelSuperblockMaterializable,
-      options.scopeSuperblockMaterializable, options.logicalProgramCountHint,
-      options.physicalVectorCoreCountHint, options.physicalAiCoreCountHint,
-      report.kernelArgumentCount, module, anchorPlan, options);
+      stageOptions.wholeKernelSuperblockMaterializable,
+      stageOptions.scopeSuperblockMaterializable,
+      stageOptions.logicalProgramCountHint,
+      stageOptions.physicalVectorCoreCountHint,
+      stageOptions.physicalAiCoreCountHint, report.kernelArgumentCount, module,
+      anchorPlan, stageOptions);
   if (!stageModel)
     return stageModel.takeError();
   report.stageModel = std::move(*stageModel);
+  // Calibrated completion of the all-SIMT whole-kernel body.  The calibration
+  // was measured on plain memory/elementwise + row-reduction V1 loop kernels
+  // whose reduction axis lies outside the measured reduction grid; across the
+  // five instance_norm shapes the measured/analytical body ratio is 0.37-0.63.
+  //
+  // The scale only applies inside that calibration domain:
+  //  * the plan must run more than one logical program per scheduling slot
+  //    (a single-program kernel has no uncalibrated loop body);
+  //  * no dot, prefix-scan or indirect-memory Stage (those classes carry their
+  //    own measured surfaces / models);
+  //  * every rowwise reduction extent must lie outside the measured
+  //    rows/extent grid, otherwise the calibrated reduction window already
+  //    covers the geometry.
+  // The scale is applied uniformly to every factor plan so the factor ranking
+  // is unchanged, and 1.0 keeps the analytical estimate.
+  const double simtScale = profile.kernelTiming.simtWholeKernelCompletionScale;
+  if (simtScale > 0.0 && std::abs(simtScale - 1.0) > 1.0e-12) {
+    int64_t measuredExtentMin = 0;
+    int64_t measuredExtentMax = 0;
+    for (const auto &factorEntry :
+         profile.hardware.simt.rowwiseReductionGroupCyclesByFactorRowsAndExtent)
+      for (const auto &rowsEntry : factorEntry.second)
+        for (const auto &extentEntry : rowsEntry.second) {
+          if (measuredExtentMin == 0 || extentEntry.first < measuredExtentMin)
+            measuredExtentMin = extentEntry.first;
+          if (extentEntry.first > measuredExtentMax)
+            measuredExtentMax = extentEntry.first;
+        }
+    bool hasRowwiseReduction = false;
+    bool insideCalibrationDomain = measuredExtentMax > 0;
+    for (const auto &stage : report.stageModel.stages) {
+      if (stage.features.hasDot || stage.features.hasPrefixScan ||
+          stage.features.hasIndirectMemory)
+        insideCalibrationDomain = false;
+      if (stage.model != "rowwise_reduction")
+        continue;
+      hasRowwiseReduction = true;
+      for (const auto &entry : stage.workload.reductionGeometryCounts) {
+        const int64_t extent = std::get<1>(entry.first);
+        if (extent >= measuredExtentMin && extent <= measuredExtentMax)
+          insideCalibrationDomain = false;
+      }
+    }
+    insideCalibrationDomain &= hasRowwiseReduction;
+    auto scaleAllSimtPlan = [&](StageRoutePlan &plan) {
+      if (!plan.legal || !insideCalibrationDomain ||
+          plan.runtimeLogicalProgramsPerSchedulingSlot <= 1)
+        return;
+      for (double &cycles : plan.logicalStageCycles)
+        cycles *= simtScale;
+      for (double &cycles : plan.scopeHandoffCycles)
+        cycles *= simtScale;
+      plan.totalCycles *= simtScale;
+      plan.diagnostic<double>("simt_whole_kernel_completion_scale") = simtScale;
+    };
+    scaleAllSimtPlan(report.stageModel.allSimt);
+    for (auto &entry : report.stageModel.allSimtFactorPlans)
+      scaleAllSimtPlan(entry.second);
+  }
   report.candidateCosts.allSimd = report.stageModel.allSimd.totalCycles;
   report.candidateCosts.allSimtOnly = report.stageModel.allSimt.totalCycles;
   report.candidateCosts.mixedSimdSimt = report.stageModel.mixed.totalCycles;

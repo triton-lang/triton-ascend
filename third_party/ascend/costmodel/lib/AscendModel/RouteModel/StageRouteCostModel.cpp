@@ -1466,6 +1466,12 @@ llvm::json::Object StageResourceCycles::toJSON() const {
       gridStrideFactorSpecificResourceBody;
   result["indirect_memory_analytical_fallback"] =
       indirectMemoryAnalyticalFallback;
+  if (!unpricedOperationElements.empty()) {
+    llvm::json::Object operations;
+    for (const auto &[name, elements] : unpricedOperationElements)
+      operations[name] = elements;
+    result["unpriced_operations"] = std::move(operations);
+  }
   return result;
 }
 
@@ -1494,6 +1500,12 @@ llvm::json::Object StageResourceCycles::toCompactJSON() const {
   for (const auto &[key, value] : flags)
     if (value)
       result[key] = true;
+  if (!unpricedOperationElements.empty()) {
+    llvm::json::Object operations;
+    for (const auto &[name, elements] : unpricedOperationElements)
+      operations[name] = elements;
+    result["unpriced_operations"] = std::move(operations);
+  }
   return result;
 }
 

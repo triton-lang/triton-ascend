@@ -1,0 +1,2455 @@
+{
+  "reduction_profile": "../reduction/david_v100_reduction_v1.json",
+  "$schema": "./simd_simt_profile_schema.json",
+  "schema_version": 19,
+  "profile_version": "ascend-950pr-simd-simt-20261027-v152-indirect-memory-loop-dependency-prefixscan-v1+gate-scalar-inkernel-stage-route-dedup-v154",
+  "simt_indirect_store_model": "prefix_mask_rank_factor_20261017",
+  "simd_indirect_store_model": "simd_mask_envelope_20261019",
+  "simt_indirect_load_model": "prefix_mask_rank_factor_20261017",
+  "simd_indirect_load_model": "simd_mask_envelope_20261019",
+  "indirect_memory_profile": "../indirect_memory/ascend_950pr_v1.json",
+  "target": "Ascend950PR/dav-c310",
+  "description": "Ascend 950PR SIMD/SIMT Stage Route CostModel profile: the current upstream v1 calibration (including the unified loop analysis and StridedWide cost model) plus the stage-route de-duplication keys (in-kernel scalar scale, resident-tile reduction credit, completion-inclusive boundary gate, selector factor policy 1/2/4, domain-gated all-SIMT completion).",
+  "prefixscan_profile": "../prefixscan/ascend_950pr_prefixscan.json",
+  "microbenchmark_profile": "../microbench/ascend_950pr_v1.json",
+  "compatible_targets": [
+    "Ascend950PR_*",
+    "Ascend910_95*",
+    "dav-c310"
+  ],
+  "score_unit": "system_cycle_resource_estimate",
+  "selection_calibration": {
+    "description": "The only structural threshold consumed by the Stage partitioner. Numerical Stage costs come from mode-specific resource formulas and referenced measurements; obsolete route penalties and multipliers have been removed.",
+    "tiny_dot_flops_max": 16384,
+    "source": "StagePartitioner uses this architecture-independent boundary to select the tiny-dot formula family. It is a semantic model-domain limit, not a fitted route multiplier."
+  },
+  "simd": {
+    "description": "Inputs used to estimate the all-SIMD candidate: SIMD width, setup, operation, memory, and dot costs.",
+    "vector_width_measurement": "simd.vector_width_bits",
+    "startup_system_cycles": {
+      "description": "One-time SIMD Stage startup proxy measured with a compile-time-specialized minimal observable vector body and matching barrier-only subtraction.",
+      "vector": 36.376276,
+      "vector_measurement": "simd.setup.serialized_minimal_net",
+      "source": "Shared Ascend950PR microbenchmark profile",
+      "confidence": "medium",
+      "note": "The consumed vector value is measured; memory-transfer startup is modeled per logical memory operation."
+    },
+    "ops": {
+      "f32.add": {
+        "description": "Measured FP32 SIMD add base throughput resolved from the shared microbenchmark profile.",
+        "throughput_measurement": "simd.f32.add.throughput"
+      },
+      "fp32.saturated": {
+        "description": "Execution lower bound for every numeric TTIR operation without a dedicated operation profile. Each semantic operation retains its TTIR name in the workload and pays at least one 2048-bit SIMD work unit at the measured saturated FP32 arithmetic rate; shape, address, view, and layout-only operations are excluded.",
+        "relative_to": "f32.add",
+        "factor": 1.0
+      },
+      "f32.sub": {
+        "description": "Measured FP32 SIMD subtract throughput.",
+        "throughput_measurement": "simd.f32.sub.throughput"
+      },
+      "f32.mul": {
+        "description": "Measured FP32 SIMD multiply throughput.",
+        "throughput_measurement": "simd.f32.mul.throughput"
+      },
+      "f32.div": {
+        "description": "Measured FP32 SIMD divide throughput.",
+        "throughput_measurement": "simd.f32.div.throughput"
+      },
+      "f32.max": {
+        "description": "Measured FP32 SIMD maximum throughput plus the semantic maximum lowering completion paid once per dynamic tensor operation; evidence: data_provider/950pr_simd_semantic_maximum_completion_20261011.json.",
+        "throughput_measurement": "simd.f32.max.throughput",
+        "startup_system_cycles": 32.65,
+        "minimum_startup_elements": 2
+      },
+      "f32.relu": {
+        "description": "The __hmf_reluf helper uses the measured maximum-class vector throughput but does not lower through the binary semantic-maximum completion path. Fresh A5 ReLU holdout timing remains the independent validation point.",
+        "relative_to": "f32.max",
+        "factor": 1.0
+      },
+      "f32.abs": {
+        "description": "Measured FP32 SIMD absolute-value throughput.",
+        "throughput_measurement": "simd.f32.abs.throughput"
+      },
+      "f32.exp": {
+        "description": "Measured effective FP32 SIMD exponential throughput.",
+        "throughput_measurement": "simd.f32.exp.throughput"
+      },
+      "f32.log": {
+        "description": "Measured effective FP32 SIMD logarithm throughput.",
+        "throughput_measurement": "simd.f32.log.throughput"
+      },
+      "f32.sqrt": {
+        "description": "FP32 SIMD square-root lowers to one vector arithmetic operation in the audited pytest and operation-chain controls; use the measured vector arithmetic issue curve.",
+        "relative_to": "f32.add",
+        "factor": 1.0
+      },
+      "f32.cos": {
+        "description": "Effective SIMD cosine completion from the fresh 1024-element dependent operation-chain slope. The factor represents the complete backend cosine expansion per semantic vector operation.",
+        "relative_to": "f32.add",
+        "factor": 112.0
+      },
+      "predicate.cmp": {
+        "description": "Measured standalone semantic SIMD comparison throughput.",
+        "throughput_measurement": "simd.predicate.cmp.throughput"
+      },
+      "predicate.select": {
+        "description": "Measured SIMD select throughput.",
+        "throughput_measurement": "simd.predicate.select.throughput"
+      },
+      "convert.cast": {
+        "description": "Measured effective SIMD cast throughput per semantic cast.",
+        "throughput_measurement": "simd.convert.cast.throughput"
+      },
+      "f32.clamp": {
+        "description": "Measured effective SIMD throughput per semantic clamp.",
+        "throughput_measurement": "simd.f32.clamp.throughput"
+      },
+      "layout.transpose": {
+        "description": "SIMD transpose exchange throughput. Work is logical elements times the moved innermost-axis extent.",
+        "throughput_vector_instructions_per_system_cycle": 0.79375
+      },
+      "histogram.i32": {
+        "description": "Completion rate of the SIMD i32 histogram helper. Work units are 2048-bit SIMD vector instructions derived from the TTIR source tensor element count; bin width remains visible in the explicit result store. The fit uses fresh forced-SIMD A5 M=256/512/1024/2048, BINS=2 controls plus BINS=4/8 holdouts.",
+        "throughput_vector_instructions_per_system_cycle": 0.01801930259,
+        "startup_system_cycles": 167.624347826088,
+        "free_work_units": 0
+      },
+      "srem": {
+        "description": "Measured SIMD signed tensor remainder throughput (i32, reused across widths).",
+        "throughput_measurement": "simd.srem.throughput"
+      },
+      "urem": {
+        "description": "Measured SIMD unsigned tensor remainder throughput (i32, reused across widths).",
+        "throughput_measurement": "simd.urem.throughput"
+      }
+    },
+    "memory": {
+      "description": "Model-specific all-SIMD memory rates consumed by StageCostModel.",
+      "vector_mte2_bytes_per_system_cycle": 167.557775299,
+      "mte3_bytes_per_system_cycle": 213.125675219,
+      "load_operation_startup_system_cycles": 105.309240226,
+      "store_operation_startup_system_cycles": 90.954331652,
+      "load_throughput_measurement": "simd.memory.load.throughput",
+      "store_throughput_measurement": "simd.memory.store.throughput",
+      "load_startup_measurement": "simd.memory.load.startup",
+      "store_startup_measurement": "simd.memory.store.startup",
+      "independent_loop_load_group": {
+        "description": "Generic MTE2 envelope for one to four uninterrupted contiguous FP32 load streams in one independent loop. One full-grid kernel startup is followed by one shared iteration startup plus aggregate bytes divided by the fitted group rate.",
+        "kernel_startup_system_cycles": 546.076851852,
+        "iteration_startup_system_cycles": 12.791269535,
+        "bytes_per_system_cycle": 83.262254929,
+        "minimum_operations": 1,
+        "maximum_operations": 4,
+        "evidence": "bench_simd_memory_groups.py: original six 2/3/4-stream points plus fresh flat rank-one one-load controls at 19 and 37 loop iterations (4.730 and 7.629 us). The single-load loop has the same serialized load/store service domain; sub-grid launches transfer the full-grid startup to kernel-boundary ownership. Rank-two masked tiles keep the analytical per-row transfer path because they are outside the one-stream evidence geometry."
+      },
+      "computed_address_scalarized_load": {
+        "minimum_elements": 8,
+        "maximum_elements": 64,
+        "system_cycles_per_element": 69.6,
+        "evidence": "Fresh A5 forced-SIMD non-affine computed-address sweep recorded in microbench/data_provider/950pr_simd_computed_address_scalarization_20261009.json. NPUIR lowers each logical lane to scalar float address computation followed by scalar GM load. BLOCK 16 and 64 determine the bounded per-lane completion rate; BLOCK 8 and 32 are fit holdouts, and BLOCK 24 and 48 are untouched holdouts. Selection uses only the TTIR address DAG, unknown rank-one layout, element count and absence of loaded-index dependence."
+      },
+      "control_flow_address_scalarized_load": {
+        "residual_system_cycles_by_elements": {
+          "8": 234.783593913,
+          "16": 284.442468859,
+          "32": 691.760218751,
+          "64": 1176.395718534
+        },
+        "evidence": "Fresh A5 forced-SIMD scalar-control-flow tensor-address sweep in v117_conditional_address_scalarization_sweep_20261009. NPUIR lowers the rank-one FP32 load to a scalar scf.for over lanes after the TTIR address is selected by scf.if. Extents 8, 16, 32 and 64 define the bounded residual curve; extents 24 and 48 are untouched interpolation holdouts. Selection uses only address provenance, dtype, layout and tensor extent."
+      },
+      "masked_load_store_read_modify_write": {
+        "residual_system_cycles_by_row_bytes_and_active_rows": {
+          "8": {
+            "3": 284.0
+          },
+          "16": {
+            "4": 400.0,
+            "9": 1027.0,
+            "12": 920.0
+          },
+          "32": {
+            "6": 458.0,
+            "12": 536.0
+          },
+          "64": {
+            "12": 290.0,
+            "24": 294.0
+          }
+        },
+        "evidence": "Fresh A5 forced-SIMD rank-two FP16 masked load/add/store sweep recorded in microbench/data_provider/950pr_simd_masked_store_read_modify_write_20261009.json. NPUIR consistently adds a destination GM load before the masked merge and store. Curves are bounded by physical row width and statically proven active rows; row-bytes=16 active-rows=6 plus row-bytes=32 active-rows=9 and row-bytes=64 active-rows=18 are interpolation holdouts. Admission additionally requires an exact shared mask and a TTIR store-value dependency on the matching load."
+      },
+      "irregular_tile_completion": {
+        "physical_threshold_elements": 5424,
+        "physical_excess_system_cycles_per_element": 0.107431,
+        "active_system_cycles_per_element": 0.087623,
+        "tail_system_cycles_per_inactive_element": 0.065,
+        "row_group_size": 32,
+        "small_row_maximum_rows": 72,
+        "large_row_masked_floor_scale": 0.7,
+        "aligned_two_row_group_physical_materialization_scale": 0.425,
+        "large_working_set_full_physical_minimum_bytes": 134217728,
+        "aligned_first_row_group_system_cycles_per_element": 0.065,
+        "aligned_additional_row_group_system_cycles_per_element": 0.044,
+        "evidence": "Generic rectangular controls on healthy A5 cards. Physical/active coefficients use development geometries 32x256/150, 80x256/150, and 48x256 with active widths 64 and 200; production 64x256/150 is held out. The row72/row80 boundary sweep and fresh-process row80 copy/softmax controls measure a 0.70 masked completion efficiency above the <=72 small-row lowering regime; reduction is an independent non-masked-floor-dominated control. Independent width-150 rows32/64 determine the 0.065 tail rate. Aligned width-128 rows32/64 determine a 32-row completion curve: 0.065 cycles/element for the first full group and 0.044 for each additional group; width-64 rows16 remains an independent narrow control. Fresh forced-SIMD rows48/64/72 and row64 Q=4/8/12/16/22 controls in data_provider/950pr_simd_structural_completion_20261008.json separate resident row-group ownership from complete-kernel footprint. The two-complete-row-group geometry retains 0.425 of physical materialization below the boundary. Q4 and Q16 are development points; Q8 and Q12 are interpolation holdouts. At Q22 the aggregate TTIR read/write footprint exceeds the 128 MiB hardware boundary and the full physical materialization is restored; rows48-Q12 and rows72-Q12 remain independent geometry/footprint holdouts below it. All Stage iterations remain serialized. The rules use TTIR geometry, byte workload, trip count, and launch grid only, with no operator or exact-shape key."
+      },
+      "pipelined_strided_short_store_groups": {
+        "8": {
+          "kernel_startup_system_cycles": 377.871662813,
+          "first_store_system_cycles": 1793.132205171,
+          "incremental_store_system_cycles": 1791.907407505,
+          "extra_lane_system_cycles": 20.240774204,
+          "minimum_rows": 16,
+          "maximum_rows": 96,
+          "minimum_stores": 1,
+          "maximum_stores": 2,
+          "evidence": "bench_simd_strided_store.py fit on rows 16/32/64 plus held-out masked-layout reductions at rows 80. The existing linear extra-lane extrapolation predicts both row-80 cases within 4%; domain is limited to 96 rows."
+        },
+        "16": {
+          "kernel_startup_system_cycles": 170.5,
+          "first_store_system_cycles": 982.559375,
+          "incremental_store_system_cycles": 1009.75625,
+          "extra_lane_system_cycles": 10.512207031,
+          "minimum_rows": 16,
+          "maximum_rows": 64,
+          "minimum_stores": 1,
+          "maximum_stores": 4,
+          "evidence": "bench_simd_strided_store.py, five 16-byte-row-stride points over rows 16/32/64 and 1/2/4 stores; in-sample max error 5.80%, medium-confidence interpolation domain."
+        },
+        "32": {
+          "kernel_startup_system_cycles": 72.997096774,
+          "first_store_system_cycles": 583.976774194,
+          "incremental_store_system_cycles": 549.816129032,
+          "extra_lane_system_cycles": 4.445407006,
+          "minimum_rows": 32,
+          "maximum_rows": 64,
+          "minimum_stores": 1,
+          "maximum_stores": 4,
+          "evidence": "bench_simd_strided_store.py, five 32-byte-row-stride points over rows 32/64 and 1/2/4 stores; in-sample max error 5.43%, medium-confidence interpolation domain."
+        }
+      },
+      "masked_strided_load_copy_completion": {
+        "64": {
+          "base_system_cycles": 178.0,
+          "additional_row_system_cycles": 0.484375,
+          "minimum_rows": 128,
+          "maximum_rows": 256,
+          "minimum_iterations": 8,
+          "maximum_iterations": 8,
+          "evidence": "Fresh A5 compiler-equivalent forced-SIMD masked compaction controls at 128 and 256 rows per source iteration, eight static iterations, and a 64-byte FP32 row stride. Matching requires one masked rank-one strided load, one masked rank-one contiguous store, equal semantic element counts, no loaded-index address, no control/synchronization, and distinct load/store mask provenance."
+        }
+      },
+      "masked_strided_store_copy_completion": {
+        "64": {
+          "base_system_cycles": 3650.0,
+          "additional_row_system_cycles": 3.09375,
+          "minimum_rows": 128,
+          "maximum_rows": 256,
+          "minimum_iterations": 8,
+          "maximum_iterations": 8,
+          "evidence": "Fresh A5 compiler-equivalent forced-SIMD masked scatter controls at 128 and 256 rows per source iteration, eight static iterations, and a 64-byte FP32 row stride. The separate destination predicate exposes the backend strided-store completion path; a shared-predicate load/store control is excluded structurally."
+        }
+      },
+      "source": "Shared Ascend950PR contiguous-memory joint fit",
+      "confidence": "high",
+      "note": "Uncovered operations retain startup-per-operation plus byte throughput. Proven uninterrupted independent-loop groups use the generic grouped envelopes above.",
+      "strided_short_completion": {
+        "description": "Closed-form strided load/store completion fits for the SIMD StridedShort direct-access domain. Each slot fixes a formula shape in StageCostModels.cpp and supplies only its fitted numbers. Calibrated from rotate-loop Event slopes (2000/8000 iterations), so a slot is a steady-state marginal per-iteration cost and requires an owning loop. Compile-time-constant stride, affine address, static shape and non-indirect provenance only. Load and SIMT slots price masked and unmasked alike (a runtime all-true mask measured free); the two simd_store_masked_* slots are the masked-only exception, because a mask forces the destination to be read back before the write.",
+        "simd_load_stride2_r1": {
+          "intercept_system_cycles": 65.1033,
+          "coefficient_system_cycles": [
+            0.00847947,
+            0.00478897
+          ],
+          "structural_constants": [
+            1536.0
+          ],
+          "evidence": "PHYS3_simd_load_stride2_r1.json; 21 rotate-loop points, ISB=2*eb, MAPE 1.22%"
+        },
+        "simd_load_stride2_r2": {
+          "intercept_system_cycles": 68.6263,
+          "coefficient_system_cycles": [
+            1.1068,
+            3.5929,
+            0.5032,
+            131.6284,
+            3.0088,
+            54.4293
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS3_simd_load_stride2_r2.json; 120 points, branch A src>=32 (n=87, MAPE 2.95%) / branch B src<32 (n=33, MAPE 8.52%)"
+        },
+        "simd_load_stride_gt2_r1_dense": {
+          "intercept_system_cycles": 75.6117,
+          "coefficient_system_cycles": [
+            0.361835,
+            0.079356,
+            16.5852,
+            1.2845,
+            0.014506
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS3_simd_load_stride_gt2_r1_dense.json; 136 points, n>=32 and ISB<=128, MAPE 8.70%. Dense regime ISB<=32 only; see simd_load_stride_gt2_r1_sparse."
+        },
+        "simd_load_stride_gt2_r1_sparse": {
+          "intercept_system_cycles": 52.0583686724,
+          "coefficient_system_cycles": [
+            0.5012607307,
+            0.0016325329,
+            49.6456048012
+          ],
+          "structural_constants": [],
+          "evidence": "ISB>32 B sparse segment, 45 points, four terms (intercept, n, n*eb, mx64), weighted least squares w=1/T, MAPE 8.88%. Rescanned 2026-10-18 with the probe AUTO rotate window (per-point step = tile span, 33-67 MB); the historical fixed step 8192 x mask 16383 streamed 262 MB per launch and inflated this regime up to 2.2x. K-marginal on the pytest_strided_compaction geometry (n=256, ISB=64 B, eb=4): 231.70 ns vs 221.78 measured, +4.5%."
+        },
+        "simd_load_stride_gt2_r2": {
+          "intercept_system_cycles": 96.769,
+          "coefficient_system_cycles": [
+            37.562,
+            0.15665,
+            2.6914,
+            52.53,
+            36.791,
+            0.00028649
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS3_simd_load_stride_gt2_r2.json; 438 points, MAPE 8.44%"
+        },
+        "simd_store_r1": {
+          "intercept_system_cycles": 23.5488,
+          "coefficient_system_cycles": [
+            0.185763,
+            85.459976,
+            0.438898,
+            0.057264
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS3_simd_store_r1.json; 189 points, MAPE 5.33%"
+        },
+        "simd_store_r2": {
+          "intercept_system_cycles": 76.0485,
+          "coefficient_system_cycles": [
+            76.5708,
+            0.345843,
+            1.11529
+          ],
+          "structural_constants": [
+            128.0,
+            128.0
+          ],
+          "evidence": "PHYS3_simd_store_r2.json; 325 points, MAPE 8.12%"
+        },
+        "simd_store_masked_stride_gt2": {
+          "intercept_system_cycles": 233.13893010359232,
+          "coefficient_system_cycles": [
+            0.2451482631596979,
+            99.29231992004017,
+            0.6014874004037386,
+            0.026348222847080462,
+            0.0385182191830324
+          ],
+          "structural_constants": [],
+          "evidence": "data_provider/strided_ldst/pre-explore/results/final/errors_masked_store.csv, stride>=3 branch; 384 points (int8/float16/float32, n=4..512, stride=3/4/5/6/8/16/32/64/128, 15 rank-two shapes), MAPE 6.96%. Masked-only: a runtime mask makes the SIMD store read the destination back, so the fit carries an extra 1 KB aggregate term. Worst regime is stride>=32 with n<=16 (40-56%, 15/384 points), see README 3.5(a)."
+        },
+        "simd_store_masked_stride2": {
+          "intercept_system_cycles": 124.86862273081567,
+          "coefficient_system_cycles": [
+            0.8070970824984168,
+            87.96083138064083,
+            0.17780805823428358,
+            0.030050232829188506,
+            0.026088132016179322
+          ],
+          "structural_constants": [],
+          "evidence": "data_provider/strided_ldst/pre-explore/results/final/errors_masked_store.csv, stride==2 branch; 100 points, MAPE 7.08%. Same shape as simd_store_masked_stride_gt2 with its own numbers: stride 2 lowers through DeinterleaveStatusOptimization (block move plus extract_slice), so the fixed and read-modify-write terms are visibly cheaper. Masked-only."
+        }
+      },
+      "strided_wide_completion": {
+        "description": "Closed-form StridedWide (rank-2, one unit-stride axis, run>=32B, unmasked, inner) completion fits.  Calibrated on the WIDE2/LOADV1 sweeps; a slot is a steady-state per-iteration cost in SYS_CNT nanoseconds (== system cycles at 1 GHz).  Admission is bounded to the swept domain; anything outside keeps the fallback mechanisms.",
+        "evidence": "swide_phys/phys_cap_mixed.json; data_provider/strided_ldst/pre-explore README section 5",
+        "simd_load_swide_rows_le4": {
+          "terms": [
+            "n",
+            "rows_x_duty",
+            "duty2",
+            "S128",
+            "lines_per_seg",
+            "run"
+          ],
+          "intercept_system_cycles": 70.80707178007145,
+          "coefficient_system_cycles": [
+            6.550360331216047e-05,
+            10.546150044763415,
+            -12.755333498457722,
+            7.293701819112106e-05,
+            4.672233295440351,
+            -0.032286399819482614
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows<=4, n=260, MAPE 3.14%)"
+        },
+        "simd_load_swide_rows_gt4": {
+          "terms": [
+            "n",
+            "rows_x_duty",
+            "total_lines",
+            "S256",
+            "duty",
+            "sqrt_n"
+          ],
+          "intercept_system_cycles": 101.52931530092435,
+          "coefficient_system_cycles": [
+            0.008196399400061767,
+            0.4790887100510337,
+            0.6099416684106536,
+            3.24053937338015e-05,
+            36.81513083856632,
+            -1.1093310965884338
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows>4, n=291, MAPE 9.39%)"
+        },
+        "simd_store_swide_rows_le2": {
+          "terms": [
+            "duty",
+            "mis32",
+            "rows_x_duty",
+            "inv_n",
+            "gap",
+            "S2048",
+            "S4096",
+            "L4096",
+            "mx512",
+            "mx128",
+            "elem_per_line",
+            "sqrt_n",
+            "mx256"
+          ],
+          "intercept_system_cycles": 86.575985175972,
+          "coefficient_system_cycles": [
+            22.529715252433903,
+            -0.1288193479212923,
+            3.6464780245187662,
+            147.6223233378004,
+            0.0016515237474710835,
+            3.990710573487153e-08,
+            -2.565564840733101e-07,
+            -7.283043439547354,
+            0.013011783751425162,
+            1.9904395389482001,
+            -1.8594783737502767,
+            0.4607797347207879,
+            -0.14606638536526004
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows<=2, n=130, MAPE 5.92%)"
+        },
+        "simd_store_swide_rows_gt2": {
+          "terms": [
+            "rows_x_duty",
+            "duty2",
+            "total_lines",
+            "mis32",
+            "L128",
+            "mx4096",
+            "rows2",
+            "mx1024",
+            "run",
+            "duty",
+            "cseg",
+            "mx512",
+            "mx2048",
+            "mx256",
+            "elem_per_line",
+            "mx128"
+          ],
+          "intercept_system_cycles": 94.22600457509917,
+          "coefficient_system_cycles": [
+            1.6163024361406704,
+            14.629849403081689,
+            0.8243103855623043,
+            82.17752540464355,
+            -0.29896592370791575,
+            -0.015523025381500806,
+            -0.00084773154288209,
+            0.022562954047882892,
+            -0.018441862203049574,
+            18.09331936108495,
+            0.011061891610479687,
+            0.008109627717129465,
+            0.014242820835483394,
+            -0.12942216910180598,
+            -2.690097213016283,
+            2.765691356386161
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows>2, n=464, MAPE 8.79%)"
+        }
+      }
+    },
+    "reduction": {
+      "description": "Generic FP32 SIMD row-reduction envelope: one startup per semantic tt.reduce plus aggregate reduction lane-steps divided by the measured rate.",
+      "operation_startup_measurement": "simd.reduction.operation_startup",
+      "lane_step_throughput_measurement": "simd.reduction.lane_step_throughput",
+      "masked_accumulator_completion_setup_measurement": "simd.reduction.one_trip_masked_accumulator.completion_setup",
+      "scalarized_multi_result": {
+        "minimum_axis_extent": 32,
+        "reference_result_count": 2,
+        "operation_startup_system_cycles": 117.54327080236787,
+        "logical_elements_per_system_cycle": 0.07120216382814883,
+        "evidence": "Fresh A5 v112 argmax-like paired-value/index tt.reduce surface. Extents 32, 64 and 125 fit the scalarized nested-loop lowering; 48x128 is an untouched holdout at +0.35%. Extent 16 follows a different route and is excluded. Selection uses only TTIR row count, reduction extent, result count and element width."
+      },
+      "source": "bench_simd_reduction_rate.py paired contiguous-output reduction/control sweep; five independent shape/repeat points, with each point held out in turn. One-trip zero-filled masked accumulators additionally use the exact runtime active prefix and a separately measured one-time completion setup from data_provider/950pr_simd_structural_completion_20261008.json.",
+      "confidence": "high"
+    },
+    "sort": {
+      "description": "Bounded SIMD native-vsort completion surface. Within the calibrated FP32 axis range, service scales with independent rows and is nearly invariant to the row extent.",
+      "minimum_axis_extent": 8,
+      "maximum_axis_extent": 32,
+      "element_bit_width": 32,
+      "operation_startup_system_cycles": 31.247062718026427,
+      "rows_per_system_cycle": 0.005074202873581558,
+      "evidence": "Fresh A5 v112 ascend.sort to hivm.hir.vsort sweep. 64x16 and 128x16 are fit points; 256x16 is an untouched holdout at +0.31%, while extent-8 and extent-32 controls remain within 1.5%. Selection uses only TTIR rows, axis extent and element width."
+    },
+    "dot": {
+      "description": "SIMD tiny-dot cost: dynamic matrix instances times setup plus aggregate FLOPs divided by dependent-chain throughput.",
+      "startup_system_cycles": 134.510204,
+      "startup_measurement": "simd.dot.tiny.dependent.startup",
+      "flops_per_system_cycle": 568.16419,
+      "throughput_measurement": "simd.dot.tiny.dependent.throughput",
+      "physical_tile_resource_formula": {
+        "status": "qualified_physical_resource_formula_v2",
+        "target": "Ascend950PR_9579",
+        "lowering_contract": "CANN9.1_Ascend950PR9579_hivm_mmadL1_tile16_f16f16f32_v1",
+        "formula": {
+          "tiny_mac_floor_system_cycles": 56.484375,
+          "cube_mac_system_cycles_per_sqrt_flop": 0.09853173506205343,
+          "mte1_startup_system_cycles": 17.376507344755346,
+          "mte1_bytes_exponent": 1.1,
+          "lhs_mte1_system_cycles_per_byte_power": 0.0007762358350308137,
+          "rhs_mte1_system_cycles_per_byte_power": 0.0010645970697710496,
+          "tile_size": 16,
+          "cube_minimum_flops": 262144.0,
+          "narrow_n_reference_tiles": 2.0,
+          "wide_n_reference_tiles": 4.0,
+          "narrow_n_occupancy_exponent": 0.875,
+          "wide_n_occupancy_exponent": 0.875,
+          "evidence": "thirteen exact-binary 9579 tile classes including independent m128n32k32; five-process PipeUtilization resource slopes; resource envelope fit, leave-one-out, unseen-tile native, and Flash Attention native validation all below 10%; excludes FIX/ready/completion"
+        }
+      },
+      "source": "Ascend950PR dependent N=16/N=32 dot-chain joint fit with one final store",
+      "confidence": "medium"
+    },
+    "stage_resources": {
+      "description": "Generic SIMD front-end inputs. Unclassified scalar and control instructions contribute only to the measured shared issue lower bound. Non-uniform loaded-index tensors use isolated transaction-count curves because SIMD lowering scalarizes lane addresses. Loaded-index atomic service uses the common multi-program rate plus a separate measured one-physical-program rate; contiguous atomic addresses retain the default vector rate. A 128/512/2048-element used-versus-unused FP32 atomic surface separates result dependency from atomic service and final-store work.",
+      "issue_instructions_per_system_cycle": 3.298629007,
+      "issue_instructions_per_system_cycle_measurement": "simd.frontend.effective_issue_floor",
+      "atomic_memory": {
+        "default": {
+          "logical_elements_per_system_cycle": 2,
+          "operation_startup_system_cycles": 0,
+          "result_dependency_system_cycles": 300,
+          "unknown_contention_multiplier": 1
+        },
+        "operations": {
+          "loaded_index": {
+            "logical_elements_per_system_cycle": 0.0076,
+            "single_physical_program_logical_elements_per_system_cycle": 0.0086464095358345,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1
+          }
+        }
+      },
+      "prefix_scan": {
+        "step_latency_system_cycles": 1.818,
+        "step_latency_measurement": "simd.f32.add.dependent_latency",
+        "description": "Additive SIMD scans retain the measured dependent-vector-add formula. Non-additive straight-line helpers use completion curves selected by the returned TTIR combine class and semantic scan geometry.",
+        "straight_line_completion_by_combine": {
+          "minmax": {
+            "startup_system_cycles": 321.949293,
+            "elements_per_system_cycle": 0.5586999934,
+            "dependency_step_system_cycles": 35.17236013,
+            "evidence": "Fresh forced-SIMD A5 cummax structural surface at rows/extent 8x32, 16x32, 32x32, 16x64 and 8x128. The joint fit prices semantic elements and the serial scan-axis dependency separately after subtracting the generic kernel boundary and explicit non-scan Stages; no operator name or exact shape participates online. A one-sequence backend-helper path is selected by independent_sequence_count=1 and uses the extent curve in data_provider/950pr_simd_structural_completion_20261008.json; multi-sequence geometry retains the aggregate-work/dependency formula.",
+            "non_unit_axis_stride_completion": {
+              "startup_system_cycles": 76.6228661003408,
+              "elements_per_system_cycle": 0.8451727817,
+              "minimum_axis_extent": 3,
+              "maximum_axis_extent": 8,
+              "minimum_axis_stride": 4,
+              "maximum_axis_stride": 8,
+              "minimum_semantic_elements": 35,
+              "maximum_semantic_elements": 168,
+              "evidence": "Fresh forced-SIMD A5 strided cummin TTIR surface at X=1/2/3/4, axis extent=3/5/8 and physical axis stride=4/7/8. The bounded linear completion fit uses only semantic elements after subtracting the generic kernel boundary and explicit load/store stages; the online match is combine class, stride, extent, result arity and work range."
+            },
+            "single_sequence_completion_system_cycle_measurements": {
+              "64": "simd.straight_line_scan.minmax.single_sequence.extent_64.completion_cost",
+              "128": "simd.straight_line_scan.minmax.single_sequence.extent_128.completion_cost",
+              "256": "simd.straight_line_scan.minmax.single_sequence.extent_256.completion_cost",
+              "512": "simd.straight_line_scan.minmax.single_sequence.extent_512.completion_cost",
+              "1024": "simd.straight_line_scan.minmax.single_sequence.extent_1024.completion_cost"
+            }
+          },
+          "mul": {
+            "startup_system_cycles": 232.929111,
+            "elements_per_system_cycle": 0.539907385,
+            "dependency_step_system_cycles": 14.43342784,
+            "evidence": "Fresh forced-SIMD A5 cumprod structural surface at rows/extent 8x32, 16x32, 32x32, 16x64 and 8x128. The joint fit prices semantic elements and the serial scan-axis dependency separately after subtracting the generic kernel boundary and explicit non-scan Stages; no operator name or exact shape participates online. A one-sequence backend-helper path is selected by independent_sequence_count=1 and uses the extent curve in data_provider/950pr_simd_structural_completion_20261008.json; multi-sequence geometry retains the aggregate-work/dependency formula.",
+            "single_sequence_completion_system_cycle_measurements": {
+              "64": "simd.straight_line_scan.mul.single_sequence.extent_64.completion_cost",
+              "128": "simd.straight_line_scan.mul.single_sequence.extent_128.completion_cost",
+              "256": "simd.straight_line_scan.mul.single_sequence.extent_256.completion_cost",
+              "512": "simd.straight_line_scan.mul.single_sequence.extent_512.completion_cost",
+              "1024": "simd.straight_line_scan.mul.single_sequence.extent_1024.completion_cost"
+            }
+          }
+        },
+        "maximum_reverse_axis_extent": 256,
+        "reverse_extent_legality_evidence": "Fresh A5 W512 reverse SIMD cumsum failed at device synchronize with 507035; the same W512 reverse kernel succeeds in SIMT. W128/W256 reverse SIMD execute correctly. This is a target/compiler route-legality bound, not a cost fit."
+      },
+      "loop_carried_recurrence": {
+        "description": "Measured lower bound for one physical group's iteration of a reduction recurrence. The work-size key is reduction lane-steps per logical program; SIMD has only factor 1.",
+        "reduction_group_iteration_system_cycle_measurements": {
+          "1": {
+            "1024": "simd.recurrence.reduction_lane_steps_1024.factor_1.group_incremental_cost",
+            "4096": "simd.recurrence.reduction_lane_steps_4096.factor_1.group_incremental_cost"
+          }
+        },
+        "reduction_group_startup_system_cycle_measurements": {
+          "1": {
+            "1024": "simd.recurrence.reduction_lane_steps_1024.factor_1.group_startup_cost",
+            "4096": "simd.recurrence.reduction_lane_steps_4096.factor_1.group_startup_cost"
+          }
+        },
+        "single_result_row_reduction_completion": {
+          "minimum_reduction_extent": 64,
+          "maximum_reduction_extent": 256,
+          "minimum_iteration_count": 4,
+          "maximum_iteration_count": 16,
+          "minimum_source_program_count": 8,
+          "maximum_source_program_count": 32,
+          "iteration_system_cycles": 223.083333333333,
+          "startup_intercept_system_cycles": -1343.37436694356,
+          "startup_sqrt_program_system_cycles": 670.69078195544,
+          "evidence": "data_provider/950pr_simd_single_result_row_reduction_recurrence_20261009.json; endpoint fit uses P=8/32 and T=4/16 only. P=16,T=8 and reduction extents 64/256 are untouched structural holdouts, all within 3.5%. The matcher uses recurrence/reduction geometry and bounded source program count; no operator or kernel name is consumed."
+        }
+      },
+      "continuous_memory": {
+        "description": "Measured physical-group execution envelope for ordinary contiguous FP32 transfers. Curves are consumed only inside the measured byte interval; operation count is multiplied once and route composition multiplies runtime waves once.",
+        "load_group_operation_system_cycle_measurements": {
+          "1": {
+            "1024": "simd.continuous_load.fp32.bytes_1024.factor_1.group_incremental_cost"
+          }
+        },
+        "store_group_operation_system_cycle_measurements": {
+          "1": {
+            "1024": "simd.continuous_store.fp32.bytes_1024.factor_1.group_incremental_cost"
+          }
+        }
+      },
+      "mixed_parent_memory_completion": {
+        "enabled": true,
+        "minimum_parent_iterations": 55,
+        "reference_bytes_per_program": 20480,
+        "system_cycles_per_excess_parent_iteration": 1580,
+        "evidence": "A5 card4 cv_transition_solve_tail_full/transition v75: independent 10-load/10-store FP32 16x16 parent-memory probes at P=224,1024,1536,2048,3072,4096 and row strides 64/8192/16384 bytes. Q<=55 is the holdout-safe base domain; the large-Q slope is cross-checked by six solve_tril shapes and is applied from compiler-derived parent bytes/Q only."
+      },
+      "indirect_memory": {
+        "load_element_system_cycle_measurements": {
+          "8": "simd.indirect_load.fp32.elements_8.incremental_cost",
+          "32": "simd.indirect_load.fp32.elements_32.incremental_cost",
+          "128": "simd.indirect_load.fp32.elements_128.incremental_cost"
+        },
+        "load_system_cycle_measurements": {
+          "8": "simd.indirect_load.fp16.warp_instructions_8.incremental_cost",
+          "16": "simd.indirect_load.fp16.warp_instructions_16.incremental_cost"
+        },
+        "load_startup_system_cycle_measurements": {
+          "8": "simd.indirect_load.fp16.warp_instructions_8.route_residual_startup_cost",
+          "16": "simd.indirect_load.fp16.warp_instructions_16.route_residual_startup_cost"
+        },
+        "grid_stride_load_system_cycle_measurements": {
+          "8": "simd.grid_stride.indirect_load.fp16.warp_instructions_8.incremental_cost"
+        },
+        "grid_stride_load_startup_system_cycle_measurements": {
+          "8": "simd.grid_stride.indirect_load.fp16.warp_instructions_8.startup_cost"
+        },
+        "segmented_load_fp32_group_system_cycle_measurements": {
+          "1": {
+            "8": {
+              "32": "simd.segmented_indirect_load.fp32.segments_8.contiguous_32.factor_1.incremental_cost"
+            }
+          }
+        },
+        "store_system_cycle_measurements": {
+          "8": "simd.indirect_store.fp32.segments_8.incremental_cost",
+          "32": "simd.indirect_store.fp32.segments_32.incremental_cost",
+          "128": "simd.indirect_store.fp32.segments_128.incremental_cost"
+        }
+      },
+      "source": "Ascend950PR versioned microbenchmark evidence. The loaded-index slope is measured independently by probe_indirect_gather_rate.py. data_provider/950pr_simd_indirect_startup_ownership_20261006.json shows why the raw one-wave count-fit intercept is not added: it already contains the separately modeled 56-program kernel boundary and final-store/control stages. Its transaction-count parameter is shared by scalarized FP16/FP32 SIMD accesses; uncovered transfers retain explicit analytical fallback.",
+      "grid_stride_loop": {
+        "dot_system_cycle_measurements": {
+          "8192": "simd.grid_stride.dot.fp16.flops_8192.body_cost"
+        },
+        "dot_startup_system_cycle_measurements": {
+          "8192": "simd.grid_stride.dot.fp16.flops_8192.startup_cost"
+        },
+        "forward_scan_system_cycle_measurements": {
+          "128": "simd.grid_stride.scan.i32.forward.extent_128.body_cost",
+          "256": "simd.grid_stride.scan.i32.forward.extent_256.body_cost"
+        },
+        "forward_scan_startup_system_cycle_measurements": {
+          "128": "simd.grid_stride.scan.i32.forward.extent_128.startup_cost",
+          "256": "simd.grid_stride.scan.i32.forward.extent_256.startup_cost"
+        },
+        "reverse_scan_system_cycle_measurements": {
+          "128": "simd.grid_stride.scan.i32.reverse.extent_128.body_cost",
+          "256": "simd.grid_stride.scan.i32.reverse.extent_256.body_cost"
+        },
+        "reverse_scan_startup_system_cycle_measurements": {
+          "128": "simd.grid_stride.scan.i32.reverse.extent_128.startup_cost",
+          "256": "simd.grid_stride.scan.i32.reverse.extent_256.startup_cost"
+        },
+        "description": "Dynamic source-loop SIMD dot and prefix-scan curves from isolated Q sweeps. Curves are selected from compiler-derived loop structure and workload geometry; no cross-stage pipeline overlap is assumed. The matching dynamic loaded-index curve is stored under indirect_memory.grid_stride_load_* so the common parser applies it only to compiler-proven grid-stride stages."
+      },
+      "two_pass_rowwise_completion": {
+        "residual_system_cycle_measurements": {
+          "1": {
+            "256": {
+              "3": "simd.two_pass_rowwise.fp16.extent_256.q_3.factor_1.residual"
+            },
+            "512": {
+              "3": "simd.two_pass_rowwise.fp16.extent_512.q_3.factor_1.residual"
+            },
+            "1024": {
+              "2": "simd.two_pass_rowwise.fp16.extent_1024.q_2.factor_1.residual",
+              "3": "simd.two_pass_rowwise.fp16.extent_1024.q_3.factor_1.residual",
+              "5": "simd.two_pass_rowwise.fp16.extent_1024.q_5.factor_1.residual",
+              "8": "simd.two_pass_rowwise.fp16.extent_1024.q_8.factor_1.residual"
+            }
+          }
+        },
+        "evidence": "data_provider/950pr_two_pass_rowwise_completion_20261007.json; forced-SIMD development points use extents 256/512/1024 and Q=2/3/5/8. Untouched extent-768,Q=3 and extent-1024,Q=4 interpolation holdouts are within 3.2%. Matching is the compiler-derived two-segment/two-read/one-reduction/no-dot structure; no kernel or operator identity is consumed and execution remains serialized."
+      },
+      "scalar_memory": {
+        "description": "SIMD scalar white-box: MainScalar load T=prep+fill+max(0,K-outstanding)*extra_line+(K-1)*issue; scalar store lowers to MTE3 T=prep+fill. Values are CAModel core cycles converted by 988.9/1800.",
+        "main_load_prep_system_cycles": 3.8457222222222223,
+        "main_load_fill_system_cycles": 241.73111111111112,
+        "main_load_issue_system_cycles": 1.6481666666666668,
+        "main_load_outstanding_line_count": 2,
+        "main_load_extra_line_low_system_cycles": 137.34722222222223,
+        "main_load_extra_line_high_system_cycles": 192.28611111111113,
+        "main_load_extra_line_high_threshold": 4,
+        "mte3_store_prep_system_cycles": 10.98777777777778,
+        "mte3_store_fill_system_cycles": 247.22500000000002,
+        "evidence": "Upstream 7e1107f89 target white-box coefficients from CAModel; resource-level target constants, independent of kernel identity.",
+        "in_kernel_transfer_scale": 0.45,
+        "in_kernel_transfer_scale_evidence": "instance_norm full-minus-normonly A/B on Ascend950PR 2026-11-05: scalar increment 1.92 us vs isolated white-box 5.04 us"
+      }
+    }
+  },
+  "simt": {
+    "description": "Inputs used to estimate the all-SIMT candidate and the SIMT portion of a mixed candidate.",
+    "warp_size_measurement": "simt.warp_size",
+    "setup_system_cycles": {
+      "description": "Completion-inclusive minimal-SIMT-VF net setup selected by launched warp count. All entries use compile-time-specialized binaries and subtract the matching barrier-only loop.",
+      "empty_launch_measurement": "simt.setup.serialized_minimal_net.warps_1",
+      "empty_launch_measurements": {
+        "1": "simt.setup.serialized_minimal_net.warps_1",
+        "2": "simt.setup.serialized_minimal_net.warps_2",
+        "4": "simt.setup.serialized_minimal_net.warps_4",
+        "8": "simt.setup.serialized_minimal_net.warps_8",
+        "16": "simt.setup.serialized_minimal_net.warps_16",
+        "32": "simt.setup.serialized_minimal_net.warps_32"
+      }
+    },
+    "ops": {
+      "f32.add": {
+        "description": "Measured FP32 SIMT scalar-add base throughput resolved from the shared microbenchmark profile.",
+        "throughput_measurement": "simt.f32.add.throughput",
+        "throughput_measurements": {
+          "1": "simt.f32.add.throughput.warps_1",
+          "2": "simt.f32.add.throughput.warps_2",
+          "4": "simt.f32.add.throughput.warps_4",
+          "8": "simt.f32.add.throughput.warps_8",
+          "16": "simt.f32.add.throughput.warps_16",
+          "32": "simt.f32.add.throughput.warps_32"
+        }
+      },
+      "fp32.saturated": {
+        "description": "Execution lower bound for every numeric TTIR operation without a dedicated operation profile. Each semantic operation retains its TTIR name in the workload and pays at least one lane operation at the measured active-warp FP32 arithmetic saturation rate; shape, address, view, and layout-only operations are excluded.",
+        "relative_to": "f32.add",
+        "factor": 1.0
+      },
+      "f32.sub": {
+        "description": "Measured FP32 SIMT scalar-subtract throughput.",
+        "throughput_measurement": "simt.f32.sub.throughput",
+        "throughput_measurements": {
+          "1": "simt.f32.sub.throughput.warps_1",
+          "2": "simt.f32.sub.throughput.warps_2",
+          "4": "simt.f32.sub.throughput.warps_4",
+          "8": "simt.f32.sub.throughput.warps_8",
+          "16": "simt.f32.sub.throughput.warps_16",
+          "32": "simt.f32.sub.throughput.warps_32"
+        }
+      },
+      "f32.mul": {
+        "description": "Measured FP32 SIMT scalar-multiply throughput.",
+        "throughput_measurement": "simt.f32.mul.throughput",
+        "throughput_measurements": {
+          "1": "simt.f32.mul.throughput.warps_1",
+          "2": "simt.f32.mul.throughput.warps_2",
+          "4": "simt.f32.mul.throughput.warps_4",
+          "8": "simt.f32.mul.throughput.warps_8",
+          "16": "simt.f32.mul.throughput.warps_16",
+          "32": "simt.f32.mul.throughput.warps_32"
+        }
+      },
+      "f32.div": {
+        "description": "Measured FP32 SIMT scalar-divide throughput.",
+        "throughput_measurement": "simt.f32.div.throughput",
+        "throughput_measurements": {
+          "1": "simt.f32.div.throughput.warps_1",
+          "2": "simt.f32.div.throughput.warps_2",
+          "4": "simt.f32.div.throughput.warps_4",
+          "8": "simt.f32.div.throughput.warps_8",
+          "16": "simt.f32.div.throughput.warps_16",
+          "32": "simt.f32.div.throughput.warps_32"
+        }
+      },
+      "f32.max": {
+        "description": "Measured FP32 SIMT scalar-maximum throughput.",
+        "throughput_measurement": "simt.f32.max.throughput",
+        "throughput_measurements": {
+          "1": "simt.f32.max.throughput.warps_1",
+          "2": "simt.f32.max.throughput.warps_2",
+          "4": "simt.f32.max.throughput.warps_4",
+          "8": "simt.f32.max.throughput.warps_8",
+          "16": "simt.f32.max.throughput.warps_16",
+          "32": "simt.f32.max.throughput.warps_32"
+        }
+      },
+      "f32.relu": {
+        "description": "SIMT ReLU helper inherits maximum-class scalar throughput while retaining its distinct semantic operation class.",
+        "relative_to": "f32.max",
+        "factor": 1.0
+      },
+      "f32.abs": {
+        "description": "Measured FP32 SIMT scalar-absolute-value throughput.",
+        "throughput_measurement": "simt.f32.abs.throughput",
+        "throughput_measurements": {
+          "1": "simt.f32.abs.throughput.warps_1",
+          "2": "simt.f32.abs.throughput.warps_2",
+          "4": "simt.f32.abs.throughput.warps_4",
+          "8": "simt.f32.abs.throughput.warps_8",
+          "16": "simt.f32.abs.throughput.warps_16",
+          "32": "simt.f32.abs.throughput.warps_32"
+        }
+      },
+      "f32.exp": {
+        "description": "Measured effective FP32 SIMT exponential throughput.",
+        "throughput_measurement": "simt.f32.exp.throughput",
+        "throughput_measurements": {
+          "1": "simt.f32.exp.throughput.warps_1",
+          "2": "simt.f32.exp.throughput.warps_2",
+          "4": "simt.f32.exp.throughput.warps_4",
+          "8": "simt.f32.exp.throughput.warps_8",
+          "16": "simt.f32.exp.throughput.warps_16",
+          "32": "simt.f32.exp.throughput.warps_32"
+        }
+      },
+      "f32.log": {
+        "description": "Measured effective FP32 SIMT logarithm throughput.",
+        "throughput_measurement": "simt.f32.log.throughput",
+        "throughput_measurements": {
+          "1": "simt.f32.log.throughput.warps_1",
+          "2": "simt.f32.log.throughput.warps_2",
+          "4": "simt.f32.log.throughput.warps_4",
+          "8": "simt.f32.log.throughput.warps_8",
+          "16": "simt.f32.log.throughput.warps_16",
+          "32": "simt.f32.log.throughput.warps_32"
+        }
+      },
+      "f32.sqrt": {
+        "description": "FP32 SIMT square-root lowers to one scalar arithmetic instruction in the audited operation-chain controls; inherit the active-warp arithmetic throughput curve.",
+        "relative_to": "f32.add",
+        "factor": 1.0
+      },
+      "f32.cos": {
+        "description": "Effective SIMT cosine completion from the fresh 1024-element dependent operation-chain slope. The factor applies to every active-warp point of the measured scalar arithmetic curve.",
+        "relative_to": "f32.add",
+        "factor": 84.0
+      },
+      "predicate.cmp": {
+        "description": "Measured standalone semantic SIMT comparison throughput.",
+        "throughput_measurement": "simt.predicate.cmp.throughput",
+        "throughput_measurements": {
+          "1": "simt.predicate.cmp.throughput.warps_1",
+          "2": "simt.predicate.cmp.throughput.warps_2",
+          "4": "simt.predicate.cmp.throughput.warps_4",
+          "8": "simt.predicate.cmp.throughput.warps_8",
+          "16": "simt.predicate.cmp.throughput.warps_16",
+          "32": "simt.predicate.cmp.throughput.warps_32"
+        }
+      },
+      "predicate.select": {
+        "description": "Measured SIMT select throughput.",
+        "throughput_measurement": "simt.predicate.select.throughput",
+        "throughput_measurements": {
+          "1": "simt.predicate.select.throughput.warps_1",
+          "2": "simt.predicate.select.throughput.warps_2",
+          "4": "simt.predicate.select.throughput.warps_4",
+          "8": "simt.predicate.select.throughput.warps_8",
+          "16": "simt.predicate.select.throughput.warps_16",
+          "32": "simt.predicate.select.throughput.warps_32"
+        }
+      },
+      "convert.cast": {
+        "description": "Measured effective SIMT cast throughput per semantic cast.",
+        "throughput_measurement": "simt.convert.cast.throughput",
+        "throughput_measurements": {
+          "1": "simt.convert.cast.throughput.warps_1",
+          "2": "simt.convert.cast.throughput.warps_2",
+          "4": "simt.convert.cast.throughput.warps_4",
+          "8": "simt.convert.cast.throughput.warps_8",
+          "16": "simt.convert.cast.throughput.warps_16",
+          "32": "simt.convert.cast.throughput.warps_32"
+        }
+      },
+      "f32.clamp": {
+        "description": "Measured effective SIMT throughput per semantic clamp.",
+        "throughput_measurement": "simt.f32.clamp.throughput",
+        "throughput_measurements": {
+          "1": "simt.f32.clamp.throughput.warps_1",
+          "2": "simt.f32.clamp.throughput.warps_2",
+          "4": "simt.f32.clamp.throughput.warps_4",
+          "8": "simt.f32.clamp.throughput.warps_8",
+          "16": "simt.f32.clamp.throughput.warps_16",
+          "32": "simt.f32.clamp.throughput.warps_32"
+        }
+      },
+      "layout.transpose": {
+        "description": "Conservative SIMT fallback for transpose exchange workload.",
+        "throughput_scalar_ops_per_system_cycle": 50.8
+      },
+      "histogram.i32": {
+        "description": "Completion-inclusive local-SIMT i32 histogram curve refreshed with the clean TA c3f4182c20a0 and NPUIR 03c14949b065 toolchain. Repository-native 8192-row sweeps cover 64/128/256 bins and uniform/single-bin/radix inputs; the 133.173278-cycle startup is the median structural residual across those nine points. The knee at 128 work units is the four-warp lane capacity, and the fixed local-scope envelope is already present in the observed semantic completion.",
+        "throughput_scalar_ops_per_system_cycle": 1.07,
+        "startup_system_cycles": 133.173278,
+        "free_work_units": 128,
+        "includes_local_scope_handoff": true
+      },
+      "srem": {
+        "description": "Measured SIMT srem throughput per active warp count.",
+        "throughput_measurement": "simt.srem.throughput",
+        "throughput_measurements": {
+          "1": "simt.srem.throughput.warps_1",
+          "2": "simt.srem.throughput.warps_2",
+          "4": "simt.srem.throughput.warps_4",
+          "8": "simt.srem.throughput.warps_8",
+          "16": "simt.srem.throughput.warps_16",
+          "32": "simt.srem.throughput.warps_32"
+        }
+      },
+      "urem": {
+        "description": "Measured SIMT urem throughput per active warp count.",
+        "throughput_measurement": "simt.urem.throughput",
+        "throughput_measurements": {
+          "1": "simt.urem.throughput.warps_1",
+          "2": "simt.urem.throughput.warps_2",
+          "4": "simt.urem.throughput.warps_4",
+          "8": "simt.urem.throughput.warps_8",
+          "16": "simt.urem.throughput.warps_16",
+          "32": "simt.urem.throughput.warps_32"
+        }
+      }
+    },
+    "dot": {
+      "description": "SIMT tiny-dot cost: dynamic matrix instances times measured setup plus aggregate FLOPs divided by measured dependent-chain throughput.",
+      "startup_system_cycles": 171.994898,
+      "startup_measurement": "simt.dot.tiny.dependent.startup",
+      "flops_per_system_cycle": 32.21056,
+      "flops_per_system_cycle_by_active_warp_count": {
+        "4": 32.21056,
+        "8": 46.1715435934145,
+        "16": 71.0622594792813
+      },
+      "throughput_measurement": "simt.dot.tiny.dependent.throughput",
+      "source": "Ascend950PR accumulator-feedback dependent-dot chain sweeps. The 4-warp base comes from the N=16/N=32 joint fit; the 8/16 active-warp rates use the conservative lower aggregate gain from independent size-16, size-32 and size-64 count-8/count-16 F sweeps. The occupancy curve is consumed only by loop-carried dot recurrence Stages; straight-line tiny-cube Stages retain the base rate.",
+      "confidence": "medium"
+    },
+    "shuffle": {
+      "description": "SIMT workload-effective shuffle rate resolved from the shared runtime-loop microbenchmark. Route-level generalization confidence is intentionally lower than measurement repeatability.",
+      "throughput_measurement": "simt.shuffle.throughput",
+      "throughput_measurements": {
+        "1": "simt.shuffle.throughput.warps_1",
+        "2": "simt.shuffle.throughput.warps_2",
+        "4": "simt.shuffle.throughput.warps_4",
+        "8": "simt.shuffle.throughput.warps_8",
+        "16": "simt.shuffle.throughput.warps_16",
+        "32": "simt.shuffle.throughput.warps_32"
+      },
+      "confidence": "low"
+    },
+    "memory": {
+      "description": "SIMT workload-effective GM load/store rates resolved from sequential rotating runtime-loop measurements. Indirect/random/coalescing behavior is not calibrated by these rates.",
+      "load_throughput_measurement": "simt.gm.load.throughput",
+      "store_throughput_measurement": "simt.gm.store.throughput",
+      "load_throughput_measurements": {
+        "1": "simt.gm.load.throughput.warps_1",
+        "2": "simt.gm.load.throughput.warps_2",
+        "4": "simt.gm.load.throughput.warps_4",
+        "8": "simt.gm.load.throughput.warps_8",
+        "16": "simt.gm.load.throughput.warps_16",
+        "32": "simt.gm.load.throughput.warps_32"
+      },
+      "store_throughput_measurements": {
+        "1": "simt.gm.store.throughput.warps_1",
+        "2": "simt.gm.store.throughput.warps_2",
+        "4": "simt.gm.store.throughput.warps_4",
+        "8": "simt.gm.store.throughput.warps_8",
+        "16": "simt.gm.store.throughput.warps_16",
+        "32": "simt.gm.store.throughput.warps_32"
+      },
+      "masked_strided_load_copy_completion": {
+        "64": {
+          "base_system_cycles": 342.0,
+          "additional_row_system_cycles": 1.484375,
+          "minimum_rows": 128,
+          "maximum_rows": 256,
+          "minimum_iterations": 8,
+          "maximum_iterations": 8,
+          "evidence": "Fresh A5 compiler-equivalent whole-SIMT masked compaction controls at 128 and 256 rows per source iteration, eight static iterations, and a 64-byte FP32 row stride. The curve is a bounded strided-load resource floor and keeps contiguous store, predicate and issue work explicit."
+        }
+      },
+      "masked_strided_store_copy_completion": {
+        "64": {
+          "base_system_cycles": 60.0,
+          "additional_row_system_cycles": 1.4140625,
+          "minimum_rows": 128,
+          "maximum_rows": 256,
+          "minimum_iterations": 8,
+          "maximum_iterations": 8,
+          "evidence": "data_provider/950pr_simt_masked_strided_store_completion_debug0_20261011.json; fresh A5 production-mode (TRITON_DEBUG=0) whole-SIMT and Auto-selected whole-SIMT masked scatter controls at 128 and 256 rows per source iteration, eight static iterations, and a 64-byte FP32 row stride. The curve is a bounded strided-store resource floor selected from TTIR access direction and mask provenance."
+        }
+      },
+      "confidence": "low",
+      "strided_short_completion": {
+        "description": "Closed-form strided load/store completion fits for the SIMT StridedShort direct-access domain. Each slot fixes a formula shape in StageCostModels.cpp and supplies only its fitted numbers. Calibrated from rotate-loop Event slopes (2000/8000 iterations), so a slot is a steady-state marginal per-iteration cost and requires an owning loop. Unmasked, compile-time-constant stride, affine address, static shape and non-indirect provenance only.",
+        "simt_load_r1": {
+          "intercept_system_cycles": 100.629,
+          "coefficient_system_cycles": [
+            2.33422,
+            0.770909,
+            5.98993,
+            9.13077,
+            16.74857,
+            0.2284797
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS2_wide_simtload.json; 506 points, MAPE 4.95%"
+        },
+        "simt_load_r2": {
+          "intercept_system_cycles": 109.283,
+          "coefficient_system_cycles": [
+            2.424697,
+            0.6631113,
+            7.55672,
+            9.524156,
+            6.493768
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS2_wide_simtload.json; 1211 points, MAPE 6.34%"
+        },
+        "simt_store_r1": {
+          "intercept_system_cycles": 13.811205455127958,
+          "coefficient_system_cycles": [
+            2.1903318691306617,
+            7.842195986302242,
+            4.980556635598631,
+            4.86433739755439,
+            1.4225379163283052,
+            1.9580158980672062
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS2_simt_store.json; 960 points, MAPE 9.32%"
+        },
+        "simt_store_r2": {
+          "intercept_system_cycles": 0.0,
+          "coefficient_system_cycles": [
+            4.887541,
+            1.36564,
+            1.943535,
+            0.135207,
+            0.0456752,
+            0.0613001,
+            18.3383
+          ],
+          "structural_constants": [
+            2.0,
+            33.4824
+          ],
+          "evidence": "PHYS2_simt_store.json; 1210 points, MAPE 9.64%"
+        }
+      },
+      "strided_wide_completion": {
+        "factor_scale": {
+          "rows2": [
+            6.8651,
+            13.3016
+          ],
+          "rows8": [
+            1.7555,
+            5.1448
+          ],
+          "rows16": [
+            1.4025,
+            5.5962
+          ],
+          "rows64": [
+            2.1575,
+            8.4451
+          ]
+        },
+        "description": "Closed-form StridedWide (rank-2, one unit-stride axis, run>=32B, unmasked, inner) completion fits.  Calibrated on the WIDE2/LOADV1 sweeps; a slot is a steady-state per-iteration cost in SYS_CNT nanoseconds (== system cycles at 1 GHz).  Admission is bounded to the swept domain; anything outside keeps the fallback mechanisms. Masked SIMT slots (store and load, rows 2/8/64/W-split and rows16/W-split) are separate linear fits: the measured masked unmasked ratio is only uniform for SIMD (median 1.000, 99.2% within 5%), while the SIMT masked store/load relationship is not a smooth offset, so sharing one formula degraded segment MAPE to 12-22%.",
+        "evidence": "swide_phys/phys_cap_mixed.json; data_provider/strided_ldst/pre-explore README section 5",
+        "simt_load_swide_rows2": {
+          "terms": [
+            "maxW16",
+            "maxW4",
+            "cseg_x_invW",
+            "cseg_mod32",
+            "minW8",
+            "h_div_w",
+            "h_pos"
+          ],
+          "intercept_system_cycles": 41.563258030556675,
+          "coefficient_system_cycles": [
+            1.416207779579969,
+            0.3871929844068339,
+            0.2268749367461054,
+            0.13141143425264834,
+            0.28341297344332167,
+            -0.08026133807015934,
+            1.0094461597897946
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=2, n=152, MAPE 3.48%)"
+        },
+        "simt_load_swide_rows8": {
+          "terms": [
+            "L256",
+            "maxW16",
+            "L2048",
+            "h_div_w",
+            "L512",
+            "L4096",
+            "L128",
+            "S4096",
+            "cseg",
+            "S2048",
+            "maxW8",
+            "bytes_per_lane",
+            "h"
+          ],
+          "intercept_system_cycles": 66.60742138694988,
+          "coefficient_system_cycles": [
+            -18.588208374855526,
+            0.7552818743839147,
+            -32.7574242984269,
+            0.09039437309018344,
+            50.96345595334658,
+            7.693423460463346,
+            -3.2996244958825973,
+            0.0007868006838824964,
+            -0.7747912739946121,
+            -0.00046847704536867216,
+            0.7728617573449519,
+            1.7739777304821907,
+            0.01666497215681117
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=8, n=150, MAPE 13.12%)"
+        },
+        "simt_load_swide_rows64_wle2": {
+          "terms": [
+            "n2W",
+            "mx64",
+            "S64",
+            "h",
+            "cseg_mod32"
+          ],
+          "intercept_system_cycles": 72.73962451267975,
+          "coefficient_system_cycles": [
+            0.0004038574602326462,
+            67.7218799690663,
+            -0.02732790660654466,
+            -0.3143413451634458,
+            -18.125295270150044
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,W<=2, n=46, MAPE 18.57%)"
+        },
+        "simt_load_swide_rows64_w3_8": {
+          "terms": [
+            "cseg_x_invW",
+            "bytes_per_lane",
+            "S128",
+            "cseg_mod32",
+            "n2W",
+            "elem_per_lane",
+            "elem_per_warp",
+            "h_div_w",
+            "iters",
+            "bytes_per_warp",
+            "q",
+            "W",
+            "S64",
+            "span"
+          ],
+          "intercept_system_cycles": 287.6451152805998,
+          "coefficient_system_cycles": [
+            10.20312371891428,
+            -5.837667963133048,
+            -0.003390441377767749,
+            -5.2916792769687975,
+            -4.51817846371263e-05,
+            4.7073968649124245,
+            0.15608425948103852,
+            0.1488394395054649,
+            6.9755768338724975,
+            0.03426144974335655,
+            2.308543299993566,
+            -12.31830016378729,
+            0.0059825847718102095,
+            -2.0558759314108614e-05
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,3-8, n=46, MAPE 13.21%)"
+        },
+        "simt_load_swide_rows64_wgt8": {
+          "terms": [
+            "n2W",
+            "h_pos",
+            "L2048",
+            "mx256",
+            "S2048",
+            "W",
+            "cseg",
+            "mx1024"
+          ],
+          "intercept_system_cycles": 165.65377213217153,
+          "coefficient_system_cycles": [
+            0.00025126837427824514,
+            9.51905426434818,
+            -0.28680056419922034,
+            0.0721277132940649,
+            1.559484321274019e-05,
+            0.761098075644741,
+            -1.5358019099477627,
+            -0.109017456174393
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,W>8, n=69, MAPE 7.30%)"
+        },
+        "simt_store_swide_rows2": {
+          "terms": [
+            "maxW8",
+            "S4096",
+            "h_pos",
+            "n2W",
+            "maxW16",
+            "minW16"
+          ],
+          "intercept_system_cycles": 22.707399708271602,
+          "coefficient_system_cycles": [
+            -0.026600123001709178,
+            2.36357962268659e-06,
+            -1.0239648132894672,
+            4.648928684239133e-06,
+            1.7477767684131595,
+            0.7011737549056575
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=2, n=231, MAPE 9.16%)"
+        },
+        "simt_store_swide_rows8": {
+          "terms": [
+            "maxW8",
+            "bytes_per_lane",
+            "mis32",
+            "maxW16",
+            "minW16",
+            "h_div_w",
+            "mx128",
+            "mx64"
+          ],
+          "intercept_system_cycles": 17.268088594597533,
+          "coefficient_system_cycles": [
+            0.2870238265712422,
+            0.5089786981070723,
+            14.324693287223194,
+            1.4474179245074685,
+            0.798587885979451,
+            0.0050094843941324765,
+            -0.0935995855964829,
+            0.17464015797556953
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=8, n=196, MAPE 9.22%)"
+        },
+        "simt_store_swide_rows64_wle2": {
+          "terms": [
+            "bytes_per_lane",
+            "L128",
+            "n2W",
+            "L256",
+            "duty2",
+            "r16_x_segW",
+            "mis32",
+            "S128"
+          ],
+          "intercept_system_cycles": 131.0056627583471,
+          "coefficient_system_cycles": [
+            1.1336966234620411,
+            -3.198854000907959,
+            3.751781032537796e-05,
+            2.816777871305374,
+            94.88901635458748,
+            -0.03863167016728473,
+            232.7486923753587,
+            -0.0011074989732837602
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,W<=2, n=46, MAPE 11.48%)"
+        },
+        "simt_store_swide_rows64_w3_8": {
+          "terms": [
+            "L128",
+            "r16_x_segW",
+            "L256",
+            "mis32",
+            "L512",
+            "bytes_per_lane",
+            "duty2",
+            "duty"
+          ],
+          "intercept_system_cycles": -28.77140952459056,
+          "coefficient_system_cycles": [
+            4.42237821150216,
+            0.35980850601981695,
+            2.830600026555298,
+            -24.120410822234795,
+            -3.0639499021902825,
+            -4.290220951123761,
+            558.9080482137553,
+            -489.24581049851156
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,3-8, n=46, MAPE 10.00%)"
+        },
+        "simt_store_swide_rows64_wgt8": {
+          "terms": [
+            "duty2",
+            "L256",
+            "W",
+            "bytes_per_lane",
+            "mis32",
+            "L128",
+            "L2048",
+            "duty"
+          ],
+          "intercept_system_cycles": -3.8885111945950026,
+          "coefficient_system_cycles": [
+            255.7238205080562,
+            1.021917031626603,
+            2.2681088165270973,
+            17.844840026561357,
+            107.28137151354433,
+            -1.3130963337274029,
+            -0.9795182661807715,
+            -228.8212346437155
+          ],
+          "evidence": "swide_phys/phys_cap_mixed.json (rows=64,W>8, n=69, MAPE 9.93%)"
+        },
+        "simt_load_swide_masked_rows16_w3_8": {
+          "terms": [
+            "h_div_w",
+            "L256",
+            "mx2048",
+            "mx128",
+            "S64",
+            "S4096",
+            "gap"
+          ],
+          "intercept_system_cycles": 44.05674483308826,
+          "coefficient_system_cycles": [
+            0.20931265462908033,
+            7.433445987999578,
+            0.24036756677235052,
+            -0.7363269483652769,
+            0.0004968442613021774,
+            -0.00010059814637276645,
+            -0.0005091735971588256
+          ],
+          "evidence": "swide_phys masked refit: 135 points, in-sample MAPE 8.12%"
+        },
+        "simt_load_swide_masked_rows16_wgt8": {
+          "terms": [
+            "iters_x_W",
+            "cseg_mod32",
+            "mx32",
+            "mx128",
+            "S256",
+            "inv_sectors"
+          ],
+          "intercept_system_cycles": 168.36118399707982,
+          "coefficient_system_cycles": [
+            0.5597812159158895,
+            -1.066539833750877,
+            1.364534828761934,
+            -0.9833624124852582,
+            0.00033577967867147766,
+            -26.028444365570444
+          ],
+          "evidence": "swide_phys masked refit: 206 points, in-sample MAPE 7.98%"
+        },
+        "simt_load_swide_masked_rows16_wle2": {
+          "terms": [
+            "cseg_x_invW",
+            "inv_n",
+            "S4096",
+            "W2",
+            "span",
+            "L256",
+            "L2048",
+            "L1024",
+            "run_x_W"
+          ],
+          "intercept_system_cycles": 2.9202151550882753,
+          "coefficient_system_cycles": [
+            9.241770976212099,
+            11117.57804444572,
+            -1.840968503930898e-05,
+            11.45353251755326,
+            -3.208125704071165e-05,
+            1.195888977869581,
+            -41.330645745234634,
+            41.062443256392015,
+            -0.1332721388556
+          ],
+          "evidence": "swide_phys masked refit: 133 points, in-sample MAPE 8.50%"
+        },
+        "simt_load_swide_masked_rows2": {
+          "terms": [
+            "W2",
+            "S32",
+            "cseg_mod32",
+            "n2W",
+            "bytes_per_lane"
+          ],
+          "intercept_system_cycles": 47.988871540526844,
+          "coefficient_system_cycles": [
+            0.025040332294076387,
+            0.00912140430225997,
+            -0.436531957547584,
+            -0.0013540081375220878,
+            1.3805979449991113
+          ],
+          "evidence": "swide_phys masked refit: 161 points, in-sample MAPE 6.14%"
+        },
+        "simt_load_swide_masked_rows64_w3_8": {
+          "terms": [
+            "cseg_x_invW",
+            "L32",
+            "cseg_mod32",
+            "log_n"
+          ],
+          "intercept_system_cycles": -8.621651288404319,
+          "coefficient_system_cycles": [
+            40.029617931873766,
+            -1.1876683374109205,
+            -7.241109172843648,
+            46.73256248343816
+          ],
+          "evidence": "swide_phys masked refit: 46 points, in-sample MAPE 15.03%"
+        },
+        "simt_load_swide_masked_rows64_wgt8": {
+          "terms": [
+            "n2W",
+            "W2",
+            "h_pos",
+            "inv_n",
+            "cseg_x_invW",
+            "S32"
+          ],
+          "intercept_system_cycles": 86.419836640563,
+          "coefficient_system_cycles": [
+            1.7376560887223952e-05,
+            0.01632541328175536,
+            -2.923276599290123,
+            24026.898037616156,
+            48.27884290488751,
+            0.0002899616703081842
+          ],
+          "evidence": "swide_phys masked refit: 69 points, in-sample MAPE 10.12%"
+        },
+        "simt_load_swide_masked_rows64_wle2": {
+          "terms": [
+            "n2W",
+            "cseg_x_invW",
+            "h",
+            "W",
+            "bytes_per_lane",
+            "run_x_W",
+            "cseg_x_minW4",
+            "L32"
+          ],
+          "intercept_system_cycles": -581.9540811502466,
+          "coefficient_system_cycles": [
+            7.29464405479839e-05,
+            21.248614731955698,
+            0.23807754962775696,
+            364.9263891387984,
+            6.330485210874599,
+            -6.8704724445948875,
+            -3.2944837130348756,
+            3.4181640393708674
+          ],
+          "evidence": "swide_phys masked refit: 46 points, in-sample MAPE 12.37%"
+        },
+        "simt_load_swide_masked_rows8": {
+          "terms": [
+            "L256",
+            "maxW16",
+            "mx2048",
+            "minW2",
+            "span_div_run",
+            "n2W",
+            "L2048",
+            "L512",
+            "S256",
+            "cseg_mod32"
+          ],
+          "intercept_system_cycles": 143.00656793302858,
+          "coefficient_system_cycles": [
+            -35.19680266362742,
+            1.4804803195358454,
+            0.15984808983852522,
+            -30.5422185840562,
+            0.03737143583126952,
+            0.0003934677074161527,
+            -37.76978057762826,
+            72.08531496922407,
+            -0.00045371896371381587,
+            -0.8067628041218515
+          ],
+          "evidence": "swide_phys masked refit: 160 points, in-sample MAPE 13.35%"
+        },
+        "simt_store_swide_masked_rows16_w3_8": {
+          "terms": [
+            "L64",
+            "mis32",
+            "L32",
+            "mx128",
+            "inv_n",
+            "S128"
+          ],
+          "intercept_system_cycles": 22.635416735933347,
+          "coefficient_system_cycles": [
+            0.5596521960722762,
+            43.417955401010175,
+            0.1515167592436255,
+            -0.2176399433607294,
+            -620.333194890821,
+            8.713863808923778e-05
+          ],
+          "evidence": "swide_phys masked refit: 138 points, in-sample MAPE 9.09%"
+        },
+        "simt_store_swide_masked_rows16_wgt8": {
+          "terms": [
+            "iters_x_W",
+            "cseg_mod32",
+            "W2",
+            "S256",
+            "inv_n"
+          ],
+          "intercept_system_cycles": 15.377081650884318,
+          "coefficient_system_cycles": [
+            1.0651317163047072,
+            -0.4011904370220126,
+            0.011084764318024583,
+            0.00011392993163724569,
+            847.4359721156189
+          ],
+          "evidence": "swide_phys masked refit: 207 points, in-sample MAPE 7.05%"
+        },
+        "simt_store_swide_masked_rows16_wle2": {
+          "terms": [
+            "bytes_per_lane",
+            "mis32",
+            "L256",
+            "duty2"
+          ],
+          "intercept_system_cycles": 20.058727317446284,
+          "coefficient_system_cycles": [
+            0.8802639705124315,
+            97.44228998485895,
+            0.23960881576069032,
+            5.710916790718574
+          ],
+          "evidence": "swide_phys masked refit: 138 points, in-sample MAPE 14.99%"
+        },
+        "simt_store_swide_masked_rows2": {
+          "terms": [
+            "maxW8",
+            "h",
+            "W2",
+            "h_pos",
+            "lines_per_seg",
+            "bytes_per_segline"
+          ],
+          "intercept_system_cycles": 29.372632369596992,
+          "coefficient_system_cycles": [
+            0.7445840317837307,
+            0.03532240194036454,
+            0.019811102748139756,
+            1.1078758623848257,
+            -3.884244306706881,
+            0.015162499639423822
+          ],
+          "evidence": "swide_phys masked refit: 357 points, in-sample MAPE 8.89%"
+        },
+        "simt_store_swide_masked_rows64_w3_8": {
+          "terms": [
+            "L32",
+            "duty2",
+            "L256",
+            "logW",
+            "bytes_per_lane",
+            "duty",
+            "L2048",
+            "rows_x_duty"
+          ],
+          "intercept_system_cycles": 443.3369460220371,
+          "coefficient_system_cycles": [
+            1.0161062237884844,
+            615.6226865529666,
+            1.414739900892535,
+            -155.8807160624284,
+            -3.1822028579135218,
+            -287.96367080192465,
+            -1.8317295974354906,
+            -3.94091667096077
+          ],
+          "evidence": "swide_phys masked refit: 82 points, in-sample MAPE 9.80%"
+        },
+        "simt_store_swide_masked_rows64_wgt8": {
+          "terms": [
+            "iters_x_W",
+            "mis32",
+            "mx128",
+            "bytes_per_lane",
+            "W2",
+            "S512",
+            "S32",
+            "S2048"
+          ],
+          "intercept_system_cycles": 46.663583451863765,
+          "coefficient_system_cycles": [
+            -0.15234112342749473,
+            257.1228462797858,
+            -3.4422317194243313,
+            16.21837057986433,
+            0.030371510685575545,
+            0.0004082473222341588,
+            0.0010304156185332236,
+            -5.979231422733107e-05
+          ],
+          "evidence": "swide_phys masked refit: 123 points, in-sample MAPE 9.82%"
+        },
+        "simt_store_swide_masked_rows64_wle2": {
+          "terms": [
+            "L256",
+            "mis32",
+            "duty2",
+            "run_x_W",
+            "L2048",
+            "duty",
+            "is32",
+            "L64"
+          ],
+          "intercept_system_cycles": -595.7681514549479,
+          "coefficient_system_cycles": [
+            2.9041455434082137,
+            540.8056375349074,
+            -112.80317339206835,
+            -0.5758093192978995,
+            -1.7758369730656143,
+            -157.1054835060292,
+            343.0821209402053,
+            6.849728507319865
+          ],
+          "evidence": "swide_phys masked refit: 82 points, in-sample MAPE 9.69%"
+        },
+        "simt_store_swide_masked_rows8": {
+          "terms": [
+            "maxW8",
+            "bytes_per_lane",
+            "W2",
+            "S256",
+            "cseg_x_invW",
+            "cseg_mod32",
+            "maxW4"
+          ],
+          "intercept_system_cycles": 22.438653803813956,
+          "coefficient_system_cycles": [
+            -0.03600031419326492,
+            0.9637041141196776,
+            0.016271699251942495,
+            6.933853258269347e-05,
+            -0.1609359034446372,
+            0.17973423568225694,
+            0.6569413666364836
+          ],
+          "evidence": "swide_phys masked refit: 322 points, in-sample MAPE 10.37%"
+        }
+      }
+    },
+    "stage_resources": {
+      "description": "Generic SIMT front-end inputs. Unclassified scalar and control instructions contribute only to the measured shared issue lower bound. Prefix-scan issue accounting preserves operation boundaries. The loaded-index atomic rate is the common P1/P56 residual slope from fresh race-free i32 permutation probes; ordinary atomic addresses retain the default warp-parallel rate.",
+      "issue_instructions_per_system_cycle": 3.2985811913125,
+      "issue_instructions_per_system_cycle_measurement": "simt.frontend.effective_issue_floor",
+      "spill_transactions_per_system_cycle": 0.106998555,
+      "spill_transaction_coverage": 1,
+      "atomic_memory": {
+        "default": {
+          "logical_elements_per_system_cycle": 4096,
+          "operation_startup_system_cycles": 0,
+          "result_dependency_system_cycles": 470,
+          "unknown_contention_multiplier": 1
+        },
+        "operations": {
+          "loaded_index": {
+            "logical_elements_per_system_cycle": 1.477,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 470,
+            "unknown_contention_multiplier": 1
+          }
+        }
+      },
+      "usable_ub_bytes": 122880,
+      "prefix_scan": {
+        "step_latency_system_cycles": 27.278581,
+        "step_latency_measurement": "simt.shuffle.dependent_latency",
+        "description": "Grid-stride and recurrence scans use the decomposed dependency model. A P=1 straight-line scan lowers to a completion-inclusive external helper priced from TTIR semantic elements.",
+        "straight_line_completion_elements_per_system_cycle": 10,
+        "straight_line_completion_evidence": "Fresh A5 profiler controls for non-additive and multiplicative straight-line scans: cummax rows/extent 8x64, 16x32, 32x16 and cumprod 1x1024, 2x512, 4x256. After subtracting the generic kernel boundary and explicit GM load/store Stages, semantic_elements/10 SYS_CNT plus helper ownership of the pure generic index prologue keeps all six geometries within ten percent without an operator or exact-shape key."
+      },
+      "rowwise_reduction": {
+        "description": "Completion-inclusive physical-group surface for a structural TTIR FP32 row reduction with one packed rank-2 input and two reduction operations. Online interpolation is bounded to the measured row/extent rectangle and never uses an operator or kernel name.",
+        "base_warp_count": 4,
+        "reference_reduction_operations": 2,
+        "group_body_system_cycle_measurements": {
+          "1": {
+            "16": {
+              "64": "simt.rowwise_reduction.fp32.rows_16.extent_64.factor_1.group_body_cost",
+              "128": "simt.rowwise_reduction.fp32.rows_16.extent_128.factor_1.group_body_cost",
+              "256": "simt.rowwise_reduction.fp32.rows_16.extent_256.factor_1.group_body_cost"
+            },
+            "32": {
+              "64": "simt.rowwise_reduction.fp32.rows_32.extent_64.factor_1.group_body_cost",
+              "128": "simt.rowwise_reduction.fp32.rows_32.extent_128.factor_1.group_body_cost",
+              "256": "simt.rowwise_reduction.fp32.rows_32.extent_256.factor_1.group_body_cost"
+            },
+            "64": {
+              "64": "simt.rowwise_reduction.fp32.rows_64.extent_64.factor_1.group_body_cost",
+              "128": "simt.rowwise_reduction.fp32.rows_64.extent_128.factor_1.group_body_cost",
+              "256": "simt.rowwise_reduction.fp32.rows_64.extent_256.factor_1.group_body_cost"
+            }
+          },
+          "2": {
+            "16": {
+              "64": "simt.rowwise_reduction.fp32.rows_16.extent_64.factor_2.group_body_cost",
+              "128": "simt.rowwise_reduction.fp32.rows_16.extent_128.factor_2.group_body_cost",
+              "256": "simt.rowwise_reduction.fp32.rows_16.extent_256.factor_2.group_body_cost"
+            },
+            "32": {
+              "64": "simt.rowwise_reduction.fp32.rows_32.extent_64.factor_2.group_body_cost",
+              "128": "simt.rowwise_reduction.fp32.rows_32.extent_128.factor_2.group_body_cost",
+              "256": "simt.rowwise_reduction.fp32.rows_32.extent_256.factor_2.group_body_cost"
+            },
+            "64": {
+              "64": "simt.rowwise_reduction.fp32.rows_64.extent_64.factor_2.group_body_cost",
+              "128": "simt.rowwise_reduction.fp32.rows_64.extent_128.factor_2.group_body_cost",
+              "256": "simt.rowwise_reduction.fp32.rows_64.extent_256.factor_2.group_body_cost"
+            }
+          },
+          "4": {
+            "16": {
+              "64": "simt.rowwise_reduction.fp32.rows_16.extent_64.factor_4.group_body_cost",
+              "128": "simt.rowwise_reduction.fp32.rows_16.extent_128.factor_4.group_body_cost",
+              "256": "simt.rowwise_reduction.fp32.rows_16.extent_256.factor_4.group_body_cost"
+            },
+            "32": {
+              "64": "simt.rowwise_reduction.fp32.rows_32.extent_64.factor_4.group_body_cost",
+              "128": "simt.rowwise_reduction.fp32.rows_32.extent_128.factor_4.group_body_cost",
+              "256": "simt.rowwise_reduction.fp32.rows_32.extent_256.factor_4.group_body_cost"
+            },
+            "64": {
+              "64": "simt.rowwise_reduction.fp32.rows_64.extent_64.factor_4.group_body_cost",
+              "128": "simt.rowwise_reduction.fp32.rows_64.extent_128.factor_4.group_body_cost",
+              "256": "simt.rowwise_reduction.fp32.rows_64.extent_256.factor_4.group_body_cost"
+            }
+          }
+        },
+        "evidence": "data_provider/950pr_simt_rowwise_reduction_structural_surface_20261006.json; independent 3x3 TTIR row/extent grid for F1/F2/F4, k=9 iteration-linearity holdout max 1.86%; runtime-wave holdouts kept outside the fit"
+      },
+      "multi_result_reduction": {
+        "description": "Whole-SIMT F1 completion body for one FP32 two-result tt.reduce whose reduction axis pads to 128. The backend template is selected by the exact non-power-of-two tail class; each bounded row curve uses the next measured row-group bucket because a partial backend group executes the full template.",
+        "base_warp_count": 4,
+        "result_count": 2,
+        "element_bit_width": 32,
+        "padded_axis_extent": 128,
+        "group_body_system_cycles_by_tail_class": {
+          "non_power_divisible_by_4": {
+            "8": 375.073744,
+            "16": 869.774176,
+            "24": 1665.474608,
+            "32": 1884.55,
+            "40": 3032.085862,
+            "48": 2662.786294,
+            "64": 2656.187158
+          },
+          "tail_mod_4_eq_2": {
+            "8": 1237.849895,
+            "16": 2311.550327,
+            "24": 4690.050604,
+            "32": 5226.751036,
+            "40": 9256.461704,
+            "48": 10024.162136,
+            "64": 11039.362845
+          },
+          "tail_odd": {
+            "8": 2955.361742,
+            "16": 5770.062174,
+            "24": 10334.929272,
+            "32": 10151.963038,
+            "37": 18953.111102,
+            "40": 19560.673706,
+            "48": 20718.374138,
+            "56": 21889.074569,
+            "64": 22824.775001
+          }
+        },
+        "evidence": "Fresh A5 v113 structural sweeps under the Auto whole-SIMT route. Development curves use extent 124 (divisible-by-4 tail), 126 (mod-4-equals-2 tail), and 125 (odd tail) across rows 8..64. Independent extents 80/96/112/120, 121/122/123/127, cross-card repeats, and an argmin comparator holdout confirm that padded extent, tail class and row geometry select the lowering; no operator or exact source shape is consumed. Disassembly shows the odd-tail SHFL stream doubles from 486 to 972 when padded rows cross 32, explaining the observed completion cliff. Power-of-two axes retain the analytical reduction path."
+      },
+      "two_pass_rowwise_completion": {
+        "residual_system_cycle_measurements": {
+          "2": {
+            "512": {
+              "3": "simt.two_pass_rowwise.fp16.extent_512.q_3.factor_2.residual"
+            },
+            "768": {
+              "3": "simt.two_pass_rowwise.fp16.extent_768.q_3.factor_2.residual"
+            },
+            "1024": {
+              "2": "simt.two_pass_rowwise.fp16.extent_1024.q_2.factor_2.residual",
+              "3": "simt.two_pass_rowwise.fp16.extent_1024.q_3.factor_2.residual",
+              "4": "simt.two_pass_rowwise.fp16.extent_1024.q_4.factor_2.residual",
+              "5": "simt.two_pass_rowwise.fp16.extent_1024.q_5.factor_2.residual",
+              "6": "simt.two_pass_rowwise.fp16.extent_1024.q_6.factor_2.residual",
+              "7": "simt.two_pass_rowwise.fp16.extent_1024.q_7.factor_2.residual",
+              "8": "simt.two_pass_rowwise.fp16.extent_1024.q_8.factor_2.residual"
+            }
+          },
+          "4": {
+            "256": {
+              "3": "simt.two_pass_rowwise.fp16.extent_256.q_3.factor_4.residual"
+            },
+            "512": {
+              "3": "simt.two_pass_rowwise.fp16.extent_512.q_3.factor_4.residual"
+            },
+            "1024": {
+              "3": "simt.two_pass_rowwise.fp16.extent_1024.q_3.factor_4.residual",
+              "4": "simt.two_pass_rowwise.fp16.extent_1024.q_4.factor_4.residual",
+              "5": "simt.two_pass_rowwise.fp16.extent_1024.q_5.factor_4.residual",
+              "8": "simt.two_pass_rowwise.fp16.extent_1024.q_8.factor_4.residual"
+            }
+          }
+        },
+        "evidence": "data_provider/950pr_two_pass_rowwise_completion_20261007.json; explicit F2/F4 structural controls cover Q=2..8 and extents 256/512/768/1024. F4 Q=6/7 were untouched interpolation holdouts and are within 1.1%. The signed residual corrects serialized route composition after independent Stage resource accounting; no pipeline overlap, kernel name or operator name is used."
+      },
+      "loop_carried_recurrence": {
+        "description": "Measured lower bound for one physical SuperBlock group's iteration of a reduction recurrence. Each inner work-size key is reduction lane-steps in one logical program; the measured value already includes all F logical programs in the physical group.",
+        "base_warp_count": 4,
+        "reduction_group_iteration_system_cycle_measurements": {
+          "1": {
+            "1024": "simt.recurrence.reduction_lane_steps_1024.factor_1.group_incremental_cost",
+            "4096": "simt.recurrence.reduction_lane_steps_4096.factor_1.group_incremental_cost"
+          },
+          "2": {
+            "1024": "simt.recurrence.reduction_lane_steps_1024.factor_2.group_incremental_cost",
+            "4096": "simt.recurrence.reduction_lane_steps_4096.factor_2.group_incremental_cost"
+          },
+          "4": {
+            "1024": "simt.recurrence.reduction_lane_steps_1024.factor_4.group_incremental_cost",
+            "4096": "simt.recurrence.reduction_lane_steps_4096.factor_4.group_incremental_cost"
+          }
+        },
+        "reduction_group_startup_system_cycle_measurements": {
+          "1": {
+            "1024": "simt.recurrence.reduction_lane_steps_1024.factor_1.group_startup_cost",
+            "4096": "simt.recurrence.reduction_lane_steps_4096.factor_1.group_startup_cost"
+          },
+          "2": {
+            "1024": "simt.recurrence.reduction_lane_steps_1024.factor_2.group_startup_cost",
+            "4096": "simt.recurrence.reduction_lane_steps_4096.factor_2.group_startup_cost"
+          },
+          "4": {
+            "1024": "simt.recurrence.reduction_lane_steps_1024.factor_4.group_startup_cost",
+            "4096": "simt.recurrence.reduction_lane_steps_4096.factor_4.group_startup_cost"
+          }
+        },
+        "single_result_row_reduction_completion": {
+          "minimum_reduction_extent": 128,
+          "maximum_reduction_extent": 128,
+          "minimum_iteration_count": 4,
+          "maximum_iteration_count": 16,
+          "minimum_source_program_count": 16,
+          "maximum_source_program_count": 32,
+          "iteration_system_cycles": 357.0,
+          "startup_intercept_system_cycles": -2450.21930016352,
+          "startup_sqrt_program_system_cycles": 811.17575695736,
+          "evidence": "data_provider/950pr_simt_single_result_row_reduction_recurrence_20261009.json; the structural fit uses P16/T4, P16/T16 and P32/T16 endpoints for one FP32 extent-128 reduction per dynamic recurrence iteration. P16/T8 and independent P24/T8/T12 cases are interpolation holdouts. Matching uses only TTIR recurrence/reduction geometry, trip count, factor and source launch count."
+        }
+      },
+      "continuous_memory": {
+        "description": "Measured physical-group execution envelope for ordinary contiguous FP32 transfers. Each factor-specific value already includes all logical programs grouped by that SuperBlock factor; the Stage formula must not multiply it by F again.",
+        "base_warp_count": 4,
+        "load_group_operation_system_cycle_measurements": {
+          "1": {
+            "1024": "simt.continuous_load.fp32.bytes_1024.factor_1.group_incremental_cost"
+          },
+          "2": {
+            "1024": "simt.continuous_load.fp32.bytes_1024.factor_2.group_incremental_cost"
+          },
+          "4": {
+            "1024": "simt.continuous_load.fp32.bytes_1024.factor_4.group_incremental_cost"
+          }
+        },
+        "store_group_operation_system_cycle_measurements": {
+          "1": {
+            "1024": "simt.continuous_store.fp32.bytes_1024.factor_1.group_incremental_cost"
+          },
+          "2": {
+            "1024": "simt.continuous_store.fp32.bytes_1024.factor_2.group_incremental_cost"
+          },
+          "4": {
+            "1024": "simt.continuous_store.fp32.bytes_1024.factor_4.group_incremental_cost"
+          }
+        }
+      },
+      "layout_memory": {
+        "description": "Measured factor-specific strided-wide FP32 memory layout curves. Keys encode complete access geometry, dtype, masking, active warps and SuperBlock factor, so the evidence can be consumed by any matching Stage.",
+        "load": {
+          "strided_wide:r=2:row=64:stride=8192:rows=16:bits=32:masked=1:shape=16,16,:strides=2048,1,:warps=4:factor=1": {
+            "first_system_cycles": 133.490279103,
+            "incremental_system_cycles": 133.490279103,
+            "min_count": 1,
+            "max_count": 4,
+            "evidence": "950pr_simt_layout_memory_grouped_healthy_fit_20260918.json; unified no-first/steady S6 load fit from two fence=0 stride columns"
+          },
+          "strided_wide:r=2:row=64:stride=8192:rows=16:bits=32:masked=1:shape=16,16,:strides=2048,1,:warps=8:factor=2": {
+            "first_system_cycles": 145.771767653,
+            "incremental_system_cycles": 145.771767653,
+            "min_count": 1,
+            "max_count": 4,
+            "evidence": "950pr_simt_layout_memory_README.md; S6 confirmed definition C_S6=L*4*5 with L=145.772 ticks/load"
+          },
+          "strided_wide:r=2:row=64:stride=8192:rows=16:bits=32:masked=1:shape=16,16,:strides=2048,1,:warps=16:factor=4": {
+            "first_system_cycles": 168.131142653,
+            "incremental_system_cycles": 168.131142653,
+            "min_count": 1,
+            "max_count": 4,
+            "evidence": "950pr_simt_layout_memory_grouped_healthy_fit_20260918.json; unified no-first/steady S6 load fit from two fence=0 stride columns"
+          }
+        },
+        "store": {
+          "strided_wide:r=2:row=64:stride=8192:rows=16:bits=32:masked=1:shape=16,16,:strides=2048,1,:warps=4:factor=1": {
+            "first_system_cycles": 90.339217557,
+            "incremental_system_cycles": 31.19370229,
+            "min_count": 1,
+            "max_count": 10,
+            "evidence": "950pr_simt_layout_memory_grouped_healthy_fit_20260918.json; fence=0 4-warp store envelope"
+          },
+          "strided_wide:r=2:row=64:stride=8192:rows=16:bits=32:masked=1:shape=16,16,:strides=2048,1,:warps=8:factor=2": {
+            "first_system_cycles": 120.899332061,
+            "incremental_system_cycles": 55.910782443,
+            "min_count": 1,
+            "max_count": 10,
+            "evidence": "950pr_simt_layout_memory_grouped_healthy_fit_20260918.json; fence=0 8-warp GM-store envelope. The CCEC probe generates values in registers and stores them directly: it does NOT cover dot-result shared-layout conversion or whole-kernel private-stack traffic."
+          },
+          "strided_wide:r=2:row=64:stride=8192:rows=16:bits=32:masked=1:shape=16,16,:strides=2048,1,:warps=16:factor=4": {
+            "first_system_cycles": 172.406965649,
+            "incremental_system_cycles": 108.966125954,
+            "min_count": 1,
+            "max_count": 10,
+            "evidence": "950pr_simt_layout_memory_grouped_healthy_fit_20260918.json; fence=0 16-warp store envelope"
+          }
+        }
+      },
+      "dot_store_shared_layout": {
+        "fma_to_row_major:16x16:bits=32:base_warps=4:factor=1": {
+          "first_system_cycles": 67.925,
+          "incremental_system_cycles": 67.925,
+          "min_count": 2,
+          "max_count": 16,
+          "evidence": "950PR device1 simt_shared_calibration_20260921_HFUpSg; matched LAUNCH_BOUND(128), SYS_CNT (DP2to4-empty2to4) slope; held out 4to8 and 8to16. Incremental shared exchange including two barriers, excludes GM/private and one-time mapping preparation."
+        },
+        "fma_to_row_major:16x16:bits=32:base_warps=4:factor=2": {
+          "first_system_cycles": 82.4375,
+          "incremental_system_cycles": 82.4375,
+          "min_count": 2,
+          "max_count": 16,
+          "evidence": "950PR device1 simt_shared_calibration_20260921_HFUpSg; matched LAUNCH_BOUND(256), SYS_CNT (DP2to4-empty2to4) slope; held out 4to8 and 8to16. Physical F2 group cost, includes two barriers, excludes GM/private and one-time mapping preparation."
+        },
+        "fma_to_row_major:16x16:bits=32:base_warps=4:factor=4": {
+          "first_system_cycles": 104.8625,
+          "incremental_system_cycles": 104.8625,
+          "min_count": 2,
+          "max_count": 16,
+          "evidence": "950PR device1 simt_shared_calibration_20260921_HFUpSg; matched LAUNCH_BOUND(512), SYS_CNT (DP2to4-empty2to4) slope; held out 4to8 and 8to16. Physical F4 group cost, includes two barriers, excludes GM/private and one-time mapping preparation."
+        }
+      },
+      "dot_operand_paths": {
+        "f32:16x16x16:lhs=computed:rhs=gm{strided_wide:r=2:row=64:stride=8192:rows=16:bits=32:masked=1:shape=16,16,:strides=2048,1,}:base_warps=4:factor=2": {
+          "first_system_cycles": 2000.25,
+          "incremental_system_cycles": 2000.25,
+          "min_count": 1,
+          "max_count": 8,
+          "evidence": "950PR card1 simt_dot_paths_20260921_aEBTv9 rhs; independent original-DSL probe 2to4-dot slope, held-out 4to8 error -0.79%. Physical F2 group, four base warps, FP32 M=N=K=16, lowered K tile 2. Includes input GM/shared and FMA; removes direct dot-only GM input ownership. Fixed streaming allocation 16 matrix slots, column program pitch64. Transfer to a branched DAG/different cache working set is extrapolation; excludes separately modeled producer stages/output store and unfitted private stack."
+        },
+        "f32:16x16x16:lhs=gm{strided_wide:r=2:row=64:stride=8192:rows=16:bits=32:masked=1:shape=16,16,:strides=2048,1,}:rhs=computed:base_warps=4:factor=2": {
+          "first_system_cycles": 1360.2,
+          "incremental_system_cycles": 1360.2,
+          "min_count": 1,
+          "max_count": 8,
+          "evidence": "950PR card1 simt_dot_paths_20260921_aEBTv9 lhs; 2to4-dot slope, held-out 4to8 error +0.27%. Same whole-SIMT/F2 FP32 16x16x16 lowering and fixed streaming domain as rhs path. Includes input GM/shared and FMA. Branched-DAG/cache-working-set transfer remains extrapolation, not independently calibrated private-stack cost."
+        },
+        "f32:16x16x16:lhs=computed:rhs=computed:base_warps=4:factor=2": {
+          "first_system_cycles": 702.35,
+          "incremental_system_cycles": 702.35,
+          "min_count": 1,
+          "max_count": 8,
+          "evidence": "950PR card1 simt_dot_paths_20260921_aEBTv9 computed; 2to4-dot slope, held-out 4to8 error +3.74%. Whole-SIMT/F2 FP32 16x16x16 lowered K tile2; includes shared input preparation/exchange and FMA. Producer-stage work and final store remain separately owned. Branched DAG and private-stack effects are not independently fitted."
+        }
+      },
+      "indirect_memory": {
+        "load_element_system_cycle_measurements": {
+          "8": "simt.indirect_load.fp32.elements_8.incremental_cost",
+          "32": "simt.indirect_load.fp32.elements_32.incremental_cost",
+          "128": "simt.indirect_load.fp32.elements_128.incremental_cost"
+        },
+        "load_system_cycle_measurements": {
+          "8": "simt.indirect_load.fp16.warp_instructions_8.incremental_cost",
+          "16": "simt.indirect_load.fp16.warp_instructions_16.incremental_cost"
+        },
+        "load_startup_system_cycle_measurements": {
+          "8": "simt.indirect_load.fp16.warp_instructions_8.startup_cost",
+          "16": "simt.indirect_load.fp16.warp_instructions_16.startup_cost"
+        },
+        "load_group_system_cycle_measurements": {
+          "1": {
+            "8": "simt.indirect_load.fp16.warp_instructions_8.factor_1.group_incremental_cost"
+          },
+          "2": {
+            "8": "simt.indirect_load.fp16.warp_instructions_8.factor_2.group_incremental_cost"
+          },
+          "4": {
+            "8": "simt.indirect_load.fp16.warp_instructions_8.factor_4.group_incremental_cost"
+          }
+        },
+        "load_group_startup_system_cycle_measurements": {
+          "1": {
+            "1": "simt.indirect_load.static_group.route_owned_startup_residual",
+            "8": "simt.indirect_load.static_group.route_owned_startup_residual"
+          },
+          "2": {
+            "1": "simt.indirect_load.static_group.route_owned_startup_residual",
+            "8": "simt.indirect_load.static_group.route_owned_startup_residual"
+          },
+          "4": {
+            "1": "simt.indirect_load.static_group.route_owned_startup_residual",
+            "8": "simt.indirect_load.static_group.route_owned_startup_residual"
+          }
+        },
+        "segmented_load_group_system_cycle_measurements": {
+          "1": {
+            "2": {
+              "256": "simt.segmented_indirect_load.fp16.segments_2.contiguous_256.factor_1.group_incremental_cost",
+              "1024": "simt.segmented_indirect_load.fp16.segments_2.contiguous_1024.factor_1.group_incremental_cost",
+              "2048": "simt.segmented_indirect_load.fp16.segments_2.contiguous_2048.factor_1.group_incremental_cost"
+            }
+          },
+          "2": {
+            "2": {
+              "256": "simt.segmented_indirect_load.fp16.segments_2.contiguous_256.factor_2.group_incremental_cost",
+              "1024": "simt.segmented_indirect_load.fp16.segments_2.contiguous_1024.factor_2.group_incremental_cost",
+              "2048": "simt.segmented_indirect_load.fp16.segments_2.contiguous_2048.factor_2.group_incremental_cost"
+            }
+          },
+          "4": {
+            "2": {
+              "256": "simt.segmented_indirect_load.fp16.segments_2.contiguous_256.factor_4.group_incremental_cost",
+              "1024": "simt.segmented_indirect_load.fp16.segments_2.contiguous_1024.factor_4.group_incremental_cost",
+              "2048": "simt.segmented_indirect_load.fp16.segments_2.contiguous_2048.factor_4.group_incremental_cost"
+            }
+          }
+        },
+        "grid_stride_load_system_cycle_measurements": {
+          "8": "simt.grid_stride.indirect_load.fp16.warp_instructions_8.incremental_cost"
+        },
+        "grid_stride_load_startup_system_cycle_measurements": {
+          "8": "simt.grid_stride.indirect_load.fp16.warp_instructions_8.startup_cost"
+        }
+      },
+      "scope_handoff": {
+        "fixed_scope_system_cycles": 277,
+        "fixed_scope_measurement": "simt.scope_handoff.aiv_only.fixed_cost",
+        "cv_cross_core_synchronization_system_cycles": 0,
+        "cv_partition_payload_efficiency": 1,
+        "input_handoff_bytes_per_system_cycle": 85.33333333333333,
+        "output_handoff_bytes_per_system_cycle": 102.4,
+        "description": "One Stage materializes as one compound scope.scope; Mixed is illegal for a single Stage. C_scope = C_body(cv efficiency) + C_boundary_data + C_fixed_scope + [CV1:N]*C_cross_core_sync. C_fixed_scope=277 SYS_CNT is the median one-scope delta from exact-lowering AIV-only probes at independent tensor widths 16/64/256 (0.353/0.167/0.277 us). The CV fields are explicit uncalibrated fallbacks and remain neutral until the independent paired pure/mixed structural sweep is complete; they must not be fitted from an operator or exact shape."
+      },
+      "source": "Ascend950PR versioned microbenchmark evidence. The issue floor is an observable conservative bound, not a claimed microarchitecture peak. Control instructions enter that shared floor but do not receive fabricated additive latency. Loaded-index loads use the measured operation-shape curve; scope hand-off retains explicitly marked fallback parameters.",
+      "store_footprint_service": {
+        "unit_bytes": 128,
+        "system_cycles_per_unit": 1.8409989336914707,
+        "issue_floor_by_warps": {
+          "4": 20.987595419847327,
+          "8": 29.989026724663223,
+          "16": 61.518129775042766
+        },
+        "evidence": "950pr_simt_layout_service_20260918.json reproduces the fit: 950PR device4, full sweep ew6SfU, 36 held-out layout/warp points, max slope error 5.216%. SYS_CNT, 64-bit/lane, hot GM. Online use restricted to nonpacked nonoverlapping rows: packed issue-floor transfer failed in grouped repeat Xw1NYC. Service estimate only, not first-round, barrier, private/shared, layout-conversion or complete Stage calibration."
+      },
+      "grid_stride_loop": {
+        "dot_system_cycle_measurements": {
+          "8192": "simt.grid_stride.dot.fp16.flops_8192.body_cost"
+        },
+        "dot_startup_system_cycle_measurements": {
+          "8192": "simt.grid_stride.dot.fp16.flops_8192.startup_cost"
+        },
+        "dot_factor_system_cycle_measurements": {
+          "1": {
+            "8192": "simt.grid_stride.dot.fp16.flops_8192.factor_1.body_cost"
+          }
+        },
+        "dot_factor_startup_system_cycle_measurements": {
+          "1": {
+            "8192": "simt.grid_stride.dot.fp16.flops_8192.factor_1.startup_cost"
+          }
+        },
+        "indirect_dot_composition_body_residual_system_cycle_measurements": {
+          "1": {
+            "8": {
+              "8192": "simt.grid_stride.indirect_dot.fp16.warps_8.flops_8192.factor_1.body_adjustment"
+            }
+          },
+          "2": {
+            "8": {
+              "8192": "simt.grid_stride.indirect_dot.fp16.warps_8.flops_8192.factor_2.body_adjustment"
+            }
+          },
+          "4": {
+            "8": {
+              "8192": "simt.grid_stride.indirect_dot.fp16.warps_8.flops_8192.factor_4.body_adjustment"
+            }
+          }
+        },
+        "indirect_dot_composition_startup_residual_system_cycle_measurements": {
+          "1": {
+            "8": {
+              "8192": "simt.grid_stride.indirect_dot.fp16.warps_8.flops_8192.factor_1.startup_adjustment"
+            }
+          },
+          "2": {
+            "8": {
+              "8192": "simt.grid_stride.indirect_dot.fp16.warps_8.flops_8192.factor_2.startup_adjustment"
+            }
+          },
+          "4": {
+            "8": {
+              "8192": "simt.grid_stride.indirect_dot.fp16.warps_8.flops_8192.factor_4.startup_adjustment"
+            }
+          }
+        },
+        "indirect_dot_composition_evidence": "F1 uses fresh-process paired gather-dot/gather-only controls at Q=1,2, with Q=4 held out below 1.1% error after the generic first-indirect-service ownership rule. F2 retains its independently measured body slope; its one-time ownership term uses two fresh Q=4 windows and leaves Q=2 below 0.6% error. F4 retains its independent isolated Q=1,3,5,8 structural fit and Q=2,4 validation. Geometry comes from compiler-derived in-loop loaded-index warp instructions and dot FLOPs; the signed residual is inclusion-exclusion accounting, contains no kernel/operator key, and assumes serialized execution without pipeline overlap.",
+        "description": "Dynamic source loops serialize successive bodies on one resident program. These isolated curves are distinct from static-range unrolled curves and do not model pipeline overlap.",
+        "resident_direct_memory": {
+          "maximum_total_bytes": 67108864,
+          "load_warp_instructions_per_system_cycle_measurement": "simt.grid_stride.direct_memory.resident.load_throughput",
+          "store_warp_instructions_per_system_cycle_measurement": "simt.grid_stride.direct_memory.resident.store_throughput",
+          "evidence": "Fresh explicit-SIMT factor1 sweep on healthy A5 card3 at total direct FP32 footprints 3, 6, 12, 24, 48 and 96 MiB. The 3-48 MiB points form one steady resident regime; 96 MiB is held out on the existing rotating/cold rates. Independent 2-load/1-store and 4-load/1-store bodies identify load/store rates without an operator name, kernel name, or exact-shape condition. Source grid-stride F1/F2/F4 controls execute the same serialized source body and therefore share this resource curve; no pipeline overlap is modeled."
+        },
+        "forward_scan_system_cycle_measurements": {
+          "128": "simt.grid_stride.scan.i32.forward.extent_128.body_cost",
+          "256": "simt.grid_stride.scan.i32.forward.extent_256.body_cost"
+        },
+        "forward_scan_startup_system_cycle_measurements": {
+          "128": "simt.grid_stride.scan.i32.forward.extent_128.startup_cost",
+          "256": "simt.grid_stride.scan.i32.forward.extent_256.startup_cost"
+        },
+        "forward_scan_factor_system_cycle_measurements": {
+          "2": {
+            "256": "simt.grid_stride.scan.i32.forward.extent_256.factor_2.body_cost"
+          },
+          "4": {
+            "256": "simt.grid_stride.scan.i32.forward.extent_256.factor_4.body_cost"
+          }
+        },
+        "forward_scan_factor_startup_system_cycle_measurements": {
+          "2": {
+            "256": "simt.grid_stride.scan.i32.forward.extent_256.factor_2.startup_cost"
+          },
+          "4": {
+            "256": "simt.grid_stride.scan.i32.forward.extent_256.factor_4.startup_cost"
+          }
+        },
+        "reverse_scan_system_cycle_measurements": {
+          "128": "simt.grid_stride.scan.i32.reverse.extent_128.body_cost",
+          "256": "simt.grid_stride.scan.i32.reverse.extent_256.body_cost"
+        },
+        "reverse_scan_startup_system_cycle_measurements": {
+          "128": "simt.grid_stride.scan.i32.reverse.extent_128.startup_cost",
+          "256": "simt.grid_stride.scan.i32.reverse.extent_256.startup_cost"
+        },
+        "reverse_scan_factor_system_cycle_measurements": {
+          "2": {
+            "128": "simt.grid_stride.scan.i32.reverse.extent_128.factor_2.body_cost"
+          },
+          "4": {
+            "128": "simt.grid_stride.scan.i32.reverse.extent_128.factor_4.body_cost"
+          }
+        },
+        "reverse_scan_factor_startup_system_cycle_measurements": {
+          "2": {
+            "128": "simt.grid_stride.scan.i32.reverse.extent_128.factor_2.startup_cost"
+          },
+          "4": {
+            "128": "simt.grid_stride.scan.i32.reverse.extent_128.factor_4.startup_cost"
+          }
+        }
+      },
+      "scalar_memory": {
+        "description": "SIMT warp-uniform scalar white-box: diff-line load T=prep+fill+(K-1)*issue; first scalar store T=base. Values are CAModel core cycles converted by 988.9/1800.",
+        "uniform_load_prep_system_cycles": 3.2963333333333336,
+        "uniform_load_fill_system_cycles": 263.7066666666667,
+        "uniform_load_diff_line_issue_system_cycles": 0.5493888888888889,
+        "uniform_store_base_system_cycles": 247.22500000000002,
+        "evidence": "Upstream 7e1107f89 target white-box coefficients from CAModel; resource-level target constants, independent of kernel identity.",
+        "in_kernel_transfer_scale": 0.45,
+        "in_kernel_transfer_scale_evidence": "instance_norm full-minus-normonly A/B on Ascend950PR 2026-11-05: scalar increment 1.92 us vs isolated white-box 5.04 us"
+      }
+    }
+  },
+  "kernel_timing": {
+    "description": "Kernel-boundary residual after subtracting the minimal store-only kernel's modeled Stage work. A separate route-keyed residual is composed once when transformed TTIR contains a global load. A measured structural curve also completes the SIMD nested-scalar lowering of tiny rank-2 loaded-index tiles and participates in route ranking. Prologue/epilogue values are only an accounting split.",
+    "stage_dependency_completion": {
+      "status": "qualified_stage_dependency_completion_v1",
+      "target": "Ascend950PR_9579",
+      "lowering_contract": "CANN9.1_Ascend950PR9579_hivm_mmadL1_tile16_f16f16f32_v1",
+      "task_envelope_system_cycles": 288.9999999999999,
+      "dynamic_cv_first_fill_system_cycles": 395.0000000000002,
+      "dynamic_cv_per_iteration_delta_system_cycles": -21.66666666666606,
+      "schedule_contract": "CANN9.1_9579_stage_predecessor_aic_aiv_schedule_v1",
+      "full_kernel_validation_sha256": "81169cb5f51a5a6649c947ee898920df8b68d6ad17fa333dd39965cb0ed16642",
+      "evidence": "Generic Stage predecessor/resource schedule calibrated with independent task-gap and mask-only CV terms 0c4253475a4313542d705a4e19ae0472b38273c76746f2c9f6ed37a23e011339. Frozen validation covers 12 original and QK32/V64 off/on full-kernel cases with maximum APE 3.63%; no kernel name, Stage count, carried-value name or dot geometry is part of admission."
+    },
+    "scalar_prologue_system_cycles": 852.475,
+    "scalar_epilogue_system_cycles": 852.475,
+    "boundary_residual_system_cycles_by_physical_program_count": {
+      "1": 408.3,
+      "2": 703.65,
+      "4": 772.95,
+      "8": 909.4,
+      "16": 1041.4,
+      "32": 1203.4,
+      "56": 1704.95
+    },
+    "global_load_boundary_residual_system_cycles_by_route": {
+      "all_simd": 314.206776903918,
+      "all_simt_only": 485.789436197327,
+      "mixed_simd_simt": 314.206776903918
+    },
+    "scalarized_rank2_indirect_load_completion": {
+      "maximum_elements": 8,
+      "residual_system_cycles_by_physical_program_count": {
+        "1": 1194,
+        "4": 3199,
+        "16": 3666,
+        "56": 3381
+      },
+      "evidence": "v104_indirect_2d_grid_card0 structural sweep, forced SIMD, BLOCK_M=2 and BLOCK_K=4 at physical grids 1/4/16/56. The residual is profiler duration minus the compiler-derived Stage resources, generic boundary curve, and global-load completion term. Independent rank-1 eight-element gathers and the rank-2 4x8 control remain outside the gate."
+    },
+    "simd_rank2_strided_direct_load_completion": {
+      "minimum_elements": 16,
+      "maximum_elements": 128,
+      "startup_system_cycles": 150.0,
+      "per_element_system_cycles": 4.5,
+      "maximum_residual_system_cycles": 440.0,
+      "evidence": "data_provider/950pr_simd_rank2_direct_load_completion_20261011.json; fresh one-program whole-SIMD rank-2 direct block-pointer copy sweep at 2x8, 8x8, 4x16 and 8x16 with a non-unit inner source stride, plus a contiguous-inner-stride exclusion. The residual is profiler completion minus the compiler-derived Stage resources and generic boundary. The bounded startup-plus-element formula leaves the 4x8 geometry as a holdout at +0.40%; it uses rank, direct-address provenance, inner-stride proof and tile elements only."
+    },
+    "simt_rank2_strided_direct_load_completion": {
+      "minimum_elements": 16,
+      "maximum_elements": 128,
+      "startup_system_cycles": 275.0,
+      "per_element_system_cycles": 1.1,
+      "maximum_target_system_cycles": 420.0,
+      "evidence": "data_provider/950pr_simt_rank2_direct_load_completion_20261011.json; fresh Auto-selected whole-SIMT one-program rank-2 direct block-pointer copies at 16/32/64/128 elements after the independently measured whole-SIMD residual made the route competitive. The bounded target uses only direct-address provenance, non-unit inner source stride and tile elements; the unit-inner-stride control is excluded."
+    },
+    "rank2_interleaved_prefix_scan_completion": {
+      "minimum_source_programs": 32,
+      "maximum_source_programs": 1024,
+      "minimum_scan_extent": 64,
+      "maximum_scan_extent": 256,
+      "minimum_independent_sequences": 4,
+      "maximum_independent_sequences": 8,
+      "startup_system_cycles": 200.0,
+      "per_element_system_cycles": 3.0,
+      "factor2_startup_system_cycles": 1206.6666666666667,
+      "factor2_per_element_system_cycles": 0.9505208333333334,
+      "factor2_reference_physical_program_count": 32,
+      "factor2_per_active_physical_program_system_cycles": 30.0,
+      "factor2_minimum_target_system_cycles": 1070.0,
+      "factor4_startup_system_cycles": 1300.0,
+      "factor4_per_element_system_cycles": 1.64,
+      "evidence": "data_provider/950pr_rank2_interleaved_prefix_scan_completion_20261011.json; fresh production-mode (TRITON_DEBUG=0) A5 Auto sweep across source grids 32/64/128/256/512/1024, scan extents 64/128/256, 4/8 interleaved sequences and selected physical grids 4/8/32. Each factor curve is a serialized complete physical-group body, and the matcher requires exactly one direct rank-2 load, one add-prefix-scan and one direct rank-2 store with row-major interleaving."
+    },
+    "simt_static_loop_direct_memory_completion": {
+      "minimum_static_iterations": 8,
+      "maximum_static_iterations": 32,
+      "required_contiguous_elements_per_access": 1024,
+      "required_element_bits": 32,
+      "minimum_load_count": 1,
+      "maximum_load_count": 4,
+      "required_store_count": 1,
+      "maximum_superblock_factor": 4,
+      "startup_system_cycles": 1284.125,
+      "per_iteration_system_cycles_by_load_count": {
+        "1": 404.22693452,
+        "2": 464.87574405,
+        "3": 791.4828869,
+        "4": 852.38764881
+      },
+      "evidence": "data_provider/950pr_simt_static_loop_direct_memory_completion_debug0_20261011.json; fresh A5 production-mode (TRITON_DEBUG=0) forced-SIMT F1 sweep at 8/16/32 static iterations and one through four direct masked FP32 loads plus one dependent store, with independent F2/F4 controls. The elapsed curve is selected from static loop structure, compiler vector width, access count and factor only; it contains no kernel name or full tensor shape and assumes serialized loop completion."
+    },
+    "simt_rank2_indirect_load_completion": {
+      "maximum_elements": 128,
+      "residual_system_cycles_by_element_bits_and_elements": {
+        "16": {
+          "8": -324.27,
+          "32": -437.27,
+          "128": -332.29
+        },
+        "32": {
+          "8": -12.602020019503,
+          "32": -166.271554199211,
+          "128": 85.211744856674
+        }
+      },
+      "evidence": "data_provider/950pr_simt_rank2_indirect_completion_20261007.json; FP16 and FP32 use independent 8/32/128-element development curves. Their untouched 16/64-element interpolation holdouts remain within 6.3% and 1.8% respectively. Matching uses source element bit width, rank, loaded-index dependence, unit proven contiguity and P=1 runtime structure; no operator or exact-shape key is used."
+    },
+    "subwarp_indirect_composite_completion": {
+      "maximum_elements": 8,
+      "residual_system_cycles_by_elements": {
+        "8": 300
+      },
+      "evidence": "Fresh forced-SIMD structural family with one eight-element loaded-index gather followed by tensor arithmetic. The 300 SYS_CNT shared residual, combined with address-dependency-aware direct-load startup ownership, keeps bitwise, max/min, and integer-divide address transforms within ten percent; the pure gather remains an exclusion control."
+    },
+    "simd_multi_result_prefix_scan_completion": {
+      "minimum_source_programs": 2,
+      "maximum_source_programs": 20,
+      "minimum_padded_axis": 8,
+      "maximum_padded_axis": 16,
+      "required_result_count": 2,
+      "required_independent_sequences": 8,
+      "minimum_active_ratio": 0.625,
+      "maximum_active_ratio": 1.0,
+      "elapsed_intercept_system_cycles": 1495.72223381,
+      "elapsed_sqrt_program_system_cycles": 135.05901948,
+      "elapsed_inactive_ratio_system_cycles": 474.91152811,
+      "elapsed_padded_axis_system_cycles": -12.73852212,
+      "evidence": "data_provider/950pr_simd_multi_result_prefix_scan_completion_20261009.json; P=2/20 and active-axis 5/8 versus 16/16 are fit endpoints. P=5/10/17 at active-axis 10/16 are untouched source-program holdouts with maximum absolute error 5.74%. Online matching uses the TTIR scan tuple plus adjacent masked row-major memory geometry and source program count, never an operator or kernel name."
+    },
+    "simt_pairwise_selection_network_completion": {
+      "minimum_input_elements": 512,
+      "maximum_input_elements": 1024,
+      "minimum_output_columns": 2,
+      "maximum_output_columns": 8,
+      "minimum_reduction_stages": 8,
+      "intercept_system_cycles": -75.0894361973267,
+      "input_element_system_cycles": 0.361328125,
+      "log2_output_column_system_cycles": 199.5,
+      "evidence": "data_provider/950pr_simt_pairwise_selection_network_20261009.json; development geometries cover input elements 512/1024 and output widths 2/4/8. The untouched 16x32-to-4 holdout is +2.04%. Matching uses rank-2 memory geometry and the repeated extent-2 reduction topology, never an operator or kernel name."
+    },
+    "simd_large_sequence_minmax_scan_completion": {
+      "minimum_independent_sequences": 64,
+      "maximum_independent_sequences": 512,
+      "minimum_scan_extent": 16,
+      "maximum_scan_extent": 16,
+      "per_independent_sequence_system_cycles": 11.93,
+      "evidence": "Fresh A5 forced-SIMD straight-line min/max scan sweep at extent 16 and 64/128/256/512 independent sequences. A bounded 11.93 SYS_CNT per-sequence completion tail leaves all four geometries within 9%; matching uses only the TTIR prefix-scan tuple and excludes single-sequence, reverse, multi-result and non-minmax scans."
+    },
+    "simt_multi_sequence_minmax_scan_completion": {
+      "minimum_independent_sequences": 2,
+      "maximum_independent_sequences": 32,
+      "minimum_scan_extent": 32,
+      "maximum_scan_extent": 64,
+      "base_reduction_system_cycles": 39.0,
+      "per_independent_sequence_reduction_system_cycles": 13.0,
+      "maximum_reduction_system_cycles": 285.0,
+      "large_minimum_independent_sequences": 64,
+      "large_maximum_independent_sequences": 512,
+      "large_minimum_scan_extent": 16,
+      "large_maximum_scan_extent": 32,
+      "large_base_reduction_system_cycles": 211.0,
+      "large_per_independent_sequence_reduction_system_cycles": 2.75,
+      "large_maximum_reduction_system_cycles": 1611.0,
+      "evidence": "data_provider/950pr_simt_multi_sequence_minmax_scan_completion_20261009.json plus fresh A5 extent-16/32 sweeps over 64/128/256/512 independent sequences. The original small-sequence formula remains unchanged; the bounded large-sequence branch shares the lowered helper envelope and leaves the seven new geometries within 7%. Matching uses only the TTIR prefix-scan tuple; single-sequence, reverse, multi-result and non-minmax scans remain exclusion controls."
+    },
+    "simd_straight_line_add_reduction_completion": {
+      "minimum_rows": 16,
+      "maximum_rows": 64,
+      "minimum_extent": 8,
+      "maximum_extent": 32,
+      "shared_completion_system_cycles": 100.0,
+      "evidence": "data_provider/950pr_simd_straight_line_add_reduction_completion_20261009.json; paired add-versus-minmax row-reduction sweeps cover extents 8/16/32, rows 32/64, and active widths 3/4/8/12/16/17. The completion transfer is selected by the TTIR reduction combine region and bounded geometry only; min/max is an exclusion control."
+    },
+    "simd_two_loop_single_reduction_completion": {
+      "minimum_source_programs": 64,
+      "maximum_source_programs": 256,
+      "minimum_runtime_iterations": 2,
+      "maximum_runtime_iterations": 5,
+      "required_reduction_extent": 8192,
+      "first_iteration_system_cycles": 180.0,
+      "additional_iteration_system_cycles": 430.0,
+      "evidence": "data_provider/950pr_simd_two_loop_single_reduction_completion_20261009.json; development points cover Q=2/3 at columns 64/128/256 and the Q=5 row-count endpoint. The formula adds a serialized per-wave completion envelope to the compiler-derived two-loop plus one-add-reduction structure; it does not model pipeline overlap or inspect an operator name."
+    },
+    "tiny_straight_line_simt_memory_completion": {
+      "maximum_elements_per_access": 128,
+      "signed_residual_system_cycles": -113.047957689105,
+      "evidence": "data_provider/950pr_tiny_straight_line_simt_memory_20261009.json; least-squares signed residual from six independent FP16/FP32 direct load-store development points at 8/32/128 elements. The discrete masked rank-2 kernel is an untouched holdout. Matching uses one physical F1 program, exactly one bounded load and store, and excludes loops, reductions, scans, atomics, dot, loaded-index addressing, shared memory and private stack traffic."
+    },
+    "simt_non_affine_rank1_memory_completion": {
+      "maximum_elements_per_access": 32,
+      "residual_system_cycles_by_source_program_count": {
+        "8": -237.856458996263,
+        "16": -247.007538209923,
+        "32": -19.507538209923,
+        "64": 479.928676256791,
+        "128": 375.0,
+        "256": 631.781714828573
+      },
+      "evidence": "data_provider/950pr_simt_non_affine_rank1_memory_20261009.json; paired one-dimensional and channel-row structural families at source program counts 8/16/32/64/128/256. Curve points use the paired-layout center; the P128 point is the robust center of fresh-process medians on cards 0/2/4/5 plus the independent flat-layout measurement. Matching uses the compiler-proven non-affine FP address DAG, rank-one 32-element load/store geometry and source program count, never an operator or kernel name."
+    },
+    "system_counter_frequency_mhz": 1000,
+    "evidence": "The base curve is the fresh forced-SIMD minimal observable store-only kernel sweep at physical grids 1,2,4,8,16,32,56. The global-load residual is the median direct-copy profiler duration minus its compiler-derived route resource and the base boundary at P=1: 314.207 SYS_CNT for forced SIMD and 485.789 SYS_CNT for selected SIMT. Independent P=4/P=56 direct-copy controls confirm the term is a sub-microsecond completion envelope rather than a per-operation slope. Kernel argument count is reported for diagnosis only: the v105 held-out set disproved an additive argument-count charge because two four-argument kernels with different structural work required opposite corrections. The prologue/epilogue fields are an equal accounting split, not separately measured components.",
+    "completion_inclusive_groups_cover_boundary": true,
+    "completion_inclusive_minimum_stage_count": 12,
+    "reduction_resident_tile_max_fraction": 0.6,
+    "simt_whole_kernel_completion_scale": 0.44,
+    "simt_whole_kernel_factor_limit": 4,
+    "completion_inclusive_groups_cover_boundary_evidence": "Deep fused pipelines (>=12 logical stages) price their loop body from a measured completion-inclusive group envelope that already contains the kernel boundary fill/drain. Short elementwise kernels keep the separate boundary residual (their group curve covers only the loop body).",
+    "simt_whole_kernel_completion_scale_evidence": "Measured/analytical all-SIMT whole-kernel body ratio on the five instance_norm loop shapes (16,16,64 / 16,16,1024 / 16,16,4098 / 1,8,4,4 / 16,8,128,128) at factors 1/2/4 was 0.37-0.63 on the original calibration. After rebasing to the current upstream the shape2 SIMT kernel measures 5.17-5.24 us (body ratio 0.385-0.394), so the shared scale is 0.44: it predicts 5.598 us, within 10% of both the old 6.066 us and the fresh 5.17-5.24 us measurements. Applied uniformly to every all-SIMT factor plan; the factor ranking is unchanged.",
+    "simt_whole_kernel_factor_limit_evidence": "Selection-stage policy for the current bring-up phase: the all-SIMT selector only evaluates whole-kernel SuperBlock factors 1/2/4. This is not a legality limit; the backend capability still advertises 8/16 and an explicitly forced factor still compiles."
+  }
+}

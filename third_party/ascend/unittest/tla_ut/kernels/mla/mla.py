@@ -150,7 +150,7 @@ def attention(
         request_row = tile * Q_TILE_ROWS
         q_row = batch * QUERY_LENGTH * QUERY_HEADS + request_row
         first_page = split * SPLIT_PAGES
-        length = tla.load(KV_LENGTHS + batch)
+        length = tla.load_scalar(tla.view(KV_LENGTHS + batch, (1, )))
         last_query = (request_row + Q_TILE_ROWS - 1).to(tla.int32) // QUERY_HEADS
         last_page = (length - QUERY_LENGTH + last_query) // PAGE
         num_pages = tla.maximum(0, tla.minimum(SPLIT_PAGES, last_page + 1 - first_page))
@@ -219,7 +219,8 @@ def attention(
                     next_slot = next_id * SLOT_ELEMS
                     next_key = tla.reshape(tla.subview(slots, offsets=(next_slot, ), sizes=(QK_DIM * KEY_ROWS, )),
                                            KV_L1_SHAPE)
-                    first = tla.load(BLOCK_TABLE + batch * MAX_PAGES + tla.minimum(page, last_page)).to(tla.int64)
+                    first = tla.load_scalar(
+                        tla.view(BLOCK_TABLE + batch * MAX_PAGES + tla.minimum(page, last_page), (1, ))).to(tla.int64)
                     tla.sync.wait_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.MTE2, next_id)
                     first_blocks = first_count.to(tla.uint32) // 16
                     page0_nd = tla.view(KV + first * PAGE * QK_DIM, (PAGE, QK_DIM))
@@ -227,8 +228,9 @@ def attention(
                     first_nz = tla.subview(next_key, (0, 0, 0, 0), (QK_DIM // 16, first_blocks, 16, 16))
                     tla.load_gm_to_l1(first_rows, first_nz, tla.LoadGM2L1Params(l2_cache_ctrl=KV_L2))
                     if first_count < KEY_ROWS:
-                        second = tla.load(BLOCK_TABLE + batch * MAX_PAGES + tla.minimum(page + 1, last_page)).to(
-                            tla.int64)
+                        second = tla.load_scalar(
+                            tla.view(BLOCK_TABLE + batch * MAX_PAGES + tla.minimum(page + 1, last_page),
+                                     (1, ))).to(tla.int64)
                         tail_count = KEY_ROWS - first_count
                         tail_blocks = tail_count.to(tla.uint32) // 16
                         page1_nd = tla.view(KV + second * PAGE * QK_DIM, (PAGE, QK_DIM))

@@ -61,6 +61,66 @@ def _ops(module, name):
 
 SCALAR_TYPES = ("i1", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "fp16", "bf16", "fp32", "fp64")
 
+FLOAT8_TYPES = (tl.float8e5, tl.float8e5b16, tl.float8e4nv, tl.float8e4b8, tl.float8e4b15)
+
+
+@pytest.mark.parametrize("dtype", FLOAT8_TYPES)
+def test_scalar_interfaces_reject_float8(dtype):
+    value = tl.tensor(None, dtype)
+    buf = tla.buffer(None, tla.buffer_type((1, ), dtype))
+    int_value = tl.tensor(None, tl.int8)
+    int_buf = tla.buffer(None, tla.buffer_type((1, ), tl.int8))
+    semantic = SimpleNamespace(to_tensor=lambda x: x)
+    for operation, operands in (
+        (tla.load_scalar, (buf, )),
+        (tla.store_scalar, (buf, 1)),
+        (tla.store_scalar, (int_buf, value)),
+        (tla.select, (True, 1, value)),
+        (tla.abs, (value, )),
+        (tla.maximum, (value, 1)),
+        (tla.minimum, (1, value)),
+        (tla.cast, (value, tl.int8)),
+        (tla.cast, (int_value, dtype)),
+        (tla.cdiv, (1, value)),
+        (tla.clamp, (1.0, 0.0, value)),
+    ):
+        with pytest.raises(TypeError, match=rf"tla[.]{operation.__name__}.*float8"):
+            operation(*operands, _semantic=semantic)
+
+
+@tla.jit
+def _store_scalar_value(out, value):
+    tla.store_scalar(tla.view(out, (1, )), value)
+
+
+@pytest.mark.parametrize("source,destination,message", [
+    ("fp64", "fp32", "does not support fp64 narrowing"),
+    ("fp64", "fp16", "does not support fp64 narrowing"),
+    ("bf16", "fp32", "input does not support bfloat16"),
+    ("fp32", "bf16", "does not support bfloat16"),
+])
+def test_store_scalar_rejects_unsupported_conversion(source, destination, message):
+    with pytest.raises(CompilationError, match=f"tla.cast {message}"):
+        compile_offline(_store_scalar_value, {"out": "*" + destination, "value": source}, {})
+
+
+@tla.jit
+def _store_scalar_literal(out, VALUE: tl.constexpr):
+    tla.store_scalar(tla.view(out, (1, )), VALUE)
+
+
+@pytest.mark.parametrize("value", [1e100, 1e-100])
+def test_store_scalar_rejects_fp64_literal_narrowing(value):
+    with pytest.raises(CompilationError, match="tla.cast does not support fp64 narrowing"):
+        compile_offline(_store_scalar_literal, {"out": "*fp32"}, {"VALUE": value})
+
+
+@pytest.mark.parametrize("source,destination,conversion", [("bf16", "bf16", False), ("fp32", "fp16", True)])
+def test_store_scalar_supported_conversion(source, destination, conversion):
+    module = _lower(_store_scalar_value, {"out": "*" + destination, "value": source})
+    assert len(_ops(module, "memref.store")) == 1
+    assert len(_ops(module, "arith.truncf")) == int(conversion)
+
 
 def _scalar_frontend(operation, operands, **kwargs):
     """Emit real scalar IR without requiring the TLA-specific native builder."""
@@ -120,10 +180,9 @@ def test_abs_literals_match_triton(value):
     assert _scalar_frontend(tla.abs, (value, )) == _scalar_frontend(tl.abs, (value, ))
 
 
-@pytest.mark.parametrize("dtype", [tl.float8e5, tl.float8e4nv, tl.float8e4b15, tl.float64])
 @pytest.mark.parametrize("wrapped", [False, True])
-def test_abs_rejects_unsupported_floats(dtype, wrapped):
-    value = tl.tensor(None, dtype)
+def test_abs_rejects_fp64(wrapped):
+    value = tl.tensor(None, tl.float64)
     with pytest.raises(TypeError, match="tla.abs does not support dtype"):
         tla.abs(tl.constexpr(value) if wrapped else value, _semantic=object())
 
@@ -194,8 +253,8 @@ def test_abs_composes_in_jit_helper():
 
 
 @pytest.mark.parametrize("condition", SCALAR_TYPES)
-@pytest.mark.parametrize("left", SCALAR_TYPES + ("fp8e5", ))
-@pytest.mark.parametrize("right", SCALAR_TYPES + ("fp8e5", ))
+@pytest.mark.parametrize("left", SCALAR_TYPES)
+@pytest.mark.parametrize("right", SCALAR_TYPES)
 def test_select_matches_triton_frontend(condition, left, right):
     operands = tuple(tl.str_to_ty(dtype, None) for dtype in (condition, left, right))
     if "bf16" in (condition, left, right):
@@ -233,8 +292,8 @@ def test_select_literals_match_triton(condition, operands):
 
 @pytest.mark.parametrize("is_max", [True, False], ids=["maximum", "minimum"])
 @pytest.mark.parametrize("propagate_nan", [tl.PropagateNan.NONE, tl.PropagateNan.ALL])
-@pytest.mark.parametrize("left", SCALAR_TYPES + ("fp8e5", ))
-@pytest.mark.parametrize("right", SCALAR_TYPES + ("fp8e5", ))
+@pytest.mark.parametrize("left", SCALAR_TYPES)
+@pytest.mark.parametrize("right", SCALAR_TYPES)
 def test_minmax_matches_triton_frontend(left, right, propagate_nan, is_max):
     operands = (tl.str_to_ty(left, None), tl.str_to_ty(right, None))
     operation = tla.maximum if is_max else tla.minimum
@@ -635,8 +694,7 @@ def test_scalar_cast_numeric_ir(source, destination):
     assert not _ops(module, "memref.alloc")
 
 
-@pytest.mark.parametrize("destination",
-                         [tl.float16, tl.float32, tl.float8e5, tl.float8e4nv, tl.float8e4b8, tl.float8e5b16])
+@pytest.mark.parametrize("destination", [tl.float16, tl.float32])
 @pytest.mark.parametrize("rounding", [None, "rtne", "rtz"])
 def test_scalar_fp64_narrowing_rejected(destination, rounding):
     outcome, _ = _scalar_frontend(tla.cast, (tl.float64, ), dtype=destination, fp_downcast_rounding=rounding)
@@ -1073,7 +1131,7 @@ def test_max_value_reject_string_dtype(dtype, wrapped):
         tla.max_value(dtype, _semantic=SimpleNamespace())
 
 
-@pytest.mark.parametrize("dtype", [tl.void, tl.float8e5, tl.float8e4nv])
+@pytest.mark.parametrize("dtype", (tl.void, ) + FLOAT8_TYPES)
 def test_max_value_reject_unsupported_dtype(dtype):
     with pytest.raises(ValueError, match="tla.max_value does not support dtype"):
         tla.max_value(dtype, _semantic=SimpleNamespace())

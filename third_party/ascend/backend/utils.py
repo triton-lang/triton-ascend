@@ -715,7 +715,10 @@ def _is_auto_map_parallel_blocks_enabled() -> bool:
 
 
 def _get_modeled_superblock_factors():
-    return (1, 2, 4, 8, 16, 32, 64)
+    # F8 is the largest currently supported whole-kernel SIMT factor.  Keep
+    # higher factors out of the capability contract until their generated
+    # code and resource model are validated.
+    return (1, 2, 4, 8)
 
 
 def _get_current_scope_superblock_factors():

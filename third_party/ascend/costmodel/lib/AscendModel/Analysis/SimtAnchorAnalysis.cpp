@@ -477,14 +477,21 @@ analyzeAnchor(Operation *op, bool compileOn91095,
     const std::string inputType = input ? getScalarTypeName(input) : "unknown";
     const std::string resultType =
         result ? getScalarTypeName(result) : "unknown";
+    // Histogram has no SIMD implementation, but the A5 vector histogram
+    // helper is legal inside a whole-kernel SIMT route.  Keeping
+    // allSimtOnly=false made Auto report only the mixed candidate; the Auto
+    // contract deliberately permits whole-kernel SIMD or SIMT and never
+    // materializes mixed scopes, so such kernels then failed with "no
+    // materializable candidate" before lowering.  Preserve the mixed route
+    // for explicit scope selection while allowing Auto to choose pure SIMT.
     descriptor.lowerability.allSimd = false;
-    descriptor.lowerability.allSimtOnly = false;
     bool supported = input && result && input.hasStaticShape() &&
                      result.hasStaticShape() && input.getRank() == 1 &&
                      result.getRank() == 1 &&
                      (inputType == "i8" || inputType == "i16" ||
                       inputType == "i32" || inputType == "i64") &&
                      resultType == "i32" && inputElements > 0 && numBins > 0;
+    descriptor.lowerability.allSimtOnly = supported;
     if (!supported)
       descriptor.lowerability.mixed = false;
   } else if (name == "tt.scan") {

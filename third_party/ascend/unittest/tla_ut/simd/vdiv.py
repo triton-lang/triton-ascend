@@ -45,7 +45,7 @@ EXACT_B = [3.0, 7.0, 3e-30, 0.1, 3.0, 3.0, 3.0, 7e-21, 3.0, 7.0, 13.0, 7.0]
 
 
 @tla.jit
-def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xy = tla.alloc((2, N), tl.float32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((6, N), tl.float32, space="ub")
@@ -56,7 +56,7 @@ def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         b = tla.simd.vlds(xy[1, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, mode=tla.simd.MODE.ZEROING))
@@ -69,7 +69,7 @@ def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vdiv_exact(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vdiv_exact(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xy = tla.alloc((2, N), tl.float32, space="ub")
     ob = tla.alloc((4, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
@@ -77,7 +77,7 @@ def vdiv_exact(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         a = tla.simd.vlds(xy[0, 0])
         b = tla.simd.vlds(xy[1, 0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, precision="exact"))
         tla.simd.vsts(ob[1, 0], tla.simd.vdiv(a, b, mask=prefix, precision="exact"))
@@ -87,7 +87,7 @@ def vdiv_exact(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xy = tla.alloc((2, N), tl.uint32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((6, N), tl.uint32, space="ub")
@@ -98,7 +98,7 @@ def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         b = tla.simd.vlds(xy[1, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, mode=tla.simd.MODE.ZEROING))
@@ -111,7 +111,7 @@ def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vdiv_u16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vdiv_u16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xy = tla.alloc((2, N), tl.uint16, space="ub")
     ib = tla.alloc((N, ), tl.int16, space="ub")
     tb = tla.alloc((N, ), tl.int16, space="ub")
@@ -124,7 +124,7 @@ def vdiv_u16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         b = tla.simd.vlds(xy[1, 0])
         idx = tla.simd.vlds(ib[0])
         t = tla.simd.vlds(tb[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, mode=tla.simd.MODE.ZEROING), dist="NORM_B16")
@@ -137,7 +137,10 @@ def vdiv_u16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 def constexprs(lanes=None, active=None):
-    return {"N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active}
+    return {
+        "N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active,
+        "MASKPAT": "VL%d" % (SHAPE["active"] if active is None else active)
+    }
 
 
 def test_ir(output_dir=None):

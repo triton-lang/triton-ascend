@@ -25,7 +25,8 @@ SIGNATURE = {name: "*u32" for name in ("X", "Y", "O")}
 
 
 @tla.jit
-def vor(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
+def vor(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr, MASKPAT: tl.constexpr,
+        TAILPAT: tl.constexpr):
     x = tla.alloc((TILES, N), tl.uint32, space="ub")
     y = tla.alloc((TILES, N), tl.uint32, space="ub")
     o = tla.alloc((4 + TILES, N), tl.uint32, space="ub")
@@ -34,7 +35,7 @@ def vor(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAI
     with tla.scope.simd():
         a = tla.simd.vlds(x[0, 0])
         b = tla.simd.vlds(y[0, 0])
-        mask = tla.simd.pge(ACTIVE, N)
+        mask = tla.simd.pset(2048 // N, MASKPAT)
         full = tla.simd.vor(a, b)
         zeroed = tla.simd.vor(a, b, mask)
         tla.simd.vsts(o[0, 0], full)
@@ -47,7 +48,7 @@ def vor(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAI
             va = tla.simd.vlds(x[t, 0])
             vb = tla.simd.vlds(y[t, 0])
             if t == TILES - 1:
-                tail_mask = tla.simd.pge(TAIL, N)
+                tail_mask = tla.simd.pset(2048 // N, TAILPAT)
                 tla.simd.vsts(o[4 + t, 0], tla.simd.vor(va, vb, tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(o[4 + t, 0], tla.simd.vor(va, vb))
@@ -55,7 +56,10 @@ def vor(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAI
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "TILES": SHAPE["tiles"], "TAIL": SHAPE["tail"]}
+    return {
+        "N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"]), "TILES": SHAPE["tiles"],
+        "TAIL": SHAPE["tail"], "TAILPAT": "VL%d" % (SHAPE["tail"])
+    }
 
 
 def test_ir(output_dir=None):

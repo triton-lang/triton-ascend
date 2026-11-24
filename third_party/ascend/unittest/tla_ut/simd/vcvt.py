@@ -26,26 +26,26 @@ SIGNATURE_F2I = {"XF": "*fp32", "OI": "*i32"}
 
 
 @tla.jit
-def vcvt_i2f(X, OF, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vcvt_i2f(X, OF, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     x = tla.alloc((N, ), tl.int32, space="ub")
     o = tla.alloc((2, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(X, (N, )), x)
     with tla.scope.simd():
         xv = tla.simd.vlds(x[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         tla.simd.vsts(o[0, 0], tla.simd.vcvt(xv, tl.float32))
         tla.simd.vsts(o[1, 0], tla.simd.vcvt(xv, tl.float32, prefix))
     tla.store_ub_to_gm(o, tla.view(OF, (2, N)))
 
 
 @tla.jit
-def vcvt_f2i(XF, OI, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vcvt_f2i(XF, OI, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xf = tla.alloc((N, ), tl.float32, space="ub")
     oi = tla.alloc((4, N), tl.int32, space="ub")
     tla.load_gm_to_ub(tla.view(XF, (N, )), xf)
     with tla.scope.simd():
         f = tla.simd.vlds(xf[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         # f2s with default round=R (ties to even)
         tla.simd.vsts(oi[0, 0], tla.simd.vcvt(f, tl.int32))
         # f2s with round=Z (toward zero)
@@ -58,7 +58,7 @@ def vcvt_f2i(XF, OI, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def test_ir(output_dir=None):

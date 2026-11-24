@@ -1346,7 +1346,7 @@ def test_public_names_are_defined_and_documented():
         assert name in defined, f"{name} not defined in simd.py"
         node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
         assert ast.get_docstring(node), f"{name} has no docstring"
-    for name in ("membar", "pge", "vci"):
+    for name in ("membar", "vci"):
         assert f'"{name}"' in src
 
 

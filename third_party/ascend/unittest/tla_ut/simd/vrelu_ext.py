@@ -23,7 +23,7 @@ ALPHA = 0.25
 
 
 @tla.jit
-def vlrelu_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vlrelu_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xb = tla.alloc((N, ), tl.float32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((ROWS_C, N), tl.float32, space="ub")
@@ -33,7 +33,7 @@ def vlrelu_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         x = tla.simd.vlds(xb[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(x, x, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vlrelu(x, 0.25))
@@ -44,7 +44,7 @@ def vlrelu_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vprelu_f32(X, A, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vprelu_f32(X, A, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xb = tla.alloc((N, ), tl.float32, space="ub")
     ab = tla.alloc((N, ), tl.float32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
@@ -57,7 +57,7 @@ def vprelu_f32(X, A, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         a = tla.simd.vlds(ab[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(x, x, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vprelu(x, a))
@@ -68,7 +68,7 @@ def vprelu_f32(X, A, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vlrelu_f16(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vlrelu_f16(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xb = tla.alloc((N, ), tl.float16, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((ROWS_C, N), tl.float16, space="ub")
@@ -78,7 +78,7 @@ def vlrelu_f16(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         x = tla.simd.vlds(xb[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(x, tla.simd.vdup(0.0, tl.float16), op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(x, x, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vlrelu(x, 0.25), dist="NORM_B16")
@@ -89,7 +89,7 @@ def vlrelu_f16(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vprelu_f16(X, A, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vprelu_f16(X, A, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xb = tla.alloc((N, ), tl.float16, space="ub")
     ab = tla.alloc((N, ), tl.float16, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
@@ -102,7 +102,7 @@ def vprelu_f16(X, A, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         a = tla.simd.vlds(ab[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(x, tla.simd.vdup(0.0, tl.float16), op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(x, x, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vprelu(x, a), dist="NORM_B16")
@@ -113,7 +113,7 @@ def vprelu_f16(X, A, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 def constexprs(shape=SHAPE):
-    return {"N": shape["lanes"], "ACTIVE": shape["active"]}
+    return {"N": shape["lanes"], "ACTIVE": shape["active"], "MASKPAT": "VL%d" % (shape["active"])}
 
 
 def test_ir(output_dir=None):

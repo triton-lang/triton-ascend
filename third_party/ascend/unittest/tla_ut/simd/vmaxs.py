@@ -38,7 +38,7 @@ W_SCALARS = (0x80000000, 0x80000001, 0xFFFFFFFF)
 
 
 @tla.jit
-def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xb = tla.alloc((N, ), tl.float32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((6, N), tl.float32, space="ub")
@@ -48,7 +48,7 @@ def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         x = tla.simd.vlds(xb[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vmaxs(x, 0.0, mode=tla.simd.MODE.ZEROING))
@@ -61,7 +61,7 @@ def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vmaxs_bounds(I, U, W, OI, OU, OW, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vmaxs_bounds(I, U, W, OI, OU, OW, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     ib = tla.alloc((N, ), tl.int64, space="ub")
     ub = tla.alloc((N, ), tl.uint64, space="ub")
     wb = tla.alloc((N, ), tl.uint32, space="ub")
@@ -76,7 +76,7 @@ def vmaxs_bounds(I, U, W, OI, OU, OW, N: tl.constexpr, ACTIVE: tl.constexpr):
         uv = tla.simd.vlds(ub[0])
         wv = tla.simd.vlds(wb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(oi[0, 0], tla.simd.vmaxs(iv, 2**53), dist="NORM_B64")
         tla.simd.vsts(oi[1, 0], tla.simd.vmaxs(iv, 2**53 + 1, mask=prefix), dist="NORM_B64")
@@ -93,7 +93,7 @@ def vmaxs_bounds(I, U, W, OI, OU, OW, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def test_ir(output_dir=None):

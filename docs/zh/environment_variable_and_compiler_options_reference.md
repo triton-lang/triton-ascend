@@ -58,7 +58,7 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 运行 | `TRITON_GRID_WARN_PRINT` | 打印Ascend launcher的grid大小警告。 | 关闭 | 支持 | 支持 |
 | 运行 | `NPU_DEVICE_LIMIT` | 按 `AI Core数,Vector Core数` 限制可用核心数，例如 `14,28`；需符合设备比例。 | 未设置，使用设备值 | 支持 | 支持 |
 | 工具链选择 | `CC` | 设置CPU launcher扩展的C/C++编译器。 | 未设置，使用系统默认编译器 | 支持 | 支持 |
-| 工具链选择 | `ASCEND_HOME_PATH` | CANN Toolkit根目录。启动Python前加载CANN的 `set_env.sh`。TA从此目录查找构建launcher扩展所需的头文件、库和CANN版本文件。 | 由 `set_env.sh` 设置 | 支持 | 支持 |
+| 工具链选择 | `ASCEND_HOME_PATH` | CANN Toolkit根目录。启动Python前加载CANN的 `set_env.sh`。Triton-Ascend从此目录查找构建launcher扩展所需的头文件、库和CANN版本文件。 | 由 `set_env.sh` 设置 | 支持 | 支持 |
 | 工具链选择 | `TRITON_NPU_COMPILER_PATH` | 仅当随包工具与 `PATH` 查找均失败时，作为Ascend编译器工具目录的后备路径。 | 未设置 | 支持 | 支持 |
 | 工具链选择 | `TRITON_BUILD_DIR` | 查找 `triton-opt`、`triton-mlir-opt` 时，在随包工具之后、`PATH` 之前查找该目录的 `bin/`。 | 未设置 | 支持 | 支持 |
 

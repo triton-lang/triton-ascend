@@ -8,7 +8,7 @@
 //      rewrite rebuilds the body and can only reproduce the loads it knows, so
 //      the matcher must decline and leave the module byte-identical.
 //
-// Bits 16/17 are known but fixed default-off (default mask 3071), so they are
+// Bits 16/17 are known but fixed default-off, so they are
 // requested explicitly. The non-950 run checks the target gate declines too.
 // RUN: echo -n > %t.empty
 // RUN: triton-opt %s --split-input-file --verify-each -graph-optimize='rule-mask=0' -canonicalize -cse -o %t.ctl

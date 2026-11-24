@@ -32,6 +32,7 @@ from triton._C.libtriton import ascend, ir
 from triton._C.libtriton.ascend import ir as ascend_ir
 from triton.backends.ascend.compiler import NPUOptions, make_ttir
 from triton.backends.ascend.program_grid import (
+    COALESC_ATOMIC_LOCK_REMOVAL_RULE_BIT,
     DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK,
     GRAPH_OPTIMIZATION_KNOWN_RULE_MASK,
     INDEPENDENT_AXIS_TENSORIZE_RULE_BIT,
@@ -308,10 +309,11 @@ def test_graph_optimize_pass_accepts_zero_rule_mask(tmp_path):
     assert_reparseable(module, tmp_path, "zero-rule-mask")
 
 
-def test_default_graph_mask_enables_iat_ptsm_and_keeps_nsa_rule_pair_off():
-    expected_mask = (511 | INDEPENDENT_AXIS_TENSORIZE_RULE_BIT | PERSISTENT_TASK_STRIP_MINING_RULE_BIT)
+def test_default_graph_mask_enables_iat_ptsm_and_atomic_lock_removal():
+    expected_mask = (511 | INDEPENDENT_AXIS_TENSORIZE_RULE_BIT | PERSISTENT_TASK_STRIP_MINING_RULE_BIT
+                     | COALESC_ATOMIC_LOCK_REMOVAL_RULE_BIT)
 
-    assert expected_mask == 3071
+    assert expected_mask == 265215
     assert DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK == expected_mask
     assert NPUOptions(arch="Ascend910_95").rule_mask == expected_mask
     assert not DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & SELECTED_BLOCK_SCAN_RULE_BIT
@@ -935,7 +937,7 @@ def test_graph_optimize_options_contribute_to_npu_hash():
 #   * the Python one, GRAPH_OPTIMIZATION_KNOWN_RULE_MASK in
 #     third_party/ascend/backend/program_grid.py (0x3FBFF: bits 0-9 and 11-17),
 #     enforced by NPUOptions and normalize_graph_optimization_rule_mask.
-# Both layers also carry the default mask (3071), which keeps bits 16 and 17
+# Both layers carry the default mask, which keeps bits 16 and 17
 # out so the pair stays opt-in; the cases below pin that default-off contract,
 # the "unknown bits stay rejected" contract, and that the scan rule only
 # registers when both bits are set (16 alone and 17 alone are no-ops).
@@ -980,8 +982,8 @@ def test_rule_mask_still_rejects_unknown_bits():
 
 
 def test_default_graph_mask_excludes_nsa_rule_pair():
-    assert DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK == 3071
-    assert NPUOptions(arch="Ascend910_95").rule_mask == 3071
+    assert DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK == 265215
+    assert NPUOptions(arch="Ascend910_95").rule_mask == DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK
     assert not DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & SELECTED_BLOCK_SCAN_RULE_BIT
     assert not DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & QUERY_ROW_BATCHING_RULE_BIT
 
@@ -1016,7 +1018,7 @@ def test_rule_a_bit_alone_is_noop(tmp_path):
     assert "scf.for" in source
 
     baseline = DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK & ~(SELECTED_BLOCK_SCAN_RULE_BIT | QUERY_ROW_BATCHING_RULE_BIT)
-    assert baseline == 3071
+    assert baseline == DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK
     a_only = baseline | SELECTED_BLOCK_SCAN_RULE_BIT
     b_only = baseline | QUERY_ROW_BATCHING_RULE_BIT
     control = _render_graph_optimize(fixture, baseline)

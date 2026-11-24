@@ -35,7 +35,7 @@ WIDE_SIGNATURE = {"I": "*i64", "U": "*u64", "T": "*i32", "OI": "*i64", "OU": "*u
 
 
 @tla.jit
-def vdupv(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vdupv(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xb = tla.alloc((N, ), tl.float32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((10, N), tl.float32, space="ub")
@@ -45,7 +45,7 @@ def vdupv(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         x = tla.simd.vlds(xb[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdupv(x, pos=tla.simd.POS.LOWEST))
@@ -62,7 +62,7 @@ def vdupv(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vdupv_wide(I, U, T, OI, OU, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vdupv_wide(I, U, T, OI, OU, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     ib = tla.alloc((N, ), tl.int64, space="ub")
     ub = tla.alloc((N, ), tl.uint64, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
@@ -76,7 +76,7 @@ def vdupv_wide(I, U, T, OI, OU, N: tl.constexpr, ACTIVE: tl.constexpr):
         uv = tla.simd.vlds(ub[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         # Signed i32 lane index vs per-lane threshold: no unsigned 64-bit compare.
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
@@ -101,7 +101,7 @@ def vdupv_wide(I, U, T, OI, OU, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def test_ir(output_dir=None):

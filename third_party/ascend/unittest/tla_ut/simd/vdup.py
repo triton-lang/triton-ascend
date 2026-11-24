@@ -51,14 +51,14 @@ ALIAS_CASES = (
 
 
 @tla.jit
-def vdup(T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vdup(T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((6, N), tl.float32, space="ub")
     tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdup(1.5, tl.float32, mode=tla.simd.MODE.ZEROING))
@@ -71,10 +71,10 @@ def vdup(T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vdup_bf16(O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vdup_bf16(O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     ob = tla.alloc((3, N), tl.bfloat16, space="ub")
     with tla.scope.simd():
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         zero = tla.simd.vdup(0.0, tl.bfloat16)
         none = tla.simd.vcmp(zero, zero, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdup(1.5, tl.bfloat16), dist="NORM_B16")
@@ -95,7 +95,10 @@ def vdup_alias(O, DT: tl.constexpr):
 
 
 def constexprs(lanes=None, active=None):
-    return {"N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active}
+    return {
+        "N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active,
+        "MASKPAT": "VL%d" % (SHAPE["active"] if active is None else active)
+    }
 
 
 def test_ir(output_dir=None):

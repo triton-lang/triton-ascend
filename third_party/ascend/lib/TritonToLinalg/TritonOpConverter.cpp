@@ -568,6 +568,32 @@ static bool isInsideSimtScope(Operation *op) {
   return false;
 }
 
+// A position reduced from vector data is already available on the vector side.
+// Turning range == splat(position) into dynamic slices forces that position
+// through scalar control flow (bounds checks and slice sizes). Keep the select
+// elementwise instead, so reduction -> broadcast -> select can stay vectorized.
+// Runtime scalar bounds and other continuous masks retain the slice lowering.
+static bool isReductionPositionMask(Value mask) {
+  auto compare = mask.getDefiningOp<arith::CmpIOp>();
+  if (!compare || (compare.getPredicate() != arith::CmpIPredicate::eq &&
+                   compare.getPredicate() != arith::CmpIPredicate::ne))
+    return false;
+
+  return llvm::any_of(compare->getOperands(), [](Value value) {
+    auto splat = value.getDefiningOp<triton::SplatOp>();
+    if (!splat)
+      return false;
+    auto reduce = splat.getSrc().getDefiningOp<triton::ReduceOp>();
+    if (!reduce || reduce->getNumOperands() != 1 ||
+        reduce->getNumResults() != 1)
+      return false;
+    auto input = dyn_cast<RankedTensorType>(reduce->getOperand(0).getType());
+    return input && input.hasStaticShape() && input.getRank() == 1 &&
+           input.getNumElements() > 1 &&
+           isa<IntegerType>(splat.getSrc().getType());
+  });
+}
+
 LogicalResult
 SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
                                      PatternRewriter &rewriter) const {
@@ -597,6 +623,10 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
   if (!isa<ShapedType>(mask.getType())) {
     // do nothing for scalar mask
     return failure();
+  }
+  if (compileOn91095Flag && isReductionPositionMask(mask)) {
+    return rewriter.notifyMatchFailure(
+        op, "Keep reduction-position feedback as an elementwise select");
   }
 
   // 1. Check for continuous masked loads.
@@ -1239,6 +1269,38 @@ SplatConverter::matchAndRewrite(triton::SplatOp op, OpAdaptor adaptor,
   // them to one per source line before codegen.
   insertDebugNopForAllLines(loc, rewriter);
   auto shape = op.getType().getShape();
+
+  // Rank-1 reductions lower to a rank-0 tensor followed by tensor.extract.
+  // A splat consumer can use that tensor directly: extracting a scalar and
+  // inserting/filling it again needlessly exposes a vector result to scalar
+  // lowering. Scalar consumers outside this splat keep the original extract.
+  auto extract = adaptor.getSrc().getDefiningOp<tensor::ExtractOp>();
+  if (compileOn91095Flag && !isInsideSimtScope(op) && extract &&
+      extract.getIndices().empty() &&
+      extract.getTensor().getDefiningOp<linalg::ReduceOp>() &&
+      !op.getType().getEncoding()) {
+    auto reducedTensor = extract.getTensor();
+    auto type = cast<RankedTensorType>(reducedTensor.getType());
+    if (type.getRank() == 0) {
+      if (shape.empty()) {
+        rewriter.replaceOp(op, reducedTensor);
+      } else if (llvm::all_of(shape, [](int64_t dim) { return dim == 1; })) {
+        rewriter.replaceOpWithNewOp<tensor::ExpandShapeOp>(
+            op, op.getType(), reducedTensor,
+            SmallVector<ReassociationIndices>{});
+      } else {
+        auto init =
+            rewriter.create<tensor::EmptyOp>(loc, shape, type.getElementType());
+        SmallVector<int64_t> dimensions;
+        for (int64_t i = 0; i < static_cast<int64_t>(shape.size()); ++i)
+          dimensions.push_back(i);
+        rewriter.replaceOpWithNewOp<linalg::BroadcastOp>(
+            op, reducedTensor, init, rewriter.getDenseI64ArrayAttr(dimensions));
+      }
+      return success();
+    }
+  }
+
   auto init = rewriter.create<tensor::EmptyOp>(loc, shape,
                                                op.getType().getElementType());
   if (llvm::all_of(shape, [](int64_t dim) { return dim == 1; })) {

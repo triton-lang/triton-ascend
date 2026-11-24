@@ -1,10 +1,11 @@
-// RUN: triton-opt %s --discrete-mask-access-conversion --triton-to-unstructure --verify-each | FileCheck %s --check-prefix=MASK
+// RUN: triton-opt %s --discrete-mask-access-conversion --triton-to-unstructure --verify-each | FileCheck %s --check-prefixes=MASK,STORE
 // RUN: triton-opt %s --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s
 // RUN: sed 's/tt.broadcast %cpred /tt.broadcast %expanded_pred /' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s
 // RUN: sed -e 's/tt.broadcast %cpred /tt.broadcast %expanded_pred /' -e 's/, %expanded_width : tensor<1x8xi32>/, %lane_widths : tensor<1x8xi32>/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s --check-prefix=SCALAR
 // RUN: sed 's/, %active, %other/, %rowmask, %other/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s --check-prefix=FULL
 // RUN: sed 's/cmpi slt, %columns/cmpi ne, %columns/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s --check-prefix=SCALAR
 // RUN: sed 's/%blockWidth = arith.constant 8/%blockWidth = arith.constant 1/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s --check-prefix=SCALAR
+// RUN: sed 's/, %mask, %constant_other :/, %mask, %inactive :/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --verify-each | FileCheck %s --check-prefix=PADDING
 
 // Guard each contiguous row before the copy and clip it at the column bound.
 // MASK-LABEL: tt.func public @masked_indirect_gather(
@@ -127,4 +128,60 @@ tt.func public @branch_selected_mask(%src: !tt.ptr<i32>, %offsets: tensor<16xi32
   }
   %value = tt.load %ptr, %mask : tensor<16x!tt.ptr<i32>>
   tt.return %value : tensor<16xi32>
+}
+
+// The store shares the column limit, so only the valid columns of the gather
+// can reach the destination. A row that fails its predicate still writes other.
+// STORE-LABEL: tt.func public @masked_gather_store(
+// STORE: %[[COLS:.*]] = tt.broadcast %{{.*}} : tensor<1x8xi1> -> tensor<4x8xi1>
+// STORE: %[[ACTIVE:.*]] = arith.andi %{{.*}}, %[[COLS]] : tensor<4x8xi1>
+// STORE: %[[RESULT:.*]] = scf.for
+// STORE-NOT: scf.if
+// STORE: %[[ROWMASK:.*]] = tensor.extract_slice %[[ACTIVE]][%{{.*}}, 0] [1, 8] [1, 1]
+// STORE-NEXT: %[[LOADED:.*]] = tt.load %{{[^,]+}}, %[[ROWMASK]], %{{.*}} : tensor<1x8x!tt.ptr<f32>>
+// STORE-NEXT: tensor.insert_slice %[[LOADED]] into
+// STORE-NOT: arith.select
+// STORE: tt.store %{{[^,]+}}, %[[RESULT]], %[[COLS]]
+// PADDING-LABEL: tt.func public @masked_gather_store(
+// PADDING-SAME: %[[INACTIVE:[a-zA-Z0-9_]+]]: tensor<4x8xf32>
+// PADDING: scf.for %{{.*}} = {{.*}} iter_args(%[[ACC:[a-zA-Z0-9_]+]] = %[[INACTIVE]])
+// PADDING: scf.if %{{.*}} -> (tensor<4x8xf32>)
+// PADDING: %[[ROWPAD:.*]] = tensor.extract_slice %[[INACTIVE]]
+// PADDING: tt.load %{{[^,]+}}, %{{[^,]+}}, %[[ROWPAD]]
+// PADDING: } else {
+// PADDING-NEXT: scf.yield %[[ACC]] : tensor<4x8xf32>
+tt.func public @masked_gather_store(%src: !tt.ptr<f32>, %dst: !tt.ptr<f32>, %indices: !tt.ptr<i32>, %width: i32, %inactive: tensor<4x8xf32>) {
+  %r = tt.make_range {start = 0 : i32, end = 4 : i32} : tensor<4xi32>
+  %idxbase = tt.splat %indices : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %idxptr = tt.addptr %idxbase, %r : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %row_ids = tt.load %idxptr : tensor<4x!tt.ptr<i32>>
+  %c = tt.make_range {start = 0 : i32, end = 8 : i32} : tensor<8xi32>
+  %c2 = tt.expand_dims %c {axis = 0 : i32} : tensor<8xi32> -> tensor<1x8xi32>
+  %columns = tt.broadcast %c2 : tensor<1x8xi32> -> tensor<4x8xi32>
+  %three = arith.constant dense<3> : tensor<4xi32>
+  %eight = arith.constant dense<8> : tensor<4xi32>
+  %rows = arith.andi %row_ids, %three : tensor<4xi32>
+  %offset = arith.muli %rows, %eight : tensor<4xi32>
+  %offset2 = tt.expand_dims %offset {axis = 1 : i32} : tensor<4xi32> -> tensor<4x1xi32>
+  %rb = tt.broadcast %offset2 : tensor<4x1xi32> -> tensor<4x8xi32>
+  %address = arith.addi %rb, %columns : tensor<4x8xi32>
+  %base = tt.splat %src : !tt.ptr<f32> -> tensor<4x8x!tt.ptr<f32>>
+  %ptr = tt.addptr %base, %address : tensor<4x8x!tt.ptr<f32>>, tensor<4x8xi32>
+  %validrow = arith.cmpi ne, %rows, %three : tensor<4xi32>
+  %validrow2 = tt.expand_dims %validrow {axis = 1 : i32} : tensor<4xi1> -> tensor<4x1xi1>
+  %rowmask = tt.broadcast %validrow2 : tensor<4x1xi1> -> tensor<4x8xi1>
+  %widths = tt.splat %width : i32 -> tensor<1x8xi32>
+  %validcol = arith.cmpi slt, %c2, %widths : tensor<1x8xi32>
+  %colmask = tt.broadcast %validcol : tensor<1x8xi1> -> tensor<4x8xi1>
+  %mask = arith.andi %rowmask, %colmask : tensor<4x8xi1>
+  %constant_other = arith.constant dense<-7.0> : tensor<4x8xf32>
+  %value = tt.load %ptr, %mask, %constant_other : tensor<4x8x!tt.ptr<f32>>
+  %rowoffsets = arith.muli %r, %eight : tensor<4xi32>
+  %r2 = tt.expand_dims %rowoffsets {axis = 1 : i32} : tensor<4xi32> -> tensor<4x1xi32>
+  %outrows = tt.broadcast %r2 : tensor<4x1xi32> -> tensor<4x8xi32>
+  %outoffset = arith.addi %outrows, %columns : tensor<4x8xi32>
+  %outbase = tt.splat %dst : !tt.ptr<f32> -> tensor<4x8x!tt.ptr<f32>>
+  %outptr = tt.addptr %outbase, %outoffset : tensor<4x8x!tt.ptr<f32>>, tensor<4x8xi32>
+  tt.store %outptr, %value, %colmask : tensor<4x8x!tt.ptr<f32>>
+  tt.return
 }

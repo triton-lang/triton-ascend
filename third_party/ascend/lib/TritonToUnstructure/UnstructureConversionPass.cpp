@@ -810,29 +810,36 @@ static bool isGatherColumnPrefix(Value mask) {
          isKnownMultiple(loop.getStep(), width);
 }
 
-// Split (row predicates) & (optional column prefix) before extracting a row.
-// The column predicate stays on the load itself so structured lowering clips
-// the copy. A lane-dependent condition cannot guard an entire row.
-static bool splitGatherRowMask(Value mask, Value &rows, Value &columns,
-                               PatternRewriter &rewriter) {
+// Split the row predicates and optional column prefix. Retain the full column
+// broadcast so a consuming store can be checked against the same bound.
+static bool splitGatherRowMask(Value mask, SmallVectorImpl<Value> &rows,
+                               Value &columns) {
   if (auto both = mask.getDefiningOp<arith::AndIOp>())
-    return splitGatherRowMask(both.getLhs(), rows, columns, rewriter) &&
-           splitGatherRowMask(both.getRhs(), rows, columns, rewriter);
+    return splitGatherRowMask(both.getLhs(), rows, columns) &&
+           splitGatherRowMask(both.getRhs(), rows, columns);
   auto broadcast = mask.getDefiningOp<triton::BroadcastOp>();
   if (!broadcast)
     return false;
   Value source = broadcast.getSrc();
   auto shape = cast<RankedTensorType>(source.getType()).getShape();
   if (shape[1] == 1 && shape[0] != 1) {
-    rows = rows ? rewriter.create<arith::AndIOp>(mask.getLoc(), rows, source)
-                      .getResult()
-                : source;
+    rows.push_back(source);
     return true;
   }
   if (columns || shape[0] != 1 || !isGatherColumnPrefix(source))
     return false;
-  columns = source;
+  columns = mask;
   return true;
+}
+
+static bool hasMaskFactor(Value mask, Value factor) {
+  if (!mask)
+    return false;
+  if (mask == factor)
+    return true;
+  auto both = mask.getDefiningOp<arith::AndIOp>();
+  return both && (hasMaskFactor(both.getLhs(), factor) ||
+                  hasMaskFactor(both.getRhs(), factor));
 }
 
 template <typename MemAccOpTy>
@@ -958,7 +965,9 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     llvm::fill(structuredAxes, false);
 
   bool maskRewritten = false;
-  Value gatherRows, gatherColumns;
+  SmallVector<Value> rowPredicates;
+  Value gatherRows, gatherColumns, columnMask;
+  bool keepSlicedLoad = false;
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
     if (simdDiscreteMask &&
         (!info.hasScalarBase() || !info.offsets.hasStructuredForm())) {
@@ -969,10 +978,9 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
           ptrType.getDimSize(1) <= 1 ||
           !isConstantIntValue(info.offsets.axes[1].stride, 1) ||
           !op.getMask() || op->use_empty() || op.getIsVolatile() ||
-          !splitGatherRowMask(op.getMask(), gatherRows, gatherColumns,
-                              rewriter) ||
-          !gatherRows) {
-        gatherRows = {};
+          !splitGatherRowMask(op.getMask(), rowPredicates, columnMask) ||
+          rowPredicates.empty()) {
+        rowPredicates.clear();
         llvm::fill(structuredAxes, false);
       }
     } else if (simdDiscreteMask || (axisDiscreteMask && isStructured())) {
@@ -1044,8 +1052,31 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   if (continuousSize % 32 != 0) {
     llvm::fill(structuredAxes, false);
   }
-  if (gatherRows && !structuredAxes[1])
-    gatherRows = {};
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+    if (!rowPredicates.empty() && structuredAxes[1]) {
+      // A masked store that shares the column prefix cannot observe the DMA
+      // padding past the valid columns. The sliced load supplies the splat
+      // value for invalid rows, so neither a row guard nor a select is needed.
+      DenseElementsAttr padding;
+      keepSlicedLoad = columnMask && !mstate && op.getOther() &&
+                       matchPattern(op.getOther(), m_Constant(&padding)) &&
+                       padding.isSplat() &&
+                       llvm::all_of(op->getUsers(), [&](Operation *user) {
+                         auto store = dyn_cast<triton::StoreOp>(user);
+                         return store && store.getValue() == op.getResult() &&
+                                hasMaskFactor(store.getMask(), columnMask);
+                       });
+      if (!keepSlicedLoad) {
+        gatherRows = rowPredicates.front();
+        for (Value predicate : llvm::drop_begin(rowPredicates))
+          gatherRows =
+              rewriter.create<arith::AndIOp>(loc, gatherRows, predicate);
+        if (columnMask)
+          gatherColumns =
+              columnMask.getDefiningOp<triton::BroadcastOp>().getSrc();
+      }
+    }
+  }
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
@@ -1415,7 +1446,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     }
     rewriter.restoreInsertionPoint(insertPoint);
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-      if (op.getMask() && op.getOther() && !destinationPadding && !gatherRows) {
+      if (op.getMask() && op.getOther() && !destinationPadding && !gatherRows &&
+          !keepSlicedLoad) {
         rewriter
             .replaceOpWithNewOp<arith::SelectOp>(op, op.getMask(), newOpResult,
                                                  op.getOther())

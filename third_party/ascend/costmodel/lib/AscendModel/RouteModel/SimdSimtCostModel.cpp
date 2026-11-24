@@ -11,6 +11,10 @@
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/Profile/MicrobenchmarkProfile.h"
 #include "AscendModel/RouteModel/Models/IndirectGatherMemoryCostModel.h"
+#include "AscendModel/RouteModel/NormalFull224SIMTLoad.h"
+#include "AscendModel/RouteModel/NormalFull224SIMTStore.h"
+#include "AscendModel/RouteModel/NormalSegmentsLoadCandidate.h"
+#include "AscendModel/RouteModel/NormalSegmentsStoreCandidate.h"
 #include "AscendModel/RouteModel/SpecializedMemoryMain.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
@@ -3841,7 +3845,18 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
         profile.kernelTiming.runtimeArgumentSetupSystemCycles(kAllSimd,
                                                               argumentCount);
   }
-  auto routes = solveStageRoutes(*costTable, hardwareProfile.scopeHandoff);
+  bool useCalibratedMemory = true;
+#ifdef ASCEND_COSTMODEL_CALIBRATION_TESTING
+  if (const char *disabled =
+          std::getenv("ASCEND_COSTMODEL_DISABLE_CALIBRATED_MEMORY"))
+    useCalibratedMemory = std::string(disabled) != "1";
+#endif
+  auto routes =
+      useCalibratedMemory
+          ? normal_full224_simt_load::solve(
+                module, *partition, *costTable, hardwareProfile, options,
+                profile.kernelTiming.systemCounterFrequencyMHz, numWarps)
+          : solveStageRoutes(*costTable, hardwareProfile.scopeHandoff);
   if (!routes)
     return routes.takeError();
   auto refreshBestAllSimt = [&]() {
@@ -4125,6 +4140,24 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     }
     if (best)
       routes->allSimt = *best;
+  }
+  if (useCalibratedMemory) {
+    // Qualified target bundle replaces only this uniform AllSIMD body after
+    // all legacy body/whole-fragment diagnostics have been produced. The helper
+    // removes conflicting complete overrides on that candidate. The unchanged
+    // completeCandidateCosts below adds real boundary/argument setup once.
+    qualified_normal_segments::tryApplyStoreCandidate(
+        module, *partition, hardwareProfile, *costTable, partitionerOptions,
+        options, profile.kernelTiming.systemCounterFrequencyMHz, numWarps,
+        *routes);
+    qualified_normal_segments::tryApplyLoadCandidate(
+        module, *partition, hardwareProfile, *costTable, partitionerOptions,
+        options, profile.kernelTiming.systemCounterFrequencyMHz, numWarps,
+        *routes);
+    normal_full224_simt_store::tryApply(
+        module, *partition, *costTable, hardwareProfile, partitionerOptions,
+        options, profile.kernelTiming.systemCounterFrequencyMHz, numWarps,
+        *routes);
   }
   return std::move(*routes);
 }

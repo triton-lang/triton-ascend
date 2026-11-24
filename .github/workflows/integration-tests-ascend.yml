@@ -139,11 +139,6 @@ jobs:
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
           NUM_PROCS=$(( $(nproc) / 9 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
-          NPU_DEVICES=$(find /dev -maxdepth 1 -type c -name 'davinci[0-9]*' | wc -l)
-          if [ "$NPU_DEVICES" -gt 0 ] && [ "$NUM_PROCS" -gt "$NPU_DEVICES" ]; then
-            NUM_PROCS="$NPU_DEVICES"
-          fi
-          echo "Running pytest with $NUM_PROCS workers for $NPU_DEVICES NPU devices"
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut
           # NOTE: kernel tests are temporarily disabled due to intermittent failures

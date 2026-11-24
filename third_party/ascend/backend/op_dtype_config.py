@@ -133,8 +133,8 @@ OP_DTYPE_RULES = {
         "dunder": ["__and__", "__rand__"],
         "dunder_label": '&',
         "unsupported": {
-            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -155,7 +155,7 @@ OP_DTYPE_RULES = {
     "argmax": {
         "names": ["triton.language.argmax"],
         "unsupported": {
-            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
@@ -167,7 +167,7 @@ OP_DTYPE_RULES = {
     "argmin": {
         "names": ["triton.language.argmin"],
         "unsupported": {
-            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
@@ -633,7 +633,7 @@ OP_DTYPE_RULES = {
         "tensor_args": [1, 2],
         "unsupported": {
             "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "fp16", "fp32", "bf16", "bool"],
@@ -1043,8 +1043,8 @@ OP_DTYPE_RULES = {
         "dunder": ["__not__"],
         "dunder_label": 'not',
         "unsupported": {
-            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -1055,8 +1055,8 @@ OP_DTYPE_RULES = {
         "dunder": ["__or__", "__ror__"],
         "dunder_label": '|',
         "unsupported": {
-            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],
@@ -1440,8 +1440,8 @@ OP_DTYPE_RULES = {
         "dunder": ["__xor__", "__rxor__"],
         "dunder_label": '^',
         "unsupported": {
-            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64", "bool"],

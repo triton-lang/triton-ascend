@@ -209,7 +209,10 @@ private:
   // Step 6: Handle CUBE_AND_VECTOR operations
   int handleCubeAndVector();
 
-  // Helper: split CUBE_AND_VECTOR operation into CUBE and VECTOR versions
+  // Helper: split CUBE_AND_VECTOR operation into CUBE and VECTOR versions.
+  // Nested-body support (operand remapping and VECTOR stamping of body ops)
+  // applies only to the single-fill guard shape; all other ops are split
+  // flat, exactly as before the fix.
   void splitOperationForCubeAndVector(
       Operation *op, llvm::DenseSet<Operation *> &processedOps,
       llvm::DenseMap<Operation *, Operation *> &opToVectorClone);

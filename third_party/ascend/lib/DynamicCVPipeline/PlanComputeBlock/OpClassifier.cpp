@@ -1822,9 +1822,9 @@ OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
 // ============================================================================
 
 // Collect `op` together with every operation nested inside its regions
-// (pre-order). Used by splitOperationForCubeAndVector so that region
-// containers (e.g. a result-less guard scf.if wrapping a linalg.fill) are
-// cloned as a whole: their body ops participate in operand remapping and are
+// (pre-order). Used by splitOperationForCubeAndVector for the single-fill
+// guard shape only (see isSingleFillGuard): its fill references the shared
+// alloc, so the body ops must participate in operand remapping and be
 // tracked for the VECTOR side.
 static void collectOpAndNestedOps(Operation *op,
                                   llvm::SmallVectorImpl<Operation *> &ops) {
@@ -1836,6 +1836,38 @@ static void collectOpAndNestedOps(Operation *op,
       }
     }
   }
+}
+
+// Whether `op` has the exact guard shape the fill-guard duplication is
+// verified for: a result-less scf.if holding exactly one fill - and nothing
+// else besides the terminator - in its body. markSharedFillGuardsForSplit
+// upgrades only this shape to CUBE_AND_VECTOR, so it is also the only shape
+// whose body ops may take part in the split. Everything else - plain ops,
+// scf.if with results, loops, richer guards - keeps the flat behavior
+// (opAndBodyOps == {op}), byte-identical to the logic before the fix. The
+// Step 6.5 root-buffer check is deliberately not re-run here: once the root
+// buffer has been split it reads CUBE_ONLY, so the shape is matched
+// structurally only.
+static bool isSingleFillGuard(Operation *op) {
+  auto ifOp = dyn_cast<scf::IfOp>(op);
+  if (!ifOp || !ifOp.getResults().empty()) {
+    return false;
+  }
+  Operation *singleFill = nullptr;
+  for (Region &region : ifOp->getRegions()) {
+    for (Block &block : region) {
+      for (Operation &inner : block) {
+        if (inner.hasTrait<OpTrait::IsTerminator>()) {
+          continue;
+        }
+        if (singleFill || !isa<linalg::FillOp>(&inner)) {
+          return false;
+        }
+        singleFill = &inner;
+      }
+    }
+  }
+  return singleFill != nullptr;
 }
 
 void OpClassifierPass::splitOperationForCubeAndVector(
@@ -1852,12 +1884,20 @@ void OpClassifierPass::splitOperationForCubeAndVector(
     return;
   }
 
-  // The op itself plus, for region containers, all nested body ops. The body
-  // ops reference outer values too (e.g. a guard scf.if's fill uses the
-  // shared alloc), so they take part in both the recursive operand split and
-  // the clone mapping below.
+  // The op itself plus, for the single-fill guard shape only, its nested
+  // body ops: the fill uses the shared alloc, so it must take part in both
+  // the recursive operand split and the clone mapping below. Every other op
+  // - plain ops, scf.if with results, loops, richer guards, pre-classified
+  // containers - keeps the flat behavior (opAndBodyOps == {op}),
+  // byte-identical to the logic before the fix.
+  bool singleFillGuard =
+      isSingleFillGuard(op) && !preClassifiedOps.contains(op);
   llvm::SmallVector<Operation *> opAndBodyOps;
-  collectOpAndNestedOps(op, opAndBodyOps);
+  if (singleFillGuard) {
+    collectOpAndNestedOps(op, opAndBodyOps);
+  } else {
+    opAndBodyOps.push_back(op);
+  }
 
   // ------------------------------------------------------------------
   // Phase 1: Recursively handle CUBE_AND_VECTOR operands first
@@ -1881,9 +1921,9 @@ void OpClassifierPass::splitOperationForCubeAndVector(
   // ------------------------------------------------------------------
   // When cloning this op for VECTOR users, any operand that already has
   // a VECTOR clone (produced by a recursive call above) must be replaced
-  // with that clone so the cloned op uses the VECTOR-side values. Body ops
-  // of region containers are remapped as well so e.g. a fill inside a guard
-  // scf.if writes the VECTOR-side buffer clone.
+  // with that clone so the cloned op uses the VECTOR-side values. For the
+  // single-fill guard, the fill's outs buffer is remapped as well so it
+  // writes the VECTOR-side buffer clone.
   IRMapping mapping;
   for (Operation *cur : opAndBodyOps) {
     for (Value operand : cur->getOperands()) {
@@ -1917,10 +1957,12 @@ void OpClassifierPass::splitOperationForCubeAndVector(
   CloneOpMap[op] = vectorOp;      // record for laterClone map
   CloneOpMap[vectorOp] = op;      // record for laterClone map
 
-  // Ops nested inside the clone belong to the VECTOR side as well: track
-  // them so stampToIR stamps their core_type (later passes derive a region
-  // container's core type from its body ops).
-  if (op->getNumRegions() > 0) {
+  // Ops nested inside a cloned single-fill guard belong to the VECTOR side
+  // as well: track them so stampToIR stamps their core_type (later passes
+  // derive a region container's core type from its body ops). Clones of any
+  // other op keep the pre-existing behavior: their nested ops are not
+  // tracked here.
+  if (singleFillGuard) {
     llvm::SmallVector<Operation *> cloneBodyOps;
     collectOpAndNestedOps(vectorOp, cloneBodyOps);
     for (Operation *bodyOp : cloneBodyOps) {

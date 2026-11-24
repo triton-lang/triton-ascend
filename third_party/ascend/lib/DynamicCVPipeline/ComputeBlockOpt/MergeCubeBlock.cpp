@@ -35,6 +35,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Debug.h"
 
@@ -213,6 +214,36 @@ MergeCubeBlockPass::performMerging(BlockDependencyGraph &graph,
   return llvm::success();
 }
 
+// Trace multiplicands through SSA definitions in the two candidate cube blocks.
+static bool feedsMatmul(const BlockNode *producer, const BlockNode *consumer,
+                        ComputeBlockIdManager &bm) {
+  llvm::SmallVector<Value> worklist;
+  for (Operation *op : consumer->ops) {
+    if (auto matmul = dyn_cast<linalg::MatmulOp>(op))
+      llvm::append_range(worklist, matmul.getInputs());
+  }
+
+  llvm::DenseSet<Operation *> visited;
+  while (!worklist.empty()) {
+    Operation *def = worklist.pop_back_val().getDefiningOp();
+    if (!def || def->getBlock() != consumer->ops.front()->getBlock() ||
+        !visited.insert(def).second)
+      continue;
+
+    int blockId = bm.getBlockIdByOp(def);
+    if (blockId != consumer->blockId && blockId != producer->blockId)
+      continue;
+    if (isa<linalg::MatmulOp>(def)) {
+      if (blockId == producer->blockId)
+        return true;
+      continue;
+    }
+
+    llvm::append_range(worklist, def->getOperands());
+  }
+  return false;
+}
+
 bool MergeCubeBlockPass::canMergeBlocks(BlockNode *target, BlockNode *source,
                                         BlockDependencyGraph &graph,
                                         const MemoryDependenceGraph &memGraph,
@@ -223,30 +254,22 @@ bool MergeCubeBlockPass::canMergeBlocks(BlockNode *target, BlockNode *source,
     return false;
   }
 
-  // Step 1: Check if they have common input or output nodes
-  if (!hasCommonInputOrOutput(target, source, graph)) {
-    LDBG("Blocks " << target->blockId << " and " << source->blockId
-                   << " cannot merge: no common input or output nodes\n");
+  bool sameDepthWithCommonIO = hasCommonInputOrOutput(target, source, graph) &&
+                               hasSameDepth(target, source, graph);
+  if (!sameDepthWithCommonIO && !feedsMatmul(target, source, bm))
     return false;
-  }
 
-  // Step 2: Check if merging would create a cycle
   if (!checkNoCycle(target, source, graph, memGraph, bm)) {
     LDBG("Blocks " << target->blockId << " and " << source->blockId
-                   << " cannot merge: would create cycle\n");
+                   << " cannot merge: would create cycle");
     return false;
-  }
-
-  // Step 3: cube blocks at the same depth (with matching successor depths).
-  if (hasSameDepth(target, source, graph)) {
-    LDBG("Blocks " << target->blockId << " and " << source->blockId
-                   << " can merge: cube blocks have same depth\n");
-    return true;
   }
 
   LDBG("Blocks " << target->blockId << " and " << source->blockId
-                 << " cannot merge: unsupport scenario\n");
-  return false;
+                 << " can merge: "
+                 << (sameDepthWithCommonIO ? "same-depth cube blocks"
+                                           : "chained matmuls"));
+  return true;
 }
 
 bool MergeCubeBlockPass::hasSameDepth(BlockNode *node1, BlockNode *node2,

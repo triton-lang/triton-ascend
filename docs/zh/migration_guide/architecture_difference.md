@@ -2,6 +2,8 @@
 
 本文系统性梳理两大平台的核心架构、编程规则与优化手段差异，拆解昇腾NPU Triton专属开发特性与适配要点，帮助开发者快速建立昇腾NPU Triton开发思维，精准完成算子迁移、代码适配与性能调优工作，规避迁移常见问题。
 
+<a id="multi-core-task-parallel-strategy"></a>
+
 ## 多核任务并行策略
 
 NPU在Triton多核并行中是物理核强绑定模式，与GPU逻辑维度并行+硬件自动物理映射的模式形成核心差异，核心对比如下表所示：
@@ -27,7 +29,7 @@ triton_gelu[n, 1, 1](...)  # 第一个参数表示使用的核数，n表示使�
 
 ### auto-blockify：突破65,535逻辑块上限
 
-社区Triton在NVIDIA GPU上把grid视为纯逻辑维度 —— `n` 个逻辑块按1:1映射到 `n` 个硬件块，运行时由硬件分发到各SM，每个块不需要内部循环。昇腾上由于[多核任务并行策略](#多核任务并行策略)中描述的物理核强绑定，可启动的grid上限被限制在65,535，对含百万级逻辑工作项的kernel（autotune后的reduce/scan、megablocks风格的稀疏kernel等）过于严苛。
+社区Triton在NVIDIA GPU上把grid视为纯逻辑维度 —— `n` 个逻辑块按1:1映射到 `n` 个硬件块，运行时由硬件分发到各SM，每个块不需要内部循环。昇腾上由于[多核任务并行策略](#multi-core-task-parallel-strategy)中描述的物理核强绑定，可启动的grid上限被限制在65,535，对含百万级逻辑工作项的kernel（autotune后的reduce/scan、megablocks风格的稀疏kernel等）过于严苛。
 
 `auto-blockify`（`SIMTAutoBlockify` 编译期pass + 配套的运行期cap）通过"编译期视为逻辑、启动期折叠到物理核"消除该限制：
 

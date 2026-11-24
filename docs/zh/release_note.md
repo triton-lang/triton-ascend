@@ -79,7 +79,7 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
   <thead>
     <tr>
       <th rowspan="2">Triton-Ascend</th>
-      <th colspan="8" style="text-align:left">TorchNPU安装包版本</th>
+      <th colspan="6" style="text-align:left">TorchNPU安装包版本</th>
     </tr>
     <tr>
       <td>2.6.0</td>

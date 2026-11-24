@@ -164,7 +164,8 @@ def _sparse_mla(
                         keys, ropes, packed = key1, rope1, packed1
                     position = sub * (BN // 2) + (chunk * 2 + stage) * GR
                     for pair in tla.static_range(GR // 2):
-                        idx2 = tla.load(IDS64 + (token * TOPK + gather_start + position) // 2 + pair)
+                        idx2 = tla.load_scalar(
+                            tla.view(IDS64 + (token * TOPK + gather_start + position) // 2 + pair, (1, )))
                         # Wrap addresses safely; softmax masks invalid indices using the original int32 values.
                         safe0 = (idx2 & 0xFFFFFFFF).to(tla.int32) & (L - 1)
                         safe1 = (idx2 >> 32).to(tla.int32) & (L - 1)
@@ -283,7 +284,8 @@ def _sparse_mla(
                         if step < 4:
                             position = sub * (BN // 2) + step * GR
                             for pair in tla.static_range(GR // 2):
-                                idx2 = tla.load(IDS64 + (token * TOPK + gather_start + position) // 2 + pair)
+                                idx2 = tla.load_scalar(
+                                    tla.view(IDS64 + (token * TOPK + gather_start + position) // 2 + pair, (1, )))
                                 safe0 = (idx2 & 0xFFFFFFFF).to(tla.int32) & (L - 1)
                                 safe1 = (idx2 >> 32).to(tla.int32) & (L - 1)
                                 row = pair * 2

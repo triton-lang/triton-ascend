@@ -175,7 +175,7 @@ def check_ttadapter(module):
     # Triton dialect. This does not enable SIMT scopes or a Tile lowering path.
     converted_ops = {
         "tt.func", "tt.call", "tt.return", "tt.addptr", "tt.ptr_to_int", "tt.get_program_id", "tt.get_num_programs",
-        "tt.assert", "tt.load", "tt.clampf"
+        "tt.assert", "tt.load", "tt.store", "tt.clampf"
     }
     forbidden = [op.get_name() for op in operations if op.get_name() in converted_ops]
     if forbidden:

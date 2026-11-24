@@ -93,15 +93,23 @@ class AscendArchTableTest(unittest.TestCase):
                 with self.subTest(arch=arch):
                     self.assertEqual(self.mod["arch_generation"](arch), expected)
 
-    def test_generation_runtime_errors_are_propagated(self):
-        with patch.dict(sys.modules, {"triton": None}), self.assertRaises(ImportError):
-            self.mod["arch_generation"]()
+    def test_generation_runtime_failures_fall_back_to_legacy(self):
+        legacy = self.mod["AscendArchGen"].LEGACY
+        with patch.dict(sys.modules, {"triton": None}):
+            self.assertEqual(self.mod["arch_generation"](), legacy)
+
+        for target in (None, SimpleNamespace(), SimpleNamespace(arch=None)):
+            with self.subTest(target=target):
+                get_current_target = Mock(return_value=target)
+                triton, runtime = self._mock_driver(get_current_target)
+                with patch.dict(sys.modules, {"triton": triton, "triton.runtime": runtime}):
+                    self.assertEqual(self.mod["arch_generation"](), legacy)
+                get_current_target.assert_called_once_with()
 
         get_current_target = Mock(side_effect=RuntimeError("target query failed"))
         triton, runtime = self._mock_driver(get_current_target)
-        with patch.dict(sys.modules, {"triton": triton, "triton.runtime": runtime}), self.assertRaisesRegex(
-                RuntimeError, "target query failed"):
-            self.mod["arch_generation"]()
+        with patch.dict(sys.modules, {"triton": triton, "triton.runtime": runtime}):
+            self.assertEqual(self.mod["arch_generation"](), legacy)
         get_current_target.assert_called_once_with()
 
     @staticmethod

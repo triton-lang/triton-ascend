@@ -89,11 +89,14 @@ def arch_generation(arch: str = None) -> AscendArchGen:
 
     When *arch* is omitted or empty, query the active driver's current target.
     Unknown / empty / non-string SOC names resolve to ``AscendArchGen.LEGACY``.
-    Errors loading or querying the runtime propagate to the caller.
+    Runtime lookup failures fall back to ``AscendArchGen.LEGACY``.
     """
     if not arch:
-        from triton.runtime import driver
-        arch = driver.active.get_current_target().arch
+        try:
+            from triton.runtime import driver
+            arch = getattr(driver.active.get_current_target(), "arch", None)
+        except Exception:
+            arch = None
     entry = _match_arch_entry(arch)
     return entry[0] if entry is not None else AscendArchGen.LEGACY
 

@@ -11,6 +11,7 @@ import types
 import unittest
 from enum import IntEnum, auto
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 BACKEND = Path(__file__).resolve().parents[2] / "backend"
@@ -71,42 +72,47 @@ class AscendArchTableTest(unittest.TestCase):
             ("Ascend910_9391", generations.LEGACY),
             ("ascend910b1", generations.LEGACY),
         ):
-            for args in ((), (None, )):
+            for args in ((), (None, ), ("", )):
                 with self.subTest(soc_name=soc_name, args=args):
-                    acl = types.ModuleType("acl")
-                    acl.get_soc_name = Mock(return_value=soc_name)
-                    with patch.dict(sys.modules, {"acl": acl}):
+                    get_current_target = Mock(return_value=SimpleNamespace(arch=soc_name))
+                    triton, runtime = self._mock_driver(get_current_target)
+                    with patch.dict(sys.modules, {"triton": triton, "triton.runtime": runtime}):
                         self.assertEqual(self.mod["arch_generation"](*args), expected)
-                    acl.get_soc_name.assert_called_once_with()
+                    get_current_target.assert_called_once_with()
 
     def test_explicit_generation_without_runtime(self):
         generations = self.mod["AscendArchGen"]
-        with patch.dict(sys.modules, {"acl": None}):
+        with patch.dict(sys.modules, {"triton": None}):
             for arch, expected in (
                 ("Ascend950", generations.GEN5),
                 ("Ascend960", generations.GEN6),
                 ("Ascend910_9391", generations.LEGACY),
                 ("Ascend910_9791", generations.LEGACY),
-                ("", generations.LEGACY),
                 (123, generations.LEGACY),
-                ([], generations.LEGACY),
-                ({}, generations.LEGACY),
             ):
                 with self.subTest(arch=arch):
                     self.assertEqual(self.mod["arch_generation"](arch), expected)
 
     def test_generation_runtime_errors_are_propagated(self):
-        with patch.dict(sys.modules, {"acl": None}), self.assertRaises(ImportError):
+        with patch.dict(sys.modules, {"triton": None}), self.assertRaises(ImportError):
             self.mod["arch_generation"]()
 
-        acl = types.ModuleType("acl")
-        with patch.dict(sys.modules, {"acl": acl}), self.assertRaises(AttributeError):
+        get_current_target = Mock(side_effect=RuntimeError("target query failed"))
+        triton, runtime = self._mock_driver(get_current_target)
+        with patch.dict(sys.modules, {"triton": triton, "triton.runtime": runtime}), self.assertRaisesRegex(
+                RuntimeError, "target query failed"):
             self.mod["arch_generation"]()
+        get_current_target.assert_called_once_with()
 
-        acl.get_soc_name = Mock(side_effect=RuntimeError("SOC query failed"))
-        with patch.dict(sys.modules, {"acl": acl}), self.assertRaisesRegex(RuntimeError, "SOC query failed"):
-            self.mod["arch_generation"]()
-        acl.get_soc_name.assert_called_once_with()
+    @staticmethod
+    def _mock_driver(get_current_target):
+        triton = types.ModuleType("triton")
+        triton.__path__ = []
+        runtime = types.ModuleType("triton.runtime")
+        runtime.__path__ = []
+        runtime.driver = SimpleNamespace(active=SimpleNamespace(get_current_target=get_current_target))
+        triton.runtime = runtime
+        return triton, runtime
 
     def test_legacy_not_register_based(self):
         for arch in ("Ascend910A", "Ascend910B1", "Ascend910_93", "Ascend310B", "Ascend910_97", ""):

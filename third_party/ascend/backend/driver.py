@@ -315,6 +315,7 @@ class NPUDriver(DriverBase):
     def map_python_to_cpp_type(self, ty: str) -> str:
         return ty_to_cpp(ty)
 
+    @functools.lru_cache(maxsize=1)
     def get_current_target(self):
         backend = "npu"
         arch = self.utils.get_arch()

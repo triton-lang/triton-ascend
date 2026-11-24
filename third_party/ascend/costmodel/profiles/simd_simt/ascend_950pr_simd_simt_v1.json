@@ -2,14 +2,14 @@
   "reduction_profile": "../reduction/david_v100_reduction_v1.json",
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 19,
-  "profile_version": "ascend-950pr-simd-simt-20261027-v152-indirect-memory-loop-dependency-prefixscan-v1",
+  "profile_version": "ascend-950pr-simd-simt-20261103-launch-overlap-prefixscan-v1",
   "simt_indirect_store_model": "prefix_mask_rank_factor_20261017",
   "simd_indirect_store_model": "simd_mask_envelope_20261019",
   "simt_indirect_load_model": "prefix_mask_rank_factor_20261017",
   "simd_indirect_load_model": "simd_mask_envelope_20261019",
   "indirect_memory_profile": "../indirect_memory/ascend_950pr_v1.json",
   "target": "Ascend950PR/dav-c310",
-  "description": "Generic Stage Route Model hardware profile. Every kernel is derived from transformed TTIR resource workloads; absolute time adds measured kernel-boundary and global-load completion envelopes selected only by structural route facts. No operator identity, exact function DAG signature, shape whitelist, or kernel-specific elapsed intercept participates in scoring or prediction. SIMD f16 MMAD resource work uses the qualified Cube/TinyCube MAC/MTE1 formula within its calibrated domain.",
+  "description": "Generic Stage Route Model hardware profile. Every kernel is derived from transformed TTIR resource workloads; absolute time combines the measured AIV/AIC physical-program distribution envelope with the overlapping Stage body. No operator identity, exact function DAG signature, shape whitelist, or kernel-specific elapsed intercept participates in scoring or prediction. SIMD f16 MMAD resource work uses the qualified Cube/TinyCube MAC/MTE1 formula within its calibrated domain.",
   "prefixscan_profile": "../prefixscan/ascend_950pr_prefixscan.json",
   "microbenchmark_profile": "../microbench/ascend_950pr_v1.json",
   "compatible_targets": [
@@ -129,6 +129,7 @@
       "vector_mte2_bytes_per_system_cycle": 167.557775299,
       "mte3_bytes_per_system_cycle": 213.125675219,
       "load_operation_startup_system_cycles": 105.309240226,
+      "tiny_16bit_second_load_startup_system_cycles": 30.0,
       "store_operation_startup_system_cycles": 90.954331652,
       "load_throughput_measurement": "simd.memory.load.throughput",
       "store_throughput_measurement": "simd.memory.store.throughput",
@@ -137,11 +138,17 @@
       "independent_loop_load_group": {
         "description": "Generic MTE2 envelope for one to four uninterrupted contiguous FP32 load streams in one independent loop. One full-grid kernel startup is followed by one shared iteration startup plus aggregate bytes divided by the fitted group rate.",
         "kernel_startup_system_cycles": 546.076851852,
+        "strided_small_grid_startup_system_cycles": 230.0,
         "iteration_startup_system_cycles": 12.791269535,
         "bytes_per_system_cycle": 83.262254929,
         "minimum_operations": 1,
         "maximum_operations": 4,
-        "evidence": "bench_simd_memory_groups.py: original six 2/3/4-stream points plus fresh flat rank-one one-load controls at 19 and 37 loop iterations (4.730 and 7.629 us). The single-load loop has the same serialized load/store service domain; sub-grid launches transfer the full-grid startup to kernel-boundary ownership. Rank-two masked tiles keep the analytical per-row transfer path because they are outside the one-stream evidence geometry."
+        "evidence": "bench_simd_memory_groups.py covers contiguous 1/2/3/4-stream loads and 19/37 iteration controls. The two-load iteration rate also predicts the measured 110–130 ns increase between one and two full AutoBlockify iterations in exact-binary SIMD FP32 vector-add runs on 56 parents. Exact stride-16 compaction replays with two parents leave a 229–253 cycle block residual without startup. The 230-cycle strided startup passes task-only holdouts with one and two parents."
+      },
+      "independent_loop_composition_completion": {
+        "exp_div_pair_system_cycles_per_element": 0.024,
+        "predicate_select_system_cycles_per_element": 0.028,
+        "evidence": "Independent-loop controls price composition beyond standalone op rates. Predicate/select was recalibrated on Ascend950PR with the same two-load, one-store FP32 binary and eight iterations of 1024 elements per parent. Two independent 36-task CANN block-profile groups imply 0.02810 and 0.02773 SYS_CNT cycles per element. The resulting 2.014 us estimate is within 5% of both task-only medians (1.919 and 1.925 us)."
       },
       "computed_address_scalarized_load": {
         "minimum_elements": 8,
@@ -487,6 +494,7 @@
       "operation_startup_measurement": "simd.reduction.operation_startup",
       "lane_step_throughput_measurement": "simd.reduction.lane_step_throughput",
       "masked_accumulator_completion_setup_measurement": "simd.reduction.one_trip_masked_accumulator.completion_setup",
+      "large_row_two_reduction_completion_system_cycles": 100.0,
       "scalarized_multi_result": {
         "minimum_axis_extent": 32,
         "reference_result_count": 2,
@@ -559,6 +567,7 @@
       "prefix_scan": {
         "step_latency_system_cycles": 1.818,
         "step_latency_measurement": "simd.f32.add.dependent_latency",
+        "non_unit_kernel_completion_system_cycles": 150.0,
         "description": "Additive SIMD scans retain the measured dependent-vector-add formula. Non-additive straight-line helpers use completion curves selected by the returned TTIR combine class and semantic scan geometry.",
         "straight_line_completion_by_combine": {
           "minmax": {
@@ -869,6 +878,11 @@
         "relative_to": "f32.add",
         "factor": 1.0
       },
+      "fp32.saturated.math.floor": {
+        "description": "Effective SIMT floor helper expansion relative to the active-warp FP32 arithmetic curve.",
+        "relative_to": "f32.add",
+        "factor": 470.0
+      },
       "f32.cos": {
         "description": "Effective SIMT cosine completion from the fresh 1024-element dependent operation-chain slope. The factor applies to every active-warp point of the measured scalar arithmetic curve.",
         "relative_to": "f32.add",
@@ -1027,6 +1041,7 @@
           "evidence": "data_provider/950pr_simt_masked_strided_store_completion_debug0_20261011.json; fresh A5 production-mode (TRITON_DEBUG=0) whole-SIMT and Auto-selected whole-SIMT masked scatter controls at 128 and 256 rows per source iteration, eight static iterations, and a 64-byte FP32 row stride. The curve is a bounded strided-store resource floor selected from TTIR access direction and mask provenance."
         }
       },
+      "masked_strided_store_kernel_startup_system_cycles": 500,
       "confidence": "low",
       "strided_short_completion": {
         "description": "Closed-form strided load/store completion fits for the SIMT StridedShort direct-access domain. Each slot fixes a formula shape in StageCostModels.cpp and supplies only its fitted numbers. Calibrated from rotate-loop Event slopes (2000/8000 iterations), so a slot is a steady-state marginal per-iteration cost and requires an owning loop. Unmasked, compile-time-constant stride, affine address, static shape and non-indirect provenance only.",
@@ -1715,6 +1730,12 @@
           "unknown_contention_multiplier": 1
         },
         "operations": {
+          "fadd.f32": {
+            "logical_elements_per_system_cycle": 4096,
+            "operation_startup_system_cycles": 0,
+            "result_dependency_system_cycles": 25775,
+            "unknown_contention_multiplier": 1
+          },
           "loaded_index": {
             "logical_elements_per_system_cycle": 1.477,
             "operation_startup_system_cycles": 0,
@@ -1729,7 +1750,8 @@
         "step_latency_measurement": "simt.shuffle.dependent_latency",
         "description": "Grid-stride and recurrence scans use the decomposed dependency model. A P=1 straight-line scan lowers to a completion-inclusive external helper priced from TTIR semantic elements.",
         "straight_line_completion_elements_per_system_cycle": 10,
-        "straight_line_completion_evidence": "Fresh A5 profiler controls for non-additive and multiplicative straight-line scans: cummax rows/extent 8x64, 16x32, 32x16 and cumprod 1x1024, 2x512, 4x256. After subtracting the generic kernel boundary and explicit GM load/store Stages, semantic_elements/10 SYS_CNT plus helper ownership of the pure generic index prologue keeps all six geometries within ten percent without an operator or exact-shape key."
+        "straight_line_kernel_completion_system_cycles": 370.0,
+        "straight_line_completion_evidence": "A5 single-parent profiler controls for cummax 8x64, 16x32 and 32x16 and cumprod 1x1024, 2x512 and 4x256. The helper owns the generic index prologue after accounting for the kernel boundary and explicit GM stages. An exact-binary two-output scan replay with the same eight active slices adds at most 105 ns when a second physical parent is launched, supporting critical-parent ownership of the 370-cycle charge."
       },
       "rowwise_reduction": {
         "description": "Completion-inclusive physical-group surface for a structural TTIR FP32 row reduction with one packed rank-2 input and two reduction operations. Online interpolation is bounded to the measured row/extent rectangle and never uses an operator or kernel name.",
@@ -2238,20 +2260,49 @@
     }
   },
   "kernel_timing": {
-    "description": "Kernel-boundary residual after subtracting the minimal store-only kernel's modeled Stage work. A separate route-keyed residual is composed once when transformed TTIR contains a global load. A measured structural curve also completes the SIMD nested-scalar lowering of tiny rank-2 loaded-index tiles and participates in route ranking. Prologue/epilogue values are only an accounting split.",
+    "description": "Device-task duration is first dispatch plus the last parent start offset, fitted scalar entry, staged body and shared-resource pressure, fitted scalar exit, and task response. The Stage solver estimates the critical scheduling slot; completion-inclusive bodies already own multi-parent pressure. Qualified legacy memory terms retain resource completion.",
     "stage_dependency_completion": {
       "status": "qualified_stage_dependency_completion_v1",
       "target": "Ascend950PR_9579",
       "lowering_contract": "CANN9.1_Ascend950PR9579_hivm_mmadL1_tile16_f16f16f32_v1",
-      "task_envelope_system_cycles": 288.9999999999999,
+      "completion_including_launch_system_cycles": 288.9999999999999,
+      "initiation_interval_efficiency": 0.8818552829255477,
       "dynamic_cv_first_fill_system_cycles": 395.0000000000002,
       "dynamic_cv_per_iteration_delta_system_cycles": -21.66666666666606,
       "schedule_contract": "CANN9.1_9579_stage_predecessor_aic_aiv_schedule_v1",
-      "full_kernel_validation_sha256": "81169cb5f51a5a6649c947ee898920df8b68d6ad17fa333dd39965cb0ed16642",
-      "evidence": "Generic Stage predecessor/resource schedule calibrated with independent task-gap and mask-only CV terms 0c4253475a4313542d705a4e19ae0472b38273c76746f2c9f6ed37a23e011339. Frozen validation covers 12 original and QK32/V64 off/on full-kernel cases with maximum APE 3.63%; no kernel name, Stage count, carried-value name or dot geometry is part of admission."
+      "full_kernel_validation_sha256": "d1c8e9a3eec2bc13ae075d5fb31b5f8df03773739dce8814f0ed1ec4f9ab30e4",
+      "evidence": "Generic Stage predecessor/resource schedule calibrated with independent task-gap and mask-only CV terms 0c4253475a4313542d705a4e19ae0472b38273c76746f2c9f6ed37a23e011339. The 289-cycle recurrent-task completion is launch-inclusive and replaces the generic additive launch envelope. The initiation-interval efficiency uses three independent original-shape processes (CV 0.39%); independent QK32/V64 holdout maximum error is 2.58%. No kernel name, Stage count, carried-value name or dot geometry is part of admission."
     },
     "scalar_prologue_system_cycles": 852.475,
     "scalar_epilogue_system_cycles": 852.475,
+    "launch_system_cycles_by_execution_domain": {
+      "aiv": {
+        "first_dispatch_system_cycles": 138,
+        "multi_parent_first_dispatch_system_cycles": 151,
+        "parent_start_interval_system_cycles": 5,
+        "scalar_prologue_system_cycles": 264,
+        "scalar_epilogue_system_cycles": 6,
+        "task_response_system_cycles": 410,
+        "parent_body_pressure_system_cycles_per_parent": 1.997,
+        "pipelined_body_pressure_system_cycles_per_parent": 7.222,
+        "scalar_store_pressure_system_cycles_per_parent": 97.2,
+        "scalar_store_pressure_cap_system_cycles": 2798,
+        "evidence": "Dispatch and scalar-store pressure anchored by 950PR block traces. The serial scalar entry uses a 264 SYS_CNT-cycle CAModel proxy: the rounded midpoint of K0/K1 entry windows (424/447 simulator ticks at 1650 displayed ticks per microsecond), including the observed ABI cache miss. The scalar exit and 410-cycle response anchor retain their prior settings. Body pressure retains the fit to 96 binary-matched hardware timings."
+      },
+      "aic": {
+        "first_dispatch_system_cycles": 138,
+        "multi_parent_first_dispatch_system_cycles": 151,
+        "parent_start_interval_system_cycles": 5,
+        "scalar_prologue_system_cycles": 264,
+        "scalar_epilogue_system_cycles": 6,
+        "task_response_system_cycles": 410,
+        "parent_body_pressure_system_cycles_per_parent": 31.672,
+        "pipelined_body_pressure_system_cycles_per_parent": 31.672,
+        "scalar_store_pressure_system_cycles_per_parent": 0,
+        "scalar_store_pressure_cap_system_cycles": 0,
+        "evidence": "Dispatch and scalar-store pressure anchored by 950PR block traces. The serial scalar entry uses a 264 SYS_CNT-cycle CAModel proxy: the rounded midpoint of K0/K1 entry windows (424/447 simulator ticks at 1650 displayed ticks per microsecond), including the observed ABI cache miss. The scalar exit and 410-cycle response anchor retain their prior settings. Body pressure retains the fit to 96 binary-matched hardware timings."
+      }
+    },
     "boundary_residual_system_cycles_by_physical_program_count": {
       "1": 408.3,
       "2": 703.65,
@@ -2265,6 +2316,11 @@
       "all_simd": 314.206776903918,
       "all_simt_only": 485.789436197327,
       "mixed_simd_simt": 314.206776903918
+    },
+    "native_indirect_store_completion": {
+      "maximum_elements": 8,
+      "signed_completion_system_cycles": -120.0,
+      "evidence": "Fresh strict-profiler holdout for one eight-element loaded-index store. This signed completion adjusts the frozen native write-chain intercept only; native indirect loads and larger stores are excluded."
     },
     "scalarized_rank2_indirect_load_completion": {
       "maximum_elements": 8,
@@ -2304,11 +2360,12 @@
       "factor2_startup_system_cycles": 1206.6666666666667,
       "factor2_per_element_system_cycles": 0.9505208333333334,
       "factor2_reference_physical_program_count": 32,
+      "factor2_maximum_physical_program_count": 32,
       "factor2_per_active_physical_program_system_cycles": 30.0,
       "factor2_minimum_target_system_cycles": 1070.0,
       "factor4_startup_system_cycles": 1300.0,
       "factor4_per_element_system_cycles": 1.64,
-      "evidence": "data_provider/950pr_rank2_interleaved_prefix_scan_completion_20261011.json; fresh production-mode (TRITON_DEBUG=0) A5 Auto sweep across source grids 32/64/128/256/512/1024, scan extents 64/128/256, 4/8 interleaved sequences and selected physical grids 4/8/32. Each factor curve is a serialized complete physical-group body, and the matcher requires exactly one direct rank-2 load, one add-prefix-scan and one direct rank-2 store with row-major interleaving."
+      "evidence": "data_provider/950pr_rank2_interleaved_prefix_scan_completion_20261011.json; production-mode A5 sweep with physical grids 4/8/32. Each factor curve prices the complete body for one physical group and matches one direct rank-two load, one add-prefix-scan and one direct row-major store. Exact-binary F2 replays at 48 and 56 parents validate the staged body above the measured 32-parent curve domain."
     },
     "simt_static_loop_direct_memory_completion": {
       "minimum_static_iterations": 8,
@@ -2393,6 +2450,10 @@
       "base_reduction_system_cycles": 39.0,
       "per_independent_sequence_reduction_system_cycles": 13.0,
       "maximum_reduction_system_cycles": 285.0,
+      "small_contiguous_body_system_cycles_by_elements": {
+        "256": 435.0,
+        "1024": 799.0
+      },
       "large_minimum_independent_sequences": 64,
       "large_maximum_independent_sequences": 512,
       "large_minimum_scan_extent": 16,
@@ -2400,7 +2461,7 @@
       "large_base_reduction_system_cycles": 211.0,
       "large_per_independent_sequence_reduction_system_cycles": 2.75,
       "large_maximum_reduction_system_cycles": 1611.0,
-      "evidence": "data_provider/950pr_simt_multi_sequence_minmax_scan_completion_20261009.json plus fresh A5 extent-16/32 sweeps over 64/128/256/512 independent sequences. The original small-sequence formula remains unchanged; the bounded large-sequence branch shares the lowered helper envelope and leaves the seven new geometries within 7%. Matching uses only the TTIR prefix-scan tuple; single-sequence, reverse, multi-result and non-minmax scans remain exclusion controls."
+      "evidence": "Large-domain calibration uses A5 extent-16/32 sweeps at 64/128/256/512 sequences. For a short contiguous FP32 scan, the complete body is measured on one Ascend950PR parent with paired identity controls. Task-only medians at 8x32 and 32x32 supply the endpoints after subtracting the current launch boundary. Shapes 8x64 and 16x32 and the endpoint repeats are holdouts. The fit is bounded by element count and requires one direct load and one direct store."
     },
     "simd_straight_line_add_reduction_completion": {
       "minimum_rows": 16,
@@ -2408,7 +2469,12 @@
       "minimum_extent": 8,
       "maximum_extent": 32,
       "shared_completion_system_cycles": 100.0,
-      "evidence": "data_provider/950pr_simd_straight_line_add_reduction_completion_20261009.json; paired add-versus-minmax row-reduction sweeps cover extents 8/16/32, rows 32/64, and active widths 3/4/8/12/16/17. The completion transfer is selected by the TTIR reduction combine region and bounded geometry only; min/max is an exclusion control."
+      "large_minimum_rows": 1,
+      "large_maximum_rows": 8,
+      "large_minimum_extent": 128,
+      "large_maximum_extent": 1024,
+      "large_additional_completion_system_cycles": 403.0,
+      "evidence": "data_provider/950pr_simd_straight_line_add_reduction_completion_20261009.json; paired add-versus-minmax row-reduction sweeps cover extents 8/16/32, rows 32/64, and active widths 3/4/8/12/16/17. The large-extent branch owns the dependent tree and epilogue drain for one add reduction with a separate rank-one bias load; it is bounded by rows/extent and excludes min/max."
     },
     "simd_two_loop_single_reduction_completion": {
       "minimum_source_programs": 64,
@@ -2416,17 +2482,29 @@
       "minimum_runtime_iterations": 2,
       "maximum_runtime_iterations": 5,
       "required_reduction_extent": 8192,
-      "first_iteration_system_cycles": 180.0,
-      "additional_iteration_system_cycles": 430.0,
-      "evidence": "data_provider/950pr_simd_two_loop_single_reduction_completion_20261009.json; development points cover Q=2/3 at columns 64/128/256 and the Q=5 row-count endpoint. The formula adds a serialized per-wave completion envelope to the compiler-derived two-loop plus one-add-reduction structure; it does not model pipeline overlap or inspect an operator name."
+      "first_iteration_system_cycles": 0.0,
+      "additional_iteration_system_cycles": 300.0,
+      "evidence": "Ascend950PR exact-binary RMSNorm sweep with 56 physical parents and 128 columns. Nonnegative fit to the Q=2 and Q=5 CANN block residuals after subtracting the modeled block time with the previous completion charge disabled. Q=3 and Q=4 and column counts 64, 512 and 1024 are task-only holdouts, each within 10%. The two-independent-loop and one-add-reduction match limits this per-wave completion charge."
     },
     "tiny_straight_line_simt_memory_completion": {
       "maximum_elements_per_access": 128,
       "signed_residual_system_cycles": -113.047957689105,
       "evidence": "data_provider/950pr_tiny_straight_line_simt_memory_20261009.json; least-squares signed residual from six independent FP16/FP32 direct load-store development points at 8/32/128 elements. The discrete masked rank-2 kernel is an untouched holdout. Matching uses one physical F1 program, exactly one bounded load and store, and excludes loops, reductions, scans, atomics, dot, loaded-index addressing, shared memory and private stack traffic."
     },
+    "simt_f2_predicated_tail": {
+      "physical_parents": 56,
+      "maximum_reduction_extent": 128,
+      "tail_system_cycles_per_reduction": 220.0,
+      "body_credit_per_earlier_dispatch_system_cycles": 23.0,
+      "evidence": "Exact-binary Ascend950PR AutoBlockify F2 sweep for two small FP32 row reductions with scalar stores. At full physical occupancy, one full group plus a predicated tail costs 534.5 and 337 ns more than two full groups in separate task-only repeats. Block service for the first and last dispatch positions in the two even-group controls implies a 23-cycle credit per earlier dispatch position. Partial-grid controls at 113 through 223 logical programs and a 64-active-column replay are holdouts."
+    },
     "simt_non_affine_rank1_memory_completion": {
       "maximum_elements_per_access": 32,
+      "factor2_full_grid_body_system_cycles_by_iteration_count": {
+        "1": 475.0,
+        "2": 711.0,
+        "3": 947.0
+      },
       "residual_system_cycles_by_source_program_count": {
         "8": -237.856458996263,
         "16": -247.007538209923,
@@ -2435,9 +2513,9 @@
         "128": 375.0,
         "256": 631.781714828573
       },
-      "evidence": "data_provider/950pr_simt_non_affine_rank1_memory_20261009.json; paired one-dimensional and channel-row structural families at source program counts 8/16/32/64/128/256. Curve points use the paired-layout center; the P128 point is the robust center of fresh-process medians on cards 0/2/4/5 plus the independent flat-layout measurement. Matching uses the compiler-proven non-affine FP address DAG, rank-one 32-element load/store geometry and source program count, never an operator or kernel name."
+      "evidence": "The legacy residual curve uses paired rank-one and channel-row sweeps at logical grids 8 to 256. The full-grid F2 body uses same-binary Ascend950PR task-only replays with 56 physical parents. Subtracting the current dispatch, response, parent and scalar boundary costs at logical grids 64 and 256 gives the one- and three-iteration bodies. Grids 96, 128 and 192 are holdouts. The compiler must prove a rank-one non-affine FP load address, a matching store and a conversion stage."
     },
     "system_counter_frequency_mhz": 1000,
-    "evidence": "The base curve is the fresh forced-SIMD minimal observable store-only kernel sweep at physical grids 1,2,4,8,16,32,56. The global-load residual is the median direct-copy profiler duration minus its compiler-derived route resource and the base boundary at P=1: 314.207 SYS_CNT for forced SIMD and 485.789 SYS_CNT for selected SIMT. Independent P=4/P=56 direct-copy controls confirm the term is a sub-microsecond completion envelope rather than a per-operation slope. Kernel argument count is reported for diagnosis only: the v105 held-out set disproved an additive argument-count charge because two four-argument kernels with different structural work required opposite corrections. The prologue/epilogue fields are an equal accounting split, not separately measured components."
+    "evidence": "Exact-binary ABBA calibration on Ascend950PR_9579. Independent direct-copy, AIV-Mixed and Cube-plus-SIMT holdouts validate the execution-domain launch formula. The legacy boundary remains only as a completion reference: a single-wave route with nontrivial work after a global load, or a dynamic dot loop, pays max(0, legacy_boundary + route_load_completion - launch); pure direct-memory paths and ordinary multi-wave routes do not. Store-only multi-block growth belongs to scalar/MTE3 completion rather than launch."
   }
 }

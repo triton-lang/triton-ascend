@@ -3,7 +3,7 @@
 One f32/i32/u32 kernel exercises all six SIMD interfaces with the hardware
 specification boundaries:
 
-  vadd    MODE.ZEROING (all lanes) and MODE.MERGING (mask pge(32, 64))
+  vadd    MODE.ZEROING (all lanes) and MODE.MERGING (mask pset(32, PAT.VL32))
   vadds   vector-scalar add in both modes
   vaddc   int32 and uint32 two's-complement carry-out
   vcmax   signed f32 and unsigned u32 horizontal max (lane 0)
@@ -125,11 +125,11 @@ def hardware_spec(A_ptr, B_ptr, C_ptr, C2_ptr, S_ptr, S2_ptr, MX_ptr, MN_ptr, I_
         bv = tla.simd.vlds(b_ub[0], dist="NORM")
         iv = tla.simd.vlds(i_ub[0], dist="NORM")
         jv = tla.simd.vlds(j_ub[0], dist="NORM")
-        half = tla.simd.pge(32, N)
+        half = tla.simd.pset(2048 // N, tla.simd.PAT.VL32)
         one = tla.simd.vdup(1, tl.int32)
         zero = tla.simd.vdup(0, tl.int32)
 
-        # vadd: zeroing and merging under the pge(32, 64) half mask.
+        # vadd: zeroing and merging under the pset(32, PAT.VL32) half mask.
         tla.simd.vsts(c_ub[0], tla.simd.vadd(av, bv), dist="NORM_B32")
         tla.simd.vsts(c2_ub[0], tla.simd.vadd(av, bv, mask=half, mode=tla.simd.MODE.MERGING), dist="NORM_B32")
 

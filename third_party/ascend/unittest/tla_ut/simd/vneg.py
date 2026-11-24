@@ -30,7 +30,8 @@ SIGNATURE_I = {"X": "*i32", "T": "*i32", "O": "*i32"}
 
 
 @tla.jit
-def vneg_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
+def vneg_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr,
+             MASKPAT: tl.constexpr, TAILPAT: tl.constexpr):
     xb = tla.alloc((TILES, N), tl.float32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((MASK_ROWS_C + TILES, N), tl.float32, space="ub")
@@ -40,7 +41,7 @@ def vneg_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
         x = tla.simd.vlds(xb[0, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vneg(x))
@@ -53,7 +54,7 @@ def vneg_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
         for tile in tl.static_range(TILES):
             v = tla.simd.vlds(xb[tile, 0])
             if tile == TILES - 1:
-                tail_mask = tla.simd.pge(TAIL, N)
+                tail_mask = tla.simd.pset(2048 // N, TAILPAT)
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vneg(v, mask=tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vneg(v))
@@ -61,7 +62,8 @@ def vneg_f32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
 
 
 @tla.jit
-def vneg_i32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
+def vneg_i32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr,
+             MASKPAT: tl.constexpr, TAILPAT: tl.constexpr):
     xb = tla.alloc((TILES, N), tl.int32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((MASK_ROWS_C + TILES, N), tl.int32, space="ub")
@@ -71,7 +73,7 @@ def vneg_i32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
         x = tla.simd.vlds(xb[0, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vneg(x))
@@ -84,7 +86,7 @@ def vneg_i32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
         for tile in tl.static_range(TILES):
             v = tla.simd.vlds(xb[tile, 0])
             if tile == TILES - 1:
-                tail_mask = tla.simd.pge(TAIL, N)
+                tail_mask = tla.simd.pset(2048 // N, TAILPAT)
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vneg(v, mask=tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vneg(v))
@@ -92,7 +94,10 @@ def vneg_i32(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "TILES": SHAPE["tiles"], "TAIL": SHAPE["tail"]}
+    return {
+        "N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"]), "TILES": SHAPE["tiles"],
+        "TAIL": SHAPE["tail"], "TAILPAT": "VL%d" % (SHAPE["tail"])
+    }
 
 
 def test_ir(output_dir=None):

@@ -19,7 +19,7 @@ SIGS = {
 
 
 @tla.jit
-def vshift_i8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vshift_i8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     x = tla.alloc((N, ), tl.int8, space="ub")
     r = tla.alloc((N, ), tl.int8, space="ub")
     y = tla.alloc((N, ), tl.int8, space="ub")
@@ -31,7 +31,7 @@ def vshift_i8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         xv = tla.simd.vlds(x[0])
         rv = tla.simd.vlds(r[0])
         yv = tla.simd.vlds(y[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(xv, xv, op=tla.simd.CMP.NE)
         tla.simd.vsts(o[0, 0], tla.simd.vshl(xv, yv), dist="NORM_B8")
         tla.simd.vsts(o[1, 0], tla.simd.vshl(xv, yv, prefix), dist="NORM_B8")
@@ -46,7 +46,7 @@ def vshift_i8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vshift_u8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vshift_u8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     x = tla.alloc((N, ), tl.uint8, space="ub")
     r = tla.alloc((N, ), tl.uint8, space="ub")
     y = tla.alloc((N, ), tl.uint8, space="ub")
@@ -58,7 +58,7 @@ def vshift_u8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         xv = tla.simd.vlds(x[0])
         rv = tla.simd.vlds(r[0])
         yv = tla.simd.vlds(y[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(xv, xv, op=tla.simd.CMP.NE)
         tla.simd.vsts(o[0, 0], tla.simd.vshl(xv, yv), dist="NORM_B8")
         tla.simd.vsts(o[1, 0], tla.simd.vshl(xv, yv, prefix), dist="NORM_B8")
@@ -73,7 +73,7 @@ def vshift_u8(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vshift_i16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vshift_i16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     x = tla.alloc((N, ), tl.int16, space="ub")
     r = tla.alloc((N, ), tl.int16, space="ub")
     y = tla.alloc((N, ), tl.int16, space="ub")
@@ -85,7 +85,7 @@ def vshift_i16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         xv = tla.simd.vlds(x[0])
         rv = tla.simd.vlds(r[0])
         yv = tla.simd.vlds(y[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(xv, xv, op=tla.simd.CMP.NE)
         tla.simd.vsts(o[0, 0], tla.simd.vshl(xv, yv), dist="NORM_B16")
         tla.simd.vsts(o[1, 0], tla.simd.vshl(xv, yv, prefix), dist="NORM_B16")
@@ -100,7 +100,7 @@ def vshift_i16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vshift_u16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vshift_u16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     x = tla.alloc((N, ), tl.uint16, space="ub")
     r = tla.alloc((N, ), tl.uint16, space="ub")
     y = tla.alloc((N, ), tl.uint16, space="ub")
@@ -112,7 +112,7 @@ def vshift_u16(X, R, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         xv = tla.simd.vlds(x[0])
         rv = tla.simd.vlds(r[0])
         yv = tla.simd.vlds(y[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(xv, xv, op=tla.simd.CMP.NE)
         tla.simd.vsts(o[0, 0], tla.simd.vshl(xv, yv), dist="NORM_B16")
         tla.simd.vsts(o[1, 0], tla.simd.vshl(xv, yv, prefix), dist="NORM_B16")
@@ -136,7 +136,7 @@ KERNELS = {
 
 def constexprs(kind):
     lanes, active = SHAPES[kind]
-    return {"N": lanes, "ACTIVE": active}
+    return {"N": lanes, "ACTIVE": active, "MASKPAT": "VL%d" % (active)}
 
 
 def test_ir(output_dir=None):

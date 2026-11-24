@@ -10,7 +10,7 @@ Semantics for one 64-lane f32 tile (row) of ``X``:
     ms   = vmaxs(a, 0.0)                    ave.hir.vmaxs (scalar == f32)
     ex   = vexp(vmin(a, zero))              ave.hir.vexp (hardware SFU)
     acc  = q + mx + mn + ms + ex
-    o    = vsel(pge(32, 64), acc, half)     lanes >= 32 -> 0.5
+    o    = vsel(pset(32, PAT.VL32), acc, half)   lanes >= 32 -> 0.5
 
 This file is the combined-chain regression only: it proves the six interfaces
 compose in one SIMD scope and that the runtime launch matches the reference.
@@ -63,7 +63,7 @@ def simd_elementwise(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, BLK: tl.const
             ex = tla.simd.vexp(tla.simd.vmin(a, zero))
             acc = tla.simd.vadd(tla.simd.vadd(q, mx), tla.simd.vadd(mn, ms))
             acc = tla.simd.vadd(acc, ex)
-            res = tla.simd.vsel(tla.simd.pge(32, BLK), acc, half)
+            res = tla.simd.vsel(tla.simd.pset(2048 // BLK, tla.simd.PAT.VL32), acc, half)
             tla.simd.vsts(o_ub[0], res, dist="NORM_B32")
         tla.store_ub_to_gm(o_ub, o)
 

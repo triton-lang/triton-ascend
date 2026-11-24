@@ -198,9 +198,12 @@ private:
                                  Operation *thenYieldForElse, Value &operand,
                                  Operation *elseYieldOp);
 
-  // Upgrade fill guards on shared (CUBE_AND_VECTOR) buffers so the split
-  // clones them for the VECTOR side as well. Must run after VECTOR upstream
-  // propagation (marks are final) and before handleCubeAndVector.
+  // Upgrade single-fill guards on shared (CUBE_AND_VECTOR) buffers so the
+  // split clones them for the VECTOR side as well. Only the exact bug shape
+  // is matched: a result-less CUBE scf.if whose sole body op is one fill into
+  // a buffer that is about to be split; richer shapes keep their marks.
+  // Must run after VECTOR upstream propagation (marks are final) and before
+  // handleCubeAndVector.
   int markSharedFillGuardsForSplit();
 
   // Step 6: Handle CUBE_AND_VECTOR operations

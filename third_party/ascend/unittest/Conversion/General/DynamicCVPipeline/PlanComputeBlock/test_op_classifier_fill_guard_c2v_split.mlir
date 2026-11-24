@@ -73,4 +73,48 @@ module {
     %acc = arith.addf %t, %t : tensor<16x16xf32>
     return %mm, %acc : tensor<16x16xf32>, tensor<16x16xf32>
   }
+
+  // Negative shape: a guard holding TWO fills is not the single-fill bug
+  // pattern and must NOT be upgraded. It keeps its CUBE_ONLY mark, no
+  // VECTOR-side guard is cloned, and the VECTOR-side buffer stays unguarded
+  // (conservative by design: only the exact single-fill shape is upgraded).
+  // CHECK-LABEL: func.func @multi_fill_guard_not_upgraded
+  func.func @multi_fill_guard_not_upgraded(
+      %src: memref<16x16xf32>,
+      %rhs: tensor<16x16xf32>,
+      %rare: i1) -> (tensor<16x16xf32>, tensor<16x16xf32>) {
+    // The buffer chain is still split into a CUBE copy and a VECTOR copy...
+    // CHECK: [[MVALLOC:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<16x16xf32>
+    // CHECK: [[MCALLOC:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.core_type = "CUBE"} : memref<16x16xf32>
+    // ...but only ONE guard remains: it keeps the CUBE mark and both of its
+    // fills still write the CUBE-side buffer.
+    // CHECK: scf.if
+    // CHECK: linalg.fill {ssbuffer.core_type = "CUBE"} ins({{.*}} : f32) outs([[MCALLOC]] : memref<16x16xf32>)
+    // CHECK: linalg.fill {ssbuffer.core_type = "CUBE"} ins({{.*}} : f32) outs([[MCALLOC]] : memref<16x16xf32>)
+    // No VECTOR-side guard is cloned for this richer shape.
+    // CHECK-NOT: linalg.fill {ssbuffer.core_type = "VECTOR"}
+
+    %c0 = arith.constant 0 : index
+    %c16 = arith.constant 16 : index
+    %zero = arith.constant 0.0 : f32
+    %alloc = memref.alloc() : memref<16x16xf32>
+    scf.if %rare {
+      linalg.fill ins(%zero : f32) outs(%alloc : memref<16x16xf32>)
+      linalg.fill ins(%zero : f32) outs(%alloc : memref<16x16xf32>)
+    }
+    %src_view = memref.subview %src[%c0, %c0] [%c16, %c16] [1, 1]
+      : memref<16x16xf32> to memref<?x?xf32, strided<[16, 1], offset: ?>>
+    %dst_view = memref.subview %alloc[%c0, %c0] [%c16, %c16] [1, 1]
+      : memref<16x16xf32> to memref<?x?xf32, strided<[16, 1], offset: ?>>
+    memref.copy %src_view, %dst_view
+      : memref<?x?xf32, strided<[16, 1], offset: ?>> to memref<?x?xf32, strided<[16, 1], offset: ?>>
+    %t = bufferization.to_tensor %alloc restrict writable
+      : memref<16x16xf32> to tensor<16x16xf32>
+    %out = tensor.empty() : tensor<16x16xf32>
+    %init = linalg.fill ins(%zero : f32) outs(%out : tensor<16x16xf32>) -> tensor<16x16xf32>
+    %mm = linalg.matmul ins(%t, %rhs : tensor<16x16xf32>, tensor<16x16xf32>)
+      outs(%init : tensor<16x16xf32>) -> tensor<16x16xf32>
+    %acc = arith.addf %t, %t : tensor<16x16xf32>
+    return %mm, %acc : tensor<16x16xf32>, tensor<16x16xf32>
+  }
 }

@@ -2010,9 +2010,12 @@ static void colorGuardConditionChain(
 // the last writer (getMemDefs reports the copy), so VECTOR propagation never
 // reaches it. The VECTOR-side buffer copy is never zero-filled and its
 // out-of-bounds region reads uninitialized memory.
-// Fix: when every body op of a result-less CUBE guard scf.if is a fill whose
-// outs buffer is CUBE_AND_VECTOR, upgrade the guard (and the scalar chain
-// computing its condition) so the split clones them for the VECTOR side.
+// Fix: when a result-less CUBE guard scf.if holds exactly one fill whose
+// outs buffer is CUBE_AND_VECTOR - and nothing else in its body - upgrade
+// the guard (and the scalar chain computing its condition) so the split
+// clones them for the VECTOR side. Richer shapes (multiple fills, extra
+// body ops, a non-empty else) keep their classification: the single-fill
+// guard is the only form the split is verified for.
 // Runs after VECTOR upstream propagation finalized the CUBE_AND_VECTOR marks
 // and before handleCubeAndVector splits them.
 int OpClassifierPass::markSharedFillGuardsForSplit() {
@@ -2024,27 +2027,28 @@ int OpClassifierPass::markSharedFillGuardsForSplit() {
         opCoreTypes[op] != OP_CUBE_ONLY || preClassifiedOps.contains(op)) {
       continue;
     }
-    // The guard must consist solely of fills into buffers that are about to
-    // be split (CUBE_AND_VECTOR).
-    bool allSharedBufferFills = true;
+    // Match the bug shape exactly: a single fill (nothing besides the
+    // terminator) writing into a buffer that is about to be split
+    // (CUBE_AND_VECTOR). Richer guards keep their classification - the
+    // single-fill form is the only one the split is verified for.
+    llvm::SmallVector<Operation *> bodyOps;
     for (Region &region : ifOp->getRegions()) {
       for (Block &block : region) {
         for (Operation &inner : block) {
-          if (inner.hasTrait<OpTrait::IsTerminator>()) {
-            continue;
-          }
-          auto fillOp = dyn_cast<linalg::FillOp>(&inner);
-          Operation *rootDef =
-              fillOp
-                  ? getViewSource(fillOp.getDpsInits()[0]).getDefiningOp()
-                  : nullptr;
-          if (!rootDef || opCoreTypes[rootDef] != OP_CUBE_AND_VECTOR) {
-            allSharedBufferFills = false;
+          if (!inner.hasTrait<OpTrait::IsTerminator>()) {
+            bodyOps.push_back(&inner);
           }
         }
       }
     }
-    if (!allSharedBufferFills) {
+    if (bodyOps.size() != 1) {
+      continue;
+    }
+    auto fillOp = dyn_cast<linalg::FillOp>(bodyOps.front());
+    Operation *rootDef =
+        fillOp ? getViewSource(fillOp.getDpsInits()[0]).getDefiningOp()
+               : nullptr;
+    if (!rootDef || opCoreTypes[rootDef] != OP_CUBE_AND_VECTOR) {
       continue;
     }
     LLVM_DEBUG(DBGS() << "fill guard on shared buffer, mark CUBE_AND_VECTOR: "

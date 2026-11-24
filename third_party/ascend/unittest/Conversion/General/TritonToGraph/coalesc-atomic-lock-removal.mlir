@@ -1,4 +1,5 @@
 // RUN: triton-opt %s --verify-each '-graph-optimize=rule-mask=262144 ub-capacity-bytes=253952 mapping-ub-capacity-bytes=253952 ub-safety-percent=100 reserved-ub-bytes=0' | FileCheck %s --check-prefix=RETILE
+// RUN: sed '/^    %unlock/i\    gpu.barrier' %s | triton-opt --verify-each '-graph-optimize=rule-mask=262144 ub-capacity-bytes=253952 mapping-ub-capacity-bytes=253952 ub-safety-percent=100 reserved-ub-bytes=0' | FileCheck %s --check-prefix=RETILE
 // RUN: sed 's/"tt.reduce"(%dy)/"tt.reduce"(%dy_with_sum)/' %s | triton-opt --verify-each '-graph-optimize=rule-mask=262144 ub-capacity-bytes=253952 mapping-ub-capacity-bytes=253952 ub-safety-percent=100 reserved-ub-bytes=0' | FileCheck %s --check-prefix=LOCKED
 // RUN: triton-opt %s --verify-each -graph-optimize | FileCheck %s --check-prefix=LOCKED
 
@@ -6,6 +7,7 @@
 // RETILE-SAME: kind = "cap"
 // RETILE: tt.make_range {end = 4096
 // RETILE-NOT: tt.atomic
+// RETILE-NOT: gpu.barrier
 // LOCKED-NOT: hacc.program_grid_transforms
 // LOCKED: tt.make_range {end = 8192
 // LOCKED: tt.atomic_cas

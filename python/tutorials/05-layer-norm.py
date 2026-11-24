@@ -279,12 +279,17 @@ class LayerNorm(torch.autograd.Function):
         # also compute partial sums for DW and DB
         x_arg = x.reshape(-1, x.shape[-1])
         M, N = x_arg.shape
+        # The Ascend graph rule can remove the locks because this launch owns
+        # freshly zeroed lock/count storage and disjoint gradient buffers.
+        graph_options = {}
+        if x.device.type == "npu" and x.is_contiguous() and dy.is_contiguous():
+            graph_options["rule_mask"] = 1 << 18
         _layer_norm_bwd_dx_fused[(M, )](  #
             dx, dy, _dw, _db, x, w, m, v, locks,  #
             x_arg.stride(0), N,  #
             BLOCK_SIZE_N=ctx.BLOCK_SIZE,  #
             GROUP_SIZE_M=GROUP_SIZE_M,  #
-            num_warps=ctx.num_warps)
+            num_warps=ctx.num_warps, **graph_options)
         grid = lambda meta: (triton.cdiv(N, meta['BLOCK_SIZE_N']), )
         # accumulate partial sums in separate kernel
         _layer_norm_bwd_dwdb[grid](

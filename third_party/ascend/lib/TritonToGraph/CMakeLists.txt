@@ -75,6 +75,7 @@ add_triton_library(TritonToGraph
   MLIRDialectUtils
   MLIRIR
   MLIRFuncDialect
+  MLIRGPUDialect
   MLIRLinalgDialect
   MLIRMemRefDialect
   MLIRMathDialect

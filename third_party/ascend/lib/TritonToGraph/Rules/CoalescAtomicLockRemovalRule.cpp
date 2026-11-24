@@ -4,6 +4,7 @@
 #include "TritonToGraph/ProgramGridTransform.h"
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Matchers.h"
@@ -346,6 +347,10 @@ std::optional<Match> match(FuncOp function) {
   for (Operation &op : branch.elseBlock()->without_terminator())
     if (!updates.contains(&op))
       return std::nullopt;
+  // This barrier orders the two partial stores before publishing the unlock.
+  // The rewritten program owns these slots, and publishes no unlock.
+  if (isa_and_nonnull<gpu::BarrierOp>(next))
+    next = next->getNextNode();
   if (!isExchange(dyn_cast_or_null<AtomicRMWOp>(next), cas.getPtr(), 0) ||
       !isa_and_nonnull<ReturnOp>(next->getNextNode()))
     return std::nullopt;

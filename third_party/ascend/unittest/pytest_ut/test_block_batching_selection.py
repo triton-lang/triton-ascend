@@ -524,6 +524,13 @@ class TestCompileContextCache(unittest.TestCase):
 
 class TestRankedRecovery(unittest.TestCase):
 
+    def setUp(self):
+        from triton import knobs
+        scope = knobs.compilation.scope()
+        scope.__enter__()
+        self.addCleanup(scope.__exit__, None, None, None)
+        knobs.compilation.always_compile = False
+
     def run_selection(self, *, selected=4, decline=False, failure=None, arch="Ascend950", saved=None, binary_hit=True,
                       baseline_error=None):
         from triton.backends.ascend import block_auto as dispatch, block_batching_worker as worker

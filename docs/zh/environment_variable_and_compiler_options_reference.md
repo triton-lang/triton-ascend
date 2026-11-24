@@ -42,6 +42,7 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 编译 | `TRITON_OVERRIDE_DIR` | 指定覆盖文件目录。 | `$TRITON_HOME/.triton/override` | 支持 | 支持 |
 | 编译 | `TRITON_F32_DEFAULT` | 设置 `tl.dot` 的默认F32输入精度；Ascend使用 `ieee`、`hf32`，兼容输入 `tf32` 会映射为 `hf32`。 | 未设置，使用后端的 `ieee` | 支持 | 支持 |
 | 编译 | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | 允许JIT前端引用非 `constexpr` 全局变量。 | 关闭 | 支持 | 支持 |
+| 编译 | `TRITON_ENABLE_LIBDEVICE` | 在A2/A3编译路径额外链接libdevice；非空字符串均视为开启，包括 `"0"`。 | 未设置 | 支持 | — |
 | 编译 | `TRITON_ENABLE_LIBDEVICE_SIMT` | 在950上为libdevice调用选择SIMT版本；非空字符串均视为开启，包括 `"0"`。 | 未设置 | — | 支持 |
 | 缓存与调优 | `TRITON_HOME` | 设置Triton缓存、dump和override目录的根位置。 | 用户主目录 | 支持 | 支持 |
 | 缓存与调优 | `TRITON_CACHE_DIR` | 指定编译缓存目录。 | `$TRITON_HOME/.triton/cache` | 支持 | 支持 |
@@ -407,5 +408,3 @@ triton.Config({"multibuffer_mode": {"gm": 1, "l1": 2, "l0c": 1, "ub": 1}})
 | `TRITON_BACKEND` | 该变量不再用于选择Ascend后端策略。 |
 | `TRITON_DISABLE_FFTS` | FFTS策略由编译目标决定。 |
 | `TRITON_REGISTER_TENSOR_MSPROF` | 不再通过环境变量控制msprof的张量形状注册。 |
-
-A2/A3编译路径始终链接默认的libdevice。`TRITON_ENABLE_LIBDEVICE` 仅影响编译缓存键，可以从启动脚本中移除。

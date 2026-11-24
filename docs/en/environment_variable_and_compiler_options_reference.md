@@ -42,6 +42,7 @@ The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilatio
 | Compilation | `TRITON_OVERRIDE_DIR` | Sets the directory containing override files. | `$TRITON_HOME/.triton/override` | Yes | Yes |
 | Compilation | `TRITON_F32_DEFAULT` | Sets the default F32 input precision for `tl.dot`; Ascend uses `ieee` or `hf32`, and maps compatibility input `tf32` to `hf32`. | Unset; backend uses `ieee` | Yes | Yes |
 | Compilation | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | Allows non-`constexpr` globals in the JIT frontend. | Off | Yes | Yes |
+| Compilation | `TRITON_ENABLE_LIBDEVICE` | Adds a libdevice link on the A2/A3 compiler path. Any nonempty value, including `"0"`, enables it. | Unset | Yes | — |
 | Compilation | `TRITON_ENABLE_LIBDEVICE_SIMT` | Selects SIMT libdevice extern symbols on Ascend 950. Any nonempty value, including `"0"`, enables it. | Unset | — | Yes |
 | Cache and autotuning | `TRITON_ASCEND_ENABLE_DYNAMIC_REUSE` | Controls automatic reuse of kernels across changes to eligible `constexpr` parameters: `0` disables reuse, `1` enables dynamic reuse, and `2` also enables tile reuse and background compilation. | `0` | Yes | Yes; tile reuse excludes `simt_only` |
 | Cache and autotuning | `TRITON_HOME` | Sets the base for cache, dump, and override directories. | User home | Yes | Yes |
@@ -408,5 +409,3 @@ Remove the following variables from launch scripts or the runtime environment; t
 | `TRITON_BACKEND` | The variable no longer selects Ascend backend policy. |
 | `TRITON_DISABLE_FFTS` | The compilation target determines FFTS policy. |
 | `TRITON_REGISTER_TENSOR_MSPROF` | Environment variables no longer control tensor-shape registration with msprof. |
-
-A2/A3 compilation always links the default libdevice. `TRITON_ENABLE_LIBDEVICE` only affects the compilation cache key and can be removed from launch scripts.

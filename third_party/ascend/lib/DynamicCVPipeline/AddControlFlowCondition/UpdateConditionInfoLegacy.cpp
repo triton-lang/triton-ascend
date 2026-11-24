@@ -251,9 +251,6 @@ static int buildWhileCounterCondition(
 SmallVector<SmallVector<Value>>
 UpdateConditionInfoPassLegacy::allocSSBuffer(ModuleOp module) {
   OpBuilder builder(module.getContext());
-  auto i64Type = builder.getIntegerType(ADDR_INT_TYPE);
-  auto i32Type = builder.getIntegerType(CONST_INT_TYPE);
-  auto memrefType = getSsbufMemrefType(builder);
 
   // alloc 2 group of ssbuffer pointers:
   // Core Vector 0: allocate ssbuffer address: 0, 4, 8, ...
@@ -267,29 +264,53 @@ UpdateConditionInfoPassLegacy::allocSSBuffer(ModuleOp module) {
     return ssbufferMemrefs;
   }
 
-  module->walk([&](Operation *op) {
-    if (auto scopeOp = dyn_cast<scope::ScopeOp>(op)) {
-      builder.setInsertionPoint(scopeOp);
-      auto loc = scopeOp.getLoc();
-      auto zeroConst = builder.create<arith::ConstantOp>(
-          scopeOp->getLoc(), i32Type, builder.getIntegerAttr(i32Type, 0));
-
-      for (int i = 0; i < numBuffers; i++) {
-        auto memref0 =
-            createPointerCastOp(builder, loc, i * VALUE_SSBUF_OFFSET);
-        auto memref1 = createPointerCastOp(
-            builder, loc, VECTOR_SSBUF_OFFSET + i * VALUE_SSBUF_OFFSET);
-
-        builder.create<memref::StoreOp>(scopeOp->getLoc(), zeroConst, memref0);
-        builder.create<memref::StoreOp>(scopeOp->getLoc(), zeroConst, memref1);
-
-        ssbufferVec0Memrefs.push_back(memref0.getResult());
-        ssbufferVec1Memrefs.push_back(memref1.getResult());
-      }
-      return mlir::WalkResult::interrupt();
-    }
-    return mlir::WalkResult::advance();
+  scope::ScopeOp firstScope, vectorScope;
+  const auto vectorType =
+      TCoreTypeAttr::get(module.getContext(), TCoreType::VECTOR);
+  module.walk<WalkOrder::PreOrder>([&](scope::ScopeOp scopeOp) {
+    if (!firstScope)
+      firstScope = scopeOp;
+    if (scopeOp->getAttrOfType<TCoreTypeAttr>("hivm.tcore_type") != vectorType)
+      return WalkResult::advance();
+    vectorScope = scopeOp;
+    return WalkResult::interrupt();
   });
+  if (!vectorScope) {
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return ssbufferMemrefs;
+  }
+
+  // Cube still needs both fixed addresses to read and update the counters.
+  builder.setInsertionPoint(firstScope);
+  Location loc = firstScope.getLoc();
+  for (int i = 0; i < numBuffers; ++i) {
+    int offset = i * VALUE_SSBUF_OFFSET;
+    ssbufferVec0Memrefs.push_back(
+        createPointerCastOp(builder, loc, offset).getResult());
+    ssbufferVec1Memrefs.push_back(
+        createPointerCastOp(builder, loc, VECTOR_SSBUF_OFFSET + offset)
+            .getResult());
+  }
+
+  // A faster sub-block can start its next tile while its peer still needs
+  // the previous tile's counters. Reset only the local bank before signaling
+  // entry to the pipeline.
+  builder.setInsertionPointToStart(&vectorScope->getRegion(0).front());
+  loc = vectorScope.getLoc();
+  Value zero = builder.create<arith::ConstantIntOp>(loc, 0, CONST_INT_TYPE);
+  Value stride = builder.create<arith::ConstantIntOp>(loc, VECTOR_SSBUF_OFFSET,
+                                                      ADDR_INT_TYPE);
+  Value subBlock = builder.create<GetSubBlockIdxOp>(
+      loc, builder.getIntegerType(ADDR_INT_TYPE));
+  Value bank = builder.create<arith::MulIOp>(loc, subBlock, stride);
+  auto memrefType = getSsbufMemrefType(builder);
+  for (int i = 0; i < numBuffers; ++i) {
+    Value offset = builder.create<arith::ConstantIntOp>(
+        loc, i * VALUE_SSBUF_OFFSET, ADDR_INT_TYPE);
+    Value addr = builder.create<arith::AddIOp>(loc, bank, offset);
+    Value ptr = builder.create<PointerCastOp>(loc, memrefType, addr);
+    builder.create<memref::StoreOp>(loc, zero, ptr);
+  }
 
   ssbufferMemrefs.push_back(ssbufferVec0Memrefs);
   ssbufferMemrefs.push_back(ssbufferVec1Memrefs);
@@ -1944,6 +1965,8 @@ int UpdateConditionInfoPassLegacy::updateIfConds(
           return !info->outerSweepPlans.contains(loop);
         }))
       ssbufferPtrs = allocSSBuffer(module);
+    if (CVPipeline::hasFallbackAttr(module))
+      return UPDATE_CONDITION_INFO_FAILED;
   }
 
   // Step0: Collect dependency buffers once outside the loop
@@ -2085,6 +2108,8 @@ void UpdateConditionInfoPassLegacy::runOnOperation() {
   SmallVector<SmallVector<Value>> ssbufferPtrs;
   if (!CVPipeline::hasOuterMainLoop(module))
     ssbufferPtrs = allocSSBuffer(module);
+  if (CVPipeline::hasFallbackAttr(module))
+    return;
   int updateResult = updateIfConds(module, std::move(ssbufferPtrs));
 
   if (updateResult != UPDATE_CONDITION_INFO_SUCCESS) {

@@ -122,7 +122,7 @@ index cab58801f..15f125080 100644
  add_subdirectory(test)
  
 diff --git a/bin/CMakeLists.txt b/bin/CMakeLists.txt
-index cc0b4fa15..212b4f9dc 100644
+index cc0b4fa15..82f52f87e 100644
 --- a/bin/CMakeLists.txt
 +++ b/bin/CMakeLists.txt
 @@ -1,11 +1,38 @@
@@ -130,7 +130,7 @@ index cc0b4fa15..212b4f9dc 100644
  
 +include_directories(
 +    ${PROJECT_SOURCE_DIR}/third_party/ascend/include
-+    "${ASCENDNPU_IR_SRC_DIR}/bishengir/include"
++    ${PROJECT_SOURCE_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
 +    ${PROJECT_BINARY_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
 +  )
 +

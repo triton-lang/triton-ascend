@@ -765,7 +765,14 @@ static triton::LoadOp rewriteSimdDiscreteMaskLoad(triton::LoadOp op,
   return load;
 }
 
-static bool isGatherColumnPrefix(arith::CmpIOp cmp) {
+static bool isGatherColumnPrefix(Value mask) {
+  // Check the same column range in both columns[None, :] < bound and
+  // (columns < bound)[None, :].
+  auto stripRowDim = [](Value value) -> Value {
+    auto expand = value.getDefiningOp<triton::ExpandDimsOp>();
+    return expand && expand.getAxis() == 0 ? expand.getSrc() : value;
+  };
+  auto cmp = stripRowDim(mask).getDefiningOp<arith::CmpIOp>();
   if (!cmp || cmp.getPredicate() != arith::CmpIPredicate::slt)
     return false;
   DenseElementsAttr bound;
@@ -773,7 +780,7 @@ static bool isGatherColumnPrefix(arith::CmpIOp cmp) {
       !(matchPattern(cmp.getRhs(), m_Constant(&bound)) && bound.isSplat()))
     return false;
 
-  Value columns = cmp.getLhs();
+  Value columns = stripRowDim(cmp.getLhs());
   if (auto range = columns.getDefiningOp<triton::MakeRangeOp>())
     return range.getStartAttr().getInt() >= 0;
   auto add = columns.getDefiningOp<arith::AddIOp>();
@@ -822,10 +829,7 @@ static bool splitGatherRowMask(Value mask, Value &rows, Value &columns,
                 : source;
     return true;
   }
-  auto expand = source.getDefiningOp<triton::ExpandDimsOp>();
-  if (columns || !expand || expand.getAxis() != 0)
-    return false;
-  if (!isGatherColumnPrefix(expand.getSrc().getDefiningOp<arith::CmpIOp>()))
+  if (columns || shape[0] != 1 || !isGatherColumnPrefix(source))
     return false;
   columns = source;
   return true;

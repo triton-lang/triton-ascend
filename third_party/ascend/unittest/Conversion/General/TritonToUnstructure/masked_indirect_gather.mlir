@@ -1,5 +1,7 @@
 // RUN: triton-opt %s --discrete-mask-access-conversion --triton-to-unstructure --verify-each | FileCheck %s --check-prefix=MASK
 // RUN: triton-opt %s --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s
+// RUN: sed 's/tt.broadcast %cpred /tt.broadcast %expanded_pred /' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s
+// RUN: sed -e 's/tt.broadcast %cpred /tt.broadcast %expanded_pred /' -e 's/, %expanded_width : tensor<1x8xi32>/, %lane_widths : tensor<1x8xi32>/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s --check-prefix=SCALAR
 // RUN: sed 's/, %active, %other/, %rowmask, %other/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s --check-prefix=FULL
 // RUN: sed 's/cmpi slt, %columns/cmpi ne, %columns/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s --check-prefix=SCALAR
 // RUN: sed 's/%blockWidth = arith.constant 8/%blockWidth = arith.constant 1/' %s | triton-opt --discrete-mask-access-conversion --triton-to-unstructure --bubble-up-operation --triton-to-linalg --verify-each | FileCheck %s --check-prefix=SCALAR
@@ -42,7 +44,7 @@
 // SCALAR: scf.if %[[ACTIVE]] -> (f32) {
 // SCALAR-NEXT: %[[VALUE:.*]] = memref.load
 // SCALAR-NEXT: scf.yield %[[VALUE]] : f32
-tt.func public @masked_indirect_gather(%src: !tt.ptr<f32>, %indices: !tt.ptr<i32>, %width: i32, %tile: i32) -> tensor<4x8xf32> {
+tt.func public @masked_indirect_gather(%src: !tt.ptr<f32>, %indices: !tt.ptr<i32>, %width: i32, %tile: i32, %lane_widths: tensor<1x8xi32>) -> tensor<4x8xf32> {
   %r = tt.make_range {start = 0 : i32, end = 4 : i32} : tensor<4xi32>
   %c = tt.make_range {start = 0 : i32, end = 8 : i32} : tensor<8xi32>
   %ibase = tt.splat %indices : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
@@ -69,6 +71,10 @@ tt.func public @masked_indirect_gather(%src: !tt.ptr<f32>, %indices: !tt.ptr<i32
   %columns = arith.addi %starts, %c : tensor<8xi32>
   %validcol = arith.cmpi slt, %columns, %widths : tensor<8xi32>
   %cpred = tt.expand_dims %validcol {axis = 0 : i32} : tensor<8xi1> -> tensor<1x8xi1>
+  // Issue #2648 uses columns[None, :] < width, expanding before the comparison.
+  %expanded_columns = tt.expand_dims %columns {axis = 0 : i32} : tensor<8xi32> -> tensor<1x8xi32>
+  %expanded_width = tt.splat %width : i32 -> tensor<1x8xi32>
+  %expanded_pred = arith.cmpi slt, %expanded_columns, %expanded_width : tensor<1x8xi32>
   %colmask = tt.broadcast %cpred : tensor<1x8xi1> -> tensor<4x8xi1>
   %active = arith.andi %rowmask, %colmask : tensor<4x8xi1>
   %other = arith.constant dense<-7.0> : tensor<4x8xf32>

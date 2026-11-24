@@ -48,6 +48,13 @@ struct MoveSplatAfterElementwisePattern
       return failure();
     }
 
+    // HiFloat8 conversions lower through target vector instructions. Keep
+    // their tensor form instead of creating unsupported scalar conversions.
+    if (isa<FpToFpOp>(op) &&
+        (isa<HiFloat8Type>(getElementTypeOrSelf(op->getOperand(0).getType())) ||
+         isa<HiFloat8Type>(getElementTypeOrSelf(op->getResult(0).getType()))))
+      return failure();
+
     for (auto operand : op->getOperands()) {
       auto definingOp = operand.getDefiningOp();
       if (!definingOp)

@@ -903,6 +903,9 @@ OpFoldResult FpToFpOp::fold(FoldAdaptor adaptor) {
     return srcVal;
   }
 
+  if (isa<HiFloat8Type>(getElementTypeOrSelf(getType())) ||
+      isa<HiFloat8Type>(getElementTypeOrSelf(getSrc().getType())))
+    return {};
   auto resElemType = cast<FloatType>(getElementTypeOrSelf(getType()));
   const llvm::fltSemantics &semantic = resElemType.getFloatSemantics();
 

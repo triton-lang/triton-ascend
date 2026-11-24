@@ -377,7 +377,7 @@ def check_bit_width(value, shift_value):
 class dtype(base_type):
     SINT_TYPES = ['int8', 'int16', 'int32', 'int64']
     UINT_TYPES = ['int1', 'uint8', 'uint16', 'uint32', 'uint64']
-    FP_TYPES = ['fp8e4b15', 'fp8e4nv', 'fp8e4b8', 'fp8e5', 'fp8e5b16', 'fp16', 'bf16', 'fp32', 'fp64']
+    FP_TYPES = ['hif8', 'fp8e4b15', 'fp8e4nv', 'fp8e4b8', 'fp8e5', 'fp8e5b16', 'fp16', 'bf16', 'fp32', 'fp64']
     STANDARD_FP_TYPES = ['fp16', 'bf16', 'fp32', 'fp64']
     OTHER_TYPES = ['void']
 
@@ -403,7 +403,12 @@ class dtype(base_type):
             self.int_signedness = dtype.SIGNEDNESS.UNSIGNED
             self.int_bitwidth = self.primitive_bitwidth
         elif name in dtype.FP_TYPES:
-            if name == 'fp8e4b15':
+            if name == 'hif8':
+                # HiF8 precision varies with the exponent. Do not describe it
+                # using the fixed-field parameters of an OCP FP8 format.
+                self.fp_mantissa_width = None
+                self.exponent_bias = None
+            elif name == 'fp8e4b15':
                 self.fp_mantissa_width = 3
                 self.exponent_bias = 15
             elif name == 'fp8e4nv':
@@ -432,6 +437,9 @@ class dtype(base_type):
                 self.exponent_bias = 1023
             else:
                 raise RuntimeError(f'Unsupported floating-point type {name}')
+
+    def is_hif8(self):
+        return self.name == 'hif8'
 
     def is_fp8(self):
         return 'fp8' in self.name
@@ -590,6 +598,8 @@ class dtype(base_type):
             return builder.get_fp8e5_ty()
         elif self.name == 'fp8e5b16':
             return builder.get_fp8e5b16_ty()
+        elif self.name == 'hif8':
+            return builder.get_hif8_ty()
         elif self.name == 'fp8e4nv':
             return builder.get_fp8e4nv_ty()
         elif self.name == 'fp8e4b8':
@@ -797,6 +807,7 @@ uint8 = dtype('uint8')
 uint16 = dtype('uint16')
 uint32 = dtype('uint32')
 uint64 = dtype('uint64')
+hifloat8 = dtype('hif8')
 float8e5 = dtype('fp8e5')
 float8e5b16 = dtype('fp8e5b16')
 float8e4nv = dtype('fp8e4nv')

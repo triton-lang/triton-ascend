@@ -759,37 +759,45 @@ class CandidateCompiler:
         from .block_batching import BatchKernel, IMPLEMENTATION_VERSION
         from .block_batching_report import validated_candidate_report
         options = dict(options)
-        if cached_only:
-            decline, compiled = self._variant(options, pending, cached_only=True)
-            if compiled is None:
-                return None
-        else:
-            decline, compiled = self._variant(options, pending)
-        retry = None
-        if (allow_layout_retry and decline and decline['reason'] == 'LAYOUT_TARGET_RESOURCE_REJECTED'
-                and decline.get('stage') == 'npubin' and decline.get('factor') == request.factor
-                and decline.get('axis') == request.axis and options.get('block_batching_layout', 'auto') == 'auto'):
-            retry = {key: decline[key] for key in ('reason', 'stage', 'diagnostic')}
-            pending.close()
-            decline, compiled = self._variant(dict(options, block_batching_layout='semantic_only'), pending)
-        if decline:
-            return rejected_bundle(baseline, request, decline, positions, retry)
-        cache, record, group, variant, timings = compiled
         try:
-            candidate = CompiledKernel(self.source, group, variant)
-            normalized = self.backend.parse_options(dict(options))
-            if (candidate.metadata.hash != variant or self.backend.target != candidate.metadata.target
-                    or candidate.metadata.block_batching_backend_revision != normalized.block_batching_backend_revision
-                    or json.dumps(candidate.metadata.block_compile_context) != json.dumps(
-                        normalized.block_compile_context)):
-                raise ValueError('artifact metadata disagrees with candidate identity')
-            report = validated_candidate_report(candidate, request, IMPLEMENTATION_VERSION)
-            if retry:
-                report['layout'] = dict(report['layout'], requested_policy='auto', selected_policy='semantic_only',
-                                        compile_fallback=retry)
-            bundle = BatchKernel(baseline, candidate, request, report, positions, publish_manifest=False)
-        except Exception as exc:
-            raise BatchCompileError(str(exc), kind='InvalidArtifact', stage='bind') from exc
+            if cached_only:
+                decline, compiled = self._variant(options, pending, cached_only=True)
+                if compiled is None:
+                    return None
+            else:
+                decline, compiled = self._variant(options, pending)
+            retry = None
+            if (allow_layout_retry and decline and decline['reason'] == 'LAYOUT_TARGET_RESOURCE_REJECTED'
+                    and decline.get('stage') == 'npubin' and decline.get('factor') == request.factor
+                    and decline.get('axis') == request.axis and options.get('block_batching_layout', 'auto') == 'auto'):
+                retry = {key: decline[key] for key in ('reason', 'stage', 'diagnostic')}
+                pending.close()
+                decline, compiled = self._variant(dict(options, block_batching_layout='semantic_only'), pending)
+            if decline:
+                return rejected_bundle(baseline, request, decline, positions, retry)
+            cache, record, group, variant, timings = compiled
+            try:
+                candidate = CompiledKernel(self.source, group, variant)
+                normalized = self.backend.parse_options(dict(options))
+                if (candidate.metadata.hash != variant or self.backend.target != candidate.metadata.target or
+                        candidate.metadata.block_batching_backend_revision != normalized.block_batching_backend_revision
+                        or json.dumps(candidate.metadata.block_compile_context) != json.dumps(
+                            normalized.block_compile_context)):
+                    raise ValueError('artifact metadata disagrees with candidate identity')
+                report = validated_candidate_report(candidate, request, IMPLEMENTATION_VERSION)
+                if retry:
+                    report['layout'] = dict(report['layout'], requested_policy='auto', selected_policy='semantic_only',
+                                            compile_fallback=retry)
+                bundle = BatchKernel(baseline, candidate, request, report, positions, publish_manifest=False)
+            except Exception as exc:
+                raise BatchCompileError(str(exc), kind='InvalidArtifact', stage='bind') from exc
+        except BatchCompileError as error:
+            # F1 is already compiled. Release private artifacts and cache locks
+            # before falling back; publication and listener errors still propagate.
+            pending.close()
+            decline = dict(reason='CANDIDATE_COMPILATION_FAILED', failure_kind=error.kind, stage=error.stage,
+                           diagnostic=str(error))
+            return rejected_bundle(baseline, request, decline, positions)
         if record is not None:
             group = _publish_artifacts(cache, record['stage'], group, record['manifest'])
             candidate.metadata_group = group
@@ -899,6 +907,8 @@ def rejected_bundle(baseline, request, decline, positions=(), retry=None):
         report['candidate_analysis'] = decline['analysis']
     if 'diagnostic' in decline:
         report.update(backend_diagnostic=decline['diagnostic'], stage=decline['stage'])
+    if 'failure_kind' in decline:
+        report['failure_kind'] = decline['failure_kind']
     if retry:
         report['layout'] = dict(requested_policy='auto', selected_policy='baseline', compile_fallback=retry)
     return BatchKernel(baseline, None, request, report, positions)

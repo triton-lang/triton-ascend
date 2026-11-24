@@ -155,7 +155,6 @@ __all__ = [
     "vpack",
     "vreduce_min",
     "vci",
-    "pge",
     "membar",
 ]
 
@@ -2896,27 +2895,6 @@ def vci(base, _semantic=None) -> vector:
     lanes = _lanes_for("i32")
     handle = _semantic.builder.create_simd_vci(base_handle, "i32", lanes, False)
     return vector(handle, vector_type(lanes, tl.int32))
-
-
-@builtin
-def pge(n, lanes, _semantic=None) -> vector:
-    """
-    Prefix predicate: the first ``n`` lanes are true, the rest false
-    (``ave.hir.pge <VLn>``).
-
-    Used for group-boundary selects (e.g. cast_back's 32-channel scale groups
-    over a 64-lane register: ``pge(32, 64)``).
-
-    :param n: number of leading true lanes; must match a supported VL pattern
-        (1, 2, 3, 4, 8, 16, 32, 64, 128)
-    :param lanes: number of i1 predicate lanes
-    """
-    n = _unwrap_if_constexpr(n)
-    lanes = _unwrap_if_constexpr(lanes)
-    ty = vector_type(lanes, tl.int1)
-    pattern = ss.check_pge_pattern(f"VL{n}")
-    handle = _semantic.builder.create_simd_pge(pattern, lanes)
-    return vector(handle, ty)
 
 
 @builtin

@@ -20,7 +20,7 @@ SCALAR = 2.0
 
 
 @tla.jit
-def vmula(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vmula(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     x = tla.alloc((N, ), tl.float32, space="ub")
     y = tla.alloc((N, ), tl.float32, space="ub")
     o = tla.alloc((4, N), tl.float32, space="ub")
@@ -31,7 +31,7 @@ def vmula(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         a = tla.simd.vlds(y[0])
         b = tla.simd.vdup(2.0, tl.float32)
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(o[0, 0], tla.simd.vmula(acc, a, b))
         tla.simd.vsts(o[1, 0], tla.simd.vmula(acc, a, b, prefix))
@@ -41,7 +41,7 @@ def vmula(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vmadd(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vmadd(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     x = tla.alloc((N, ), tl.float32, space="ub")
     y = tla.alloc((N, ), tl.float32, space="ub")
     o = tla.alloc((N, ), tl.float32, space="ub")
@@ -51,13 +51,13 @@ def vmadd(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         acc = tla.simd.vlds(x[0])
         a = tla.simd.vlds(y[0])
         b = tla.simd.vdup(2.0, tl.float32)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         tla.simd.vsts(o[0], tla.simd.vmadd(acc, a, b, mask=prefix, mode=tla.simd.MODE.MERGING))
     tla.store_ub_to_gm(o, tla.view(O, (N, )))
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def _reference(x, y):

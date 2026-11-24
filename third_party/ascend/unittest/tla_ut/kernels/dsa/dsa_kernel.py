@@ -180,7 +180,7 @@ def _sparse_mla(
                         )
                     with tla.scope.simd():
                         # Only the first 64 BF16 lanes of the RoPE tail are valid.
-                        half = tla.simd.pge(64, 128)
+                        half = tla.simd.pset(16, tla.simd.PAT.VL64)
                         for local_row in tla.range(GR):
                             for col in tla.static_range(4):
                                 value = tla.simd.vlds(keys[local_row, col * 128])
@@ -264,7 +264,7 @@ def _sparse_mla(
                         if step >= 2:
                             position = sub * (BN // 2) + (step - 2) * GR
                             with tla.scope.simd():
-                                half = tla.simd.pge(64, 128)
+                                half = tla.simd.pset(16, tla.simd.PAT.VL64)
                                 for local_row in tla.range(GR):
                                     for col in tla.static_range(4):
                                         value = tla.simd.vlds(keys[local_row, col * 128])

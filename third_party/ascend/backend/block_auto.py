@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 import tempfile
 
-_A5_VV_FACTORS = (2, 3, 4, 8, 16)
+_A5_VV_FACTORS = (2, 4, 8, 16)
 _MAX_MERGED_TTIRS = 5
 
 

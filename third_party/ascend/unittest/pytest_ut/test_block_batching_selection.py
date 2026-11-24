@@ -94,7 +94,7 @@ class TestTtirAnalysis(unittest.TestCase):
     def test_vv_factors_for_supported_targets(self):
         from triton.backends.ascend import block_auto
         for arch in ("Ascend950", "Ascend910_95"):
-            self.assertEqual(block_auto._vv_factors(arch), (2, 3, 4, 8, 16))
+            self.assertEqual(block_auto._vv_factors(arch), (2, 4, 8, 16))
         for arch in ("Ascend910B", "Ascend910_93"):
             self.assertEqual(block_auto._vv_factors(arch), (2, 4))
 
@@ -625,7 +625,7 @@ class TestRankedRecovery(unittest.TestCase):
         return result.block_auto_selection, events
 
     def test_only_winner_and_f1_enter_backend(self):
-        for selected in (2, 3, 4, 8, 16):
+        for selected in (2, 4, 8, 16):
             with self.subTest(selected=selected):
                 result, events = self.run_selection(selected=selected)
                 self.assertEqual(events, ["ttir", "f1", selected])

@@ -193,7 +193,7 @@ class TestVV:
             explicit_auto = pointwise[(8, )](x, y, 1003, 128, block_batching_factor="auto")
             torch.npu.synchronize()
             assert default is explicit_auto
-            assert default.block_auto_selection['selected_factor'] in (1, 2, 3, 4, 8)
+            assert default.block_auto_selection['selected_factor'] in (1, 2, 4, 8)
             assert not hasattr(kernel, 'block_auto_selection')
             assert not hasattr(kernel, 'candidate')  # Explicit F1 disables selection.
             torch.testing.assert_close(y.cpu(), cpu * 2 + 1, rtol=0, atol=0)

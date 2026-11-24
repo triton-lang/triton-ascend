@@ -28,10 +28,15 @@ def scoped_add(x, y, z, n: tl.constexpr, BLOCK: tl.constexpr):
             tl.store(z + offsets, result, offsets < n)
 
 
-@pytest.mark.parametrize("n", [256, 4096])
-def test_instrumentation(tmp_path, monkeypatch, n):
+@pytest.fixture(autouse=True)
+def instrumentation_semantic(monkeypatch):
     monkeypatch.setattr(pl, "_SEMANTICS", pl._SEMANTICS.copy())
     pl.enable_semantic("triton")
+    monkeypatch.delenv("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES", raising=False)
+
+
+@pytest.mark.parametrize("n", [256, 4096])
+def test_instrumentation(tmp_path, n):
     x = torch.randn(n, device="npu")
     y = torch.randn_like(x)
     out = torch.empty_like(x)
@@ -89,3 +94,68 @@ def test_instrumentation(tmp_path, monkeypatch, n):
             e["dur"] <= parent["ts"] + parent["dur"] + 1e-9
         ]
         assert sorted(children) == ["compute", "load", "store"]
+
+
+@triton.jit
+def plain_add(x, y, out, BLOCK: tl.constexpr):
+    offsets = tl.arange(0, BLOCK)
+    tl.store(out + offsets, tl.load(x + offsets) + tl.load(y + offsets))
+
+
+@triton.jit
+def restart_add(x, y, out, BLOCK: tl.constexpr):
+    with pl.scope("iks_add"):
+        plain_add(x, y, out, BLOCK)
+
+
+@pytest.mark.parametrize(("data", "suffix"), [("tree", ".hatchet"), ("trace", ".chrome_trace")])
+def test_kernel_without_records(tmp_path, data, suffix):
+    x = torch.arange(256, device="npu", dtype=torch.float32)
+    out = torch.full_like(x, float("nan"))
+    base = tmp_path / "empty"
+    session = proton.start(str(base), backend="instrumentation", data=data)
+    try:
+        plain_add[(1, )](x, x, out, BLOCK=256)
+        torch.npu.synchronize()
+    finally:
+        proton.finalize(session)
+    torch.testing.assert_close(out, x + x)
+    path = base.with_suffix(suffix)
+    if data == "trace":
+        assert path.read_bytes() == b""
+    else:
+        root = json.loads(path.read_text())[0]
+        assert root["frame"]["name"] == "ROOT" and root["children"] == []
+
+
+def _scopes(node, name):
+    if node["frame"]["name"] == name:
+        yield node
+    for child in node["children"]:
+        yield from _scopes(child, name)
+
+
+def test_restart_with_loaded_kernel(tmp_path):
+    x = torch.arange(256, device="npu", dtype=torch.float32)
+    out = torch.empty_like(x)
+    handles = []
+    for label, launches in (("warm", 1), ("single", 1), ("aggregate", 3)):
+        out.fill_(float("nan"))
+        base = tmp_path / label
+        session = proton.start(str(base), backend="instrumentation", data="tree")
+        try:
+            for _ in range(launches):
+                compiled = restart_add[(1, )](x, x, out, BLOCK=256)
+                handles.append(compiled.function)
+            torch.npu.synchronize()
+        finally:
+            proton.finalize(session)
+        torch.testing.assert_close(out, x + x)
+        root = json.loads(base.with_suffix(".hatchet").read_text())[0]
+        scopes = list(_scopes(root, "iks_add"))
+        assert scopes, f"{label}: no iks_add scope in {root}"
+        for scope in scopes:
+            for key in ("cycles", "normalized_cycles"):
+                value = scope["metrics"][key]
+                assert math.isfinite(value) and value > 0, (label, key, value)
+    assert handles[0] and len(set(handles)) == 1

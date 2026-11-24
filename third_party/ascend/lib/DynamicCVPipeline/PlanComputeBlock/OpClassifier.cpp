@@ -151,6 +151,7 @@ void OpClassifierPass::initializePass(ModuleOp module) {
   inBroadcastChain.clear();
   CloneOpMap.clear();
   preClassifiedOps.clear();
+  fillGuardOps.clear();
 
   // Treat a `scope::ScopeOp` from an earlier pass as an atomic unit: record the
   // scope but skip its body -> `WalkResult::skip()` needs PreOrder to prune.
@@ -1822,10 +1823,10 @@ OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
 // ============================================================================
 
 // Collect `op` together with every operation nested inside its regions
-// (pre-order). Used by splitOperationForCubeAndVector for the single-fill
-// guard shape only (see isSingleFillGuard): its fill references the shared
-// alloc, so the body ops must participate in operand remapping and be
-// tracked for the VECTOR side.
+// (pre-order). Used by splitOperationForCubeAndVector for the fill guards
+// Step 6.5 marked (fillGuardOps): their fill references the shared alloc, so
+// the body ops must participate in operand remapping and be tracked for the
+// VECTOR side.
 static void collectOpAndNestedOps(Operation *op,
                                   llvm::SmallVectorImpl<Operation *> &ops) {
   ops.push_back(op);
@@ -1836,38 +1837,6 @@ static void collectOpAndNestedOps(Operation *op,
       }
     }
   }
-}
-
-// Whether `op` has the exact guard shape the fill-guard duplication is
-// verified for: a result-less scf.if holding exactly one fill - and nothing
-// else besides the terminator - in its body. markSharedFillGuardsForSplit
-// upgrades only this shape to CUBE_AND_VECTOR, so it is also the only shape
-// whose body ops may take part in the split. Everything else - plain ops,
-// scf.if with results, loops, richer guards - keeps the flat behavior
-// (opAndBodyOps == {op}), byte-identical to the logic before the fix. The
-// Step 6.5 root-buffer check is deliberately not re-run here: once the root
-// buffer has been split it reads CUBE_ONLY, so the shape is matched
-// structurally only.
-static bool isSingleFillGuard(Operation *op) {
-  auto ifOp = dyn_cast<scf::IfOp>(op);
-  if (!ifOp || !ifOp.getResults().empty()) {
-    return false;
-  }
-  Operation *singleFill = nullptr;
-  for (Region &region : ifOp->getRegions()) {
-    for (Block &block : region) {
-      for (Operation &inner : block) {
-        if (inner.hasTrait<OpTrait::IsTerminator>()) {
-          continue;
-        }
-        if (singleFill || !isa<linalg::FillOp>(&inner)) {
-          return false;
-        }
-        singleFill = &inner;
-      }
-    }
-  }
-  return singleFill != nullptr;
 }
 
 void OpClassifierPass::splitOperationForCubeAndVector(
@@ -1884,16 +1853,15 @@ void OpClassifierPass::splitOperationForCubeAndVector(
     return;
   }
 
-  // The op itself plus, for the single-fill guard shape only, its nested
-  // body ops: the fill uses the shared alloc, so it must take part in both
-  // the recursive operand split and the clone mapping below. Every other op
-  // - plain ops, scf.if with results, loops, richer guards, pre-classified
-  // containers - keeps the flat behavior (opAndBodyOps == {op}),
-  // byte-identical to the logic before the fix.
-  bool singleFillGuard =
-      isSingleFillGuard(op) && !preClassifiedOps.contains(op);
+  // The op itself plus, for the fill guards Step 6.5 marked, its nested body
+  // ops: the fill uses the shared alloc, so it must take part in both the
+  // recursive operand split and the clone mapping below. Every other op -
+  // plain ops, scf.if with results, loops, pre-classified containers - keeps
+  // the flat behavior (opAndBodyOps == {op}), byte-identical to the logic
+  // before the fix.
+  bool splitBodyOps = fillGuardOps.contains(op);
   llvm::SmallVector<Operation *> opAndBodyOps;
-  if (singleFillGuard) {
+  if (splitBodyOps) {
     collectOpAndNestedOps(op, opAndBodyOps);
   } else {
     opAndBodyOps.push_back(op);
@@ -1957,12 +1925,12 @@ void OpClassifierPass::splitOperationForCubeAndVector(
   CloneOpMap[op] = vectorOp;      // record for laterClone map
   CloneOpMap[vectorOp] = op;      // record for laterClone map
 
-  // Ops nested inside a cloned single-fill guard belong to the VECTOR side
-  // as well: track them so stampToIR stamps their core_type (later passes
-  // derive a region container's core type from its body ops). Clones of any
-  // other op keep the pre-existing behavior: their nested ops are not
-  // tracked here.
-  if (singleFillGuard) {
+  // Ops nested inside the clone of a marked fill guard belong to the VECTOR
+  // side as well: track them so stampToIR stamps their core_type (later
+  // passes derive a region container's core type from its body ops). Clones
+  // of any other op keep the pre-existing behavior: their nested ops are
+  // not tracked here.
+  if (splitBodyOps) {
     llvm::SmallVector<Operation *> cloneBodyOps;
     collectOpAndNestedOps(vectorOp, cloneBodyOps);
     for (Operation *bodyOp : cloneBodyOps) {
@@ -2096,6 +2064,9 @@ int OpClassifierPass::markSharedFillGuardsForSplit() {
     LLVM_DEBUG(DBGS() << "fill guard on shared buffer, mark CUBE_AND_VECTOR: "
                       << *ifOp << "\n");
     opCoreTypes[op] = OP_CUBE_AND_VECTOR;
+    // Record the guard so the split gives it (and only it) nested-body
+    // support - see splitOperationForCubeAndVector.
+    fillGuardOps.insert(op);
     // The guard condition runs on both sides after the split; duplicate its
     // CUBE-only scalar chain too.
     for (Value operand : ifOp->getOperands()) {

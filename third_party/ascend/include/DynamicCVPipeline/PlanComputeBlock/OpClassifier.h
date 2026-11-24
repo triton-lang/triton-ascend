@@ -90,6 +90,11 @@ private:
   // and they act as propagation boundaries.
   llvm::DenseSet<Operation *> preClassifiedOps;
 
+  // Fill guards Step 6.5 (markSharedFillGuardsForSplit) upgraded to
+  // CUBE_AND_VECTOR. Only these get nested-body support in the
+  // CUBE_AND_VECTOR split; see splitOperationForCubeAndVector.
+  llvm::DenseSet<Operation *> fillGuardOps;
+
   // Cache: value -> whether its defining chain reaches a VECTOR-only op.
   // Memoizes hasVectorOnlyProducer during CUBE upstream propagation.
   llvm::DenseMap<mlir::Value, bool> vectorOnlyProducerCache;
@@ -211,8 +216,8 @@ private:
 
   // Helper: split CUBE_AND_VECTOR operation into CUBE and VECTOR versions.
   // Nested-body support (operand remapping and VECTOR stamping of body ops)
-  // applies only to the single-fill guard shape; all other ops are split
-  // flat, exactly as before the fix.
+  // applies only to the fill guards Step 6.5 marked (fillGuardOps); all
+  // other ops are split flat, exactly as before the fix.
   void splitOperationForCubeAndVector(
       Operation *op, llvm::DenseSet<Operation *> &processedOps,
       llvm::DenseMap<Operation *, Operation *> &opToVectorClone);

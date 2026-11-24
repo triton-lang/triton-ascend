@@ -259,5 +259,22 @@
   "mbarrier",
   "Moudallal",
   "LLDB",
-  "msDebug"
+  "msDebug",
+  "Query",
+  "Batching",
+  "attention",
+  "program",
+  "query",
+  "online",
+  "softmax",
+  "token",
+  "Cube",
+  "carried",
+  "state",
+  "tile",
+  "kernel",
+  "axis",
+  "load",
+  "store",
+  "varlen"
 ]

@@ -1803,7 +1803,7 @@
   - **收益**：原本 256 个元素需靠标量循环逐个取，改写后交由 SIMT 并行访问单元处理，整个指针算术链一并消失
   - **约束**：只在 910\_95/950 + simd\_simt\_template 下运行；以下情况有意不改写：步长 1（本就连续）、步长 2（走 deinterleave 路径）、步长为 ≥4 的 2 的幂（走跨步 DMA 更快）、步长为运行时变量（可能运行时就是 1 或 2 的幂，保留 SIMD 路径更稳妥）、做过维度置换的布局（交由 ImplicitPermute）；stride\_load 只支持 1\~3 维静态 shape，快速路径最多 5 维；非浮点类型要求 NaN 填充时放弃；addptr 路径会调用指针分析，可能留下无用辅助 IR，需后续 CSE/canonicalize 清理（T2L pipeline 已安排）
 - 11.6 程序映射与 Grid 变换 pattern（AutoBlockifyV2）：合并 program、提升单 program 吞吐
-  - **共同目标**：把多个独立 program 合并成一个，用单 program 内的向量化/张量化计算换掉重复的标量地址计算——program 数减少、Vector 单次处理数据量增大、UB 利用率提升，本质是"以 program 数换单 program 吞吐"。均不受 rule-mask 控制
+  - **共同目标**：把多个独立 program 合并成一个，用单 program 内的向量化/张量化计算换掉重复的标量地址计算——program 数减少、Vector 单次处理数据量增大、UB 利用率提升，本质是"以 program 数换单 program 吞吐"。11.6.1–11.6.3 均不受 rule-mask 控制；11.6.4 默认关闭（opt-in）
 - 11.6.1 IndependentAxisTensorize：独立轴张量化（IAT）
   - **触发模式**：grid 为二维（token 轴、head 轴）且不同 head 间计算完全独立时，把 head 轴的 16 个 program 合并成一个，让一个 program 一次处理 16 个 head
   - **DSL 写法（触发示例）**：二维 grid（token 轴、head 轴），head 间计算完全独立
@@ -1935,6 +1935,61 @@
   ```
   - **CV 收益**：矩阵乘 M 维从 16 撑到 128，填满 Cube 单元（M 维过小会严重浪费算力）；K/V 从 GM 读取 8 次降为 1 次
   - **CV 约束**：只支持 Ascend950；只能有一个基本块和一个 public 入口；必须恰好有 1 个 axis0 program\_id、1 个下界为 0 的顶层 scf.for、1 个顶层 store，且至少 1 个矩阵乘；矩阵乘必须是二维 f16/bf16，且 A 随行变化、B 不随行变化；不支持 tt.reduce、循环内依赖行的 load、volatile load、用于变长/间接索引的标量 load；循环上界依赖 pid 时必须能证明单调递增；循环体内含不可推测执行的算子（如可能除零的整数除法）时拒绝；R 的选取是保守经验策略，非实测最优值
+- 11.6.4 QueryRowBatching：块稀疏 attention 的行合并
+  - **触发模式**：NSA 一类块稀疏 attention——每个 program 一行 query，循环按该行的块表跳块：每轮读一个标量块号，`scf.if` 判它是否被选中，中了才载入 `[K,BS]`/`[BS,V]` 做 QK dot + online softmax。K/V 的 token 地址字面依赖数据，既过不了结构化地址分析，也无法证明可跨行共享，Cube 的 M 轴只跑 1 行 query。改写分两步：`SelectedBlockScan`（扫描）先把循环改成按 token 顺序的扫描，`QueryRowBatching`（行合并）再把 R 行 query 并进一个 program；扫描只在这份沙箱里的行提升被接受时才提交，否则整次丢弃、IR 逐字节不变
+  - **DSL 写法（触发示例）**：块表 + 块级 `if` 的稀疏 attention 循环（`_exp` 是 fp32 的 exp 辅助；bwd dQ 是同一形态，carried state 换成 1 个加法累加器）
+
+  ```python
+  for i in range(NS):
+      i_s = tl.load(block_indices + i).to(tl.int32) * BS          # 每轮读一个标量块号
+      if i_s <= Q_OFFSET + i_t and i_s >= 0:                     # 只算被选中的块
+          b_k = tl.load(tl.make_block_ptr(k, (K, TK), (1, H * K), (0, i_s), (BK, BS), (0, 1)), boundary_check=(0, 1))
+          b_v = tl.load(tl.make_block_ptr(v, (TK, V), (H * V, 1), (i_s, i_v * BV), (BS, BV), (1, 0)), boundary_check=(0, 1))
+          b_s = tl.where((Q_OFFSET + i_t >= i_s + tl.arange(0, BS))[None, :], tl.dot(b_q, b_k), float("-inf"))
+          b_m, b_mp = tl.maximum(b_m, tl.max(b_s, 1)), b_m          # online softmax
+          b_r = _exp(b_mp - b_m); b_p = _exp(b_s - b_m[:, None])
+          b_acc = b_acc * b_r + tl.sum(b_p, 1)
+          b_o = b_o * b_r[:, None] + tl.dot(b_p.to(b_q.dtype), b_v)
+  ```
+
+  - **改写（扫描）**：整表在循环外一次向量读入；循环内无条件载入宽 `BN = max(64, BS)` 的 tile，"该块是否被选中"变成每 token 权重，`scf.if` 折成零权重，K/V 地址于是只依赖循环变量
+
+  ```ttir
+  # Before：循环内读标量块号 + 块级 scf.if
+  %r:3 = scf.for %i = 0 to %NS step 1 iter_args(%o = 0, %m = -inf, %l = 0) {
+    %id = tt.load (tt.addptr %rowBase, %i) : !tt.ptr<i64>     # 每轮一个标量块号
+    %g  = andi(cmpi sle %bs, %row, cmpi sge %bs, 0)           # 块级谓词
+    %t:3 = scf.if %g -> (o, m, l) { ... QK dot + online softmax ... }
+           else { scf.yield %o, %m, %l }                      # 未选中 ≡ 零权重
+    scf.yield %t#0, %t#1, %t#2
+  }
+
+  # After：整表提前读，循环内无条件宽 tile，块谓词变成每 token 权重
+  %ids   = tt.load (tt.addptr (tt.splat %rowBase), %lane) : tensor<16xi64>  # 循环外读整表
+  %start = arith.muli (arith.trunci %ids), %c64                             # 每个槽位的块起点
+  %scan:3 = scf.for %iv = 0 to %ub step 1 iter_args(%o = 0, %m = -inf, %l = 0) {
+    %ts  = arith.muli %iv, %c64                                            # tile 的 token 起点
+    %k   = tt.load (tt.make_tensor_ptr %kBase ... [0, %ts])                 # 无需条件
+    %cnt = "tt.reduce"(addi, axis = 1) (andi (cmpi eq %start, %ts), %slot)  # 该 tile 被选中次数
+    %w   = arith.sitofp %cnt                                               # 0 = 未选中
+    %valid = andi (cmpf ogt %w, %zero), cmpi sle (%ts + range(64)), %row    # 权重 & 因果
+    ...                                                                    # 打分 / 掩码 softmax / PV
+  }
+  ```
+
+  - **改写（行提升）**：R 行 query 合进一个 program，循环携带值压平成 `[R*M, N]`，dot 的 M 轴从 1 行/块抬到 R 行/块；启动契约把网格换成 `ceil_div(grid, R)`，kernel 用隐藏参数还原真实行数
+
+  ```ttir
+  module attributes { hacc.program_grid_transforms = {
+    extent_source = "runtime_original_grid",
+    hidden_argument_order = ["originalGridX", "originalGridY"],
+    transforms = [{axis = 0, factor = 8, kind = "ceil_div"}], version = 2}}
+  tt.func public @parallel_nsa_fwd_kernel(..., %TQ: i32, %TK: i32,
+          %__hacc_original_grid_x: i32, %__hacc_original_grid_y: i32)
+  ```
+
+  - **收益**：program 数降为 1/R；一个 K/V tile 由 R 行共享，dot 的 M 轴从 1 行撑到 R 行，Cube 不再空转；每 program 的寻址与启动开销摊薄到 R 行
+  - **约束**：单 `scf.for`、单 axis-0 `program_id`；K/V load 直供 `tt.make_tensor_ptr`（fwd）或 `tt.addptr` + 显式掩码（bwd，仅加法形态）；carried state 只认两种——online softmax（`o/m/l`，`-inf` 中性元）与纯加法（1 个累加器，0 中性元，`BN = BS`）；`BS` 须为 2 的幂、表长 `S <= 4096`，表宽取 `TW = next_pow2(S)` 并把补齐槽位钳到 `S-1`；行相关 `scf.if`、循环内带掩码 store、循环内多一个张量 load、`grid` 不可证单调的循环上界一律拒绝；varlen 能匹配但联合门不提交（无法证明一个 tile 内的 R 行同属一条序列）；R 由 L0A/L0C/单值/网格规模与 UB 峰值预算选出，`R < 2` 不提升，预算不过只发 `warning: selected-block-scan: ... declining` 并放弃改写
 - 11.7 确认图优化 pass 是否命中
   - **IR 检索**：在生成的 IR 中搜索特征标记——`hivm.multi_buffer` + `arith.select` 槽位结构（多缓冲）、`convert_layout`（布局转换）、`annotation.mark {break_vf}`（VF 断点）、fixpipe（NZ2ND）——缺失说明对应模式未命中
   - **常用图优化开关**：

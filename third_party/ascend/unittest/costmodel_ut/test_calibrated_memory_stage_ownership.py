@@ -135,7 +135,7 @@ def memory_module(operation, payload):
     return source
 
 
-def analyze(tmp_path, source, programs=224, capability=True, factor2=True, baseline=False):
+def analyze(tmp_path, source, programs=224, capability=True, factor2=True, baseline=False, warps=4):
     profile = Path(__file__).resolve().parents[2] / "costmodel/profiles/simd_simt/ascend_950pr_simd_simt_v1.json"
     module_path = tmp_path / "memory.mlir"
     module_path.write_text(source)
@@ -143,9 +143,11 @@ def analyze(tmp_path, source, programs=224, capability=True, factor2=True, basel
     if native:
         selector = "2" if not capability else "1" if factor2 else "0"
         result = subprocess.run(
-            [native, str(module_path),
+            [native,
+             str(module_path),
              str(profile), "1" if baseline else "0",
-             str(programs), selector], capture_output=True, text=True, timeout=20, check=True)
+             str(programs), selector,
+             str(warps)], capture_output=True, text=True, timeout=20, check=True)
         return json.loads(result.stdout)
     lib = pytest.importorskip("triton._C.libtriton")
     ir, ascend = lib.ir, lib.ascend
@@ -166,7 +168,7 @@ def analyze(tmp_path, source, programs=224, capability=True, factor2=True, basel
         "whole_kernel_superblock_factors": factors,
     }
     pm = ir.pass_manager(context)
-    ascend.passes.ttir.add_select_simd_simt_costmodel(pm, "report", str(profile), "Ascend950PR_9579", 4, True, True,
+    ascend.passes.ttir.add_select_simd_simt_costmodel(pm, "report", str(profile), "Ascend950PR_9579", warps, True, True,
                                                       True, 4, 4, programs, "",
                                                       json.dumps(caps) if capability else "", str(report))
     pm.run(module, "calibrated_memory")
@@ -218,6 +220,8 @@ def test_calibrated_target_keeps_auxiliary_operations(tmp_path, payload, operati
     report = analyze(tmp_path, memory_module(operation, payload))
     for factor, price in zip((1, 2, 4), (_LOAD_PRICES if operation == "Load" else _STORE_PRICES)[payload]):
         route = _routes(report)[str(factor)]
+        assert not route.get("specialized_memory_complete_applied", False)
+        assert not route.get("native_indirect_chain_applied", False)
         if operation == "Load":
             assert route["qualified_normal_full224_SIMT_target_Load_applied"]
             graph = json.loads(route["qualified_normal_full224_SIMT_target_Load_json"])
@@ -313,9 +317,45 @@ def test_simd_target_preserves_non_memory_work(tmp_path, payload, operation):
     source = single_program_module(memory_module("Load",
                                                  payload)) if operation == "Load" else simd_store_module(payload)
     route = analyze(tmp_path, source, programs=1)["stage_model"]["routes"]["all_simd"]
+    assert not route.get("specialized_memory_complete_applied", False)
+    assert not route.get("native_indirect_chain_applied", False)
     if operation == "Load":
         assert route["qualified_normal_segments_load_bundle_applied"]
         assert route["qualified_normal_segments_load_target_system_cycles"] > 0
     else:
         assert route["qualified_normal_segments_bundle_applied"]
         assert route["qualified_normal_segments_target_system_cycles"] > 0
+
+
+@pytest.mark.parametrize("operation", ("Load", "Store"))
+@pytest.mark.parametrize("programs", (1, 224))
+def test_new_models_do_not_claim_unvalidated_warp_count(tmp_path, operation, programs):
+    source = (single_program_module(memory_module("Load", "u8"))
+              if operation == "Load" else simd_store_module("u8")) if programs == 1 else memory_module(operation, "u8")
+    report = analyze(tmp_path, source, programs=programs, warps=1)
+    plans = list(_routes(report).values()) + list(report["stage_model"]["routes"].values())
+    flags = ("qualified_normal_segments_load_bundle_applied", "qualified_normal_segments_bundle_applied",
+             "qualified_normal_full224_SIMT_target_Load_applied",
+             "qualified_normal_full224_SIMTStore_scoped_bundle_applied")
+    assert not any(plan.get(flag, False) for plan in plans for flag in flags)
+
+
+def unmasked_simd_store(columns):
+    source = simd_store_module("f32")
+    source = "\n".join(line for line in source.splitlines()
+                       if not line.strip().startswith(("%row_literal", "%row_bound", "%row_mask", "%col_literal",
+                                                       "%col_bound", "%col_mask", "%rm =", "%cm =", "%mask =")))
+    source = source.replace("%target_ptr, %values, %mask :", "%target_ptr, %values :")
+    return source.replace("256", str(columns)) + "\n"
+
+
+def test_retired_overlapping_fragment_cannot_bypass_stage_contract(tmp_path):
+    route = analyze(tmp_path, unmasked_simd_store(256), programs=1)["stage_model"]["routes"]["all_simd"]
+    assert not route.get("qualified_normal_segments_bundle_applied", False)
+    assert not route.get("specialized_memory_complete_applied", False)
+
+
+def test_nonoverlapping_legacy_fragment_remains_available(tmp_path):
+    route = analyze(tmp_path, unmasked_simd_store(128), programs=1)["stage_model"]["routes"]["all_simd"]
+    assert not route.get("qualified_normal_segments_bundle_applied", False)
+    assert route["specialized_memory_complete_applied"]

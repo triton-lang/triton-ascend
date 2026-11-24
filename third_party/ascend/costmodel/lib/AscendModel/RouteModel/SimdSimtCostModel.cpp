@@ -50,6 +50,36 @@
 using namespace mlir;
 using namespace mlir::ascend;
 
+// A calibrated stage owns its target cost before legacy route completions.
+static bool hasCalibratedMemoryStage(const StageRoutePlan &plan) {
+  return plan.diagnostic<bool>(
+             "qualified_normal_segments_load_bundle_applied") ||
+         plan.diagnostic<bool>("qualified_normal_segments_bundle_applied") ||
+         plan.diagnostic<bool>(
+             "qualified_normal_full224_SIMT_target_Load_applied") ||
+         plan.diagnostic<bool>(
+             "qualified_normal_full224_SIMTStore_scoped_bundle_applied");
+}
+
+static bool usesGenericMemoryStage(const StageRoutePlan &plan,
+                                   const StageCostTable &table) {
+  for (size_t i = 0; i < plan.implementations.size() && i < table.stages.size();
+       ++i) {
+    const auto &selected = plan.implementations[i];
+    for (const auto &cost : table.stages[i].implementations) {
+      const auto &impl = cost.implementation;
+      if (impl.mode == selected.mode &&
+          impl.superblockFactor == selected.superblockFactor &&
+          impl.localScope == selected.localScope &&
+          impl.aivSubblocks == selected.aivSubblocks &&
+          (cost.ordinaryLoadSelectedUsed ||
+           cost.ordinaryStoreRound4CandidateUsed))
+        return true;
+    }
+  }
+  return false;
+}
+
 static bool finiteValues(std::initializer_list<double> values) {
   return llvm::all_of(values,
                       [](double value) { return std::isfinite(value); });
@@ -3885,9 +3915,27 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
                  cost.indirectLoadPricing != "generic_resource_model";
         });
   };
+  if (useCalibratedMemory) {
+    // Select newly calibrated target stages before any legacy memory
+    // completion. Auxiliary resource costs and once-only route boundaries
+    // remain independent; legacy formulas cannot replace this target again.
+    qualified_normal_segments::tryApplyStoreCandidate(
+        module, *partition, hardwareProfile, *costTable, partitionerOptions,
+        options, profile.kernelTiming.systemCounterFrequencyMHz, numWarps,
+        *routes);
+    qualified_normal_segments::tryApplyLoadCandidate(
+        module, *partition, hardwareProfile, *costTable, partitionerOptions,
+        options, profile.kernelTiming.systemCounterFrequencyMHz, numWarps,
+        *routes);
+    normal_full224_simt_store::tryApply(
+        module, *partition, *costTable, hardwareProfile, partitionerOptions,
+        options, profile.kernelTiming.systemCounterFrequencyMHz, numWarps,
+        *routes);
+  }
   // Rank-2 residuals calibrate the generic model, not the fitted fragment.
   // Test the selected implementation independently for each route/factor.
   if (scalarizedRank2IndirectOwner && routes->allSimd.legal &&
+      !hasCalibratedMemoryStage(routes->allSimd) &&
       !usesFittedIndirectLoad(routes->allSimd, *scalarizedRank2IndirectOwner)) {
     const double residual =
         profile.kernelTiming.scalarizedRank2IndirectLoadResidualSystemCycles(
@@ -3897,7 +3945,7 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
                        residual);
   }
   if (simdRank2StridedDirectOwner && simdRank2StridedDirectElements > 0 &&
-      routes->allSimd.legal &&
+      routes->allSimd.legal && !hasCalibratedMemoryStage(routes->allSimd) &&
       routes->allSimd.runtimePhysicalProgramCount == 1) {
     const double residual =
         simdRank2Direct.cycles(simdRank2StridedDirectElements);
@@ -3918,8 +3966,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     const double target =
         simtRank2Direct.cycles(simdRank2StridedDirectElements);
     auto applyTarget = [&](StageRoutePlan &plan) {
-      if (!plan.legal || plan.runtimePhysicalProgramCount != 1 ||
-          target <= plan.totalCycles)
+      if (!plan.legal || hasCalibratedMemoryStage(plan) ||
+          plan.runtimePhysicalProgramCount != 1 || target <= plan.totalCycles)
         return;
       const double adjustment =
           setRouteTotal(plan, *simdRank2StridedDirectOwner, target);
@@ -4032,7 +4080,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
       applyTarget(plan);
     refreshBestAllSimt();
   }
-  if (subwarpIndirectCompositeOwner && routes->allSimd.legal) {
+  if (subwarpIndirectCompositeOwner && routes->allSimd.legal &&
+      !hasCalibratedMemoryStage(routes->allSimd)) {
     const double residual =
         profile.kernelTiming.subwarpIndirectCompositeResidualSystemCycles(
             subwarpIndirectCompositeElements);
@@ -4045,7 +4094,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
         profile.kernelTiming.simtRank2IndirectLoadResidualSystemCycles(
             simtRank2IndirectElementBits, simtRank2IndirectElements);
     auto applyResidual = [&](StageRoutePlan &plan) {
-      if (!plan.legal || plan.runtimePhysicalProgramCount != 1 ||
+      if (!plan.legal || hasCalibratedMemoryStage(plan) ||
+          plan.runtimePhysicalProgramCount != 1 ||
           usesFittedIndirectLoad(plan, *simtRank2IndirectOwner) ||
           std::abs(residual) <= 1.0e-12)
         return;
@@ -4061,7 +4111,9 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
   bool nativeChain = false;
   for (auto &[factor, plan] : routes->allSimtFactorPlans) {
     // Frozen native labels use profiler microseconds * 1000.
-    if (profile.kernelTiming.systemCounterFrequencyMHz != 1000)
+    if (profile.kernelTiming.systemCounterFrequencyMHz != 1000 ||
+        hasCalibratedMemoryStage(plan) ||
+        usesGenericMemoryStage(plan, *costTable))
       continue;
     if (auto elapsed = IndirectGatherMemoryCostModel::nativeChainCost(
             *partition, hardwareProfile, plan)) {
@@ -4080,7 +4132,11 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     if (auto geometry = proveSpecializedMemoryFragment(module)) {
       auto applyFragment = [&](StageRoutePlan &plan,
                                SpecializedMemoryMode mode) {
-        if (!plan.legal || plan.routeSuperblockFactor != 1 ||
+        // New stage models, then generic target increments, take priority.
+        // The old complete-fragment model remains only outside those domains.
+        if (!plan.legal || hasCalibratedMemoryStage(plan) ||
+            usesGenericMemoryStage(plan, *costTable) ||
+            plan.routeSuperblockFactor != 1 ||
             plan.runtimePhysicalProgramCount != 1 ||
             plan.runtimeLoopIterationCount != 1 ||
             llvm::any_of(plan.implementations,
@@ -4089,6 +4145,13 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
                          }))
           return;
         auto g = *geometry;
+        // Retire the former full-fragment SIMD Store formula in the new
+        // R16C256/W4 domain, including the unmasked spelling. If its stronger
+        // stage ownership contract fails, retain generic/resource fallback.
+        if (mode == SpecializedMemoryMode::SIMD && numWarps == 4 &&
+            g.operation == SpecializedMemoryOperation::Store &&
+            g.shape == std::vector<int64_t>({16, 256}))
+          return;
         g.mode = mode;
         g.warps = mode == SpecializedMemoryMode::SIMD ? 1 : numWarps;
         auto estimate = estimateSpecializedMemory(g);
@@ -4140,24 +4203,6 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     }
     if (best)
       routes->allSimt = *best;
-  }
-  if (useCalibratedMemory) {
-    // Qualified target bundle replaces only this uniform AllSIMD body after
-    // all legacy body/whole-fragment diagnostics have been produced. The helper
-    // removes conflicting complete overrides on that candidate. The unchanged
-    // completeCandidateCosts below adds real boundary/argument setup once.
-    qualified_normal_segments::tryApplyStoreCandidate(
-        module, *partition, hardwareProfile, *costTable, partitionerOptions,
-        options, profile.kernelTiming.systemCounterFrequencyMHz, numWarps,
-        *routes);
-    qualified_normal_segments::tryApplyLoadCandidate(
-        module, *partition, hardwareProfile, *costTable, partitionerOptions,
-        options, profile.kernelTiming.systemCounterFrequencyMHz, numWarps,
-        *routes);
-    normal_full224_simt_store::tryApply(
-        module, *partition, *costTable, hardwareProfile, partitionerOptions,
-        options, profile.kernelTiming.systemCounterFrequencyMHz, numWarps,
-        *routes);
   }
   return std::move(*routes);
 }
@@ -4370,17 +4415,19 @@ completeCandidateCosts(const SimdSimtCostReport &report,
   scores.allSimtOnly +=
       routeFixedSystemCycles(profile, kAllSimtOnly, report.stageModel.allSimt,
                              kernelArgumentCount, routeHasGlobalLoad);
-  if (auto adjustment = tinyStraightLineSimtMemoryAdjustment(
-          report.stageModel, report.stageModel.allSimt,
-          profile.kernelTiming.tinyStraightLineSimtMemoryCompletion))
-    scores.allSimtOnly = std::max(0.0, scores.allSimtOnly + *adjustment);
-  if (auto adjustment = simtNonAffineRank1MemoryAdjustment(
-          report.stageModel, report.stageModel.allSimt,
-          report.sourceLogicalProgramCountHint > 0
-              ? report.sourceLogicalProgramCountHint
-              : report.logicalProgramCountHint,
-          profile.kernelTiming.simtNonAffineRank1MemoryCompletion))
-    scores.allSimtOnly = std::max(0.0, scores.allSimtOnly + *adjustment);
+  if (!hasCalibratedMemoryStage(report.stageModel.allSimt)) {
+    if (auto adjustment = tinyStraightLineSimtMemoryAdjustment(
+            report.stageModel, report.stageModel.allSimt,
+            profile.kernelTiming.tinyStraightLineSimtMemoryCompletion))
+      scores.allSimtOnly = std::max(0.0, scores.allSimtOnly + *adjustment);
+    if (auto adjustment = simtNonAffineRank1MemoryAdjustment(
+            report.stageModel, report.stageModel.allSimt,
+            report.sourceLogicalProgramCountHint > 0
+                ? report.sourceLogicalProgramCountHint
+                : report.logicalProgramCountHint,
+            profile.kernelTiming.simtNonAffineRank1MemoryCompletion))
+      scores.allSimtOnly = std::max(0.0, scores.allSimtOnly + *adjustment);
+  }
   scores.mixedSimdSimt +=
       routeFixedSystemCycles(profile, kMixedSimdSimt, report.stageModel.mixed,
                              kernelArgumentCount, routeHasGlobalLoad);
@@ -4451,7 +4498,8 @@ static void populateSelectedRouteElapsedPrediction(
   prediction.fixedSystemCycles =
       routeFixedSystemCycles(profile, prediction.candidate, *plan,
                              kernelArgumentCount, routeHasGlobalLoad);
-  if (report.decision == SimdSimtCandidateKind::AllSIMTOnly) {
+  if (report.decision == SimdSimtCandidateKind::AllSIMTOnly &&
+      !hasCalibratedMemoryStage(*plan)) {
     if (auto adjustment = tinyStraightLineSimtMemoryAdjustment(
             report.stageModel, *plan,
             profile.kernelTiming.tinyStraightLineSimtMemoryCompletion)) {
@@ -4493,6 +4541,16 @@ static void populateSelectedRouteElapsedPrediction(
       prediction.fixedSystemCycles + prediction.baseSelectionScore;
   prediction.predictedMicroseconds = prediction.predictedSystemCounterCycles /
                                      prediction.systemCounterFrequencyMHz;
+  if (hasCalibratedMemoryStage(*plan)) {
+    prediction.reason = "calibrated_memory_stage_formula";
+    prediction.calibrationName = "calibrated_memory_stage_v1";
+    prediction.formula = "(route_fixed_system_cycles + "
+                         "retained_auxiliary_and_target_stage_cycles) / "
+                         "system_counter_frequency_mhz";
+    prediction.evidence = "Static-IR-qualified target stage; retained "
+                          "auxiliary work and once-only "
+                          "route boundaries; no legacy full-fragment override";
+  }
   if (plan->diagnostic<bool>("native_indirect_chain_applied")) {
     prediction.reason = prediction.calibrationName =
         "native_indirect_chain_20261021";

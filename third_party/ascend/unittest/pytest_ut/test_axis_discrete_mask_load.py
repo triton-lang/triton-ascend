@@ -17,7 +17,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-
 """Axis-discrete mask load on the A5/A6 register pipeline.
 
 Each test checks the numeric result and, on A5/A6, the routing of the same
@@ -37,6 +36,11 @@ from triton.backends.ascend.utils import is_register_based_arch
 def _register_based():
     arch = triton.runtime.driver.active.get_current_target().arch
     return is_register_based_arch(arch)
+
+
+def _skip_unless_register_based():
+    if not _register_based():
+        pytest.skip("axis-discrete SIMD routing requires A5/A6")
 
 
 def _adapter(compiled, kernel_name):
@@ -199,6 +203,8 @@ def _axis_discrete_mask_load_kernel_rank3(
     (4, 128, 64, 96),
 ])
 def test_axis_discrete_mask_load_rank3(BLOCK_R, BLOCK_K, G, topk):
+    # The rank-3 tile does not fit A3 UB; the carve-out is A5/A6-only.
+    _skip_unless_register_based()
     torch.manual_seed(0)
     kv = torch.randn(BLOCK_R, BLOCK_K, G, dtype=torch.float16, device="npu")
     idx = torch.randint(0, BLOCK_K, (BLOCK_K, ), dtype=torch.int32, device="npu")

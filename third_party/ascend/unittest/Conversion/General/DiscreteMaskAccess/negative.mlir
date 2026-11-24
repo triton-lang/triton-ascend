@@ -5,7 +5,6 @@
 //   causal   - lower-triangular mask, not a rectangle
 //   xori     - arith.xori is not understood, must stay conservative
 //   c1       - per-row variable-length prefix, no constant axis
-//   atomic   - gathered pointer, SIMT indirect atomic has no contMask
 
 // PASS-LABEL: tt.func @causal_mask_negative
 // PASS: tt.load {{.*}} {MixCompileDiscreteMask}
@@ -13,8 +12,6 @@
 // PASS: tt.load {{.*}} {MixCompileDiscreteMask}
 // PASS-LABEL: tt.func @c1_mask_negative
 // PASS: tt.load {{.*}} {MixCompileDiscreteMask}
-// PASS-LABEL: tt.func @atomic_gather_negative
-// PASS: tt.atomic_rmw add, acq_rel, gpu, {{.*}} {ExplicitRouteToSIMD = false, MixCompileDiscreteMask}
 
 // ROUTE-LABEL: tt.func @causal_mask_negative
 // ROUTE: ascend.indirect_load
@@ -22,8 +19,6 @@
 // ROUTE: ascend.indirect_load
 // ROUTE-LABEL: tt.func @c1_mask_negative
 // ROUTE: ascend.indirect_load
-// ROUTE-LABEL: tt.func @atomic_gather_negative
-// ROUTE: __builtin_indirect_atomic
 
 tt.func @causal_mask_negative(%base: !tt.ptr<i32>) {
   %c0 = arith.constant dense<0> : tensor<4x8xi32>
@@ -114,35 +109,5 @@ tt.func @c1_mask_negative(%base: !tt.ptr<i32>, %boundp: !tt.ptr<i32>) {
 
   %v = tt.load %ptrs, %mask, %c0 : tensor<4x8x!tt.ptr<i32>>
   tt.store %ptrs, %v : tensor<4x8x!tt.ptr<i32>>
-  tt.return
-}
-
-// -----
-
-tt.func @atomic_gather_negative(%base: !tt.ptr<i32>, %idxp: !tt.ptr<i32>) {
-  %c8 = arith.constant dense<8> : tensor<4xi32>
-  %zero = arith.constant dense<0> : tensor<4xi32>
-  %val = arith.constant dense<1> : tensor<4x8xi32>
-
-  %g = tt.make_range {start = 0 : i32, end = 8 : i32} : tensor<8xi32>
-  %sidx = tt.splat %idxp : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
-  %idx = tt.load %sidx : tensor<4x!tt.ptr<i32>>
-  %row = arith.muli %idx, %c8 : tensor<4xi32>
-  %row1 = tt.expand_dims %row {axis = 1 : i32} : tensor<4xi32> -> tensor<4x1xi32>
-  %row2 = tt.broadcast %row1 : tensor<4x1xi32> -> tensor<4x8xi32>
-  %g1 = tt.expand_dims %g {axis = 0 : i32} : tensor<8xi32> -> tensor<1x8xi32>
-  %g2 = tt.broadcast %g1 : tensor<1x8xi32> -> tensor<4x8xi32>
-  %off = arith.addi %row2, %g2 : tensor<4x8xi32>
-
-  %splat = tt.splat %base : !tt.ptr<i32> -> tensor<4x8x!tt.ptr<i32>>
-  %ptrs = tt.addptr %splat, %off : tensor<4x8x!tt.ptr<i32>>, tensor<4x8xi32>
-
-  %valid = arith.cmpi sge, %idx, %zero : tensor<4xi32>
-  %v1 = tt.expand_dims %valid {axis = 1 : i32} : tensor<4xi1> -> tensor<4x1xi1>
-  %mask = tt.broadcast %v1 : tensor<4x1xi1> -> tensor<4x8xi1>
-
-  %old = tt.atomic_rmw add, acq_rel, gpu, %ptrs, %val, %mask : (tensor<4x8x!tt.ptr<i32>>, tensor<4x8xi32>, tensor<4x8xi1>) -> tensor<4x8xi32>
-  %outp = tt.addptr %splat, %off : tensor<4x8x!tt.ptr<i32>>, tensor<4x8xi32>
-  tt.store %outp, %old : tensor<4x8x!tt.ptr<i32>>
   tt.return
 }

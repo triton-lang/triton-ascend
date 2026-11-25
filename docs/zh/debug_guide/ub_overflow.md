@@ -1,4 +1,4 @@
-﻿# UB Overflow问题排查指南
+# UB Overflow问题排查指南
 
 ## 概述
 

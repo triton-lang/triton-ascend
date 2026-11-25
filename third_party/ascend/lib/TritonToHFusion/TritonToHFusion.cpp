@@ -93,22 +93,16 @@ struct TritonFpToFpToHFusionConversion : OpRewritePattern<triton::FpToFpOp> {
     // arith.truncf/extf. Check this before querying tensor-only properties:
     // scalar fp_to_fp operations are valid Triton IR too.
     auto roundingMode = op.getRounding();
-    const bool isHiF8 =
-        isa<HiFloat8Type>(getElementTypeOrSelf(input.getType())) ||
-        isa<HiFloat8Type>(getElementTypeOrSelf(resultType));
-    if (!isHiF8 && (!roundingMode.has_value() ||
-                    roundingMode.value() == triton::RoundingMode::RTNE)) {
+    if (!roundingMode.has_value() ||
+        roundingMode.value() == triton::RoundingMode::RTNE) {
       // RTNE or no rounding mode specified: let TritonToLinalg handle it
       return failure();
     }
 
     // HFusion owns only non-RTNE tensor conversions. Keep the tensor
     // precondition checked here; a scalar must not silently fall through.
-    auto srcType = dyn_cast<TensorType>(input.getType());
-    auto dstType = dyn_cast<TensorType>(resultType);
-    if (!srcType || !dstType)
-      return rewriter.notifyMatchFailure(op,
-                                         "HFusion conversion requires tensors");
+    auto srcType = cast<TensorType>(input.getType());
+    auto dstType = cast<TensorType>(resultType);
     if (!srcType.getElementType().isIntOrFloat() ||
         !dstType.getElementType().isIntOrFloat()) {
       return failure();
@@ -116,13 +110,7 @@ struct TritonFpToFpToHFusionConversion : OpRewritePattern<triton::FpToFpOp> {
 
     // Map non-RTNE rounding modes to HFusion rounding mode
     hfusion::RoundMode hfusionRoundMode;
-    switch (roundingMode.value_or(triton::RoundingMode::RTA)) {
-    case triton::RoundingMode::RTA:
-      hfusionRoundMode = hfusion::RoundMode::ROUND;
-      break;
-    case triton::RoundingMode::HYBRID:
-      hfusionRoundMode = hfusion::RoundMode::HYBRID;
-      break;
+    switch (roundingMode.value()) {
     case triton::RoundingMode::RTZ:
       hfusionRoundMode = hfusion::RoundMode::TRUNC;
       break;

@@ -1,4 +1,4 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=arith.select
 
 // UpdateConditionInfo on scf.while: tensor-typed iter_arg control vars.
 // while carries (tensor, iv); block 5 consumes the tensor, block 6 produces a
@@ -28,10 +28,11 @@
 // the counter condition is added.
 // CHECK: arith.andi
 // CHECK: %[[COND5:.*]] = arith.andi
+// The loop does not force a single block per iteration any more: the
+// condition of a block does not check the flag of the loop.
 // CHECK: scf.if %[[COND5]]
 // CHECK: arith.subi
 // CHECK: } {{.*}}ssbuffer.if = 5
-
 // Producer if=6: after cross slt, eq 0 is and-ed into cond; then +1 inside if.
 // The block 6 is on the first level of the vector core, the block 5 is on the
 // second one: the preload condition c_block6 - c_block5 <= 2 (2 - 1 + (2 - 1))

@@ -1,4 +1,4 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=arith.select
 
 // Intra consumers are numbered by IR order, and that number selects the
 // iter arg. Edges only go forward: a two-if swap is a cycle and the pass
@@ -13,6 +13,8 @@
 // CHECK: scf.while (%{{[^ ]+}} = %{{[^ ,]+}}, %[[CNT0:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT1:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT2:[^ ,]+]] = %{{[^ ,]+}}, %[[DEP0:[^ ,]+]] = %{{[^ ,]+}}, %[[DEP1:[^ ,]+]] = %{{[^ ,]+}})
 // CHECK: ^bb0
 // CHECK: arith.cmpi slt, %[[DEP0]], %{{.*}}
+// The loop does not force a single block per iteration any more: the
+// condition of a block does not check the flag of the loop.
 // CHECK: %[[AND1:.*]] = arith.andi %{{.*}}, %{{.*}}
 // CHECK: %[[IF1:[0-9]+]]:2 = scf.if %[[AND1]]
 // CHECK: arith.addi %[[DEP0]], %{{.*}}

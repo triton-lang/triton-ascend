@@ -228,9 +228,24 @@ def log1p(arg0, _semantic=None):
     arg0 = _semantic.to_tensor(arg0)
     if ((_is_a5_target(_semantic) or _is_a3_target(_semantic) or _is_a6_target(_semantic))
             and arg0.dtype == core.dtype("fp32")):
-        return core.extern_elementwise("", "", [arg0], {
+        result = core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_log1p_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
+        # The hardware intrinsic loses precision for tiny |x| (e.g. log1p(1e-8)
+        # returns 0 instead of ~1e-8). Compensate with a Taylor series when
+        # |x| < 1e-3: log1p(x) = x - x^2/2 + x^3/3 + O(x^4).
+        x2 = _semantic.mul(arg0, arg0, True)
+        x3 = _semantic.mul(x2, arg0, True)
+        taylor = _semantic.sub(arg0, _semantic.mul(x2, 0.5, True), True)
+        taylor = _semantic.add(taylor, _semantic.mul(x3, 1.0 / 3.0, True), True)
+        abs_x = math.abs(arg0, _semantic=_semantic)
+        threshold = _semantic.full(arg0.shape, 1e-3, arg0.type.scalar)
+        tiny = _semantic.less_than(abs_x, threshold)
+        # Preserve the sign of zero: log1p(-0.0) must stay -0.0.
+        zero = _semantic.full(arg0.shape, 0.0, arg0.type.scalar)
+        is_zero = _semantic.equal(abs_x, zero)
+        taylor = _semantic.where(is_zero, arg0, taylor)
+        return _semantic.where(tiny, taylor, result)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_log1pf", core.dtype("fp32")),

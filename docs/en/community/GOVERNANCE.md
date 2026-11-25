@@ -49,6 +49,10 @@ Triton-Ascend is an open-source project under the Triton community, with role ap
 - Actively handle `Issues`, respond to inquiries, and participate in discussions
 - Made significant technical contributions to the project (such as core feature development, architectural design, performance optimization, etc.)
 - Demonstrate good technical judgment and community collaboration skills
+- Meet the following quantitative election criteria:
+  - Continuously active for at least **3 months**
+  - At least **50** review comments in the last **3 months**
+  - At least **one** software implementation design document
 
 **Permissions**: Granted GitHub repository write permissions, including read, clone, and push code to the repository, core branch protection and merge permissions, release execution permissions, and management of `Issues` and `Pull Requests`.
 
@@ -65,8 +69,13 @@ Promotion is collectively reviewed by existing `Maintainers`, considering contri
 
 ### Nomination Process
 
-- Nominations can be initiated by anyone, including self-nominations, through a community `Issue`
-- Nominations must include the candidate's contribution record and technical capability description
+- Nominations can be initiated by anyone, including self-nominations, through a community `Issue` (see [Issue #2193](https://github.com/triton-lang/triton-ascend/issues/2193) for reference)
+- Nominations must include the candidate's contribution record and technical capability description, preferably organized with the following materials template:
+  1. Application Information
+  2. Summary of Contributions
+  3. Detailed Contributions (software implementation design documents, core code `PRs`, key review comments)
+  4. Self-Assessment
+  5. Contribution References
 - Existing `Maintainers` review and evaluate, requiring **more than half of current `Maintainers` to agree with no objections**
 
 ### Regular Review

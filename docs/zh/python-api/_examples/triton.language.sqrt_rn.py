@@ -24,12 +24,13 @@ def test_sqrt_rn():
     dtype, shape, ncore, xblock, xblock_sub = param_list
     x0 = torch.randn(size=shape, dtype=eval('torch.' + dtype)).npu()
 
-    torch_res = torch_sqrt_rn(x0)
-    triton_res = torch.empty_like(x0)
-    triton_sqrt_rn[ncore, 1, 1](x0, triton_res, x0.numel(), xblock, xblock_sub)
+    ref = torch_sqrt_rn(x0)
+    out = torch.empty_like(x0)
+    triton_sqrt_rn[ncore, 1, 1](x0, out, x0.numel(), xblock, xblock_sub)
 
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == '__main__':
     test_sqrt_rn()
+    print("test_sqrt_rn passed!")

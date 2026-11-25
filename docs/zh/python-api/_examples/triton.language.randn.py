@@ -16,12 +16,19 @@ def kernel_randn(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.cons
 def test_randn():
     shape = (1, 3)
 
-    y_calf = torch.zeros(shape, dtype=eval('torch.float32')).npu()
-    numel = y_calf.numel()
+    out = torch.zeros(shape, dtype=eval('torch.float32')).npu()
+    numel = out.numel()
     ncore = 1 if numel < 32 else 32
     xblock = math.ceil(numel / ncore)
-    kernel_randn[ncore, 1, 1](y_calf, 10, numel, xblock)
+    kernel_randn[ncore, 1, 1](out, 10, numel, xblock)
+
+    # tl.randn is a pure function of (seed, offset), so re-running with the
+    # same arguments reproduces exactly the same values.
+    ref = torch.zeros(shape, dtype=eval('torch.float32')).npu()
+    kernel_randn[ncore, 1, 1](ref, 10, numel, xblock)
+    torch.testing.assert_close(out, ref)
 
 
 if __name__ == "__main__":
     test_randn()
+    print("test_randn passed!")

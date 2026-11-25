@@ -1,4 +1,3 @@
-import pytest
 import torch
 import torch_npu
 import triton
@@ -17,11 +16,12 @@ def triton_elementwise_unary(in_ptr0, out_ptr0, N: tl.constexpr, NUMEL: tl.const
 def test_lshift():
     dtype, N = ['int32', 32]
     x0 = torch.randint(low=0, high=256, size=(N, ), dtype=eval(f'torch.{dtype}')).npu()
-    ans = x0 << 2
+    ref = x0 << 2
     out = torch.zeros((N, ), dtype=eval(f'torch.{dtype}')).npu()
     triton_elementwise_unary[1, 1, 1](x0, out, N=N, NUMEL=N)
-    torch.testing.assert_close(ans, out)
+    torch.testing.assert_close(out, ref)
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     test_lshift()
+    print("test_lshift passed!")

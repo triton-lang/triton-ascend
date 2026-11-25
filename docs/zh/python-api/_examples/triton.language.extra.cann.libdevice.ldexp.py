@@ -38,16 +38,16 @@ def test_ldexp():
     ncore, xblock, xblock_sub = 2, 1024, 512
     x0 = torch.randn(size=shape, dtype=torch.float32)
     x1 = torch.randint(-126, 128, size=shape, dtype=torch.int32)
-    torch_res = torch_ldexp_reference(x0, x1)
+    ref = torch_ldexp_reference(x0, x1)
     x0 = x0.npu()
     x1 = x1.npu()
 
-    triton_res = torch.empty_like(x0)
-    triton_ldexp[ncore, 1, 1](x0, x1, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simt_only')
+    out = torch.empty_like(x0)
+    triton_ldexp[ncore, 1, 1](x0, x1, out, x0.numel(), xblock, xblock_sub, compile_mode='simt_only')
 
-    torch_res = torch_res.cpu()
-    triton_res = triton_res.cpu()
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+    ref = ref.cpu()
+    out = out.cpu()
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 def test_ldexp_simd():
@@ -55,21 +55,23 @@ def test_ldexp_simd():
     ncore, xblock, xblock_sub = 2, 1024, 512
     x0 = torch.randn(size=shape, dtype=torch.float32)
     x1 = torch.randint(-126, 128, size=shape, dtype=torch.int32)
-    torch_res = torch_ldexp_reference(x0, x1)
+    ref = torch_ldexp_reference(x0, x1)
     x0 = x0.npu()
     x1 = x1.npu()
 
-    triton_res = torch.empty_like(x0)
-    triton_ldexp[ncore, 1, 1](x0, x1, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simd')
+    out = torch.empty_like(x0)
+    triton_ldexp[ncore, 1, 1](x0, x1, out, x0.numel(), xblock, xblock_sub, compile_mode='simd')
 
-    torch_res = torch_res.cpu()
-    triton_res = triton_res.cpu()
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+    ref = ref.cpu()
+    out = out.cpu()
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == "__main__":
     test_ldexp_simd()
+    print("test_ldexp_simd passed!")
     if not _is_a5_target_arch(NPUUtils().get_arch()):
         print(_SIMT_SKIP_MSG)
     else:
         test_ldexp()
+        print("test_ldexp passed!")

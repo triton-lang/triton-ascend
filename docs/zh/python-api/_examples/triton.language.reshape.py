@@ -23,9 +23,10 @@ def test_reshape():
     out = torch.empty((D1 * D2 * D3, ), dtype=torch.float32, device="npu")
     reshape_kernel[(1, )](x, out, D1, D2, D3, R1, R2)
 
-    assert out.shape == (D1 * D2 * D3, ), f"Shape mismatch: expected {(D1*D2*D3,)} but got {out.shape}."
-    print("Test passed.")
+    ref = x.reshape(R1, R2).reshape(D1 * D2 * D3)
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_reshape()
+    print("test_reshape passed!")

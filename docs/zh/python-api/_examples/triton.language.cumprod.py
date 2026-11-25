@@ -35,17 +35,18 @@ def test_cumprod_2d():
     reverse = False
 
     x = torch.randn((X, R), dtype=torch.float32).npu()
-    output = torch.zeros_like(x)
+    out = torch.zeros_like(x)
 
-    cumprod_2d_kernel[(1, )](output, x, dim=dim, reverse=reverse, numel_x=X, numel_r=R, XBLOCK=X, RBLOCK=R)
+    cumprod_2d_kernel[(1, )](out, x, dim=dim, reverse=reverse, numel_x=X, numel_r=R, XBLOCK=X, RBLOCK=R)
 
     if reverse:
-        expected = torch.flip(torch.cumprod(torch.flip(x.cpu(), [dim]), dim=dim), [dim])
+        ref = torch.flip(torch.cumprod(torch.flip(x.cpu(), [dim]), dim=dim), [dim])
     else:
-        expected = torch.cumprod(x.cpu(), dim=dim)
+        ref = torch.cumprod(x.cpu(), dim=dim)
 
-    assert torch.allclose(output.cpu(), expected.cpu())
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_cumprod_2d()
+    print("test_cumprod_2d passed!")

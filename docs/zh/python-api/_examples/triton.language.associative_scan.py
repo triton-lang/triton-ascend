@@ -36,14 +36,15 @@ def test_associative_scan_2d():
     reverse = False
 
     x = torch.randn((X, R), dtype=torch.float32).npu()
-    output = torch.zeros_like(x)
+    out = torch.zeros_like(x)
 
-    associative_scan_2d_kernel[(1, )](output, x, dim=dim, reverse=reverse, numel_x=X, numel_r=R, XBLOCK=X, RBLOCK=R)
+    associative_scan_2d_kernel[(1, )](out, x, dim=dim, reverse=reverse, numel_x=X, numel_r=R, XBLOCK=X, RBLOCK=R)
 
-    expected = torch.cumsum(x.cpu(), dim=dim)
+    ref = torch.cumsum(x.cpu(), dim=dim)
 
-    assert torch.allclose(output.cpu(), expected.cpu())
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_associative_scan_2d()
+    print("test_associative_scan_2d passed!")

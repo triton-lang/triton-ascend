@@ -20,11 +20,11 @@ def test_expand_dims():
     torch.manual_seed(0)
     x = torch.randn((M, N), dtype=torch.float32, device="npu")
     out = torch.zeros((M * N, ), dtype=torch.float32, device="npu")
-    expand_dims_kernel[(1, )](out, x, M=M, N=N)
+    expand_dims_kernel[(1, )](x, out, M=M, N=N)
     ref = x.cpu().flatten()
     torch.testing.assert_close(out.cpu(), ref)
-    print("Test passed.")
 
 
 if __name__ == "__main__":
     test_expand_dims()
+    print("test_expand_dims passed!")

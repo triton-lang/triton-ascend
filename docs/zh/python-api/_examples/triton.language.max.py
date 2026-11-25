@@ -27,9 +27,10 @@ def test_max():
     out = torch.empty(M, dtype=torch.float32).npu()
     triton_max_2d[1, 1, 1](x, out, dim, M, N, M, N)
     ref = torch.max(x, dim=dim)[0]
-    assert torch.allclose(out.cpu(), ref.cpu()), "max result mismatch"
+    torch.testing.assert_close(out.cpu(), ref.cpu())
     print("max result:", out)
 
 
 if __name__ == "__main__":
     test_max()
+    print("test_max passed!")

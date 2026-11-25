@@ -1,4 +1,3 @@
-import pytest
 import torch
 import torch_npu
 import triton
@@ -20,11 +19,12 @@ def triton_not(in_ptr0, out_ptr0, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr
 def test_not():
     dtype, shape, ncore, xblock, xblock_sub = ['int32', (8, 8), 8, 8, 8]
     x0 = torch.randint(low=0, high=256, size=shape, dtype=eval(f'torch.{dtype}')).npu()
-    ans = torch.bitwise_not(x0)
-    y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
-    triton_not[ncore, 1, 1](x0, y_cal, xblock, xblock_sub)
-    torch.testing.assert_close(ans, y_cal)
+    ref = torch.bitwise_not(x0)
+    out = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
+    triton_not[ncore, 1, 1](x0, out, xblock, xblock_sub)
+    torch.testing.assert_close(out, ref)
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     test_not()
+    print("test_not passed!")

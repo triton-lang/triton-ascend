@@ -1,4 +1,3 @@
-import pytest
 import torch
 import torch_npu
 import triton
@@ -6,8 +5,8 @@ import triton.language as tl
 
 
 @triton.jit
-def fn_npu_(output_ptr, x_ptr, y_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr, XNUMEL: tl.constexpr,
-            YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
+def fn_npu_(output_ptr, x_ptr, y_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr, YNUMEL: tl.constexpr,
+            ZNUMEL: tl.constexpr):
     xoffs = tl.program_id(0) * XB
     yoffs = tl.program_id(1) * YB
     zoffs = tl.program_id(2) * ZB
@@ -32,11 +31,12 @@ def test_where():
     x = torch.randn(shape, dtype=eval(f'torch.{dtype}'), device="npu")
     y = torch.randn(shape, dtype=eval(f'torch.{dtype}'), device="npu")
 
-    ans = torch.where(x < y, x, 1)
-    output = torch.zeros_like(ans)
-    fn_npu_[1, 1, shape[1]](output, x, y, 1, shape[0], 1, 1, shape[0], shape[1])
-    torch.testing.assert_close(ans, output)
+    ref = torch.where(x < y, x, 1)
+    out = torch.zeros_like(ref)
+    fn_npu_[1, 1, shape[1]](out, x, y, 1, shape[0], 1, shape[0], shape[1])
+    torch.testing.assert_close(out, ref)
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     test_where()
+    print("test_where passed!")

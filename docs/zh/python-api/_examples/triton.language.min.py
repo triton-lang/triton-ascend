@@ -27,9 +27,10 @@ def test_min():
     out = torch.empty(M, dtype=torch.float32).npu()
     triton_min_2d[1, 1, 1](x, out, dim, M, N, M, N)
     ref = torch.min(x, dim=dim)[0]
-    assert torch.allclose(out.cpu(), ref.cpu()), "min result mismatch"
+    torch.testing.assert_close(out.cpu(), ref.cpu())
     print("min result:", out)
 
 
 if __name__ == "__main__":
     test_min()
+    print("test_min passed!")

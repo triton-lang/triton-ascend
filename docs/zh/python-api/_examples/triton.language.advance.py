@@ -39,13 +39,15 @@ def kernel(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constex
 def test_advance():
     XB, YB, ZB = 4, 4, 4
     x = torch.arange(XB * YB * ZB).reshape(XB, YB, ZB).npu()
-    output = torch.zeros_like(x)
+    out = torch.zeros_like(x)
 
     # Run Triton kernel
-    kernel[(1, )](output, x, XB, YB, ZB)
+    kernel[(1, )](out, x, XB, YB, ZB)
 
-    assert torch.all(output.cpu() == x.cpu())
+    ref = x.cpu()
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_advance()
+    print("test_advance passed!")

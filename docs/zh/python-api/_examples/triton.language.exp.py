@@ -1,12 +1,11 @@
 import torch
-
 import triton
 import triton.language as tl
 
 
 @triton.jit
-def exp_kernel(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr, XNUMEL: tl.constexpr,
-               YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
+def exp_kernel(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr, YNUMEL: tl.constexpr,
+               ZNUMEL: tl.constexpr):
     xoffs = tl.program_id(0) * XB
     yoffs = tl.program_id(1) * YB
     zoffs = tl.program_id(2) * ZB
@@ -30,13 +29,14 @@ def test_exp():
         XB=shape[0],
         YB=shape[1],
         ZB=shape[2],
-        XNUMEL=shape[0],
         YNUMEL=shape[1],
         ZNUMEL=shape[2],
         debug=True,
     )
-    torch.testing.assert_close(out.cpu(), torch.exp(x_cpu), rtol=1e-4, atol=1e-4)
+    ref = torch.exp(x_cpu)
+    torch.testing.assert_close(out.cpu(), ref, rtol=1e-4, atol=1e-4)
 
 
 if __name__ == "__main__":
     test_exp()
+    print("test_exp passed!")

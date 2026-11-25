@@ -5,7 +5,7 @@ import triton.language as tl
 
 @triton.jit
 def join_2d_kernel(x_ptr, y_ptr, out_ptr, M: tl.constexpr, N: tl.constexpr):
-    # (M, N) -> (2, M, N)
+    # (M, N) -> (M, N, 2)
     offsets_m = tl.arange(0, M)[:, None]
     offsets_n = tl.arange(0, N)[None, :]
     x = tl.load(x_ptr + offsets_m * N + offsets_n)
@@ -23,9 +23,11 @@ def test_join():
     out = torch.empty((2 * M * N, ), dtype=torch.float32, device="npu")
     join_2d_kernel[(1, )](x, y, out, M=M, N=N)
 
-    assert out.shape == (2 * M * N, ), f"Shape mismatch: expected {(2*M*N,)} but got {out.shape}."
-    print("Test passed.")
+    ref = torch.stack((x, y)).reshape(2 * M * N)
+    assert out.shape == (2 * M * N, ), f"Shape mismatch: expected {(2 * M * N,)} but got {out.shape}."
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_join()
+    print("test_join passed!")

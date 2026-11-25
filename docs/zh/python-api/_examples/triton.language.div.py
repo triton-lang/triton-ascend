@@ -27,12 +27,13 @@ def test_div():
     x0 = torch.randn(size=shape, dtype=eval('torch.' + dtype)).npu()
     x1 = torch.randn(size=shape, dtype=eval('torch.' + dtype)).npu()
 
-    torch_res = torch_div(x0, x1)
-    triton_res = torch.empty_like(x0)
-    triton_div[ncore, 1, 1](x0, x1, triton_res, xblock, xblock_sub)
+    ref = torch_div(x0, x1)
+    out = torch.empty_like(x0)
+    triton_div[ncore, 1, 1](x0, x1, out, xblock, xblock_sub)
 
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == '__main__':
     test_div()
+    print("test_div passed!")

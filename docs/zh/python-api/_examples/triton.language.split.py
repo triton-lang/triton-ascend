@@ -21,11 +21,13 @@ def test_split():
     x = torch.zeros([M, 2], dtype=torch.float32).npu()
     out0 = torch.empty((M, ), dtype=torch.float32, device="npu")
     out1 = torch.empty((M, ), dtype=torch.float32, device="npu")
-    split_kernel[(1, )](out0, out1, x, M=M)
+    split_kernel[(1, )](x, out0, out1, M=M)
 
-    assert out0.shape == (M, ) and out1.shape == (M, ), "Shape mismatch"
-    print("Test passed.")
+    ref0, ref1 = x.split(1, dim=1)
+    torch.testing.assert_close(out0.cpu(), ref0.reshape(M).cpu())
+    torch.testing.assert_close(out1.cpu(), ref1.reshape(M).cpu())
 
 
 if __name__ == "__main__":
     test_split()
+    print("test_split passed!")

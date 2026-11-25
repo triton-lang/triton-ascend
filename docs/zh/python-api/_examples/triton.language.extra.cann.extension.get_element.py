@@ -5,7 +5,7 @@ import torch
 
 
 @triton.jit
-def get_element_test_kernel(in_ptr, indices_ptr, out_ptr, dim, g_stride: tl.constexpr, indice_length: tl.constexpr,
+def get_element_test_kernel(in_ptr, indices_ptr, out_ptr, g_stride: tl.constexpr, indice_length: tl.constexpr,
                             g_block: tl.constexpr, g_block_sub: tl.constexpr, other_block: tl.constexpr):
     g_begin = tl.program_id(0) * g_block
     for goffs in range(0, g_block, g_block_sub):
@@ -39,7 +39,7 @@ def triton_get_element(x0, dim, indices, num_vec_core=48):
     g_block = (indice_length - 1) // num_vec_core + 1
 
     # Calculate UB space allocation
-    enable_multi_buffer = True
+    enable_multi_buffer = False
     ub_size = 125 * 1024 // (2 if enable_multi_buffer else 1)
     other_block = g_stride
     g_block_sub = ub_size // (
@@ -50,9 +50,8 @@ def triton_get_element(x0, dim, indices, num_vec_core=48):
         g_block_sub = 1
 
     # Select kernel based on implementation
-    get_element_test_kernel[num_vec_core, 1,
-                            1](x0, indices, out, dim, g_stride=g_stride, indice_length=indice_length, g_block=g_block,
-                               g_block_sub=g_block_sub, other_block=other_block, multibuffer=False)
+    get_element_test_kernel[num_vec_core, 1, 1](x0, indices, out, g_stride=g_stride, indice_length=indice_length,
+                                                g_block=g_block, g_block_sub=g_block_sub, other_block=other_block)
 
     return out
 
@@ -65,11 +64,11 @@ def test_index_select_manual():
 
     x0 = torch.randn(size=src_shape, dtype=eval('torch.' + dtype)).npu()
     indices = torch.randint(0, src_shape[dim], size=indice_shape, dtype=torch.int32).npu()
-    torch_ref = torch.index_select(x0, dim, indices)
-    triton_cal = triton_get_element(x0, dim, indices, num_vec_core=40)
-    assert torch.equal(torch_ref, triton_cal), \
-        f"Manual implementation failed for shape={src_shape}, dim={dim}, indices={indice_shape}"
+    ref = torch.index_select(x0, dim, indices)
+    out = triton_get_element(x0, dim, indices, num_vec_core=40)
+    torch.testing.assert_close(out, ref)
 
 
 if __name__ == "__main__":
     test_index_select_manual()
+    print("test_index_select_manual passed!")

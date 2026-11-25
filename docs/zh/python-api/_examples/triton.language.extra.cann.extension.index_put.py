@@ -33,14 +33,14 @@ def test_index_put():
     # pytest.raises(MLIRCompilationError).
     pytest.skip("index_put is currently broken on Ascend 950PR&950DT products")
     # dst: (4,2) of zeros
-    dst = torch.zeros((4, 2), device='npu', dtype=torch.float32)
+    out = torch.zeros((4, 2), device='npu', dtype=torch.float32)
     # value = [[1., 2.],
     #          [3., 4.]]
     value = torch.tensor([[1., 2.], [3., 4.]], device='npu')
     # index = [2, 0]
     index = torch.tensor([2, 0], device='npu')
 
-    kernel[(1, )](value, index, dst)
+    kernel[(1, )](value, index, out)
 
     # Reference: dst[index[i], :] = value[i, :]
     # dst[2, :] = value[0, :] = [1., 2.]
@@ -49,10 +49,10 @@ def test_index_put():
     #             [0., 0.],
     #             [1., 2.],
     #             [0., 0.]]
-    expected = torch.tensor([[3., 4.], [0., 0.], [1., 2.], [0., 0.]], device='cpu')
-    assert torch.allclose(dst.cpu(), expected), \
-        f"Mismatch: expected {expected}, got {dst.cpu()}"
+    ref = torch.tensor([[3., 4.], [0., 0.], [1., 2.], [0., 0.]], device='cpu')
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_index_put()
+    print("test_index_put passed!")

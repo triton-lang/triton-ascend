@@ -1,6 +1,5 @@
 import torch
 import torch_npu
-from torch.testing import assert_close
 
 import triton
 import triton.language as tl
@@ -23,9 +22,10 @@ def test_range():
     range_kernel[(1, )](x, out, N=N)
     torch.npu.synchronize()
 
-    assert_close(out, x.sum().reshape(1), rtol=1e-3, atol=1e-3)
+    ref = x.sum().reshape(1)
+    torch.testing.assert_close(out, ref, rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":
     test_range()
-    print("test_range PASSED!")
+    print("test_range passed!")

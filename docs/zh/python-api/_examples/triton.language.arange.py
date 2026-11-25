@@ -14,11 +14,12 @@ def test_arange():
     start = 0
     end = 128
     BLOCK = end - start
-    output = torch.zeros(BLOCK, dtype=torch.int32).npu()
-    arange_kernel[(1, )](output, BLOCK=BLOCK, START=start, END=end)
-    expected = torch.arange(start, end, dtype=torch.int32)
-    assert torch.allclose(output.cpu(), expected.cpu())
+    out = torch.zeros(BLOCK, dtype=torch.int32).npu()
+    arange_kernel[(1, )](out, BLOCK=BLOCK, START=start, END=end)
+    ref = torch.arange(start, end, dtype=torch.int32)
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_arange()
+    print("test_arange passed!")

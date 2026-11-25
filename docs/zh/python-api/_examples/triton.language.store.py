@@ -20,13 +20,15 @@ def test_load_store():
     N = 128
     total = 4 * N
     x = torch.arange(total, dtype=torch.float32).npu()
-    output = torch.zeros_like(x)
+    out = torch.zeros_like(x)
 
     # Run Triton kernel
-    kernel[(4, )](output, x, N)
+    kernel[(4, )](out, x, N)
 
-    assert torch.allclose(output.cpu(), x.cpu())
+    ref = x.cpu()
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_load_store()
+    print("test_load_store passed!")

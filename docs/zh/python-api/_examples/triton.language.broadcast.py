@@ -5,11 +5,11 @@ import triton.language as tl
 
 @triton.jit
 def broadcast_kernel(output_ptr, BLOCK_SIZE: tl.constexpr):
-    # Broadcast the scalar to the same shape as the vector using broadcast_to.
-    scalar = tl.full([1], 5.0, dtype=tl.float32)
-    broadcasted_scalar = tl.broadcast_to(scalar, (BLOCK_SIZE, ))
+    # Broadcast the [1] block and the [BLOCK_SIZE] block to a common shape.
+    fill_value = tl.full([1], 5.0, dtype=tl.float32)
     offsets = tl.arange(0, BLOCK_SIZE)
-    result = tl.arange(0, BLOCK_SIZE) + broadcasted_scalar
+    broadcasted_fill, broadcasted_offsets = tl.broadcast(fill_value, offsets)
+    result = broadcasted_offsets + broadcasted_fill
     tl.store(output_ptr + offsets, result)
 
 
@@ -23,3 +23,4 @@ def test_broadcast():
 
 if __name__ == "__main__":
     test_broadcast()
+    print("test_broadcast passed!")

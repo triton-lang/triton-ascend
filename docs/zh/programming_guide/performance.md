@@ -89,21 +89,21 @@
     - 持久化循环天然形成软件流水线——上一轮 Vector 计算与下一轮 MTE2 加载重叠
 
   ```python
-  # ── Before: 多维逻辑 Grid，每 program 处理一个 (M块, head, batch) 组合 ──
+  # ── Before: multi-dimensional logical Grid, each program handles one (M-block, head, batch) ──
   @triton.jit
   def fwd_kernel(q_ptr, k_ptr, v_ptr, ...,
                  BLOCK_M: tl.constexpr, ...):
-      start_m = tl.program_id(0)    # M 维度 block 索引
-      start_qh = tl.program_id(1)   # head 维度
-      start_b = tl.program_id(2)    # batch 维度
-      # ... 单块计算逻辑 ...
+      start_m = tl.program_id(0)    # block index along the M dimension
+      start_qh = tl.program_id(1)   # head dimension
+      start_b = tl.program_id(2)    # batch dimension
+      # ... per-block compute logic ...
 
-  # 调用处：Grid 远超物理核数
+  # Call site: Grid far exceeds the number of physical cores
   grid = lambda META: (triton.cdiv(max_seqlen_q, META["BLOCK_M"]),
                        q_head, batch_size)
   fwd_kernel[grid](q, k, v, ...)
 
-  # ── After: 一维物理 Grid，每 program 循环处理多个块（interleaved 分配）──
+  # ── After: 1-D physical Grid, each program loops over multiple blocks (interleaved assignment) ──
   @triton.jit
   def fwd_kernel(q_ptr, k_ptr, v_ptr, ...,
                  AICORE_NUM: tl.constexpr, MAX_Q_LEN: tl.constexpr,
@@ -112,20 +112,20 @@
       pid = tl.program_id(0)
       NUM_BLOCKS_M = tl.cdiv(MAX_Q_LEN, BLOCK_M)
       NUM_BLOCKS = NUM_BLOCKS_M * BATCH_SIZE * q_head
-      # interleaved 遍历：步长 = AICORE_NUM，各核交替领取任务
+      # interleaved traversal: stride = AICORE_NUM, each core alternately claims tasks
       for block_idx in range(pid, NUM_BLOCKS, AICORE_NUM):
-          # 从一维 block_idx 反推多维索引
+          # reconstruct multi-dimensional indices from the 1-D block_idx
           task_hz_idx = block_idx // NUM_BLOCKS_M
           start_m = block_idx % NUM_BLOCKS_M
           start_b = task_hz_idx // q_head
           start_qh = task_hz_idx % q_head
-          start_kvh = start_qh * kv_head // q_head  # GQA head 映射
-          # ... 单块计算逻辑（与 Before 相同）...
+          start_kvh = start_qh * kv_head // q_head  # GQA head mapping
+          # ... per-block compute logic (same as Before) ...
 
-  # 调用处：Grid = 物理核数，核心数动态获取
+  # Call site: Grid = number of physical cores, core count obtained dynamically
   import triton.runtime.driver as driver
   properties = driver.active.utils.get_device_properties(device)
-  NUM_CORES = properties["num_aicore"]  # CV 融合算子用 aicore
+  NUM_CORES = properties["num_aicore"]  # CV-fused ops use aicore
   grid = (NUM_CORES,)
   fwd_kernel[grid](q, k, v, ...,
                    AICORE_NUM=NUM_CORES,
@@ -139,16 +139,16 @@
   - **方案**：根据实际任务量动态缩减 Grid 核心数，确保每个核心至少分到一个完整任务块，避免无效核心参与调度
 
   ```python
-  # ── Before: 固定核心数，部分核心空转 ──
-  NUM_CORES = VECTOR_NUM  # 80 核
+  # ── Before: fixed core count, some cores idle ──
+  NUM_CORES = VECTOR_NUM  # 80 cores
   grid = (NUM_CORES,)
-  # 当 total_tasks=4 时，76 个核心空转
+  # when total_tasks=4, 76 cores stay idle
 
-  # ── After: 根据任务量动态缩减 ──
-  # 计算每核至少分到一个 BLOCK_SIZE 大小的任务块
+  # ── After: shrink dynamically based on the task count ──
+  # ensure every core gets at least one task block of size BLOCK_SIZE
   total_tasks = triton.cdiv(numel, BLOCK_SIZE)
   if total_tasks < VECTOR_NUM:
-      NUM_CORES = total_tasks  # 缩减到实际任务数
+      NUM_CORES = total_tasks  # shrink to the actual number of tasks
   else:
       NUM_CORES = VECTOR_NUM
   grid = (NUM_CORES,)
@@ -161,7 +161,7 @@
   - **关键细节**：SPLIT\_K 个 program 写同一输出地址，必须用 `tl.atomic_add` 累加（无锁）或 `LOCK` 数组 + `tl.store`（有锁）；autotune 时需 `reset_to_zero=["output_ptr"]` 避免多次评估累加
 
   ```python
-  # ── Before: 单 program 处理完整 K 维度，M×N 并行度不足 ──
+  # ── Before: a single program processes the full K dimension, M×N parallelism is insufficient ──
   @triton.jit
   def matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K, ...,
                     BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
@@ -169,35 +169,35 @@
       pid_m = tl.program_id(0)
       pid_n = tl.program_id(1)
       acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-      # 单 program 遍历完整 K 维度
+      # one program iterates over the full K dimension
       for k in range(0, K, BLOCK_K):
           a = tl.load(a_ptr + ...)
           b = tl.load(b_ptr + ...)
           acc += tl.dot(a, b)
-      tl.store(c_ptr + ..., acc)  # 直接写入，无冲突
+      tl.store(c_ptr + ..., acc)  # direct write, no conflicts
 
-  grid = (cdiv(M, BLOCK_M), cdiv(N, BLOCK_N))  # M×N 并行度
+  grid = (cdiv(M, BLOCK_M), cdiv(N, BLOCK_N))  # M×N parallelism
 
-  # ── After: K 维度拆分，多 program 并行 + 原子累加 ──
+  # ── After: split the K dimension, parallel programs + atomic accumulation ──
   @triton.jit
   def matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K, ...,
                     BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
                     BLOCK_K: tl.constexpr, SPLIT_K: tl.constexpr):
       pid_m = tl.program_id(0)
       pid_n = tl.program_id(1)
-      pid_k = tl.program_id(2)  # K 维度拆分索引
+      pid_k = tl.program_id(2)  # index of the K-dimension split
       acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-      # 每个 program 只处理 K/SPLIT_K 部分
+      # each program only processes its K/SPLIT_K slice
       k_start = pid_k * K // SPLIT_K
       k_end = (pid_k + 1) * K // SPLIT_K
       for k in range(k_start, k_end, BLOCK_K):
           a = tl.load(a_ptr + ...)
           b = tl.load(b_ptr + ...)
           acc += tl.dot(a, b)
-      # 原子累加：SPLIT_K 个 program 写同一地址
+      # atomic accumulation: SPLIT_K programs write to the same address
       tl.atomic_add(c_ptr + ..., acc)
 
-  # Grid 增加 K 维度：M×N×SPLIT_K 并行度
+  # Grid gains a K dimension: M×N×SPLIT_K parallelism
   grid = (cdiv(M, BLOCK_M), cdiv(N, BLOCK_N), SPLIT_K)
   ```
 
@@ -209,44 +209,44 @@
   - **原理**：降序排序保证大任务优先被分配，轮询则让每个核在排序序列上等距采样（核 0 取第1、第 C+1 、第 2C+1...大的任务），因此各核拿到的任务集合在大小分布上高度同构，总工作量趋于均衡；同时避免"最后才遇到一个超大任务，已无处摊平"的情况。
 
   ```python
-  # ── Before: kernel 内 stride 遍历，各核工作量严重不均 ──
+  # ── Before: stride traversal inside the kernel, workload heavily imbalanced across cores ──
   @triton.jit
   def attn_kernel(q_ptr, k_ptr, ...):
       pid = tl.program_id(0)
-      # interleaved 遍历：靠前的 query block 工作量小，靠后的大
+      # interleaved traversal: earlier query blocks have less work, later ones more
       for block_idx in range(pid, total_tasks, num_cores):
           start_m = block_idx % NUM_BLOCKS_M
-          # causal mask：start_m 越大，需处理的 key block 越多
-          num_kv_blocks = start_m + 1  # 工作量随 start_m 线性增长
+          # causal mask: larger start_m means more key blocks to process
+          num_kv_blocks = start_m + 1  # workload grows linearly with start_m
           for kv in range(num_kv_blocks):
-              ...  # 靠前的核只执行 1 轮，靠后的执行 NUM_BLOCKS_M 轮
+              ...  # early cores run only 1 iteration, later cores run NUM_BLOCKS_M
 
-  # ── After: 主机端预排序 + 轮询分配，各核均衡 ──
-  # 主机端：计算每个任务的 workload 并降序排序
+  # ── After: host-side pre-sorting + round-robin assignment, cores balanced ──
+  # Host side: compute each task workload and sort in descending order
   def assign_tasks(total_tasks, num_cores):
       workloads = [compute_workload(t) for t in range(total_tasks)]
       tasks_sorted = sorted(range(total_tasks), key=lambda t: workloads[t],
-                            reverse=True)  # 降序：重任务在前
-      # 轮询分配：核 0 拿 tasks_sorted[0], tasks_sorted[num_cores], ...
+                            reverse=True)  # descending: heavy tasks first
+      # round-robin: core 0 gets tasks_sorted[0], tasks_sorted[num_cores], ...
       core_tasks = [[] for _ in range(num_cores)]
       for i, task in enumerate(tasks_sorted):
           core_tasks[i % num_cores].append(task)  # round-robin
-      # 展平为连续张量供 kernel 读取
-      core_tasks_ranges = [...]  # 每核的任务起止偏移
+      # flatten into a contiguous tensor for the kernel to read
+      core_tasks_ranges = [...]  # per-core start/end offsets of tasks
       core_tasks_flat = tensor([task for core in core_tasks for task in core])
       return core_tasks_ranges, core_tasks_flat
 
-  # kernel 端：通过任务张量读取分配到本核的任务
+  # Kernel side: read this core assigned tasks through the task tensors
   @triton.jit
   def attn_kernel(q_ptr, k_ptr, core_tasks_ptr, core_tasks_ranges_ptr, ...):
       pid = tl.program_id(0)
       start_offset = tl.load(core_tasks_ranges_ptr + pid * 2)
       end_offset = tl.load(core_tasks_ranges_ptr + pid * 2 + 1)
-      # 只遍历分配到本核的任务（已均衡）
+      # only iterate over this core assigned tasks (already balanced)
       for i in range(start_offset, end_offset):
           block_idx = tl.load(core_tasks_ptr + i)
           start_m = block_idx % NUM_BLOCKS_M
-          ...  # 各核总工作量趋于一致
+          ...  # total workload across cores converges to balance
   ```
 
   - **案例**：FlexAttention — 主机端 sorted round-robin 分配，消除 causal mask 导致的工作量不均
@@ -267,7 +267,7 @@
   - **方案**：新增 `BLOCK_NUM` 参数，单 program 内循环处理多个数据块，Grid 相应缩小 `BLOCK_NUM` 倍。核内多块循环减少 Grid 规模（降低核切换开销），同时实现存算并行（上一块 compute 与下一块 load 重叠）
 
   ```python
-  # ── Before: 每 program 一个块，Grid 大但无核内流水线 ──
+  # ── Before: one block per program, large Grid but no intra-core pipeline ──
   @triton.jit
   def softcap_fwd_kernel(x_ptr, y_ptr, n_elements, softcap,
                          BLOCK_SIZE: tl.constexpr):
@@ -279,16 +279,16 @@
       y = softcap * libdevice.tanh(x.to(tl.float32) / softcap).to(x.dtype)
       tl.store(y_ptr + offsets, y, mask=mask)
 
-  grid = (triton.cdiv(n_elements, BLOCK_SIZE),)  # Grid 可能很大
+  grid = (triton.cdiv(n_elements, BLOCK_SIZE),)  # Grid may be very large
 
-  # ── After: 每 program 处理 BLOCK_NUM 个块，Grid 缩小 ──
+  # ── After: each program processes BLOCK_NUM blocks, Grid shrinks ──
   @triton.jit
   def softcap_fwd_kernel(x_ptr, y_ptr, n_elements, softcap,
                          BLOCK_SIZE: tl.constexpr,
-                         BLOCK_NUM: tl.constexpr):   # 新增多块参数
+                         BLOCK_NUM: tl.constexpr):   # new multi-block parameter
       pid = tl.program_id(0)
       for i in range(BLOCK_NUM):
-          # 每 i 轮处理一个 BLOCK_SIZE 大小的块
+          # each i-th iteration processes a block of size BLOCK_SIZE
           block_start = pid * BLOCK_SIZE * BLOCK_NUM + i * BLOCK_SIZE
           offsets = block_start + tl.arange(0, BLOCK_SIZE)
           mask = offsets < n_elements
@@ -296,7 +296,7 @@
           y = softcap * libdevice.tanh(x.to(tl.float32) / softcap).to(x.dtype)
           tl.store(y_ptr + offsets, y, mask=mask)
 
-  # Grid 缩小 BLOCK_NUM 倍，核内循环实现存算并行
+  # Grid shrinks by BLOCK_NUM×; the intra-core loop overlaps load and compute
   grid = (triton.cdiv(n_elements, BLOCK_SIZE * BLOCK_NUM),)
   ```
 
@@ -306,7 +306,7 @@
   - **方案**：改为 1D flatten kernel，将二维 `(rows, cols)` 展平为一维 `rows*cols`，消除 2D 索引，提升内存合并（连续地址访问）
 
   ```python
-  # ── Before: 2D kernel，小 shape 下索引开销高 ──
+  # ── Before: 2D kernel, high indexing overhead for small shapes ──
   @triton.jit
   def gelu_fwd_kernel(x_ptr, y_ptr, n_rows, n_cols, ...,
                       BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
@@ -314,7 +314,7 @@
       pid_n = tl.program_id(1)
       row = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
       col = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-      # 2D 索引：行偏移 × stride + 列偏移
+      # 2D indexing: row offset × stride + column offset
       offsets = row[:, None] * n_cols + col[None, :]
       mask = (row[:, None] < n_rows) & (col[None, :] < n_cols)
       x = tl.load(x_ptr + offsets, mask=mask)
@@ -323,12 +323,12 @@
 
   grid = (triton.cdiv(n_rows, BLOCK_M), triton.cdiv(n_cols, BLOCK_N))
 
-  # ── After: 1D flatten kernel，消除 2D 索引 ──
+  # ── After: 1-D flattened kernel, eliminates 2D indexing ──
   @triton.jit
   def gelu_fwd_kernel(x_ptr, y_ptr, n_elements, ...,
                       BLOCK_SIZE: tl.constexpr):
       pid = tl.program_id(0)
-      # 1D 连续偏移，无二维广播
+      # 1-D contiguous offsets, no 2D broadcasting
       offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
       mask = offsets < n_elements
       x = tl.load(x_ptr + offsets, mask=mask)
@@ -344,36 +344,36 @@
   - **方案**：当实际维度满足 32B 对齐要求时（FP16 的 d 须为 16 的倍数），直接使用实际维度 `D_ROUNDED = d`，消除 padding 浪费并使循环只执行一次
 
   ```python
-  # ── Before: 向上取整到 2 的幂，padding 浪费 + 多次循环 ──
+  # ── Before: round up to a power of 2, padding waste + multiple loop iterations ──
   @triton.jit
   def rmsnorm_fwd_kernel(x_ptr, w_ptr, y_ptr, n_rows, ...,
                          D_ROUNDED: tl.constexpr):
       # D_ROUNDED = triton.next_power_of_2(d)
-      # 当 d=300 时 D_ROUNDED=512，多分配 212 个元素的 UB 空间
+      # when d=300, D_ROUNDED=512, wasting UB space for 212 extra elements
       offs_d = tl.arange(0, D_ROUNDED)
-      mask_d = offs_d < d  # 需要 mask 截断 padding 区域
+      mask_d = offs_d < d  # mask needed to clip the padding region
       x = tl.load(x_ptr + row * d + offs_d, mask=mask_d, other=0.0)
-      # 当 D_ROUNDED > d 时，循环可能执行多次
+      # when D_ROUNDED > d, the reduction loop may run multiple times
       mean = tl.sum(x * x, axis=0) / d
       ...
 
-  # 调用处
+  # Call site
   D_ROUNDED = triton.next_power_of_2(d)  # 300 → 512
 
-  # ── After: 直接使用实际维度，无 padding + 单次循环 ──
+  # ── After: use the real dimension directly, no padding + single loop pass ──
   @triton.jit
   def rmsnorm_fwd_kernel(x_ptr, w_ptr, y_ptr, n_rows, ...,
                          D_ROUNDED: tl.constexpr):
-      # D_ROUNDED = d（当 d 满足 32B 对齐时）
+      # D_ROUNDED = d (when d satisfies 32B alignment)
       offs_d = tl.arange(0, D_ROUNDED)
-      # D_ROUNDED == d，无需 mask（已对齐）
+      # D_ROUNDED == d, no mask needed (already aligned)
       x = tl.load(x_ptr + row * d + offs_d)
-      # D_ROUNDED == d，循环只执行一次 → 单 Pass 融合
+      # D_ROUNDED == d, loop runs once → single-pass fusion
       mean = tl.sum(x * x, axis=0) / d
       ...
 
-  # 调用处
-  D_ROUNDED = d  # 直接用 300（假设 300 是 16 的倍数，或已对齐）
+  # Call site
+  D_ROUNDED = d  # use 300 directly (assuming 300 is a multiple of 16, or already aligned)
   ```
 
   - **案例**：RMSNorm — `D_ROUNDED=triton.next_power_of_2(d)` → `D_ROUNDED=d`，使归约循环只执行一次
@@ -385,38 +385,38 @@
     - **拆分**（全局窗口占比高时更优）：将统一循环拆分为两段——全局段无 mask 开销（满密度直接计算），非全局段只执行 causal+local mask
 
   ```python
-  # ── 合并策略（全局窗口占比低时更优）──
-  # Before: 两个独立循环，循环开销翻倍
+  # ── Merge strategy (better when the global-window fraction is low) ──
+  # Before: two separate loops, doubled loop overhead
   for kv in range(global_window_blocks):
       k = tl.load(k_block_ptr); qk = tl.dot(q, k)
-      mask = global_mask  # 全局窗口 mask
+      mask = global_mask  # global-window mask
       qk = tl.where(mask, qk, -inf)
   for kv in range(local_window_blocks):
       k = tl.load(k_block_ptr); qk = tl.dot(q, k)
       mask = causal_local_mask  # causal + local mask
       qk = tl.where(mask, qk, -inf)
 
-  # After: 合并为一个循环，用 tl.where 统一 mask
+  # After: merge into one loop, unify the mask with tl.where
   for kv in range(all_kv_blocks):
       k = tl.load(k_block_ptr); qk = tl.dot(q, k)
       is_global = (kv < global_threshold)
-      # 统一 mask：全局段用 global_mask，非全局段用 causal_local_mask
+      # unified mask: global_mask for global segments, causal_local_mask otherwise
       mask = tl.where(is_global, global_mask, causal_local_mask)
       qk = tl.where(mask, qk, -inf)
 
-  # ── 拆分策略（全局窗口占比高时更优）──
-  # Before: 统一循环，全局段也承受 mask 检查开销
+  # ── Split strategy (better when the global-window fraction is high) ──
+  # Before: unified loop, global segments also pay mask-check overhead
   for kv in range(all_kv_blocks):
       k = tl.load(k_block_ptr); qk = tl.dot(q, k)
-      # 每轮都检查 global_window_check，即使全局段不需要
+      # checks global_window_check every iteration, even for global segments
       mask = causal_mask & (local_window_check | global_window_check)
       qk = tl.where(mask, qk, -inf)
 
-  # After: 拆分为两段，全局段零 mask 开销
-  for kv in range(global_blocks):       # 段 1：全局窗口，无 mask 开销
+  # After: split into two segments, global segment has zero mask overhead
+  for kv in range(global_blocks):       # segment 1: global window, no mask overhead
       k = tl.load(k_block_ptr); qk = tl.dot(q, k)
-      # 全局窗口满密度，无需 mask
-  for kv in range(local_blocks):        # 段 2：非全局窗口，causal + local mask
+      # global window is fully dense, no mask needed
+  for kv in range(local_blocks):        # segment 2: non-global window, causal + local mask
       k = tl.load(k_block_ptr); qk = tl.dot(q, k)
       mask = causal_mask & local_window_mask
       qk = tl.where(mask, qk, -inf)
@@ -439,23 +439,23 @@
   - **方案**：从小 BLOCK 起步，通过 Autotune 逐步增大搜索最优值。候选值可包含非 2 的幂以精确匹配实际维度（如序列长度 100）
 
   ```python
-  # ── Before: 固定小值，无法适配不同 shape ──
+  # ── Before: fixed small value, cannot adapt to different shapes ──
   @triton.jit
   def fwd_kernel(..., BLOCK_M: tl.constexpr):
-      # BLOCK_M 固定为 32，大 shape 下 Cube 利用率低
+      # BLOCK_M fixed at 32, low Cube utilization for large shapes
       ...
 
-  # ── After: Autotune 搜索，自动选择最优 BLOCK ──
+  # ── After: Autotune searches and picks the optimal BLOCK automatically ──
   @triton.autotune(
       configs=[
           triton.Config({"BLOCK_M": 32}),
           triton.Config({"BLOCK_M": 64}),
           triton.Config({"BLOCK_M": 128}),
           triton.Config({"BLOCK_M": 256}),
-          # 场景：非 2 的幂精确匹配实际维度
-          triton.Config({"BLOCK_M": 100}),  # 序列长度恰好 100
+          # use case: non-power-of-2 to exactly match the real dimension
+          triton.Config({"BLOCK_M": 100}),  # sequence length is exactly 100
       ],
-      key=["QK_DIM", "V_DIM"],  # 按 head_dim 缓存最优 config
+      key=["QK_DIM", "V_DIM"],  # cache the best config by head_dim
   )
   @triton.jit
   def fwd_kernel(..., BLOCK_M: tl.constexpr):
@@ -470,20 +470,20 @@
   - **方案**：从单 config 扩展到多维组合搜索，使用列表推导生成笛卡尔积
 
   ```python
-  # ── Before: 单 config，无法捕捉维度交互 ──
+  # ── Before: single config, cannot capture dimension interactions ──
   @triton.autotune(
-      configs=[triton.Config({"BLOCK_M": 128})],  # 只有一个配置
+      configs=[triton.Config({"BLOCK_M": 128})],  # only one config
       key=["M", "N"],
   )
 
-  # ── After: 多维组合搜索，覆盖 BM×BN×BK 全空间 ──
+  # ── After: multi-dimensional combinatorial search covering the full BM×BN×BK space ──
   @triton.autotune(
       configs=[
           triton.Config({"BLOCK_M": BM, "BLOCK_N": BN, "BLOCK_K": BK})
           for BM in [128, 256, 512]
           for BN in [64, 128, 256, 512]
           for BK in [32, 64, 128, 512]
-      ],  # 3×4×4 = 48 个配置
+      ],  # 3×4×4 = 48 configs
       key=["M", "N", "K"],
   )
   @triton.jit
@@ -498,23 +498,23 @@
   - **方案**：按输入形状/属性缓存最优 config；将 dtype 也加入 key（通过 `X_ptr.dtype` 引用指针的 dtype）
 
   ```python
-  # ── Before: 基础 key，跨 shape/dtype 重复调优 ──
+  # ── Before: basic key, redundant tuning across shapes/dtypes ──
   @triton.autotune(
       configs=[...],
-      key=["n_rows", "n_cols"],  # 缺少 dtype，fp16/bf16 共用 config
+      key=["n_rows", "n_cols"],  # dtype missing, fp16/bf16 share one config
   )
 
-  # ── After: 扩展 key（含 dtype + 算子属性）──
+  # ── After: extended key (dtype + operator attributes) ──
   @triton.autotune(
       configs=[...],
-      # 将 dtype 加入 key：fp16 和 bf16 各自缓存最优 config
+      # add dtype to the key: fp16 and bf16 each cache their own best config
       key=["n_rows", "n_cols", "X_ptr.dtype"],
   )
 
-  # 或按算子属性缓存（Flash Attention 场景）
+  # or cache by operator attributes (Flash Attention scenario)
   @triton.autotune(
       configs=get_fwd_configs(),
-      # QK_DIM/V_DIM 影响 UB 占用，MASK_FN/SPARSE_OPT 影响计算量
+      # QK_DIM/V_DIM affect UB usage, MASK_FN/SPARSE_OPT affect the compute amount
       key=["QK_DIM", "V_DIM", "MASK_FN", "SPARSE_OPT"],
   )
   ```
@@ -527,29 +527,29 @@
   - **方案二（架构剪枝）**：按架构裁剪搜索空间，只保留该架构上可能胜出的 Config
 
   ```python
-  # ── UB 剪枝：过滤会溢出 UB 的 Config ──
+  # ── UB pruning: filter out Configs that would overflow UB ──
   def _prune_oversized_tiles(configs, named_args, **kwargs):
-      # 过滤 BLOCK_M × BLOCK_N 超过 UB 容量的 Config
+      # filter Configs whose BLOCK_M × BLOCK_N exceeds UB capacity
       return [c for c in configs
               if c.kwargs['BLOCK_M'] * c.kwargs['BLOCK_N'] <= 1048576]
 
   @triton.autotune(
-      configs=[...],  # 原始搜索空间
+      configs=[...],  # original search space
       prune_configs_by={"early_config_prune": _prune_oversized_tiles},
       key=["M", "N"],
   )
 
-  # ── 架构剪枝：按架构裁剪搜索空间 ──
+  # ── Architecture pruning: trim the search space per architecture ──
   def get_configs():
       all_configs = [
           triton.Config({"BLOCK_M": BM, "BLOCK_N": BN})
           for BM in [32, 64, 128, 256]
           for BN in [32, 64, 128, 256]
       ]
-      if is_910():  # 910B UB 只有 192KB，大 BLOCK 容易溢出
-          # 只保留 BLOCK_M ≤ 128 的 Config（910B 胜出 config）
+      if is_910():  # 910B has only 192KB UB, large BLOCKs easily overflow
+          # keep only Configs with BLOCK_M ≤ 128 (winning configs on 910B)
           return [c for c in all_configs if c.kwargs['BLOCK_M'] <= 128]
-      return all_configs  # 910_95 UB 248KB，全空间搜索
+      return all_configs  # 910_95 has 248KB UB, search the full space
 
   @triton.autotune(configs=get_configs(), key=["M", "N"])
   ```
@@ -561,10 +561,10 @@
   - **方案**：将编译参数作为 Autotune 搜索维度，让调优器自动选择
 
   ```python
-  # ── 编译参数加入搜索 ──
+  # ── include compile parameters in the search ──
   @triton.autotune(
       configs=[
-          # 同一 BLOCK 下，multibuffer 和 vf_fusion_mode 各试一次
+          # try multibuffer and vf_fusion_mode once each for the same BLOCK
           triton.Config({"BLOCK_M": 8}, multibuffer=True, vf_fusion_mode="max-parallel"),
           triton.Config({"BLOCK_M": 8}, multibuffer=True, vf_fusion_mode="ub-aware-op"),
           triton.Config({"BLOCK_M": 8}, multibuffer=True, vf_fusion_mode="all-op"),
@@ -589,8 +589,8 @@
           triton.Config({"BLOCK_SIZE": 2048}, multibuffer=True),
           triton.Config({"BLOCK_SIZE": 1024}, multibuffer=False),
       ],
-      key=["n"],            # n 不变 → 命中磁盘缓存，跳过 benchmark
-      cache_results=True,   # 关键：开启磁盘缓存
+      key=["n"],            # n unchanged → disk cache hit, skip benchmark
+      cache_results=True,   # key: enable disk cache
   )
   @triton.jit
   def kernel(x_ptr, y_ptr, n, BLOCK_SIZE: tl.constexpr):
@@ -621,7 +621,7 @@
       v = tl.load(x_ptr + offs)
       tl.store(y_ptr + offs, v)
 
-  # 直接指定最优 config（BLOCK_SIZE=1024 + multibuffer=True），跳过搜索
+  # pin the optimal config directly (BLOCK_SIZE=1024 + multibuffer=True), skipping the search
   kernel[(grid,)](x, y, n, BLOCK_SIZE=1024, multibuffer=True)
   ```
 
@@ -642,7 +642,7 @@
           triton.Config({"BLOCK_SIZE": 512}),
           triton.Config({"BLOCK_SIZE": 1024}),
       ],
-      key=["seq_bucket"],  # seq_len 的精确值不进入调优 key
+      key=["seq_bucket"],  # the exact seq_len value does not enter the tuning key
       cache_results=True,
   )
   @triton.jit(do_not_specialize=["seq_len", "seq_bucket"])
@@ -681,7 +681,7 @@
           return 256
       if seq_len <= 4096:
           return 512
-      return 1024  # 为更长输入提供覆盖路径
+      return 1024  # coverage path for longer inputs
 
   @triton.heuristics({"BLOCK_SIZE": lambda args: select_block_size(args["seq_len"])})
   @triton.jit(do_not_specialize=["seq_len"])
@@ -702,7 +702,7 @@
       grid = lambda meta: (
           min(num_cores, triton.cdiv(seq_len, meta["BLOCK_SIZE"])),
       )
-      add_one_fixed_kernel[grid](x, y, seq_len)  # BLOCK_SIZE 由 heuristics 计算
+      add_one_fixed_kernel[grid](x, y, seq_len)  # BLOCK_SIZE computed by heuristics
       return y
   ```
 
@@ -725,42 +725,42 @@
   - **方案二**：在 `tl.dot` 之前插入 `compile_hint("break_vf")`，打断 VF 融合链，确保 `ds` 独立计算后 `tl.dot` 单独调度到 Cube
 
   ```python
-  # ── 指令重排序：让 Cube 提前启动 ──
-  # Before: Vector 先执行，Cube 等待（Flash Attention softmax 循环体）
+  # ── Instruction reordering: start Cube earlier ──
+  # Before: Vector runs first while Cube waits (Flash Attention softmax loop body)
   m_new = tl.maximum(m, tl.max(s, 1))
   alpha = tl.math.exp2((m - m_new) * qk_scale)  # Vector
   p = tl.math.exp2((s - m_new[:, None]) * qk_scale)
   p_sum = tl.sum(p, 1)       # Vector
   acc *= alpha[:, None]      # Vector
   v = load_if(v_block_ptr, False, True)
-  acc += tl.dot(p.to(dtype), v)  # Cube（等以上全部 Vector 完成后启动）
+  acc += tl.dot(p.to(dtype), v)  # Cube (starts only after all the Vector ops above finish)
 
-  # After: Cube 提前启动，与 Vector 并行
+  # After: Cube starts early, in parallel with Vector
   m_new = tl.maximum(m, tl.max(s, 1))
   p = tl.math.exp2((s - m_new[:, None]) * qk_scale)
   v = load_if(v_block_ptr, False, True)
-  pv = tl.dot(p.to(dtype), v)          # Cube 提前启动（无依赖 acc）
-  p_sum = tl.sum(p, 1)                  # Vector（与 Cube 并行）
-  alpha = tl.math.exp2((m - m_new) * qk_scale)  # Vector（与 Cube 并行）
-  acc = acc * alpha[:, None] + pv       # 合并：依赖 Cube 结果，放最后
+  pv = tl.dot(p.to(dtype), v)          # Cube starts early (no dependency on acc)
+  p_sum = tl.sum(p, 1)                  # Vector (runs in parallel with Cube)
+  alpha = tl.math.exp2((m - m_new) * qk_scale)  # Vector (runs in parallel with Cube)
+  acc = acc * alpha[:, None] + pv       # merge: depends on the Cube result, placed last
   l = l * alpha + p_sum
   m = m_new
 
-  # ── break_vf：打断 VF 融合链（Flash Attention 反向）──
+  # ── break_vf: break the VF fusion chain (Flash Attention backward) ──
   import triton.language.extra.cann.extension as extension
 
-  # Before: ds 可能被融合到 dot 的 VF 链，阻止 Cube 调度
+  # Before: ds may get fused into dot VF chain, blocking Cube scheduling
   ds = p * (dp - d[:, None])
   ds = tl.where(mask, ds, 0.0)
   ds = ds.to(dtype)
-  dq += tl.dot(ds, k)  # ds 的 VF 链可能过长，UB 溢出或 Cube 无法独立调度
+  dq += tl.dot(ds, k)  # ds VF chain may be too long, causing UB overflow or blocking Cube scheduling
 
-  # After: 打断 VF 链，ds 独立计算后 tl.dot 单独调度到 Cube
+  # After: break the VF chain so ds computes independently and tl.dot dispatches to Cube alone
   ds = p * (dp - d[:, None])
   ds = tl.where(mask, ds, 0.0)
   ds = ds.to(dtype)
-  extension.compile_hint(ds, "break_vf")  # 在此处打断 VF 融合
-  dq += tl.dot(ds, k)  # tl.dot 独立调度到 Cube
+  extension.compile_hint(ds, "break_vf")  # break the VF fusion here
+  dq += tl.dot(ds, k)  # tl.dot dispatches independently to Cube
   ```
 
   - **案例**：FA v4/v8 fwd — `tl.dot(p, v)` 提前到 `p_sum` / `alpha` 之前
@@ -771,25 +771,25 @@
   - **方案二**：CV 融合算子配置完整的七参数集，精确控制 CV 协同、多缓冲、同步策略等
 
   ```python
-  # ── 子块绑定决策 ──
-  # CV 融合算子（含 tl.dot）：启用子块绑定，实现 CV 1:2 协同
+  # ── sub-block binding decision ──
+  # CV-fused ops (with tl.dot): enable sub-block binding for CV 1:2 cooperation
   fwd_kernel[grid](..., enable_auto_bind_sub_block=True)
-  # 纯 Vector 算子（无 tl.dot）：禁用子块绑定
+  # pure Vector ops (no tl.dot): disable sub-block binding
   rmsnorm_kernel[grid](..., enable_auto_bind_sub_block=False)
 
-  # ── CV 完整七参数配置（CV 融合算子专用）──
+  # ── full seven-parameter CV config (for CV-fused ops only) ──
   fwd_kernel[grid](
       ...,
-      enable_mixed_cv=True,                              # 启用 Cube/Vector 混合调度
-      sync_solver=True,                                  # 自动求解 CV 间同步点
-      enable_auto_bind_sub_block=True,                   # 自动绑定子块（CV 1:2 协同）
-      set_workspace_multibuffer=2,                       # workspace 双缓冲
-      limit_auto_multi_buffer_of_local_buffer="no-limit", # 不限制 UB 多缓冲分配
-      enable_flatten=False,                              # CV 融合必须 False（不能展平）
-      multibuffer=True,                                  # UB 双缓冲，存算并行
+      enable_mixed_cv=True,                              # enable mixed Cube/Vector scheduling
+      sync_solver=True,                                  # auto-solve CV sync points
+      enable_auto_bind_sub_block=True,                   # auto-bind sub-blocks (CV 1:2 cooperation)
+      set_workspace_multibuffer=2,                       # workspace double buffering
+      limit_auto_multi_buffer_of_local_buffer="no-limit", # do not limit UB multi-buffer allocation
+      enable_flatten=False,                              # must be False for CV fusion (cannot flatten)
+      multibuffer=True,                                  # UB double buffering, load-compute overlap
   )
 
-  # ── 纯 Vector 算子配置（只需 2 个参数）──
+  # ── pure Vector op config (only 2 parameters needed) ──
   rmsnorm_kernel[grid](
       ...,
       multibuffer=True,
@@ -806,24 +806,24 @@
   - **方案三（k\_scale post-dot）**：将 k\_scale 从 pre-dot（dot 前对 k 乘 scale）移到 post-dot（dot 后与结果融合），消除额外 Vector 乘法
 
   ```python
-  # ── Scale 融合到输入（SDPA 反向）──
-  # Before: scale 在 dot 之后，额外一次 Vector 乘法
+  # ── fuse Scale into the input (SDPA backward) ──
+  # Before: scale after the dot, one extra Vector multiply
   dq += tl.dot(ds, k) * scale
-  # After: scale 融入 ds（dot 输入），消除 dot 后乘法
+  # After: fold scale into ds (the dot input), removing the post-dot multiply
   ds = ds * scale
   dq += tl.dot(ds, k)
 
-  # ── Accumulator-in-dot（SDPA 前向 online softmax）──
-  # Before: 缩放 + matmul + 累加（三步，三次 Vector/Cube 操作）
+  # ── Accumulator-in-dot (SDPA forward online softmax) ──
+  # Before: scale + matmul + accumulate (three steps, three Vector/Cube ops)
   block_o = alpha[:, None] * block_o + tl.dot(block_p, block_v)
-  # After: 融合为单条 dot 三参数形式（Cube 硬件累加器完成缩放+累加）
+  # After: fused into a single three-argument dot (Cube hardware accumulator does scale + add)
   block_o = tl.dot(block_p, block_v, block_o * alpha[:, None])
 
   # ── k_scale post-dot（LightningIndexer）──
-  # Before: pre-dot Vector 乘法（对 k 整个矩阵乘 scale）
+  # Before: pre-dot Vector multiply (scale the whole k matrix)
   k = k * k_scale[:, None]
   qk = tl.dot(q, tl.trans(k))
-  # After: scale 融合到后续 ReLU（只对 qk 结果乘，元素更少）
+  # After: fold scale into the following ReLU (only scales the qk result, fewer elements)
   qk = tl.dot(q, tl.trans(k))
   relu_qk = tl.maximum(qk * k_scale[None, :], 0.0)
   ```
@@ -848,46 +848,46 @@
   - **方案二**：将循环内不变的计算/加载提到循环外（hoisting），只加载一次，循环内直接复用
 
   ```python
-  # ── 核内循环实现存算并行（RMSNorm 持久化 kernel）──
-  # Before: 每 program 一个块，无核内流水线
+  # ── intra-core loop for load-compute overlap (RMSNorm persistent kernel) ──
+  # Before: one block per program, no intra-core pipeline
   @triton.jit
   def rmsnorm_kernel(x_ptr, w_ptr, y_ptr, n_rows, ...):
       pid = tl.program_id(0)
-      # 单行处理，无循环
+      # processes a single row, no loop
       row = pid
       x = tl.load(x_ptr + row * stride + offs_d)
       ...  # compute
       tl.store(y_ptr + row * stride + offs_d, y)
 
-  grid = (n_rows,)  # Grid 可能远超物理核数
+  grid = (n_rows,)  # Grid may far exceed the number of physical cores
 
-  # After: 持久化 kernel，核内循环处理多行
+  # After: persistent kernel, intra-core loop handles multiple rows
   @triton.jit
   def rmsnorm_kernel(x_ptr, w_ptr, y_ptr, n_rows, ...,
                      NUM_CORES: tl.constexpr):
       pid = tl.program_id(0)
-      # 核内循环：上一轮 compute 与下一轮 load 自动重叠
+      # intra-core loop: previous compute overlaps with next load automatically
       for row in range(pid, n_rows, NUM_CORES):
-          x = tl.load(x_ptr + row * stride + offs_d)  # 本轮 load (MTE2)
-          # 上轮 compute (Vector) 与本轮 load 并行
+          x = tl.load(x_ptr + row * stride + offs_d)  # this iteration load (MTE2)
+          # previous compute (Vector) runs in parallel with this load
           mean = tl.sum(x * x, axis=0) / D
           rstd = 1.0 / tl.sqrt(mean + eps)
           y = (x * rstd[:, None]) * w + b
           tl.store(y_ptr + row * stride + offs_d, y)
 
-  grid = (NUM_CORES,)  # Grid = 物理核数
+  grid = (NUM_CORES,)  # Grid = number of physical cores
 
-  # ── 循环不变量外提（RMSNorm weight 加载）──
-  # Before: 每轮重复加载 weight（循环不变量）
+  # ── loop-invariant hoisting (RMSNorm weight load) ──
+  # Before: reloads weight every iteration (loop invariant)
   for row in range(pid, n_rows, NUM_CORES):
-      w = tl.load(w_ptr + offs_d)  # weight 每轮重新加载（浪费）
+      w = tl.load(w_ptr + offs_d)  # weight reloaded every iteration (wasteful)
       x = tl.load(x_ptr + row * stride + offs_d)
       y = (x * rstd[:, None]) * w + b
       tl.store(y_ptr + ..., y)
 
-  # After: weight 循环外加载一次，循环内直接复用
-  w = tl.load(w_ptr + offs_d)  # 循环外加载一次
-  col_offsets = tl.arange(0, D_ROUNDED)  # 循环外计算一次
+  # After: load weight once outside the loop, reuse it inside
+  w = tl.load(w_ptr + offs_d)  # loaded once outside the loop
+  col_offsets = tl.arange(0, D_ROUNDED)  # computed once outside the loop
   for row in range(pid, n_rows, NUM_CORES):
       x = tl.load(x_ptr + row * stride + col_offsets)
       y = (x * rstd[:, None]) * w + b
@@ -900,34 +900,34 @@
   - **方案**：每轮处理 2 个（或更多）数据块，双路 load/compute/store——路 0 的 compute 与路 1 的 load 重叠，MTE2 和 Vector 都满载
 
   ```python
-  # ── Before: 单路循环，流水线深度有限 ──
+  # ── Before: single-lane loop, limited pipeline depth ──
   @triton.jit
   def rmsnorm_kernel(x_ptr, ..., NUM_CORES: tl.constexpr):
       pid = tl.program_id(0)
       for row in range(pid, n_rows, NUM_CORES):
-          x = tl.load(x_ptr + row * stride + offs_d)  # 单路 load
-          mean = tl.sum(x * x, axis=0) / D             # 单路 compute
+          x = tl.load(x_ptr + row * stride + offs_d)  # single-lane load
+          mean = tl.sum(x * x, axis=0) / D             # single-lane compute
           y = (x * rstd[:, None]) * w
-          tl.store(y_ptr + row * stride + offs_d, y)   # 单路 store
+          tl.store(y_ptr + row * stride + offs_d, y)   # single-lane store
 
-  # ── After: 双路展开，路 0 compute 与路 1 load 重叠 ──
+  # ── After: two-lane unrolling, lane 0 compute overlaps lane 1 load ──
   @triton.jit
   def rmsnorm_kernel(x_ptr, ..., NUM_CORES: tl.constexpr):
       pid = tl.program_id(0)
-      # 每轮处理 2 行，步长翻倍
+      # processes 2 rows per iteration, stride doubled
       for row in range(pid * 2, n_rows, NUM_CORES * 2):
-          # 路 0 和路 1 的 load 可并行发射（无依赖）
-          x_0 = tl.load(x_ptr + (row) * stride + offs_d)      # 路 0 load
-          x_1 = tl.load(x_ptr + (row + 1) * stride + offs_d)  # 路 1 load
-          # 路 0 compute（与路 1 load 重叠）
+          # lane 0 and lane 1 loads can issue in parallel (no dependency)
+          x_0 = tl.load(x_ptr + (row) * stride + offs_d)      # lane 0 load
+          x_1 = tl.load(x_ptr + (row + 1) * stride + offs_d)  # lane 1 load
+          # lane 0 compute (overlaps with lane 1 load)
           mean_0 = tl.sum(x_0 * x_0, axis=0) / D
           rstd_0 = 1.0 / tl.sqrt(mean_0 + eps)
           y_0 = (x_0 * rstd_0[:, None]) * w
-          # 路 1 compute
+          # lane 1 compute
           mean_1 = tl.sum(x_1 * x_1, axis=0) / D
           rstd_1 = 1.0 / tl.sqrt(mean_1 + eps)
           y_1 = (x_1 * rstd_1[:, None]) * w
-          # 双路 store
+          # two-lane store
           tl.store(y_ptr + (row) * stride + offs_d, y_0)
           tl.store(y_ptr + (row + 1) * stride + offs_d, y_1)
   ```
@@ -939,18 +939,18 @@
   - **权衡**：开启后 UB 可用空间减半（248KB → 124KB），需评估对 BLOCK\_SIZE 的影响——可能需要减小 BLOCK\_SIZE 或减少核内同时存活的 tensor
 
   ```python
-  # ── Before: 显式关闭 multibuffer（multibuffer=False），load 和 compute 串行 ──
+  # ── Before: multibuffer explicitly disabled (multibuffer=False), load and compute are serial ──
   rope_kernel[grid](
       in_ptr, pos_ptr, cu_seqlens, out_ptr,
       head, base, DIM, max_seq_len, REVERSE,
-      multibuffer=False,  # 显式关闭；默认值为 True（已开启），串行需手动关闭
+      multibuffer=False,  # explicitly disabled; default is True (on), disable manually for serial execution
   )
 
-  # ── After: 显式开启 multibuffer ──
+  # ── After: explicitly enable multibuffer ──
   rope_kernel[grid](
       in_ptr, pos_ptr, cu_seqlens, out_ptr,
       head, base, DIM, max_seq_len, REVERSE,
-      multibuffer=True,  # 显式开启 Ping-Pong 双缓冲
+      multibuffer=True,  # explicitly enable Ping-Pong double buffering
   )
   ```
 
@@ -960,30 +960,30 @@
   - **方案**：改为每轮独立计算 offset（`base + k * BLOCK_SIZE`），消除迭代间 RAW 依赖——每轮的指针地址只依赖循环变量 `k` 和循环外常量 `base`，编译器可自由重排 load 指令
 
   ```python
-  # ── Before: += 引入 RAW 依赖，阻塞 MTE2 并行发射 ──
+  # ── Before: += introduces a RAW dependency, blocking parallel MTE2 issue ──
   @triton.jit
   def matmul_kernel(a_ptr, b_ptr, ...):
-      # 循环外计算基址
+      # compute base addresses outside the loop
       a_ptrs = a_ptr + (offset_m[:, None] * K + offset_k[None, :])
       b_ptrs = b_ptr + (offset_k[:, None] * N + offset_n[None, :])
       for k in range(0, tl.cdiv(K, BLOCK_K)):
-          a = tl.load(a_ptrs)  # load 必须等上一轮 a_ptrs += 完成后才能发射
+          a = tl.load(a_ptrs)  # load must wait for the previous a_ptrs += to finish before issuing
           b = tl.load(b_ptrs)
           acc += tl.dot(a, b)
-          a_ptrs += BLOCK_K       # RAW：下轮 load 等上轮完成
-          b_ptrs += BLOCK_K * N   # RAW：下轮 load 等上轮完成
+          a_ptrs += BLOCK_K       # RAW: next load waits for this one to finish
+          b_ptrs += BLOCK_K * N   # RAW: next load waits for this one to finish
 
-  # ── After: 每轮独立计算 offset，无 RAW 依赖 ──
+  # ── After: recompute the offset every iteration, no RAW dependency ──
   @triton.jit
   def matmul_kernel(a_ptr, b_ptr, ...):
-      # 循环外计算基址（不变量）
+      # base addresses computed outside the loop (invariants)
       a_ptrs_base = a_ptr + (offset_m[:, None] * K + offset_k[None, :])
       b_ptrs_base = b_ptr + (offset_k[:, None] * N + offset_n[None, :])
       for k in range(0, tl.cdiv(K, BLOCK_K)):
-          # 每轮独立计算地址：base + k * stride（无迭代间依赖）
+          # recompute the address per iteration: base + k * stride (no cross-iteration dependency)
           a_ptrs = a_ptrs_base + k * BLOCK_K
           b_ptrs = b_ptrs_base + k * BLOCK_K * N
-          a = tl.load(a_ptrs)  # 无 RAW，可提前发射
+          a = tl.load(a_ptrs)  # no RAW, can issue early
           b = tl.load(b_ptrs)
           acc += tl.dot(a, b)
   ```
@@ -997,29 +997,29 @@
   - **方案二**：外层循环多发射 `preload` 个 Cube 任务（预加载多块数据），最后 `preload` 次循环处理 cool-down（等待 Cube 结果回写）
 
   ```python
-  # ── parallel 循环：并行化多个无依赖 GM load ──
+  # ── parallel loop: parallelize multiple dependency-free GM loads ──
   import triton.language.extra.cann.extension as extension
 
-  # Before: 普通循环，编译器串行发射各轮 load
+  # Before: ordinary loop, compiler issues each load serially
   for page_iter in range(PAGE_AGGREGATION_NUM):
-      k_slice = tl.load(k_ptr + page_iter * stride)  # 串行 load
+      k_slice = tl.load(k_ptr + page_iter * stride)  # serial load
 
-  # After: 标记为可并行，编译器并行发射各轮 load
+  # After: marked as parallel, compiler issues each load in parallel
   for page_iter in extension.parallel(0, PAGE_AGGREGATION_NUM):
-      k_slice = tl.load(k_ptr + page_iter * stride)  # 并行 load
+      k_slice = tl.load(k_ptr + page_iter * stride)  # parallel load
 
-  # ── Preload + Cool-down：多发射 Cube 任务 ──
-  preload = 3  # 预加载 3 个块
-  # 外层循环多发射 preload 个 Cube 任务
-  end_block = end_block + preload  # 扩展循环范围，多发射 3 个块
+  # ── Preload + Cool-down: issue extra Cube tasks ──
+  preload = 3  # preload 3 blocks
+  # the outer loop issues preload extra Cube tasks
+  end_block = end_block + preload  # extend the loop range to issue 3 extra blocks
   for sq_loop in range(start, end_block, step):
       if sq_loop < last_loop:
-          # 正常路径：发射 Cube 任务 + preload 下一个块的数据
-          qk = tl.dot(q, k)  # Cube 任务
-          k_next = tl.load(...)  # 预加载下一块
+          # normal path: issue a Cube task + preload the next block
+          qk = tl.dot(q, k)  # Cube task
+          k_next = tl.load(...)  # preload the next block
       else:
-          # cool-down：最后 preload 次循环，等待 Cube 结果回写
-          # 不发射新 Cube 任务，只处理已发射的结果
+          # cool-down: the last preload iterations wait for Cube results to drain
+          # issue no new Cube tasks, only consume the already-issued results
           acc = acc + qk_result
   ```
 
@@ -1045,23 +1045,23 @@
     - softmax + 累积采样：softmax + multinomial → 单 kernel（消除概率矩阵的 GM 往返）
 
   ```python
-  # ── 反向 QKV 三合一（Flash Attention 反向）──
-  # Before: 两个独立 kernel，前端计算（P 矩阵）执行两遍
-  # kernel 1: bwd_q → 计算 P = softmax(Q@K^T) → dq = P @ (do - sum) @ K
-  bwd_q_kernel[grid](q, k, v, do, dq, ...)  # P 在此计算
-  # kernel 2: bwd_kv → 重新计算 P → dk = P^T @ do @ Q, dv = P^T @ do @ V
-  bwd_kv_kernel[grid](q, k, v, do, dk, dv, ...)  # P 又计算一遍
+  # ── fused backward QKV (Flash Attention backward) ──
+  # Before: two separate kernels, the front-end compute (P matrix) runs twice
+  # kernel 1: bwd_q → computes P = softmax(Q@K^T) → dq = P @ (do - sum) @ K
+  bwd_q_kernel[grid](q, k, v, do, dq, ...)  # P is computed here
+  # kernel 2: bwd_kv → recomputes P → dk = P^T @ do @ Q, dv = P^T @ do @ V
+  bwd_kv_kernel[grid](q, k, v, do, dk, dv, ...)  # P is computed again
 
-  # After: 单 kernel，前端计算只执行一遍
-  # bwd_qkv → dq, dk, dv 同时输出
-  # P 只计算一次，dq/dk/dv 共享 P 矩阵
+  # After: single kernel, the front-end compute runs only once
+  # bwd_qkv → dq, dk, dv are produced together
+  # P is computed once; dq/dk/dv share the P matrix
   bwd_qkv_kernel[grid](
       q, k, v, do,
-      dq, dk, dv,  # 三合一输出
+      dq, dk, dv,  # fused three-in-one outputs
       ...,
-      # dq 用 atomic_add 处理多核写冲突（多个 program 写同一 dq 地址）
+      # dq uses atomic_add to handle multi-core write conflicts (multiple programs write the same dq address)
   )
-  # autotune 需配 reset_to_zero=["dq_ptr"] 避免多次评估累加
+  # autotune needs reset_to_zero=["dq_ptr"] to avoid accumulation across evaluations
   ```
 
   - **案例**：FA v8 bwd — `fused bwd_qkv_kernel`，dq 用 atomic\_add
@@ -1072,21 +1072,21 @@
   - **方案**：融合为单趟，中间数据（gated 值）全程在寄存器/UB，消除 scratch GM 往返和额外显存占用
 
   ```python
-  # ── Before: 两趟，gated 写回 GM scratch ──
+  # ── Before: two passes, gated written back to a GM scratch ──
   # Pass 1: compute gated → write to scratch (GM)
-  gated = silu(x @ w_gate)  # 前端计算
-  torch.empty_like(gated).copy_(gated)  # 写回 GM scratch
+  gated = silu(x @ w_gate)  # front-end compute
+  torch.empty_like(gated).copy_(gated)  # write back to GM scratch
 
   # Pass 2: read scratch → compute RMSNorm
-  gated_from_gm = load_from_scratch()  # 从 GM 读回
+  gated_from_gm = load_from_scratch()  # read back from GM
   mean = tl.sum(gated_from_gm ** 2, axis=0) / D
   y = gated_from_gm * rsqrt(mean + eps) * weight
 
-  # ── After: 单趟，gated 全程在寄存器/UB ──
-  # gated 值不写回 GM，直接在寄存器中传给 RMSNorm 计算
-  gated = silu(x @ w_gate)  # 前端计算，结果在寄存器
-  # 直接对寄存器中的 gated 做 RMSNorm（无需 GM 往返）
-  mean = tl.sum(gated ** 2, axis=0) / D  # gated 在寄存器，零 GM 访问
+  # ── After: single pass, gated stays in registers/UB throughout ──
+  # gated is not written back to GM; passed to RMSNorm directly from registers
+  gated = silu(x @ w_gate)  # front-end compute, result lives in registers
+  # apply RMSNorm directly on the in-register gated (no GM round trip)
+  mean = tl.sum(gated ** 2, axis=0) / D  # gated is in registers, zero GM access
   y = gated * rsqrt(mean + eps) * weight
   ```
 
@@ -1099,36 +1099,36 @@
   - **方案二（头展平到 Grid）**：将核内头循环展平到 Grid 维度，`h = pid % num_kv_heads`，让不同核并行处理不同 head
 
   ```python
-  # ── 3D Block Pointer：多 Head 一次加载（RoPE）──
-  # Before: 逐 head 加载，核内 head 循环串行
+  # ── 3D Block Pointer: load all heads at once (RoPE) ──
+  # Before: per-head loads, serial head loop inside the kernel
   for head in range(num_heads):
       x = tl.load(make_block_ptr(
           base=in_ptr + begin * head * DIM + head * DIM,
-          shape=(len, DIM),          # 2D：单 head
+          shape=(len, DIM),          # 2D: single head
           strides=(head * DIM, 1),
           block_shape=(BLOCK_M, DIM // 2),
       ))
-      # ... 旋转计算 ...
+      # ... rotation compute ...
 
-  # After: 3D block_ptr 一次加载所有 head
+  # After: 3D block_ptr loads all heads at once
   x = tl.load(make_block_ptr(
       base=in_ptr + begin * head * DIM,
-      shape=(len, head, DIM),        # 3D：所有 head
-      strides=(head * DIM, DIM, 1),  # 三维 stride
-      block_shape=(BLOCK_M, head, DIM // 2),  # 一次加载所有 head
-      order=(2, 1, 0),               # 最内维 DIM 连续
+      shape=(len, head, DIM),        # 3D: all heads
+      strides=(head * DIM, DIM, 1),  # 3-D strides
+      block_shape=(BLOCK_M, head, DIM // 2),  # load all heads at once
+      order=(2, 1, 0),               # innermost dim DIM is contiguous
   ))
-  # ... 旋转计算（3D 广播）...
+  # ... rotation compute (3D broadcast) ...
 
-  # ── 头展平到 Grid：利用核间并行（KV Cache）──
-  # Before: 核内串行处理各 head
+  # ── flatten heads onto the Grid: use inter-core parallelism (KV Cache) ──
+  # Before: heads processed serially inside the kernel
   grid = (num_chunks,)
-  for h in range(num_kv_heads):  # 核内串行
+  for h in range(num_kv_heads):  # serial inside the kernel
       process(h)
 
-  # After: Grid 维度展开，各核并行处理不同 head
+  # After: Grid dimension expanded, each core handles a different head in parallel
   grid = (num_chunks * num_kv_heads,)
-  h = pid % num_kv_heads  # 从 pid 反推 head 索引
+  h = pid % num_kv_heads  # derive the head index from pid
   process(h)
   ```
 
@@ -1139,20 +1139,20 @@
   - **方案**：将逐 Q head 的 Vector 乘法改为按 KV head 分组的 Cube 矩阵乘，GROUP\_SIZE 个 Q head 融合为一个矩阵乘的 M 维度——Cube 单元的 `mmad` 指令一次完成 GROUP\_SIZE 个 Q head 与 KV 的点积
 
   ```python
-  # ── Before: Vector 逐元素乘 + 归约（GQA decode）──
-  # 逐 Q head 处理，Vector 单元做逐元素乘 + sum 归约
+  # ── Before: Vector elementwise multiply + reduction (GQA decode) ──
+  # process Q heads one by one; the Vector unit does elementwise multiply + sum reduction
   for q_head in range(GROUP_SIZE):
-      q = tl.load(q_ptr + q_head * stride)  # 单 Q head
-      # Vector 逐元素乘 + 归约（Cube 空闲）
-      qk = tl.sum(q[None, :] * k, axis=head_dim)  # Vector 乘 + sum
-      # ... 后续 softmax ...
+      q = tl.load(q_ptr + q_head * stride)  # a single Q head
+      # Vector elementwise multiply + reduction (Cube idle)
+      qk = tl.sum(q[None, :] * k, axis=head_dim)  # Vector multiply + sum
+      # ... subsequent softmax ...
 
-  # ── After: Cube 矩阵乘，GROUP_SIZE 个 Q head 融合 ──
-  # 按 KV head 分组，GROUP_SIZE 个 Q head 融合为矩阵乘的 M 维
-  q_group = tl.load(q_ptr + kv_head * GROUP_SIZE * stride)  # GROUP_SIZE 个 Q head
-  # Cube 矩阵乘：一次完成 GROUP_SIZE 个 Q head 与 K 的点积
-  qk = tl.dot(q_group, tl.trans(k))  # Cube mmad，任务数减少 GROUP_SIZE 倍
-  # ... 后续 softmax ...
+  # ── After: Cube matmul, GROUP_SIZE Q heads fused ──
+  # group by KV head; GROUP_SIZE Q heads fuse into the M dimension of the matmul
+  q_group = tl.load(q_ptr + kv_head * GROUP_SIZE * stride)  # GROUP_SIZE Q heads
+  # Cube matmul: dot products of GROUP_SIZE Q heads with K in one shot
+  qk = tl.dot(q_group, tl.trans(k))  # Cube mmad, task count reduced by GROUP_SIZE×
+  # ... subsequent softmax ...
   ```
 
   - **案例**：FA/SWA decode — GQA group-fusion + Cube grid
@@ -1165,48 +1165,48 @@
   - **方案三**：统一数据布局，全程 D-T 布局一致（输入、权重、输出都用同一布局），消除所有转置
 
   ```python
-  # ── Mask 预计算（Flash Attention）──
-  # Before: 运行时逐元素计算 mask（kernel 内 Vector 计算）
+  # ── Mask precomputation (Flash Attention) ──
+  # Before: elementwise mask computed at runtime (Vector compute inside the kernel)
   @triton.jit
   def mask_fn(q_attn_arg, k_attn_arg, q_offset, k_offset):
       tril_causal = q_offset[:, None] >= k_offset[None, :]
       attn_args_mask = (q_attn_arg == k_attn_arg) | (k_attn_arg == 0)
       return (tril_causal & attn_args_mask) | (q_offset == k_offset)
 
-  mask = mask_fn(q_attn_arg, k_attn_arg, offset_m, offset_n)  # Vector 计算
+  mask = mask_fn(q_attn_arg, k_attn_arg, offset_m, offset_n)  # Vector compute
 
-  # After: 直接加载预计算 mask（kernel 内 MTE2 搬入）
-  # 主机端预计算 mask_tensor [batch, max_q_len, max_k_len]
-  mask = tl.load(mask_block_ptr)  # MTE2 搬入，零 Vector 计算
+  # After: load the precomputed mask directly (MTE2 move inside the kernel)
+  # precompute mask_tensor on the host [batch, max_q_len, max_k_len]
+  mask = tl.load(mask_block_ptr)  # MTE2 move, zero Vector compute
 
-  # ── Group RMSNorm 融合 ──
-  # Before: 逐 group 循环，N 个 kernel 启动
+  # ── Group RMSNorm fusion ──
+  # Before: per-group loop, N kernel launches
   for group in range(num_groups):
-      rmsnorm_kernel[grid](x[group], weight[group])  # 每次启动一个 kernel
+      rmsnorm_kernel[grid](x[group], weight[group])  # one kernel launch each time
 
-  # After: 单 kernel 融合所有 group
+  # After: a single kernel fuses all groups
   @triton.jit
   def group_rmsnorm_kernel(x_ptr, weight_ptr, head_to_group_ptr, ...):
       pid = tl.program_id(0)
-      head = pid  # 每个 program 处理一个 head
-      group = tl.load(head_to_group_ptr + head)  # 查找 head 属于哪个 group
-      # 用 tl.where 选择对应 group 的 weight
+      head = pid  # each program handles one head
+      group = tl.load(head_to_group_ptr + head)  # look up which group the head belongs to
+      # use tl.where to select the weight of the corresponding group
       w = tl.load(weight_ptr + group * stride + offs_d)
-      ...  # RMSNorm 计算
+      ...  # RMSNorm compute
 
-  # ── Conv1D 布局一致性 ──
-  # Before: 加载后转置 × 3 次（输入、权重、输出各转置一次）
-  x = tl.trans(tl.load(x_ptr + ...))   # 转置 1：输入
-  w = tl.trans(tl.load(w_ptr + ...))   # 转置 2：权重
+  # ── Conv1D layout consistency ──
+  # Before: 3 transposes after loads (input, weight, output each once)
+  x = tl.trans(tl.load(x_ptr + ...))   # transpose 1: input
+  w = tl.trans(tl.load(w_ptr + ...))   # transpose 2: weight
   result = tl.dot(x, w)
-  out = tl.trans(result)                # 转置 3：输出
+  out = tl.trans(result)                # transpose 3: output
   tl.store(out_ptr + ..., out)
 
-  # After: 全程 D-T 布局一致，无转置
-  x = tl.load(x_ptr + ...)   # D-T 布局加载，不转置
-  w = tl.load(w_ptr + ...)   # D-T 布局加载，不转置
-  result = tl.dot(x, w)      # D-T 布局矩阵乘
-  tl.store(out_ptr + ..., result)  # D-T 布局存储，不转置
+  # After: D-T layout consistent throughout, no transposes
+  x = tl.load(x_ptr + ...)   # D-T layout load, no transpose
+  w = tl.load(w_ptr + ...)   # D-T layout load, no transpose
+  result = tl.dot(x, w)      # D-T layout matmul
+  tl.store(out_ptr + ..., result)  # D-T layout store, no transpose
   ```
 
   - **案例**：FA v5/v8 bwd — mask\_tensor 替代 mask\_fn
@@ -1228,21 +1228,21 @@
   - **方案**：`tl.where(mask, value, -inf)` 只需一条 Vector 选择指令——硬件直接按 mask 条件选择 value 或 -inf，无需类型转换和乘法
 
   ```python
-  # ── Before: 乘法 mask（3 条指令）──
+  # ── Before: multiply mask (3 instructions) ──
   @triton.jit
   def attn_kernel(q_ptr, k_ptr, ...):
-      # ... 计算 qk 分数 ...
+      # ... compute qk scores ...
       mask = (offs_m[:, None] < Q_LEN) & (offs_n[None, :] < K_LEN)
-      # 乘法 mask：类型转换 + 减法 + 乘法（3 条 Vector 指令）
-      block_s = qk - (1.0 - mask.to(tl.float32)) * 1e6  # 越界位置减去大数
+      # multiply mask: cast + subtract + multiply (3 Vector instructions)
+      block_s = qk - (1.0 - mask.to(tl.float32)) * 1e6  # subtract a large number at out-of-bounds positions
 
-  # ── After: where mask（1 条指令）──
+  # ── After: where mask (1 instruction) ──
   @triton.jit
   def attn_kernel(q_ptr, k_ptr, ...):
-      # ... 计算 qk 分数 ...
+      # ... compute qk scores ...
       mask = (offs_m[:, None] < Q_LEN) & (offs_n[None, :] < K_LEN)
-      # where mask：硬件条件选择（1 条 Vector 指令）
-      block_s = tl.where(mask, qk, -1e6)  # 越界位置直接置为 -inf
+      # where mask: hardware conditional select (1 Vector instruction)
+      block_s = tl.where(mask, qk, -1e6)  # set out-of-bounds positions directly to -inf
   ```
 
 - 9.2 预计算 Mask + 全局缓存：从运行时计算到直接加载
@@ -1251,38 +1251,38 @@
   - **方案二**：mask 参数不变时缓存预计算 mask 张量——按 mask 参数（如 window\_size）作为缓存键，参数不变时直接返回缓存的 mask\_tensor，避免重复预计算
 
   ```python
-  # ── 预计算单 mask（SWA prefill）──
-  # Before: 4 次 load + 3 次布尔运算（kernel 内逐元素计算）
+  # ── precompute a single mask (SWA prefill) ──
+  # Before: 4 loads + 3 boolean ops (elementwise compute inside the kernel)
   @triton.jit
   def swa_kernel(q_ptr, k_ptr, ...):
-      # 4 次 mask load
-      tril_mask = gen_mask_tril(offs_m, offs_n)       # causal 下三角
-      triu_mask = gen_mask_triu(offs_m, offs_n)       # attention arg 上三角
-      bound_mask = gen_mask_bound(offs_n, K_LEN)      # 边界 mask
-      q_mask = gen_mask_q(offs_m, Q_LEN)              # query 边界
-      # 3 次布尔运算组合
-      mask = tril_mask & (triu_mask | bound_mask) & q_mask  # Vector 计算
+      # 4 mask loads
+      tril_mask = gen_mask_tril(offs_m, offs_n)       # causal lower triangle
+      triu_mask = gen_mask_triu(offs_m, offs_n)       # attention-arg upper triangle
+      bound_mask = gen_mask_bound(offs_n, K_LEN)      # boundary mask
+      q_mask = gen_mask_q(offs_m, Q_LEN)              # query boundary
+      # combine with 3 boolean ops
+      mask = tril_mask & (triu_mask | bound_mask) & q_mask  # Vector compute
 
-  # After: 1 次 load（主机端预计算单 mask）
+  # After: 1 load (single mask precomputed on the host)
   @triton.jit
   def swa_kernel(q_ptr, k_ptr, mask_ptr, ...):
-      # 1 次 MTE2 load，零 Vector 计算
-      mask = tl.load(mask_ptr + offsets)  # 预计算 mask 直接加载
+      # 1 MTE2 load, zero Vector compute
+      mask = tl.load(mask_ptr + offsets)  # load the precomputed mask directly
 
-  # ── 全局缓存（SWA prefill）──
-  # Before: 每次调用重算预计算 mask
+  # ── global cache (SWA prefill) ──
+  # Before: recomputes the precomputed mask on every call
   def swa_forward(q, k, window_size, ...):
-      mask = precompute_mask(window_size, ...)  # 每次 forward 都重算
+      mask = precompute_mask(window_size, ...)  # recomputed every forward
       swa_kernel[grid](q, k, mask, ...)
 
-  # After: mask 参数不变时缓存命中
+  # After: cache hit when the mask parameters are unchanged
   _GLOBAL_WINDOW_SIZE = None
   _CACHED_MASK = None
 
   def swa_forward(q, k, window_size, ...):
       global _GLOBAL_WINDOW_SIZE, _CACHED_MASK
       if _GLOBAL_WINDOW_SIZE == window_size:
-          mask = _CACHED_MASK  # 缓存命中，零计算
+          mask = _CACHED_MASK  # cache hit, zero compute
       else:
           mask = precompute_mask(window_size, ...)
           _CACHED_MASK = mask
@@ -1300,29 +1300,29 @@
     - `% M / % N` 取模运算：Grid 已保证 pid 不越界（`pid < NUM_BLOCKS_M`），取模 `% M` 是冗余的，且 `%` 运算在 NPU 上导致标量退化（性能下降 5-10 倍）
 
   ```python
-  # ── 尾维 mask 消除（FlexAttention）──
-  # Before: 双维检查（即使 BLOCK_K == HEAD_DIM，尾维检查仍执行）
+  # ── tail-dim mask elimination (FlexAttention) ──
+  # Before: two-dimension check (the tail check still runs even when BLOCK_K == HEAD_DIM)
   mask = (offs_m[:, None] < Q_LEN) & (offs_k[None, :] < HEAD_DIM)
-  # 当 BLOCK_K == HEAD_DIM 时，offs_k = arange(0, HEAD_DIM) < HEAD_DIM 恒为 True
+  # when BLOCK_K == HEAD_DIM, offs_k = arange(0, HEAD_DIM) < HEAD_DIM is always True
 
-  # After: HEAD_DIM = BLOCK_SIZE，尾维检查冗余，移除
-  mask = (offs_m[:, None] < Q_LEN)  # 只保留 M 维边界检查
+  # After: HEAD_DIM = BLOCK_SIZE, tail check is redundant and removed
+  mask = (offs_m[:, None] < Q_LEN)  # keep only the M-dimension boundary check
 
-  # ── masked_out_rows 消除（FlexAttention online softmax）──
-  # Before: 安全保护（3 条指令），防止全 -inf 行导致 NaN
-  masked_out_rows = (m_ij == float('-inf'))  # 检查是否全 -inf
-  m_ij_masked = tl.where(masked_out_rows, 0, m_ij)  # 全 -inf 时置 0
-  alpha = tl.exp(m_i - m_ij_masked)  # 安全的 exp
+  # ── masked_out_rows elimination (FlexAttention online softmax) ──
+  # Before: safety guard (3 instructions) preventing NaN from all--inf rows
+  masked_out_rows = (m_ij == float('-inf'))  # check whether the row is all -inf
+  m_ij_masked = tl.where(masked_out_rows, 0, m_ij)  # set to 0 when all -inf
+  alpha = tl.exp(m_i - m_ij_masked)  # safe exp
 
-  # After: 非首块路径中 m_i 已有有效值，直接使用（消除 3 条指令）
-  alpha = tl.exp(m_i - m_ij)  # 无需安全保护
+  # After: m_i already holds a valid value on non-first-block paths, use it directly (saves 3 instructions)
+  alpha = tl.exp(m_i - m_ij)  # no safety guard needed
 
-  # ── 取模运算消除（SwiGLU fwd）──
-  # Before: 取模防止越界（且 % 导致标量退化）
-  offset = (pid * BLOCK + tl.arange(0, BLOCK)) % M  # % 运算，标量退化
+  # ── modulo elimination (SwiGLU fwd) ──
+  # Before: modulo prevents out-of-bounds (and % causes scalar degradation)
+  offset = (pid * BLOCK + tl.arange(0, BLOCK)) % M  # % op, scalar degradation
 
-  # After: Grid 已保证 pid 不越界，取模冗余
-  offset = pid * BLOCK + tl.arange(0, BLOCK)  # 连续地址，向量化
+  # After: the Grid already guarantees pid stays in bounds, modulo is redundant
+  offset = pid * BLOCK + tl.arange(0, BLOCK)  # contiguous addresses, vectorized
   ```
 
   - **案例**：FlexAttention — 移除尾维 mask、masked\_out\_rows、KV\_LEN 边界保护（6 处）
@@ -1332,39 +1332,39 @@
   - **方案**：用编译期常量（`tl.constexpr`）控制是否生成 mask 代码——将"是否对齐"的判断从运行时提升到编译时，编译器在编译期直接消除整段死代码
 
   ```python
-  # ── Before: 总是生成 mask（即使列已对齐）──
+  # ── Before: always generates the mask (even when columns are aligned) ──
   @triton.jit
   def gelu_fwd_kernel(x_ptr, y_ptr, n_cols, ...,
                       BLOCK_SIZE: tl.constexpr):
       pid = tl.program_id(0)
       offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-      # 总是生成 mask，即使 n_cols % BLOCK_SIZE == 0（mask 恒为 True）
+      # always generates the mask, even when n_cols % BLOCK_SIZE == 0 (mask is always True)
       mask = (offs < n_cols)
       x = tl.load(x_ptr + offs, mask=mask, other=0.0)
       y = x * 0.5 * (1.0 + tl.tanh(0.7978 * (x + 0.0447 * x * x * x)))
       tl.store(y_ptr + offs, y, mask=mask)
 
-  # ── After: constexpr 控制，编译期消除 mask ──
+  # ── After: constexpr controls it, mask eliminated at compile time ──
   @triton.jit
   def gelu_fwd_kernel(x_ptr, y_ptr, n_cols, ...,
                       BLOCK_SIZE: tl.constexpr,
-                      COL_ALIGNED: tl.constexpr):  # 编译期常量
+                      COL_ALIGNED: tl.constexpr):  # compile-time constant
       pid = tl.program_id(0)
       offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
       if not COL_ALIGNED:
-          # 仅不对齐时生成 mask 代码（编译期决定）
+          # generate mask code only when unaligned (decided at compile time)
           mask = (offs < n_cols)
           x = tl.load(x_ptr + offs, mask=mask, other=0.0)
           y = x * 0.5 * (1.0 + tl.tanh(0.7978 * (x + 0.0447 * x * x * x)))
           tl.store(y_ptr + offs, y, mask=mask)
       else:
-          # 对齐时无 mask（编译器消除 if not 分支）
-          x = tl.load(x_ptr + offs)  # 无 mask
+          # no mask when aligned (the compiler removes the if-not branch)
+          x = tl.load(x_ptr + offs)  # no mask
           y = x * 0.5 * (1.0 + tl.tanh(0.7978 * (x + 0.0447 * x * x * x)))
-          tl.store(y_ptr + offs, y)  # 无 mask
+          tl.store(y_ptr + offs, y)  # no mask
 
-  # 调用处：编译期传入 COL_ALIGNED
-  COL_ALIGNED = (n_cols % BLOCK_SIZE == 0)  # 编译期计算
+  # Call site: COL_ALIGNED passed in at compile time
+  COL_ALIGNED = (n_cols % BLOCK_SIZE == 0)  # computed at compile time
   gelu_fwd_kernel[grid](x, y, n_cols, COL_ALIGNED=COL_ALIGNED, ...)
   ```
 
@@ -1389,45 +1389,45 @@
   - **方案二（权重转置缓存）**：按 `data_ptr()` 键缓存转置结果，消除重复 O(N·K) 转置——每次 forward 都做 `weight.t().contiguous()` 是 O(N·K) 的数据搬运，但权重内容不变时转置结果可缓存复用
 
   ```python
-  # ── Sin/Cos 预计算（RoPE）──
-  # Before: kernel 内计算超越函数（多条 Vector 指令）
+  # ── Sin/Cos precomputation (RoPE) ──
+  # Before: transcendentals computed inside the kernel (many Vector instructions)
   @triton.jit
   def rope_kernel(in_ptr, pos_ptr, out_ptr, ...):
       pos = tl.load(pos_ptr + offsets)
-      freqs = pos[:, None] * inv_freq[None, :]  # 计算频率
-      sin = tl.sin(freqs)  # 昂贵的超越函数（多条 Vector 指令）
-      cos = tl.cos(freqs)  # 昂贵的超越函数
-      x1 = x0 * cos - y0 * sin  # 旋转
+      freqs = pos[:, None] * inv_freq[None, :]  # compute frequencies
+      sin = tl.sin(freqs)  # expensive transcendental (many Vector instructions)
+      cos = tl.cos(freqs)  # expensive transcendental
+      x1 = x0 * cos - y0 * sin  # rotation
       ...
 
-  # After: 直接 load 预计算结果（1 次 MTE2 load）
+  # After: load the precomputed results directly (1 MTE2 load)
   @triton.jit
   def rope_kernel(in_ptr, pos_ptr, sin_cache_ptr, cos_cache_ptr, out_ptr, ...):
-      # 直接加载预计算 sin/cos（零超越函数计算）
-      sin = tl.load(sin_cache_ptr + offsets)  # MTE2 搬入
-      cos = tl.load(cos_cache_ptr + offsets)  # MTE2 搬入
-      x1 = x0 * cos - y0 * sin  # 旋转
+      # load the precomputed sin/cos directly (zero transcendental compute)
+      sin = tl.load(sin_cache_ptr + offsets)  # MTE2 move-in
+      cos = tl.load(cos_cache_ptr + offsets)  # MTE2 move-in
+      x1 = x0 * cos - y0 * sin  # rotation
       ...
 
-  # 主机端预计算
+  # host-side precomputation
   def rope_forward(x, position, ...):
-      sin_cache, cos_cache = precompute_sin_cos(position, base, DIM)  # CPU 计算
+      sin_cache, cos_cache = precompute_sin_cos(position, base, DIM)  # CPU compute
       rope_kernel[grid](x, position, sin_cache, cos_cache, out, ...)
 
-  # ── 权重转置缓存（GEMM）──
-  # Before: 每次 forward 重算转置（O(N·K) 数据搬运）
+  # ── weight-transpose cache (GEMM) ──
+  # Before: transpose recomputed every forward (O(N·K) data movement)
   def gemm_forward(x, weight, ...):
-      weight_t = weight.t().contiguous()  # 每次 forward 都转置
+      weight_t = weight.t().contiguous()  # transposed every forward
       gemm_kernel[grid](x, weight_t, ...)
 
-  # After: 按 data_ptr() 缓存，权重不变时复用
-  _bt_cache = {}  # 全局缓存字典
+  # After: cache by data_ptr(), reused while the weight is unchanged
+  _bt_cache = {}  # global cache dict
 
   def gemm_forward(x, weight, ...):
-      key = weight.data_ptr()  # 用张量内存地址作为缓存键
+      key = weight.data_ptr()  # use the tensor memory address as the cache key
       if key not in _bt_cache:
-          _bt_cache[key] = weight.t().contiguous()  # 首次计算并缓存
-      weight_t = _bt_cache[key]  # 后续直接复用
+          _bt_cache[key] = weight.t().contiguous()  # compute and cache on first use
+      weight_t = _bt_cache[key]  # reused directly afterwards
       gemm_kernel[grid](x, weight_t, ...)
   ```
 
@@ -1440,39 +1440,39 @@
   - **方案二（CANN extension）**：用 CANN 扩展版本替代通用 slice，直接映射 DMA 切片指令，跳过范围检查
 
   ```python
-  # ── L1 Cache 聚合（FA/SWA page aggregation）──
-  # Before: 逐页加载 + 小 matmul，Cube 利用率低
+  # ── L1 cache aggregation (FA/SWA page aggregation) ──
+  # Before: per-page loads + small matmuls, low Cube utilization
   @triton.jit
   def fa_kernel(q_ptr, k_ptr, ...):
       for kv_block in range(num_kv_blocks):
-          k = tl.load(k_ptr + kv_block * page_stride)  # 单页加载
-          qk = tl.dot(q, tl.trans(k))  # 小 matmul，Cube 利用率低
+          k = tl.load(k_ptr + kv_block * page_stride)  # single-page load
+          qk = tl.dot(q, tl.trans(k))  # small matmul, low Cube utilization
           # ... softmax ...
 
-  # After: 聚合为大 tile + 大 matmul，Cube 利用率高
+  # After: aggregate into a large tile + big matmul, high Cube utilization
   @triton.jit
   def fa_kernel(q_ptr, k_ptr, ..., PAGE_AGG_NUM: tl.constexpr):
-      PAGE_AGG = PAGE_AGG_NUM  # 聚合页数
+      PAGE_AGG = PAGE_AGG_NUM  # number of aggregated pages
       for kv_block in range(0, num_kv_blocks, PAGE_AGG):
-          # 预分配大 tile
+          # pre-allocate the large tile
           k = tl.zeros((PAGE_AGG * BLOCK_N, D), dtype=tl.float16)
           for i in range(PAGE_AGG):
-              # 加载单页并插入大 tile 的对应位置
+              # load one page and insert it at the right place in the large tile
               k_slice = tl.load(k_ptr + (kv_block + i) * page_stride)
               k = insert_slice(k, k_slice, offset=i * BLOCK_N, axis=0)
-          # 大 matmul，Cube 利用率高
-          qk = tl.dot(q, tl.trans(k))  # 矩阵规模增大 PAGE_AGG 倍
+          # big matmul, high Cube utilization
+          qk = tl.dot(q, tl.trans(k))  # matrix size grows by PAGE_AGG×
           # ... softmax ...
 
   # ── CANN extension slice（RoPE / Conv1D / GroupGEMM / VisionRoPE）──
-  # Before: 通用版本（运行时范围检查）
+  # Before: generic version (runtime range checks)
   slice_result = tl.extract_slice(tensor, offsets, shape, strides)
-  # 运行时检查 offsets + shape 是否越界（Vector 开销）
+  # runtime check whether offsets + shape go out of bounds (Vector overhead)
 
-  # After: CANN 扩展（直接映射 DMA 指令，跳过检查）
+  # After: CANN extension (maps directly to a DMA instruction, skipping the checks)
   import triton.language.extra.cann.extension as extension
   slice_result = extension.extract_slice(tensor, offsets, shape, strides)
-  # 直接发起 DMA 切片指令，零范围检查开销
+  # issues a DMA slice instruction directly, zero range-check overhead
   ```
 
   - **案例**：FA/SWA prefill — 小 page 聚合提升 Cube 利用率
@@ -1482,25 +1482,25 @@
   - **方案一**：将无依赖 load 提前到有依赖 load 之前，使无依赖 load 与上一轮 store 并行执行
 
   ```python
-  # ── Load 重排序（Quant/RoPE）──
-  # Before: 依赖 load 先执行，无依赖 load 后执行（串行）
+  # ── Load reordering (Quant/RoPE) ──
+  # Before: dependent load first, dependency-free load after (serial)
   @triton.jit
   def kernel(x_ptr, scale_ptr, ...):
       for i in range(num_iters):
-          # x 的 load 依赖上一轮 store（同一地址），阻塞
+          # x load depends on the previous store (same address), so it is blocked
           x = tl.load(x_ptr + offsets)
-          # scale 的 load 无依赖，但必须等 x 的 load 完成后才能发射
+          # scale load has no dependency, but must wait for x load to finish before issuing
           scale = tl.load(scale_ptr + offsets)
           # ... compute ...
-          tl.store(x_ptr + offsets, result)  # 下一轮 x load 依赖此 store
+          tl.store(x_ptr + offsets, result)  # next iteration x load depends on this store
 
-  # After: 无依赖 load 先发射，两个 load 并行
+  # After: issue the dependency-free load first, both loads run in parallel
   @triton.jit
   def kernel(x_ptr, scale_ptr, ...):
       for i in range(num_iters):
-          # scale 的 load 无依赖，先发射（与上一轮 store 并行）
+          # scale load has no dependency, issued first (parallel with the previous store)
           scale = tl.load(scale_ptr + offsets)
-          # x 的 load 依赖上一轮 store，后发射
+          # x load depends on the previous store, issued later
           x = tl.load(x_ptr + offsets)
           # ... compute ...
           tl.store(x_ptr + offsets, result)
@@ -1514,8 +1514,8 @@
   - **方案二**：用 `torch.empty_like()`（仅分配内存，无拷贝）替代 `clone`（分配 + 拷贝），配合非原地 kernel（读写不同地址）
 
   ```python
-  # ── Block Pointer 替代手动指针算术 ──
-  # Before: 手动指针算术 + mask（Vector 计算 offset 和 mask）
+  # ── Block Pointer replaces manual pointer arithmetic ──
+  # Before: manual pointer arithmetic + mask (Vector computes offsets and mask)
   @triton.jit
   def kernel(ptr, M, N, stride, ...,
              BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
@@ -1523,19 +1523,19 @@
       pid_n = tl.program_id(1)
       row = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
       col = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-      # 手动计算 offset（Vector 计算）
+      # manually compute the offset (Vector compute)
       offsets = row[:, None] * stride + col[None, :]
-      # 手动计算 mask（Vector 计算）
+      # manually compute the mask (Vector compute)
       mask = (row[:, None] < M) & (col[None, :] < N)
-      x = tl.load(ptr + offsets, mask=mask)  # 手动 load
+      x = tl.load(ptr + offsets, mask=mask)  # manual load
 
-  # After: block_ptr 自动处理边界（DMA 描述符硬件完成）
+  # After: block_ptr handles boundaries automatically (done by the DMA descriptor hardware)
   @triton.jit
   def kernel(ptr, M, N, stride, ...,
              BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
       pid_m = tl.program_id(0)
       pid_n = tl.program_id(1)
-      # block_ptr：DMA 描述符自动处理边界，零 Vector 开销
+      # block_ptr: the DMA descriptor handles boundaries automatically, zero Vector overhead
       block_ptr = tl.make_block_ptr(
           base=ptr,
           shape=(M, N),
@@ -1544,18 +1544,18 @@
           block_shape=(BLOCK_M, BLOCK_N),
           order=(1, 0),
       )
-      x = tl.load(block_ptr)  # 自动 load，越界位置填充 0
+      x = tl.load(block_ptr)  # automatic load, out-of-bounds filled with 0
 
-  # ── empty_like 替代 clone（RoPE）──
-  # Before: 分配 + 拷贝（O(N) 数据搬运 + 原地 RAW 冒险）
+  # ── empty_like replaces clone (RoPE) ──
+  # Before: allocate + copy (O(N) data movement + in-place RAW hazard)
   def rope_forward(q, ...):
-      q_out = torch.clone(q)  # 分配新内存 + 拷贝 q 的所有数据
-      rope_kernel[grid](q_out, ...)  # 原地修改 q_out（读写同一地址）
+      q_out = torch.clone(q)  # allocate new memory + copy all of q data
+      rope_kernel[grid](q_out, ...)  # modifies q_out in place (reads and writes the same address)
 
-  # After: 仅分配（无拷贝，非原地无 RAW）
+  # After: allocate only (no copy, not in-place, no RAW)
   def rope_forward(q, ...):
-      q_out = torch.empty_like(q)  # 仅分配内存，不拷贝数据
-      rope_kernel[grid](q, q_out, ...)  # 非原地：读 q，写 q_out（不同地址）
+      q_out = torch.empty_like(q)  # allocate memory only, no data copy
+      rope_kernel[grid](q, q_out, ...)  # not in-place: read q, write q_out (different addresses)
   ```
 
   - **案例**：VisionRoPE — 3D block\_ptr for cos/sin/q/k
@@ -1567,38 +1567,38 @@
   - **方案二**：将 cast 提前到 transpose 之前，cast 结果可被 dv 和 dk 两处复用（`tl.trans` 只是布局变换，不改变数据）
 
   ```python
-  # ── Bias 提前加载（Fused MatMul fwd）──
-  # Before: 每轮重复加载 bias（循环不变量在循环内）
+  # ── Bias hoisting (Fused MatMul fwd) ──
+  # Before: bias reloaded every iteration (loop invariant kept inside the loop)
   @triton.jit
   def matmul_kernel(a_ptr, b_ptr, bias_ptr, c_ptr, ...):
       for k in range(0, K, BLOCK_K):
-          bias = tl.load(bias_ptr + offsets)  # 每轮重复加载（浪费）
+          bias = tl.load(bias_ptr + offsets)  # reloaded every iteration (wasteful)
           a = tl.load(a_ptr + ...)
           b = tl.load(b_ptr + ...)
-          acc += tl.dot(a, b) + bias[None, :]  # bias 每轮加一次
+          acc += tl.dot(a, b) + bias[None, :]  # bias added every iteration
 
-  # After: 循环外加载一次 + 显式广播
+  # After: load once outside the loop + explicit broadcast
   @triton.jit
   def matmul_kernel(a_ptr, b_ptr, bias_ptr, c_ptr, ...):
-      # 循环外加载一次
+      # load once outside the loop
       bias = tl.load(bias_ptr + offsets)
-      bias = tl.broadcast_to(bias[None, :])  # 显式广播到矩阵维度
+      bias = tl.broadcast_to(bias[None, :])  # explicitly broadcast to the matrix dimensions
       for k in range(0, K, BLOCK_K):
           a = tl.load(a_ptr + ...)
           b = tl.load(b_ptr + ...)
-          acc += tl.dot(a, b)  # 循环内不加 bias
-      acc += bias  # 循环外加一次
+          acc += tl.dot(a, b)  # no bias added inside the loop
+      acc += bias  # added once outside the loop
 
   # ── Cast Hoisting（FA v5 bwd_kv / FA v8 bwd_q）──
-  # Before: trans 后 cast，重复转换
-  # p 需要转置后用于 dv 和 dk 两处，每处都重新 cast
-  dv = tl.dot(tl.trans(p).to(dtype), do)       # trans 后 cast（第 1 次）
-  dk = tl.dot(tl.trans(p).to(dtype), do_other)  # trans 后 cast（第 2 次，重复）
+  # Before: cast after trans, repeated conversion
+  # p is transposed for both dv and dk, and cast again at each use site
+  dv = tl.dot(tl.trans(p).to(dtype), do)       # cast after trans (1st time)
+  dk = tl.dot(tl.trans(p).to(dtype), do_other)  # cast after trans (2nd time, duplicated)
 
-  # After: trans 前 cast 一次，复用结果
-  p = p.to(dtype)                       # trans 前 cast（只 1 次）
-  dv = tl.dot(tl.trans(p), do)          # 复用 cast 后的 p
-  dk = tl.dot(tl.trans(p), do_other)    # 复用 cast 后的 p
+  # After: cast once before trans, reuse the result
+  p = p.to(dtype)                       # cast before trans (only once)
+  dv = tl.dot(tl.trans(p), do)          # reuse the cast p
+  dk = tl.dot(tl.trans(p), do_other)    # reuse the cast p
   ```
 
   - **案例**：Fused MatMul fwd — bias 循环外提前加载
@@ -1610,36 +1610,36 @@
   - **方案二**：`tl.full([M], float("-inf"))` 直接填充目标值（1 条指令），消除减法操作
 
   ```python
-  # ── Mask 类型转换（FA v4 fwd）──
-  # Before: 隐式 bool（可能触发不确定行为）
+  # ── Mask type conversion (FA v4 fwd) ──
+  # Before: implicit bool (may trigger undefined behavior)
   @triton.jit
   def fa_kernel(...):
       q_offset = tl.arange(0, BLOCK_M) * stride
       k_offset = tl.arange(0, BLOCK_N) * stride
-      # 隐式 bool 类型，参与 where 时可能不确定
+      # implicit bool type, may be undefined when used with where
       mask = (q_offset <= k_offset)
       block_s = tl.where(mask, block_s, -1e6)
 
-  # After: 显式 int32（类型安全）
+  # After: explicit int32 (type-safe)
   @triton.jit
   def fa_kernel(...):
       q_offset = tl.arange(0, BLOCK_M) * stride
       k_offset = tl.arange(0, BLOCK_N) * stride
-      # 显式转换为 int32，确保类型安全
+      # explicitly cast to int32 to ensure type safety
       mask = (q_offset <= k_offset).to(tl.int32)
       block_s = tl.where(mask, block_s, -1e6)
 
-  # ── tl.full 替代 zeros - inf（FlexAttention）──
-  # Before: 2 条指令（创建零张量 + 减法）
+  # ── tl.full replaces zeros - inf (FlexAttention) ──
+  # Before: 2 instructions (create zero tensor + subtraction)
   @triton.jit
   def fa_kernel(...):
-      # 先创建零张量，再减去 inf（2 条 Vector 指令）
+      # first create a zero tensor, then subtract inf (2 Vector instructions)
       m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
 
-  # After: 1 条指令（直接填充 -inf）
+  # After: 1 instruction (fill -inf directly)
   @triton.jit
   def fa_kernel(...):
-      # 直接填充目标值（1 条 Vector 指令）
+      # fill the target value directly (1 Vector instruction)
       m_i = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
   ```
 
@@ -1680,25 +1680,25 @@
   def kernel(x_ptr, y_ptr, n, BLOCK: tl.constexpr):
       pid = tl.program_id(0)
       offs = pid * BLOCK + tl.arange(0, BLOCK)
-      wrap = offs % n                  # 越界下标绕回数组开头
-      mask = offs < n                  # store 的守卫掩码
-      v = tl.load(x_ptr + wrap)        # load 无掩码（读绕回数据）
+      wrap = offs % n                  # wrap out-of-bounds indices back to the start
+      mask = offs < n                  # guard mask for the store
+      v = tl.load(x_ptr + wrap)        # load without mask (reads the wrapped data)
       tl.store(y_ptr + offs, v, mask=mask)
   ```
 
   - **改写**：去掉取模让地址恢复连续，同时给 load 补上同样的掩码（越界位置读 0）
 
   ```ttir
-  # Before：offs % n 把连续地址打乱成跳跃的，load 无掩码
+  # Before: offs % n scrambles contiguous addresses into jumps, load has no mask
   %wrap = arith.remsi %offs, %n       # offs % n
   %addr = arith.addi %kb, %wrap
-  %v    = tt.load %wa                 # load 无掩码
-  tt.store %oa, %v, %gb               # store 已带 offs < n 掩码
+  %v    = tt.load %wa                 # load without mask
+  tt.store %oa, %v, %gb               # store already carries the offs < n mask
 
-  # After：地址恢复线性，load 补掩码 + 零填充
+  # After: addresses become linear again, load gets a mask + zero fill
   %cmp  = arith.cmpi slt, %offs, %n   # offs < n
-  %addr = arith.addi %kb, %offs       # 地址线性化
-  %v    = tt.load %wa, %cmp, %cst     # 补掩码，越界读 0
+  %addr = arith.addi %kb, %offs       # linearized addresses
+  %v    = tt.load %wa, %cmp, %cst     # mask added, out-of-bounds reads 0
   tt.store %oa, %v, %cmp
   ```
 
@@ -1711,9 +1711,9 @@
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, M: tl.constexpr, N: tl.constexpr):
-      rows = tl.arange(0, M)           # 32 行
-      cols = tl.arange(0, N)           # 16 列
-      # 元素 (r, c) 的地址 = r + c * M：内维步长 M，读一个元素跳 M 个元素
+      rows = tl.arange(0, M)           # 32 rows
+      cols = tl.arange(0, N)           # 16 columns
+      # address of element (r, c) = r + c * M: inner-dim stride M, each element jumps M elements
       offs = rows[:, None] + cols[None, :] * M
       v = tl.load(x_ptr + offs)        # [32, 16]
       tl.store(y_ptr + offs, v + 1.0)
@@ -1722,15 +1722,15 @@
   - **改写**：把整个"读→算→写"闭包的维度顺序调换，使最内维变成内存中真正连续的那维；同步改写掩码、assert、循环携带指针，以及循环之后 reduce 的轴号
 
   ```ttir
-  # Before：最内维 16 列每列相隔 32 个元素，读一个元素跳 128 字节
-  %off = arith.addi %mb, %nb          # 32×16 偏移
+  # Before: the 16 innermost columns are 32 elements apart, each read jumps 128 bytes
+  %off = arith.addi %mb, %nb          # 32×16 offsets
   %sa  = tt.addptr %sp, %off
   %x   = tt.load %sa : tensor<32x16x!tt.ptr>
   %y   = arith.addf %x, %one
   tt.store %da, %y
 
-  # After：调换维度顺序，最内维 32 个元素紧邻，一次连续搬 128 字节
-  %off = arith.addi %mb, %nb          # 16×32 偏移
+  # After: swap the dimension order, the 32 innermost elements are adjacent, moved in one 128-byte burst
+  %off = arith.addi %mb, %nb          # 16×32 offsets
   %sa  = tt.addptr %sp, %off
   %x   = tt.load %sa : tensor<16x32x!tt.ptr>
   %y   = arith.addf %x, %cst
@@ -1751,20 +1751,20 @@
       v0 = tl.load(x_ptr + offs0)
       v1 = tl.load(x_ptr + offs1)
       tl.store(y_ptr + offs0, v0)      # [0, BLOCK)
-      tl.store(y_ptr + offs1, v1)      # [BLOCK, 2*BLOCK)，紧邻上一段
+      tl.store(y_ptr + offs1, v1)      # [BLOCK, 2*BLOCK), contiguous with the previous segment
   ```
 
   - **改写**：先在寄存器中把数据拼成一个大张量，最后一次性写出
 
   ```ttir
-  # Before：两段相邻 store 分两次写
+  # Before: two adjacent stores write in two separate passes
   tt.store %base, %v0                 # [0, 64)
   tt.store %base + 64, %v1            # [64, 128)
 
-  # After：寄存器拼成 128 元素大张量，一次写出
+  # After: stitch into a 128-element tensor in registers, write out in one pass
   %t = tensor.insert_slice %v0 into %empty[0] [64] [1]
   %t = tensor.insert_slice %v1 into %t[64] [64] [1]
-  tt.store %base, %t                  # 一次 128 元素连续写
+  tt.store %base, %t                  # one contiguous 128-element write
   ```
 
   - **收益**：两次 256 字节的写变成一次 512 字节的写，搬运次数减半、单次更长，GM 写带宽利用率更高
@@ -1778,31 +1778,31 @@
   def kernel(x_ptr, y_ptr, n, BLOCK: tl.constexpr):
       offs = tl.arange(0, BLOCK)
       mask = offs < n
-      a = tl.load(x_ptr + offs, mask=mask, other=0.0)     # 带掩码 load
+      a = tl.load(x_ptr + offs, mask=mask, other=0.0)     # masked load
       b = tl.load(x_ptr + BLOCK + offs, mask=mask, other=0.0)
-      c = tl.cat(a, b)                  # 拼接 → 降级后两块缓冲各写一半
+      c = tl.cat(a, b)                  # concat → after lowering, two buffers each get half the data
       tl.store(y_ptr + tl.arange(0, 2 * BLOCK), c)
   ```
 
   - **改写**：把两块缓冲合并为一块；若能证明两次拷贝覆盖了后续全部读取范围，两个填充操作都删除
 
   ```ttir
-  # Before：两块 32×512 缓冲各写一半（各含一次 fill + copy + to_tensor）
+  # Before: two 32×512 buffers each written half (each with one fill + copy + to_tensor)
   %a0 = memref.alloc() : memref<32x512xf32>
   linalg.fill ins(%cst) outs(%a0)
-  memref.copy %ss0, %sd0              # 写 [0, 256)
+  memref.copy %ss0, %sd0              # writes [0, 256)
   %t0 = bufferization.to_tensor %a0
   %a1 = memref.alloc() : memref<32x512xf32>
   linalg.fill ins(%cst) outs(%a1)
-  memref.copy %ss1, %sd1              # 写 [256, 512)
+  memref.copy %ss1, %sd1              # writes [256, 512)
   %t1 = bufferization.to_tensor %a1
   %ex  = tensor.extract_slice %t0[0, 0] [32, 256] [1, 1]
   %ins = tensor.insert_slice %ex into %t1[0, 0] [32, 256] [1, 1]
 
-  # After：合并为一块缓冲，拷贝写不同 subview，两次填充删除
+  # After: merge into one buffer, copies write different subviews, both fills removed
   %a = memref.alloc() : memref<32x512xf32>
-  memref.copy %ss0, %sv0              # 写 [0, 256)
-  memref.copy %ss1, %sv1              # 写 [256, 512)
+  memref.copy %ss0, %sv0              # writes [0, 256)
+  memref.copy %ss1, %sv1              # writes [256, 512)
   %t = bufferization.to_tensor %a
   ```
 
@@ -1816,21 +1816,21 @@
   @triton.jit
   def kernel(x_ptr, y_ptr, n, S: tl.constexpr, BLOCK: tl.constexpr):
       pid = tl.program_id(0)
-      i_h = pid % S                        # 取自己负责的 head
+      i_h = pid % S                        # get the head this program handles
       tp = tl.make_block_ptr(x_ptr, (n,), (S,), (i_h,), (BLOCK,), (0,))
-      v = tl.load(tp)                      # 每隔 S 个元素取一个
+      v = tl.load(tp)                      # take one element every S elements
       tl.store(tp, v + 1.0)
   ```
 
   - **改写**：把 H 轴重新折回张量内层，组成二维 tile 一次读完；逐 head 的标量 load 相应提升为向量 load
 
   ```ttir
-  # Before：一维、步长 4，每 program 处理一个 head（pid % 4）
+  # Before: 1-D with stride 4, each program handles one head (pid % 4)
   %i_h = arith.remsi %pid, %c4        # i_h = pid % 4
   %tp  = tt.make_tensor_ptr %base, [16], [4], [i_h]
   %v   = tt.load %tp : tensor<16xf32>
 
-  # After：二维、内维步长 1，取模消失，整块连续内存一次 DMA 搬完
+  # After: 2-D with inner stride 1, modulo gone, one DMA covers the whole contiguous block
   %tp  = tt.make_tensor_ptr %base, [16, 4], [4, 1], [0, 0]
   %v   = tt.load %tp : tensor<16x4xf32>
   ```
@@ -1845,24 +1845,24 @@
   @triton.jit
   def kernel(x_ptr, y_ptr, n, T: tl.constexpr):
       pid = tl.program_id(0)
-      offs = pid * T + tl.arange(0, T)     # 每 tile 仅 T 个元素（连续字节数不足）
+      offs = pid * T + tl.arange(0, T)     # only T elements per tile (too few contiguous bytes)
       mask = offs < n
       v = tl.load(x_ptr + offs, mask=mask, other=0.0)
       tl.store(y_ptr + offs, v, mask=mask)
   ```
 
   ```ttir
-  # Before：一维 16 元素 = 64 字节、带掩码（64 字节远低于 DMA 高效传输长度）
+  # Before: 1-D, 16 elements = 64 bytes, masked (64 bytes is far below the DMA-efficient length)
   %4 = arith.addi %3, %2 : tensor<16xi32>            # offs = pid*16 + arange(16)
   %5 = arith.cmpi slt, %4, %cst_0 : tensor<16xi32>   # offs < 256
   %8 = tt.load %7, %5, %cst : tensor<16x!tt.ptr>
   tt.store %10, %8, %5 : tensor<16x!tt.ptr>
 
-  # After：二维 16×16 = 1024 字节，掩码删除
+  # After: 2-D, 16×16 = 1024 bytes, mask removed
   %7  = tt.expand_dims %5 {axis = 1 : i32} : tensor<16xi32> -> tensor<16x1xi32>
   %8  = tt.broadcast %7 : tensor<16x1xi32> -> tensor<16x16xi32>
   %11 = arith.addi %8, %10 : tensor<16x16xi32>
-  %16 = tt.load %15 : tensor<16x16x!tt.ptr>          # 无掩码
+  %16 = tt.load %15 : tensor<16x16x!tt.ptr>          # no mask
   tt.store %20, %16 : tensor<16x16x!tt.ptr>
   ```
 
@@ -1875,7 +1875,7 @@
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, BLOCK: tl.constexpr):
-      offs = tl.arange(0, BLOCK) * 3       # 步长 3：硬件跨步 DMA 不支持
+      offs = tl.arange(0, BLOCK) * 3       # stride 3: not supported by hardware strided DMA
       v = tl.load(x_ptr + offs)
       tl.store(y_ptr + offs, v)
   ```
@@ -1883,12 +1883,12 @@
   - **改写**：把步长为非 2 的幂常量的 load/store 改写为专用的 ascend.stride\_load/stride\_store 或间接访问算子
 
   ```ttir
-  # Before：步长 3 的地址链，标量循环逐个取
-  %1 = arith.muli %arange, %c3        # 步长 3
+  # Before: stride-3 address chain, scalar loop fetches one by one
+  %1 = arith.muli %arange, %c3        # stride 3
   %3 = tt.addptr %splat, %1
   %4 = tt.load %3 : tensor<256x!tt.ptr>
 
-  # After：专用跨步访问算子，交由 SIMT 并行访问单元处理
+  # After: dedicated strided-access op, handled by the SIMT parallel access unit
   %1 = ascend.stride_load %arg0, %c0_i64, %cst, [%c3_i64], [%c256_i64]
   ```
 
@@ -1903,28 +1903,28 @@
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, BLOCK: tl.constexpr):
-      pid_t = tl.program_id(0)             # token 轴
-      pid_h = tl.program_id(1)             # head 轴
+      pid_t = tl.program_id(0)             # token axis
+      pid_h = tl.program_id(1)             # head axis
       offs = tl.arange(0, BLOCK)
-      # MergeSplit 形态：4×BLOCK tile 沿 T 轴归约 → BLOCK（每 program 只处理一个 head）
+      # MergeSplit form: 4×BLOCK tile reduced along the T axis → BLOCK (each program handles one head)
       v = tl.load(x_ptr + pid_h * 4 * BLOCK + tl.arange(0, 4)[:, None] * BLOCK + offs[None, :])
-      s = tl.sum(v, axis=0)                # 归约
+      s = tl.sum(v, axis=0)                # reduction
       tl.store(y_ptr + pid_h * BLOCK + offs, s)
   ```
 
   - **改写**：原 program\_id(1) 变为长度 16 的向量，相关张量各增加一维，尾部补掩码。支持 MergeSplit 与 NormRope 两种归约形态
 
   ```ttir
-  # Before：二维 grid，每 program 处理一个 head（标量 head 索引）
+  # Before: 2-D grid, each program handles one head (scalar head index)
   %head = tt.get_program_id y
   %th   = arith.addi %th0, %head
   %v    = tt.load %xa : tensor<4x128x!tt.ptr>
   %sum  = tt.reduce(%v) {axis = 0 : i32} : (tensor<4x128xf32>) -> tensor<128xf32>
   tt.store %ya, %sum
 
-  # After：head 轴张量化，一个 program 处理 16 个 head
-  %lanes = arith.addi %pid_y*16, %arange(16)          # 16 条 head lane
-  %mask  = arith.cmpi ult, %lanes, %extent            # 尾部掩码
+  # After: head axis tensorized, one program handles 16 heads
+  %lanes = arith.addi %pid_y*16, %arange(16)          # 16 head lanes
+  %mask  = arith.cmpi ult, %lanes, %extent            # tail mask
   %v     = tt.load %xa : tensor<4x16x128x!tt.ptr>
   %sum   = tt.reduce(%v) {axis = 0 : i32} : (tensor<4x16x128xf32>) -> tensor<16x128xf32>
   tt.store %ya, %sum, %mask
@@ -1939,18 +1939,18 @@
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, D: tl.constexpr):
-      pid = tl.program_id(0)             # 一个 token 一个 program
+      pid = tl.program_id(0)             # one token per program
       offs = pid * D + tl.arange(0, D)
-      v = tl.load(x_ptr + offs)          # 一行 D 个元素
-      s2 = tl.sum(v * v)                 # RMSNorm 类：sum(x²)
-      # LayerNorm 类再加：s1 = tl.sum(v)（同时算 sum(x) 与 sum(x²)）
+      v = tl.load(x_ptr + offs)          # D elements in one row
+      s2 = tl.sum(v * v)                 # RMSNorm-like: sum(x²)
+      # LayerNorm-like additionally computes: s1 = tl.sum(v) (both sum(x) and sum(x²))
       tl.store(y_ptr + pid, s2)
   ```
 
   - **改写**：原本有多少 token 就启动多少 program，改为固定数量的 program，每个用跨步循环反复领取任务，单次处理 BLOCK\_T 个 token（LayerNorm 类 64，RMSNorm 类配合 IAT 时 4），尾部按原始 token 数加掩码
 
   ```ttir
-  # Before：逐 token 一个 program，标量行归约
+  # Before: one program per token, scalar row reduction
   %row = arith.muli %pid, %cD
   %v   = tt.load %xa : tensor<128x!tt.ptr>
   %s1  = tt.reduce(%v) {axis = 0 : i32}       # sum(x)
@@ -1958,14 +1958,14 @@
   %s2  = tt.reduce(%sq) {axis = 0 : i32}      # sum(x²)
   tt.store %ya, %o
 
-  # After：固定数量 program + 跨步循环，向量化行归约
-  %groups = arith.divui %total, %c64          # ceil(T / 64) 组
+  # After: fixed number of programs + strided loop, vectorized row reduction
+  %groups = arith.divui %total, %c64          # ceil(T / 64) groups
   scf.for %iv = %pid to %groups step %num_programs {
-    %v   = tt.load %xa : tensor<64x128x!tt.ptr>    # 单次 32KB 连续数据
+    %v   = tt.load %xa : tensor<64x128x!tt.ptr>    # 32KB contiguous data in one shot
     %s1  = tt.reduce(%v) {axis = 1 : i32}     # → 64
     %sq  = arith.mulf %v, %v
     %s2  = tt.reduce(%sq) {axis = 1 : i32}
-    tt.store %ya, %o, %mask                   # 尾部掩码
+    tt.store %ya, %o, %mask                   # tail mask
   }
   ```
 
@@ -1979,7 +1979,7 @@
   @triton.jit
   def kernel(x_ptr, y_ptr, n_rows, BLOCK: tl.constexpr):
       pid = tl.program_id(0)
-      if pid >= n_rows:                  # 越界直接返回
+      if pid >= n_rows:                  # out of bounds, return immediately
           return
       offs = pid * BLOCK + tl.arange(0, BLOCK)
       v = tl.load(x_ptr + offs)
@@ -1988,7 +1988,7 @@
   ```
 
   ```ttir
-  # Before：取 pid → 越界直接返回 → 否则处理一行
+  # Before: take pid → return immediately if out of bounds → otherwise process one row
   %done = arith.cmpi sge, %pid, %n_rows
   cf.cond_br %done, ^exit, ^work
   ^work:
@@ -1996,9 +1996,9 @@
     %o = arith.maxnumf %v, %z
     tt.store %ya, %o
 
-  # After：一个 program 处理 8 行，分支消失
-  %rows = arith.addi %pid*8, %arange(8)      # 8 个行号
-  %mask = arith.cmpi slt, %rows, %n_rows     # 尾部掩码
+  # After: one program handles 8 rows, the branch disappears
+  %rows = arith.addi %pid*8, %arange(8)      # 8 row indices
+  %mask = arith.cmpi slt, %rows, %n_rows     # tail mask
   %v    = tt.load %xa : tensor<8x16x!tt.ptr>
   %o    = arith.maxnumf %v, %cst
   tt.store %ya, %o, %mask
@@ -2012,19 +2012,19 @@
   ```python
   @triton.jit
   def decode_attn(q_ptr, k_ptr, o_ptr, K, M: tl.constexpr, N: tl.constexpr):
-      pid = tl.program_id(0)             # 一行 query 一个 program
+      pid = tl.program_id(0)             # one query row per program
       offs_m = tl.arange(0, M)
       offs_n = tl.arange(0, N)
-      a = tl.load(q_ptr + pid * M + offs_m)[:, None]     # [M, 1]，随行变化
+      a = tl.load(q_ptr + pid * M + offs_m)[:, None]     # [M, 1], varies per row
       acc = tl.zeros((M, N), dtype=tl.float32)
-      for i in range(0, K, N):           # K 维循环做矩阵乘
-          b = tl.load(k_ptr + i + offs_n)[None, :]       # [1, N]，K/V 与行无关
+      for i in range(0, K, N):           # K-dimension loop doing the matmul
+          b = tl.load(k_ptr + i + offs_n)[None, :]       # [1, N], K/V independent of the row
           acc += tl.dot(a, b)            # [M,1] × [1,N] → [M,N]
       tl.store(o_ptr + pid * M + offs_m, tl.sum(acc, axis=1))
   ```
 
   ```ttir
-  # Before：每 program 一行 query，K 维循环矩阵乘（M=16 过小浪费 Cube）
+  # Before: one query row per program, matmul loop over K (M=16 too small, wastes Cube)
   %a = tt.load %pa : tensor<16x16x!tt.ptr>
   %loop = scf.for %iv = %c0 to %upper step %c1 iter_args(%acc0 = %zero0) {
     %b   = tt.load %pb : tensor<16x16x!tt.ptr>
@@ -2032,9 +2032,9 @@
   }
   tt.store %pc, %loop
 
-  # After：R 行合成一个 program，M 撑到 128 填满 Cube；K/V 二维共享
-  %a   = tt.load %pa : tensor<8x16x16x!tt.ptr>      # A 增加前导行维
-  %rhs = tt.load %pb : tensor<16x16x!tt.ptr>        # B 保持二维，8 行共享
+  # After: R rows fused into one program, M padded to 128 to fill the Cube; K/V shared as 2-D
+  %a   = tt.load %pa : tensor<8x16x16x!tt.ptr>      # A gains a leading row dimension
+  %rhs = tt.load %pb : tensor<16x16x!tt.ptr>        # B stays 2-D, shared by 8 rows
   %dot = tt.dot %a2d, %rhs, %acc : tensor<128x16xf16> * tensor<16x16xf16> -> tensor<128x16xf32>
   tt.store %pc, %dot, %mask
   ```
@@ -2047,8 +2047,8 @@
 
   ```python
   for i in range(NS):
-      i_s = tl.load(block_indices + i).to(tl.int32) * BS          # 每轮读一个标量块号
-      if i_s <= Q_OFFSET + i_t and i_s >= 0:                     # 只算被选中的块
+      i_s = tl.load(block_indices + i).to(tl.int32) * BS          # read one scalar block id per iteration
+      if i_s <= Q_OFFSET + i_t and i_s >= 0:                     # only process selected blocks
           b_k = tl.load(tl.make_block_ptr(k, (K, TK), (1, H * K), (0, i_s), (BK, BS), (0, 1)), boundary_check=(0, 1))
           b_v = tl.load(tl.make_block_ptr(v, (TK, V), (H * V, 1), (i_s, i_v * BV), (BS, BV), (1, 0)), boundary_check=(0, 1))
           b_s = tl.where((Q_OFFSET + i_t >= i_s + tl.arange(0, BS))[None, :], tl.dot(b_q, b_k), float("-inf"))
@@ -2061,25 +2061,25 @@
   - **改写（扫描）**：整表在循环外一次向量读入；循环内无条件载入宽 `BN = max(64, BS)` 的 tile，"该块是否被选中"变成每 token 权重，`scf.if` 折成零权重，K/V 地址于是只依赖循环变量
 
   ```ttir
-  # Before：循环内读标量块号 + 块级 scf.if
+  # Before: scalar block id read inside the loop + block-level scf.if
   %r:3 = scf.for %i = 0 to %NS step 1 iter_args(%o = 0, %m = -inf, %l = 0) {
-    %id = tt.load (tt.addptr %rowBase, %i) : !tt.ptr<i64>     # 每轮一个标量块号
-    %g  = andi(cmpi sle %bs, %row, cmpi sge %bs, 0)           # 块级谓词
+    %id = tt.load (tt.addptr %rowBase, %i) : !tt.ptr<i64>     # one scalar block id per iteration
+    %g  = andi(cmpi sle %bs, %row, cmpi sge %bs, 0)           # block-level predicate
     %t:3 = scf.if %g -> (o, m, l) { ... QK dot + online softmax ... }
-           else { scf.yield %o, %m, %l }                      # 未选中 ≡ 零权重
+           else { scf.yield %o, %m, %l }                      # not selected ≡ zero weight
     scf.yield %t#0, %t#1, %t#2
   }
 
-  # After：整表提前读，循环内无条件宽 tile，块谓词变成每 token 权重
-  %ids   = tt.load (tt.addptr (tt.splat %rowBase), %lane) : tensor<16xi64>  # 循环外读整表
-  %start = arith.muli (arith.trunci %ids), %c64                             # 每个槽位的块起点
+  # After: the whole table is read early; the loop unconditionally loads a wide tile, and the block predicate becomes per-token weights
+  %ids   = tt.load (tt.addptr (tt.splat %rowBase), %lane) : tensor<16xi64>  # read the whole table outside the loop
+  %start = arith.muli (arith.trunci %ids), %c64                             # block start of each slot
   %scan:3 = scf.for %iv = 0 to %ub step 1 iter_args(%o = 0, %m = -inf, %l = 0) {
-    %ts  = arith.muli %iv, %c64                                            # tile 的 token 起点
-    %k   = tt.load (tt.make_tensor_ptr %kBase ... [0, %ts])                 # 无需条件
-    %cnt = "tt.reduce"(addi, axis = 1) (andi (cmpi eq %start, %ts), %slot)  # 该 tile 被选中次数
-    %w   = arith.sitofp %cnt                                               # 0 = 未选中
-    %valid = andi (cmpf ogt %w, %zero), cmpi sle (%ts + range(64)), %row    # 权重 & 因果
-    ...                                                                    # 打分 / 掩码 softmax / PV
+    %ts  = arith.muli %iv, %c64                                            # token start of the tile
+    %k   = tt.load (tt.make_tensor_ptr %kBase ... [0, %ts])                 # no condition needed
+    %cnt = "tt.reduce"(addi, axis = 1) (andi (cmpi eq %start, %ts), %slot)  # times this tile is selected
+    %w   = arith.sitofp %cnt                                               # 0 = not selected
+    %valid = andi (cmpf ogt %w, %zero), cmpi sle (%ts + range(64)), %row    # weight & causality
+    ...                                                                    # scoring / masked softmax / PV
   }
   ```
 

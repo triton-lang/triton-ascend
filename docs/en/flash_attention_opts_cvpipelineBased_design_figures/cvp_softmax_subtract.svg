@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="222" viewBox="0 0 900 222" role="img" aria-labelledby="title desc">
+  <title id="title">Subtracting each query maximum in the two score layouts</title>
+  <desc id="desc">Query-major · lanes hold different keys     Key-major · lanes hold different queries
+Q0: [ 1,  2,  3] - [ 3,  3,  3]            K0: [1, 10] - [3, 30]
+Q1: [10, 20, 30] - [30, 30, 30]            K1: [2, 20] - [3, 30]
+                    ↑ broadcast            K2: [3, 30] - [3, 30]
+                                                          ↑ same maxima vector</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="900" height="222" rx="6" fill="#ffffff" />
+  <rect x="8" y="8" width="438.0" height="206" rx="8" fill="#f2f7f9" />
+  <rect x="8" y="18" width="4" height="27" rx="2" fill="#20568a" />
+  <text x="21" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">Query-major · lanes hold different keys</text>
+  <rect x="454.0" y="8" width="438.0" height="206" rx="8" fill="#f2f7f9" />
+  <rect x="454.0" y="18" width="4" height="27" rx="2" fill="#166656" />
+  <text x="467.0" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">Key-major · lanes hold different queries</text>
+  <rect x="23" y="59" width="397" height="34" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="221.5" y="81.78" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">Q0: [1, 2, 3] - [3, 3, 3]</text>
+  <rect x="23" y="102" width="397" height="34" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="221.5" y="124.78" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">Q1: [10, 20, 30] - [30, 30, 30]</text>
+  <rect x="472" y="59" width="394" height="32" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="669.0" y="80.78" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">K0: [1, 10] - [3, 30]</text>
+  <rect x="472" y="97" width="394" height="32" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="669.0" y="118.78" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">K1: [2, 20] - [3, 30]</text>
+  <rect x="472" y="135" width="394" height="32" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="669.0" y="156.78" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="normal" text-anchor="middle">K2: [3, 30] - [3, 30]</text>
+  <text x="322" y="175" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">↑ broadcast</text>
+  <text x="726" y="195" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">↑ same maxima vector</text>
+</svg>

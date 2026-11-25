@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="742" height="296" viewBox="0 0 742 296" role="img" aria-labelledby="title desc">
+  <title id="title">Even and odd UB pairs store each query’s output rows in GM</title>
+  <desc id="desc">Q0 finishes → UB pair 0 → store to Q0’s rows of O and M in GM
+Q1 finishes → UB pair 1 → store to Q1’s rows of O and M in GM
+Q2 finishes → UB pair 0 → store to Q2’s rows of O and M in GM
+Q3 finishes → UB pair 1 → store to Q3’s rows of O and M in GM</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="742" height="296" rx="6" fill="#ffffff" />
+  <rect x="4" y="8" width="734" height="66" rx="6" fill="#f2f7f9" />
+  <text x="74.5" y="46.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Q0 finishes</text>
+  <rect x="165" y="16" width="144" height="50" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="237.0" y="46.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">UB pair 0</text>
+  <polyline points="139,41 162,41" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="337" y="16" width="393" height="50" rx="5" fill="#ffffff" stroke="#c7d6df" />
+  <text x="533.5" y="46.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">store to Q0’s rows of O and M in GM</text>
+  <polyline points="311,41 334,41" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="4" y="78" width="734" height="66" rx="6" fill="#f2f7f9" />
+  <text x="74.5" y="116.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Q1 finishes</text>
+  <rect x="165" y="86" width="144" height="50" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="237.0" y="116.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">UB pair 1</text>
+  <polyline points="139,111 162,111" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="337" y="86" width="393" height="50" rx="5" fill="#ffffff" stroke="#c7d6df" />
+  <text x="533.5" y="116.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">store to Q1’s rows of O and M in GM</text>
+  <polyline points="311,111 334,111" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="4" y="148" width="734" height="66" rx="6" fill="#f2f7f9" />
+  <text x="74.5" y="186.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Q2 finishes</text>
+  <rect x="165" y="156" width="144" height="50" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="237.0" y="186.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">UB pair 0</text>
+  <polyline points="139,181 162,181" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="337" y="156" width="393" height="50" rx="5" fill="#ffffff" stroke="#c7d6df" />
+  <text x="533.5" y="186.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">store to Q2’s rows of O and M in GM</text>
+  <polyline points="311,181 334,181" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="4" y="218" width="734" height="66" rx="6" fill="#f2f7f9" />
+  <text x="74.5" y="256.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Q3 finishes</text>
+  <rect x="165" y="226" width="144" height="50" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="237.0" y="256.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">UB pair 1</text>
+  <polyline points="139,251 162,251" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="337" y="226" width="393" height="50" rx="5" fill="#ffffff" stroke="#c7d6df" />
+  <text x="533.5" y="256.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">store to Q3’s rows of O and M in GM</text>
+  <polyline points="311,251 334,251" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+</svg>

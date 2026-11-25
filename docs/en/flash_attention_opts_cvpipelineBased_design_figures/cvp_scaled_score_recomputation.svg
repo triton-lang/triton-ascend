@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="225" viewBox="0 0 920 225" role="img" aria-labelledby="title desc">
+  <title id="title">Storing the scaled tile in UB or recomputing it at each use</title>
+  <desc id="desc">Store the scaled tile in UB                Recompute at each use
+[2, 6, 4] × 0.5 → write [1, 3, 2]          raw QK ─┬─ × 0.5 → row maximum
+                   ├─ read → row maximum           └─ × 0.5 → subtract max, exp
+                   └─ read → subtract max, exp</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="920" height="225" rx="6" fill="#ffffff" />
+  <rect x="8" y="8" width="448.0" height="209" rx="8" fill="#f2f7f9" />
+  <rect x="8" y="18" width="4" height="27" rx="2" fill="#20568a" />
+  <text x="21" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">Store the scaled tile in UB</text>
+  <rect x="464.0" y="8" width="448.0" height="209" rx="8" fill="#f2f7f9" />
+  <rect x="464.0" y="18" width="4" height="27" rx="2" fill="#166656" />
+  <text x="477.0" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">Recompute at each use</text>
+  <rect x="28" y="63" width="193" height="42" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="124.5" y="89.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">[2, 6, 4] × 0.5</text>
+  <polyline points="222,84 242,84" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="244" y="63" width="183" height="42" rx="5" fill="#fff1ce" stroke="#c7d6df" />
+  <text x="335.5" y="89.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">write [1, 3, 2]</text>
+  <polyline points="335,105 335,125 118,125 118,143" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <polyline points="335,105 335,143" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="25" y="145" width="186" height="48" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="118.0" y="174.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">read → row maximum</text>
+  <rect x="223" y="145" width="213" height="48" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="329.5" y="164.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">read → subtract max,</text>
+  <text x="329.5" y="184.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">exp</text>
+  <rect x="484" y="103" width="95" height="45" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="531.5" y="130.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">raw QK</text>
+  <polyline points="579,125 602,125 602,84 625,84" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="627" y="62" width="260" height="45" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="757.0" y="89.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">× 0.5 → row maximum</text>
+  <polyline points="579,125 602,125 602,169 625,169" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="627" y="147" width="260" height="45" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="757.0" y="174.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">× 0.5 → subtract max, exp</text>
+</svg>

@@ -36,6 +36,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, Optional, Tuple, Union
 from .debug_line_rewriter import rewrite_debug_line
+from .toolchain import toolchain_fingerprint
 
 from triton import knobs
 from triton._C.libtriton import ir, passes, ascend, buffer_ir
@@ -842,6 +843,147 @@ def get_common_bishengir_compile_options(metadata):
     return [bishengir_target_opt]
 
 
+# Native controls exposed through NPUOptions. The native frontend owns the
+# semantic contract between controls; this boundary validates types, CLI
+# spelling and frontend availability only.
+_NATIVE_COMPILER_OPTION_SPECS = {
+    "enable_vf_operand_substitution": ("--enable-vf-operand-substitution", bool, None),
+    "enable_fused_multiply_add": ("--enable-fused-multiply-add", bool, None),
+    "enable_cvp_plan_analysis": ("--enable-cvp-plan-analysis", bool, None),
+    "enable_cvp_rematerialization": ("--enable-cvp-rematerialization", bool, None),
+    "enable_cvp_reduction_scaling": ("--enable-cvp-reduction-scaling", bool, None),
+    "enable_cvp_reduction_major_layout": ("--enable-cvp-reduction-major-layout", bool, None),
+    "enable_cvp_dense_operand": ("--enable-cvp-dense-operand", bool, None),
+    "allow_cvp_sum_reassociation": ("--allow-cvp-sum-reassociation", bool, None),
+    "cvp_stage_fusion": ("--cvp-stage-fusion", str, ("none", "reduce-exp-state")),
+    "cvp_reduction_chains": ("--cvp-reduction-chains", int, (1, 2)),
+    "enable_cvp_persistent_pipeline": ("--enable-cvp-persistent-pipeline", bool, None),
+    "enable_cvp_state_copy_forward": ("--enable-cvp-state-copy-forward", bool, None),
+    "enable_cvp_final_output_forward": ("--enable-cvp-final-output-forward", bool, None),
+    "enable_cvp_output_copy_forward": ("--enable-cvp-output-copy-forward", bool, None),
+    "enable_cvp_scalar_input_forward": ("--enable-cvp-scalar-input-forward", bool, None),
+    "cvp_persistent_pipeline_mode": ("--cvp-persistent-pipeline-mode", str, ("skew", )),
+    "cvp_inner_unroll": ("--cvp-inner-unroll", int, (1, )),
+    "cvp_invariant_cache_mode": ("--cvp-invariant-cache-mode", str, ("none", "cached", "auto")),
+    "cvp_invariant_cache_consider_overlapping": ("--cvp-invariant-cache-consider-overlapping", bool, None),
+    "enable_cvp_cube_banked_ready": ("--enable-cvp-cube-banked-ready", bool, None),
+    "enable_cvp_cube_overlap": ("--enable-cvp-cube-overlap", bool, None),
+    "enable_cvp_cube_derived_drain": ("--enable-cvp-cube-derived-drain", bool, None),
+}
+
+# These controls changed names with the versioned stage contract. Reject them
+# before option filtering so an old spelling cannot silently disable a feature.
+_RETIRED_CVP_OPTIONS = {
+    'enable_cvp_attention_analysis': 'enable_cvp_plan_analysis',
+    'enable_cvp_attention_score_rematerialization': 'enable_cvp_rematerialization',
+    'enable_cvp_attention_max_scaling': 'enable_cvp_reduction_scaling',
+    'enable_cvp_attention_key_major': 'enable_cvp_reduction_major_layout',
+    'enable_cvp_attention_dense_p': 'enable_cvp_dense_operand',
+    'allow_cvp_attention_sum_reassociation': 'allow_cvp_sum_reassociation',
+    'cvp_attention_producer_fusion': 'cvp_stage_fusion',
+    'cvp_attention_reduction_chains': 'cvp_reduction_chains',
+    'enable_cvp_query_pipeline': 'enable_cvp_persistent_pipeline',
+    'enable_cvp_query_state_copy_forward': 'enable_cvp_state_copy_forward',
+    'enable_cvp_query_final_output_forward': 'enable_cvp_final_output_forward',
+    'enable_cvp_query_output_copy_forward': 'enable_cvp_output_copy_forward',
+    'enable_cvp_query_scalar_input_forward': 'enable_cvp_scalar_input_forward',
+    'cvp_query_pipeline_mode': 'cvp_persistent_pipeline_mode',
+    'cvp_query_key_unroll': 'cvp_inner_unroll',
+}
+
+
+def _reject_retired_cvp_options(options):
+    for old_name, current_name in _RETIRED_CVP_OPTIONS.items():
+        if old_name in options:
+            raise ValueError(f"{old_name} was renamed to {current_name}; use the current option")
+
+
+def _validate_native_compiler_options(options):
+    _reject_retired_cvp_options(options)
+    for name, (_flag, expected_type, choices) in _NATIVE_COMPILER_OPTION_SPECS.items():
+        value = options.get(name)
+        if value is None:
+            continue
+        type_name = {bool: "boolean", str: "string", int: "integer"}[expected_type]
+        if type(value) is not expected_type:
+            raise TypeError(f"{name} must be a {type_name} or None")
+        if choices is not None and value not in choices:
+            raise ValueError(f"{name} must be one of: {', '.join(map(str, choices))}, or None")
+    if options.get("enable_fused_multiply_add") is True and options.get("disable_fma") is True:
+        raise ValueError("enable_fused_multiply_add=True conflicts with disable_fma=True")
+
+
+def _uses_native_compiler_options(options):
+    return any(options.get(name) is not None for name in _NATIVE_COMPILER_OPTION_SPECS)
+
+
+def _resolve_persistent_buffer_policy(options):
+    """Protect tightly coupled buffers for the persistent stage pipeline."""
+    value = options.get("disable_tightly_coupled_buffer_reuse")
+    if value is not None and type(value) is not bool:
+        raise TypeError("disable_tightly_coupled_buffer_reuse must be a boolean or None")
+    if options.get("enable_cvp_persistent_pipeline") is True:
+        if value is False:
+            raise ValueError("CVPipeline persistent pipeline requires disable_tightly_coupled_buffer_reuse=True")
+        return True
+    return False if value is None else value
+
+
+def _probe_compiler_help(compiler_path, env):
+    try:
+        result = subprocess.run([compiler_path, "--help"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        return None, None, error
+    return result.returncode, result.stdout or "", None
+
+
+def _advertises_compiler_option(help_text, flag):
+    return re.search(r"(?m)^\s*" + re.escape(flag) + r"(?:[=\s]|$)", help_text) is not None
+
+
+def _native_compiler_compile_options(metadata, compiler_path, env):
+    _validate_native_compiler_options(metadata)
+    requested = []
+
+    vf_requested = metadata.get("enable_vf_operand_substitution")
+    # The implicit DCVP setting predates capability probing. Keep its rc=3
+    # safety fallback independent of checks for explicitly requested controls.
+    implicit_vf = (vf_requested is None and metadata.get("enable_dynamic_cv_pipeline") is True
+                   and _is_a5_target_arch(metadata.get("target_arch", metadata.get("arch", "")))
+                   and not metadata.get("disable_vf_operand_substitution", False))
+    if vf_requested and metadata.get("disable_vf_operand_substitution", False):
+        raise ValueError("explicit VF operand substitution conflicts with the compiler safety disable")
+
+    for name, (flag, _expected_type, _choices) in _NATIVE_COMPILER_OPTION_SPECS.items():
+        value = metadata.get(name)
+        if value is not None:
+            requested.append((flag, value))
+
+    returncode, help_text, help_error = _probe_compiler_help(compiler_path, env)
+    options = []
+
+    # This switch is optional even on CANN 9.2: packaged and source-built
+    # frontends can differ. An absent or failed probe keeps frontend defaults.
+    metaop_flag = "--enable-optimized-metaop"
+    if help_error is None and returncode == 0 and _advertises_compiler_option(help_text, metaop_flag):
+        options.append(f"{metaop_flag}={is_cann_version_at_least(9, 2, 0)}")
+
+    if implicit_vf:
+        options.append("--enable-vf-operand-substitution=True")
+    if not requested:
+        return options
+    if help_error is not None:
+        raise RuntimeError("cannot verify requested native NPU compiler options") from help_error
+    if returncode != 0:
+        raise RuntimeError("selected NPU compiler did not return a successful --help")
+    for flag, value in requested:
+        if not _advertises_compiler_option(help_text, flag):
+            raise RuntimeError(f"selected NPU compiler does not support requested {flag}")
+        options.append(f"{flag}={value}")
+    return options
+
+
 @functools.lru_cache()
 def _supports_full_row_copy_inlining(compiler_path):
     try:
@@ -1035,8 +1177,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
 
-        _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
-
         has_limit, aic, aiv = _compile_device_limit(opt)
         if _is_a5_target_arch(metadata["target"].arch) or has_limit:
             _compile_option_list += [
@@ -1107,12 +1247,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--enable-mixed-cv={enable_mixed_cv}"]
 
-        enable_dynamic_cv_pipeline = metadata["enable_dynamic_cv_pipeline"]
-        if (enable_dynamic_cv_pipeline == True
-                and _is_a5_target_arch(metadata.get("target_arch", metadata.get("arch", "")))
-                and not metadata.get("disable_vf_operand_substitution", False)):
-            _compile_option_list += [f"--enable-vf-operand-substitution=True"]
-
         enable_flatten = metadata["enable_flatten"]
         if enable_flatten is not None:
             _compile_option_list += \
@@ -1145,6 +1279,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if metadata["auto_blockify_enabled"]:
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
+        _compile_option_list += _native_compiler_compile_options(metadata, npu_compiler_path, env)
         if npu_compiler_path.endswith("bishengir-compile"):
             _compile_option_list += [
                 "--enable-hfusion-compile=true",
@@ -1287,8 +1422,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
 
-        _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
-
         if _is_ascend_sanitizer_enabled():
             _compile_option_list += ["--enable-sanitizer=true"]
         if not _is_debug_line_info_disabled():
@@ -1381,6 +1514,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if metadata["auto_blockify_enabled"]:
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
+        _compile_option_list += _native_compiler_compile_options(metadata, npu_compiler_path, env)
         if npu_compiler_path.endswith("bishengir-compile"):
             _compile_option_list += [
                 "--enable-hfusion-compile=true",
@@ -1566,7 +1700,7 @@ class NPUOptions:
     disable_size_align_for_cast: bool = None
     enable_preload: bool = None
     enable_auto_bind_sub_block: bool = None
-    disable_tightly_coupled_buffer_reuse: bool = False
+    disable_tightly_coupled_buffer_reuse: Optional[bool] = None
     enable_hivm_auto_cv_balance: bool = None
     # Temporary 910_95 switch; the NPU compiler plans to make this default in Q4.
     enable_hivm_batch_matmul: bool = False
@@ -1591,6 +1725,30 @@ class NPUOptions:
     enable_dynamic_cv_pipeline: bool = None
     enable_outer_main_loop: bool = False
     enable_tla_mode: bool = field(default=False, init=False)
+    # None preserves the existing compiler defaults and DCVP-derived VF policy.
+    # FMA permission is independent of reduction-tree reassociation.
+    enable_vf_operand_substitution: Optional[bool] = None
+    enable_fused_multiply_add: Optional[bool] = None
+    enable_cvp_plan_analysis: Optional[bool] = None
+    enable_cvp_rematerialization: Optional[bool] = None
+    enable_cvp_reduction_scaling: Optional[bool] = None
+    enable_cvp_reduction_major_layout: Optional[bool] = None
+    enable_cvp_persistent_pipeline: Optional[bool] = None
+    enable_cvp_state_copy_forward: Optional[bool] = None
+    enable_cvp_final_output_forward: Optional[bool] = None
+    enable_cvp_output_copy_forward: Optional[bool] = None
+    enable_cvp_scalar_input_forward: Optional[bool] = None
+    cvp_persistent_pipeline_mode: Optional[str] = None
+    cvp_inner_unroll: Optional[int] = None
+    cvp_invariant_cache_mode: Optional[str] = None
+    cvp_invariant_cache_consider_overlapping: Optional[bool] = None
+    enable_cvp_cube_banked_ready: Optional[bool] = None
+    enable_cvp_cube_overlap: Optional[bool] = None
+    enable_cvp_cube_derived_drain: Optional[bool] = None
+    enable_cvp_dense_operand: Optional[bool] = None
+    cvp_stage_fusion: Optional[str] = None
+    cvp_reduction_chains: Optional[int] = None
+    allow_cvp_sum_reassociation: Optional[bool] = None
     enable_cube_block_merge: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = None
     buf_slot_num_of_veccore: int = None
@@ -1733,6 +1891,12 @@ class NPUOptions:
             object.__setattr__(self, "parallel_mode", "simt")
         else:
             object.__setattr__(self, "parallel_mode", "simd")
+
+        _validate_native_compiler_options(self.__dict__)
+        object.__setattr__(self, "disable_tightly_coupled_buffer_reuse",
+                           _resolve_persistent_buffer_policy(self.__dict__))
+        if _uses_native_compiler_options(self.__dict__) and (not _is_a5_target_arch(arch) or self.is_pure_simt):
+            raise ValueError("native compiler controls require an Ascend 950/910_95 SIMD compilation")
 
         if self.is_pure_simt:
             if self.shared_mem_dynamic_size is None:
@@ -1943,6 +2107,7 @@ class AscendBackend(BaseBackend):
     def parse_options(self, opts) -> Any:
         # TODO: get available targets when building options?
         if self.target.backend == "npu":
+            _reject_retired_cvp_options(opts)
             _warn_deprecated_ascend_env_vars()
             option_names = {
                 name
@@ -2126,11 +2291,12 @@ class AscendBackend(BaseBackend):
             for ext, stage in stages.items():
                 stages[ext] = attempt.wrap(ext, stage)
 
-    @functools.lru_cache()
     def hash(self):
-        # TODO fetch compiler version
-        version_key = (self.target, _get_libdevice_compile_state())
-        return str(version_key)
+        compiler, environment = _get_npucompiler_path()
+        # Triton hashes the in-process IR implementation in triton_key().
+        # The native frontend consumes ttadapter text directly.
+        identity = toolchain_fingerprint(compiler, None, (), get_libdevice(self.target.arch), environment)
+        return str((self.target, _get_libdevice_compile_state(), identity))
 
     def get_module_map(self) -> Dict[str, ModuleType]:
         from triton.language.extra.cann import libdevice

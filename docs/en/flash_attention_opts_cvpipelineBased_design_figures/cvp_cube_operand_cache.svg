@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="848" height="196" viewBox="0 0 848 196" role="img" aria-labelledby="title desc">
+  <title id="title">Q transfers for three key tiles with and without Q caching</title>
+  <desc id="desc">Key tile   Without Q caching                    With Q caching
+K0         Copy Q0 from L1 to L0B → QK(Q0,K0)   Copy Q0 from L1 to L0B → QK(Q0,K0)
+K1         Copy Q0 from L1 to L0B → QK(Q0,K1)   Reuse Q0 in L0B        → QK(Q0,K1)
+K2         Copy Q0 from L1 to L0B → QK(Q0,K2)   Reuse Q0 in L0B        → QK(Q0,K2)</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="848" height="196" rx="6" fill="#ffffff" />
+  <rect x="8" y="8" width="96" height="39" rx="4" fill="#172f43" />
+  <text x="56.0" y="32.94" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Key tile</text>
+  <rect x="106" y="8" width="365" height="39" rx="4" fill="#172f43" />
+  <text x="288.5" y="32.94" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Without Q caching</text>
+  <rect x="473" y="8" width="365" height="39" rx="4" fill="#172f43" />
+  <text x="655.5" y="32.94" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">With Q caching</text>
+  <rect x="8" y="51" width="96" height="42" rx="4" fill="#f2f7f9" />
+  <text x="56.0" y="77.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">K0</text>
+  <rect x="106" y="51" width="365" height="42" rx="4" fill="#e3eff8" />
+  <text x="288.5" y="77.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Copy Q0 from L1 to L0B → QK(Q0,K0)</text>
+  <rect x="473" y="51" width="365" height="42" rx="4" fill="#e0f1ec" />
+  <text x="655.5" y="77.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Copy Q0 from L1 to L0B → QK(Q0,K0)</text>
+  <rect x="8" y="96" width="96" height="42" rx="4" fill="#f2f7f9" />
+  <text x="56.0" y="122.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">K1</text>
+  <rect x="106" y="96" width="365" height="42" rx="4" fill="#e3eff8" />
+  <text x="288.5" y="122.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Copy Q0 from L1 to L0B → QK(Q0,K1)</text>
+  <rect x="473" y="96" width="365" height="42" rx="4" fill="#e0f1ec" />
+  <text x="655.5" y="122.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Reuse Q0 in L0B → QK(Q0,K1)</text>
+  <rect x="8" y="141" width="96" height="42" rx="4" fill="#f2f7f9" />
+  <text x="56.0" y="167.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">K2</text>
+  <rect x="106" y="141" width="365" height="42" rx="4" fill="#e3eff8" />
+  <text x="288.5" y="167.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Copy Q0 from L1 to L0B → QK(Q0,K2)</text>
+  <rect x="473" y="141" width="365" height="42" rx="4" fill="#e0f1ec" />
+  <text x="655.5" y="167.1" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Reuse Q0 in L0B → QK(Q0,K2)</text>
+</svg>

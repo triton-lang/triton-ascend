@@ -1,0 +1,180 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="804" height="474" viewBox="0 0 804 474" role="img" aria-labelledby="title desc">
+  <title id="title">Original schedule for Q0 and Q1</title>
+  <desc id="desc">| Iteration index | Cube computes scores (QK) | Vector computes weights (P) | Cube computes P × V | Vector updates the output |
+| ---: | --- | --- | --- | --- |
+| 0 | Q0 tile 0 | — | — | — |
+| 1 | Q0 tile 1 | Q0 tile 0 | — | — |
+| 2 | Q0 tile 2 | Q0 tile 1 | Q0 tile 0 | — |
+| 3 | Q0 tile 3 | Q0 tile 2 | Q0 tile 1 | Q0 tile 0 |
+| 4 | — | Q0 tile 3 | Q0 tile 2 | Q0 tile 1 |
+| 5 | — | — | Q0 tile 3 | Q0 tile 2 |
+| 6 | — | — | — | Q0 tile 3 |
+| 7 | Q1 tile 0 | — | — | — |
+| 8 | Q1 tile 1 | Q1 tile 0 | — | — |
+| 9 | Q1 tile 2 | Q1 tile 1 | Q1 tile 0 | — |
+| 10 | Q1 tile 3 | Q1 tile 2 | Q1 tile 1 | Q1 tile 0 |
+| 11 | — | Q1 tile 3 | Q1 tile 2 | Q1 tile 1 |
+| 12 | — | — | Q1 tile 3 | Q1 tile 2 |
+| 13 | — | — | — | Q1 tile 3 |</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="804" height="474" rx="6" fill="#ffffff" />
+  <rect x="8" y="8" width="104" height="47" rx="4" fill="#172f43" />
+  <text x="60.0" y="27.1" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Iteration</text>
+  <text x="60.0" y="46.1" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">index</text>
+  <rect x="114" y="8" width="162" height="47" rx="4" fill="#172f43" />
+  <text x="195.0" y="27.1" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Cube computes</text>
+  <text x="195.0" y="46.1" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">scores (QK)</text>
+  <rect x="278" y="8" width="178" height="47" rx="4" fill="#172f43" />
+  <text x="367.0" y="27.1" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Vector computes</text>
+  <text x="367.0" y="46.1" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">weights (P)</text>
+  <rect x="458" y="8" width="155" height="47" rx="4" fill="#172f43" />
+  <text x="535.5" y="27.1" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Cube computes</text>
+  <text x="535.5" y="46.1" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">P × V</text>
+  <rect x="615" y="8" width="179" height="47" rx="4" fill="#172f43" />
+  <text x="704.5" y="27.1" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Vector updates the</text>
+  <text x="704.5" y="46.1" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">output</text>
+  <rect x="8" y="58" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="76.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">0</text>
+  <rect x="114" y="58" width="162" height="27" rx="3" fill="#e3eff8" />
+  <text x="195.0" y="76.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 0</text>
+  <rect x="278" y="58" width="178" height="27" rx="3" fill="#f4f5f6" />
+  <text x="367.0" y="76.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="458" y="58" width="155" height="27" rx="3" fill="#f4f5f6" />
+  <text x="535.5" y="76.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="615" y="58" width="179" height="27" rx="3" fill="#f4f5f6" />
+  <text x="704.5" y="76.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="8" y="87" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="105.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">1</text>
+  <rect x="114" y="87" width="162" height="27" rx="3" fill="#e3eff8" />
+  <text x="195.0" y="105.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 1</text>
+  <rect x="278" y="87" width="178" height="27" rx="3" fill="#e3eff8" />
+  <text x="367.0" y="105.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 0</text>
+  <rect x="458" y="87" width="155" height="27" rx="3" fill="#f4f5f6" />
+  <text x="535.5" y="105.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="615" y="87" width="179" height="27" rx="3" fill="#f4f5f6" />
+  <text x="704.5" y="105.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="8" y="116" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="134.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">2</text>
+  <rect x="114" y="116" width="162" height="27" rx="3" fill="#e3eff8" />
+  <text x="195.0" y="134.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 2</text>
+  <rect x="278" y="116" width="178" height="27" rx="3" fill="#e3eff8" />
+  <text x="367.0" y="134.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 1</text>
+  <rect x="458" y="116" width="155" height="27" rx="3" fill="#e3eff8" />
+  <text x="535.5" y="134.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 0</text>
+  <rect x="615" y="116" width="179" height="27" rx="3" fill="#f4f5f6" />
+  <text x="704.5" y="134.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="8" y="145" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="163.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">3</text>
+  <rect x="114" y="145" width="162" height="27" rx="3" fill="#e3eff8" />
+  <text x="195.0" y="163.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 3</text>
+  <rect x="278" y="145" width="178" height="27" rx="3" fill="#e3eff8" />
+  <text x="367.0" y="163.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 2</text>
+  <rect x="458" y="145" width="155" height="27" rx="3" fill="#e3eff8" />
+  <text x="535.5" y="163.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 1</text>
+  <rect x="615" y="145" width="179" height="27" rx="3" fill="#e3eff8" />
+  <text x="704.5" y="163.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 0</text>
+  <rect x="8" y="174" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="192.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">4</text>
+  <rect x="114" y="174" width="162" height="27" rx="3" fill="#f4f5f6" />
+  <text x="195.0" y="192.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="278" y="174" width="178" height="27" rx="3" fill="#e3eff8" />
+  <text x="367.0" y="192.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 3</text>
+  <rect x="458" y="174" width="155" height="27" rx="3" fill="#e3eff8" />
+  <text x="535.5" y="192.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 2</text>
+  <rect x="615" y="174" width="179" height="27" rx="3" fill="#e3eff8" />
+  <text x="704.5" y="192.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 1</text>
+  <rect x="8" y="203" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="221.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">5</text>
+  <rect x="114" y="203" width="162" height="27" rx="3" fill="#f4f5f6" />
+  <text x="195.0" y="221.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="278" y="203" width="178" height="27" rx="3" fill="#f4f5f6" />
+  <text x="367.0" y="221.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="458" y="203" width="155" height="27" rx="3" fill="#e3eff8" />
+  <text x="535.5" y="221.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 3</text>
+  <rect x="615" y="203" width="179" height="27" rx="3" fill="#e3eff8" />
+  <text x="704.5" y="221.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 2</text>
+  <rect x="8" y="232" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="250.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">6</text>
+  <rect x="114" y="232" width="162" height="27" rx="3" fill="#f4f5f6" />
+  <text x="195.0" y="250.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="278" y="232" width="178" height="27" rx="3" fill="#f4f5f6" />
+  <text x="367.0" y="250.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="458" y="232" width="155" height="27" rx="3" fill="#f4f5f6" />
+  <text x="535.5" y="250.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="615" y="232" width="179" height="27" rx="3" fill="#e3eff8" />
+  <text x="704.5" y="250.6" fill="#20568a" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q0 tile 3</text>
+  <rect x="8" y="261" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="279.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">7</text>
+  <rect x="114" y="261" width="162" height="27" rx="3" fill="#166656" />
+  <text x="195.0" y="279.6" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Q1 tile 0</text>
+  <rect x="278" y="261" width="178" height="27" rx="3" fill="#f4f5f6" />
+  <text x="367.0" y="279.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="458" y="261" width="155" height="27" rx="3" fill="#f4f5f6" />
+  <text x="535.5" y="279.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="615" y="261" width="179" height="27" rx="3" fill="#f4f5f6" />
+  <text x="704.5" y="279.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="8" y="290" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="308.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">8</text>
+  <rect x="114" y="290" width="162" height="27" rx="3" fill="#e0f1ec" />
+  <text x="195.0" y="308.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 1</text>
+  <rect x="278" y="290" width="178" height="27" rx="3" fill="#166656" />
+  <text x="367.0" y="308.6" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Q1 tile 0</text>
+  <rect x="458" y="290" width="155" height="27" rx="3" fill="#f4f5f6" />
+  <text x="535.5" y="308.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="615" y="290" width="179" height="27" rx="3" fill="#f4f5f6" />
+  <text x="704.5" y="308.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="8" y="319" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="337.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">9</text>
+  <rect x="114" y="319" width="162" height="27" rx="3" fill="#e0f1ec" />
+  <text x="195.0" y="337.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 2</text>
+  <rect x="278" y="319" width="178" height="27" rx="3" fill="#e0f1ec" />
+  <text x="367.0" y="337.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 1</text>
+  <rect x="458" y="319" width="155" height="27" rx="3" fill="#166656" />
+  <text x="535.5" y="337.6" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Q1 tile 0</text>
+  <rect x="615" y="319" width="179" height="27" rx="3" fill="#f4f5f6" />
+  <text x="704.5" y="337.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="8" y="348" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="366.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">10</text>
+  <rect x="114" y="348" width="162" height="27" rx="3" fill="#e0f1ec" />
+  <text x="195.0" y="366.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 3</text>
+  <rect x="278" y="348" width="178" height="27" rx="3" fill="#e0f1ec" />
+  <text x="367.0" y="366.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 2</text>
+  <rect x="458" y="348" width="155" height="27" rx="3" fill="#e0f1ec" />
+  <text x="535.5" y="366.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 1</text>
+  <rect x="615" y="348" width="179" height="27" rx="3" fill="#166656" />
+  <text x="704.5" y="366.6" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Q1 tile 0</text>
+  <rect x="8" y="377" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="395.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">11</text>
+  <rect x="114" y="377" width="162" height="27" rx="3" fill="#f4f5f6" />
+  <text x="195.0" y="395.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="278" y="377" width="178" height="27" rx="3" fill="#e0f1ec" />
+  <text x="367.0" y="395.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 3</text>
+  <rect x="458" y="377" width="155" height="27" rx="3" fill="#e0f1ec" />
+  <text x="535.5" y="395.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 2</text>
+  <rect x="615" y="377" width="179" height="27" rx="3" fill="#e0f1ec" />
+  <text x="704.5" y="395.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 1</text>
+  <rect x="8" y="406" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="424.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">12</text>
+  <rect x="114" y="406" width="162" height="27" rx="3" fill="#f4f5f6" />
+  <text x="195.0" y="424.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="278" y="406" width="178" height="27" rx="3" fill="#f4f5f6" />
+  <text x="367.0" y="424.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="458" y="406" width="155" height="27" rx="3" fill="#e0f1ec" />
+  <text x="535.5" y="424.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 3</text>
+  <rect x="615" y="406" width="179" height="27" rx="3" fill="#e0f1ec" />
+  <text x="704.5" y="424.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 2</text>
+  <rect x="8" y="435" width="104" height="27" rx="3" fill="#f2f7f9" />
+  <text x="60.0" y="453.6" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle">13</text>
+  <rect x="114" y="435" width="162" height="27" rx="3" fill="#f4f5f6" />
+  <text x="195.0" y="453.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="278" y="435" width="178" height="27" rx="3" fill="#f4f5f6" />
+  <text x="367.0" y="453.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="458" y="435" width="155" height="27" rx="3" fill="#f4f5f6" />
+  <text x="535.5" y="453.6" fill="#455c6d" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">—</text>
+  <rect x="615" y="435" width="179" height="27" rx="3" fill="#e0f1ec" />
+  <text x="704.5" y="453.6" fill="#166656" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="normal" text-anchor="middle">Q1 tile 3</text>
+</svg>

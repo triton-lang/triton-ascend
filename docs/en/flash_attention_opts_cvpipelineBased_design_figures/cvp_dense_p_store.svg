@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="222" viewBox="0 0 880 222" role="img" aria-labelledby="title desc">
+  <title id="title">One key per Vector store and two keys per Vector store</title>
+  <desc id="desc">One key per Vector store                  Two keys per Vector store
+key 0  → [A: 64 FP16] → store             key 0  ─┐
+key 64 → [B: 64 FP16] → store             key 64 ─┴─ pack [A | B] → store 128 FP16 weights</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#536675" />
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="880" height="222" rx="6" fill="#ffffff" />
+  <rect x="8" y="8" width="428.0" height="206" rx="8" fill="#f2f7f9" />
+  <rect x="8" y="18" width="4" height="27" rx="2" fill="#20568a" />
+  <text x="21" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">One key per Vector store</text>
+  <rect x="444.0" y="8" width="428.0" height="206" rx="8" fill="#f2f7f9" />
+  <rect x="444.0" y="18" width="4" height="27" rx="2" fill="#166656" />
+  <text x="457.0" y="38" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="bold" text-anchor="start">Two keys per Vector store</text>
+  <text x="22" y="94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="start">key 0</text>
+  <polyline points="84,88 112,88" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="114" y="70" width="177" height="39" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="202.5" y="94.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">[A: 64 FP16]</text>
+  <polyline points="291,88 317,88" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="319" y="70" width="86" height="39" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="362.0" y="94.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">store</text>
+  <text x="461" y="94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="start">key 0</text>
+  <polyline points="526,88 548,88 548,121" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+  <text x="22" y="160" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="start">key 64</text>
+  <polyline points="84,154 112,154" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="114" y="136" width="177" height="39" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="202.5" y="160.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">[B: 64 FP16]</text>
+  <polyline points="291,154 317,154" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="319" y="136" width="86" height="39" rx="5" fill="#e3eff8" stroke="#c7d6df" />
+  <text x="362.0" y="160.94" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">store</text>
+  <text x="461" y="160" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="start">key 64</text>
+  <polyline points="526,154 548,154 548,121" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+  <polyline points="548,121 564,121" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="566" y="99" width="121" height="44" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="626.5" y="126.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">pack [A | B]</text>
+  <polyline points="687,121 703,121" fill="none" stroke="#536675" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)" />
+  <rect x="705" y="84" width="142" height="74" rx="5" fill="#e0f1ec" stroke="#c7d6df" />
+  <text x="776.0" y="116.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">store 128 FP16</text>
+  <text x="776.0" y="136.44" fill="#172f43" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="normal" text-anchor="middle">weights</text>
+</svg>

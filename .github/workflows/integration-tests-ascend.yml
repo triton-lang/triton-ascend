@@ -16,9 +16,7 @@ jobs:
     timeout-minutes: 300
     strategy:
       matrix:
-        # Each config entry carries its full environment (cann_version,
-        # chip_type, os, python_version) because chips differ: a3 uses
-        # cann8.5.0/py3.10+3.11 while a5 (Ascend 950) uses cann9.1.0/py3.12.
+        # Each config entry supplies the image tag components for its runner.
         config: ${{ fromJson(inputs.matrix) }}
       fail-fast: false
     env:

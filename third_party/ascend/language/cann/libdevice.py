@@ -2613,9 +2613,24 @@ def expm1(arg0: core.tensor, _semantic=None):
     arg0 = _semantic.to_tensor(arg0)
     if ((_is_a5_target(_semantic) or _is_a3_target(_semantic) or _is_a6_target(_semantic))
             and arg0.dtype == core.dtype("fp32")):
-        return core.extern_elementwise("", "", [arg0], {
+        result = core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_expm1_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
+        # The hardware intrinsic loses precision for tiny |x| (e.g. expm1(1e-8)
+        # returns 0 instead of ~1e-8). Compensate with a Taylor series when
+        # |x| < 1e-3: expm1(x) = x + x^2/2 + x^3/6 + x^4/24 + x^5/120 + O(x^6).
+        x2 = _semantic.mul(arg0, arg0, True)
+        x3 = _semantic.mul(x2, arg0, True)
+        x4 = _semantic.mul(x3, arg0, True)
+        x5 = _semantic.mul(x4, arg0, True)
+        taylor = _semantic.add(arg0, _semantic.mul(x2, 0.5, True), True)
+        taylor = _semantic.add(taylor, _semantic.mul(x3, 1.0 / 6.0, True), True)
+        taylor = _semantic.add(taylor, _semantic.mul(x4, 1.0 / 24.0, True), True)
+        taylor = _semantic.add(taylor, _semantic.mul(x5, 1.0 / 120.0, True), True)
+        abs_x = math.abs(arg0, _semantic=_semantic)
+        threshold = _semantic.full(arg0.shape, 1e-3, arg0.type.scalar)
+        tiny = _semantic.less_than(abs_x, threshold)
+        return _semantic.where(tiny, taylor, result)
     else:
         arg0 = _semantic.to_tensor(arg0)
         tmp = core.tensor(_semantic.builder.create_exp(arg0.handle), arg0.type)

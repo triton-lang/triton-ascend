@@ -45,16 +45,15 @@ def _compile_binary(compiler, module, metadata, options):
         output = argv.index("-o")
         return [*argv[:output], *extra, *argv[output:]]
 
-    def run(argv, **kwargs):
+    def run_vendor(argv, *args, **kwargs):
         argv[:] = command(argv)
-        return ascend.subprocess.run(argv, **kwargs)
+        return ascend._run_vendor_npubin(argv, *args, **kwargs)
 
     def join(argv):
         return ascend.shlex.join(command(argv))
 
     # The Ascend stages format the debug command and invoke the compiler separately.
-    stage = _bind(compiler, subprocess=SimpleNamespace(**dict(vars(ascend.subprocess), run=run)),
-                  shlex=SimpleNamespace(**dict(vars(ascend.shlex), join=join)))
+    stage = _bind(compiler, _run_vendor_npubin=run_vendor, shlex=SimpleNamespace(**dict(vars(ascend.shlex), join=join)))
     return stage(module, metadata, options)
 
 
@@ -97,5 +96,6 @@ def make_backend(target):
 
 
 def compile_tla(src, target=None, options=None, _env_vars=None):
-    compile_one = _bind(triton_compiler.compile, make_backend=make_backend)
+    # The inner compiler selects the backend used to construct the stages.
+    compile_one = _bind(triton_compiler._compile, make_backend=make_backend)
     return compile_one(src, target=target, options=options, _env_vars=_env_vars)

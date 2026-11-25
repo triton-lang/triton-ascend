@@ -34,6 +34,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MathExtras.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -1809,6 +1810,7 @@ bool RowLiftBuilder::run(triton::FuncOp fn) {
           rewriter.create<arith::ConstantIntOp>(op.getLoc(),
                                                 candidate.rowsPerProgram, 32));
 
+      firstRow = base;
       Value last = rewriter.create<arith::AddIOp>(
           op.getLoc(), base,
           rewriter.create<arith::ConstantIntOp>(
@@ -1871,7 +1873,122 @@ bool RowLiftBuilder::run(triton::FuncOp fn) {
   return true;
 }
 
+// Build the stream predicate in the same layout as the score tile. Token
+// bounds are independent of query/head, so compare them before broadcasting.
+// Materializing the causal coordinates in flat lane order avoids passing
+// query-shaped predicates and full score-shaped weights across vector blocks.
+bool RowLiftBuilder::rewriteStreamingDQMask(triton::BroadcastOp broadcast) {
+  auto expand = broadcast.getSrc().getDefiningOp<triton::ExpandDimsOp>();
+  auto type = dyn_cast<RankedTensorType>(broadcast.getType());
+  int64_t rows = candidate.rowsPerProgram * dotRows;
+  if (!expand || expand.getAxis() != 0 || !type || type.getRank() != 2 ||
+      !firstRow || !rewrittenLoop || type.getShape()[0] != dotRows ||
+      !llvm::isPowerOf2_64(rows))
+    return false;
+
+  arith::CmpFOp weight;
+  arith::CmpIOp causal, bound;
+  SmallVector<Value, 3> predicates{expand.getSrc()};
+  while (!predicates.empty()) {
+    Value predicate = predicates.pop_back_val();
+    if (auto both = predicate.getDefiningOp<arith::AndIOp>()) {
+      predicates.push_back(both.getLhs());
+      predicates.push_back(both.getRhs());
+    } else if (auto cmp = predicate.getDefiningOp<arith::CmpFOp>();
+               cmp && cmp.getPredicate() == arith::CmpFPredicate::OGT &&
+               !weight) {
+      weight = cmp;
+    } else if (auto cmp = predicate.getDefiningOp<arith::CmpIOp>()) {
+      if (cmp.getPredicate() == arith::CmpIPredicate::sle && !causal)
+        causal = cmp;
+      else if (cmp.getPredicate() == arith::CmpIPredicate::slt && !bound)
+        bound = cmp;
+      else
+        return false;
+    } else {
+      return false;
+    }
+  }
+  if (!weight || !causal || (bound && causal.getLhs() != bound.getLhs()))
+    return false;
+
+  auto query = causal.getRhs().getDefiningOp<triton::SplatOp>();
+  Value tokens = valueMapping.lookupOrNull(causal.getLhs());
+  if (!query || query.getSrc() != candidate.anchor->getResult(0) || !tokens ||
+      tokens.getType() != causal.getLhs().getType())
+    return false;
+
+  Value limit;
+  if (bound) {
+    limit = valueMapping.lookupOrNull(bound.getRhs());
+    if (!limit || tokens.getType() != limit.getType())
+      return false;
+  }
+
+  Location loc = broadcast.getLoc();
+  Type i32 = rewriter.getI32Type();
+  Type i1 = rewriter.getI1Type();
+  int64_t width = type.getShape()[1];
+  auto lanesType = RankedTensorType::get({rows}, i32);
+  auto positionsType = RankedTensorType::get({rows, width}, i32);
+  auto weightsType = RankedTensorType::get(
+      {candidate.rowsPerProgram, dotRows, width},
+      cast<RankedTensorType>(weight.getLhs().getType()).getElementType());
+  auto scoreType =
+      RankedTensorType::get({rows, width}, weightsType.getElementType());
+  auto flattenWeight = [&](Value old) {
+    Value value =
+        rewriter.create<triton::ExpandDimsOp>(loc, getRowValue(old), 1);
+    return view(rewriter.create<triton::BroadcastOp>(loc, weightsType, value),
+                scoreType);
+  };
+  Value weights = flattenWeight(weight.getLhs());
+  Value zeros = flattenWeight(weight.getRhs());
+
+  Value positions;
+  {
+    OpBuilder::InsertionGuard guard(rewriter);
+    rewriter.setInsertionPoint(rewrittenLoop);
+    Value lanes = rewriter.create<triton::MakeRangeOp>(loc, lanesType, 0, rows);
+    Value heads = rewriter.create<arith::ConstantOp>(
+        loc,
+        DenseElementsAttr::get(lanesType, rewriter.getI32IntegerAttr(dotRows)));
+    Value queryLane = rewriter.create<arith::DivSIOp>(loc, lanes, heads);
+    Value base = rewriter.create<triton::SplatOp>(loc, lanesType, firstRow);
+    Value row = rewriter.create<arith::AddIOp>(loc, base, queryLane);
+    positions = broadcastRowValue(row, positionsType);
+  }
+
+  Value tokenRow = rewriter.create<triton::ExpandDimsOp>(
+      loc, RankedTensorType::get({1, width}, i32), tokens, 0);
+  Value weightValid = rewriter.create<arith::CmpFOp>(
+      loc, arith::CmpFPredicate::OGT, weights, zeros);
+  Value tokenPositions =
+      rewriter.create<triton::BroadcastOp>(loc, positionsType, tokenRow);
+  Value causalValid = rewriter.create<arith::CmpIOp>(
+      loc, arith::CmpIPredicate::sle, tokenPositions, positions);
+  Value valid = rewriter.create<arith::AndIOp>(loc, weightValid, causalValid);
+  // Raw-pointer K/V loads already apply their bounds. Keep the explicit
+  // predicate only when the scan builder put it in the score mask.
+  if (limit) {
+    Value limitRow = rewriter.create<triton::ExpandDimsOp>(
+        loc, RankedTensorType::get({1, width}, i32), limit, 0);
+    Value inRange = rewriter.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::slt, tokenRow, limitRow);
+    inRange = rewriter.create<triton::BroadcastOp>(
+        loc, RankedTensorType::get({rows, width}, i1), inRange);
+    valid = rewriter.create<arith::AndIOp>(loc, valid, inRange);
+  }
+  valueMapping.map(broadcast.getResult(), valid);
+  return true;
+}
+
 bool RowLiftBuilder::rewrite(Operation *op) {
+  if (auto broadcast = dyn_cast<triton::BroadcastOp>(op);
+      broadcast && op->hasAttr(kStreamingDQMaskAttr) &&
+      rewriteStreamingDQMask(broadcast))
+    return true;
+
   bool flat = flatOperations.contains(op);
 
   if (auto loop = dyn_cast<scf::ForOp>(op))
@@ -1907,7 +2024,7 @@ bool RowLiftBuilder::rewrite(Operation *op) {
     });
 
   if (!dependent) {
-    rewriter.clone(*op, valueMapping);
+    rewriter.clone(*op, valueMapping)->removeAttr(kStreamingDQMaskAttr);
     return true;
   }
 
@@ -2018,6 +2135,7 @@ bool RowLiftBuilder::rewrite(Operation *op) {
       rewriter.create(op->getLoc(), op->getName().getIdentifier(), operands,
                       types, op->getAttrs());
 
+  cloned->removeAttr(kStreamingDQMaskAttr);
   if (auto flags = dyn_cast<arith::ArithIntegerOverflowFlagsInterface>(cloned))
     cloned->setAttr(
         flags.getIntegerOverflowAttrName(),

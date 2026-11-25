@@ -59,10 +59,16 @@ def prepare_params(ccinfo, kernel, signature, constants, out_path, params, arg_n
                                      for name, ty in signature.items()}, {index(name)
                                                                           for name in constants})
     _, runtime_path = launcher.get_runtime(npu_utils.get_so_path())
+    # One generic launcher serves every kernel; spec/types live in each stub.
     shutil.copy(launcher.export_launcher(spec, types, runtime_path), out_path.parent / "launcher_export.so")
     # The generated stubs include it; the harness compiles them in place.
     aot_header = Path(launcher.__file__).with_name("launcher_src") / "launcher_cann.h"
     shutil.copy(aot_header, out_path.parent / "launcher_cann.h")
+    # Field order must match TritonNpuLaunchSpecV1.
+    params["launch_spec_fields"] = ", ".join(str(value) for value in spec.as_dict().values())
+    # Fallback initializer for type-less kernels (num_types stays 0).
+    params["launch_types_init"] = ", ".join(f"{{{kind}, {dtype}}}" for kind, dtype in types) or "{0, -1}"
+    params["num_types"] = len(types)
     params["register_kernel_name"] = ccinfo.metadata.kernel_name
     params["packed_kernel_name"] = ccinfo.packed_metadata["kernel_name"]
     # CANN >= 9.1 launches through aclrtLaunchKernelWithHostArgs, so the stub

@@ -200,6 +200,13 @@ jobs:
             exit 0
           fi
           PAYLOAD_DIR=$(dirname "$(dirname "${BIN}")")
+          WANT_SHA="${{ steps.npuir-cache.outputs.npuir_sha }}"
+          HAVE_SHA=$(cat "${PAYLOAD_DIR}/npuir-sha.txt" 2>/dev/null || true)
+          if [ "${HAVE_SHA}" != "${WANT_SHA}" ]; then
+            echo "Payload source '${HAVE_SHA:-<unknown>}' does not match ${WANT_SHA}; building in-image."
+            echo "build_npuir=ON" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "Using npuir-build payload at ${PAYLOAD_DIR}"
           rm -rf .npuir-payload
           mkdir -p .npuir-payload
@@ -209,36 +216,20 @@ jobs:
           # zips without setUnixMode) and action-download-artifact extracts
           # via adm-zip as 0644, so restore the exec bit explicitly.
           chmod -R a+x .npuir-payload/bin
-          # Seed the PVC cache only when the payload self-identifies as built
-          # from exactly the stable HEAD we keyed on (npuir-build.yml writes
-          # npuir-sha.txt into the artifact). A stale payload — e.g. the old
-          # pin-built one from main while this PR's npuir-build is still
-          # running — is still used for this wheel, but must NOT be cached
-          # under the stable-HEAD key: a poisoned entry would mask the real
-          # payload on every later run until stable moves again.
-          WANT_SHA="${{ steps.npuir-cache.outputs.npuir_sha }}"
-          HAVE_SHA=$(cat "${PAYLOAD_DIR}/npuir-sha.txt" 2>/dev/null || true)
-          if [ "${HAVE_SHA}" != "${WANT_SHA}" ]; then
-            echo "WARNING: payload built from npuir '${HAVE_SHA:-<unknown, legacy artifact>}' but stable HEAD is ${WANT_SHA}; using it without caching"
-          else
-            # Seed the shared-volume PVC cache atomically (write a per-process
-            # temp dir, then mv) so the next run skips the slow download and the
-            # concurrent same-arch jobs (same key, identical content) never
-            # clobber each other's temp or expose a half-written dir.
-            CACHE_DIR="${{ steps.npuir-cache.outputs.cache_dir }}"
-            TMP_DIR="${CACHE_DIR}.tmp.$$"
-            rm -rf "${TMP_DIR}"
-            mkdir -p "${TMP_DIR}"
-            cp -a .npuir-payload/bin "${TMP_DIR}/"
-            cp -a .npuir-payload/lib "${TMP_DIR}/"
-            # Mark the entry with its source SHA (HAVE == WANT inside this
-            # branch) so the restore step can validate it on later runs.
-            cp "${PAYLOAD_DIR}/npuir-sha.txt" "${TMP_DIR}/npuir-sha.txt"
-            chmod -R a+x "${TMP_DIR}/bin"
-            rm -rf "${CACHE_DIR}"
-            mv "${TMP_DIR}" "${CACHE_DIR}"
-            echo "Saved npuir payload to local cache ${CACHE_DIR}"
-          fi
+          # Stage the cache in a per-process directory before replacing it.
+          CACHE_DIR="${{ steps.npuir-cache.outputs.cache_dir }}"
+          TMP_DIR="${CACHE_DIR}.tmp.$$"
+          rm -rf "${TMP_DIR}"
+          mkdir -p "${TMP_DIR}"
+          cp -a .npuir-payload/bin "${TMP_DIR}/"
+          cp -a .npuir-payload/lib "${TMP_DIR}/"
+          # Mark the entry with its source SHA (HAVE == WANT inside this
+          # branch) so the restore step can validate it on later runs.
+          cp "${PAYLOAD_DIR}/npuir-sha.txt" "${TMP_DIR}/npuir-sha.txt"
+          chmod -R a+x "${TMP_DIR}/bin"
+          rm -rf "${CACHE_DIR}"
+          mv "${TMP_DIR}" "${CACHE_DIR}"
+          echo "Saved npuir payload to local cache ${CACHE_DIR}"
           ls -la .npuir-payload/bin
           echo "build_npuir=OFF" >> "$GITHUB_OUTPUT"
 

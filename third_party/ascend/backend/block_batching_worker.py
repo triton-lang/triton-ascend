@@ -625,7 +625,11 @@ def _candidate_cache(variant):
 
 
 def _remember_decline(cache, variant, payload):
-    if _cacheable_decline(payload):
+    # Replaying a cached selection re-reports its declines, so only write when
+    # the stored record is absent or says something else. Rewriting an identical
+    # record would swap the inode and bump mtime, which strict AOT cache
+    # inventories compare and report as a modified artifact.
+    if _cacheable_decline(payload) and _cached_decline(cache, variant) != payload:
         cache.put(json.dumps(dict(version=_PROTOCOL, variant=variant, decline=payload, digest=_digest(payload))),
                   _DECLINE, binary=False)
 
@@ -887,7 +891,12 @@ def _freeze_source(backend, src, baseline_options, backend_revision, *, scalar_p
     cache = get_cache_manager(fingerprint)
     if type(cache) is not FileCacheManager:
         return BatchDecline("CUSTOM_CACHE_NOT_SUPPORTED", "freeze")
-    path = cache.put(data, "block_batching.original.ttir", binary=True)
+    # The fingerprint digests this snapshot, so an entry already stored under it
+    # is byte-identical. Rewriting it would swap the inode and bump mtime, which
+    # strict AOT cache inventories compare and report as a modified artifact.
+    path = cache.get_file("block_batching.original.ttir")
+    if path is None:
+        path = cache.put(data, "block_batching.original.ttir", binary=True)
 
     from .block_batching_source import FrozenSource
     frozen = FrozenSource(src, path, fingerprint, hashlib.sha256(data).hexdigest())

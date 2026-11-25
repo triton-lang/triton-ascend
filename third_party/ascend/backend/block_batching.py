@@ -373,8 +373,17 @@ class BatchKernel:
             self.candidate.hash if self.candidate is not None else None, "request":
             {"factor": self.request.factor, "axis": self.request.axis}, "report": self.block_batching
         }
-        identity = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
-        get_cache_manager(identity).put(json.dumps(manifest, sort_keys=True), "block_batching.bundle.json")
+        payload = json.dumps(manifest, sort_keys=True)
+        identity = hashlib.sha256(payload.encode()).hexdigest()
+        manager = get_cache_manager(identity)
+        # The identity is the digest of this payload, so an entry already stored
+        # under that key is byte-identical. Writing it again would still swap the
+        # inode and bump mtime, which strict AOT cache inventories compare and
+        # report as a modified artifact. get_file() is the CacheManager contract;
+        # has_file() exists on FileCacheManager alone, and refusal bundles still
+        # publish under a custom manager.
+        if manager.get_file("block_batching.bundle.json") is None:
+            manager.put(payload, "block_batching.bundle.json")
 
     def __getattr__(self, name):
         return getattr(self._primary, name)

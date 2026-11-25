@@ -1120,13 +1120,9 @@ bool isInvariantAlongAxis(Value expr, int64_t axis) {
       return isInvariantAlongAxis(operand, axis);
     });
 
-  if (auto broadcast = dyn_cast<triton::BroadcastOp>(producer)) {
-    auto srcType = cast<RankedTensorType>(broadcast.getSrc().getType());
-    int64_t leading = type.getRank() - srcType.getRank();
-    if (axis < leading)
-      return true; // dimension created by the broadcast
-    return isInvariantAlongAxis(broadcast.getSrc(), axis - leading);
-  }
+  // tt.broadcast is rank-preserving; rank growth is tt.expand_dims.
+  if (isa<triton::BroadcastOp>(producer))
+    return isInvariantAlongAxis(producer->getOperand(0), axis);
   if (auto expand = dyn_cast<triton::ExpandDimsOp>(producer)) {
     int64_t inserted = expand.getAxis();
     if (axis == inserted)
@@ -1134,8 +1130,6 @@ bool isInvariantAlongAxis(Value expr, int64_t axis) {
     return isInvariantAlongAxis(expand.getSrc(),
                                 axis > inserted ? axis - 1 : axis);
   }
-  if (isa<arith::ExtSIOp>(producer))
-    return isInvariantAlongAxis(producer->getOperand(0), axis);
   return false;
 }
 
@@ -1151,13 +1145,12 @@ bool isAxisDiscreteMaskAccess(Operation *op, Value ptr, Value mask,
   if (maskType.getShape() != ptrType.getShape())
     return false;
 
-  auto [contMask, discMask] =
-      decomposeAndMask(op, mask, op->getLoc(), rewriter);
-  if (!discMask)
+  auto decomposition = decomposeAndMask(op, mask, op->getLoc(), rewriter);
+  if (!decomposition.discMask)
     return false;
 
   for (int64_t axis = 0; axis < maskType.getRank(); ++axis)
-    if (isInvariantAlongAxis(discMask, axis))
+    if (isInvariantAlongAxis(decomposition.discMask, axis))
       return true;
   return false;
 }

@@ -514,6 +514,32 @@ def _get_install_requirements():
     return [*install_requires]
 
 
+def _iter_ascend_backend_subpackages():
+    """Yield every Python package under ``third_party/ascend/backend`` as a
+    dotted ``triton.backends.ascend.*`` name (top-level package excluded).
+
+    The in-tree Ascend backend is mapped into the wheel via ``package_dir``
+    (``triton.backends.ascend`` -> ``third_party/ascend/backend``). setuptools
+    only installs packages that appear in the ``packages`` list and does not
+    auto-discover subpackages through that mapping -- ``find_packages`` does
+    not traverse the build-time symlink either. Without enumerating the
+    subpackages here, the autotuner runtime package (``...runtime``) is
+    silently omitted from the wheel, so ``triton.autotune`` is never patched
+    to ``AutoTilingTuner`` and issue #2818 stays open on installed builds.
+    """
+    backend_dir = _REPO_ROOT / "third_party" / "ascend" / "backend"
+    if not backend_dir.is_dir():
+        return
+    for dirpath, _dirnames, filenames in os.walk(backend_dir):
+        if "__init__.py" not in filenames:
+            continue
+        rel = os.path.relpath(dirpath, backend_dir).replace(os.sep, ".")
+        if rel == ".":
+            # The top-level package is already yielded by the community loop.
+            continue
+        yield f"triton.backends.ascend.{rel}"
+
+
 def patch_module(mod):
     """Apply all Ascend-specific overrides to the setup.py globals adapter."""
 
@@ -660,9 +686,20 @@ def patch_module(mod):
     _orig_get_packages = mod.get_packages
 
     def get_packages():
-        yield from _orig_get_packages()
-        yield "triton.backends.ascend.reuse"
-        yield "triton.backends.ascend.reuse.dsl"
+        seen = set()
+        for pkg in _orig_get_packages():
+            seen.add(pkg)
+            yield pkg
+        # Enumerate every subpackage under third_party/ascend/backend
+        # (runtime, reuse, ...). The ascend backend is mapped via package_dir,
+        # but setuptools only installs packages listed in ``packages`` and does
+        # not auto-discover subpackages through that mapping; without this the
+        # autotuner runtime package is omitted from the wheel and
+        # ``triton.autotune`` is never patched to AutoTilingTuner (issue #2818).
+        for pkg in _iter_ascend_backend_subpackages():
+            if pkg not in seen:
+                seen.add(pkg)
+                yield pkg
         if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
             distributed_pkg_root = os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python",
                                                 "triton_dist")

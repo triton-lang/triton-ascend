@@ -26,12 +26,19 @@ from .autotuner import get_max_configs, max_autotune
 def _patch_autotune():
     try:
         import triton
+        import triton.runtime as _runtime
     except ImportError:
         return
 
     from .autotuner import autotune
 
     triton.autotune = autotune
+    # Also rebind the name in the triton.runtime namespace. triton/__init__.py
+    # binds ``triton.autotune`` from ``triton.runtime`` at import time, and
+    # callers may capture ``from triton.runtime import autotune``. Patching
+    # both keeps them consistent regardless of import order, so the Ascend
+    # AutoTilingTuner cannot be shadowed by a reference taken earlier.
+    _runtime.autotune = autotune
 
 
 def _patch_config_init():

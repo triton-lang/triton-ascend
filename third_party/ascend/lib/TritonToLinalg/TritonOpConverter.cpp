@@ -810,7 +810,7 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
     rewriter.replaceOp(op, truncOp.getResult());
   } else if (srcBitwidth > dstBitwidth) {
     // Downcast: use arith.truncf with round_mode=rint
-    bool saturate = srcElemType.isF32() &&
+    bool saturate = isa<Float16Type, BFloat16Type, Float32Type>(srcElemType) &&
                     isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType);
     if (saturate) {
       if (auto value =

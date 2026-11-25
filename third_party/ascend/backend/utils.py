@@ -60,8 +60,6 @@ _ARCH_TABLE = (
      None),
 )
 
-_RF_SIZE_BY_GENERATION = {gen: rf_kb for _, gen, _, rf_kb in _ARCH_TABLE}
-
 # Legacy SOC names without FFTS support.  Compared *exactly*, not by prefix:
 # the predicate historically tested ``arch in ["Ascend910A", "Ascend310B4"]``,
 # so a distinct SOC that merely shares a prefix (e.g. "Ascend910A2") keeps
@@ -117,7 +115,11 @@ def rf_size_in_kbytes_for_arch(arch: str = None):
 
     An omitted or empty *arch* resolves to the current runtime target.
     """
-    return _RF_SIZE_BY_GENERATION.get(arch_generation(arch))
+    generation = arch_generation(arch)
+    for _, gen, _, rf_kb in _ARCH_TABLE:
+        if gen == generation:
+            return rf_kb
+    return None
 
 
 # Cached result of the runtime SOC detection used by is_compile_on_910_95().

@@ -28,7 +28,7 @@ _ARCH_FUNCTIONS = {
 }
 
 # Module-level constants the extracted functions close over.
-_ARCH_CONSTANTS = {"_ARCH_TABLE", "_RF_SIZE_BY_GENERATION", "_FFTS_UNSUPPORTED_ARCHS"}
+_ARCH_CONSTANTS = {"_ARCH_TABLE", "_FFTS_UNSUPPORTED_ARCHS"}
 
 
 def _exec_nodes(path, nodes, namespace):

@@ -1742,13 +1742,16 @@ index a672722a1279f68cf80d5fde3d0b654100611d7a..c59e4d63797650f49f014f34f1c7921c
      # active hooks
      active_hooks: list[Hook] = []
 diff --git a/third_party/proton/proton/hooks/instrumentation.py b/third_party/proton/proton/hooks/instrumentation.py
-index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3bc21e452 100644
+index aac27ad1887339d44c3d16e47ce48c456b474d4c..87d486c12e19a1e6541df3f0235b0f5a5e3b7b88 100644
 --- a/third_party/proton/proton/hooks/instrumentation.py
 +++ b/third_party/proton/proton/hooks/instrumentation.py
-@@ -42,6 +42,30 @@ class CudaAllocator:
+@@ -42,6 +42,33 @@ class CudaAllocator:
          return buffer
  
  
++_PERF_MONITOR_COLLECTIONS = ("perf_monitor", "a5_perf_monitor", "mspti")
++
++
 +class NpuAllocator:
 +    """Profile scratch allocator for Ascend NPU; torch_npu is imported lazily."""
 +
@@ -1776,7 +1779,7 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
  class Instrumentation:
  
      def __init__(self, ir_map: Dict[str, Any]):
-@@ -61,6 +85,20 @@ class Instrumentation:
+@@ -61,6 +88,20 @@ class Instrumentation:
          triton_proton.load_dialects(ctx)
  
  
@@ -1797,7 +1800,7 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
  def _interpret_mode(mode_obj: Union[str, mode.InstrumentationMode]) -> mode.InstrumentationMode:
      if isinstance(mode_obj, mode.InstrumentationMode):
          return mode_obj
-@@ -121,6 +159,8 @@ def _get_backend_name() -> str:
+@@ -121,6 +162,8 @@ def _get_backend_name() -> str:
          return "nvidia"
      elif backend == "hip":
          return "amd"
@@ -1806,7 +1809,7 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
      else:
          raise RuntimeError(f"Unsupported backend: {backend}")
  
-@@ -139,9 +179,15 @@ class InstrumentationHook(Hook):
+@@ -139,9 +182,14 @@ class InstrumentationHook(Hook):
          # Mapping of function objects to their scope ID pairs
          self.mode: mode.InstrumentationMode = _interpret_mode(mode_obj)
  
@@ -1816,14 +1819,13 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
 +        self.allocator = NpuAllocator(self) if _get_backend_name() == "ascend" else CudaAllocator(self)
          self.buffer = None
          self.metadata_path: Dict[Any, Optional[str]] = {}
-+        self._perf_monitor_functions = set()
 +        self._perf_monitor = None
 +        self._warmup_remaining = {}
 +        self._skipping_warmup = False
  
      def activate(self):
          if InstrumentationHook.active_count > 0:
-@@ -152,8 +198,14 @@ class InstrumentationHook(Hook):
+@@ -152,8 +200,14 @@ class InstrumentationHook(Hook):
          flags.instrumentation_on = True
  
          device = triton.runtime.driver.active.get_current_device()
@@ -1839,7 +1841,7 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
  
          def to_llvmir_passes(pm):
              is_long_clk = False if mode.Optimize.CLOCK32 in self.mode.optimizations else True
-@@ -181,12 +233,27 @@ class InstrumentationHook(Hook):
+@@ -181,12 +235,27 @@ class InstrumentationHook(Hook):
                  arch = triton.runtime.driver.active.utils.get_device_properties(device)["arch"].split(":")[0]
                  triton_proton.add_convert_proton_amd_gpu_to_llvm(pm, arch)
  
@@ -1873,7 +1875,7 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
  
          # Set up the profiling allocator
          set_profile_allocator(self.allocator)
-@@ -198,6 +265,9 @@ class InstrumentationHook(Hook):
+@@ -198,6 +267,9 @@ class InstrumentationHook(Hook):
          if InstrumentationHook.active_count == 0:
              return
  
@@ -1883,7 +1885,7 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
          InstrumentationHook.active_count -= 1
  
          backend_name = _get_backend_name()
-@@ -225,18 +295,55 @@ class InstrumentationHook(Hook):
+@@ -225,18 +297,46 @@ class InstrumentationHook(Hook):
              return
  
          # Find the IR path in metadata
@@ -1899,7 +1901,9 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
 +            import json
 +            with open(metadata_path) as file:
 +                compiled_metadata = json.load(file)
-+            if compiled_metadata.get("proton_collection") in ("perf_monitor", "a5_perf_monitor", "mspti"):
++            if compiled_metadata.get("proton_collection") == "none":
++                return
++            if compiled_metadata.get("proton_collection") in _PERF_MONITOR_COLLECTIONS:
 +                entries = compiled_metadata.get("proton_metadata", [])
 +                if len(entries) != 1 or entries[0]["proton"]["format_version"] != 2:
 +                    raise RuntimeError(
@@ -1908,17 +1912,6 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
 +                names = [(s["start_region_id"] & 0x3ff, s["name"]) for s in scopes]
 +                parents = [(s["start_region_id"] & 0x3ff, s["parent_id"]) for s in scopes if s["parent_id"] >= 0]
 +                libproton.init_function_metadata(function, name, names, parents, metadata_path)
-+                self._perf_monitor_functions.add(function)
-+                import os
-+                import warnings
-+                warmup = int(os.environ.get("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES", "0"))
-+                if not 0 <= warmup <= 100:
-+                    raise ValueError("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES must be between 0 and 100")
-+                self._warmup_remaining[function] = warmup
-+                if warmup:
-+                    warnings.warn(
-+                        f"Hardware instrumentation: the first {warmup} launch(es) of {name} are explicit warmup and not collected"
-+                    )
 +                return
 +
          if ir_path:
@@ -1941,11 +1934,26 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
              triton_proton.load_dialects(context)
              module = triton_ir.parse_mlir_module(ir_path, context)
              module.context = context
-@@ -252,6 +359,16 @@ class InstrumentationHook(Hook):
+@@ -252,6 +352,31 @@ class InstrumentationHook(Hook):
  
      def enter(self, metadata: LazyDict) -> None:
          func = metadata.data.get("function")
-+        if func in self._perf_monitor_functions:
++        collection = getattr(metadata, "_proton_collection", None)
++        if collection == "none":
++            return
++        if collection in _PERF_MONITOR_COLLECTIONS:
++            if func not in self._warmup_remaining:
++                import os
++                import warnings
++                warmup = int(os.environ.get("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES", "0"))
++                if not 0 <= warmup <= 100:
++                    raise ValueError("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES must be between 0 and 100")
++                self._warmup_remaining[func] = warmup
++                if warmup:
++                    name = metadata.data["name"]
++                    warnings.warn(
++                        f"Hardware instrumentation: the first {warmup} launch(es) of {name} are explicit warmup and not collected"
++                    )
 +            if self._perf_monitor is None:
 +                from ..ascend_perf_monitor import PerfMonitorCollector
 +                self._perf_monitor = PerfMonitorCollector()
@@ -1958,11 +1966,14 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
          stream = metadata.data.get("stream")
          alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
          libproton.enter_instrumented_op(stream, func, self._data_ptr(), alloc_size)
-@@ -260,6 +377,15 @@ class InstrumentationHook(Hook):
+@@ -260,6 +385,18 @@ class InstrumentationHook(Hook):
  
      def exit(self, metadata: LazyDict) -> None:
          func = metadata.data.get("function")
-+        if func in self._perf_monitor_functions:
++        collection = getattr(metadata, "_proton_collection", None)
++        if collection == "none":
++            return
++        if collection in _PERF_MONITOR_COLLECTIONS:
 +            if self._skipping_warmup:
 +                import torch
 +                torch.npu.synchronize()
@@ -1974,7 +1985,7 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..2ce6e898fad4ebfce96864c73cc582c3
          stream = metadata.data.get("stream")
          alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
          libproton.exit_instrumented_op(stream, func, self._data_ptr(), alloc_size)
-@@ -279,6 +405,9 @@ class InstrumentationHook(Hook):
+@@ -279,6 +416,9 @@ class InstrumentationHook(Hook):
                      return 1
                  elif target["backend"] == "hip":
                      return 2

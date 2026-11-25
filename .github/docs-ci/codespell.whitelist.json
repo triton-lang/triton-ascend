@@ -53,9 +53,11 @@
   "conv",
   "UBSIZE",
   "ttadapter",
+  "SIMD",
   "simd",
   "GELU",
   "SIMT",
+  "simt",
   "cosp",
   "bessel",
   "erfcin",
@@ -276,5 +278,13 @@
   "axis",
   "load",
   "store",
-  "varlen"
+  "varlen",
+  "SDPA",
+  "silu",
+  "multinomial",
+  "DOTA",
+  "addptr",
+  "deinterleave",
+  "Tensorize",
+  "PTSM"
 ]

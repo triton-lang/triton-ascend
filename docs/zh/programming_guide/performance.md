@@ -62,7 +62,7 @@
   - 指令时间线诊断规则（断流检测、空白段识别）
 - 2.4 瓶颈分类与优化方向决策树（看完怎么办）
   - 计算密集型 → 增大分块 / CV 融合
-  - 访存密集型 → 存算并行 / care\_padding / 对齐优化
+  - 访存密集型 → 存算并行 / Load 重排序 / 对齐优化
   - 标量退化 → 数据类型优化（避免 int64）
   - 同步开销 → 减少同步 / 调整编译参数
 
@@ -87,6 +87,7 @@
     - 核心数动态获取（`device_properties.get("num_vectorcore")`），不硬编码——910B 与 950 核心数不同
     - 纯 Vector 算子使用 `num_vectorcore`，CV 融合算子用 `num_aicore`
     - 持久化循环天然形成软件流水线——上一轮 Vector 计算与下一轮 MTE2 加载重叠
+
   ```python
   # ── Before: 多维逻辑 Grid，每 program 处理一个 (M块, head, batch) 组合 ──
   @triton.jit
@@ -130,11 +131,13 @@
                    AICORE_NUM=NUM_CORES,
                    MAX_Q_LEN=max_seqlen_q, ...)
   ```
+
   - **案例**：FA v8 fwd/bwd — 3D Grid `(blocks_m, q_head, batch)` → 1D Grid `(AICORE_NUM,)` + interleaved 循环
   - **案例**：RoPE — 3D Grid `(seq_blocks, bs, head)` → 1D Grid `(bs,)` + 核内遍历 seq\_len 和 head
 - 3.2 自适应分核：按任务量缩减核数
   - **问题**：当任务总量小于总核数时（如 batch\_size=4 而 num\_vectorcore=80），部分核心分不到任务，产生空转——`range(pid, total_tasks, num_cores)` 中 `pid >= total_tasks` 的核心循环体为空，属于无效启动、造成资源空转。
   - **方案**：根据实际任务量动态缩减 Grid 核心数，确保每个核心至少分到一个完整任务块，避免无效核心参与调度
+
   ```python
   # ── Before: 固定核心数，部分核心空转 ──
   NUM_CORES = VECTOR_NUM  # 80 核
@@ -150,11 +153,13 @@
       NUM_CORES = VECTOR_NUM
   grid = (NUM_CORES,)
   ```
+
   - **案例**：RMSNorm — `n_rows < num_cores` 时缩减 Grid 到 `n_rows`
 - 3.3 SPLIT\_K 拆分：K 维度并行化
   - **问题**：当 M×N 维度不足以饱和所有核心时（如 decode 场景的小 batch，M=1、N=head\_dim=128，只有 1×8=8 个输出块），大量核心闲置。此时 M×N 的并行度远小于物理核数
   - **方案**：在 K 维度上拆分 matmul，多个 program 并行计算部分和，通过原子操作或锁机制累加到最终输出
   - **关键细节**：SPLIT\_K 个 program 写同一输出地址，必须用 `tl.atomic_add` 累加（无锁）或 `LOCK` 数组 + `tl.store`（有锁）；autotune 时需 `reset_to_zero=["output_ptr"]` 避免多次评估累加
+
   ```python
   # ── Before: 单 program 处理完整 K 维度，M×N 并行度不足 ──
   @triton.jit
@@ -195,12 +200,14 @@
   # Grid 增加 K 维度：M×N×SPLIT_K 并行度
   grid = (cdiv(M, BLOCK_M), cdiv(N, BLOCK_N), SPLIT_K)
   ```
+
   - **案例**：Fused MatMul bwd\_w — `SPLIT_K` 参数（8/16）拆分 K 维度，配合 `LOCK_W` 数组处理写冲突
   - **案例**：FA bwd\_qkv — `dq` 用 `tl.atomic_add` 累加多核结果，autotune 配 `reset_to_zero=["dq_ptr"]`
 - 3.4 Sorted Round-Robin 负载均衡：稀疏注意力的任务不均衡问题
   - **问题**：稀疏注意力（Flex Attention / SWA）与 GQA 场景中，不同任务块的工作量差异极大：causal mask 使上三角全零，前几个 query block 只需处理少量 key block，而最后一个 query block 要处理全部 key block。此时若按stride 方式遍历任务（`range(pid, total, num_cores)`），各核任务大小混杂不均，导致各核总工作量严重失衡：分配到靠后 query block 的核满载，分配到靠前的核大量空转。
   - **方案**：主机端先枚举所有任务 → 计算 workload（如每个 query block 需处理的 key block 数）→ 按 workload 降序排序 → 以轮询方式分配到各核（round-robin）→ kernel 端通过任务张量读取本核的任务列表
   - **原理**：降序排序保证大任务优先被分配，轮询则让每个核在排序序列上等距采样（核 0 取第1、第 C+1 、第 2C+1...大的任务），因此各核拿到的任务集合在大小分布上高度同构，总工作量趋于均衡；同时避免"最后才遇到一个超大任务，已无处摊平"的情况。
+
   ```python
   # ── Before: kernel 内 stride 遍历，各核工作量严重不均 ──
   @triton.jit
@@ -241,6 +248,7 @@
           start_m = block_idx % NUM_BLOCKS_M
           ...  # 各核总工作量趋于一致
   ```
+
   - **案例**：FlexAttention — 主机端 sorted round-robin 分配，消除 causal mask 导致的工作量不均
   - **案例**：SWA prefill — 滑动窗口场景的 workload 排序分配
 
@@ -257,6 +265,7 @@
 - 4.1 核内多块循环：提升 MTE2/MTE3/计算流水并行度
   - **问题**：标准 Grid 模式下每个 program 只处理一个数据块，Grid 规模大（如 `cdiv(numel, BLOCK_SIZE)=1000`）但核内无流水线深度——每个 program 只做一次 load→compute→store，无法利用存算并行
   - **方案**：新增 `BLOCK_NUM` 参数，单 program 内循环处理多个数据块，Grid 相应缩小 `BLOCK_NUM` 倍。核内多块循环减少 Grid 规模（降低核切换开销），同时实现存算并行（上一块 compute 与下一块 load 重叠）
+
   ```python
   # ── Before: 每 program 一个块，Grid 大但无核内流水线 ──
   @triton.jit
@@ -290,10 +299,12 @@
   # Grid 缩小 BLOCK_NUM 倍，核内循环实现存算并行
   grid = (triton.cdiv(n_elements, BLOCK_SIZE * BLOCK_NUM),)
   ```
+
   - **案例**：Softcap — 新增 `BLOCK_NUM` 参数（1/2/4/8/16/32/64），核内循环处理多块，BLOCK\_SIZE×BLOCK\_NUM 决定每 program 总数据量
 - 4.2 1D 展平替代 2D：小 shape 场景的索引开销消除
   - **问题**：小 shape 下 2D row-blocked kernel 的 2D 索引开销占比高——`offsets = row[:, None] * stride + col[None, :]` 需要二维广播乘加，当 `n_cols` 较小时（如 head\_dim=128），索引计算的时间接近甚至超过实际计算时间
   - **方案**：改为 1D flatten kernel，将二维 `(rows, cols)` 展平为一维 `rows*cols`，消除 2D 索引，提升内存合并（连续地址访问）
+
   ```python
   # ── Before: 2D kernel，小 shape 下索引开销高 ──
   @triton.jit
@@ -326,10 +337,12 @@
 
   grid = (triton.cdiv(n_rows * n_cols, BLOCK_SIZE),)
   ```
+
   - **案例**：GELU / SiLU — `n_cols <= 10240` 或 `n_rows < num_cores` 时切换到 1D flatten kernel
 - 4.3 移除 next\_power\_of\_2：避免不必要的 padding
   - **问题**：`next_power_of_2(d)` 将实际维度向上取整到 2 的幂（如 d=300 → 512，d=192 → 256），导致 padding 浪费 UB 空间（多分配 70% 的 UB）和多余循环迭代。更关键的是，当 `BLOCK_DIN = next_power_of_2(Din)` 使 `BLOCK_DIN > Din` 时，归约循环需要执行多次（无法单 Pass 完成），阻碍算子融合
   - **方案**：当实际维度满足 32B 对齐要求时（FP16 的 d 须为 16 的倍数），直接使用实际维度 `D_ROUNDED = d`，消除 padding 浪费并使循环只执行一次
+
   ```python
   # ── Before: 向上取整到 2 的幂，padding 浪费 + 多次循环 ──
   @triton.jit
@@ -362,6 +375,7 @@
   # 调用处
   D_ROUNDED = d  # 直接用 300（假设 300 是 16 的倍数，或已对齐）
   ```
+
   - **案例**：RMSNorm — `D_ROUNDED=triton.next_power_of_2(d)` → `D_ROUNDED=d`，使归约循环只执行一次
   - **案例**：Gate RMSNorm — `BLOCK_DIN=min(3264, next_power_of_2(Din))` → `BLOCK_DIN=Din`，使循环只执行一次，实现单 Pass 融合
 - 4.4 SWA 循环结构优化：合并 vs 拆分
@@ -369,6 +383,7 @@
   - **两种策略**（根据全局窗口占比选择）：
     - **合并**（全局窗口占比低时更优）：将两个独立循环合并为一个，用 `tl.where` 统一 mask，减少循环数量和 Grid 开销
     - **拆分**（全局窗口占比高时更优）：将统一循环拆分为两段——全局段无 mask 开销（满密度直接计算），非全局段只执行 causal+local mask
+
   ```python
   # ── 合并策略（全局窗口占比低时更优）──
   # Before: 两个独立循环，循环开销翻倍
@@ -406,13 +421,14 @@
       mask = causal_mask & local_window_mask
       qk = tl.where(mask, qk, -inf)
   ```
+
   - **案例**：SWA prefill — 根据全局窗口占比选择合并或拆分策略
 
 ### 第 5 章 Autotune 调优策略：让调优器替你找到最优配置
 
 > **核心理念**：NPU 的最优 BLOCK 尺寸取决于 UB 容量、数据类型、矩阵形状和硬件架构的复杂交互，人工试错效率低下。Autotune 让调优器自动搜索最优配置，是 NPU 算子调优的标准武器。
 >
-> **（1）Config 内容差异。** GPU 的 `triton.Config` 包含 Tiling 参数 + `num_stages`（软件流水线深度，1\~4）+ `num_warps`（线程束数量，4/8/16/32）。NPU 的 Config **仅含 Tiling 参数**——`num_stages` 和 `num_warps` 在 NPU 上无意义（NPU 无 GPU 式 warp 和软件流水线 stage），必须移除。NPU 的流水线并行通过 `multibuffer`（UB 双缓冲）和核内 `for` 循环实现，而非 `num_stages`。此外，NPU 的 Config 可以将编译参数（如 `multibuffer`、`enable_vf_fusion`）作为搜索维度。
+> **（1）Config 内容差异。** GPU 的 `triton.Config` 包含 Tiling 参数 + `num_stages`（软件流水线深度，1\~4）+ `num_warps`（线程束数量，4/8/16/32）。NPU 的 Config **仅含 Tiling 参数**——`num_stages` 和 `num_warps` 在 NPU 上无意义（NPU 无 GPU 式 warp 和软件流水线 stage），必须移除。NPU 的流水线并行通过 `multibuffer`（UB 双缓冲）和核内 `for` 循环实现，而非 `num_stages`。此外，NPU 的 Config 可以将编译参数（如 `multibuffer`、`vf_fusion_mode`）作为搜索维度。
 >
 > **（2）候选值约束。** NPU 的 BLOCK 候选值受 UB 容量硬约束——大 BLOCK 提升 Cube 利用率和数据复用，但超出 UB 容量则编译失败（`ub overflow`）。经验公式：`最大Tiling元素数 ≈ UB_SIZE / (dtype_bytes × buffer数量)`，如 FP16（2B）3 buffers 时 248KB/(2×3) ≈ 40960 元素。此外，NPU 的 BLOCK 值应满足 32B 对齐（FP16 须为 16 的倍数），使用 2 的幂次值（32/64/128/256/512/1024/2048）天然满足对齐要求。非 2 的幂的值（如 100、86）也可使用，但需确保对齐。
 >
@@ -421,6 +437,7 @@
 - 5.1 BLOCK 尺寸搜索：从小 BLOCK 起步逐步增大
   - **问题**：固定小 BLOCK 导致 Cube 利用率低和数据复用差，但盲目增大可能溢出 UB。开发者难以人工判断特定 shape 下的最优 BLOCK 值
   - **方案**：从小 BLOCK 起步，通过 Autotune 逐步增大搜索最优值。候选值可包含非 2 的幂以精确匹配实际维度（如序列长度 100）
+
   ```python
   # ── Before: 固定小值，无法适配不同 shape ──
   @triton.jit
@@ -444,12 +461,14 @@
   def fwd_kernel(..., BLOCK_M: tl.constexpr):
       ...
   ```
+
   - **案例**：FA bwd\_q blkM 32→64→128，bwd\_kv blkN 32→64→128，bwd\_preprocess 32→128/256
   - **案例**：Fused MatMul fwd 从搜索空间收敛到 BM=BN=BK=128（Cube 单元最优分块）
   - **案例**：RoPE TOKEN\_BLOCK\_SIZE=3（非 2 的幂精确匹配）
 - 5.2 多维组合搜索：从单 config 到全空间
   - **问题**：单维度搜索无法捕捉 BLOCK\_M × BLOCK\_N × BLOCK\_K 的交互效应——如 BLOCK\_M=128 在 BLOCK\_N=32 时最优，但在 BLOCK\_N=128 时可能 BLOCK\_M=64 更优（UB 约束）
   - **方案**：从单 config 扩展到多维组合搜索，使用列表推导生成笛卡尔积
+
   ```python
   # ── Before: 单 config，无法捕捉维度交互 ──
   @triton.autotune(
@@ -472,10 +491,12 @@
                     BLOCK_K: tl.constexpr):
       ...
   ```
+
   - **案例**：SwiGLU — 从单 config 扩展到 BM×BN×BK 三维搜索
 - 5.3 Key 参数化：按形状/dtype 缓存最优 config
   - **问题**：不同输入形状/属性的最优 config 不同，无 key 参数化时跨形状重复调优（每次 shape 变化都重新搜索全部 Config）。更隐蔽的问题：不同 dtype（fp16 vs bf16）的 UB 占用和计算路径不同，但若 dtype 不在 key 中，fp16 选出的 config 可能对 bf16 不是最优
   - **方案**：按输入形状/属性缓存最优 config；将 dtype 也加入 key（通过 `X_ptr.dtype` 引用指针的 dtype）
+
   ```python
   # ── Before: 基础 key，跨 shape/dtype 重复调优 ──
   @triton.autotune(
@@ -497,12 +518,14 @@
       key=["QK_DIM", "V_DIM", "MASK_FN", "SPARSE_OPT"],
   )
   ```
+
   - **案例**：FA v5 — 按 QK\_DIM/V\_DIM/MASK\_FN/SPARSE\_OPT 缓存
   - **案例**：RMSNorm — 将 dtype 加入 key（fp16 vs bf16 UB 占用不同）
 - 5.4 搜索空间剪枝：提前过滤无效 config
   - **问题**：大搜索空间中包含两类无效 Config：(1) 会溢出 UB 的 Config（BLOCK\_M×BLOCK\_N 过大），首次运行时编译失败浪费时间；(2) 特定架构上永远不会胜出的 Config（如 910B 上大 BLOCK 因 UB 只有 192KB 而总是不如小 BLOCK）。这些无效 Config 浪费首次运行编译时间
   - **方案一（UB 剪枝）**：通过 `prune_configs_by` 的 `early_config_prune` 回调函数，在编译前过滤会溢出 UB 的 Config
   - **方案二（架构剪枝）**：按架构裁剪搜索空间，只保留该架构上可能胜出的 Config
+
   ```python
   # ── UB 剪枝：过滤会溢出 UB 的 Config ──
   def _prune_oversized_tiles(configs, named_args, **kwargs):
@@ -530,29 +553,35 @@
 
   @triton.autotune(configs=get_configs(), key=["M", "N"])
   ```
+
   - **案例**：RMSNorm / Int8GEMM — UB 溢出 config 提前过滤
   - **案例**：SWA a2 — 8 configs → 1 config（910B 架构剪枝）
 - 5.5 编译参数加入搜索
-  - **问题**：编译参数（如 `enable_vf_fusion`、`multibuffer`）的最优值取决于具体 shape，人工选择容易遗漏。特别是 `multibuffer`：开启后 UB 减半但实现存算并行，某些 shape 下开启更优（计算密集），某些 shape 下关闭更优（UB 受限需要大 BLOCK）
+  - **问题**：编译参数（如 `vf_fusion_mode`、`multibuffer`）的最优值取决于具体 shape，人工选择容易遗漏。特别是 `multibuffer`：开启后 UB 减半但实现存算并行，某些 shape 下开启更优（计算密集），某些 shape 下关闭更优（UB 受限需要大 BLOCK）
   - **方案**：将编译参数作为 Autotune 搜索维度，让调优器自动选择
+
   ```python
   # ── 编译参数加入搜索 ──
   @triton.autotune(
       configs=[
-          # 同一 BLOCK 下，multibuffer 和 enable_vf_fusion 各试一次
-          triton.Config({"BLOCK_M": 8}, multibuffer=True, enable_vf_fusion=True),
-          triton.Config({"BLOCK_M": 8}, multibuffer=True, enable_vf_fusion=False),
-          triton.Config({"BLOCK_M": 8}, multibuffer=False, enable_vf_fusion=True),
-          triton.Config({"BLOCK_M": 8}, multibuffer=False, enable_vf_fusion=False),
+          # 同一 BLOCK 下，multibuffer 和 vf_fusion_mode 各试一次
+          triton.Config({"BLOCK_M": 8}, multibuffer=True, vf_fusion_mode="max-parallel"),
+          triton.Config({"BLOCK_M": 8}, multibuffer=True, vf_fusion_mode="ub-aware-op"),
+          triton.Config({"BLOCK_M": 8}, multibuffer=True, vf_fusion_mode="all-op"),
+          triton.Config({"BLOCK_M": 8}, multibuffer=False, vf_fusion_mode="max-parallel"),
+          triton.Config({"BLOCK_M": 8}, multibuffer=False, vf_fusion_mode="ub-aware-op"),
+          triton.Config({"BLOCK_M": 8}, multibuffer=False, vf_fusion_mode="all-op"),
       ],
       key=["M", "N"],
   )
   ```
-  - **案例**：RMSNorm — `enable_vf_fusion` 作为搜索维度加入 autotune configs
+
+  - **案例**：RMSNorm — `enable_vf_fusion` 作为搜索维度加入 autotune configs（注意：`enable_vf_fusion` 已废弃，不再透传给 NPU 编译器，请改用 `vf_fusion_mode`）
   - **案例**：RoPE — `multibuffer` 作为搜索维度加入 autotune configs
 - 5.6 autotune 结果磁盘缓存：避免重复调优
   - **问题**：每次运行都重新 autotune 浪费时间，特别适用于固定 shape 的生产环境（如推理场景的 seq\_len 固定）
   - **方案**：开启 autotune 的**磁盘缓存**——`cache_results=True`，或环境变量 `TRITON_CACHE_AUTOTUNING=1` 全局开启。首次调用正常编译并 benchmark 全部 config，把每个 config 的耗时写入 `TRITON_CACHE_DIR/<hash>/<函数名>.autotune.json`；后续相同 `key` 的调用直接加载缓存、取耗时最短的 config，**跳过整个搜索阶段**。注意这是**按 key 缓存**而非永久固定：`key` 参数取值、dtype、编译选项或 config 列表任一变化都会使缓存失效并重新调优
+
   ```python
   @triton.autotune(
       configs=[
@@ -569,7 +598,9 @@
       v = tl.load(x_ptr + offs)
       tl.store(y_ptr + offs, v)
   ```
+
   - **缓存文件内容**：`<函数名>.autotune.json` 保存 `key` 与每个 config 的实测耗时（中位数/下界/上界），命中后按耗时取 `min`
+
   ```json
   {
     "key": [8192],
@@ -580,7 +611,9 @@
     ]
   }
   ```
+
   - **彻底固定配置**：若 shape 长期不变，可调优一次后把最优 config 直接写死、去掉 `@triton.autotune`，连首次调优开销也省掉
+
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, n, BLOCK_SIZE: tl.constexpr):
@@ -591,12 +624,14 @@
   # 直接指定最优 config（BLOCK_SIZE=1024 + multibuffer=True），跳过搜索
   kernel[(grid,)](x, y, n, BLOCK_SIZE=1024, multibuffer=True)
   ```
+
   - **案例**：RoPE / 推理场景 — seq\_len 固定使 `key` 不变，后续推理直接命中缓存
 - 5.7 动态序列长度：避免每个新长度都触发 Autotune
   - **问题**：在自回归解码、变长输入等整网场景中，切分轴 `seq_len` 可能连续取 `1001、1002、1003……`。如果使用 `key=["seq_len"]`，每个未见过的长度都会产生新的调优缓存项。相同的完整 key 可以复用已有结果，但开启 5.6 节的磁盘缓存只能解决相同 key 的跨进程复用，不能自动让新长度沿用附近长度的配置。
   - **选择原则**：将大量精确长度归并为有限的性能区间，并让 kernel 在运行时处理真实长度。
     **方案1：长度分桶：用桶值做调优 key，用真实长度执行。**
   将长度向上归并到 2 的幂，例如 `1001、1002、1024` 的桶值均为 `1024`，`1025` 的桶值为 `2048`。也可以根据性能拐点设置不等宽区间。桶值只控制配置复用，不要求将输入 padding 到桶上界；grid、循环边界和 mask 仍使用真实长度。
+
   ```python
   def length_bucket(seq_len):
       return triton.next_power_of_2(max(128, seq_len))
@@ -633,11 +668,13 @@
       add_one_bucket_kernel[grid](x, y, seq_len, seq_bucket)
       return y
   ```
+
   同桶的第一次调用会在当时的真实长度上 benchmark，后续直接复用，**不会对桶内每个长度继续搜索**。应选择有代表性的长度预热，并验证桶下界、上界及常见长度的正确性和性能；若桶内性能差异明显，拆分桶，或离线在多个代表点上综合选择配置。所有候选配置都必须对桶内全部长度正确，不能依赖首次调优长度的整除性，也不能省略必要的尾部 mask。
 
   **方案2：启发式分派：离线调优形成规则，线上直接选择配置。**
 
   在目标硬件、dtype、布局和典型长度上离线测量，找到不同配置的性能交叉点，再将结果写成区间表或条件分支。线上只选择配置并调用普通 `@triton.jit` kernel，不执行 `@triton.autotune` 的搜索；也可以用 `@triton.heuristics` 把选配置的规则直接挂到 kernel 上，在 launch 时动态算出 `BLOCK_SIZE`，效果与手动分派等价：
+
   ```python
   def select_block_size(seq_len):
       if seq_len <= 512:
@@ -668,6 +705,7 @@
       add_one_fixed_kernel[grid](x, y, seq_len)  # BLOCK_SIZE 由 heuristics 计算
       return y
   ```
+
   **调优缓存与编译缓存需要分别处理**：缩小 autotune key 只减少 benchmark 次数。如果将每步变化的真实长度标为 `tl.constexpr`，即使命中调优缓存，JIT 仍可能为每个长度编译新版本。上述示例将真实长度保留为运行时参数，并用 `do_not_specialize` 避免按该标量的值或对齐特征进一步特化；它不禁止 `seq_bucket` 作为 autotune key。有限的 `BLOCK_SIZE: tl.constexpr` 仍会对应不同编译版本，可在上线前预热各桶或分派分支。`prune_configs_by` 只能减少每次搜索的候选数，无法消除大量精确长度带来的新 key。
 
 ### 第 6 章 CV 流水线优化：让 Cube 和 Vector 并行工作
@@ -685,6 +723,7 @@
   - **方案一**：将无数据依赖的 `tl.dot` 提前到 Vector 计算之前，使 Cube 与 Vector 并行。注意：依赖 Cube 结果的操作（如 `acc += pv`）必须延后
   - **问题二**：前驱 Vector 计算与 `tl.dot` 的 VF（Vector Function）融合链过长，导致 UB 溢出或阻止 dot 调度到 Cube（编译器将 `ds` 的计算融合到 dot 的 VF 链中，使整个链在 Vector 执行，Cube 无法独立调度）
   - **方案二**：在 `tl.dot` 之前插入 `compile_hint("break_vf")`，打断 VF 融合链，确保 `ds` 独立计算后 `tl.dot` 单独调度到 Cube
+
   ```python
   # ── 指令重排序：让 Cube 提前启动 ──
   # Before: Vector 先执行，Cube 等待（Flash Attention softmax 循环体）
@@ -723,12 +762,14 @@
   extension.compile_hint(ds, "break_vf")  # 在此处打断 VF 融合
   dq += tl.dot(ds, k)  # tl.dot 独立调度到 Cube
   ```
+
   - **案例**：FA v4/v8 fwd — `tl.dot(p, v)` 提前到 `p_sum` / `alpha` 之前
   - **案例**：FA bwd\_q/bwd\_qkv — `ds` 计算后插入 `break_vf`，确保 `tl.dot` 调度到 Cube
 - 6.2 CV 协同配置：子块绑定与完整七参数
   - **问题**：CV 融合算子需要 Cube 和 Vector 以 1:2 比例协同（匹配 1 Cube + 2 Vector 架构），但默认配置不启用协同——Cube 和 Vector 各自独立调度，无法实现流水线并行。此外，CV 融合算子需要一组完整的编译参数来控制 CV 协同行为
   - **方案一**：CV 融合算子启用 `enable_auto_bind_sub_block=True`（自动绑定子块，实现 CV 1:2 协同），纯 Vector 算子禁用（无 Cube 需要协同）
   - **方案二**：CV 融合算子配置完整的七参数集，精确控制 CV 协同、多缓冲、同步策略等
+
   ```python
   # ── 子块绑定决策 ──
   # CV 融合算子（含 tl.dot）：启用子块绑定，实现 CV 1:2 协同
@@ -755,6 +796,7 @@
       limit_auto_multi_buffer_of_local_buffer="no-limit",
   )
   ```
+
   - **案例**：FA v8 全系列 — 完整七参数配置
   - **案例**：FA bwd\_q — 从 `enable_auto_bind_sub_block=False` 改为启用
 - 6.3 Scale 融合：减少 FixPipe 后处理
@@ -762,6 +804,7 @@
   - **方案一（Scale 融合到输入）**：将 dot 之后的 scale 乘法移到 dot 输入中，减少一次 Vector 乘法
   - **方案二（Accumulator-in-dot）**：将 alpha 缩放 + PV matmul + 累加融合为单条 `tl.dot` 三参数调用 `tl.dot(p, v, acc)`，利用 Cube 的硬件累加器
   - **方案三（k\_scale post-dot）**：将 k\_scale 从 pre-dot（dot 前对 k 乘 scale）移到 post-dot（dot 后与结果融合），消除额外 Vector 乘法
+
   ```python
   # ── Scale 融合到输入（SDPA 反向）──
   # Before: scale 在 dot 之后，额外一次 Vector 乘法
@@ -784,6 +827,7 @@
   qk = tl.dot(q, tl.trans(k))
   relu_qk = tl.maximum(qk * k_scale[None, :], 0.0)
   ```
+
   - **案例**：SDPA fwd — accumulator-in-dot 融合
   - **案例**：SDPA bwd — scale 融合到 matmul 输入
   - **案例**：LightningIndexer — k\_scale post-dot 融合
@@ -802,6 +846,7 @@
   - **问题**：标准 Grid 模式下每 program 一个块，无核内流水线深度（只做一次 load→compute→store，无法重叠）；循环内重复加载不变量（如 weight、col\_offsets）是纯浪费——每轮重新发起 MTE2 搬运相同数据
   - **方案一**：用核内 for 循环替代大 Grid，使上一轮 compute 与下一轮 load 重叠（持久化 kernel 模式）
   - **方案二**：将循环内不变的计算/加载提到循环外（hoisting），只加载一次，循环内直接复用
+
   ```python
   # ── 核内循环实现存算并行（RMSNorm 持久化 kernel）──
   # Before: 每 program 一个块，无核内流水线
@@ -848,10 +893,12 @@
       y = (x * rstd[:, None]) * w + b
       tl.store(y_ptr + ..., y)
   ```
+
   - **案例**：RMSNorm — 持久化 kernel + weight/col\_offsets 循环外加载
 - 7.2 循环手动展开：双路并行增加流水线深度
   - **问题**：单路循环的流水线深度有限——每轮只有一个 load 和一个 compute，load/compute 重叠不充分（MTE2 搬入一块后 Vector 计算一块，MTE2 空闲等待 Vector 完成）
   - **方案**：每轮处理 2 个（或更多）数据块，双路 load/compute/store——路 0 的 compute 与路 1 的 load 重叠，MTE2 和 Vector 都满载
+
   ```python
   # ── Before: 单路循环，流水线深度有限 ──
   @triton.jit
@@ -884,17 +931,19 @@
           tl.store(y_ptr + (row) * stride + offs_d, y_0)
           tl.store(y_ptr + (row + 1) * stride + offs_d, y_1)
   ```
+
   - **案例**：RMSNorm — 每轮处理 2 行（`pid*2` 步长），双路 load/compute/store
 - 7.3 multibuffer 启用：Ping-Pong 双缓冲
   - **问题**：当不启用 Ping-Pong 双缓冲时， load 和 compute 串行执行——MTE2 搬入完成后 Vector 才能开始计算，MTE2 在 Vector 计算期间空闲
   - **方案**：当前 multibuffer 已默认开启，或者通过设置 `multibuffer=True` 的方式手动启用，UB 双缓冲使下一 tile 的内存加载与当前 tile 的计算重叠。Ping-Pong 模式：buffer A 供当前 tile 计算，buffer B 供下一 tile 搬入，交替使用
   - **权衡**：开启后 UB 可用空间减半（248KB → 124KB），需评估对 BLOCK\_SIZE 的影响——可能需要减小 BLOCK\_SIZE 或减少核内同时存活的 tensor
+
   ```python
-  # ── Before: multibuffer 默认关闭（910_95），load 和 compute 串行 ──
+  # ── Before: 显式关闭 multibuffer（multibuffer=False），load 和 compute 串行 ──
   rope_kernel[grid](
       in_ptr, pos_ptr, cu_seqlens, out_ptr,
       head, base, DIM, max_seq_len, REVERSE,
-      # 无 multibuffer 参数，使用默认值 False
+      multibuffer=False,  # 显式关闭；默认值为 True（已开启），串行需手动关闭
   )
 
   # ── After: 显式开启 multibuffer ──
@@ -904,10 +953,12 @@
       multibuffer=True,  # 显式开启 Ping-Pong 双缓冲
   )
   ```
+
   - **案例**：RoPE / Softcap / FA / RMSNorm — 显式开启 multibuffer
 - 7.4 指针依赖消除：避免循环内 `+=` 引入 RAW 依赖
   - **问题**：循环内 `ptrs += BLOCK_SIZE` 引入 Read-After-Write（RAW）依赖——当前迭代的指针值依赖前一次迭代的写入结果，导致编译器无法重排指令，MTE2 load 指令必须等上一轮 `+=` 完成后才能发射，阻塞流水线
   - **方案**：改为每轮独立计算 offset（`base + k * BLOCK_SIZE`），消除迭代间 RAW 依赖——每轮的指针地址只依赖循环变量 `k` 和循环外常量 `base`，编译器可自由重排 load 指令
+
   ```python
   # ── Before: += 引入 RAW 依赖，阻塞 MTE2 并行发射 ──
   @triton.jit
@@ -936,6 +987,7 @@
           b = tl.load(b_ptrs)
           acc += tl.dot(a, b)
   ```
+
   - **案例**：Fused MatMul fwd — `a_ptrs_base + k * BLOCK_SIZE_K` 替代循环内 `+=`
   - **案例**：RMSNorm — 行方向 offset 每轮独立计算
 - 7.5 高级流水线：parallel 循环 + Preload/Cool-down
@@ -943,6 +995,7 @@
   - **方案一**：用 CANN extension 的 `parallel` 标记无携带依赖的循环，提示编译器并行发射各轮 load
   - **问题二**：逐块串行发射 Cube 任务，流水线深度不足——每轮只发射一个 `tl.dot`，Cube 单元在 fixpipe 期间空闲
   - **方案二**：外层循环多发射 `preload` 个 Cube 任务（预加载多块数据），最后 `preload` 次循环处理 cool-down（等待 Cube 结果回写）
+
   ```python
   # ── parallel 循环：并行化多个无依赖 GM load ──
   import triton.language.extra.cann.extension as extension
@@ -969,6 +1022,7 @@
           # 不发射新 Cube 任务，只处理已发射的结果
           acc = acc + qk_result
   ```
+
   - **案例**：FA/SWA page aggregation — parallel 循环并行化多个 GM load
   - **案例**：fa-opt/fast\_fa\_fwd — preload=3 多发射 + cool-down
 
@@ -989,6 +1043,7 @@
     - 反向 QKV 三合一：bwd\_q + bwd\_kv → bwd\_qkv（dq 用 atomic\_add 或 per-core workspace 处理多核写冲突）
     - 逐元素操作融合：GELU(x) + GELU(x)\*y → 单 kernel（消除中间 GELU(x) 的 GM 往返）
     - softmax + 累积采样：softmax + multinomial → 单 kernel（消除概率矩阵的 GM 往返）
+
   ```python
   # ── 反向 QKV 三合一（Flash Attention 反向）──
   # Before: 两个独立 kernel，前端计算（P 矩阵）执行两遍
@@ -1008,12 +1063,14 @@
   )
   # autotune 需配 reset_to_zero=["dq_ptr"] 避免多次评估累加
   ```
+
   - **案例**：FA v8 bwd — `fused bwd_qkv_kernel`，dq 用 atomic\_add
   - **案例**：GELU+Mul — 两个逐元素操作融合为单 kernel
   - **案例**：Sample — `_top_k_sample_kernel` 融合 softmax + multinomial
 - 8.2 Two-Pass → Single-Pass 融合：消除 scratch 中间存储
   - **问题**：两趟计算中，Pass 1 的中间结果写回 GM（scratch buffer），Pass 2 再读回继续计算——两次 GM 访问（一次写 + 一次读），且 scratch buffer 占用额外显存。以 Gate RMSNorm 为例：Pass 1 计算 `gated = silu(x @ w_gate)` → 写回 GM scratch → Pass 2 读回 scratch → 计算 `rmsnorm(gated)`
   - **方案**：融合为单趟，中间数据（gated 值）全程在寄存器/UB，消除 scratch GM 往返和额外显存占用
+
   ```python
   # ── Before: 两趟，gated 写回 GM scratch ──
   # Pass 1: compute gated → write to scratch (GM)
@@ -1032,6 +1089,7 @@
   mean = tl.sum(gated ** 2, axis=0) / D  # gated 在寄存器，零 GM 访问
   y = gated * rsqrt(mean + eps) * weight
   ```
+
   - **案例**：Gate RMSNorm — 两趟融合为单趟，gated 值全程保留在寄存器
   - **案例**：RMSNorm 单 pass — 配合 `BLOCK_DIN=Din`（移除 next\_power\_of\_2）使归约循环只执行一次
 - 8.3 维度融合：多 Head 一次加载 + 头循环展平
@@ -1039,6 +1097,7 @@
   - **方案一（3D Block Pointer）**：用 3D block\_ptr `(BLOCK, Q_HEAD_NUM, V_DIM)` 一次加载所有 head，利用硬件 DMA 描述符的多维搬运能力，单次 MTE2 完成所有 head 数据搬入
   - **问题二**：核内头循环串行处理各 KV head，无法利用核间并行
   - **方案二（头展平到 Grid）**：将核内头循环展平到 Grid 维度，`h = pid % num_kv_heads`，让不同核并行处理不同 head
+
   ```python
   # ── 3D Block Pointer：多 Head 一次加载（RoPE）──
   # Before: 逐 head 加载，核内 head 循环串行
@@ -1072,11 +1131,13 @@
   h = pid % num_kv_heads  # 从 pid 反推 head 索引
   process(h)
   ```
+
   - **案例**：FA v8 bwd\_preprocess — 3D block\_ptr 融合所有 head 的归约
   - **案例**：KV Cache — 头维度展平到 Grid
 - 8.4 计算单元升级融合：Vector → Cube
   - **问题**：GQA decode 场景下（GROUP\_SIZE 个 Q head 共享一组 KV），逐 Q head 的 Vector 逐元素乘 + 归约效率低——每个 Q head 独立做 `qk = tl.sum(q[None, :] * k, axis=...)`，Vector 单元逐元素乘 + 归约，Cube 单元空闲
   - **方案**：将逐 Q head 的 Vector 乘法改为按 KV head 分组的 Cube 矩阵乘，GROUP\_SIZE 个 Q head 融合为一个矩阵乘的 M 维度——Cube 单元的 `mmad` 指令一次完成 GROUP\_SIZE 个 Q head 与 KV 的点积
+
   ```python
   # ── Before: Vector 逐元素乘 + 归约（GQA decode）──
   # 逐 Q head 处理，Vector 单元做逐元素乘 + sum 归约
@@ -1093,6 +1154,7 @@
   qk = tl.dot(q_group, tl.trans(k))  # Cube mmad，任务数减少 GROUP_SIZE 倍
   # ... 后续 softmax ...
   ```
+
   - **案例**：FA/SWA decode — GQA group-fusion + Cube grid
 - 8.5 Mask 预计算融合 + Group 融合 + 布局一致性
   - **问题一**：运行时 mask\_fn 逐元素计算 mask 开销大——每个 program 在 kernel 内动态计算 causal mask、local mask、attention arg mask 的组合，占用大量 Vector 周期
@@ -1101,6 +1163,7 @@
   - **方案二**：单 kernel 融合所有 group，通过 `head_to_group` 查找表 + `tl.where` 权重选择，在核内循环中处理不同 group 的不同 weight
   - **问题三**：kernel 内 `tl.trans` 转置操作昂贵——每次转置需要一次 UB 内数据搬运 + 格式转换
   - **方案三**：统一数据布局，全程 D-T 布局一致（输入、权重、输出都用同一布局），消除所有转置
+
   ```python
   # ── Mask 预计算（Flash Attention）──
   # Before: 运行时逐元素计算 mask（kernel 内 Vector 计算）
@@ -1145,6 +1208,7 @@
   result = tl.dot(x, w)      # D-T 布局矩阵乘
   tl.store(out_ptr + ..., result)  # D-T 布局存储，不转置
   ```
+
   - **案例**：FA v5/v8 bwd — mask\_tensor 替代 mask\_fn
   - **案例**：GroupRMSNorm — `_group_rmsnorm_interleaved_kernel`
   - **案例**：Conv1D — 4 次 trans → 全程布局一致
@@ -1162,6 +1226,7 @@
 - 9.1 Mask 实现方式优化：tl.where 替代乘法 mask
   - **问题**：`(1 - mask) * -inf` 的乘法 mask 需要三条指令：`mask.to(float)`（bool→float 类型转换）+ `1.0 - mask_float`（减法）+ `result * 1e6`（乘法）。三条 Vector 指令只为实现一个条件选择
   - **方案**：`tl.where(mask, value, -inf)` 只需一条 Vector 选择指令——硬件直接按 mask 条件选择 value 或 -inf，无需类型转换和乘法
+
   ```python
   # ── Before: 乘法 mask（3 条指令）──
   @triton.jit
@@ -1179,10 +1244,12 @@
       # where mask：硬件条件选择（1 条 Vector 指令）
       block_s = tl.where(mask, qk, -1e6)  # 越界位置直接置为 -inf
   ```
+
 - 9.2 预计算 Mask + 全局缓存：从运行时计算到直接加载
   - **问题**：多个 mask load + 布尔运算在 kernel 内逐元素计算，开销大。以 SWA 为例：causal mask + local window mask + attention arg mask + query mask，4 次 mask load + 3 次布尔运算（`&` 和 `|` 组合），每次都占用 Vector 周期。更严重的是，这些 mask 在每次 forward 时都重新计算，即使 mask 参数（window\_size 等）没有变化
   - **方案一**：预计算单 mask 替代多 mask 组合——主机端将所有 mask 组合为一个预计算 mask\_tensor，kernel 内只需 1 次 MTE2 load
   - **方案二**：mask 参数不变时缓存预计算 mask 张量——按 mask 参数（如 window\_size）作为缓存键，参数不变时直接返回缓存的 mask\_tensor，避免重复预计算
+
   ```python
   # ── 预计算单 mask（SWA prefill）──
   # Before: 4 次 load + 3 次布尔运算（kernel 内逐元素计算）
@@ -1222,6 +1289,7 @@
           _GLOBAL_WINDOW_SIZE = window_size
       swa_kernel[grid](q, k, mask, ...)
   ```
+
   - **案例**：SWA prefill — `gen_mask_causal_with_window` JIT + `_GLOBAL_WINDOW_SIZE` 缓存
 - 9.3 冗余 Mask 消除：利用对齐信息删除死代码
   - **问题**：当 BLOCK\_SIZE = HEAD\_DIM、BLOCK 整除维度、或 mask 已覆盖边界时，额外 mask 检查是死代码——条件恒为 True，但运行时仍会生成 mask 指令并执行
@@ -1230,6 +1298,7 @@
     - masked\_out\_rows 安全保护：非首块路径中 m\_i 已有有效值（上一轮的 m\_new），不存在全 -inf 行，`masked_out_rows` 检查是冗余的
     - KV\_LEN / IS\_FULL\_BLOCKS 条件 mask：当 mask 已覆盖边界或 BLOCK 整除维度时，额外的 KV\_LEN 边界检查重复
     - `% M / % N` 取模运算：Grid 已保证 pid 不越界（`pid < NUM_BLOCKS_M`），取模 `% M` 是冗余的，且 `%` 运算在 NPU 上导致标量退化（性能下降 5-10 倍）
+
   ```python
   # ── 尾维 mask 消除（FlexAttention）──
   # Before: 双维检查（即使 BLOCK_K == HEAD_DIM，尾维检查仍执行）
@@ -1255,11 +1324,13 @@
   # After: Grid 已保证 pid 不越界，取模冗余
   offset = pid * BLOCK + tl.arange(0, BLOCK)  # 连续地址，向量化
   ```
+
   - **案例**：FlexAttention — 移除尾维 mask、masked\_out\_rows、KV\_LEN 边界保护（6 处）
   - **案例**：SwiGLU fwd — offset 移除取模
 - 9.4 编译期 Mask 消除：constexpr 控制代码生成
   - **问题**：当列数/token 数对齐时（如 `n_cols % BLOCK_SIZE == 0`），mask 代码是死代码（条件恒为 True），但运行时条件判断仍会生成 mask 指令——编译器无法在运行时判断条件是否恒为 True，保守地生成 mask 代码
   - **方案**：用编译期常量（`tl.constexpr`）控制是否生成 mask 代码——将"是否对齐"的判断从运行时提升到编译时，编译器在编译期直接消除整段死代码
+
   ```python
   # ── Before: 总是生成 mask（即使列已对齐）──
   @triton.jit
@@ -1296,6 +1367,7 @@
   COL_ALIGNED = (n_cols % BLOCK_SIZE == 0)  # 编译期计算
   gelu_fwd_kernel[grid](x, y, n_cols, COL_ALIGNED=COL_ALIGNED, ...)
   ```
+
   - **案例**：GELU — `COL_ALIGNED` constexpr 消除 mask
   - **案例**：VisionRoPE — `TOKEN_ALIGNED` constexpr 消除 mask
 
@@ -1310,13 +1382,12 @@
 > **（3）`%`** **取模的标量退化。** NPU 上 `%` 取模运算通过标量 ALU 执行，导致向量运算退化为逐元素标量计算——地址不连续，DMA 引擎无法发起连续搬运，性能可能下降 **5-10 倍**。应尽量用 mask 替代取模：mask 是向量化的比较操作（保持连续地址），取模是标量运算（破坏连续地址）。
 >
 > **（4）CANN extension 切片指令。** CANN extension 的 `extract_slice` / `insert_slice` 直接映射 NPU DMA 切片指令，无通用版本的范围检查开销——通用 Triton 的 slice 操作在运行时检查 offset 和 shape 是否越界（占用 Vector 周期），CANN 扩展版本跳过检查直接发起 DMA 切片。
->
-> **（5）care\_padding 依赖跳过。** `care_padding=False` 跳过 padding 区域的依赖检查——默认情况下，编译器检查 load 的 padding 区域（BLOCK\_SIZE > 实际维度的部分）是否与其他操作有依赖，阻止 load 指令并行发射。设置 `care_padding=False` 后，编译器跳过此检查（通过 mask 保证正确性），允许 load 指令提前并行发射。
 
 - 10.1 预计算缓存：从运行时计算到直接加载
   - **问题**：kernel 内的 sin/cos 等超越函数计算、每次 forward 的权重转置都是昂贵的重复计算。以 RoPE 为例：每个 program 在 kernel 内计算 `freqs = pos * inv_freq; sin = tl.sin(freqs); cos = tl.cos(freqs)`，`tl.sin`/`tl.cos` 是昂贵的超越函数（多条 Vector 指令），且每次 forward 都重复计算相同的 sin/cos 值
   - **方案一（Sin/Cos 预计算）**：CPU 预计算 sin/cos 表后传入 kernel 直接 load，将超越函数计算转为 MTE2 搬入
   - **方案二（权重转置缓存）**：按 `data_ptr()` 键缓存转置结果，消除重复 O(N·K) 转置——每次 forward 都做 `weight.t().contiguous()` 是 O(N·K) 的数据搬运，但权重内容不变时转置结果可缓存复用
+
   ```python
   # ── Sin/Cos 预计算（RoPE）──
   # Before: kernel 内计算超越函数（多条 Vector 指令）
@@ -1359,6 +1430,7 @@
       weight_t = _bt_cache[key]  # 后续直接复用
       gemm_kernel[grid](x, weight_t, ...)
   ```
+
   - **案例**：RoPE — sin/cos 预计算缓存
   - **案例**：GEMM — `_bt_cache` 消除重复转置
 - 10.2 数据聚合与 CANN 切片：提升 Cube 利用率与切片效率
@@ -1366,6 +1438,7 @@
   - **方案一（L1 Cache 聚合）**：多个页用 `insert_slice` 聚合为单个大 tile 后再做 matmul——PAGE\_AGG\_NUM 个 page 聚合为 `(PAGE_AGG_NUM * BLOCK_N, D)` 的大矩阵，Cube 一次处理大矩阵，利用率大幅提升
   - **问题二**：通用 Triton 的 slice 操作有范围检查开销——`tl.extract_slice` 在运行时检查 offset 和 shape 是否越界，占用 Vector 周期
   - **方案二（CANN extension）**：用 CANN 扩展版本替代通用 slice，直接映射 DMA 切片指令，跳过范围检查
+
   ```python
   # ── L1 Cache 聚合（FA/SWA page aggregation）──
   # Before: 逐页加载 + 小 matmul，Cube 利用率低
@@ -1401,27 +1474,14 @@
   slice_result = extension.extract_slice(tensor, offsets, shape, strides)
   # 直接发起 DMA 切片指令，零范围检查开销
   ```
+
   - **案例**：FA/SWA prefill — 小 page 聚合提升 Cube 利用率
   - **案例**：RoPE / Conv1D / GroupGEMM / VisionRoPE — CANN extension slice
-- 10.3 访存并行优化：care\_padding + Load 重排序
-  - **问题一**：padding 区域的依赖检查阻止 load 指令并行发射——当 BLOCK\_SIZE > 实际维度时，load 的 padding 部分（越界位置）被编译器检查是否与其他操作有依赖，此检查阻止 load 提前发射
-  - **方案一**：`care_padding=False` 跳过 padding 区域依赖检查（通过 mask 保证正确性），允许 load 指令提前并行发射
-  - **问题二**：无依赖 load 排在依赖 load 之后，串行执行——编译器不重排 load 顺序，如果排在前的 load 因等待上一轮 store 而阻塞，排在后的无依赖 load 也无法提前发射
-  - **方案二**：将无依赖 load 提前到有依赖 load 之前，使无依赖 load 与上一轮 store 并行执行
+- 10.3 访存并行优化：Load 重排序
+  - **问题一**：无依赖 load 排在依赖 load 之后，串行执行——编译器不重排 load 顺序，如果排在前的 load 因等待上一轮 store 而阻塞，排在后的无依赖 load 也无法提前发射
+  - **方案一**：将无依赖 load 提前到有依赖 load 之前，使无依赖 load 与上一轮 store 并行执行
+
   ```python
-  # ── care_padding（KV Cache）──
-  # Before: 默认检查 padding，load 被阻塞
-  @triton.jit
-  def kv_cache_kernel(k_ptr, ...):
-      # padding 区域依赖检查阻止 load 并行发射
-      k = tl.load(k_ptr + offsets, mask=mask)  # 默认 care_padding=True
-
-  # After: 跳过 padding 检查，load 提前并行发射
-  @triton.jit
-  def kv_cache_kernel(k_ptr, ...):
-      # 跳过 padding 依赖检查（mask 保证正确性）
-      k = tl.load(k_ptr + offsets, mask=mask, care_padding=False)  # 允许并行发射
-
   # ── Load 重排序（Quant/RoPE）──
   # Before: 依赖 load 先执行，无依赖 load 后执行（串行）
   @triton.jit
@@ -1445,13 +1505,14 @@
           # ... compute ...
           tl.store(x_ptr + offsets, result)
   ```
-  - **案例**：KV Cache — `care_padding=False` 提升数据加载并行度
+
   - **案例**：Quant/RoPE — Load 重排序隐藏内存延迟
 - 10.4 Block Pointer + 内存分配优化
   - **问题一**：手动指针算术 + mask 比 Block Pointer 效率低——手动方式需要 Vector 单元计算 `offsets = row[:, None] * stride + col[None, :]` 和 `mask = (row < M) & (col < N)`，占用 Vector 周期；Block Pointer 由 DMA 描述符硬件自动处理边界，零 Vector 开销
   - **方案一**：用 `tl.make_block_ptr` 替代手动指针算术，利用硬件 DMA 描述符自动处理边界
   - **问题二**：`torch.clone()` 拷贝整个张量数据，配合原地 kernel 引入 RAW 冒险——`clone` 分配新内存并拷贝数据（O(N) 数据搬运），原地 kernel 读写同一地址引入 Read-After-Write 冒险
   - **方案二**：用 `torch.empty_like()`（仅分配内存，无拷贝）替代 `clone`（分配 + 拷贝），配合非原地 kernel（读写不同地址）
+
   ```python
   # ── Block Pointer 替代手动指针算术 ──
   # Before: 手动指针算术 + mask（Vector 计算 offset 和 mask）
@@ -1496,6 +1557,7 @@
       q_out = torch.empty_like(q)  # 仅分配内存，不拷贝数据
       rope_kernel[grid](q, q_out, ...)  # 非原地：读 q，写 q_out（不同地址）
   ```
+
   - **案例**：VisionRoPE — 3D block\_ptr for cos/sin/q/k
   - **案例**：RoPE — `empty_like` 节省一个 q 张量大小的显存峰值
 - 10.5 循环不变量外提：Bias 提前加载 + Cast 位置提前
@@ -1503,6 +1565,7 @@
   - **方案一**：bias 在循环外提前加载一次 + `broadcast_to` 显式广播，循环内直接复用
   - **问题二**：`.to(dtype)` 在 `tl.trans` 之后，cast 结果无法被多处复用——`p.to(dtype)` 在 `tl.trans(p)` 之后，每次需要转置后的 p 时都要重新 cast
   - **方案二**：将 cast 提前到 transpose 之前，cast 结果可被 dv 和 dk 两处复用（`tl.trans` 只是布局变换，不改变数据）
+
   ```python
   # ── Bias 提前加载（Fused MatMul fwd）──
   # Before: 每轮重复加载 bias（循环不变量在循环内）
@@ -1538,6 +1601,7 @@
   dv = tl.dot(tl.trans(p), do)          # 复用 cast 后的 p
   dk = tl.dot(tl.trans(p), do_other)    # 复用 cast 后的 p
   ```
+
   - **案例**：Fused MatMul fwd — bias 循环外提前加载
   - **案例**：FA v5 bwd\_kv / FA v8 bwd\_q — p 的 cast 提前复用
 - 10.6 指令简化：Mask 类型转换 + tl.full 初始化
@@ -1545,6 +1609,7 @@
   - **方案一**：对布尔 mask 进行显式类型转换 `.to(tl.int32)`，确保类型安全
   - **问题二**：`tl.zeros([M]) - float("inf")` 需要先创建零张量再减（2 条指令：`tl.zeros` 创建零张量 + 减法），用于初始化 online softmax 的最大值数组 `m_i`
   - **方案二**：`tl.full([M], float("-inf"))` 直接填充目标值（1 条指令），消除减法操作
+
   ```python
   # ── Mask 类型转换（FA v4 fwd）──
   # Before: 隐式 bool（可能触发不确定行为）
@@ -1578,6 +1643,7 @@
       # 直接填充目标值（1 条 Vector 指令）
       m_i = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
   ```
+
   - **案例**：FA v4 fwd — mask\_fn 显式类型转换
   - **案例**：FlexAttention — `m_i` 初始化优化
 
@@ -1586,7 +1652,7 @@
 ### 第 11 章 编译器图优化：固定模式匹配的自动优化
 
 > **核心理念**：Triton-Ascend 的图优化 pass 在 IR 图上做固定模式匹配（pattern match），命中特定子图后自动重写为更优的等价形式。开发者无需（也无法）手写这些变换，但理解匹配的模式与触发条件，可以预判编译器行为、定位"为什么没被优化"，并知道何时需要显式干预。
-
+>
 > **背景知识**：图优化 pass 针对 IR 图中的固定子图形态做自动重写，主要覆盖五类模式——**融合类**（逐元素链、dot 后处理、向量函数打包）、**循环结构类**（多缓冲标记）、**布局类**（NZ↔ND 转换）、**访存地址与布局类**（取模线性化、读写置换、store 合并、跨步改写）、**程序映射与 Grid 变换类**（独立轴张量化、持久化任务挖掘、行合并）。每个 pass 只认自己关心的子图结构，未命中则原样保留。
 
 - 11.1 匹配机制概述：IR 图 → pass 扫描固定子图 → 重写
@@ -1609,6 +1675,7 @@
 - 11.5.1 ConvertModuloToMask：取模线性化
   - **触发模式**：kernel 写 `offs % n` 让越界下标绕回数组开头以避免非法访问，但写回处已有 `offs < n` 掩码丢弃越界数据——读进来的绕回数据本就无用
   - **DSL 写法（触发示例）**：load 用取模绕回地址，store 带 `offs < n` 掩码
+
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, n, BLOCK: tl.constexpr):
@@ -1619,7 +1686,9 @@
       v = tl.load(x_ptr + wrap)        # load 无掩码（读绕回数据）
       tl.store(y_ptr + offs, v, mask=mask)
   ```
+
   - **改写**：去掉取模让地址恢复连续，同时给 load 补上同样的掩码（越界位置读 0）
+
   ```ttir
   # Before：offs % n 把连续地址打乱成跳跃的，load 无掩码
   %wrap = arith.remsi %offs, %n       # offs % n
@@ -1633,11 +1702,13 @@
   %v    = tt.load %wa, %cmp, %cst     # 补掩码，越界读 0
   tt.store %oa, %v, %cmp
   ```
+
   - **收益**：地址线性化后后端可识别为整块连续内存，用一次 DMA 搬完，而非因取模被迫逐元素离散访问
   - **约束**：除数必须是运行时变量（编译期常量交由 TritonToStructured 处理更优，它保留绕回语义并改写为跨步访问，完全等价）；下标必须是一维 i32、无 layout，长度等于 make\_range 长度；必须存在 store 上的 offs < n 守卫作为依据，因此归约轴上的取模无法处理（归约轴无输出坐标，不会有这种掩码）；取模结果只能流向 load 地址，不能流向 other、tt.trans、tt.reshape 或其他计算；expand\_dims 的轴必须唯一；不支持跨嵌套 scf.for 的多条循环携带地址
 - 11.5.2 LoadStoreTranspose：读写维度置换
   - **触发模式**：分析 load/store 的地址表达式，判断张量各维的实际内存步长。若最内维（代码中变化最快的那维）在内存里是跳着走的，则触发
   - **DSL 写法（触发示例）**：tile 最内维（cols）在内存中跳着走——列主序访问
+
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, M: tl.constexpr, N: tl.constexpr):
@@ -1648,7 +1719,9 @@
       v = tl.load(x_ptr + offs)        # [32, 16]
       tl.store(y_ptr + offs, v + 1.0)
   ```
+
   - **改写**：把整个"读→算→写"闭包的维度顺序调换，使最内维变成内存中真正连续的那维；同步改写掩码、assert、循环携带指针，以及循环之后 reduce 的轴号
+
   ```ttir
   # Before：最内维 16 列每列相隔 32 个元素，读一个元素跳 128 字节
   %off = arith.addi %mb, %nb          # 32×16 偏移
@@ -1664,11 +1737,13 @@
   %y   = arith.addf %x, %cst
   tt.store %da, %y
   ```
+
   - **收益**：改写前每读一个元素跳 128 字节、16 个元素是 16 次离散访问；改写后最内维 32 个元素紧邻，一次连续搬 128 字节
   - **约束**：指针必须是 addptr(splat(标量指针), 偏移) 形式，维度 ≥2、静态 shape、无 layout，不支持 block pointer；每一维须恰好由一个 make\_range 驱动，且各维步长大小关系能在结构上证明（运行时步长需掩码提供取值范围）；必须同时有 load 和 store 且存在 load→store 数据通路，所有访存点置换一致；不支持 volatile、padding、boundary\_check；load 的 other 必须是均匀常量；闭包内只允许逐元素算子、splat、broadcast、expand\_dims、addptr、trans、常量，不支持矩阵乘和 reshape；循环结果只能被单输入 tt.reduce 消费；不跨 scf.if/scf.while 区域边界；遇到用户自己写的张量 assert 直接放弃
 - 11.5.3 StoreCoalescing：相邻 store 合并
   - **触发模式**：函数内有几次 store 写入同一块内存的相邻区段（前一次结尾正好接下一次开头）
   - **DSL 写法（触发示例）**：对同一基址的相邻区段分多次 store，首尾严格相接
+
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, BLOCK: tl.constexpr):
@@ -1679,7 +1754,9 @@
       tl.store(y_ptr + offs0, v0)      # [0, BLOCK)
       tl.store(y_ptr + offs1, v1)      # [BLOCK, 2*BLOCK)，紧邻上一段
   ```
+
   - **改写**：先在寄存器中把数据拼成一个大张量，最后一次性写出
+
   ```ttir
   # Before：两段相邻 store 分两次写
   tt.store %base, %v0                 # [0, 64)
@@ -1690,11 +1767,13 @@
   %t = tensor.insert_slice %v1 into %t[64] [64] [1]
   tt.store %base, %t                  # 一次 128 元素连续写
   ```
+
   - **收益**：两次 256 字节的写变成一次 512 字节的写，搬运次数减半、单次更长，GM 写带宽利用率更高
   - **约束**：只处理函数最外层 store（循环或分支内的不处理）；store 不能带掩码或 boundary\_check，且须能静态证明按行主序连续排列；基地址必须是同一 SSA 值（纯语法比较，不做别名推断）；元素类型、cache/evict 修饰及其他属性须完全一致；至少两段，段间不重叠且首尾严格相接；合并后总字节数不超过 UB 预算；被推迟的 store 与中间夹着的其他访存必须能证明不冲突；不支持 i1 和不足一字节的类型；偏移量须在 i32 范围内；simt\_only 下关闭
 - 11.5.4 MergeConcatLoadBuffer：concat 缓冲合并
   - **触发模式**：在降级到 memref 之后生效。带掩码的 load 降级后会变成"分配整块缓冲 → 用填充值填满 → 把有效部分拷入"，若紧接着做 tl.cat 拼接，就会出现两块缓冲各写一半
   - **DSL 写法（触发示例）**：两个带掩码 load 后紧跟 tl.cat 拼接
+
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, n, BLOCK: tl.constexpr):
@@ -1705,7 +1784,9 @@
       c = tl.cat(a, b)                  # 拼接 → 降级后两块缓冲各写一半
       tl.store(y_ptr + tl.arange(0, 2 * BLOCK), c)
   ```
+
   - **改写**：把两块缓冲合并为一块；若能证明两次拷贝覆盖了后续全部读取范围，两个填充操作都删除
+
   ```ttir
   # Before：两块 32×512 缓冲各写一半（各含一次 fill + copy + to_tensor）
   %a0 = memref.alloc() : memref<32x512xf32>
@@ -1725,11 +1806,13 @@
   memref.copy %ss1, %sv1              # 写 [256, 512)
   %t = bufferization.to_tensor %a
   ```
+
   - **收益**：UB 占用从 2 块 tile 降到 1 块，并省去两次 32×512 元素的填充与一次切片数据搬移
   - **约束**：只在 910\_95/950 上启用。910\_9362 的代码生成只保证紧邻 to\_tensor 的那次拷贝可见，合并后另一半 tile 会读到填充值，故该芯片上禁用；extract 与 insert 的偏移、大小必须完全一致；填充必须发生在拷贝之前，否则放弃；只保留一个填充时，要求两个填充都是单纯 fill 且填充值相同
 - 11.5.5 StridedAxisCoalescing：跨步轴折回
   - **触发模式**：kernel 实现中把本来连续的 H 轴（如 head 数）摊到 grid 上，用 `pid % S` 取出自己负责的 head，导致每个 program 读的数据在内存中每隔 S 个元素取一个
   - **DSL 写法（触发示例）**：H 轴摊到 grid、`pid % S` 取 head，用步长 S 的一维 block pointer 读
+
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, n, S: tl.constexpr, BLOCK: tl.constexpr):
@@ -1739,7 +1822,9 @@
       v = tl.load(tp)                      # 每隔 S 个元素取一个
       tl.store(tp, v + 1.0)
   ```
+
   - **改写**：把 H 轴重新折回张量内层，组成二维 tile 一次读完；逐 head 的标量 load 相应提升为向量 load
+
   ```ttir
   # Before：一维、步长 4，每 program 处理一个 head（pid % 4）
   %i_h = arith.remsi %pid, %c4        # i_h = pid % 4
@@ -1750,11 +1835,13 @@
   %tp  = tt.make_tensor_ptr %base, [16, 4], [4, 1], [0, 0]
   %v   = tt.load %tp : tensor<16x4xf32>
   ```
+
   - **收益**：改写前 16 个元素分散在 16×4 范围内、需 16 次离散访问；改写后是一整块连续内存一次 DMA 搬完；program 数同时降为 1/4
   - **约束**：只在 910\_95/950 + simd\_simt\_template 下运行，不受 rule-mask 控制；种子 load 必须是一维 block pointer，步长为大于 1 的常量，且所有种子步长相同；kernel 不能读对应轴的 num\_programs（grid 被除以 S 后该值会变，读了就会算错）；子图只允许逐元素算子、类型转换、splat、沿 T 轴的 scan/reduce；不支持转置、矩阵乘、reshape，也不支持沿 lane 方向的归约；输出 store 也必须是同样步长的 block pointer；i\_h 不能参与间接寻址；按整个 module 改写，任一条件不满足即整体放弃
 - 11.5.6 ChunkCoalescing：小块合并
   - **触发模式**：对 `offs = pid * T + arange(T)` 这种标准分块写法，若每个 tile 太小导致连续字节数不足、DMA 效率低，就把 H 个相邻 tile 合并到一个 program，使单次连续访问至少达到 512 字节
   - **DSL 写法（触发示例）**：`offs = pid * T + arange(T)` 的小 tile 分块 + 尾部掩码
+
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, n, T: tl.constexpr):
@@ -1764,6 +1851,7 @@
       v = tl.load(x_ptr + offs, mask=mask, other=0.0)
       tl.store(y_ptr + offs, v, mask=mask)
   ```
+
   ```ttir
   # Before：一维 16 元素 = 64 字节、带掩码（64 字节远低于 DMA 高效传输长度）
   %4 = arith.addi %3, %2 : tensor<16xi32>            # offs = pid*16 + arange(16)
@@ -1778,11 +1866,13 @@
   %16 = tt.load %15 : tensor<16x16x!tt.ptr>          # 无掩码
   tt.store %20, %16 : tensor<16x16x!tt.ptr>
   ```
+
   - **收益**：单次连续搬运从 64 字节增至 1024 字节（64 字节远低于 DMA 高效传输长度，大部分时间消耗在启动开销上），program 数降为 1/16
   - **约束**：只在 910\_95/950 + simd\_simt\_template 下运行；对应 grid 轴只有一个 program\_id 且不读 num\_programs；pid 派生链上不能出现 min/max/取余/除法；派生出的比较结果除作为那一个掩码外，只能流向 device\_assert（溢出检查默认开启，会给几乎每个 pid 派生下标插桩，必须明确放行）；不支持 boundary\_check；H 取值范围为 \[max(2, ⌈512B ÷ tile字节⌉), min(16, 128KB ÷ 单tile占用)] 且必须整除总 tile 数，算不出合法 H 就不改；若 StridedAxisCoalescing 已设过 coalesce\_factor 则直接跳过
 - 11.5.7 StridedLoadStoreRewrite：非 2 幂跨步改写
   - **触发模式**：硬件跨步 DMA 引擎只支持 2 的幂步长，遇到步长 3、5、7 这类会退化为极慢的逐元素标量访问
   - **DSL 写法（触发示例）**：地址步长为非 2 的幂常量（3、5、7…）
+
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, BLOCK: tl.constexpr):
@@ -1790,7 +1880,9 @@
       v = tl.load(x_ptr + offs)
       tl.store(y_ptr + offs, v)
   ```
+
   - **改写**：把步长为非 2 的幂常量的 load/store 改写为专用的 ascend.stride\_load/stride\_store 或间接访问算子
+
   ```ttir
   # Before：步长 3 的地址链，标量循环逐个取
   %1 = arith.muli %arange, %c3        # 步长 3
@@ -1800,6 +1892,7 @@
   # After：专用跨步访问算子，交由 SIMT 并行访问单元处理
   %1 = ascend.stride_load %arg0, %c0_i64, %cst, [%c3_i64], [%c256_i64]
   ```
+
   - **收益**：原本 256 个元素需靠标量循环逐个取，改写后交由 SIMT 并行访问单元处理，整个指针算术链一并消失
   - **约束**：只在 910\_95/950 + simd\_simt\_template 下运行；以下情况有意不改写：步长 1（本就连续）、步长 2（走 deinterleave 路径）、步长为 ≥4 的 2 的幂（走跨步 DMA 更快）、步长为运行时变量（可能运行时就是 1 或 2 的幂，保留 SIMD 路径更稳妥）、做过维度置换的布局（交由 ImplicitPermute）；stride\_load 只支持 1\~3 维静态 shape，快速路径最多 5 维；非浮点类型要求 NaN 填充时放弃；addptr 路径会调用指针分析，可能留下无用辅助 IR，需后续 CSE/canonicalize 清理（T2L pipeline 已安排）
 - 11.6 程序映射与 Grid 变换 pattern（AutoBlockifyV2）：合并 program、提升单 program 吞吐
@@ -1807,6 +1900,7 @@
 - 11.6.1 IndependentAxisTensorize：独立轴张量化（IAT）
   - **触发模式**：grid 为二维（token 轴、head 轴）且不同 head 间计算完全独立时，把 head 轴的 16 个 program 合并成一个，让一个 program 一次处理 16 个 head
   - **DSL 写法（触发示例）**：二维 grid（token 轴、head 轴），head 间计算完全独立
+
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, BLOCK: tl.constexpr):
@@ -1818,7 +1912,9 @@
       s = tl.sum(v, axis=0)                # 归约
       tl.store(y_ptr + pid_h * BLOCK + offs, s)
   ```
+
   - **改写**：原 program\_id(1) 变为长度 16 的向量，相关张量各增加一维，尾部补掩码。支持 MergeSplit 与 NormRope 两种归约形态
+
   ```ttir
   # Before：二维 grid，每 program 处理一个 head（标量 head 索引）
   %head = tt.get_program_id y
@@ -1834,11 +1930,13 @@
   %sum   = tt.reduce(%v) {axis = 0 : i32} : (tensor<4x16x128xf32>) -> tensor<16x128xf32>
   tt.store %ya, %sum, %mask
   ```
+
   - **收益**：program 数降为 1/16；原本每 program 都要重算的标量地址计算现由 16 个 head 分摊一次；Vector 指令单次处理数据量增加 16 倍，UB 利用率显著提升
   - **约束**：必须是非 simt\_only 模式；函数只能有一个基本块，不能有 scf/cf 控制流、函数调用、原子操作、barrier；axis0 与 axis1 的 program\_id 各只能出现一次；axis1 依赖闭包内不能有 make\_tensor\_ptr，也不能读 num\_programs；store 与 load 指针必须来自不同入参；UB 峰值×16 后不能超预算；动态 shape 直接拒绝；合并因子固定为 16，无自动调优；module 上已有其他 grid 契约时不再叠加；NormRope 形态要求 PTSM 同时启用
 - 11.6.2 PersistentTaskStripMining：持久化任务条带挖掘（PTSM）
   - **触发模式**：针对逐 token 做行归约的 kernel——LayerNorm 类同时算 sum(x) 与 sum(x²)，RMSNorm 类只算 sum(x²)
   - **DSL 写法（触发示例）**：逐 token 做行归约的 norm 类 kernel（一个 token 一个 program）
+
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, D: tl.constexpr):
@@ -1849,7 +1947,9 @@
       # LayerNorm 类再加：s1 = tl.sum(v)（同时算 sum(x) 与 sum(x²)）
       tl.store(y_ptr + pid, s2)
   ```
+
   - **改写**：原本有多少 token 就启动多少 program，改为固定数量的 program，每个用跨步循环反复领取任务，单次处理 BLOCK\_T 个 token（LayerNorm 类 64，RMSNorm 类配合 IAT 时 4），尾部按原始 token 数加掩码
+
   ```ttir
   # Before：逐 token 一个 program，标量行归约
   %row = arith.muli %pid, %cD
@@ -1869,11 +1969,13 @@
     tt.store %ya, %o, %mask                   # 尾部掩码
   }
   ```
+
   - **收益**：program 数从 T 降为固定值；单次 load 从 512 字节变为 32KB 连续数据；标量归约变为向量化行归约
   - **约束**：只能有一个 public 入口函数、返回值为空、不能有函数调用；函数内不能出现 scf 控制流、原子操作、barrier、随机数、print；必须匹配上述两种归约形态之一（判定严格：需检查平方项是否同一值自乘、两个归约结果下游是否汇合等）；token 轴 program\_id 唯一且不读 num\_programs；store/load 来自不同入参；改写后 UB 峰值须通过资源评估；已有 grid 契约只能是 1 个非 token 轴、非持久化的变换（即 IAT）；BLOCK\_T 固定，不做调优；simt\_only 下关闭
 - 11.6.3 RowCoalescing：行合并
   - **VV 形态（逐行 Vector kernel）**：匹配"取 pid → 越界直接返回 → 否则处理一行"这种写法的 kernel，改为一个 program 处理 R 行。R 依据工作区内最大张量元素数自动选取：≤16 选 8，17\~1023 选 4，1024 选 2，超过 1024 不做
   - **DSL 写法（触发示例）**：取 pid → 越界直接返回 → 否则处理一行
+
   ```python
   @triton.jit
   def kernel(x_ptr, y_ptr, n_rows, BLOCK: tl.constexpr):
@@ -1885,6 +1987,7 @@
       o = tl.maximum(v, 0.0)
       tl.store(y_ptr + offs, o)
   ```
+
   ```ttir
   # Before：取 pid → 越界直接返回 → 否则处理一行
   %done = arith.cmpi sge, %pid, %n_rows
@@ -1901,10 +2004,12 @@
   %o    = arith.maxnumf %v, %cst
   tt.store %ya, %o, %mask
   ```
+
   - **VV 收益**：program 数降为 1/8；cf.cond\_br 分支开销消失；单次处理 8×16 元素，SIMT 线程利用更充分
   - **VV 约束**：只在 compile\_mode=simt\_only 下生效；module 只能有一个 public 入口且无函数调用；只有一个 program\_id，且不读该轴 num\_programs；pid 派生值不能在工作区外使用；工作区只允许 arith/math 运算、load/store、指针与形状类算子、scan/reduce、scf.for，不支持矩阵乘；工作区计算结果不能流出；与 IAT、PTSM 或已有 coalesce 属性互斥；在所有阶段之后单独执行一次，不占用 64 次改写配额
   - **CV 形态（decode attention 行合并）**：针对"每个 program 处理一行 query、在 K 维循环里做矩阵乘"的 decode attention 模式：把 R 个 program 合成一个，随行变化的值加一个前导行维，矩阵乘时 reshape 为 \[R×M, K] 以撑大 M 维；K/V 这类与行无关的数据保持二维、R 行共享。R 从 32/16/8/4/2 中选取，要求 M×R ≤ 128 且最大张量字节数×R ≤ 128KB
   - **DSL 写法（触发示例）**：每 program 处理一行 query，在 K 维循环里做矩阵乘
+
   ```python
   @triton.jit
   def decode_attn(q_ptr, k_ptr, o_ptr, K, M: tl.constexpr, N: tl.constexpr):
@@ -1918,6 +2023,7 @@
           acc += tl.dot(a, b)            # [M,1] × [1,N] → [M,N]
       tl.store(o_ptr + pid * M + offs_m, tl.sum(acc, axis=1))
   ```
+
   ```ttir
   # Before：每 program 一行 query，K 维循环矩阵乘（M=16 过小浪费 Cube）
   %a = tt.load %pa : tensor<16x16x!tt.ptr>
@@ -1933,6 +2039,7 @@
   %dot = tt.dot %a2d, %rhs, %acc : tensor<128x16xf16> * tensor<16x16xf16> -> tensor<128x16xf32>
   tt.store %pc, %dot, %mask
   ```
+
   - **CV 收益**：矩阵乘 M 维从 16 撑到 128，填满 Cube 单元（M 维过小会严重浪费算力）；K/V 从 GM 读取 8 次降为 1 次
   - **CV 约束**：只支持 Ascend950；只能有一个基本块和一个 public 入口；必须恰好有 1 个 axis0 program\_id、1 个下界为 0 的顶层 scf.for、1 个顶层 store，且至少 1 个矩阵乘；矩阵乘必须是二维 f16/bf16，且 A 随行变化、B 不随行变化；不支持 tt.reduce、循环内依赖行的 load、volatile load、用于变长/间接索引的标量 load；循环上界依赖 pid 时必须能证明单调递增；循环体内含不可推测执行的算子（如可能除零的整数除法）时拒绝；R 的选取是保守经验策略，非实测最优值
 - 11.6.4 QueryRowBatching：块稀疏 attention 的行合并
@@ -1993,11 +2100,13 @@
 - 11.7 确认图优化 pass 是否命中
   - **IR 检索**：在生成的 IR 中搜索特征标记——`hivm.multi_buffer` + `arith.select` 槽位结构（多缓冲）、`convert_layout`（布局转换）、`annotation.mark {break_vf}`（VF 断点）、fixpipe（NZ2ND）——缺失说明对应模式未命中
   - **常用图优化开关**：
+
     | 开关                            | 作用                                           | 默认           |
     | ----------------------------- | -------------------------------------------- | ------------ |
     | `--enable-auto-multi-buffer`  | 自动多缓冲总开关                                     | true         |
     | `--vf-fusion-mode`            | VF 融合模式（max-parallel / ub-aware-op / all-op） | max-parallel |
     | `--set-workspace-multibuffer` | GM Workspace 多缓冲数量（950 默认 2，A3/A2 默认 4）      | 随硬件          |
+
 - 11.8 干预手段
   - **hint 断点**：`compile_hint("break_vf")` 在 VF 融合链上放置不可跨越的断点，拆开过长的融合域（回指第 6 章）
   - **关闭开关**：`--enable-auto-multi-buffer=false`、`--limit-auto-multi-buffer-*` 系列，用于性能对比或问题定位

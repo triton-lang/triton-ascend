@@ -27,7 +27,8 @@ _MANIFEST = 'block_batching.artifacts'
 _DECLINE = 'block_batching.decline'
 # Extend only for audited, deterministic TTIR failures. Resource limits,
 # analysis budgets and abnormal worker exits must remain retryable.
-_CACHEABLE_DECLINES = frozenset({'UNSUPPORTED_ADDRESS_EXPRESSION', 'UNSUPPORTED_BYTE_OPERATION'})
+_CACHEABLE_DECLINES = frozenset(
+    {'UNSUPPORTED_ADDRESS_EXPRESSION', 'UNSUPPORTED_BYTE_OPERATION', 'A3_EXP2_BATCHING_NOT_VALIDATED'})
 # Cost model limits reported by scoring itself. These are raised while reading
 # the TTIR, so the same module always reaches the same limit, and the request
 # identity carries the backend revision the model ships with.
@@ -228,6 +229,7 @@ def _native_report(operation, body, directory):
 # compiler diagnostic must be classified deliberately; generated IR/ABI failures
 # (e.g. INVALID_BATCH_PLAN and VALUE_MAPPING_MISSING) must propagate as errors.
 _CAPABILITIES = frozenset('''
+A3_EXP2_BATCHING_NOT_VALIDATED
 ALREADY_MAPPED ANALYSIS_BUDGET_EXCEEDED BASIC_CONTROL_FLOW_NOT_IMPLEMENTED BASIC_OP_NOT_IMPLEMENTED CROSS_LANE_REORDER
 CV_BATCH_LOAD_LAYOUT_NOT_PROVEN CV_BATCH_MASK_LAYOUT_NOT_PROVEN CV_BATCH_MASK_RECTANGLE_NOT_PROVEN
 CV_BATCH_QUOTIENT_GROUP_CROSSES_PERIOD CV_BATCH_VOLATILE_TRANSPOSE_NOT_VALIDATED CV_DEVICE_ADDRESS_NOT_PROVEN

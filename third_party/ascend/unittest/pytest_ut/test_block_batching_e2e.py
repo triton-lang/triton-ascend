@@ -18,6 +18,15 @@ def pointwise(X, Y, N: tl.constexpr, B: tl.constexpr):
 
 
 @triton.jit
+def column_exp2(X, Y, N: tl.constexpr):
+    x = tl.arange(0, 1) + tl.program_id(0)
+    y = tl.arange(0, 13) + tl.program_id(1) * 13
+    z = tl.arange(0, 1) + tl.program_id(2)
+    idx = x[:, None, None] * 13 * N + y[None, :, None] * N + z[None, None, :]
+    tl.store(Y + idx, tl.exp2(tl.load(X + idx)))
+
+
+@triton.jit
 def grid_values(Y):
     x, y, z = tl.program_id(0), tl.program_id(1), tl.program_id(2)
     gx, gy, gz = tl.num_programs(0), tl.num_programs(1), tl.num_programs(2)
@@ -173,6 +182,34 @@ class TestVV:
     @pytest.fixture(autouse=True)
     def batching_target(self, monkeypatch):
         require_batching_target(monkeypatch, include_legacy=True)
+
+    @pytest.mark.parametrize('columns', [256, 741])
+    @pytest.mark.parametrize('factor', [None, 2, 4])
+    def test_a3_exp2_falls_back_before_execution(self, columns, factor):
+        if not triton.runtime.driver.active.get_current_target().arch.startswith('Ascend910_93'):
+            pytest.skip('A3 candidate containment')
+        cpu = torch.randn((13, columns), generator=torch.Generator().manual_seed(20261124))
+        x, y = cpu.npu(), torch.full((13, columns), -123., device='npu')
+        options = {} if factor is None else dict(block_batching_factor=factor)
+        grid = (1, 1, columns)
+        kernel = column_exp2.warmup(x, y, columns, grid=grid, **options)
+        assert kernel.candidate is None
+        if factor is None:
+            selection = kernel.block_auto_selection
+            assert selection['selected_factor'] == 1
+            declines = selection['candidate_plan']['declines']
+            assert {item['factor'] for item in declines} == {2, 4}
+            assert all(item['reason'] == 'A3_EXP2_BATCHING_NOT_VALIDATED' for item in declines)
+        else:
+            assert kernel.block_batching['reason'] == 'A3_EXP2_BATCHING_NOT_VALIDATED'
+        torch.npu.synchronize()
+        assert (y == -123.).all()
+        expected = torch.exp2(cpu.double()).float()
+        for _ in range(3):
+            y.fill_(-123.)
+            assert column_exp2[grid](x, y, columns, **options) is kernel
+            torch.npu.synchronize()
+            torch.testing.assert_close(y.cpu(), expected, rtol=1.e-4, atol=1.e-4)
 
     @pytest.mark.parametrize('factor', [1, 3])
     def test_factor_tail_and_default(self, factor):

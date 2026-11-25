@@ -8,7 +8,7 @@ UB numbers are optional diagnostics, not another resource admission gate.
 from .block_batching import _is_cv_report
 from .block_batching_worker import BatchCompileError, BatchDecline
 
-VALIDATION_POLICY = "ta_only_v1"
+VALIDATION_POLICY = "ta_only_v2"
 CV_VALIDATION_POLICY = "ta_cv_integer_rank_two_v23"
 
 CV_MASKED_BATCH_LOWERINGS = ("rank3_masked_batch_v1", "rank3_uniform_control_batch_v1")
@@ -63,8 +63,8 @@ def _has_independent_row_layout(report):
         for access in accesses)
 
 
-def vv_layout_refusal(report):
-    """Conservative structural matching for independent row pointwise bodies.
+def vv_layout_refusal(report, target_arch=""):
+    """Conservative target and layout admission for VV candidates.
 
     Proven top-level rows may use the structured backend path. Incomplete
     layout evidence, shared accesses and control-flow bodies retain the
@@ -73,6 +73,10 @@ def vv_layout_refusal(report):
     if (report.get("owner") != "block_batching" or report.get("cv_mode") != "disabled"
             or report.get("lane_width", 1) <= 1):
         return None
+    # A3 merged exp2 has reproduced nondeterministic wrong results. Keep the
+    # original F1 until its lowering is validated, even for proven row layouts.
+    if target_arch.startswith("Ascend910_93") and report.get("operations", {}).get("math.exp2"):
+        return "A3_EXP2_BATCHING_NOT_VALIDATED"
     # An unsupported symbolic bridge leaves coupled lane/local tail masks.
     # Structured lowering can implement their store as a full-tile read/select/
     # write, touching bytes owned by another program even when the source mask

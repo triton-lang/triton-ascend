@@ -391,6 +391,33 @@ def structured_rows():
     return value
 
 
+@pytest.mark.parametrize('factor', [2, 4])
+def test_a3_exp2_rejects_native_candidates_only(tmp_path, factor):
+    from triton.backends.ascend.compiler import AscendBackend, make_ttir
+    from triton.backends.ascend.block_batching_worker import BatchDecline
+    from triton.backends.compiler import GPUTarget
+
+    source = pointwise(2).replace('arith.addf %v, %gv', 'math.exp2 %v')
+    for arch in ('Ascend910_9382', 'Ascend910_9391', 'Ascend910B2', 'Ascend950PR_9579', 'Ascend910_9589'):
+        backend = AscendBackend(GPUTarget('npu', arch, 0))
+        options = backend.parse_options(
+            dict(block_batching_factor=factor, block_batching_axis=2, enable_graph_optimize=False,
+                 block_compile_context=(arch, 24, (False, 24, 48), None)))
+        metadata = {}
+        result = make_ttir(parse(tmp_path, source), metadata, options)
+        if arch.startswith('Ascend910_93'):
+            assert isinstance(result, BatchDecline)
+            assert (result.reason, result.stage) == ('A3_EXP2_BATCHING_NOT_VALIDATED', 'ttir')
+        else:
+            assert not isinstance(result, BatchDecline)
+            assert metadata['block_batching']['compile_status'] == 'REWRITTEN'
+    for change in (dict(lane_width=1), dict(cv_mode='spatial_concat_v1'), dict(operations={'math.exp': 1})):
+        control = structured_rows()
+        control['operations']['math.exp2'] = 1
+        control.update(change)
+        assert reports.vv_layout_refusal(control, 'Ascend910_9382') is None
+
+
 @pytest.mark.parametrize('shape', [[128], [1, 128], [128, 1], [1]])
 def test_proved_top_level_rows_reach_backend_memory_validation(shape):
     value = structured_rows()

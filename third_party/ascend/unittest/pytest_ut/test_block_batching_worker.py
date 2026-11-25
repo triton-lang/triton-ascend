@@ -179,13 +179,14 @@ def decline_compiler(tmp_path, monkeypatch):
         yield compiler, caches
 
 
-def test_decline_cache_reuses_exact_attempt_and_retries_stale_entries(decline_compiler, monkeypatch):
+@pytest.mark.parametrize('reason', ['UNSUPPORTED_ADDRESS_EXPRESSION', 'A3_EXP2_BATCHING_NOT_VALIDATED'])
+def test_decline_cache_reuses_exact_attempt_and_retries_stale_entries(decline_compiler, monkeypatch, reason):
     import json
     from contextlib import ExitStack
     from triton import knobs
     compiler, caches = decline_compiler
     calls = []
-    refusal = dict(reason='UNSUPPORTED_ADDRESS_EXPRESSION', stage='ttir', analysis={'stage': 'source'})
+    refusal = worker.BatchDecline(reason, 'ttir', analysis={'stage': 'source'}).payload()
 
     def attempt(operation, body):
         calls.append(body['variant'])

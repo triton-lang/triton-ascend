@@ -413,11 +413,12 @@ class TestSelectionCache(unittest.TestCase):
         report["selection"].update(model_complete=False, reason="TTIR_BASELINE_MODEL_UNSUPPORTED")
         report["selection"]["candidates"]["unmerged"].update(status="TTIR_MODEL_UNSUPPORTED",
                                                              error=sorted(_DETERMINISTIC_MODEL_LIMITS)[0])
-        report["selection"]["candidates"]["a0_f2"] = dict(factor=2, axis=0, requested_axis=0, status="COMPILE_REJECTED",
-                                                          error="UNSUPPORTED_BYTE_OPERATION")
-        report["plan"]["declines"] = [dict(axis=0, factor=2, stage="ttir", reason="UNSUPPORTED_BYTE_OPERATION")]
-        self.assertIn("UNSUPPORTED_BYTE_OPERATION", _CACHEABLE_DECLINES)
-        self.assertTrue(self.auto._cacheable_selection(report))
+        for reason in ('UNSUPPORTED_BYTE_OPERATION', 'A3_EXP2_BATCHING_NOT_VALIDATED'):
+            report["selection"]["candidates"]["a0_f2"] = dict(factor=2, axis=0, requested_axis=0,
+                                                              status="COMPILE_REJECTED", error=reason)
+            report["plan"]["declines"] = [dict(axis=0, factor=2, stage="ttir", reason=reason)]
+            self.assertIn(reason, _CACHEABLE_DECLINES)
+            self.assertTrue(self.auto._cacheable_selection(report))
 
 
 class TestCompileContextCache(unittest.TestCase):

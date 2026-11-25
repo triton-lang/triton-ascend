@@ -479,7 +479,7 @@ def make_ttir(mod, metadata, opt):
                 refusal, "ttir",
                 analysis={"stage": "source", "computation": report["computation"], "operations": report["operations"]})
         report["admission"] = {"version": 1, "source": "proven", "layout": "pending", "memory_lowering": "pending"}
-        refusal = batching_vv_layout_refusal(report)
+        refusal = batching_vv_layout_refusal(report, opt.target_arch)
         if refusal:
             return BatchDecline(
                 refusal, "ttir",

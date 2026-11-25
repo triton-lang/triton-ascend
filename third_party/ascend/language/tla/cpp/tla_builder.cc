@@ -1624,23 +1624,48 @@ void init_tla_builder(py::module &&m) {
            })
       .def(
           "create_tla_l12l0",
-          [](TLABuilder &self, Value src, Value dst, int64_t kPartIdx,
-             int64_t kPart, int64_t kPartCeil, int64_t kPartLoop,
-             int64_t kPartActual, int64_t m, bool isTransposed) {
+          [](TLABuilder &self, Value src, Value dst, bool isTransposed) {
             checkDmaBuffers(src, dst);
-            auto &builder = self.getBuilder();
-            self.create<hivm::L12L0Op>(TypeRange{}, src, dst,
-                                       builder.getI64IntegerAttr(kPartIdx),
-                                       builder.getI64IntegerAttr(kPart),
-                                       builder.getI64IntegerAttr(kPartCeil),
-                                       builder.getI64IntegerAttr(kPartLoop),
-                                       builder.getI64IntegerAttr(kPartActual),
-                                       builder.getI64IntegerAttr(m),
-                                       builder.getBoolAttr(isTransposed));
+            auto srcType = cast<MemRefType>(src.getType());
+            auto dstType = cast<MemRefType>(dst.getType());
+            auto space = [](MemRefType type) {
+              return dyn_cast_or_null<hivm::AddressSpaceAttr>(
+                  type.getMemorySpace());
+            };
+            if (!space(srcType) || !space(dstType) ||
+                space(srcType).getAddressSpace() != hivm::AddressSpace::L1 ||
+                (space(dstType).getAddressSpace() != hivm::AddressSpace::L0A &&
+                 space(dstType).getAddressSpace() != hivm::AddressSpace::L0B))
+              throw py::value_error("copy_l1_to_l0 requires L1 to L0A/L0B");
+            Type elem = srcType.getElementType();
+            if (elem != dstType.getElementType() ||
+                !(elem.isF16() || elem.isBF16() || elem.isF32()))
+              throw py::type_error(
+                  "copy_l1_to_l0 requires matching f16/bf16/f32");
+            int64_t c0 = 256 / srcType.getElementTypeBitWidth();
+            for (auto type : {srcType, dstType}) {
+              if (!type.hasStaticShape() ||
+                  (type.getRank() != 2 && type.getRank() != 4))
+                throw py::value_error(
+                    "copy_l1_to_l0 requires static rank 2 or 4");
+              if (type.getRank() == 4 &&
+                  (type.getDimSize(2) != 16 || type.getDimSize(3) != c0))
+                throw py::value_error(
+                    "copy_l1_to_l0 physical views require inner dimensions "
+                    "(16, C0), where C0 = 32 / sizeof(dtype)");
+            }
+            auto op = self.create<hivm::L12L0Op>(src, dst, isTransposed);
+            // The native builder derives the copy extent from dst. Keep the
+            // operands' layouts, offsets and strides for the NPUIR pipeline.
+            int64_t k = op.getKPartAttr().getInt();
+            int64_t mn = op.getMAttr().getInt();
+            if (k <= 0 || mn <= 0 || k % 16 || mn % 16) {
+              op.erase();
+              throw py::value_error(
+                  "copy_l1_to_l0 K and M/N must be multiples of 16");
+            }
           },
-          py::arg("src"), py::arg("dst"), py::arg("k_part_idx"),
-          py::arg("k_part"), py::arg("k_part_ceil"), py::arg("k_part_loop"),
-          py::arg("k_part_actual"), py::arg("m"), py::arg("is_transposed"))
+          py::arg("src"), py::arg("dst"), py::arg("is_transposed") = false)
       .def(
           "create_tla_fixpipe",
           [](TLABuilder &self, Value src, Value dst, const py::dict &attrs,

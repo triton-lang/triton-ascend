@@ -6,7 +6,9 @@ From the triton-ascend root (substitute this file's repository-relative path):
   TLA_TEST_STAGE=run python -m pytest -v -s -x <this-file> -k test_run
   TLA_TEST_STAGE=run python <this-file>
 
-Case groups for pytest -k: dynamic_clear, subview, capacity, shape, barrier.
+Case groups for pytest -k: dynamic_clear, subview, capacity, shape, barrier,
+l12l0_view. The last group isolates L1->L0A/B source and destination views
+with FP16/BF16 identity GEMMs; it does not add transpose or batch coverage.
 The script form runs all enabled stages. All kernels use explicit pipeline
 events and grid=(1,), unit_flag=False, sync_solver=False.
 Capacity cases exercise legal upper bounds (64 KiB L0A/B, 256 KiB L0C,
@@ -58,6 +60,29 @@ CONFIGS = [
 ]
 
 
+def _l12l0_view_cases():
+    for dtype in ("float16", "bfloat16"):
+        for to_b in (False, True):
+            side = "b" if to_b else "a"
+            rows, cols, tile_rows, tile_cols = (96, 80, 48, 32) if to_b else (64, 96, 32, 48)
+            for endpoint in ("src", "dst"):
+                # Source zN's inner physical axis is logical rows. Destination
+                # nZ (B) instead has logical columns on that physical axis.
+                one_rows, one_cols = (32, 16) if endpoint == "src" or to_b else (16, 32)
+                windows = (
+                    ("pitch", rows, cols, tile_rows, tile_cols, 16, 16),
+                    ("end", rows, cols, tile_rows, tile_cols, rows - tile_rows, cols - tile_cols),
+                    ("one_fractal", one_rows, one_cols, 16, 16, one_rows - 16, one_cols - 16),
+                )
+                for boundary, pr, pc, tr, tc, row, col in windows:
+                    yield dict(name=f"l12l0_view_{endpoint}_{side}_{boundary}_{dtype}", kind="l12l0_view",
+                               endpoint=endpoint, dtype=dtype, TO_B=to_b, ROWS=pr, COLS=pc, TILE_ROWS=tr, TILE_COLS=tc,
+                               ROW=row, COL=col)
+
+
+CONFIGS += list(_l12l0_view_cases())
+
+
 # The shared test helper pins tla.jit to TLAJITFunction. partial supports
 # decorator options with that class as well as the public decorator function.
 @partial(tla.jit, do_not_specialize=["Clear"])
@@ -104,14 +129,10 @@ def plain_mmad(A, B, C, Clear, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr
                     a_tile = a1
                     b_tile = b1
                 tla.sync.wait_flag(tla.sync.PIPE.M, tla.sync.PIPE.MTE1, ki % SLOTS)
-                tla.copy_l1_to_l0(
-                    a_l1, a_tile,
-                    tla.CopyL1ToL0Params(is_transpose=False, k_part_idx=ki, k_part=L0_K, k_part_ceil=L0_K,
-                                         k_part_loop=K // L0_K, k_part_actual=L0_K, m=M))
-                tla.copy_l1_to_l0(
-                    b_l1, b_tile,
-                    tla.CopyL1ToL0Params(is_transpose=False, k_part_idx=ki, k_part=L0_K, k_part_ceil=L0_K,
-                                         k_part_loop=K // L0_K, k_part_actual=L0_K, m=N))
+                a_src = tla.subview(a_l1, (ki * (L0_K // 16), 0, 0, 0), (L0_K // 16, M // 16, 16, 16))
+                b_src = tla.subview(b_l1, (0, ki * (L0_K // 16), 0, 0), (N // 16, L0_K // 16, 16, 16))
+                tla.copy_l1_to_l0(a_src, a_tile)
+                tla.copy_l1_to_l0(b_src, b_tile)
                 tla.sync.set_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
                 tla.sync.wait_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
                 if pass_id == 1 and ki == 0:
@@ -157,14 +178,8 @@ def subview_mmad(A, B, TileOut, FullOut, a_offset, b_offset, c_offset, DYNAMIC: 
         # the copies could let matching copy/MMAD offset bugs cancel out.
         tla.sync.set_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.MTE1, 0)
         tla.sync.wait_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.MTE1, 0)
-        tla.copy_l1_to_l0(
-            a_l1, a_root,
-            tla.CopyL1ToL0Params(is_transpose=False, k_part_idx=0, k_part=96, k_part_ceil=96, k_part_loop=1,
-                                 k_part_actual=96, m=32))
-        tla.copy_l1_to_l0(
-            b_l1, b_root,
-            tla.CopyL1ToL0Params(is_transpose=False, k_part_idx=0, k_part=96, k_part_ceil=96, k_part_loop=1,
-                                 k_part_actual=96, m=64))
+        tla.copy_l1_to_l0(a_l1, a_root)
+        tla.copy_l1_to_l0(b_l1, b_root)
         tla.sync.set_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
         tla.sync.wait_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
         tla.cube.mmad_l0(a_root, b_root, c_left, m=32, n=64, k=96, clear_accum=True,
@@ -197,7 +212,95 @@ def subview_mmad(A, B, TileOut, FullOut, a_offset, b_offset, c_offset, DYNAMIC: 
         tla.sync.barrier(tla.sync.PIPE.ALL)
 
 
+@tla.jit
+def l12l0_source_mmad(Data, Identity, C, TO_B: tl.constexpr, ROWS: tl.constexpr, COLS: tl.constexpr,
+                      TILE_ROWS: tl.constexpr, TILE_COLS: tl.constexpr, ROW: tl.constexpr, COL: tl.constexpr):
+    """Copy one L1 window into compact L0, then expose it with an identity GEMM."""
+    K: tl.constexpr = TILE_ROWS if TO_B else TILE_COLS
+    with tla.scope.cube():
+        src = tla.alloc((COLS // 16, ROWS // 16, 16, 16), Data.dtype.element_ty, space="l1")
+        identity_l1 = tla.alloc((K // 16, K // 16, 16, 16), Data.dtype.element_ty, space="l1")
+        a = tla.alloc((K // 16, TILE_ROWS // 16, 16, 16), Data.dtype.element_ty, space="l0a")
+        b = tla.alloc((K // 16, TILE_COLS // 16, 16, 16), Data.dtype.element_ty, space="l0b")
+        acc = tla.alloc((TILE_COLS // 16, TILE_ROWS // 16, 16, 16), tl.float32, space="l0c")
+        tla.load_gm_to_l1(tla.view(Data, (ROWS, COLS)), src)
+        tla.load_gm_to_l1(tla.view(Identity, (K, K)), identity_l1)
+        tla.sync.set_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.MTE1, 0)
+        tla.sync.wait_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.MTE1, 0)
+        # L1 is zN for both A and B. The source retains the full parent pitch.
+        tile = tla.subview(src, (COL // 16, ROW // 16, 0, 0), (TILE_COLS // 16, TILE_ROWS // 16, 16, 16))
+        if TO_B:
+            tla.copy_l1_to_l0(identity_l1, a)
+            tla.copy_l1_to_l0(tile, b)
+        else:
+            tla.copy_l1_to_l0(tile, a)
+            tla.copy_l1_to_l0(identity_l1, b)
+        tla.sync.set_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
+        tla.sync.wait_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
+        tla.cube.mmad_l0(a, b, acc, m=TILE_ROWS, n=TILE_COLS, k=K, clear_accum=True,
+                         unit_flag_ctrl=tla.UnitFlagMode.DISABLED)
+        tla.sync.set_flag(tla.sync.PIPE.M, tla.sync.PIPE.F, 0)
+        tla.sync.wait_flag(tla.sync.PIPE.M, tla.sync.PIPE.F, 0)
+        tla.store_l0c_to_gm(
+            acc, tla.view(C, (TILE_ROWS, TILE_COLS)),
+            tla.FixpipeL0C2GMParams(dma_mode=tla.FixpipeDMAMode.NZ2ND, unit_flag_ctrl=tla.UnitFlagMode.DISABLED))
+        tla.sync.barrier(tla.sync.PIPE.ALL)
+
+
+@tla.jit
+def l12l0_destination_mmad(Data, Initial, Identity, C, TO_B: tl.constexpr, ROWS: tl.constexpr, COLS: tl.constexpr,
+                           TILE_ROWS: tl.constexpr, TILE_COLS: tl.constexpr, ROW: tl.constexpr, COL: tl.constexpr):
+    """Overwrite an L0 window, but read the WHOLE parent through an identity GEMM.
+
+    MMAD uses zero-offset compact parents, not the copy's destination subview.
+    This prevents matching copy/MMAD view bugs from hiding a misplaced write,
+    and exposes untouched elements before, between and after the copied blocks.
+    """
+    K: tl.constexpr = ROWS if TO_B else COLS
+    with tla.scope.cube():
+        src = tla.alloc((TILE_COLS // 16, TILE_ROWS // 16, 16, 16), Data.dtype.element_ty, space="l1")
+        initial_l1 = tla.alloc((COLS // 16, ROWS // 16, 16, 16), Data.dtype.element_ty, space="l1")
+        identity_l1 = tla.alloc((K // 16, K // 16, 16, 16), Data.dtype.element_ty, space="l1")
+        a = tla.alloc((K // 16, ROWS // 16, 16, 16), Data.dtype.element_ty, space="l0a")
+        b = tla.alloc((K // 16, COLS // 16, 16, 16), Data.dtype.element_ty, space="l0b")
+        acc = tla.alloc((COLS // 16, ROWS // 16, 16, 16), tl.float32, space="l0c")
+        tla.load_gm_to_l1(tla.view(Data, (TILE_ROWS, TILE_COLS)), src)
+        tla.load_gm_to_l1(tla.view(Initial, (ROWS, COLS)), initial_l1)
+        tla.load_gm_to_l1(tla.view(Identity, (K, K)), identity_l1)
+        tla.sync.set_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.MTE1, 0)
+        tla.sync.wait_flag(tla.sync.PIPE.MTE2, tla.sync.PIPE.MTE1, 0)
+        if TO_B:
+            tla.copy_l1_to_l0(identity_l1, a)
+            tla.copy_l1_to_l0(initial_l1, b)
+            tile = tla.subview(b, (ROW // 16, COL // 16, 0, 0), (TILE_ROWS // 16, TILE_COLS // 16, 16, 16))
+        else:
+            tla.copy_l1_to_l0(initial_l1, a)
+            tla.copy_l1_to_l0(identity_l1, b)
+            tile = tla.subview(a, (COL // 16, ROW // 16, 0, 0), (TILE_COLS // 16, TILE_ROWS // 16, 16, 16))
+        # Finish parent initialization before the overlapping MTE1 write.
+        tla.sync.barrier(tla.sync.PIPE.MTE1)
+        tla.copy_l1_to_l0(src, tile)
+        tla.sync.set_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
+        tla.sync.wait_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, 0)
+        tla.cube.mmad_l0(a, b, acc, m=ROWS, n=COLS, k=K, clear_accum=True, unit_flag_ctrl=tla.UnitFlagMode.DISABLED)
+        tla.sync.set_flag(tla.sync.PIPE.M, tla.sync.PIPE.F, 0)
+        tla.sync.wait_flag(tla.sync.PIPE.M, tla.sync.PIPE.F, 0)
+        tla.store_l0c_to_gm(
+            acc, tla.view(C, (ROWS, COLS)),
+            tla.FixpipeL0C2GMParams(dma_mode=tla.FixpipeDMAMode.NZ2ND, unit_flag_ctrl=tla.UnitFlagMode.DISABLED))
+        tla.sync.barrier(tla.sync.PIPE.ALL)
+
+
 def _spec(case):
+    if case["kind"] == "l12l0_view":
+        element = "bf16" if case["dtype"] == "bfloat16" else "fp16"
+        signature = dict(Data="*" + element, Identity="*" + element, C="*fp32")
+        fn = l12l0_source_mmad
+        if case["endpoint"] == "dst":
+            signature["Initial"] = "*" + element
+            fn = l12l0_destination_mmad
+        constants = {key: case[key] for key in ("TO_B", "ROWS", "COLS", "TILE_ROWS", "TILE_COLS", "ROW", "COL")}
+        return fn, signature, constants
     if case["kind"] == "subview":
         signature = dict(A="*fp16", B="*fp16", TileOut="*fp32", FullOut="*fp32", a_offset="i32", b_offset="i32",
                          c_offset="i32")
@@ -216,6 +319,49 @@ def _inputs(op):
     return re.search(r"ins\((.*?) :", op).group(1).split(", ")
 
 
+def _check_l12l0_view_ir(text, case, ops, values, bools):
+    destination = case["endpoint"] == "dst"
+    to_b = case["TO_B"]
+    rows, cols = case["ROWS"], case["COLS"]
+    tr, tc, row, col = (case[key] for key in ("TILE_ROWS", "TILE_COLS", "ROW", "COL"))
+    elem = "bf16" if case["dtype"] == "bfloat16" else "f16"
+    copies = re.findall(r"hivm\.hir\.l12l0[^\n]*", text)
+    assert len(copies) == (3 if destination else 2)
+    copy = copies[-1] if destination else copies[1 if to_b else 0]
+    operands = re.search(r"ins\((.*?)\)\s+outs\((.*?)\)\s*\{", copy)
+    assert operands, copy
+    src, dst = operands.groups()
+    assert f"{tc // 16}x{tr // 16}x16x16x{elem}" in src
+    outer, inner = (tr // 16, tc // 16) if to_b else (tc // 16, tr // 16)
+    assert f"{outer}x{inner}x16x16x{elem}" in dst
+    assert "address_space<cbuf>" in src
+    assert ("address_space<cb>" if to_b else "address_space<ca>") in dst
+    if destination:
+        pitch = (cols if to_b else rows) * 16
+        offset = row * cols + col * 16 if to_b else col * rows + row * 16
+        descriptor = dst
+    else:
+        pitch, offset = rows * 16, col * rows + row * 16
+        descriptor = src
+    assert f"strided<[{pitch}, 256, 16, 1], offset: {offset}>" in descriptor, copy
+    tile_k, tile_mn = (tr, tc) if to_b else (tc, tr)
+    for name, value in (("k_part_idx", 0), ("k_part_loop", 1), ("k_part", tile_k), ("k_part_ceil", tile_k),
+                        ("k_part_actual", tile_k), ("m", tile_mn)):
+        assert re.search(rf"\b{name} = {value}\b", copy), copy
+    assert "scf.for" not in text and text.count("hivm.hir.fixpipe ") == 1
+    assert len(ops) == 1
+    args = _inputs(ops[0])
+    m, n = (rows, cols) if destination else (tr, tc)
+    k = m if to_b else n
+    assert tuple(values[v] for v in args[2:5]) == (m, k, n)
+    assert bools[args[5]] is False and bools[args[6]] is False and bools[args[7]] is True
+    copy_dst = dst.split(" :", 1)[0]
+    if destination:
+        assert args[1 if to_b else 0] != copy_dst, "MMAD must inspect the whole L0 parent"
+    else:
+        assert args[1 if to_b else 0] == copy_dst, "MMAD must read the compact copy destination"
+
+
 @matrix(CONFIGS)
 def test_ir(case, output_dir=None):
     fn, signature, constants = _spec(case)
@@ -226,6 +372,9 @@ def test_ir(case, output_dir=None):
     if case["kind"] == "subview":
         assert ast.count("memref.subview") == 5
         assert ast.count("memref.alloc()") == 5, "subviews must alias their parent allocations"
+    elif case["kind"] == "l12l0_view":
+        assert ast.count("memref.subview") == 1
+        assert ast.count("memref.alloc()") == (6 if case["endpoint"] == "dst" else 5)
     text = str(lower_offline(module, ctx, output_dir=dump))
     ops = _ops(text)
     assert "hivm.hir.l12bt" not in text and "address_space<biasbuf>" not in text
@@ -234,7 +383,9 @@ def test_ir(case, output_dir=None):
     assert all(" bias(" not in op and "unit_flag<DISABLED>" in op for op in ops)
     values = {name: int(value) for name, value in re.findall(r"(%[\w]+) = arith\.constant (\d+) : index", text)}
     bools = {name: value == "true" for name, value in re.findall(r"(%[\w]+) = arith\.constant (true|false)", text)}
-    if case["kind"] == "subview":
+    if case["kind"] == "l12l0_view":
+        _check_l12l0_view_ir(text, case, ops, values, bools)
+    elif case["kind"] == "subview":
         assert len(ops) == 3 and text.count("hivm.hir.l12l0 ") == 2
         assert text.count("hivm.hir.fixpipe ") == 2
         for op, k in zip(ops, (96, 96, 32)):
@@ -314,10 +465,53 @@ def _compare(actual, expected, exact=False):
     return (actual - expected).abs().max().item()
 
 
+def _l12l0_view_inputs(case, seed):
+    import torch
+
+    dtype = getattr(torch, case["dtype"])
+    rows, cols, tr, tc, row, col = (case[key] for key in ("ROWS", "COLS", "TILE_ROWS", "TILE_COLS", "ROW", "COL"))
+
+    def pattern(r, c, negative=False):
+        # All values are exactly representable in both FP16 and BF16. Different
+        # row/column weights expose swapped axes and misplaced fractal blocks.
+        rr, cc = torch.arange(r)[:, None], torch.arange(c)[None, :]
+        values = ((rr * 17 + cc * 7 + seed * 11) % 127 + 1).float() / 16
+        return (-values if negative else values).to(dtype)
+
+    if case["endpoint"] == "src":
+        data = pattern(rows, cols)
+        k = tr if case["TO_B"] else tc
+        expected = data[row:row + tr, col:col + tc].float().clone()
+        return (data, torch.eye(k, dtype=dtype)), expected
+    data, initial = pattern(tr, tc), pattern(rows, cols, negative=True)
+    k = rows if case["TO_B"] else cols
+    expected = initial.float().clone()
+    expected[row:row + tr, col:col + tc] = data.float()
+    return (data, initial, torch.eye(k, dtype=dtype)), expected
+
+
+def _launch_l12l0_view(case, seed, compile_only=False):
+    import torch
+
+    fn, _, constants = _spec(case)
+    inputs, expected = _l12l0_view_inputs(case, seed)
+    out, storage = _guarded_output(*expected.shape)
+    args = tuple(value.npu() for value in inputs) + (out, )
+    kernel = _invoke(fn, args, constants, compile_only)
+    if not compile_only:
+        # Keep the device inputs alive until the asynchronous launch completes.
+        torch.npu.synchronize()
+    return kernel, out, storage, expected
+
+
 @matrix(CONFIGS)
 def test_compile(case):
     import torch_npu  # noqa: F401
 
+    if case["kind"] == "l12l0_view":
+        kernel, _, _, _ = _launch_l12l0_view(case, 7, compile_only=True)
+        check_kernel_binary(kernel)
+        return
     fn, _, constants = _spec(case)
     a, b = _inputs_cpu(case, 7)
     x, y = a.npu(), b.npu()
@@ -336,6 +530,14 @@ def test_run(case):
     import torch
     import torch_npu  # noqa: F401
 
+    if case["kind"] == "l12l0_view":
+        for seed in (7, 19):
+            print("RUN:", case["name"], "seed", seed, flush=True)
+            _, out, storage, expected = _launch_l12l0_view(case, seed)
+            error = _compare(out.cpu(), expected, exact=True)
+            _check_guards(storage)
+            print("ACCURACY PASS:", case["name"], "seed", seed, "max_abs_error", error)
+        return
     fn, _, constants = _spec(case)
     binary = None
     for seed in (7, 19):

@@ -17,6 +17,7 @@
 // UNSTRUCTURE: tt.ptr_to_int
 // UNSTRUCTURE: tt.int_to_ptr
 // UNSTRUCTURE-NOT: tt.bitcast
+// UNSTRUCTURE: tt.return
 // SIMT-LABEL: tt.func public @widen_tensor_offset
 // SIMT: %[[OFFSETS:.*]] = arith.divsi {{.*}} : tensor<8xi64>
 // SIMT: %[[ADDRESS:.*]] = tt.ptr_to_int %{{.*}} : !tt.ptr<i8> -> i64
@@ -25,6 +26,7 @@
 // SIMT: %[[PTRS:.*]] = tt.addptr %[[BASES]], %[[OFFSETS]] : tensor<8x!tt.ptr<i32>>, tensor<8xi64>
 // SIMT: tt.load %[[PTRS]] : tensor<8x!tt.ptr<i32>>
 // SIMT-NOT: tt.bitcast
+// SIMT: tt.return
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @widen_tensor_offset(
       %src: !tt.ptr<i8> {tt.divisibility = 16 : i32},
@@ -58,6 +60,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // UNSTRUCTURE: arith.addi
 // UNSTRUCTURE: tt.int_to_ptr
 // UNSTRUCTURE-NOT: tt.bitcast
+// UNSTRUCTURE: tt.return
 // SIMT-LINALG-LABEL: func.func @widen_scalar_multi_addptr
 // SIMT-LINALG-NOT: tt.int_to_ptr
 // SIMT-LINALG: memref.extract_aligned_pointer_as_index
@@ -103,6 +106,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // UNSTRUCTURE: tt.splat
 // UNSTRUCTURE: tt.addptr
 // UNSTRUCTURE-NOT: tt.bitcast
+// UNSTRUCTURE: tt.return
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @widen_pointer_inside_loop(
       %src: !tt.ptr<i8> {tt.divisibility = 16 : i32},

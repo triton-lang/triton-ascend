@@ -55,7 +55,7 @@ def test_flip(dtype):
 # ---------------
 # `tl.flip` is lowered in the frontend as a bit-reversal idiom: reshape the
 # 2^k-sized dim into k trailing 2s, xor-swap along each of them, then reshape
-# back. TritonToLinalg recognizes that idiom and rewrites it into the native
+# back. TritonToStructured recognizes that idiom and rewrites it into the native
 # `ascend.flip`, which lowers through @triton_flip -> hfusion.flip -> hivm.vflip.
 # Since hivm.vflip only flips the last (innermost) dim, only last-dim flips are
 # rewritten; leading-dim flips stay on the bit-reversal path.

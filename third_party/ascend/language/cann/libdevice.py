@@ -2630,6 +2630,11 @@ def expm1(arg0: core.tensor, _semantic=None):
         abs_x = math.abs(arg0, _semantic=_semantic)
         threshold = _semantic.full(arg0.shape, 1e-3, arg0.type.scalar)
         tiny = _semantic.less_than(abs_x, threshold)
+        # Preserve the sign of zero: expm1(-0.0) must stay -0.0, but the Taylor
+        # series collapses -0.0 + 0.0 to +0.0.
+        zero = _semantic.full(arg0.shape, 0.0, arg0.type.scalar)
+        is_zero = _semantic.equal(abs_x, zero)
+        taylor = _semantic.where(is_zero, arg0, taylor)
         return _semantic.where(tiny, taylor, result)
     else:
         arg0 = _semantic.to_tensor(arg0)

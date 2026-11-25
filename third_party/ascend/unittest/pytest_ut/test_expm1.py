@@ -45,7 +45,6 @@ def triton_expm1(in_ptr0, out_ptr0, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constex
         tl.store(out_ptr0 + (x0), tmp1, None)
 
 
-@pytest.mark.skip(reason="expm1 failed sometimes, wait for fix")
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 4096, 8), 2, 32768, 1024],
 ])
@@ -60,3 +59,18 @@ def test_expm1(param_list):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_expm1[ncore, 1, 1](x0, y_cal, xblock, xblock_sub)
     test_common.validate_cmp(dtype, y_cal, y_ref)
+
+
+def test_expm1_boundary():
+    vals = torch.tensor([1e-8, -1e-8, 1e-6, -1e-6, 1e-3, -1e-3, 0.0, -0.0], dtype=torch.float32)
+    y_ref = torch.expm1(vals)
+    x0 = vals.npu()
+    y_cal = torch.zeros_like(x0).npu()
+    n = vals.numel()
+    triton_expm1[1, 1, 1](x0, y_cal, n, n)
+    y_cal = y_cal.cpu()
+    # Tight relative tolerance (atol=0): a zero result for a tiny input such as
+    # expm1(1e-8) == 0 must not be accepted as matching the ~1e-8 reference.
+    torch.testing.assert_close(y_cal, y_ref, rtol=1e-3, atol=0.0)
+    # expm1(-0.0) must preserve the negative sign of zero.
+    assert torch.signbit(y_cal[-1]), "expm1(-0.0) must be -0.0"

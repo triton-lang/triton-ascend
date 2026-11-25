@@ -685,8 +685,8 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.histogram"],
         "tensor_args": [0],
         "unsupported": {
-            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
-            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32", "int64"],
@@ -1163,8 +1163,8 @@ OP_DTYPE_RULES = {
     "reduce_or": {
         "names": ["triton.language.reduce_or"],
         "unsupported": {
-            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
-            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a2a3": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2"],
         },
         "supported": {
             "a2a3": ["uint8", "int8", "int16", "int32"],
@@ -1274,7 +1274,7 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.static_assert"],
         "unsupported": {
             "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a5": ["fp64"],
         },
         "supported": {
             "a2a3": ["bool"],

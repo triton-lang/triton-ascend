@@ -394,10 +394,10 @@ index 0000000000000000000000000000000000000000..5b3fdde057add2b1925cd97bbe4d40ab
 +#endif // PROTON_DRIVER_GPU_CANN_H_
 diff --git a/third_party/proton/csrc/include/Driver/GPU/MsptiApi.h b/third_party/proton/csrc/include/Driver/GPU/MsptiApi.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..e4f205b1a22709cc8fab3fbf1c7bcf4402084792
+index 0000000000000000000000000000000000000000..bb64741d7eafb4ff9944940e6b92614e2e3cd10f
 --- /dev/null
 +++ b/third_party/proton/csrc/include/Driver/GPU/MsptiApi.h
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,51 @@
 +#ifndef PROTON_DRIVER_GPU_MSPTI_H_
 +#define PROTON_DRIVER_GPU_MSPTI_H_
 +
@@ -429,6 +429,8 @@ index 0000000000000000000000000000000000000000..e4f205b1a22709cc8fab3fbf1c7bcf44
 +msptiResult activityDisable(msptiActivityKind kind);
 +
 +template <bool CheckSuccess> msptiResult activityFlushAll(uint32_t flag);
++
++bool tryFlushSharedKernelChannel();
 +
 +template <bool CheckSuccess>
 +msptiResult activityGetNextRecord(uint8_t *buffer, size_t validBufferSizeBytes,
@@ -763,13 +765,14 @@ index 0000000000000000000000000000000000000000..7fbde92189c16f59a851788a32e2ed40
 +} // namespace proton::cann
 diff --git a/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp b/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..63721ba512d3c8cae6da0911d5d603aae995ab1c
+index 0000000000000000000000000000000000000000..ca764959e2888570e9c4c2122c260f35e62e1b04
 --- /dev/null
 +++ b/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,96 @@
 +#include "Driver/GPU/MsptiApi.h"
 +#include "Device.h"
 +#include "Driver/Dispatch.h"
++#include <string_view>
 +
 +namespace proton {
 +
@@ -824,6 +827,40 @@ index 0000000000000000000000000000000000000000..63721ba512d3c8cae6da0911d5d603aa
 +DEFINE_DISPATCH(ExternLibMspti, activityPopExternalCorrelationId,
 +                msptiActivityPopExternalCorrelationId,
 +                msptiExternalCorrelationKind, uint64_t *)
++
++static bool needsLegacyKernelDrain() {
++  // Limit the workaround to the 910B / legacy MSPTI interface combination.
++  // Newer libraries keep their own channel drain and parser teardown policy.
++  if (dlsym(ExternLibMspti::lib, "msptiGetVersion"))
++    return false;
++  void *acl = dlopen("libascendcl.so", RTLD_LAZY | RTLD_NOLOAD);
++  if (!acl)
++    return false;
++  using GetSocName = const char *(*)();
++  auto getSocName = reinterpret_cast<GetSocName>(dlsym(acl, "aclrtGetSocName"));
++  const char *name = getSocName ? getSocName() : nullptr;
++  bool match = name && std::string_view(name).rfind("Ascend910B", 0) == 0;
++  dlclose(acl);
++  return match;
++}
++
++bool tryFlushSharedKernelChannel() {
++  static const bool legacy = needsLegacyKernelDrain();
++  if (!legacy)
++    return false;
++  // Legacy MSPTI shares the STARS reader between these two activity kinds.
++  // Never disable a communication activity that was enabled by another caller.
++  using IsEnabled = bool (*)(msptiActivityKind);
++  static auto isEnabled = reinterpret_cast<IsEnabled>(
++      dlsym(ExternLibMspti::lib, "msptiActivityIsEnabled"));
++  constexpr auto kind = MSPTI_ACTIVITY_KIND_COMMUNICATION;
++  if (!isEnabled || isEnabled(kind) || !isEnabled(MSPTI_ACTIVITY_KIND_KERNEL))
++    return false;
++  if (activityEnable<false>(kind) != MSPTI_SUCCESS)
++    return false;
++  activityDisable<true>(kind);
++  return true;
++}
 +
 +} // namespace mspti
 +
@@ -1233,10 +1270,10 @@ index 0bf9147b2cfb0ab2c6b157e0fa0c7579b3fb130b..67779b6a3d8807c2a44ea31fea81f76a
  } // namespace proton
 diff --git a/third_party/proton/csrc/lib/Profiler/Mspti/MsptiProfiler.cpp b/third_party/proton/csrc/lib/Profiler/Mspti/MsptiProfiler.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..959227f5f7061cd4f34dda66186c208bcaadff24
+index 0000000000000000000000000000000000000000..f50ef3b2015479206b37296309e1eef95cfaae7c
 --- /dev/null
 +++ b/third_party/proton/csrc/lib/Profiler/Mspti/MsptiProfiler.cpp
-@@ -0,0 +1,359 @@
+@@ -0,0 +1,372 @@
 +#include "Profiler/Mspti/MsptiProfiler.h"
 +#include "Context/Context.h"
 +#include "Data/Metric.h"
@@ -1244,6 +1281,7 @@ index 0000000000000000000000000000000000000000..959227f5f7061cd4f34dda66186c208b
 +#include "Driver/GPU/MsptiApi.h"
 +
 +#include <atomic>
++#include <chrono>
 +#include <cstdlib>
 +#include <deque>
 +#include <memory>
@@ -1532,6 +1570,18 @@ index 0000000000000000000000000000000000000000..959227f5f7061cd4f34dda66186c208b
 +
 +void MsptiProfiler::MsptiProfilerPimpl::doFlush() {
 +  mspti::activityFlushAll<true>(/*flag=*/0);
++  if (pendingKernelActivities.load(std::memory_order_relaxed) != 0 &&
++      mspti::tryFlushSharedKernelChannel()) {
++    // Consume the last device records while the KERNEL parser is still enabled.
++    const auto deadline =
++        std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
++    do {
++      mspti::activityFlushAll<true>(0);
++      if (pendingKernelActivities.load(std::memory_order_relaxed) == 0)
++        break;
++      std::this_thread::sleep_for(std::chrono::milliseconds(1));
++    } while (std::chrono::steady_clock::now() < deadline);
++  }
 +  if (pendingKernelActivities.load(std::memory_order_relaxed) != 0) {
 +    // MSPTI 26.1 flushes its host ActivityBuffer but does not flush the
 +    // device profiling channel. Cycling only KERNEL forces those SOC records

@@ -46,7 +46,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 
 // -----
 
-// The product feeds the next matmul directly and also reaches its accumulator
+// A cube intermediate feeds the next matmul and also reaches its accumulator
 // through block 4. Merging 7 and 2 would create a cycle with block 4.
 // CHECK-LABEL: func.func @keep_chained_matmuls_if_merge_creates_cycle(
 // CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 7 : i32
@@ -59,8 +59,53 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %c16 = arith.constant 16 : index
     scf.for %i = %c0 to %c16 step %c1 {
       %product = linalg.matmul {ssbuffer.block_id = 7 : i32, ssbuffer.core_type = "CUBE"} ins(%a, %b : tensor<16x16xf32>, tensor<16x16xf32>) outs(%init : tensor<16x16xf32>) -> tensor<16x16xf32>
+      %lhs = arith.negf %product {ssbuffer.block_id = 7 : i32, ssbuffer.core_type = "CUBE"} : tensor<16x16xf32>
+      %acc = arith.addf %lhs, %init {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "VECTOR"} : tensor<16x16xf32>
+      %result = linalg.matmul {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} ins(%lhs, %b : tensor<16x16xf32>, tensor<16x16xf32>) outs(%acc : tensor<16x16xf32>) -> tensor<16x16xf32>
+    }
+    return
+  }
+}
+
+// -----
+
+// Only the chain could merge these blocks. Its producer also feeds block 4.
+// CHECK-LABEL: func.func @keep_chained_matmuls_with_vector_user(
+// CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 7 : i32
+// CHECK: arith.addf {{.*}}ssbuffer.block_id = 4 : i32
+// CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 2 : i32
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @keep_chained_matmuls_with_vector_user(%a: tensor<16x16xf32>, %b: tensor<16x16xf32>, %init: tensor<16x16xf32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    scf.for %i = %c0 to %c16 step %c1 {
+      %product = linalg.matmul {ssbuffer.block_id = 7 : i32, ssbuffer.core_type = "CUBE"} ins(%a, %b : tensor<16x16xf32>, tensor<16x16xf32>) outs(%init : tensor<16x16xf32>) -> tensor<16x16xf32>
       %acc = arith.addf %product, %init {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "VECTOR"} : tensor<16x16xf32>
-      %result = linalg.matmul {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} ins(%product, %b : tensor<16x16xf32>, tensor<16x16xf32>) outs(%acc : tensor<16x16xf32>) -> tensor<16x16xf32>
+      %result = linalg.matmul {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} ins(%product, %b : tensor<16x16xf32>, tensor<16x16xf32>) outs(%init : tensor<16x16xf32>) -> tensor<16x16xf32>
+    }
+    return
+  }
+}
+
+// -----
+
+// The independent vector user only restricts the chain rule. The shared
+// vector input still allows these same-depth cube blocks to merge.
+// CHECK-LABEL: func.func @merge_shared_input_despite_vector_user(
+// CHECK: linalg.matmul {{.*}}ssbuffer.block_id = [[MERGED:[0-9]+]] : i32
+// CHECK: arith.addf {{.*}}ssbuffer.block_id = 4 : i32
+// CHECK: linalg.matmul {{.*}}ssbuffer.block_id = [[MERGED]] : i32
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @merge_shared_input_despite_vector_user(%a: tensor<16x16xf32>, %b: tensor<16x16xf32>, %init: tensor<16x16xf32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    scf.for %i = %c0 to %c16 step %c1 {
+      %shared = arith.negf %a {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR"} : tensor<16x16xf32>
+      %product = linalg.matmul {ssbuffer.block_id = 7 : i32, ssbuffer.core_type = "CUBE"} ins(%shared, %b : tensor<16x16xf32>, tensor<16x16xf32>) outs(%init : tensor<16x16xf32>) -> tensor<16x16xf32>
+      %acc = arith.addf %product, %init {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "VECTOR"} : tensor<16x16xf32>
+      %result = linalg.matmul {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} ins(%product, %shared : tensor<16x16xf32>, tensor<16x16xf32>) outs(%init : tensor<16x16xf32>) -> tensor<16x16xf32>
     }
     return
   }

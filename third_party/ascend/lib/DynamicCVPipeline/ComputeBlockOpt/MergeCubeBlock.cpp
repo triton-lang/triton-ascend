@@ -223,6 +223,7 @@ static bool feedsMatmul(const BlockNode *producer, const BlockNode *consumer,
       llvm::append_range(worklist, matmul.getInputs());
   }
 
+  bool foundProducer = false;
   llvm::DenseSet<Operation *> visited;
   while (!worklist.empty()) {
     Operation *def = worklist.pop_back_val().getDefiningOp();
@@ -234,14 +235,19 @@ static bool feedsMatmul(const BlockNode *producer, const BlockNode *consumer,
     if (blockId != consumer->blockId && blockId != producer->blockId)
       continue;
     if (isa<linalg::MatmulOp>(def)) {
-      if (blockId == producer->blockId)
-        return true;
+      if (blockId == producer->blockId) {
+        if (llvm::any_of(def->getUsers(), isVectorSimpleOpOrCf)) {
+          LDBG("Producer matmul in block " << blockId << " has a vector user");
+          return false;
+        }
+        foundProducer = true;
+      }
       continue;
     }
 
     llvm::append_range(worklist, def->getOperands());
   }
-  return false;
+  return foundProducer;
 }
 
 bool MergeCubeBlockPass::canMergeBlocks(BlockNode *target, BlockNode *source,

@@ -1,6 +1,9 @@
 # _ascend_constraints.py
-# Ascend platform constraints for Triton API
+# Ascend platform constraints for Triton / TLA API
 # Fields: constraints (text list), example (optional file name)
+
+# TLA entries use _TLA_PREFIX; their examples live under docs/zh/examples/tla.
+_TLA_PREFIX = "triton.language.extra.tla"
 
 CONSTRAINTS = {
     "triton.Config": {
@@ -1114,5 +1117,415 @@ CONSTRAINTS = {
     },
     "triton.language.extra.cann.libdevice.trunc": {
         "example": "triton.language.extra.cann.libdevice.trunc",
+    },
+    # ------------------------------------------------------------------
+    # TLA interfaces
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Core types
+    # ------------------------------------------------------------------
+    f"{_TLA_PREFIX}.buffer": {
+        "constraints": [
+            "``buf[i0, i1, ...]`` 返回 ``buffer_access``，用作 ``simd.vlds`` / ``simd.vsts`` 的地址参数。",
+            "GM buffer 必须通过 ``tla.view`` 从内核指针获得，不能用 ``alloc`` 分配。",
+        ],
+        "example":
+        "buffer",
+    },
+    f"{_TLA_PREFIX}.buffer_type": {
+        "constraints": [
+            "``shape`` / ``strides`` 必须是正的编译期整数，且 ``strides`` 的秩与 ``shape`` 一致。",
+            "``space`` 只能是 ``gm`` / ``ub`` / ``l1`` / ``l0a`` / ``l0b`` / ``l0c``。",
+        ],
+        "example":
+        "buffer",
+    },
+    f"{_TLA_PREFIX}.vector": {
+        "constraints": [
+            "不支持隐式转换为 Triton tensor，也不能作为标量条件使用（``__bool__`` 会报错）。",
+        ],
+        "example": "buffer",
+    },
+    f"{_TLA_PREFIX}.vector_type": {
+        "constraints": [
+            "``lanes`` 必须是正的编译期整数。",
+            "元素类型必须是标量整型或浮点型 dtype。",
+        ],
+        "example": "buffer",
+    },
+
+    # ------------------------------------------------------------------
+    # Allocation / view / copy
+    # ------------------------------------------------------------------
+    f"{_TLA_PREFIX}.alloc": {
+        "constraints": [
+            "``space`` 默认 ``\"ub\"``，不能为 ``\"gm\"``；GM buffer 必须由内核指针经 ``tla.view`` 获得。",
+            "``versions`` 必须是正整数；``1`` 表示关闭多缓冲。",
+        ],
+        "example":
+        "buffer",
+    },
+    f"{_TLA_PREFIX}.alloc_buffer": {
+        "constraints": [
+            "``space`` 默认 ``\"ub\"``，不能为 ``\"gm\"``；GM buffer 必须由内核指针经 ``tla.view`` 获得。",
+            "``versions`` 必须是正整数；``1`` 表示关闭多缓冲。",
+        ],
+        "example":
+        "buffer",
+    },
+    f"{_TLA_PREFIX}.annotate_buffer_versions": {
+        "constraints": [
+            "``versions`` 必须是正整数，``1`` 表示关闭多缓冲。",
+            "版本数通过 ``hivm.multi_buffer`` 注解交给 NPU-IR 多缓冲 pass。",
+        ],
+        "example": "buffer",
+    },
+    f"{_TLA_PREFIX}.copy": {
+        "constraints": [
+            "``src`` 和 ``dst`` 都必须是 ``tla.buffer``，不接受指针或 tensor。",
+            "源和目标元素类型必须一致。",
+            "支持的地址空间组合：``gm->ub``、``ub->gm``、``gm->l1``、``l0c->*``。",
+            "除 ``gm->l1`` 的 ND->NZ 和 ``l0c`` Fixpipe 的 fractal 关系外，源和目标形状必须一致。",
+            "其他地址空间组合会报错。",
+        ],
+        "example":
+        "copy",
+    },
+    f"{_TLA_PREFIX}.view": {
+        "constraints": [
+            "指针入口：``src`` 必须是指针 tensor，``strides`` 为最终 memref 步长，默认行主序。",
+            "缓冲区切片：``src`` 必须是 ``tla.buffer``，``strides`` 相对于源视图，``space`` 必须保持默认值。",
+            "``strides`` / ``offsets`` 的秩必须与结果形状一致。",
+            "静态 offset 必须位于源 buffer 范围内。",
+        ],
+        "example":
+        "view",
+    },
+    f"{_TLA_PREFIX}.reshape": {
+        "constraints": [
+            "只支持连续、行主序、无偏移的 buffer；带步长或偏移的切片请先使用 ``tla.view``。",
+            "元素总数必须保持不变。",
+        ],
+        "example": "reshape",
+    },
+
+    # ------------------------------------------------------------------
+    # Core-mode scopes
+    # ------------------------------------------------------------------
+    f"{_TLA_PREFIX}.scope": {
+        "constraints": [
+            "作用域在编译期确定核心类型，不需要运行时参数。",
+            "使用 ``with tla.scope.vector():`` / ``with tla.scope.simd():`` / ``with tla.scope.cube():``。",
+        ],
+        "example":
+        "scope",
+    },
+    f"{_TLA_PREFIX}.scope.vector": {
+        "constraints": [
+            "承载 ``tla.copy``、控制流等非 SIMD 操作。",
+            "可以嵌套 ``tla.scope.simd()``。",
+        ],
+        "example": "scope",
+    },
+    f"{_TLA_PREFIX}.scope.simd": {
+        "constraints": [
+            "SIMD 向量函数区域，编译器会 outline 为 ``hivm.vector_function``。",
+            "``tla.simd.*`` 只能操作 ``tla.vector``。",
+        ],
+        "example": "scope",
+    },
+    f"{_TLA_PREFIX}.scope.cube": {
+        "constraints": [
+            "Cube 核区域当前保留，Cube 算子尚未通过该作用域暴露。",
+        ],
+        "example": "scope",
+    },
+
+    # ------------------------------------------------------------------
+    # SIMD load / store
+    # ------------------------------------------------------------------
+    f"{_TLA_PREFIX}.simd.vlds": {
+        "constraints": [
+            "``ptr`` 必须是 UB buffer 或 ``buf[i0, i1, ...]`` 形式的元素范围。",
+            "``dist`` 必须是 AVE load 分布字符串，默认 ``NORM``。",
+            "结果是一个满向量寄存器：2048 位；``i64`` / ``u64`` 使用 4096 位。",
+            "支持的元素类型：``i8`` / ``i16`` / ``i32`` / ``i64`` / ``fp8e4nv`` / ``f16`` / ``bf16`` / ``f32``。",
+        ],
+        "example":
+        "simd_load_store",
+    },
+    f"{_TLA_PREFIX}.simd.vsts": {
+        "constraints": [
+            "``ptr`` 必须是 UB buffer 或 ``buf[i0, i1, ...]`` 形式的元素范围。",
+            "``dist`` 默认 ``NORM_B32``，必须是 AVE store 分布字符串。",
+            "``mask`` 默认全真 ``pge <ALL>``；显式传入时 lane 数必须与值向量一致。",
+        ],
+        "example":
+        "simd_load_store",
+    },
+
+    # ------------------------------------------------------------------
+    # SIMD conversion / layout
+    # ------------------------------------------------------------------
+    f"{_TLA_PREFIX}.simd.vextf": {
+        "constraints": [
+            "当前只支持拓宽到 ``f32``，结果为 64 lane 满寄存器。",
+            "``part`` 只支持 ``part_even`` / ``part_odd``，不改变结果位宽。",
+        ],
+        "example": "simd_convert",
+    },
+    f"{_TLA_PREFIX}.simd.vtruncf": {
+        "constraints": [
+            "目标类型只支持 ``bf16`` / ``f16`` / ``fp8e4nv``。",
+            "总位宽保持不变，元素变窄后 lane 数相应增加。",
+            "``part`` 只支持 ``part_even`` / ``part_odd``。",
+        ],
+        "example":
+        "simd_convert",
+    },
+    f"{_TLA_PREFIX}.simd.vbitcast": {
+        "constraints": [
+            "源总位宽必须能被目标元素位宽整除。",
+            "结果 lane 数为 ``src_lanes * src_bits / dst_bits``。",
+        ],
+        "example": "simd_convert",
+    },
+    f"{_TLA_PREFIX}.simd.vintlv": {
+        "constraints": [
+            "两个源寄存器类型必须完全一致。",
+            "返回两个结果寄存器。",
+        ],
+        "example": "simd_convert",
+    },
+    f"{_TLA_PREFIX}.simd.vdintlv": {
+        "constraints": [
+            "两个源寄存器类型必须完全一致。",
+            "返回两个结果寄存器，是 ``vintlv`` 的逆操作。",
+        ],
+        "example": "simd_convert",
+    },
+
+    # ------------------------------------------------------------------
+    # SIMD arithmetic / unary
+    # ------------------------------------------------------------------
+    **{
+        f"{_TLA_PREFIX}.simd.{name}": {
+            "constraints": [
+                "两个操作数类型必须完全一致，不支持隐式类型提升。",
+                "使用全真 ``pge <ALL>`` 掩码。",
+            ],
+            "example": "simd_arith",
+        }
+        for name in ("vadd", "vmul", "vdiv", "vxor")
+    },
+    f"{_TLA_PREFIX}.simd.vmod": {
+        "constraints": [
+            "仅用于整数向量，两个操作数类型必须完全一致。",
+            "使用全真 ``pge <ALL>`` 掩码。",
+        ],
+        "example": "simd_arith",
+    },
+    f"{_TLA_PREFIX}.simd.vfma": {
+        "constraints": [
+            "``acc`` / ``lhs`` / ``rhs`` 类型必须完全一致，计算 ``acc + lhs * rhs``。",
+            "使用全真 ``pge <ALL>`` 掩码。",
+        ],
+        "example": "simd_arith",
+    },
+    **{
+        f"{_TLA_PREFIX}.simd.{name}": {
+            "constraints": [
+                "保持元素类型不变。",
+                "使用全真 ``pge <ALL>`` 掩码。",
+            ],
+            "example": "simd_arith",
+        }
+        for name in ("vneg", "vsqrt", "vrsqrt", "vexp")
+    },
+
+    # ------------------------------------------------------------------
+    # SIMD compare / select
+    # ------------------------------------------------------------------
+    f"{_TLA_PREFIX}.simd.vcmp": {
+        "constraints": [
+            "``cmp_type`` 支持 ``eq`` / ``ne`` / ``gt`` / ``ge`` / ``lt`` / ``le``。",
+            "两个操作数类型必须完全一致。",
+            "返回 ``int1`` 谓词向量，lane 数与输入一致。",
+        ],
+        "example":
+        "simd_compare",
+    },
+    f"{_TLA_PREFIX}.simd.vsel": {
+        "constraints": [
+            "``mask`` 的 lane 数必须与值向量一致。",
+            "``true_val`` 和 ``false_val`` 类型必须完全一致。",
+        ],
+        "example": "simd_compare",
+    },
+
+    # ------------------------------------------------------------------
+    # SIMD reduction / broadcast / constants / predicate
+    # ------------------------------------------------------------------
+    f"{_TLA_PREFIX}.simd.vreduce": {
+        "constraints": [
+            "``kind`` 为 ``add`` / ``min`` / ``max``。",
+            "结果放在 lane 0（AVE 规约语义）。",
+        ],
+        "example": "simd_reduce",
+    },
+    f"{_TLA_PREFIX}.simd.vreduce_sum": {
+        "constraints": [
+            "等价于 ``vreduce(src, \"add\")``，结果放在 lane 0。",
+        ],
+        "example": "simd_reduce",
+    },
+    f"{_TLA_PREFIX}.simd.vreduce_max": {
+        "constraints": [
+            "接受单个寄存器或寄存器列表，所有寄存器类型必须一致。",
+            "先做逐元素 ``max``，再水平规约并广播到所有 lane。",
+        ],
+        "example": "simd_reduce",
+    },
+    f"{_TLA_PREFIX}.simd.vreduce_min": {
+        "constraints": [
+            "接受单个寄存器或寄存器列表，所有寄存器类型必须一致。",
+            "先做逐元素 ``min``，再水平规约并广播到所有 lane。",
+        ],
+        "example": "simd_reduce",
+    },
+    f"{_TLA_PREFIX}.simd.vbroadcast": {
+        "constraints": [
+            "``low=True`` 广播低半部分，``low=False`` 广播高半部分。",
+            "结果 lane 数与源寄存器一致。",
+        ],
+        "example": "simd_reduce",
+    },
+    f"{_TLA_PREFIX}.simd.vfull": {
+        "constraints": [
+            "``lanes`` 必须是正的编译期整数。",
+            "``lanes`` 与元素位宽的乘积不能超过寄存器位宽。",
+        ],
+        "example": "simd_const",
+    },
+    f"{_TLA_PREFIX}.simd.vsplat": {
+        "constraints": [
+            "lane 数由 ``dtype`` 推导：``2048 // elem_bits``，``i64`` 使用 4096 位。",
+        ],
+        "example": "simd_const",
+    },
+    f"{_TLA_PREFIX}.simd.vci": {
+        "constraints": [
+            "固定为 ``int32`` / 64 lane。",
+            "``base`` 可以是编译期 int32，或标量 int32 tensor。",
+        ],
+        "example": "simd_const",
+    },
+    f"{_TLA_PREFIX}.simd.pge": {
+        "constraints": [
+            "``n`` 只支持 1 / 2 / 3 / 4 / 8 / 16 / 32 / 64 / 128。",
+            "``lanes`` 是 ``int1`` 谓词向量的 lane 数。",
+        ],
+        "example": "simd_const",
+    },
+    f"{_TLA_PREFIX}.simd.membar": {
+        "constraints": [
+            "``scope`` 支持 AVE membar 类型，例如 ``VV_ALL``、``VST_VLD``、``VLD_VST``。",
+            "完整取值：VV_ALL、VST_VLD、VLD_VST、VST_VST、VS_ALL、VST_LD、VLD_ST、VST_ST、"
+            "SV_ALL、ST_VLD、LD_VST、ST_VST、SS_ALL、ST_LD、LD_ST、ST_ST。",
+        ],
+        "example":
+        "simd_membar",
+    },
+
+    # ------------------------------------------------------------------
+    # Cube
+    # ------------------------------------------------------------------
+    f"{_TLA_PREFIX}.cube.mmad": {
+        "constraints": [
+            "``a`` / ``b`` 必须是 L1 buffer，``acc`` 必须是 L0C buffer。",
+            "``a`` 和 ``b`` 元素类型必须一致。",
+            "形状必须满足 ``a=(M, K)``、``b=(K, N)``、``acc=(M, N)``。",
+            "操作数可以是 2 维 ND 形状，也可以是等价的 4 维 zN 形状。",
+            "只暴露 ``transpose_b``；``transpose_a`` 可通过 GM->L1 拷贝调整布局实现。",
+        ],
+        "example":
+        "cube_mmad",
+    },
+
+    # ------------------------------------------------------------------
+    # Synchronization
+    # ------------------------------------------------------------------
+    f"{_TLA_PREFIX}.sync.barrier": {
+        "constraints": [
+            "``pipe`` 是编译期字符串，例如 ``\"V\"``、``\"MTE2\"`` 或 ``\"PIPE_V\"``。",
+            "``barrier(\"ALL\")`` 等价于 ``PIPE_ALL``。",
+        ],
+        "example":
+        "sync",
+    },
+    f"{_TLA_PREFIX}.sync.set_flag": {
+        "constraints": [
+            "``event_id`` 范围 ``[0, 7]``。",
+            "``pipe1`` / ``pipe2`` 是编译期流水字符串。",
+        ],
+        "example": "sync",
+    },
+    f"{_TLA_PREFIX}.sync.wait_flag": {
+        "constraints": [
+            "``event_id`` 范围 ``[0, 7]``，必须与对应的 ``set_flag`` 一致。",
+            "``pipe1`` / ``pipe2`` 是编译期流水字符串。",
+        ],
+        "example": "sync",
+    },
+    f"{_TLA_PREFIX}.sync.sync_all": {
+        "constraints": [
+            "``mode`` 必须是编译期 ``bool``。",
+            "``mode=False`` 同步 AIV 核，``mode=True`` 同步 AIC 和 AIV 全部核。",
+        ],
+        "example": "sync",
+    },
+    f"{_TLA_PREFIX}.sync.block_set_flag": {
+        "constraints": [
+            "``mode`` 取值：``0`` inter-block、``1`` inter-subblock、``2`` intra-block。",
+            "``flag`` 范围 ``[0, 15]``。",
+        ],
+        "example":
+        "sync",
+    },
+    f"{_TLA_PREFIX}.sync.block_wait_flag": {
+        "constraints": [
+            "``flag`` 范围 ``[0, 15]``，必须与对应的 ``block_set_flag`` 一致。",
+        ],
+        "example": "sync",
+    },
+
+    # ------------------------------------------------------------------
+    # Math / debug
+    # ------------------------------------------------------------------
+    f"{_TLA_PREFIX}.compensated_rstd": {
+        "constraints": [
+            "``square_sum`` 必须是 ``f32`` 向量寄存器，通常为广播到所有 lane 的值。",
+            "``hidden`` 必须是正的 Python / constexpr 标量。",
+            "``eps`` 必须不小于最小 FP32 正规数 ``2^-126``。",
+            "语义与 TileKernels ``rstd.py`` 的 ``make_rstd_impl`` 一致，不是普通 RMSNorm 公式。",
+        ],
+        "example":
+        "compensated_rstd",
+    },
+    f"{_TLA_PREFIX}.device_print": {
+        "constraints": [
+            "只允许在 ``tla.scope`` 外使用。",
+            "只支持 UB buffer、UB 元素范围和标量。",
+            "``prefix`` 必须是字符串。",
+        ],
+        "example": "device",
+    },
+    f"{_TLA_PREFIX}.device_assert": {
+        "constraints": [
+            "``cond`` 必须是标量 ``int1``，向量条件会被拒绝。",
+            "仅在开启 ``debug`` 选项时生效。",
+            "``msg`` 必须是字符串。",
+        ],
+        "example": "device",
     },
 }

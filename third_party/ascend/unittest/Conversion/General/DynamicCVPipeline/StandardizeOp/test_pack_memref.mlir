@@ -84,16 +84,16 @@ module {
 
   // ============================================================================
   // 5. pack_custom_op_with_convert_layout
-  // A to_tensor whose single user is a layout conversion drags that conversion
-  // into the unit, so the packed scope returns the converted tensor.
+  // Move the layout conversion before to_tensor and pack the memref view
+  // with the custom op, returning the converted tensor from the scope.
   // ============================================================================
   // CHECK-LABEL: func.func @pack_custom_op_with_convert_layout(
   // CHECK: %[[SCOPE:.*]] = scope.scope : () -> tensor<2048xf32> {
   // CHECK:   %[[ALLOC:.*]] = memref.alloc() : memref<2048xf32>
   // CHECK:   %[[CUSTOM:.*]] = hivm.hir.custom {{.*}} outs(%[[ALLOC]] : memref<2048xf32>) -> memref<2048xf32>
-  // CHECK:   %[[T:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable : memref<2048xf32>
-  // CHECK:   %[[CL:.*]] = hivm.hir.convert_layout %[[T]] output_shape [2048] {{.*}} : (tensor<2048xf32>) -> tensor<2048xf32>
-  // CHECK:   scope.return %[[CL]] : tensor<2048xf32>
+  // CHECK:   %[[CL:.*]] = hivm.hir.convert_layout %[[ALLOC]] output_shape [2048] {{.*}} : (memref<2048xf32>) -> memref<2048xf32>
+  // CHECK:   %[[T:.*]] = bufferization.to_tensor %[[CL]] restrict writable : memref<2048xf32>
+  // CHECK:   scope.return %[[T]] : tensor<2048xf32>
   // CHECK: } {ssbuffer.core_type = "VECTOR"}
   // CHECK: return %[[SCOPE]]
   func.func @pack_custom_op_with_convert_layout(%arg0: tensor<2048xf32>) -> tensor<2048xf32> {

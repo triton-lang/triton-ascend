@@ -1,17 +1,15 @@
 // RUN: triton-opt --split-input-file --merge-cube-block %s | FileCheck %s --check-prefix=MERGE
 // RUN: triton-opt --split-input-file --merge-cube-block --reorder-ops-by-block-id %s | FileCheck %s --check-prefix=REORDER
 
-// A later loop without a merge must not clear an earlier loop's merge state.
+// A later loop without a merge must not affect an earlier loop's merges.
 // Merging blocks 2 and 3 leaves block 2 split by independent block 4, so the
 // following reorder must run and make the merged block contiguous.
 // MERGE-LABEL: module attributes
-// MERGE-NOT: ssbuffer.skip_extra_reorder
 // MERGE: func.func @merge_then_no_merge
 // MERGE: linalg.matmul {ssbuffer.block_id = 2 : i32
 // MERGE: linalg.matmul {ssbuffer.block_id = 4 : i32
 // MERGE: linalg.matmul {ssbuffer.block_id = 2 : i32
 // REORDER-LABEL: module attributes
-// REORDER-NOT: ssbuffer.skip_extra_reorder
 // REORDER: func.func @merge_then_no_merge
 // REORDER: linalg.matmul {ssbuffer.block_id = 2 : i32
 // REORDER-NEXT: %{{.*}} = linalg.matmul {ssbuffer.block_id = 2 : i32
@@ -42,13 +40,11 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 
 // Reversing the loop order must still request reorder after a merge.
 // MERGE-LABEL: module attributes
-// MERGE-NOT: ssbuffer.skip_extra_reorder
 // MERGE: func.func @no_merge_then_merge
 // MERGE: linalg.matmul {ssbuffer.block_id = 2 : i32
 // MERGE: linalg.matmul {ssbuffer.block_id = 4 : i32
 // MERGE: linalg.matmul {ssbuffer.block_id = 2 : i32
 // REORDER-LABEL: module attributes
-// REORDER-NOT: ssbuffer.skip_extra_reorder
 // REORDER: func.func @no_merge_then_merge
 // REORDER: linalg.matmul {ssbuffer.block_id = 2 : i32
 // REORDER-NEXT: %{{.*}} = linalg.matmul {ssbuffer.block_id = 2 : i32
@@ -77,12 +73,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 
 // -----
 
-// When no loop merges, set the skip marker and let reorder consume it.
+// Reordering preserves these already contiguous blocks when no loop merges.
 // MERGE-LABEL: module attributes
-// MERGE-SAME: ssbuffer.skip_extra_reorder = true
 // MERGE: func.func @no_loop_merges
 // REORDER-LABEL: module attributes
-// REORDER-NOT: ssbuffer.skip_extra_reorder
 // REORDER: func.func @no_loop_merges
 // REORDER: scf.for
 // REORDER-NEXT: %{{.*}} = arith.addf {{.*}}ssbuffer.block_id = 1 : i32

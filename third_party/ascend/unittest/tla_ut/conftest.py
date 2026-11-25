@@ -19,22 +19,26 @@
 # THE SOFTWARE.
 """pytest glue for tla_ut: map TLA_TEST_STAGE onto skips, provide fixtures."""
 import os
+from pathlib import Path
 import sys
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+TLA_TEST_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(TLA_TEST_DIR))
 
+from blacklist import BLACKLIST
 from utils.tla_test_utils import get_stages, npu_available
 
 
 @pytest.fixture(scope="session", autouse=True)
-def assign_npu(worker_id):
+def assign_npu(request):
     """One NPU per xdist worker; no-op when no device (ir-only mode)."""
     if not npu_available():
         return
     import torch
 
+    worker_id = request.getfixturevalue("worker_id") if request.config.pluginmanager.hasplugin("xdist") else "master"
     npu_id = 0 if worker_id == "master" else int(worker_id[2:]) % torch.npu.device_count()
     torch.npu.set_device(npu_id)
 
@@ -49,7 +53,12 @@ def output_dir():
 def pytest_collect_file(file_path, parent):
     """Extend normal collection to op-named files without collecting modules twice."""
     collectors = yield
-    if file_path.suffix == ".py" and file_path.name != "conftest.py":
+    if file_path.relative_to(TLA_TEST_DIR).as_posix() in BLACKLIST:
+        return []
+    # Composite kernels load device code lazily; only collect their test modules.
+    if TLA_TEST_DIR / "kernels" in file_path.parents and not file_path.name.startswith("test_"):
+        return []
+    if file_path.suffix == ".py" and file_path.name not in ("blacklist.py", "conftest.py"):
         if not any(isinstance(collector, pytest.Module) for collector in collectors):
             collectors.append(pytest.Module.from_parent(parent, path=file_path))
     return collectors

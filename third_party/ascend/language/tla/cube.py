@@ -17,17 +17,97 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-"""Cube-core primitives for TLA (hivm.hir.mmadL1).
+"""Cube-core primitives for TLA (hivm.hir.mmadL1 / hivm.hir.mmadmxL1 / hivm.hir.mmadL0).
 
 ``mmad`` computes ``C = A x B (+C)`` with A=(M,K)/B=(K,N) in L1 and C in L0C.
-Inputs may use logical 2-D shapes or physical 4-D NZ shapes. Only
-``transpose_b`` is exposed; ``transpose_a`` folds into the GM->L1 copy.
-"""
-from triton.language.core import builtin, _unwrap_if_constexpr
-from .core import buffer
-from .dma import _unit_flag_args
+Inputs may use logical 2-D shapes or physical 4-D NZ shapes. Transposition
+is applied to the logical matrix dimensions represented by each L1 buffer.
 
-__all__ = ["mmad"]
+``mmad_mx`` is the Ascend950PR microscaling variant: A/B are FP8/FP4 in L1,
+per-32-element E8M0 scale factors live in L1, and C is an L0C accumulator.
+
+``mmad_l0`` consumes explicit physical L0A/L0B tiles and writes L0C.
+"""
+from enum import Enum
+
+from triton.language.core import (
+    builtin,
+    float8e4nv,
+    float8e5,
+    int8,
+    uint8,
+    float16,
+    bfloat16,
+    float32,
+    tensor,
+    _unwrap_if_constexpr,
+)
+from .core import buffer, _row_major_strides
+from .dma import _boolean, _unit_flag_args
+
+__all__ = ["MxFormat", "mmad", "mmad_l0", "mmad_mx"]
+
+
+class MxFormat(Enum):
+    """Microscaling element format stored by an ``mmad_mx`` operand.
+
+    ``E5M2`` and ``E4M3`` are the FP8 formats; ``E2M1`` selects packed FP4,
+    whose L1 buffer holds two logical K values per byte.
+    """
+    E5M2 = "e5m2"
+    E4M3 = "e4m3"
+    E2M1 = "e2m1"
+
+
+_MX_FORMAT_CODES = {MxFormat.E5M2: 1, MxFormat.E4M3: 2, MxFormat.E2M1: 3}
+_MX_SCALE_GROUP = 32
+
+
+def _inferred_mx_format(dtype):
+    if dtype == float8e5:
+        return MxFormat.E5M2
+    if dtype == float8e4nv:
+        return MxFormat.E4M3
+    return None
+
+
+def _mx_format(format, dtype, name):
+    """Resolve an operand's MxFormat and its native ``lhsFormat``/``rhsFormat``.
+
+    The native attribute is only meaningful for packed integer operands; FP8
+    element types already encode the format in the library-call name.
+    """
+    format = _unwrap_if_constexpr(format)
+    if format is not None and not isinstance(format, MxFormat):
+        raise TypeError(f"tla.mmad_mx format_{name} must be a tla.MxFormat or None")
+    inferred = _inferred_mx_format(dtype)
+    if format is None:
+        if inferred is None:
+            raise ValueError(f"tla.mmad_mx format_{name} is required for integer operands")
+        return inferred, None
+    if inferred is not None:
+        if inferred is not format:
+            raise ValueError(f"tla.mmad_mx format_{name}={format.value} does not match operand dtype")
+        return format, None
+    return format, _MX_FORMAT_CODES[format]
+
+
+def _mx_k_factor(format):
+    """Logical K values represented by one stored element."""
+    return 2 if format is MxFormat.E2M1 else 1
+
+
+def _scale_logical_shape(shape):
+    """Logical (rows, K//32) of a 2-D ND or 4-D zZ/nN E8M0 scale buffer.
+
+    The 4-D fractal form is ``(rows // 16, (K32 + 1) // 2, 16, 2)``: 16 rows by
+    2 scale bytes per tile, padded on the K-group axis when ``K32`` is odd.
+    """
+    if len(shape) == 2:
+        return shape
+    if len(shape) == 4:
+        return (shape[0] * shape[2], shape[1] * shape[3])
+    raise ValueError("tla.mmad_mx scale buffers must be 2-D ND or 4-D zZ/nN")
 
 
 def _logical_shape(shape):
@@ -45,20 +125,79 @@ def _logical_shape(shape):
 
 
 @builtin
-def mmad(a, b, acc, transpose_b=False, clear_accum=False, unit_flag_ctrl=None, *, unit_flag_group_id=None,
-         _semantic=None):
-    """Multiply L1 buffers into L0C, optionally clearing the accumulator first.
+def mmad(a, b, acc, transpose_a=False, transpose_b=False, clear_accum=False, unit_flag_ctrl=None, *,
+         unit_flag_group_id=None, real_m=None, real_k=None, real_n=None, _semantic=None):
+    """Multiplies L1 matrices into L0C using ``hivm.hir.mmadL1``.
 
-    ``unit_flag_ctrl`` and ``unit_flag_group_id`` pass through to HIVM's
-    UnitFlag interface. None leaves each attribute unset; modes 0/2/3 mean
-    disabled, enabled without update, and enabled with update respectively.
-    To test manual modes without backend automatic UnitFlag inference
-    rewriting them, launch with ``unit_flag=False``.
+    Computes ``acc = a @ b`` when ``clear_accum=True`` and adds the product to
+    the existing accumulator otherwise.
+
+    :param a: L1 left operand with logical shape ``(M, K)``, or ``(K, M)``
+        when ``transpose_a=True``.
+    :type a: tla.buffer
+    :param b: L1 right operand with logical shape ``(K, N)``, or ``(N, K)``
+        when ``transpose_b=True``, and the same element type as ``a``.
+    :type b: tla.buffer
+    :param acc: L0C accumulator with logical shape ``(real_m, real_n)``. Its
+        element type must be a backend-supported accumulator type for ``a``
+        and ``b``.
+    :type acc: tla.buffer
+    :param transpose_a: Compile-time native A-transpose flag. Defaults to
+        ``False``. The transpose is carried by MMAD rather than a separate
+        data movement, and the frontend swaps the two logical dimensions of
+        ``a`` when validating the product.
+    :type transpose_a: bool
+    :param transpose_b: Compile-time native B-transpose flag. Defaults to
+        ``False``. Like ``transpose_a`` it is carried by MMAD, and the
+        frontend swaps the two logical dimensions of ``b``.
+    :type transpose_b: bool
+    :param clear_accum: Whether to initialize the accumulator before this
+        multiplication. Defaults to ``False``; in that case ``acc`` must
+        already contain valid values.
+    :type clear_accum: bool
+    :param unit_flag_ctrl: Compile-time UnitFlag mode, or ``None`` to leave
+        the attribute unset (default). ``DISABLED`` (0),
+        ``ENABLED_WITHOUT_UPDATE`` (2) and ``ENABLED_WITH_UPDATE`` (3) select
+        explicit modes. Value 1 is reserved.
+    :type unit_flag_ctrl: tla.UnitFlagMode, int or None
+    :param unit_flag_group_id: Keyword-only compile-time signed 64-bit group
+        ID, or ``None`` to leave it unset. Match the related Fixpipe protocol;
+        valid hardware IDs are backend-dependent.
+    :type unit_flag_group_id: int or None
+    :param real_m: Actual M extent to compute, or ``None`` (default) for the
+        full ``M``. Must be a positive compile-time multiple of 16 that does
+        not exceed ``M``.
+    :type real_m: int or None
+    :param real_k: Actual K extent to compute, or ``None`` (default) for the
+        full ``K``. Must be a positive compile-time multiple of 16 that does
+        not exceed ``K``.
+    :type real_k: int or None
+    :param real_n: Actual N extent to compute, or ``None`` (default) for the
+        full ``N``. Must be a positive compile-time multiple of 16 that does
+        not exceed ``N``.
+    :type real_n: int or None
+    :return: None. The result is stored in ``acc``.
+    :rtype: None
+
+    .. note::
+        Use inside ``tla.scope.cube()``. Each operand may independently use
+        a logical 2-D shape or a physical 4-D NZ shape. A 4-D buffer has logical
+        shape ``(shape[1] * shape[2], shape[0] * shape[3])``. After the
+        transposes are applied the dimensions must satisfy ``a=(M,K)``,
+        ``b=(K,N)`` and ``acc=(real_m, real_n)``. Explicit ``real_m``,
+        ``real_k`` and ``real_n`` restrict the multiplication to a leading
+        submatrix, and ``acc`` is a packed L0C accumulator that must match
+        those actual extents exactly. Dtypes, block sizes and alignment are
+        checked by the backend.
+
+        To preserve a manually configured UnitFlag protocol, launch with
+        ``unit_flag=False`` to disable automatic UnitFlag inference. Leaving
+        ``unit_flag_ctrl=None`` does not explicitly disable the protocol.
     """
     if not (isinstance(a, buffer) and isinstance(b, buffer) and isinstance(acc, buffer)):
         raise TypeError("tla.mmad expects tla.buffer operands for a, b, acc")
     if a.space != "l1" or b.space != "l1":
-        raise ValueError("tla.mmad a/b must be L1 buffers (fill via tla.copy(gm->l1))")
+        raise ValueError("tla.mmad a/b must be L1 buffers (fill via tla.load_gm_to_l1)")
     if acc.space != "l0c":
         raise ValueError("tla.mmad acc must be an L0C buffer")
     if a.dtype != b.dtype:
@@ -68,10 +207,281 @@ def mmad(a, b, acc, transpose_b=False, clear_accum=False, unit_flag_ctrl=None, *
     # dims must agree.
     m, k = _logical_shape(a.shape)
     k2, n = _logical_shape(b.shape)
-    if k != k2 or _logical_shape(acc.shape) != (m, n):
-        raise ValueError("tla.mmad shape mismatch: a=(M,K), b=(K,N), acc=(M,N)")
+    transpose_a = bool(_unwrap_if_constexpr(transpose_a))
+    transpose_b = bool(_unwrap_if_constexpr(transpose_b))
+    if transpose_a:
+        m, k = k, m
+    if transpose_b:
+        k2, n = n, k2
+    if k != k2:
+        raise ValueError("tla.mmad reduction dimensions must match after transposition")
+    actual = []
+    for name, bound, extent in zip(("real_m", "real_k", "real_n"), (m, k, n), (real_m, real_k, real_n)):
+        extent = _unwrap_if_constexpr(extent)
+        if extent is None:
+            extent = bound
+        elif type(extent) is not int or extent <= 0 or extent > bound or extent % 16:
+            raise ValueError(f"tla.mmad {name} must be a positive multiple of 16 within {bound}")
+        actual.append(extent)
+    m, k, n = actual
+    if _logical_shape(acc.shape) != (m, n):
+        raise ValueError("tla.mmad acc must have the actual (real_m, real_n) shape")
     unit_flag_ctrl, unit_flag_group_id = _unit_flag_args(unit_flag_ctrl, unit_flag_group_id)
     _semantic.builder.create_hivm_mmadl1(a.handle, b.handle, acc.handle,
                                          init_condition=bool(_unwrap_if_constexpr(clear_accum)), real_m=m, real_k=k,
-                                         real_n=n, transpose_b=bool(_unwrap_if_constexpr(transpose_b)),
-                                         unit_flag_ctrl=unit_flag_ctrl, unit_flag_group_id=unit_flag_group_id)
+                                         real_n=n, transpose_b=transpose_b, unit_flag_ctrl=unit_flag_ctrl,
+                                         unit_flag_group_id=unit_flag_group_id, transpose_a=transpose_a)
+
+
+def _check_mmad_l0_buffer(value, name, space, dtype, shape, capacity, alignment):
+    if not isinstance(value, buffer):
+        raise TypeError(f"tla.cube.mmad_l0 {name} must be a tla.buffer")
+    if value.space != space:
+        raise ValueError(f"tla.cube.mmad_l0 {name} must be in {space}")
+    allowed_dtypes = dtype if isinstance(dtype, tuple) else (dtype, )
+    if value.dtype not in allowed_dtypes:
+        expected = " or ".join(str(ty) for ty in allowed_dtypes)
+        raise ValueError(f"tla.cube.mmad_l0 {name} must have dtype {expected}")
+    if value.shape != shape:
+        raise ValueError(f"tla.cube.mmad_l0 {name} must have exact physical shape {shape}")
+    if value.strides != _row_major_strides(shape):
+        raise ValueError(f"tla.cube.mmad_l0 {name} must have compact physical strides")
+    elements = 1
+    for extent in shape:
+        elements *= extent
+    itemsize = value.dtype.itemsize
+    size = elements * itemsize
+    if size > capacity:
+        raise ValueError(f"tla.cube.mmad_l0 {name} exceeds {capacity}-byte capacity")
+    # None means the Python view metadata does not know the offset. Preserve
+    # its SSA value; npuir resolves BT offsets statically and checks runtime
+    # L0 addresses. A Python-unknown offset may still fold to a constant IR offset.
+    if value.offset is not None:
+        offset = value.offset
+        if (type(offset) is not int or offset < 0 or offset * itemsize + size > capacity
+                or offset * itemsize % alignment):
+            raise ValueError(f"tla.cube.mmad_l0 {name} offset exceeds capacity or violates {alignment}-byte alignment")
+
+
+@builtin
+def mmad_l0(a, b, acc, *, m, n, k, bias=None, clear_accum=False, disable_gemv=True, unit_flag_ctrl=None,
+            _semantic=None):
+    """Multiplies physical L0 tiles into L0C using A5 ``hivm.hir.mmadL0``.
+
+    :param a: FP16 or BF16 L0A zN buffer with shape ``(k//16, m//16, 16, 16)``.
+    :type a: tla.buffer
+    :param b: FP16 or BF16 L0B nZ buffer with shape ``(k//16, n//16, 16, 16)``.
+        Must have the same dtype as ``a``; mixed FP16/BF16 inputs are rejected.
+        This differs from the physical L1 B layout used by :func:`mmad`.
+    :type b: tla.buffer
+    :param acc: FP32 L0C buffer with shape ``(n//16, m//16, 16, 16)``.
+    :type acc: tla.buffer
+    :param m: Compile-time M extent, a multiple of 16 in ``[16, 2048]``.
+    :type m: int
+    :param n: Compile-time N extent, a multiple of 16 in ``[16, 2048]``.
+    :type n: int
+    :param k: Compile-time K extent, a multiple of 16 in ``[16, 2048]``.
+    :type k: int
+    :param bias: Optional FP32 BT buffer of shape ``(n,)``. With bias,
+        computes ``acc = a @ b + broadcast(bias)`` and replaces the old
+        accumulator; ``clear_accum`` must be the compile-time value False.
+    :type bias: tla.buffer or None
+    :param clear_accum: Without bias, True computes ``acc = a @ b`` and
+        False computes ``acc += a @ b``. A runtime scalar i1 is also accepted.
+        Defaults to False; the caller must initialize acc before accumulating.
+    :type clear_accum: bool or scalar tl.tensor of dtype tl.int1
+    :param disable_gemv: Compile-time bool. The A5 implementation requires True.
+    :type disable_gemv: bool
+    :param unit_flag_ctrl: Compile-time UnitFlag mode. Only None (attribute
+        absent) or ``tla.UnitFlagMode.DISABLED`` (0) is supported on A5.
+    :type unit_flag_ctrl: tla.UnitFlagMode, int or None
+    :return: None. The result is stored in ``acc``.
+    :rtype: None
+
+    .. note::
+        Use inside ``tla.scope.cube()`` with an A5 backend that supports
+        standalone MMAD L0. All buffers must have the exact physical shape
+        and compact row-major strides, including size-one dimensions. Tile
+        footprints must fit L0A/L0B (64 KiB each), L0C (256 KiB), and BT
+        (4 KiB). A/B, acc and bias require 512, 1024 and 64 byte alignment,
+        respectively. Compact subviews and nonzero offsets are supported;
+        npuir must resolve the BT offset statically. Runtime L0 addresses
+        and offsets are checked by the backend.
+
+        This operation emits no copies, K loop or cross-pipe synchronization.
+        Fill A/B with ``copy_l1_to_l0`` and bias with ``copy_l1_to_bt``;
+        the caller owns buffer reuse and pipeline events. The CATLASS template
+        owns the small-tile PIPE_M barrier. Standalone MMAD cannot share a
+        function with L1 matmul/conv templates that own implicit L0 storage.
+        Launch with ``unit_flag=False`` when using explicit UnitFlag settings.
+    """
+    m, n, k = (_unwrap_if_constexpr(value) for value in (m, n, k))
+    for name, extent in (("m", m), ("n", n), ("k", k)):
+        if type(extent) is not int or not 16 <= extent <= 2048 or extent % 16:
+            raise ValueError(f"tla.cube.mmad_l0 {name} must be a compile-time multiple of 16 in [16, 2048]")
+    _check_mmad_l0_buffer(a, "a", "l0a", (float16, bfloat16), (k // 16, m // 16, 16, 16), 64 * 1024, 512)
+    _check_mmad_l0_buffer(b, "b", "l0b", (float16, bfloat16), (k // 16, n // 16, 16, 16), 64 * 1024, 512)
+    if a.dtype != b.dtype:
+        raise ValueError("tla.cube.mmad_l0 a and b must have same dtype (FP16 or BF16)")
+    _check_mmad_l0_buffer(acc, "acc", "l0c", float32, (n // 16, m // 16, 16, 16), 256 * 1024, 1024)
+    bias = _unwrap_if_constexpr(bias)
+    if bias is not None:
+        _check_mmad_l0_buffer(bias, "bias", "bt", float32, (n, ), 4 * 1024, 64)
+    clear_accum = _unwrap_if_constexpr(clear_accum)
+    if bias is not None and clear_accum is not False:
+        raise ValueError("tla.cube.mmad_l0 with bias requires compile-time clear_accum=False")
+    if isinstance(clear_accum, tensor):
+        if clear_accum.shape or not clear_accum.dtype.is_bool():
+            raise TypeError("tla.cube.mmad_l0 clear_accum must be a bool or scalar i1 tensor")
+        init_condition = clear_accum.handle
+    else:
+        init_condition = _boolean(clear_accum, "tla.cube.mmad_l0 clear_accum")
+    disable_gemv = _boolean(disable_gemv, "tla.cube.mmad_l0 disable_gemv")
+    if not disable_gemv:
+        raise ValueError("tla.cube.mmad_l0 on A5 requires disable_gemv=True")
+    unit_flag_ctrl, _ = _unit_flag_args(unit_flag_ctrl, None)
+    if unit_flag_ctrl not in (None, 0):
+        raise ValueError("tla.cube.mmad_l0 on A5 supports only DISABLED unit_flag_ctrl")
+    _semantic.builder.create_hivm_mmadl0(a.handle, b.handle, acc.handle, init_condition=init_condition, real_m=m,
+                                         real_k=k, real_n=n, bias=None if bias is None else bias.handle,
+                                         disable_gemv=disable_gemv, unit_flag_ctrl=unit_flag_ctrl)
+
+
+def _mx_operand(operand, transpose, format, name):
+    """Stored (rows, cols), logical-K factor and native format code.
+
+    The L1 buffer shape is the *stored* shape: packed FP4 keeps two logical K
+    values per byte, so its logical reduction extent is twice the stored one.
+    ``rows``/``cols`` are the stored dims after the native transpose flag.
+    """
+    if not isinstance(operand, buffer):
+        raise TypeError(f"tla.mmad_mx expects tla.buffer operands for {name}")
+    if operand.space != "l1":
+        raise ValueError(f"tla.mmad_mx {name} must be an L1 buffer")
+    resolved, code = _mx_format(format, operand.dtype, name)
+    rows, cols = _logical_shape(operand.shape)
+    if transpose:
+        rows, cols = cols, rows
+    return rows, cols, _mx_k_factor(resolved), code
+
+
+def _mx_scale(scale, rows, k32, name):
+    if not isinstance(scale, buffer):
+        raise TypeError(f"tla.mmad_mx expects tla.buffer operands for {name}")
+    if scale.space != "l1":
+        raise ValueError(f"tla.mmad_mx {name} must be an L1 buffer")
+    if scale.dtype not in (int8, uint8):
+        raise ValueError(f"tla.mmad_mx {name} must be an int8/uint8 E8M0 buffer")
+    actual_rows, actual_k32 = _scale_logical_shape(scale.shape)
+    # A 4-D zZ/nN scale buffer pads an odd K-group count to a full 16x2 tile;
+    # a 2-D ND buffer must match the logical extent exactly.
+    expected_k32 = ((k32 + 1) // 2) * 2 if len(scale.shape) == 4 else k32
+    if actual_rows != rows or actual_k32 != expected_k32:
+        raise ValueError(f"tla.mmad_mx {name} must have logical shape ({rows}, {k32})")
+
+
+@builtin
+def mmad_mx(a, b, scale_a, scale_b, acc, *, format_a=None, format_b=None, transpose_a=False, transpose_b=False,
+            clear_accum=False, bias=None, real_m=None, real_k=None, real_n=None, _semantic=None):
+    """Multiplies microscaled L1 matrices into L0C using ``hivm.hir.mmadmxL1``.
+
+    Computes ``acc = MX(a, scale_a) @ MX(b, scale_b) (+bias)``, where each
+    group of 32 logical K elements of ``a``/``b`` is scaled by one E8M0 byte.
+    This is the Ascend950PR (A5) microscaling Cube instruction.
+
+    :param a: L1 left operand. Its element type is ``tl.float8e5``,
+        ``tl.float8e4nv`` or a packed 8-bit integer type. For packed FP4 the
+        K axis stores two logical values per byte.
+    :type a: tla.buffer
+    :param b: L1 right operand with the same element type rules as ``a``.
+    :type b: tla.buffer
+    :param scale_a: L1 E8M0 (``int8``/``uint8``) scale buffer with logical
+        shape ``(M, K // 32)``, or the equivalent 4-D zZ shape
+        ``(M // 16, (K // 32 + 1) // 2, 16, 2)``.
+    :type scale_a: tla.buffer
+    :param scale_b: L1 E8M0 scale buffer with logical shape ``(N, K // 32)``,
+        or the equivalent 4-D nN shape.
+    :type scale_b: tla.buffer
+    :param acc: L0C accumulator with logical shape ``(real_m, real_n)``.
+    :type acc: tla.buffer
+    :param format_a: Compile-time :class:`tla.MxFormat` of ``a``. Required for
+        packed integer operands and inferred from FP8 element types. Defaults
+        to ``None``.
+    :type format_a: tla.MxFormat or None
+    :param format_b: Compile-time :class:`tla.MxFormat` of ``b``, with the same
+        rules as ``format_a``.
+    :type format_b: tla.MxFormat or None
+    :param transpose_a: Compile-time native A-transpose flag. Defaults to
+        ``False``.
+    :type transpose_a: bool
+    :param transpose_b: Compile-time native B-transpose flag. Defaults to
+        ``False``.
+    :type transpose_b: bool
+    :param clear_accum: Whether to initialize the accumulator before this
+        multiplication. Defaults to ``False``.
+    :type clear_accum: bool
+    :param bias: Optional L1 per-channel bias with logical shape ``(N,)``,
+        ``(1, N)`` or a 4-D zN shape. Defaults to ``None``.
+    :type bias: tla.buffer or None
+    :param real_m: Actual M extent, or ``None`` (default) for the full ``M``.
+    :type real_m: int or None
+    :param real_k: Actual reduction extent along the operands' K axis, or
+        ``None`` (default) for the full extent. For packed FP4 this is the
+        stored byte count (half the logical ``K``).
+    :type real_k: int or None
+    :param real_n: Actual N extent, or ``None`` (default) for the full ``N``.
+    :type real_n: int or None
+    :return: None. The result is stored in ``acc``.
+    :rtype: None
+
+    .. note::
+        Use inside ``tla.scope.cube()``. Load scales with
+        :func:`tla.load_gm_to_l1_mx_scale` so the backend emits the MX scale
+        DMA instead of an ND-to-NZ conversion. FP4 requires both operands to
+        use ``MxFormat.E2M1``; mixed FP8/FP4 is not supported by the backend.
+        ``acc`` must match the actual ``(real_m, real_n)`` extents exactly.
+    """
+    transpose_a = bool(_unwrap_if_constexpr(transpose_a))
+    transpose_b = bool(_unwrap_if_constexpr(transpose_b))
+    m, k_stored, factor_a, code_a = _mx_operand(a, transpose_a, format_a, "a")
+    k_b_stored, n, factor_b, code_b = _mx_operand(b, transpose_b, format_b, "b")
+    if factor_a != factor_b:
+        raise ValueError("tla.mmad_mx does not support mixed FP8/FP4 operands")
+    if k_stored != k_b_stored:
+        raise ValueError("tla.mmad_mx reduction dimensions must match after transposition")
+    k_logical = k_stored * factor_a
+    if k_logical % _MX_SCALE_GROUP:
+        raise ValueError("tla.mmad_mx reduction extent must be a multiple of 32")
+    if not isinstance(acc, buffer):
+        raise TypeError("tla.mmad_mx expects a tla.buffer for acc")
+    if acc.space != "l0c":
+        raise ValueError("tla.mmad_mx acc must be an L0C buffer")
+    # Scales describe the full L1 tile, independent of any real_* sub-extent.
+    full_m, full_n = m, n
+    actual = []
+    for name, bound, extent in zip(("real_m", "real_k", "real_n"), (m, k_stored, n), (real_m, real_k, real_n)):
+        extent = _unwrap_if_constexpr(extent)
+        if extent is None:
+            extent = bound
+        elif type(extent) is not int or extent <= 0 or extent > bound or extent % 16:
+            raise ValueError(f"tla.mmad_mx {name} must be a positive multiple of 16 within {bound}")
+        actual.append(extent)
+    m, k_stored, n = actual
+    if _logical_shape(acc.shape) != (m, n):
+        raise ValueError("tla.mmad_mx acc must have the actual (real_m, real_n) shape")
+    k32 = k_logical // _MX_SCALE_GROUP
+    _mx_scale(scale_a, full_m, k32, "scale_a")
+    _mx_scale(scale_b, full_n, k32, "scale_b")
+    if bias is not None:
+        if not isinstance(bias, buffer) or bias.space != "l1":
+            raise ValueError("tla.mmad_mx bias must be an L1 buffer")
+        if bias.dtype != acc.dtype:
+            raise ValueError("tla.mmad_mx bias must have the accumulator element type")
+    # The native op's real_k is the *stored* reduction extent: the template
+    # multiplies it by the FP4 packing factor internally.
+    _semantic.builder.create_hivm_mmadmx(a.handle, b.handle, scale_a.handle, scale_b.handle, acc.handle,
+                                         init_condition=bool(_unwrap_if_constexpr(clear_accum)), real_m=m,
+                                         real_k=k_stored, real_n=n, lhs_format=code_a, rhs_format=code_b,
+                                         transpose_a=bool(_unwrap_if_constexpr(transpose_a)),
+                                         transpose_b=bool(_unwrap_if_constexpr(transpose_b)),
+                                         per_channel_bias=bias.handle if bias is not None else None)

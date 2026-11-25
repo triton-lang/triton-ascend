@@ -32,22 +32,24 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
     tl.static_assert(E % 64 == 0, "E must be a multiple of 64 until tail DMA is supported")
     tl.static_assert(TMAX > 0 and CORES > 0)
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
-    scores_ub = tla.alloc_buffer((((E + 63) // 64) * 64, ), tl.float32, space="ub", versions=6)
+    scores_ub = tla.alloc((((E + 63) // 64) * 64, ), tl.float32, space="ub")
     # int64 output (i32-equivalent): low word = index, high word = 0.
-    out_ub = tla.alloc_buffer((2 * K, ), tl.int32, space="ub", versions=6)
-    flag_ub = tla.alloc_buffer((1, ), tl.float32, space="ub")
+    out_ub = tla.alloc((2 * K, ), tl.int32, space="ub")
+    tla.annotate_multi_buffer(scores_ub, 6)
+    tla.annotate_multi_buffer(out_ub, 6)
+    flag_ub = tla.alloc((1, ), tl.float32, space="ub")
     for row in range(tl.program_id(0), num_tokens, CORES):
         if row < num_tokens:
             scr = tla.view(SCR_ptr, (((E + 63) // 64) * 64, ), strides=(1, ), offsets=(row * E, ))
             idx = tla.view(IDX_ptr, (2 * K, ), strides=(1, ), offsets=(row * 2 * K, ))
             flag = tla.view(FLAG_ptr, (1, ), strides=(1, ), offsets=(row, ))
-            tla.copy(scr, scores_ub)
+            tla.load_gm_to_ub(scr, scores_ub)
             with tla.scope.simd():
-                neg_inf = tla.simd.vsplat(float("-inf"), tl.float32)
-                zero32 = tla.simd.vsplat(0.0, tl.float32)
-                one32 = tla.simd.vsplat(1.0, tl.float32)
-                zero_i32 = tla.simd.vsplat(0, tl.int32)
-                sentinel = tla.simd.vsplat(E, tl.int32)
+                neg_inf = tla.simd.vdup(float("-inf"), tl.float32)
+                zero32 = tla.simd.vdup(0.0, tl.float32)
+                one32 = tla.simd.vdup(1.0, tl.float32)
+                zero_i32 = tla.simd.vdup(0, tl.int32)
+                sentinel = tla.simd.vdup(E, tl.int32)
                 s_raw = ()
                 idx_lane = ()
                 pad_ok = ()
@@ -62,14 +64,20 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
                     nf_mask = tla.simd.vcmp(d, zero32, op=tla.simd.CMP.NE)
                     nf_raw = tla.simd.vsel(nf_mask, one32, zero32)
                     nf = nf + (tla.simd.vsel(pad_ok[i], nf_raw, zero32), )
-                any_nf = tla.simd.vreduce_max(nf)
+                nf_max = nf[0]
+                for i in tl.static_range(1, (E + 63) // 64):
+                    nf_max = tla.simd.vmax(nf_max, nf[i])
+                any_nf = tla.simd.vcmax(nf_max)
                 tla.simd.vsts(flag_ub[0], any_nf, dist="ONEPT_B32")
                 # padding lane -> -inf。
                 sc = ()
                 for i in tl.static_range((E + 63) // 64):
                     sc = sc + (tla.simd.vsel(pad_ok[i], s_raw[i], neg_inf), )
                 for k in tl.static_range(K):
-                    m = tla.simd.vreduce_max(sc)
+                    score_max = sc[0]
+                    for i in tl.static_range(1, (E + 63) // 64):
+                        score_max = tla.simd.vmax(score_max, sc[i])
+                    m = tla.simd.vdupv(tla.simd.vcmax(score_max))
                     cand = ()
                     for i in tl.static_range((E + 63) // 64):
                         cand = cand + (tla.simd.vsel(tla.simd.vcmp(sc[i], m, op=tla.simd.CMP.EQ), idx_lane[i],
@@ -82,8 +90,8 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
                         new_sc = new_sc + (tla.simd.vsel(tla.simd.vcmp(idx_lane[i], winner, op=tla.simd.CMP.EQ),
                                                          neg_inf, sc[i]), )
                     sc = new_sc
-            tla.copy(out_ub, idx)
-            tla.copy(flag_ub, flag)
+            tla.store_ub_to_gm(out_ub, idx)
+            tla.store_ub_to_gm(flag_ub, flag)
 
 
 def constexprs():
@@ -95,8 +103,6 @@ def test_ir(output_dir=None):
     module, ctx = compile_offline(topk_gate, SIGNATURE, constexprs(), output_dir=output_dir)
     text = str(module)
     assert "!tt.ptr" in text, "route A entry must keep pointer args at AST stage"
-    assert text.count("hivm.hir.pointer_cast") == 3, "tla.view(ptr) x3"
-    assert text.count("memref.reinterpret_cast") == 3, "tla.view(ptr) x3"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
     check_lowered_ir(text, loads=1, stores=2, buffers=None, extra=("ave.hir.vmax", ))

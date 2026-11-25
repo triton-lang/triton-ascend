@@ -63,6 +63,11 @@ enum TritonNpuLaunchFlag {
   // DotRow divides X by coalesce_factor (2/4/8/16/32), with ceil division.
   // It is mutually exclusive with IAT/PTSM and has no persistent X-axis cap.
   TRITON_NPU_DOT_ROW = 1 << 10,
+  // Modifier for standalone IAT: divide Y by 64 instead of 16.
+  // Requires IAT and cannot be combined with PTSM. The argument ABI is
+  // unchanged.
+  TRITON_NPU_IAT64 = 1 << 11,
+  TRITON_NPU_ATOMIC_REMOVE = 1 << 12,
 };
 
 typedef struct {
@@ -87,7 +92,21 @@ typedef struct {
   uint32_t task_type;
   uint32_t mix_ratio;
   uint32_t shared_mem_dynamic_size;
+  uint64_t profile_scratch_size;
 } TritonNpuLaunchSpecV1;
+
+/* V2 is an independent envelope; the published V1 layout is unchanged.
+ * The request layout remains TritonNpuLaunchRequestV1. Original G[3] is
+ * appended before the transformed launch grid in the kernel argument buffer. */
+typedef struct {
+  uint32_t version;
+  uint32_t struct_size;
+  TritonNpuLaunchSpecV1 base;
+  uint32_t grid_contract_version;
+  int32_t batch_axis;
+  uint32_t batch_factor;
+  uint32_t reserved;
+} TritonNpuLaunchSpecV2;
 
 typedef struct {
   uint32_t version;
@@ -100,6 +119,7 @@ typedef struct {
   const int *shape_dims;
   const int *tensor_kinds;
   int num_tensors;
+  void *profile_scratch;
 } TritonNpuLaunchRequestV1;
 
 typedef struct TritonNpuLaunchPlan TritonNpuLaunchPlan;
@@ -119,6 +139,16 @@ int triton_npu_launch_v1(const TritonNpuLaunchPlan *plan,
                          const TritonNpuLaunchRequestV1 *request,
                          const void *const *args, const size_t *arg_sizes,
                          size_t num_args, char *error, size_t error_size);
+
+TritonNpuLaunchPlan *
+triton_npu_create_plan_v2(const TritonNpuLaunchSpecV2 *spec,
+                          const TritonNpuArgTypeV1 *types, size_t num_types,
+                          char *error, size_t error_size);
+int triton_npu_launch_v2(const TritonNpuLaunchPlan *plan,
+                         const TritonNpuLaunchRequestV1 *request,
+                         const void *const *args, const size_t *arg_sizes,
+                         size_t num_args, char *error, size_t error_size);
+uint32_t triton_npu_program_grid_contract_version(void);
 
 #ifdef __cplusplus
 }

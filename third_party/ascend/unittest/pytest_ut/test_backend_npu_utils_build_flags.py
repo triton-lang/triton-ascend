@@ -67,6 +67,7 @@ def _assert_npu_utils_uses_special_flags(utils, monkeypatch, tmp_path):
     monkeypatch.setattr(utils.sysconfig, "get_paths", lambda scheme=None: {"include": "/pyinclude"})
 
     calls = []
+    commands = []
 
     def fake_get_backend_func(name, *args, **kwargs):
         calls.append((name, args, kwargs))
@@ -80,7 +81,7 @@ def _assert_npu_utils_uses_special_flags(utils, monkeypatch, tmp_path):
     monkeypatch.setattr(
         utils.subprocess,
         "run",
-        lambda *args, **kwargs: SimpleNamespace(returncode=0, stderr=""),
+        lambda command, **kwargs: commands.append(command) or SimpleNamespace(returncode=0, stderr=""),
     )
 
     src_path = tmp_path / "npu_utils.cpp"
@@ -89,6 +90,7 @@ def _assert_npu_utils_uses_special_flags(utils, monkeypatch, tmp_path):
     so_path = utils._build_npu_ext("npu_utils", str(src_path), kernel_launcher="torch")
 
     assert so_path.endswith(".so")
+    assert "-ldl" in commands[0]
     assert any(name == "get_cc_cmd_npu_utils" for name, _, _ in calls)
     assert not any(name == "get_cc_cmd" for name, _, _ in calls)
 
@@ -225,7 +227,6 @@ def test_npu_utils_initialization_builds_and_caches_shared_object(monkeypatch, t
 
     fake_cache = FakeCache()
     monkeypatch.setattr(driver, "get_cache_manager", lambda key: fake_cache)
-    monkeypatch.setattr(driver._ascend_utils, "bin_cache_manager", lambda key, bin_dir: fake_cache)
     monkeypatch.setattr(driver, "_build_npu_ext", lambda *args, **kwargs: str(built_so))
 
     npu_utils = driver.NPUUtils()
@@ -268,8 +269,6 @@ def test_npu_utils_cache_key_uses_build_fingerprint_and_source(monkeypatch, tmp_
         lambda name: version_calls.append(name) or versions[name],
     )
     monkeypatch.setattr(driver, "get_cache_manager", lambda key: captured_keys.append(key) or FakeCache())
-    monkeypatch.setattr(driver._ascend_utils, "bin_cache_manager",
-                        lambda key, bin_dir: captured_keys.append(key) or FakeCache())
 
     npu_utils = driver.NPUUtils()
     source = (DEFAULT_DRIVER_PATH.parent / "npu_utils.cpp").read_text()

@@ -509,6 +509,7 @@ def _original_grid_echo(out, original_x, original_y):
 @pytest.mark.parametrize("taskqueue", [False, True])
 @pytest.mark.parametrize("sequence", [
     [(1, 16, False)],
+    [(1, 64, False)],
     [(0, 64, True)],
     [(1, 16, False), (0, 4, True)],
     *[[(0, factor, False)] for factor in (2, 4, 8, 16, 32)],
@@ -539,16 +540,20 @@ def test_dynamic_original_grid_abi_reaches_both_entries(monkeypatch, taskqueue, 
     # Reuse one plan and one exported stub for changing, non-divisible grids.
     # Keep the largest transformed launch below legacy CANN's 65535-block
     # limit: ceil(2049 / 2) * 17 * 3 == 52275 for DotRow factor=2.
-    for grid in [(1, 1, 1), (2049, 17, 3), (129, 65, 1)]:
+    for grid in [(1, 1, 1), (2049, 17, 3), (129, 65, 1), (1, 63, 1), (1, 64, 1)]:
         transformed = apply_program_grid_transforms(grid, contract,
                                                     physical_core_count=instance.launch_spec.physical_blocks)
         assert transformed[0] * transformed[1] * transformed[2] <= 65535
         expected = [*grid[:2], *transformed]
         output.fill_(-1)
+        if not taskqueue:
+            torch.npu.synchronize()
         _run(instance, compiled, (output, ), grid=grid)
         torch.npu.synchronize()
         assert output.cpu().tolist() == expected
         output.fill_(-2)
+        if not taskqueue:
+            torch.npu.synchronize()
         _c_launch(instance, compiled, [ctypes.c_void_p(output.data_ptr())], grid=grid)
         torch.npu.synchronize()
         assert output.cpu().tolist() == expected

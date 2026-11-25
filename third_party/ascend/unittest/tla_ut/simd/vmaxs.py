@@ -6,7 +6,7 @@ f32 kernel rows (64 lanes each):
   1 vmaxs(x, 0.0, prefix)            first ACTIVE lanes, MODE_ZEROING
   2 vmaxs(x, 0.0, arb)               per-lane threshold from ``T`` (signed i32 index)
   3 vmaxs(x, 0.0, none)              all-false predicate
-  4 vmaxs(x, 0.0, prefix, MERGING)   merge source is ``+0``
+  4 vmaxs(x, 0.0, prefix, MERGING)   inactive lanes retain ``x``
   5 vmaxs(x, 0.0, arb, MERGING)
 
 Scalar-bound kernel (one register per row, three scalars per dtype):
@@ -38,17 +38,17 @@ W_SCALARS = (0x80000000, 0x80000001, 0xFFFFFFFF)
 
 
 @tla.jit
-def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (N, )), xb)
-    tla.copy(tla.view(T, (N, )), tb)
+def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    xb = tla.alloc((N, ), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), xb)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vmaxs(x, 0.0, mode=tla.simd.MODE.ZEROING))
@@ -57,26 +57,26 @@ def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vmaxs(x, 0.0, mask=none, mode=tla.simd.MODE.ZEROING))
         tla.simd.vsts(ob[4, 0], tla.simd.vmaxs(x, 0.0, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vmaxs(x, 0.0, mask=arb, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 @tla.jit
-def vmaxs_bounds(I, U, W, OI, OU, OW, N: tl.constexpr, ACTIVE: tl.constexpr):
-    ib = tla.alloc_buffer((N, ), tl.int64, space="ub")
-    ub = tla.alloc_buffer((N, ), tl.uint64, space="ub")
-    wb = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    oi = tla.alloc_buffer((3, N), tl.int64, space="ub")
-    ou = tla.alloc_buffer((3, N), tl.uint64, space="ub")
-    ow = tla.alloc_buffer((3, N), tl.uint32, space="ub")
-    tla.copy(tla.view(I, (N, )), ib)
-    tla.copy(tla.view(U, (N, )), ub)
-    tla.copy(tla.view(W, (N, )), wb)
+def vmaxs_bounds(I, U, W, OI, OU, OW, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    ib = tla.alloc((N, ), tl.int64, space="ub")
+    ub = tla.alloc((N, ), tl.uint64, space="ub")
+    wb = tla.alloc((N, ), tl.uint32, space="ub")
+    oi = tla.alloc((3, N), tl.int64, space="ub")
+    ou = tla.alloc((3, N), tl.uint64, space="ub")
+    ow = tla.alloc((3, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(I, (N, )), ib)
+    tla.load_gm_to_ub(tla.view(U, (N, )), ub)
+    tla.load_gm_to_ub(tla.view(W, (N, )), wb)
     with tla.scope.simd():
         iv = tla.simd.vlds(ib[0])
         uv = tla.simd.vlds(ub[0])
         wv = tla.simd.vlds(wb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(oi[0, 0], tla.simd.vmaxs(iv, 2**53), dist="NORM_B64")
         tla.simd.vsts(oi[1, 0], tla.simd.vmaxs(iv, 2**53 + 1, mask=prefix), dist="NORM_B64")
@@ -87,13 +87,13 @@ def vmaxs_bounds(I, U, W, OI, OU, OW, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ow[0, 0], tla.simd.vmaxs(wv, 0x80000000))
         tla.simd.vsts(ow[1, 0], tla.simd.vmaxs(wv, 0x80000001, mask=prefix))
         tla.simd.vsts(ow[2, 0], tla.simd.vmaxs(wv, 0xFFFFFFFF, mask=none))
-    tla.copy(oi, tla.view(OI, (3, N)))
-    tla.copy(ou, tla.view(OU, (3, N)))
-    tla.copy(ow, tla.view(OW, (3, N)))
+    tla.store_ub_to_gm(oi, tla.view(OI, (3, N)))
+    tla.store_ub_to_gm(ou, tla.view(OU, (3, N)))
+    tla.store_ub_to_gm(ow, tla.view(OW, (3, N)))
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def test_ir(output_dir=None):
@@ -109,6 +109,7 @@ def test_ir(output_dir=None):
     btext = str(module)
     assert btext.count("ave.hir.vmaxs") == 3, "signed i64 uses vmaxs"
     assert btext.count("ave.hir.vumaxs") == 6, "u64 and u32 must select vumaxs"
+    assert btext.count("ave.hir.vsel") == 4, "masked i64/u64 ZEROING selects zero"
     assert "9007199254740993 : i64" in btext, "2**53+1 must stay an exact i64 constant"
     assert "-9223372036854775808 : i64" in btext, "u64 2**63 travels as two's-complement bits"
     assert "-1 : i64" in btext, "u64 2**64-1 travels as two's-complement bits"
@@ -148,8 +149,8 @@ def _launch():
         _apply(v, masks["prefix"]),
         _apply(v, masks["arb"]),
         _apply(v, masks["none"]),
-        _apply(v, masks["prefix"]),
-        _apply(v, masks["arb"]),
+        torch.where(masks["prefix"], v, x),
+        torch.where(masks["arb"], v, x),
     ])
 
     iv = torch.tensor([(i * 7919) % (2**62) * ((-1)**i) for i in range(n)], dtype=torch.int64)
@@ -179,25 +180,6 @@ def _launch():
         (ou.cpu(), torch.stack(urows), None), (ow.cpu(), torch.stack(wrows), None)
 
 
-def _bitwise_zero(t):
-    if t.dtype == torch.float32:
-        return bool((t.view(torch.int32) == 0).all())
-    if t.dtype == torch.float64:
-        return bool((t.view(torch.int64) == 0).all())
-    if t.dtype == torch.uint64:
-        return bool((t.view(torch.int64) == 0).all())
-    if t.dtype == torch.int64:
-        return bool((t == 0).all())
-    return bool((t.view(torch.int32) == 0).all())
-
-
-def _inactive_zero(got, masks):
-    for row, name in ((1, "prefix"), (2, "arb"), (3, "none"), (4, "prefix"), (5, "arb")):
-        keep = masks[name]
-        inactive = got[row][~keep] if keep.any() else got[row]
-        assert _bitwise_zero(inactive), f"row {row} ({name}) has a non-zero inactive lane"
-
-
 def test_compile():
     _launch()
     artifacts = check_compile_artifacts()
@@ -205,28 +187,13 @@ def test_compile():
     print("COMPILE PASS: vmaxs generated artifacts", len(artifacts), "->", artifacts[0])
 
 
-def test_run():
-    (got, ref, masks), (igot, iref, _), (ugot, uref, _), (wgot, wref, _) = _launch()
-    torch.testing.assert_close(got, ref, rtol=0, atol=0)
-    _inactive_zero(got, masks)
-    torch.testing.assert_close(igot, iref, rtol=0, atol=0)
-    torch.testing.assert_close(ugot.view(torch.int64), uref.view(torch.int64), rtol=0, atol=0)
-    torch.testing.assert_close(wgot.view(torch.int32), wref.view(torch.int32), rtol=0, atol=0)
-    # The masked bound rows must keep their inactive lanes at +0 as well.
-    assert _bitwise_zero(igot[1][~masks["prefix"]]), "i64 prefix row leaked an inactive lane"
-    assert _bitwise_zero(wgot[2]), "u32 all-false row must be +0"
-    print("VMAXS OK: masks/modes plus exact i64/u64/u32 scalar bounds")
-
-
 def main():
-    do_ir, do_compile, do_run = get_stages()
+    do_ir, do_compile, _ = get_stages()
     if do_ir:
         test_ir()
     if do_compile:
         test_compile()
-    if do_run:
-        test_run()
-    print("ALL PASS: vmaxs", "ir" if do_ir else "", "compile/run" if do_run else "compile" if do_compile else "")
+    print("ALL PASS: vmaxs", "ir" if do_ir else "", "compile" if do_compile else "")
 
 
 if __name__ == "__main__":

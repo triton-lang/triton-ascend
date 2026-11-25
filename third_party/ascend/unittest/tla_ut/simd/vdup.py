@@ -10,7 +10,7 @@ One register per output row (64 f32 lanes):
   5 vdup(1.5, f32, arb, MERGING)
 
 ``vdup`` must lower to the masked ``ave.hir.broadcast`` (vdups form), never to
-the unmasked ``ave.hir.scalar_broadcast`` that ``vsplat`` emits.  A bf16 kernel
+the unmasked ``ave.hir.scalar_broadcast``. A bf16 kernel
 pins the 128-lane 16-bit register, and an IR-only kernel covers every
 documented dtype spelling (``i8``/``u8``/``i32``/``u32``/``f16``/``f32``/
 ``bf16``/``fp8e4nv`` plus the canonical ``int*``/``uint*``/``fp*``/``float*``
@@ -51,14 +51,14 @@ ALIAS_CASES = (
 
 
 @tla.jit
-def vdup(T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
-    tla.copy(tla.view(T, (N, )), tb)
+def vdup(T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdup(1.5, tl.float32, mode=tla.simd.MODE.ZEROING))
@@ -67,35 +67,38 @@ def vdup(T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vdup(1.5, tl.float32, mask=none, mode=tla.simd.MODE.ZEROING))
         tla.simd.vsts(ob[4, 0], tla.simd.vdup(1.5, tl.float32, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vdup(1.5, tl.float32, mask=arb, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 @tla.jit
-def vdup_bf16(O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    ob = tla.alloc_buffer((3, N), tl.bfloat16, space="ub")
+def vdup_bf16(O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    ob = tla.alloc((3, N), tl.bfloat16, space="ub")
     with tla.scope.simd():
-        prefix = tla.simd.pge(ACTIVE, N)
-        zero = tla.simd.vsplat(0.0, tl.bfloat16)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
+        zero = tla.simd.vdup(0.0, tl.bfloat16)
         none = tla.simd.vcmp(zero, zero, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdup(1.5, tl.bfloat16), dist="NORM_B16")
         tla.simd.vsts(ob[1, 0], tla.simd.vdup(1.5, tl.bfloat16, mask=prefix), dist="NORM_B16")
         tla.simd.vsts(ob[2, 0], tla.simd.vdup(1.5, tl.bfloat16, mask=none), dist="NORM_B16")
-    tla.copy(ob, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (3, N)))
 
 
 @tla.jit
 def vdup_alias(O, DT: tl.constexpr):
     """IR-only: dtype spelling -> canonical element type, still ``broadcast``."""
-    ob = tla.alloc_buffer((64, ), tl.uint32, space="ub")
+    ob = tla.alloc((64, ), tl.uint32, space="ub")
     with tla.scope.simd():
         d = tla.simd.vdup(1, DT)
         bc = tla.simd.vbitcast(d, "uint32")
         tla.simd.vsts(ob[0], bc, dist="NORM_B32")
-    tla.copy(ob, tla.view(O, (64, )))
+    tla.store_ub_to_gm(ob, tla.view(O, (64, )))
 
 
 def constexprs(lanes=None, active=None):
-    return {"N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active}
+    return {
+        "N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active,
+        "MASKPAT": "VL%d" % (SHAPE["active"] if active is None else active)
+    }
 
 
 def test_ir(output_dir=None):
@@ -113,7 +116,7 @@ def test_ir(output_dir=None):
 
     module, ctx = compile_offline(vdup_bf16, BF16_SIGNATURE, constexprs(BF16_LANES, BF16_LANES // 2))
     btext = str(module)
-    assert btext.count("ave.hir.broadcast") == 3
+    assert btext.count("ave.hir.broadcast") == 4
     assert "ave.hir.pge <VL64>" in btext
     btext = str(lower_offline(module, ctx))
     check_lowered_ir(btext, loads=0, stores=1, buffers=None, extra=("ave.hir.broadcast", "vector<128xbf16>"))

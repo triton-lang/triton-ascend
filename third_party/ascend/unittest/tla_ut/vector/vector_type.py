@@ -59,14 +59,14 @@ def test_operand_validation():
         with pytest.raises(ValueError, match="mask must be"):
             tla.simd.vsel(mask, vec, vec, _semantic=sem)
     with pytest.raises(TypeError, match="tla.vector"):
-        tla.simd.vreduce_max([vec, vec, tensor], _semantic=sem)
+        tla.simd.vreduce_min([vec, vec, tensor], _semantic=sem)
 
 
 @tr.jit
 def _vector_control_flow(out, n):
     with tla.scope.simd():
-        acc = tla.simd.vfull(0.0, tl.float32, 64)
-        step = tla.simd.vfull(1.0, tl.float32, 64)
+        acc = tla.simd.vdup(0.0, tl.float32)
+        step = tla.simd.vdup(1.0, tl.float32)
         for i in range(n):
             acc, mask = tla.simd.vadd(acc, step), tla.simd.vcmp(acc, step, op=tla.simd.CMP.GE)
             acc = tla.simd.vsel(mask, acc, step)
@@ -82,14 +82,90 @@ def _vector_control_flow(out, n):
             acc = tla.simd.vmul(acc, step)
         else:
             acc = tla.simd.vneg(acc)
-        narrow = tla.simd.vtruncf(acc, tl.bfloat16)
+        narrow = tla.simd.vcvt(acc, tl.bfloat16, round=tla.simd.ROUND.A)
         acc = tla.simd.vextf(narrow, tl.float32)
         bits = tla.simd.vbitcast(acc, "bf16")
         acc = tla.simd.vbitcast(bits, "f32")
         lo, hi = tla.simd.vintlv(acc, step)
         lo, hi = tla.simd.vdintlv(lo, hi)
-        acc = tla.simd.vreduce_max([lo, hi])
+        acc = tla.simd.vdupv(tla.simd.vcmax(tla.simd.vmax(lo, hi)))
         tla.simd.vsts(out[0], acc)
+
+
+@tr.jit
+def _scalar_select(out, cond):
+    base = tla.select(cond, 0, 32)
+    with tla.scope.simd():
+        tla.simd.vsts(out[0], tla.simd.vci(base), dist="NORM_B32")
+
+
+@tr.jit
+def _scalar_truncmod(out, a, b, DTYPE: tl.constexpr):
+    rem = tla.truncmod(a, b)
+    with tla.scope.simd():
+        tla.simd.vsts(out[0], tla.simd.vdup(rem, DTYPE), dist="NORM_B32")
+
+
+def test_truncmod_scalar_ir(output_dir=None):
+    for kind, dtype, op in (("i32", tl.int32, "arith.remsi"), ("u32", tl.uint32, "arith.remui")):
+        module, ctx = compile_offline(_scalar_truncmod, {
+            "out": tla.buffer_type((64, ), dtype, "ub"),
+            "a": kind,
+            "b": kind,
+        }, {"DTYPE": dtype}, output_dir)
+        text = str(module)
+        assert op in text, text
+        assert "tensor<" not in text, text
+        lower_offline(module, ctx, output_dir)
+
+
+@tr.jit
+def _scalar_sqrt(out, x):
+    root = tla.sqrt(x)
+    with tla.scope.simd():
+        tla.simd.vsts(out[0], tla.simd.vdup(root, tl.float32), dist="NORM_B32")
+
+
+@tr.jit
+def _vector_sqrt(out):
+    with tla.scope.simd():
+        x = tla.simd.vlds(out[0])
+        tla.simd.vsts(out[0], tla.sqrt(x), dist="NORM_B32")
+
+
+def test_sqrt_ir(output_dir=None):
+    for kernel, signature in (
+        (_scalar_sqrt, {"out": tla.buffer_type((64, ), tl.float32, "ub"), "x": "fp32"}),
+        (_vector_sqrt, {"out": tla.buffer_type((64, ), tl.float32, "ub")}),
+    ):
+        module, ctx = compile_offline(kernel, signature, {}, output_dir)
+        text = str(module)
+        assert ("math.sqrt" if kernel is _scalar_sqrt else "ave.hir.vsqrt") in text, text
+        lower_offline(module, ctx, output_dir)
+
+
+def test_scalar_select_ir(output_dir=None):
+    # vci materializes an i32 vector, so the UB view must be int32 (f32 here
+    # made the vsts dtype mismatch).
+    module, ctx = compile_offline(_scalar_select, {"out": tla.buffer_type((64, ), tl.int32, "ub"), "cond": "i1"}, {},
+                                  output_dir)
+    text = str(module)
+    assert "arith.select" in text, text
+    assert "tensor<" not in text
+    lower_offline(module, ctx, output_dir)
+
+
+@tr.jit
+def _scalar_assume(cond):
+    tla.assume(cond)
+
+
+def test_assume_scalar_ir(output_dir=None):
+    module, ctx = compile_offline(_scalar_assume, {"cond": "i1"}, {}, output_dir)
+    text = str(module)
+    assert "llvm.intr.assume" in text, text
+    lowered = lower_offline(module, ctx, output_dir)
+    assert "llvm.intr.assume" in str(lowered), str(lowered)
 
 
 def test_ir(output_dir=None):

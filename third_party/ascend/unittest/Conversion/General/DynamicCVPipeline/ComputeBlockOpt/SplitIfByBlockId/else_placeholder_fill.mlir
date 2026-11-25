@@ -76,3 +76,31 @@ func.func @matmul_placeholder_no_fill(%a: tensor<2x2xf32>, %b: tensor<2x2xf32>, 
   }
   return
 }
+
+// -----
+
+// A rectangular PV result needs the same storage in both branches. Keeping
+// an unwritten empty in the inactive branch creates an L0C alias without a
+// producer after bufferization.
+// CHECK-LABEL: func.func @outer_matmul_shared_empty
+// CHECK: %[[EMPTY:.*]] = tensor.empty() {{.*}} : tensor<128x64xf32>
+// CHECK: scf.if {{.*}} -> (tensor<128x64xf32>) {
+// CHECK: linalg.fill {{.*}} outs(%[[EMPTY]] : tensor<128x64xf32>)
+// CHECK: linalg.matmul
+// CHECK: } else {
+// CHECK-NEXT: scf.yield {{.*}}%[[EMPTY]] : tensor<128x64xf32>
+func.func @outer_matmul_shared_empty(%a: tensor<128x128xbf16>, %b: tensor<128x64xbf16>, %out: tensor<128x64xf32>, %cond: i1) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %zero = arith.constant 0.0 : f32
+  scf.for %iv = %c0 to %c1 step %c1 {
+    scf.if %cond {
+      %v = arith.addf %a, %a {ssbuffer.block_id = 94 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xbf16>
+      %empty = tensor.empty() {ssbuffer.block_id = 95 : i32, ssbuffer.core_type = "CUBE"} : tensor<128x64xf32>
+      %init = linalg.fill ins(%zero : f32) outs(%empty : tensor<128x64xf32>) {ssbuffer.block_id = 95 : i32, ssbuffer.core_type = "CUBE"} -> tensor<128x64xf32>
+      %m = linalg.matmul ins(%v, %b : tensor<128x128xbf16>, tensor<128x64xbf16>) outs(%init : tensor<128x64xf32>) {ssbuffer.block_id = 95 : i32, ssbuffer.core_type = "CUBE"} -> tensor<128x64xf32>
+      %result = arith.addf %m, %out {ssbuffer.block_id = 96 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x64xf32>
+    }
+  } {ssbuffer.explicit_main_loop, ssbuffer.outer_event_control_count = 0 : i32}
+  return
+}

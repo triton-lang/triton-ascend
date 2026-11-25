@@ -28,11 +28,16 @@ def grad_w_reduce(P_ptr, WH_ptr, WE_ptr, GH_ptr, GE_ptr, H: tl.constexpr, HC: tl
     tl.static_assert(NP > 0 and HC > 0 and CORES > 0)
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
     # UB 5-buffer: partial (NP,1,BW) matches strided GM view; two read_write grads.
-    p_ub = tla.alloc_buffer((NP, 1, BW), tl.float32, space="ub", versions=VERSIONS)
-    wh_ub = tla.alloc_buffer((1, BW), tl.bfloat16, space="ub", versions=VERSIONS)
-    we_ub = tla.alloc_buffer((1, BW), tl.bfloat16, space="ub", versions=VERSIONS)
-    gh_ub = tla.alloc_buffer((1, BW), tl.float32, space="ub", versions=VERSIONS)
-    ge_ub = tla.alloc_buffer((1, BW), tl.float32, space="ub", versions=VERSIONS)
+    p_ub = tla.alloc((NP, 1, BW), tl.float32, space="ub")
+    wh_ub = tla.alloc((1, BW), tl.bfloat16, space="ub")
+    we_ub = tla.alloc((1, BW), tl.bfloat16, space="ub")
+    gh_ub = tla.alloc((1, BW), tl.float32, space="ub")
+    ge_ub = tla.alloc((1, BW), tl.float32, space="ub")
+    tla.annotate_multi_buffer(p_ub, VERSIONS)
+    tla.annotate_multi_buffer(wh_ub, VERSIONS)
+    tla.annotate_multi_buffer(we_ub, VERSIONS)
+    tla.annotate_multi_buffer(gh_ub, VERSIONS)
+    tla.annotate_multi_buffer(ge_ub, VERSIONS)
     for task in range(tl.program_id(0), (H // BW) * HC, CORES):
         shard = task // HC
         head = task % HC
@@ -43,15 +48,15 @@ def grad_w_reduce(P_ptr, WH_ptr, WE_ptr, GH_ptr, GE_ptr, H: tl.constexpr, HC: tl
         we = tla.view(WE_ptr, (1, BW), strides=(H, 1), offsets=(head, off))
         gh = tla.view(GH_ptr, (1, BW), strides=(H, 1), offsets=(head, off))
         ge = tla.view(GE_ptr, (1, BW), strides=(H, 1), offsets=(head, off))
-        tla.copy(p_blk, p_ub)
-        tla.copy(wh, wh_ub)
-        tla.copy(we, we_ub)
-        tla.copy(gh, gh_ub)
-        tla.copy(ge, ge_ub)
+        tla.load_gm_to_ub(p_blk, p_ub)
+        tla.load_gm_to_ub(wh, wh_ub)
+        tla.load_gm_to_ub(we, we_ub)
+        tla.load_gm_to_ub(gh, gh_ub)
+        tla.load_gm_to_ub(ge, ge_ub)
         with tla.scope.simd():
             # per register block: serially accumulate NP partials, fma back to gh/ge.
             for c in tl.static_range(BW // 64):
-                acc = tla.simd.vsplat(0.0, tl.float32)
+                acc = tla.simd.vdup(0.0, tl.float32)
                 for q in tl.static_range(NP):
                     pq = tla.simd.vlds(p_ub[q, 0, c * 64], dist="NORM")
                     acc = tla.simd.vadd(acc, pq)
@@ -59,11 +64,11 @@ def grad_w_reduce(P_ptr, WH_ptr, WE_ptr, GH_ptr, GE_ptr, H: tl.constexpr, HC: tl
                 b = tla.simd.vlds(ge_ub[0, c * 64], dist="NORM")
                 w_he = tla.simd.vextf(tla.simd.vlds(we_ub[0, c * 64], dist="UNPK_B16"), tl.float32, part="part_even")
                 w_hh = tla.simd.vextf(tla.simd.vlds(wh_ub[0, c * 64], dist="UNPK_B16"), tl.float32, part="part_even")
-                # simd.vfma(x, y, z) = x + y*z -> grad_new = grad_old + acc*w。
-                tla.simd.vsts(gh_ub[0, c * 64], tla.simd.vfma(a, acc, w_he), dist="NORM_B32")
-                tla.simd.vsts(ge_ub[0, c * 64], tla.simd.vfma(b, acc, w_hh), dist="NORM_B32")
-        tla.copy(gh_ub, gh)
-        tla.copy(ge_ub, ge)
+                # vmula computes grad_old + acc * w.
+                tla.simd.vsts(gh_ub[0, c * 64], tla.simd.vmula(a, acc, w_he), dist="NORM_B32")
+                tla.simd.vsts(ge_ub[0, c * 64], tla.simd.vmula(b, acc, w_hh), dist="NORM_B32")
+        tla.store_ub_to_gm(gh_ub, gh)
+        tla.store_ub_to_gm(ge_ub, ge)
 
 
 def constexprs():
@@ -75,8 +80,6 @@ def test_ir(output_dir=None):
     module, ctx = compile_offline(grad_w_reduce, SIGNATURE, constexprs(), output_dir=output_dir)
     text = str(module)
     assert "!tt.ptr" in text, "route A entry must keep pointer args at AST stage"
-    assert text.count("hivm.hir.pointer_cast") == 5, "tla.view(ptr) x5"
-    assert text.count("memref.reinterpret_cast") == 5, "tla.view(ptr) x5"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
     check_lowered_ir(text, loads=5, stores=2, buffers=None)

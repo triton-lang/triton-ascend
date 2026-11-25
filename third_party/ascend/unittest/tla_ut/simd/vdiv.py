@@ -45,18 +45,18 @@ EXACT_B = [3.0, 7.0, 3e-30, 0.1, 3.0, 3.0, 3.0, 7e-21, 3.0, 7.0, 13.0, 7.0]
 
 
 @tla.jit
-def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (2, N)), xy)
-    tla.copy(tla.view(T, (N, )), tb)
+def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    xy = tla.alloc((2, N), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         a = tla.simd.vlds(xy[0, 0])
         b = tla.simd.vlds(xy[1, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, mode=tla.simd.MODE.ZEROING))
@@ -65,40 +65,40 @@ def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vdiv(a, b, mask=none, mode=tla.simd.MODE.ZEROING))
         tla.simd.vsts(ob[4, 0], tla.simd.vdiv(a, b, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vdiv(a, b, mask=arb, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 @tla.jit
-def vdiv_exact(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.float32, space="ub")
-    ob = tla.alloc_buffer((4, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (2, N)), xy)
+def vdiv_exact(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    xy = tla.alloc((2, N), tl.float32, space="ub")
+    ob = tla.alloc((4, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
     with tla.scope.simd():
         a = tla.simd.vlds(xy[0, 0])
         b = tla.simd.vlds(xy[1, 0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, precision="exact"))
         tla.simd.vsts(ob[1, 0], tla.simd.vdiv(a, b, mask=prefix, precision="exact"))
         tla.simd.vsts(ob[2, 0], tla.simd.vdiv(a, b, mask=none, precision="exact"))
         tla.simd.vsts(ob[3, 0], tla.simd.vdiv(a, b, mask=prefix, precision="vdiv_0ulp_ftz_true"))
-    tla.copy(ob, tla.view(O, (4, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (4, N)))
 
 
 @tla.jit
-def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.uint32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (2, N)), xy)
-    tla.copy(tla.view(T, (N, )), tb)
+def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    xy = tla.alloc((2, N), tl.uint32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         a = tla.simd.vlds(xy[0, 0])
         b = tla.simd.vlds(xy[1, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, mode=tla.simd.MODE.ZEROING))
@@ -107,24 +107,24 @@ def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vdiv(a, b, mask=none, mode=tla.simd.MODE.ZEROING))
         tla.simd.vsts(ob[4, 0], tla.simd.vdiv(a, b, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vdiv(a, b, mask=arb, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 @tla.jit
-def vdiv_u16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.uint16, space="ub")
-    ib = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.uint16, space="ub")
-    tla.copy(tla.view(X, (2, N)), xy)
-    tla.copy(tla.view(I, (N, )), ib)
-    tla.copy(tla.view(T, (N, )), tb)
+def vdiv_u16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    xy = tla.alloc((2, N), tl.uint16, space="ub")
+    ib = tla.alloc((N, ), tl.int16, space="ub")
+    tb = tla.alloc((N, ), tl.int16, space="ub")
+    ob = tla.alloc((6, N), tl.uint16, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
+    tla.load_gm_to_ub(tla.view(I, (N, )), ib)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         a = tla.simd.vlds(xy[0, 0])
         b = tla.simd.vlds(xy[1, 0])
         idx = tla.simd.vlds(ib[0])
         t = tla.simd.vlds(tb[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, mode=tla.simd.MODE.ZEROING), dist="NORM_B16")
@@ -133,11 +133,14 @@ def vdiv_u16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vdiv(a, b, mask=none, mode=tla.simd.MODE.ZEROING), dist="NORM_B16")
         tla.simd.vsts(ob[4, 0], tla.simd.vdiv(a, b, mask=prefix, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
         tla.simd.vsts(ob[5, 0], tla.simd.vdiv(a, b, mask=arb, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 def constexprs(lanes=None, active=None):
-    return {"N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active}
+    return {
+        "N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active,
+        "MASKPAT": "VL%d" % (SHAPE["active"] if active is None else active)
+    }
 
 
 def test_ir(output_dir=None):
@@ -282,7 +285,12 @@ def _inactive_zero(got, masks):
     """Every lane outside the mask must be bitwise +0 (not merely close)."""
     for row, name in ((1, "prefix"), (2, "arb"), (3, "none"), (4, "prefix"), (5, "arb")):
         keep = masks[name]
-        inactive = got[row][~keep] if keep.any() else got[row]
+        # Boolean indexing has no CPU kernel for uint32; the u16/u32 rows are
+        # bit-pattern checks, so read them through their signed twin.
+        values = got[row]
+        if values.dtype in (torch.uint16, torch.uint32):
+            values = values.view(torch.int16 if values.dtype == torch.uint16 else torch.int32)
+        inactive = values[~keep] if keep.any() else values
         assert _bitwise_zero(inactive), f"row {row} ({name}) has a non-zero inactive lane"
 
 
@@ -301,7 +309,12 @@ def test_run():
     for key in ("exact", "u32"):
         got, ref, masks = runs[key]
         torch.testing.assert_close(got.view(torch.int32), ref.view(torch.int32), rtol=0, atol=0)
-        _inactive_zero(got, masks)
+        if key == "u32":
+            # Only the u32 kernel uses the six-row prefix/arb/none layout.  The
+            # exact kernel has four rows ([ALL, prefix, none, prefix(0ulp)]) and
+            # forwards the caller mask without an extra select, so the shared
+            # row/mask table does not describe it.
+            _inactive_zero(got, masks)
     hgot, href, hmasks = runs["u16"]
     torch.testing.assert_close(hgot, href, rtol=0, atol=0)
     _inactive_zero(hgot, hmasks)

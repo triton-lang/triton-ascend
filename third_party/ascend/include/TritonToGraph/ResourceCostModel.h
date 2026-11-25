@@ -68,6 +68,11 @@ struct ResourceSnapshot {
   uint64_t l0cCapacityBytes = 0;
   unsigned l0SafetyPercent = 80;
 
+  // Physical AI-core blocks the launcher schedules (AIV for pure-SIMT kernels,
+  // AIC otherwise).  The row-count policy keeps one full wave after R-way
+  // coalescing; zero means unknown and disables the check.
+  uint64_t coreNum = 0;
+
   bool isKnown() const;
   // True only when every cube buffer capacity is populated; the candidate
   // L0 checks are enforced only when this holds.
@@ -83,16 +88,21 @@ struct ResourceSnapshot {
                uint64_t l0bCapacityBytes = 0, uint64_t l0cCapacityBytes = 0,
                unsigned l0SafetyPercent = 80);
 
-  static ResourceSnapshot fromHardwareConfig(
-      const ascend::HardwareConfig &hardware, unsigned ubSafetyPercent = 80,
-      uint64_t reservedUBBytes = 0, unsigned l0SafetyPercent = 80);
+  static ResourceSnapshot
+  fromHardwareConfig(const ::mlir::ascend::HardwareConfig &hardware,
+                     unsigned ubSafetyPercent = 80,
+                     uint64_t reservedUBBytes = 0,
+                     unsigned l0SafetyPercent = 80);
 };
+
+constexpr uint64_t kUBMultiBufferReplication = 2;
 
 struct LiveTensorInterval {
   Value value;
   uint64_t begin = 0;
   uint64_t end = 0;
   uint64_t bytes = 0;
+  bool pipelined = false;
 };
 
 struct LiveByteEstimate {
@@ -100,6 +110,7 @@ struct LiveByteEstimate {
   bool overflow = false;
   ResourceCostRejectReason reason = ResourceCostRejectReason::UnknownResource;
   uint64_t peakLiveBytes = 0;
+  uint64_t peakPipelinedLiveBytes = 0;
   llvm::SmallVector<LiveTensorInterval, 16> intervals;
 };
 

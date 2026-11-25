@@ -16,7 +16,12 @@
 #                 initializes them itself, e.g. build_npuir.py which has
 #                 its own retry handling)
 #
-# All logs go to stderr; the resolved stable SHA is printed on stdout as the
+# NPUIR_REPO_BRANCH selects what to fetch: a branch name (default: stable,
+# resolved to its HEAD via ls-remote) or a full 40-hex commit SHA, which is
+# fetched directly — the pinned-wheel job in wheels.yml passes the submodule
+# gitlink SHA that way.
+#
+# All logs go to stderr; the resolved SHA is printed on stdout as the
 # last line so callers can capture it for cache keys:
 #   NPUIR_SHA=$(bash fetch-npuir-stable.sh)
 set -eu -o pipefail
@@ -62,12 +67,19 @@ fetch_at() { # fetch_at <dest> <sha> <url> — depth-1 fetch of an exact SHA.
   git -C "$dest" checkout -q FETCH_HEAD
 }
 
-SHA=$(retry 3 git ls-remote "$URL" "refs/heads/${BRANCH}" | awk '{print $1}')
-if [ -z "$SHA" ]; then
-  log "could not resolve refs/heads/${BRANCH} at ${URL}"
-  exit 1
+if printf '%s' "$BRANCH" | grep -qE '^[0-9a-fA-F]{40}$'; then
+  # An exact commit SHA (e.g. the submodule gitlink): no ref resolution
+  # needed; the depth-1 `want <sha>` fetch below serves it directly.
+  SHA="$BRANCH"
+  log "pinned SHA: ${SHA}"
+else
+  SHA=$(retry 3 git ls-remote "$URL" "refs/heads/${BRANCH}" | awk '{print $1}')
+  if [ -z "$SHA" ]; then
+    log "could not resolve refs/heads/${BRANCH} at ${URL}"
+    exit 1
+  fi
+  log "${BRANCH} HEAD: ${SHA}"
 fi
-log "${BRANCH} HEAD: ${SHA}"
 
 NEED_FETCH=1
 if [ -d "${DEST}/.git" ]; then

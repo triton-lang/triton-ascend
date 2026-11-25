@@ -583,10 +583,11 @@ def test_ascend_compile_only_skips_launch(fresh_knobs, monkeypatch):
                                get_aicore_num=lambda: 1)
 
     monkeypatch.setattr(driver, "NPUUtils", fake_npu_utils)
-    monkeypatch.setattr(driver, "make_launch_spec", lambda _metadata, _npu_utils: SimpleNamespace(as_dict=lambda: {}))
+    monkeypatch.setattr(driver, "make_launch_spec",
+                        lambda _metadata, _npu_utils: SimpleNamespace(grid_contract_version=0, as_dict=lambda: {}))
     monkeypatch.setattr(driver, "argument_types", lambda _signature, _constants: [])
     monkeypatch.setattr(driver, "get_runtime", lambda _path, _debug=False: (fake_runtime, "/tmp/fake-runtime.so"))
-    monkeypatch.setattr(driver, "wrap_handle_tensordesc", lambda fn, _signature: fn)
+    monkeypatch.setattr(driver, "wrap_handle_tensordesc", lambda fn, _signature, _has_profile_scratch: fn)
     monkeypatch.setattr(driver, "get_cache_manager",
                         lambda _key: SimpleNamespace(cache_dir="/tmp/knob-compile-only-cache"))
 

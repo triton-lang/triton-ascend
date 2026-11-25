@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -9,6 +10,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HACC/Utils/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -31,6 +34,7 @@
 #include "mlir/Support/LLVM.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
@@ -114,6 +118,114 @@ void setFallbackAttr(ModuleOp module, int errorCode) {
 
 bool hasFallbackAttr(ModuleOp module) {
   return module->hasAttr(CVPipeline::ERRCODE_ATTR);
+}
+
+static bool isTensorComputeOpLegacy(Operation *op) {
+  if (llvm::isa<tensor::CollapseShapeOp, tensor::ExpandShapeOp,
+                tensor::EmptyOp>(op)) {
+    return false;
+  }
+  bool allOperandsTensor = llvm::all_of(op->getOperands(), [](Value operand) {
+    return llvm::isa<RankedTensorType>(operand.getType());
+  });
+  bool allResultsTensor = llvm::all_of(op->getResults(), [](Value result) {
+    return llvm::isa<RankedTensorType>(result.getType());
+  });
+  return allOperandsTensor && allResultsTensor;
+}
+
+// Keep this whitelist aligned with NPUIR ArithToHFusion and InlineBrc.
+// The dynamic CV pipeline targets regbase; do not look through casts here.
+static bool isDirectInlineBrcArithUser(Operation *op) {
+  if (!llvm::all_of(op->getOperandTypes(),
+                    [](Type type) { return isa<RankedTensorType>(type); }) ||
+      op->getNumResults() != 1) {
+    return false;
+  }
+  auto resultType = dyn_cast<RankedTensorType>(op->getResult(0).getType());
+  // Static shapes guarantee a fresh tensor.empty destination during lowering.
+  if (!resultType || !resultType.hasStaticShape()) {
+    return false;
+  }
+
+  if (auto cmp = dyn_cast<arith::CmpFOp>(op)) {
+    switch (cmp.getPredicate()) {
+    case arith::CmpFPredicate::ORD:
+    case arith::CmpFPredicate::UNO:
+    case arith::CmpFPredicate::AlwaysTrue:
+    case arith::CmpFPredicate::AlwaysFalse:
+      return false;
+    default:
+      return true;
+    }
+  }
+  if (auto cmp = dyn_cast<arith::CmpIOp>(op)) {
+    // Ordered i1 comparisons introduce casts; only accept direct lowering.
+    // Since we disscuss about fill's user, operands in op are allways
+    // RankedTensorType, so we can safely use getElementTypeOrSelf to get the
+    // element type.
+    return !getElementTypeOrSelf(cmp.getLhs().getType()).isInteger(1) ||
+           cmp.getPredicate() == arith::CmpIPredicate::eq ||
+           cmp.getPredicate() == arith::CmpIPredicate::ne;
+  }
+  return isa<arith::AddFOp, arith::AddIOp, arith::SubFOp, arith::SubIOp,
+             arith::MulFOp, arith::MulIOp, arith::DivFOp, arith::DivSIOp,
+             arith::DivUIOp, arith::MaxSIOp, arith::MaxUIOp, arith::MinSIOp,
+             arith::MinUIOp, arith::NegFOp, arith::AndIOp, arith::OrIOp,
+             arith::XOrIOp, arith::MinNumFOp, arith::MinimumFOp,
+             arith::MaxNumFOp, arith::MaximumFOp, arith::RemFOp, arith::RemSIOp,
+             arith::RemUIOp, arith::ShLIOp, arith::ShRSIOp, arith::ShRUIOp,
+             arith::FloorDivSIOp, arith::CeilDivSIOp, arith::CeilDivUIOp,
+             arith::SelectOp>(op);
+}
+
+static bool isFillEliminableByInlineBrc(linalg::FillOp fillOp) {
+  if (fillOp->getNumResults() != 1 || fillOp.getInputs().size() != 1 ||
+      !fillOp.getInputs().front().getType().isIntOrFloat() ||
+      !isa<RankedTensorType>(fillOp->getResult(0).getType())) {
+    return false;
+  }
+
+  // Every use must disappear before the fill can be excluded from the count.
+  // Arith users have no DPS inits and lower to fresh destinations above.
+  return llvm::all_of(fillOp->getResult(0).getUsers(),
+                      isDirectInlineBrcArithUser);
+}
+
+bool isTensorComputeOp(Operation *op) {
+  auto funcOp = op->getParentOfType<func::FuncOp>();
+  if (funcOp) {
+    constexpr llvm::StringLiteral legacyFuncNames[]{"pcb10_tc01_kernel"};
+    if (llvm::is_contained(legacyFuncNames, funcOp.getSymName())) {
+      return isTensorComputeOpLegacy(op);
+    }
+  }
+  if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
+    if (linalg::isaCopyOpInterface(linalgOp)) {
+      return false;
+    }
+    auto genericOp = dyn_cast<linalg::GenericOp>(op);
+    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value()) {
+      return false;
+    }
+    if (auto fillOp = dyn_cast<linalg::FillOp>(op)) {
+      auto input = fillOp.getInputs()[0];
+      auto constantOp = input.getDefiningOp<arith::ConstantOp>();
+      if (constantOp) {
+        return false;
+      }
+      if (isFillEliminableByInlineBrc(fillOp)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  if (op->hasTrait<mlir::OpTrait::Elementwise>()) {
+    return llvm::any_of(op->getResultTypes(),
+                        [](Type t) { return isa<RankedTensorType>(t); });
+  }
+  return false;
 }
 
 bool isVectorOnlyOp(Operation *op) {
@@ -458,12 +570,12 @@ scf::YieldOp MainLoop::getLoopYieldOp(Operation *loopOp) {
   return {};
 }
 
-int getLoopCarriedArgIndex(Value operand, Block *block) {
+int getLoopCarriedArgIndex(Value argValue, Block *block) {
   if (!block || !block->mightHaveTerminator()) {
     return -1;
   }
 
-  auto barg = dyn_cast_if_present<BlockArgument>(operand);
+  auto barg = dyn_cast_if_present<BlockArgument>(argValue);
   if (!barg || barg.getOwner() != block) {
     return -1;
   }
@@ -488,6 +600,18 @@ int getLoopCarriedArgIndex(Value operand, Block *block) {
   }
 
   return argIdx;
+}
+
+OpOperand *getLoopCarriedUpdateOperand(Value value, Block *loopBlock) {
+  int index = getLoopCarriedArgIndex(value, loopBlock);
+  if (index == -1) {
+    return nullptr;
+  }
+  auto *yieldOp = loopBlock->getTerminator();
+  if (yieldOp == nullptr || !isa<scf::YieldOp>(yieldOp)) {
+    return nullptr;
+  }
+  return &yieldOp->getOpOperand(index);
 }
 
 int getTensorIterArgIndex(Value v, ArrayRef<Value> iterArgs) {
@@ -524,6 +648,115 @@ std::optional<hivm::FixpipePreQuantMode> getFixpipePreQuantMode(Operation *op) {
     return hivm::FixpipePreQuantMode::S322I8;
   }
   return std::nullopt;
+}
+
+bool isFixpipeQuantScaleHint(Operation *op) {
+  return isa<annotation::MarkOp>(op) && op->hasAttr(kInlinableQuantScaleAttr);
+}
+
+std::optional<FixpipeOutputCastInfo> matchFixpipeOutputCast(Operation *castOp) {
+  if (!castOp)
+    return std::nullopt;
+  auto preQuantMode = getFixpipePreQuantMode(castOp);
+  if (!preQuantMode || *preQuantMode != hivm::FixpipePreQuantMode::F322F16)
+    return std::nullopt;
+
+  auto castOutputType =
+      dyn_cast<RankedTensorType>(castOp->getResult(0).getType());
+  if (!castOutputType || !castOutputType.hasStaticShape())
+    return std::nullopt;
+
+  Value producerValue = castOp->getOperand(0);
+  SmallVector<Operation *, 4> foldedOps{castOp};
+  bool writesNZ = false;
+  linalg::FillOp scaleSplatOp;
+  Value quantScale;
+
+  // FIXPIPE accepts one scalar f32 scale. Tensor lowering represents that scale
+  // as linalg.fill(scalar) followed by a no-fastmath elementwise multiply.
+  auto matchScalarSplat =
+      [](Value value) -> std::optional<std::pair<linalg::FillOp, Value>> {
+    auto fill = value.getDefiningOp<linalg::FillOp>();
+    if (!fill)
+      return std::nullopt;
+    Value scalar = fill.getInputs()[0];
+    if (!scalar.getType().isF32())
+      return std::nullopt;
+    return std::make_pair(fill, scalar);
+  };
+
+  // Layout conversion and scalar scaling commute for this FIXPIPE operation, so
+  // accept either ordering while allowing at most one of each operation.
+  for (unsigned i = 0; i != 2; ++i) {
+    if (!quantScale) {
+      if (auto mul = producerValue.getDefiningOp<arith::MulFOp>()) {
+        if (mul.getFastmath() != arith::FastMathFlags::none ||
+            !llvm::any_of(mul->getUsers(), isFixpipeQuantScaleHint))
+          return std::nullopt;
+        auto lhsScale = matchScalarSplat(mul.getLhs());
+        auto rhsScale = matchScalarSplat(mul.getRhs());
+        if (lhsScale.has_value() == rhsScale.has_value())
+          return std::nullopt;
+        auto scale = lhsScale ? *lhsScale : *rhsScale;
+        foldedOps.push_back(mul);
+        scaleSplatOp = scale.first;
+        quantScale = scale.second;
+        producerValue = lhsScale ? mul.getRhs() : mul.getLhs();
+        continue;
+      }
+    }
+
+    if (!writesNZ) {
+      if (auto convert = producerValue.getDefiningOp<hivm::ConvertLayoutOp>()) {
+        auto srcType =
+            dyn_cast<RankedTensorType>(convert.getSource().getType());
+        auto dstType = dyn_cast<RankedTensorType>(convert.getType());
+        auto fractalSizes = convert.getDstLayout().getFractalSizes();
+        if (!srcType || !dstType || !srcType.hasStaticShape() ||
+            !dstType.hasStaticShape() || srcType.getRank() != 2 ||
+            dstType.getRank() != 4 ||
+            convert.getSrcLayout().getTransposeValue().value_or(false) ||
+            convert.getDstLayout().getTransposeValue().value_or(false) ||
+            convert.getSrcLayout().getDataLayout() != hivm::DataLayout::ND ||
+            convert.getDstLayout().getDataLayout() !=
+                hivm::DataLayout::Fractal ||
+            !fractalSizes ||
+            fractalSizes.asArrayRef() != ArrayRef<int64_t>({16, 16}))
+          return std::nullopt;
+
+        int64_t m = srcType.getDimSize(0);
+        int64_t n = srcType.getDimSize(1);
+        if (m % 16 != 0 || n % 16 != 0 ||
+            dstType.getShape() != ArrayRef<int64_t>({n / 16, m / 16, 16, 16}))
+          return std::nullopt;
+
+        writesNZ = true;
+        foldedOps.push_back(convert);
+        producerValue = convert.getSource();
+        continue;
+      }
+    }
+    break;
+  }
+
+  auto matmulOp = producerValue.getDefiningOp<linalg::MatmulOp>();
+  auto matmulType =
+      matmulOp ? dyn_cast<RankedTensorType>(matmulOp.getResult(0).getType())
+               : RankedTensorType{};
+  if (!matmulOp || !matmulType || !matmulType.hasStaticShape() ||
+      matmulType.getRank() != 2)
+    return std::nullopt;
+
+  if (quantScale) {
+    auto module = castOp->getParentOfType<ModuleOp>();
+    if (!module || !hacc::utils::isAscend950(module))
+      return std::nullopt;
+    preQuantMode = hivm::FixpipePreQuantMode::QF322F16_PRE;
+    foldedOps.push_back(scaleSplatOp);
+  }
+
+  return FixpipeOutputCastInfo{matmulOp, std::move(foldedOps), quantScale,
+                               *preQuantMode, writesNZ};
 }
 
 Operation *getSourceThroughCIntermediateOps(Value operand) {
@@ -574,6 +807,113 @@ Value getAliasSource(Value value) {
         return toTensor.getBuffer();
       })
       .Default([](auto) { return nullptr; });
+}
+
+Block *getFirstLoopBlock(Block *block) {
+  while (block) {
+    Region *parentRegion = block->getParent();
+    if (!parentRegion) {
+      return nullptr;
+    }
+    Operation *parentOp = parentRegion->getParentOp();
+    if (!parentOp) {
+      return nullptr;
+    }
+    if (isa<scf::ForOp, scf::WhileOp>(parentOp)) {
+      return block;
+    }
+    // Move to the block containing the parent operation.
+    block = parentOp->getBlock();
+  }
+
+  return nullptr;
+}
+
+// op's index-th operation operand is in the same loop block as op, then push it
+// to work.
+static bool appendOperand(Operation *op, unsigned index, Block *block,
+                          SmallVectorImpl<Value> &work) {
+  if (!op || index >= op->getNumOperands()) {
+    // index errors!
+    return false;
+  }
+  auto nextValue = op->getOperand(index);
+  if (auto def = nextValue.getDefiningOp()) {
+    if (def->getBlock() == block) {
+      work.push_back(nextValue);
+      return true;
+    }
+  }
+  return true;
+}
+
+Operation *getCommonAncestor(Operation *lhs, Operation *rhs) {
+  for (Operation *ancestor = lhs; ancestor;
+       ancestor = ancestor->getParentOp()) {
+    for (Operation *other = rhs; other; other = other->getParentOp()) {
+      if (ancestor == other) {
+        return ancestor;
+      }
+    }
+  }
+  return nullptr;
+}
+
+// Follow SCF forwarding edges, stopping at ordinary defining operations.
+Operation *getLoopCarriedOrigin(Value incoming) {
+  SmallVector<Value> work{incoming};
+  Operation *origin = nullptr;
+  while (!work.empty()) {
+    Value current = work.pop_back_val();
+    auto result = dyn_cast<OpResult>(current);
+    if (!result) {
+      return nullptr;
+    }
+    Operation *def = result.getOwner();
+    unsigned index = result.getResultNumber();
+    if (auto ifOp = dyn_cast<scf::IfOp>(def)) {
+      for (Region &region : ifOp->getRegions()) {
+        if (region.empty() || !appendOperand(region.front().getTerminator(),
+                                             index, &region.front(), work)) {
+          return nullptr;
+        }
+      }
+    } else if (auto forOp = dyn_cast<scf::ForOp>(def)) {
+      if (!appendOperand(forOp.getBody()->getTerminator(), index,
+                         forOp.getBody(), work)) {
+        return nullptr;
+      }
+    } else if (auto whileOp = dyn_cast<scf::WhileOp>(def)) {
+      auto condition =
+          dyn_cast<scf::ConditionOp>(whileOp.getBeforeBody()->getTerminator());
+      if (!condition || index >= condition.getArgs().size()) {
+        return nullptr;
+      }
+      work.push_back(condition.getArgs()[index]);
+    } else {
+      origin = origin ? getCommonAncestor(origin, def) : def;
+      if (!origin) {
+        return nullptr;
+      }
+    }
+  }
+  return origin;
+}
+
+Operation *getLoopCarriedDefOp(Value argValue, Block *block) {
+  auto arg = dyn_cast_if_present<BlockArgument>(argValue);
+  auto loopBlock = getFirstLoopBlock(block);
+  if (!arg || !loopBlock || arg.getOwner() != loopBlock) {
+    return nullptr;
+  }
+
+  OpOperand *updateOperand = getLoopCarriedUpdateOperand(argValue, loopBlock);
+  if (!updateOperand) {
+    return nullptr;
+  }
+
+  Operation *origin = getLoopCarriedOrigin(updateOperand->get());
+  return origin ? getAncestorInBlock(origin, block) : nullptr;
 }
 
 } // namespace CVPipeline

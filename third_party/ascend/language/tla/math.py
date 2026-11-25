@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 """
-Math helpers for TLA vector kernels.
+Math helpers for TLA scalars and vector kernels.
 
 ``compensated_rstd`` is the TLA-side expansion of TileKernels
 ``tile_kernels/quant/rstd.py`` (``make_rstd_impl``): it re-constructs the
@@ -34,13 +34,76 @@ Triton kernel and compose the ``@builtin`` simd ops directly.
 
 import struct
 
-from triton.language.core import builtin, _unwrap_if_constexpr
+import triton.language as tl
+from triton.language.core import builtin, tensor, _unwrap_if_constexpr
 
 from . import simd as S
+from .core import vector
 
-__all__ = ["compensated_rstd"]
+__all__ = ["compensated_rstd", "truncmod", "sqrt"]
 
 _FP32_MIN_NORMAL = 2.0**-126
+
+
+@builtin
+def truncmod(a, b, _semantic=None):
+    """
+    Integer remainder with division truncated toward zero.
+
+    Like TileLang's ``T.truncmod``, a nonzero remainder has the sign of ``a``:
+    ``truncmod(-7, 3)`` is -1 and ``truncmod(7, -3)`` is 1, unlike Python's
+    floor-based ``%``. Integer type promotion follows Triton; mixed signed
+    and unsigned tensor operands are rejected. Floating-point operands,
+    block tensors, and SIMD vectors are not supported.
+
+    :param a: integer scalar tensor or Python/constexpr integer dividend
+    :param b: integer scalar tensor or Python/constexpr integer divisor;
+        must be nonzero. Signed minimum divided by -1 is also undefined
+    :return: scalar integer ``tl.tensor`` with the promoted operand dtype
+    """
+    a = _unwrap_if_constexpr(a)
+    b = _unwrap_if_constexpr(b)
+    for name, value in (("a", a), ("b", b)):
+        if isinstance(value, tensor):
+            if value.type.is_block() or not value.dtype.is_int() or value.dtype == tl.int1:
+                raise TypeError(f"truncmod {name} must be a non-boolean scalar integer tensor")
+        elif not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(f"truncmod {name} must be a scalar integer or integer tensor")
+    if isinstance(b, int) and b == 0:
+        raise ValueError("truncmod divisor must be nonzero")
+    # Preserve Python scalar promotion rules; do not pre-convert to tensors.
+    return _semantic.mod(a, b)
+
+
+@builtin
+def sqrt(x, _semantic=None):
+    """
+    Square root of a scalar or each lane of a SIMD vector.
+
+    Like TileLang's ``T.sqrt``, this returns an IR expression, preserves the
+    input dtype, and does not implicitly convert integers to floating point.
+
+    :param x: f32 scalar tensor, Python/constexpr float inferred as f32 by
+        Triton, or f16/f32 vector register. Block tensors are not supported
+    :return: scalar ``tl.tensor`` or vector register, same dtype as ``x``;
+        vector results also preserve the lane count
+    """
+    x = _unwrap_if_constexpr(x)
+    if isinstance(x, vector):
+        if x.dtype not in (tl.float16, tl.float32):
+            raise TypeError(f"sqrt supports float16/float32 vectors, got {x.dtype}")
+        return S.vsqrt(x, _semantic=_semantic)
+    if isinstance(x, tensor):
+        if x.type.is_block():
+            raise TypeError("sqrt does not support block tensors; use a tla.vector")
+        if x.dtype != tl.float32:
+            raise TypeError(f"sqrt supports float32 scalars, got {x.dtype}")
+    elif not isinstance(x, float):
+        raise TypeError("sqrt expects a float32 scalar or a float16/float32 tla.vector")
+    x = _semantic.to_tensor(x)
+    if x.dtype != tl.float32:
+        raise TypeError(f"sqrt supports float32 scalars, got {x.dtype}")
+    return tl.sqrt(x, _semantic=_semantic)
 
 
 def split_fp32(value: float) -> tuple:
@@ -52,35 +115,32 @@ def split_fp32(value: float) -> tuple:
 
 def _naive_rsqrt(value, _semantic):
     """1/sqrt(v) from ``rstd.py`` naive_rsqrt (vdiv + vsqrt)."""
-    return S.vdiv(S.vsplat(1.0, value.dtype, _semantic=_semantic), S.vsqrt(value, _semantic=_semantic),
+    return S.vdiv(S.vdup(1.0, value.dtype, _semantic=_semantic), S.vsqrt(value, _semantic=_semantic),
                   _semantic=_semantic)
 
 
 def _compensated_div_add(a, reciprocal_c0_hi, reciprocal_c0_lo, c1_hi, c1_lo, _semantic):
     """
     High/low parts of ``a / c0 + c1`` with TwoSum error recovery
-    (``rstd.py`` compensated_div_add; vmuls/vadds/vsub are expressed through
-    splat + mul/add/neg).
+    (``rstd.py`` compensated_div_add).
     """
-    r_c0_hi_v = S.vsplat(reciprocal_c0_hi, a.dtype, _semantic=_semantic)
+    r_c0_hi_v = S.vdup(reciprocal_c0_hi, a.dtype, _semantic=_semantic)
     product = S.vmul(a, r_c0_hi_v, _semantic=_semantic)
-    value = S.vadd(product, S.vsplat(c1_hi, a.dtype, _semantic=_semantic), _semantic=_semantic)
+    value = S.vadds(product, c1_hi, _semantic=_semantic)
 
     # Error-free TwoSum for product + c1_hi.
     virtual_c1 = S.vadd(value, S.vneg(product, _semantic=_semantic), _semantic=_semantic)
     product_sum_error = S.vadd(
         product, S.vneg(S.vadd(value, S.vneg(virtual_c1, _semantic=_semantic), _semantic=_semantic),
                         _semantic=_semantic), _semantic=_semantic)
-    c1_sum_error = S.vadd(S.vneg(virtual_c1, _semantic=_semantic), S.vsplat(c1_hi, a.dtype, _semantic=_semantic),
-                          _semantic=_semantic)
+    c1_sum_error = S.vadds(S.vneg(virtual_c1, _semantic=_semantic), c1_hi, _semantic=_semantic)
     sum_error = S.vadd(product_sum_error, c1_sum_error, _semantic=_semantic)
 
     # Recover the multiplication error and add the low parts of both constants.
-    product_error = S.vfma(S.vneg(product, _semantic=_semantic), a, r_c0_hi_v, _semantic=_semantic)
-    value_error = S.vadd(
-        S.vadd(product_error, sum_error, _semantic=_semantic),
-        S.vadd(S.vmul(a, S.vsplat(reciprocal_c0_lo, a.dtype, _semantic=_semantic), _semantic=_semantic),
-               S.vsplat(c1_lo, a.dtype, _semantic=_semantic), _semantic=_semantic), _semantic=_semantic)
+    product_error = S.vmula(S.vneg(product, _semantic=_semantic), a, r_c0_hi_v, _semantic=_semantic)
+    value_error = S.vadd(S.vadd(product_error, sum_error, _semantic=_semantic),
+                         S.vadds(S.vmuls(a, reciprocal_c0_lo, _semantic=_semantic), c1_lo, _semantic=_semantic),
+                         _semantic=_semantic)
     return value, value_error
 
 
@@ -92,19 +152,18 @@ def _compensated_rsqrt(value, value_error, estimate, _semantic):
     """
     estimate_squared = S.vmul(estimate, estimate, _semantic=_semantic)
     # square_error starts at -estimate_squared, then vmula adds estimate*estimate.
-    square_error = S.vfma(S.vneg(estimate_squared, _semantic=_semantic), estimate, estimate, _semantic=_semantic)
+    square_error = S.vmula(S.vneg(estimate_squared, _semantic=_semantic), estimate, estimate, _semantic=_semantic)
 
-    residual = S.vsplat(1.0, value.dtype, _semantic=_semantic)
+    residual = S.vdup(1.0, value.dtype, _semantic=_semantic)
     negative_value = S.vneg(value, _semantic=_semantic)
     negative_value_error = S.vneg(value_error, _semantic=_semantic)
-    residual = S.vfma(residual, negative_value, estimate_squared, _semantic=_semantic)
-    residual = S.vfma(residual, negative_value, square_error, _semantic=_semantic)
-    residual = S.vfma(residual, negative_value_error, estimate_squared, _semantic=_semantic)
-    residual = S.vfma(residual, negative_value_error, square_error, _semantic=_semantic)
+    residual = S.vmula(residual, negative_value, estimate_squared, _semantic=_semantic)
+    residual = S.vmula(residual, negative_value, square_error, _semantic=_semantic)
+    residual = S.vmula(residual, negative_value_error, estimate_squared, _semantic=_semantic)
+    residual = S.vmula(residual, negative_value_error, square_error, _semantic=_semantic)
 
     # refined = estimate + (estimate * 0.5) * residual
-    refined = S.vfma(estimate, S.vmul(estimate, S.vsplat(0.5, value.dtype, _semantic=_semantic), _semantic=_semantic),
-                     residual, _semantic=_semantic)
+    refined = S.vmula(estimate, S.vmuls(estimate, 0.5, _semantic=_semantic), residual, _semantic=_semantic)
     return refined
 
 

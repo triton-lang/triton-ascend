@@ -25,16 +25,17 @@ SIGNATURE = {name: "*u32" for name in ("X", "Y", "O")}
 
 
 @tla.jit
-def vsub(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    x = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    y = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    o = tla.alloc_buffer((4 + TILES, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), x)
-    tla.copy(tla.view(Y, (TILES, N)), y)
+def vsub(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr, MASKPAT: tl.constexpr,
+         TAILPAT: tl.constexpr):
+    x = tla.alloc((TILES, N), tl.uint32, space="ub")
+    y = tla.alloc((TILES, N), tl.uint32, space="ub")
+    o = tla.alloc((4 + TILES, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), x)
+    tla.load_gm_to_ub(tla.view(Y, (TILES, N)), y)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0, 0])
         b = tla.simd.vlds(y[0, 0])
-        mask = tla.simd.pge(ACTIVE, N)
+        mask = tla.simd.pset(2048 // N, MASKPAT)
         full = tla.simd.vsub(a, b)
         zeroed = tla.simd.vsub(a, b, mask)
         tla.simd.vsts(o[0, 0], full)
@@ -42,20 +43,23 @@ def vsub(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TA
         tla.simd.vsts(o[2, 0], tla.simd.vreduce(full, "add"))
         tla.simd.vsts(o[3, 0], tla.simd.vreduce(zeroed, "add"))
         # Seed only the tail row; full tiles overwrite their rows entirely.
-        tla.simd.vsts(o[4 + TILES - 1, 0], tla.simd.vsplat(SENTINEL_C, tl.uint32))
+        tla.simd.vsts(o[4 + TILES - 1, 0], tla.simd.vdup(SENTINEL_C, tl.uint32))
         for t in tl.static_range(TILES):
             va = tla.simd.vlds(x[t, 0])
             vb = tla.simd.vlds(y[t, 0])
             if t == TILES - 1:
-                tail_mask = tla.simd.pge(TAIL, N)
+                tail_mask = tla.simd.pset(2048 // N, TAILPAT)
                 tla.simd.vsts(o[4 + t, 0], tla.simd.vsub(va, vb, tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(o[4 + t, 0], tla.simd.vsub(va, vb))
-    tla.copy(o, tla.view(O, (4 + TILES, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (4 + TILES, N)))
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "TILES": SHAPE["tiles"], "TAIL": SHAPE["tail"]}
+    return {
+        "N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"]), "TILES": SHAPE["tiles"],
+        "TAIL": SHAPE["tail"], "TAILPAT": "VL%d" % (SHAPE["tail"])
+    }
 
 
 def test_ir(output_dir=None):

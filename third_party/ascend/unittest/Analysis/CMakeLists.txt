@@ -22,9 +22,58 @@ add_triton_ut(
     MLIRParser
 )
 
+add_triton_ut(
+  NAME TestLegacyPointerConverters
+  SRCS LegacyPointerConvertersTest.cpp
+  LIBS
+    ${offset_cache_test_libs}
+    TritonNVIDIAGPUToLLVM
+    BiShengIRAnnotationDialect
+    BiShengIRHACCDialect
+    BiShengIRHFusionDialect
+    BiShengIRHIVMDialect
+    BiShengIRMathExtDialect
+    BiShengIRMemRefExtDialect
+    BiShengIRScopeDialect
+    BiShengIRSymbolDialect
+    BiShengIRTensorDialect
+    MLIRParser
+)
+
 # Observe real BlockArgumentImpl deallocation without production hooks.
 # Both forms of operator delete are used by supported Linux/ELF toolchains.
 target_link_options(TestTritonOffsetCacheLifetime PRIVATE
   "LINKER:--wrap=_ZdlPv"
   "LINKER:--wrap=_ZdlPvm"
+)
+
+add_triton_ut(
+  NAME TestPublicPtrAnalysis
+  SRCS
+    PtrAnalysisTest.cpp
+    PtrAnalysisAddressTest.cpp
+    PtrAnalysisBitcastTest.cpp
+    PtrAnalysisTestUtils.cpp
+    PtrAnalysisShapeTest.cpp
+    PtrAnalysisIntegerTest.cpp
+    PtrAnalysisOpCoverageTest.cpp
+    BlockPtrAnalysisTest.cpp
+    PtrAnalysisLifecycleTest.cpp
+    PtrAnalysisSubAxisTest.cpp
+    PtrAnalysisControlFlowTest.cpp
+    CommonPtrSCFTest.cpp
+  LIBS
+    TritonPtrAnalysis
+    TritonIR
+    TritonGPUIR
+    TritonGPUTransforms
+    TritonNvidiaGPUTransforms
+    MLIRArithDialect
+    MLIRFuncDialect
+    MLIRIR
+    MLIRParser
+    MLIRSCFDialect
+    MLIRTensorDialect
+    MLIRSupport
+    MLIRTransforms
 )

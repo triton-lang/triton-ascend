@@ -19,16 +19,19 @@
 // THE SOFTWARE.
 // TLA-specific Ascend IR builder bindings.
 #include "Utils/AscendNPUIROpBuilder.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "pybind11/pybind11.h"
 #include <pybind11/stl.h>
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVMAVE/IR/HIVMAVE.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/Block.h"
@@ -90,6 +93,32 @@ Type resolveSimdElementType(MLIRContext *ctx, const py::object &elem) {
                               "\"; expected i8 / bf16 / f32 / fp8e4nv");
 }
 
+// memref.view needs a one-dimensional identity-layout byte source. Rebase a
+// strided descriptor without losing its offset or the buffer's alias identity.
+Value predicateByteView(TLABuilder &self, Value ptr, Value byteOffset) {
+  auto &b = self.getBuilder();
+  auto ty = cast<MemRefType>(ptr.getType());
+  if (!ty.getLayout().isIdentity()) {
+    auto metadata = self.create<memref::ExtractStridedMetadataOp>(ptr);
+    Value offset = metadata.getOffset();
+    byteOffset = self.create<arith::AddIOp>(offset, byteOffset);
+    Value extent =
+        self.create<arith::AddIOp>(offset, metadata.getSizes().front());
+    auto baseTy =
+        MemRefType::get({ShapedType::kDynamic}, b.getI8Type(),
+                        MemRefLayoutAttrInterface{}, ty.getMemorySpace());
+    // reinterpret_cast replaces the descriptor offset; view below applies it
+    // exactly once, in bytes. Keep ptr as the source for memory-effect
+    // analysis.
+    ptr = self.create<memref::ReinterpretCastOp>(
+        baseTy, ptr, b.getIndexAttr(0), ArrayRef<OpFoldResult>{extent},
+        ArrayRef<OpFoldResult>{b.getIndexAttr(1)});
+  }
+  auto bitsTy = MemRefType::get(
+      {256}, b.getI1Type(), MemRefLayoutAttrInterface{}, ty.getMemorySpace());
+  return self.create<memref::ViewOp>(bitsTy, ptr, byteOffset, ValueRange{});
+}
+
 // Core type of the enclosing TLA core-mode scope, defaulting to the AIV
 // (vector) core that plain TLA kernels run on.
 hivm::TCoreType enclosingCoreType(OpBuilder &builder) {
@@ -102,38 +131,70 @@ hivm::TCoreType enclosingCoreType(OpBuilder &builder) {
   return hivm::TCoreType::VECTOR;
 }
 
-// Resolve a frontend pipe name ("PIPE_MTE2") to its HIVM attribute.
-hivm::PipeAttr getSyncPipe(OpBuilder &builder, const std::string &pipe) {
+// Pipes available to each core for explicit synchronization.
+bool isSyncPipeSupported(hivm::PIPE pipe, hivm::TCoreType core) {
+  switch (core) {
+  case hivm::TCoreType::VECTOR:
+    return pipe == hivm::PIPE::PIPE_S || pipe == hivm::PIPE::PIPE_V ||
+           pipe == hivm::PIPE::PIPE_MTE2 || pipe == hivm::PIPE::PIPE_MTE3;
+  case hivm::TCoreType::CUBE:
+    return pipe == hivm::PIPE::PIPE_S || pipe == hivm::PIPE::PIPE_M ||
+           pipe == hivm::PIPE::PIPE_MTE1 || pipe == hivm::PIPE::PIPE_MTE2 ||
+           pipe == hivm::PIPE::PIPE_MTE3 || pipe == hivm::PIPE::PIPE_FIX;
+  default:
+    return false;
+  }
+}
+
+// Resolve a frontend pipe name ("PIPE_MTE2") to its HIVM attribute and check
+// that the enclosing core can use it. PIPE_ALL is only valid for barrier.
+hivm::PipeAttr getSyncPipe(OpBuilder &builder, const std::string &pipe,
+                           bool allowAll = false) {
   auto pipeEnum = hivm::symbolizePIPE(pipe);
   if (!pipeEnum)
     throw std::invalid_argument("unknown sync pipe: " + pipe);
+  auto core = enclosingCoreType(builder);
+  if (!(allowAll && *pipeEnum == hivm::PIPE::PIPE_ALL) &&
+      !isSyncPipeSupported(*pipeEnum, core))
+    throw std::invalid_argument(
+        "sync pipe " + pipe + " is not supported by the enclosing " +
+        (core == hivm::TCoreType::CUBE ? "cube" : "vector") + " core");
   return hivm::PipeAttr::get(builder.getContext(), *pipeEnum);
 }
 
-// Validate a frontend constant against its hardware range [0, upper].
-int64_t checkSyncRange(int64_t value, int64_t upper, const char *what) {
-  if (value < 0 || value > upper)
+// Hardware ID limits and the frontend value that selects MODE.INTRA.
+constexpr int64_t kMaxEventId = 7;
+constexpr int64_t kMaxBlockFlagId = 15;
+constexpr int64_t kMaxCubeIntraBlockId = 31;
+constexpr int64_t kMaxVectorIntraBlockId = 15;
+constexpr int64_t kMaxBufferId = 31;
+constexpr int kSyncModeIntra = 3;
+
+// Validate a frontend constant against its hardware range [0, max_id].
+int64_t checkSyncRange(int64_t value, int64_t max_id, const char *what) {
+  if (value < 0 || value > max_id)
     throw std::invalid_argument(std::string(what) + " must be in [0, " +
-                                std::to_string(upper) + "]");
+                                std::to_string(max_id) + "]");
   return value;
 }
 
 // Preserve a static ID or a runtime i64 scalar ID.
-OpFoldResult getSyncId(TLABuilder &self, const py::object &id, int64_t upper,
-                       const char *name) {
-  if (py::isinstance<py::int_>(id) && !py::isinstance<py::bool_>(id))
+OpFoldResult getSyncId(TLABuilder &self, const py::object &id_value,
+                       int64_t max_id, const char *what) {
+  if (py::isinstance<py::int_>(id_value) &&
+      !py::isinstance<py::bool_>(id_value))
     return self.getBuilder().getI64IntegerAttr(
-        checkSyncRange(id.cast<int64_t>(), upper, name));
-  auto value = id.cast<Value>();
+        checkSyncRange(id_value.cast<int64_t>(), max_id, what));
+  auto value = id_value.cast<Value>();
   if (!value.getType().isInteger(64))
-    throw std::invalid_argument(std::string(name) + " must be an i64 scalar");
+    throw std::invalid_argument(std::string(what) + " must be an i64 scalar");
   return value;
 }
 
 template <typename Op>
 void createEventSync(TLABuilder &self, const std::string &pipe,
-                     const std::string &waitPipe, const py::object &eventId) {
-  auto id = getSyncId(self, eventId, 7, "event_id");
+                     const std::string &waitPipe, const py::object &event_id) {
+  auto id = getSyncId(self, event_id, kMaxEventId, "event_id");
   hivm::EventAttr staticId;
   Value dynamicId;
   if (auto attr = dyn_cast<Attribute>(id))
@@ -149,21 +210,150 @@ void createEventSync(TLABuilder &self, const std::string &pipe,
 
 // Cross-core set/wait are block-level synchronization: emit them with the
 // block instruction mode requested by the frontend and the core type of the
-// enclosing TLA scope.
-void createBlockSync(TLABuilder &self, const std::string &pipe, int64_t flag,
-                     hivm::SyncBlockInstrMode instrMode, bool isSet) {
+// enclosing TLA scope. INTRA uses direct A5 intra-block counters, which keep
+// their physical IDs instead of the automatic partner offset.
+void createBlockSync(TLABuilder &self, const std::string &pipe,
+                     const py::object &flag_id, int sync_mode, bool is_set) {
   auto &builder = self.getBuilder();
   auto *ctx = builder.getContext();
-  auto coreAttr = hivm::TCoreTypeAttr::get(ctx, enclosingCoreType(builder));
+  auto core = enclosingCoreType(builder);
+  auto coreAttr = hivm::TCoreTypeAttr::get(ctx, core);
   auto pipeAttr = getSyncPipe(builder, pipe);
-  auto flagAttr = builder.getI64IntegerAttr(checkSyncRange(flag, 15, "flag"));
-  auto modeAttr = hivm::SyncBlockInstrModeAttr::get(ctx, instrMode);
-  if (isSet)
-    self.create<hivm::SyncBlockSetOp>(coreAttr, pipeAttr, pipeAttr, flagAttr,
-                                      Value{}, modeAttr);
+  checkSyncRange(sync_mode, kSyncModeIntra, "sync mode");
+  if (sync_mode == kSyncModeIntra) {
+    const int64_t max_flag_id = core == hivm::TCoreType::CUBE
+                                    ? kMaxCubeIntraBlockId
+                                    : kMaxVectorIntraBlockId;
+    auto flag_id_attr = getSyncId(self, flag_id, max_flag_id, "flagid");
+    if (is_set)
+      self.create<hivm::SyncIntraBlockSetOp>(coreAttr, pipeAttr, flag_id_attr);
+    else
+      self.create<hivm::SyncIntraBlockWaitOp>(coreAttr, pipeAttr, flag_id_attr);
+    return;
+  }
+  auto flag_id_attr = getSyncId(self, flag_id, kMaxBlockFlagId, "flagid");
+  auto mode_attr = hivm::SyncBlockInstrModeAttr::get(
+      ctx, static_cast<hivm::SyncBlockInstrMode>(sync_mode));
+  if (is_set)
+    self.create<hivm::SyncBlockSetOp>(coreAttr, pipeAttr, pipeAttr,
+                                      flag_id_attr, Value{}, mode_attr);
   else
-    self.create<hivm::SyncBlockWaitOp>(coreAttr, pipeAttr, pipeAttr, flagAttr,
-                                       modeAttr);
+    self.create<hivm::SyncBlockWaitOp>(coreAttr, pipeAttr, pipeAttr,
+                                       flag_id_attr, mode_attr);
+}
+
+// Expand the TLA global barrier before handing IR to the affinity backend.
+// Delay until all scopes are known: ALL in a pure AIV kernel is different
+// from ALL in a mixed kernel, and a top-level mixed barrier needs both scopes.
+void lowerTlaSyncAll(ModuleOp module) {
+  auto *ctx = module.getContext();
+  auto moduleCore =
+      module->getAttrOfType<hivm::TModuleCoreTypeAttr>("hivm.module_core_type");
+  bool mixed = moduleCore &&
+               moduleCore.getModuleCoreType() == hivm::TModuleCoreType::MIX;
+  SmallVector<hivm::SyncBlockOp> barriers;
+  module.walk([&](hivm::SyncBlockOp op) { barriers.push_back(op); });
+  for (auto op : barriers) {
+    auto mode = op.getSyncBlockModeAttr().getSyncMode();
+    if (mode != hivm::SyncBlockMode::ALL &&
+        mode != hivm::SyncBlockMode::ALL_VECTOR)
+      throw std::invalid_argument("unexpected TLA global barrier mode");
+    OpBuilder builder(op);
+    auto loc = op.getLoc();
+    auto pipe = [&](hivm::PIPE value) {
+      return hivm::PipeAttr::get(ctx, value);
+    };
+    auto cube = hivm::TCoreTypeAttr::get(ctx, hivm::TCoreType::CUBE);
+    auto vector = hivm::TCoreTypeAttr::get(ctx, hivm::TCoreType::VECTOR);
+    auto inter = hivm::SyncBlockInstrModeAttr::get(
+        ctx, hivm::SyncBlockInstrMode::INTER_BLOCK_SYNCHRONIZATION);
+    auto intra = hivm::SyncBlockInstrModeAttr::get(
+        ctx, hivm::SyncBlockInstrMode::INTRA_BLOCK_SYNCHRONIZATION);
+    auto set = [&](hivm::TCoreTypeAttr target, hivm::PipeAttr src,
+                   hivm::PipeAttr dst, int64_t id,
+                   hivm::SyncBlockInstrModeAttr instrMode) {
+      builder.create<hivm::SyncBlockSetOp>(loc, target, src, dst,
+                                           builder.getI64IntegerAttr(id),
+                                           Value{}, instrMode);
+    };
+    auto wait = [&](hivm::TCoreTypeAttr target, hivm::PipeAttr src,
+                    hivm::PipeAttr dst, int64_t id,
+                    hivm::SyncBlockInstrModeAttr instrMode) {
+      builder.create<hivm::SyncBlockWaitOp>(
+          loc, target, src, dst, builder.getI64IntegerAttr(id), instrMode);
+    };
+    auto emit = [&](bool isCube) {
+      auto core = isCube ? cube : vector;
+      auto src = pipe(isCube ? hivm::PIPE::PIPE_FIX : hivm::PIPE::PIPE_MTE3);
+      auto dst = pipe(hivm::PIPE::PIPE_S);
+      builder.create<hivm::PipeBarrierOp>(loc, pipe(hivm::PIPE::PIPE_ALL));
+      if (mode == hivm::SyncBlockMode::ALL_VECTOR || !mixed) {
+        // Match HIVMDecomposeOp's default flags: ALL_VECTOR=14,
+        // ALL on a pure Cube=13 or Vector=12 kernel.
+        int64_t id = mode == hivm::SyncBlockMode::ALL_VECTOR ? 14
+                     : isCube                                ? 13
+                                                             : 12;
+        set(core, src, dst, id, inter);
+        wait(core, src, dst, id, inter);
+      } else if (isCube) {
+        wait(cube, pipe(hivm::PIPE::PIPE_MTE3), dst, 10, intra);
+        set(cube, src, dst, 13, inter);
+        wait(cube, src, dst, 13, inter);
+        set(cube, src, dst, 11, intra);
+      } else {
+        set(vector, src, dst, 10, intra);
+        wait(vector, pipe(hivm::PIPE::PIPE_FIX), dst, 11, intra);
+      }
+    };
+    std::optional<bool> enclosingCube;
+    for (Operation *parent = op->getParentOp(); parent;
+         parent = parent->getParentOp()) {
+      if (parent->hasAttr("hivm.vector_function"))
+        throw std::invalid_argument(
+            "sync_all must be outside SIMD/SIMT scopes");
+      if (!enclosingCube) {
+        if (auto core =
+                parent->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type"))
+          enclosingCube = core.getTcoretype() == hivm::TCoreType::CUBE;
+      }
+    }
+    if (mode == hivm::SyncBlockMode::ALL_VECTOR &&
+        enclosingCube.value_or(moduleCore && moduleCore.getModuleCoreType() ==
+                                                 hivm::TModuleCoreType::AIC))
+      throw std::invalid_argument("sync_all(False) requires a vector core");
+    if (mixed && !enclosingCube) {
+      auto emitScope = [&](bool isCube) {
+        OpBuilder::InsertionGuard guard(builder);
+        auto scope = builder.create<scope::ScopeOp>(loc, TypeRange{});
+        scope->setAttr("hivm.tcore_type", isCube ? cube : vector);
+        if (scope.getRegion().empty())
+          scope.getRegion().emplaceBlock();
+        builder.setInsertionPointToStart(&scope.getRegion().front());
+        emit(isCube);
+        builder.create<scope::ReturnOp>(loc);
+      };
+      if (mode == hivm::SyncBlockMode::ALL)
+        emitScope(true);
+      emitScope(false);
+    } else {
+      bool isCube =
+          enclosingCube.value_or(moduleCore && moduleCore.getModuleCoreType() ==
+                                                   hivm::TModuleCoreType::AIC);
+      emit(isCube);
+    }
+    op.erase();
+  }
+}
+
+template <typename Op>
+void createBufferSync(TLABuilder &self, const py::object &buf_id,
+                      const std::string &pipe, bool nonblocking) {
+  auto &builder = self.getBuilder();
+  // PR4478 buffer-sync ops identify the core by their pipe and no longer
+  // carry a TCoreTypeAttr. Keep the frontend pipe/core check for diagnostics.
+  self.create<Op>(getSyncPipe(builder, pipe),
+                  getSyncId(self, buf_id, kMaxBufferId, "bufid"),
+                  builder.getBoolAttr(nonblocking));
 }
 
 // vload/masked_store indices must be index-typed.
@@ -182,21 +372,60 @@ llvm::SmallVector<Value> toIndexValues(TLABuilder &self,
 
 // Zero-offset row-major memrefs stay identity: the canonical form, and the
 // only layout PointerCastOp's LLVM lowering accepts. Subview/reinterpret
-// results keep strided layouts via the dynamic-offset branch below.
+// results keep strided layouts via the dynamic-offset branch below. A dynamic
+// dim or stride can never prove compactness, so it forces a strided layout.
 MemRefLayoutAttrInterface tlaBufferLayout(MLIRContext *ctx,
                                           ArrayRef<int64_t> shape,
                                           ArrayRef<int64_t> strides,
                                           std::optional<int64_t> offset) {
   bool isIdentity = offset.has_value() && *offset == 0;
-  for (int64_t expectedStride = 1, i = shape.size(); i-- > 0;) {
-    if (shape[i] > 1 && strides[i] != expectedStride)
-      isIdentity = false;
-    expectedStride *= shape[i];
+  if (isIdentity) {
+    for (int64_t expectedStride = 1, i = shape.size(); i-- > 0;) {
+      if (ShapedType::isDynamic(shape[i]) ||
+          ShapedType::isDynamic(strides[i])) {
+        isIdentity = false;
+        break;
+      }
+      if (shape[i] > 1 && strides[i] != expectedStride) {
+        isIdentity = false;
+        break;
+      }
+      expectedStride *= shape[i];
+    }
   }
   if (isIdentity)
     return {};
   return StridedLayoutAttr::get(ctx, offset.value_or(ShapedType::kDynamic),
                                 strides);
+}
+
+// Index-typed foldable entry for subview/reinterpret_cast dims: a Python int
+// is a compile-time constant, anything else a runtime scalar.
+OpFoldResult toMixedDim(TLABuilder &self, const py::object &value) {
+  if (py::isinstance<py::int_>(value) && !py::isinstance<py::bool_>(value))
+    return self.getBuilder().getIndexAttr(value.cast<int64_t>());
+  auto dim = value.cast<Value>();
+  if (!dim.getType().isIndex())
+    dim =
+        self.create<arith::IndexCastOp>(self.getBuilder().getIndexType(), dim);
+  return dim;
+}
+
+// Runtime i64 shape/stride operand for tt.make_tensor_ptr: static entries
+// become i64 constants, dynamic entries must already be i64 scalars.
+Value toI64Dim(TLABuilder &self, const py::object &value) {
+  if (py::isinstance<py::int_>(value) && !py::isinstance<py::bool_>(value)) {
+    int64_t dim = value.cast<int64_t>();
+    if (dim <= 0)
+      throw std::invalid_argument(
+          "TLA GM view requires positive sizes and strides");
+    return self.create<arith::ConstantIntOp>(dim, 64);
+  }
+  auto dim = value.cast<Value>();
+  if (!dim.getType().isInteger(64))
+    throw std::invalid_argument(
+        "TLA GM view dynamic sizes and strides must be i64 scalars");
+  return dim;
 }
 
 void checkDmaBuffers(Value src, Value dst) {
@@ -288,9 +517,57 @@ Value applySimdMode(TLABuilder &self, Value result, Value mask,
       .getResult();
 }
 
+struct TLAKernelFeatures {
+  bool hasIntraCoreSync = false;
+  bool hasCrossCoreSync = false;
+  bool hasUnitFlag = false;
+  bool hasMultiBuffer = false;
+  bool usesPipeline = false;
+  std::optional<bool> pipelinePreload;
+};
+
+TLAKernelFeatures getTLAKernelFeatures(ModuleOp module) {
+  TLAKernelFeatures features;
+  if (auto mode = module->getAttrOfType<IntegerAttr>("tla.pipeline")) {
+    features.usesPipeline = true;
+    features.pipelinePreload = mode.getInt() != 0;
+  }
+  module.walk([&](Operation *op) {
+    features.hasIntraCoreSync |=
+        isa<hivm::SetFlagOp, hivm::WaitFlagOp, hivm::PipeBarrierOp,
+            hivm::GetBufOp, hivm::RlsBufOp>(op);
+    features.hasCrossCoreSync |=
+        isa<hivm::SyncBlockOp, hivm::SyncBlockSetOp, hivm::SyncBlockWaitOp,
+            hivm::SyncIntraBlockSetOp, hivm::SyncIntraBlockWaitOp>(op);
+    features.hasMultiBuffer |=
+        isa<annotation::MarkOp>(op) && op->hasAttr(hivm::MultiBufferAttr::name);
+    features.usesPipeline |=
+        isa<scf::ForOp>(op) && op->hasAttr(hivm::CVPipelinedLoopAttr::name);
+    if (auto flagged = dyn_cast<hivm::UnitFlagEnabledInterface>(op)) {
+      if (auto modes = flagged.getUnitFlagModes())
+        features.hasUnitFlag |=
+            llvm::any_of(*modes, [](hivm::UnitFlagAttr attr) {
+              auto mode = attr.getUnitFlag();
+              return mode == hivm::UNIT_FLAG::ENABLED_WITH_UPDATE ||
+                     mode == hivm::UNIT_FLAG::ENABLED_WITHOUT_UPDATE;
+            });
+    }
+  });
+  return features;
+}
+
 } // namespace
 
 void init_tla_builder(py::module &&m) {
+  py::class_<TLAKernelFeatures>(m, "TLAKernelFeatures", py::module_local())
+      .def_readonly("has_intra_core_sync", &TLAKernelFeatures::hasIntraCoreSync)
+      .def_readonly("has_cross_core_sync", &TLAKernelFeatures::hasCrossCoreSync)
+      .def_readonly("has_unit_flag", &TLAKernelFeatures::hasUnitFlag)
+      .def_readonly("has_multi_buffer", &TLAKernelFeatures::hasMultiBuffer)
+      .def_readonly("uses_pipeline", &TLAKernelFeatures::usesPipeline)
+      .def_readonly("pipeline_preload", &TLAKernelFeatures::pipelinePreload);
+  m.def("get_tla_kernel_features", &getTLAKernelFeatures, py::arg("module"));
+  m.def("lower_tla_sync_all", &lowerTlaSyncAll, py::arg("module"));
   py::class_<TLABuilder, AscendNPUIROpBuilder>(
       m, "tla_builder", py::module_local(), py::dynamic_attr())
       .def(py::init<MLIRContext *, std::string, std::string>(),
@@ -310,59 +587,137 @@ void init_tla_builder(py::module &&m) {
           "create_tla_barrier",
           [](TLABuilder &self, const std::string &pipe) {
             self.create<hivm::PipeBarrierOp>(
-                getSyncPipe(self.getBuilder(), pipe));
+                getSyncPipe(self.getBuilder(), pipe, /*allowAll=*/true));
           },
           py::arg("pipe"))
       .def(
           "create_tla_set_flag",
           [](TLABuilder &self, const std::string &pipe,
-             const std::string &waitPipe, const py::object &eventId) {
-            createEventSync<hivm::SetFlagOp>(self, pipe, waitPipe, eventId);
+             const std::string &waitPipe, const py::object &event_id) {
+            createEventSync<hivm::SetFlagOp>(self, pipe, waitPipe, event_id);
           },
           py::arg("pipe"), py::arg("wait_pipe"), py::arg("event_id"))
       .def(
           "create_tla_wait_flag",
           [](TLABuilder &self, const std::string &pipe,
-             const std::string &waitPipe, const py::object &eventId) {
-            createEventSync<hivm::WaitFlagOp>(self, pipe, waitPipe, eventId);
+             const std::string &waitPipe, const py::object &event_id) {
+            createEventSync<hivm::WaitFlagOp>(self, pipe, waitPipe, event_id);
           },
           py::arg("pipe"), py::arg("wait_pipe"), py::arg("event_id"))
       // Hardware global barrier: AIV-only (false) or all AIC/AIV (true).
       .def(
           "create_tla_sync_all",
-          [](TLABuilder &self, bool allCores) {
+          [](TLABuilder &self, bool all_cores) {
             auto *ctx = self.getBuilder().getContext();
             auto pipeAll = hivm::PipeAttr::get(ctx, hivm::PIPE::PIPE_ALL);
             auto syncMode = hivm::SyncBlockModeAttr::get(
-                ctx, allCores ? hivm::SyncBlockMode::ALL
-                              : hivm::SyncBlockMode::ALL_VECTOR);
+                ctx, all_cores ? hivm::SyncBlockMode::ALL
+                               : hivm::SyncBlockMode::ALL_VECTOR);
             self.create<hivm::SyncBlockOp>(
                 syncMode, IntegerAttr{}, Value{},
-                allCores ? pipeAll : hivm::PipeAttr{}, pipeAll);
+                all_cores ? pipeAll : hivm::PipeAttr{}, pipeAll);
           },
           py::arg("all_cores"))
-      // FFTS cross-core modes 0..2.
+      // Logical block modes 0..2 and mode 3 for one physical A5 counter.
       .def(
           "create_tla_block_set_flag",
-          [](TLABuilder &self, int mode, const std::string &pipe,
-             int64_t flag) {
-            createBlockSync(self, pipe, flag,
-                            static_cast<hivm::SyncBlockInstrMode>(
-                                checkSyncRange(mode, 2, "sync mode")),
-                            /*isSet=*/true);
+          [](TLABuilder &self, int sync_mode, const std::string &pipe,
+             const py::object &flag_id) {
+            createBlockSync(self, pipe, flag_id, sync_mode, /*is_set=*/true);
           },
-          py::arg("mode"), py::arg("pipe"), py::arg("flag"))
+          py::arg("mode"), py::arg("pipe"), py::arg("flag_id"))
       .def(
           "create_tla_block_wait_flag",
-          [](TLABuilder &self, int mode, const std::string &pipe,
-             int64_t flag) {
-            createBlockSync(self, pipe, flag,
-                            static_cast<hivm::SyncBlockInstrMode>(
-                                checkSyncRange(mode, 2, "sync mode")),
-                            /*isSet=*/false);
+          [](TLABuilder &self, int sync_mode, const std::string &pipe,
+             const py::object &flag_id) {
+            createBlockSync(self, pipe, flag_id, sync_mode, /*is_set=*/false);
           },
-          py::arg("mode"), py::arg("pipe"), py::arg("flag"))
+          py::arg("mode"), py::arg("pipe"), py::arg("flag_id"))
+      // A5 buffer synchronization tokens.
+      .def(
+          "create_tla_mutex_lock",
+          [](TLABuilder &self, const py::object &buf_id,
+             const std::string &pipe, bool nonblocking) {
+            createBufferSync<hivm::GetBufOp>(self, buf_id, pipe, nonblocking);
+          },
+          py::arg("buf_id"), py::arg("pipe"), py::arg("nonblocking") = false)
+      .def(
+          "create_tla_mutex_unlock",
+          [](TLABuilder &self, const py::object &buf_id,
+             const std::string &pipe, bool nonblocking) {
+            createBufferSync<hivm::RlsBufOp>(self, buf_id, pipe, nonblocking);
+          },
+          py::arg("buf_id"), py::arg("pipe"), py::arg("nonblocking") = false)
       // SIMD vector-register ops (AVE dialect, ave.hir.*).
+      .def(
+          "create_simd_vgather",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             Value index, Value mask, py::object elem, int32_t lanes) -> Value {
+            auto &builder = self.getBuilder();
+            auto vecTy = VectorType::get(
+                {lanes}, resolveSimdElementType(builder.getContext(), elem));
+            auto indicesIdx = toIndexValues(self, indices);
+            return self
+                .create<hivmave::VFGatherOp>(vecTy, ptr, ValueRange(indicesIdx),
+                                             index, mask)
+                .getResult();
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("index"), py::arg("mask"),
+          py::arg("elem"), py::arg("lanes"))
+      .def(
+          "create_simd_pst",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices, Value val,
+             const std::string &pb) {
+            auto &builder = self.getBuilder();
+            auto *ctx = builder.getContext();
+            auto pbEnum = hivmave::symbolizeFunctionDistType(pb);
+            if (!pbEnum || (pb != "pb8" && pb != "pb16" && pb != "pb32"))
+              throw std::invalid_argument("invalid predicate store density");
+            if (indices.size() != 1)
+              throw std::invalid_argument(
+                  "predicate store needs one byte offset");
+            auto indicesIdx = toIndexValues(self, indices);
+            ptr = predicateByteView(self, ptr, indicesIdx.front());
+            Value zero = self.create<arith::ConstantIndexOp>(0);
+            Value mask = self.create<hivmave::VFPgeOp>(
+                val.getType(), hivmave::PgePattern::ALL);
+            auto op = self.create<hivmave::VFMaskedStoreOp>(
+                hivmave::StoreDistAttr::get(ctx, hivmave::StoreDist::NORM_B8),
+                ptr, ValueRange{zero}, mask, val);
+            op->setAttr("functionType",
+                        hivmave::FunctionDistTypeAttr::get(ctx, *pbEnum));
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("val"), py::arg("pb"))
+      .def(
+          "create_simd_pld",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             int32_t lanes, const std::string &dist,
+             const std::string &pb) -> Value {
+            auto &builder = self.getBuilder();
+            auto *ctx = builder.getContext();
+            auto distEnum = hivmave::symbolizeLoadDist(dist);
+            auto pbEnum = hivmave::symbolizeFunctionDistType(pb);
+            if (!distEnum || !pbEnum ||
+                (dist != "NORM" && dist != "US" && dist != "DS") ||
+                (pb != "pb8" && pb != "pb16" && pb != "pb32"))
+              throw std::invalid_argument(
+                  "invalid predicate load distribution");
+            if (indices.size() != 1)
+              throw std::invalid_argument(
+                  "predicate load needs one byte offset");
+            auto vecTy = VectorType::get({lanes}, builder.getI1Type());
+            auto indicesIdx = toIndexValues(self, indices);
+            ptr = predicateByteView(self, ptr, indicesIdx.front());
+            Value zero = self.create<arith::ConstantIndexOp>(0);
+            auto op = self.create<hivmave::VFLoadOp>(
+                vecTy, hivmave::LoadDistAttr::get(ctx, *distEnum), ptr,
+                ValueRange{zero});
+            op->setAttr("functionType",
+                        hivmave::FunctionDistTypeAttr::get(ctx, *pbEnum));
+            return op.getResult(0);
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("lanes"), py::arg("dist"),
+          py::arg("pb"))
       .def(
           "create_simd_vlds",
           [](TLABuilder &self, Value &ptr, std::vector<Value> &indices,
@@ -420,6 +775,9 @@ void init_tla_builder(py::module &&m) {
             } else if (kind == "or") {
               result = self.create<hivmave::VFOrOp>(resTy, lhs, rhs, mask)
                            .getResult();
+            } else if (kind == "and") {
+              result = self.create<hivmave::VFAndOp>(resTy, lhs, rhs, mask)
+                           .getResult();
             } else if (kind == "div") {
               result = self.create<hivmave::VFDivOp>(resTy, lhs, rhs, mask)
                            .getResult();
@@ -437,6 +795,15 @@ void init_tla_builder(py::module &&m) {
                            .getResult();
             } else if (kind == "mod") {
               result = self.create<hivmave::VFModOp>(resTy, lhs, rhs, mask)
+                           .getResult();
+            } else if (kind == "absdiff") {
+              result = self.create<hivmave::VFAbsDiffOp>(resTy, lhs, rhs, mask)
+                           .getResult();
+            } else if (kind == "expdif") {
+              result = self.create<hivmave::VFExpdifOp>(resTy, lhs, rhs, mask)
+                           .getResult();
+            } else if (kind == "prelu") {
+              result = self.create<hivmave::VFPReluOp>(resTy, lhs, rhs, mask)
                            .getResult();
             } else if (kind == "max") {
               result = self.create<hivmave::VFMaxOp>(resTy, lhs, rhs, mask)
@@ -466,6 +833,57 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("kind"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"),
           py::arg("mode") = "zeroing")
+      // Elementwise vector-vector shift (``ave.hir.vshl`` / ``ave.hir.vshr``).
+      // ``sign`` selects arithmetic vs logical right shift; ``mode`` is
+      // consumed by applySimdMode.
+      .def(
+          "create_simd_shift",
+          [](TLABuilder &self, std::string &kind, Value &lhs, Value &rhs,
+             Value &mask, bool sign, std::string mode) -> Value {
+            auto &builder = self.getBuilder();
+            auto loc = self.getLastLoc();
+            auto signVal = builder.create<arith::ConstantOp>(
+                loc, builder.getBoolAttr(sign));
+            auto resTy = lhs.getType();
+            Value result;
+            if (kind == "shl") {
+              result = self.create<hivmave::VFShlOp>(resTy, lhs, rhs, mask,
+                                                     signVal)
+                           .getResult();
+            } else if (kind == "shr") {
+              result = self.create<hivmave::VFShrOp>(resTy, lhs, rhs, mask,
+                                                     signVal)
+                           .getResult();
+            } else {
+              throw std::invalid_argument("unknown shift kind: " + kind);
+            }
+            return applySimdMode(self, result, mask, mode);
+          },
+          py::arg("kind"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"),
+          py::arg("sign"), py::arg("mode") = "zeroing")
+      // Elementwise vector-scalar left shift (``ave.hir.vshls``).  The scalar
+      // must already have the vector element type; ``mode`` is consumed by
+      // applySimdMode.
+      .def(
+          "create_simd_shift_scalar",
+          [](TLABuilder &self, std::string &kind, Value &vec, Value &scalar,
+             Value &mask, bool sign, std::string mode) -> Value {
+            auto &builder = self.getBuilder();
+            auto loc = self.getLastLoc();
+            auto signVal = builder.create<arith::ConstantOp>(
+                loc, builder.getBoolAttr(sign));
+            auto resTy = vec.getType();
+            if (kind != "shls") {
+              throw std::invalid_argument("unknown scalar shift kind: " + kind);
+            }
+            auto result = self
+                              .create<hivmave::VFShlsOp>(resTy, vec, scalar,
+                                                         mask, signVal)
+                              .getResult();
+            return applySimdMode(self, result, mask, mode);
+          },
+          py::arg("kind"), py::arg("vec"), py::arg("scalar"),
+          py::arg("mask"), py::arg("sign"), py::arg("mode") = "zeroing")
       // Elementwise vector-scalar (``ave.hir.vmaxs`` / ``ave.hir.vsmaxs`` /
       // ``ave.hir.vumaxs``): the scalar operand must have exactly the vector's
       // element type (AVE_VecScalarOp::TypesMatchWith), so the Python frontend
@@ -493,6 +911,9 @@ void init_tla_builder(py::module &&m) {
                            .getResult();
             } else if (kind == "umins") {
               result = self.create<hivmave::VMinsUIOp>(resTy, vec, scalar, mask)
+                           .getResult();
+            } else if (kind == "lrelus") {
+              result = self.create<hivmave::VFLRelusOp>(resTy, vec, scalar, mask)
                            .getResult();
             } else {
               throw std::invalid_argument("unknown vector-scalar kind: " +
@@ -528,24 +949,80 @@ void init_tla_builder(py::module &&m) {
           py::arg("kind"), py::arg("vec"), py::arg("scalar"), py::arg("mask"))
       .def(
           "create_simd_vfma",
-          [](TLABuilder &self, Value &acc, Value &lhs, Value &rhs,
-             Value &mask) -> Value {
+          [](TLABuilder &self, Value &acc, Value &lhs, Value &rhs, Value &mask,
+             std::string mode) -> Value {
             auto resTy = acc.getType();
             // vmula %acc, %lhs, %rhs, %mask == acc + lhs * rhs
             auto op =
                 self.create<hivmave::VFMulaOp>(resTy, acc, lhs, rhs, mask);
-            return op.getResult();
+            return applySimdMode(self, op.getResult(), mask, mode);
           },
-          py::arg("acc"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"))
+          py::arg("acc"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"),
+          py::arg("mode") = "zeroing")
+      .def(
+          "create_simd_preg_binary",
+          [](TLABuilder &self, std::string &kind, Value &lhs, Value &rhs,
+             Value &mask) -> Value {
+            auto resTy = lhs.getType();
+            auto &builder = self.getBuilder();
+            auto mwAttr = hivmave::MaskWidthAttr::get(builder.getContext(),
+                                                      hivmave::MaskWidth::B8);
+            if (kind == "and")
+              return self
+                  .create<hivmave::PregAndOp>(resTy, mwAttr, lhs, rhs, mask)
+                  .getResult();
+            if (kind == "or")
+              return self
+                  .create<hivmave::PregOrOp>(resTy, mwAttr, lhs, rhs, mask)
+                  .getResult();
+            if (kind == "xor")
+              return self
+                  .create<hivmave::PregXorOp>(resTy, mwAttr, lhs, rhs, mask)
+                  .getResult();
+            throw std::invalid_argument("unknown preg binary kind: " + kind);
+          },
+          py::arg("kind"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"))
+      .def(
+          "create_simd_preg_unary",
+          [](TLABuilder &self, std::string &kind, Value &src,
+             Value &mask) -> Value {
+            auto resTy = src.getType();
+            auto &builder = self.getBuilder();
+            auto mwAttr = hivmave::MaskWidthAttr::get(builder.getContext(),
+                                                      hivmave::MaskWidth::B8);
+            if (kind == "not")
+              return self.create<hivmave::PregNotOp>(resTy, mwAttr, src, mask)
+                  .getResult();
+            throw std::invalid_argument("unknown preg unary kind: " + kind);
+          },
+          py::arg("kind"), py::arg("src"), py::arg("mask"))
+      .def(
+          "create_simd_vmull",
+          [](TLABuilder &self, Value &src1, Value &src2,
+             Value &mask) -> py::tuple {
+            auto ty = src1.getType();
+            auto op = self.create<hivmave::VFVMULLOp>(ty, ty, src1, src2, mask);
+            return py::make_tuple(op.getRes1(), op.getRes2());
+          },
+          py::arg("src1"), py::arg("src2"), py::arg("mask"))
       .def(
           "create_simd_unary",
           [](TLABuilder &self, std::string &kind, Value &src, Value &mask,
              std::string mode) -> Value {
             auto resTy = src.getType();
             Value result;
-            if (kind == "neg") {
+            if (kind == "abs") {
+              result =
+                  self.create<hivmave::VFAbsOp>(resTy, src, mask).getResult();
+            } else if (kind == "neg") {
               result =
                   self.create<hivmave::VFNegOp>(resTy, src, mask).getResult();
+            } else if (kind == "not") {
+              result =
+                  self.create<hivmave::VFNotOp>(resTy, src, mask).getResult();
+            } else if (kind == "relu") {
+              result =
+                  self.create<hivmave::VFReluOp>(resTy, src, mask).getResult();
             } else if (kind == "sqrt") {
               result =
                   self.create<hivmave::VFSqrtOp>(resTy, src, mask).getResult();
@@ -555,6 +1032,9 @@ void init_tla_builder(py::module &&m) {
             } else if (kind == "exp") {
               result =
                   self.create<hivmave::VFExpOp>(resTy, src, mask).getResult();
+            } else if (kind == "ln") {
+              result =
+                  self.create<hivmave::VFLnOp>(resTy, src, mask).getResult();
             } else {
               throw std::invalid_argument("unknown unary kind: " + kind);
             }
@@ -713,10 +1193,63 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("scalar"), py::arg("elem_tag"), py::arg("lanes"),
           py::arg("mask"), py::arg("mode") = "zeroing")
+      // Pack b16 -> b8 or b32 -> b16 into one half of the destination.
+      // ``part`` is 0 for part_even and 1 for part_odd; the unwritten half is
+      // left unspecified by a single call.
+      .def(
+          "create_simd_vpack",
+          [](TLABuilder &self, Value &src, int32_t part,
+             py::object out_elem_tag, int32_t out_lanes) -> Value {
+            auto &builder = self.getBuilder();
+            auto *ctx = builder.getContext();
+            auto outElemTy = resolveSimdElementType(ctx, out_elem_tag);
+            auto outTy = VectorType::get({out_lanes}, outElemTy);
+            auto op = self.create<hivmave::VFVpackOp>(
+                outTy, src, builder.getI32IntegerAttr(part));
+            return op.getResult();
+          },
+          py::arg("src"), py::arg("part"), py::arg("out_elem_tag"),
+          py::arg("out_lanes"))
+      .def(
+          "create_simd_vunpack",
+          [](TLABuilder &self, Value src, py::object elem,
+             const std::string &part, const std::string &pp,
+             bool isSigned) -> Value {
+            auto &builder = self.getBuilder();
+            auto *ctx = builder.getContext();
+            auto srcTy = cast<VectorType>(src.getType());
+            auto elemTy = resolveSimdElementType(ctx, elem);
+            auto outTy = VectorType::get(
+                {2048 / elemTy.getIntOrFloatBitWidth()}, elemTy);
+            auto partEnum = hivmave::symbolizeVCVT_PartType(part);
+            auto ppEnum = hivmave::symbolizeVCVT_PPType(pp);
+            if (!partEnum || !ppEnum)
+              throw std::invalid_argument("invalid integer extension selector");
+            // Extension predicates are indexed by source position. Apply the
+            // user-supplied output mask with vsel in the Python frontend.
+            auto maskTy = VectorType::get({srcTy.getNumElements()},
+                                          builder.getI1Type());
+            Value mask = self.create<hivmave::VFPgeOp>(
+                maskTy, hivmave::PgePattern::ALL);
+            bool factor4 = srcTy.getElementType().isInteger(8) &&
+                           elemTy.isInteger(32);
+            auto partAttr = factor4 ? hivmave::VCVT_PartTypeAttr{}
+                                   : hivmave::VCVT_PartTypeAttr::get(ctx, *partEnum);
+            auto ppAttr = factor4 ? hivmave::VCVT_PPTypeAttr::get(ctx, *ppEnum)
+                                 : hivmave::VCVT_PPTypeAttr{};
+            if (isSigned)
+              return self.create<hivmave::VFExtSIOp>(
+                  outTy, src, mask, partAttr, ppAttr).getResult();
+            return self.create<hivmave::VFExtUIOp>(
+                outTy, src, mask, partAttr, ppAttr).getResult();
+          },
+          py::arg("src"), py::arg("elem"), py::arg("part"), py::arg("pp"),
+          py::arg("signed"))
       .def(
           "create_simd_vcvt",
           [](TLABuilder &self, std::string &kind, Value &src, Value &mask,
-             py::object out_elem_tag, std::string &part) -> Value {
+             py::object out_elem_tag, std::string &part, std::string &round,
+             bool sat, std::string mode) -> Value {
             auto &builder = self.getBuilder();
             auto *ctx = builder.getContext();
             auto outElemTy = resolveSimdElementType(ctx, out_elem_tag);
@@ -725,30 +1258,91 @@ void init_tla_builder(py::module &&m) {
               throw std::invalid_argument("unknown vcvt part: " + part);
             }
             auto partAttr = hivmave::VCVT_PartTypeAttr::get(ctx, *partEnum);
+            auto roundEnum = hivm::symbolizeRoundMode(round);
+            if (!roundEnum) {
+              throw std::invalid_argument("unknown vcvt round mode: " + round);
+            }
+            auto roundAttr = hivm::RoundModeAttr::get(ctx, *roundEnum);
             auto srcTy = cast<VectorType>(src.getType());
+            int64_t totalBits = srcTy.getNumElements() *
+                                srcTy.getElementType().getIntOrFloatBitWidth();
+            auto outVecTy = VectorType::get(
+                {totalBits / outElemTy.getIntOrFloatBitWidth()}, outElemTy);
+            Value result;
             if (kind == "truncf") {
               // vtruncf narrows keeping the total register bits: f32 (64) ->
               // bf16/f16 (128) -> f8 (256), lane count = total_bits / out_bits.
-              int64_t totalBits =
-                  srcTy.getNumElements() *
-                  srcTy.getElementType().getIntOrFloatBitWidth();
-              auto outVecTy = VectorType::get(
-                  {totalBits / outElemTy.getIntOrFloatBitWidth()}, outElemTy);
-              return self
-                  .create<hivmave::VFTruncFOp>(
-                      outVecTy, src, mask,
-                      hivm::RoundModeAttr::get(ctx, hivm::RoundMode::ROUND),
-                      builder.getBoolAttr(true), partAttr)
-                  .getResult();
+              result = self.create<hivmave::VFTruncFOp>(
+                               outVecTy, src, mask, roundAttr,
+                               builder.getBoolAttr(sat), partAttr,
+                               hivmave::VCVT_ModeTypeAttr{})
+                           .getResult();
+            } else if (kind == "extf") {
+              // vextf widens to a full register: 2048 / out_bits lanes.
+              result = self.create<hivmave::VFExtFOp>(
+                               outVecTy, src, mask, partAttr,
+                               hivmave::VCVT_ModeTypeAttr{})
+                           .getResult();
+            } else if (kind == "s2f" || kind == "u2f") {
+              // int -> fp conversion, sign chosen by the source dtype.
+              // ISA attribute rules (VFSIntToFpOp/VFUIntToFpOp::verify):
+              //   i8->f16, i16->f32, u8->f16 : part set, rnd unset
+              //   i16->f16, i32->f32         : part unset, rnd set
+              //   i64->f32, u64->f32         : part set, rnd set
+              unsigned sb = srcTy.getElementType().getIntOrFloatBitWidth();
+              bool outF16 = outElemTy.isF16();
+              if (kind == "s2f") {
+                auto op = self.create<hivmave::VFSIntToFpOp>(
+                    outVecTy, src, mask, roundAttr, partAttr);
+                bool needPart =
+                    (sb == 8 && outF16) || (sb == 16 && !outF16) || sb == 64;
+                bool needRnd = !needPart || sb == 64;
+                if (!needPart)
+                  op.removePartAttr();
+                if (!needRnd)
+                  op.removeRndAttr();
+                result = op.getResult();
+              } else {
+                auto op = self.create<hivmave::VFUIntToFpOp>(
+                    outVecTy, src, mask, roundAttr, partAttr);
+                bool needRnd = sb == 64;
+                if (!needRnd)
+                  op.removeRndAttr();
+                result = op.getResult();
+              }
+            } else if (kind == "f2s" || kind == "f2u") {
+              // fp -> int conversion with rounding and saturation.
+              // ISA attribute rules (VFFpToSIntOp::verify):
+              //   f32->i32, f16->i16 : part unset, sat set
+              //   f16->i32           : part set,   sat unset
+              //   everything else    : part set,   sat set
+              auto satAttr = builder.getBoolAttr(sat);
+              if (kind == "f2s") {
+                auto op = self.create<hivmave::VFFpToSIntOp>(
+                    outVecTy, src, mask, roundAttr, satAttr, partAttr);
+                unsigned sb = srcTy.getElementType().getIntOrFloatBitWidth();
+                bool sameWidth = sb == outElemTy.getIntOrFloatBitWidth();
+                if (sameWidth)
+                  op.removePartAttr();
+                else if (srcTy.getElementType().isF16() &&
+                         outElemTy.isInteger(32))
+                  op.removeSatAttr();
+                result = op.getResult();
+              } else {
+                // vfptoui only supports f16 -> u8 (part/rnd/sat all set).
+                result = self.create<hivmave::VFFpToUIntOp>(outVecTy, src, mask,
+                                                            roundAttr, satAttr,
+                                                            partAttr)
+                             .getResult();
+              }
+            } else {
+              throw std::invalid_argument("unknown vcvt kind: " + kind);
             }
-            // vextf widens to a full register: 2048 / out_bits lanes.
-            auto outVecTy = VectorType::get(
-                {2048 / outElemTy.getIntOrFloatBitWidth()}, outElemTy);
-            return self.create<hivmave::VFExtFOp>(outVecTy, src, mask, partAttr)
-                .getResult();
+            return applySimdMode(self, result, mask, mode);
           },
           py::arg("kind"), py::arg("src"), py::arg("mask"),
-          py::arg("out_elem_tag"), py::arg("part"))
+          py::arg("out_elem_tag"), py::arg("part"), py::arg("round") = "round",
+          py::arg("sat") = true, py::arg("mode") = "zeroing")
       .def(
           "create_simd_pge",
           [](TLABuilder &self, std::string &pattern, int32_t lanes) -> Value {
@@ -838,10 +1432,14 @@ void init_tla_builder(py::module &&m) {
                throw std::invalid_argument(
                    "TLA buffer shape and strides must have the same rank");
              auto *ctx = self.getBuilder().getContext();
+             // Match converted Triton pointer arguments. GM is inferred from
+             // the argument/view chain; local buffers retain explicit spaces.
              return MemRefType::get(
                  shape, elementType,
                  tlaBufferLayout(ctx, shape, strides, offset),
-                 hivm::AddressSpaceAttr::get(ctx, *memorySpace));
+                 *memorySpace == hivm::AddressSpace::GM
+                     ? Attribute{}
+                     : hivm::AddressSpaceAttr::get(ctx, *memorySpace));
            })
       .def("create_tla_alloc",
            [](TLABuilder &self, Type type) -> Value {
@@ -851,21 +1449,97 @@ void init_tla_builder(py::module &&m) {
                    "TLA alloc requires a static memref");
              return self.create<memref::AllocOp>(memrefType).getResult();
            })
-      .def("create_tla_bind",
-           [](TLABuilder &self, Value addr, Type type) -> Value {
-             auto memrefType = dyn_cast<MemRefType>(type);
-             if (!memrefType)
-               throw std::invalid_argument("TLA bind requires a memref type");
-             if (!addr.getType().isInteger(64))
-               throw std::invalid_argument(
-                   "TLA bind requires an i64 address operand");
-             return self.create<hivm::PointerCastOp>(memrefType, addr)
+      .def("create_tla_load_scalar",
+           [](TLABuilder &self, Value source) {
+             Value zero = self.create<arith::ConstantIndexOp>(0);
+             SmallVector<Value> indices(
+                 cast<MemRefType>(source.getType()).getRank(), zero);
+             return self.create<memref::LoadOp>(source, ValueRange(indices))
                  .getResult();
+           })
+      .def("create_tla_store_scalar",
+           [](TLABuilder &self, Value dest, Value value) {
+             Value zero = self.create<arith::ConstantIndexOp>(0);
+             SmallVector<Value> indices(
+                 cast<MemRefType>(dest.getType()).getRank(), zero);
+             self.create<memref::StoreOp>(value, dest, ValueRange(indices));
+           })
+      // Scalar broadcast into one buffer: hivm.hir.vbrc with an empty
+      // broadcast_dims array, which the verifier requires for scalar sources.
+      // Only UB is enabled: InferCoreType maps UB to VECTOR and rejects other
+      // spaces for this op.
+      .def(
+          "create_tla_fill",
+          [](TLABuilder &self, Value dst, Value value) {
+            auto dstType = dyn_cast<MemRefType>(dst.getType());
+            if (!dstType)
+              throw std::invalid_argument(
+                  "TLA fill requires a memref destination");
+            if (hivm::getOptionalHIVMAddressSpace(dstType) !=
+                hivm::AddressSpace::UB)
+              throw std::invalid_argument(
+                  "TLA fill requires a UB destination buffer");
+            if (isa<ShapedType>(value.getType()))
+              throw std::invalid_argument("TLA fill requires a scalar value");
+            if (value.getType() != dstType.getElementType())
+              throw std::invalid_argument(
+                  "TLA fill scalar type must match the destination element "
+                  "type");
+            self.create<hivm::VBrcOp>(TypeRange{}, value, dst);
+          },
+          py::arg("dst"), py::arg("value"))
+      .def("create_tla_pointer_view",
+           [](TLABuilder &self, Value source, Value linear, Type resultType,
+              const std::vector<py::object> &sizes,
+              const std::vector<py::object> &strides) -> Value {
+             auto type = dyn_cast<MemRefType>(resultType);
+             auto ptrType = dyn_cast<triton::PointerType>(source.getType());
+             if (!type || !ptrType || type.getRank() == 0 ||
+                 type.getMemorySpace() ||
+                 type.getElementType() != ptrType.getPointeeType() ||
+                 sizes.size() != static_cast<size_t>(type.getRank()) ||
+                 strides.size() != sizes.size())
+               throw std::invalid_argument("invalid TLA GM view type");
+             if (!linear.getType().isInteger(64))
+               throw std::invalid_argument(
+                   "TLA GM view requires an i64 element offset");
+             SmallVector<int64_t> staticStrides;
+             int64_t staticOffset;
+             if (failed(type.getStridesAndOffset(staticStrides, staticOffset)))
+               throw std::invalid_argument(
+                   "TLA GM view requires a strided layout");
+             // Put the full signed displacement in the scalar base. Block
+             // offsets are i32 and their standard lowering clamps negatives.
+             Value base =
+                 self.create<triton::AddPtrOp>(source.getType(), source, linear);
+             SmallVector<Value> shapeValues, strideValues, offsets;
+             SmallVector<int32_t> order;
+             auto &builder = self.getBuilder();
+             for (size_t i = 0; i < sizes.size(); ++i) {
+               shapeValues.push_back(toI64Dim(self, sizes[i]));
+               strideValues.push_back(toI64Dim(self, strides[i]));
+               offsets.push_back(self.create<arith::ConstantIntOp>(0, 32));
+               order.push_back(sizes.size() - 1 - i);
+             }
+             auto blockType =
+                 RankedTensorType::get(type.getShape(), type.getElementType());
+             auto blockPtrType = triton::PointerType::get(
+                 blockType, ptrType.getAddressSpace());
+             auto block = self.create<triton::MakeTensorPtrOp>(
+                 blockPtrType, base, shapeValues, strideValues, offsets,
+                 builder.getDenseI32ArrayAttr(order));
+             if (!type.hasStaticShape() ||
+                 llvm::any_of(staticStrides, ShapedType::isDynamic))
+               block->setAttr("tla.gm_view", builder.getUnitAttr());
+             auto bridge = self.create<UnrealizedConversionCastOp>(
+                 TypeRange{resultType}, ValueRange{block.getResult()});
+             bridge->setAttr("tla.gm_view", builder.getUnitAttr());
+             return bridge.getResult(0);
            })
       .def("create_tla_subview",
            [](TLABuilder &self, Value source, const std::vector<Value> &offsets,
-              const std::vector<int64_t> &sizes,
-              const std::vector<int64_t> &strides) -> Value {
+              const std::vector<py::object> &sizes,
+              const std::vector<py::object> &strides) -> Value {
              auto type = dyn_cast<MemRefType>(source.getType());
              if (!type || offsets.size() != type.getRank() ||
                  sizes.size() != offsets.size() ||
@@ -879,37 +1553,13 @@ void init_tla_builder(py::module &&m) {
                      self.getBuilder().getIndexType(), offset);
                mixedOffsets.push_back(offset);
              }
-             for (auto size : sizes)
-               mixedSizes.push_back(self.getBuilder().getIndexAttr(size));
-             for (auto stride : strides)
-               mixedStrides.push_back(self.getBuilder().getIndexAttr(stride));
+             for (const auto &size : sizes)
+               mixedSizes.push_back(toMixedDim(self, size));
+             for (const auto &stride : strides)
+               mixedStrides.push_back(toMixedDim(self, stride));
              return self
                  .create<memref::SubViewOp>(source, mixedOffsets, mixedSizes,
                                             mixedStrides)
-                 .getResult();
-           })
-      .def("create_tla_reinterpret_cast",
-           [](TLABuilder &self, Value source, Value offset,
-              const std::vector<int64_t> &sizes,
-              const std::vector<int64_t> &strides, Type resultType) -> Value {
-             if (!isa<MemRefType>(source.getType()) ||
-                 sizes.size() != strides.size())
-               throw std::invalid_argument(
-                   "TLA reinterpret_cast requires a memref source and matching "
-                   "sizes/strides");
-             if (!offset.getType().isIndex())
-               offset = self.create<arith::IndexCastOp>(
-                   self.getBuilder().getIndexType(), offset);
-             // resultType is strided<strides, offset: ?>: sizes/strides are
-             // static, only the linear offset is dynamic.
-             return self
-                 .create<memref::ReinterpretCastOp>(
-                     resultType, source, ValueRange{offset}, ValueRange{},
-                     ValueRange{},
-                     self.getBuilder().getDenseI64ArrayAttr(
-                         {ShapedType::kDynamic}),
-                     self.getBuilder().getDenseI64ArrayAttr(sizes),
-                     self.getBuilder().getDenseI64ArrayAttr(strides))
                  .getResult();
            })
       // memref.collapse_shape / expand_shape materialization (see
@@ -922,29 +1572,24 @@ void init_tla_builder(py::module &&m) {
       // Each explicit DMA binding materializes one native HIVM operation.
       .def(
           "create_tla_load",
-          [](TLABuilder &self, Value src, Value dst, const py::dict &attrs,
-             std::optional<Value> padValue, std::optional<Value> leftPadding,
-             std::optional<Value> rightPadding) {
+          [](TLABuilder &self, Value src, Value dst,
+             std::optional<Attribute> l2CacheCtrl) {
             checkDmaBuffers(src, dst);
             auto op = self.create<hivm::LoadOp>(
-                TypeRange{}, src, dst, hivm::PadModeAttr{},
-                padValue.value_or(Value{}),
-                dmaIndexOperand(self, leftPadding.value_or(Value{})),
-                dmaIndexOperand(self, rightPadding.value_or(Value{})));
-            setDmaAttrs(op, attrs);
+                TypeRange{}, src, dst, hivm::PadModeAttr{}, Value{}, Value{},
+                Value{});
+            if (l2CacheCtrl)
+              op->setAttr("eviction_policy", *l2CacheCtrl);
           },
-          py::arg("src"), py::arg("dst"), py::arg("attrs"),
-          py::arg("pad_value") = std::nullopt,
-          py::arg("left_padding_num") = std::nullopt,
-          py::arg("right_padding_num") = std::nullopt)
+          py::arg("src"), py::arg("dst"),
+          py::arg("l2_cache_ctrl") = std::nullopt)
       .def(
           "create_tla_store",
-          [](TLABuilder &self, Value src, Value dst, const py::dict &attrs) {
+          [](TLABuilder &self, Value src, Value dst) {
             checkDmaBuffers(src, dst);
-            auto op = self.create<hivm::StoreOp>(TypeRange{}, src, dst);
-            setDmaAttrs(op, attrs);
+            self.create<hivm::StoreOp>(TypeRange{}, src, dst);
           },
-          py::arg("src"), py::arg("dst"), py::arg("attrs"))
+          py::arg("src"), py::arg("dst"))
       .def(
           "create_tla_nd2nz",
           [](TLABuilder &self, Value src, Value dst, const py::dict &attrs) {
@@ -1034,6 +1679,25 @@ void init_tla_builder(py::module &&m) {
                  self.getBuilder().getBoolAttr(enable),
                  self.getBuilder().getI64IntegerAttr(idx));
            })
+      .def("create_tla_set_atomic",
+           [](TLABuilder &self, const std::string &kind, Type type) {
+             hivm::AtomicKind atomicKind;
+             if (kind == "none")
+               atomicKind = hivm::AtomicKind::NONE;
+             else if (kind == "add")
+               atomicKind = hivm::AtomicKind::ADD;
+             else if (kind == "max")
+               atomicKind = hivm::AtomicKind::MAX;
+             else if (kind == "min")
+               atomicKind = hivm::AtomicKind::MIN;
+             else
+               throw std::invalid_argument("unsupported TLA atomic kind: " + kind);
+             auto *ctx = self.getBuilder().getContext();
+             self.create<hivm::SetAtomicOp>(
+                 hivm::AtomicKindAttr::get(ctx, atomicKind),
+                 TypeAttr::get(type));
+           },
+           py::arg("kind"), py::arg("type"))
       .def("create_hivm_load",
            [](TLABuilder &self, Value src, Value dst) {
              checkDmaBuffers(src, dst);
@@ -1093,12 +1757,12 @@ void init_tla_builder(py::module &&m) {
           py::arg("src"), py::arg("dst"), py::arg("dma_mode"))
       // C = A x B (+C): A=(M,K)/B=(K,N) in L1, C in L0C (f32/i32).
       // init_condition clears L0C first (clear_accum), real_m/k/n are the
-      // actual tile sizes (arith.constant index); transpose_b sets UnitAttr.
+      // actual tile sizes (arith.constant index); transposes set UnitAttrs.
       .def(
           "create_hivm_mmadl1",
           [](TLABuilder &self, Value a, Value b, Value c, bool init_condition,
-             int64_t real_m, int64_t real_k, int64_t real_n, bool transpose_b,
-             std::optional<int32_t> unitFlagCtrl,
+             int64_t real_m, int64_t real_k, int64_t real_n, bool transposeA,
+             bool transposeB, std::optional<int32_t> unitFlagCtrl,
              std::optional<int64_t> unitFlagGroupId) {
             auto &builder = self.getBuilder();
             auto loc = self.getLastLoc();
@@ -1107,18 +1771,104 @@ void init_tla_builder(py::module &&m) {
             auto m = builder.create<arith::ConstantIndexOp>(loc, real_m);
             auto k = builder.create<arith::ConstantIndexOp>(loc, real_k);
             auto n = builder.create<arith::ConstantIndexOp>(loc, real_n);
-            auto bTrans = transpose_b ? builder.getUnitAttr() : UnitAttr{};
+            auto aTrans = transposeA ? builder.getUnitAttr() : UnitAttr{};
+            auto bTrans = transposeB ? builder.getUnitAttr() : UnitAttr{};
             auto op = self.create<hivm::MmadL1Op>(
                 TypeRange{}, a, b, init, m, k, n, c,
-                /*per_channel_bias=*/Value{}, /*a_transpose=*/UnitAttr{},
+                /*per_channel_bias=*/Value{}, /*a_transpose=*/aTrans,
                 /*b_transpose=*/bTrans, /*enable_HF32=*/UnitAttr{},
                 /*enable_I4=*/UnitAttr{});
             setUnitFlagAttrs(builder, op, unitFlagCtrl, unitFlagGroupId);
           },
           py::arg("a"), py::arg("b"), py::arg("c"), py::arg("init_condition"),
           py::arg("real_m"), py::arg("real_k"), py::arg("real_n"),
-          py::arg("transpose_b"), py::arg("unit_flag_ctrl") = std::nullopt,
+          py::arg("transpose_a") = false, py::arg("transpose_b") = false,
+          py::arg("unit_flag_ctrl") = std::nullopt,
           py::arg("unit_flag_group_id") = std::nullopt)
+      .def(
+          "create_hivm_mmadl0",
+          [](TLABuilder &self, Value a, Value b, Value c,
+             const py::object &initCondition, int64_t real_m, int64_t real_k,
+             int64_t real_n, std::optional<Value> bias, bool disableGemv,
+             std::optional<int32_t> unitFlagCtrl) {
+            auto &builder = self.getBuilder();
+            auto loc = self.getLastLoc();
+            auto boolConstant = [&](bool value) -> Value {
+              return builder.create<arith::ConstantOp>(
+                  loc, builder.getI1Type(), builder.getBoolAttr(value));
+            };
+            Value init;
+            if (py::isinstance<py::bool_>(initCondition))
+              init = boolConstant(initCondition.cast<bool>());
+            else
+              init = initCondition.cast<Value>();
+            if (!init || !init.getType().isInteger(1))
+              throw std::invalid_argument(
+                  "mmad_l0 init_condition must be a bool or scalar i1 value");
+            auto m = builder.create<arith::ConstantIndexOp>(loc, real_m);
+            auto k = builder.create<arith::ConstantIndexOp>(loc, real_k);
+            auto n = builder.create<arith::ConstantIndexOp>(loc, real_n);
+            auto op = self.create<hivm::MmadL0Op>(
+                TypeRange{}, a, b, m, k, n, c,
+                /*k_direction_align=*/boolConstant(false),
+                /*is_with_bias=*/boolConstant(bias.has_value()), init,
+                /*enable_HF32=*/UnitAttr{}, /*enable_I4=*/UnitAttr{},
+                bias.value_or(Value{}), builder.getBoolAttr(disableGemv));
+            setUnitFlagAttrs(builder, op, unitFlagCtrl, std::nullopt);
+          },
+          py::arg("a"), py::arg("b"), py::arg("c"), py::arg("init_condition"),
+          py::arg("real_m"), py::arg("real_k"), py::arg("real_n"),
+          py::arg("bias") = std::nullopt, py::arg("disable_gemv") = true,
+          py::arg("unit_flag_ctrl") = std::nullopt)
+      // C = MX(A, ScaleA) x MX(B, ScaleB) (+bias): A/B and the E8M0 scales are
+      // in L1, C is an L0C accumulator. lhs_format/rhs_format are the native
+      // HIVMMatmulDataformat codes (1=E5M2, 2=E4M3, 3=E2M1) and are only set
+      // for packed integer operands; FP8 element types encode the format.
+      .def(
+          "create_hivm_mmadmx",
+          [](TLABuilder &self, Value a, Value b, Value scaleA, Value scaleB,
+             Value c, bool init_condition, int64_t real_m, int64_t real_k,
+             int64_t real_n, std::optional<int32_t> lhsFormat,
+             std::optional<int32_t> rhsFormat, bool transposeA,
+             bool transposeB, std::optional<Value> perChannelBias) {
+            auto &builder = self.getBuilder();
+            auto loc = self.getLastLoc();
+            auto init = builder.create<arith::ConstantOp>(
+                loc, builder.getI1Type(), builder.getBoolAttr(init_condition));
+            auto m = builder.create<arith::ConstantIndexOp>(loc, real_m);
+            auto k = builder.create<arith::ConstantIndexOp>(loc, real_k);
+            auto n = builder.create<arith::ConstantIndexOp>(loc, real_n);
+            auto aTrans = transposeA ? builder.getUnitAttr() : UnitAttr{};
+            auto bTrans = transposeB ? builder.getUnitAttr() : UnitAttr{};
+            auto lhsAttr = lhsFormat
+                               ? builder.getI32IntegerAttr(*lhsFormat)
+                               : IntegerAttr{};
+            auto rhsAttr = rhsFormat
+                               ? builder.getI32IntegerAttr(*rhsFormat)
+                               : IntegerAttr{};
+            self.create<hivm::MmadMxL1Op>(
+                TypeRange{}, a, b, scaleA, scaleB, init, m, k, n, c,
+                /*lhsFormat=*/lhsAttr, /*rhsFormat=*/rhsAttr,
+                /*a_transpose=*/aTrans, /*b_transpose=*/bTrans,
+                /*per_channel_bias=*/perChannelBias.value_or(Value{}));
+          },
+          py::arg("a"), py::arg("b"), py::arg("scale_a"), py::arg("scale_b"),
+          py::arg("c"), py::arg("init_condition"), py::arg("real_m"),
+          py::arg("real_k"), py::arg("real_n"),
+          py::arg("lhs_format") = std::nullopt,
+          py::arg("rhs_format") = std::nullopt,
+          py::arg("transpose_a") = false, py::arg("transpose_b") = false,
+          py::arg("per_channel_bias") = std::nullopt)
+      // GM -> L1 MX scale load (hivm.hir.load_scale). The source is a 2-D ND
+      // E8M0 tensor and the destination the 4-D zZ/nN fractal buffer.
+      .def(
+          "create_hivm_load_mx_scale",
+          [](TLABuilder &self, Value src, Value dst, bool isTransposed) {
+            checkDmaBuffers(src, dst);
+            self.create<hivm::LoadMXScaleOp>(TypeRange{}, src, dst,
+                                             isTransposed);
+          },
+          py::arg("src"), py::arg("dst"), py::arg("is_transposed") = false)
       .def("create_scope_op",
            [](TLABuilder &self, py::dict &scopeAttrs,
               std::vector<Type> resultTypes) -> OpState {
@@ -1133,18 +1883,51 @@ void init_tla_builder(py::module &&m) {
              scopeOp->setAttrs(attrs);
              return OpState(scopeOp);
            })
+      .def("create_tla_stage", [](TLABuilder &, std::vector<OpState> tasks) {
+        OpState last = tasks.at(tasks.size() - 1);
+        if (tasks.size() == 1)
+          return last;
+        OpBuilder builder(last.getOperation());
+        auto stage = builder.create<scope::ScopeOp>(last.getLoc(), TypeRange{});
+        Block &body = stage.getRegion().emplaceBlock();
+        for (auto task : tasks)
+          task->moveBefore(&body, body.end());
+        builder.setInsertionPointToEnd(&body);
+        builder.create<scope::ReturnOp>(last.getLoc(), ValueRange{});
+        return OpState(stage);
+      })
+      .def("create_tla_pipeline",
+           [](TLABuilder &self, Value stop) {
+             auto &builder = self.getBuilder();
+             if (!stop.getType().isInteger(32) && !stop.getType().isInteger(64))
+               throw py::value_error("pipeline stop must be i32 or i64");
+             Value lb = self.create<arith::ConstantIndexOp>(0);
+             Value ub =
+                 self.create<arith::IndexCastOp>(builder.getIndexType(), stop);
+             Value step = self.create<arith::ConstantIndexOp>(1);
+             auto loop = self.create<scf::ForOp>(lb, ub, step);
+             // Python emits the body and its yield after scope/carry checks.
+             loop.getBody()->getTerminator()->erase();
+             builder.setInsertionPointToStart(loop.getBody());
+             Value iv = self.create<arith::IndexCastOp>(builder.getI64Type(),
+                                                        loop.getInductionVar());
+             auto bound = stop.getDefiningOp<arith::ConstantIntOp>();
+             return std::make_tuple(loop, iv, !bound || bound.value() > 1);
+           })
       // Ensures the TLA scope has its entry block; the cann-shared
       // create_scope_op makes its own, so the emplace stays here to avoid
       // two blocks in non-TLA scopes.
       // pybind11 wraps Block in unique_ptr; reference keeps it alive.
       .def(
           "get_scope_entry_block",
-          [](TLABuilder &self, OpState op) -> Block * {
-            Region &region = op->getRegion(0);
-            if (region.empty())
-              region.emplaceBlock();
-            return &region.front();
-          },
+          [](TLABuilder &self, OpState op) -> Block
+                                               * {
+                                                 Region &region =
+                                                     op->getRegion(0);
+                                                 if (region.empty())
+                                                   region.emplaceBlock();
+                                                 return &region.front();
+                                               },
           py::return_value_policy::reference)
       // Set an attribute on an existing operation. module.get_function is not
       // usable for the ttadapter entry: triton_to_linalg lowers it from

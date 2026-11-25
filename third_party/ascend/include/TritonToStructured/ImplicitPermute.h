@@ -42,19 +42,19 @@ inline constexpr const char *ImplicitPermuteHandledTAG =
 
 class LoadConverter : public OpRewritePattern<triton::LoadOp> {
 public:
-  explicit LoadConverter(MLIRContext *context, bool compileOn91095Flag = false,
-                         bool existDotFlag = false)
+  LoadConverter(MLIRContext *context, bool compileOn91095Flag, bool existDotFlag,
+                bool forceExplicitLoadTranspose)
       : OpRewritePattern<triton::LoadOp>(context),
-        compileOn91095Flag(compileOn91095Flag), existDotFlag(existDotFlag) {}
-
-  using OpRewritePattern<triton::LoadOp>::OpRewritePattern;
+        compileOn91095Flag(compileOn91095Flag), existDotFlag(existDotFlag),
+        forceExplicitLoadTranspose(forceExplicitLoadTranspose) {}
 
   LogicalResult matchAndRewrite(triton::LoadOp op,
                                 PatternRewriter &rewriter) const override;
 
 private:
-  bool compileOn91095Flag = false;
-  bool existDotFlag = false;
+  bool compileOn91095Flag;
+  bool existDotFlag;
+  bool forceExplicitLoadTranspose;
 };
 
 class StoreConverter : public OpRewritePattern<triton::StoreOp> {

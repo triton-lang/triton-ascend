@@ -15,8 +15,10 @@ def TritonToStructured : Pass<"triton-to-structured", "mlir::ModuleOp"> {
             "Enable dynamic offset feature">,
         Option<"compileOn91095", "compile-on-910-95",
             "bool", /*default*/"false",
-            "If true, skip ImplicitPermute on loads when the module has no dot/cube ops "
-            "(historical 91095 SIMT behavior).">
+            "Use register-based target constraints when rewriting memory accesses.">,
+        Option<"forceExplicitLoadTranspose", "force-explicit-load-transpose",
+            "bool", /*default*/"false",
+            "Force an explicit restoring transpose for eligible ordinary loads when compile-on-910-95 is set.">
     ];
 }
 

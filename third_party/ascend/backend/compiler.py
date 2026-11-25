@@ -554,6 +554,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         # Select analysis is a fixed lowering policy, not a user compile option.
         enable_select_analysis = True
         compile_on_910_95 = metadata["compile_on_910_95"]
+        force_explicit_load_transpose = getattr(opt, "force_explicit_load_transpose", False)
         compile_mode = opt.compile_mode
         metadata["compile_mode"] = compile_mode
         enable_mixed_cv = metadata.get("enable_mixed_cv")
@@ -577,7 +578,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
-        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95)
+        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95, force_explicit_load_transpose)
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, compile_mode)
         ascend.passes.ttir.add_triton_to_annotation(pm)
         ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, compile_mode)
@@ -585,7 +586,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         ascend.passes.ttir.add_triton_to_hfusion(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm, compile_on_910_95)
-        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95)
+        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95, force_explicit_load_transpose)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis, compile_on_910_95,
                                                 compile_mode)
         # MergeConcatLoadBuffer is A5-only; A6 must not be enabled by its register-based flag.
@@ -1627,6 +1628,9 @@ class NPUOptions:
     # unmasked kernels whose grid dims are compile-time known.
     grid_num_tiles: int = None
 
+    # Force an explicit restoring transpose for ordinary loads on compile_on_910_95 targets.
+    force_explicit_load_transpose: bool = False
+
     # Deprecated names remain visible to callers that use parse_options({})
     # to distinguish compile options from kernel arguments. Their public
     # values are ignored (or routed to canonical options) before construction.
@@ -1718,6 +1722,8 @@ class NPUOptions:
             "compile_on_910_95",
             _is_register_based_target_arch(arch),
         )
+        if not self.compile_on_910_95:
+            object.__setattr__(self, "force_explicit_load_transpose", False)
         try:
             normalized_rule_mask = normalize_graph_optimization_rule_mask(rule_mask)
         except ProgramGridContractError as error:

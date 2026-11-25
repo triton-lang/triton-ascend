@@ -22,6 +22,7 @@
 
 #include "TritonToStructured/ImplicitPermute.h"
 
+#include "TritonMemoryAccess/MemoryAccessTags.h"
 #include "TritonMemoryAccess/OpFoldResultUtils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -107,8 +108,8 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
     return success();
   }
 
-  // skip only loads without data-dependent offsets.
-  if (compileOn91095Flag && !existDotFlag &&
+  // Ordinary register-based loads use the existing permutation only when forced.
+  if (compileOn91095Flag && !existDotFlag && !forceExplicitLoadTranspose &&
       tf.ptrState.dynamicOffsets.empty()) {
     LLVM_DEBUG({
       llvm::dbgs() << "----------------------------------------------\n";
@@ -182,6 +183,9 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
   auto permuteResult =
       tf.materializeImplicitPermute(broadCastResult, loc, rewriter);
 
+  if (auto trans = permuteResult.getDefiningOp<triton::TransOp>())
+    trans->setAttr(triton::memory_access::ImplicitLoadPermuteAttr,
+                   rewriter.getUnitAttr());
   rewriter.replaceOp(op, permuteResult);
   return success();
 }

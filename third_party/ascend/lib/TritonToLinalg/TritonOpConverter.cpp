@@ -22,6 +22,7 @@
  */
 
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
+#include "ascend/include/TritonMemoryAccess/MemoryAccessTags.h"
 #include "ascend/include/TritonToGraph/BlockBatching/ElementwiseModels.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
@@ -144,6 +145,9 @@ TransposeConverter::matchAndRewrite(triton::TransOp op, OpAdaptor adaptor,
   auto src = adaptor.getSrc();
   auto res = ConverterUtils::getTransposedValue(src, op.getLoc(), rewriter,
                                                 op.getOrder());
+  if (auto marker = op->getAttr(triton::memory_access::ImplicitLoadPermuteAttr))
+    res.getDefiningOp()->setAttr(triton::memory_access::ImplicitLoadPermuteAttr,
+                                 marker);
   rewriter.replaceOp(op, res);
   return success();
 }

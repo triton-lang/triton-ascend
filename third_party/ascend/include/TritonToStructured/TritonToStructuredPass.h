@@ -38,8 +38,8 @@ std::unique_ptr<OperationPass<ModuleOp>> createTritonToStructuredPass();
 
 std::unique_ptr<OperationPass<ModuleOp>>
 createTritonToStructuredPass(bool enableMaskFallbackConversion,
-                             bool optimizeDynamicOffset,
-                             bool compileOn91095 = false);
+                             bool optimizeDynamicOffset, bool compileOn91095,
+                             bool forceExplicitLoadTranspose);
 
 } // namespace triton
 } // namespace mlir
@@ -53,11 +53,12 @@ public:
   TritonToStructuredPass() = default;
 
   TritonToStructuredPass(bool enableMaskFallbackConversion,
-                         bool optimizeDynamicOffset,
-                         bool compileOn91095 = false) {
+                         bool optimizeDynamicOffset, bool compileOn91095,
+                         bool forceExplicitLoadTranspose) {
     this->enableMaskFallbackConversion = enableMaskFallbackConversion;
     this->optimizeDynamicOffset = optimizeDynamicOffset;
     this->compileOn91095 = compileOn91095;
+    this->forceExplicitLoadTranspose = forceExplicitLoadTranspose;
   };
   void getDependentDialects(DialectRegistry &registry) const override;
   void runOnOperation() override;

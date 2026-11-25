@@ -228,9 +228,11 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
   m.def("add_triton_to_structure", [](mlir::PassManager &pm,
                                       bool enableMaskFallbackConversion,
                                       bool optimizeDynamicOffset,
-                                      bool compileOn91095 = false) {
+                                      bool compileOn91095,
+                                      bool forceExplicitLoadTranspose) {
     pm.addPass(mlir::triton::createTritonToStructuredPass(
-        enableMaskFallbackConversion, optimizeDynamicOffset, compileOn91095));
+        enableMaskFallbackConversion, optimizeDynamicOffset, compileOn91095,
+        forceExplicitLoadTranspose));
   });
 
   m.def("add_triton_control_flow_opt", [](mlir::PassManager &pm) {

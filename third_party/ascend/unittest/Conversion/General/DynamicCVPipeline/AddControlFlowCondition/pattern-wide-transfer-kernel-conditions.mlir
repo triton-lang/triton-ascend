@@ -1,31 +1,32 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.while
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.for --implicit-check-not=arith.select
 
-// The pattern of AddControlFlowCondition is the dependency graph plus the
-// number of the tightly coupled buffers: every transfer of the chain has to
-// be double buffered, so the chain of four blocks carries 2 * 3 = 6 buffers.
+// The shape of the cross core dependency does not gate the normal preload
+// scheme: the scheme is the only scheme, every kernel takes it, no operator is
+// filtered out. This test guards that a kernel whose cross core dependency
+// does not have the shape the scheme was validated on still takes it.
 //
-// This kernel has the very same dependency chain as the test
+// This kernel has the dependency chain of the test
 // pattern-kernel-conditions.mlir:
 //   cube block 0 -> vector block 1 -> cube block 2 -> vector block 3
-// but the direction from the vector block 1 to the cube block 2 is carried
-// by two cross core groups instead of one, so it holds four tightly coupled
-// buffers and not two. The buffers of a direction are the total of the groups
-// that carry it, and every transfer of the chain has to carry the same number
-// of buffers, so the pattern does not match and the kernel keeps the upstream
-// scheme: the main loop is an scf.for and the blocks handshake through
-// PIPE_S. The implicit check forbids the scf.while of the normal preload
-// scheme.
-
+// but the direction from the vector block 1 to the cube block 2 is
+// carried by two cross core groups instead of one, so it holds four
+// tightly coupled buffers and not two. The buffers of a direction are
+// the total of the groups that carry it, so this direction carries
+// twice the buffers of the other ones: it is not the shape the scheme
+// was validated on.
+// The kernel takes the normal preload scheme: the main loop is an scf.while
+// and the blocks do not handshake through PIPE_S any more. The implicit check
+// forbids the scf.for of the upstream scheme, and the select that computed the
+// flag of the loop, which is not added any more.
 // CHECK-LABEL: func.func @pattern_wide_transfer_kernel_conditions
 
-// The upstream scheme: the main loop stays an scf.for, the flags of the
-// blocks are published through the PIPE_S handshake.
-// CHECK: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_set[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
+// The normal preload scheme: one scf.while per core.
+// CHECK: scf.while
+// CHECK: ssbuffer.if = 1 : i32}
+// CHECK: ssbuffer.if = 3 : i32}
+// CHECK: scf.while
+// CHECK: ssbuffer.if = 0 : i32}
+// CHECK: ssbuffer.if = 2 : i32}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @pattern_wide_transfer_kernel_conditions(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {

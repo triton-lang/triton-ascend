@@ -1,23 +1,25 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.for --implicit-check-not=arith.select
 
-// The kernels listed in legacyKernel of AddControlFlowCondition.cpp keep the
-// control flow conditions of the upstream implementation. The other kernels
-// get the normal preload scheme: a while loop for the main loop, a flag chain
-// computed with arith.select and no PIPE_S handshake.
+// No kernel is filtered out by its name: the list of the legacy kernel names
+// is gone, the normal preload scheme is the only scheme. This test guards that
+// a kernel whose name used to be in the list takes it.
 //
-// The upstream path keeps the for loop of the main loop.
-// The func name is one of the legacyKernel names of AddControlFlowCondition.cpp,
-// it is the way to reach the legacy path.
+// The kernel takes the normal preload scheme: the main loop is an scf.while
+// and the rounds are counted with the block counters instead of the PIPE_S
+// handshake of the upstream scheme. The implicit check forbids the scf.for of
+// the upstream scheme, and the select that computed the flag of the loop,
+// which is not added any more.
+
 // CHECK-LABEL: func.func @chunk_gated_delta_rule_fwd_kernel_h_blockdim64_npu_kernel
-// CHECK: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: scf.for
-// The upstream path synchronizes the cores with PIPE_S, the normal preload
-// scheme counts the rounds with the block counters instead.
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// The upstream path yields the counters from the blocks, the normal preload
-// scheme computes the flags with a select after the blocks.
-// CHECK-NOT: arith.select
-// CHECK-NOT: scf.while
+
+// The normal preload scheme: one scf.while per core.
+// CHECK: scf.while
+// CHECK: ssbuffer.if = 1 : i32}
+// CHECK: ssbuffer.if = 2 : i32}
+// CHECK: ssbuffer.if = 3 : i32}
+// CHECK: scf.while
+// CHECK: ssbuffer.if = 3 : i32}
+// CHECK: ssbuffer.if = 4 : i32}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @chunk_gated_delta_rule_fwd_kernel_h_blockdim64_npu_kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {

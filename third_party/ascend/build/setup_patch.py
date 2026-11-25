@@ -184,10 +184,9 @@ def _get_patch_files(patch_path):
 
 def get_triton_ascend_patch_file():
     patch_dir = _REPO_ROOT / "third_party" / "ascend" / "patch"
-    dev_patch = patch_dir / "triton-ascend-dev-3.7.0.patch"
     patch = patch_dir / "triton-ascend-3.7.0.patch"
-    dev_patch_files = _get_patch_files(dev_patch) if dev_patch.is_file() else []
     patch_files = _get_patch_files(patch) if patch.is_file() else []
+    dev_patch_files = ["python/triton/runtime/autotuner.py"]
     return patch_files, dev_patch_files
 
 
@@ -210,13 +209,11 @@ def _apply_triton_ascend_patch():
     patch_path = os.path.join("third_party", "ascend", "patch")
     dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.7.0.patch")
     patch = os.path.join(patch_path, "triton-ascend-3.7.0.patch")
+    patch_files, dev_patch_files = get_triton_ascend_patch_file()
     if _is_dev_mode() and os.path.isfile(dev_patch):
-        dev_patch_files = _get_patch_files(dev_patch)
-        if dev_patch_files:
-            checkout_file(dev_patch_files)
+        checkout_file(dev_patch_files)
         _apply_patch(str(dev_patch))
     if os.path.isfile(patch):
-        patch_files = _get_patch_files(patch)
         if not patch_files:
             raise RuntimeError(f"patch({patch}) has no file sections.")
         checkout_file(patch_files)

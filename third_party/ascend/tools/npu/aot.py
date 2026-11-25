@@ -81,6 +81,6 @@ def c_types_include():
 
 def rewrite_types(text):
     """Replace CUDA-style type spellings in generated sources with the NPU stand-ins."""
-    return (text.replace("CUresult", "NPUresult").replace("CUstream",
-                                                          "NPUstream").replace("CUDA_ERROR_INVALID_VALUE",
-                                                                               "ASCEND_ERROR_INVALID_VALUE"))
+    return (text.replace("TT_ResultTy", "NPUresult").replace("TT_StreamTy", "NPUstream").replace(
+        "TT_ERROR_INVALID_VALUE", "ASCEND_ERROR_INVALID_VALUE").replace("CUresult", "NPUresult").replace(
+            "CUstream", "NPUstream").replace("CUDA_ERROR_INVALID_VALUE", "ASCEND_ERROR_INVALID_VALUE"))

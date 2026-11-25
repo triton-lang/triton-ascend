@@ -421,6 +421,28 @@ index 857ff4aad7..11997cb952 100644
      }
    }
    return success();
+diff --git a/lib/Dialect/Triton/Transforms/Combine.cpp b/lib/Dialect/Triton/Transforms/Combine.cpp
+index 1e9830c066..ddf1531da1 100644
+--- a/lib/Dialect/Triton/Transforms/Combine.cpp
++++ b/lib/Dialect/Triton/Transforms/Combine.cpp
+@@ -160,7 +160,7 @@ public:
+     auto broadcastLhsShape =
+         cast<ShapedType>(broadcastLhsOp.getType()).getShape();
+     auto broadcastRhsShape =
+-        cast<ShapedType>(broadcastLhsOp.getType()).getShape();
++        cast<ShapedType>(broadcastRhsOp.getType()).getShape();
+     if (broadcastLhsShape[2] < 16 || broadcastRhsShape[0] < 16)
+       return failure();
+     Type newAccType = RankedTensorType::get(
+@@ -173,7 +173,7 @@ public:
+                                                   rewriter.getF32FloatAttr(0)));
+     rewriter.replaceOpWithNewOp<DotOp>(op, expandLhsOp.getSrc(),
+                                        expandRhsOp.getSrc(), newAcc,
+-                                       InputPrecision::TF32, 0);
++                                       InputPrecision::IEEE, 0);
+     return success();
+   }
+ };
 diff --git a/python/src/ir.cc b/python/src/ir.cc
 index 2c27b5a5ae..74877af626 100644
 --- a/python/src/ir.cc
@@ -469,7 +491,7 @@ index aac0e676fe..9c9afbbeb8 100644
  
      if numel > TRITON_MAX_TENSOR_NUMEL:
 diff --git a/python/triton/compiler/code_generator.py b/python/triton/compiler/code_generator.py
-index 3ffb904574..d0df0fbf82 100644
+index 3ffb904574..34becd1d94 100644
 --- a/python/triton/compiler/code_generator.py
 +++ b/python/triton/compiler/code_generator.py
 @@ -11,8 +11,16 @@ from dataclasses import dataclass
@@ -639,7 +661,7 @@ index 3ffb904574..d0df0fbf82 100644
  
  
 diff --git a/python/triton/compiler/compiler.py b/python/triton/compiler/compiler.py
-index d6f8dd26fe..eb61008092 100644
+index d6f8dd26fe..7f9488d63b 100644
 --- a/python/triton/compiler/compiler.py
 +++ b/python/triton/compiler/compiler.py
 @@ -10,6 +10,7 @@ from ..runtime.autotuner import OutOfResources
@@ -677,7 +699,18 @@ index d6f8dd26fe..eb61008092 100644
          ir_filename = f"{file_name}.{ext}"
          if fn_override_manager is None:
              # Users can override kernels at scale by setting `ir_override` in autotune config
-@@ -466,7 +489,7 @@ class CompiledKernel:
+@@ -334,8 +353,8 @@ def compile(src, target=None, options=None, _env_vars=None):
+         elif full_name := fn_override_manager.get_file(ir_filename):
+             print(f"\nOverriding kernel with file {full_name}")
+             next_module = parse(full_name, ext, context)
+-        # If TRITON_STORE_BINARY_ONLY is 1, only store cubin/hsaco/json
+-        if (not store_only_binary) or (ext in ("cubin", "hsaco", "json")):
++        # If TRITON_STORE_BINARY_ONLY is 1, only store the final binary.
++        if (not store_only_binary) or (ext in (backend.binary_ext, "json")):
+             metadata_group[ir_filename] = fn_cache_manager.put(next_module, ir_filename)
+         if fn_dump_manager is not None:
+             fn_dump_manager.put(next_module, ir_filename)
+@@ -466,7 +485,7 @@ class CompiledKernel:
              knobs.runtime.kernel_load_start_hook(self.module, self.function, self.name, self.metadata_group, self.hash)
          # TODO: n_regs, n_spills should be metadata generated when calling `ptxas`
          self.module, self.function, self.n_regs, self.n_spills, self.n_max_threads = driver.active.utils.load_binary(
@@ -715,6 +748,29 @@ index 39e6c4dfb0..c72ca65c24 100644
 +
 +    def format_line_delim(self, keyword):
 +        return f"///------------------{keyword}------------------\n"
+diff --git a/python/triton/language/core.py b/python/triton/language/core.py
+index 85e977d034..ddfa33ec99 100644
+--- a/python/triton/language/core.py
++++ b/python/triton/language/core.py
+@@ -1596,8 +1596,16 @@ def _aggregate(cls):
+ 
+     for (name, member) in inspect.getmembers(cls):
+         if inspect.isfunction(member) or inspect.ismethod(member) or isinstance(member, JITCallable):
+-            if name != "__init__":
+-                setattr(aggregate_value, name, member)
++            if name == "__init__":
++                continue
++            # __annotate__ is a Python 3.14+ internal; exclude from hash and
++            # don't copy it onto the aggregate value type.
++            if name == "__annotate__":
++                continue
++            setattr(aggregate_value, name, member)
++
++            # Exclude __annotate_func__ from hash — isn't user facing (Python 3.14+).
++            if name != "__annotate_func__":
+                 hash_attrs.append(member)
+ 
+     aggregate_value.hash_attrs = hash_attrs
 diff --git a/python/triton/language/math.py b/python/triton/language/math.py
 index 582cd876cb..13ff1cef09 100644
 --- a/python/triton/language/math.py
@@ -975,6 +1031,86 @@ index 57c22b0d71..b99cd89414 100644
  
  
  @core._tensor_member_fn
+diff --git a/python/triton/runtime/autotuner.py b/python/triton/runtime/autotuner.py
+index 0c4d710496..42f463f557 100644
+--- a/python/triton/runtime/autotuner.py
++++ b/python/triton/runtime/autotuner.py
+@@ -5,6 +5,7 @@ import time
+ import inspect
+ import hashlib
+ import json
++from contextlib import nullcontext
+ from functools import cached_property
+ from typing import Dict, Tuple, List, Optional
+ 
+@@ -16,6 +17,15 @@ from .cache import get_cache_manager, triton_key
+ from triton._C.libtriton import get_cache_invalidating_env_vars
+ 
+ 
++def _exact_request_scope():
++    from ..compiler import make_backend
++    from .driver import driver
++
++    backend = make_backend(driver.active.get_current_target())
++    factory = getattr(backend, "get_exact_request_scope", None)
++    return nullcontext() if factory is None else factory()
++
++
+ class Autotuner(KernelInterface):
+ 
+     def __init__(self, fn, arg_names, configs, key, reset_to_zero, restore_value, pre_hook=None, post_hook=None,
+@@ -126,7 +136,7 @@ class Autotuner(KernelInterface):
+         return self._do_bench
+ 
+     def _bench(self, *args, config, **meta):
+-        from ..compiler.errors import CompileTimeAssertionFailure
++        from ..compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
+ 
+         verbose = knobs.autotuning.print
+         if verbose:
+@@ -147,10 +157,11 @@ class Autotuner(KernelInterface):
+                 config.pre_hook(full_nargs)
+             self.pre_hook(full_nargs)
+             try:
+-                self.fn.run(
+-                    *args,
+-                    **current,
+-                )
++                with _exact_request_scope():
++                    self.fn.run(
++                        *args,
++                        **current,
++                    )
+             except Exception as e:
+                 try:
+                     self.post_hook(full_nargs, exception=e)
+@@ -162,7 +173,7 @@ class Autotuner(KernelInterface):
+ 
+         try:
+             return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+-        except (OutOfResources, CompileTimeAssertionFailure, PTXASError) as e:
++        except (OutOfResources, CompileTimeAssertionFailure, PTXASError, MLIRCompilationError) as e:
+             if verbose:
+                 print(f"Autotuning failed with {e}")
+             return [float("inf"), float("inf"), float("inf")]
+@@ -288,11 +299,12 @@ class Autotuner(KernelInterface):
+         self.nargs = dict(zip(self.arg_names, args))
+         ret = []
+         for autotune_config in self.prune_configs(kwargs):
+-            ret.append(self.fn.warmup(
+-                *args,
+-                **kwargs,
+-                **autotune_config.all_kwargs(),
+-            ))
++            with _exact_request_scope():
++                ret.append(self.fn.warmup(
++                    *args,
++                    **kwargs,
++                    **autotune_config.all_kwargs(),
++                ))
+         self.nargs = None
+         return ret
+ 
 diff --git a/python/triton/runtime/interpreter.py b/python/triton/runtime/interpreter.py
 index e68576b7be..7b215d0caf 100644
 --- a/python/triton/runtime/interpreter.py
@@ -1175,3 +1311,101 @@ index ba21a58e19..dacab27a95 100644
      specialization = [{','.join(specialization)}]
      return params, specialization, options
  """
+diff --git a/python/triton/tools/compile.py b/python/triton/tools/compile.py
+index 03a210a50a..008a03be75 100644
+--- a/python/triton/tools/compile.py
++++ b/python/triton/tools/compile.py
+@@ -195,6 +195,11 @@ def compile_kernel(args: CompileArgs):
+         "warp_size": target.warp_size,
+         "backend_name": backend_name,
+     }
++    if target.backend == "npu":
++        # NPU AOT: launcher export and template params live in the NPU tools package.
++        from triton.tools.extra.npu.aot import prepare_params
++
++        prepare_params(ccinfo, kernel, signature, constants, out_path, params, arg_names_not_1)
+     output_files = []
+     template_dir = Path(__file__).parent / "extra" / backend_name
+     for template_path in template_dir.glob('compile.*'):
+diff --git a/python/triton/tools/link.py b/python/triton/tools/link.py
+index 9c070160ff..da0eaef54c 100644
+--- a/python/triton/tools/link.py
++++ b/python/triton/tools/link.py
+@@ -4,6 +4,8 @@ from typing import Sequence, Union
+ 
+ from dataclasses import dataclass
+ 
++from triton.tools.extra.npu import aot
++
+ 
+ def _exists(x):
+     return x is not None
+@@ -36,7 +38,7 @@ class HeaderParser:
+         # [name, hash, suffix]
+         self.kernel_name = re.compile("^([\\w]+)_([\\w]+)_([\\w]*)$")
+         # [(type, name)]
+-        self.c_sig = re.compile("[\\s]*(\\w+)\\s(\\w+)[,]?")
++        self.c_sig = re.compile(aot.c_sig_pattern())
+         # [d|c]
+         self.arg_suffix = re.compile("[c,d]")
+         # [backend_name]
+@@ -180,15 +182,9 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
+     src += (f"TT_ResultTy {name}(TT_StreamTy stream, {gen_signature_with_full_args(metas[-1])}){{")
+     src += "\n"
+     for meta in sorted(metas, key=lambda m: -m.num_specs):
+-        cond_fn = (  #
+-            lambda val, hint: f"((uintptr_t){val} % {hint} == 0)"  #
+-            if hint == 16  #
+-            else f"({val} == {hint})"  #
+-            if hint == 1  #
+-            else None)
+         conds = " && ".join([  #
+-            cond_fn(val, hint)  #
+-            for val, hint in zip(meta.arg_names, meta.sizes)  #
++            aot.hint_condition(val, hint, ty)  #
++            for val, hint, ty in zip(meta.arg_names, meta.sizes, meta.arg_ctypes)  #
+             if hint is not None
+         ])
+         src += (f"  if ({conds})\n" if any(meta.sizes) else "if (1)\n"
+@@ -281,6 +277,12 @@ if __name__ == "__main__":
+         default="",
+         help="String to prefix kernel dispatcher names",
+     )
++    parser.add_argument(
++        "--backend",
++        type=str,
++        default="cuda",
++        help="Backend of the headers being linked (cuda|hip|npu); selects the result/stream types of the generated code (cuda.h for cuda|hip, NPU stand-ins for npu)",
++    )
+     args = parser.parse_args()
+ 
+     # metadata
+@@ -298,7 +300,11 @@ if __name__ == "__main__":
+     meta = meta_lists[0][0]
+     get_num_algos_decl = make_get_num_algos_decl(meta)
+     global_decl = make_global_decl(meta)
+-    backend_prelude = (Path(__file__).parent / "extra" / parser.backend_name / "link.h").read_text()
++    if args.backend == "npu":
++        backend_prelude = aot.c_types_include() + "\n"
++    else:
++        backend_name = parser.backend_name if parser.backend_name is not None else args.backend
++        backend_prelude = (Path(__file__).parent / "extra" / backend_name / "link.h").read_text()
+     with args.out.with_suffix(".h").open("w") as fp:
+         out = backend_prelude
+         out += "\n".join(algo_decls)
+@@ -306,6 +312,8 @@ if __name__ == "__main__":
+         out += get_num_algos_decl
+         out += "\n"
+         out += global_decl
++        if args.backend == "npu":
++            out = aot.rewrite_types(out)
+         fp.write(out)
+ 
+     # generate source
+@@ -332,4 +340,6 @@ if __name__ == "__main__":
+         out += load_unload_def
+         out += "\n"
+         out += default_algo_kernel
++        if args.backend == "npu":
++            out = aot.rewrite_types(out)
+         fp.write(out)

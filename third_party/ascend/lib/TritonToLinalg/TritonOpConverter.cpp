@@ -659,10 +659,9 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
     origBitwidth = 8;
   if (castBitwidth == 1)
     castBitwidth = 8;
-  if (origBitwidth != castBitwidth) {
-    bitcastOp.emitError() << "Casting pointers with unmatched bitwidth!\n";
+  // Hoisting across addptr reuses its offset in the original element units.
+  if (origBitwidth != castBitwidth)
     return failure();
-  }
 
   Operation *beforeCastOp = castSrc.getDefiningOp();
   if (beforeCastOp == nullptr) {

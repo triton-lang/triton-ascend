@@ -73,37 +73,16 @@ static triton::PointerType getScalarPointerType(Type type) {
 
 // Keep this deliberately narrow. These are the byte-buffer views used by the
 // paged-attention and KV-cache kernels covered by this canonicalization.
-static std::optional<int64_t>
-getSupportedPointerBitcastScale(triton::BitcastOp op) {
+static bool isSupportedByteBufferCast(triton::BitcastOp op) {
   auto srcType = getScalarPointerType(op.getSrc().getType());
   auto dstType = getScalarPointerType(op.getType());
   if (!srcType || !dstType ||
       srcType.getAddressSpace() != dstType.getAddressSpace() ||
       !srcType.getPointeeType().isInteger(8))
-    return std::nullopt;
+    return false;
 
-  Type dstPointeeType = dstType.getPointeeType();
-  if (dstPointeeType.isF16() || dstPointeeType.isBF16())
-    return 2;
-  if (dstPointeeType.isF32() || dstPointeeType.isInteger(32))
-    return 4;
-  return std::nullopt;
-}
-
-static FailureOr<Value> scaleTensorPointerOffset(Value offset, int64_t divisor,
-                                                 IRRewriter &rewriter) {
-  auto offsetType = dyn_cast<RankedTensorType>(offset.getType());
-  if (!offsetType || !offsetType.hasStaticShape())
-    return failure();
-  auto elementType = dyn_cast<IntegerType>(offsetType.getElementType());
-  if (!elementType ||
-      (elementType.getWidth() != 32 && elementType.getWidth() != 64))
-    return failure();
-  auto divisorAttr = rewriter.getIntegerAttr(elementType, divisor);
-  Value divisorValue = rewriter.create<arith::ConstantOp>(
-      offset.getLoc(), DenseElementsAttr::get(offsetType, divisorAttr));
-  return rewriter.create<arith::DivSIOp>(offset.getLoc(), offset, divisorValue)
-      .getResult();
+  Type dst = dstType.getPointeeType();
+  return dst.isF16() || dst.isBF16() || dst.isF32() || dst.isInteger(32);
 }
 
 static bool isPublicKernelArgument(Value value) {
@@ -187,7 +166,7 @@ static bool hasOnlySupportedPointerUses(Value pointer) {
 }
 
 static bool canRewriteSupportedPointerBitcast(triton::BitcastOp op) {
-  if (!getSupportedPointerBitcastScale(op) ||
+  if (!isSupportedByteBufferCast(op) ||
       !hasOnlySupportedPointerUses(op.getResult()))
     return false;
 
@@ -232,10 +211,6 @@ static bool canRewriteSupportedPointerBitcast(triton::BitcastOp op) {
 static LogicalResult
 rewriteSupportedPointerBitcast(triton::BitcastOp op, IRRewriter &rewriter,
                                triton::BitcastOp &nextBitcast) {
-  auto divisor = getSupportedPointerBitcastScale(op);
-  if (!divisor)
-    return failure();
-
   Value src = op.getSrc();
   rewriter.setInsertionPoint(op);
   if (!isa<RankedTensorType>(src.getType())) {
@@ -250,34 +225,23 @@ rewriteSupportedPointerBitcast(triton::BitcastOp op, IRRewriter &rewriter,
   }
 
   if (src.getDefiningOp<triton::AddPtrOp>()) {
-    Value base = src;
-    Value byteOffset;
-    while (auto currentAddPtr = base.getDefiningOp<triton::AddPtrOp>()) {
-      Value currentOffset = currentAddPtr.getOffset();
-      auto offsetType = cast<RankedTensorType>(currentOffset.getType());
-      auto elementType = cast<IntegerType>(offsetType.getElementType());
-      if (elementType.getWidth() < 64) {
-        auto i64OffsetType =
-            RankedTensorType::get(offsetType.getShape(), rewriter.getI64Type());
-        currentOffset = rewriter.create<arith::ExtSIOp>(
-            op.getLoc(), i64OffsetType, currentOffset);
-      }
-      if (byteOffset)
-        byteOffset = rewriter.create<arith::AddIOp>(op.getLoc(), byteOffset,
-                                                    currentOffset);
-      else
-        byteOffset = currentOffset;
-      base = currentAddPtr.getPtr();
-    }
-    auto scaledOffset =
-        scaleTensorPointerOffset(byteOffset, *divisor, rewriter);
-    if (failed(scaledOffset))
+    // Analyze through the splat: scalar and tensor byte increments can each
+    // have a remainder even when their sum is divisible in every lane.
+    mlir::triton::ptr::PtrAnalysis analysis(rewriter);
+    auto info = analysis.analyze(op.getResult());
+    if (failed(info) || !info->hasScalarBase())
       return failure();
-    nextBitcast =
-        rewriter.create<triton::BitcastOp>(op.getLoc(), op.getType(), base);
-    auto newAddPtr = rewriter.create<triton::AddPtrOp>(
-        op.getLoc(), op.getType(), nextBitcast, *scaledOffset);
-    rewriter.replaceOp(op, newAddPtr.getResult());
+    auto resultType = cast<RankedTensorType>(op.getType());
+    auto offsets = mlir::triton::ptr::detail::materializeFullOffset(
+        info->offsets, resultType.clone(rewriter.getI64Type()), rewriter,
+        op.getLoc());
+    if (failed(offsets))
+      return failure();
+    nextBitcast = info->base.getDefiningOp<triton::BitcastOp>();
+    Value bases =
+        rewriter.create<triton::SplatOp>(op.getLoc(), resultType, info->base);
+    rewriter.replaceOpWithNewOp<triton::AddPtrOp>(op, resultType, bases,
+                                                  *offsets);
     return success();
   }
 

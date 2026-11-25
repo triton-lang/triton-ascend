@@ -545,6 +545,13 @@ def patch_module(mod):
 
     mod.get_llvm_package_info = get_llvm_package_info
 
+    def get_json_package_info():
+        version = (Path(mod.get_base_dir()) / "cmake/json-version.txt").read_text(encoding="utf-8").strip()
+        url = f"https://github.com/nlohmann/json/releases/download/{version}/include.zip"
+        return mod.Package("json", "", url, "JSON_INCLUDE_DIR", "", "JSON_SYSPATH")
+
+    mod.get_json_package_info = get_json_package_info
+
     # 3. Skip downloading NVIDIA proprietary toolchain dependencies
     #    (ptxas/cuobjdump/...); they are irrelevant for the Ascend wheel.
     mod.download_and_copy_dependencies = lambda *args, **kwargs: None

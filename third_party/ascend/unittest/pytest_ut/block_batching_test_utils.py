@@ -76,6 +76,9 @@ def bundle_environment(monkeypatch):
 
     class Cache:
 
+        def get_file(self, name):
+            return None
+
         def put(self, data, name, **kwargs):
             return '/tmp/' + name
 

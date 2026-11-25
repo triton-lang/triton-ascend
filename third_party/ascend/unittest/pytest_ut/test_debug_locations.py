@@ -5,6 +5,8 @@ from triton._C.libtriton import ir
 from triton.backends.compiler import GPUTarget
 from triton.compiler.compiler import ASTSource, make_backend
 
+pytestmark = pytest.mark.backend("native")
+
 
 @triton.jit
 def overflow_location_kernel(out, index, stride):
@@ -38,7 +40,8 @@ def test_overflow_check_does_not_inherit_assignment_name(monkeypatch):
     module.walk(collect)
     assert '"block_start"' in str(multiply_locations["i32"])
     assert '"block_start"' not in str(multiply_locations["i64"])
-    source_location = str(multiply_locations["i32"].without_name())
-    assert str(multiply_locations["i64"]) == source_location
-    assert assertion_locations == [source_location]
+    source_location = multiply_locations["i64"]
+    named_location = ir.builder(context).create_name_loc("block_start", source_location)
+    assert str(multiply_locations["i32"]) == str(named_location)
+    assert assertion_locations == [str(source_location)]
     assert "tt.auto_overflow_assert" in str(module)

@@ -414,7 +414,7 @@ index 1b72c1376..ee5defb6e 100644
    }
    return success();
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 5af645bc0..de35b7753 100644
+index 5af645bc0..011f82d60 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
 @@ -332,6 +332,7 @@ void init_triton_ir(py::module &&m) {
@@ -425,19 +425,7 @@ index 5af645bc0..de35b7753 100644
        .value("BF16x3", InputPrecision::BF16x3)
        .value("BF16x6", InputPrecision::BF16x6)
        .export_values();
-@@ -412,6 +413,11 @@ void init_triton_ir(py::module &&m) {
-              self.print(os);
-              return os.str();
-            })
-+      .def("without_name", [](Location loc) {
-+        if (auto namedLoc = dyn_cast<NameLoc>(loc))
-+          return namedLoc.getChildLoc();
-+        return loc;
-+      })
-       .def("set_name", [](Location &self, std::string &name) {
-         mlir::StringAttr nameAttr =
-             mlir::StringAttr::get(self.getContext(), name);
-@@ -1790,6 +1796,18 @@ void init_triton_ir(py::module &&m) {
+@@ -1790,6 +1791,18 @@ void init_triton_ir(py::module &&m) {
                                                  llvm::StringRef(message));
               self.create<AssertOp>(condition, messageAttr);
             })
@@ -1108,7 +1096,7 @@ index 582cd876c..034fe0f87 100644
  @core._tensor_member_fn
  def exp(x, _semantic=None):
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 42bf7024f..722343443 100644
+index 42bf7024f..4740109e0 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
 @@ -210,16 +210,24 @@ class TritonSemantic(Generic[TensorTy]):
@@ -1125,10 +1113,10 @@ index 42bf7024f..722343443 100644
 -        cond = self.and_(self.less_equal(ret, max_value), self.greater_equal(ret, min_value))
 -        msg = f"int{lhs_sca_ty.int_bitwidth} overflow detected for operation {binary_op.__name__}"
 -        self.device_assert(cond, msg, None)
-+        # Overflow helpers share the source position of the arithmetic, but only its result carries the assignment name.
-+        loc = self.builder.get_loc() if isinstance(self.builder, ir.builder) else None
++        get_check_loc = getattr(self.builder, "codegen_fns", {}).get("get_overflow_check_loc")
++        loc = self.builder.get_loc() if get_check_loc is not None else None
 +        if loc is not None:
-+            self.builder.set_loc(loc.without_name())
++            self.builder.set_loc(get_check_loc(loc))
 +        try:
 +            lhs = self.cast(lhs, tl.int64)
 +            rhs = self.cast(rhs, tl.int64)

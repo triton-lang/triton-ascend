@@ -195,6 +195,12 @@ if not hasattr(_triton_ir.context, '__enter__'):
 } // namespace
 
 void init_ascend_ir(py::module &&m) {
+  m.def("get_overflow_check_loc", [](Location loc) {
+    if (auto namedLoc = dyn_cast<NameLoc>(loc))
+      return namedLoc.getChildLoc();
+    return loc;
+  });
+
   auto affineExprClass =
       py::class_<AffineExpr>(m, "affine_expr", py::module_local());
   affineExprClass

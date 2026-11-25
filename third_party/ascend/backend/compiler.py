@@ -2008,7 +2008,10 @@ class AscendBackend(BaseBackend):
     def get_codegen_implementation(self, options):
         # Note: a dict of functions is required to generate vendor-specific code piecies
         #       e.g. convert custom types like fp8e4b15
-        codegen_fns = {"min_dot_size": min_dot_size(self.target)}
+        codegen_fns = {
+            "min_dot_size": min_dot_size(self.target),
+            "get_overflow_check_loc": ascend_ir.get_overflow_check_loc,
+        }
         return codegen_fns
 
     def load_dialects(self, ctx):

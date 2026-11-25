@@ -60,6 +60,8 @@ _ARCH_TABLE = (
      None),
 )
 
+_RF_SIZE_BY_GENERATION = {gen: rf_kb for _, gen, _, rf_kb in _ARCH_TABLE}
+
 # Legacy SOC names without FFTS support.  Compared *exactly*, not by prefix:
 # the predicate historically tested ``arch in ["Ascend910A", "Ascend310B4"]``,
 # so a distinct SOC that merely shares a prefix (e.g. "Ascend910A2") keeps
@@ -91,7 +93,7 @@ def arch_generation(arch: str = None) -> AscendArchGen:
     Unknown / empty / non-string SOC names resolve to ``AscendArchGen.LEGACY``.
     Runtime lookup failures fall back to ``AscendArchGen.LEGACY``.
     """
-    if not arch:
+    if arch is None or (isinstance(arch, str) and not arch):
         try:
             from triton.runtime import driver
             arch = getattr(driver.active.get_current_target(), "arch", None)
@@ -102,15 +104,20 @@ def arch_generation(arch: str = None) -> AscendArchGen:
 
 
 def is_register_based_arch(arch: str = None) -> bool:
-    """Return whether the target uses the register-based (A5/A6) compile pipeline."""
-    entry = _match_arch_entry(arch)
-    return entry is not None and entry[0] in (AscendArchGen.GEN5, AscendArchGen.GEN6)
+    """Return whether the target uses the register-based (A5/A6) compile pipeline.
+
+    An omitted or empty *arch* resolves to the current runtime target.
+    """
+    gen = arch_generation(arch)
+    return gen in (AscendArchGen.GEN5, AscendArchGen.GEN6)
 
 
 def rf_size_in_kbytes_for_arch(arch: str = None):
-    """Return the raw RF capacity (KiB) for *arch*, or None when not applicable."""
-    entry = _match_arch_entry(arch)
-    return entry[2] if entry is not None else None
+    """Return the raw RF capacity (KiB) for *arch*, or None when not applicable.
+
+    An omitted or empty *arch* resolves to the current runtime target.
+    """
+    return _RF_SIZE_BY_GENERATION.get(arch_generation(arch))
 
 
 # Cached result of the runtime SOC detection used by is_compile_on_910_95().

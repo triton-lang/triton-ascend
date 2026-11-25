@@ -28,7 +28,7 @@ _ARCH_FUNCTIONS = {
 }
 
 # Module-level constants the extracted functions close over.
-_ARCH_CONSTANTS = {"_ARCH_TABLE", "_FFTS_UNSUPPORTED_ARCHS"}
+_ARCH_CONSTANTS = {"_ARCH_TABLE", "_RF_SIZE_BY_GENERATION", "_FFTS_UNSUPPORTED_ARCHS"}
 
 
 def _exec_nodes(path, nodes, namespace):
@@ -136,7 +136,7 @@ class A6TargetContract(unittest.TestCase):
             ("", False, 0),
             (123, False, 0),
         ]:
-            with self.subTest(arch=arch):
+            with self.subTest(arch=arch), patch.dict(sys.modules, {"triton.runtime": None}):
                 self.assertEqual(self.utils["is_compile_on_910_95"](arch), register_based)
                 self.assertEqual(self.compiler["_is_register_based_target_arch"](arch), register_based)
                 self.assertEqual(self.utils["ub_size_in_kbytes_for_arch"](arch), ub)

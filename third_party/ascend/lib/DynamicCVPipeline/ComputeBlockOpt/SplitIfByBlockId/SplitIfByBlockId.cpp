@@ -1064,6 +1064,8 @@ static llvm::FailureOr<Value> createMatmulPlaceHolderValue(
           return sourceEmpty.getResult();
         }
 
+        if (!tensorType.hasStaticShape())
+          return failure();
         auto emptyOp = builder.create<tensor::EmptyOp>(
             loc, tensorType.getShape(), tensorType.getElementType());
         emptyOp->setAttr(CVPipeline::kBlockId,
@@ -1117,6 +1119,8 @@ createPlaceholderValue(int blockId, OpBuilder &builder, Location loc, Type type,
       }
     }
     if (!usedTrace) {
+      if (!tensorType.hasStaticShape())
+        return failure();
       auto emptyOp = builder.create<tensor::EmptyOp>(
           loc, tensorType.getShape(), tensorType.getElementType());
       emptyOp->setAttr(CVPipeline::kBlockId,

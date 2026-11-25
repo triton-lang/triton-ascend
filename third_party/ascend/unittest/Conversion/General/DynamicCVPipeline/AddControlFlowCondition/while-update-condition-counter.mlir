@@ -1,4 +1,4 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=arith.select
 
 // UpdateConditionInfo on scf.while: clone scf.condition(x) def-chain
 // (extsi + cmpi) into each ssbuffer.if via whileBlockArgMap.
@@ -14,7 +14,9 @@
 // CHECK: ^bb0
 
 // Vector ssbuffer.if = 5: cross-core cond and-ed with the preload cond and
-// the cloned while counter.
+// the cloned while counter. The loop does not force a single block per
+// iteration any more: the condition of a block does not check the flag of
+// the loop.
 // CHECK: %[[EXT5:.*]] = arith.extsi %{{.*}} : i32 to i64
 // CHECK: %[[CMP5:.*]] = arith.cmpi slt, %[[EXT5]], %{{.*}} : i64
 // CHECK: %[[AND5:.*]] = arith.andi %{{.*}}, %[[CMP5]]

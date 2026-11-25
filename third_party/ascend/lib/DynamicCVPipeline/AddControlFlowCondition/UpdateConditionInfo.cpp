@@ -1426,11 +1426,19 @@ UpdateConditionInfoPass::computeVectorSSBufferMemrefs(OpBuilder &builder,
 //                                    the consumer consumed
 //   producer side: c_P - c_C < N_e  the producer is less than N_e rounds
 //                                    ahead of the consumer
-// A cube block consuming a vector block additionally waits until both vector
-// cores produced the same number of rounds (c_V0 == c_V1).
-//
 // A vector block only ever looks at the counter copy of its own core: the
 // number of rounds the other core produced does not constrain it.
+//
+// A cube block consuming a vector block reads the slot the two vector cores
+// fill together, one half each. It waits for both of them, but it does not
+// need them to have produced the same number of rounds:
+//   - the consumer side tells that each core completed the round c_C the
+//     cube is about to read, so both halves of that slot come from that
+//     round,
+//   - the producer side tells that no core ran far enough to overwrite that
+//     slot before the cube read it.
+// The two conditions are enough, an extra alignment condition on the two
+// counters would only make the pipeline wait for the cores to be in step.
 Value UpdateConditionInfoPass::addCrossCoreBlockConditions(
     OpBuilder &builder, Location loc, scf::IfOp ifOp, bool isAIC,
     Value zeroConst, DenseMap<int, Value> &vectorSSBufferMemrefs,
@@ -1513,17 +1521,6 @@ Value UpdateConditionInfoPass::addCrossCoreBlockConditions(
         combineCondition(builder.create<arith::CmpIOp>(
             loc, arith::CmpIPredicate::sgt, diff, zeroConst));
       }
-    }
-
-    // A cube block reads the whole slot filled by the two vector cores: it
-    // has to wait until both cores produced the same number of rounds.
-    if (!currentIsProducer && isAIC && producerIsVector) {
-      Value core0Value =
-          loadCounter(builder, loc, producerMemrefs[0], loadedCounters);
-      Value core1Value =
-          loadCounter(builder, loc, producerMemrefs[1], loadedCounters);
-      combineCondition(builder.create<arith::CmpIOp>(
-          loc, arith::CmpIPredicate::eq, core0Value, core1Value));
     }
   }
 
@@ -2599,8 +2596,8 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
   return newIfOp;
 }
 
-// Combine the conditions: crossCore condition + intraCore condition + counter
-// condition + flowOpt condition
+// Combine the conditions: crossCore condition + preload condition +
+// intraCore condition + counter condition + flowOpt condition
 int UpdateConditionInfoPass::combineConditions(
     ModuleOp module, Value crossCoreCond, Value preloadCond,
     Value intraCoreCond, Value flowOptCond, scf::IfOp ifOp, Operation *loopOp,
@@ -2820,6 +2817,9 @@ int UpdateConditionInfoPass::updateIfConds(
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
+    // The buffers a block reads from and writes to the other blocks of the
+    // same core are collected before the conditions are built: the intra-core
+    // condition of a block is built from them.
     SmallVector<SmallVector<int>> intraCoreInputValuesList(ifOps.size());
     SmallVector<SmallVector<int>> intraCoreOutputValuesList(ifOps.size());
     for (size_t ifIdx = 0; ifIdx < ifOps.size(); ++ifIdx) {

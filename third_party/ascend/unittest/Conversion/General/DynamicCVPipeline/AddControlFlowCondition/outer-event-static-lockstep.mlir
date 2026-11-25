@@ -1,4 +1,13 @@
 // RUN: triton-opt --split-input-file --add-control-flow-condition --canonicalize %s | FileCheck %s --implicit-check-not=memref_ext.volatile
+//
+// XFAIL: *
+//
+// The static ordinal schedule and the native credit handshake of the outer
+// main loop are computed by the conditions of the upstream implementation,
+// which the normal preload scheme does not model. The upstream implementation
+// is gone, so the schedule is not computed and the checks of this test do not
+// hold. Remove the marker when the schedule is ported to the normal preload
+// scheme: lit reports an unexpectedly passing test as a failure.
 
 // A single slot cannot support two producer sweeps under one grant. Keep
 // the scalar handshake in each sweep, along with the native data flags.

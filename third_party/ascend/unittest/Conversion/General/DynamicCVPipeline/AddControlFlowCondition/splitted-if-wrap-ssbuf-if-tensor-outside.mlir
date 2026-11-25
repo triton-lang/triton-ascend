@@ -1,7 +1,7 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
 
-// The mulf sits in block 5 but outside the splitted_if then. checkCanWrap
-// rejects the module and leaves the splitted_if inside ssbuffer.if 5.
+// The mulf sits in block 5 but outside the splitted_if then. The normal
+// scheme has no wrap step, so it leaves the splitted_if inside ssbuffer.if 5.
 
 // CHECK-LABEL: func.func @tensor_outside_split_then
 // CHECK: } {{.*}}ssbuffer.splitted_if = 0 : i32}

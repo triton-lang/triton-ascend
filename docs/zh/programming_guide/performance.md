@@ -1571,7 +1571,6 @@
   # Before: 每轮重复加载 bias（循环不变量在循环内）
   @triton.jit
   def matmul_kernel(a_ptr, b_ptr, bias_ptr, c_ptr, ...):
-      bias = tl.load(bias_ptr + offsets)  # 循环外？不，在循环内
       for k in range(0, K, BLOCK_K):
           bias = tl.load(bias_ptr + offsets)  # 每轮重复加载（浪费）
           a = tl.load(a_ptr + ...)

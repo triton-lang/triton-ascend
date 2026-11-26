@@ -2,10 +2,12 @@
 #include <mspti.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
 #include <set>
+#include <thread>
 
 namespace {
 std::atomic<bool> measuring{false};
@@ -111,6 +113,15 @@ extern "C" int probe_start() {
 }
 
 extern "C" void probe_mark(int on) { measuring.store(on != 0); }
+
+extern "C" int probe_wait() {
+  CHECK(msptiActivityFlushAll(0));
+  snapshot("immediate");
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  CHECK(msptiActivityFlushAll(0));
+  snapshot("after_500ms");
+  return 0;
+}
 
 extern "C" int probe_stop() {
   snapshot("before_flush");

@@ -52,7 +52,7 @@ def test_mspti(tmp_path):
     selected = f"MSPTI: {library} (ASCEND_HOME_PATH={env.get('ASCEND_HOME_PATH')})"
     if result.returncode:
         details = ""
-        if Path(env.get("ASCEND_HOME_PATH", "")).name == "cann-8.5.0":
+        if Path(env.get("ASCEND_HOME_PATH", "")).name in ("cann-8.5.0", "cann-9.2.0-beta.1"):
             details = _probe_failure(env, library, tmp_path)
         pytest.fail(f"{selected}; child exited with {result.returncode}\n{details}\n{result.stdout}", pytrace=False)
     print(selected)
@@ -77,7 +77,7 @@ def _probe_failure(env, library, tmp):
                            text=True, timeout=45)
         if r.returncode:
             return f"MSPTI-PROBE compile failed: {r.stderr[-2000:]}"
-        for mode in ("late-triton", "late-torch", "early-triton"):
+        for mode in ("late-triton", "late-torch", "early-triton", "late-wait-triton"):
             logdir = tmp / mode
             logdir.mkdir()
             probe_env = dict(env, ASCEND_PROCESS_LOG_PATH=str(logdir), ASCEND_GLOBAL_LOG_LEVEL="0",
@@ -125,6 +125,8 @@ def _run_raw(device, tmp, mode):
     for _ in range(3):
         add()
     probe.probe_mark(0)
+    if mode == "late-wait-triton":
+        assert probe.probe_wait() == 0
     assert probe.probe_stop() == 0
     torch.testing.assert_close(y.cpu(), x.cpu() + 1)
 

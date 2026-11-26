@@ -15,24 +15,27 @@ CONFIGS = [dict(name="plain_" + dtype, dtype=dtype) for dtype in ("fp16", "fp32"
 CONFIGS += [
     dict(name="l2_cache_normal_fv", dtype="fp32", l2_cache_ctrl=tla.L2CachePolicy.NORMAL_FV, hivm_policy="EvictFirst"),
     dict(name="l2_cache_normal_lv", dtype="fp32", l2_cache_ctrl=tla.L2CachePolicy.NORMAL_LV, hivm_policy="EvictLast"),
+    dict(name="l2_cache_raw_load", dtype="fp32", raw_l2_cache_mode=4),
 ]
 DTYPES = {"fp16": (tl.float16, torch.float16), "fp32": (tl.float32, torch.float32), "i32": (tl.int32, torch.int32)}
 
 
 @tla.jit
-def transfer(X, Y, DTYPE: tl.constexpr, L2_CACHE_CTRL: tl.constexpr):
+def transfer(X, Y, DTYPE: tl.constexpr, L2_CACHE_CTRL: tl.constexpr, RAW_L2_CACHE_MODE: tl.constexpr):
     with tla.scope.vector():
         src = tla.view(X, (2, 32))
         out = tla.view(Y, (2, 32))
         ub = tla.alloc((2, 32), DTYPE)
         # Construct in a JIT function, including constexpr fields.
-        p: tl.constexpr = tla.LoadGM2UBParams(l2_cache_ctrl=L2_CACHE_CTRL)
+        p: tl.constexpr = tla.LoadGM2UBParams(l2_cache_ctrl=L2_CACHE_CTRL, raw_l2_cache_mode=RAW_L2_CACHE_MODE)
         tla.load_gm_to_ub(src, ub, p)
+        tla.sync.barrier(tla.sync.PIPE.ALL)
         tla.store_ub_to_gm(ub, out)
 
 
 def constants(case):
-    return dict(DTYPE=DTYPES[case["dtype"]][0], L2_CACHE_CTRL=case.get("l2_cache_ctrl"))
+    return dict(DTYPE=DTYPES[case["dtype"]][0], L2_CACHE_CTRL=case.get("l2_cache_ctrl"),
+                RAW_L2_CACHE_MODE=case.get("raw_l2_cache_mode"))
 
 
 @matrix(CONFIGS)
@@ -44,8 +47,13 @@ def test_ir(case, output_dir=None):
     assert "#hivm.tcore_type<VECTOR>" in text
     assert 'hacc.mode = "tla"' in text
     # Pin existing public members and their meanings independently of enum values.
-    policy = case.get("hivm_policy", "EvictFirst")
-    assert f"eviction_policy = <{policy}>" in text
+    mode = case.get("raw_l2_cache_mode")
+    if mode is None:
+        policy = case.get("hivm_policy", "EvictFirst")
+        assert f"eviction_policy = <{policy}>" in text
+    else:
+        assert f"hivm.l2_cache_mode = {mode} : i32" in text
+        assert "eviction_policy" not in text
     print("IR PASS:", case["name"])
 
 

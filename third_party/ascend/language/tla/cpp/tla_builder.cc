@@ -1718,16 +1718,21 @@ void init_tla_builder(py::module &&m) {
       .def(
           "create_tla_load",
           [](TLABuilder &self, Value src, Value dst,
-             std::optional<Attribute> l2CacheCtrl) {
+             std::optional<Attribute> l2CacheCtrl,
+             std::optional<int32_t> rawL2CacheMode) {
             checkDmaBuffers(src, dst);
             auto op = self.create<hivm::LoadOp>(
                 TypeRange{}, src, dst, hivm::PadModeAttr{}, Value{}, Value{},
                 Value{});
             if (l2CacheCtrl)
               op->setAttr("eviction_policy", *l2CacheCtrl);
+            if (rawL2CacheMode)
+              op->setAttr("hivm.l2_cache_mode",
+                          self.getBuilder().getI32IntegerAttr(*rawL2CacheMode));
           },
           py::arg("src"), py::arg("dst"),
-          py::arg("l2_cache_ctrl") = std::nullopt)
+          py::arg("l2_cache_ctrl") = std::nullopt,
+          py::arg("raw_l2_cache_mode") = std::nullopt)
       .def(
           "create_tla_store",
           [](TLABuilder &self, Value src, Value dst) {

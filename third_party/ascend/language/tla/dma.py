@@ -216,10 +216,14 @@ class LoadGM2UBParams:
     """Cache configuration for :func:`load_gm_to_ub`.
 
     :param l2_cache_ctrl: Compile-time L2 cache control: ``NORMAL_FV`` or
-        ``NORMAL_LV``. ``None`` selects ``NORMAL_FV``.
+        ``NORMAL_LV``. If neither field is set, the default is ``NORMAL_FV``.
     :type l2_cache_ctrl: tla.L2CachePolicy or None
+    :param raw_l2_cache_mode: Optional compile-time Ascend950 MTE2 descriptor
+        field, 0-6 or 8-15. Mutually exclusive with ``l2_cache_ctrl``.
+    :type raw_l2_cache_mode: int or None
     """
     l2_cache_ctrl: L2CachePolicy = None
+    raw_l2_cache_mode: int = None
 
 
 @dataclass(frozen=True)
@@ -479,11 +483,19 @@ def load_gm_to_ub(src, dst, params=None, _semantic=None):
     _route(src, dst, (("gm", "ub"), ))
     p = _params(params, LoadGM2UBParams)
     l2_cache_ctrl = _unwrap_if_constexpr(p.l2_cache_ctrl)
-    if l2_cache_ctrl is None:
-        l2_cache_ctrl = L2CachePolicy.NORMAL_FV
-    # Keep the public cache control independent of HIVM attribute names.
-    eviction = _enum_attr(l2_cache_ctrl, L2CachePolicy, "eviction_policy", _semantic)
-    _semantic.builder.create_tla_load(src.handle, dst.handle, eviction)
+    raw_mode = _unwrap_if_constexpr(p.raw_l2_cache_mode)
+    eviction = None
+    if raw_mode is None:
+        if l2_cache_ctrl is None:
+            l2_cache_ctrl = L2CachePolicy.NORMAL_FV
+        eviction = _enum_attr(l2_cache_ctrl, L2CachePolicy, "eviction_policy", _semantic)
+    else:
+        raw_mode = _integer(raw_mode, "raw_l2_cache_mode", bits=32)
+        if not 0 <= raw_mode <= 15 or raw_mode == 7:
+            raise ValueError("GM-to-UB raw_l2_cache_mode must be in 0-6 or 8-15")
+        if l2_cache_ctrl is not None:
+            raise ValueError("raw_l2_cache_mode and l2_cache_ctrl are mutually exclusive")
+    _semantic.builder.create_tla_load(src.handle, dst.handle, eviction, raw_mode)
 
 
 @builtin

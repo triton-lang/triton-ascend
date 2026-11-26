@@ -596,12 +596,15 @@ OpFoldResult divideIndex(OpFoldResult value, uint64_t divisor,
   return builder.create<arith::DivSIOp>(loc, cast<Value>(value), d).getResult();
 }
 
-// The caller has proved that the complete value can be divided exactly.
+// The complete value is divisible under the caller's contract.
 // Retain only descriptor fields whose units can also be converted exactly.
 void divideDecomposition(OffsetInfo &info, uint64_t divisor, OpBuilder &builder,
                          Location loc) {
   if (info.scalarOffset) {
-    if (isKnownMultiple(info.scalarOffset, divisor))
+    // A complete decomposition's origin is the displacement at lane zero.
+    // A partial origin may be only one term of that displacement.
+    if (info.hasStructuredDecomposition() ||
+        isKnownMultiple(info.scalarOffset, divisor))
       info.scalarOffset = divideIndex(info.scalarOffset, divisor, builder, loc);
     else
       info.scalarOffset = {};

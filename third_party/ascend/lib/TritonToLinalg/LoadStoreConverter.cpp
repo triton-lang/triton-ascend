@@ -573,6 +573,16 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     auto fullMemRefType = MemRefType::get(fullMemRefShape, memRefElementType);
     bool isIndexSelectScenario =
         (extractedLoopCount == 1) && (fullMemRefShape.size() > 1u);
+    if (isIndexSelectScenario && compileOn91095Flag &&
+        compileModeFlag == triton::ascend::CompileMode::SimdSimt) {
+      // Discrete slices depend on vector-side indices. Keep their temporary
+      // in UB so CV lowering transfers the gathered result to Cube, rather
+      // than moving the index tensor to L1 for an unsupported scalar read.
+      fullMemRefType =
+          MemRefType::get(fullMemRefShape, memRefElementType, AffineMap{},
+                          hivm::AddressSpaceAttr::get(rewriter.getContext(),
+                                                      hivm::AddressSpace::UB));
+    }
     if (isIndexSelectScenario)
       loopOp->setAttr("hivm.parallel_loop", rewriter.getUnitAttr());
     allocOp = rewriter.create<memref::AllocOp>(loc, fullMemRefType);

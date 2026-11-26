@@ -4,7 +4,7 @@
 
 ## Quick Reference
 
-- Triton-Ascend is maintained by[Triton-Ascend Code Repository](https://github.com/triton-lang/triton-ascend/)
+- Triton-Ascend is maintained by [Triton-Ascend Code Repository](https://github.com/triton-lang/triton-ascend/)
 - Where to get help
   - [Triton-Ascend Code Repository](https://github.com/triton-lang/triton-ascend/)
   - [Triton-Ascend Data Website](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)

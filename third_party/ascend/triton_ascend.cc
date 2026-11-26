@@ -1,3 +1,4 @@
+#include "mlir/Bytecode/BytecodeWriter.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -10,10 +11,18 @@
 #include "mlir/Transforms/Passes.h" // createInlinerPass
 
 #include "ascend/include/AutoBlockify/Passes.h"
+#include "ascend/include/BlockAuto/Analysis.h"
+#ifdef TRITON_ASCEND_ENABLE_PROTON
+#include "ascend/include/ProtonToHIVM/Passes.h"
+#endif
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
+#include "ascend/include/TritonToGraph/BlockBatching/BatchOpRegistry.h"
+#include "ascend/include/TritonToGraph/BlockBatching/BatchRequest.h"
+#include "ascend/include/TritonToGraph/BlockBatching/MemoryModels.h"
+#include "ascend/include/TritonToGraph/BlockBatching/ReductionModels.h"
 #include "ascend/include/TritonToGraph/GraphOptimization.h"
 #include "ascend/include/TritonToGraph/LayoutMemoryOptimization.h"
 #include "ascend/include/TritonToGraph/Passes.h"
@@ -21,11 +30,13 @@
 #include "ascend/include/TritonToHIVM/Passes.h"
 #include "ascend/include/TritonToLLVM/Passes.h"
 #include "ascend/include/TritonToLinalg/Passes.h"
+#include "ascend/include/TritonToLinalg/TLAToLinalgPass.h"
 #include "ascend/include/TritonToStructured/Passes.h"
 #include "ascend/include/TritonToUnstructure/Passes.h"
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Passes.h"
 
@@ -60,18 +71,167 @@ namespace py = pybind11;
 using namespace mlir;
 
 void init_triton_ascend_passes_ttir(py::module &&m) {
+#ifdef TRITON_ASCEND_ENABLE_PROTON
+  m.def("add_assign_ascend_proton_scope_ids", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::proton::createAssignAscendProtonScopeIdsPass());
+  });
+  m.def("add_lower_ascend_proton_to_hivm",
+        [](mlir::PassManager &pm, int32_t bufferSize) {
+          pm.addPass(mlir::triton::proton::createLowerAscendProtonToHIVMPass(
+              bufferSize));
+        });
+#endif
+
+  m.def("block_batching_registry", []() {
+    py::list result;
+    for (const auto &descriptor : mlir::triton::cfg::getBatchOpRegistry()) {
+      py::dict row;
+      row["op_name"] = descriptor.name.str();
+      row["spec_level"] = std::string(1, descriptor.specLevel);
+      row["implementation"] =
+          descriptor.implemented
+              ? "supported"
+              : (descriptor.specLevel == 'R' ? "rejected" : "deferred");
+      row["model"] =
+          mlir::triton::cfg::getBatchModelName(descriptor.model).str();
+      row["attribute_policy"] =
+          mlir::triton::cfg::getBatchAttributePolicyName(descriptor.attributes)
+              .str();
+      row["inactive_input_policy"] =
+          mlir::triton::cfg::getBatchInactivePolicyName(
+              descriptor.inactiveInputs)
+              .str();
+      row["implementation_version"] =
+          mlir::triton::cfg::kBatchImplementationVersion;
+      row["type_scope"] =
+          "scalar/static-ranked; f16,bf16,f32,i1,i32,i64; default encoding";
+      result.append(row);
+    }
+    return result;
+  });
+  m.def("block_batching_has_dynamic_contiguous_copy",
+        &mlir::triton::cfg::hasBatchDynamicContiguousCopy);
+  m.def("lower_block_batching_scans", &mlir::triton::cfg::lowerBatchLaneScans);
+  m.def("clear_block_batching_owner", [](mlir::ModuleOp module) {
+    auto owner =
+        module->getAttrOfType<mlir::StringAttr>("hacc.block_mapping_owner");
+    if (!owner || owner.getValue() != "block_batching")
+      return false;
+    module.walk([](mlir::Operation *op) {
+      op->removeAttr("hacc.block_mapping_owner");
+      op->removeAttr("hacc.batch_effect_order_verified");
+    });
+    return true;
+  });
+  m.def(
+      "rewrite_block_batching",
+      [](mlir::ModuleOp module, py::object factorObject, py::object axisObject,
+         std::string layoutPolicy, py::object cvObject,
+         py::object batchObject) {
+        if (!PyBool_Check(cvObject.ptr()))
+          throw py::value_error("block batching cv must be bool");
+        bool cv = cvObject.cast<bool>();
+        if (!PyBool_Check(batchObject.ptr()))
+          throw py::value_error("block batching cv batch matmul must be bool");
+        bool cvBatchMatmul = batchObject.cast<bool>();
+        if (cvBatchMatmul && !cv)
+          throw py::value_error("batch matmul requires CV opt-in");
+        if (!PyLong_CheckExact(factorObject.ptr()) ||
+            !PyLong_CheckExact(axisObject.ptr()))
+          throw py::value_error(
+              "block batching factor and axis must be integers (not bool)");
+        int64_t factor = factorObject.cast<int64_t>();
+        int64_t axisValue = axisObject.cast<int64_t>();
+        if (factor <= 0 || axisValue < -1 || axisValue > 2)
+          throw py::value_error("invalid block batching factor or axis");
+        int32_t axis = static_cast<int32_t>(axisValue);
+        if (layoutPolicy != "auto" && layoutPolicy != "semantic_only")
+          throw py::value_error("invalid block batching layout policy");
+        auto result = mlir::triton::cfg::rewriteBlockBatching(
+            module,
+            {factor, axis, layoutPolicy == "semantic_only", cv, cvBatchMatmul});
+        if (mlir::failed(result))
+          throw std::runtime_error(
+              "block batching rewrite failed verification");
+        py::dict report;
+        report["report_version"] = 1;
+        report["compile_status"] = result->status;
+        report["reason"] = result->reason;
+        report["location"] = result->location;
+        report["operation"] = result->operation;
+        report["context"] = result->context;
+        report["implementation_version"] =
+            mlir::triton::cfg::kBatchImplementationVersion;
+        report["requested_factor"] = factor;
+        report["requested_axis"] = axis;
+        report["selected_axis"] = result->selectedAxis;
+        report["lane_width"] = result->laneWidth;
+        report["guard_json"] = result->guardJSON;
+        report["layout_json"] = result->layoutJSON;
+        report["computation_json"] = result->computationJSON;
+        report["operations"] = result->operations;
+        report["cv_mode"] = result->cvMode;
+        report["cv_lowering"] = result->cvLowering;
+        report["vv_lowering"] = result->vvLowering;
+        report["structured_masks"] = result->structuredMasks;
+        report["tail_policy"] = cv ? "full_groups_only" : "masked";
+        return report;
+      },
+      py::arg("module"), py::arg("factor"), py::arg("axis"),
+      py::arg("layout_policy") = "auto", py::arg("cv") = false,
+      py::arg("cv_batch_matmul") = false);
+  m.def(
+      "analyze_block_batching",
+      [](mlir::ModuleOp module, py::object factor, py::object axis,
+         py::object cv) {
+        if (!PyBool_Check(cv.ptr()))
+          throw py::value_error("block batching cv must be bool");
+        if (!PyLong_CheckExact(factor.ptr()) || !PyLong_CheckExact(axis.ptr()))
+          throw py::value_error(
+              "block batching factor and axis must be integers (not bool)");
+        const auto factorValue = factor.cast<int64_t>();
+        const auto axisValue = axis.cast<int64_t>();
+        if (factorValue <= 0 || axisValue < -1 || axisValue > 2)
+          throw py::value_error("invalid block batching factor or axis");
+        mlir::triton::cfg::BatchRequest request{factorValue,
+                                                static_cast<int32_t>(axisValue),
+                                                true, cv.cast<bool>()};
+        auto report = mlir::triton::cfg::analyzeBlockBatching(module, request);
+        if (mlir::failed(report))
+          throw py::value_error("invalid block batching request");
+        py::dict result;
+        result["report_version"] = 1;
+        result["compile_status"] = report->status;
+        result["requested_factor"] = factorValue;
+        result["requested_axis"] = axisValue;
+        result["applied_factor"] = 1;
+        result["owner"] = "none";
+        result["reason"] = report->reason;
+        result["location"] = report->location;
+        result["operation"] = report->operation;
+        result["context"] = report->context;
+        result["layout_json"] = report->layoutJSON;
+        result["computation_json"] = report->computationJSON;
+        result["implementation_version"] =
+            mlir::triton::cfg::kBatchImplementationVersion;
+        result["operations"] = report->operations;
+        return result;
+      },
+      py::arg("module"), py::arg("factor"), py::arg("axis"),
+      py::arg("cv") = false);
   m.def("add_auto_blockify", [](mlir::PassManager &pm, int autoBlockifySize) {
     AutoBlockifyOptions opts;
     opts.autoBlockifySize = autoBlockifySize;
     pm.addPass(mlir::triton::createAutoBlockifyPass(opts));
   });
 
-  m.def("add_triton_to_structure",
-        [](mlir::PassManager &pm, bool enableMaskFallbackConversion,
-           bool optimizeDynamicOffset) {
-          pm.addPass(mlir::triton::createTritonToStructuredPass(
-              enableMaskFallbackConversion, optimizeDynamicOffset));
-        });
+  m.def("add_triton_to_structure", [](mlir::PassManager &pm,
+                                      bool enableMaskFallbackConversion,
+                                      bool optimizeDynamicOffset,
+                                      bool compileOn91095 = false) {
+    pm.addPass(mlir::triton::createTritonToStructuredPass(
+        enableMaskFallbackConversion, optimizeDynamicOffset, compileOn91095));
+  });
 
   m.def("add_triton_control_flow_opt", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createTritonControlFlowOptPass());
@@ -89,6 +249,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
               globalKernel, namedOps, enableNd2nzOnVector, enableSelectAnalysis,
               compileOn91095, compileMode));
         });
+
+  m.def("add_tla_to_linalg", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createTLAToLinalgPass());
+  });
 
   m.def("add_merge_concat_load_buffer", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::cfg::createMergeConcatLoadBufferPass());
@@ -151,7 +315,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
          std::uint64_t mappingUBCapacityBytes,
          std::uint64_t storeCoalescingUBBudgetBytes,
          const std::string &compileMode, std::uint64_t ubSafetyPercent,
-         std::uint64_t reservedUBBytes) {
+         std::uint64_t reservedUBBytes, std::uint64_t mappingL0ACapacityBytes,
+         std::uint64_t mappingL0BCapacityBytes,
+         std::uint64_t mappingL0CCapacityBytes, std::uint64_t l0SafetyPercent,
+         std::uint64_t coreNum, bool compileOn91095) {
         if (ruleMask > std::numeric_limits<std::uint32_t>::max())
           throw py::value_error("rule_mask must fit in uint32_t");
         const auto graphRuleMask =
@@ -181,6 +348,16 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
             reservedUBBytes > effectiveMappingUBCapacity)
           throw py::value_error("reserved_ub_bytes must fit in unsigned and "
                                 "not exceed mapping UB");
+        if (mappingL0ACapacityBytes > std::numeric_limits<unsigned>::max() ||
+            mappingL0BCapacityBytes > std::numeric_limits<unsigned>::max() ||
+            mappingL0CCapacityBytes > std::numeric_limits<unsigned>::max())
+          throw py::value_error("mapping L0 capacities must fit in unsigned");
+        if (l0SafetyPercent == 0 || l0SafetyPercent > 100 ||
+            l0SafetyPercent > std::numeric_limits<unsigned>::max())
+          throw py::value_error(
+              "l0_safety_percent must be an unsigned value in [1, 100]");
+        if (coreNum > std::numeric_limits<unsigned>::max())
+          throw py::value_error("core_num must fit in unsigned");
 
         mlir::triton::cfg::GraphOptimizationOptions options;
         options.enabledRuleMask = graphRuleMask;
@@ -193,7 +370,16 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
             static_cast<unsigned>(storeCoalescingUBBudgetBytes);
         options.ubSafetyPercent = static_cast<unsigned>(ubSafetyPercent);
         options.reservedUBBytes = static_cast<unsigned>(reservedUBBytes);
+        options.mappingL0ACapacityBytes =
+            static_cast<unsigned>(mappingL0ACapacityBytes);
+        options.mappingL0BCapacityBytes =
+            static_cast<unsigned>(mappingL0BCapacityBytes);
+        options.mappingL0CCapacityBytes =
+            static_cast<unsigned>(mappingL0CCapacityBytes);
+        options.l0SafetyPercent = static_cast<unsigned>(l0SafetyPercent);
+        options.coreNum = static_cast<unsigned>(coreNum);
         options.compileMode = compileMode;
+        options.compileOn91095 = compileOn91095;
         pm.addPass(mlir::triton::cfg::createGraphOptimizePass(options));
       },
       py::arg("pm"),
@@ -204,7 +390,12 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       py::arg("mapping_ub_capacity_bytes") = 0,
       py::arg("store_coalescing_ub_budget_bytes") = 0,
       py::arg("compile_mode") = "simd_simt_template",
-      py::arg("ub_safety_percent") = 80, py::arg("reserved_ub_bytes") = 0);
+      py::arg("ub_safety_percent") = 80, py::arg("reserved_ub_bytes") = 0,
+      py::arg("mapping_l0a_capacity_bytes") = 0,
+      py::arg("mapping_l0b_capacity_bytes") = 0,
+      py::arg("mapping_l0c_capacity_bytes") = 0,
+      py::arg("l0_safety_percent") = 80, py::arg("core_num") = 0,
+      py::arg("compile_on_910_95") = false);
 
   m.def("set_buffer_count", [](mlir::ModuleOp &module, const std::string &type,
                                int count) {
@@ -221,6 +412,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     }
   });
 
+  m.def("set_enable_outer_main_loop", [](mlir::ModuleOp &module) {
+    module->setAttr(CVPipeline::kEnableOuterMainLoop,
+                    UnitAttr::get(module.getContext()));
+  });
   m.def("set_enable_ub_refine_opt",
         [](mlir::ModuleOp &moduleop, bool enable) { return; });
   m.def("set_enable_buffer_insert_optimization", [](mlir::ModuleOp &moduleop) {
@@ -458,13 +653,41 @@ runAscendCostModelInProcess(const std::string &mlirText,
 // Forward declaration for ascend_ir bindings (defined in ascend_ir.cc)
 void init_ascend_ir(py::module &&m);
 void init_buffer_ir(py::module &&m);
+// TLA-specific builder bindings (defined in language/tla/cpp/tla_builder.cc)
+void init_tla_builder(py::module &&m);
 
 void init_triton_ascend(py::module &&m) {
   py::module_ libtriton = py::module_::import("triton._C.libtriton");
   init_buffer_ir(libtriton.def_submodule("buffer_ir"));
 
   auto passes = m.def_submodule("passes");
+  // Host-only frontend scoring and bounded axis/factor planning.
+  m.def("block_data_only_arguments",
+        &mlir::triton::ascend::blockDataOnlyArguments,
+        py::call_guard<py::gil_scoped_release>());
+  m.def(
+      "score_block_ttir",
+      [](mlir::ModuleOp module, const std::string &request) {
+        return mlir::triton::ascend::scoreBlockTtir(module, request);
+      },
+      py::call_guard<py::gil_scoped_release>());
+  m.def(
+      "select_block_candidates",
+      [](const std::string &request) {
+        return mlir::triton::ascend::selectBlockCandidates(request);
+      },
+      py::call_guard<py::gil_scoped_release>());
   // load dialects
+
+  m.def("serialize_block_input", [](mlir::ModuleOp module) {
+    std::string data;
+    llvm::raw_string_ostream stream(data);
+    if (failed(mlir::writeBytecodeToFile(module, stream)))
+      throw std::runtime_error(
+          "cannot serialize block batching frontend input");
+    return py::bytes(data);
+  });
+
   m.def("load_dialects", [](mlir::MLIRContext &context) {
     mlir::DialectRegistry registry;
     registry.insert<mlir::triton::ascend::TritonAscendDialect>();
@@ -496,4 +719,6 @@ void init_triton_ascend(py::module &&m) {
 
   // Initialize ascend IR bindings (ascendnpu_ir_builder, scope/hivm dialects)
   init_ascend_ir(m.def_submodule("ir"));
+  // TLA builder bindings share the same "ir" submodule (def_submodule caches).
+  init_tla_builder(m.def_submodule("ir"));
 }

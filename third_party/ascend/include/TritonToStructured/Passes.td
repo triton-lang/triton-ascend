@@ -12,7 +12,11 @@ def TritonToStructured : Pass<"triton-to-structured", "mlir::ModuleOp"> {
             "If enabled, select will perform a fallback conversion when mask matching fails.">,
         Option<"optimizeDynamicOffset", "optimize-dynamic-offset",
             "bool", /*default*/"false",
-            "Enable dynamic offset feature">
+            "Enable dynamic offset feature">,
+        Option<"compileOn91095", "compile-on-910-95",
+            "bool", /*default*/"false",
+            "If true, skip ImplicitPermute on loads when the module has no dot/cube ops "
+            "(historical 91095 SIMT behavior).">
     ];
 }
 

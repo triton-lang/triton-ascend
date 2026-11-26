@@ -21,10 +21,10 @@
 虽然运行时接口允许下发并发任务数最大为65535，但超过物理核数的部分是通过新一轮的下发来完成的。如果直接将GPU上的Triton算子拿到昇腾平台上运行，这些大量的任务会引入可观的核启动和核初始化时的额外开销，影响到算子性能表现。\
 因此，需要针对昇腾平台特性修改分核逻辑。最推荐的做法是**将分核的数量直接固定为硬件的物理核数**，在核内做更为细致的数据分块：
 
-* 对于纯Vector算子，分核数等于**Vector核数量**。
-* 对于CV融合算子，分核数等于**Cube核数量**（通常为Vector核数量的一半），算子执行时会按1：2的比例调用Vector核。
+- 对于纯Vector算子，分核数等于**Vector核数量**。
+- 对于CV融合算子，分核数等于**Cube核数量**（通常为Vector核数量的一半），算子执行时会按1:2的比例调用Vector核。
 
-一般而言，在NPU卡上，一个计算核心AI Core含有一个Cube核，每个Cube核配有两个Vector核，因此可以通过以下接口获取**Vector核数(vectorcore_num)**与**Cube核数量(aicore_num)**：
+一般而言，在NPU卡上，一个计算核心AI Core含有一个Cube核，每个Cube核配有两个Vector核，因此可以通过以下接口获取**Vector核数（vectorcore_num）**与**Cube核数量（aicore_num）**：
 
 ```python
 import torch
@@ -41,7 +41,7 @@ aicore_num = properties["num_aicore"]
 参考示例代码，先固定核数，再通过内部循环分批处理任务分块：
 
 ```python
-NUM_CORE = vectorcore_num
+NUM_CORE = vectorcore_num  # 纯Vector算子使用 vectorcore_num；CV融合算子应使用 aicore_num
 grid = (NUM_CORE ,)
 _attn_fwd[grid](Q, K, V, M, Out, acc, scale, ...)
 
@@ -56,7 +56,7 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
               BLOCK_N: tl.constexpr,
               STAGE: tl.constexpr
               ):
-    # 计算任务总量,将三维任务(Z,H,M)展平为一维总任务数
+    # 计算任务总量，将三维任务(Z,H,M)展平为一维总任务数
     NUM_BLOCKS_M = N_CTX // BLOCK_M
     NUM_BLOCKS = NUM_BLOCKS_M * Z * H
 
@@ -86,7 +86,7 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
 
 ## 通用单核数据搬运
 
-### 设置合适的循环内数据分块大小（BLOCK SIZE）
+### 设置合适的循环内数据分块大小（BLOCK_SIZE）
 
 以add_kernel为例，变量和操作共同决定了片上内存的空间占用大小，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上内存的空间时尽可能大，这可以通过Triton-Ascend的[Autotune](../examples/06_autotune_example.md)预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。
 
@@ -123,8 +123,8 @@ def add_kernel(x_ptr,
 
 | 算子类型 | 使用的计算单元 | 尾轴对齐要求 |
 | --- | --- | --- |
-| VV类算子（Vector-Vector，纯向量计算类算子） | 仅使用Vector核 | 尾轴大小能被32B整除 |
-| CV类算子（Cube-Vector，Cube核与Vector核融合计算类算子） | 使用Cube核+Vector核 | 尾轴大小能被512B整除 |
+| VV类算子（Vector-Vector，纯向量计算类算子） | 仅使用Vector核 | 尾轴大小能被32Byte整除 |
+| CV类算子（Cube-Vector，Cube核与Vector核融合计算类算子） | 使用Cube核+Vector核 | 尾轴大小能被512Byte整除 |
 
 【描述】对模型中shape为(2048,3)和(2048,1)Tensor的种种操作，都会因为自动补齐导致性能明显恶化，此时可考虑通过转置操作将对齐轴转到低维，直到store时再转置为原始状态，从而规避自动补齐，优化计算速度。
 同时由于转置操作本身也受自动补齐规则的影响，因此同样需要特殊技巧来规避补齐。这里列出一个“借轴转置”的tip，适用于**tensor.numel() % 256Byte == 0**的场景，具体操作如下：
@@ -188,7 +188,7 @@ def pick_kernel(
 
 通过分析表格中的数据可以发现，优化前后的aiv_mte2_time(μs)和aiv_mte2_ratio差距较大，优化方案通过先将大部分数据搬运到UB上，减少小批量数据通过L2搬运到UB的次数，减少了L2搬运到UB上的总时间。
 
-> 注意：优化后的 aiv_mte2_time 反而更高，这是因为优化方案一次性将大量数据搬运到 UB（增加 MTE2 耗时），但消除了原先通过 L2 逐条搬运 UB 的低效路径，整体性能更优。
+> 注意：优化后的 aiv_mte2_time 反而更高，这是因为优化方案一次性将大量数据搬运到 UB（增加 MTE2 耗时），但消除了原先通过 L2 逐条搬运到 UB 的低效路径，整体性能更优。
 
 ### 存算并行
 
@@ -256,7 +256,7 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
     import triton.language as tl
 
     @triton.autotune(
-    configs=[ # 待测试的参数配置列表,参数候选值需要是2的幂次
+    configs=[ # 待测试的参数配置列表，参数候选值需要是2的幂次
             triton.Config({'BLOCK_SIZE': 128}),
             triton.Config({'BLOCK_SIZE': 256}),
             triton.Config({'BLOCK_SIZE': 512}),
@@ -294,6 +294,7 @@ max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backe
 - 简单示例
 
     ```python
+    import triton
     from triton.backends.ascend.runtime import max_autotune
 
     @max_autotune(
@@ -325,7 +326,7 @@ max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backe
 
 以下为pytest回显的Triton编译失败日志：每行开头的`E`为pytest错误输出前缀（表示该行来自pytest捕获的错误输出），并非日志本身内容。
 
-```text
+```output
 E triton.compiler.errors.MLIRCompilationError:
 E ///--------------------- [ERROR][Triton][BEG]-------------------------
 E [ConvertLinalgRToBinary] encounters error:
@@ -424,18 +425,18 @@ large or block number is more than what user expect due to multi-buffer feature 
 
     关闭multi-buffer会降低搬运与计算的流水重叠度、可能影响性能，建议仅在UB紧张时使用，并优先通过autotune在多组配置间对比取舍（参见本文档「存算并行」章节）。
 
-4. **重新编译验证。** 重新运行核函数编译或测试用例，确认日志中不再出现`ub overflow`、`MLIRCompilationError`报错，核函数编译通过且输出结果与预期一致，即为解决。若以上步骤全部执行后仍溢出，请对照日志中`requires`与`available`两个数值继续减小分块参数，并核对目标产品的UB规格（见文末规格表）。
+4. **重新编译验证。** 重新运行核函数编译或测试用例，确认日志中不再出现`ub overflow`、`MLIRCompilationError`报错，核函数编译通过且输出结果与预期一致，即为解决。若以上步骤全部执行后仍溢出，请对照日志中`requires`与`available`两个数值继续减小分块参数，并核对目标产品的UB规格（见本节末规格表）。
 
 #### 预防措施
 
 | 预防措施 | 说明 |
 | --- | --- |
 | 编码前估算UB占用 | 单个tile的UB占用（bit）≈ tile元素数 × 每元素字节数 × buffer份数 × 8；实际还需叠加多个中间张量与对齐开销，应预留充足余量。建议BLOCK_SIZE_SUB从1024~4096起步并以autotune实测为准 |
-| 优先使用autotune | 用`triton.autotune`枚举多组BLOCK_SIZE（可含`multibuffer`开关）配置，由运行时自动选择不溢出且性能最优的组合，避免手工反复试错（参见本文档「triton.autotune 自动调优」章节） |
+| 优先使用autotune | 用`triton.autotune`枚举多组BLOCK_SIZE（可含`multibuffer`开关）配置，由运行时自动选择不溢出且性能最优的组合，避免手工反复试错（参见本文档「Triton Autotune 自动调优」章节） |
 | 关注multi-buffer影响 | 编译器默认开启存算并行（`multiBuffer=True`），多缓冲使UB占用按buffer份数成倍增加；UB紧张时在Config中设置`multibuffer=False`（参见本文档「存算并行」章节） |
 | 长序列分批处理 | 当序列长度导致单tile估算占用接近或超过UB上限时，在核函数内用for循环按序列维度分块load/计算/store，避免单次整段搬运 |
 
-UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）时，仅该张量即需65536×4×2×8 = 4194304 bit，已超过Atlas A2系列产品可用的1572864 bit；按Atlas A2系列产品1572864 bit上限反推，单张量float16、双缓冲下的理论上限约49152个元素（1572864÷8÷2÷2 = 49152）。
+UB占用估算示例：65536个float32元素（4Byte）、双缓冲（2份）时，仅该张量即需65536×4×2×8 = 4194304 bit，已超过Atlas A2系列产品可用的1572864 bit；按Atlas A2系列产品1572864 bit上限反推，单个float16张量、双缓冲下的理论上限约49152个元素（1572864÷8÷2÷2 = 49152）。
 
 【注意】Atlas A2系列产品UB大小为192KB（即1572864bit）。各产品系列片上内存规格如下：
 
@@ -464,14 +465,14 @@ UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）�
     ```python
 
     @triton.jit
-    def add_kernel(x_ptr, # Pointer to first input vector.
-        y_ptr, # Pointer to second input vector.
-        output_ptr, # output 向量的指针.
-        n_elements, # 向量的大小.
-        BLOCK_SIZE: tl.constexpr, # 每个进程需要处理的元素个数.
-        # 注意：constexpr属性表示它可以被用作shape值.
+    def add_kernel(x_ptr, # 指向第一个输入向量的指针。
+        y_ptr, # 指向第二个输入向量的指针。
+        output_ptr, # output 向量的指针。
+        n_elements, # 向量的大小。
+        BLOCK_SIZE: tl.constexpr, # 每个程序需要处理的元素个数。
+        # 注意：constexpr属性表示它可以被用作shape值。
     ):
-        pid = tl.program_id(axis=0) # We use a 1D launch grid so axis is 0.
+        pid = tl.program_id(axis=0) # 我们使用一维发射网格，所以axis是0。
         block_start = pid * BLOCK_SIZE
         offsets = block_start + tl.arange(0, BLOCK_SIZE)
         mask = offsets < n_elements
@@ -492,7 +493,7 @@ UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）�
         return output
     ```
 
-    使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性
+    使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性。
 
     ```python
     torch.manual_seed(0)
@@ -513,18 +514,18 @@ UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）�
 
 3. 单核运算的关键点
 
-    -块级数据处理：每个计算块负责一小段数据，保证并行性。
+    - 块级数据处理：每个计算块负责一小段数据，保证并行性。
 
-    -边界检查：使用 mask 或 if (tid < N) 避免越界。
+    - 边界检查：使用 mask 或 if (tid < N) 避免越界。
 
-    -块大小选择：合理设置 block 和 grid
+    - 块大小选择：合理设置 block 和 grid。
 
 4. 性能要点：
 
-    (1)访存优化
-    -保证连续访问。
-    -使用对齐的 stride，避免跨行/跨列跳跃式访问。
-    -尽量让数据块大小对齐到 32 字节边界。
+    （1）访存优化
+    - 保证连续访问。
+    - 使用对齐的 stride，避免跨行/跨列跳跃式访问。
+    - 尽量让数据块大小对齐到 32 字节边界。
     输入输出 buffer 在分配时保证对齐，避免访存性能下降。
     例：
 
@@ -567,9 +568,9 @@ UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）�
         return z
     ```
 
-    (2)子块划分
-    -将大矩阵分解为小block，每个block在 UB 内完成计算。
-    -子块划分要兼顾访存连续性和计算单元利用率。
+    （2）子块划分
+    - 将大矩阵分解为小block，每个block在 UB 内完成计算。
+    - 子块划分要兼顾访存连续性和计算单元利用率。
     例：
 
     ```python
@@ -618,7 +619,7 @@ UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）�
 
 ## 通用多维张量切分
 
-Triton 算子处理多维张量时，核心思想是将高维数据映射到硬件的 Block、Core、硬件单元中。本节提供二维与三维张量的典型处理示例。
+Triton 算子处理多维张量时，核心思想是按维度切分为若干数据块（Block），每个数据块由一个 program 处理，并行调度到硬件 Core 执行。本节提供二维与三维张量的典型处理示例。
 
 ### 二维张量切分：以矩阵乘法（GEMM）为例
 
@@ -644,16 +645,16 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K,
     b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
 
     # 3. 循环迭代 K 维度进行累加计算
-    accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float16)
+    accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
     for k in range(0, K, BLOCK_K):
-        a = tl.load(a_ptrs, mask=(offs_am[:, None] < M) & (offs_k[None, :] < K))
-        b = tl.load(b_ptrs, mask=(offs_k[:, None] < K) & (offs_bn[None, :] < N))
+        a = tl.load(a_ptrs, mask=(offs_am[:, None] < M) & (offs_k[None, :] < K), other=0.0)
+        b = tl.load(b_ptrs, mask=(offs_k[:, None] < K) & (offs_bn[None, :] < N), other=0.0)
         accumulator += tl.dot(a, b)
 
         a_ptrs += BLOCK_K * stride_ak
         b_ptrs += BLOCK_K * stride_bk
 
-    tl.store(c_ptr + offs_am[:, None] * stride_cm + offs_bn[None, :] * stride_cn, accumulator)
+    tl.store(c_ptr + offs_am[:, None] * stride_cm + offs_bn[None, :] * stride_cn, accumulator, mask=(offs_am[:, None] < M) & (offs_bn[None, :] < N))
 ```
 
 **要点**：

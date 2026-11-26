@@ -287,10 +287,9 @@ def _specialization(kernel, wrapper, constants, dtype, family, *, values=None, o
         if required != set(constants):
             raise ValueError(f"{kernel.name} constexpr parameters changed: {required ^ set(constants)}")
     signature = {arg.arg: _runtime_type(arg.arg, family, dtype) for arg in args if arg.arg not in constexpr}
-    aliases = {"intra_cache_num": "buf_slot_num_of_veccore", "inter_cache_num": "buf_slot_num_of_crosscore"}
     arg_names = {arg.arg for arg in args}
     launch_options = {
-        aliases.get(kw.arg, kw.arg): _static_value(kw.value, values)
+        kw.arg: _static_value(kw.value, values)
         for kw in _launch(wrapper, kernel.name).keywords
         if kw.arg is not None and kw.arg not in arg_names
     }

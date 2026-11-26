@@ -6,6 +6,10 @@
 // CHECK-NOT: isExact
 
 func.func @shrsi(%a: i32, %b: i32) -> i32 {
+<<<<<<< HEAD
   %0 = "arith.shrsi"(%a, %b) {isExact} : (i32, i32) -> i32
+=======
+  %0 = arith.shrsi %a, %b : i32
+>>>>>>> upstream/main
   return %0 : i32
 }

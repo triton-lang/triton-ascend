@@ -35,11 +35,13 @@
 #include "ascend/include/TritonToGraph/ProgramMappingScalarSpecialization.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/HIVMAVE/IR/HIVMAVE.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 
 #include "mlir/AsmParser/AsmParser.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -56,32 +58,8 @@
 using namespace mlir;
 namespace py = pybind11;
 
-struct AscendNPUIROpBuilder : public TritonOpBuilder {
-  std::string target;
-  std::string compile_mode;
-  static constexpr char kTarget910_95[] = "Ascend910_95";
-  static constexpr char kTarget950[] = "Ascend950";
-
-  explicit AscendNPUIROpBuilder(MLIRContext *context, std::string target = "",
-                                std::string compile_mode = "simd")
-      : TritonOpBuilder(context), target(target), compile_mode(compile_mode) {}
-
-  bool isSimtMode() const { return compile_mode == "simt"; }
-
-  bool is_910_95() const {
-    // TODO: Use enum instead of strings after enabling HACC in satandalone
-    // build
-    constexpr size_t kLen910 = sizeof(kTarget910_95) - 1;
-    bool match_910 = target.size() >= kLen910 &&
-                     target.compare(0, kLen910, kTarget910_95) == 0;
-
-    constexpr size_t kLen950 = sizeof(kTarget950) - 1;
-    bool match_950 =
-        target.size() >= kLen950 && target.compare(0, kLen950, kTarget950) == 0;
-
-    return match_910 || match_950;
-  }
-};
+// Shared IR OpBuilder; subclasses inherit it across TUs.
+#include "Utils/AscendNPUIROpBuilder.h"
 
 namespace {
 MLIRContext *gDefaultAscendContext = nullptr;
@@ -507,11 +485,16 @@ void init_ascend_ir(py::module &&m) {
       "computation placement in the Ascend NPU compiler.";
 
   py::enum_<hivm::AddressSpace>(m, "AddressSpace", py::module_local())
+      .value("Zero", hivm::AddressSpace::Zero)
+      .value("GM", hivm::AddressSpace::GM)
       .value("L1", hivm::AddressSpace::L1)
-      .value("UB", hivm::AddressSpace::UB)
       .value("L0A", hivm::AddressSpace::L0A)
       .value("L0B", hivm::AddressSpace::L0B)
       .value("L0C", hivm::AddressSpace::L0C)
+      .value("UB", hivm::AddressSpace::UB)
+      .value("SSBUF", hivm::AddressSpace::SSBUF)
+      .value("FixBUF", hivm::AddressSpace::FixBUF)
+      .value("BiasBUF", hivm::AddressSpace::BiasBUF)
       .export_values();
 
   py::enum_<hivm::TCoreType>(m, "CoreType", py::module_local())
@@ -599,15 +582,17 @@ void init_ascend_ir(py::module &&m) {
       .value("P_RELU", hivm::FixpipePreReluMode::P_RELU)
       .export_values();
   py::enum_<hivm::DataLayout>(m, "DataLayout", py::module_local())
+      .value("ND", hivm::DataLayout::ND)
       .value("nZ", hivm::DataLayout::nZ)
       .value("zN", hivm::DataLayout::zN)
+      .value("Fractal", hivm::DataLayout::Fractal)
       .export_values();
 
   m.def("load_dialects", [](MLIRContext &context) {
     gDefaultAscendContext = &context;
     DialectRegistry registry;
     registry.insert<annotation::AnnotationDialect, mlir::hivm::HIVMDialect,
-                    scope::ScopeDialect>();
+                    mlir::hivmave::AVEDialect, scope::ScopeDialect>();
     context.appendDialectRegistry(registry);
     context.loadAllAvailableDialects();
   });
@@ -617,6 +602,22 @@ void init_ascend_ir(py::module &&m) {
       return py::none();
     }
     return py::cast(ret.getInt());
+  });
+  m.def("get_kernel_profile_metadata", [](ModuleOp mod) {
+    py::dict attrs;
+    for (auto func : mod.getOps<func::FuncOp>()) {
+      if (!func->hasAttr("global_kernel"))
+        continue;
+      for (const char *name :
+           {"profile_scratch_size", "profile_scratch_align",
+            "profile_num_units", "profile_sections_per_block",
+            "profile_sample_every_n"}) {
+        if (auto attr = func->getAttrOfType<IntegerAttr>(name))
+          attrs[name] = attr.getInt();
+      }
+      break;
+    }
+    return attrs;
   });
   m.def("get_program_grid_transforms", [](OpState &op) -> py::object {
     Attribute attribute =
@@ -634,21 +635,27 @@ void init_ascend_ir(py::module &&m) {
     py::list hiddenExtentAxes;
     hiddenExtentAxes.append(0);
     hiddenExtentAxes.append(1);
+    if (contract->version == 3)
+      hiddenExtentAxes.append(2);
     result["hidden_extent_axes"] = std::move(hiddenExtentAxes);
     py::list hiddenArgumentOrder;
     hiddenArgumentOrder.append("originalGridX");
     hiddenArgumentOrder.append("originalGridY");
+    if (contract->version == 3)
+      hiddenArgumentOrder.append("originalGridZ");
     result["hidden_argument_order"] = std::move(hiddenArgumentOrder);
     py::list hiddenArgumentTypes;
     hiddenArgumentTypes.append("i32");
     hiddenArgumentTypes.append("i32");
+    if (contract->version == 3)
+      hiddenArgumentTypes.append("i32");
     result["hidden_argument_types"] = std::move(hiddenArgumentTypes);
     py::list transforms;
     for (const mlir::triton::cfg::ProgramGridTransform &transform :
          contract->transforms) {
       py::dict item;
       item["order"] = transform.order;
-      item["kind"] = "ceil_div";
+      item["kind"] = transform.capToFactor ? "cap" : "ceil_div";
       item["axis"] = transform.axis;
       item["factor"] = transform.factor;
       item["persistent_coverage"] = transform.persistentCoverage;
@@ -1075,7 +1082,7 @@ void init_ascend_ir(py::module &&m) {
       .def(
           "create_conv1d",
           [](AscendNPUIROpBuilder &self, Value input, Value weight,
-             py::object bias, int64_t stride, int64_t padding_size,
+             py::object bias, int64_t stride, py::object padding,
              int64_t dilation, int64_t groups, Type output_type) -> Value {
             Value biasValue;
             if (!bias.is_none()) {
@@ -1084,17 +1091,32 @@ void init_ascend_ir(py::module &&m) {
               biasValue = Value();
             }
             auto &builder = self.getBuilder();
+            // Keep ints as IntegerAttr and sequences as DenseI32ArrayAttr.
+            // padding = [pad_left, pad_right] or a uniform scalar.
+            Attribute paddingAttr;
+            if (py::isinstance<py::int_>(padding)) {
+              paddingAttr = builder.getI64IntegerAttr(padding.cast<int64_t>());
+            } else {
+              py::sequence seq = padding.cast<py::sequence>();
+              if (py::len(seq) != 2) {
+                throw std::invalid_argument(
+                    "padding must be an integer or a 2-element sequence");
+              }
+              SmallVector<int32_t> values;
+              for (auto item : seq)
+                values.push_back(item.cast<int32_t>());
+              paddingAttr = builder.getDenseI32ArrayAttr(values);
+            }
             auto strideAttr = builder.getI64IntegerAttr(stride);
-            auto paddingSizeAttr = builder.getI64IntegerAttr(padding_size);
             auto dilationAttr = builder.getI64IntegerAttr(dilation);
             auto groupsAttr = builder.getI64IntegerAttr(groups);
             auto op = self.create<triton::ascend::Conv1dOp>(
-                output_type, input, weight, biasValue, strideAttr,
-                paddingSizeAttr, dilationAttr, groupsAttr);
+                output_type, input, weight, biasValue, strideAttr, paddingAttr,
+                dilationAttr, groupsAttr);
             return op.getResult();
           },
           py::arg("input"), py::arg("weight"), py::arg("bias"),
-          py::arg("stride"), py::arg("padding_size"), py::arg("dilation"),
+          py::arg("stride"), py::arg("padding"), py::arg("dilation"),
           py::arg("groups"), py::arg("output_type"))
       // dot: D = A * B with per-operand fractal (zN) flags; result type
       // inferred from A, B and the flags.
@@ -1241,6 +1263,12 @@ void init_ascend_ir(py::module &&m) {
            [](AscendNPUIROpBuilder &self, hivm::VFMode mode) -> Attribute {
              return self.getBuilder().getAttr<hivm::VFModeAttr>(mode);
            })
+      .def(
+          "get_data_layout_attr",
+          [](AscendNPUIROpBuilder &self, hivm::DataLayout layout) -> Attribute {
+            auto *ctx = self.getBuilder().getContext();
+            return hivm::DataLayoutAttr::get(ctx, layout);
+          })
       .def("get_iterator_types_attr",
            [](AscendNPUIROpBuilder &self,
               const std::vector<hivm::IteratorType> &array) {
@@ -1399,7 +1427,18 @@ void init_ascend_ir(py::module &&m) {
              ValueRange inputs{ins};
              ValueRange outputs{outs};
              ValueRange temp_buffers{};
-             TypeRange res_types{outputs};
+             // An out that is already a buffer is written in place, so a result
+             // would only hand back that same buffer. Keeping it makes the
+             // library call return a memref, which reaches the template as an
+             // sret pointer ahead of the real arguments and shifts every one of
+             // them by a position. Tensor outs still need the result;
+             // bufferization folds it away later.
+             const bool bufferSemantics =
+                 !outs.empty() && llvm::all_of(outs, [](Value v) {
+                   return isa<MemRefType>(v.getType());
+                 });
+             TypeRange res_types =
+                 bufferSemantics ? TypeRange{} : TypeRange{outputs};
              auto op = self.create<hivm::CustomOp>(res_types, name, inputs,
                                                    outputs, temp_buffers);
              for (auto &attr : attrs) {

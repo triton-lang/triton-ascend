@@ -1,17 +1,17 @@
 # 融合注意力（Fused Attention）
 
-本节实现了一个基于 **Triton** 的 **Flash Attention v2 风格的融合注意力前向传播内核**，适用于昇腾（Ascend）NPU 平台。该实现支持：
+本节实现了一个基于 **Triton** 的 **Flash Attention v2风格的融合注意力前向传播内核**，适用于昇腾（Ascend）NPU平台。该实现支持：
 
 - **因果（causal）与非因果注意力**
 - **分块计算（tiling）以处理长序列**
 - **数值稳定性优化（max-shifted softmax）**
 
-整体结构包含两个核心 Triton 内核：
+整体结构包含两个核心Triton内核：
 
-1. `_attn_fwd_inner`：执行单个 query block 与 key/value blocks 的 attention 计算（分阶段处理 causal mask）
-2. `_attn_fwd`：调度所有 query blocks，并管理 block 指针、accumulator 和归一化
+1. `_attn_fwd_inner`：执行单个query block与key/value blocks的attention计算（分阶段处理causal mask）
+2. `_attn_fwd`：调度所有query blocks，并管理block指针、accumulator和归一化
 
-并通过 PyTorch `autograd.Function` 封装为可调用的 `attention` 函数，与 `torch_npu.npu_fusion_attention` 进行精度对齐验证。
+并通过PyTorch `autograd.Function` 封装为可调用的 `attention` 函数，与 `torch_npu.npu_fusion_attention` 进行精度对齐验证。
 
 ```python
 import pytest
@@ -25,12 +25,12 @@ DEVICE = "npu"
 
 
 @triton.jit
-def _attn_fwd_inner(acc_ptr, l_i, m_i, q,  # 累加器，局部 l，局部 m，查询向量
-                    K_block_ptr, V_block_ptr,  # 当前阶段的 Key 和 Value 块指针
-                    start_m, qk_scale,  # 当前 query 块的起始位置，qk 缩放因子
+def _attn_fwd_inner(acc_ptr, l_i, m_i, q,  # 累加器，局部l，局部m，查询向量
+                    K_block_ptr, V_block_ptr,  # 当前阶段的Key和Value块指针
+                    start_m, qk_scale,  # 当前query块的起始位置，qk缩放因子
                     BLOCK_M: tl.constexpr, HEAD_DIM: tl.constexpr, BLOCK_N: tl.constexpr,  # 块大小常量
-                    STAGE: tl.constexpr, offs_m: tl.constexpr, offs_n: tl.constexpr,  # 当前阶段标志，m 和 n 的偏移索引
-                    N_CTX: tl.constexpr, fp8_v: tl.constexpr):  # 上下文总长度，是否对 value 启用 FP8 精度
+                    STAGE: tl.constexpr, offs_m: tl.constexpr, offs_n: tl.constexpr,  # 当前阶段标志，m和n的偏移索引
+                    N_CTX: tl.constexpr, fp8_v: tl.constexpr):  # 上下文总长度，是否对value启用FP8精度
     # 设置当前阶段的处理范围 [lo, hi)（以列块为单位）
     # causal = true
     # stage = 1
@@ -38,14 +38,14 @@ def _attn_fwd_inner(acc_ptr, l_i, m_i, q,  # 累加器，局部 l，局部 m，�
     # 只允许模型看到当前位置及之前的位置。
     # 换句话说，当前位置的输出只能依赖于该位置及之前的输入，
     # 不能访问未来位置的信息。
-    # 因果注意力保证了顺序性，防止"未来信息泄露"。
-    # 但以下逻辑也会被触发
+    # 因果注意力保证了顺序性，防止“未来信息泄露”。
+    # 根据 STAGE 分阶段确定因果掩码的遍历范围 [lo, hi)：
     if STAGE == 1:
-        # 阶段 1：处理 query 块之前的所有 token
+        # 阶段1：处理query块之前的所有token
         tl.static_assert(BLOCK_M >= BLOCK_N)
         lo, hi = 0, start_m * BLOCK_M
     elif STAGE == 2:
-        # 阶段 2：处理当前 query 块
+        # 阶段2：处理当前query块
         tl.static_assert(BLOCK_M >= BLOCK_N)
         lo, hi = start_m * BLOCK_M, (start_m + 1) * BLOCK_M
         lo = tl.multiple_of(lo, BLOCK_M)  # 对齐起始位置
@@ -53,49 +53,49 @@ def _attn_fwd_inner(acc_ptr, l_i, m_i, q,  # 累加器，局部 l，局部 m，�
     else:
         lo, hi = 0, N_CTX  # 处理整个上下文
 
-    # 将 K 和 V 块指针调整到起始位置 `lo`
-    K_block_ptr = tl.advance(K_block_ptr, (lo, 0))  # K 的形状为 [HEAD_DIM, N_CTX]，沿第二维偏移 lo
-    V_block_ptr = tl.advance(V_block_ptr, (lo, 0))  # V 的形状为 [N_CTX, HEAD_DIM]，沿第一维偏移 lo
+    # 将K和V块指针调整到起始位置 `lo`
+    K_block_ptr = tl.advance(K_block_ptr, (lo, 0))  # K的形状为 [HEAD_DIM, N_CTX]，沿第二维偏移lo
+    V_block_ptr = tl.advance(V_block_ptr, (lo, 0))  # V的形状为 [N_CTX, HEAD_DIM]，沿第一维偏移lo
 
-    # 累加器的索引映射，用于 HEAD_DIM >= 256 时的切片
+    # 累加器的索引映射，用于HEAD_DIM >= 256时的切片
     row = tl.arange(0, BLOCK_M)[:, None]
     col_head_dim = tl.arange(0, HEAD_DIM)[None, :]
     block2d_acc = row * HEAD_DIM + col_head_dim
 
-    # 遍历当前阶段的所有 k、v 块并累加输出
-    for start_n in range(lo, hi, BLOCK_N):  # 每次处理 BLOCK_N 列
+    # 遍历当前阶段的所有k、v块并累加输出
+    for start_n in range(lo, hi, BLOCK_N):  # 每次处理BLOCK_N列
         start_n = tl.multiple_of(start_n, BLOCK_N)  # 对齐列起始位置
-        # -- 计算 qk ----
+        # -- 计算qk ----
         k = tl.load(K_block_ptr)
-        # 转置 K
+        # 转置K
         trans_k = tl.trans(k)
         qk = tl.dot(q, trans_k)
-        # 在 STAGE 2 时应用因果掩码
+        # 在STAGE 2时应用因果掩码
         if STAGE == 2:
             mask = offs_m[:, None] >= (start_n + offs_n[None, :])  # 构造上三角掩码
             qk = qk * qk_scale + tl.where(mask, 0, -1.0e6)  # 将无效位置设为 -∞
-            m_ij = tl.maximum(m_i, tl.max(qk, 1))  # 更新 m_ij = max(m_i, max(qk))
-            qk -= m_ij[:, None]  # 减去最大值以保证 softmax 数值稳定性
+            m_ij = tl.maximum(m_i, tl.max(qk, 1))  # 更新m_ij = max(m_i, max(qk))
+            qk -= m_ij[:, None]  # 减去最大值以保证softmax数值稳定性
         else:
             qk = qk * qk_scale
             m_ij = tl.maximum(m_i, tl.max(qk, 1))  # 缩放后的最大值
             qk = qk - m_ij[:, None]  # 稳定化
 
-        # softmax 权重 p = exp(qk)
+        # softmax权重p = exp(qk)
         p = tl.math.exp(qk)
 
-        # 根据 FP8 使用情况转换 softmax 权重类型
+        # 根据FP8使用情况转换softmax权重类型
         if fp8_v:
-            p_cast = p.to(tl.float8e5)  # 转换为 FP8 格式（节省内存）
+            p_cast = p.to(tl.float8e5)  # 转换为FP8格式（节省内存）
         else:
             p_cast = p.to(k.dtype)
 
-        v = tl.load(V_block_ptr)  # 加载对应的 V 块
+        v = tl.load(V_block_ptr)  # 加载对应的V块
         pv = tl.dot(p_cast, v)
-        l_ij = tl.sum(p, 1)  # softmax 分母（每行求和）
-        # -- 更新 m_i 和 l_i
-        alpha = tl.math.exp(m_i - m_ij)  # 更新因子：新旧最大值的 exp 差值
-        l_i = l_i * alpha + l_ij  # 更新 softmax 分母
+        l_ij = tl.sum(p, 1)  # softmax分母（每行求和）
+        # -- 更新m_i和l_i
+        alpha = tl.math.exp(m_i - m_ij)  # 更新因子：新旧最大值的exp差值
+        l_i = l_i * alpha + l_ij  # 更新softmax分母
         # -- 更新输出累加器 --
         if HEAD_DIM < 256:
             acc_ptr = acc_ptr * alpha[:, None]
@@ -103,7 +103,7 @@ def _attn_fwd_inner(acc_ptr, l_i, m_i, q,  # 累加器，局部 l，局部 m，�
         else:
             # 1. 加载累加器的当前切片
             acc = tl.load(acc_ptr + block2d_acc)
-            # 2. 分片更新（按 BLOCK_M 的 1/4 切分以避免 ub 溢出）
+            # 2. 分片更新（按BLOCK_M的1/4切分以避免UB溢出）
             for i in range(4):
                 # 计算当前切片的起始/结束行
                 offset = i * (BLOCK_M // 4)
@@ -119,10 +119,10 @@ def _attn_fwd_inner(acc_ptr, l_i, m_i, q,  # 累加器，局部 l，局部 m，�
             tl.store(acc_ptr + block2d_acc, acc)
 
         m_i = m_ij  # 更新当前块的最大值
-        # 将 V 和 K 块指针推进到下一个 BLOCK_N 范围
+        # 将V和K块指针推进到下一个BLOCK_N范围
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
         K_block_ptr = tl.advance(K_block_ptr, (BLOCK_N, 0))
-    # 返回累加输出 acc_ptr、softmax 分母 l_i 和最大值 m_i
+    # 返回累加输出acc_ptr、softmax分母l_i和最大值m_i
     return acc_ptr, l_i, m_i
 
 
@@ -144,16 +144,16 @@ def _attn_fwd(Q, K, V, M, Out, acc, sm_scale,
     # 总任务数 = 序列块数 × 批大小（Z）× 注意力头数（H）
     NUM_BLOCKS = NUM_BLOCKS_M * Z * H
 
-    # 当前 M 维度的块索引
+    # 当前M维度的块索引
     pid = tl.program_id(0)
 
-    for block_idx in range(pid, NUM_BLOCKS, 20):
+    for block_idx in range(pid, NUM_BLOCKS, tl.num_programs(0)):
         task_hz_idx = block_idx // NUM_BLOCKS_M
         task_m_idx = block_idx % NUM_BLOCKS_M
         off_z = task_hz_idx // H
         off_h = task_hz_idx % H
         qvk_offset = off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
-        # 为 Q、K、V、Output 创建块指针
+        # 为Q、K、V、Output创建块指针
         Q_block_ptr = tl.make_block_ptr(
             base=Q + qvk_offset,
             shape=(N_CTX, HEAD_DIM),
@@ -206,18 +206,18 @@ def _attn_fwd(Q, K, V, M, Out, acc, sm_scale,
 
         q = tl.load(Q_block_ptr)
 
-        # 阶段 1：带外（off-band）
-        # 当 causal = True 时，STAGE = 3，_attn_fwd_inner 的 STAGE 取值为 1
-        # 当 causal = False 时，STAGE = 1，_attn_fwd_inner 的 STAGE 取值为 3
+        # 阶段1：带外（off-band）
+        # 当causal = True时，STAGE = 3，_attn_fwd_inner的STAGE取值为1
+        # 当causal = False时，STAGE = 1，_attn_fwd_inner的STAGE取值为3
         if STAGE & 1:
             acc_ptr, l_i, m_i = _attn_fwd_inner(acc_ptr, l_i, m_i, q, K_block_ptr, V_block_ptr,  #
                                                 task_m_idx, sm_scale,  #
                                                 BLOCK_M, HEAD_DIM, BLOCK_N,  #
                                                 4 - STAGE, offs_m, offs_n, N_CTX, V.dtype.element_ty == tl.float8e5  #
                                                 )
-        # 阶段 2：带内（on-band）
+        # 阶段2：带内（on-band）
         if STAGE & 2:
-            # barrier 使得编译器更容易将
+            # barrier使得编译器更容易将
             # 两个循环独立调度
             acc_ptr, l_i, m_i = _attn_fwd_inner(acc_ptr, l_i, m_i, q, K_block_ptr, V_block_ptr,  #
                                                 task_m_idx, sm_scale,  #
@@ -238,7 +238,7 @@ def _attn_fwd(Q, K, V, M, Out, acc, sm_scale,
         m_ptrs = M + task_hz_idx * N_CTX + offs_m
 
         tl.store(m_ptrs, m_i)
-        tl.store(O_block_ptr, accumulator.to(Out.type.element_ty))
+        tl.store(O_block_ptr, accumulator.to(Out.dtype.element_ty))
 
 
 class _attention(torch.autograd.Function):
@@ -249,19 +249,19 @@ class _attention(torch.autograd.Function):
         前向计算接口：
         参数：
             ctx: 上下文对象
-            q: Query 张量（Q），形状 [Z, H, N_CTX, HEAD_DIM]
-            k: Key 张量（K），形状 [Z, H, N_CTX, HEAD_DIM]
-            v: Value 张量（V），形状 [Z, H, N_CTX, HEAD_DIM]
+            q: Query张量（Q），形状 [Z, H, N_CTX, HEAD_DIM]
+            k: Key张量（K），形状 [Z, H, N_CTX, HEAD_DIM]
+            v: Value张量（V），形状 [Z, H, N_CTX, HEAD_DIM]
             causal: 是否启用因果注意力
-            sm_scale: QK 乘积的缩放因子
-            BM: Q 块大小（BLOCK_M）
-            BN: K/V 块大小（BLOCK_N）
+            sm_scale: QK乘积的缩放因子
+            BM: Q块大小（BLOCK_M）
+            BN: K/V块大小（BLOCK_N）
         返回：
             o: 注意力输出张量，形状 [Z, H, N_CTX, HEAD_DIM]
         """
         # 形状约束
         HEAD_DIM_Q, HEAD_DIM_K = q.shape[-1], k.shape[-1]
-        # 当 v 为 float8_e5m2 时会被转置
+        # 当v为float8_e5m2时会被转置
         HEAD_DIM_V = v.shape[-1]
         assert HEAD_DIM_Q == HEAD_DIM_K and HEAD_DIM_K == HEAD_DIM_V
         assert HEAD_DIM_K in {16, 32, 64, 128, 256}
@@ -271,7 +271,7 @@ class _attention(torch.autograd.Function):
         extra_kern_args = {}
 
 
-        # NPU 核数（根据硬件调整）
+        # NPU核数（根据硬件调整）
         num_cores = 20
         acc = torch.zeros((q.shape[0], q.shape[1], q.shape[2], HEAD_DIM_K), dtype=torch.float32, device=q.device)
         M = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
@@ -308,7 +308,7 @@ attention = _attention.apply
     (4, 32, 4096, 64, False, torch.float16, 128, 128),
 ])
 def test_op(Z, H, N_CTX, HEAD_DIM, causal, dtype, BM, BN):
-    # 过滤非整除的情况；N_CTX 必须能被 BM 和 BN 整除，HEAD_DIM 必须能被 16 整除
+    # 过滤非整除的情况；N_CTX必须能被BM和BN整除，HEAD_DIM必须能被16整除
     if N_CTX % BM != 0 or N_CTX % BN != 0 or HEAD_DIM % 16 != 0:
         pytest.skip("Skipping non-divisible case")
 
@@ -327,8 +327,8 @@ def test_op(Z, H, N_CTX, HEAD_DIM, causal, dtype, BM, BN):
             scale=sm_scale,
             keep_prob=1.0,
             input_layout="BNSD",
-            pre_tokens=65535,
-            next_tokens=65535,
+            pre_tockens=65535,
+            next_tockens=65535,
             sparse_mode=0,
             )[0]
 
@@ -348,7 +348,7 @@ if __name__ == "__main__":
 
 ## 输出结果
 
-```text
+```output
 [PASSED] Attention shape:(1, 1, 128, 128), BM: 32, BN: 128, dtype: torch.float16
 [PASSED] Attention shape:(1, 1, 128, 128), BM: 64, BN: 128, dtype: torch.bfloat16
 [PASSED] Attention shape:(1, 2, 256, 256), BM: 32, BN: 256, dtype: torch.bfloat16
@@ -358,4 +358,4 @@ if __name__ == "__main__":
 [PASSED] Attention shape:(4, 32, 4096, 64), BM: 128, BN: 128, dtype: torch.float16
 ```
 
-上面输出日志表明Triton和PyTorch上的输出结果完全一致。
+上面输出日志表明Triton和PyTorch上的输出结果在atol=1e-2、rtol=1e-2容差范围内一致。

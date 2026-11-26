@@ -205,3 +205,148 @@ def test_dot_scaled_fp4():
     b_deq = dequant_e2m1(b_packed_nk, b_scale, N, K)
     ref = a_deq @ b_deq.t()
     torch.testing.assert_close(c, ref)
+
+
+MIDDLE_RANGE_DICT = {
+    'fp8e4m3': [-4, 4],
+}
+
+
+def get_tolerance(dtype_name):
+    if dtype_name == 'fp8e4m3':
+        return 5e-3, 5e-3
+    return 1e-5, 1e-5
+
+
+TL_DTYPE_MAP = {
+    'fp8e4m3': tl.float8e4b8,
+}
+
+
+@triton.jit
+def complex_pipeline_kernel(x_ptr, y_ptr, M, K, BM: tl.constexpr, BK: tl.constexpr, OUTER: tl.constexpr,
+                            INNER: tl.constexpr, DEEP: tl.constexpr, CLAMP_I: tl.constexpr, OUT_DTYPE: tl.constexpr,
+                            IS_FP8: tl.constexpr):
+    pid = tl.program_id(axis=0)
+    num_k_blocks = tl.cdiv(K, BK)
+    pid_m = pid // num_k_blocks
+    pid_k = pid % num_k_blocks
+
+    offs_m = pid_m * BM + tl.arange(0, BM)
+    offs_k = pid_k * BK + tl.arange(0, BK)
+    mask = (offs_m[:, None] < M) & (offs_k[None, :] < K)
+
+    x = tl.load(x_ptr + offs_m[:, None] * K + offs_k[None, :], mask=mask, other=0.0)
+
+    if IS_FP8:
+        x_raw = x
+        xt_raw = tl.trans(x_raw)
+        xf = x.to(tl.float16)
+    else:
+        xf = x.to(tl.float32)
+        xtf = tl.trans(xf)
+
+    sync_flag = 1.0
+    acc = tl.zeros((BM, BK), dtype=tl.float32)
+
+    for o in range(OUTER):
+        sync_flag = sync_flag * 0.75 + 0.25 * (o + 1)
+        unit_flag = sync_flag / (1.0 + sync_flag)
+        acc += unit_flag
+
+        for i in range(INNER):
+            if IS_FP8:
+                d = tl.dot_scaled(xt_raw, None, "e4m3", x_raw, None, "e4m3")
+                d = d.to(tl.float16)
+            else:
+                d = tl.dot(xtf, xf, input_precision="ieee")
+
+            mul_r = d * xf
+            min_val = tl.min(mul_r)
+            sub_r = d - min_val
+            for dj in range(DEEP):
+                for ci in range(CLAMP_I):
+                    sub_r = tl.minimum(tl.maximum(sub_r, -1.0), 1.0)
+            acc += sub_r
+
+    out = acc.to(OUT_DTYPE)
+    tl.store(y_ptr + offs_m[:, None] * K + offs_k[None, :], out, mask=mask)
+
+
+def compute_reference(x: torch.Tensor, outer, inner, deep, clamp_i, dtype):
+    M, K = x.shape
+    xf = x.float()
+    sync_flag = 1.0
+    acc = torch.zeros_like(xf)
+    for o in range(outer):
+        sync_flag = sync_flag * 0.75 + 0.25 * (o + 1)
+        unit_flag = sync_flag / (1.0 + sync_flag)
+        acc = acc + unit_flag
+        for i in range(inner):
+            d = xf @ xf.T
+            mul_r = d * xf
+            min_val = mul_r.min()
+            sub_r = d - min_val
+            for _ in range(deep):
+                for _ in range(clamp_i):
+                    sub_r = torch.clamp(sub_r, -1.0, 1.0)
+            acc = acc + sub_r
+    return acc
+
+
+OUTER, INNER, DEEP, CLAMP_I = 2, 2, 2, 2
+BM, BK = 16, 16
+TEST_DTYPE = "fp8e4m3"
+TL_DTYPE = TL_DTYPE_MAP[TEST_DTYPE]
+FAIL_SHAPES = [
+    (32, ),
+    (37, ),
+    (16, 16),
+    (17, 19),
+    (2, 2, 2, 17, 19),
+]
+
+
+def run_single_case(shape, dtype_name, device, verbose=True):
+    flat_size = 1
+    for s in shape:
+        flat_size *= s
+    M = flat_size
+    K = flat_size
+    x = torch.randn((M, K), dtype=torch.float32, device=device).to(dtype=torch.float8_e4m3fn)
+    y = torch.zeros_like(x)
+    complex_pipeline_kernel[(M // BM, )](x, y, M, K, BM=BM, BK=BK, OUTER=OUTER, INNER=INNER, DEEP=DEEP, CLAMP_I=CLAMP_I,
+                                         OUT_DTYPE=TL_DTYPE, IS_FP8=(dtype_name == "fp8e4m3"))
+    ref = compute_reference(x, OUTER, INNER, DEEP, CLAMP_I, dtype_name)
+    rtol, atol = get_tolerance(dtype_name)
+    torch.testing.assert_close(y.float(), ref, rtol=rtol, atol=atol)
+    return True, 0, 0, 0
+
+
+def get_device():
+    return torch.device("npu")
+
+
+@pytest.mark.skipif(
+    not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
+    reason="native FP8 scaled dot requires Ascend 950",
+)
+@pytest.mark.parametrize("shape", FAIL_SHAPES)
+def test_fp8_error_input_only(shape):
+    device = get_device()
+    try:
+        success, n_mis, total, pct = run_single_case(shape, TEST_DTYPE, device, verbose=True)
+        pytest.fail(f"shape={shape}: kernel compiled successfully, MatMulMx check not triggered")
+    except triton.compiler.errors.MLIRCompilationError as e:
+        err_msg = str(e)
+        matmul_mx_check = "MatMulMx" in err_msg and "must be divisible by 64" in err_msg
+        hfusion_crash = "unsupported datatype for arith::TruncFOp to hfusion" in err_msg
+        if matmul_mx_check or hfusion_crash:
+            print(f"[PASS - Expected error] shape={shape}")
+            return
+        else:
+            print(f"[FAIL] shape={shape}, unexpected compile error:\n{err_msg}")
+            pytest.fail(f"captured non-target compile error: {e}")
+    except Exception as e:
+        print(f"[FAIL] shape={shape}, dtype={TEST_DTYPE}, exception={e}")
+        pytest.fail(f"runtime exception: {type(e).__name__}: {e}")

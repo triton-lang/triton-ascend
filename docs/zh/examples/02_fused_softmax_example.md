@@ -1,12 +1,12 @@
-# 融合 Softmax （Fused Softmax）
+# 融合Softmax（Fused Softmax）
 
-在本节中，我们将使用 Triton 编写一个融合的 softmax 操作的程序。
+在本节中，我们将使用Triton编写一个融合的softmax操作的程序。
 在此过程中，你会学习到：
 
-- 内核融合对于带宽受限操作的优势。
-- Triton 中缩减操作。
+- 内核融合对于带宽受限操作的优势
+- Triton中的缩减操作
 
-## 使用原生 PyTorch 对 X 逐行进行 Softmax 计算
+## 原生PyTorch逐行进行Softmax计算
 
 ```python
 import torch
@@ -17,33 +17,33 @@ import triton.language as tl
 
 def naive_softmax(x):
     """
-    我们减去最大元素以避免溢出。Softmax 对于这种偏移是不变的。
+    我们减去最大元素以避免溢出。Softmax对于这种偏移是不变的。
     """
-    # 读取 MN 个元素；写入 M 个元素
+    # 读取MN个元素；写入M个元素
     x_max = x.max(dim=1)[0]
-    # 读取 MN + M 个元素；写入 MN 个元素
+    # 读取MN + M个元素；写入MN个元素
     z = x - x_max[:, None]
-    # 读取 MN 个元素；写入 MN 个元素
+    # 读取MN个元素；写入MN个元素
     numerator = torch.exp(z)
-    # 读取 MN 个元素；写入 M 个元素
+    # 读取MN个元素；写入M个元素
     denominator = numerator.sum(dim=1)
-    # 读取 MN + M 个元素；写入 MN 个元素
+    # 读取MN + M个元素；写入MN个元素
     ret = numerator / denominator[:, None]
-    # 总计：读取 5MN + 2M 个元素；写入 3MN + 2M 个元素
+    # 总计：读取5MN + 2M个元素；写入3MN + 2M个元素
     return ret
 ```
 
 ## 内核融合的目的
 
-当在 PyTorch 中以原生方式实现时，计算`y=naive_softmax(x)`需要从 DRAM 中读取 5MN+2M 个元素，并写回 3MN+2M 个元素。显然这是非常低效的；我们更希望使用一个自定义的“融合”内核，它只需读取一次 x，并在芯片上完成所有必要的计算。
-这样一来只需读取和写回 2MN 个元素，因此我们可以期望理论上的加速比大约为 4 倍（即 (8MN+4M)/2MN）。
+当在PyTorch中以原生方式实现时，计算`y=naive_softmax(x)`需要从DRAM中读取5MN+2M个元素，并写回3MN+2M个元素。显然这是非常低效的；我们更希望使用一个自定义的“融合”内核，它只需读取一次x，并在芯片上完成所有必要的计算。
+这样一来只需读取和写回2MN个元素，因此我们可以期望理论上的加速比大约为4倍（即 (8MN+4M)/2MN）。
 
 `torch.jit.script`旨在自动执行这种“内核融合”，但它仍然远未达到理想状态。
 
 ## 计算内核
 
-softmax 内核工作原理如下：每个计算单元（program）以程序数量为步长加载输入矩阵X的一组行数据，执行归一化处理后，将结果写入输出矩阵Y。
-注意：Triton 的一个重要限制是每个块必须具有 2 的幂次数的元素，因此，如果我们要处理任意可能的输入形状，需要在内部「填充」每一行，并确保内存操作正确性。
+softmax内核工作原理如下：每个计算单元（program）以程序数量为步长加载输入矩阵X的一组行数据，执行归一化处理后，将结果写入输出矩阵Y。
+注意：Triton的一个重要限制是每个块必须包含2的幂个元素，因此，如果我们要处理任意可能的输入形状，需要在内部「填充」每一行，并确保内存操作正确性。
 
 ```python
 @triton.jit
@@ -52,28 +52,28 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride, n
     row_start = tl.program_id(0)
     row_step = tl.num_programs(0)
     for row_idx in tl.range(row_start, n_rows, row_step):
-        # 步长表示我们需要对指针增加多少以推进 1 行
+        # 步长表示我们需要对指针增加多少以推进1行
         row_start_ptr = input_ptr + row_idx * input_row_stride
-        # 块大小是大于 n_cols 的下一个二的幂，因此我们可以适配
+        # 块大小是大于n_cols的下一个二的幂，因此我们可以适配
         # 单个块中的行
         col_offsets = tl.arange(0, BLOCK_SIZE)
         input_ptrs = row_start_ptr + col_offsets
-        # 将行加载到 SRAM 中，使用掩码，因为 BLOCK_SIZE 可能大于 n_cols
+        # 将行加载到SRAM中，使用掩码，因为BLOCK_SIZE可能大于n_cols
         mask = col_offsets < n_cols
         row = tl.load(input_ptrs, mask=mask, other=-float('inf'))
         # 为了数值稳定性而减去最大值
         row_minus_max = row - tl.max(row, axis=0)
-        # 请注意，Triton 中的指数运算速度很快，但是是近似的。
+        # 请注意，Triton中的指数运算速度很快，但是是近似的。
         numerator = tl.exp(row_minus_max)
         denominator = tl.sum(numerator, axis=0)
         softmax_output = numerator / denominator
-        # 将输出写回 DRAM
+        # 将输出写回DRAM
         output_row_start_ptr = output_ptr + row_idx * output_row_stride
         output_ptrs = output_row_start_ptr + col_offsets
         tl.store(output_ptrs, softmax_output, mask=mask)
 ```
 
-我们可以创建一个辅助函数，该函数能够将核函数及其元参数加入执行队列，以处理任意给定的输入张量。
+我们可以创建一个辅助函数，该函数能够将内核及其元参数加入执行队列，以处理任意给定的输入张量。
 
 ```python
 kernels = {}
@@ -86,10 +86,10 @@ def softmax(x):
     # 分配输出空间
     y = torch.empty_like(x)
 
-    # 预编译内核以获取寄存器使用情况并计算线程占用情况。
+    # 以BLOCK_SIZE为键缓存内核和程序数，避免同一块大小重复编译。
     kernel, num_programs = kernels.get(BLOCK_SIZE, (None, 0))
     if kernel is None:
-        num_programs = 32
+        num_programs = 32  # 每个内核固定启动32个程序并行处理，随后按行数n_rows截断
         kernel = softmax_kernel
         kernels[BLOCK_SIZE] = (kernel, num_programs)
 
@@ -109,10 +109,10 @@ def softmax(x):
 
 ## 单元测试
 
-需要在一个具有不规则行和列数的矩阵上测试处理好的内核，此举可以验证Padding机制是否起作用
+需要在一个具有不规则行和列数的矩阵上测试处理好的内核，此举可以验证Padding机制是否起作用。
 
 ```python
-torch.manual_seed(0)
+torch.manual_seed(0)    # 固定随机种子，保证结果可复现
 x = torch.randn(1823, 781, device='npu')
 y_triton = softmax(x)
 y_torch = torch.softmax(x, axis=1)
@@ -125,7 +125,7 @@ print(f'The maximum difference between torch and triton is '
 
 ## 输出结果
 
-```text
+```output
 tensor([[0.0002, 0.0017, 0.0009,  ..., 0.0009, 0.0013, 0.0073],
         [0.0001, 0.0004, 0.0006,  ..., 0.0006, 0.0004, 0.0003],
         [0.0007, 0.0002, 0.0006,  ..., 0.0011, 0.0004, 0.0039],

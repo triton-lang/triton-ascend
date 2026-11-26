@@ -33,7 +33,6 @@
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "DynamicCVPipeline/Common/CycleDetector.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -51,8 +50,10 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/PlanCubeBlockPass.h"
 
+#include "DynamicCVPipeline/Common/CycleDetector.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 using namespace mlir;
 using namespace triton;
@@ -174,6 +175,7 @@ class TopologicalPartitionPlanner {
   bool shouldSkip(Operation *op) {
     return !isCubeSimpleOpOrCf(op) || assigned.contains(op);
   };
+
   bool canExpandTo(Operation *op);
   void dumpQueueAndIndegreeInfo();
   llvm::LogicalResult populateQueueWithReadyOps();
@@ -195,6 +197,7 @@ public:
       }
     });
   }
+
   llvm::LogicalResult run();
 };
 
@@ -434,6 +437,7 @@ static bool checkValidInputSeed(Operation *op) {
              tensor::EmptyOp, linalg::BroadcastOp, tensor::ExpandShapeOp,
              arith::ExtFOp>(op);
 }
+
 static bool checkValidUserSeed(Operation *op, linalg::MatmulOp &preDot) {
   // keep unify to OpClassifer
   if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp,
@@ -450,17 +454,27 @@ static bool checkValidUserSeed(Operation *op, linalg::MatmulOp &preDot) {
   }
   return false;
 }
-
 static SmallVector<Operation *>
 matchSeed(Operation *dotOp, ComputeBlockIdManager &bm,
-          const MemoryDependenceGraph &memGraph) {
+          const MemoryDependenceGraph &memGraph,
+          const llvm::DenseMap<int64_t, Operation *> &coupledStoreMap) {
   // match inputs
   SmallVector<Operation *> ret;
   ret.push_back(dotOp);
+
+  // If matmul has kCoupledMatmulAndStore tag, also include the paired store
+  if (auto coupledId = dotOp->getAttrOfType<IntegerAttr>(
+          mlir::CVPipeline::kCoupledMatmulAndStore)) {
+    if (auto *storeOp = coupledStoreMap.lookup(coupledId.getInt())) {
+      ret.push_back(storeOp);
+    }
+  }
+
   for (Value operand : dotOp->getOperands()) {
     Operation *def = operand.getDefiningOp();
-    if (!def)
+    if (!def) {
       continue;
+    }
     if (checkValidInputSeed(def) && isCubeSimpleOpOrCf(def) &&
         dotOp->getBlock() == def->getBlock() && bm.getBlockIdByOp(def) == -1) {
       if (CVPipeline::isOnlyDirectlyUse(def, dotOp, memGraph)) {
@@ -500,6 +514,16 @@ processBlockWithCubeBFS(Block *block, const DependencyHelper &depHelper,
   // Source-order sync walls of this block; used to keep every block_id group
   // on a single side of each synchronization op.
   SyncWall wall(block);
+  // Pre-build coupled store map for kCoupledMatmulAndStore
+  llvm::DenseMap<int64_t, Operation *> coupledStoreMap;
+  for (Operation &op : *block) {
+    if (auto coupledId = op.getAttrOfType<IntegerAttr>(
+            mlir::CVPipeline::kCoupledMatmulAndStore)) {
+      if (isa<memref::StoreOp>(op)) {
+        coupledStoreMap[coupledId.getInt()] = &op;
+      }
+    }
+  }
 
   // Phase 1: Add helper ops (transpose, load/store, ptr etc.) to cube block of
   // related matmul
@@ -509,7 +533,7 @@ processBlockWithCubeBFS(Block *block, const DependencyHelper &depHelper,
     }
     auto temBlockId = bm.getNextId();
     llvm::SmallVector<Operation *> dotSeeds =
-        matchSeed(dot, bm, depHelper.memGraph);
+        matchSeed(dot, bm, depHelper.memGraph, coupledStoreMap);
     // Drop seeds straddling a sync relative to the dot: they belong to their
     // own segment and Phase 2 hands them a separate id, so the seed group can
     // never appear on both sides of the barrier.
@@ -568,6 +592,11 @@ void mlir::triton::PlanCubeBlockPass::runOnOperation() {
   // We do not need to skip linalg blocks since they do not have core types and
   // do not contain matmul
   auto result = moduleOp.walk<WalkOrder::PreOrder>([&](Block *block) {
+    // Packed scope units are atomic and already carry their core type; never
+    // assign block ids to the ops nested inside them.
+    if (isa_and_nonnull<scope::ScopeOp>(block->getParentOp())) {
+      return WalkResult::skip();
+    }
     if (bm.shouldInheritFromParent(block, CoreType::CUBE_ONLY)) {
       if (llvm::failed(bm.inheritFromParent(block))) {
         block->getParentOp()->emitError()

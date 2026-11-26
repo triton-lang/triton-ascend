@@ -1,17 +1,20 @@
 // RUN: triton-opt --triton-to-linalg %s | FileCheck %s
 
 // CHECK-LABEL: func.func @test_while_loop_index_tensor
-// CHECK: %[[C8:.*]] = arith.constant 8 : index
-// CHECK: %[[C0_I32:.*]] = arith.constant 0 : i32
-// CHECK: %[[C1_I32:.*]] = arith.constant 1 : i32
-// CHECK: %[[C4_I32:.*]] = arith.constant 4 : i32
-// CHECK: %[[C0:.*]] = arith.constant 0 : index
+// CHECK-DAG: %[[C8:.*]] = arith.constant 8 : index
+// CHECK-DAG: %[[C0_I32:.*]] = arith.constant 0 : i32
+// CHECK-DAG: %[[C1_I32:.*]] = arith.constant 1 : i32
+// CHECK-DAG: %[[C4_I32:.*]] = arith.constant 4 : i32
+// CHECK-DAG: %[[C0:.*]] = arith.constant 0 : index
 // CHECK: scf.while (%[[ARG9:.*]] = %[[C0_I32]], %[[ARG10:.*]] = %[[C0]])
 // CHECK: arith.cmpi slt, %[[ARG9]], %[[C4_I32]]
 // CHECK: scf.condition
 // CHECK: ^bb0(%[[ARG9:.*]]: i32, %[[ARG10:.*]]: index)
-// CHECK: arith.addi %[[ARG9]], %[[C1_I32]]
-// CHECK: arith.addi %[[ARG10]], %[[C8]]
+// The offset increment can reuse the masked access bound after CSE.
+// Check both updates and the loop backedge without ordering the additions.
+// CHECK-DAG: %[[NEXT_ITER:.*]] = arith.addi %[[ARG9]], %[[C1_I32]] : i32
+// CHECK-DAG: %[[NEXT_OFFSET:.*]] = arith.addi %[[ARG10]], %[[C8]] : index
+// CHECK: scf.yield %[[NEXT_ITER]], %[[NEXT_OFFSET]] : i32, index
 
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @test_while_loop_index_tensor(

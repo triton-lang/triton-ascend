@@ -142,6 +142,11 @@ def _to_value(value, _semantic=None, ty=None):
             # that specified by type hint 'ty', insert a cast for it.
             return _semantic.cast(value, ty).handle
         return value.handle
+    if isinstance(value, tl.base_value):
+        # Any other handle-carrying value, in particular a bl.buffer used to
+        # name a non-UB destination such as L1. There is nothing to cast: the
+        # buffer's type already fixes its shape and address space.
+        return value.handle
     if isinstance(value, bool):
         return _semantic.builder.get_int1(value)
     if isinstance(value, int):
@@ -255,11 +260,56 @@ def _make_align_dim_attrs(op, builder, arg_attrs):
             assert False, f"{name}'s keys should be string or int"
 
 
+def _make_data_layout_attrs(op, builder, arg_attrs):
+    # data_layout should be a dict mapping argument name/index to a DataLayout enum value.
+    # Only applied for CUBE core type.
+    name = 'data_layout'
+    if not hasattr(op, name):
+        return
+
+    param_names = list(op.signature.parameters.keys()) if hasattr(op, "signature") else []
+
+    for arg, layout in op.data_layout.items():
+        layout_value = layout.value if isinstance(layout, core.DataLayout) else layout
+        if isinstance(arg, str) and arg in param_names:
+            arg_idx = param_names.index(arg)
+        elif isinstance(arg, int):
+            arg_idx = arg
+        else:
+            assert False, f"{name}'s keys should be string or int"
+        arg_attrs[arg_idx][name] = builder.get_data_layout_attr(layout_value)
+
+
+def _make_address_space_attrs(op, builder, arg_attrs):
+    # address_space should be a dict mapping argument name/index to an AddressSpace enum value
+    # (al.AddressSpace or ascend_ir.AddressSpace). Only applied for CUBE core type.
+    name = 'address_space'
+    if not hasattr(op, name):
+        return
+
+    param_names = list(op.signature.parameters.keys()) if hasattr(op, "signature") else []
+
+    for arg, space in op.address_space.items():
+        space_value = space.value if isinstance(space, core.AddressSpace) else space
+        if isinstance(arg, str) and arg in param_names:
+            arg_idx = param_names.index(arg)
+        elif isinstance(arg, int):
+            arg_idx = arg
+        else:
+            assert False, f"{name}'s keys should be string or int"
+        arg_attrs[arg_idx][name] = builder.get_target_attribute(space_value)
+
+
 def _make_arg_attrs(op, builder):
     num_args = len(op.signature.parameters) if hasattr(op, "signature") else 0
     arg_attrs = [{} for _ in range(num_args)]
 
     _make_align_dim_attrs(op, builder, arg_attrs)
+
+    if op.core == core.CORE.CUBE:
+        _make_data_layout_attrs(op, builder, arg_attrs)
+        _make_address_space_attrs(op, builder, arg_attrs)
+
     return arg_attrs
 
 
@@ -357,14 +407,22 @@ def _make_attrs(op, builder, is_macro):
     return attrs
 
 
+def _rewrap(handle, ty):
+    # Rebuild through the type so an output keeps the class it was passed in as:
+    # a tl.dtype/block_type yields a tl.tensor, a bl.buffer_type yields a
+    # bl.buffer that still carries its address space.
+    value, _ = ty._unflatten_ir([handle], 0)
+    return value
+
+
 def _to_result(res, res_types):
     assert (len(res) == len(res_types))
     n_res = len(res)
     if n_res == 0:
         return None
     if n_res == 1:
-        return tl.tensor(res[0], res_types[0])
-    return tl.tuple(tl.tensor(res[i], res_types[i]) for i in range(n_res))
+        return _rewrap(res[0], res_types[0])
+    return tl.tuple(_rewrap(res[i], res_types[i]) for i in range(n_res))
 
 
 def _init_op(op_class, *args, **kwargs):
@@ -407,12 +465,19 @@ def custom_semantic(name: str, *args, _semantic=None, **kwargs):
     attrs = _make_attrs(op, builder, is_macro)
     arg_attrs = _make_arg_attrs(op, builder)
     # Build IR for the custom op.
+    # Create the op through the unified (main) builder so its insertion point
+    # is synced before delegating to the ascend builder. Calling the ascend
+    # builder directly uses its own stale insertion point, so inside a loop the
+    # op lands in a different block than its constant operands (which the main
+    # builder just created); erasing the dry-run body block during loop-carry
+    # analysis then destroys a constant still used by the misplaced op.
     if is_macro:
-        res = builder.create_custom_macro_op(name, attrs, inputs, outputs, arg_attrs)
+        res = _semantic.builder.create_custom_macro_op(name, attrs, inputs, outputs, arg_attrs)
     else:
-        res = builder.create_custom_op(name, attrs, inputs, outputs, arg_attrs)
-    # Results with same types as outputs.
-    res_types = [out.type for out in outs]
+        res = _semantic.builder.create_custom_op(name, attrs, inputs, outputs, arg_attrs)
+    # Results with same types as outputs. A buffer out is written in place and
+    # the op yields nothing, so there is nothing to rewrap.
+    res_types = [out.type for out in outs][:len(res)]
     return _to_result(res, res_types)
 
 

@@ -21,7 +21,9 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
 
@@ -47,6 +49,9 @@ void AnalyzeDataFlowPass::runOnOperation() {
 
   pm.addPass(createAnalyzeScopePass());
 
+  if (CVPipeline::hasOuterMainLoop(module))
+    pm.addPass(createReorderOuterEventCarryPass());
+
   pm.addPass(createAnalyzeArgsPass());
 
   pm.addPass(createAnalyzeFlagPass());
@@ -54,8 +59,6 @@ void AnalyzeDataFlowPass::runOnOperation() {
   pm.addPass(createAnalyzeCubeContolFLowInputChainPass());
 
   pm.addPass(createAnalyzeWhileConditionArgsPass());
-
-  pm.addPass(createAnalyzeSplitIfPass());
 
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {
@@ -76,13 +79,13 @@ std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass() {
 
 void registerAnalyzeDataFlowPasses() {
   registerPass(createAnalyzeNamePass);
+  registerPass(createReorderOuterEventCarryPass);
   registerPass(createAnalyzeArgsPass);
   registerPass(createAnalyzeFlagPass);
   registerPass(createAnalyzeScopePass);
   registerPass(createAnalyzeDataFlowPass);
   registerPass(createAnalyzeWhileConditionArgsPass);
   registerPass(createAnalyzeCubeContolFLowInputChainPass);
-  registerPass(createAnalyzeSplitIfPass);
 }
 
 } // namespace triton

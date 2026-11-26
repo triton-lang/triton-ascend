@@ -368,6 +368,11 @@ int UpdateConditionInfoPass::buildCrossCoreBlockEdges(ModuleOp module) {
           // Several groups share the same block pair: keep the strictest depth.
           edges[it->second].bufferNum = bufferNum;
         }
+        LDBG("Cross core edge: the producer block holds "
+             << bufferNum
+             << " producer ops of the group, the producer runs less than "
+             << edges[edgeIndex[key]].bufferNum
+             << " rounds ahead of the consumer.\n");
       }
     }
   }
@@ -742,11 +747,11 @@ UpdateConditionInfoPass::getPreloadTargets(scf::IfOp ifOp, bool isAIC) {
   return targets;
 }
 
-// The number of the cross-core buffers, the base of the preload bounds.
+// The number of the cross-core buffers, the depth of the pipeline.
 //
 // The count is the number of buffers the cross-core data passes through, it is
-// the depth of the pipeline between the two cores. It is the same number the
-// producer side of the cross-core conditions uses.
+// the depth of the pipeline between the two cores. The preload bounds and the
+// flowOpt threshold are both built on it.
 //
 // The attribute does not always live on the module: the buffer count manager
 // puts it there, but the function that carries the pipeline may hold it as
@@ -754,24 +759,35 @@ UpdateConditionInfoPass::getPreloadTargets(scf::IfOp ifOp, bool isAIC) {
 // neither of them holds the attribute, the default of the buffer count
 // manager is used.
 int UpdateConditionInfoPass::getPreloadBufferCount(ModuleOp module) {
-  int count = 0;
+  int moduleCount = 0;
+  if (auto attr =
+          module->getAttrOfType<IntegerAttr>(CVPipeline::kInterCoreBufCount)) {
+    moduleCount = static_cast<int>(attr.getInt());
+  }
+
+  int functionCount = 0;
   for (func::FuncOp funcOp : module.getOps<func::FuncOp>()) {
     if (auto attr = funcOp->getAttrOfType<IntegerAttr>(
             CVPipeline::kInterCoreBufCount)) {
-      count = static_cast<int>(attr.getInt());
+      functionCount = static_cast<int>(attr.getInt());
       break;
     }
   }
-  if (count <= 0) {
-    if (auto attr = module->getAttrOfType<IntegerAttr>(
-            CVPipeline::kInterCoreBufCount)) {
-      count = static_cast<int>(attr.getInt());
-    }
-  }
-  if (count <= 0) {
+
+  int count = 0;
+  const char *source = "the default of the buffer count manager";
+  if (functionCount > 0) {
+    count = functionCount;
+    source = "the function that carries the pipeline";
+  } else if (moduleCount > 0) {
+    count = moduleCount;
+    source = "the module";
+  } else {
     count = 2;
   }
-  LDBG("Preload buffer count: " << count);
+  LDBG("Cross core depth: "
+       << count << " buffers, taken from " << source << ". The module declares "
+       << moduleCount << ", the function declares " << functionCount << ".\n");
   return count;
 }
 
@@ -856,6 +872,9 @@ Value UpdateConditionInfoPass::addPreloadConditions(
     int limit = (ownLevel == 1)
                     ? (targetLevel - ownLevel) + (preloadBufferCount - 1)
                     : (targetLevel - ownLevel);
+    LDBG("Preload bound: the block of level "
+         << ownLevel << " against the block of level " << targetLevel << ": "
+         << limit << " rounds.\n");
 
     Value targetValue =
         loadCounter(builder, loc, targetMemrefs[0], loadedCounters);
@@ -2046,8 +2065,16 @@ int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
   // Check if flowOpt condition is needed based on buffer counts
   // - Cross-core buffer count > CROSS_CORE_BUFFER_COUNT_THRESHOLD
   // - Intra-core buffer count > INTRA_CORE_BUFFER_COUNT_THRESHOLD
+  //
+  // The cross-core buffer count of the check is the number of producer ops of
+  // the dependency groups: the flowOpt condition only makes sense when the
+  // data is copied to more than one core.
   if (info->crossCoreBufferCount <= CROSS_CORE_BUFFER_COUNT_THRESHOLD ||
       info->intraCoreBufferCount <= INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
+    LDBG("No flowOpt condition: the biggest dependency group has "
+         << info->crossCoreBufferCount
+         << " producer ops, the intra core buffer count is "
+         << info->intraCoreBufferCount << ".\n");
     flowOptCond = nullptr;
     return UPDATE_CONDITION_INFO_SUCCESS;
   }
@@ -2085,9 +2112,16 @@ int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
                                               counter, upperBound);
 
   // Build condition: counter >= lowerBound + step * opt_num
-  // opt_num = min(intraCoreBufferCount - 1, crossCoreBufferCount)
-  int optInt =
-      std::min(info->intraCoreBufferCount - 1, info->crossCoreBufferCount);
+  // opt_num = min(intraCoreBufferCount - 1, crossCoreDepth)
+  //
+  // The cross core term is the depth of the pipeline, the number of buffers
+  // the cross core data passes through. It is the number the preload bounds
+  // use as well, and it has to be the same one: the preload bound holds a
+  // block back by a number of rounds, the flowOpt condition lets a block run
+  // only once the source has produced that many rounds. A flowOpt threshold
+  // larger than the preload bound would have the two conditions wait for each
+  // other.
+  int optInt = std::min(info->intraCoreBufferCount - 1, preloadBufferCount);
 
   auto stepIntType = dyn_cast<IntegerType>(step.getType());
   if (!stepIntType) {
@@ -2913,8 +2947,13 @@ void UpdateConditionInfoPass::runOnOperation() {
     return;
   }
   preloadBufferCount = getPreloadBufferCount(module);
-  LDBG("The preload conditions use " << preloadBufferCount
-                                     << " cross core buffers as base.\n");
+  LDBG("The cross core depth of the pipeline is "
+       << preloadBufferCount
+       << " buffers. The preload bounds use it as their base, the flowOpt "
+       << "threshold is "
+       << std::min(info->intraCoreBufferCount - 1, preloadBufferCount)
+       << " rounds: min(intra " << info->intraCoreBufferCount << " - 1, "
+       << "depth " << preloadBufferCount << ").\n");
 
   // Step3:Init the ssbufferPtrs
   SmallVector<SmallVector<Value>> ssbufferPtrs = allocSSBuffer(module);

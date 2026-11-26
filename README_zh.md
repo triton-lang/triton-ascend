@@ -46,7 +46,7 @@ Triton-Ascend
 
 ## 介绍
 
-**Triton-Ascend**是适配华为昇腾处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对华为昇腾NPU特性进行深度优化，能够帮助用户在华为昇腾平台上快速开发和部署高性能计算任务。
+**Triton-Ascend**是适配昇腾处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对华为昇腾NPU特性进行深度优化，能够帮助用户在昇腾平台上快速开发和部署高性能计算任务。
 
 ## 📖 快速安装
 
@@ -56,7 +56,7 @@ Triton-Ascend
 
 支持的操作系统：Linux(aarch64/x86_64)
 
-支持的华为昇腾产品：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
+支持的昇腾产品：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
 
 最小硬件配置：单卡32GB显存（推荐）
 
@@ -66,7 +66,7 @@ Triton-Ascend
 
 - Python版本选择：py3.10-py3.13均可。
 
-- CANN版本选择：可以访问华为昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装9.2.0版本。
+- CANN版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装9.2.0版本。
 
 - TorchNPU版本选择：当前配套的TorchNPU版本为2.10.0.post7。
 

@@ -5,7 +5,7 @@
 You are advised to enable the address space layout randomization (ASLR) (level 2) in the system. You can perform the following operation to enable it:
 
 ```bash
-    echo 2 > /proc/sys/kernel/randomize_va_space
+echo 2 > /proc/sys/kernel/randomize_va_space
 ```
 
 ## Suggestions on Running Users

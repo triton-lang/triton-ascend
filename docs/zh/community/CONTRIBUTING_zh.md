@@ -38,10 +38,12 @@ git commit -s -m "your commit message"
 ### Fork-Pull开发模式
 
 1. Fork Triton-Ascend项目
-  在您向Triton-Ascend项目提交自己的代码之前，请确保已经将Triton-Ascend项目Fork到您自己的仓库。后续您将在自己Fork的项目上进行开发，并通过Pull Request的方式合并到Triton-Ascend项目。这意味着Triton-Ascend仓库和您自己的仓库之间存在并行开发，因此请注意保持仓库之间的一致性。
+
+    在您向Triton-Ascend项目提交自己的代码之前，请确保已经将Triton-Ascend项目Fork到您自己的仓库。后续您将在自己Fork的项目上进行开发，并通过Pull Request的方式合并到Triton-Ascend项目。这意味着Triton-Ascend仓库和您自己的仓库之间存在并行开发，因此请注意保持仓库之间的一致性。
 
 2. 克隆远程仓库
-  使用git克隆您fork的Triton-Ascend项目&添加上游仓库upstream：
+
+    使用git克隆您fork的Triton-Ascend项目&添加上游仓库upstream：
 
     ```bash
     git clone https://github.com/{your_forked_repo}/triton-ascend.git && cd triton-ascend && git submodule update --init --depth 1
@@ -49,8 +51,9 @@ git commit -s -m "your commit message"
     ```
 
 3. 本地环境开发代码
-  在开发您的代码之前，您需要根据[Triton-Ascend安装指南](https://github.com/triton-lang/triton-ascend/blob/main/docs/zh/installation_guide.md)搭建开发环境。
-  为避免多个分支间的不一致问题，请创建新的本地开发分支进行新特性的开发：
+
+    在开发你的代码之前，你需要根据[Triton-Ascend安装指南](https://github.com/triton-lang/triton-ascend/blob/main/docs/zh/installation_guide.md)搭建开发环境。
+    为避免多个分支间的不一致问题，请创建新的本地开发分支进行新特性的开发：
 
     ```bash
     git checkout -b {new_branch_name} origin/main

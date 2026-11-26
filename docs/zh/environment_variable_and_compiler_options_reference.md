@@ -134,7 +134,7 @@ triton.knobs.propagate_env = False  # 之后的赋值不再写回os.environ
 
 | 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
 |------|----------|--------|----------|------|
-| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | 向Ascend NPU编译器传入sanitizer开关。A2/A3运行静态插桩后的kernel时，须通过 `mssanitizer` 拉起脚本。 |
+| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | 向Ascend NPU编译器传入sanitizer开关。A2/A3运行静态插桩后的kernel时，须通过 `mssanitizer` 运行脚本。 |
 | `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | `True` / `False` | 请求编译器打印UB占用位数。 |
 | `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | `True` / `False` | 请求编译器输出内存使用信息。 |
 | `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | 目录路径 / `None` | 仅当随包工具与 `PATH` 查找均失败时，作为Ascend编译器工具目录的后备路径。 |

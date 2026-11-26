@@ -4,21 +4,21 @@
 
 ## Quick Reference
 
-- Triton-Ascend is maintained by[triton-ascend Code Repository](https://github.com/triton-lang/triton-ascend/)
+- Triton-Ascend is maintained by[Triton-Ascend Code Repository](https://github.com/triton-lang/triton-ascend/)
 - Where to get help
-    - [triton-Ascend Code Repository](https://github.com/triton-lang/triton-ascend/)
-    - [Triton-Ascend Data Website](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)
-    - [Issue Tracker](https://github.com/triton-lang/triton-ascend/issues)
+  - [Triton-Ascend Code Repository](https://github.com/triton-lang/triton-ascend/)
+  - [Triton-Ascend Data Website](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)
+  - [Issue Tracker](https://github.com/triton-lang/triton-ascend/issues)
 
 ---
 
-# Triton-Ascend
+## Triton-Ascend
 
 Triton-Ascend is a Triton compilation framework built for the Ascend platform, aiming to enable Triton code to run efficiently on Ascend hardware. For details, see [Triton-Ascend](https://github.com/triton-lang/triton-ascend/blob/main/README.md).
 
-# Supported Tags and Dockerfile
+## Supported Tags and Dockerfile
 
-## Tag specifications
+### Tag specifications
 
 Tags follow the following format：<br/>
 `{triton-ascend version}-{CANN version}-{torch_npu version}-{applicable product}-{os version}-{python version}`
@@ -106,9 +106,9 @@ Tags follow the following format：<br/>
 | 3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-ubuntu22.04-py3.11     | [Dockerfile](3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-ubuntu22.04-py3.11/Dockerfile)     | docker pull quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-ubuntu22.04-py3.11     |
 | 3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-openeuler24.03-py3.11  | [Dockerfile](3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-openeuler24.03-py3.11/Dockerfile)  | docker pull quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-openeuler24.03-py3.11  |
 
-# Quick Start
+## Quick Start
 
-## Running the Triton-Ascend Container
+### Running the Triton-Ascend Container
 
 ```bash
 # Assume that your NPU device model is A3, the device is installed in /dev/davinci1, and the NPU driver is installed in /usr/local/Ascend:
@@ -136,7 +136,7 @@ quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-ubuntu24.04-py3.1
 
 ```
 
-## How to Build Locally?
+### How to Build Locally?
 
 **arm64**
 
@@ -162,7 +162,7 @@ docker build \
 -f Dockerfile .
 ```
 
-## How to Perform Secondary Development?
+### How to Perform Secondary Development?
 
 ```bash
 # Using the triton-ascend image as the base image and adding user software to it.
@@ -172,7 +172,7 @@ RUN apt update -y && \
     ...
 ```
 
-# Supported hardware
+### Supported hardware
 
 | Chip Series | Product Example                 | Architecture  |
 |-------------|---------------------------------|---------------|
@@ -180,7 +180,7 @@ RUN apt update -y && \
 | Ascend A3   | Atlas 800T A3                   | arm64, amd64 |
 | Ascend 950  | 950PR Series                    | arm64, amd64 |
 
-# License
+## License
 
 View the license information of the CANN, Torch-NPU and Triton-Ascend software contained in the image. For details, visit [License](https://www.hiascend.com/en/software/protocol).<br/>
 As with all container images, the pre-installed software packages (such as Python and system libraries) may be subject to their own licenses.

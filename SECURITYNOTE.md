@@ -4,7 +4,9 @@
 
 You are advised to enable the address space layout randomization (ASLR) (level 2) in the system. You can perform the following operation to enable it:
 
+```bash
     echo 2 > /proc/sys/kernel/randomize_va_space
+```
 
 ## Suggestions on Running Users
 
@@ -12,7 +14,7 @@ To ensure security and minimize permissions, you are advised not to use administ
 
 ## File Permission Control
 
-1. You are advised to take security measures such as permission control on sensitive files, such as personal privacy data and business assets. For details about how to set the permissions, see the "File Permission Reference" section.
+1. You are advised to take security measures such as permission control on sensitive files, such as personal privacy data and business assets. For details about how to set the permissions, see the "[File Permission Reference](#file-permission-reference)" section.
 
 2. During the installation and use, you are advised to control the permissions. For details about how to set the permissions, see [File Permission Reference](#file-permission-reference).
 
@@ -44,7 +46,7 @@ Triton-Ascend can be installed through source code compilation. During the compi
 
 ## Public IP Address Statement
 
-Public IP addresses are used in the configuration files and scripts of Triton-Ascend. For details, see the "Public IP Addresses" section.
+Public IP addresses are used in the configuration files and scripts of Triton-Ascend. For details, see the "[Public IP Addresses](#public-ip-addresses)" section.
 
 ### Public IP addresses
 

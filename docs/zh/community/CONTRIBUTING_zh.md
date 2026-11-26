@@ -37,11 +37,11 @@ git commit -s -m "your commit message"
 
 ### Fork-Pull开发模式
 
-1、Fork Triton-Ascend项目
+1.Fork Triton-Ascend项目
 
 在您向Triton-Ascend项目提交自己的代码之前，请确保已经将Triton-Ascend项目Fork到您自己的仓库。后续您将在自己Fork的项目上进行开发，并通过Pull Request的方式合并到Triton-Ascend项目。这意味着Triton-Ascend仓库和您自己的仓库之间存在并行开发，因此请注意保持仓库之间的一致性。
 
-2、克隆远程仓库
+2.克隆远程仓库
 
 使用git克隆您fork的Triton-Ascend项目&添加上游仓库upstream：
 
@@ -50,7 +50,7 @@ git clone https://github.com/{your_forked_repo}/triton-ascend.git && cd triton-a
 git remote add upstream https://github.com/triton-lang/triton-ascend.git
 ```
 
-3、本地环境开发代码
+3.本地环境开发代码
 
 在开发您的代码之前，您需要根据[Triton-Ascend安装指南](https://github.com/triton-lang/triton-ascend/blob/main/docs/zh/installation_guide.md)搭建开发环境。
 
@@ -64,13 +64,13 @@ git rebase upstream/main # Rebase onto the latest upstream trunk
 
 以main分支为例，Triton-Ascend可能会根据需要创建版本分支或下游开发分支。当您创建完分支&同步上游main分支更新后，就可以开始开发您的代码了。
 
-4、代码更改自测
+4.代码更改自测
 
 完成代码更改后，请检查您的更改是否可以通过测试：
 
 在本地代码分支的third_party/ascend/unittest/pytest_ut路径下为您开发的代码编写测试用例代码，并在本地环境中验证您的测试脚本，确保您的更改可以通过测试。
 
-5、代码推送到远程仓库
+5.代码推送到远程仓库
 
 代码更新&测试完成&代码静态检查后，推送您的commit到您的远程仓库。
 
@@ -83,7 +83,7 @@ git commit -s -m "your commit message"
 git push origin {your_new_branch_name}
 ```
 
-6、向Triton-Ascend主仓创建Pull Request
+6.向Triton-Ascend主仓创建Pull Request
 
 代码推送至您的远程仓库后，你需要在你的新分支和Triton-Ascend main分支之间新建Pull Request。完成新建Pull Request后，“Jenkins CI”将自动为你设置构建流水线测试。你的Pull Request请尽快合并到上游main分支，以降低合并风险。
 
@@ -105,8 +105,6 @@ git push origin {your_new_branch_name}
 
 ### ISSUE规范
 
-为项目做贡献的一个好的方法是在遇到问题时发送详细报告。我们总是非常感谢写得详细、彻底的错误报告，并会因此非常感谢您！
-
 在报告问题时，请参考以下格式：
 
 - 您环境里使用的软件版本（Triton-Ascend、Python、OS等）？
@@ -114,7 +112,7 @@ git push origin {your_new_branch_name}
 - 您报告的是什么样的问题，添加对应的标签以便在问题仪表盘上突出显示？
 - 发生了什么？
 - 您预计会发生什么？
-- 如何重现它？（尽可能精确）
+- 如何重现它？（尽可能精确）。
 
 您也可以选择其中一个预定义的[issue填写模板](https://github.com/triton-lang/triton-ascend/issues/new/choose)。
 

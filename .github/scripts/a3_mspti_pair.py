@@ -134,7 +134,8 @@ def main(out):
         print(f"PAIR {mode} plog_sites={dict(sites)}")
     files = [out / (mode + ".device") for mode in ("msprof", "stock", "shared")]
     ids = [f.read_text() if f.is_file() else None for f in files]
-    print(f"PAIR msprof/stock/shared verified physical IDs: {ids}, same_device={None not in ids and len(set(ids)) == 1}")
+    print(
+        f"PAIR msprof/stock/shared verified physical IDs: {ids}, same_device={None not in ids and len(set(ids)) == 1}")
     if shutil.which("gdb"):
         e = dict(env, PAIR_MSPTI=str(lib))
         execute([

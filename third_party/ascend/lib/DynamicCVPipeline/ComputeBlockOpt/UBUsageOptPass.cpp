@@ -387,7 +387,8 @@ static bool isActiveEndNode(int srcNode, int endNode,
     if (nodeBlockId[node] != nodeBlockId[endNode] &&
         nodeBlockId[node] != nodeBlockId[srcNode]) {
       if (CVPipeline::getCoreTypeOfSimpleOpOrCf(nodeId2op[node]) !=
-                  CVPipeline::CoreType::VECTOR_ONLY || linkIn[node].size() != 0) {
+              CVPipeline::CoreType::VECTOR_ONLY ||
+          linkIn[node].size() != 0) {
         return false;
       }
     }

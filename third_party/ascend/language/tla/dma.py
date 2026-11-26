@@ -499,7 +499,7 @@ def load_gm_to_ub(src, dst, params=None, _semantic=None):
 
 
 @builtin
-def store_ub_to_gm(src, dst, _semantic=None):
+def store_ub_to_gm(src, dst, *, l2_cache_ctrl=None, _semantic=None):
     """Stores UB data to global memory using ``hivm.hir.store``.
 
     :param src: UB source with ``space="ub"``.
@@ -507,6 +507,12 @@ def store_ub_to_gm(src, dst, _semantic=None):
     :param dst: GM destination with ``space="gm"``, typically created with
         ``tla.view``. Its element type must match ``src``.
     :type dst: tla.buffer
+    :param l2_cache_ctrl: Optional compile-time Ascend950 MTE3 cache field
+        (0, 1, 2, 4 or 8). ``None`` preserves the default store behavior.
+        Explicit modes require non-atomic stores and apply only to DMA
+        instructions. Functions that enable :func:`set_atomic` cannot use
+        explicit modes.
+    :type l2_cache_ctrl: int or None
     :return: None. The destination buffer is updated in place.
     :rtype: None
 
@@ -517,7 +523,12 @@ def store_ub_to_gm(src, dst, _semantic=None):
         ``AtomicKind.NONE``.
     """
     _route(src, dst, (("ub", "gm"), ))
-    _semantic.builder.create_tla_store(src.handle, dst.handle)
+    mode = _unwrap_if_constexpr(l2_cache_ctrl)
+    if mode is not None:
+        mode = _integer(mode, "l2_cache_ctrl", bits=32)
+        if mode not in (0, 1, 2, 4, 8):
+            raise ValueError("UB-to-GM l2_cache_ctrl must be 0, 1, 2, 4 or 8")
+    _semantic.builder.create_tla_store(src.handle, dst.handle, mode)
 
 
 @builtin

@@ -1735,11 +1735,16 @@ void init_tla_builder(py::module &&m) {
           py::arg("raw_l2_cache_mode") = std::nullopt)
       .def(
           "create_tla_store",
-          [](TLABuilder &self, Value src, Value dst) {
+          [](TLABuilder &self, Value src, Value dst,
+             std::optional<int32_t> l2CacheMode) {
             checkDmaBuffers(src, dst);
-            self.create<hivm::StoreOp>(TypeRange{}, src, dst);
+            auto op = self.create<hivm::StoreOp>(TypeRange{}, src, dst);
+            if (l2CacheMode)
+              op->setAttr("hivm.l2_cache_mode",
+                          self.getBuilder().getI32IntegerAttr(*l2CacheMode));
           },
-          py::arg("src"), py::arg("dst"))
+          py::arg("src"), py::arg("dst"),
+          py::arg("l2_cache_mode") = std::nullopt)
       .def(
           "create_tla_nd2nz",
           [](TLABuilder &self, Value src, Value dst, const py::dict &attrs) {

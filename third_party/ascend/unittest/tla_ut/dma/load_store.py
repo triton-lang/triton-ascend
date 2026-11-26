@@ -16,12 +16,15 @@ CONFIGS += [
     dict(name="l2_cache_normal_fv", dtype="fp32", l2_cache_ctrl=tla.L2CachePolicy.NORMAL_FV, hivm_policy="EvictFirst"),
     dict(name="l2_cache_normal_lv", dtype="fp32", l2_cache_ctrl=tla.L2CachePolicy.NORMAL_LV, hivm_policy="EvictLast"),
     dict(name="l2_cache_raw_load", dtype="fp32", raw_l2_cache_mode=4),
+    dict(name="l2_cache_default_store", dtype="fp32", store_cache_mode=0),
+    dict(name="l2_cache_raw_load_and_store", dtype="fp32", raw_l2_cache_mode=4, store_cache_mode=8),
 ]
 DTYPES = {"fp16": (tl.float16, torch.float16), "fp32": (tl.float32, torch.float32), "i32": (tl.int32, torch.int32)}
 
 
 @tla.jit
-def transfer(X, Y, DTYPE: tl.constexpr, L2_CACHE_CTRL: tl.constexpr, RAW_L2_CACHE_MODE: tl.constexpr):
+def transfer(X, Y, DTYPE: tl.constexpr, L2_CACHE_CTRL: tl.constexpr, RAW_L2_CACHE_MODE: tl.constexpr,
+             STORE_CACHE_MODE: tl.constexpr):
     with tla.scope.vector():
         src = tla.view(X, (2, 32))
         out = tla.view(Y, (2, 32))
@@ -30,12 +33,12 @@ def transfer(X, Y, DTYPE: tl.constexpr, L2_CACHE_CTRL: tl.constexpr, RAW_L2_CACH
         p: tl.constexpr = tla.LoadGM2UBParams(l2_cache_ctrl=L2_CACHE_CTRL, raw_l2_cache_mode=RAW_L2_CACHE_MODE)
         tla.load_gm_to_ub(src, ub, p)
         tla.sync.barrier(tla.sync.PIPE.ALL)
-        tla.store_ub_to_gm(ub, out)
+        tla.store_ub_to_gm(ub, out, l2_cache_ctrl=STORE_CACHE_MODE)
 
 
 def constants(case):
     return dict(DTYPE=DTYPES[case["dtype"]][0], L2_CACHE_CTRL=case.get("l2_cache_ctrl"),
-                RAW_L2_CACHE_MODE=case.get("raw_l2_cache_mode"))
+                RAW_L2_CACHE_MODE=case.get("raw_l2_cache_mode"), STORE_CACHE_MODE=case.get("store_cache_mode"))
 
 
 @matrix(CONFIGS)
@@ -43,17 +46,24 @@ def test_ir(case, output_dir=None):
     sig = {"X": "*" + case["dtype"], "Y": "*" + case["dtype"]}
     mod, ctx = compile_offline(transfer, sig, constants(case), output_dir=output_dir)
     text = str(lower_offline(mod, ctx, output_dir=output_dir))
-    assert text.count("hivm.hir.load ") == 1 and text.count("hivm.hir.store ") == 1
+    loads = [line for line in text.splitlines() if "hivm.hir.load " in line]
+    stores = [line for line in text.splitlines() if "hivm.hir.store " in line]
+    assert len(loads) == len(stores) == 1
     assert "#hivm.tcore_type<VECTOR>" in text
     assert 'hacc.mode = "tla"' in text
     # Pin existing public members and their meanings independently of enum values.
     mode = case.get("raw_l2_cache_mode")
     if mode is None:
         policy = case.get("hivm_policy", "EvictFirst")
-        assert f"eviction_policy = <{policy}>" in text
+        assert f"eviction_policy = <{policy}>" in loads[0]
     else:
-        assert f"hivm.l2_cache_mode = {mode} : i32" in text
-        assert "eviction_policy" not in text
+        assert f"hivm.l2_cache_mode = {mode} : i32" in loads[0]
+        assert "eviction_policy" not in loads[0]
+    store_mode = case.get("store_cache_mode")
+    if store_mode is None:
+        assert "hivm.l2_cache_mode" not in stores[0]
+    else:
+        assert f"hivm.l2_cache_mode = {store_mode} : i32" in stores[0]
     print("IR PASS:", case["name"])
 
 

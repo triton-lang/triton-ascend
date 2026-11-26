@@ -347,7 +347,7 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.cast"],
         "tensor_args": [1],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {

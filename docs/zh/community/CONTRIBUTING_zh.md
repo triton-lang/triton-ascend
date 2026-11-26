@@ -112,7 +112,7 @@ git push origin {your_new_branch_name}
 - 您报告的是什么样的问题，添加对应的标签以便在问题仪表盘上突出显示？
 - 发生了什么？
 - 您预计会发生什么？
-- 如何重现它？（尽可能精确）。
+- 如何重现它？（尽可能精确）
 
 您也可以选择其中一个预定义的[issue填写模板](https://github.com/triton-lang/triton-ascend/issues/new/choose)。
 

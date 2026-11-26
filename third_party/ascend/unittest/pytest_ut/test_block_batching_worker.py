@@ -40,6 +40,36 @@ def test_frozen_worker_source_keeps_function_optional(tmp_path):
     assert restored.to_wire() == dict(parent.to_wire(), path=restored.path)
 
 
+def test_frozen_snapshot_is_written_once_per_fingerprint(tmp_path, monkeypatch):
+    import triton
+    from triton._C.libtriton import ascend
+    from triton.compiler.compiler import ASTSource
+
+    @triton.jit
+    def kernel(x):
+        pass
+
+    monkeypatch.setattr(ASTSource, 'make_ir', lambda self, *args, **kwargs: object())
+    monkeypatch.setattr(ascend, 'serialize_block_input', lambda module: b'frozen snapshot')
+    backend = SimpleNamespace(target=None, parse_options=lambda opts: SimpleNamespace(**opts),
+                              load_dialects=lambda context: None, get_codegen_implementation=lambda opts: None,
+                              get_module_map=lambda: {})
+    with triton.knobs.cache.scope():
+        triton.knobs.cache.dir = str(tmp_path)
+        first = worker._freeze_source(backend, ASTSource(kernel, {'x': '*fp32'}), {}, 'rev')
+        snapshot = Path(first.path)
+        # Back-date so a rewrite is visible regardless of clock resolution.
+        stat = snapshot.stat()
+        os.utime(snapshot, ns=(stat.st_atime_ns, stat.st_mtime_ns - 10**7))
+        stamped = snapshot.stat()
+        second = worker._freeze_source(backend, ASTSource(kernel, {'x': '*fp32'}), {}, 'rev')
+        after = Path(second.path).stat()
+    # The fingerprint digests the snapshot, so the second freeze must reuse the
+    # stored entry untouched; strict AOT inventories compare (size, mtime_ns).
+    assert Path(second.path) == snapshot and snapshot.read_bytes() == b'frozen snapshot'
+    assert (after.st_size, after.st_mtime_ns, after.st_ino) == (stamped.st_size, stamped.st_mtime_ns, stamped.st_ino)
+
+
 def test_cold_compiler_fingerprint_does_not_import_device_frameworks():
     import subprocess
     subprocess.run([
@@ -279,6 +309,57 @@ def test_fallback_bundle_keeps_the_executable_cache_identity(bundle_environment)
     assert result.hash == env.base.hash and result._primary is env.base
     result._set_primary(env.candidate)
     assert result.hash == env.candidate.hash and result._primary is env.candidate
+
+
+def test_republished_manifest_keeps_the_stored_entry_byte_identical(tmp_path):
+    import triton
+    kernel = object.__new__(batching.BatchKernel)
+    kernel.baseline = SimpleNamespace(hash='baseline-hash')
+    kernel.candidate = None
+    kernel.request = batching.BatchRequest(factor=1, axis=-1)
+    kernel.block_batching = dict(compile_status='DISABLED', owner='none', reason='DISABLED', requested_factor=1,
+                                 applied_factor=1)
+    with triton.knobs.cache.scope():
+        triton.knobs.cache.dir = str(tmp_path)
+        kernel.publish_manifest()
+        sidecars = sorted(tmp_path.rglob('block_batching.bundle.json'))
+        assert len(sidecars) == 1
+        sidecar = sidecars[0]
+        payload = sidecar.read_bytes()
+        # Back-date the entry so a rewrite is visible regardless of clock
+        # resolution, then republish exactly as a cached-kernel init would.
+        stat = sidecar.stat()
+        os.utime(sidecar, ns=(stat.st_atime_ns, stat.st_mtime_ns - 10**7))
+        stamped = sidecar.stat()
+        kernel.publish_manifest()
+        after = sidecar.stat()
+    # Strict AOT cache inventories compare (size, mtime_ns) and treat any
+    # difference as a modified artifact, forcing a recompile.
+    assert sidecar.read_bytes() == payload
+    assert (after.st_size, after.st_mtime_ns, after.st_ino) == (stamped.st_size, stamped.st_mtime_ns, stamped.st_ino)
+
+
+def test_rememembering_a_known_decline_leaves_the_record_untouched(tmp_path):
+    import triton
+    payload = dict(reason='UNSUPPORTED_ADDRESS_EXPRESSION', stage='ttir')
+    with triton.knobs.cache.scope():
+        triton.knobs.cache.dir = str(tmp_path)
+        cache = worker._candidate_cache('variant')
+        worker._remember_decline(cache, 'variant', payload)
+        record = Path(cache.get_file(worker._DECLINE))
+        # Back-date so a rewrite is visible regardless of clock resolution.
+        stat = record.stat()
+        os.utime(record, ns=(stat.st_atime_ns, stat.st_mtime_ns - 10**7))
+        stamped = record.stat()
+        # Replaying a cached selection re-reports the same declines.
+        worker._remember_decline(cache, 'variant', payload)
+        after = record.stat()
+        assert worker._cached_decline(cache, 'variant') == payload
+        # A genuinely different decline for the same variant must still land.
+        changed = dict(reason='UNSUPPORTED_BYTE_OPERATION', stage='ttir')
+        worker._remember_decline(cache, 'variant', changed)
+        assert worker._cached_decline(cache, 'variant') == changed
+    assert (after.st_size, after.st_mtime_ns, after.st_ino) == (stamped.st_size, stamped.st_mtime_ns, stamped.st_ino)
 
 
 def test_valid_unsupported_lowering_and_corrupt_evidence_are_distinct(compile_errors):

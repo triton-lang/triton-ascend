@@ -517,6 +517,17 @@ def _export_profile_metadata(mod, metadata):
         metadata.update(ascend.ir.get_kernel_profile_metadata(mod))
 
 
+def _has_proton_records(mod):
+    found = False
+
+    def visit(op):
+        nonlocal found
+        found = found or op.get_name() == "proton.record"
+
+    mod.walk(visit)
+    return found
+
+
 def tla_to_ttadapter(mod, metadata, opt):
     from triton.language.extra.tla.compiler import lower_ttir
 
@@ -606,7 +617,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
 
         if AscendBackend.instrumentation:
             if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
-                metadata["proton_collection"] = "perf_monitor"
+                metadata["proton_collection"] = "perf_monitor" if _has_proton_records(mod) else "none"
             else:
                 AscendBackend.instrumentation.patch("ttir_to_linalg", pm, mod.context)
 

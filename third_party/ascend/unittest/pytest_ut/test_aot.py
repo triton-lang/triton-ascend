@@ -454,3 +454,217 @@ def test_launcher_has_no_available_kernel():
         # It should fail since the launcher requires all the strides be 1 while they are not.
         assert result.returncode == -6
         assert "kernel launch failed" in result.stderr
+
+
+# Several compile.py runs into one output directory
+
+SIG_NOSPEC = ("*fp32, *fp16, *fp16, i32, i32, i32, "
+              "i32, i32, i32, i32, i32, i32, 16, 16, 16")
+SIG_ALIGNED = ("*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, "
+               "i32:16, i32:1, i32:16, i32:1, i32:16, i32:1, 16, 16, 16")
+SIG_SQUARE = "*fp16:16, *fp16:16, i32, i32, i32, 256"
+GRID_SQUARE = "n/256, 1, 1"
+
+square_kernel_src = """
+@triton.jit
+def square_fp16(Y, X, n, y_stride, x_stride, BLOCK: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n
+    v = tl.load(X + offs * x_stride, mask=mask)
+    tl.store(Y + offs * y_stride, v * v, mask=mask)
+"""
+
+multi_kernel_src = kernel_src + square_kernel_src
+
+two_kernel_host_src = test_utils_src.replace('#include "kernel.h"',
+                                             '#include "matmul_dispatch.h"\n#include "square_dispatch.h"') + """
+#include <stdlib.h>
+
+static void write_i16_csv(char *filename, int16_t *buffer, int size) {
+    FILE *file = fopen(filename, "w");
+    if (file == NULL) {
+        printf("Could not open file %s\\n", filename);
+        return;
+    }
+    for (int i = 0; i < size; i++) {
+        fprintf(file, "%d", (int)buffer[i]);
+        if (i < size - 1) fprintf(file, ",");
+    }
+    fclose(file);
+}
+
+int main(int argc, char **argv) {
+  int M = 16, N = 16, K = 16, n = 1024;
+  aclrtStream stream = NULL;
+  void *A = NULL, *B = NULL, *C = NULL, *X = NULL, *Y = NULL;
+  aclInit(NULL);
+  aclrtSetDevice(0);
+  aclrtMalloc(&A, M * K * 2, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&B, K * N * 2, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&C, M * N * 4, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&X, n * 2, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&Y, n * 2, ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtCreateStream(&stream);
+  load_matmul_fp16();
+  load_square_fp16();
+  int16_t *hA = (int16_t*)malloc(M * K * 2);
+  int16_t *hB = (int16_t*)malloc(K * N * 2);
+  int16_t *hX = (int16_t*)malloc(n * 2);
+  memset(hA, 0, M * K * 2);
+  memset(hB, 0, K * N * 2);
+  memset(hX, 0, n * 2);
+  read_csv_to_buffer(argv[1], hA, M * K);
+  read_csv_to_buffer(argv[2], hB, K * N);
+  read_csv_to_buffer(argv[3], hX, n);
+  aclrtMemcpyAsync(A, M * K * 2, hA, M * K * 2, ACL_MEMCPY_HOST_TO_DEVICE, stream);
+  aclrtMemcpyAsync(B, K * N * 2, hB, K * N * 2, ACL_MEMCPY_HOST_TO_DEVICE, stream);
+  aclrtMemcpyAsync(X, n * 2, hX, n * 2, ACL_MEMCPY_HOST_TO_DEVICE, stream);
+  aclrtSynchronizeStream(stream);
+  int ret = matmul_fp16_default(stream, C, A, B, M, N, K, N, 1, K, 1, N, 1);
+  if (ret != 0) fprintf(stderr, "matmul launch failed\\n");
+  assert(ret == 0);
+  ret = square_fp16_default(stream, Y, X, n, 1, 1);
+  if (ret != 0) fprintf(stderr, "square launch failed\\n");
+  assert(ret == 0);
+  aclrtSynchronizeStream(stream);
+  int32_t *hC = (int32_t*)malloc(M * N * 4);
+  int16_t *hY = (int16_t*)malloc(n * 2);
+  memset(hC, 0, M * N * 4);
+  memset(hY, 0, n * 2);
+  aclrtMemcpyAsync(hC, M * N * 4, C, M * N * 4, ACL_MEMCPY_DEVICE_TO_HOST, stream);
+  aclrtMemcpyAsync(hY, n * 2, Y, n * 2, ACL_MEMCPY_DEVICE_TO_HOST, stream);
+  aclrtSynchronizeStream(stream);
+  write_buffer_to_csv(argv[4], hC, M * N);
+  write_i16_csv(argv[5], hY, n);
+  unload_matmul_fp16();
+  unload_square_fp16();
+  aclrtFree(A); aclrtFree(B); aclrtFree(C); aclrtFree(X); aclrtFree(Y);
+  aclrtDestroyStream(stream);
+  aclFinalize();
+  free(hA); free(hB); free(hX); free(hC); free(hY);
+  return 0;
+}
+"""
+
+
+def _compile_kernel_npu(out_dir, signature, kernel_path, kernel_name="kernel", out_name="matmul_fp16",
+                        grid="M/16, N/16, 1", num_warps=1):
+    before = set(glob.glob(os.path.join(out_dir, "*.h")))
+    _compile_kernel(out_dir, signature, kernel_name, out_name, out_name, num_warps, grid, kernel_path)
+    after = set(glob.glob(os.path.join(out_dir, "*.h")))
+    new = sorted(after - before)
+    return [os.path.basename(path) for path in (new or sorted(after))]
+
+
+def link_aot_kernel_headers(dir, headers, out_name):
+    """Link headers into one dispatcher; only the first original kernel gets <kernel>_default."""
+    linker_path = os.path.join(triton.tools.__path__[0], "link.py")
+    subprocess.run([sys.executable, linker_path, *headers, "-o", out_name, "--backend", "npu"], check=True, cwd=dir)
+
+
+def _gcc_exe(dir, src_name, exe):
+    include_flags, link_flags, lib_dirs, python_libdir, python_lib, _ = _npu_toolchain()
+    command = ["gcc", src_name]
+    command.extend(include_flags)
+    command.extend(link_flags)
+    if python_libdir:
+        command += [f"-L{python_libdir}", f"-Wl,-rpath,{python_libdir}"]
+    for lib_dir in lib_dirs:
+        command += [f"-Wl,-rpath,{lib_dir}"]
+    command += [
+        "-Wl,--no-as-needed", f"-l{python_lib}", "-Wl,--as-needed", "-ldl", "-L", dir, "-l", "kernel", "-o", exe
+    ]
+    subprocess.run(command, check=True, cwd=dir)
+
+
+def test_aot_per_kernel_launcher_metadata():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        kernel_path = write_triton_kernels(tmp_dir, multi_kernel_src, kernel_utils_src)
+        _compile_kernel_npu(tmp_dir, SIG_ALIGNED, kernel_path, out_name="matmul_fp16")
+        _compile_kernel_npu(tmp_dir, SIG_SQUARE, kernel_path, kernel_name="square_fp16", out_name="square_fp16",
+                            grid=GRID_SQUARE)
+        c_files = sorted(f for f in os.listdir(tmp_dir) if f.endswith(".c"))
+        assert len(c_files) == 2, c_files
+        spec_names = set()
+        for name in c_files:
+            text = open(os.path.join(tmp_dir, name), encoding="utf-8").read()
+            match = re.search(r"static const npu_aot_launch_spec_t (\w+)_spec", text)
+            assert match, name
+            func_name = match.group(1)
+            assert func_name.startswith(("matmul_fp16_", "square_fp16_")), (name, func_name)
+            assert f"static const npu_aot_arg_type_t {func_name}_types[]" in text, name
+            assert f"&{func_name}_spec" in text, name
+            assert f"{func_name}_types" in text, name
+            assert "npuAotLaunch(" in text, name
+            spec_names.add(func_name)
+        assert len(spec_names) == 2, spec_names
+        so = os.path.join(tmp_dir, "launcher_export.so")
+        nm = subprocess.run(["nm", "-D", "--defined-only", so], capture_output=True, text=True, check=True).stdout
+        exported = {line.split()[-1] for line in nm.splitlines() if line.strip()}
+        assert {"triton_launch_kernel_create", "triton_launch_kernel_run", "triton_launch_kernel"} <= exported, \
+            sorted(exported)
+
+
+def test_aot_two_kernels_independent():
+    np.random.seed(3)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        kernel_path = write_triton_kernels(tmp_dir, multi_kernel_src, kernel_utils_src)
+        matmul_headers = _compile_kernel_npu(tmp_dir, SIG_ALIGNED, kernel_path, out_name="matmul_fp16")
+        square_headers = _compile_kernel_npu(tmp_dir, SIG_SQUARE, kernel_path, kernel_name="square_fp16",
+                                             out_name="square_fp16", grid=GRID_SQUARE)
+        matmul_headers = [header for header in matmul_headers if header != "launcher_cann.h"]
+        square_headers = [header for header in square_headers if header != "launcher_cann.h"]
+        # Keep matmul first so link.py emits matmul_fp16_default for the host.
+        link_aot_kernel_headers(tmp_dir, matmul_headers + square_headers, "kernel")
+        gen_kernel_library_npu(tmp_dir, "libkernel.so")
+        gen_test_bin_npu(tmp_dir, 16, 16, 16)
+
+        a, b, a_path, b_path, c_path = generate_matmul_test_data(tmp_dir, 16, 16, 16)
+        subprocess.run(["./test", a_path, b_path, c_path], env=_npu_run_env(tmp_dir), check=True, cwd=tmp_dir)
+
+        c = np.genfromtxt(c_path, delimiter=",", dtype=np.int32)
+        c_tri = c.reshape((16, 16)).view(np.float32)
+        c_ref = np.matmul(a.astype(np.float32), b.astype(np.float32))
+        np.testing.assert_allclose(c_tri, c_ref * c_ref, atol=1e-4, rtol=0.0)
+
+
+@pytest.mark.parametrize("order", ["matmul_first", "square_first"])
+def test_aot_two_kernels_both_launch(order):
+    np.random.seed(3)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        kernel_path = write_triton_kernels(tmp_dir, multi_kernel_src, kernel_utils_src)
+        steps = [("matmul", SIG_ALIGNED, "kernel", "matmul_fp16", "M/16, N/16, 1"),
+                 ("matmul", SIG_NOSPEC, "kernel", "matmul_fp16", "M/16, N/16, 1"),
+                 ("square", SIG_SQUARE, "square_fp16", "square_fp16", GRID_SQUARE)]
+        if order == "square_first":
+            steps.reverse()
+        matmul_headers, square_headers = [], []
+        for kind, signature, kernel_name, out_name, grid in steps:
+            headers = _compile_kernel_npu(tmp_dir, signature, kernel_path, kernel_name=kernel_name, out_name=out_name,
+                                          grid=grid)
+            headers = [header for header in headers if header != "launcher_cann.h"]
+            (matmul_headers if kind == "matmul" else square_headers).extend(headers)
+        assert len(matmul_headers) == 2, matmul_headers
+        assert len(square_headers) == 1, square_headers
+        link_aot_kernel_headers(tmp_dir, matmul_headers, "matmul_dispatch")
+        link_aot_kernel_headers(tmp_dir, square_headers, "square_dispatch")
+        gen_kernel_library_npu(tmp_dir, "libkernel.so")
+        with open(os.path.join(tmp_dir, "test.c"), "w") as file:
+            file.write(two_kernel_host_src)
+        _gcc_exe(tmp_dir, "test.c", "test")
+
+        a, b, a_path, b_path, c_path = generate_matmul_test_data(tmp_dir, 16, 16, 16)
+        n = 1024
+        x = (np.arange(n, dtype=np.int32) % 17 - 8).astype(np.float16)
+        x_path = os.path.join(tmp_dir, "x.csv")
+        y_path = os.path.join(tmp_dir, "y.csv")
+        x.view(np.int16).tofile(x_path, sep=",")
+        subprocess.run(["./test", a_path, b_path, x_path, c_path, y_path], env=_npu_run_env(tmp_dir), check=True,
+                       cwd=tmp_dir)
+
+        c = np.genfromtxt(c_path, delimiter=",", dtype=np.int32)
+        c_tri = c.reshape((16, 16)).view(np.float32)
+        c_ref = np.matmul(a.astype(np.float32), b.astype(np.float32))
+        np.testing.assert_allclose(c_tri, c_ref * c_ref, atol=1e-4, rtol=0.0)
+        y = np.genfromtxt(y_path, delimiter=",", dtype=np.int16).view(np.float16)
+        np.testing.assert_allclose(y.astype(np.float32), x.astype(np.float32)**2, rtol=1e-3, atol=1e-3)

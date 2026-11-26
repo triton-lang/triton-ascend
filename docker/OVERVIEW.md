@@ -172,7 +172,7 @@ RUN apt update -y && \
     ...
 ```
 
-### Supported hardware
+## Supported hardware
 
 | Chip Series | Product Example                 | Architecture  |
 |-------------|---------------------------------|---------------|

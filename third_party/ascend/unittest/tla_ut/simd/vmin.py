@@ -33,7 +33,7 @@ U32_SIGNATURE = {"X": "*u32", "Y": "*u32", "T": "*i32", "O": "*u32"}
 
 
 @tla.jit
-def vmin(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vmin(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xy = tla.alloc((2, N), tl.float32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((6, N), tl.float32, space="ub")
@@ -44,7 +44,7 @@ def vmin(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         b = tla.simd.vlds(xy[1, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vmin(a, b, mode=tla.simd.MODE.ZEROING))
@@ -57,7 +57,7 @@ def vmin(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vmin_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vmin_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xy = tla.alloc((2, N), tl.uint32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((6, N), tl.uint32, space="ub")
@@ -68,7 +68,7 @@ def vmin_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         b = tla.simd.vlds(xy[1, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vmin(a, b, mode=tla.simd.MODE.ZEROING))
@@ -81,7 +81,7 @@ def vmin_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def test_ir(output_dir=None):

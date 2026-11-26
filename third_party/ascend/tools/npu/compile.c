@@ -30,6 +30,9 @@
 unsigned char NPUBIN_NAME[{bin_size}] = {{ {bin_data} }};
 static size_t {kernel_name}_stub = 0;
 static void *{kernel_name}_func = NULL;
+// Per-kernel launch policy; field order must match TritonNpuLaunchSpecV1.
+static const npu_aot_launch_spec_t {kernel_name}_spec = {{1, sizeof(npu_aot_launch_spec_t), {launch_spec_fields}}};
+static const npu_aot_arg_type_t {kernel_name}_types[] = {{ {launch_types_init} }};
 
 void load_{kernel_name}(void) {{
     if ({kernel_name}_func != NULL) return;
@@ -52,6 +55,9 @@ NPUresult {kernel_name}(NPUstream stream, {signature}) {{
        load_{kernel_name}();
     void *args[{num_args}] = {{ {arg_pointers} }};
     size_t arg_sizes[{num_args}] = {{ {arg_sizes} }};
+    // Pass this kernel's own policy; the shared launcher caches a plan for it.
     return npuAotLaunch("{packed_kernel_name}", {kernel_name}_func, stream,
-                        {gridX}, {gridY}, {gridZ}, args, arg_sizes, {num_args});
+                        {gridX}, {gridY}, {gridZ}, &{kernel_name}_spec,
+                        {kernel_name}_types, {num_types}, args, arg_sizes,
+                        {num_args});
 }}

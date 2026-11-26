@@ -32,7 +32,7 @@ F16_SIGNATURE = {"X": "*fp16", "I": "*i16", "T": "*i16", "O": "*fp16"}
 
 
 @tla.jit
-def vexp(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vexp(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xb = tla.alloc((N, ), tl.float32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
     ob = tla.alloc((6, N), tl.float32, space="ub")
@@ -42,7 +42,7 @@ def vexp(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         x = tla.simd.vlds(xb[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vexp(x, mode=tla.simd.MODE.ZEROING))
@@ -55,7 +55,7 @@ def vexp(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 @tla.jit
-def vexp_f16(X, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vexp_f16(X, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     xb = tla.alloc((N, ), tl.float16, space="ub")
     ib = tla.alloc((N, ), tl.int16, space="ub")
     tb = tla.alloc((N, ), tl.int16, space="ub")
@@ -67,7 +67,7 @@ def vexp_f16(X, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         x = tla.simd.vlds(xb[0])
         idx = tla.simd.vlds(ib[0])
         t = tla.simd.vlds(tb[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vexp(x, mode=tla.simd.MODE.ZEROING), dist="NORM_B16")
@@ -80,7 +80,10 @@ def vexp_f16(X, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 def constexprs(lanes=None, active=None):
-    return {"N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active}
+    return {
+        "N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active,
+        "MASKPAT": "VL%d" % (SHAPE["active"] if active is None else active)
+    }
 
 
 def test_ir(output_dir=None):

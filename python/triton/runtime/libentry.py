@@ -39,6 +39,7 @@ from typing import (
 
 import triton
 import torch
+import torch_npu  # noqa: F401
 from .code_cache import config_cache_dir
 
 torch_device_fn = torch.npu

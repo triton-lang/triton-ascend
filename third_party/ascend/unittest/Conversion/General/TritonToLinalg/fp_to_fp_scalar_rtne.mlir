@@ -8,7 +8,13 @@
 // CHECK-LABEL: func.func @scalar_fp32_to_f8e5m2_rtne
 // CHECK: arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E5M2
 // CHECK-LABEL: func.func @scalar_fp16_to_f8e5m2_rtne
-// CHECK: arith.truncf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f16 to f8E5M2
+// CHECK: arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f16 to f8E5M2
+// CHECK-LABEL: func.func @scalar_bf16_to_f8e4m3fn_rtne
+// CHECK: arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : bf16 to f8E4M3FN
+// CHECK-LABEL: func.func @scalar_fp16_nan_to_f8e5m2
+// CHECK: arith.constant 0.000000e+00 : f8E5M2
+// CHECK-LABEL: func.func @scalar_bf16_inf_to_f8e4m3fn
+// CHECK: arith.constant 4.480000e+02 : f8E4M3FN
 // CHECK-LABEL: func.func @scalar_fp8_to_fp32_rtne
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: %[[FP8_TO_F32:.*]] = arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E4M3FN to f32
@@ -59,6 +65,23 @@ module {
   tt.func @scalar_fp16_to_f8e5m2_rtne(%arg0: f16) -> f8E5M2 {
     %0 = tt.fp_to_fp %arg0, rounding = rtne : f16 -> f8E5M2
     tt.return %0 : f8E5M2
+  }
+
+  tt.func @scalar_bf16_to_f8e4m3fn_rtne(%arg0: bf16) -> f8E4M3FN {
+    %0 = tt.fp_to_fp %arg0, rounding = rtne : bf16 -> f8E4M3FN
+    tt.return %0 : f8E4M3FN
+  }
+
+  tt.func @scalar_fp16_nan_to_f8e5m2() -> f8E5M2 {
+    %c = arith.constant 0x7E00 : f16
+    %0 = tt.fp_to_fp %c, rounding = rtne : f16 -> f8E5M2
+    tt.return %0 : f8E5M2
+  }
+
+  tt.func @scalar_bf16_inf_to_f8e4m3fn() -> f8E4M3FN {
+    %c = arith.constant 0x7F80 : bf16
+    %0 = tt.fp_to_fp %c, rounding = rtne : bf16 -> f8E4M3FN
+    tt.return %0 : f8E4M3FN
   }
 
   tt.func @scalar_fp8_to_fp32_rtne(%arg0: f8E4M3FN) -> f32 {

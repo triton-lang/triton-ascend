@@ -265,7 +265,9 @@ constexpr GraphOptimizationRuleMask kDefaultEligibleGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::IndependentAxisTensorize) |
     getGraphOptimizationRuleMask(
-        GraphOptimizationRuleId::PersistentTaskStripMining);
+        GraphOptimizationRuleId::PersistentTaskStripMining) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::CoalescAtomicLockRemoval);
 
 // Fixed default-off: these bits are known and can be enabled through the rule
 // mask, but they are not part of the default bundle.  RFC #2686 keeps
@@ -283,9 +285,7 @@ constexpr GraphOptimizationRuleMask kFixedDefaultOffGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::ContiguousBlockAccessFormation) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::SelectedBlockScan) |
-    getGraphOptimizationRuleMask(GraphOptimizationRuleId::QueryRowBatching) |
-    getGraphOptimizationRuleMask(
-        GraphOptimizationRuleId::CoalescAtomicLockRemoval);
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::QueryRowBatching);
 
 constexpr GraphOptimizationRuleMask kDefaultGraphOptimizationRuleMask =
     kDefaultEligibleGraphOptimizationRuleMask;
@@ -298,10 +298,8 @@ static_assert(kLegacyGraphOptimizationRuleMask == 511,
 static_assert(kDefaultGraphOptimizationRuleMask ==
                   kDefaultEligibleGraphOptimizationRuleMask,
               "the default set must stay equal to the default-eligible set");
-static_assert(
-    kDefaultGraphOptimizationRuleMask == 3071,
-    "default graph rule mask stays 3071: the #2686 SelectedBlockScan and "
-    "QueryRowBatching bits are fixed default-off (RFC #2686)");
+static_assert(kDefaultGraphOptimizationRuleMask == 265215,
+              "default graph rule mask includes atomic lock removal");
 static_assert(kKnownGraphOptimizationRuleMask ==
                   (kDefaultEligibleGraphOptimizationRuleMask |
                    kFixedDefaultOffGraphOptimizationRuleMask),

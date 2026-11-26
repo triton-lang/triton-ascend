@@ -747,7 +747,17 @@ llvm::json::Object StageMemoryAccess::toJSON() const {
   };
 }
 
-std::string AtomicWorkload::profileKey() const { return kind + "." + dataType; }
+std::string AtomicWorkload::profileKey() const {
+  // The template spelling differs from the frontend spelling. Normalize to the
+  // profile keys so the unsigned halves of a float min/max split do not fall
+  // back to `default`.
+  llvm::StringRef normalized = kind;
+  if (normalized == "umax")
+    normalized = "max";
+  else if (normalized == "umin")
+    normalized = "min";
+  return normalized.str() + "." + dataType;
+}
 
 bool AtomicWorkload::isFiniteAndNonNegative() const {
   const std::array<double, 3> values = {

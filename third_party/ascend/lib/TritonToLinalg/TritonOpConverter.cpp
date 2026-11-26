@@ -749,6 +749,9 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
   Value input = op.getSrc();
   auto resultType = op.getResult().getType();
 
+  if (isa<HiFloat8Type>(getElementTypeOrSelf(input.getType())) ||
+      isa<HiFloat8Type>(getElementTypeOrSelf(resultType)))
+    return failure();
   // Check if rounding mode is specified
   auto roundingMode = op.getRounding();
   if (roundingMode.has_value() &&

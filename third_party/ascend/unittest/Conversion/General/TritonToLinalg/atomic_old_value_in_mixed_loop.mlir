@@ -2,16 +2,25 @@
 // RUN: triton-opt --triton-to-linalg='named-ops=true' %s | FileCheck %s --check-prefixes=CHECK,ORDERED
 
 // CHECK-LABEL: func.func @atomic_old_value_in_mixed_loop
+// CHECK: %[[ZERO:.*]] = arith.constant 0.000000e+00 : f32
 // CHECK: scf.for
+// CHECK: %[[OLD:.*]] = memref.alloc() : memref<16xf32>
+// CHECK: %[[ACTIVE:.*]] = memref.subview %[[OLD]][0] [%[[VALID:[a-zA-Z_0-9]+]]] [1]
 // A5: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock {hivm.sync_block_lock_unordered}
 // A5: hivm.hir.sync_block_lock {hivm.sync_block_lock_unordered} lock_var(%[[LOCK]] :
 // ORDERED: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock :
 // ORDERED: hivm.hir.sync_block_lock lock_var(%[[LOCK]] :
-// CHECK: memref.copy %[[GM:[^,]+]],
+// CHECK: memref.copy %[[GM:[^,]+]], %[[ACTIVE]]
+// CHECK: %[[SNAPSHOT:.*]] = bufferization.to_tensor %[[OLD]] restrict writable
 // CHECK: hivm.hir.store {{.*}} outs(%[[GM]] : {{.*}}) {already_sync} atomic = <add>
 // A5: hivm.hir.sync_block_unlock {hivm.sync_block_lock_unordered} lock_var(%[[LOCK]] :
 // ORDERED: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] :
-// CHECK: linalg.matmul
+// CHECK: %[[ZEROS:.*]] = linalg.fill ins(%[[ZERO]] : f32) outs({{.*}} : tensor<16xf32>)
+// CHECK: %[[SLICE:.*]] = tensor.extract_slice %[[SNAPSHOT]][0] [%[[VALID]]] [1]
+// CHECK: %[[PADDED:.*]] = tensor.insert_slice %[[SLICE]] into %[[ZEROS]][0] [%[[VALID]]] [1]
+// CHECK: %[[BCAST:.*]] = linalg.broadcast ins(%[[PADDED]] :
+// CHECK: %[[HALF:.*]] = arith.truncf %[[BCAST]]
+// CHECK: linalg.matmul {{.*}}ins(%[[HALF]], %[[HALF]] :
 
 // Hoisting considers all locks in an outer loop together. An independent
 // ordered lock in the second loop must keep both critical sections ordered.

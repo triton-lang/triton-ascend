@@ -36,7 +36,7 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 调试 | `TRITON_MEMORY_DISPLAY` | 请求编译器输出内存使用信息。 | 关闭 | 支持 | — |
 | 调试 | `ENABLE_PRINT_UB_BITS` | 请求编译器打印UB占用位数。 | 关闭 | 支持 | 常规路径 |
 | 调试 | `TRITON_INTERPRET` | 在CPU解释器中执行其支持的Triton操作，便于Python断点调试。 | 关闭 | 支持 | 支持 |
-| 调试 | `TRITON_ENABLE_SANITIZER` | 向Ascend NPU编译器传入sanitizer开关。A2/A3开启静态插桩后，运行插桩kernel时须通过 `mssanitizer python3 run_kernel.py` 拉起脚本。 | 关闭 | 支持 | 常规路径 |
+| 调试 | `TRITON_ENABLE_SANITIZER` | 向Ascend NPU编译器传入sanitizer开关。A2/A3开启静态插桩后，运行插桩kernel时须通过 `mssanitizer python3 run_kernel.py` 启动脚本。 | 关闭 | 支持 | 常规路径 |
 | 编译 | `TRITON_ALWAYS_COMPILE` | 忽略命中的编译缓存，强制重新编译。 | 关闭 | 支持 | 支持 |
 | 编译 | `TRITON_KERNEL_OVERRIDE` | 从覆盖目录读取与编译阶段同名的外部IR/二进制文件。 | 关闭 | 支持 | 支持 |
 | 编译 | `TRITON_OVERRIDE_DIR` | 指定覆盖文件目录。 | `$TRITON_HOME/.triton/override` | 支持 | 支持 |

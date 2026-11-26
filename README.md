@@ -33,11 +33,11 @@ Triton-Ascend
 <summary>More latest news</summary>
 
 - [2025.11.14] Triton-Ascend 3.2.0rc4 pre-release is now available:<br>- [Extended the tt.fp_to_fp interface to add FP8 type conversion support](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>- [Added the scatter_ub_to_out interface to support efficient data scatter operations from UB to GM](https://gitcode.com/Ascend/triton-ascend/pull/864)
-- [2025.09.30] Improved Scan/Sort Triton Python APIs, supporting non-contiguous memory access, and completed adaptation of key Triton operators in vLLM and SGlang open-source repositories
+- [2025.09.30] Improved Scan/Sort Triton Python APIs, supporting non-contiguous memory access, and completed adaptation of key Triton operators in vLLM and SGLang open-source repositories
 - [2025.09.19] Supported Triton-Ascend [nightly package](https://test.pypi.org/project/triton-ascend/#history) extraction
-- [2025.08.15] Improved Atomic-class Triton Python API support, completed adaptation of key Triton operators in the Flaggems open-source repository, and provided reference examples for high-performance implementations of simple operators such as Matmul
+- [2025.08.15] Improved Atomic-class Triton Python API support, completed adaptation of key Triton operators in the FlagGems open-source repository, and provided reference examples for high-performance implementations of simple operators such as Matmul
 - [2025.06.30] Supported 85% of Triton Python APIs, supporting contiguous memory access, covering basic usage scenarios
-- [2025.05.20] Triton-Ascend is open-sourced, Gitcode repository is alive!
+- [2025.05.20] Triton-Ascend is open-sourced, Gitcode repository is alive.
 
 </details>
 </div>

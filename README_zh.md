@@ -35,9 +35,9 @@ Triton-Ascend
 - [2025.11.14]Triton-Ascend 3.2.0rc4预发布版本上线：<br>- [扩展tt.fp_to_fp接口，新增对FP8的类型转换支持](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>- [新增scatter_ub_to_out接口，支持从UB到GM的高效数据分散操作](https://gitcode.com/Ascend/triton-ascend/pull/864)
 - [2025.09.30]完善Scan/Sort类Triton Python API，支持非连续访存，完成vLLM、SGLang开源仓中重点Triton算子适配
 - [2025.09.19]支持Triton-Ascend [nightly包](https://test.pypi.org/project/triton-ascend/#history)提取
-- [2025.08.15]完善Atomic类Triton Python API支持，完成Flaggems开源仓重点Triton算子适配，提供Matmul等简单算子高性能实现参考用例
+- [2025.08.15]完善Atomic类Triton Python API支持，完成FlagGems开源仓重点Triton算子适配，提供Matmul等简单算子高性能实现参考用例
 - [2025.06.30]支持85% Triton Python API，支持连续访存，覆盖基本使用场景需求
-- [2025.05.20]Triton-Ascend开源，Gitcode代码仓Alive！
+- [2025.05.20]Triton-Ascend开源，GitCode代码仓Alive！
 
 </details>
 </div>
@@ -64,13 +64,13 @@ Triton-Ascend
 
 确定Python、CANN和TorchNPU软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
 
-- Python版本选择：py3.10-py3.13 均可。
+- Python版本选择：py3.10-py3.13均可。
 
-- CANN版本选择：可以访问华为昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装 9.2.0 版本。
+- CANN版本选择：可以访问华为昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装9.2.0版本。
 
 - TorchNPU版本选择：当前配套的TorchNPU版本为2.10.0.post7。
 
-### 访问华为昇腾NPU
+### 华为昇腾NPU资源访问
 
 若需要访问华为昇腾NPU算力资源进行开发或测试，请进入HiDevLab平台的[HiDevLab-在线开发](https://hidevlab.huawei.com/online-develop-intro)页面申请并使用算力。
 

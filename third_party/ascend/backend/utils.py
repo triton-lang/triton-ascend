@@ -270,11 +270,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "it is ignored; this option has been moved into the first digit of simt_optimization_mode.",
     "storage_align": "it is ignored; the removed vendor compiler control has no replacement.",
     "stream": "it is ignored; launch streams are managed by the runtime and driver.",
-<<<<<<< HEAD
-    "use_bytecode": "it is ignored; the bytecode pipeline is disabled on Triton Ascend 3.7.",
-=======
     "use_bytecode": "it is ignored; BishengIR compatible text is emitted directly.",
->>>>>>> upstream/main
     "warp_size": "it is ignored; the Ascend backend fixes warp_size to 32.",
 }
 

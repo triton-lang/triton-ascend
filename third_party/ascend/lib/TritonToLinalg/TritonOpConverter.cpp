@@ -2806,7 +2806,6 @@ MatmulConverter::matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
   return success();
 }
 
-<<<<<<< HEAD
 // Fractal (zN) block geometry for ascend.dot lowering comes from Utils.h,
 // shared with DotOp::inferReturnTypes.
 
@@ -3144,8 +3143,6 @@ SortOpConverter::matchAndRewrite(triton::ascend::SortOp op, OpAdaptor adaptor,
   return success();
 }
 
-=======
->>>>>>> upstream/main
 LogicalResult
 DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                                     ConversionPatternRewriter &rewriter) const {

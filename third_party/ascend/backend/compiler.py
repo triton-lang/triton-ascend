@@ -2101,20 +2101,9 @@ class AscendBackend(BaseBackend):
 
     def add_stages(self, stages, options, language):
         if self.target.backend == "npu":
-<<<<<<< HEAD
-            stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
-            if options.is_pure_simt:
-                stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
-                return
-            stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
-            if options.compile_on_910_95:
-                stages["npubin"] = (
-                    lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(src, metadata, options))
-=======
             if options.enable_tla_mode:
                 stages["ttir"] = lambda src, metadata: make_tla_ttir(src, metadata, options)
                 stages["ttadapter"] = lambda src, metadata: tla_to_ttadapter(src, metadata, options)
->>>>>>> upstream/main
             else:
                 stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
                 if not options.is_pure_simt:

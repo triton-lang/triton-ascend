@@ -667,11 +667,8 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     rewriter.setInsertionPoint(op);
     allocOp = rewriter.create<memref::SubViewOp>(
         loc, cast<MemRefType>(allocType), allocOp, offsets, sizes, strides);
-    // Bypass the rewriter to avoid issues with the conversion framework's
-    // tracking of conditional replacements (LLVM PR #169606).
-    // replaceUsesWithIf triggers an assertion in rollback mode.
-    insertSliceOp.getResult().replaceAllUsesExcept(insertSliceOp.getDest(),
-                                                   insertSliceOp);
+    rewriter.replaceAllUsesExcept(insertSliceOp.getResult(),
+                                  insertSliceOp.getDest(), insertSliceOp);
     rewriter.eraseOp(insertSliceOp);
   } else {
     allocOp = rewriter.create<memref::AllocOp>(
@@ -950,9 +947,6 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
   auto getInputMemref = [&]() -> Value {
     if (isa<MemRefType>(inputVal.getType()))
       return inputVal;
-<<<<<<< HEAD
-    return rewriter.create<bufferization::ToMemrefOp>(loc, ptrType, inputVal);
-=======
     auto tensorType = cast<RankedTensorType>(inputVal.getType());
     auto inputType =
         MemRefType::get(tensorType.getShape(), tensorType.getElementType());
@@ -967,7 +961,6 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
                                   tensorType.getElementType(), layout);
     }
     return rewriter.create<bufferization::ToMemrefOp>(loc, inputType, inputVal);
->>>>>>> upstream/main
   };
   auto inputMemref = getInputMemref();
   auto inputMemrefType = cast<MemRefType>(inputMemref.getType());

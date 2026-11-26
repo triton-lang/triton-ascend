@@ -8,8 +8,8 @@ Shape, dtype and hardware restrictions are checked by the backend verifier.
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 
-from triton.language.core import (builtin, dtype as triton_dtype, float32, float16, bfloat16, int8, int16, int32,
-                                  _unwrap_if_constexpr)
+from triton.language.core import (builtin, dtype as triton_dtype, tensor, float32, float16, bfloat16, int8, int16, int32,
+                                  int64, _unwrap_if_constexpr)
 from .core import buffer
 
 
@@ -302,11 +302,17 @@ class CopyL1ToL0Params:
     :param is_transpose: Compile-time bool selecting the native source layout
         and transpose form. Defaults to ``False``; existing layout hints apply.
     :type is_transpose: bool
+    :param actual_batch: Number of matrices to copy from the current batch
+        views. Supply an integer in the range ``[1, min(src.shape[0], dst.shape[0])]``.
+        An explicit one still requires batch views. The default ``None``
+        selects single-matrix views.
+    :type actual_batch: int, scalar integer tl.tensor or None
 
     Views specify the complete matrix region. Select K partitions
     with ``tla.subview``; there are no public K-partition attributes.
     """
     is_transpose: bool = False
+    actual_batch: object = None
 
 
 @dataclass(frozen=True)
@@ -696,7 +702,10 @@ def copy_l1_to_l0(src, dst, params=None, _semantic=None):
     :type params: tla.CopyL1ToL0Params or None
     :return: None. The destination buffer is updated in place.
     :rtype: None
-    Static logical rank-2 and physical rank-4 views are passed through to NPUIR.
+    With ``actual_batch=None``, each endpoint is a static logical rank-2 or
+    physical rank-4 matrix. A5 batch copies take static rank-3 or rank-5
+    views with a leading batch dimension on each endpoint. Each endpoint
+    can independently use logical or physical layout.
     Logical L0A is ``[M,K]`` and L0B is ``[K,N]``. Physical L0A/L0B is
     ``[K/C0,MN/16,16,C0]``. Both physical endpoints must have inner dimensions
     ``(16, C0)``, where ``C0=32/sizeof(dtype)``: 16 for float16/bfloat16 and
@@ -709,7 +718,9 @@ def copy_l1_to_l0(src, dst, params=None, _semantic=None):
 
     .. note::
         Emit in ``tla.scope.cube()``. Use ``tla.subview`` for matrix origins
-        and sizes. Input view/subview layouts, offsets and strides are retained
+        and sizes. Batch ``i`` starts at ``offset + i * strides[0]`` in
+        elements on each side. The count selects a prefix of each view.
+        Input view/subview layouts, offsets and strides are retained
         without copy-specific descriptor rewriting or stride restrictions.
         NPUIR checks target layout support, alignment, physical address ranges
         and L0 capacity. This operation does not multiply matrices, allocate
@@ -720,19 +731,31 @@ def copy_l1_to_l0(src, dst, params=None, _semantic=None):
         tla.copy_l1_to_l0(src_matrix, dst_matrix)
         src_tile = tla.subview(src, (0, ki * L0_K), (M, L0_K))
         tla.copy_l1_to_l0(src_tile, dst_tile)
+        tla.copy_l1_to_l0(src_group, dst_group, tla.CopyL1ToL0Params(actual_batch=n))
     """
     _route(src, dst, (("l1", "l0a"), ("l1", "l0b")))
     p = _params(params, CopyL1ToL0Params)
     transpose = _boolean(p.is_transpose, "is_transpose")
+    batch = _unwrap_if_constexpr(p.actual_batch)
     if src.dtype != dst.dtype or src.dtype not in (float16, bfloat16, float32):
         raise TypeError("copy_l1_to_l0 requires matching float16, bfloat16 or float32 types")
     c0 = 256 // src.dtype.primitive_bitwidth
+    ranks = (2, 4) if batch is None else (3, 5)
     for view in (src, dst):
-        if len(view.shape) not in (2, 4):
-            raise ValueError("copy_l1_to_l0 requires static logical rank-2 or physical rank-4 views")
-        if len(view.shape) == 4 and view.shape[-2:] != (16, c0):
+        if len(view.shape) not in ranks or None in view.shape:
+            raise ValueError(f"copy_l1_to_l0 requires static rank {ranks[0]} or {ranks[1]} views "
+                             f"when actual_batch is {'omitted or None' if batch is None else 'specified'}")
+        if len(view.shape) == ranks[1] and view.shape[-2:] != (16, c0):
             raise ValueError(f"copy_l1_to_l0 physical views require inner dimensions (16, {c0})")
-    _semantic.builder.create_tla_l12l0(src.handle, dst.handle, is_transposed=transpose)
+    if type(batch) is int:
+        if not 1 <= batch <= min(src.shape[0], dst.shape[0]):
+            raise ValueError("actual_batch must be positive and fit both batch views")
+    elif batch is not None and (not isinstance(batch, tensor) or batch.shape or not batch.dtype.is_int()
+                                or batch.dtype.is_bool()):
+        raise TypeError("actual_batch must be an integer scalar, excluding bool")
+    # Widen with the Triton dtype's signedness before the binding casts to index.
+    _semantic.builder.create_tla_l12l0(src.handle, dst.handle, is_transposed=transpose,
+                                       actual_batch=_scalar(batch, _semantic, int64))
 
 
 def _fixpipe(src, dst, p, semantic):

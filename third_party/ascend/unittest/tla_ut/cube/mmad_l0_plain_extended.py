@@ -7,8 +7,8 @@ From the triton-ascend root (substitute this file's repository-relative path):
   TLA_TEST_STAGE=run python <this-file>
 
 Case groups for pytest -k: dynamic_clear, subview, capacity, shape, barrier,
-l12l0_view. The last group isolates L1->L0A/B source and destination views
-with FP16/BF16 identity GEMMs; it does not add transpose or batch coverage.
+l12l0_view and l12l0_batch. These groups read back L1->L0A/B copies with
+identity GEMMs, including inactive batch slots and strided views.
 The script form runs all enabled stages. All kernels use explicit pipeline
 events and grid=(1,), unit_flag=False, sync_solver=False.
 Capacity cases exercise legal upper bounds (64 KiB L0A/B, 256 KiB L0C,
@@ -81,6 +81,12 @@ def _l12l0_view_cases():
 
 
 CONFIGS += list(_l12l0_view_cases())
+CONFIGS += [
+    dict(name=f"l12l0_batch_{side}_{layout}", kind="l12l0_batch", TO_B=side == "b", SRC_STEP=src_step,
+         DST_STEP=dst_step)
+    for side in ("a", "b")
+    for layout, src_step, dst_step in (("compact", 1, 1), ("strided", 2, 3))
+]
 
 
 # The shared test helper pins tla.jit to TLAJITFunction. partial supports
@@ -291,7 +297,52 @@ def l12l0_destination_mmad(Data, Initial, Identity, C, TO_B: tl.constexpr, ROWS:
         tla.sync.barrier(tla.sync.PIPE.ALL)
 
 
+@partial(tla.jit, do_not_specialize=["Total"])
+def l12l0_batch_mmad(Data, Initial, Identity, Out, Total, TO_B: tl.constexpr, SRC_STEP: tl.constexpr,
+                     DST_STEP: tl.constexpr):
+    # One fractal per matrix lets MMAD read each slot from the same 4D parent.
+    SRC_SLOTS: tl.constexpr = 1 + 12 * SRC_STEP
+    DST_SLOTS: tl.constexpr = 1 + 4 * DST_STEP
+    with tla.scope.cube():
+        src = tla.alloc((SRC_SLOTS, 16, 16), tl.float16, space="l1")
+        init = tla.alloc((DST_SLOTS, 16, 16), tl.float16, space="l1")
+        eye_l1 = tla.alloc((1, 1, 16, 16), tl.float16, space="l1")
+        root = tla.alloc((DST_SLOTS, 1, 16, 16), tl.float16, space="l0b" if TO_B else "l0a")
+        dst = tla.reshape(root, (DST_SLOTS, 1, 1, 16, 16))
+        eye = tla.alloc((1, 1, 16, 16), tl.float16, space="l0a" if TO_B else "l0b")
+        acc = tla.alloc((1, 1, 16, 16), tl.float32, space="l0c")
+        tla.load_gm_to_l1(tla.view(Data, (SRC_SLOTS, 16, 16)), src)
+        tla.load_gm_to_l1(tla.view(Initial, (DST_SLOTS, 16, 16)), init)
+        tla.load_gm_to_l1(tla.view(Identity, (16, 16)), eye_l1)
+        tla.sync.barrier(tla.sync.PIPE.ALL)
+        tla.copy_l1_to_l0(init, dst, tla.CopyL1ToL0Params(actual_batch=DST_SLOTS))
+        tla.copy_l1_to_l0(eye_l1, eye)
+        tla.sync.barrier(tla.sync.PIPE.ALL)
+        d = tla.subview(dst, (1, 0, 0, 0, 0), (4, 1, 1, 16, 16), (DST_STEP, 1, 1, 1, 1))
+        for group in tla.static_range(3):
+            s = tla.subview(src, (1 + group * 4 * SRC_STEP, 0, 0), (4, 16, 16), (SRC_STEP, 1, 1))
+            n = tla.minimum(4, Total - 4 * group)
+            tla.copy_l1_to_l0(s, d, tla.CopyL1ToL0Params(actual_batch=n))
+            tla.sync.barrier(tla.sync.PIPE.ALL)
+            for slot in range(DST_SLOTS):
+                tile = tla.subview(root, (slot, 0, 0, 0), (1, 1, 16, 16))
+                if TO_B:
+                    tla.cube.mmad_l0(eye, tile, acc, m=16, n=16, k=16, clear_accum=True,
+                                     unit_flag_ctrl=tla.UnitFlagMode.DISABLED)
+                else:
+                    tla.cube.mmad_l0(tile, eye, acc, m=16, n=16, k=16, clear_accum=True,
+                                     unit_flag_ctrl=tla.UnitFlagMode.DISABLED)
+                tla.sync.barrier(tla.sync.PIPE.ALL)
+                out = tla.view(Out + (group * DST_SLOTS + slot) * 256, (16, 16))
+                tla.store_l0c_to_gm(acc, out, tla.FixpipeL0C2GMParams(dma_mode=tla.FixpipeDMAMode.NZ2ND,
+                                                                      unit_flag_ctrl=tla.UnitFlagMode.DISABLED))
+                tla.sync.barrier(tla.sync.PIPE.ALL)
+
+
 def _spec(case):
+    if case["kind"] == "l12l0_batch":
+        signature = dict(Data="*fp16", Initial="*fp16", Identity="*fp16", Out="*fp32", Total="i32")
+        return l12l0_batch_mmad, signature, {key: case[key] for key in ("TO_B", "SRC_STEP", "DST_STEP")}
     if case["kind"] == "l12l0_view":
         element = "bf16" if case["dtype"] == "bfloat16" else "fp16"
         signature = dict(Data="*" + element, Identity="*" + element, C="*fp32")
@@ -383,7 +434,13 @@ def test_ir(case, output_dir=None):
     assert all(" bias(" not in op and "unit_flag<DISABLED>" in op for op in ops)
     values = {name: int(value) for name, value in re.findall(r"(%[\w]+) = arith\.constant (\d+) : index", text)}
     bools = {name: value == "true" for name, value in re.findall(r"(%[\w]+) = arith\.constant (true|false)", text)}
-    if case["kind"] == "l12l0_view":
+    if case["kind"] == "l12l0_batch":
+        copies = re.findall(r"hivm\.hir\.l12l0[^\n]*", text)
+        assert len(copies) == 5 and sum("actual_batch = %" in op for op in copies) == 4
+        for op in copies[-3:]:
+            assert "4x16x16xf16" in op and "4x1x1x16x16xf16" in op
+            assert "k_part = 16" in op and "m = 16" in op
+    elif case["kind"] == "l12l0_view":
         _check_l12l0_view_ir(text, case, ops, values, bools)
     elif case["kind"] == "subview":
         assert len(ops) == 3 and text.count("hivm.hir.l12l0 ") == 2
@@ -504,10 +561,39 @@ def _launch_l12l0_view(case, seed, compile_only=False):
     return kernel, out, storage, expected
 
 
+def _launch_l12l0_batch(case, total, compile_only=False):
+    import torch
+
+    src_step, dst_step = case["SRC_STEP"], case["DST_STEP"]
+    src_slots, dst_slots = 1 + 12 * src_step, 1 + 4 * dst_step
+    # Slot and in-matrix position are both visible through the identity GEMM.
+    pattern = torch.arange(256).reshape(16, 16) % 31
+    data = (32 * torch.arange(src_slots)[:, None, None] + pattern).half()
+    initial = -(1 + 32 * torch.arange(dst_slots)[:, None, None] + pattern).half()
+    snapshots = []
+    slots = initial.clone()
+    for start in (0, 4, 8):
+        for i in range(min(4, total - start)):
+            slots[1 + i * dst_step] = data[1 + (start + i) * src_step]
+        snapshots.append(slots.clone())
+    expected = torch.stack(snapshots).float().reshape(-1, 16)
+    out, storage = _guarded_output(*expected.shape)
+    fn, _, constants = _spec(case)
+    args = (data.npu(), initial.npu(), torch.eye(16, dtype=torch.float16).npu(), out, total)
+    kernel = _invoke(fn, args, constants, compile_only)
+    if not compile_only:
+        torch.npu.synchronize()
+    return kernel, out, storage, expected
+
+
 @matrix(CONFIGS)
 def test_compile(case):
     import torch_npu  # noqa: F401
 
+    if case["kind"] == "l12l0_batch":
+        kernel, _, _, _ = _launch_l12l0_batch(case, 10, compile_only=True)
+        check_kernel_binary(kernel)
+        return
     if case["kind"] == "l12l0_view":
         kernel, _, _, _ = _launch_l12l0_view(case, 7, compile_only=True)
         check_kernel_binary(kernel)
@@ -530,6 +616,12 @@ def test_run(case):
     import torch
     import torch_npu  # noqa: F401
 
+    if case["kind"] == "l12l0_batch":
+        for total in (10, 9):  # Same kernel, final group of two or one.
+            _, out, storage, expected = _launch_l12l0_batch(case, total)
+            _compare(out.cpu(), expected, exact=True)
+            _check_guards(storage)
+        return
     if case["kind"] == "l12l0_view":
         for seed in (7, 19):
             print("RUN:", case["name"], "seed", seed, flush=True)

@@ -173,18 +173,8 @@ def attention(
                 tla.sync.set_flag(tla.sync.PIPE.F, tla.sync.PIPE.M, event)
             for event in tla.static_range(2):
                 tla.sync.set_flag(tla.sync.PIPE.M, tla.sync.PIPE.MTE1, event)
-            tla.copy_l1_to_l0(
-                query,
-                q_first,
-                tla.CopyL1ToL0Params(
-                    k_part_idx=0,
-                    k_part=QK_K,
-                    k_part_ceil=QK_K,
-                    k_part_loop=QK_DIM // QK_K,
-                    k_part_actual=QK_K,
-                    m=Q_TILE_ROWS,
-                ),
-            )
+            q_prefix = tla.subview(query, offsets=(0, 0, 0, 0), sizes=Q_L0_SHAPE)
+            tla.copy_l1_to_l0(q_prefix, q_first)
         with tla.scope.vector():
             tla.sync.set_flag(tla.sync.PIPE.MTE3, tla.sync.PIPE.V, 0)
             tla.sync.set_flag(tla.sync.PIPE.MTE3, tla.sync.PIPE.V, 1)
@@ -258,26 +248,14 @@ def attention(
                         if chunk == 0:
                             q_operand = q_first
                         else:
-                            q_fragment = query
+                            # The alternating L0A slots hold 112 and 128 K elements.
                             q_operand = q_even if chunk % 2 else q_odd
                             q_fragment = tla.subview(
                                 query,
                                 offsets=(QK_OFFSETS[chunk], 0, 0, 0),
                                 sizes=(QK_CHUNKS[chunk] // 16, Q_TILE_ROWS // 16, 16, 16),
                             )
-                            tla.copy_l1_to_l0(
-                                q_fragment,
-                                q_operand,
-                                tla.CopyL1ToL0Params(
-                                    k_part_idx=0,
-                                    k_part=QK_CHUNKS[chunk],
-                                    k_part_ceil=QK_CHUNKS[chunk],
-                                    k_part_loop=1,
-                                    k_part_actual=QK_CHUNKS[chunk],
-                                    m=Q_TILE_ROWS,
-                                ),
-                            )
-                        k_fragment = key
+                            tla.copy_l1_to_l0(q_fragment, q_operand)
                         bank = tla.subview(
                             b_banks,
                             offsets=(qk_bank * L0B_BANK_ELEMENTS, ),
@@ -292,19 +270,7 @@ def attention(
                             offsets=(QK_OFFSETS[chunk], 0, 0, 0),
                             sizes=(QK_CHUNKS[chunk] // 16, KEY_ROWS // 16, 16, 16),
                         )
-                        tla.copy_l1_to_l0(
-                            k_fragment,
-                            k_operand,
-                            tla.CopyL1ToL0Params(
-                                is_transpose=True,
-                                k_part_idx=0,
-                                k_part=QK_CHUNKS[chunk],
-                                k_part_ceil=QK_CHUNKS[chunk],
-                                k_part_loop=1,
-                                k_part_actual=QK_CHUNKS[chunk],
-                                m=KEY_ROWS,
-                            ),
-                        )
+                        tla.copy_l1_to_l0(k_fragment, k_operand, tla.CopyL1ToL0Params(is_transpose=True))
                         tla.sync.set_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, qk_bank)
                         tla.sync.wait_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, qk_bank)
                         tla.cube.mmad_l0(
@@ -372,18 +338,7 @@ def attention(
                             pv_bank = (pv_phase + chunk) % 2
                             tla.sync.wait_flag(tla.sync.PIPE.M, tla.sync.PIPE.MTE1, pv_bank)
                             if band == 0 and chunk == 0:
-                                tla.copy_l1_to_l0(
-                                    probability_tile,
-                                    q_even,
-                                    tla.CopyL1ToL0Params(
-                                        k_part_idx=0,
-                                        k_part=KEY_ROWS,
-                                        k_part_ceil=KEY_ROWS,
-                                        k_part_loop=1,
-                                        k_part_actual=KEY_ROWS,
-                                        m=Q_TILE_ROWS,
-                                    ),
-                                )
+                                tla.copy_l1_to_l0(probability_tile, q_even)
                             p_operand = tla.subview(
                                 q_even,
                                 offsets=(chunk * (PV_K // 16), 0, 0, 0),
@@ -398,18 +353,13 @@ def attention(
                                 tla.subview(bank, offsets=(0, ), sizes=(PV_CHUNKS[chunk] * PV_N, )),
                                 (PV_CHUNKS[chunk] // 16, PV_N // 16, 16, 16),
                             )
-                            tla.copy_l1_to_l0(
+                            # L1 zN has [N/16, K/16, 16, 16]; slice K while retaining the band's N stride.
+                            v_fragment = tla.subview(
                                 v_band,
-                                v_operand,
-                                tla.CopyL1ToL0Params(
-                                    k_part_idx=chunk,
-                                    k_part=PV_K,
-                                    k_part_ceil=PV_CHUNKS[chunk],
-                                    k_part_loop=2,
-                                    k_part_actual=PV_CHUNKS[chunk],
-                                    m=PV_N,
-                                ),
+                                offsets=(0, chunk * (PV_K // 16), 0, 0),
+                                sizes=(PV_N // 16, PV_CHUNKS[chunk] // 16, 16, 16),
                             )
+                            tla.copy_l1_to_l0(v_fragment, v_operand)
                             if band == 1 and chunk == 1:
                                 tla.sync.set_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.MTE2, (step + 2) % 3)
                             tla.sync.set_flag(tla.sync.PIPE.MTE1, tla.sync.PIPE.M, pv_bank)

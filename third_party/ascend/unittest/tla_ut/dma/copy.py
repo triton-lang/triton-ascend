@@ -1,4 +1,5 @@
 """UB -> L1 -> UB; direct frontend contracts for L12L0/L12BT/FixBUF."""
+import re
 import sys
 from pathlib import Path
 
@@ -117,6 +118,12 @@ def transpose_route(src, dst, transpose):
 
 
 @tla.jit
+def batch_route(src, dst, count):
+    with tla.scope.cube():
+        tla.copy_l1_to_l0(src, dst, tla.CopyL1ToL0Params(actual_batch=count))
+
+
+@tla.jit
 def logical_slice_route(src, dst, MATRIX_OFFSET: tl.constexpr, ROW_STEP: tl.constexpr):
     with tla.scope.cube():
         s = tla.subview(src, (MATRIX_OFFSET, 16), (32, 64), (ROW_STEP, 1))
@@ -158,6 +165,7 @@ def check_l12l0_contracts():
             copy = next(line for line in text.splitlines() if "hivm.hir.l12l0 " in line)
             assert "k_part_idx = 0" in copy and "k_part_loop = 1" in copy
             assert "k_part = 64" in copy and "m = 32" in copy
+            assert "actual_batch" not in copy
         # These malformed fractals still yield K and M/N divisible by 16.
         # Check each endpoint independently; transpose cannot legalize them.
         malformed = ((64 // c0, 2, 8, c0), (64 // c0, 2, 32, c0), (64 // c0, 2, 16, c0 // 2), (64 // c0, 2, 16, c0 * 2))
@@ -235,6 +243,57 @@ def check_l12l0_contracts():
     assert "is_transposed = true" in copy
 
 
+def check_l12l0_batch_contracts():
+    for dtype in (tl.float16, tl.bfloat16, tl.float32):
+        c0 = 32 // dtype.itemsize
+        for to_b in (False, True):
+            dst_space = "l0b" if to_b else "l0a"
+            rows, cols = (64, 32) if to_b else (32, 64)
+            for transpose in (False, True):
+                sr, sc = (cols, rows) if transpose else (rows, cols)
+                src_physical = (sc // c0, sr // 16, 16, c0)
+                dst_physical = (64 // c0, 2, 16, c0)
+                # Different capacities and mixed logical/physical endpoints.
+                for src, dst, n in (((sr, sc), dst_physical, 1), (src_physical, (rows, cols), 2)):
+                    params = tla.CopyL1ToL0Params(is_transpose=transpose, actual_batch=n)
+                    text = route_ir("l1", dst_space, params, "l0", dtype, (4, *src), (2, *dst))
+                    copies = [line for line in text.splitlines() if "hivm.hir.l12l0 " in line]
+                    assert len(copies) == 1 and "scf.for" not in text
+                    count = re.search(r"actual_batch = (%\w+)", copies[0]).group(1)
+                    assert f"{count} = arith.constant {n} : index" in text
+                    assert "k_part = 64" in copies[0] and "m = 32" in copies[0]
+                    assert ("is_transposed = true" in copies[0]) == transpose
+
+    shape = (4, 32, 64)
+    physical = (2, 4, 2, 16, 16)
+    sig = dict(src=tla.buffer_type(shape, tl.float16, "l1"), dst=tla.buffer_type(physical, tl.float16, "l0a"))
+    for count_type in ("i32", "i64", "u8"):
+        mod, ctx = compile_offline(batch_route, {**sig, "count": count_type}, {})
+        if count_type == "u8":
+            assert re.search(r"arith.extui .* : i8 to i64", str(mod))
+        text = str(lower_offline(mod, ctx))
+        assert text.count("hivm.hir.l12l0 ") == 1 and "scf.for" not in text
+        assert re.search(r"actual_batch = %\w+", text) and "arith.index_cast" in text
+
+    for count_type in ("i1", "fp32", "*i32", tl.block_type(tl.int32, [4])):
+        with pytest.raises(Exception, match="actual_batch must be an integer scalar"):
+            compile_offline(batch_route, {**sig, "count": count_type}, {})
+    for n in (True, False, 1.5, 0, -1, 3):
+        with pytest.raises(Exception, match="actual_batch"):
+            route_ir("l1", "l0a", tla.CopyL1ToL0Params(actual_batch=n), "l0", src_shape=shape, dst_shape=physical)
+    with pytest.raises(Exception, match="fit both batch views"):
+        route_ir("l1", "l0a", tla.CopyL1ToL0Params(actual_batch=2), "l0", src_shape=(1, 32, 64), dst_shape=physical)
+    for src, dst, n in ((shape, physical, None), (shape, physical[1:], None), (shape[1:], physical, None),
+                        (shape[1:], physical[1:], 1), (shape, physical[1:], 1), (shape[1:], physical, 1),
+                        ((None, 32, 64), physical, 2)):
+        with pytest.raises(Exception, match="requires static rank"):
+            route_ir("l1", "l0a", tla.CopyL1ToL0Params(actual_batch=n), "l0", src_shape=src, dst_shape=dst)
+    bad_physical = (2, 4, 2, 8, 16)
+    for src, dst in ((bad_physical, physical), (shape, bad_physical)):
+        with pytest.raises(Exception, match="physical views require inner dimensions"):
+            route_ir("l1", "l0a", tla.CopyL1ToL0Params(actual_batch=1), "l0", src_shape=src, dst_shape=dst)
+
+
 @matrix(CONFIGS)
 def test_ir(case, output_dir=None):
     mod, ctx = compile_offline(transfer, {"X": "*fp16", "Y": "*fp16"}, {"N": case["n"]}, output_dir=output_dir)
@@ -247,6 +306,7 @@ def test_ir(case, output_dir=None):
     if case["n"] == 16:
         check_param_contracts()
         check_l12l0_contracts()
+        check_l12l0_batch_contracts()
     print("IR PASS:", case["name"])
 
 

@@ -1609,7 +1609,8 @@ void init_tla_builder(py::module &&m) {
            })
       .def(
           "create_tla_l12l0",
-          [](TLABuilder &self, Value src, Value dst, bool isTransposed) {
+          [](TLABuilder &self, Value src, Value dst, bool isTransposed,
+             std::optional<Value> actualBatch) {
             checkDmaBuffers(src, dst);
             auto srcType = cast<MemRefType>(src.getType());
             auto dstType = cast<MemRefType>(dst.getType());
@@ -1628,18 +1629,36 @@ void init_tla_builder(py::module &&m) {
               throw py::type_error(
                   "copy_l1_to_l0 requires matching f16/bf16/f32");
             int64_t c0 = 256 / srcType.getElementTypeBitWidth();
+            int64_t logicalRank = actualBatch ? 3 : 2;
+            int64_t physicalRank = logicalRank + 2;
             for (auto type : {srcType, dstType}) {
-              if (!type.hasStaticShape() ||
-                  (type.getRank() != 2 && type.getRank() != 4))
+              int64_t rank = type.getRank();
+              if (rank != logicalRank && rank != physicalRank)
                 throw py::value_error(
-                    "copy_l1_to_l0 requires static rank 2 or 4");
-              if (type.getRank() == 4 &&
-                  (type.getDimSize(2) != 16 || type.getDimSize(3) != c0))
+                    actualBatch ? "actual_batch requires rank 3 or 5 on both views"
+                                : "single-matrix copy_l1_to_l0 requires rank 2 or 4");
+              if (!type.hasStaticShape() ||
+                  llvm::any_of(type.getShape(),
+                               [](int64_t dim) { return dim <= 0; }))
+                throw py::value_error(
+                    "copy_l1_to_l0 requires positive static dimensions");
+              if (rank == physicalRank &&
+                  (type.getDimSize(rank - 2) != 16 ||
+                   type.getDimSize(rank - 1) != c0))
                 throw py::value_error(
                     "copy_l1_to_l0 physical views require inner dimensions "
                     "(16, C0), where C0 = 32 / sizeof(dtype)");
             }
-            auto op = self.create<hivm::L12L0Op>(src, dst, isTransposed);
+            Value batch;
+            if (actualBatch) {
+              Type type = actualBatch->getType();
+              if (!type.isIntOrIndex() || type.isInteger(1))
+                throw py::type_error(
+                    "actual_batch must be an integer scalar, excluding bool");
+              batch = dmaIndexOperand(self, *actualBatch);
+            }
+            auto op =
+                self.create<hivm::L12L0Op>(src, dst, isTransposed, batch);
             // The native builder derives the copy extent from dst. Keep the
             // operands' layouts, offsets and strides for the NPUIR pipeline.
             int64_t k = op.getKPartAttr().getInt();
@@ -1650,7 +1669,8 @@ void init_tla_builder(py::module &&m) {
                   "copy_l1_to_l0 K and M/N must be multiples of 16");
             }
           },
-          py::arg("src"), py::arg("dst"), py::arg("is_transposed") = false)
+          py::arg("src"), py::arg("dst"), py::arg("is_transposed") = false,
+          py::arg("actual_batch") = std::nullopt)
       .def(
           "create_tla_fixpipe",
           [](TLABuilder &self, Value src, Value dst, const py::dict &attrs,

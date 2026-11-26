@@ -9,7 +9,7 @@ on:
       - .github/workflows/ascend-wheels.yml
       - .github/workflows/ascend-llvm-build.yml
       - .github/workflows/build/almalinux.Dockerfile
-      - .github/actions/use-llvm-artifact/**
+      - .github/workflows/build/install-llvm-artifact.sh
       - .github/workflows/build/wheels.Dockerfile
       - .github/workflows/build/fetch-npuir-stable.sh
       - setup.py
@@ -100,12 +100,17 @@ jobs:
           # push/workflow_dispatch/schedule: use the matrix branch ref.
           ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
 
-      - name: Prepare PR LLVM for the manylinux build
+      - name: Download PR LLVM for the manylinux build
+        if: needs.pr-llvm.outputs.use-artifact == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-almalinux-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+          path: .pr-llvm-artifact
+
+      - name: Install PR LLVM for the manylinux build
         if: needs.pr-llvm.outputs.use-artifact == 'true'
         id: llvm
-        uses: ./.github/actions/use-llvm-artifact
-        with:
-          target-os: almalinux
+        run: .github/workflows/build/install-llvm-artifact.sh .pr-llvm-artifact/*.tar.gz
 
       - name: Restore npuir payload from local cache
         id: npuir-cache

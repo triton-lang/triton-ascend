@@ -22,7 +22,7 @@ on:
       - '.github/workflows/ascend-ci.yml'
       - '.github/workflows/ascend-llvm-build.yml'
       - '.github/workflows/build/almalinux.Dockerfile'
-      - '.github/actions/use-llvm-artifact/**'
+      - '.github/workflows/build/install-llvm-artifact.sh'
       - '.github/workflows/integration-tests-ascend.yml'
       - '.github/workflows/ascend-runner-preparation.yml'
   merge_group:

@@ -47,7 +47,7 @@ jobs:
           files=$(git diff --no-renames --name-only HEAD^1 HEAD -- \
             cmake/llvm-hash.txt 'third_party/ascend/patch/llvm_patch_*.patch' \
             .github/workflows/ascend-llvm-build.yml .github/workflows/build/almalinux.Dockerfile \
-            .github/actions/use-llvm-artifact)
+            .github/workflows/build/install-llvm-artifact.sh)
           if [[ -n "$files" ]]; then
             printf 'LLVM inputs changed:\n%s\n' "$files"
             echo "changed=true" >> "$GITHUB_OUTPUT"

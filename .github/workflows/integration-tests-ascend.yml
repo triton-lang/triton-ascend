@@ -49,11 +49,16 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-
 
+      - name: Download PR LLVM
+        if: inputs.use-llvm-artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-ubuntu-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+          path: .pr-llvm-artifact
+
       - name: Install PR LLVM
         if: inputs.use-llvm-artifact
-        uses: ./.github/actions/use-llvm-artifact
-        with:
-          target-os: ubuntu
+        run: .github/workflows/build/install-llvm-artifact.sh .pr-llvm-artifact/*.tar.gz
 
       - name: Download and install Bisheng compiler
         shell: bash

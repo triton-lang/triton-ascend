@@ -51,6 +51,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
@@ -267,41 +268,30 @@ UpdateConditionInfoPassLegacy::allocSSBuffer(ModuleOp module) {
     return ssbufferMemrefs;
   }
 
-  // Locate the vector scope: the counter initialization is emitted inside it so
-  // that only the vector kernel resets the counters.
-  scope::ScopeOp vectorScope = nullptr;
-  {
-    auto vectorCoreType = hivm::TCoreTypeAttr::get(module.getContext(),
-                                                   hivm::TCoreType::VECTOR);
-    module->walk([&](scope::ScopeOp scopeOp) {
-      auto scopeTypeAttr =
-          scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
-      if (scopeTypeAttr && scopeTypeAttr == vectorCoreType) {
-        vectorScope = scopeOp;
-        return mlir::WalkResult::interrupt();
-      }
-      return mlir::WalkResult::advance();
-    });
-  }
+  scope::ScopeOp firstScope, vectorScope;
+  module.walk<WalkOrder::PreOrder>([&](scope::ScopeOp scopeOp) {
+    if (!firstScope)
+      firstScope = scopeOp;
+    bool isCube, isVector;
+    if (succeeded(getScopeType(scopeOp, isCube, isVector)) && isVector) {
+      vectorScope = scopeOp;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
 
   // Cube accesses both counter banks through these fixed addresses.
-  module->walk([&](Operation *op) {
-    if (auto scopeOp = dyn_cast<scope::ScopeOp>(op)) {
-      builder.setInsertionPoint(scopeOp);
-      auto loc = scopeOp.getLoc();
-      for (int i = 0; i < numBuffers; i++) {
-        auto memref0 =
-            createPointerCastOp(builder, loc, i * VALUE_SSBUF_OFFSET);
-        auto memref1 = createPointerCastOp(
-            builder, loc, VECTOR_SSBUF_OFFSET + i * VALUE_SSBUF_OFFSET);
-
-        ssbufferVec0Memrefs.push_back(memref0.getResult());
-        ssbufferVec1Memrefs.push_back(memref1.getResult());
-      }
-      return mlir::WalkResult::interrupt();
+  if (firstScope) {
+    builder.setInsertionPoint(firstScope);
+    auto loc = firstScope.getLoc();
+    for (int i = 0; i < numBuffers; i++) {
+      auto memref0 = createPointerCastOp(builder, loc, i * VALUE_SSBUF_OFFSET);
+      auto memref1 = createPointerCastOp(
+          builder, loc, VECTOR_SSBUF_OFFSET + i * VALUE_SSBUF_OFFSET);
+      ssbufferVec0Memrefs.push_back(memref0.getResult());
+      ssbufferVec1Memrefs.push_back(memref1.getResult());
     }
-    return mlir::WalkResult::advance();
-  });
+  }
 
   // Reset the counters at the beginning of the vector block instead of in front
   // of the first scope: every sub block only resets the copy it owns

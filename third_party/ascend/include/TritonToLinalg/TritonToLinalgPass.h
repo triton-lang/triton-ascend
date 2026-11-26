@@ -23,6 +23,7 @@
 #ifndef TRITON_ADAPTER_CONVERSION_TRITONTOLINALG_H
 #define TRITON_ADAPTER_CONVERSION_TRITONTOLINALG_H
 
+#include "TritonToLinalg/MemoryPointer.h"
 #include "ascend/include/Utils/Utils.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -70,6 +71,8 @@ class TritonToLinalgPass : public TritonToLinalgBase<TritonToLinalgPass> {
       LAUNCH_GRID_RANK * 2;
 
 private:
+  triton::MemoryPointerInfos pointerInfos;
+
   // Stage helpers follow the execution order in runOnOperation.
   LogicalResult initializeTargetOptions();
   void normalizeMemoryAccessForms(ModuleOp moduleOp);

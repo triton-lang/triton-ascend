@@ -27,13 +27,14 @@ SIGNATURE = {"X": "*u32", "O": "*u32", "limit": "u32"}
 
 
 @tla.jit
-def vmins(X, O, limit, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    x = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    o = tla.alloc_buffer((4 + TILES, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), x)
+def vmins(X, O, limit, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr,
+          MASKPAT: tl.constexpr, TAILPAT: tl.constexpr):
+    x = tla.alloc((TILES, N), tl.uint32, space="ub")
+    o = tla.alloc((4 + TILES, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), x)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0, 0])
-        mask = tla.simd.pge(ACTIVE, N)
+        mask = tla.simd.pset(2048 // N, MASKPAT)
         limit = limit.to(tl.uint32)
         full = tla.simd.vmins(a, limit)
         zeroed = tla.simd.vmins(a, limit, mask)
@@ -42,19 +43,22 @@ def vmins(X, O, limit, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexp
         tla.simd.vsts(o[2, 0], tla.simd.vreduce(full, "add"))
         tla.simd.vsts(o[3, 0], tla.simd.vreduce(zeroed, "add"))
         # Seed only the tail row; full tiles overwrite their rows entirely.
-        tla.simd.vsts(o[4 + TILES - 1, 0], tla.simd.vsplat(SENTINEL_C, tl.uint32))
+        tla.simd.vsts(o[4 + TILES - 1, 0], tla.simd.vdup(SENTINEL_C, tl.uint32))
         for t in tl.static_range(TILES):
             va = tla.simd.vlds(x[t, 0])
             if t == TILES - 1:
-                tail_mask = tla.simd.pge(TAIL, N)
+                tail_mask = tla.simd.pset(2048 // N, TAILPAT)
                 tla.simd.vsts(o[4 + t, 0], tla.simd.vmins(va, limit, tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(o[4 + t, 0], tla.simd.vmins(va, limit))
-    tla.copy(o, tla.view(O, (4 + TILES, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (4 + TILES, N)))
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "TILES": SHAPE["tiles"], "TAIL": SHAPE["tail"]}
+    return {
+        "N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"]), "TILES": SHAPE["tiles"],
+        "TAIL": SHAPE["tail"], "TAILPAT": "VL%d" % (SHAPE["tail"])
+    }
 
 
 def test_ir(output_dir=None):

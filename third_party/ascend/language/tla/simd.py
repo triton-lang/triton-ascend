@@ -131,9 +131,10 @@ __all__ = [
     "vdup",
     "vdups",
     "vdupv",
+    "vcvt",
+    "vmula",
     "vxor",
     "vmod",
-    "vfma",
     "vsel",
     "vabs",
     "vneg",
@@ -147,19 +148,13 @@ __all__ = [
     "vabsdif",
     "vexpdif",
     "vreduce",
+    "vcadd",
     "vcmax",
     "vcmin",
     "vcmp",
-    "vbroadcast",
-    "vfull",
-    "vsplat",
-    "vtruncf",
     "vpack",
-    "vreduce_sum",
-    "vreduce_max",
     "vreduce_min",
     "vci",
-    "pge",
     "membar",
 ]
 
@@ -742,8 +737,7 @@ def _make_scalar(scalar, dtype, tag, op, _semantic):
     """Materialize a scalar operand whose type is exactly ``dtype``.
 
     Integers go through ``create_simd_scalar_int`` so that i64 values are not
-    rounded through a Python double; ``create_simd_scalar`` (float path) is
-    left untouched for vsplat/vfull compatibility.
+    rounded through a Python double.
     """
     value = _unwrap_if_constexpr(scalar)
     if isinstance(value, tensor):
@@ -1528,7 +1522,7 @@ def vdiv(src0, src1, mask=None, mode=MODE.ZEROING, precision=None, _semantic=Non
     # zero-init + vsel merge for that mode, and adding a second select here
     # would duplicate the same predicate/zero pair.
     if mode == MODE.ZEROING and explicit_mask and unsigned and tag in ("i16", "i32"):
-        zero = vfull(0, src0.dtype, lanes, _semantic=_semantic)
+        zero = vxor(src0, src0, _semantic=_semantic)
         res = vsel(mask, res, zero, _semantic=_semantic)
     return res
 
@@ -1633,7 +1627,9 @@ def vmaxs(src0, scalar, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     if mode is MODE.ZEROING and tag == "i64" and explicit_mask:
         # The 64-bit integer fallback ignores its mask, so restore ZEROING here.
         # TODO: remove this workaround once AVE i64 mask support is correct.
-        zero = vfull(0, src0.dtype, lanes, _semantic=_semantic)
+        zero_scalar = _semantic.builder.create_simd_scalar_int(tag, 0)
+        zero_handle = _semantic.builder.create_simd_vsplat(zero_scalar, tag, lanes)
+        zero = vector(zero_handle, src0.type)
         return vsel(mask, result, zero, _semantic=_semantic)
     return _merge_inactive(result, mask, src0, mode, _semantic)
 
@@ -1674,8 +1670,7 @@ def vexp(src, mask=None, mode=MODE.ZEROING, precision=None, _semantic=None) -> v
 def vdup(scalar, dtype, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     """
     Masked scalar broadcast: broadcast ``scalar`` to a full register
-    (``ave.hir.broadcast``, i.e. the masked ``vdups`` form -- not the unmasked
-    ``ave.hir.scalar_broadcast`` that :func:`vsplat` emits).
+    (``ave.hir.broadcast``, the masked ``vdups`` form).
 
     Register width is ``2048 // elem_bits`` lanes for the supported
     8/16/32-bit elements (a full i64 register would be 4096 bits / 64 lanes,
@@ -1696,8 +1691,7 @@ def vdup(scalar, dtype, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     Supported element types: i8/i16/i32/bf16/f16/f32/fp8e4nv (u8/u16/u32).
     i64/u64 are rejected: the VdupsZ intrinsic is 8/16/32-bit only, and the
     64-bit library fallback (``_mlir_ciface_vdups_int64_t``) drops the
-    predicate and would silently ignore a mask.  Use :func:`vsplat` when an
-    unmasked i64/u64 broadcast is needed.
+    predicate and would silently ignore a mask.
     """
     mode = _check_mode(mode)
     tag, dtype_obj = _resolve_element_dtype(dtype)
@@ -2309,7 +2303,8 @@ def vunpack(src: vector, target_dtype, mask=None, part=PART.EVEN, pp="pp0", sign
     handle = _semantic.builder.create_simd_vunpack(src.handle, out_tag, part, pp, signed)
     result = vector(handle, vector_type(lanes, target_dtype))
     if mask is not None:
-        result = vsel(mask, result, vsplat(0, target_dtype, _semantic=_semantic), _semantic=_semantic)
+        zero = vxor(result, result, _semantic=_semantic)
+        result = vsel(mask, result, zero, _semantic=_semantic)
     return result
 
 
@@ -2489,23 +2484,6 @@ def vmod(lhs, rhs, _semantic=None) -> vector:
 
 
 @builtin
-def vfma(acc, lhs, rhs, _semantic=None) -> vector:
-    """
-    Fused multiply-add (``ave.hir.vmula``): ``acc + lhs * rhs``.
-    """
-    _require_vector(acc, "acc")
-    _require_vector(lhs, "lhs")
-    _require_vector(rhs, "rhs")
-    if not (acc.type == lhs.type == rhs.type):
-        raise ValueError("fma requires same-typed operands, "
-                         f"got {acc.type}, {lhs.type}, {rhs.type}")
-    lanes = acc.shape[0]
-    mask = _all_mask(lanes, _semantic)
-    handle = _semantic.builder.create_simd_vfma(acc.handle, lhs.handle, rhs.handle, mask.handle)
-    return vector(handle, acc.type)
-
-
-@builtin
 def vsel(mask, true_val, false_val, _semantic=None) -> vector:
     """
     Bitwise select (``ave.hir.vsel``): ``mask ? true_val : false_val``.
@@ -2659,7 +2637,7 @@ def vrelu(src, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     :rtype: tla.vector
 
     .. note::
-        For other dtypes use ``vmax(src, vsplat(0, dtype))``.
+        For other supported dtypes use ``vmax(src, vdup(0, dtype))``.
     """
     return _unary_op("vrelu", "relu", src, mask, mode, _semantic)
 
@@ -2723,12 +2701,18 @@ def vreduce(src, kind, mask=None, _semantic=None) -> vector:
 
 
 def _reduce_horiz(op, src, kind, mask, mode, _semantic):
-    """Masked horizontal reduction shared by vcmax/vcmin."""
+    """Masked horizontal reduction shared by vcadd/vcmax/vcmin."""
     mode = _resolve_mode(mode)
     if mode != "ZEROING":
         raise NotImplementedError(f"{op} only supports MODE.ZEROING; MERGING needs a destination "
                                   "register and is not exposed by the AVE dialect")
     return vreduce(src, kind, mask=mask, _semantic=_semantic)
+
+
+@builtin
+def vcadd(src: vector, mask: vector = None, mode: tl.constexpr = MODE.ZEROING, _semantic=None) -> vector:
+    """Sum active lanes and place the result in lane 0."""
+    return _reduce_horiz("vcadd", src, "add", mask, mode, _semantic)
 
 
 @builtin
@@ -2799,65 +2783,6 @@ def vcmp(src0: vector, src1: vector, mask: vector = None, op: tl.constexpr = CMP
 
 
 @builtin
-def vbroadcast(src, low=True, _semantic=None) -> vector:
-    """
-    Broadcast a vector register's half (``ave.hir.vector_broadcast``).
-
-    ``low`` selects the low half to broadcast to the full register; used to
-    splat a reduced value (e.g. the lane-0 sum) across all lanes.
-    """
-    _require_vector(src, "src")
-    lanes = src.shape[0]
-    mask = _all_mask(lanes, _semantic)
-    handle = _semantic.builder.create_simd_vbroadcast(src.handle, mask.handle, bool(low))
-    return vector(handle, src.type)
-
-
-@builtin
-def vfull(value, dtype, lanes, _semantic=None) -> vector:
-    """
-    Constant vector register: broadcast a scalar ``value`` to ``lanes`` lanes.
-
-    Used for the -inf sentinel in topk, zero vectors, etc.
-    """
-    value = _unwrap_if_constexpr(value)
-    lanes = _unwrap_if_constexpr(lanes)
-    tag = _elem_tag(dtype)
-    ty = vector_type(lanes, dtype)
-    scalar = _semantic.builder.create_simd_scalar(tag, float(value))
-    handle = _semantic.builder.create_simd_vsplat(scalar, tag, lanes)
-    return vector(handle, ty)
-
-
-@builtin
-def vtruncf(src, target_dtype, mask=None, part="part_even", _semantic=None) -> vector:
-    """
-    Narrowing float conversion (``ave.hir.vtruncf``), e.g. f32 -> bf16.
-
-    Keeps the total bit count; the number of lanes grows as the element type narrows.
-
-    :param src: source vector register (f32)
-    :param target_dtype: destination element dtype (bf16/f16)
-    :param mask: predicate vector; defaults to an all-true mask
-    :param part: ``part_even`` / ``part_odd`` sub-register selector
-    """
-    _require_vector(src, "src")
-    part = ss.check_part(_unwrap_if_constexpr(part))
-    out_tag = _elem_tag(target_dtype)
-    if out_tag not in ("bf16", "f16", "fp8e4nv"):
-        raise ValueError(f"vtruncf only narrows to bf16/f16/fp8e4nv, got {target_dtype}")
-    src_tag = _elem_tag(src.dtype)
-    src_bits = _ELEM_SPECS[src_tag]
-    out_bits = _ELEM_SPECS[out_tag]
-    out_lanes = src.shape[0] * src_bits // out_bits
-    if mask is None:
-        mask = _all_mask(src.shape[0], _semantic)
-    _check_mask(mask, src.type.lanes)
-    handle = _semantic.builder.create_simd_vcvt("truncf", src.handle, mask.handle, out_tag, part)
-    return vector(handle, vector_type(out_lanes, target_dtype))
-
-
-@builtin
 def vpack(src: vector, part: tl.constexpr = "part_even", _semantic=None) -> vector:
     """
     Pack wider lanes to narrower lanes (``ave.hir.vpack``).
@@ -2869,7 +2794,7 @@ def vpack(src: vector, part: tl.constexpr = "part_even", _semantic=None) -> vect
     :type src: tla.vector
     :param part: ``part_even`` (default, low destination half) or
         ``part_odd`` (high destination half), matching :func:`vextf` /
-        :func:`vtruncf`.
+        :func:`vcvt`.
     :type part: str or tl.constexpr
     :return: Vector with twice as many lanes and half the element width.
     :rtype: tla.vector
@@ -2903,32 +2828,6 @@ def vpack(src: vector, part: tl.constexpr = "part_even", _semantic=None) -> vect
     return vector(handle, vector_type(out_lanes, out_dtype))
 
 
-@builtin
-def vsplat(value, dtype, _semantic=None) -> vector:
-    """
-    Constant vector register: broadcast a scalar ``value`` to a full register
-    of ``dtype`` lanes (``ave.hir.scalar_broadcast``).
-
-    Thin wrapper over :func:`vfull` that derives the lane count from ``dtype``
-    (2048 // elem_bits; i64 spans 4096 bits).
-
-    :param value: scalar value (Python int/float or constexpr)
-    :param dtype: element dtype; lane count is derived from it
-    """
-    tag = _elem_tag(dtype)
-    return vfull(value, dtype, _lanes_for(tag), _semantic=_semantic)
-
-
-@builtin
-def vreduce_sum(src, _semantic=None) -> vector:
-    """
-    Horizontal reduction to sum (``ave.hir.reduction <add>``).
-
-    Alias of ``vreduce(src, 'add')``; the combining result is placed at lane 0.
-    """
-    return vreduce(src, "add", _semantic=_semantic)
-
-
 def _reduce_across(regs, kind, _semantic):
     """
     Reduce a single register or a tuple/list of registers to the elementwise
@@ -2960,27 +2859,14 @@ def _reduce_across(regs, kind, _semantic):
         handle = _semantic.builder.create_simd_binary(kind_op, acc.handle, r.handle, mask.handle)
         acc = vector(handle, acc.type)
     reduced = vreduce(acc, kind, _semantic=_semantic)
-    return vbroadcast(reduced, low=True, _semantic=_semantic)
-
-
-@builtin
-def vreduce_max(regs, _semantic=None) -> vector:
-    """
-    Reduce a register or list of registers to the global max across all lanes
-    and registers, broadcast to every lane.
-
-    Combines elementwise ``ave.hir.vmax`` folds across registers, a horizontal
-    ``ave.hir.reduction <max>``, and ``ave.hir.vector_broadcast`` (low half).
-    """
-    return _reduce_across(regs, "max", _semantic)
+    return vdupv(reduced, _semantic=_semantic)
 
 
 @builtin
 def vreduce_min(regs, _semantic=None) -> vector:
     """
     Reduce a register or list of registers to the global min across all lanes
-    and registers, broadcast to every lane.  Symmetric to
-    :func:`vreduce_max` with ``ave.hir.vmin``.
+    and registers, broadcast to every lane.
     """
     return _reduce_across(regs, "min", _semantic)
 
@@ -3009,27 +2895,6 @@ def vci(base, _semantic=None) -> vector:
     lanes = _lanes_for("i32")
     handle = _semantic.builder.create_simd_vci(base_handle, "i32", lanes, False)
     return vector(handle, vector_type(lanes, tl.int32))
-
-
-@builtin
-def pge(n, lanes, _semantic=None) -> vector:
-    """
-    Prefix predicate: the first ``n`` lanes are true, the rest false
-    (``ave.hir.pge <VLn>``).
-
-    Used for group-boundary selects (e.g. cast_back's 32-channel scale groups
-    over a 64-lane register: ``pge(32, 64)``).
-
-    :param n: number of leading true lanes; must match a supported VL pattern
-        (1, 2, 3, 4, 8, 16, 32, 64, 128)
-    :param lanes: number of i1 predicate lanes
-    """
-    n = _unwrap_if_constexpr(n)
-    lanes = _unwrap_if_constexpr(lanes)
-    ty = vector_type(lanes, tl.int1)
-    pattern = ss.check_pge_pattern(f"VL{n}")
-    handle = _semantic.builder.create_simd_pge(pattern, lanes)
-    return vector(handle, ty)
 
 
 @builtin

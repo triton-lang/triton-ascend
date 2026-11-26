@@ -220,8 +220,6 @@ _DEPRECATED_NPU_OPTION_ROUTE_PRECEDENCE = (
 # Renamed value options preserve the complete user value.  A simultaneously
 # supplied canonical option wins via setdefault below.
 _DEPRECATED_NPU_OPTION_ALIASES = {
-    "intra_cache_num": "buf_slot_num_of_veccore",
-    "inter_cache_num": "buf_slot_num_of_crosscore",
     "load_cache_num": "buf_slot_num_of_gm",
     "enable_bishengir_simt_optimization": "simt_optimization_mode",
 }
@@ -256,11 +254,12 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "graph_optimize_emit_remarks": "it is ignored; the backend fixes graph-optimization remarks to False.",
     "graph_optimize_max_rewrites_per_function":
     "it is ignored; the backend fixes the maximum rewrites per function to 64.",
-    "graph_optimize_rule_mask":
-    "it is ignored; the backend fixes the graph-optimization rule mask to 3071 (legacy + IAT + PTSM).",
+    "graph_optimize_rule_mask": "it is ignored; use 'rule_mask' to select graph optimization rules.",
     "graph_optimize_ub_capacity_bytes":
     "it is ignored; the backend derives an 80%-of-raw-UB graph budget from the target architecture.",
     "has_auto_blockify_blacklist_op": "it is ignored; the safety flag is derived by scanning TTIR.",
+    "inter_cache_num": "it is ignored; use 'buf_slot_num_of_crosscore' to set the inter-core buffer count.",
+    "intra_cache_num": "it is ignored; use 'buf_slot_num_of_veccore' to set the intra-core buffer count.",
     "kernel_name": "it is ignored; the kernel name is derived from TTIR.",
     "llvm_version": "it is ignored; this option has no replacement because it had no effective consumer.",
     "mix_mode": "it is ignored; mix mode is derived from Linalg IR as internal metadata.",
@@ -722,7 +721,7 @@ def _get_cxx():
 
 
 def _npu_ext_build_command(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch",
-                           precompile=False, extra_cflags=(), extra_ldflags=()):
+                           precompile=False, extra_cflags=()):
     header_path = None
     if src_path is None:
         src_path = header_or_src_path
@@ -741,24 +740,9 @@ def _npu_ext_build_command(obj_name: str, header_or_src_path, src_path=None, *, 
         # Preserve the position of this optional include in the original command.
         cc_cmd.insert(5, f"-I{os.path.dirname(header_path)}")
     cc_cmd += list(extra_cflags)
-    cc_cmd += list(extra_ldflags)
     cc_cmd += cann_version_compile_args()
     cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", so_path]
     return cc_cmd, so_path
-
-
-@functools.lru_cache(maxsize=1)
-def _torch_library_dirs():
-    from torch.utils.cpp_extension import library_paths
-
-    return tuple(library_paths())
-
-
-@functools.lru_cache(maxsize=1)
-def _torch_npu_library_dir():
-    import torch_npu
-
-    return os.path.join(os.path.dirname(torch_npu.__file__), "lib")
 
 
 @functools.lru_cache(maxsize=32)
@@ -801,45 +785,17 @@ def _npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_head
         else:
             cc_cmd += get_backend_func("get_cc_cmd")
 
-    for lib_dir in _torch_library_dirs():
-        cc_cmd.append(f"-Wl,-rpath,{lib_dir}")
-    cc_cmd.append(f"-Wl,-rpath,{_torch_npu_library_dir()}")
-
     return tuple(cc_cmd)
 
 
 def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch", precompile=False,
-                   extra_cflags=(), extra_ldflags=()) -> str:
+                   extra_cflags=()) -> str:
     cc_cmd, so_path = _npu_ext_build_command(obj_name, header_or_src_path, src_path, kernel_launcher=kernel_launcher,
-                                             precompile=precompile, extra_cflags=extra_cflags,
-                                             extra_ldflags=extra_ldflags)
+                                             precompile=precompile, extra_cflags=extra_cflags)
     result = subprocess.run(cc_cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"Failed to compile {header_or_src_path}, error: {result.stderr},cmd={cc_cmd}")
     return so_path
-
-
-def bin_cache_manager(key, bin_dir):
-    """Return a FileCacheManager rooted at a fixed directory (default: backend bin/).
-
-    Shared host artifacts (npu_utils.so, the launcher runtime) must not live
-    under TRITON_CACHE_DIR: PyTorch Inductor repoints that directory to a
-    fresh temporary root around every test case, stranding artifacts built
-    under earlier roots. This manager keeps the default file cache's exact
-    semantics (key sub-directory, flock coordination, atomic put) under an
-    installation-fixed directory, while custom managers configured via
-    knobs.cache.manager_class stay scoped to the per-kernel artifacts they
-    are meant to serve. Constructed via __new__ to keep the FileCacheManager
-    type (checked by build coordination) without triggering knob/env reads
-    or directory creation under a TRITON_CACHE_DIR that may be repointed.
-    """
-    from triton.runtime.cache import FileCacheManager, _base32
-    cache = FileCacheManager.__new__(FileCacheManager)
-    cache.key = _base32(key)
-    cache.cache_dir = os.path.join(str(bin_dir), cache.key)
-    cache.lock_path = os.path.join(cache.cache_dir, "lock")
-    os.makedirs(cache.cache_dir, exist_ok=True)
-    return cache
 
 
 def _is_elf_file(path):
@@ -969,14 +925,13 @@ def _npu_fingerprint(command, compiler, identity, cann, policy):
     }
 
 
-def npu_extension_fingerprint(obj_name, *, extra_cflags=(), extra_ldflags=()):
+def npu_extension_fingerprint(obj_name, *, extra_cflags=()):
     """Fingerprint the command actually used to build a host extension.
 
     Temporary source/output paths use deterministic placeholders. Runtime source
     and generated configuration are hashed separately by the cache owner.
     """
-    command, _ = _npu_ext_build_command(obj_name, "/__triton_build__/source.cpp", extra_cflags=extra_cflags,
-                                        extra_ldflags=extra_ldflags)
+    command, _ = _npu_ext_build_command(obj_name, "/__triton_build__/source.cpp", extra_cflags=extra_cflags)
     compiler = os.path.realpath(shutil.which(command[0]) or command[0])
     info = _npu_fingerprint(tuple(command), compiler, _file_identity(compiler), get_cann_version(), backend_policy
                             or "torch_npu")
@@ -1211,11 +1166,6 @@ def cann_version_compile_args():
     if is_cann_version_at_least(9, 1, 0):
         return ["-DTRITON_CANN_910"]
     return []
-
-
-def triton_enable_libdevice_simt(arch: str = None) -> bool:
-    """Return whether the environment switch selects SIMT libdevice."""
-    return bool(os.getenv("TRITON_ENABLE_LIBDEVICE_SIMT", False)) and is_register_based_arch(arch)
 
 
 def get_cann_version_file_hash():

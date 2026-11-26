@@ -21,8 +21,5 @@ Import reusable helpers with `from kernels.utils import ...`; the parent `tla_ut
 provides the import root and assigns the NPU. Helpers import device libraries lazily so
 IR/compile-stage collection does not import the operator implementation.
 
-To add MLA, follow the same layout under `kernels/mla/` with `mla_kernel.py`, `test_mla.py`
-and a README. Only `test_*.py` files are collected under `kernels/`; load the operator with
-`load_kernel(Path(__file__).with_name('mla_kernel.py'))` after checking the runtime stage.
-Use a `test_run` accuracy entry and an explicitly enabled, serial `test_perf` entry.
-Keep settings as module globals and reuse the existing `TLA_TEST_STAGE` convention.
+[Paged MLA](mla/README.md) follows the same layout under `kernels/mla/`.
+Its test module covers IR, device accuracy and opt-in serial profiling.

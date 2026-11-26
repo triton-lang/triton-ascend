@@ -44,6 +44,10 @@ Triton-Ascend
 
 ---
 
+## 介绍
+
+**Triton-Ascend**是适配华为昇腾处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对华为昇腾NPU特性进行深度优化，能够帮助用户在华为昇腾平台上快速开发和部署高性能计算任务。
+
 ## 📖 快速安装
 
 ### 环境准备
@@ -76,6 +80,18 @@ Triton-Ascend
 #以安装triton-ascend 3.6.0 为例
 pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
+
+### Nightly包安装
+
+我们提供每周更新的Nightly测试包，安装命令如下：
+
+```bash
+pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly
+```
+
+所有Nightly包可在[历史列表](https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly/triton-ascend/)中查看。
+
+> 注意：Nightly包为测试版本，不建议生产环境使用。
 
 ### 源码安装
 

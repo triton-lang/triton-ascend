@@ -22,32 +22,83 @@
 import math
 
 from triton.language import core as tl
+from triton.language.math import abs as _triton_abs
 
-__all__ = ["select", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity", "clamp"]
+from .core import buffer
+from .scope import _check_not_in_simd
+
+__all__ = [
+    "load_scalar", "store_scalar", "select", "abs", "maximum", "minimum", "cast", "max_value", "cdiv", "infinity",
+    "clamp"
+]
 
 
-def _check_scalar(value, name):
+def _check_scalar_type(dtype, name, *, allow_bfloat16=False, require_byte_addressable=False):
+    is_numeric_scalar = not dtype.is_block() and (dtype.is_int() or dtype.is_floating())
+    if require_byte_addressable and (not is_numeric_scalar or dtype.primitive_bitwidth % 8):
+        raise TypeError(f"{name} requires a byte-addressable integer or floating-point element type")
+    if not is_numeric_scalar:
+        raise TypeError(f"{name} must be a boolean, integer, or floating-point scalar; got {dtype}")
+    if dtype.is_fp8():
+        raise TypeError(f"{name} does not support float8 dtype {dtype}")
+    if dtype == tl.bfloat16 and not allow_bfloat16:
+        raise TypeError(f"{name} does not support bfloat16")
+
+
+def _check_scalar(value, name, *, allow_bfloat16=False):
     value = tl._unwrap_if_constexpr(value)
     if isinstance(value, tl.tensor):
-        if value.type.is_block() or not (value.dtype.is_int() or value.dtype.is_floating()):
-            raise TypeError(f"{name} must be a boolean, integer, or floating-point scalar; got {value.type}")
-        if value.dtype == tl.bfloat16:
-            raise TypeError(f"{name} does not support bfloat16")
-        return value
-    if type(value) not in (bool, int, float):
+        _check_scalar_type(value.type, name, allow_bfloat16=allow_bfloat16)
+    elif type(value) not in (bool, int, float):
         raise TypeError(f"{name} must be a boolean, integer, or floating-point scalar; got {type(value).__name__}")
     return value
+
+
+def _check_scalar_buffer(buf, name):
+    buf = tl._unwrap_if_constexpr(buf)
+    if not isinstance(buf, buffer) or buf.space not in ("gm", "ub"):
+        raise TypeError(f"{name} expects a GM or UB tla.buffer")
+    if any(extent != 1 for extent in buf.shape):
+        raise ValueError(f"{name} requires a single-element buffer with every extent equal to 1")
+    _check_scalar_type(buf.dtype, name, allow_bfloat16=True, require_byte_addressable=True)
+    return buf
+
+
+@tl.builtin
+def load_scalar(buf, _semantic=None):
+    """Load the only element of a GM or UB buffer outside a SIMD VF."""
+    _check_not_in_simd("tla.load_scalar", _semantic)
+    buf = _check_scalar_buffer(buf, "tla.load_scalar")
+    handle = _semantic.builder.create_tla_load_scalar(buf.handle)
+    return tl.tensor(handle, buf.dtype)
+
+
+@tl.builtin
+def store_scalar(buf, value, _semantic=None):
+    """Store to the only element of a GM or UB buffer outside a SIMD VF.
+
+    Conversion to the buffer element type follows the numeric conversion
+    restrictions of ``tla.cast``.
+    """
+    _check_not_in_simd("tla.store_scalar", _semantic)
+    buf = _check_scalar_buffer(buf, "tla.store_scalar")
+    value = _check_scalar(value, "tla.store_scalar value", allow_bfloat16=True)
+    value = _semantic.to_tensor(value)
+    if value.dtype != buf.dtype:
+        value = cast(value, buf.dtype, _semantic=_semantic)
+    _semantic.builder.create_tla_store_scalar(buf.handle, value.handle)
 
 
 @tl.builtin
 def select(condition, true_value, false_value, _semantic=None):
     """Scalar-only ``tl.where``, with identical conversion and promotion rules.
 
-    Bfloat16 inputs are unsupported. Condition conversion,
+    Bfloat16 and float8 inputs are unsupported. Condition conversion,
     branch type promotion, and diagnostics follow ``tl.where`` directly.
     Both value expressions are evaluated before the selection. This operation
     cannot guard side effects or out-of-bounds accesses.
     """
+    _check_not_in_simd("tla.select", _semantic)
     condition = _check_scalar(condition, "tla.select condition")
     true_value = _check_scalar(true_value, "tla.select true_value")
     false_value = _check_scalar(false_value, "tla.select false_value")
@@ -55,13 +106,35 @@ def select(condition, true_value, false_value, _semantic=None):
 
 
 @tl.builtin
+def abs(x, _semantic=None):
+    """Return the absolute value of a scalar, following ``tl.abs``.
+
+    Accepts Python and runtime boolean, integer, float16 and float32
+    scalars. Runtime inputs retain their dtype; unsigned integers and booleans
+    are unchanged. Signed integer minima retain their fixed-width value,
+    without saturation or widening. Floating-point absolute value clears the
+    sign of zero, infinity and NaN; NaN payload preservation is not guaranteed.
+
+    Bfloat16, float64 and float8 inputs are unsupported. Buffers, memory access
+    positions, SIMD registers and Blocks require their explicit interfaces.
+    This operation allocates no buffer and performs no SIMD broadcast.
+    """
+    _check_not_in_simd("tla.abs", _semantic)
+    x = _check_scalar(x, "tla.abs x")
+    if isinstance(x, tl.tensor) and x.dtype.is_floating() and x.dtype not in (tl.float16, tl.float32):
+        raise TypeError(f"tla.abs does not support dtype {x.dtype}")
+    return _triton_abs(x, _semantic=_semantic)
+
+
+@tl.builtin
 def maximum(a, b, propagate_nan: tl.constexpr = tl.PropagateNan.NONE, _semantic=None):
     """Scalar-only ``tl.maximum`` with standard type promotion.
 
-    Float16 and bfloat16 inputs are unsupported. ``propagate_nan`` defaults to
+    Float16, bfloat16 and float8 inputs are unsupported. ``propagate_nan`` defaults to
     ``tl.PropagateNan.NONE``; use ``ALL`` to propagate either input NaN.
     With ``NONE``, exactly one NaN input is temporarily unsupported on Ascend.
     """
+    _check_not_in_simd("tla.maximum", _semantic)
     a = _check_scalar(a, "tla.maximum a")
     b = _check_scalar(b, "tla.maximum b")
     for name, value in (("a", a), ("b", b)):
@@ -74,10 +147,11 @@ def maximum(a, b, propagate_nan: tl.constexpr = tl.PropagateNan.NONE, _semantic=
 def minimum(a, b, propagate_nan: tl.constexpr = tl.PropagateNan.NONE, _semantic=None):
     """Scalar-only ``tl.minimum`` with standard type promotion.
 
-    Float16 and bfloat16 inputs are unsupported. ``propagate_nan`` defaults to
+    Float16, bfloat16 and float8 inputs are unsupported. ``propagate_nan`` defaults to
     ``tl.PropagateNan.NONE``.
     With ``NONE``, exactly one NaN input is temporarily unsupported on Ascend.
     """
+    _check_not_in_simd("tla.minimum", _semantic)
     a = _check_scalar(a, "tla.minimum a")
     b = _check_scalar(b, "tla.minimum b")
     for name, value in (("a", a), ("b", b)):
@@ -96,9 +170,10 @@ def cdiv(x, div, _semantic=None, _generator=None):
 
     Delegates to Triton's ``(x + (div - 1)) // div`` implementation.
     Integer overflow and signed division follow standard Triton semantics;
-    this does not provide overflow-safe ceiling division. Bfloat16 inputs
+    this does not provide overflow-safe ceiling division. Bfloat16 and float8 inputs
     are unsupported.
     """
+    _check_not_in_simd("tla.cdiv", _semantic)
     from triton.language import cdiv as triton_cdiv
 
     x = _check_scalar(x, "tla.cdiv x")
@@ -113,13 +188,18 @@ def cast(input, dtype, fp_downcast_rounding=None, bitcast=False, _semantic=None)
 
     Accepts Python and runtime scalars. ``bitcast=True``
     reinterprets equal-width scalar bit patterns. Buffers and SIMD registers
-    require their explicit memory and SIMD interfaces. Bfloat16 source or
-    destination types are unsupported.
+    require their explicit memory and SIMD interfaces. Bfloat16 and float8
+    source and destination types are unsupported. Numeric fp64 conversions to narrower
+    floating-point types are unsupported because they can require implicit buffers.
     """
+    _check_not_in_simd("tla.cast", _semantic)
     input = _check_scalar(input, "tla.cast input")
     dtype = tl._unwrap_if_constexpr(dtype)
-    if dtype == tl.bfloat16:
-        raise TypeError("tla.cast does not support bfloat16")
+    _check_scalar_type(dtype, "tla.cast")
+    input = _semantic.to_tensor(input)
+    bitcast = tl._unwrap_if_constexpr(bitcast)
+    if input.dtype == tl.float64 and not bitcast and dtype.is_floating() and dtype.primitive_bitwidth < 64:
+        raise TypeError("tla.cast does not support fp64 narrowing")
     return tl.cast(input, dtype, fp_downcast_rounding=fp_downcast_rounding, bitcast=bitcast, _semantic=_semantic)
 
 
@@ -140,6 +220,7 @@ def max_value(dtype, _semantic=None):
         upper = tla.max_value(tla.int32)
 
     This operation creates no buffer and performs no runtime conversion.
+    Constants may be constructed inside or outside SIMD VF.
     Pointer, block, buffer, SIMD vector and float8 types are unsupported.
     """
     dtype = tl._unwrap_if_constexpr(dtype)
@@ -162,6 +243,7 @@ def infinity(dtype, _semantic=None):
     dtype. The result is a scalar, with no buffer allocation or SIMD
     broadcast. Use ``-tla.infinity(dtype)`` for negative infinity and
     ``tla.simd.vdup`` to broadcast it explicitly.
+    Constants may be constructed inside or outside SIMD VF.
     """
     dtype = tl._unwrap_if_constexpr(dtype)
     if not isinstance(dtype, tl.dtype):
@@ -176,13 +258,14 @@ def clamp(x, min, max, propagate_nan: tl.constexpr = tl.PropagateNan.NONE, _sema
     """Scalar-only ``tl.clamp`` with standard type promotion.
 
     Clamp ``x`` to [min, max]. Accepts Python and runtime numeric scalars;
-    float16 and bfloat16 inputs are unsupported. Triton requires a floating-point
+    float16, bfloat16 and float8 inputs are unsupported. Triton requires a floating-point
     computation. ``propagate_nan`` defaults to ``tl.PropagateNan.NONE`` and applies
     only to ``x``. With ``NONE``, NaN ``x`` is temporarily unsupported on Ascend.
     Behavior is undefined if either bound is NaN or ``min > max``.
     No buffer allocation or SIMD broadcast is performed. Compute the scalar
     outside SIMD VF and broadcast it explicitly inside VF.
     """
+    _check_not_in_simd("tla.clamp", _semantic)
     x = _check_scalar(x, "tla.clamp x")
     min = _check_scalar(min, "tla.clamp min")
     max = _check_scalar(max, "tla.clamp max")

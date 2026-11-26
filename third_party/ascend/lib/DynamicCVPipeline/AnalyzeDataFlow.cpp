@@ -21,7 +21,9 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
 
@@ -46,6 +48,9 @@ void AnalyzeDataFlowPass::runOnOperation() {
   pm.addPass(createAnalyzeNamePass());
 
   pm.addPass(createAnalyzeScopePass());
+
+  if (CVPipeline::hasOuterMainLoop(module))
+    pm.addPass(createReorderOuterEventCarryPass());
 
   pm.addPass(createAnalyzeArgsPass());
 
@@ -74,6 +79,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass() {
 
 void registerAnalyzeDataFlowPasses() {
   registerPass(createAnalyzeNamePass);
+  registerPass(createReorderOuterEventCarryPass);
   registerPass(createAnalyzeArgsPass);
   registerPass(createAnalyzeFlagPass);
   registerPass(createAnalyzeScopePass);

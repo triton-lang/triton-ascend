@@ -175,6 +175,7 @@ private:
 
   bool isControlFlowOp(mlir::Operation *op);
   bool isCubeAndVectorOp(mlir::Operation *op);
+  bool isUsedByMatmulAB(mlir::Operation *op);
   bool isValidShapeForDependency(mlir::Value value);
   bool isValidValueForDependency(mlir::Value value);
   bool isValidScalarDependency(mlir::Value value);

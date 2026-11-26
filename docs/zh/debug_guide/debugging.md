@@ -8,7 +8,7 @@
 
 | 章节 | 主要内容 |
 |------|--------|
-| **1. 概述** | 说明调试的核心目标（聚焦 `ttir.mlir` → `ttadapter.mlir` 转换），并对常见问题进行分类指引。 |
+| **1. 引言** | 说明调试的核心目标（聚焦 `ttir.mlir` → `ttadapter.mlir` 转换），并对常见问题进行分类指引。 |
 | **2. 编译流程概览** | 介绍Triton-Ascend端到端编译链的关键阶段，为后续调试提供上下文基础。 |
 | **3. 临时文件指引** | 详解编译过程中生成的中间文件（如 `.mlir`、`.ll`、`.o` 等）的存储位置与用途，便于人工检查。 |
 | **4. 解释器模式** | 介绍如何通过 `TRITON_INTERPRET=1` 在CPU上运行kernel，作为NPU计算结果的精度基准。 |
@@ -34,9 +34,9 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **Python Kernel编译** | `triton_kernel.py` (Python) | `ttir.mlir` (MLIR) | Triton JIT编译器 | 将用户编写的Triton Python kernel编译为标准Triton IR (TTIR)。 |
 | **Triton IR适配转换** | `ttir.mlir` | `ttadapter.mlir` | 适配Ascend的Triton后端 | **关键调试阶段**。将TTIR转换为面向Ascend NPU后端的适配器IR。 |
-| **MLIR编译与代码生成** | `ttadapter.mlir` | `.o` (可执行对象文件) | 毕昇编译器 (`bishengir-compile`) | 将适配器IR进一步编译并优化，生成可在NPU上执行的二进制代码。 |
+| **MLIR编译与代码生成** | `ttadapter.mlir` | `.o`（可执行对象文件）| 毕昇编译器 (`bishengir-compile`) | 将适配器IR进一步编译并优化，生成可在NPU上执行的二进制代码。 |
 
-```text
+```output
 # Triton-Ascend编译流程示意
 [Python Kernel]
      ↓ (triton.compile)
@@ -47,7 +47,7 @@
 [NPU可执行文件 .o]
 ```
 
-**本指南的调试重点**集中在第二阶段：`ttir.mlir` → `ttadapter.mlir` 的转换过程，此阶段是Triton-Ascend的主要功能。
+**本指南的调试重点**集中在第二阶段：`ttir.mlir` → `ttadapter.mlir` 的转换过程，此阶段是Triton-Ascend调试的主要环节。
 
 ## 3 Triton-Ascend临时文件指引
 
@@ -59,34 +59,34 @@ Triton使用缓存机制来加速重复编译过程。编译过程中生成的�
 
 缓存目录结构：
 
-- 默认路径: ~/.triton/cache/
+- 默认路径：`~/.triton/cache/`
 
-主要缓存内容:
+主要缓存内容：
 
-- 输入文件缓存: 原始Triton kernel生成的ttir.mlir文件
+- 输入文件缓存：原始Triton kernel生成的ttir.mlir文件
 
-- 输出文件缓存: 经过适配Ascend转换后的ttadapter.mlir文件
+- 输出文件缓存：经过适配Ascend转换后的ttadapter.mlir文件
 
-- 编译产物缓存: 最终编译生成的可执行文件
+- 编译产物缓存：最终编译生成的可执行文件
 
 缓存文件命名约定：
 缓存文件通常以MD5哈希值命名，确保相同的kernel代码对应相同的缓存文件。
 
 **缓存管理建议：**
 
-定期清理: 缓存可能占用较多磁盘空间，可定期清理：
+定期清理：缓存可能占用较多磁盘空间，可定期清理。
 
 ```bash
 rm -rf ~/.triton/cache
 ```
 
-调试时禁用缓存: 在调试编译问题时，建议临时禁用缓存以确保每次都重新编译：
+调试时禁用缓存：在调试编译问题时，建议临时禁用缓存以确保每次都重新编译。
 
 ```bash
 export TRITON_ALWAYS_COMPILE=1
 ```
 
-缓存验证: 当怀疑缓存导致问题时，可删除相关缓存文件后重新测试。
+缓存验证：当怀疑缓存导致问题时，可删除相关缓存文件后重新测试。
 
 <a id="debug-dump-files"></a>
 
@@ -98,9 +98,9 @@ export TRITON_ALWAYS_COMPILE=1
 
 - 默认路径: ~/.triton/dump/
 
-目录命名: 每个编译会话会生成一个以时间戳或唯一ID命名的子目录。
+目录命名：每个编译会话会生成一个以时间戳或唯一ID命名的子目录。
 
-主要转储文件:
+主要转储文件：
 
 - kernel.ttir.mlir: Triton IR文件（编译输入）
 
@@ -149,7 +149,7 @@ TRITON_DEBUG=1 TRITON_ALWAYS_COMPILE=1 python 01-vector-add.py
 
 运行用例后会打印dump文件路径，默认是 ~/.triton/dump，显示如下：
 
-```text
+```output
 Dumping intermediate results to ~/.triton/dump/xxx
 # xxx是一串hash的唯一标识符
 ```
@@ -191,7 +191,7 @@ module {
 TTIR是Triton编译器前端生成的中间表示（Intermediate Representation），它以MLIR（Multi-Level IR）格式表达，保留了原始Triton Python内核的语义结构。在 `kernel.ttir.mlir` 中：
 
 - 函数 `@add_kernel` 接收三个指针参数（分别对应输入A、B和输出C的设备内存地址）以及一个整型参数 `n` 表示向量长度。
-- 每个Triton program (向量化执行单元) 处理1024个元素（由 `%c1024_i32` 常量体现），通过 `tt.get_program_id x` 获取当前block的ID，并计算其全局偏移。
+- 每个Triton program（向量化执行单元）处理1024个元素（由 `%c1024_i32` 常量体现），通过 `tt.get_program_id x` 获取当前block的ID，并计算其全局偏移。
 - 使用 `tt.make_range` 与 `tt.splat` 构造SIMD风格的索引张量，配合 `arith.addi` 生成每个线程处理的全局地址偏移。
 - 通过 `tt.addptr` 和 `tt.load` 实现向量化加载，使用掩码 `%6`（由 `arith.cmpi slt` 生成）防止越界访问。
 - 执行逐元素浮点加法 `arith.addf`，再通过 `tt.store` 将结果写回全局内存。
@@ -265,21 +265,20 @@ TTAdapter IR已完成从Triton抽象到适配昇腾NPU的格式转换。
 
 **使用方法：**
 
-1. 在Triton kernel源码中需要检查的位置插入Python断点：
+1. 设置环境变量`TRITON_INTERPRET=1`并运行程序，使Triton kernel在CPU解释器上执行。
+2. 在Triton kernel源码中需要检查的位置插入Python断点：
 
     ```python
     breakpoint()  # Python内置断点函数
     ```
 
-2. 设置环境变量 `TRITON_INTERPRET=1` 并运行程序，使Triton kernel在CPU解释器上执行。
+3. 程序执行到此处会暂停并进入Python调试器（`Pdb`）。可以打印和检查任意中间变量的值：
 
-3. 程序执行到此处会暂停并进入Python调试器 (`Pdb`)。可以打印和检查任意中间变量的值：
-
-    ```text
+    ```python
     (Pdb) p tmp0  # 打印变量tmp0的值
     ```
 
-- 注：解释器模式会在CPU上执行所有计算，显著降低运行效率。因此，在完成调试或验证后，务必取消设置环境变量 `TRITON_INTERPRET`，或显式将其设为0，确保系统性能不受影响：
+- 注：解释器模式会在CPU上执行所有计算，显著降低运行效率。因此，在完成调试或验证后，务必取消设置环境变量TRITON_INTERPRET，或显式将其设为0，确保系统性能不受影响：
 
 ```bash
 # 取消该环境变量
@@ -295,7 +294,7 @@ export TRITON_INTERPRET=0
 
 ### 5.1 打印调试方法
 
-#### 5.1.1 静态打印调试方法
+### 5.1.1 静态打印调试方法
 
 此方法使用 `tl.static_print` 在编译时打印常量表达式的值，适用于调试编译时已知的配置参数和常量。
 
@@ -311,7 +310,7 @@ export TRITON_INTERPRET=0
 
 使用方法：
 
-1.在Triton kernel中，为需要调试的常量参数添加tl.static_print语句
+1.在Triton kernel中，为需要调试的常量参数添加tl.static_print语句。
 
 ```python
 import triton
@@ -351,13 +350,13 @@ export TRITON_DEVICE_PRINT=1
 python your_program.py
 ```
 
-#### 5.1.2 运行时调试方法
+### 5.1.2 运行时调试方法
 
-此方法使用 `tl.device_print` 时可以灵活打印需要观察的变量的值。
-设置环境变量 `TRITON_DEVICE_PRINT=1` 可启用 `tl.device_print` 功能。此函数允许在kernel内部打印张量值，是分阶段验证计算精度的高效方法。
+此方法使用`tl.device_print`时可以灵活打印需要观察的变量的值。
+设置环境变量`TRITON_DEVICE_PRINT=1`可启用`tl.device_print`功能。此函数允许在kernel内部打印张量值，是分阶段验证计算精度的高效方法。
 **使用方法：**
 
-1. 在Triton kernel中，为需要打印的变量增加 `tl.device_print` 的语句。
+1. 在Triton kernel中，为需要打印的变量增加`tl.device_print`的语句。
 
 ```python
 import triton
@@ -373,7 +372,7 @@ def triton_kernel(out_ptr0, in_ptr0, in_ptr1, XBLOCK: tl.constexpr):
     tl.store(out_ptr0 + idx, tmp2)
 ```
 
-2.设置环境变量`TRITON_DEVICE_PRINT=1`并运行程序，窗口将打印出该变量的值。
+2.设置环境变量`TRITON_DEVICE_PRINT=1`并运行程序，终端将打印出该变量的值。
 
 ```bash
 # 启用Triton调试输出（包含device_print）
@@ -385,7 +384,7 @@ python your_program.py
 
 运行后，`tl.device_print` 打印的变量内容会显示在 `HiIPU Print` 区块内，示例如下：
 
-```text
+```output
 -----------------------------------------------------------------------------
 ---------------------------------HiIPU Print---------------------------------
 -----------------------------------------------------------------------------
@@ -397,7 +396,7 @@ python your_program.py
 - 注：打印长度限制：
 tl.device_print在张量打印时有长度限制，具体表现为：当张量长度超过一定阈值时，输出会被截断。
 
-#### 5.1.3 对比两种打印方法
+### 5.1.3 对比两种打印方法
 
 | 特性 | `tl.device_print` | `tl.static_print` |
 |------|-------------------|-------------------|
@@ -417,16 +416,16 @@ TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）
 
 ### 5.2 编译错误调试方法
 
-当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成 `ttadapter.mlir` ，报错 `MLIRCompilationError` 。
+当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompilationError`。
 需要进入Triton-Ascend代码层面定位问题。Triton-Ascend包含Python和C++ 代码层，需根据报错日志中的调用栈信息，定位到具体的报错代码片段，并采用相应的调试方法。
 
-#### 5.2.1 Python代码调试方法
+### 5.2.1 Python代码调试方法
 
-当调用栈信息显示错误源自Triton-Ascend的Python层代码时，可以使用Python内置的调试器pdb进行交互式调试。pdb允许设置断点、单步执行、检查变量状态，是定位Python代码逻辑错误的有效工具。
+当调用栈信息显示错误源自Triton-Ascend的Python层代码时，可以使用Python内置的调试器pdb进行交互式调试。pdb允许你设置断点、单步执行、检查变量状态，是定位Python代码逻辑错误的有效工具。
 
 使用步骤：
 
-1.定位问题入口
+定位问题入口
 在报错日志中找到最接近用户代码的Python调用栈信息，通常位于栈顶附近，例如：
 
 ```text
@@ -434,7 +433,7 @@ File "/path/to/triton/ascend/compiler.py", line 123, in compile_fn
     result = lower_function(...)
 ```
 
-2.插入调试断点
+插入调试断点
 在怀疑出错的Python源文件中插入pdb断点。
 
 ```python
@@ -442,7 +441,7 @@ def compile_fn(ttir):
     import pdb; pdb.set_trace()  # 兼容所有Python版本
 ```
 
-**示例：**
+**示例:**
 假设在 `compiler.py` 的第123行设置了断点，程序暂停后：
 
 ```text
@@ -459,23 +458,21 @@ python
 (Pdb) p result  # 查看结果
 ```
 
-#### 5.2.2 环境变量调试方法
+### 5.2.2 环境变量调试方法
 
 在开发或调试Triton算子时，可通过设置以下环境变量启用不同阶段的中间表示（IR）打印，帮助定位问题。以下是两个关键调试开关的详细说明。
 
-##### 5.2.2.1 `MLIR_ENABLE_DUMP=1`
+#### 5.2.2.1 `MLIR_ENABLE_DUMP=1`
 
 **功能**
 启用 **MLIR高层IR的自动dump**。在每个MLIR Pass执行前后，将当前函数的IR以可读文本形式输出到 `stderr`。
 
 **特点**
-
-- 日志量小：通常几十至几百行，易于阅读。
-
-- 聚焦高层逻辑：适用于调试算子转换、内存布局、并行策略等。
+日志量小：通常几十至几百行，易于阅读。
+聚焦高层逻辑：适用于调试算子转换、内存布局、并行策略等。
 
 **使用建议**
-日常调试首选：90%的Triton算子问题可通过此日志定位。
+日常调试首选：90% 的Triton算子问题可通过此日志定位。
 配合 `TRITON_DEBUG=1` 可进一步增强信息。
 
 **启用方式**
@@ -486,22 +483,19 @@ export TRITON_DEBUG=1
 python your_triton_script.py
 ```
 
-##### 5.2.2.2 `TRITON_ENABLE_LLVM_DEBUG=1`
+#### 5.2.2.2 `TRITON_ENABLE_LLVM_DEBUG=1`
 
 **功能**
 启用LLVM后端CodeGen阶段的全量调试日志，包括指令选择、寄存器分配、指令调度、机器码生成等底层过程。
 
 **特点**
-
-- 日志量极大：单个kernel可产生数万行输出。
-
-- 极底层细节：包含寄存器名、物理/虚拟寄存器映射、栈帧布局等。
-
-- 仅限LLVM专家：对普通Triton开发者通常为“噪声”。
+日志量极大：单个kernel可产生数万行输出。
+极底层细节：包含寄存器名、物理/虚拟寄存器映射、栈帧布局等。
+仅限LLVM专家：对普通Triton开发者通常为“噪声”。
 
 **使用建议**
 仅在怀疑LLVM后端bug时启用（如生成非法指令、性能异常）。
-配合 `TRITON_LLVM_DEBUG_ONLY` 限制输出范围。
+配合TRITON_LLVM_DEBUG_ONLY限制输出范围。
 
 在启用 `TRITON_ENABLE_LLVM_DEBUG=1` 时，可通过 `TRITON_LLVM_DEBUG_ONLY` 环境变量指定仅输出特定模块的调试日志。以下是常用 `DEBUG_TYPE` 的简要解释：
 

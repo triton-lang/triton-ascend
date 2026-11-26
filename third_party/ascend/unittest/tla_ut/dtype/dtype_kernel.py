@@ -23,7 +23,7 @@ Each case passes one ``tla`` dtype as a constexpr into two kernels:
 
 - ``dtype_copy`` declares a UB buffer and a GM view with that dtype, so the
   dtype reaches ``tla.alloc``, ``tla.view`` and the DMA copy ops;
-- ``dtype_splat`` builds a full SIMD register with ``tla.simd.vfull``, so the
+- ``dtype_splat`` builds a full SIMD register with ``tla.simd.vdup``, so the
   dtype also reaches ``tla.vector_type``.
 
 The ``tla.dtype("fp32")`` constructor is covered as one more case value.  The
@@ -32,8 +32,7 @@ dtypes (fp32/bf16/int32/uint8/int64) that exercises float, bf16, signed,
 unsigned and 64-bit elements.
 
 ``int64`` and ``uint64`` are covered by ``dtype_copy`` but excluded from the
-``vfull`` case: 64-bit vector broadcast currently crashes in the Bisheng
-backend (``vbr_int64_t``), so that part is left to the backend fix.
+``vdup`` case: the masked broadcast does not support 64-bit elements.
 """
 import os
 import sys
@@ -60,17 +59,16 @@ DTYPES = {
     "uint64": (tla.uint64, torch.uint64, 64, "i64"),
 }
 RUN_CASES = ("float32", "bfloat16", "int32", "uint8", "int64")
-# 64-bit vector broadcast (vfull) is not supported by the current Bisheng
-# backend; keep these dtypes in dtype_copy but skip the vfull case.
-VFULL_UNSUPPORTED = frozenset({"int64", "uint64"})
+# Keep 64-bit types in dtype_copy; masked broadcast does not support them.
+VDUP_UNSUPPORTED = frozenset({"int64", "uint64"})
 
 
 @tla.jit
 def dtype_copy(X, Y, DT: tl.constexpr, N: tl.constexpr):
     ub = tla.alloc((N, ), DT, space="ub")
     with tla.scope.vector():
-        tla.copy(tla.view(X, (N, )), ub)
-        tla.copy(ub, tla.view(Y, (N, )))
+        tla.load_gm_to_ub(tla.view(X, (N, )), ub)
+        tla.store_ub_to_gm(ub, tla.view(Y, (N, )))
 
 
 @tla.jit
@@ -78,8 +76,8 @@ def dtype_splat(O, DT: tl.constexpr, N: tl.constexpr):
     ub = tla.alloc((N, ), DT, space="ub")
     with tla.scope.vector():
         with tla.scope.simd():
-            tla.simd.vsts(ub[0], tla.simd.vfull(0, DT, N))
-        tla.copy(ub, tla.view(O, (N, )))
+            tla.simd.vsts(ub[0], tla.simd.vdup(0, DT))
+        tla.store_ub_to_gm(ub, tla.view(O, (N, )))
 
 
 def signature(ty):
@@ -97,14 +95,14 @@ def test_ir(output_dir=None):
         lowered = str(lower_offline(module, ctx, output_dir=output_dir))
         check_lowered_ir(lowered, loads=1, stores=1, buffers=None)
 
-        if name in VFULL_UNSUPPORTED:
+        if name in VDUP_UNSUPPORTED:
             continue
         module, ctx = compile_offline(dtype_splat, {"O": "*" + ty.mangle()}, constexprs, output_dir=output_dir)
         text = str(module)
         assert f"vector<{lanes}x{elem}>" in text, name
-        assert "ave.hir.scalar_broadcast" in text, name
+        assert "ave.hir.broadcast" in text, name
         lower_offline(module, ctx, output_dir=output_dir)
-    print("IR PASS: 11 tla dtypes plus tla.dtype('fp32') reach buffers; vfull skips int64/uint64")
+    print("IR PASS: 11 tla dtypes plus tla.dtype('fp32') reach buffers; vdup skips int64/uint64")
 
 
 def _launch(name):
@@ -115,7 +113,7 @@ def _launch(name):
     torch.npu.synchronize()
     got = y.cpu()
     torch.testing.assert_close(got, x, rtol=0, atol=0)
-    if name in VFULL_UNSUPPORTED:
+    if name in VDUP_UNSUPPORTED:
         return
     out = torch.full((lanes, ), 3, dtype=torch_dtype, device="npu")
     dtype_splat[(1, )](out, DT=ty, N=lanes)
@@ -134,8 +132,8 @@ def test_compile():
 def test_run():
     for name in RUN_CASES:
         _launch(name)
-    vfull_cases = [name for name in RUN_CASES if name not in VFULL_UNSUPPORTED]
-    print("DTYPE OK: copy for", ", ".join(RUN_CASES), "; vfull for", ", ".join(vfull_cases))
+    vdup_cases = [name for name in RUN_CASES if name not in VDUP_UNSUPPORTED]
+    print("DTYPE OK: copy for", ", ".join(RUN_CASES), "; vdup for", ", ".join(vdup_cases))
 
 
 def main():

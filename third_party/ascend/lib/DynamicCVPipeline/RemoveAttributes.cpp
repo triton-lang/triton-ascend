@@ -30,6 +30,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassRegistry.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
 
@@ -65,6 +66,15 @@ void RemoveSsbufAttrPass::runOnOperation() {
 
   if (CVPipeline::hasFallbackAttr(module)) {
     return;
+  }
+
+  if (module->removeAttr(kOuterMainLoopHint)) {
+    module->walk([](Operation *op) {
+      op->removeAttr(kExplicitMainLoop);
+      op->removeAttr(kOuterEventControlCount);
+      op->removeAttr(kOuterEventControl);
+      op->removeAttr(kOuterEventFallback);
+    });
   }
 
   module->walk([](Operation *op) {

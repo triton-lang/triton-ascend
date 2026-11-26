@@ -35,10 +35,7 @@ using namespace mlir::triton;
 namespace {
 struct ReleaseProbe {
   Value watched;
-  llvm::DenseMap<Value, PtrOffsetInfo> *cache;
   unsigned releases = 0;
-  bool staleKey = false;
-  bool stalePayload = false;
 };
 thread_local ReleaseProbe *activeProbe = nullptr;
 
@@ -49,14 +46,6 @@ void observeRelease(void *pointer) {
   if (!probe || pointer != probe->watched.getAsOpaquePointer())
     return;
   ++probe->releases;
-  probe->staleKey |= probe->cache->contains(probe->watched);
-  for (auto &entry : *probe->cache) {
-    auto &info = entry.second;
-    probe->stalePayload |=
-        info.getPtr() == probe->watched || info.getOffset() == probe->watched;
-    for (Value offset : info.getOffsetsRef())
-      probe->stalePayload |= offset == probe->watched;
-  }
 }
 } // namespace
 
@@ -73,20 +62,22 @@ extern "C" void __wrap__ZdlPvm(void *pointer, std::size_t size) noexcept {
   __real__ZdlPvm(pointer, size);
 }
 
-TEST(OffsetCacheLifetime, ReleasesOldValuesAfterCacheInvalidation) {
+TEST(PointerBoundaryLifetime, ReleasesReplacedArguments) {
   MLIRContext context;
   context.loadDialect<arith::ArithDialect, scf::SCFDialect,
                       triton::TritonDialect>();
   auto module = parseSourceString<ModuleOp>(R"mlir(
     module {
-      tt.func @cache_lifetime(%base: !tt.ptr<i32>, %n: i32) {
+      tt.func @cache_lifetime(%base: !tt.ptr<i32>, %other: !tt.ptr<i32>, %n: i32) {
         %zero = arith.constant 0 : i32
         %one = arith.constant 1 : i32
         %p0 = tt.addptr %base, %n : !tt.ptr<i32>, i32
-        %result = scf.for %i = %zero to %n step %one
-            iter_args(%p = %p0) -> (!tt.ptr<i32>) : i32 {
+        // The cursor can carry an offset in place. The second slot switches
+        // bases, forcing the loop and its original arguments to be replaced.
+        %result:2 = scf.for %i = %zero to %n step %one
+            iter_args(%p = %p0, %q = %base) -> (!tt.ptr<i32>, !tt.ptr<i32>) : i32 {
           %next = tt.addptr %p, %one : !tt.ptr<i32>, i32
-          scf.yield %next : !tt.ptr<i32>
+          scf.yield %next, %other : !tt.ptr<i32>, !tt.ptr<i32>
         }
         tt.return
       }
@@ -97,23 +88,18 @@ TEST(OffsetCacheLifetime, ReleasesOldValuesAfterCacheInvalidation) {
   auto func = *module->getOps<triton::FuncOp>().begin();
   auto loop = *func.getBody().front().getOps<scf::ForOp>().begin();
   Value oldArg = loop.getRegionIterArgs().front();
-  llvm::DenseMap<Value, PtrOffsetInfo> cache;
-  IRRewriter rewriter(&context);
-  parse(oldArg, oldArg.getLoc(), rewriter, cache);
-  ASSERT_TRUE(cache.contains(oldArg));
-
-  ReleaseProbe probe{oldArg, &cache};
+  ReleaseProbe probe{oldArg};
   ASSERT_EQ(activeProbe, nullptr);
   {
     activeProbe = &probe;
     auto resetProbe = llvm::make_scope_exit([] { activeProbe = nullptr; });
-    replacePtrArguments(func, cache);
+    ASSERT_TRUE(succeeded(replacePtrArguments(func)));
   }
 
   // Do not silently pass if the linker or MLIR allocation path stops routing
   // the watched deallocation through the wrappers.
   EXPECT_EQ(probe.releases, 1u);
-  EXPECT_FALSE(probe.staleKey);
-  EXPECT_FALSE(probe.stalePayload);
+  auto replacement = *func.getBody().front().getOps<scf::ForOp>().begin();
+  EXPECT_TRUE(replacement.getRegionIterArgs().front().getType().isInteger(64));
   EXPECT_TRUE(succeeded(verify(*module)));
 }

@@ -35,17 +35,17 @@ WIDE_SIGNATURE = {"I": "*i64", "U": "*u64", "T": "*i32", "OI": "*i64", "OU": "*u
 
 
 @tla.jit
-def vdupv(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((10, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (N, )), xb)
-    tla.copy(tla.view(T, (N, )), tb)
+def vdupv(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    xb = tla.alloc((N, ), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((10, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), xb)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdupv(x, pos=tla.simd.POS.LOWEST))
@@ -58,25 +58,25 @@ def vdupv(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[7, 0], tla.simd.vdupv(x, mask=none, pos=tla.simd.POS.HIGHEST))
         tla.simd.vsts(ob[8, 0], tla.simd.vdupv(x, mask=prefix, pos=tla.simd.POS.LOWEST, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[9, 0], tla.simd.vdupv(x, mask=prefix, pos=tla.simd.POS.HIGHEST, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (10, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (10, N)))
 
 
 @tla.jit
-def vdupv_wide(I, U, T, OI, OU, N: tl.constexpr, ACTIVE: tl.constexpr):
-    ib = tla.alloc_buffer((N, ), tl.int64, space="ub")
-    ub = tla.alloc_buffer((N, ), tl.uint64, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    oi = tla.alloc_buffer((8, N), tl.int64, space="ub")
-    ou = tla.alloc_buffer((8, N), tl.uint64, space="ub")
-    tla.copy(tla.view(I, (N, )), ib)
-    tla.copy(tla.view(U, (N, )), ub)
-    tla.copy(tla.view(T, (N, )), tb)
+def vdupv_wide(I, U, T, OI, OU, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    ib = tla.alloc((N, ), tl.int64, space="ub")
+    ub = tla.alloc((N, ), tl.uint64, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    oi = tla.alloc((8, N), tl.int64, space="ub")
+    ou = tla.alloc((8, N), tl.uint64, space="ub")
+    tla.load_gm_to_ub(tla.view(I, (N, )), ib)
+    tla.load_gm_to_ub(tla.view(U, (N, )), ub)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         iv = tla.simd.vlds(ib[0])
         uv = tla.simd.vlds(ub[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         # Signed i32 lane index vs per-lane threshold: no unsigned 64-bit compare.
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
@@ -96,12 +96,12 @@ def vdupv_wide(I, U, T, OI, OU, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ou[5, 0], tla.simd.vdupv(uv, mask=arb, pos=tla.simd.POS.HIGHEST), dist="NORM_B64")
         tla.simd.vsts(ou[6, 0], tla.simd.vdupv(uv, mask=none, pos=tla.simd.POS.LOWEST), dist="NORM_B64")
         tla.simd.vsts(ou[7, 0], tla.simd.vdupv(uv, mask=none, pos=tla.simd.POS.HIGHEST), dist="NORM_B64")
-    tla.copy(oi, tla.view(OI, (8, N)))
-    tla.copy(ou, tla.view(OU, (8, N)))
+    tla.store_ub_to_gm(oi, tla.view(OI, (8, N)))
+    tla.store_ub_to_gm(ou, tla.view(OU, (8, N)))
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def test_ir(output_dir=None):

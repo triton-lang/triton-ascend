@@ -227,9 +227,9 @@ int64_t selectRowsPerProgram(int64_t grid, int64_t maxDotRows,
     tighten(budget / maxTensorBytes);
 
   if (policy.ubBudgetBytes > 0 && peakLiveBytes > 0) {
-    const uint64_t perFactorDemand =
-        static_cast<uint64_t>(peakLiveBytes) * kUBBufferReplication;
-    tighten(static_cast<int64_t>(policy.ubBudgetBytes / perFactorDemand));
+    // peakLiveBytes already carries the per-buffer multi-buffer accounting.
+    tighten(static_cast<int64_t>(policy.ubBudgetBytes /
+                                 static_cast<uint64_t>(peakLiveBytes)));
   }
 
   if (policy.targetDotRows > 0 && maxDotRows > 0)

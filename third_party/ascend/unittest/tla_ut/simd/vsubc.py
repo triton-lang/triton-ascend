@@ -27,19 +27,19 @@ SIGNATURE = {name: "*u32" for name in ("X", "Y", "D", "B")}
 
 @tla.jit
 def vsubc(X, Y, D, B, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr,
-          BASE_ROWS: tl.constexpr):
-    x = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    y = tla.alloc_buffer((TILES, N), tl.uint32, space="ub")
-    d = tla.alloc_buffer((BASE_ROWS + TILES, N), tl.uint32, space="ub")
-    b = tla.alloc_buffer((BASE_ROWS + TILES, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), x)
-    tla.copy(tla.view(Y, (TILES, N)), y)
+          BASE_ROWS: tl.constexpr, MASKPAT: tl.constexpr, TAILPAT: tl.constexpr):
+    x = tla.alloc((TILES, N), tl.uint32, space="ub")
+    y = tla.alloc((TILES, N), tl.uint32, space="ub")
+    d = tla.alloc((BASE_ROWS + TILES, N), tl.uint32, space="ub")
+    b = tla.alloc((BASE_ROWS + TILES, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), x)
+    tla.load_gm_to_ub(tla.view(Y, (TILES, N)), y)
     with tla.scope.simd():
         a = tla.simd.vlds(x[0, 0])
         c = tla.simd.vlds(y[0, 0])
-        mask = tla.simd.pge(ACTIVE, N)
-        one_u = tla.simd.vsplat(1, tl.uint32)
-        zero_u = tla.simd.vsplat(0, tl.uint32)
+        mask = tla.simd.pset(2048 // N, MASKPAT)
+        one_u = tla.simd.vdup(1, tl.uint32)
+        zero_u = tla.simd.vdup(0, tl.uint32)
 
         full, full_borrow = tla.simd.vsubc(a, c)
         zeroed, zeroed_borrow = tla.simd.vsubc(a, c, mask)
@@ -51,19 +51,19 @@ def vsubc(X, Y, D, B, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
         signed = tla.simd.vbitcast(a, "int32")
         signed_subtrahend = tla.simd.vbitcast(c, "int32")
         signed_diff, signed_borrow = tla.simd.vsubc(signed, signed_subtrahend)
-        one_i = tla.simd.vsplat(1, tl.int32)
-        zero_i = tla.simd.vsplat(0, tl.int32)
+        one_i = tla.simd.vdup(1, tl.int32)
+        zero_i = tla.simd.vdup(0, tl.int32)
         tla.simd.vsts(d[2, 0], tla.simd.vbitcast(signed_diff, "uint32"))
         tla.simd.vsts(b[2, 0], tla.simd.vsel(signed_borrow, one_i, zero_i))
 
         # Seed only the tail rows; full tiles overwrite their rows entirely.
-        tla.simd.vsts(d[BASE_ROWS + TILES - 1, 0], tla.simd.vsplat(SENTINEL_C, tl.uint32))
-        tla.simd.vsts(b[BASE_ROWS + TILES - 1, 0], tla.simd.vsplat(SENTINEL_C, tl.uint32))
+        tla.simd.vsts(d[BASE_ROWS + TILES - 1, 0], tla.simd.vdup(SENTINEL_C, tl.uint32))
+        tla.simd.vsts(b[BASE_ROWS + TILES - 1, 0], tla.simd.vdup(SENTINEL_C, tl.uint32))
         for t in tl.static_range(TILES):
             va = tla.simd.vlds(x[t, 0])
             vb = tla.simd.vlds(y[t, 0])
             if t == TILES - 1:
-                tail_mask = tla.simd.pge(TAIL, N)
+                tail_mask = tla.simd.pset(2048 // N, TAILPAT)
                 tail_diff, tail_borrow = tla.simd.vsubc(va, vb, tail_mask)
                 tla.simd.vsts(d[BASE_ROWS + t, 0], tail_diff, mask=tail_mask)
                 tla.simd.vsts(b[BASE_ROWS + t, 0], tla.simd.vsel(tail_borrow, one_u, zero_u), mask=tail_mask)
@@ -71,16 +71,18 @@ def vsubc(X, Y, D, B, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr
                 tile_diff, tile_borrow = tla.simd.vsubc(va, vb)
                 tla.simd.vsts(d[BASE_ROWS + t, 0], tile_diff)
                 tla.simd.vsts(b[BASE_ROWS + t, 0], tla.simd.vsel(tile_borrow, one_u, zero_u))
-    tla.copy(d, tla.view(D, (BASE_ROWS + TILES, N)))
-    tla.copy(b, tla.view(B, (BASE_ROWS + TILES, N)))
+    tla.store_ub_to_gm(d, tla.view(D, (BASE_ROWS + TILES, N)))
+    tla.store_ub_to_gm(b, tla.view(B, (BASE_ROWS + TILES, N)))
 
 
 def constexprs():
     return {
         "N": SHAPE["lanes"],
         "ACTIVE": SHAPE["active"],
+        "MASKPAT": "VL%d" % (SHAPE["active"]),
         "TILES": SHAPE["tiles"],
         "TAIL": SHAPE["tail"],
+        "TAILPAT": "VL%d" % (SHAPE["tail"]),
         "BASE_ROWS": SHAPE["base_rows"],
     }
 

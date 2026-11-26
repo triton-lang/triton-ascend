@@ -88,16 +88,21 @@ struct ResourceSnapshot {
                uint64_t l0bCapacityBytes = 0, uint64_t l0cCapacityBytes = 0,
                unsigned l0SafetyPercent = 80);
 
-  static ResourceSnapshot fromHardwareConfig(
-      const ascend::HardwareConfig &hardware, unsigned ubSafetyPercent = 80,
-      uint64_t reservedUBBytes = 0, unsigned l0SafetyPercent = 80);
+  static ResourceSnapshot
+  fromHardwareConfig(const ::mlir::ascend::HardwareConfig &hardware,
+                     unsigned ubSafetyPercent = 80,
+                     uint64_t reservedUBBytes = 0,
+                     unsigned l0SafetyPercent = 80);
 };
+
+constexpr uint64_t kUBMultiBufferReplication = 2;
 
 struct LiveTensorInterval {
   Value value;
   uint64_t begin = 0;
   uint64_t end = 0;
   uint64_t bytes = 0;
+  bool pipelined = false;
 };
 
 struct LiveByteEstimate {
@@ -105,6 +110,7 @@ struct LiveByteEstimate {
   bool overflow = false;
   ResourceCostRejectReason reason = ResourceCostRejectReason::UnknownResource;
   uint64_t peakLiveBytes = 0;
+  uint64_t peakPipelinedLiveBytes = 0;
   llvm::SmallVector<LiveTensorInterval, 16> intervals;
 };
 

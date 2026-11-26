@@ -1,9 +1,9 @@
 // RUN: triton-opt --triton-to-unstructure --triton-to-linalg="named-ops=True" --split-input-file %s  | FileCheck %s
 // CHECK-LABEL: func.func @parse_custom
-// CHECK: %4 = hivm.hir.custom
-// CHECK: %reinterpret_cast = memref.reinterpret_cast %4 to offset: [0], sizes: [32], strides: [1] : memref<?xf16> to memref<32xf16, strided<[1]>>
-// CHECK: %alloc = memref.alloc() : memref<32xf16>
-// CHECK: memref.copy %reinterpret_cast, %alloc : memref<32xf16, strided<[1]>> to memref<32xf16>
+// CHECK: %[[CUSTOM:.*]] = hivm.hir.custom
+// CHECK: %[[VIEW:.*]] = memref.reinterpret_cast %[[CUSTOM]] to offset: [0], sizes: [32], strides: [1] : memref<?xf16> to memref<32xf16, strided<[1]>>
+// CHECK: %[[BUFFER:.*]] = memref.alloc() : memref<32xf16>
+// CHECK: memref.copy %[[VIEW]], %[[BUFFER]] : memref<32xf16, strided<[1]>> to memref<32xf16>
 
 module {
   tt.func public @parse_custom(%arg0: !tt.ptr<f16>, %arg1: !tt.ptr<f16>, %arg2: i32, %arg3: i32) {

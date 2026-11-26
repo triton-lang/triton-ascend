@@ -77,6 +77,7 @@ enum class GraphOptimizationRuleId : GraphOptimizationRuleMask {
   // rules stay independently gated; RFC #2686 places it in the ProgramMapping
   // phase, alongside IAT.
   QueryRowBatching = 131072,
+  CoalescAtomicLockRemoval = 262144,
 };
 
 enum class GraphOptimizationRulePhase : uint8_t {
@@ -133,6 +134,8 @@ getGraphOptimizationRuleName(GraphOptimizationRuleId rule) {
     return "SelectedBlockScanRule";
   case GraphOptimizationRuleId::QueryRowBatching:
     return "QueryRowBatchingRule";
+  case GraphOptimizationRuleId::CoalescAtomicLockRemoval:
+    return "CoalescAtomicLockRemovalRule";
   }
   return "Unknown";
 }
@@ -169,6 +172,7 @@ getGraphOptimizationRulePhase(GraphOptimizationRuleId rule) {
     return GraphOptimizationRulePhase::ContiguousBlockAccessFormation;
   case GraphOptimizationRuleId::SelectedBlockScan:
     return GraphOptimizationRulePhase::SelectedBlockScan;
+  case GraphOptimizationRuleId::CoalescAtomicLockRemoval:
   case GraphOptimizationRuleId::QueryRowBatching:
     return GraphOptimizationRulePhase::ProgramMapping;
   case GraphOptimizationRuleId::RowCoalescing:
@@ -181,7 +185,7 @@ getGraphOptimizationRulePhase(GraphOptimizationRuleId rule) {
   return GraphOptimizationRulePhase::Compatibility;
 }
 
-constexpr std::array<GraphOptimizationRuleId, 17>
+constexpr std::array<GraphOptimizationRuleId, 18>
     kGraphOptimizationRuleRegistry = {
         GraphOptimizationRuleId::LoadStoreTranspose,
         GraphOptimizationRuleId::TransposePointwiseReorder,
@@ -200,6 +204,7 @@ constexpr std::array<GraphOptimizationRuleId, 17>
         GraphOptimizationRuleId::ContiguousBlockAccessFormation,
         GraphOptimizationRuleId::SelectedBlockScan,
         GraphOptimizationRuleId::QueryRowBatching,
+        GraphOptimizationRuleId::CoalescAtomicLockRemoval,
 };
 
 constexpr bool hasUniqueSingleBitGraphOptimizationRuleIds() {
@@ -251,14 +256,18 @@ constexpr GraphOptimizationRuleMask kKnownGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::ContiguousBlockAccessFormation) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::SelectedBlockScan) |
-    getGraphOptimizationRuleMask(GraphOptimizationRuleId::QueryRowBatching);
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::QueryRowBatching) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::CoalescAtomicLockRemoval);
 
 constexpr GraphOptimizationRuleMask kDefaultEligibleGraphOptimizationRuleMask =
     kLegacyGraphOptimizationRuleMask |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::IndependentAxisTensorize) |
     getGraphOptimizationRuleMask(
-        GraphOptimizationRuleId::PersistentTaskStripMining);
+        GraphOptimizationRuleId::PersistentTaskStripMining) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::CoalescAtomicLockRemoval);
 
 // Fixed default-off: these bits are known and can be enabled through the rule
 // mask, but they are not part of the default bundle.  RFC #2686 keeps
@@ -289,10 +298,8 @@ static_assert(kLegacyGraphOptimizationRuleMask == 511,
 static_assert(kDefaultGraphOptimizationRuleMask ==
                   kDefaultEligibleGraphOptimizationRuleMask,
               "the default set must stay equal to the default-eligible set");
-static_assert(
-    kDefaultGraphOptimizationRuleMask == 3071,
-    "default graph rule mask stays 3071: the #2686 SelectedBlockScan and "
-    "QueryRowBatching bits are fixed default-off (RFC #2686)");
+static_assert(kDefaultGraphOptimizationRuleMask == 265215,
+              "default graph rule mask includes atomic lock removal");
 static_assert(kKnownGraphOptimizationRuleMask ==
                   (kDefaultEligibleGraphOptimizationRuleMask |
                    kFixedDefaultOffGraphOptimizationRuleMask),
@@ -371,6 +378,7 @@ struct GraphOptimizationOptions {
   // compile_mode="simt_only".  Keep the source selector rather than a
   // second derived force flag so every consumer follows one mode contract.
   std::string compileMode = "simd_simt_template";
+  bool compileOn91095 = false;
   IndependentAxisTensorizeRuleOptions independentAxisTensorize;
   PersistentTaskStripMiningRuleOptions persistentTaskStripMining;
   StoreCoalescingRuleOptions storeCoalescing;

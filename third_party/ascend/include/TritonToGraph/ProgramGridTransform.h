@@ -46,6 +46,7 @@ struct ProgramGridTransform {
   int64_t factor = 1;
   bool persistentCoverage = false;
   bool gridStrideAbiVerified = false;
+  bool capToFactor = false;
 };
 
 struct ProgramGridTransformContract {
@@ -53,8 +54,10 @@ struct ProgramGridTransformContract {
   SmallVector<ProgramGridTransform> transforms;
 };
 
-LogicalResult addProgramGridHiddenExtentArguments(triton::FuncOp function);
-bool hasProgramGridHiddenExtentArguments(triton::FuncOp function);
+LogicalResult addProgramGridHiddenExtentArguments(triton::FuncOp function,
+                                                  int64_t version = 2);
+bool hasProgramGridHiddenExtentArguments(triton::FuncOp function,
+                                         int64_t version = 2);
 
 LogicalResult commitProgramGridFunctionFromSandbox(triton::FuncOp destination,
                                                    triton::FuncOp source);

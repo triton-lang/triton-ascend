@@ -1,28 +1,30 @@
-// === #2686 SelectedBlockScanRule (bit 65536) — merged case ===
-//
 // Two modules in one file:
 //   1. POSITIVE: the sparse gather kernel. The rule never commits alone: its
 //      plan hands a private sandbox to the row lift's real materialize entry
 //      (QueryRowBatching.h), so the joint scan + row lift form is what lands.
-//      Bit 131072 only decides whether the row lift is ALSO scheduled alone, so
-//      65536 and 196608 must agree, and both must differ from the rule-off run.
+//      The rule is registered only when BOTH bits are set: 65536 alone and
+//      131072 alone must be exact no-ops, and only 196608 may rewrite.
 //   2. NEGATIVE: the same kernel with a third tensor load inside the loop. The
 //      rewrite rebuilds the body and can only reproduce the loads it knows, so
 //      the matcher must decline and leave the module byte-identical.
 //
-// Bits 16/17 are known but fixed default-off (default mask 3071), so they are
+// Bits 16/17 are known but fixed default-off, so they are
 // requested explicitly. The non-950 run checks the target gate declines too.
 // RUN: echo -n > %t.empty
-// RUN: triton-opt %s --split-input-file -graph-optimize='rule-mask=0' -canonicalize -cse -o %t.ctl
-// RUN: triton-opt %s --split-input-file -graph-optimize='rule-mask=65536' -canonicalize -cse -o %t.a
-// RUN: triton-opt %s --split-input-file -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.ab
-// RUN: diff %t.a %t.ab
-// RUN: not diff %t.ctl %t.a
-// RUN: triton-opt %s --split-input-file -graph-optimize='rule-mask=65536' -canonicalize -cse -o /dev/null 2> %t.err
+// RUN: triton-opt %s --split-input-file --verify-each -graph-optimize='rule-mask=0' -canonicalize -cse -o %t.ctl
+// RUN: triton-opt %s --split-input-file --verify-each -graph-optimize='rule-mask=65536' -canonicalize -cse -o %t.a
+// RUN: triton-opt %s --split-input-file --verify-each -graph-optimize='rule-mask=131072' -canonicalize -cse -o %t.b
+// RUN: triton-opt %s --split-input-file --verify-each -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.ab
+// RUN: diff %t.ctl %t.a
+// RUN: diff %t.ctl %t.b
+// RUN: not diff %t.ctl %t.ab
+// the rewritten shape itself is pinned by the REWRITTEN/EXTRA checks below
+// RUN: triton-opt %s --split-input-file --verify-each -graph-optimize='rule-mask=196608' -canonicalize -cse | FileCheck %s --check-prefix=REWRITTEN --check-prefix=EXTRA
+// RUN: triton-opt %s --split-input-file --verify-each -graph-optimize='rule-mask=196608' -canonicalize -cse -o /dev/null 2> %t.err
 // RUN: diff %t.empty %t.err
 // RUN: sed 's/Ascend950PR_9579/Ascend910_95/' %s > %t.a595.mlir
-// RUN: triton-opt %t.a595.mlir --split-input-file -graph-optimize='rule-mask=0' -canonicalize -cse -o %t.a595.ctl
-// RUN: triton-opt %t.a595.mlir --split-input-file -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.a595.out 2> %t.a595.err
+// RUN: triton-opt %t.a595.mlir --split-input-file --verify-each -graph-optimize='rule-mask=0' -canonicalize -cse -o %t.a595.ctl
+// RUN: triton-opt %t.a595.mlir --split-input-file --verify-each -graph-optimize='rule-mask=196608' -canonicalize -cse -o %t.a595.out 2> %t.a595.err
 // RUN: diff %t.a595.ctl %t.a595.out
 // RUN: diff %t.empty %t.a595.err
 

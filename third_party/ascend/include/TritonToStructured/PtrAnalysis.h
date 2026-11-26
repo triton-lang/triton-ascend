@@ -188,6 +188,15 @@ public:
   LogicalResult visitOperandAddptr(triton::AddPtrOp addptrOp, PtrState &state,
                                    const Location loc, OpBuilder &builder);
 
+  // Operand is a pointer element-type cast.
+  // A width-preserving cast (i1 counts as one byte) is a pure reinterpretation,
+  // so the offset arithmetic is unchanged and the analysis can continue on the
+  // cast source. This keeps the broadcast/addptr structure that the frontend
+  // emits before the bool `ptr<i1> -> ptr<i8>` cast visible to the caller.
+  LogicalResult visitOperandBitcast(triton::BitcastOp bitcastOp,
+                                    PtrState &state, const Location loc,
+                                    OpBuilder &builder);
+
   // Operand is the result of tt.make_tensor_ptr.
   // Expected result:
   //  Parse source pointer and grab results

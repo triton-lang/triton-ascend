@@ -70,8 +70,6 @@ struct RowLiftFeatures {
 constexpr int64_t kMaxLiftedValueBytes = 128 * 1024;
 // Vector register width, used as the whole-row broadcast granularity.
 constexpr int64_t kVectorRegisterBytes = 256;
-// Conservative UB replication factor covering the auto multi-buffer copy.
-constexpr uint64_t kUBBufferReplication = 2;
 
 // Policy for picking the rows per program (R).
 struct RowCountPolicy {

@@ -27,7 +27,6 @@ import json
 import os
 from pathlib import Path
 import re
-import sys
 import sysconfig
 import tempfile
 from types import MappingProxyType
@@ -35,7 +34,7 @@ from types import MappingProxyType
 from triton import knobs
 from triton.runtime.cache import get_cache_manager, get_dump_manager
 from . import utils
-from .program_grid import (ProgramGridContractError, get_persistent_transform, normalize_program_grid_transforms)
+from .program_grid import ProgramGridContractError, normalize_program_grid_transforms
 
 # Host optimization for the shared runtime and lazy C export adapter.
 _LAUNCHER_CFLAGS = ("-O2", )
@@ -43,8 +42,8 @@ _LAUNCHER_CFLAGS = ("-O2", )
 # Keep these values in sync with launcher_abi.h. These are data tags, not C++
 # spellings: a signature is decoded once when a native plan is constructed.
 CONSTEXPR, POINTER, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F16, BF16 = range(14)
-FFTS, PURE_SIMT, TASKQUEUE, AUTO_MAP, GRID_WARNING, COALESCE_CEIL, DYNAMIC_SHARED, DEVICE_PRINT, IAT, PTSM, DOT_ROW, IAT64 = (
-    1 << i for i in range(12))
+FFTS, PURE_SIMT, TASKQUEUE, AUTO_MAP, GRID_WARNING, COALESCE_CEIL, DYNAMIC_SHARED, DEVICE_PRINT, IAT, PTSM, DOT_ROW, IAT64, ATOMIC_REMOVE = (
+    1 << i for i in range(13))
 
 _KINDS = {
     "constexpr": CONSTEXPR,
@@ -99,11 +98,18 @@ class LaunchSpec:
     task_type: int
     mix_ratio: int
     shared_mem_dynamic_size: int
+    grid_contract_version: int = 0
+    batch_axis: int = -1
+    batch_factor: int = 1
 
     profile_scratch_size: int = 0
 
     def as_dict(self):
-        return asdict(self)
+        result = asdict(self)
+        if not self.grid_contract_version:
+            for key in ("grid_contract_version", "batch_axis", "batch_factor"):
+                result.pop(key)
+        return result
 
 
 def _program_grid_config(metadata):
@@ -123,12 +129,12 @@ def _program_grid_config(metadata):
         transforms = normalize_program_grid_transforms(raw) if mapping else None
     except ProgramGridContractError as error:
         raise RuntimeError(f"invalid program_grid_transforms launcher metadata: {error}") from error
-    persistent = get_persistent_transform(transforms) if transforms is not None else None
+    persistent = transforms is not None and any(t["persistent_coverage"] for t in transforms["transforms"])
     if transforms is not None and metadata.row_coalescing_applied:
         raise RuntimeError("program-grid transforms conflict with legacy RowCoalescing")
     if metadata.auto_blockify_enabled and metadata.ptsm_cap_authorized:
         raise RuntimeError("auto_blockify_enabled and ptsm_cap_authorized cannot both be true")
-    if persistent is None:
+    if not persistent:
         if metadata.ptsm_cap_authorized:
             raise RuntimeError("ptsm_cap_authorized requires a persistent transform")
     elif not metadata.ptsm_cap_authorized:
@@ -147,10 +153,15 @@ def _program_grid_config(metadata):
     elif factor != 1 or axis != -1 or ceil_div:
         raise RuntimeError("unmatched RowCoalescing must retain default coalesce metadata")
     if transforms is None:
-        return COALESCE_CEIL if ceil_div else 0, factor, axis
+        return (COALESCE_CEIL if ceil_div else 0, factor, axis), transforms
+    if transforms["version"] == 3:
+        # Independent V2 fields carry this mapping; legacy flags stay clear.
+        return (0, 1, -1), transforms
     # Encode the compiler's v2 sequences using the existing C spec fields.
     # DOT_ROW uses X-axis ceil division like legacy coalescing, but also
     # requires the originalGridX/Y hidden arguments of dynamic mappings.
+    if transforms["transforms"][0]["kind"] == "cap":
+        return (ATOMIC_REMOVE, transforms["transforms"][0]["factor"], 0), transforms
     modes = {
         ((1, 16, False, False), ): (IAT, 1, -1),
         ((1, 64, False, False), ): (IAT | IAT64, 1, -1),
@@ -161,15 +172,15 @@ def _program_grid_config(metadata):
     }
     sequence = tuple((t["axis"], t["factor"], t["persistent_coverage"], t["grid_stride_abi_verified"])
                      for t in transforms["transforms"])
-    if transforms["version"] != 2 or sequence not in modes:
+    if sequence not in modes:
         raise RuntimeError("unsupported native launcher program-grid transforms")
-    return modes[sequence]
+    return modes[sequence], transforms
 
 
 def make_launch_spec(metadata, npu_utils):
     """Translate compiler metadata without emitting native source code."""
     arch = metadata.target.arch
-    flags, coalesce_factor, coalesce_axis = _program_grid_config(metadata)
+    (flags, coalesce_factor, coalesce_axis), transforms = _program_grid_config(metadata)
     if utils.is_ffts_supported(arch) and not utils.force_disable_ffts(arch):
         flags |= FFTS
     if metadata.is_pure_simt:
@@ -199,8 +210,12 @@ def make_launch_spec(metadata, npu_utils):
         if candidate in (1, 2, 3, 4):
             task_type = candidate
     physical = npu_utils.get_aivector_core_num() if metadata.mix_mode == "aiv" else npu_utils.get_aicore_num()
+    batch = transforms if transforms is not None and transforms["version"] == 3 else None
     return LaunchSpec(
         profile_scratch_size=int(getattr(metadata, "profile_scratch_size", 0) or 0),
+        grid_contract_version=3 if batch else 0,
+        batch_axis=batch["transforms"][0]["axis"] if batch else -1,
+        batch_factor=batch["transforms"][0]["factor"] if batch else 1,
         flags=flags,
         workspace_size=max(int(getattr(metadata, "workspace_size", 0)), 0),
         ordered_locks=ordered,
@@ -320,34 +335,10 @@ def _shared_key(fingerprint, sources):
     return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
 
-def _python_link_flags():
-    """Link libpython into the launcher artifacts.
-
-    The exported C ABI is consumed from plain C processes (AOT), where the
-    artifacts are dlopened without a Python interpreter on the stack. Python
-    data symbols (e.g. PyExc_RuntimeError) must resolve eagerly at dlopen
-    time, so the artifacts link libpython themselves instead of relying on
-    the host process to provide it.
-    """
-    flags = []
-    libdir = sysconfig.get_config_var("LIBDIR")
-    if libdir:
-        flags += [f"-L{libdir}", f"-Wl,-rpath,{libdir}"]
-    flags += [f"-lpython{sys.version_info.major}.{sys.version_info.minor}"]
-    return tuple(flags)
-
-
-def _build_shared(name, sources, debug=False, bin_dir=None):
-    ldflags = _python_link_flags()
-    fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=_LAUNCHER_CFLAGS, extra_ldflags=ldflags)
+def _build_shared(name, sources, debug=False):
+    fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=_LAUNCHER_CFLAGS)
     key = _shared_key(json.dumps(fingerprint, sort_keys=True), tuple(sorted(sources.items())))
-    # bin_dir roots this shared artifact under a fixed installation directory
-    # instead of TRITON_CACHE_DIR (which PyTorch Inductor repoints per test
-    # case), keeping the artifact location tied to its content key.
-    if bin_dir is not None:
-        cache = utils.bin_cache_manager(key, bin_dir)
-    else:
-        cache = get_cache_manager(key)
+    cache = get_cache_manager(key)
     filename = name + sysconfig.get_config_var("EXT_SUFFIX")
     if debug:
         dump = get_dump_manager(key)
@@ -360,7 +351,7 @@ def _build_shared(name, sources, debug=False, bin_dir=None):
                 Path(temp, source_name).write_text(content)
             source_path = Path(temp,
                                "launcher_runtime.cpp" if name == "__triton_launcher_runtime" else "launcher_export.cpp")
-            built = utils._build_npu_ext(name, str(source_path), extra_cflags=_LAUNCHER_CFLAGS, extra_ldflags=ldflags)
+            built = utils._build_npu_ext(name, str(source_path), extra_cflags=_LAUNCHER_CFLAGS)
             return Path(built).read_bytes()
 
     return utils._get_or_build_npu_artifact(cache, filename, build)
@@ -390,16 +381,14 @@ def get_runtime(npu_utils_path, debug=False):
         print_identity = (bisheng, utils._file_identity(bisheng), version_file,
                           utils._file_identity(version_file) if version_file else None)
     sources = {**_runtime_sources(), **_runtime_config(npu_utils_path, utils.backend_policy, print_identity)}
-    # The runtime lands under the backend's in-package bin/ directory (with the
-    # helper), so repointing TRITON_CACHE_DIR no longer strands or rebuilds
-    # the pair; the runtime key embeds the helper's stable location.
-    bin_dir = Path(__file__).with_name("bin")
-    path = _build_shared("__triton_launcher_runtime", sources, debug, bin_dir=bin_dir)
+    path = _build_shared("__triton_launcher_runtime", sources, debug)
     return _load_runtime(path), path
 
 
 def export_launcher(spec, types, runtime_path, debug=False):
     """Bind the legacy C ABI using constants and a fixed export adapter."""
+    if spec.grid_contract_version:
+        raise RuntimeError("guarded block batching bundles require baseline export")
     fields = ", ".join(str(value) for value in spec.as_dict().values())
     initializers = ", ".join(f"{{{kind}, {dtype}}}" for kind, dtype in types) or "{0, -1}"
     config = (f"#define TRITON_EXPORT_RUNTIME_PATH {json.dumps(runtime_path)}\n"

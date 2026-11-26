@@ -178,3 +178,22 @@ def save_json(path, value):
 
 def passed(checks):
     return all(metric['passed'] for outputs in checks.values() for metric in outputs.values())
+
+
+def benchmark(call, output_dir, reset=None):
+    """Measure every device task and the synchronized wall time per call."""
+    rounds = []
+    for index in range(3):
+        if reset is not None:
+            reset()
+        result = profile(call, output_dir / f"round-{index}.json", 40)
+        assert result["occupancy_consistent"], "Device occupancy changed during profiling"
+        rounds.append(result)
+    report = {
+        "device_us": statistics.median(sample for row in rounds for sample in row["samples_us"]),
+        "wall_us": statistics.median(sample for row in rounds for sample in row["wall_samples_us"]),
+        "launch": getattr(call, "metadata", {}),
+        "rounds": rounds,
+    }
+    save_json(output_dir / "result.json", report)
+    print(f"Device {report['device_us']:.1f} us, wall {report['wall_us']:.1f} us ({output_dir})")

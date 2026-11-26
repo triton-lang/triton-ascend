@@ -4,7 +4,7 @@ Triton-Ascend 版本提供了一个稳定的代码基础快照，封装成可以
 
 ## 发布计划
 
-以下是 Triton-Ascend 的发布计划。请注意：补丁版本是可选的。
+以下是 Triton-Ascend 的发布计划：请注意，补丁版本是可选的。
 
 | 主版本         | 发布分支切出时间    | 发布日期        | 版本性质 |
 |-------------|-------------|-------------|------|
@@ -15,13 +15,13 @@ Triton-Ascend 版本提供了一个稳定的代码基础快照，封装成可以
 | 3.2.1       | 2026年4月15日  | 2026年5月6日   | 正式版本 |
 | 3.2.0       | 2025年12月08日 | 2026年1月     | 正式版本 |
 
-注：3.2.0版本在[gitcode(AtomGit)](https://gitcode.com/Ascend/triton-ascend/releases) 上归档，3.2.1版本及以上均已迁移至[github](https://github.com/triton-lang/triton-ascend/releases)。
+注：3.2.0版本在[gitcode（AtomGit）](https://gitcode.com/Ascend/triton-ascend/releases) 上归档，3.2.1版本及以上均已迁移至[github](https://github.com/triton-lang/triton-ascend/releases)。
 
 ## 版本发布策略
 
 ### 版本编号
 
-Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范，版本号与上游 Triton 对齐：`vMAJOR.MINOR.PATCH[rcN][.postN]`
+Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范，版本号与上游 Triton 对齐：`vMAJOR.MINOR.PATCH[rcN][.postN]`。
 
 - **MAJOR.MINOR**：与上游 Triton 版本一一对应，例如 Triton-Ascend `3.2` 基于 Triton `3.2`
 - **PATCH**：Triton-Ascend 的 `PATCH` 版本可能高于上游 Triton，用于 `MAJOR.MINOR` 级别的问题修复或改进，例如 Triton-Ascend `3.2.0` 和 `3.2.1` 均基于 Triton `3.2.0`
@@ -38,17 +38,17 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
 
 维护分支状态包括：
 
-- **活跃（Active）**：持续接受缺陷修复、功能改进和安全补丁；将继续演进功能或发布新版本
+- **活跃（Active）**：持续接受缺陷修复、功能改进和安全补丁；将继续增强功能或发布新版本
 - **维护（Maintenance）**：仅接受关键缺陷修复和安全补丁；不再发布功能改进
 - **停止维护（End of Life）**：不再接受任何修复；分支维护已停止
 
 | 分支                    | 状态     | Triton 版本 | Triton-Ascend 发布                         | 维护截止 |
 |-----------------------| -------- |-----------|------------------------------------------| -------- |
 | `main`                | `活跃`   | `3.6.0`   | /                                        | /        |
-| `release/3.6.0`       | `活跃`   | `3.6.0`   | `3.6.0.post2`，`3.6.0`                    | /        |
-| `release/3.2.2`       | `维护`   | `3.2.0`   | `3.2.2.post2`，`3.2.2`                    | /        |
+| `release/3.6.0`       | `活跃`   | `3.6.0`   | `3.6.0.post2`、`3.6.0`                    | /        |
+| `release/3.2.2`       | `维护`   | `3.2.0`   | `3.2.2.post2`、`3.2.2`                    | /        |
 | `release/3.2.1`       | `维护`   | `3.2.0`   | `3.2.1`                                  | /        |
-| `release/3.2.x`       | `维护`   | `3.2.0`   | `3.2.0rc2`，`3.2.0rc3`，`3.2.0rc4`，`3.2.0` | /        |
+| `release/3.2.x`       | `维护`   | `3.2.0`   | `3.2.0rc2`、`3.2.0rc3`、`3.2.0rc4`、`3.2.0` | /        |
 
 ## 发布周期
 
@@ -62,7 +62,7 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
 
 | Triton-Ascend |  PyTorch | TorchNPU安装包     | CANN    | SHMEM  | LLVM commit hash | Python              | LLVM 补丁 |
 |---------------|---------|-----------------|---------|--------|------------------|---------------------|-----------|
-| `main`        | `2.10.0` | `2.10.0.post7`  | `9.2.0` | `v1.7.0` | `f6ded0b`        | `3.9~3.13`          | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
+| `main`        | `2.10.0` | `2.10.0.post7`  | `9.2.0` | `v1.7.0` | `f6ded0b`        | `3.9-3.13`          | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
 | `3.6.0`       | `2.10.0` | `2.10.0.post7`  | `9.2.0` | `v1.7.0` | `f6ded0b`        | `3.10~3.13`             | - |
 | `3.2.2.post2` | `2.7.1`  | `2.7.1.post11` | `9.2.0` | `v1.7.0` | `b5cc222`        | `3.9`(x86), `3.10-3.13` | -         |
 | `3.2.2`       | `2.7.1` | `2.7.1.post8`   | `9.1.0` | -      | `b5cc222`        | `3.9`(x86), `3.10-3.13` | -         |

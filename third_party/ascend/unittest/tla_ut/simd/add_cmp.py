@@ -50,21 +50,21 @@ SIGNATURE = {
 @tla.jit
 def add_cmp(A_ptr, B_ptr, C_ptr, S_ptr, MX_ptr, MN_ptr, M_ptr, C2_ptr, I_ptr, J_ptr, SUM_ptr, CAR_ptr, ULT_ptr,
             UMAX_ptr, UMIN_ptr, N: tl.constexpr):
-    a_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    b_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    c_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    s_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    mx_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    mn_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    m_ub = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    c2_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    i_ub = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    j_ub = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    sum_ub = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    car_ub = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ult_ub = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    umax_ub = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    umin_ub = tla.alloc_buffer((N, ), tl.int32, space="ub")
+    a_ub = tla.alloc((N, ), tl.float32, space="ub")
+    b_ub = tla.alloc((N, ), tl.float32, space="ub")
+    c_ub = tla.alloc((N, ), tl.float32, space="ub")
+    s_ub = tla.alloc((N, ), tl.float32, space="ub")
+    mx_ub = tla.alloc((N, ), tl.float32, space="ub")
+    mn_ub = tla.alloc((N, ), tl.float32, space="ub")
+    m_ub = tla.alloc((N, ), tl.int32, space="ub")
+    c2_ub = tla.alloc((N, ), tl.float32, space="ub")
+    i_ub = tla.alloc((N, ), tl.int32, space="ub")
+    j_ub = tla.alloc((N, ), tl.int32, space="ub")
+    sum_ub = tla.alloc((N, ), tl.int32, space="ub")
+    car_ub = tla.alloc((N, ), tl.int32, space="ub")
+    ult_ub = tla.alloc((N, ), tl.int32, space="ub")
+    umax_ub = tla.alloc((N, ), tl.int32, space="ub")
+    umin_ub = tla.alloc((N, ), tl.int32, space="ub")
 
     a = tla.view(A_ptr, (N, ), strides=(1, ), offsets=(0, ))
     b = tla.view(B_ptr, (N, ), strides=(1, ), offsets=(0, ))
@@ -82,10 +82,10 @@ def add_cmp(A_ptr, B_ptr, C_ptr, S_ptr, MX_ptr, MN_ptr, M_ptr, C2_ptr, I_ptr, J_
     umax_out = tla.view(UMAX_ptr, (N, ), strides=(1, ), offsets=(0, ))
     umin_out = tla.view(UMIN_ptr, (N, ), strides=(1, ), offsets=(0, ))
 
-    tla.copy(a, a_ub)
-    tla.copy(b, b_ub)
-    tla.copy(i, i_ub)
-    tla.copy(j, j_ub)
+    tla.load_gm_to_ub(a, a_ub)
+    tla.load_gm_to_ub(b, b_ub)
+    tla.load_gm_to_ub(i, i_ub)
+    tla.load_gm_to_ub(j, j_ub)
 
     with tla.scope.simd():
         av = tla.simd.vlds(a_ub[0], dist="NORM")
@@ -95,7 +95,7 @@ def add_cmp(A_ptr, B_ptr, C_ptr, S_ptr, MX_ptr, MN_ptr, M_ptr, C2_ptr, I_ptr, J_
 
         # vadd: default zeroing and explicit merging under a half mask.
         tla.simd.vsts(c_ub[0], tla.simd.vadd(av, bv), dist="NORM_B32")
-        half = tla.simd.pge(32, N)
+        half = tla.simd.pset(2048 // N, tla.simd.PAT.VL32)
         tla.simd.vsts(c2_ub[0], tla.simd.vadd(av, bv, mask=half, mode=tla.simd.MODE.MERGING), dist="NORM_B32")
 
         # vadds: vector + scalar.
@@ -106,12 +106,10 @@ def add_cmp(A_ptr, B_ptr, C_ptr, S_ptr, MX_ptr, MN_ptr, M_ptr, C2_ptr, I_ptr, J_
         tla.simd.vsts(mn_ub[0], tla.simd.vcmin(av), dist="ONEPT_B32")
 
         # vcmp: CMP enum + mask, materialize the predicate as i32 0/1.
-        one = tla.simd.vsplat(1.0, tl.int32)
-        zero = tla.simd.vsplat(0.0, tl.int32)
+        one = tla.simd.vdup(1, tl.int32)
+        zero = tla.simd.vdup(0, tl.int32)
         gt = tla.simd.vcmp(av, bv, op=tla.simd.CMP.GT)
-        # tla.where(mask, x, y) is the vector form of vsel; keep the other
-        # selects below on the explicit tla.simd.vsel spelling.
-        tla.simd.vsts(m_ub[0], tla.where(gt, one, zero), dist="NORM_B32")
+        tla.simd.vsts(m_ub[0], tla.simd.vsel(gt, one, zero), dist="NORM_B32")
 
         # vaddc: int32 sum + two's-complement carry-out.
         sv, cv = tla.simd.vaddc(iv, jv)
@@ -128,17 +126,17 @@ def add_cmp(A_ptr, B_ptr, C_ptr, S_ptr, MX_ptr, MN_ptr, M_ptr, C2_ptr, I_ptr, J_
         tla.simd.vsts(umax_ub[0], umax, dist="ONEPT_B32")
         tla.simd.vsts(umin_ub[0], umin, dist="ONEPT_B32")
 
-    tla.copy(c_ub, c)
-    tla.copy(c2_ub, c2)
-    tla.copy(s_ub, s)
-    tla.copy(mx_ub, mx)
-    tla.copy(mn_ub, mn)
-    tla.copy(m_ub, m)
-    tla.copy(sum_ub, total)
-    tla.copy(car_ub, carry)
-    tla.copy(ult_ub, ult_out)
-    tla.copy(umax_ub, umax_out)
-    tla.copy(umin_ub, umin_out)
+    tla.store_ub_to_gm(c_ub, c)
+    tla.store_ub_to_gm(c2_ub, c2)
+    tla.store_ub_to_gm(s_ub, s)
+    tla.store_ub_to_gm(mx_ub, mx)
+    tla.store_ub_to_gm(mn_ub, mn)
+    tla.store_ub_to_gm(m_ub, m)
+    tla.store_ub_to_gm(sum_ub, total)
+    tla.store_ub_to_gm(car_ub, carry)
+    tla.store_ub_to_gm(ult_ub, ult_out)
+    tla.store_ub_to_gm(umax_ub, umax_out)
+    tla.store_ub_to_gm(umin_ub, umin_out)
 
 
 def constexprs():

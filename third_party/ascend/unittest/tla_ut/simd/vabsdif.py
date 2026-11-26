@@ -31,20 +31,21 @@ SIGNATURE_H = {"X": "*fp16", "Y": "*fp16", "I": "*i16", "T": "*i16", "O": "*fp16
 
 
 @tla.jit
-def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    xb = tla.alloc_buffer((TILES, N), tl.float32, space="ub")
-    yb = tla.alloc_buffer((TILES, N), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), xb)
-    tla.copy(tla.view(Y, (TILES, N)), yb)
-    tla.copy(tla.view(T, (N, )), tb)
+def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr,
+                MASKPAT: tl.constexpr, TAILPAT: tl.constexpr):
+    xb = tla.alloc((TILES, N), tl.float32, space="ub")
+    yb = tla.alloc((TILES, N), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((MASK_ROWS_C + TILES, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), xb)
+    tla.load_gm_to_ub(tla.view(Y, (TILES, N)), yb)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0, 0])
         y = tla.simd.vlds(yb[0, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vabsdif(x, y))
@@ -53,35 +54,36 @@ def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.con
         tla.simd.vsts(ob[3, 0], tla.simd.vabsdif(x, y, mask=none))
         tla.simd.vsts(ob[4, 0], tla.simd.vabsdif(x, y, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vabsdif(x, y, mask=arb, mode=tla.simd.MODE.MERGING))
-        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vsplat(SENTINEL_FC, tl.float32))
+        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vdup(SENTINEL_FC, tl.float32))
         for tile in tl.static_range(TILES):
             vx = tla.simd.vlds(xb[tile, 0])
             vy = tla.simd.vlds(yb[tile, 0])
             if tile == TILES - 1:
-                tail_mask = tla.simd.pge(TAIL, N)
+                tail_mask = tla.simd.pset(2048 // N, TAILPAT)
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vabsdif(vx, vy, mask=tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vabsdif(vx, vy))
-    tla.copy(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
 
 
 @tla.jit
-def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
-    xb = tla.alloc_buffer((TILES, N), tl.float16, space="ub")
-    yb = tla.alloc_buffer((TILES, N), tl.float16, space="ub")
-    ib = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    ob = tla.alloc_buffer((MASK_ROWS_C + TILES, N), tl.float16, space="ub")
-    tla.copy(tla.view(X, (TILES, N)), xb)
-    tla.copy(tla.view(Y, (TILES, N)), yb)
-    tla.copy(tla.view(I, (N, )), ib)
-    tla.copy(tla.view(T, (N, )), tb)
+def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr,
+                MASKPAT: tl.constexpr, TAILPAT: tl.constexpr):
+    xb = tla.alloc((TILES, N), tl.float16, space="ub")
+    yb = tla.alloc((TILES, N), tl.float16, space="ub")
+    ib = tla.alloc((N, ), tl.int16, space="ub")
+    tb = tla.alloc((N, ), tl.int16, space="ub")
+    ob = tla.alloc((MASK_ROWS_C + TILES, N), tl.float16, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (TILES, N)), xb)
+    tla.load_gm_to_ub(tla.view(Y, (TILES, N)), yb)
+    tla.load_gm_to_ub(tla.view(I, (N, )), ib)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0, 0])
         y = tla.simd.vlds(yb[0, 0])
         idx = tla.simd.vlds(ib[0])
         t = tla.simd.vlds(tb[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vabsdif(x, y), dist="NORM_B16")
@@ -90,22 +92,25 @@ def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.
         tla.simd.vsts(ob[3, 0], tla.simd.vabsdif(x, y, mask=none), dist="NORM_B16")
         tla.simd.vsts(ob[4, 0], tla.simd.vabsdif(x, y, mask=prefix, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
         tla.simd.vsts(ob[5, 0], tla.simd.vabsdif(x, y, mask=arb, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
-        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vsplat(SENTINEL_FC, tl.float16), dist="NORM_B16")
+        tla.simd.vsts(ob[TAIL_BASE_C + TILES - 1, 0], tla.simd.vdup(SENTINEL_FC, tl.float16), dist="NORM_B16")
         for tile in tl.static_range(TILES):
             vx = tla.simd.vlds(xb[tile, 0])
             vy = tla.simd.vlds(yb[tile, 0])
             if tile == TILES - 1:
-                tail_mask = tla.simd.pge(TAIL, N)
+                tail_mask = tla.simd.pset(2048 // N, TAILPAT)
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vabsdif(vx, vy, mask=tail_mask), mask=tail_mask,
                               dist="NORM_B16")
             else:
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vabsdif(vx, vy), dist="NORM_B16")
-    tla.copy(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (MASK_ROWS_C + TILES, N)))
 
 
 def constexprs(shape=None):
     s = SHAPE if shape is None else shape
-    return {"N": s["lanes"], "ACTIVE": s["active"], "TILES": s["tiles"], "TAIL": s["tail"]}
+    return {
+        "N": s["lanes"], "ACTIVE": s["active"], "MASKPAT": "VL%d" % (s["active"]), "TILES": s["tiles"], "TAIL":
+        s["tail"], "TAILPAT": "VL%d" % (s["tail"])
+    }
 
 
 def test_ir(output_dir=None):

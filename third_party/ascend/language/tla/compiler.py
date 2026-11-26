@@ -98,11 +98,12 @@ def lower_ttir(module, context, output_dir=None):
 
 
 def add_ttir_pipeline(pm):
-    """Resolve JIT helpers without applying generic Triton optimization."""
+    """Resolve JIT helpers and apply explicitly requested loop unrolling."""
     from triton._C.libtriton import passes
 
     passes.common.add_inliner(pm)
     passes.common.add_symbol_dce(pm)
+    passes.ttir.add_loop_unroll(pm)
 
 
 def _kernel_entries(module):

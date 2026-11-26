@@ -1426,7 +1426,6 @@ void TritonToUnstructurePass::runOnOperation() {
   ModuleOp moduleOp = getOperation();
   MLIRContext *ctx = &getContext();
 
-  canonicalizeSupportedPointerBitcasts(moduleOp);
   // Fix one permitted lane order before analyzing a pointer reshape. The
   // original pointers and the derived integer offsets must share that order.
   moduleOp.walk([](triton::ReshapeOp op) {

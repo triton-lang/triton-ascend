@@ -55,6 +55,7 @@
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "llvm/ADT/DenseMap.h"
@@ -81,6 +82,28 @@ using namespace triton;
 const std::string MayImplicitTransposeWithLastAxisTAG =
     "MayImplicitTransposeWithLastAxis";
 static constexpr llvm::StringLiteral kAlreadySyncAttr = "already_sync";
+
+// NPU-IR hoists ordered locks around the outermost loop. In a mixed kernel
+// that can put Cube/Vector synchronization inside the atomic critical section.
+// Hoisting considers every lock in that loop together, so preserve an
+// independent ordered critical section if the input already contains one.
+static bool canUseUnorderedSnapshotLock(hivm::SyncBlockLockOp lock) {
+  if (!compileOn91095Flag || !existDotFlag)
+    return false;
+  auto loop = lock->getParentOfType<LoopLikeOpInterface>();
+  if (!loop)
+    return false;
+  while (auto outer = loop->getParentOfType<LoopLikeOpInterface>())
+    loop = outer;
+  WalkResult result = loop->walk([&](hivm::SyncBlockLockOp other) {
+    if (other != lock &&
+        !other->hasAttr(hivm::SyncBlockLockUnorderedAttr::name) &&
+        other.getOrdering() == hivm::SyncBlockLockOrdering::Ordered)
+      return WalkResult::interrupt();
+    return WalkResult::advance();
+  });
+  return !result.wasInterrupted();
+}
 
 // During dialect conversion the adaptor may expose the converted memref
 // directly, while a failed rewrite later leaves a one-input, one-output UCC in
@@ -1004,7 +1027,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
 
   bool needsReturnValueLock =
       hasUsedReturn && hasContinuousMaskSubview && isHardwareSupported;
-  Value returnValueLock;
+  hivm::SyncBlockLockOp returnValueLock;
   if (hasUsedReturn) {
     auto tensorType =
         RankedTensorType::get(ptrType.getShape(), ptrType.getElementType());
@@ -1022,8 +1045,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
       auto lockType = MemRefType::get({1}, rewriter.getI64Type());
       auto lockVar =
           rewriter.create<hivm::CreateSyncBlockLockOp>(loc, lockType, Value());
-      returnValueLock = lockVar.getResult();
-      rewriter.create<hivm::SyncBlockLockOp>(loc, returnValueLock);
+      returnValueLock = rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
     }
     rewriter.create<memref::CopyOp>(loc, copySrc, copyDst);
     Value tensorToReplace = rewriter.create<bufferization::ToTensorOp>(
@@ -1054,7 +1076,15 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
         // The return-value copy and the atomic update must be one critical
         // section. Mark the store so HIVM does not add another lock.
         storeOp->setAttr(kAlreadySyncAttr, rewriter.getUnitAttr());
-        rewriter.create<hivm::SyncBlockUnlockOp>(loc, returnValueLock);
+        Value lockVar = returnValueLock.getLockVar();
+        auto unlock = rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
+        if (canUseUnorderedSnapshotLock(returnValueLock)) {
+          for (Operation *lockOp :
+               {lockVar.getDefiningOp(), returnValueLock.getOperation(),
+                unlock.getOperation()})
+            lockOp->setAttr(hivm::SyncBlockLockUnorderedAttr::name,
+                            rewriter.getUnitAttr());
+        }
       }
     } else if (rmwOp == RMWOp::XCHG)
       rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),

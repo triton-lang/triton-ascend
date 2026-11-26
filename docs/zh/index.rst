@@ -34,6 +34,7 @@ Triton Ascend
    Cube算子开发 <programming_guide/cube_operator>
    融合算子开发 <programming_guide/cv_fusion_operator>
    Triton-Ascend autotune <autotune_guide>
+   Triton-Ascend AOT 编译 <aot_guide>
    典型算子样例 <examples/index>
 
 .. toctree::

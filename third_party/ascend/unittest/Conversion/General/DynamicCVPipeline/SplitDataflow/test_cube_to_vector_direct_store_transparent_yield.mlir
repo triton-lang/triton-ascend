@@ -27,6 +27,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inse
         %20 = linalg.matmul {indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>, affine_map<(d0, d1, d2) -> (d0, d1)>], input_precision = "ieee", ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%reshape, %reshape : tensor<16x16xf32>, tensor<16x16xf32>) outs(%13 : tensor<16x16xf32>) -> tensor<16x16xf32>
 
         %reshape_7 = tensor.reshape %20(%cst) {ssbuffer.block_id = 15 : i32, ssbuffer.core_type = "VECTOR"} : (tensor<16x16xf32>, tensor<1xi64>) -> tensor<256xf32>
+        %add = arith.addf %arg16, %reshape_7 {ssbuffer.block_id = 15 : i32, ssbuffer.core_type = "VECTOR"} : tensor<256xf32>
 
         %21:2 = scf.while (%arg17 = %c0_i32, %arg18 = %reshape_7) : (i32, tensor<256xf32>) -> (i32, tensor<256xf32>) {
           %23 = arith.cmpi slt, %arg17, %c1_i32 {ssbuffer.block_id = 15 : i32, ssbuffer.core_type = "VECTOR"} : i32
@@ -86,6 +87,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inse
 // CHECK: memref.memory_space_cast
 // CHECK: bufferization.to_tensor
 // CHECK: tensor.reshape
+// CHECK: arith.addf
 // CHECK: scf.while
 // CHECK: scf.while
 // CHECK: arith.addf

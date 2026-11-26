@@ -1015,6 +1015,7 @@ def convert_sigtype_to_int(sigty: str):
         "fp32": 0,  # FLOAT
         "fp64": 11,  # DOUBLE
         "fp8e5": 35,  # FLOAT8_E5M2
+        "hif8": 34,  # ACL_HIFLOAT8
         "fp8e4nv": 36,  # FLOAT8_E4M3FN
     }
     if sigty not in MAP_SIGTYPE_TO_INT:

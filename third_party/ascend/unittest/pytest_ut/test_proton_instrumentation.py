@@ -82,17 +82,18 @@ def test_instrumentation(tmp_path, n):
     assert after.asm["ttir"] == before.asm["ttir"]
 
     trace = json.loads(base.with_suffix(".chrome_trace").read_text())
-    events = [e for e in (trace if isinstance(trace, list) else trace["traceEvents"]) if e["ph"] == "X"]
+    events = [e for e in (trace if isinstance(trace, list) else trace["traceEvents"]) if e["ph"] in ("X", "i")]
     counts = Counter(e["name"] for e in events)
     assert counts.keys() == {"kernel", "load", "compute", "store"}
     assert len(set(counts.values())) == 1
-    assert all(math.isfinite(e["ts"]) and math.isfinite(e["dur"]) and e["dur"] >= 0 for e in events)
+    assert all(math.isfinite(e["ts"]) for e in events)
 
     # Hardware traces cover sampled channels; only software buffers promise one group per program.
     if getattr(compiled.metadata, "proton_collection", None) != "perf_monitor":
         assert compiled.metadata.profile_scratch_size > 0 and compiled.metadata.profile_scratch_align == 64
         assert compiled.metadata.profile_num_units == 1
         assert counts["kernel"] == 2 * grid[0]
+        assert all(e["ph"] == "X" and math.isfinite(e["dur"]) and e["dur"] >= 0 for e in events)
         return
     assert (compiled.metadata.profile_scratch_size, compiled.metadata.profile_scratch_align) == (0, 1)
     for e in events:
@@ -100,14 +101,16 @@ def test_instrumentation(tmp_path, n):
         assert args["coverage"] == "sampled_hardware_channels"
         assert args["all_logical_blocks"] is False and args["channel_id_is_core_id"] is False
         freq = args["Frequency (MHz)"]
-        assert math.isfinite(freq) and freq > 0 and e["dur"] > 0
-        assert e["dur"] == pytest.approx((args["end_cycle"] - args["start_cycle"]) / freq)
+        cycles = args["end_cycle"] - args["start_cycle"]
+        assert cycles > 0 and math.isfinite(freq) and freq >= 0
+        if freq == 0:
+            assert e["ph"] == "i" and e["ts"] == 0 and "dur" not in e
+        else:
+            assert e["ph"] == "X" and e["dur"] == pytest.approx(cycles / freq)
     for parent in (e for e in events if e["name"] == "kernel"):
         children = [
-            e["name"]
-            for e in events
-            if e["pid"] == parent["pid"] and e["name"] != "kernel" and e["ts"] >= parent["ts"] - 1e-9 and e["ts"] +
-            e["dur"] <= parent["ts"] + parent["dur"] + 1e-9
+            e["name"] for e in events if e["pid"] == parent["pid"] and e["name"] != "kernel" and e["args"]
+            ["start_cycle"] >= parent["args"]["start_cycle"] and e["args"]["end_cycle"] <= parent["args"]["end_cycle"]
         ]
         assert sorted(children) == ["compute", "load", "store"]
 
@@ -160,7 +163,7 @@ def test_cached_kernel_hook_routing(tmp_path, monkeypatch):
     from triton.profiler import ascend_perf_monitor
 
     collector = Mock(active=False)
-    collector.stop.return_value = [(12, 0, 0, 100, 117, 1650)]
+    collector.stop.return_value = [(12, 0, 0, 100, 117, 0)]
     monkeypatch.setattr(ascend_perf_monitor, "PerfMonitorCollector", lambda: collector)
     x = torch.arange(256, device="npu", dtype=torch.float32)
     out = torch.empty_like(x)
@@ -206,3 +209,39 @@ def test_restart_with_loaded_kernel(tmp_path):
                 value = scope["metrics"][key]
                 assert math.isfinite(value) and value > 0, (label, key, value)
     assert handles[0] and len(set(handles)) == 1
+
+
+def test_partial_clock_trace(tmp_path, monkeypatch):
+    if not _is_a5():
+        pytest.skip("Requires the A5 performance monitor hook")
+    from triton.profiler import ascend_perf_monitor as pm
+
+    def info(device, module, kind, out):
+        if module == 4:
+            return 8
+        out._obj.value = 1650
+        return 0
+
+    driver = object.__new__(pm._Driver)
+    driver.info = info
+    with pytest.warns(RuntimeWarning, match="module 4"):
+        clocks = driver.clocks(0)
+    assert clocks == [0, 1650]
+    collector = Mock(active=False)
+    collector.stop.return_value = [(11, 0, 0, 100, 133, clocks[0]), (12, 0, 0, 400, 433, clocks[1])]
+    monkeypatch.setattr(pm, "PerfMonitorCollector", lambda: collector)
+    x = torch.arange(256, device="npu", dtype=torch.float32)
+    out = torch.empty_like(x)
+    base = tmp_path / "partial_clock"
+    session = proton.start(str(base), backend="instrumentation", data="trace")
+    try:
+        restart_add[(1, )](x, x, out, BLOCK=256, block_batching_factor=1)
+        torch.npu.synchronize()
+    finally:
+        proton.finalize(session)
+    events = json.loads(base.with_suffix(".chrome_trace").read_text())["traceEvents"]
+    markers = {e["args"]["channel_id"]: e for e in events if e.get("name") == "iks_add"}
+    unknown, known = markers[11], markers[12]
+    assert unknown["args"]["Frequency (MHz)"] == 0 and unknown["ph"] == "i" and "dur" not in unknown
+    assert unknown["args"]["end_cycle"] - unknown["args"]["start_cycle"] == 33
+    assert known["ph"] == "X" and known["dur"] == pytest.approx(33 / 1650)

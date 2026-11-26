@@ -34,6 +34,8 @@
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "DynamicCVPipeline/Common/DependencyHelper.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -51,14 +53,11 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
-
-#include "DynamicCVPipeline/Common/DependencyHelper.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 #include "bishengir/Dialect/HIVM/Utils/Utils.h"
 
 using namespace mlir;
-static constexpr const char *DEBUG_TYPE = "reorder-ops-by-block-id";
+static constexpr const char *DEBUG_TYPE = "ReorderOpsByBlockIdPass";
 
 #define DBGS(...) LLVM_DEBUG(llvm::dbgs() << __VA_ARGS__)
 #define LOG_DEBUG(...) DBGS("[" << DEBUG_TYPE << "] " << __VA_ARGS__)
@@ -479,7 +478,7 @@ static llvm::FailureOr<SmallVector<Operation *>> buildReorderedOps(
     return llvm::failure();
   }
 
-  for (const int blockId : groupOrderResult.value()) {
+  for (int const blockId : groupOrderResult.value()) {
     SmallVector<Operation *>
         originOrderOp; // collect ops following program order.
     for (Operation *op : graph.ops) {
@@ -572,7 +571,7 @@ reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph,
 }
 
 void ReorderOpsByBlockIdPass::runOnOperation() {
-  const OpBuilder builder(&getContext());
+  OpBuilder const builder(&getContext());
 
   auto moduleOp = getOperation();
 

@@ -32,6 +32,8 @@ namespace triton {
 std::unique_ptr<OperationPass<ModuleOp>> createUBUsageOptPass();
 std::unique_ptr<OperationPass<ModuleOp>> createMergeSameSourceAxisPass();
 void registerMergeSameSourceAxisPass();
+std::unique_ptr<OperationPass<ModuleOp>> createUnifyAllocBlockPass();
+void registerUnifyAllocBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createMergeVectorIfBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createMergeOuterVectorBlockPass();
 void registerMergeVectorIfBlockPass();
@@ -42,6 +44,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createMergeSmallBlockPass();
 void registerMergeSmallBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createSinkI1ProducersIntoUsersPass();
 std::unique_ptr<OperationPass<ModuleOp>> createBroadcastUBOptPass();
+std::unique_ptr<OperationPass<ModuleOp>> createMoveLoadIntoUserPass();
 std::unique_ptr<OperationPass<ModuleOp>> createPosMaskPatternPass();
 std::unique_ptr<OperationPass<ModuleOp>> createRelocateMemrefDeclPass();
 std::unique_ptr<OperationPass<ModuleOp>> createMergeComputeBlockPass();

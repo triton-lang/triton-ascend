@@ -209,7 +209,12 @@ jobs:
           # warnings trip -Werror on LLVM 19 code. Verified still required
           # on the manylinux_2_34 image (trial run hit the int64_t error
           # without it).
-          printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error\n' > /tmp/clang++-cstdint
+          # -Wno-c2y-extensions: yum's unpinned clang moved to 22, whose
+          # -pedantic flags benchmark.h's __COUNTER__ as a C2y extension.
+          # LLVM's third-party benchmark builds with -pedantic-errors, which
+          # turns that into a hard error that -Wno-error cannot demote, so
+          # the warning itself has to be disabled.
+          printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error -Wno-c2y-extensions\n' > /tmp/clang++-cstdint
           chmod +x /tmp/clang++-cstdint
           build-tools/build.sh -o build -j "${JOBS}" \
             --cxx-compiler=/tmp/clang++-cstdint \

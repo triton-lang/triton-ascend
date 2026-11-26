@@ -50,8 +50,9 @@ Triton-Ascend is an open-source project under the Triton community, with role ap
 - Made significant technical contributions to the project (such as core feature development, architectural design, performance optimization, etc.)
 - Demonstrate good technical judgment and community collaboration skills
 - Meet the following quantitative election criteria:
-  - Continuously active for at least **3 months**
-  - At least **50** review comments in the last **3 months**
+  - Continuously active for at least **2 months**
+  - At least **40** review comments in the last **2 months**
+  - At least **10** merged `PRs` in the last **2 months**, or more than **2000** lines of new code
   - At least **one** software implementation design document
 
 **Permissions**: Granted GitHub repository write permissions, including read, clone, and push code to the repository, core branch protection and merge permissions, release execution permissions, and management of `Issues` and `Pull Requests`.

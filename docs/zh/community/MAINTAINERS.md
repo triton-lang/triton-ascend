@@ -7,16 +7,16 @@
 | Name | ID | Join Date |
 |---|---|---|
 | Ce Zhu | Cadenza4287 | 2025-12-23 |
-| Zhao Jingkai | elstainniles | 2026-09-17 |
+| Jingkai Zhao | elstainniles | 2026-09-17 |
 | Lijuan Hai | hailijuan | 2025-09-27 |
-| Xuan Peng | HinPeng | 2025-12-23 |
+| Peng Xuan | HinPeng | 2025-12-23 |
 | Ziqi Hong | hongziqi | 2026-03-26 |
 | Zhijie Zhao | insanecoder-zzj | 2025-09-27 |
 | Jingchang Shi | jingchangshi | 2025-09-27 |
 | Kaixin Yang | kaixin1976 | 2025-09-27 |
 | Yihan Zhou | KanuaK | 2026-05-11 |
 | Ingu Kung | kig9981 | 2026-05-08 |
-| Liu Huan | LH-123L | 2026-09-17 |
+| Huan Liu | LH-123L | 2026-09-17 |
 | Pengcheng Liu | patchliu | 2026-11-12 |
 | Yichen Liu | Skyminers | 2026-09-17 |
 | Yingcong Liang | wcleungaj-70 | 2025-09-27 |
@@ -25,7 +25,7 @@
 | Peiji Chen | zackc6 | 2026-05-07 |
 | Wei Zhan | zhanwei33 | 2026-09-17 |
 
-## 荣誉 Maintainers
+## Emeritus Maintainers
 曾对 Triton-Ascend 做出重要贡献、现已转为荣誉身份的 Maintainer（感谢！）：
 
 | Name | ID | Join Date |

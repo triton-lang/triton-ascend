@@ -266,3 +266,24 @@ def test_pointer_bitcast_tensor_multi_addptr_broadcast_load():
     )
 
     torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)
+
+
+@triton.jit
+def _load_widened_pointers(src, offsets_ptr, out, SCALAR_OFFSET: tl.constexpr, BLOCK: tl.constexpr):
+    lanes = tl.arange(0, BLOCK)
+    offsets = tl.load(offsets_ptr + lanes)
+    ptrs = (src + SCALAR_OFFSET + offsets).to(tl.pointer_type(tl.int32), bitcast=True)
+    tl.store(out + lanes, tl.load(ptrs))
+
+
+@pytest.mark.parametrize("src_dtype, scalar_offset", [(torch.int16, 0), (torch.uint8, 0), (torch.uint8, 1)])
+def test_pointer_bitcast_runtime_offsets(src_dtype, scalar_offset):
+    words = torch.arange(64, dtype=torch.int32) * 0x01010101 + 0x01020304
+    src = words.view(src_dtype)
+    indices = torch.arange(16, 48, dtype=torch.int32).flip(0)
+    # Both byte-buffer variants address the same words. With a scalar offset of
+    # one, only the sum of the scalar and per-lane offsets is divisible by four.
+    offsets = indices * (words.element_size() // src.element_size()) - scalar_offset
+    out = torch.empty_like(indices, device="npu")
+    _load_widened_pointers[(1, )](src.npu(), offsets.npu(), out, SCALAR_OFFSET=scalar_offset, BLOCK=indices.numel())
+    torch.testing.assert_close(out.cpu(), words[indices.long()], rtol=0, atol=0)

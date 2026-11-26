@@ -660,7 +660,6 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
   if (castBitwidth == 1)
     castBitwidth = 8;
   if (origBitwidth != castBitwidth) {
-    bitcastOp.emitError() << "Casting pointers with unmatched bitwidth!\n";
     return failure();
   }
 

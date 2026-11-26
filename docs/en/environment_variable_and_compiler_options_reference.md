@@ -36,7 +36,7 @@ The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilatio
 | Debugging | `TRITON_MEMORY_DISPLAY` | Requests compiler memory-usage output. | Off | Yes | — |
 | Debugging | `ENABLE_PRINT_UB_BITS` | Requests the number of occupied UB bits from the compiler. | Off | Yes | Normal path |
 | Debugging | `TRITON_INTERPRET` | Runs supported Triton operations in the CPU interpreter for Python breakpoint debugging. | Off | Yes | Yes |
-| Debugging | `TRITON_ENABLE_SANITIZER` | Passes the sanitizer switch to the Ascend NPU compiler. On A2/A3, use `mssanitizer python3 run_kernel.py` to launch the script when running a statically instrumented kernel. | Off | Yes | Normal path |
+| Debugging | `TRITON_ENABLE_SANITIZER` | Passes the sanitizer switch to the Ascend NPU compiler. On Atlas A2 products/Atlas A3 products, use `mssanitizer python3 run_kernel.py` to launch the script when running a statically instrumented kernel. | Off | Yes | Normal path |
 | Compilation | `TRITON_ALWAYS_COMPILE` | Ignores compilation cache hits and recompiles kernels. | Off | Yes | Yes |
 | Compilation | `TRITON_KERNEL_OVERRIDE` | Loads an external IR or binary with a matching stage filename. | Off | Yes | Yes |
 | Compilation | `TRITON_OVERRIDE_DIR` | Sets the directory containing override files. | `$TRITON_HOME/.triton/override` | Yes | Yes |
@@ -135,7 +135,7 @@ The table below lists each configuration group by purpose; the fields of each gr
 
 | Field | Environment variable | Default | Value range | Description |
 |-------|----------------------|---------|-------------|-------------|
-| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | Passes the sanitizer switch to the Ascend NPU compiler. On A2/A3, launch the script with `mssanitizer` when running a statically instrumented kernel. |
+| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | Passes the sanitizer switch to the Ascend NPU compiler. On Atlas A2 products/Atlas A3 products, launch the script with `mssanitizer` when running a statically instrumented kernel. |
 | `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | `True` / `False` | Requests the number of occupied UB bits from the compiler. |
 | `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | `True` / `False` | Requests compiler memory-usage output. |
 | `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | Directory path / `None` | Fallback NPU compiler tool directory used only when packaged tools and `PATH` lookup fail. |

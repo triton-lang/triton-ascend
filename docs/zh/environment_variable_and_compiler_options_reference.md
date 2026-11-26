@@ -36,7 +36,7 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 调试 | `TRITON_MEMORY_DISPLAY` | 请求编译器输出内存使用信息。 | 关闭 | 支持 | — |
 | 调试 | `ENABLE_PRINT_UB_BITS` | 请求编译器打印UB占用位数。 | 关闭 | 支持 | 常规路径 |
 | 调试 | `TRITON_INTERPRET` | 在CPU解释器中执行其支持的Triton操作，便于Python断点调试。 | 关闭 | 支持 | 支持 |
-| 调试 | `TRITON_ENABLE_SANITIZER` | 向Ascend NPU编译器传入sanitizer开关。A2/A3开启静态插桩后，运行插桩kernel时须通过 `mssanitizer python3 run_kernel.py` 启动脚本。 | 关闭 | 支持 | 常规路径 |
+| 调试 | `TRITON_ENABLE_SANITIZER` | 向Ascend NPU编译器传入sanitizer开关。在 Atlas A2 products/Atlas A3 products 上运行静态插桩后的kernel时，须通过 `mssanitizer python3 run_kernel.py` 启动脚本。 | 关闭 | 支持 | 常规路径 |
 | 编译 | `TRITON_ALWAYS_COMPILE` | 忽略命中的编译缓存，强制重新编译。 | 关闭 | 支持 | 支持 |
 | 编译 | `TRITON_KERNEL_OVERRIDE` | 从覆盖目录读取与编译阶段同名的外部IR/二进制文件。 | 关闭 | 支持 | 支持 |
 | 编译 | `TRITON_OVERRIDE_DIR` | 指定覆盖文件目录。 | `$TRITON_HOME/.triton/override` | 支持 | 支持 |
@@ -134,7 +134,7 @@ triton.knobs.propagate_env = False  # 之后的赋值不再写回os.environ
 
 | 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
 |------|----------|--------|----------|------|
-| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | 向Ascend NPU编译器传入sanitizer开关。A2/A3运行静态插桩后的kernel时，须通过 `mssanitizer` 运行脚本。 |
+| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | 向Ascend NPU编译器传入sanitizer开关。在 Atlas A2 products/Atlas A3 products 上运行静态插桩后的kernel时，须通过 `mssanitizer` 运行脚本。 |
 | `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | `True` / `False` | 请求编译器打印UB占用位数。 |
 | `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | `True` / `False` | 请求编译器输出内存使用信息。 |
 | `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | 目录路径 / `None` | 仅当随包工具与 `PATH` 查找均失败时，作为Ascend编译器工具目录的后备路径。 |

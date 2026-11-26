@@ -275,6 +275,52 @@ for _ in range(20):
         self.assertEqual(result["factor"], 1)
         self.assertFalse(result["model_complete"])
 
+    def test_dot_output_extent_excludes_reduction_and_batch_dimensions(self):
+        for batch, m, n, k in ((1, 64, 32, 128), (128, 32, 64, 32), (2, 128, 32, 32), (2, 32, 128, 32)):
+            with self.subTest(batch=batch, m=m, n=n, k=k):
+                prefix = f"{batch}x" if batch > 1 else ""
+                a, b, out = f"{prefix}{m}x{k}", f"{prefix}{k}x{n}", f"{prefix}{m}x{n}"
+                result = self.score(
+                    f'''module {{
+                  tt.func public @kernel(%a: tensor<{a}xf16>, %b: tensor<{b}xf16>,
+                                         %out: tensor<{out}x!tt.ptr<f32>>) {{
+                    %zero = arith.constant dense<0.0> : tensor<{out}xf32>
+                    %dot = tt.dot %a, %b, %zero : tensor<{a}xf16> * tensor<{b}xf16> -> tensor<{out}xf32>
+                    tt.store %out, %dot : tensor<{out}x!tt.ptr<f32>>
+                    tt.return
+                  }}
+                }}''', cv=True)
+                self.assertEqual(result["status"], "TTIR_COST_ESTIMATED", result)
+                self.assertEqual(result["max_dot_output_extent"], max(m, n))
+
+    def test_large_batch_tiles_are_excluded_from_all_automatic_choices(self):
+        for groups in (4, 256):
+            for cv, kind, extent in ((True, "batch", 32), (True, "batch", 64), (True, "batch", 128), (True, "M", 128),
+                                     (True, "N", 128), (False, "vv", 128)):
+                with self.subTest(groups=groups, cv=cv, kind=kind, extent=extent):
+                    rows = [
+                        dict(factor=f, axis=-1 if f == 1 else 0, status="TTIR_COST_ESTIMATED", score=100 / f, cores=56,
+                             blocks=groups // f, cv=cv, merge_kind="unmerged" if f == 1 else kind,
+                             max_dot_output_extent=extent) for f in (1, 2, 4)
+                    ]
+                    result = json.loads(
+                        ascend.select_block_candidates(
+                            json.dumps(
+                                dict(action="rank_ttir", contract=dict(grid=[groups, 1, 1], core_floor=0),
+                                     candidates=rows))))
+                    limited = cv and kind == "batch" and extent > 64
+                    if limited:
+                        self.assertEqual(result["factor"], 1)
+                        self.assertEqual(result["reason"], "CV_BATCH_TILE_LIMIT_EXCEEDED")
+                        self.assertEqual(result["ranked_candidates"], ["unmerged"])
+                        for factor in (2, 4):
+                            row = result["candidates"][f"a0_f{factor}"]
+                            self.assertEqual(row["status"], "TTIR_COST_ESTIMATED")
+                            self.assertEqual(row["selection_reason"], "CV_BATCH_TILE_LIMIT_EXCEEDED")
+                    else:
+                        self.assertGreater(result["factor"], 1)
+                        self.assertEqual(set(result["ranked_candidates"]), {"unmerged", "a0_f2", "a0_f4"})
+
     def test_supported_targets_share_scores_with_explicit_core_counts(self):
         text = """module { tt.func public @kernel(%out: !tt.ptr<i32>) {
           %zero = arith.constant 0 : i32
@@ -816,6 +862,41 @@ class TestHostIntegration(unittest.TestCase):
         self.assertEqual(contract["grid"], [256, 1, 1])
         self.assertEqual(contract["arguments"]["x"]["shape"], [256, 512])
         self.assertNotIn("block_auto_contract", self.kwargs)
+
+    def test_cv_reselects_changed_grid_and_reuses_warm_decisions(self):
+        compiled = []
+
+        def tail(args, options, grid, *unused, memory_key, **hooks):
+            self.assertIsInstance(memory_key, str)
+            self.assertEqual(json.loads(json.dumps(memory_key)), memory_key)
+            kernels = self.fn.device_caches[0][0]
+            if memory_key not in kernels:
+                compiled.append(tuple(grid))
+                kernels[memory_key] = SimpleNamespace(block_auto_cache_grid=options['block_batching_grid'])
+            return kernels[memory_key]
+
+        self.tail = tail
+        large = self.run_handler((512, ))
+        small = self.run_handler((4, ), warmup=True)
+        self.assertIsNot(large, small)
+        self.assertIs(self.run_handler((4, 1, 1)), small)
+        self.assertIs(self.run_handler((512, )), large)
+        self.assertEqual(compiled, [(512, ), (4, )])
+        self.fn.device_caches[0][0].clear()
+        self.assertIsNot(self.run_handler((4, )), small)
+        self.assertEqual(len(compiled), 3)
+
+    def test_vv_shapes_keep_ordinary_specialization_reuse(self):
+        keys = []
+
+        def tail(*args, memory_key, **hooks):
+            keys.append(memory_key)
+            return self.fn.device_caches[0][0].setdefault(memory_key, SimpleNamespace())
+
+        self.tail = tail
+        first = self.run_handler((512, ))
+        self.assertIs(self.run_handler((4, )), first)
+        self.assertEqual(keys[0], keys[1])
 
     def test_omitted_factor_matches_explicit_auto(self):
         explicit, _ = self.dispatch.prepare_launch(self.fn, (Tensor(), 131072), self.kwargs, (256, ), False, 0,

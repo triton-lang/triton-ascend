@@ -131,10 +131,13 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         if (!PyBool_Check(cvObject.ptr()))
           throw py::value_error("block batching cv must be bool");
         bool cv = cvObject.cast<bool>();
-        if (!PyBool_Check(batchObject.ptr()))
-          throw py::value_error("block batching cv batch matmul must be bool");
-        bool cvBatchMatmul = batchObject.cast<bool>();
-        if (cvBatchMatmul && !cv)
+        if (!batchObject.is_none() && !PyBool_Check(batchObject.ptr()))
+          throw py::value_error(
+              "block batching cv batch matmul must be bool or None");
+        std::optional<bool> cvBatchMatmul;
+        if (!batchObject.is_none())
+          cvBatchMatmul = batchObject.cast<bool>();
+        if (cvBatchMatmul.value_or(true) && !cv)
           throw py::value_error("batch matmul requires CV opt-in");
         if (!PyLong_CheckExact(factorObject.ptr()) ||
             !PyLong_CheckExact(axisObject.ptr()))

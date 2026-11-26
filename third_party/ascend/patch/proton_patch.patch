@@ -794,10 +794,10 @@ index 0000000000000000000000000000000000000000..7fbde92189c16f59a851788a32e2ed40
 +} // namespace proton::cann
 diff --git a/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp b/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..ca764959e2888570e9c4c2122c260f35e62e1b04
+index 0000000000000000000000000000000000000000..4030b9887f8c176b3298ee7b500a247e5a705934
 --- /dev/null
 +++ b/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,97 @@
 +#include "Driver/GPU/MsptiApi.h"
 +#include "Device.h"
 +#include "Driver/Dispatch.h"
@@ -858,7 +858,6 @@ index 0000000000000000000000000000000000000000..ca764959e2888570e9c4c2122c260f35
 +                msptiExternalCorrelationKind, uint64_t *)
 +
 +static bool needsLegacyKernelDrain() {
-+  // Limit the workaround to the 910B / legacy MSPTI interface combination.
 +  // Newer libraries keep their own channel drain and parser teardown policy.
 +  if (dlsym(ExternLibMspti::lib, "msptiGetVersion"))
 +    return false;
@@ -868,7 +867,9 @@ index 0000000000000000000000000000000000000000..ca764959e2888570e9c4c2122c260f35
 +  using GetSocName = const char *(*)();
 +  auto getSocName = reinterpret_cast<GetSocName>(dlsym(acl, "aclrtGetSocName"));
 +  const char *name = getSocName ? getSocName() : nullptr;
-+  bool match = name && std::string_view(name).rfind("Ascend910B", 0) == 0;
++  const std::string_view soc = name ? name : "";
++  const bool match =
++      soc.rfind("Ascend910B", 0) == 0 || soc.rfind("Ascend910_93", 0) == 0;
 +  dlclose(acl);
 +  return match;
 +}

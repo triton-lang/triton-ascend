@@ -325,7 +325,7 @@ int UpdateConditionInfoPass::buildCrossCoreBlockEdges(ModuleOp module) {
       // producer block owns its own counter and produces its own buffers, so
       // a group whose producers spread over several blocks produces one edge
       // per block.
-      SmallVector<std::pair<scf::IfOp, int>> producersByBlock;
+      SmallVector<scf::IfOp> producerBlocks;
       for (Operation *producerOp : producers) {
         scf::IfOp producerBlock = findIfOpContainingOp(producerOp);
         if (!producerBlock) {
@@ -333,24 +333,12 @@ int UpdateConditionInfoPass::buildCrossCoreBlockEdges(ModuleOp module) {
                << *producerOp << "\n");
           return UPDATE_CONDITION_INFO_FAILED;
         }
-        auto blockIt = producersByBlock.end();
-        for (auto it = producersByBlock.begin(); it != producersByBlock.end();
-             ++it) {
-          if (it->first == producerBlock) {
-            blockIt = it;
-            break;
-          }
-        }
-        if (blockIt == producersByBlock.end()) {
-          producersByBlock.push_back({producerBlock, 1});
-        } else {
-          blockIt->second++;
+        if (!llvm::is_contained(producerBlocks, producerBlock)) {
+          producerBlocks.push_back(producerBlock);
         }
       }
 
-      for (const auto &producerEntry : producersByBlock) {
-        scf::IfOp producerIf = producerEntry.first;
-        int bufferNum = producerEntry.second;
+      for (scf::IfOp producerIf : producerBlocks) {
         if (producerIf == consumerIf) {
           // Producer and consumer share the block: the difference of their
           // counters is always zero, the edge carries no information.
@@ -363,10 +351,7 @@ int UpdateConditionInfoPass::buildCrossCoreBlockEdges(ModuleOp module) {
         auto it = edgeIndex.find(key);
         if (it == edgeIndex.end()) {
           edgeIndex[key] = static_cast<int>(edges.size());
-          edges.push_back({producerIf, consumerIf, bufferNum});
-        } else if (bufferNum < edges[it->second].bufferNum) {
-          // Several groups share the same block pair: keep the strictest depth.
-          edges[it->second].bufferNum = bufferNum;
+          edges.push_back({producerIf, consumerIf});
         }
       }
     }
@@ -742,39 +727,6 @@ UpdateConditionInfoPass::getPreloadTargets(scf::IfOp ifOp, bool isAIC) {
   return targets;
 }
 
-// The number of the cross-core buffers, the base of the preload bounds.
-//
-// The count is the number of buffers the cross-core data passes through, it is
-// the depth of the pipeline between the two cores. It is the same number the
-// producer side of the cross-core conditions uses.
-//
-// The attribute does not always live on the module: the buffer count manager
-// puts it there, but the function that carries the pipeline may hold it as
-// well. The function is looked at first, it is the more specific one. When
-// neither of them holds the attribute, the default of the buffer count
-// manager is used.
-int UpdateConditionInfoPass::getPreloadBufferCount(ModuleOp module) {
-  int count = 0;
-  for (func::FuncOp funcOp : module.getOps<func::FuncOp>()) {
-    if (auto attr = funcOp->getAttrOfType<IntegerAttr>(
-            CVPipeline::kInterCoreBufCount)) {
-      count = static_cast<int>(attr.getInt());
-      break;
-    }
-  }
-  if (count <= 0) {
-    if (auto attr = module->getAttrOfType<IntegerAttr>(
-            CVPipeline::kInterCoreBufCount)) {
-      count = static_cast<int>(attr.getInt());
-    }
-  }
-  if (count <= 0) {
-    count = 2;
-  }
-  LDBG("Preload buffer count: " << count);
-  return count;
-}
-
 // Preload conditions of `ifOp`.
 //
 // The computation blocks of a core that take part in a cross-core dependency
@@ -854,7 +806,7 @@ Value UpdateConditionInfoPass::addPreloadConditions(
     // rounds further ahead than the other levels. The other levels are only
     // held back by the distance that separates them.
     int limit = (ownLevel == 1)
-                    ? (targetLevel - ownLevel) + (preloadBufferCount - 1)
+                    ? (targetLevel - ownLevel) + (crossCoreBufferNum - 1)
                     : (targetLevel - ownLevel);
 
     Value targetValue =
@@ -1505,8 +1457,12 @@ Value UpdateConditionInfoPass::addCrossCoreBlockConditions(
       Value diff =
           builder.create<arith::SubIOp>(loc, producerValue, consumerValue);
       if (currentIsProducer) {
+        // The producer may not run more than the number of the cross core
+        // buffers ahead of the consumer. The cross core data passes through
+        // that many buffers, so a producer that is further ahead would
+        // overwrite a buffer the consumer has not read yet.
         Value bufferNum = builder.create<arith::ConstantIntOp>(
-            loc, edge.bufferNum, CONST_INT_TYPE);
+            loc, crossCoreBufferNum, CONST_INT_TYPE);
         combineCondition(builder.create<arith::CmpIOp>(
             loc, arith::CmpIPredicate::slt, diff, bufferNum));
       } else {
@@ -2088,9 +2044,25 @@ int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
                                               counter, upperBound);
 
   // Build condition: counter >= lowerBound + step * opt_num
-  // opt_num = min(intraCoreBufferCount - 1, crossCoreBufferCount)
-  int optInt =
-      std::min(info->intraCoreBufferCount - 1, info->crossCoreBufferCount);
+  // opt_num = min(cross core buffer count - 1, cross core copy count)
+  //
+  // The cross core buffer count is the number of buffers the cross core data
+  // passes through, the depth of the pipeline between the two cores. It is the
+  // number the preload bounds use as well: the preload bound holds a block
+  // back by a number of rounds, the flowOpt condition lets a block run only
+  // once the source has produced that many rounds. A flowOpt threshold larger
+  // than the preload bound would have the two conditions wait for each other,
+  // so the two read the same number.
+  //
+  // The copy count is the number of copies the producer makes for the
+  // consumer. The producer may not run more than that many rounds ahead of
+  // the consumer, so the consumer cannot wait for more rounds than that.
+  int optInt = std::min(crossCoreBufferNum - 1, info->crossCoreBufferCount);
+  LDBG("The flowOpt threshold is " << optInt
+                                   << " rounds: min(cross core "
+                                      "buffers "
+                                   << crossCoreBufferNum << " - 1, copy count "
+                                   << info->crossCoreBufferCount << ")");
 
   auto stepIntType = dyn_cast<IntegerType>(step.getType());
   if (!stepIntType) {
@@ -2912,9 +2884,9 @@ void UpdateConditionInfoPass::runOnOperation() {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
-  preloadBufferCount = getPreloadBufferCount(module);
-  LDBG("The preload conditions use " << preloadBufferCount
-                                     << " cross core buffers as base.\n");
+  crossCoreBufferNum = getCrossCoreBufferCount(module);
+  LDBG("The cross core conditions use " << crossCoreBufferNum
+                                        << " cross core buffers as base.\n");
 
   // Step3:Init the ssbufferPtrs
   SmallVector<SmallVector<Value>> ssbufferPtrs = allocSSBuffer(module);

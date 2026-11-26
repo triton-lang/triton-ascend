@@ -51,6 +51,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
@@ -1290,9 +1291,18 @@ int UpdateConditionInfoPassLegacy::setFlowOptCondition(scf::IfOp currentIfOp,
                                               counter, upperBound);
 
   // Build condition: counter >= lowerBound + step * opt_num
-  // opt_num = min(intraCoreBufferCount - 1, crossCoreBufferCount)
-  int optInt =
-      std::min(info->intraCoreBufferCount - 1, info->crossCoreBufferCount);
+  // opt_num = min(cross core buffer count - 1, cross core copy count)
+  //
+  // The cross core buffer count is the number of buffers the cross core data
+  // passes through, the depth of the pipeline between the two cores. The
+  // producer may not run more than the number of copies ahead of the
+  // consumer, so the consumer cannot wait for more rounds than that.
+  int optInt = std::min(crossCoreBufferNum - 1, info->crossCoreBufferCount);
+  LDBG("The flowOpt threshold is " << optInt
+                                   << " rounds: min(cross core "
+                                      "buffers "
+                                   << crossCoreBufferNum << " - 1, copy count "
+                                   << info->crossCoreBufferCount << ")");
 
   auto stepIntType = dyn_cast<IntegerType>(step.getType());
   if (!stepIntType) {
@@ -1932,7 +1942,8 @@ int UpdateConditionInfoPassLegacy::updateIfConds(
         eventPairs[loop->getAttrOfType<IntegerAttr>(kMainLoop).getInt()]
             .push_back(loop);
     for (const auto &[id, loops] : eventPairs) {
-      auto schedule = inferOuterEventStaticSchedule(loops, *info);
+      auto schedule =
+          inferOuterEventStaticSchedule(loops, *info, crossCoreBufferNum);
       if (failed(schedule))
         continue;
       staticOffsets.insert(schedule->offsets.begin(), schedule->offsets.end());
@@ -2082,6 +2093,7 @@ void UpdateConditionInfoPassLegacy::runOnOperation() {
   }
 
   LDBG("Enter UpdateConditionInfo pass." << "\n");
+  crossCoreBufferNum = getCrossCoreBufferCount(module);
   SmallVector<SmallVector<Value>> ssbufferPtrs;
   if (!CVPipeline::hasOuterMainLoop(module))
     ssbufferPtrs = allocSSBuffer(module);

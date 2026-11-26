@@ -23,6 +23,7 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "llvm/Support/Debug.h"
 #include <optional>
 
@@ -481,6 +482,36 @@ scf::IfOp findIfOpContainingOp(Operation *op) {
   }
 
   return nullptr;
+}
+
+// The number of the cross core buffers, the depth of the pipeline between the
+// two cores.
+//
+// The attribute does not always live on the module: the buffer count manager
+// puts it there, but the function that carries the pipeline may hold it as
+// well. The function is looked at first, it is the more specific one. When
+// neither of them holds the attribute, the default of the buffer count
+// manager is used.
+int getCrossCoreBufferCount(ModuleOp module) {
+  int count = 0;
+  for (func::FuncOp funcOp : module.getOps<func::FuncOp>()) {
+    if (auto attr = funcOp->getAttrOfType<IntegerAttr>(
+            CVPipeline::kInterCoreBufCount)) {
+      count = static_cast<int>(attr.getInt());
+      break;
+    }
+  }
+  if (count <= 0) {
+    if (auto attr = module->getAttrOfType<IntegerAttr>(
+            CVPipeline::kInterCoreBufCount)) {
+      count = static_cast<int>(attr.getInt());
+    }
+  }
+  if (count <= 0) {
+    count = 2;
+  }
+  LDBG("The cross core buffer count is " << count);
+  return count;
 }
 
 } // namespace mlir

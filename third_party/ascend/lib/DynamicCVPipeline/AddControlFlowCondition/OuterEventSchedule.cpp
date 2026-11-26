@@ -411,7 +411,8 @@ LogicalResult addCarryEdges(ArrayRef<Side> sides,
 } // namespace
 
 FailureOr<OuterEventStaticSchedule> mlir::triton::inferOuterEventStaticSchedule(
-    ArrayRef<Operation *> loops, const ControlFlowConditionInfo &info) {
+    ArrayRef<Operation *> loops, const ControlFlowConditionInfo &info,
+    int crossCoreBufferNum) {
   auto sides = collectOrderedSides(loops, info);
   if (failed(sides))
     return failure();
@@ -496,8 +497,7 @@ FailureOr<OuterEventStaticSchedule> mlir::triton::inferOuterEventStaticSchedule(
   // opt firings in earlier sweeps, or finish first when T is smaller.
   if (info.crossCoreBufferCount > CROSS_CORE_BUFFER_COUNT_THRESHOLD &&
       info.intraCoreBufferCount > INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
-    int opt =
-        std::min(info.intraCoreBufferCount - 1, info.crossCoreBufferCount);
+    int opt = std::min(crossCoreBufferNum - 1, info.crossCoreBufferCount);
     for (const auto &[target, source] : info.flowOptIfOpPairs) {
       auto from = number.find(source), to = number.find(target);
       if (from == number.end() || to == number.end() ||

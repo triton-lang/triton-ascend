@@ -23,7 +23,8 @@ struct OuterEventStaticSchedule {
 // Prove a one-event-per-sweep schedule before adding scalar readiness checks.
 FailureOr<OuterEventStaticSchedule>
 inferOuterEventStaticSchedule(ArrayRef<Operation *> loops,
-                              const ControlFlowConditionInfo &info);
+                              const ControlFlowConditionInfo &info,
+                              int crossCoreBufferNum);
 
 LogicalResult groupOuterEventSweepGrants(scf::ForOp loop);
 void issueOuterProducerBeforeWait(ModuleOp module);

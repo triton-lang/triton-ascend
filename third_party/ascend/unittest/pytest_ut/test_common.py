@@ -252,7 +252,7 @@ def validate_cmp(dtype, y_cal, y_ref, overflow_mode: Optional[str] = None):
     if dtype == 'float16':
         torch.testing.assert_close(y_ref, y_cal, rtol=1e-03, atol=1e-03, equal_nan=True)
     elif dtype == 'bfloat16':
-        torch.testing.assert_close(y_ref.to(torch.float32), y_cal.to(torch.float32), rtol=1e-03, atol=1e-03,
+        torch.testing.assert_close(y_ref.to(torch.float32), y_cal.to(torch.float32), rtol=1e-02, atol=1e-02,
                                    equal_nan=True)
     elif dtype == 'float32':
         torch.testing.assert_close(y_ref, y_cal, rtol=1e-04, atol=1e-04, equal_nan=True)

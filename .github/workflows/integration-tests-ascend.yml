@@ -157,6 +157,14 @@ jobs:
       - name: CCache stats
         run: ccache --print-stats
 
+      - name: Compare msprof and MSPTI on one A3 device
+        if: matrix.config.chip_type == 'a3' && matrix.config.python_version == '3.11'
+        shell: bash
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          ${PYTHON} .github/scripts/a3_mspti_pair.py
+
       - name: Run unit tests on NPU
         shell: bash
         run: |

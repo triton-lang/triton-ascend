@@ -114,6 +114,16 @@ extern "C" int probe_start() {
 
 extern "C" void probe_mark(int on) { measuring.store(on != 0); }
 
+extern "C" int probe_shared_drain() {
+  CHECK(msptiActivityFlushAll(0));
+  snapshot("before_shared_drain");
+  CHECK(msptiActivityEnable(MSPTI_ACTIVITY_KIND_COMMUNICATION));
+  CHECK(msptiActivityDisable(MSPTI_ACTIVITY_KIND_COMMUNICATION));
+  CHECK(msptiActivityFlushAll(0));
+  snapshot("after_shared_drain");
+  return 0;
+}
+
 extern "C" int probe_wait() {
   CHECK(msptiActivityFlushAll(0));
   snapshot("immediate");

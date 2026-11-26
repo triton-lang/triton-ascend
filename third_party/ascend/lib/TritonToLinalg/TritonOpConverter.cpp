@@ -36,7 +36,6 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
@@ -636,83 +635,45 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
   return success();
 }
 
-/*
- * Move tt.bitcast to a previous location if tt.bitcast is not directly
- * applied on function arguments
- */
 LogicalResult
-BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
+BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp op,
                                       PatternRewriter &rewriter) const {
-  Value castSrc = bitcastOp.getSrc();
-  Value castRes = bitcastOp.getResult();
-  Type castSrcTy = castSrc.getType();
-  Type castSrcPtrTy = isa<ShapedType>(castSrcTy)
-                          ? cast<ShapedType>(castSrcTy).getElementType()
-                          : castSrcTy;
-  if (!isa<triton::PointerType>(castSrcPtrTy))
+  Type resultType = op.getType();
+  Type elementType = getElementTypeOrSelf(resultType);
+  if (!isa<triton::PointerType>(elementType))
+    return failure();
+  Value source = op.getSrc();
+  // Preserve the layout when pushing the cast through its producer.
+  if (auto tensor = dyn_cast<RankedTensorType>(source.getType());
+      tensor && tensor.clone(elementType) != resultType)
     return failure();
 
-  auto origBitwidth = getPointeeBitWidth(castSrc.getType());
-  auto castBitwidth = getPointeeBitWidth(castRes.getType());
-
-  if (origBitwidth == 1)
-    origBitwidth = 8;
-  if (castBitwidth == 1)
-    castBitwidth = 8;
-  // Hoisting across addptr reuses its offset in the original element units.
-  if (origBitwidth != castBitwidth)
-    return failure();
-
-  Operation *beforeCastOp = castSrc.getDefiningOp();
-  if (beforeCastOp == nullptr) {
+  Value replacement;
+  if (auto previous = source.getDefiningOp<triton::BitcastOp>()) {
+    Value input = previous.getSrc();
+    replacement = input;
+    if (input.getType() != resultType)
+      replacement =
+          rewriter.create<triton::BitcastOp>(op.getLoc(), resultType, input);
+  } else if (auto splat = source.getDefiningOp<triton::SplatOp>()) {
+    Value input = splat.getSrc();
+    Type castType = elementType;
+    if (auto tensor = dyn_cast<RankedTensorType>(input.getType()))
+      castType = tensor.clone(elementType);
+    Value cast =
+        rewriter.create<triton::BitcastOp>(op.getLoc(), castType, input);
+    replacement =
+        rewriter.create<triton::SplatOp>(op.getLoc(), resultType, cast);
+  } else {
     return failure();
   }
 
-  auto newRes =
-      TypeSwitch<Operation *, FailureOr<Operation *>>(beforeCastOp)
-          // before: addptr - bitcast - load/store
-          // after: bitcast - addptr - load/store
-          .Case<triton::AddPtrOp>([&](triton::AddPtrOp addptrOp) {
-            auto newCastOp = rewriter.create<triton::BitcastOp>(
-                bitcastOp.getLoc(), castRes.getType(), addptrOp.getPtr());
-            return rewriter.create<triton::AddPtrOp>(
-                bitcastOp.getLoc(), castRes.getType(), newCastOp.getResult(),
-                addptrOp.getOffset());
-          })
-          .Case<triton::SplatOp>([&](triton::SplatOp splatOp) {
-            Type newCastSrcTy =
-                cast<RankedTensorType>(castRes.getType()).getElementType();
-
-            Value splatSrc = splatOp.getSrc();
-            Type splatSrcTy = splatSrc.getType();
-            if (auto splatSrcTensorTy = dyn_cast<RankedTensorType>(splatSrcTy))
-              newCastSrcTy =
-                  splatSrcTensorTy.cloneWith(std::nullopt, newCastSrcTy);
-            auto newCastOp = rewriter.create<triton::BitcastOp>(
-                bitcastOp.getLoc(), newCastSrcTy, splatSrc);
-            return rewriter.create<triton::SplatOp>(
-                bitcastOp.getLoc(), castRes.getType(), newCastOp);
-          })
-          // before: bitcast - bitcast
-          // after(fusion optimization): bitcast
-          .Case<triton::BitcastOp>([&](triton::BitcastOp prevCastOp) {
-            return rewriter.create<triton::BitcastOp>(
-                bitcastOp.getLoc(), castRes.getType(), prevCastOp.getSrc());
-          })
-          .Default([&](Operation *op) {
-            return rewriter.notifyMatchFailure(bitcastOp,
-                                               "Unknown bitcast pattern");
-          });
-  if (succeeded(newRes)) {
-    // Preserve debug location in case beforeCastOp is erased below.
-    insertDebugNop(beforeCastOp->getLoc(), rewriter);
-    rewriter.replaceOp(bitcastOp, newRes.value());
-    if (beforeCastOp->use_empty()) {
-      rewriter.eraseOp(beforeCastOp);
-    }
-    return success();
-  }
-  return failure();
+  Operation *producer = source.getDefiningOp();
+  insertDebugNop(producer->getLoc(), rewriter);
+  rewriter.replaceOp(op, replacement);
+  if (producer->use_empty())
+    rewriter.eraseOp(producer);
+  return success();
 }
 
 // arith.truncf's generic constant folder does not interpret enable_saturate.

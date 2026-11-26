@@ -141,3 +141,24 @@ module {
     return %value : i32
   }
 }
+
+// -----
+
+module {
+  // Moving the outer cast through splat exposes the scalar round trip.
+  // CHECK-LABEL: func.func @splat_roundtrip
+  // CHECK-NOT: hivm.hir.pointer_cast
+  // CHECK: memref.copy
+  tt.func public @splat_roundtrip(%src: !tt.ptr<i8>, %dst: !tt.ptr<i8>) {
+    %r = tt.make_range {start = 0 : i32, end = 8 : i32} : tensor<8xi32>
+    %wide = tt.bitcast %src : !tt.ptr<i8> -> !tt.ptr<i32>
+    %s = tt.splat %wide : !tt.ptr<i32> -> tensor<8x!tt.ptr<i32>>
+    %bytes = tt.bitcast %s : tensor<8x!tt.ptr<i32>> -> tensor<8x!tt.ptr<i8>>
+    %p = tt.addptr %bytes, %r : tensor<8x!tt.ptr<i8>>, tensor<8xi32>
+    %v = tt.load %p : tensor<8x!tt.ptr<i8>>
+    %d = tt.splat %dst : !tt.ptr<i8> -> tensor<8x!tt.ptr<i8>>
+    %out = tt.addptr %d, %r : tensor<8x!tt.ptr<i8>>, tensor<8xi32>
+    tt.store %out, %v : tensor<8x!tt.ptr<i8>>
+    tt.return
+  }
+}

@@ -105,10 +105,7 @@ private:
   const bool useDirectSelectSlices;
 };
 
-/*
- * Move tt.bitcast to a previous location if tt.bitcast is not directly applied
- * on function arguments
- */
+/// Fold adjacent pointer bitcasts and move pointer bitcasts through splats.
 class BitcastCanonicalizer : public OpRewritePattern<triton::BitcastOp> {
 public:
   using OpRewritePattern<triton::BitcastOp>::OpRewritePattern;

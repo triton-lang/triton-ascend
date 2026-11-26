@@ -483,9 +483,18 @@ void parse(Value operand, const Location &loc, RewriterBase &rewriter,
   }
 
   if (!offsetMap.contains(operand)) {
-    offsetMap[operand] = PtrOffsetInfo();
-    if (auto tensorType = dyn_cast<RankedTensorType>(operand.getType()))
-      offsetMap[operand].setUnstructured(tensorType.getRank());
+    if (isScalarPointer(operand)) {
+      // A scalar pointer produced by an op this analysis does not model (e.g.
+      // a noinline tt.call result) is already a complete runtime address.
+      // Record it as the opaque base with a zero displacement so later
+      // splat/addptr users keep a valid base instead of an empty
+      // PtrOffsetInfo.
+      recordOpaqueScalarPointer(operand, offsetMap);
+    } else {
+      offsetMap[operand] = PtrOffsetInfo();
+      if (auto tensorType = dyn_cast<RankedTensorType>(operand.getType()))
+        offsetMap[operand].setUnstructured(tensorType.getRank());
+    }
   }
 
   LLVM_DEBUG({

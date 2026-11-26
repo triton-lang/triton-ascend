@@ -100,6 +100,8 @@ std::unique_ptr<GraphOptimizationRule>
 createRowCoalescingRule(bool enableLegacy = true);
 std::unique_ptr<GraphOptimizationRule> createDiagonalMaskRemovalRule();
 std::unique_ptr<GraphOptimizationRule> createConvertModuloToMaskRule();
+std::unique_ptr<GraphOptimizationRule> createSelectedBlockScanRule();
+
 std::unique_ptr<GraphOptimizationRule> createIndependentAxisTensorizeRule(
     const IndependentAxisTensorizeRuleOptions &options);
 std::unique_ptr<GraphOptimizationRule> createPersistentTaskStripMiningRule(
@@ -118,6 +120,7 @@ std::unique_ptr<GraphOptimizationRule> createStoreCoveragePlanningRule(
     const StoreCoveragePlanningRuleOptions &options);
 std::unique_ptr<GraphOptimizationRule> createContiguousBlockAccessFormationRule(
     const ContiguousBlockAccessFormationRuleOptions &options);
+std::unique_ptr<GraphOptimizationRule> createQueryRowBatchingRule();
 
 } // namespace cfg
 } // namespace triton

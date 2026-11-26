@@ -22,6 +22,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -454,38 +455,6 @@ static bool isAllocTensorPattern(Value depVal) {
   return isa_and_nonnull<bufferization::AllocTensorOp>(depVal.getDefiningOp());
 }
 
-// Check if depVal is the result of a bufferization.to_tensor wrapping a
-// freshly-allocated memref that has no data copy landing on it before the
-// to_tensor
-static bool isAllocToTensorPattern(Value depVal) {
-  auto toTensorOp =
-      dyn_cast_or_null<bufferization::ToTensorOp>(depVal.getDefiningOp());
-  if (!toTensorOp)
-    return false;
-  Value memref = toTensorOp.getOperand();
-  auto allocOp = dyn_cast_or_null<memref::AllocOp>(memref.getDefiningOp());
-  if (!allocOp)
-    return false;
-
-  // Scan from allocOp down to (but not including) toTensorOp
-  bool seenAlloc = false;
-  for (Operation &op : *allocOp->getBlock()) {
-    if (&op == allocOp) {
-      seenAlloc = true;
-      continue;
-    }
-    if (&op == toTensorOp)
-      break;
-    if (!seenAlloc)
-      continue;
-    for (OpOperand &use : memref.getUses()) {
-      if (use.getOwner() == &op)
-        return false;
-    }
-  }
-  return true;
-}
-
 SmallVector<Value>
 collectBufferValues(DenseMap<Value, SmallVector<Value>> &depValueMap,
                     const DenseSet<Value> &clonedDepVals) {
@@ -515,11 +484,6 @@ collectBufferValues(DenseMap<Value, SmallVector<Value>> &depValueMap,
 
       // Skip bufferization.alloc_tensor
       if (isa<bufferization::AllocTensorOp>(op))
-        continue;
-
-      // Skip to_tensor whose operand is a memref.alloc — handled by
-      // cloneAllocToTensorsInBlocks in Phase 2.
-      if (isAllocToTensorPattern(depVal))
         continue;
 
       valueList.push_back(depVal);
@@ -1095,23 +1059,28 @@ insertProducerLogic(OpBuilder &builder, Value depVal,
   return newOps;
 }
 
-// Handle consumer when N==1 (directly return buffer)
-static Operation *handleSingleBufferConsumer(OpBuilder &builder, Location loc,
-                                             SmallVector<BufferPair> &buffers) {
-  auto memrefType = mlir::cast<mlir::MemRefType>(buffers[0].second.getType());
-  auto tensorType = mlir::RankedTensorType::get(memrefType.getShape(),
-                                                memrefType.getElementType());
-  return builder.create<mlir::bufferization::ToTensorOp>(
-      loc, tensorType, buffers[0].second,
-      mlir::UnitAttr::get(builder.getContext()),
-      mlir::UnitAttr::get(builder.getContext()));
-}
-
-// Helper function to create ToTensorOp
-static mlir::bufferization::ToTensorOp createToTensorOp(OpBuilder &builder,
-                                                        Location loc,
-                                                        mlir::Type tensorType,
-                                                        Value buffer) {
+// A shared ring buffer is still needed by other compute blocks. Exposing it
+// through independent `to_tensor restrict writable` operations both violates
+// the restrict contract and lets bufferization overwrite a later consumer's
+// input (for example, m0 can become exp(-inf - m0) before alpha1 reads m0).
+// For explicitly selected outer loops, give each consumer a private snapshot.
+// The allocation/copy belong to the consumer block, so they run only after its
+// readiness test and the ring credit is returned after the whole block runs.
+static mlir::bufferization::ToTensorOp
+createToTensorOp(OpBuilder &builder, Location loc, mlir::Type tensorType,
+                 Value buffer, const MainLoop &loop, int blockId) {
+  if (loop->hasAttr(kOuterEventControlCount)) {
+    auto memrefType = cast<MemRefType>(buffer.getType());
+    auto snapshot = builder.create<memref::AllocOp>(loc, memrefType);
+    auto copy = builder.create<hivm::CopyOp>(loc, TypeRange{}, buffer,
+                                             snapshot.getResult());
+    if (blockId >= 0) {
+      auto attr = builder.getI32IntegerAttr(blockId);
+      snapshot->setAttr(kBlockId, attr);
+      copy->setAttr(kBlockId, attr);
+    }
+    buffer = snapshot.getResult();
+  }
   return builder.create<mlir::bufferization::ToTensorOp>(
       loc, tensorType, buffer, mlir::UnitAttr::get(builder.getContext()),
       mlir::UnitAttr::get(builder.getContext()));
@@ -1127,7 +1096,11 @@ static int insertConsumerLogic(OpBuilder &builder, Value depVal,
   Location loc = builder.getInsertionPoint()->getLoc();
 
   if (N == kBufferCountOne) {
-    Operation *consumerOp = handleSingleBufferConsumer(builder, loc, buffers);
+    auto memrefType = cast<MemRefType>(buffers[0].second.getType());
+    auto tensorType = RankedTensorType::get(memrefType.getShape(),
+                                            memrefType.getElementType());
+    Operation *consumerOp = createToTensorOp(builder, loc, tensorType,
+                                             buffers[0].second, loop, blockId);
     outIfOps.push_back(consumerOp);
     if (groupId >= 0) {
       consumerOp->setAttr(kIntraDeps, builder.getI32ArrayAttr({groupId, 0}));
@@ -1143,7 +1116,7 @@ static int insertConsumerLogic(OpBuilder &builder, Value depVal,
   int ret = buildIfChain(
       builder, loc, readIdx, buffers, newOps, outIfOps,
       [&](OpBuilder &b, Location l, Value buffer) -> Operation * {
-        return createToTensorOp(b, l, tensorType, buffer);
+        return createToTensorOp(b, l, tensorType, buffer, loop, blockId);
       },
       [&](OpBuilder &b, Location l, Operation *op) -> Value {
         return cast<mlir::bufferization::ToTensorOp>(op).getResult();
@@ -1232,7 +1205,7 @@ insertBufferSelectionInRegion(OpBuilder &builder, Region &region, Location loc,
   int ret = buildIfChain(
       builder, loc, readIdx, buffers, newIfOps, outIfOps,
       [&](OpBuilder &b, Location l, Value buffer) -> Operation * {
-        return createToTensorOp(b, l, tensorType, buffer);
+        return createToTensorOp(b, l, tensorType, buffer, loop, blockId);
       },
       [&](OpBuilder &b, Location l, Operation *op) -> Value {
         return cast<mlir::bufferization::ToTensorOp>(op).getResult();
@@ -1703,30 +1676,6 @@ cloneAllocTensorsInBlocks(const MainLoop &loop,
       });
 }
 
-// Clone a memref.alloc + bufferization.to_tensor chain to each consumer block.
-static int cloneAllocToTensorsInBlocks(
-    const MainLoop &loop, DenseMap<Value, InnerBlockInfo> &blocks,
-    DenseMap<Value, SmallVector<Value>> &depValueMap,
-    DenseMap<Value, SmallVector<Operation *>> &depUserMap,
-    OpBuilder &globalBuilder) {
-  return cloneDepsToConsumers(
-      loop, blocks, depValueMap, depUserMap, globalBuilder,
-      isAllocToTensorPattern,
-      [](IRMapping &mapper, OpBuilder &builder, Value depVal, int userBlockId,
-         ArrayRef<Operation *> users) -> Value {
-        auto toTensor = cast<bufferization::ToTensorOp>(depVal.getDefiningOp());
-        Operation *origAlloc = toTensor.getOperand().getDefiningOp();
-
-        Operation *newAlloc = builder.clone(*origAlloc, mapper);
-        newAlloc->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
-        mapper.map(origAlloc->getResult(0), newAlloc->getResult(0));
-
-        Operation *newToTensor = builder.clone(*toTensor, mapper);
-        newToTensor->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
-        return newToTensor->getResult(0);
-      });
-}
-
 // Process cross-block tensor dependencies for double buffering
 static int
 processTensorDependencies(const MainLoop &loop,
@@ -1764,11 +1713,6 @@ processTensorDependencies(const MainLoop &loop,
 
       // Skip bufferization.alloc_tensor
       if (isa<bufferization::AllocTensorOp>(depVal.getDefiningOp()))
-        continue;
-
-      // Skip to_tensor whose operand is a memref.alloc — cloned to consumer
-      // blocks by cloneAllocToTensorsInBlocks in Phase 2.
-      if (isAllocToTensorPattern(depVal))
         continue;
 
       auto *parentOp = depVal.getDefiningOp()->getParentOp();
@@ -2032,8 +1976,8 @@ static void insertWhileCounterOps(const MainLoop &mainLoop) {
   builder.setInsertionPointAfter(lastWithBlockId);
   IntegerAttr blockIdAttr = builder.getI32IntegerAttr(*counterBlockId);
 
-  Value one = builder.create<arith::ConstantIntOp>(
-      loc, 1, mainLoop.iterCounter.getType().getIntOrFloatBitWidth());
+  Value one = builder.create<arith::ConstantOp>(
+      loc, builder.getIntegerAttr(mainLoop.iterCounter.getType(), 1));
   one.getDefiningOp()->setAttr(kBlockId, blockIdAttr);
 
   Value nextCounter =
@@ -2170,11 +2114,6 @@ static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
   // Clone bufferization.alloc_tensor deps to each consumer's block.
   if (cloneAllocTensorsInBlocks(mainLoop, blocks, depValueMap, depUserMap,
                                 globalBuilder) != 0)
-    return -1;
-
-  // Clone memref.alloc + bufferization.to_tensor deps to each consumer's block
-  if (cloneAllocToTensorsInBlocks(mainLoop, blocks, depValueMap, depUserMap,
-                                  globalBuilder) != 0)
     return -1;
   auto valueList = collectBufferValues(depValueMap, phase1ClonedDepVals);
   LLVM_DEBUG(

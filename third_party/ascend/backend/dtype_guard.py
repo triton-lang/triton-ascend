@@ -64,10 +64,17 @@ class UnsupportedDtypeError(TypeError):
 
 
 def arch_bucket(arch):
-    """Classify an ``options.arch`` value into an ``"a2"`` / ``"a5"`` bucket."""
+    """Classify an options.arch value into an "a2" / "a5" / "a6" bucket.
+
+    A5 and A6 share the register-based pipeline; they are distinguished
+    by generation only for bucket-specific tuning heuristics.
+    """
     try:
-        from triton.backends.ascend.utils import is_compile_on_910_95
-        return "a5" if is_compile_on_910_95(arch) else "a2"
+        from triton.backends.ascend.utils import AscendArchGen, arch_generation
+        gen = arch_generation(arch)
+        if gen == AscendArchGen.GEN6:
+            return "a6"
+        return "a5" if gen == AscendArchGen.GEN5 else "a2"
     except Exception:
         return "a2"
 
@@ -283,7 +290,7 @@ def validate(rule_id, args, bucket, op_label=None, kws=None, fn=None):
 
     # Operator symbol (``>>`` for a dunder) or the concise rule/function name.
     label = op_label or rule_id
-    arch_name = "Ascend 950PR&950DT" if bucket == "a5" else "Atlas A2 products/Atlas A3 products"
+    arch_name = "Ascend 950PR&950DT / Ascend 960" if bucket in ("a5", "a6") else "Atlas A2 products/Atlas A3 products"
     # The interception decision uses the blacklist above; the message tells
     # the user which dtypes ARE supported, so it is built from the complement
     # of that blacklist derived on the fly.

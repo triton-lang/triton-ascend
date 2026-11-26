@@ -43,6 +43,19 @@ public:
 
 std::unique_ptr<OperationPass<ModuleOp>> createReorderOpsByBlockIdPass();
 
+// Final, conservative ordering of old-carry readers before event writers.
+class ReorderOuterEventCarryPass
+    : public PassWrapper<ReorderOuterEventCarryPass, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ReorderOuterEventCarryPass);
+  void runOnOperation() override;
+  llvm::StringRef getArgument() const final {
+    return "reorder-outer-event-carry";
+  }
+};
+
+std::unique_ptr<OperationPass<ModuleOp>> createReorderOuterEventCarryPass();
+
 } // namespace mlir::triton
 
 #endif // TRITION_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_REORDER_OPS_BY_BLOCKID_H

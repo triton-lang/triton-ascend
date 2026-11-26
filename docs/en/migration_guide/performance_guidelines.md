@@ -18,42 +18,7 @@ When executing Triton operators, NPUs leverage parallel mechanisms such as multi
 
 ### II. Code Examples
 
-- Example 1: Reducing synchronization for higher DOP
-
-    In operator optimization, increasing instruction-level parallelism (DOP) is a critical strategy. In the `tl.load` statement below, when `N` > `M`, the loaded data fills only a portion of the tensor memory space pointed to by `data`. For the remaining unfilled portion, if users do not specify the `other` value, GPUs default to zero-padding. To reduce the adaptation workload of migration, NPUs maintain the same behavior as GPUs. NPUs first use the vector core to set all the memory space pointed to by `data` to a specified value (defaulting to `0` if no `other` value is provided). Subsequently, the MTE2 instruction transfers data to part of the memory space pointed to by `data`. This implementation results in a dependency between MTE2 and vector operations, which limits parallelism and degrades overall performance.
-
-    ```diff
-    @triton.jit
-    def npu_vector_add_kernel(
-        input,                          # [Tensor] input tensor (1 x col)
-        output,                         # [Tensor] output tensor (1 x col)
-        M: tl.constexpr,                # len of the vector
-        BLOCK_SIZE: tl.constexpr
-    ):
-        N :tl.constexpr = BLOCK_SIZE
-        idx = tl.arange(0, N)
-        mask = idx < M
-        data = tl.load(input + idx, mask = mask) # Alternatively, specify a value such as other=-1.
-    ```
-
-    To increase DOP and enhance performance, when the loaded data fills only a portion of the memory space pointed to by `data`, add `care_padding=False` to the load statement to remove default-value padding, provided that the unfilled portion does not affect subsequent computation results. That is, the preceding operator can be optimized follows:
-
-    ```diff
-    @triton.jit
-    def npu_vector_add_kernel(
-        input,                          # [Tensor] input tensor (1 x col)
-        output,                         # [Tensor] output tensor (1 x col)
-        M: tl.constexpr,                # len of the vector
-        BLOCK_SIZE: tl.constexpr
-    ):
-        N = BLOCK_SIZE
-        idx = tl.arange(0, N)
-        mask = idx < M
-        # data = tl.load(input + idx, mask = mask) # Alternatively, specify a value such as other=-1.
-        data = tl.load(input + idx, mask = mask, care_padding=False) # Alternatively, specify a value such as other=-1.
-    ```
-
-  - Example 2: Using `for` loops in Triton operators to increase tiling and enhance DOP
+  - Example 1: Using `for` loops in Triton operators to increase tiling and enhance DOP
 
       In Triton operator programming, `mask` operations are frequently employed in syntax such as `load`, `store`, and `where`. During performance optimization, you should prioritize identifying performance degradation caused by these operations. When the logic within Triton operators executes sequentially in a single pass (Start -> Data-in -> Computation -> Data-out -> End), instructions cannot be parallelized, resulting in low execution efficiency. By introducing `for` loops to increase tiling, you can process data in multiple passes (with each pass handling a reduced data volume), enabling parallel execution of data-in, computation, and data-out. This approach reduces serial waiting time and improves overall performance. Additionally, compared to monolithic (non-tiled) data processing, the use of `for` loops for tiling reduces UB space consumption.
       Note: Mathematical equivalence is an important aspect to consider when you increase data tiling.

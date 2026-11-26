@@ -165,3 +165,22 @@ def test_npu_device_limit_get_aicore_num(monkeypatch):
 
     assert NPUUtils.get_aicore_num(mock_utils) == 8
     assert NPUUtils.get_aivector_core_num(mock_utils) == 16
+
+
+@pytest.mark.parametrize(
+    "env_value",
+    [
+        "-1,48",
+        "abc",
+    ],
+)
+def test_get_device_limit_throw(monkeypatch, env_value):
+    """Test get_aicore_num / get_aivector_core_num read from get_device_properties."""
+    mock_utils, NPUUtils = _make_mock_npu_utils()
+    mock_utils.get_device_limit = types.MethodType(NPUUtils.get_device_limit, mock_utils)
+    monkeypatch.setenv("NPU_DEVICE_LIMIT", env_value)
+
+    hash_limit, aic, aiv = NPUUtils.get_device_limit(mock_utils)
+    assert hash_limit == False
+    assert aic == _MOCK_AICORE_NUM
+    assert aiv == _MOCK_AIVECTOR_NUM

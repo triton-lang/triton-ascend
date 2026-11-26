@@ -1,4 +1,4 @@
-from triton.backends.ascend.utils import is_compile_on_910_95
+from triton.backends.ascend.utils import is_register_based_arch
 from triton._C.libtriton.ascend import ir as _ascend_ir
 
 # MLIR affine bindings (same objects as triton._C.libtriton.ascend.ir).
@@ -44,6 +44,8 @@ from .core import (
     conv1d,
     dot,
     conv2d,
+    AddressSpace,
+    DataLayout,
 )
 
 from .scope import scope
@@ -79,6 +81,7 @@ from .mem_ops import (
     gather_out_to_ub,
     scatter_ub_to_out,
     index_select_simd,
+    sparse_gather_load_to_L1buffer,
 )
 
 __all__ = [
@@ -106,9 +109,11 @@ __all__ = [
     "SYNC_IN_VF",
     "conv1d",
     "conv2d",
+    "DataLayout",
 
     # address space
     "ascend_address_space",
+    "AddressSpace",
 
     # ascend IR affine (MLIR)
     "affine_expr",
@@ -158,9 +163,10 @@ __all__ = [
     "gather_out_to_ub",
     "scatter_ub_to_out",
     "index_select_simd",
+    "sparse_gather_load_to_L1buffer",
 
     # utils
-    "is_compile_on_910_95",
+    "is_register_based_arch",
 
     # dot ops
     "dot",

@@ -316,6 +316,22 @@ ControlFlowAnalysisContext::analyzeWhile(Operation *operation) {
       yieldOp.getNumOperands() != whileOp.getBeforeArguments().size())
     return failure();
 
+  // A while may have different before/after signatures. If neither boundary
+  // carries pointers, only nested operations need decomposition.
+  auto isTarget = [&](Value value) {
+    return policy.isDecompositionTarget(value);
+  };
+  if (llvm::none_of(whileOp.getBeforeArguments(), isTarget) &&
+      llvm::none_of(whileOp.getAfterArguments(), isTarget)) {
+    ControlFlowOpAnalysis result;
+    if (failed(analyzeNestedOperations(whileOp.getBeforeBody(),
+                                       result.hasNestedRewrite)) ||
+        failed(analyzeNestedOperations(whileOp.getAfterBody(),
+                                       result.hasNestedRewrite)))
+      return failure();
+    return result;
+  }
+
   SmallVector<std::optional<AnalyzedValue>> initialStates(
       whileOp.getInits().size());
   SmallVector<SmallVector<unsigned>> candidateIndices(

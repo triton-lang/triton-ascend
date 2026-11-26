@@ -26,7 +26,7 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 类别 | 环境变量 | 功能说明 | 默认值 | A2/A3 | 950 |
 |------|----------|----------|--------|-------|-----|
 | 调试 | `TRITON_DEBUG` | 开启JIT调试及设备断言，保存TTIR；常规路径还输出编译日志并保存后端IR与二进制。 | 关闭 | 支持 | 支持 |
-| 调试 | `USE_IR_LOC` | 以指定阶段的IR文件行号重建位置信息；当前AST编译可用 `ttir`，IR输入还可使用源文件位置快照。 | 未设置 | 支持 | 支持 |
+| 调试 | `USE_IR_LOC` | 编译Python kernel时，设为 `ttir` 可按TTIR文件的行号重建位置信息。直接以文本IR文件为输入时，可为输入文件创建位置快照。`ttadapter` 和 `npubin` 不支持作为阶段值。 | 未设置 | 支持 | 支持 |
 | 调试 | `TRITON_FRONT_END_DEBUGGING` | 前端错误发生时保留原始Python异常堆栈。 | 关闭 | 支持 | 支持 |
 | 调试 | `TRITON_KERNEL_DUMP` | 保存编译阶段产物及最终 `npubin`；只对实际发生的编译生效。 | 关闭 | 支持 | 支持 |
 | 调试 | `TRITON_DUMP_DIR` | 指定 `TRITON_KERNEL_DUMP` 的输出目录。 | `$TRITON_HOME/.triton/dump` | 支持 | 支持 |
@@ -36,7 +36,7 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 调试 | `TRITON_MEMORY_DISPLAY` | 请求编译器输出内存使用信息。 | 关闭 | 支持 | — |
 | 调试 | `ENABLE_PRINT_UB_BITS` | 请求编译器打印UB占用位数。 | 关闭 | 支持 | 常规路径 |
 | 调试 | `TRITON_INTERPRET` | 在CPU解释器中执行其支持的Triton操作，便于Python断点调试。 | 关闭 | 支持 | 支持 |
-| 调试 | `TRITON_ENABLE_SANITIZER` | 向Ascend NPU编译器传入sanitizer开关。 | 关闭 | 支持 | 常规路径 |
+| 调试 | `TRITON_ENABLE_SANITIZER` | 向Ascend NPU编译器传入sanitizer开关。在 Atlas A2 products/Atlas A3 products 上运行静态插桩后的kernel时，须通过 `mssanitizer python3 run_kernel.py` 启动脚本。 | 关闭 | 支持 | 常规路径 |
 | 编译 | `TRITON_ALWAYS_COMPILE` | 忽略命中的编译缓存，强制重新编译。 | 关闭 | 支持 | 支持 |
 | 编译 | `TRITON_KERNEL_OVERRIDE` | 从覆盖目录读取与编译阶段同名的外部IR/二进制文件。 | 关闭 | 支持 | 支持 |
 | 编译 | `TRITON_OVERRIDE_DIR` | 指定覆盖文件目录。 | `$TRITON_HOME/.triton/override` | 支持 | 支持 |
@@ -53,11 +53,12 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 缓存与调优 | `TRITON_ENABLE_UBTUNER` | 选择UB调优模式：`compile` 或 `run`。 | 未设置 | 支持 | 常规路径 |
 | 缓存与调优 | `TRITON_AUTOTUNE_PARALLEL_COMPILE` | 控制Ascend autotune的并行编译，`0` 关闭。 | `1` | 支持 | 支持 |
 | 缓存与调优 | `TRITON_BENCH_METHOD` | 设为 `npu` 时选择Ascend的 `do_bench_npu`；`default` 使用通用测量方法。 | `default` | 支持 | 支持 |
-| 运行 | `TRITON_COMPILE_ONLY` | 设为 `1/true` 时不启动kernel；编译及launcher扩展加载仍会执行。 | 关闭 | 支持 | 支持 |
+| 运行 | `TRITON_COMPILE_ONLY` | 设为 `1`、`y`、`on`、`yes` 或 `true` 时开启，字母大小写不敏感。开启后跳过kernel启动，编译及launcher扩展加载仍会执行。 | 关闭 | 支持 | 支持 |
 | 运行 | `TRITON_ENABLE_TASKQUEUE` | 控制Ascend launcher的task queue。 | 开启 | 支持 | 支持 |
 | 运行 | `TRITON_GRID_WARN_PRINT` | 打印Ascend launcher的grid大小警告。 | 关闭 | 支持 | 支持 |
 | 运行 | `NPU_DEVICE_LIMIT` | 按 `AI Core数,Vector Core数` 限制可用核心数，例如 `14,28`；需符合设备比例。 | 未设置，使用设备值 | 支持 | 支持 |
 | 工具链选择 | `CC` | 设置CPU launcher扩展的C/C++编译器。 | 未设置，使用系统默认编译器 | 支持 | 支持 |
+| 工具链选择 | `ASCEND_HOME_PATH` | CANN Toolkit根目录。启动Python前加载CANN的 `set_env.sh`。Triton-Ascend从此目录查找构建launcher扩展所需的头文件、库和CANN版本文件。 | 由 `set_env.sh` 设置 | 支持 | 支持 |
 | 工具链选择 | `TRITON_NPU_COMPILER_PATH` | 仅当随包工具与 `PATH` 查找均失败时，作为Ascend编译器工具目录的后备路径。 | 未设置 | 支持 | 支持 |
 | 工具链选择 | `TRITON_BUILD_DIR` | 查找 `triton-opt`、`triton-mlir-opt` 时，在随包工具之后、`PATH` 之前查找该目录的 `bin/`。 | 未设置 | 支持 | 支持 |
 
@@ -133,7 +134,7 @@ triton.knobs.propagate_env = False  # 之后的赋值不再写回os.environ
 
 | 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
 |------|----------|--------|----------|------|
-| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | 向Ascend NPU编译器传入sanitizer开关。 |
+| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | 向Ascend NPU编译器传入sanitizer开关。在 Atlas A2 products/Atlas A3 products 上运行静态插桩后的kernel时，须通过 `mssanitizer` 运行脚本。 |
 | `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | `True` / `False` | 请求编译器打印UB占用位数。 |
 | `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | `True` / `False` | 请求编译器输出内存使用信息。 |
 | `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | 目录路径 / `None` | 仅当随包工具与 `PATH` 查找均失败时，作为Ascend编译器工具目录的后备路径。 |
@@ -156,7 +157,7 @@ triton.knobs.propagate_env = False  # 之后的赋值不再写回os.environ
 | `dump_ir_extract_di_local_variables` | `LLVM_EXTRACT_DI_LOCAL_VARIABLES` | `False` | `True` / `False` | 请求毕昇编译器生成调试变量信息。 |
 | `store_binary_only` | `TRITON_STORE_BINARY_ONLY` | `False` | `True` / `False` | 只写入 `cubin`/`hsaco`/`json` 产物，不写中间IR；Ascend二进制扩展名为 `npubin`，不在该列表内。 |
 | `always_compile` | `TRITON_ALWAYS_COMPILE` | `False` | `True` / `False` | 忽略命中的编译缓存，强制重新编译。 |
-| `use_ir_loc` | `USE_IR_LOC` | `None` | `None`、阶段名（如 `"ttir"`）、源文件位置快照 | 以指定阶段的IR文件行号重建位置信息。 |
+| `use_ir_loc` | `USE_IR_LOC` | `None` | `None` 或 `"ttir"` | 按TTIR文件的行号重建位置信息。直接以文本IR文件为输入时，可为输入文件创建位置快照。`ttadapter` 和 `npubin` 不支持作为阶段值。 |
 | `enable_asan` | `TRITON_ENABLE_ASAN` | `False` | `True` / `False` | Ascend不支持。 |
 | `disable_line_info` | `TRITON_DISABLE_LINE_INFO` | `False` | `True` / `False` | 禁止向毕昇编译器请求行号信息。Ascend后端直接读取该环境变量，未设置时按 `True` 处理。 |
 | `front_end_debugging` | `TRITON_FRONT_END_DEBUGGING` | `False` | `True` / `False` | 前端错误发生时保留原始Python异常堆栈。 |
@@ -210,7 +211,7 @@ triton.knobs.propagate_env = False  # 之后的赋值不再写回os.environ
 | 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
 |------|----------|--------|----------|------|
 | `fp32_default` | `TRITON_F32_DEFAULT` | `None` | `None`、`"ieee"`、`"hf32"`、`"tf32"`（映射为 `hf32`） | `tl.dot` 的默认FP32输入精度；`None` 时使用后端默认值 `ieee`。 |
-| `default_fp_fusion` | `TRITON_DEFAULT_FP_FUSION` | `True` | `True` / `False` | 默认是否允许浮点运算融合。 |
+| `default_fp_fusion` | `TRITON_DEFAULT_FP_FUSION` | `True` | `True` / `False` | 仅NVIDIA和AMD后端读取此项，用于设置 `enable_fp_fusion` 的默认值。Ascend接收 `enable_fp_fusion` 作为兼容字段，其值不控制浮点运算融合。Ascend 950纯SIMT的FMA控制见 `disable_fma`。 |
 
 <a id="knobs-build"></a>
 
@@ -300,12 +301,12 @@ configs = [
 | 算子优化 | `enable_vf_stack_limit` | 在BiShengIR编译中根据向量函数（VF）的栈占用估算限制融合，降低栈溢出风险。 | `False`；布尔值 | — | 常规路径 |
 | 算子优化 | `hfusion_enable_multiple_consumer_fusion` | 控制多个消费者的HFusion。 | `None`；布尔值 | — | 常规路径 |
 | 算子优化 | `enable_hivm_batch_matmul` | 为BiShengIR编译启用batch matmul。 | `False`；布尔值 | — | 常规路径 |
-| 算子优化 | `auto_vectorize_v2_max_fused_ops_num` | 设置AutoVectorizeV2最大融合op数。 | `None`；整数 | — | 常规路径 |
-| 算子优化 | `prevec_max_fused_ops_num` | 设置预向量化最大融合op数。 | `None`；整数 | — | 常规路径 |
+| 算子优化 | `auto_vectorize_v2_max_fused_ops_num` | 设置AutoVectorizeV2最大融合操作数。 | `None`（默认）或有符号32位整数。`None` 和负值沿用该pass的默认上限。大于或等于 `0` 的值设置显式上限。 | — | 常规路径 |
+| 算子优化 | `prevec_max_fused_ops_num` | 限制预向量化融合中的逐元素操作数。 | `None`（默认）或有符号32位整数。正值设置操作数上限。`None`、`0` 和负值均不设置此上限。 | — | 常规路径 |
 | 纯SIMT | `simt_optimization_mode` | 设置纯SIMT的多位优化模式；在A2/A3或950常规路径显式传入时，会发出 `UserWarning` 并忽略。 | `0`；整数，位语义由NPU编译器定义 | — | 仅纯SIMT |
-| 纯SIMT | `shared_mem_dynamic_size` | 设置纯SIMT动态共享内存大小。 | `120` KB（即122880字节）；可显式设整数字节数 | — | 仅纯SIMT |
+| 纯SIMT | `shared_mem_dynamic_size` | 设置纯SIMT动态共享内存大小。 | 省略或传入 `None` 时使用 `122880` 字节。显式值须为 `122880` 至 `221184` 字节的整数，含两个端点。 | — | 仅纯SIMT |
 | 纯SIMT | `disable_fma` | 在纯SIMT编译路径禁用FMA优化。 | `False`；布尔值 | — | 仅纯SIMT |
-| 纯SIMT | `superblock_factor` | 在自动block mapping生效且未做row coalescing时，设置纯SIMT superblock因子。 | `1`；大于 `1` 时传给编译器 | — | 仅纯SIMT |
+| 纯SIMT | `superblock_factor` | 设置纯SIMT superblock因子。在自动block mapping生效且未做row coalescing时，后端会下发大于 `1` 的值。 | 大于或等于 `1` 的2的幂。默认 `1`，表示关闭superblocking。 | — | 仅纯SIMT |
 
 <a id="compiler-option-cleanup-and-compatibility"></a>
 

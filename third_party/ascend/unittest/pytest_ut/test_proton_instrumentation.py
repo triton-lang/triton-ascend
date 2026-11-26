@@ -2,6 +2,7 @@
 import json
 import math
 from collections import Counter
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -13,6 +14,11 @@ import triton.language as tl
 import triton.profiler as proton
 import triton.profiler.language as pl
 from triton.backends.ascend.compiler import NPUOptions
+
+
+def _is_a5():
+    arch = triton.runtime.driver.active.get_current_target().arch
+    return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
 
 
 @triton.jit
@@ -55,12 +61,22 @@ def test_instrumentation(tmp_path, n):
     assert (before.metadata.profile_scratch_size, before.metadata.profile_scratch_align) == (0, 1)
     assert "proton.record" not in before.asm["ttir"]
     base = tmp_path / "instrumentation"
+    mixed = _is_a5()
+    if mixed:
+        plain_out = torch.empty_like(x[:256])
     session = proton.start(str(base), backend="instrumentation", data="trace")
     try:
+        if mixed:
+            plain_add[(1, )](x, y, plain_out, BLOCK=256)
         for _ in range(2):
             compiled = launch()
+        if mixed:
+            plain_add[(1, )](plain_out, y, plain_out, BLOCK=256)
+            torch.npu.synchronize()
     finally:
         proton.finalize(session, output_format="chrome_trace")
+    if mixed:
+        torch.testing.assert_close(plain_out, x[:256] + y[:256] + y[:256])
     after = launch()
     assert (after.metadata.profile_scratch_size, after.metadata.profile_scratch_align) == (0, 1)
     assert after.asm["ttir"] == before.asm["ttir"]
@@ -115,11 +131,14 @@ def test_kernel_without_records(tmp_path, data, suffix):
     base = tmp_path / "empty"
     session = proton.start(str(base), backend="instrumentation", data=data)
     try:
-        plain_add[(1, )](x, x, out, BLOCK=256)
+        compiled = plain_add[(1, )](x, x, out, BLOCK=256)
         torch.npu.synchronize()
     finally:
         proton.finalize(session)
     torch.testing.assert_close(out, x + x)
+    if _is_a5():
+        assert compiled.metadata.proton_collection == "none"
+        assert not hasattr(compiled.metadata, "proton_metadata")
     path = base.with_suffix(suffix)
     if data == "trace":
         assert path.read_bytes() == b""
@@ -133,6 +152,34 @@ def _scopes(node, name):
         yield node
     for child in node["children"]:
         yield from _scopes(child, name)
+
+
+def test_cached_kernel_hook_routing(tmp_path, monkeypatch):
+    if not _is_a5():
+        pytest.skip("Requires the A5 performance monitor hook")
+    from triton.profiler import ascend_perf_monitor
+
+    collector = Mock(active=False)
+    collector.stop.return_value = [(12, 0, 0, 100, 117, 1650)]
+    monkeypatch.setattr(ascend_perf_monitor, "PerfMonitorCollector", lambda: collector)
+    x = torch.arange(256, device="npu", dtype=torch.float32)
+    out = torch.empty_like(x)
+    handles = []
+    for i in range(2):
+        base = tmp_path / f"cached_{i}"
+        session = proton.start(str(base), backend="instrumentation")
+        try:
+            handles.append(restart_add[(1, )](x, x, out, BLOCK=256, block_batching_factor=1).function)
+            torch.npu.synchronize()
+        finally:
+            proton.finalize(session)
+        kernel, = json.loads(base.with_suffix(".hatchet").read_text())[0]["children"]
+        scope, = kernel["children"]
+        assert scope["frame"]["name"] == "iks_add"
+        assert scope["metrics"]["cycles"] == scope["metrics"]["normalized_cycles"] == 17
+    assert handles[0] == handles[1]
+    assert collector.start.call_count == collector.stop.call_count == 2
+    torch.testing.assert_close(out, x + x)
 
 
 def test_restart_with_loaded_kernel(tmp_path):

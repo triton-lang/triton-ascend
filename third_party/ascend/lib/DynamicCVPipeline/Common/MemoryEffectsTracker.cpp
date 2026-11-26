@@ -292,8 +292,7 @@ static EffectsTy collectOuterEffects(Operation *op, bool &unknown,
 
   return llvm::TypeSwitch<Operation *, EffectsTy>(op)
       .Case([](annotation::MarkOp markOp) -> EffectsTy {
-        if (markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr) ||
-            markOp->hasAttr(CVPipeline::kGMLoadMultiBufferHintAttr)) {
+        if (markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr)) {
           return {};
         }
         MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Write::get());

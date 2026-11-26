@@ -10,7 +10,7 @@ module {
   // CHECK-NEXT: %[[L:.*]] = hivm.hir.convert_layout %[[C]] {{.*}} : (memref<1x1x16x16xbf16>) -> memref<16x16xbf16>
   // CHECK-NEXT: %[[T:.*]] = bufferization.to_tensor %[[L]] restrict : memref<16x16xbf16>
   // CHECK-NEXT: scope.return %[[T]] : tensor<16x16xbf16>
-  // CHECK-NEXT: } {ssbuffer.core_type = "CUBE", ssbuffer.load}
+  // CHECK-NEXT: } {ssbuffer.core_type = "CUBE"}
   // CHECK-NEXT: return %[[S]]
   func.func @pack_l1_output_cast(%gm: memref<1xbf16>) -> tensor<16x16xbf16> {
     %alloc = memref.alloc() : memref<1x1x16x16xbf16, #hivm.address_space<cbuf>>

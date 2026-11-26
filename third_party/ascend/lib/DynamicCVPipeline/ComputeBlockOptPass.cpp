@@ -50,6 +50,7 @@ void ComputeBlockOptPass::runOnOperation() {
      unified block. Then, use UBUsageOpt to find the smallest UB dependency
      location and divide the computation blocks.
    */
+  pm.addPass(createUnifyAllocBlockPass());
   pm.addPass(createExpLoadPatternPass());
   pm.addPass(createUBUsageOptPass());
   pm.addPass(createBroadcastUBOptPass());
@@ -58,6 +59,7 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createMergeSmallBlockPass());
   pm.addPass(createSinkI1ProducersIntoUsersPass());
   pm.addPass(createFixpipeOptPass());
+  pm.addPass(createMoveLoadIntoUserPass());
   pm.addPass(createUnifyStoreBlockPass());
   pm.addPass(createExpSubfPatternPass());
   pm.addPass(createMergeSmallBlockPass());
@@ -99,6 +101,7 @@ void registerComputeBlockOptPasses() {
   });
   registerPass(createUBUsageOptPass);
   registerPass(createMergeSameSourceAxisPass);
+  registerPass(createUnifyAllocBlockPass);
   registerPass(createMergeVectorIfBlockPass);
   registerPass(createFixpipeOptPass);
   registerPass(createUnifyStoreBlockPass);
@@ -106,6 +109,7 @@ void registerComputeBlockOptPasses() {
   registerPass(createExpLoadPatternPass);
   registerPass(createSinkI1ProducersIntoUsersPass);
   registerPass(createBroadcastUBOptPass);
+  registerPass(createMoveLoadIntoUserPass);
   registerPass(createPosMaskPatternPass);
   registerPass(createMergeSmallBlockPass);
   registerPass(createSplitIfByBlockIdPass);

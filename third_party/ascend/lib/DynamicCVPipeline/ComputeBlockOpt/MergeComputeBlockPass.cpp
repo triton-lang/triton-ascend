@@ -20,13 +20,15 @@
  * THE SOFTWARE.
  */
 
-#include <optional>
+#include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
+#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/Debug.h"
+#include "DynamicCVPipeline/Common/Utils.h"
 
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -39,16 +41,13 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 
-#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
-#include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
-#include "ascend/include/DynamicCVPipeline/Common/ScopeOpUtils.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 
-#include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
+#include <optional>
 
 static constexpr const char *DEBUG_TYPE = "merge-compute-block";
 #define LOG_DEBUG(...)                                                         \
@@ -180,27 +179,19 @@ static void collectAllDeps(Operation *startOp,
   while (!worklist.empty()) {
     Operation *cur = worklist.pop_back_val();
     helper.forEachSource(cur, [&](Operation *src) {
-      if (collected.insert(src).second) {
+      if (collected.insert(src).second)
         worklist.push_back(src);
-      }
       return WalkResult::advance();
     });
   }
 }
 
-/// True when `op` carries a tensor out of a compute block.
-/// That is a raw `bufferization::ToTensorOp`, or the atomic `ssbuffer.load`
-/// scope PackMemref packed the load unit into.
-static bool isTensorCarrier(Operation *op) {
-  return isa<bufferization::ToTensorOp>(op) || CVPipeline::isLoadScope(op);
-}
-
-/// Carriers in `cubePre` that `cube` depends on.
-/// \p edgeSrcOps are the dependency source ops on the CubePre → Cube edges.
-/// Post: empty when `cubePre` is null or holds no such carrier.
+/// Check if Cube depends on CubePre via bufferization::ToTensorOp defined in
+/// CubePre. \p edgeSrcOps are the dependency source ops on the CubePre → Cube
+/// edges. Returns the to_tensor ops in CubePre that Cube depends on.
 static SmallVector<Operation *>
-findTensorCarrierDeps(const ComputeBlock *cubePre,
-                      ArrayRef<Operation *> edgeSrcOps) {
+findToTensorDeps(const ComputeBlock *cubePre,
+                 ArrayRef<Operation *> edgeSrcOps) {
   SmallVector<Operation *> result;
   if (!cubePre) {
     return result;
@@ -208,7 +199,8 @@ findTensorCarrierDeps(const ComputeBlock *cubePre,
   DenseSet<Operation *> cubePreOpsSet(cubePre->ops.begin(), cubePre->ops.end());
 
   for (Operation *srcOp : edgeSrcOps) {
-    if (isTensorCarrier(srcOp) && cubePreOpsSet.contains(srcOp)) {
+    if (isa<bufferization::ToTensorOp>(srcOp) &&
+        cubePreOpsSet.contains(srcOp)) {
       result.push_back(srcOp);
     }
   }
@@ -237,12 +229,8 @@ cloneOpCrossCubeDep(int cubePreId, int cubeId,
       continue;
     }
     Operation *cloned = builder.clone(*op, mapper);
-    // A cloned load scope keeps its atomicity: stamp the scope, not its body.
-    cloned->walk<WalkOrder::PreOrder>([&](Operation *innerOp) {
-      bm.updateBlockId(innerOp, cubeId);
-      return CVPipeline::isLoadScope(innerOp) ? WalkResult::skip()
-                                              : WalkResult::advance();
-    });
+    cloned->walk(
+        [&](Operation *innerOp) { bm.updateBlockId(innerOp, cubeId); });
   }
 
   // Remap Cube's original ops' operands: replace references to old CubePre
@@ -276,23 +264,19 @@ collectVectorCandidates(const DenseMap<int, ComputeBlock> &computeBlocks,
 
   SmallVector<int> vecCandidates;
   for (auto &kv : computeBlocks) {
-    if (kv.second.coreType != CVPipeline::CoreType::VECTOR_ONLY) {
+    if (kv.second.coreType != CVPipeline::CoreType::VECTOR_ONLY)
       continue;
-    }
-    if (!hasTensorResult(kv.second)) {
+    if (!hasTensorResult(kv.second))
       continue;
-    }
 
     // Must have a successor or predecessor that is CUBE
     bool hasCubeEdge =
         hasCubeNeighbor(succs, kv.first) || hasCubeNeighbor(preds, kv.first);
-    if (!hasCubeEdge) {
+    if (!hasCubeEdge)
       continue;
-    }
 
-    if (!llvm::is_contained(vecCandidates, kv.first)) {
+    if (!llvm::is_contained(vecCandidates, kv.first))
       vecCandidates.push_back(kv.first);
-    }
   }
   return vecCandidates;
 }
@@ -304,9 +288,8 @@ findAdjacentVectorPair(ArrayRef<int> vecCandidates,
                        const DenseMap<int, SmallVector<int>> &succs) {
   for (int candId : vecCandidates) {
     auto it = succs.find(candId);
-    if (it == succs.end()) {
+    if (it == succs.end())
       continue;
-    }
     for (int succId : it->second) {
       if (llvm::is_contained(vecCandidates, succId)) {
         return std::make_pair(candId, succId);
@@ -320,9 +303,8 @@ static void markSubBlock(const DenseMap<int, ComputeBlock> &computeBlocks,
                          int predVId, int succVId) {
   for (int id : {predVId, succVId}) {
     auto it = computeBlocks.find(id);
-    if (it == computeBlocks.end()) {
+    if (it == computeBlocks.end())
       continue;
-    }
     for (Operation *op : it->second.ops) {
       int curId = CVPipeline::getOpBlockId(op).value_or(id);
       CVPipeline::setSubBlockId(op, curId);
@@ -337,15 +319,13 @@ static bool tryDirectMerge(ArrayRef<Operation *> opsToMerge,
                            int predVId, int succVId,
                            const DenseMap<int, ComputeBlock> &computeBlocks,
                            CVPipeline::ComputeBlockIdManager &bm) {
-  if (willCreateCycle(opsToMerge, memGraph, predVId, bm)) {
+  if (willCreateCycle(opsToMerge, memGraph, predVId, bm))
     return false;
-  }
   LOG_DEBUG("Successfully direct merge: " << succVId << " -> " << predVId);
 
   markSubBlock(computeBlocks, predVId, succVId);
-  for (Operation *op : opsToMerge) {
+  for (Operation *op : opsToMerge)
     bm.updateBlockId(op, predVId);
-  }
   return true;
 }
 
@@ -359,9 +339,8 @@ collectOpsToBreakCycle(int cubePreId,
 
   SmallPtrSet<Operation *, 16> opsToClone;
   for (Operation *op : allPredecessors) {
-    if (llvm::is_contained(cbIt->second.ops, op)) {
+    if (llvm::is_contained(cbIt->second.ops, op))
       opsToClone.insert(op);
-    }
   }
   return opsToClone;
 }
@@ -393,37 +372,35 @@ static bool tryCrossCubeCloneMerge(
     return false;
   }
 
-  // 5c. Check whether Cube depends on CubePre via a tensor carrier:
-  // a raw to_tensor, or the packed load scope.
-  SmallVector<Operation *> carrierOps;
+  // 5c. Check if Cube depends on CubePre via to_tensor
+  SmallVector<Operation *> toTensorOps;
   auto edgeIt = blockEdges.find(*cubePreId);
   if (edgeIt != blockEdges.end()) {
     auto dstIt = edgeIt->second.find(*cubeId);
     if (dstIt != edgeIt->second.end()) {
-      carrierOps =
-          findTensorCarrierDeps(&computeBlocks.at(*cubePreId), dstIt->second);
+      toTensorOps =
+          findToTensorDeps(&computeBlocks.at(*cubePreId), dstIt->second);
     }
   }
-  if (carrierOps.empty()) {
+  if (toTensorOps.empty()) {
     LOG_DEBUG("MergeComputeBlock: Cube("
               << *cubeId << ") depends on CubePre(" << *cubePreId
-              << ") but not via a tensor carrier, skipping");
+              << ") but not via to_tensor, skipping");
     return false;
   }
 
   // 5d. Trace back all transitive dependencies
   SmallPtrSet<Operation *, 16> allPredecessors;
-  for (Operation *carrier : carrierOps) {
-    collectAllDeps(carrier, memGraph, allPredecessors);
+  for (Operation *toTensor : toTensorOps) {
+    collectAllDeps(toTensor, memGraph, allPredecessors);
   }
 
   // 5e. Filter to ops in CubePre and clone to Cube
   SmallPtrSet<Operation *, 16> opsToClone =
       collectOpsToBreakCycle(*cubePreId, computeBlocks, allPredecessors);
 
-  for (auto op : opsToClone) {
+  for (auto op : opsToClone)
     LOG_DEBUG("Cloning op: " << *op);
-  }
   cloneOpCrossCubeDep(*cubePreId, *cubeId, opsToClone, computeBlocks, bm);
 
   // 5f. Re-check cycle after cloning
@@ -437,9 +414,8 @@ static bool tryCrossCubeCloneMerge(
   LOG_DEBUG("MergeComputeBlock: Successfully merge after cross-Cube clone: "
             << succVId << " -> " << predVId);
   markSubBlock(computeBlocks, predVId, succVId);
-  for (Operation *op : opsToMerge) {
+  for (Operation *op : opsToMerge)
     bm.updateBlockId(op, predVId);
-  }
   return true;
 }
 

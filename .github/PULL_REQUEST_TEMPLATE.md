@@ -7,8 +7,16 @@ tasks and include the filled-out checklist in your PR description.**
 Complete the following tasks before sending your PR, and replace `[ ]` with
 `[x]` to indicate you have done them.
 -->
+# Related issue
 
-# New contributor declaration
+- Select one of the following.
+  - [ ] This PR addresses an issue and should close it on merge:
+        `Fixes #<ISSUE_NUMBER>` (also `Closes` / `Resolves`)
+  - [ ] This PR is related to an issue but should **not** auto-close it:
+        mention only, e.g. `Ref #<ISSUE_NUMBER>` (see note below)
+  - [ ] This PR is not associated with an issue because `FILL THIS IN`.
+
+# Contributor CheckList
 - [ ] I am not making a trivial change, such as fixing a typo in a comment.
 
 - [ ] I have written a PR description following these

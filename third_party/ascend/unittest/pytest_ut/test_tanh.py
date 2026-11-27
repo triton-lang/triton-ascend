@@ -64,24 +64,39 @@ target = triton.runtime.driver.active.get_current_target()
 
 
 @triton.jit
-def triton_tanh_negative_tail(in_ptr0, out_ptr0, N: tl.constexpr):
+def triton_tanh_high_precision(in_ptr0, out_ptr0, N: tl.constexpr):
     offsets = tl.arange(0, N)
     x0 = tl.load(in_ptr0 + offsets)
-    tmp = libdevice.tanh(x0)
+    tmp = libdevice.tanh(x0, high_precision=True)
     tl.store(out_ptr0 + offsets, tmp)
 
 
 @pytest.mark.skipif(not is_compile_on_910_95(target.arch), reason="Currently unsupported on A2A3")
-def test_tanh_negative_tail():
-    # Near negative saturation, 1 + tanh(x) approaches zero; cancellation makes
-    # a one-ULP tanh error visible. Compare raw FP32 bits instead of a tolerance.
-    x0 = torch.linspace(-8.0, -9.0, 4096, dtype=torch.float32).npu()
-    y_ref = torch_tanh(x0).cpu()
+def test_tanh_high_precision():
+    x0 = test_common.generate_tensor((1024, ), 'float32')
+    # Sample near zero, across the central range, and densely near both saturation tails.
+    x0[:256].mul_(0.01)
+    x0[256:512].mul_(4.0)
+    x0[512:768].mul_(0.25).sub_(8.5)
+    x0[768:].mul_(0.25).add_(8.5)
+    max_fp32 = torch.finfo(x0.dtype).max
+    # Issue #3356: tanh rounds to the input for the smallest FP32 subnormals of either sign.
+    subnormal_bits = torch.tensor([0x00000001, -0x7fffffff], dtype=torch.int32)
+    x0[:2].view(torch.int32).copy_(subnormal_bits)
+    x0[2:11] = x0.new_tensor([
+        0.0,
+        -0.6,
+        0.6,
+        -9.010913848876953,
+        9.010913848876953,
+        -max_fp32,
+        max_fp32,
+        -float('inf'),
+        float('inf'),
+    ])
+    x0 = x0.npu()
+    y_ref = torch_tanh(x0)
 
     y_cal = torch.empty_like(x0)
-    triton_tanh_negative_tail[(1, )](x0, y_cal, N=x0.numel())
-
-    y_cal_bits = y_cal.cpu().view(torch.int32)
-    y_ref_bits = y_ref.view(torch.int32)
-    assert torch.equal(y_cal_bits, y_ref_bits), \
-        "tanh(x) is not bitwise identical to torch_npu for negative tail input"
+    triton_tanh_high_precision[(1, )](x0, y_cal, N=x0.numel())
+    torch.testing.assert_close(y_cal.cpu(), y_ref.cpu(), rtol=0, atol=0)

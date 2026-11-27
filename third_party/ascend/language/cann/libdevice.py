@@ -332,12 +332,14 @@ def atan(arg0, _semantic=None):
 
 
 @core.extern
-def tanh(arg0, _semantic=None):
+def tanh(arg0, high_precision=False, _semantic=None):
     """
     Computes the hyperbolic tangent of input parameter x.
 
     :param arg0: ``x``. Supported dtype(s): ``float32``.
     :type arg0: scalar or tl.tensor
+    :param high_precision: Compile-time boolean for float32 inputs on A5. Defaults to ``False``
+        (``fast_tanh_fp32``). Set to ``True`` to use ``tanh_fp32``.
     :return: The hyperbolic tangent of input x.
     :rtype: ``float32``
     """
@@ -346,12 +348,21 @@ def tanh(arg0, _semantic=None):
     if original_dtype == core.dtype("bf16"):
         arg0 = _semantic.cast(arg0, core.float32)
 
+    high_precision = core._unwrap_if_constexpr(high_precision)
+    if not isinstance(high_precision, bool):
+        raise TypeError("libdevice.tanh high_precision must be a bool argument")
+
     if _is_a3_target(_semantic) and original_dtype == core.dtype("fp32"):
         res = _libdevice_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_tanh_fp32", core.dtype("fp32")),
         }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
     else:
-        if (_is_a5_target(_semantic) or _is_a6_target(_semantic)) and original_dtype == core.dtype("fp32"):
+        if _is_a5_target(_semantic) and original_dtype == core.dtype("fp32"):
+            symbol = "__hmf_tanh_fp32" if high_precision else "__hmf_fast_tanh_fp32"
+            dispatch = {
+                (core.dtype("fp32"), ): (symbol, core.dtype("fp32")),
+            }
+        elif _is_a6_target(_semantic) and original_dtype == core.dtype("fp32"):
             dispatch = {
                 (core.dtype("fp32"), ): ("__hmf_tanh_fp32", core.dtype("fp32")),
             }

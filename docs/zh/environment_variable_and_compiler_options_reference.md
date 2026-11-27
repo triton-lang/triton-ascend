@@ -340,8 +340,6 @@ triton.Config({"multibuffer_mode": {"gm": 1, "l1": 2, "l0c": 1, "ub": 1}})
 |----------|----------------|----------|
 | `force_simt_only` | `compile_mode="simt_only"` | 旧值为 `True` 时覆盖已传入的 `compile_mode`，为 `False` 时不改变模式。两个旧force开关都为 `True` 时，本项优先。 |
 | `force_simt_template` | `compile_mode="simd_simt_template"` | 旧值为 `True` 时覆盖已传入的 `compile_mode`，为 `False` 时不改变模式。 |
-| `intra_cache_num` | `buf_slot_num_of_veccore` | 沿用原值；同时传入新旧名称时使用新名称。 |
-| `inter_cache_num` | `buf_slot_num_of_crosscore` | 沿用原值；同时传入新旧名称时使用新名称。 |
 | `load_cache_num` | `buf_slot_num_of_gm` | 沿用原值；同时传入新旧名称时使用新名称。 |
 | `enable_bishengir_simt_optimization` | `simt_optimization_mode` | 沿用原值；同时传入新旧名称时使用新名称。仅在950纯SIMT路径生效。 |
 
@@ -381,6 +379,8 @@ triton.Config({"multibuffer_mode": {"gm": 1, "l1": 2, "l0c": 1, "ub": 1}})
 | `graph_optimize_ub_capacity_bytes` | Graph Optimization UB预算由后端根据目标产品推导。 |
 | `grid_num_tiles` | 该值由后端根据静态grid自动注入。 |
 | `has_auto_blockify_blacklist_op` | 安全标记由编译器扫描TTIR生成。 |
+| `inter_cache_num` | 直接设置 `buf_slot_num_of_crosscore`。 |
+| `intra_cache_num` | 直接设置 `buf_slot_num_of_veccore`。 |
 | `kernel_name` | kernel名称由TTIR推导。 |
 | `llvm_version` | 无替代项。 |
 | `mix_mode` | 由编译器自动推导。 |

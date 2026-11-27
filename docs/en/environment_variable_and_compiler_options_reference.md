@@ -341,8 +341,6 @@ Replace the following old names with the corresponding names or values:
 |-----------------|-------------------------|------------------------|
 | `force_simt_only` | `compile_mode="simt_only"` | `True` overrides an existing `compile_mode`; `False` leaves the mode unchanged. This option takes precedence when both legacy force switches are `True`. |
 | `force_simt_template` | `compile_mode="simd_simt_template"` | `True` overrides an existing `compile_mode`; `False` leaves the mode unchanged. |
-| `intra_cache_num` | `buf_slot_num_of_veccore` | Preserves the value; the new name wins when both names are supplied. |
-| `inter_cache_num` | `buf_slot_num_of_crosscore` | Preserves the value; the new name wins when both names are supplied. |
 | `load_cache_num` | `buf_slot_num_of_gm` | Preserves the value; the new name wins when both names are supplied. |
 | `enable_bishengir_simt_optimization` | `simt_optimization_mode` | Preserves the value; the new name wins when both names are supplied. Effective only on the 950 pure-SIMT path. |
 
@@ -382,6 +380,8 @@ Remove the following options from kernel launch arguments and `triton.Config`; t
 | `graph_optimize_ub_capacity_bytes` | The Graph Optimization UB budget is derived from the target product. |
 | `grid_num_tiles` | The backend injects this value automatically from a static grid. |
 | `has_auto_blockify_blacklist_op` | The compiler derives the safety marker by scanning TTIR. |
+| `inter_cache_num` | Set `buf_slot_num_of_crosscore` directly. |
+| `intra_cache_num` | Set `buf_slot_num_of_veccore` directly. |
 | `kernel_name` | The kernel name is derived from TTIR. |
 | `llvm_version` | No replacement. |
 | `mix_mode` | Derived automatically by the compiler. |

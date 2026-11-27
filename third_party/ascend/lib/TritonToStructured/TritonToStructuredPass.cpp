@@ -281,13 +281,10 @@ static bool moduleHasCubeOps(ModuleOp moduleOp) {
 
 LogicalResult
 TritonToStructuredPass::processImplicitPermuteOperations(ModuleOp moduleOp) {
-  // Same early-exit inputs as the former Linalg globals:
-  //   if (compileOn91095Flag && !existDotFlag) skip load permute.
-  bool existDotFlag = moduleHasCubeOps(moduleOp);
   mlir::RewritePatternSet patterns(&getContext());
   patterns.add<ImplicitPermute::LoadConverter>(
-      patterns.getContext(), /*compileOn91095Flag=*/compileOn91095,
-      /*existDotFlag=*/existDotFlag);
+      patterns.getContext(), compileOn91095, moduleHasCubeOps(moduleOp),
+      forceExplicitLoadTranspose);
   patterns.add<ImplicitPermute::StoreConverter>(patterns.getContext());
   patterns.add<ImplicitPermute::AtomicRMWConverter>(patterns.getContext());
   patterns.add<ImplicitPermute::AtomicCASConverter>(patterns.getContext());
@@ -369,10 +366,10 @@ triton::createTritonToStructuredPass() {
   return std::make_unique<TritonToStructuredPass>();
 }
 
-std::unique_ptr<OperationPass<ModuleOp>>
-triton::createTritonToStructuredPass(bool enableMaskFallbackConversion,
-                                     bool optimizeDynamicOffset,
-                                     bool compileOn91095) {
+std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToStructuredPass(
+    bool enableMaskFallbackConversion, bool optimizeDynamicOffset,
+    bool compileOn91095, bool forceExplicitLoadTranspose) {
   return std::make_unique<TritonToStructuredPass>(
-      enableMaskFallbackConversion, optimizeDynamicOffset, compileOn91095);
+      enableMaskFallbackConversion, optimizeDynamicOffset, compileOn91095,
+      forceExplicitLoadTranspose);
 }

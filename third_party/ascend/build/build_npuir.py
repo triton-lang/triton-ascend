@@ -74,11 +74,8 @@ def _is_submodule_initialized(dir_path):
 def _init_npuir_repo():
     """Initialize the AscendNPU-IR submodule and its nested submodules.
 
-    Local builds use the version pinned by the submodule gitlink (the
-    relatively stable, tested revision), NOT the upstream stable branch:
-    tracking stable HEAD is the wheel CI's job, which pre-fetches the
-    sources before running setup.py (see wheels.Dockerfile) — an existing
-    source tree is therefore left untouched here.
+    Local builds use the version pinned by the submodule gitlink unless a
+    source tree has already been provided.
 
     AscendNPU-IR depends on LLVM and Torch-MLIR, which are pulled in as
     nested submodules, hence the recursive update.
@@ -105,13 +102,12 @@ def _init_npuir_repo():
     ], cwd=_REPO_ROOT)
 
     # Then initialize the nested submodules recorded by the pinned revision
-    # (third-party/llvm-project, torch-mlir, shmem) — single level, depth-1,
-    # mirroring what the wheel CI fetches (fetch-npuir-stable.sh). NOT
-    # --recursive: the torch-mlir fork's own .gitmodules points at github.com
+    # (third-party/llvm-project, torch-mlir, shmem) — single level, depth-1.
+    # Avoid --recursive: the torch-mlir fork's own .gitmodules points at github.com
     # (externals/llvm-project — the full upstream LLVM monorepo — and
     # stablehlo), which recursive init would try to clone with no depth
     # limit; build-tools/build.sh consumes third-party/* directly and never
-    # uses those externals (the CI payload builds prove it daily).
+    # uses those externals.
     if _is_submodule_initialized(_NPUIR_DIR):
         _run_with_retry([
             "git",
@@ -228,10 +224,7 @@ def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Rele
         "-DLLVM_ENABLE_LLD=ON", "--build-triton", "--build-torch-mlir", "--build-shmem-template", "--bishengir-publish",
         "ON", "--collect-binary"
     ]
-    # CI-only override: the manylinux wheel images need a clang++ wrapper
-    # (-include cstdint -Wno-error) for the Ascend LLVM fork; they create it
-    # themselves and point NPUIR_CXX_COMPILER at it. Local builds use the
-    # toolchain's default C++ compiler (no --cxx-compiler).
+    # Callers can supply a compiler wrapper for the Ascend LLVM fork.
     cxx_compiler = os.getenv("NPUIR_CXX_COMPILER", "")
     if cxx_compiler:
         _log(f"Using C++ compiler override: {cxx_compiler}")

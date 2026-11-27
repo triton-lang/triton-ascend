@@ -416,9 +416,8 @@ def _copy_ascend_tools(extdir, cmake_dir):
 
 
 def _get_bishengir_payload_source():
-    # Priority: an explicit external payload dir (TRITON_ASCEND_BISHENGIR_PATH,
-    # the prebuilt npuir-build artifact flow), else the in-repo output of
-    # build_npuir.py when TRITON_BUILD_NPUIR=ON.
+    # The wheel CI supplies the unpacked OBS package via TRITON_ASCEND_BISHENGIR_PATH.
+    # Source builds can use the output of build_npuir.py when TRITON_BUILD_NPUIR=ON.
     raw_path = os.getenv(_BISHENGIR_PAYLOAD_ENV)
     if raw_path:
         source = Path(raw_path).expanduser().resolve()

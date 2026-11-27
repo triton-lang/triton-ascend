@@ -36,6 +36,7 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/LogicalResult.h"
@@ -49,13 +50,19 @@ namespace ConverterUtils {
 
 const std::string GeneratedByMakeTensorPtrTAG = "GeneratedByMakeTensorPtr";
 const std::string discreteMaskAttrName = "DiscreteMask";
+const std::string axisDiscreteMaskAttrName = "AxisDiscreteMask";
 const std::string mixCompileDiscreteMaskAttrName = "MixCompileDiscreteMask";
+const std::string simdDiscreteMaskAttrName = "SimdDiscreteMask";
 const std::string explicitRouteToSIMDAttrName = "ExplicitRouteToSIMD";
 // The access must consume the actual loop mask; full-load/select is unsafe.
 const std::string runtimeLoopMaskAttrName = "RuntimeLoopMask";
 const std::string discreteAttrName = "DiscreteMemAccess";
 const std::string continuousAttrName = "ContinuousMemAccess";
 const std::string customSrcPtrIndexAttrName = "SrcPtrIndex";
+
+/// Pick an unused module-level name for a generated runtime function.
+llvm::SmallString<128> generateUniqueFuncName(ModuleOp moduleOp,
+                                              llvm::StringRef funcNameBase);
 
 bool isaPermutedMemRefType(MemRefType);
 
@@ -135,8 +142,6 @@ inline bool isPureSimtMode(CompileMode mode) {
 
 } // namespace ascend
 
-enum class IndirectLoadInterfaceOpType { Undefined = 0, Load = 1, Calc = 2 };
-
 // Traceback from rootOp to find the targetOp with the specified condition
 mlir::Operation *
 findFirstMatchingOperandDef(mlir::Operation *rootOp,
@@ -164,18 +169,6 @@ void traverseForwardUpdateUserChainIf(
     std::function<bool(Operation *)> stopFn,
     std::function<void(OpBuilder &, Operation *)> actionFn,
     llvm::SmallPtrSet<Operation *, 16> &stopOps);
-
-// UseAnalysis will tag operations whose results are used only as meta-data
-// with "MetaUse" tag.
-bool isMetaUse(Operation *op);
-
-bool isMixUse(Operation *op);
-
-IndirectLoadInterfaceOpType getIndirectLoadInterfaceOpType(Operation *op);
-
-bool opIsIndirectLoad(Operation *op);
-
-bool opIsIndirectCalc(Operation *op);
 
 /// Maximum expected rank for loop tiling in tensor operations.
 static constexpr int kMaxTiledRank = 4;

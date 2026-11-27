@@ -21,10 +21,35 @@
 # THE SOFTWARE.
 
 __all__ = [
-    "ascend_address_space", "builtin", "CORE", "copy_from_ub_to_l1", "copy", "debug_barrier", "fixpipe",
-    "FixpipeDMAMode", "FixpipeDualDstMode", "FixpipePreQuantMode", "FixpipePreReluMode", "int64", "is_builtin", "MODE",
-    "PIPE", "SYNC_HINT", "EVENT_ID", "IteratorType", "sub_vec_id", "sub_vec_num", "sync_block_all", "sync_block_set",
-    "sync_block_wait", "SYNC_IN_VF", "conv1d", "dot", "conv2d"
+    "ascend_address_space",
+    "builtin",
+    "CORE",
+    "copy_from_ub_to_l1",
+    "copy",
+    "debug_barrier",
+    "fixpipe",
+    "FixpipeDMAMode",
+    "FixpipeDualDstMode",
+    "FixpipePreQuantMode",
+    "FixpipePreReluMode",
+    "int64",
+    "is_builtin",
+    "MODE",
+    "PIPE",
+    "SYNC_HINT",
+    "EVENT_ID",
+    "IteratorType",
+    "sub_vec_id",
+    "sub_vec_num",
+    "sync_block_all",
+    "sync_block_set",
+    "sync_block_wait",
+    "SYNC_IN_VF",
+    "conv1d",
+    "dot",
+    "conv2d",
+    "AddressSpace",
+    "DataLayout",
 ]
 
 import enum
@@ -38,6 +63,7 @@ import triton.language.core as tl
 import triton.extension.buffer.language as bl
 from triton.language.core import _unwrap_if_constexpr
 from triton.backends.ascend.driver import NPUUtils
+from triton.backends.ascend.utils import is_register_based_arch
 
 from . import semantic as semantic
 
@@ -127,6 +153,24 @@ class IteratorType(enum.Enum):
     Opaque = ascend_ir.IteratorType.Opaque
 
 
+class DataLayout(enum.Enum):
+    ND = ascend_ir.DataLayout.ND
+    Fractal = ascend_ir.DataLayout.Fractal
+
+
+class AddressSpace(enum.Enum):
+    Zero = ascend_ir.AddressSpace.Zero
+    GM = ascend_ir.AddressSpace.GM
+    L1 = ascend_ir.AddressSpace.L1
+    L0A = ascend_ir.AddressSpace.L0A
+    L0B = ascend_ir.AddressSpace.L0B
+    L0C = ascend_ir.AddressSpace.L0C
+    UB = ascend_ir.AddressSpace.UB
+    SSBUF = ascend_ir.AddressSpace.SSBUF
+    FixBUF = ascend_ir.AddressSpace.FixBUF
+    BiasBUF = ascend_ir.AddressSpace.BiasBUF
+
+
 class ascend_address_space_base(bl.address_space):
 
     def __init__(self, address_space_value: ascend_ir.AddressSpace) -> None:
@@ -147,6 +191,11 @@ class ascend_address_space_group:
     - ``L0A`` — L0 buffer A (Cube unit input)
     - ``L0B`` — L0 buffer B (Cube unit input)
     - ``L0C`` — L0 buffer C (Cube unit output)
+    - ``GM`` — Global Memory
+    - ``SSBUF`` — Shared Scalar Buffer
+    - ``FixBUF`` — Fix Buffer
+    - ``BiasBUF`` — Bias Buffer
+    - ``Zero`` — default/no address space
 
     Usage with :func:`bl.alloc() <triton.extension.buffer.language.alloc>`::
 
@@ -353,8 +402,8 @@ def fixpipe(
     :return: If dst is None, returns the created tensor; otherwise returns None.
     :rtype: tl.tensor | None
     """
-    if not _semantic.builder.is_910_95():
-        raise RuntimeError("this feature is only supported on Ascend910_95")
+    if not is_register_based_arch(_semantic.builder.options.arch):
+        raise RuntimeError("this feature is only supported on Ascend910_95 and Ascend960")
     if not isinstance(src, tl.tensor):
         raise TypeError("src is not of tensor type")
 
@@ -447,8 +496,20 @@ def sub_vec_num(_semantic=None) -> tl.constexpr:
     return tl.constexpr(const_val)
 
 
+def _reject_conv1d_padding_size(fn):
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if "padding_size" in kwargs:
+            raise TypeError("conv1d() got an unexpected keyword argument 'padding_size'; use 'padding' instead.")
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+@_reject_conv1d_padding_size
 @builtin
-def conv1d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=None, padding_size=None, dilation=None,
+def conv1d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=None, padding=None, dilation=None,
            groups=None, _semantic=None) -> tl.tensor:
     """
     Applies a 1D convolution over an input signal.
@@ -461,10 +522,12 @@ def conv1d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=N
     :type bias: tensor or None
     :param stride: The stride of the convolution kernel. Can be an int or a 1-element tuple.
     :type stride: int or Tuple[int]
-    :param padding_size: Padding added to both sides of the input. Can be an int, a 1-element tuple, or a string. Can be a string {'valid', 'same'}, single number or a one-element tuple.
-        ``padding_size='valid'`` is the same as no padding.
-        ``padding_size='same'`` pads the input so the output has the same shape as the input. However, this mode doesn't support any stride values other than 1.
-    :type padding_size: int, Tuple[int], or str
+    :param padding: Padding added to the input. Can be an int (symmetric
+        on both sides), a 2-element tuple (pad_left, pad_right) (asymmetric),
+        or a string.
+        ``padding='valid'`` is the same as no padding.
+        ``padding='same'`` pads the input so the output has the same shape as the input. However, this mode doesn't support any stride values other than 1.
+    :type padding: int, Tuple[int, int], or str
     :param dilation: The spacing between kernel elements. Can be an int or a 1-element tuple.
     :type dilation: int or Tuple[int]
     :param groups: Number of blocked connections from input to output channels.
@@ -481,13 +544,13 @@ def conv1d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=N
             weight_block = tl.load(weight_ptr + ...)
 
             # Perform 1D convolution
-            # Using default stride=1, padding_size=0, dilation=1, groups=1
+            # Using default stride=1, padding=0, dilation=1, groups=1
             conv_output = al.conv1d(
                 input_block,
                 weight_block,
                 bias=None,
                 stride=1,
-                padding_size=0,
+                padding=0,
                 dilation=1,
                 groups=1,
             )
@@ -500,13 +563,13 @@ def conv1d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=N
     """
 
     stride = _unwrap_if_constexpr(stride)
-    padding_size = _unwrap_if_constexpr(padding_size)
+    padding = _unwrap_if_constexpr(padding)
     dilation = _unwrap_if_constexpr(dilation)
     groups = _unwrap_if_constexpr(groups)
 
     # Set default value
     stride = stride if stride is not None else 1
-    padding_size = padding_size if padding_size is not None else 0
+    padding = padding if padding is not None else 0
     dilation = dilation if dilation is not None else 1
     groups = groups if groups is not None else 1
 
@@ -525,28 +588,46 @@ def conv1d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=N
         assert isinstance(param, int), f"{name} must be an integer or a 1-element tuple, got {type(param)}"
         return param
 
+    def _check_and_normalize_padding(param):
+        """Keep ints as ints and tuples as tuples; lists are accepted and
+        converted to tuples.
+
+        Accepts an int (symmetric on both sides) or a 2-element sequence
+        [pad_left, pad_right] (asymmetric).
+        """
+        if param is None:
+            return 0
+        if isinstance(param, list):
+            assert len(param) == 2, \
+                f"padding must be an int or a 2-element sequence, got {param}"
+            return tuple(param)
+        if isinstance(param, (tuple, tl.tuple)):
+            assert len(param) == 2, \
+                f"padding must be an int or a 2-element sequence, got {param}"
+            return param
+        assert isinstance(param, int), \
+            f"padding must be an int or a 2-element sequence, got {type(param)}"
+        return param
+
     stride = _check_and_normalize_1d_param(stride, 'stride')
     dilation = _check_and_normalize_1d_param(dilation, 'dilation')
 
     is_batched = len(input.shape) == 3
-    L_in = input.shape[-1]
-    K = weight.shape[2]
+    L_in = _unwrap_if_constexpr(input.shape[-1])
+    K = _unwrap_if_constexpr(weight.shape[2])
 
-    if isinstance(padding_size, str):
-        assert padding_size in ['same', 'valid'], f"padding_size string must be 'same' or 'valid', got '{padding_size}'"
-    else:
-        padding_size = _check_and_normalize_1d_param(padding_size, 'padding_size')
-    if isinstance(padding_size, str):
-        if padding_size == 'valid':
-            padding_size_int = 0
-        elif padding_size == 'same':
+    if isinstance(padding, str):
+        assert padding in ['same', 'valid'], f"padding string must be 'same' or 'valid', got '{padding}'"
+        if padding == 'valid':
+            padding_int = 0
+        elif padding == 'same':
             #The case where padding_needed is an odd number needs to be handled.
             if stride != 1:
-                raise ValueError("padding_size='same' is only supported when stride=1")
+                raise ValueError("padding='same' is only supported when stride=1")
             padding_needed = (L_in - 1) * stride + dilation * (K - 1) + 1 - L_in
-            padding_size_int = padding_needed // 2
+            padding_int = (padding_needed // 2, padding_needed - padding_needed // 2)
     else:
-        padding_size_int = padding_size if padding_size is not None else 0
+        padding_int = _check_and_normalize_padding(padding)
 
     assert len(input.shape) in [2, 3], f"input must be a 2D (C, L) or 3D (N, C, L) tensor, got {len(input.shape)}D"
     assert len(
@@ -559,14 +640,17 @@ def conv1d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=N
     L_in_val = _unwrap_if_constexpr(input.shape[-1])
     K_val = _unwrap_if_constexpr(weight.shape[2])
 
-    calculation_result = (L_in_val + 2 * padding_size_int - dilation * (K_val - 1) - 1) / stride + 1
+    # padding_int is an int (uniform) or [pad_left, pad_right].
+    pad_left, pad_right = (padding_int, padding_int) \
+        if isinstance(padding_int, int) else padding_int
+    calculation_result = (L_in_val + pad_left + pad_right - dilation * (K_val - 1) - 1) / stride + 1
     L_out_val = -int(-calculation_result)
     if is_batched:
         output_shape = [input.shape[0], C_out, L_out_val]
     else:
         output_shape = [C_out, L_out_val]
 
-    return semantic.conv1d(input, weight, bias, stride, padding_size_int, dilation, groups, output_shape, _semantic)
+    return semantic.conv1d(input, weight, bias, stride, padding_int, dilation, groups, output_shape, _semantic)
 
 
 def _dot_to_nd_shape(shape, fractal, is_lhs):

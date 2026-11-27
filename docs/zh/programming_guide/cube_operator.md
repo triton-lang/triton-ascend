@@ -8,14 +8,19 @@ Cube算子以矩阵乘或批量矩阵乘为主要计算负载，Triton代码中�
 
 1. 明确输入输出shape和stride，例如 `A[M, K]`、`B[K, N]`、`C[M, N]`。
 2. 用 `tl.program_id` 映射当前program到输出矩阵的 `(pid_m, pid_n)` tile。
-3. 用 `BLOCK_SIZE_M/N/K` 构造A/B的二维偏移。
+3. 用 `BLOCK_M/N/K` 构造A/B的二维偏移。
 4. 沿K维循环加载A/B子块，并用 `tl.dot` 累加到fp32 accumulator。
 5. 将accumulator转为输出dtype，并用边界mask写回C。
 
 核心结构如下：
 
 ```python
+import triton
+import triton.language as tl
+
 @triton.jit
+# Cube矩阵乘kernel：输入A[M,K]、B[K,N]，输出C[M,N]，沿K维分块用tl.dot累加到fp32累加器
+# stride_*为A/B/C各维步长，BLOCK_M/N/K为单次搬运与计算的分块大小
 def matmul_kernel(a_ptr, b_ptr, c_ptr,
                   M: tl.constexpr, N: tl.constexpr, K: tl.constexpr,
                   stride_am: tl.constexpr, stride_ak: tl.constexpr,
@@ -47,7 +52,7 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr,
 
 - `BLOCK_M/N/K` 是否满足硬件支持和UB/L1容量限制。
 - K维循环是否可以开启 `multibuffer` 以形成搬运和计算流水。
-- 输出tile是否包含额外bias、scale、activation。如果后处理很轻，可以仍归为Cube算子；如果后处理包含明显Vector归约或跨核同步，应按CV融合算子组织。
+- 输出tile是否包含额外bias、scale、activation。如果后处理很轻，仍可归为Cube算子；如果后处理包含明显Vector归约或跨核同步，应按CV融合算子组织。
 
 ## Cube复杂算子开发
 
@@ -57,7 +62,7 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr,
 
 1. **先抽出纯矩阵乘核心**：确认每次 `tl.dot` 的输入tile shape、dtype、累加dtype和输出tile shape。
 2. **再处理不规则访存**：如果K/V cache低维离散、高维连续，直接二维load可能退化为标量访存。可先按连续维搬入UB，再通过转置或Ascend扩展接口 `extension.insert_slice` 重组为 `tl.dot` 需要的布局。
-3. **把归约和归一化留到边界明确的位置**：例如attention中的 `max/sum/exp` 属于Vector逻辑，若和 `tl.dot` 放在同一kernel，需要转到 [CV融合算子开发](./cv_fusion_operator.md) 的思路。
+3. **把归约和归一化留到边界明确的位置**：例如attention中的 `max/sum/exp` 属于Vector逻辑，若和 `tl.dot` 放在同一kernel，需要参考 [CV融合算子开发](./cv_fusion_operator.md) 的思路。
 4. **为长K或长序列设计内层循环**：K维循环要控制单次A/B tile的片上占用；序列维循环要避免一次load过大的K/V block。
 5. **用Autotune管理候选tile**：为常见shape准备多组 `BLOCK_M/N/K` 和 `multibuffer` 配置，让运行时选择最优组合。
 

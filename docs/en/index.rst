@@ -14,7 +14,7 @@ Triton Ascend
    <a href="https://deepwiki.com/triton-lang/triton-ascend"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
    </p>
 
-**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors, providing efficient kernel auto-tuning, operator compilation, and deployment capabilities. It supports Ascend Atlas A2/A3/950 series products, maintains compatibility with Triton core syntax, and includes deep optimizations for Ascend NPU features such as automatic kernel argument parsing, memory access optimization, and robust deployment mechanisms.
+**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors, providing efficient kernel auto-tuning, operator compilation, and deployment capabilities. It supports Atlas A2/A3 and Ascend 950PR&950DT series products, maintains compatibility with Triton core syntax, and includes deep optimizations for Huawei Ascend NPU features such as automatic kernel argument parsing, memory access optimization, and robust deployment mechanisms.
 
 .. toctree::
    :maxdepth: 1
@@ -34,6 +34,7 @@ Triton Ascend
    Cube Operator <programming_guide/cube_operator>
    CV Fusion Operator <programming_guide/cv_fusion_operator>
    Triton-Ascend Autotune <autotune_guide>
+   Triton-Ascend AOT Compile <aot_guide>
    Example Operators <examples/index>
 
 .. toctree::

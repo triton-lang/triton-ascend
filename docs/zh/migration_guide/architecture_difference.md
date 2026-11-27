@@ -1,6 +1,6 @@
 # 架构差异分析
 
-本⽂系统性梳理两⼤平台的核⼼架构、编程规则与优化⼿段差异，拆解昇腾NPU Triton专属开发特性与适配要点，帮助开发者快速建⽴昇腾NPU Triton开发思维，精准完成算⼦迁移、代码适配与性能调优⼯作，规避迁移常⻅问题。
+本文系统性梳理两大平台的核心架构、编程规则与优化手段差异，拆解昇腾NPU Triton专属开发特性与适配要点，帮助开发者快速建立昇腾NPU Triton开发思维，精准完成算子迁移、代码适配与性能调优工作，规避迁移常见问题。
 
 ## 多核任务并行策略
 
@@ -8,11 +8,11 @@ NPU在Triton多核并行中是物理核强绑定模式，与GPU逻辑维度并�
 
 |维度       |GPU（NVIDIA） |昇腾（Ascend）|
 |-----------|--------------|-----------|
-|grid 本质| 逻辑任务维度（和物理核解耦）| 物理核组映射（绑定 AI Core 拓扑）|
-|核数 / 维度限制| grid 维度 / 大小无硬限制| grid 大小≤AI Core 总数，2D 需匹配拓扑|
+|grid本质| 逻辑任务维度（和物理核解耦）| 物理核组映射（绑定AI Core拓扑）|
+|核数 / 维度限制| grid维度 / 大小无硬限制| grid大小≤AI Core总数，2D需匹配拓扑|
 
 GPU可绑定多个维度轴（三维grid=[n,m,l] 等同于乘积n×m×l个并行线程），每个线程仅对应一次kernel执行，且仅执行一次。\
-NPU的Vector核、Cube核属于多个物理核，不同代际硬件核数不同，每个核仅执行一次Block,且支持对该Block重复调度执行。
+NPU的Vector核、Cube核属于多个物理核，不同代际硬件核数不同，每个核仅执行一次Block，且支持对该Block重复调度执行。
 
 ### 充分利用核数
 
@@ -23,24 +23,24 @@ NPU的Vector核、Cube核属于多个物理核，不同代际硬件核数不同�
 triton_gelu[n, 1, 1](...)  # 第一个参数表示使用的核数，n表示使用n个核
 ```
 
-通过对核数的调优，可实现对所有计算资源的充分调度和利用，从而最大化并行度与吞吐量。未启用 `auto-blockify`（见下节）时，启动grid的核数需小于等于 65,535。
+通过对核数的调优，可实现对所有计算资源的充分调度和利用，从而最大化并行度与吞吐量。未启用 `auto-blockify`（见下节）时，启动grid的核数需小于等于AI Core总数（同时grid各维度大小受65,535上限约束）。
 
-### auto-blockify：突破 65,535 逻辑块上限
+### auto-blockify：突破65,535逻辑块上限
 
-社区 Triton 在 NVIDIA GPU 上把 grid 视为纯逻辑维度 —— `n` 个逻辑块按 1:1 映射到 `n` 个硬件块，运行时由硬件分发到各 SM，每个块不需要内部循环。昇腾上由于[多核任务并行策略](#多核任务并行策略)中描述的物理核强绑定，可启动的 grid 上限被限制在 65,535，对含百万级逻辑工作项的 kernel（autotune 后的 reduce/scan、megablocks 风格的稀疏 kernel 等）过于严苛。
+社区Triton在NVIDIA GPU上把grid视为纯逻辑维度 —— `n` 个逻辑块按1:1映射到 `n` 个硬件块，运行时由硬件分发到各SM，每个块不需要内部循环。昇腾上由于[多核任务并行策略](#多核任务并行策略)中描述的物理核强绑定，可启动的grid上限被限制在65,535，对含百万级逻辑工作项的kernel（autotune后的reduce/scan、megablocks风格的稀疏kernel等）过于严苛。
 
-`auto-blockify`（`SIMTAutoBlockify` 编译期 pass + 配套的运行期 cap）通过"编译期视为逻辑、启动期折叠到物理核"消除该限制：
+`auto-blockify`（`SIMTAutoBlockify` 编译期pass + 配套的运行期cap）通过"编译期视为逻辑、启动期折叠到物理核"消除该限制：
 
-- **编译期**：Triton pass 把 kernel 函数体包进一层 `scf.for`，迭代变量由 `gpu.linear_block_id` 提供。chunk 大小 = `ceildiv(logical_block_count, physical_core_count)`，每个物理块依次跑 `chunk` 个逻辑 block id。
-- **运行期**：传给 launcher 的 block-count 参数从逻辑 grid clamp 到 `physical_core_count`，与编译期的折叠保持一致。
+- **编译期**：Triton pass把kernel函数体包进一层 `scf.for`，迭代变量由 `gpu.linear_block_id` 提供。chunk大小 = `ceildiv(logical_block_count, physical_core_count)`，每个物理块依次跑 `chunk` 个逻辑block id。
+- **运行期**：传给launcher的block-count参数从逻辑grid clamp到 `physical_core_count`，与编译期的折叠保持一致。
 
-编译期和运行期共享同一份后端内部策略。自动 block mapping 由后端统一启用，编译器生成的 IR 安全标记会排除不适用的 kernel。因此，编译期循环包与运行期 cap 始终同步，不存在 kernel 按一种模式编译却按另一种模式启动的情形。
+编译期和运行期共享同一份后端内部策略。自动block mapping由后端统一启用，编译器生成的IR安全标记会排除不适用的kernel。因此，编译期循环包与运行期cap始终同步，不存在kernel按一种模式编译却按另一种模式启动的情形。
 
-从 GPU Triton kernel 移植时的注意事项：
+从GPU Triton kernel移植时的注意事项：
 
-- grid 大于 65,535 可直接运行，无需手动把外层维度折叠进 kernel 函数体。
-- 逻辑块之间必须保持顺序无关（循环按 chunk 顺序访问）。依赖严格逻辑 block id 顺序的 kernel（如基于特定顺序的跨块同步）需要改写。
-- per-block workspace 分配从 `O(logical_block_count)` 降到 `O(physical_core_count)`，因为 workspace 在内层 `scf.for` 各次迭代间复用。
+- grid大于65,535可直接运行，无需手动把外层维度折叠进kernel函数体。
+- 逻辑块之间必须保持顺序无关（循环按chunk顺序访问）。依赖严格逻辑块id顺序的kernel（如基于特定顺序的跨块同步）需要改写。
+- per-block workspace分配从 `O(logical_block_count)` 降到 `O(physical_core_count)`，因为workspace在内层 `scf.for` 各次迭代间复用。
 
 ## 单核数据搬运策略
 
@@ -59,7 +59,7 @@ xblock_sub：核内切分粒度（核内细粒度划分）
 开发者可根据实际场景手动选择最优的切分配置，使得每次计算尽可能充分利用片上内存（On-chip Memory），避免频繁访问全局内存（Global Memory）造成的
 性能瓶颈。
 
-以GELU算子为例，通过调整切分参数，可以有效适配片上缓存容量限制，从而提升执行效率。
+以GELU算子为例，通过调整切分参数，可以有效适配片上内存容量限制，从而提升执行效率。
 
 注：Atlas 800T A2训练服务器、Atlas 800I A2推理服务器的片上内存容量为192KB，因此在设计切分策略时需考虑该限制，确保每轮计算的数据量不超过片上内存容量。
 
@@ -67,15 +67,11 @@ xblock_sub：核内切分粒度（核内细粒度划分）
 
 GELU算子开发示例，使用3种方式计算结果。
 
-standard_unary      为标准Torch计算。
-
-triton_easy_kernel  为简单Triton实现。
-
-triton_better_kernel为更高效的Triton实现。
+`standard_unary`为标准Torch计算；`triton_easy_kernel`为简单Triton实现；`triton_better_kernel`为更高效的Triton实现。
 
 #### 标准Torch写法
 
-输入tensor x0，经过torch计算实现 GELU 算子，返回结果值。
+输入tensor x0，经过torch计算实现GELU算子，返回结果值。
 
 ```Python
 def standard_unary(x0):
@@ -85,7 +81,7 @@ def standard_unary(x0):
 
 #### 简单Triton写法
 
-以下是一个使用 Triton 编写的简单内核示例，用于展示如何定义和调用一个基本的Triton内核函数。此示例实现了一个简单的数学运算（GELU 激活函数）。
+以下是一个使用Triton编写的简单内核示例，用于展示如何定义和调用一个基本的Triton内核函数。此示例实现了一个简单的数学运算（GELU激活函数）。
 
 ```Python
 
@@ -112,15 +108,15 @@ triton_easy_kernel[1, 1, 1](x0, out1, x0.numel())
 注意事项
 
 1. 内存限制：上述写法中，所有输入数据一次性被加载到内存中进行计算。如果输入张量过大，可能会超出单个内核的片上内存容量，导致内存溢出错误。
-因此，这种简单的写法更适合于小规模张量的计算或用于理解 Triton 内核的基本写法和调用方式。
+因此，这种简单的写法更适合于小规模张量的计算或用于理解Triton内核的基本写法和调用方式。
 
-2. 适用场景：尽管这种方法有助于快速理解和入门 Triton 编程，但对于大规模数据集或高性能要求的应用场景，建议采用更复杂的数据切分策略（如 Tiling），
-以充分利用硬件资源并避免内存溢出问题。通过这种方式，开发者可以快速上手 Triton 编程，同时了解如何定义、调用以及优化 Triton 内核函数。
+2. 适用场景：尽管这种方法有助于快速理解和入门Triton编程，但对于大规模数据集或高性能要求的应用场景，建议采用更复杂的数据切分策略（如Tiling），
+以充分利用硬件资源并避免内存溢出问题。通过这种方式，开发者可以快速上手Triton编程，同时了解如何定义、调用以及优化Triton内核函数。
 
-#### 更高效triton写法
+#### 更高效Triton写法
 
-在昇腾 NPU 上使用 Triton 编写高性能算子时，为了充分利用硬件资源、避免内存溢出并提升执行效率，通常需要采用数据切分（Tiling）策略。
-下面是一个经过优化的 Triton 内核实现示例，适用于大规模张量计算。
+在昇腾NPU上使用Triton编写高性能算子时，为了充分利用硬件资源、避免内存溢出并提升执行效率，通常需要采用数据切分（Tiling）策略。
+下面是一个经过优化的Triton内核实现示例，适用于大规模张量计算。
 
 ```Python
 
@@ -144,19 +140,19 @@ def triton_better_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK
 ncore = 32
 xblock = 32768
 xblock_sub = 8192
-x0 = torch.rand(32768, device='npu')
+x0 = torch.rand(ncore * xblock, device='npu')
 out1 = torch.empty_like(x0)
 # 调用triton_kernel核函数
 triton_better_kernel[ncore, 1, 1](x0, out1, x0.numel(), xblock, xblock_sub)
 ```
 
-关键代码解释
+关键代码解释：
 
 ```Python
-# 计算当前核处理数据块的起始偏移地址，实现核间切分。每个核仅负责 XBLOCK 大小的数据范围。
+# 计算当前核处理数据块的起始偏移地址，实现核间切分。每个核仅负责XBLOCK大小的数据范围。
 xoffset = tl.program_id(0) * XBLOCK
 
-# 在单个核内部进一步细分数据块，每次处理 XBLOCK_SUB 大小的数据，实现核内切分。
+# 在单个核内部进一步细分数据块，每次处理XBLOCK_SUB大小的数据，实现核内切分。
 for xoffset_sub in range(0, XBLOCK, XBLOCK_SUB):
 
 # 构造当前迭代的数据索引数组，用于访问输入和输出张量。
@@ -166,33 +162,33 @@ x_index = xoffset + xoffset_sub + tl.arange(0, XBLOCK_SUB)[:]
 xmask = x_index < xnumel
 
 # 分别用于从全局内存加载数据到片上内存，以及将计算结果写回全局内存。
-tl.load() 和 tl.store()
+tl.load() 和tl.store()
 ```
 
 ## 编译优化能力
 
 ### AscendNPU IR优化
 
-针对昇腾软硬件特性，适配了AscendNPU IR优化的编译选项，如下表所示。
-**使用方法**：在autotune的配置阶段，传入编译选项的值
+针对昇腾软硬件特性，适配了AscendNPU IR优化的编译选项，如下表所示：
+**使用方法**：在autotune的配置阶段，传入编译选项的值。
 以开启`multibuffer`选项举例，在autotune的配置阶段，即`triton.Config`中，传入`'multibuffer': True`，详见[autotune示例](../examples/06_autotune_example.md)：
 
-```python
+```Python
     def get_autotune_config():
         return [
             triton.Config({'XS': 1 * 128, 'multibuffer': True}),]
 ```
 
-| 选项      | 能力       | 是否开启 |
+| 选项      | 能力       | 默认值与取值范围 |
 | ----------------- | ------------ | ----------------- |
 | multibuffer                                   | 开启流水并行数据搬运  | 默认true；true , false。autotune中可配置                     |
-| unit_flag                                     | cube搬出的一个优化项                                         | 默认None；true , false。autotune中可配置                     |
-| limit_auto_multi_buffer_only_for_local_buffer | CV算子一个优化项，cube搬出的一个优化项                         | 默认None；true , false。autotune中可配置 |
-| limit_auto_multi_buffer_of_local_buffer       | cube算子开启double buffer具体的scope                         | 默认None；可取值 "no-limit" 或 "no-l0c"，autotune中可配置           |
-| set_workspace_multibuffer                     | 配置 workspace multi-buffer 档位，用于为 workspace 相关数据搬运启用多缓冲。 | 默认None；可取单个值，如 2 或 4；autotune中可配置候选值                            |
-| enable_hivm_auto_cv_balance                   | 启用或禁用自动 CV balance，用于在 CV 融合场景下平衡 Cube 与 Vector 执行。 | 默认None；true , false。autotune中可配置 |
-| tile_mix_vector_loop                          | CV算子的一个优化项，当前vector可以切几份                        | 默认None；可取单个值，如 2、4 或 8；autotune中可配置候选值                       |
-| tile_mix_cube_loop                            | CV算子一个优化项，当前cube可以切几份      | 默认None；可取单个值，如 2、4 或 8；autotune中可配置候选值                      |
+| unit_flag                                     | Cube搬出的一个优化项                                         | 默认None；true , false。autotune中可配置                     |
+| limit_auto_multi_buffer_only_for_local_buffer | CV算子一个优化项，Cube搬出的一个优化项                         | 默认None；true , false。autotune中可配置 |
+| limit_auto_multi_buffer_of_local_buffer       | Cube算子开启double buffer具体的scope                         | 默认None；可取值 "no-limit" 或 "no-l0c"。autotune中可配置           |
+| set_workspace_multibuffer                     | 配置workspace multi-buffer档位，用于为workspace相关数据搬运启用多缓冲。 | 默认None；可取单个值，如2或4。autotune中可配置候选值                            |
+| enable_hivm_auto_cv_balance                   | 启用或禁用自动CV balance，用于在CV融合场景下平衡Cube与Vector执行。 | 默认None；true , false。autotune中可配置 |
+| tile_mix_vector_loop                          | CV算子的一个优化项，当前Vector可以切几份                        | 默认None；可取单个值，如2、4或8。autotune中可配置候选值                       |
+| tile_mix_cube_loop                            | CV算子一个优化项，当前Cube可以切几份      | 默认None；可取单个值，如2、4或8。autotune中可配置候选值                      |
 
 - 注：优化编译选项位于 `third_party/ascend/backend/compiler.py`。
 - 注：CV算子表示该算子运算过程中既使用了AI Core又使用了Vector Core。

@@ -11,8 +11,11 @@
 // CHECK: hacc.program_grid_transforms = {{.*}}factor = 8 : i64
 // CHECK-LABEL: tt.func @runtime_grid(
 // CHECK-SAME: %[[EXTENT:arg[0-9]+]]: i32, %{{arg[0-9]+}}: i32)
-// CHECK: %[[LIMIT:.*]] = tt.splat %[[EXTENT]] : i32 -> tensor<8xi32>
-// CHECK: arith.cmpi slt, {{.*}}, %[[LIMIT]] : tensor<8xi32>
+// CHECK: %[[BASE:.*]] = arith.muli {{.*}} : i32
+// CHECK: %[[LANES:.*]] = tt.make_range {end = 8 : i32, start = 0 : i32}
+// CHECK: %[[REMAINING:.*]] = arith.subi %[[EXTENT]], %[[BASE]] : i32
+// CHECK: %[[LIMIT:.*]] = tt.splat %[[REMAINING]] : i32 -> tensor<8xi32>
+// CHECK: arith.cmpi slt, %[[LANES]], %[[LIMIT]] : tensor<8xi32>
 // CHECK: tt.load {{.*}}, %{{.*}}, %{{.*}} : tensor<8x16x16x!tt.ptr<f16>>
 // CHECK: tt.dot {{.*}} : tensor<128x16xf16> * tensor<16x16xf16> -> tensor<128x16xf32>
 // CHECK: tt.store {{.*}}, %{{.*}}, %{{.*}} : tensor<8x16x16x!tt.ptr<f32>>
@@ -71,11 +74,14 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK-SAME: %[[COLUMNS:arg[0-9]+]]: i32, %[[GRID:arg[0-9]+]]: i32, %{{arg[0-9]+}}: i32)
 // CHECK-DAG: %[[ONE:.*]] = arith.constant 1 : i32
 // CHECK-DAG: %[[ONES:.*]] = arith.constant dense<1> : tensor<8xi32>
+// CHECK: %[[GROUP_BASE:.*]] = arith.muli {{.*}} : i32
 // CHECK: %[[END:.*]] = arith.subi %[[GRID]], %[[ONE]] : i32
 // CHECK: %[[LAST:.*]] = arith.minsi %{{.*}}, %[[END]] : i32
+// CHECK: %[[ROW_LANES:.*]] = tt.make_range {end = 8 : i32, start = 0 : i32}
 // CHECK: %[[ROWS:.*]] = arith.addi {{.*}} : tensor<8xi32>
-// CHECK: %[[GRID_TILE:.*]] = tt.splat %[[GRID]] : i32 -> tensor<8xi32>
-// CHECK: %[[VALID:.*]] = arith.cmpi slt, %[[ROWS]], %[[GRID_TILE]] : tensor<8xi32>
+// CHECK: %[[ROWS_LEFT:.*]] = arith.subi %[[GRID]], %[[GROUP_BASE]] : i32
+// CHECK: %[[GRID_TILE:.*]] = tt.splat %[[ROWS_LEFT]] : i32 -> tensor<8xi32>
+// CHECK: %[[VALID:.*]] = arith.cmpi slt, %[[ROW_LANES]], %[[GRID_TILE]] : tensor<8xi32>
 // CHECK: %[[COUNT:.*]] = tt.splat %[[COLUMNS]] : i32 -> tensor<16x16xi32>
 // CHECK: %[[ORIGINAL:.*]] = arith.cmpi slt, %{{.*}}, %[[COUNT]] : tensor<16x16xi32>
 // CHECK: %[[VALID1:.*]] = tt.expand_dims %[[VALID]] {axis = 1 : i32}
@@ -90,6 +96,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK: %[[RESULT:.*]] = scf.for %[[IV:.*]] = %{{.*}} to %[[UPPER]] step %[[ONE]] iter_args(%[[ACC:.*]] = %{{.*}})
 // CHECK: %[[IV_TILE:.*]] = tt.splat %[[IV]] : i32 -> tensor<8xi32>
 // CHECK: %[[ACTIVE:.*]] = arith.cmpi slt, %[[IV_TILE]], %[[ROW_UPPER]] : tensor<8xi32>
+// The accumulator uses only the trip-count mask; loads/stores retain VALID.
+// CHECK-NOT: arith.andi %[[ACTIVE]]
 // CHECK: %[[ACTIVE1:.*]] = tt.expand_dims %[[ACTIVE]] {axis = 1 : i32}
 // CHECK: %[[ACTIVE2:.*]] = tt.expand_dims %[[ACTIVE1]] {axis = 2 : i32}
 // CHECK: %[[ACTIVE_TILE:.*]] = tt.broadcast %[[ACTIVE2]]

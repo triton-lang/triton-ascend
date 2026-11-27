@@ -164,6 +164,48 @@ def test_interleave_with_mask(para_type, data_type, head_dim_half, bias, numel):
     assert torch.allclose(k, k_ref)
 
 
+def torch_discrete_deinterleave_pair(src, idx, half, bias):
+    seg = src[idx][:, bias:bias + half * 2]
+    return torch.cat((seg[:, 0::2], seg[:, 1::2]), dim=1)
+
+
+@triton.jit
+def triton_discrete_deinterleave_pair(src_ptr, idx_ptr, out_ptr, row: tl.constexpr, half: tl.constexpr,
+                                      bias: tl.constexpr, block_n: tl.constexpr):
+    n = tl.arange(0, block_n)
+    d = tl.arange(0, half)
+    rows = tl.load(idx_ptr + n)
+    base = src_ptr + rows[:, None] * row + bias + d[None, :] * 2
+    even = tl.load(base)
+    odd = tl.load(base + 1)
+    tl.store(out_ptr + n[:, None] * (2 * half) + d[None, :], even)
+    tl.store(out_ptr + n[:, None] * (2 * half) + d[None, :] + half, odd)
+
+
+# Discrete gather (row addresses come from an index tensor) combined with a stride-2
+# interleaved last dim. Without the deinterleave writeback, the gathered rows are read
+# back from an unwritten buffer; in the correct form both parity loads share a single
+# ExtractedLoadOrStore loop.
+@pytest.mark.parametrize('data_type,block_n,half,bias', [
+    [torch.float32, 32, 16, 0],
+    [torch.float32, 32, 16, 64],
+])
+def test_discrete_deinterleave_load(data_type, block_n, half, bias):
+    row = bias + half * 2 + 8
+    src_cpu = torch.randn((block_n * 4, row), dtype=data_type)
+    idx_cpu = torch.randperm(block_n * 4)[:block_n].to(torch.int32)
+    expected = torch_discrete_deinterleave_pair(src_cpu, idx_cpu, half, bias)
+
+    src = src_cpu.npu()
+    idx = idx_cpu.npu()
+    out = torch.empty((block_n, half * 2), dtype=data_type).npu()
+
+    kernel = triton_discrete_deinterleave_pair[(1, )](src, idx, out, row, half, bias, block_n)
+
+    assert torch.allclose(out.cpu(), expected)
+    assert kernel.asm["ttadapter"].count("ExtractedLoadOrStore") == 1
+
+
 @pytest.mark.parametrize('para_type,data_type,head_dim_half,bias,numel', [
     ['float32', torch.float32, 16, 0, 8],
     ['float32', torch.float32, 16, 64, 8],

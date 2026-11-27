@@ -20,8 +20,9 @@
  * THE SOFTWARE.
  */
 
-#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/BlockDependencyGraph.h"
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
@@ -45,6 +46,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
 #include <optional>
+#include <set>
 #include <utility>
 
 static constexpr const char *DEBUG_TYPE = "merge-small-block";
@@ -76,55 +78,10 @@ private:
   const int MIN_VF_SIZE = 3;
 };
 
-inline bool isTensorComputeOpLegacy(Operation *op) {
-  if (llvm::isa<tensor::CollapseShapeOp, tensor::ExpandShapeOp,
-                tensor::EmptyOp>(op)) {
-    return false;
-  }
-  bool allOperandsTensor = llvm::all_of(op->getOperands(), [](Value operand) {
-    return llvm::isa<RankedTensorType>(operand.getType());
-  });
-  bool allResultsTensor = llvm::all_of(op->getResults(), [](Value result) {
-    return llvm::isa<RankedTensorType>(result.getType());
-  });
-  return allOperandsTensor && allResultsTensor;
-}
-
-inline bool isTensorComputeOp(Operation *op) {
-  auto funcOp = op->getParentOfType<func::FuncOp>();
-  if (funcOp) {
-    constexpr llvm::StringLiteral legacyFuncNames[]{"pcb10_tc01_kernel"};
-    if (llvm::is_contained(legacyFuncNames, funcOp.getSymName())) {
-      return isTensorComputeOpLegacy(op);
-    }
-  }
-  if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
-    if (linalg::isaCopyOpInterface(linalgOp))
-      return false;
-    auto genericOp = dyn_cast<linalg::GenericOp>(op);
-    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value())
-      return false;
-    if (auto fillOp = dyn_cast<linalg::FillOp>(op)) {
-      auto input = fillOp.getInputs()[0];
-      auto constantOp = input.getDefiningOp<arith::ConstantOp>();
-      if (constantOp) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  if (op->hasTrait<mlir::OpTrait::Elementwise>()) {
-    return llvm::any_of(op->getResultTypes(),
-                        [](Type t) { return isa<RankedTensorType>(t); });
-  }
-  return false;
-}
-
 static int cntComputeOps(const llvm::ArrayRef<Operation *> ops) {
   int count = 0;
   for (Operation *op : ops) {
-    if (isTensorComputeOp(op)) {
+    if (CVPipeline::isTensorComputeOp(op)) {
       count++;
     }
   }
@@ -575,7 +532,7 @@ static void collectUpstream(int smallBlockId, Block *block,
         continue;
       }
       if (bm.getBlockIdByOp(defInBlock) == -1 ||
-          CVPipeline::getOpCoreType(defInBlock) !=
+          CVPipeline::getCoreTypeOfSimpleOpOrCf(defInBlock) !=
               CVPipeline::CoreType::VECTOR_ONLY) {
         haveCubeLink = true;
         break;
@@ -630,9 +587,8 @@ collectDownstream(int smallBlockId, Block *block,
           continue;
         }
 
-        if (bid == -1 || CVPipeline::getOpCoreType(userInBlock) !=
+        if (bid == -1 || CVPipeline::getCoreTypeOfSimpleOpOrCf(userInBlock) !=
                              CVPipeline::CoreType::VECTOR_ONLY) {
-          // FIXME: wait for multi-region
           haveCubeLink = true;
           break;
         }
@@ -704,20 +660,61 @@ selectMergeTarget(SmallVector<int> &candidates,
   return std::nullopt;
 }
 
-static void getBlockIdsInProgramOrder(Block *block,
-                                      CVPipeline::ComputeBlockIdManager &bm,
-                                      SmallVector<int> &ordered,
-                                      DenseMap<int, int> &id2order) {
+/// Returns failure if a cycle is detected in the dependency graph.
+static LogicalResult getBlockIdsInTopoOrder(
+    Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
+    CVPipeline::ComputeBlockIdManager &bm, SmallVector<int> &ordered,
+    DenseMap<int, int> &id2order) {
   ordered.clear();
   id2order.clear();
-  llvm::SmallDenseSet<int, 4> seen;
-  for (Operation &op : *block) {
-    int bid = bm.getBlockIdByOp(&op);
-    if (bid != -1 && seen.insert(bid).second) {
-      id2order[bid] = ordered.size();
-      ordered.push_back(bid);
+
+  CVPipeline::BlockDependencyGraph graph(block, memGraph, bm);
+  if (failed(graph.buildGraph())) {
+    return failure();
+  }
+
+  // In-degree of every block, keyed by block id.
+  llvm::DenseMap<int, int> indegree;
+  for (auto &entry : graph.blockNodes) {
+    indegree[entry.first] = entry.second->predecessors.size();
+  }
+
+  std::set<int> ready;
+  for (auto &entry : indegree) {
+    if (entry.second == 0) {
+      ready.insert(entry.first);
     }
   }
+
+  while (!ready.empty()) {
+    int nowBlockId = *ready.begin();
+    ready.erase(ready.begin());
+
+    id2order[nowBlockId] = ordered.size();
+    ordered.push_back(nowBlockId);
+
+    CVPipeline::BlockNode *node = graph.getBlockNode(nowBlockId);
+    if (!node) {
+      continue;
+    }
+
+    for (CVPipeline::BlockNode *succ : node->successors) {
+      if (--indegree[succ->blockId] == 0) {
+        ready.insert(succ->blockId);
+      }
+    }
+  }
+
+  // Blocks still carrying a non-zero in-degree belong to a cycle, which should
+  // not occur for a valid dependency graph, create cycle.
+  for (auto &entry : indegree) {
+    if (entry.second > 0) {
+      LOG_DEBUG("Block " << entry.first
+                         << " has non-zero in-degree, create cycle!");
+      return failure();
+    }
+  }
+  return success();
 }
 
 /// Match the pattern inside a small VECTOR block:
@@ -788,9 +785,13 @@ void MergeSmallBlockPass::runOnOperation() {
   SmallVector<int> orderedBlockIds;
   DenseMap<int, int> id2order;
   module.walk([&](Block *block) {
-    getBlockIdsInProgramOrder(block, bm, orderedBlockIds, id2order);
+    if (failed(getBlockIdsInTopoOrder(block, memGraph, bm, orderedBlockIds,
+                                      id2order))) {
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+      return WalkResult::interrupt();
+    }
     if (orderedBlockIds.size() < 2) {
-      return;
+      return WalkResult::advance();
     }
 
     for (int nowBlockId : orderedBlockIds) {
@@ -799,7 +800,7 @@ void MergeSmallBlockPass::runOnOperation() {
       if (ops.empty() || cntComputeOps(ops) > MIN_VF_SIZE) {
         continue;
       }
-      if (CVPipeline::getOpCoreType(*ops.begin()) !=
+      if (CVPipeline::getCoreTypeOfSimpleOpOrCf(*ops.begin()) !=
           CVPipeline::CoreType::VECTOR_ONLY) {
         continue;
       }
@@ -844,6 +845,7 @@ void MergeSmallBlockPass::runOnOperation() {
         }
       }
     }
+    return WalkResult::advance();
   });
 }
 

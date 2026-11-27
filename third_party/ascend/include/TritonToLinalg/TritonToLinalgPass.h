@@ -23,6 +23,7 @@
 #ifndef TRITON_ADAPTER_CONVERSION_TRITONTOLINALG_H
 #define TRITON_ADAPTER_CONVERSION_TRITONTOLINALG_H
 
+#include "TritonToLinalg/MemoryPointer.h"
 #include "ascend/include/Utils/Utils.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -71,6 +72,22 @@ class TritonToLinalgPass
       LAUNCH_GRID_RANK * 2;
 
 private:
+  triton::MemoryPointerInfos pointerInfos;
+
+  // Stage helpers follow the execution order in runOnOperation.
+  LogicalResult initializeTargetOptions();
+  void normalizeMemoryAccessForms(ModuleOp moduleOp);
+  LogicalResult prepareMemoryConversion(ModuleOp moduleOp);
+  LogicalResult convertMemoryAndPointers(ModuleOp moduleOp);
+  LogicalResult convertRemainingComputations(ModuleOp moduleOp);
+  LogicalResult finalizeLoweredModule(ModuleOp moduleOp, bool hasCubeOps,
+                                      bool hasSimtOps);
+
+  LogicalResult finalizePointerCasts(ModuleOp moduleOp);
+  void optimizeInterleavedStores(ModuleOp moduleOp);
+  void addRuntimeWorkspaceArguments(ModuleOp moduleOp);
+  void repairUnknownLocations(ModuleOp moduleOp);
+
   // grid构造 num_programs 3维, program_id 3维
   // remember 'xxxOp' is usually a Pointer, so that we can change target memory
   // without giving a reference argument
@@ -96,7 +113,6 @@ private:
 
   LogicalResult processDescriptorOperations(ModuleOp moduleOp);
   LogicalResult processPtrBroadcastOperations(ModuleOp moduleOp);
-  LogicalResult processImplicitPermuteOperations(ModuleOp moduleOp);
   LogicalResult processStridedLoadStoreRewriteOperations(ModuleOp moduleOp);
   LogicalResult processLegalStrideOperations(ModuleOp moduleOp);
 

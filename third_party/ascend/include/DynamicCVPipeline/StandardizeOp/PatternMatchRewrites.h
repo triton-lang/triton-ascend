@@ -23,19 +23,21 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CVPIPELINE_PATTERN_MATCH_REWRITES_H
 #define TRITON_ADAPTER_DYNAMIC_CVPIPELINE_PATTERN_MATCH_REWRITES_H
 
-#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "llvm/Support/LogicalResult.h"
+
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 
-namespace mlir::triton::CVSplit {
+namespace mlir::CVPipeline {
 
 class SplitMatmulPattern : public mlir::OpRewritePattern<linalg::MatmulOp> {
 public:
   explicit SplitMatmulPattern(mlir::MLIRContext *context, bool needSplitAll)
       : OpRewritePattern<linalg::MatmulOp>(context),
         needSplitAll(needSplitAll) {}
+
   llvm::LogicalResult matchAndRewrite(linalg::MatmulOp matmulOp,
                                       PatternRewriter &rewriter) const override;
 
@@ -51,26 +53,6 @@ public:
                                       PatternRewriter &rewriter) const override;
 };
 
-class PatternMatchRewritePass
-    : public PassWrapper<PatternMatchRewritePass, OperationPass<ModuleOp>> {
-public:
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PatternMatchRewritePass);
-
-  PatternMatchRewritePass() = default;
-  void runOnOperation() override;
-
-  void getDependentDialects(mlir::DialectRegistry &registry) const override {
-    registry.insert<mlir::linalg::LinalgDialect, mlir::arith::ArithDialect,
-                    mlir::tensor::TensorDialect>();
-  }
-
-  [[nodiscard]] llvm::StringRef getArgument() const final {
-    return "ssbuf-standardize-op-pattern-match";
-  }
-};
-
-std::unique_ptr<OperationPass<ModuleOp>> createPatternMatchRewritePass();
-
-} // namespace mlir::triton::CVSplit
+} // namespace mlir::CVPipeline
 
 #endif // TRITON_ADAPTER_DYNAMIC_CVPIPELINE_PATTERN_MATCH_REWRITES_H

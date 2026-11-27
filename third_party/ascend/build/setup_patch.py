@@ -92,9 +92,17 @@ def _get_ascend_llvm_package_info(base_dir):
         elif arch == "arm64":
             system_suffix = "ubuntu-arm64"
         elif arch == "x64":
-            vglibc = tuple(map(int, platform.libc_ver()[1].split(".")))
-            vglibc = vglibc[0] * 100 + vglibc[1]
-            system_suffix = "ubuntu-x64" if vglibc > 228 else "almalinux-x64"
+            # AlmaLinux (manylinux) images always take the almalinux build,
+            # which is compiled against glibc 2.28 and therefore runs on any
+            # >= 2.28 image. The glibc-version heuristic below picked
+            # ubuntu-x64 on manylinux_2_34 (glibc 2.34 > 2.28), whose
+            # Ubuntu 22.04 binaries need glibc 2.35 and fail to run there.
+            if _is_linux_os("almalinux"):
+                system_suffix = "almalinux-x64"
+            else:
+                vglibc = tuple(map(int, platform.libc_ver()[1].split(".")))
+                vglibc = vglibc[0] * 100 + vglibc[1]
+                system_suffix = "ubuntu-x64" if vglibc > 228 else "almalinux-x64"
         else:
             return None
     else:
@@ -109,23 +117,36 @@ def _get_ascend_llvm_package_info(base_dir):
     return {"name": name, "sym_name": sym_name, "url": url}
 
 
-def _apply_patch(patch_path, *, directory=None, cwd=None):
-    cmd = ["git", "apply"]
-    if directory:
-        cmd.extend(["--directory", directory])
-    cmd.append(patch_path)
+def _apply_patch(patch_path, reverse=False):
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, cwd=str(cwd or _REPO_ROOT))
+        command = ["git", "apply"] + (["--reverse"] if reverse else []) + [str(patch_path)]
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, cwd=str(_REPO_ROOT))
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"patch({patch_path}) failed,cmd={e.cmd}, retcode={e.returncode}") from e
     except FileNotFoundError:
         raise RuntimeError(f"patch({patch_path}) not found.")
 
 
-def checkout_file(files, *, cwd=None):
+def _apply_proton_patch(enabled):
+    """Toggle the Proton patch without resetting local source changes."""
+    patch_path = _REPO_ROOT / "third_party" / "ascend" / "patch" / "proton_patch-3.7.0.patch"
+    command = ["git", "apply", "--check"]
+    # Check the opposite direction to detect the desired state already exists.
+    already_applied = ["--reverse"] if enabled else []
+    result = subprocess.run(command + already_applied + [str(patch_path)], cwd=_REPO_ROOT, capture_output=True)
+    if result.returncode == 0:
+        return
+    direction = [] if enabled else ["--reverse"]
+    result = subprocess.run(command + direction + [str(patch_path)], cwd=_REPO_ROOT, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError("Proton patch conflicts with local changes or is incomplete; "
+                           "no files were changed. Resolve the conflict before rebuilding.\n" + result.stderr)
+    _apply_patch(patch_path, reverse=not enabled)
+
+
+def checkout_file(files):
     try:
-        subprocess.run(["git", "checkout", "--"] + files, check=True, stdout=subprocess.DEVNULL, cwd=str(cwd
-                                                                                                         or _REPO_ROOT))
+        subprocess.run(["git", "checkout", "--"] + files, check=True, stdout=subprocess.DEVNULL, cwd=str(_REPO_ROOT))
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"restore sources failed, list:{files}, cmd={e.cmd}, retcode={e.returncode}") from e
 
@@ -155,46 +176,77 @@ def _get_patch_files(patch_path):
     return files
 
 
-def get_triton_ascend_patch_file():
-    patch_dir = _REPO_ROOT / "third_party" / "ascend" / "patch"
-    dev_patch = patch_dir / "triton-ascend-dev-3.7.0.patch"
-    patch = patch_dir / "triton-ascend-3.7.0.patch"
-    dev_patch_files = _get_patch_files(dev_patch) if dev_patch.is_file() else []
-    patch_files = _get_patch_files(patch) if patch.is_file() else []
-    return patch_files, dev_patch_files
+def _apply_npuir_adapter_patch():
+    """Apply AscendNPU-IR adaptations for LLVM 23 (Triton Ascend 3.7).
 
-
-def _apply_npuir_patch():
-    """Apply AscendNPU-IR adaptations for LLVM 23 (Triton Ascend 3.7)."""
-    patch_path = os.path.join("third_party", "ascend", "patch", "npuir_adapter_to_llvm_23.patch")
-    npuir_dir = os.path.join("third_party", "ascend", "AscendNPU-IR")
-    if not os.path.isfile(patch_path):
-        raise RuntimeError(f"patch({patch_path}) not found.")
-    if not os.path.isdir(npuir_dir):
-        raise RuntimeError(f"AscendNPU-IR not found at {npuir_dir}")
+    Intentionally does not extend ``_apply_patch`` / ``checkout_file``: those
+    stay byte-compatible with 3.6 main to reduce merge conflicts on sync.
+    """
+    patch_rel = os.path.join("third_party", "ascend", "patch", "npuir_adapter_to_llvm_23.patch")
+    npuir_rel = os.path.join("third_party", "ascend", "AscendNPU-IR")
+    patch_path = _REPO_ROOT / patch_rel
+    npuir_dir = _REPO_ROOT / npuir_rel
+    if not patch_path.is_file():
+        raise RuntimeError(f"patch({patch_rel}) not found.")
+    if not npuir_dir.is_dir():
+        raise RuntimeError(f"AscendNPU-IR not found at {npuir_rel}")
     patch_files = _get_patch_files(patch_path)
     if not patch_files:
-        raise RuntimeError(f"patch({patch_path}) has no file sections.")
-    checkout_file(patch_files, cwd=npuir_dir)
-    _apply_patch(patch_path, directory=npuir_dir)
+        raise RuntimeError(f"patch({patch_rel}) has no file sections.")
+    try:
+        # Restore targets inside the AscendNPU-IR worktree, then apply with a
+        # repo-relative --directory so paths match the unified diff headers.
+        subprocess.run(["git", "checkout", "--"] + patch_files, check=True, stdout=subprocess.DEVNULL,
+                       cwd=str(npuir_dir))
+        subprocess.run(["git", "apply", "--directory", npuir_rel, patch_rel], check=True, stdout=subprocess.DEVNULL,
+                       cwd=str(_REPO_ROOT))
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"npuir adapter patch failed, cmd={e.cmd}, retcode={e.returncode}") from e
+
+
+def get_triton_ascend_patch_file():
+    patch_files = [
+        "CMakeLists.txt",
+        "include/triton/Dialect/Triton/IR/TritonAttrDefs.td",
+        "lib/Dialect/Triton/IR/Traits.cpp",
+        "lib/Dialect/Triton/Transforms/Combine.cpp",
+        "python/src/ir.cc",
+        "python/triton/_utils.py",
+        "python/triton/compiler/code_generator.py",
+        "python/triton/compiler/compiler.py",
+        "python/triton/compiler/errors.py",
+        "python/triton/extension/buffer/src/buffer_ir.cc",
+        "python/triton/language/core.py",
+        "python/triton/language/math.py",
+        "python/triton/language/semantic.py",
+        "python/triton/language/standard.py",
+        "python/triton/runtime/autotuner.py",
+        "python/triton/runtime/cache.py",
+        "python/triton/runtime/interpreter.py",
+        "python/triton/runtime/autotuner.py",
+        "python/triton/runtime/jit.py",
+        "python/triton/tools/compile.py",
+        "python/triton/tools/link.py",
+        "bin/RegisterTritonDialects.h",
+        "bin/triton-opt.cpp",
+        "bin/CMakeLists.txt",
+    ]
+    dev_patch_files = ["python/triton/runtime/autotuner.py"]
+    return patch_files, dev_patch_files
 
 
 def _apply_triton_ascend_patch():
     patch_path = os.path.join("third_party", "ascend", "patch")
     dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.7.0.patch")
     patch = os.path.join(patch_path, "triton-ascend-3.7.0.patch")
+    patch_files, dev_patch_files = get_triton_ascend_patch_file()
     if _is_dev_mode() and os.path.isfile(dev_patch):
-        dev_patch_files = _get_patch_files(dev_patch)
-        if dev_patch_files:
-            checkout_file(dev_patch_files)
+        checkout_file(dev_patch_files)
         _apply_patch(str(dev_patch))
     if os.path.isfile(patch):
-        patch_files = _get_patch_files(patch)
-        if not patch_files:
-            raise RuntimeError(f"patch({patch}) has no file sections.")
         checkout_file(patch_files)
         _apply_patch(str(patch))
-    _apply_npuir_patch()
+    _apply_npuir_adapter_patch()
 
 
 def _print_patch_restore_warning():
@@ -332,8 +384,15 @@ def _git_check_call_with_retry(cmd, cwd=None, retries=3, interval=5):
     raise last_error
 
 
-def _ensure_npuir_submodule():
-    if os.getenv("TRITON_BUILD_NPUIR", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
+def _npuir_build_enabled():
+    return os.getenv("TRITON_BUILD_NPUIR", "OFF").upper() in ["ON", "1", "YES", "TRUE", "Y"]
+
+
+def _ensure_npuir_payload():
+    """ON mode: build the BishengIR payload via build_npuir.py (which uses
+    the pinned AscendNPU-IR submodule unless a source tree is already
+    present — the wheel CI pre-fetches its own sources)."""
+    if not _npuir_build_enabled():
         return
     build_npuir()
 
@@ -342,7 +401,7 @@ def _ensure_distributed_submodule():
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
     distributed_dir = _REPO_ROOT / "third_party" / "ascend" / "Triton-distributed-ascend"
-    commit_id = "8c1dae1acbb4bcf99c3e473c8ed876f2cd42ba35"
+    commit_id = "64e4e09ebf7899514aa7d4e8968db4198c7f0608"
     if not distributed_dir.is_dir():
         try:
             _git_check_call_with_retry([
@@ -382,8 +441,8 @@ def _ensure_distributed_submodule():
 
 
 def _copy_ascend_tools(extdir, cmake_dir):
-    # triton-mlir-opt is deprecated for Triton Ascend 3.7 / LLVM 23.
     for rel_src, name in [
+        ("third_party/ascend/bin/triton-mlir-opt", "triton-mlir-opt"),
         ("bin/triton-opt", "triton-opt"),
     ]:
         src = Path(cmake_dir) / rel_src
@@ -401,18 +460,26 @@ def _copy_ascend_tools(extdir, cmake_dir):
 
 
 def _get_bishengir_payload_source():
+    # Priority: an explicit external payload dir (TRITON_ASCEND_BISHENGIR_PATH,
+    # the prebuilt npuir-build artifact flow), else the in-repo output of
+    # build_npuir.py when TRITON_BUILD_NPUIR=ON.
     raw_path = os.getenv(_BISHENGIR_PAYLOAD_ENV)
-    if not raw_path:
+    if raw_path:
+        source = Path(raw_path).expanduser().resolve()
+        origin = _BISHENGIR_PAYLOAD_ENV
+    elif _npuir_build_enabled():
+        source = _REPO_ROOT / "third_party" / "ascend" / "backend" / "bishengir"
+        origin = "TRITON_BUILD_NPUIR (build_npuir output)"
+    else:
         return None
 
-    source = Path(raw_path).expanduser().resolve()
     required_paths = [
         source / "bin" / "bishengir-compile",
         source / "bin" / "bishengir-opt",
         source / "lib",
     ]
     if not source.is_dir() or any(not path.exists() for path in required_paths):
-        raise RuntimeError(f"{_BISHENGIR_PAYLOAD_ENV} must name a BishengIR directory containing "
+        raise RuntimeError(f"{origin} must name a BishengIR directory containing "
                            "bin/bishengir-compile, bin/bishengir-opt, and lib")
     return source
 
@@ -422,6 +489,13 @@ def _copy_bishengir_payload(build_lib):
     if source is None:
         return
 
+    # Must match the runtime lookup in utils.py:
+    #   <dir of utils.py>/bishengir/bin/bishengir-compile
+    # utils.py installs to triton/backends/ascend/utils.py (the source
+    # tree's backend/ dir flattens into the ascend package), so the payload
+    # must land at triton/backends/ascend/bishengir — WITHOUT the extra
+    # backend/ layer (build_npuir.py's source-tree copy is flattened the
+    # same way at package time).
     destination = Path(build_lib) / "triton" / "backends" / "ascend" / "bishengir"
     if destination.exists():
         shutil.rmtree(destination)
@@ -438,22 +512,49 @@ def _get_ascend_cmake_args():
     return cmake_args
 
 
+def _get_ascend_proton_cmake_args():
+    """Return CANN and MSPTI paths for both Ascend Proton backends."""
+    cann_home = os.getenv("ASCEND_TOOLKIT_HOME", "") or os.getenv("ASCEND_HOME_PATH", "")
+    cann_include_dir = os.getenv("CANN_INCLUDE_DIR", "") or os.getenv("ASCEND_INCLUDE_DIR", "")
+    if not cann_include_dir and cann_home:
+        for candidate in (os.path.join(cann_home, "include"), os.path.join(cann_home, "runtime", "include")):
+            if os.path.exists(os.path.join(candidate, "acl", "acl.h")):
+                cann_include_dir = candidate
+                break
+    cmake_args = [
+        "-DPROTON_BUILD_CUDA=OFF",
+        "-DPROTON_BUILD_HIP=OFF",
+        "-DPROTON_BUILD_CANN=ON",
+        "-DPROTON_BUILD_MSPTI=ON",
+    ]
+    if cann_include_dir:
+        cmake_args.append(f"-DCANN_INCLUDE_DIR={cann_include_dir}")
+    for variable, suffix in (("MSPTI_INCLUDE_DIR", "include"), ("MSPTI_LIB_DIR", "lib64")):
+        path = os.getenv(variable, "")
+        if not path and cann_home:
+            path = os.path.join(cann_home, "tools", "mspti", suffix)
+        if path:
+            cmake_args.append(f"-D{variable}={path}")
+    return cmake_args
+
+
 def _get_install_requirements():
     install_requires = [
-        "attrs==24.2.0",
-        "numpy==1.26.4",
-        "scipy==1.13.1;python_version<'3.13'",
-        "scipy==1.15.1;python_version>='3.13'",
-        "decorator==5.1.1",
-        "psutil==6.0.0",
-        "pytest>=8.3.2,<9.0.0",
-        "pytest-xdist==3.6.1",
+        "attrs",
+        "numpy",
+        "scipy",
+        "decorator",
+        "psutil",
         "pyyaml",
         "pybind11",
         "pandas",
-        "pyelftools>=0.29",
-        "triton==3.7.0",
+        "pyelftools",
     ]
+    argv = " ".join(sys.argv).lower()
+    if "editable_wheel" not in argv and "dist_info" not in argv:
+        install_requires.append("triton==3.7.0")
+    if os.getenv("TRITON_BUILD_PROTON", "OFF").lower() not in ("0", "false", "off", "no"):
+        install_requires.append("llnl-hatchet")
     return [*install_requires]
 
 
@@ -493,7 +594,14 @@ def patch_module(mod):
 
     class CMakeBuild(_OrigCMakeBuild):
 
+        def get_proton_cmake_args(self):
+            cmake_args = mod.get_thirdparty_packages([mod.get_json_package_info()])
+            cmake_args += self.get_pybind11_cmake_args()
+            cmake_args += _get_ascend_proton_cmake_args()
+            return cmake_args
+
         def run(self):
+            _apply_proton_patch(mod.check_env_flag("TRITON_BUILD_PROTON", "OFF"))
             _apply_triton_ascend_patch()
 
             enable_hitest = os.getenv("TRITON_ENABLE_COVERAGE_HITEST", "0").lower() \
@@ -536,6 +644,8 @@ def patch_module(mod):
 
             _copy_ascend_tools(extdir, mod.get_cmake_dir())
 
+    mod.open_url = _robust_open_url
+
     mod.CMakeBuild = CMakeBuild
 
     _OrigCMakeBuildPy = mod.CMakeBuildPy
@@ -558,14 +668,16 @@ def patch_module(mod):
 
             if is_manylinux:
                 file = glob.glob(os.path.join(self.dist_dir, "*-linux_*.whl"))[0]
+                # Target policy is fixed to the build image (manylinux_2_34);
+                # auditwheel's own repair error names the policy if the image
+                # ever drifts to a toolchain that does not know it.
+                target_policy = f"manylinux_2_34_{platform.machine()}"
                 auditwheel_cmd = [
                     "auditwheel",
                     "-v",
                     "repair",
                     "--plat",
-                    f"manylinux_2_27_{platform.machine()}",
-                    "--plat",
-                    f"manylinux_2_28_{platform.machine()}",
+                    target_policy,
                     "-w",
                     self.dist_dir,
                     file,
@@ -593,6 +705,8 @@ def patch_module(mod):
 
     def get_packages():
         yield from _orig_get_packages()
+        yield "triton.backends.ascend.reuse"
+        yield "triton.backends.ascend.reuse.dsl"
         if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
             distributed_pkg_root = os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python",
                                                 "triton_dist")
@@ -624,13 +738,45 @@ def patch_module(mod):
     mod._ascend_is_manylinux = is_manylinux
 
 
+def _robust_open_url(url, retries=5):
+    """Download ``url`` fully to a temp file with resumable retries.
+
+    The prebuilt LLVM tarballs are ~1.2 GB. The upstream setup.py streams
+    them via urllib with a 300 s timeout and no retry: OBS serves large
+    objects at ~2.5 MB/s per connection, so every download exceeds the
+    timeout (or gets cut) and the build dies — systematically, on every
+    job. Use curl with `-C -` so each attempt resumes from the bytes
+    already on disk instead of restarting.
+    """
+    import subprocess
+    import tempfile
+
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    tmp.close()
+    last_error = None
+    for attempt in range(1, retries + 1):
+        proc = subprocess.run(
+            [
+                "curl", "-fsSL", "-C", "-", "--retry", "2", "--retry-all-errors", "--connect-timeout", "30",
+                "--max-time", "1000", "-o", tmp.name, url
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if proc.returncode == 0:
+            return open(tmp.name, "rb")
+        last_error = proc.stderr.decode(errors="replace")[-300:]
+        print(f"[setup_patch] download of {url} attempt {attempt}/{retries} failed: {last_error}")
+    raise RuntimeError(f"download failed after {retries} attempts: {last_error}")
+
+
 def _build_setup_kwargs(mod, kwargs):
     """Modify kwargs passed to setup() for Ascend."""
     is_manylinux = mod._ascend_is_manylinux
 
     kwargs["name"] = os.environ.get("TRITON_WHEEL_NAME", "triton_ascend")
     kwargs["version"] = _get_version(is_manylinux, mod.get_git_commit_hash)
-    kwargs["url"] = "https://gitcode.com/Ascend/triton-ascend/"
+    kwargs["url"] = "https://github.com/triton-lang/triton-ascend/"
 
     # README as long_description
     readme = _REPO_ROOT / "README.md"
@@ -664,9 +810,15 @@ def _build_setup_kwargs(mod, kwargs):
 
 
 def prepare():
-    """Top-of-setup.py hook: defaults and optional submodules."""
+    """Top-of-setup.py hook: defaults and optional npuir/distributed sources."""
     _set_default_env_vars()
-    _ensure_npuir_submodule()
+    # OFF-mode note: the C++ plugin build needs the AscendNPU-IR source tree
+    # (add_subdirectory), but only its top level (the STANDALONE_IR_ONLY
+    # dialects; MLIR comes from Triton's own LLVM). Initializing the pinned
+    # submodule is left to the root setup.py's BackendInstaller.prepare
+    # (`git submodule update --init <backend>`); the wheel CI images pre-fetch
+    # their own sources, and ON mode goes through build_npuir() below.
+    _ensure_npuir_payload()
     _ensure_distributed_submodule()
 
 

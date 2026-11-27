@@ -31,6 +31,14 @@ from triton.runtime.autotuner import Config
 from triton.runtime.errors import OutOfResources
 
 
+@pytest.fixture(autouse=True)
+def _autotune_print_off():
+    """Printing follows knobs.autotuning.print. These stub tuners do not expect diagnostics."""
+    with triton.knobs.autotuning.scope():
+        triton.knobs.autotuning.print = False
+        yield
+
+
 @triton.jit
 def _compile_key_kernel(
     x,
@@ -44,6 +52,7 @@ def _compile_key_kernel(
 def _make_compile_key_tuner(monkeypatch, wrapped_fn):
     tuner = object.__new__(AutoTilingTuner)
     tuner.fn = wrapped_fn
+    tuner.arg_names = _compile_key_kernel.arg_names
     tuner.compile_parallel = False
     tuner.user_defined_pre_hook = False
 
@@ -63,6 +72,7 @@ def _make_compile_key_tuner(monkeypatch, wrapped_fn):
             "num_stages",
             "debug",
             "instrumentation_mode",
+            "block_batching_factor",
         ))
         return {}, specialization, options
 
@@ -101,6 +111,19 @@ def test_compile_failure_key_supports_direct_jit_function(monkeypatch):
     assert binder_calls[0]["EVEN_M"] is True
     assert "grid" not in binder_calls[0]
     assert "warmup" not in binder_calls[0]
+    assert binder_calls[0]["block_batching_factor"] == 1
+
+
+def test_compile_failure_key_preserves_explicit_batching(monkeypatch):
+    tuner, calls = _make_compile_key_tuner(monkeypatch, _compile_key_kernel)
+    config = Config({"BLOCK_SIZE": 128, "EVEN_M": True})
+    default = tuner._get_jit_compile_cache_key(object(), 16, config=config, grid=(256, ))
+    manual = tuner._get_jit_compile_cache_key(object(), 16, config=config, grid=(256, ), block_batching_factor=2)
+    assert default != manual and calls[-1]["block_batching_factor"] == 2
+    explicit_config = Config({"BLOCK_SIZE": 128, "EVEN_M": True, "block_batching_factor": 2})
+    assert tuner._get_jit_compile_cache_key(object(), 16, config=explicit_config, grid=(256, )) == manual
+    assert tuner._get_jit_compile_cache_key(object(), 16, config=config, grid=(256, ),
+                                            block_batching_factor='auto') is None
 
 
 def test_compile_failure_key_replays_heuristics_before_binder(monkeypatch):
@@ -194,7 +217,6 @@ def _make_batch_bench_tuner():
     tuner = object.__new__(AutoTilingTuner)
     tuner.compile_parallel = False
     tuner.enable_ubtuner = False
-    tuner.print_autotuning = False
     tuner.user_defined_do_bench = True
     tuner._compile_failure_cache = {}
     tuner._compile_failure_cache_lock = threading.Lock()

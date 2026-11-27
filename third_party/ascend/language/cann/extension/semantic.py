@@ -212,6 +212,17 @@ def dot(a: tl.tensor, b: tl.tensor, fractal_a: bool, fractal_b: bool, fractal_c:
     return tl.tensor(out, output_ty)
 
 
+def dot_s4(lhs: tl.tensor, rhs: tl.tensor, acc: Union[tl.tensor, None], output_shape, _semantic=None) -> tl.tensor:
+    output_ty = tl.block_type(tl.int32, output_shape)
+    if acc is None:
+        zero = _semantic.builder.get_int32(0)
+        acc_handle = _semantic.builder.create_splat(output_ty.to_ir(_semantic.builder), zero)
+    else:
+        acc_handle = acc.handle
+    out = _semantic.builder.create_dot_s4(lhs.handle, rhs.handle, acc_handle)
+    return tl.tensor(out, output_ty)
+
+
 def conv2d(input_tensor: tl.tensor, weight_tensor: tl.tensor, bias: Union[tl.tensor, None], stride: Union[int, tuple],
            padding: Union[int, tuple], dilation: Union[int,
                                                        tuple], groups: int, output_shape, _semantic=None) -> tl.tensor:

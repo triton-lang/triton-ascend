@@ -48,8 +48,8 @@ jobs:
       max-parallel: 8
       matrix:
         config:
-        - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64'}
-        - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64'}
+        - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64', image_tag: 'x86-v1'}
+        - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64', image_tag: 'arm64-v1'}
         python: ["cp310", "cp311", "cp312", "cp313"]
         branch:
         - {ref: 'main', tag: 'main', local: 'dev'}
@@ -85,6 +85,12 @@ jobs:
           # PR: checkout the PR head, not the matrix.branch ref (main).
           # push/workflow_dispatch/schedule: use the matrix branch ref.
           ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
+
+      - name: Set up Python for the NPUIR manifest
+        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - name: Download NPUIR payload from OBS
         id: npuir
@@ -143,7 +149,7 @@ jobs:
           context: .
           file: .github/workflows/build/wheels.Dockerfile
           build-args: |
-            MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
+            MANYLINUX_IMAGE=swr.cn-north-4.myhuaweicloud.com/triton-build/triton:${{ matrix.config.image_tag }}
             PYTHON_VERSION=${{ matrix.python }}
             NPUIR_REF=${{ steps.npuir.outputs.revision }}
             TRITON_WHEEL_VERSION_SUFFIX=+${{ matrix.branch.local }}

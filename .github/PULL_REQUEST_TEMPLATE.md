@@ -16,7 +16,7 @@ Complete the following tasks before sending your PR, and replace `[ ]` with
         mention only, e.g. `Ref #<ISSUE_NUMBER>` (see note below)
   - [ ] This PR is not associated with an issue because `FILL THIS IN`.
 
-# Contributor CheckList
+# Checklist
 - [ ] I am not making a trivial change, such as fixing a typo in a comment.
 
 - [ ] I have written a PR description following these

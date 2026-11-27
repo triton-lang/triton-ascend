@@ -45,18 +45,18 @@ EXACT_B = [3.0, 7.0, 3e-30, 0.1, 3.0, 3.0, 3.0, 7e-21, 3.0, 7.0, 13.0, 7.0]
 
 
 @tla.jit
-def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (2, N)), xy)
-    tla.copy(tla.view(T, (N, )), tb)
+def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    xy = tla.alloc((2, N), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         a = tla.simd.vlds(xy[0, 0])
         b = tla.simd.vlds(xy[1, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, mode=tla.simd.MODE.ZEROING))
@@ -65,40 +65,40 @@ def vdiv(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vdiv(a, b, mask=none, mode=tla.simd.MODE.ZEROING))
         tla.simd.vsts(ob[4, 0], tla.simd.vdiv(a, b, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vdiv(a, b, mask=arb, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 @tla.jit
-def vdiv_exact(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.float32, space="ub")
-    ob = tla.alloc_buffer((4, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (2, N)), xy)
+def vdiv_exact(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    xy = tla.alloc((2, N), tl.float32, space="ub")
+    ob = tla.alloc((4, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
     with tla.scope.simd():
         a = tla.simd.vlds(xy[0, 0])
         b = tla.simd.vlds(xy[1, 0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, precision="exact"))
         tla.simd.vsts(ob[1, 0], tla.simd.vdiv(a, b, mask=prefix, precision="exact"))
         tla.simd.vsts(ob[2, 0], tla.simd.vdiv(a, b, mask=none, precision="exact"))
         tla.simd.vsts(ob[3, 0], tla.simd.vdiv(a, b, mask=prefix, precision="vdiv_0ulp_ftz_true"))
-    tla.copy(ob, tla.view(O, (4, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (4, N)))
 
 
 @tla.jit
-def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.uint32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (2, N)), xy)
-    tla.copy(tla.view(T, (N, )), tb)
+def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    xy = tla.alloc((2, N), tl.uint32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         a = tla.simd.vlds(xy[0, 0])
         b = tla.simd.vlds(xy[1, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, mode=tla.simd.MODE.ZEROING))
@@ -107,24 +107,24 @@ def vdiv_u32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vdiv(a, b, mask=none, mode=tla.simd.MODE.ZEROING))
         tla.simd.vsts(ob[4, 0], tla.simd.vdiv(a, b, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vdiv(a, b, mask=arb, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 @tla.jit
-def vdiv_u16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xy = tla.alloc_buffer((2, N), tl.uint16, space="ub")
-    ib = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int16, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.uint16, space="ub")
-    tla.copy(tla.view(X, (2, N)), xy)
-    tla.copy(tla.view(I, (N, )), ib)
-    tla.copy(tla.view(T, (N, )), tb)
+def vdiv_u16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    xy = tla.alloc((2, N), tl.uint16, space="ub")
+    ib = tla.alloc((N, ), tl.int16, space="ub")
+    tb = tla.alloc((N, ), tl.int16, space="ub")
+    ob = tla.alloc((6, N), tl.uint16, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (2, N)), xy)
+    tla.load_gm_to_ub(tla.view(I, (N, )), ib)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         a = tla.simd.vlds(xy[0, 0])
         b = tla.simd.vlds(xy[1, 0])
         idx = tla.simd.vlds(ib[0])
         t = tla.simd.vlds(tb[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, mode=tla.simd.MODE.ZEROING), dist="NORM_B16")
@@ -133,11 +133,14 @@ def vdiv_u16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vdiv(a, b, mask=none, mode=tla.simd.MODE.ZEROING), dist="NORM_B16")
         tla.simd.vsts(ob[4, 0], tla.simd.vdiv(a, b, mask=prefix, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
         tla.simd.vsts(ob[5, 0], tla.simd.vdiv(a, b, mask=arb, mode=tla.simd.MODE.MERGING), dist="NORM_B16")
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 def constexprs(lanes=None, active=None):
-    return {"N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active}
+    return {
+        "N": SHAPE["lanes"] if lanes is None else lanes, "ACTIVE": SHAPE["active"] if active is None else active,
+        "MASKPAT": "VL%d" % (SHAPE["active"] if active is None else active)
+    }
 
 
 def test_ir(output_dir=None):

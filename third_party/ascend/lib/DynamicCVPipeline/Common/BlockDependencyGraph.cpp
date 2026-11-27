@@ -244,15 +244,19 @@ llvm::LogicalResult BlockDependencyGraph::rebuildAfterMerge(BlockNode *target,
 
   for (BlockNode *pred : sourcePreds) {
     pred->successors.erase(source);
-    pred->successors.insert(target);
+    if (pred != target) {
+      pred->successors.insert(target);
+      target->predecessors.insert(pred);
+    }
   }
-  target->predecessors.insert(sourcePreds.begin(), sourcePreds.end());
 
   for (BlockNode *succ : sourceSuccs) {
     succ->predecessors.erase(source);
-    succ->predecessors.insert(target);
+    if (succ != target) {
+      succ->predecessors.insert(target);
+      target->successors.insert(succ);
+    }
   }
-  target->successors.insert(sourceSuccs.begin(), sourceSuccs.end());
 
   // Drop the source node from blockNodes. The BlockNode object itself is
   // destroyed here (unique_ptr is reset); only `source`'s local pointer

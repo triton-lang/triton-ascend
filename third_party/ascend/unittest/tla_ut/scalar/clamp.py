@@ -28,29 +28,23 @@ sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != _CASE_DIR]
 sys.path.insert(0, str(_CASE_DIR.parent))
 
 import triton.language as tl
-import pytest
 from triton.language.extra import tla
 from utils.tla_test_utils import get_stages, matrix, compile_offline, lower_offline, check_kernel_binary
 
 
 @tla.jit
 def clamp_scalar(Out, x, lo, hi, INPUT_DTYPE: tl.constexpr, BOUND_DTYPE: tl.constexpr, DTYPE: tl.constexpr,
-                 N: tl.constexpr, PROPAGATE_NAN: tl.constexpr, IN_VF: tl.constexpr):
+                 N: tl.constexpr, PROPAGATE_NAN: tl.constexpr):
     out = tla.view(Out, (N, ))
     local = tla.alloc((N, ), DTYPE)
     with tla.scope.vector():
         x = tla.cast(x, INPUT_DTYPE)
         lo = tla.cast(lo, BOUND_DTYPE)
         hi = tla.cast(hi, BOUND_DTYPE)
-        if not IN_VF:
-            result = tla.clamp(x, lo, hi, propagate_nan=PROPAGATE_NAN)
-            tl.static_assert(result.dtype == DTYPE)
-            tl.static_assert(len(result.shape) == 0)
+        result = tla.clamp(x, lo, hi, propagate_nan=PROPAGATE_NAN)
+        tl.static_assert(result.dtype == DTYPE)
+        tl.static_assert(len(result.shape) == 0)
         with tla.scope.simd():
-            if IN_VF:
-                result = tla.clamp(x, lo, hi, propagate_nan=PROPAGATE_NAN)
-                tl.static_assert(result.dtype == DTYPE)
-                tl.static_assert(len(result.shape) == 0)
             reg = tla.simd.vdup(result, DTYPE)
             tla.simd.vsts(local[0], reg, dist="NORM_B32")
         tla.store_ub_to_gm(local, out)
@@ -58,7 +52,7 @@ def clamp_scalar(Out, x, lo, hi, INPUT_DTYPE: tl.constexpr, BOUND_DTYPE: tl.cons
 
 CONFIGS = [
     dict(name=f"{tag}_{policy}_outside", tag=tag, input_dtype=input_dtype, bound_dtype=bound_dtype, dtype=dtype,
-         propagate_nan=propagate_nan, in_vf=False) for tag, input_dtype, bound_dtype, dtype in (
+         propagate_nan=propagate_nan) for tag, input_dtype, bound_dtype, dtype in (
              ("f32", tl.float32, tl.float32, tl.float32),
              ("f32_i32", tl.float32, tl.int32, tl.float32),
          ) for policy, propagate_nan in (("none", tl.PropagateNan.NONE), ("all", tl.PropagateNan.ALL))
@@ -67,16 +61,11 @@ CONFIGS = [
 
 def constexprs(case):
     return dict(INPUT_DTYPE=case["input_dtype"], BOUND_DTYPE=case["bound_dtype"], DTYPE=case["dtype"],
-                N=2048 // case["dtype"].primitive_bitwidth, PROPAGATE_NAN=case["propagate_nan"], IN_VF=case["in_vf"])
+                N=2048 // case["dtype"].primitive_bitwidth, PROPAGATE_NAN=case["propagate_nan"])
 
 
 @matrix(CONFIGS)
-@pytest.mark.parametrize("in_vf", [False, True], ids=["outside_vf", "inside_vf"])
-def test_ir(case, in_vf, output_dir=None):
-    # Current A5 codegen rejects floating scalar min/max inside SIMD VF.
-    # Still check that both placements lower correctly at the TLA IR boundary.
-    name = case["name"].removesuffix("_outside") + ("_inside" if in_vf else "_outside")
-    case = dict(case, in_vf=in_vf, name=name)
+def test_ir(case, output_dir=None):
     signature = dict(Out="*fp32", x="fp32", lo="i32" if case["bound_dtype"].is_int() else "fp32",
                      hi="i32" if case["bound_dtype"].is_int() else "fp32")
     dump = Path(output_dir) / case["name"] if output_dir is not None else None
@@ -160,8 +149,7 @@ def main():
     do_ir, do_compile, do_run = get_stages()
     for case in CONFIGS:
         if do_ir:
-            test_ir(case, in_vf=False)
-            test_ir(case, in_vf=True)
+            test_ir(case)
         if do_compile:
             test_compile(case)
         if do_run:

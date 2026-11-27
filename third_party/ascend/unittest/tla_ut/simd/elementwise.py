@@ -10,14 +10,14 @@ Semantics for one 64-lane f32 tile (row) of ``X``:
     ms   = vmaxs(a, 0.0)                    ave.hir.vmaxs (scalar == f32)
     ex   = vexp(vmin(a, zero))              ave.hir.vexp (hardware SFU)
     acc  = q + mx + mn + ms + ex
-    o    = vsel(pge(32, 64), acc, half)     lanes >= 32 -> 0.5
+    o    = vsel(pset(32, PAT.VL32), acc, half)   lanes >= 32 -> 0.5
 
 This file is the combined-chain regression only: it proves the six interfaces
 compose in one SIMD scope and that the runtime launch matches the reference.
 The per-interface contracts (mask matrix, MODE_ZEROING/MERGING merge source,
 unsigned zeroing, exact tier, dtype aliases, 64-lane wide registers, scalar
 bounds) live in ``vector/vdiv.py``, ``vexp.py``, ``vmax.py``, ``vmin.py``,
-``vmaxs.py``, ``vdup.py``, ``vdups.py`` and ``vdupv.py``; the runtime-N tail /
+``vmaxs.py``, ``vdup.py`` and ``vdupv.py``; the runtime-N tail /
 multi-chunk / multi-core matrix lives in ``vector/simd_tail.py``.  Keeping that
 detail out of this file avoids two copies of the same IR assertions.
 
@@ -43,12 +43,14 @@ SIGNATURE = {"X_ptr": "*fp32", "O_ptr": "*fp32", "num_tokens": "i32"}
 def simd_elementwise(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, BLK: tl.constexpr, CORES: tl.constexpr):
     tl.static_assert(BLK == 64, "one full f32 register per tile")
     tl.static_assert(TMAX % 2 == 0, "one pair of rows per output row")
-    xy_ub = tla.alloc_buffer((2, BLK), tl.float32, space="ub", versions=2)
-    o_ub = tla.alloc_buffer((BLK, ), tl.float32, space="ub", versions=2)
+    xy_ub = tla.alloc((2, BLK), tl.float32, space="ub")
+    o_ub = tla.alloc((BLK, ), tl.float32, space="ub")
+    tla.annotate_multi_buffer(xy_ub, 2)
+    tla.annotate_multi_buffer(o_ub, 2)
     for p in range(tl.program_id(0), num_tokens // 2, CORES):
         xy = tla.view(X_ptr, (2, BLK), strides=(BLK, 1), offsets=(2 * p, 0))
         o = tla.view(O_ptr, (BLK, ), strides=(1, ), offsets=(p * BLK, ))
-        tla.copy(xy, xy_ub)
+        tla.load_gm_to_ub(xy, xy_ub)
         with tla.scope.simd():
             a = tla.simd.vlds(xy_ub[0, 0], dist="NORM")
             b = tla.simd.vlds(xy_ub[1, 0], dist="NORM")
@@ -61,9 +63,9 @@ def simd_elementwise(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, BLK: tl.const
             ex = tla.simd.vexp(tla.simd.vmin(a, zero))
             acc = tla.simd.vadd(tla.simd.vadd(q, mx), tla.simd.vadd(mn, ms))
             acc = tla.simd.vadd(acc, ex)
-            res = tla.simd.vsel(tla.simd.pge(32, BLK), acc, half)
+            res = tla.simd.vsel(tla.simd.pset(2048 // BLK, tla.simd.PAT.VL32), acc, half)
             tla.simd.vsts(o_ub[0], res, dist="NORM_B32")
-        tla.copy(o_ub, o)
+        tla.store_ub_to_gm(o_ub, o)
 
 
 def constexprs():
@@ -79,7 +81,7 @@ def test_ir(output_dir=None):
     for probe in ("ave.hir.vdiv", "ave.hir.vmax", "ave.hir.vmin", "ave.hir.vmaxs", "ave.hir.vexp", "ave.hir.broadcast"):
         assert probe in text, f"missing {probe} in lowered IR"
     # vdup must be the masked broadcast, never the unmasked scalar_broadcast
-    assert "ave.hir.scalar_broadcast" not in text, "vdup must not degrade to vsplat"
+    assert "ave.hir.scalar_broadcast" not in text, "vdup must emit a masked broadcast"
     # The combined chain ends in an explicit vsel, which is the only select here.
     assert text.count("ave.hir.vsel") == 1
     print("IR PASS: combined vdiv/vmax/vmin/vmaxs/vexp/vdup chain plus vsel")

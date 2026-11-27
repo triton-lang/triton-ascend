@@ -204,12 +204,15 @@ private:
                                             Operation *to) const {
     if (!from || !to || from == to)
       return;
-    bool eventScalar = from->hasAttr(CVPipeline::kOuterEventControl) &&
-                       to->getNumRegions() == 0 && isMemoryEffectFree(to) &&
-                       llvm::all_of(to->getResultTypes(), [](Type type) {
-                         return type.isIntOrIndexOrFloat();
-                       });
-    if (!isTrackedControlFlowOp(from) && !eventScalar)
+    // Arithmetic canonicalizations can rebuild pointer-size expressions after
+    // block IDs have been assigned. Their new scalar results retain the block
+    // of the replaced operation, including outside outer-event control chains.
+    bool scalarReplacement =
+        to->getNumResults() != 0 && to->getNumRegions() == 0 &&
+        isMemoryEffectFree(to) &&
+        llvm::all_of(to->getResultTypes(),
+                     [](Type type) { return type.isIntOrIndexOrFloat(); });
+    if (!isTrackedControlFlowOp(from) && !scalarReplacement)
       return;
 
     Attribute blockId = from->getAttr(CVPipeline::kBlockId);
@@ -222,7 +225,7 @@ private:
     }
 
     to->setAttr(CVPipeline::kBlockId, blockId);
-    if (eventScalar) {
+    if (scalarReplacement && from->hasAttr(CVPipeline::kOuterEventControl)) {
       to->setAttr(CVPipeline::kOuterEventControl,
                   from->getAttr(CVPipeline::kOuterEventControl));
       if (auto core = from->getAttr(CVPipeline::kCoreType))

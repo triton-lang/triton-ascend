@@ -97,10 +97,10 @@ def _entry_func_name(module):
     return m.group(1) if m else "lower"
 
 
-def compile_offline(fn, signature, constexprs, output_dir=None):
-    """AST -> TTIR -> symbol_dce: front-end IR handed to npuir."""
+def compile_offline(fn, signature, constexprs, output_dir=None, options=None):
+    """AST -> TTIR -> symbol_dce; options may override the default test target."""
     ctx = make_context()
-    module = ast_to_ttir(fn, signature, constexprs, ctx, Options())
+    module = ast_to_ttir(fn, signature, constexprs, ctx, Options() if options is None else options)
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "00_ast.mlir").write_text(str(module))
@@ -173,6 +173,24 @@ def check_kernel_binary(kernel):
     assert any(path.is_file() and path.read_bytes() == binary
                for path in paths), "generated binary is missing or differs from this kernel's cache artifact"
     print("COMPILE PASS:", kernel.name, "->", ", ".join(str(path) for path in paths))
+
+
+def compile_native_kernel(fn, signature, constexprs):
+    """Compile an exact TLA specialization without allocating or launching tensors.
+
+    Uses TLA_TEST_ARCH or the current Ascend target and checks its own binary,
+    never a stale artifact found elsewhere in the cache.
+    """
+    import triton
+    from triton.language.extra.tla.jit import TLASTSource
+    from triton.runtime.driver import driver
+    from triton.backends.compiler import GPUTarget
+
+    arch = os.environ.get("TLA_TEST_ARCH")
+    target = GPUTarget("npu", arch, 0) if arch else driver.active.get_current_target()
+    kernel = triton.compile(TLASTSource(fn, signature, constexprs), target=target)
+    check_kernel_binary(kernel)
+    return kernel
 
 
 def matrix(cases):

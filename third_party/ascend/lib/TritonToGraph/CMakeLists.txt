@@ -6,6 +6,28 @@ add_triton_library(TritonToGraph
   EntryArgPointerAliasAnalysis.cpp
   GraphOptimizationContext.cpp
   ResourceCostModel.cpp
+  BlockBatching/BatchOpRegistry.cpp
+  BlockBatching/ElementwiseModels.cpp
+  BlockBatching/ShapeModels.cpp
+  BlockBatching/BatchAccessAnalysis.cpp
+  BlockBatching/BatchExpr.cpp
+  BlockBatching/BatchFactsJSON.cpp
+  BlockBatching/BatchRangeAnalysis.cpp
+  BlockBatching/BatchAffine.cpp
+  BlockBatching/BatchLoopSchedule.cpp
+  BlockBatching/BatchLoopForm.cpp
+  BlockBatching/BatchLoopLegality.cpp
+  BlockBatching/BatchLoopTransform.cpp
+  BlockBatching/BatchLayoutAnalysis.cpp
+  BlockBatching/BatchMemoryView.cpp
+  BlockBatching/MemoryModels.cpp
+  BlockBatching/MemoryPolicyNormalization.cpp
+  BlockBatching/ReductionModels.cpp
+  BlockBatching/ControlFlowModels.cpp
+  BlockBatching/BatchAnalysis.cpp
+  BlockBatching/BatchRewriteFinalizer.cpp
+  BlockBatching/BatchRewrite.cpp
+  BlockBatching/CVSpatial.cpp
   GraphOptimizationPass.cpp
   LayoutMemoryCompatibilityPass.cpp
   MemorySsaBuilder.cpp
@@ -22,6 +44,7 @@ add_triton_library(TritonToGraph
   LegacyMemoryAccess/StridedAxisCoalescing.cpp
   LegacyMemoryAccess/StridedLoadStoreRewrite.cpp
   Rules/ConvertModuloToMaskRule.cpp
+  Rules/CoalescAtomicLockRemovalRule.cpp
   Rules/ReservedGraphOptimizationRule.cpp
   Rules/DiagonalMaskRemovalRule.cpp
   Rules/IndependentAxisTensorizeRule.cpp
@@ -45,6 +68,7 @@ add_triton_library(TritonToGraph
 
   LINK_LIBS PUBLIC
   BiShengIRHACCUtils
+  MLIRAnalysis
   MLIRArithDialect
   MLIRBufferizationDialect
   MLIRControlFlowDialect

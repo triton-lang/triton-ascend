@@ -10,60 +10,34 @@ from enum import Enum, IntEnum
 
 from triton.language.core import (builtin, dtype as triton_dtype, float32, float16, bfloat16, int8, int16, int32,
                                   _unwrap_if_constexpr)
-from .core import buffer
+from .core import buffer, _row_major_strides
 
 
-class PadMode(Enum):
-    """Padding mode for GM->UB loads and UB->L1 copies.
-
-    - ``PadNull``: no padding.
-    - ``PadFirstElem``: pad using the first element.
-    - ``PadValue``: pad using the configured pad value.
-
-    Whether a mode is valid with the supplied pad value or padding counts is
-    checked by the backend.
-    """
-
-    PadNull = "PadNull"
-    PadFirstElem = "PadFirstElem"
-    PadValue = "PadValue"
-
-
-class EvictionPolicy(Enum):
+class L2CachePolicy(Enum):
     """L2 eviction hint for GM loads.
 
-    - ``EvictNormal``: default eviction behavior.
-    - ``EvictFirst``: mark the data as likely to be evicted first.
-    - ``EvictLast``: mark the data as likely to be evicted last.
+    - ``NORMAL_FV``: mark the data as likely to be evicted first.
+    - ``NORMAL_LV``: mark the data as likely to be evicted last.
 
-    The hint does not change correctness; the backend decides whether a target
-    honors it.
+    The hint does not change correctness; the backend decides whether a
+    target honors it.
     """
 
-    EvictNormal = "EvictNormal"
-    EvictFirst = "EvictFirst"
-    EvictLast = "EvictLast"
+    NORMAL_FV = "EvictFirst"
+    NORMAL_LV = "EvictLast"
 
 
 class AtomicKind(Enum):
-    """Atomic operation kind for ``UB->GM`` stores.
+    """Atomic mode selected by the independent :func:`set_atomic` control.
 
-    ``ADD``, ``MAX`` and ``MIN`` are the native StoreOp atomic operations
-    documented by the backend. ``NONE`` omits the atomic attribute. The
-    remaining members are enumerated here but do not imply support for a
-    particular route, dtype or target; unsupported combinations are rejected
-    by the backend.
+    ``ADD``, ``MAX`` and ``MIN`` select the atomic update operation. ``NONE``
+    resets the mode for following GM stores.
     """
 
     NONE = "none"
     ADD = "add"
     MAX = "max"
     MIN = "min"
-    AND = "and"
-    OR = "or"
-    XOR = "xor"
-    UMAX = "umax"
-    UMIN = "umin"
 
 
 class UnitFlagMode(IntEnum):
@@ -223,98 +197,32 @@ def _unit_flag_args(control, group_id):
 
 @dataclass(frozen=True)
 class LoadGM2UBParams:
-    """Configuration for :func:`load_gm_to_ub`.
+    """Cache configuration for :func:`load_gm_to_ub`.
 
-    :param pad_mode: Compile-time ``PadNull``, ``PadFirstElem`` or ``PadValue``
-        from ``tla.PadMode``. ``None`` leaves the attribute unset.
-    :type pad_mode: tla.PadMode or None
-    :param pad_value: Scalar fill value, converted to the source element type.
-        A runtime tensor must have scalar shape. ``None`` omits the operand.
-    :type pad_value: int, float, scalar tl.tensor or None
-    :param left_padding_num: Number of left padding elements, passed as an
-        index operand. ``None`` omits the operand.
-    :type left_padding_num: int, scalar integer tl.tensor or None
-    :param right_padding_num: Number of right padding elements, passed as an
-        index operand. ``None`` omits the operand.
-    :type right_padding_num: int, scalar integer tl.tensor or None
-    :param eviction_policy: Compile-time L2 eviction policy: ``EvictNormal``,
-        ``EvictFirst`` or ``EvictLast``. ``None`` leaves the attribute unset.
-    :type eviction_policy: tla.EvictionPolicy or None
-
-    All fields default to ``None``. Padding values/counts may be runtime
-    scalars; enum fields must be compile-time values. The backend checks
-    the padding-mode/operand combination and alignment.
+    :param l2_cache_ctrl: Compile-time L2 cache control: ``NORMAL_FV`` or
+        ``NORMAL_LV``. ``None`` selects ``NORMAL_FV``.
+    :type l2_cache_ctrl: tla.L2CachePolicy or None
     """
-    pad_mode: PadMode = None
-    pad_value: object = None
-    left_padding_num: object = None
-    right_padding_num: object = None
-    eviction_policy: EvictionPolicy = None
+    l2_cache_ctrl: L2CachePolicy = None
 
 
-@dataclass(frozen=True)
-class StoreUB2GMParams:
-    """Configuration for :func:`store_ub_to_gm`.
+class LoadGM2L1Mode(Enum):
+    """Supported GM-to-L1 transfer modes."""
 
-    :param atomic_kind: Compile-time atomic operation. Defaults to ``None``,
-        which omits the attribute. ``ADD``, ``MAX`` and ``MIN`` are the native
-        StoreOp atomic operations documented by the backend. Other enum
-        members do not imply support for this route, dtype or target.
-    :type atomic_kind: tla.AtomicKind or None
-    """
-    atomic_kind: AtomicKind = None
+    ENABLE_ND2NZ = "enable_nd2nz"
 
 
 @dataclass(frozen=True)
 class LoadGM2L1Params:
     """Configuration for :func:`load_gm_to_l1`.
 
-    :param l2_cache_ctrl: Raw compile-time MTE2 cache-control field, encoded as
-        a signed 32-bit ``l2_cache_mode`` attribute. ``None`` (default) omits
-        it, selecting the backend default. This is not an eviction-policy enum.
+    :param l2_cache_ctrl: Compile-time MTE2 cache mode from 0 to 4. ``None`` omits the attribute, selecting mode 0.
     :type l2_cache_ctrl: int or None
-    :param enable_nz2nd: Reserved reverse-layout flag. Must be ``False``
-        (default); ``True`` raises ``NotImplementedError``.
-    :type enable_nz2nd: bool
-    :param enable_nz2dn: Reserved reverse-layout flag. Must be ``False``
-        (default); ``True`` raises ``NotImplementedError``.
-    :type enable_nz2dn: bool
+    :param mode: Compile-time GM-to-L1 transfer mode. Only ND-to-NZ is supported.
+    :type mode: LoadGM2L1Mode
     """
     l2_cache_ctrl: int = None
-    enable_nz2nd: bool = False
-    enable_nz2dn: bool = False
-
-
-@dataclass(frozen=True)
-class CopyUB2L1Params:
-    """Configuration for :func:`copy_ub_to_l1`.
-
-    :param pad_mode: Compile-time ``tla.PadMode`` member. ``None`` omits the
-        padding-mode attribute.
-    :type pad_mode: tla.PadMode or None
-    :param pad_value: Scalar padding value converted to the source element
-        type. ``None`` omits the operand.
-    :type pad_value: int, float, scalar tl.tensor or None
-    :param collapse_reassociation: Compile-time groups of source dimension
-        indices to collapse, for example ``((0, 1), (2, 3))`` for a rank-four
-        source. Each group contains integer axis indices; the backend checks
-        validity. ``None`` omits the attribute.
-    :type collapse_reassociation: tuple[tuple[int, ...], ...] or None
-
-    All fields default to ``None``.
-    """
-    pad_mode: PadMode = None
-    pad_value: object = None
-    collapse_reassociation: tuple = None
-
-
-@dataclass(frozen=True)
-class CopyL12UBParams:
-    """Configuration for :func:`copy_l1_to_ub`.
-
-    This immutable configuration has no fields. Pass ``tla.CopyL12UBParams()``
-    or omit the operation's ``params`` argument.
-    """
+    mode: LoadGM2L1Mode = LoadGM2L1Mode.ENABLE_ND2NZ
 
 
 @dataclass(frozen=True)
@@ -502,7 +410,7 @@ def load_gm_to_ub(src, dst, params=None, _semantic=None):
     :param src: GM source with ``space="gm"``, typically created with ``tla.view``.
     :type src: tla.buffer
     :param dst: UB destination with ``space="ub"`` and the same element type
-        as ``src``. Its shape must accommodate the requested data and padding.
+        as ``src`` and a backend-compatible shape.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
         ``tla.LoadGM2UBParams()``. See :class:`LoadGM2UBParams` for field formats.
@@ -512,9 +420,7 @@ def load_gm_to_ub(src, dst, params=None, _semantic=None):
 
     .. note::
         Pass buffer views, not raw pointers or buffer element accesses.
-        Padding counts are scalar operands; the backend checks supported
-        padding, alignment and dtype combinations. This interface does not
-        take the per-element mask of ``tl.load``.
+        Normal mode fills each burst to a 32-byte boundary.
 
     Example inside a ``@tla.jit`` kernel::
 
@@ -523,18 +429,16 @@ def load_gm_to_ub(src, dst, params=None, _semantic=None):
     """
     _route(src, dst, (("gm", "ub"), ))
     p = _params(params, LoadGM2UBParams)
-    attrs = {
-        "pad_mode": _enum_attr(p.pad_mode, PadMode, "padmode", _semantic),
-        "eviction_policy": _enum_attr(p.eviction_policy, EvictionPolicy, "eviction_policy", _semantic),
-    }
-    _semantic.builder.create_tla_load(src.handle, dst.handle, attrs,
-                                      pad_value=_scalar(p.pad_value, _semantic, src.dtype),
-                                      left_padding_num=_scalar(p.left_padding_num, _semantic),
-                                      right_padding_num=_scalar(p.right_padding_num, _semantic))
+    l2_cache_ctrl = _unwrap_if_constexpr(p.l2_cache_ctrl)
+    if l2_cache_ctrl is None:
+        l2_cache_ctrl = L2CachePolicy.NORMAL_FV
+    # Keep the public cache control independent of HIVM attribute names.
+    eviction = _enum_attr(l2_cache_ctrl, L2CachePolicy, "eviction_policy", _semantic)
+    _semantic.builder.create_tla_load(src.handle, dst.handle, eviction)
 
 
 @builtin
-def store_ub_to_gm(src, dst, params=None, _semantic=None):
+def store_ub_to_gm(src, dst, _semantic=None):
     """Stores UB data to global memory using ``hivm.hir.store``.
 
     :param src: UB source with ``space="ub"``.
@@ -542,35 +446,35 @@ def store_ub_to_gm(src, dst, params=None, _semantic=None):
     :param dst: GM destination with ``space="gm"``, typically created with
         ``tla.view``. Its element type must match ``src``.
     :type dst: tla.buffer
-    :param params: Configuration object. ``None`` (default) constructs
-        ``tla.StoreUB2GMParams()``. See :class:`StoreUB2GMParams` for atomic modes.
-    :type params: tla.StoreUB2GMParams or None
     :return: None. The destination buffer is updated in place.
     :rtype: None
 
     .. note::
         Source and destination views must describe a backend-compatible tile.
-        Atomic operation and dtype support depend on the target backend;
-        ``atomic_kind=None`` leaves the atomic attribute unset.
+        Use :func:`set_atomic` to control the mode for following GM stores,
+        synchronize their completion, then explicitly reset the mode with
+        ``AtomicKind.NONE``.
     """
     _route(src, dst, (("ub", "gm"), ))
-    p = _params(params, StoreUB2GMParams)
-    attrs = {"atomic_kind": _enum_attr(p.atomic_kind, AtomicKind, "atomic_kind", _semantic)}
-    _semantic.builder.create_tla_store(src.handle, dst.handle, attrs)
+    _semantic.builder.create_tla_store(src.handle, dst.handle)
 
 
 @builtin
 def load_gm_to_l1(src, dst, params=None, _semantic=None):
     """Loads GM data into L1 with ND-to-NZ conversion using ``hivm.hir.nd2nz``.
 
-    :param src: GM source with ``space="gm"`` in ND layout.
+    :param src: GM source in ND layout with a contiguous last dimension.
+        On Ascend950, source and destination use matching float16,
+        bfloat16 or float32. For float32, effective addresses, source
+        row stride and transfer width must be 32-byte aligned.
     :type src: tla.buffer
-    :param dst: L1 destination with ``space="l1"`` in the corresponding NZ
-        layout. For an aligned fp16 ``(M, N)`` tile, a physical NZ shape is
-        ``(N // 16, M // 16, 16, 16)``.
+    :param dst: L1 destination with ``space="l1"`` in NZ layout. For
+        a logical source shape ``(M, N)``, the physical shape is
+        ``(N // C, M // 16, 16, C)`` with C=8 for float32 and C=16 for
+        float16 and bfloat16.
     :type dst: tla.buffer
     :param params: Configuration object. ``None`` (default) constructs
-        ``tla.LoadGM2L1Params()``. See :class:`LoadGM2L1Params` for cache control.
+        ``tla.LoadGM2L1Params()``.
     :type params: tla.LoadGM2L1Params or None
     :return: None. The destination buffer is updated in place.
     :rtype: None
@@ -578,18 +482,23 @@ def load_gm_to_l1(src, dst, params=None, _semantic=None):
     .. note::
         Emit this Cube transfer in ``tla.scope.cube()``. The two views must
         describe the same logical tile in their respective layouts. The
-        backend checks dtype and layout alignment. Reverse-layout flags
-        ``enable_nz2nd`` and ``enable_nz2dn`` must remain ``False``.
+        backend checks dtype and layout alignment.
     """
     _route(src, dst, (("gm", "l1"), ))
     p = _params(params, LoadGM2L1Params)
-    if _boolean(p.enable_nz2nd, "enable_nz2nd") or _boolean(p.enable_nz2dn, "enable_nz2dn"):
-        raise NotImplementedError("GM->L1 ND2NZOp has no enable_nz2nd/enable_nz2dn fields; "
-                                  "reverse-layout flags require specification review")
+    mode = _unwrap_if_constexpr(p.mode)
+    if not isinstance(mode, LoadGM2L1Mode):
+        raise TypeError("mode must be a compile-time LoadGM2L1Mode")
+    if mode is not LoadGM2L1Mode.ENABLE_ND2NZ:
+        raise ValueError("unsupported GM-to-L1 transfer mode")
     cache = _unwrap_if_constexpr(p.l2_cache_ctrl)
     attrs = {}
     if cache is not None:
-        attrs["l2_cache_mode"] = _semantic.builder.get_int32_attr(_integer(cache, "l2_cache_ctrl", bits=32))
+        if type(cache) is not int:
+            raise TypeError("l2_cache_ctrl must be a compile-time integer or None")
+        if not 0 <= cache <= 4:
+            raise ValueError("l2_cache_ctrl must be between 0 and 4")
+        attrs["l2_cache_mode"] = _semantic.builder.get_int32_attr(cache)
     _semantic.builder.create_tla_nd2nz(src.handle, dst.handle, attrs)
 
 
@@ -626,7 +535,7 @@ def load_gm_to_l1_mx_scale(src, dst, params=None, _semantic=None):
 
 
 @builtin
-def copy_ub_to_l1(src, dst, params=None, _semantic=None):
+def copy_ub_to_l1(src, dst, *, _semantic=None):
     """Copies UB data into L1 using ``hivm.hir.copy``.
 
     :param src: UB source with ``space="ub"``.
@@ -634,52 +543,45 @@ def copy_ub_to_l1(src, dst, params=None, _semantic=None):
     :param dst: L1 destination with ``space="l1"`` and a backend-compatible
         shape and element type.
     :type dst: tla.buffer
-    :param params: Configuration object. ``None`` (default) constructs
-        ``tla.CopyUB2L1Params()``. See :class:`CopyUB2L1Params` for padding
-        and dimension-reassociation formats.
-    :type params: tla.CopyUB2L1Params or None
     :return: None. The destination buffer is updated in place.
     :rtype: None
 
     .. note::
         This route does not implicitly perform the GM-to-L1 ND2NZ conversion.
-        Prepare compatible physical layouts. When a Cube scope consumes data
-        produced by a Vector scope, explicitly synchronize the handoff.
+        On Ascend950, use matching float16, bfloat16 or float32 buffers
+        with compatible physical layouts and a contiguous last dimension.
+        Effective addresses, row widths and row strides must be 32-byte
+        aligned, and the transfer must stay within each allocation.
+        Synchronize the handoff from the Vector scope to the Cube scope.
     """
     _route(src, dst, (("ub", "l1"), ))
-    p = _params(params, CopyUB2L1Params)
-    attrs = {"pad_mode": _enum_attr(p.pad_mode, PadMode, "padmode", _semantic)}
-    groups = _unwrap_if_constexpr(p.collapse_reassociation)
-    if groups is not None:
-        indices = [[_integer(axis, "collapse_reassociation")
-                    for axis in _unwrap_if_constexpr(group)]
-                   for group in groups]
-        attrs["collapse_reassociation"] = _semantic.builder.parse_attr(str(indices))
-    _semantic.builder.create_tla_copy(src.handle, dst.handle, attrs,
-                                      pad_value=_scalar(p.pad_value, _semantic, src.dtype))
+    _semantic.builder.create_tla_copy(src.handle, dst.handle, {})
 
 
 @builtin
-def copy_l1_to_ub(src, dst, params=None, _semantic=None):
+def copy_l1_to_ub(src, dst, *, _semantic=None):
     """Copies L1 NZ data into UB ND layout using ``hivm.hir.l12ub``.
 
     :param src: L1 source with ``space="l1"`` in NZ layout.
     :type src: tla.buffer
     :param dst: UB destination with ``space="ub"`` in the corresponding ND layout.
     :type dst: tla.buffer
-    :param params: Empty configuration object. ``None`` (default) is equivalent
-        to ``tla.CopyL12UBParams()``; this native operation has no options.
-    :type params: tla.CopyL12UBParams or None
     :return: None. The destination buffer is updated in place.
     :rtype: None
 
     .. note::
         Emit this Cube transfer in ``tla.scope.cube()``. Before a Vector scope
         consumes the destination, synchronize the handoff and select the AIV
-        sub-block that owns the written UB. The backend checks layout and dtype.
+        sub-block that owns the written UB.
+        On Ascend950, use matching float16, bfloat16 or float32.
+        The NZ source uses contiguous (16, C) blocks, where
+        C = 32 / sizeof(dtype). Outer strides must be 32-byte aligned
+        and the source blocks must not overlap. The ND destination has
+        a contiguous last dimension. Effective addresses and the
+        destination row stride must be 32-byte aligned. Accesses must
+        stay within each allocation.
     """
     _route(src, dst, (("l1", "ub"), ))
-    _params(params, CopyL12UBParams)
     _semantic.builder.create_tla_l12ub(src.handle, dst.handle)
 
 
@@ -901,8 +803,7 @@ def set_atomic(kind, dtype, _semantic=None):
     """Set the atomic mode for following GM stores; use NONE to reset it."""
     kind = _unwrap_if_constexpr(kind)
     dtype = _unwrap_if_constexpr(dtype)
-    if not isinstance(kind, AtomicKind) or kind not in (AtomicKind.NONE, AtomicKind.ADD, AtomicKind.MAX,
-                                                        AtomicKind.MIN):
+    if not isinstance(kind, AtomicKind):
         raise ValueError("set_atomic kind must be AtomicKind.NONE, ADD, MAX, or MIN")
     if not isinstance(dtype, triton_dtype) or dtype not in (float32, float16, bfloat16, int8, int16, int32):
         raise ValueError("set_atomic dtype must be tl.float32, float16, bfloat16, int8, int16, or int32")

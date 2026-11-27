@@ -1,28 +1,35 @@
 // RUN: triton-opt --triton-to-unstructure --triton-to-linalg="named-ops=True" --split-input-file %s | FileCheck %s
 // RUN: triton-opt --triton-to-unstructure --split-input-file %s | FileCheck %s --check-prefix=UNSTRUCTURE
-// RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s --check-prefix=SIMT
+// RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s --check-prefix=UNSTRUCTURE
 // RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' '--triton-to-linalg=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s --check-prefix=SIMT-LINALG
 
+// The scalar byte offset 1 and lane offsets 63 + 4*i address i32 elements 16+i.
 // CHECK-LABEL: func.func @widen_tensor_offset
-// CHECK: scf.for
-// CHECK: hivm.hir.pointer_cast{{.*}} : memref<?xi32>
+// CHECK: %[[BASE:.*]] = memref.extract_aligned_pointer_as_index %{{.*}} : memref<?xi8> -> index
+// CHECK: %[[ADDRESS:.*]] = arith.index_cast %[[BASE]] : index to i64
+// CHECK: %[[CAPACITY:.*]] = arith.constant 24 : index
+// CHECK: %[[PTR:.*]] = hivm.hir.pointer_cast(%[[ADDRESS]]) [%[[CAPACITY]]] : memref<?xi32>
+// CHECK: %[[VIEW:.*]] = memref.reinterpret_cast %[[PTR]] to offset: [16], sizes: [8], strides: [1]
+// CHECK: memref.copy %[[VIEW]], {{.*}} : memref<8xi32, strided<[1], offset: 16>> to memref<8xi32>
 // CHECK: return
 // UNSTRUCTURE-LABEL: tt.func public @widen_tensor_offset
-// UNSTRUCTURE: arith.divsi
-// UNSTRUCTURE: tt.ptr_to_int
-// UNSTRUCTURE: tt.int_to_ptr
-// UNSTRUCTURE-NOT: tt.bitcast
-// SIMT-LABEL: tt.func public @widen_tensor_offset
-// SIMT: ascend.indirect_load
-// SIMT-NOT: tt.bitcast
+// UNSTRUCTURE: %[[SHIFTED:.*]] = tt.addptr {{.*}} : !tt.ptr<i8>, i32
+// UNSTRUCTURE: %[[BASES:.*]] = tt.splat %[[SHIFTED]]
+// UNSTRUCTURE: %[[BYTES:.*]] = tt.addptr %[[BASES]], {{.*}} : tensor<8x!tt.ptr<i8>>, tensor<8xi32>
+// UNSTRUCTURE: %[[WORDS:.*]] = tt.bitcast %[[BYTES]] : tensor<8x!tt.ptr<i8>> -> tensor<8x!tt.ptr<i32>>
+// UNSTRUCTURE: tt.load %[[WORDS]]
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @widen_tensor_offset(
       %src: !tt.ptr<i8> {tt.divisibility = 16 : i32},
       %dst: !tt.ptr<i32> {tt.divisibility = 16 : i32}) attributes {noinline = false} {
     %range = tt.make_range {start = 0 : i32, end = 8 : i32} : tensor<8xi32>
     %four = arith.constant dense<4> : tensor<8xi32>
-    %offsets = arith.muli %range, %four : tensor<8xi32>
-    %srcs = tt.splat %src : !tt.ptr<i8> -> tensor<8x!tt.ptr<i8>>
+    %scaled = arith.muli %range, %four : tensor<8xi32>
+    %bias = arith.constant dense<63> : tensor<8xi32>
+    %offsets = arith.addi %scaled, %bias : tensor<8xi32>
+    %one = arith.constant 1 : i32
+    %shifted = tt.addptr %src, %one : !tt.ptr<i8>, i32
+    %srcs = tt.splat %shifted : !tt.ptr<i8> -> tensor<8x!tt.ptr<i8>>
     %byte_ptrs = tt.addptr %srcs, %offsets : tensor<8x!tt.ptr<i8>>, tensor<8xi32>
     %i32_ptrs = tt.bitcast %byte_ptrs : tensor<8x!tt.ptr<i8>> -> tensor<8x!tt.ptr<i32>>
     %values = tt.load %i32_ptrs : tensor<8x!tt.ptr<i32>>
@@ -40,10 +47,13 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // CHECK: hivm.hir.pointer_cast{{.*}} : memref<?xbf16>
 // CHECK: return
 // UNSTRUCTURE-LABEL: tt.func public @widen_scalar_multi_addptr
-// UNSTRUCTURE: tt.ptr_to_int
-// UNSTRUCTURE: arith.addi
-// UNSTRUCTURE: tt.int_to_ptr
-// UNSTRUCTURE-NOT: tt.bitcast
+// UNSTRUCTURE: %[[BLOCK:.*]] = tt.addptr {{.*}} : !tt.ptr<i8>, i64
+// UNSTRUCTURE: %[[TOKEN:.*]] = tt.addptr %[[BLOCK]],
+// UNSTRUCTURE: %[[FIELD:.*]] = tt.addptr %[[TOKEN]],
+// UNSTRUCTURE: %[[BF16:.*]] = tt.bitcast %[[FIELD]] : !tt.ptr<i8> -> !tt.ptr<bf16>
+// UNSTRUCTURE: %[[DST_BASES:.*]] = tt.splat %[[BF16]]
+// UNSTRUCTURE: %[[DST:.*]] = tt.addptr %[[DST_BASES]],
+// UNSTRUCTURE: tt.store %[[DST]],
 // SIMT-LINALG-LABEL: func.func @widen_scalar_multi_addptr
 // SIMT-LINALG-NOT: tt.int_to_ptr
 // SIMT-LINALG: memref.extract_aligned_pointer_as_index
@@ -84,11 +94,12 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // CHECK: return
 // UNSTRUCTURE-LABEL: tt.func public @widen_pointer_inside_loop
 // UNSTRUCTURE: scf.for
-// UNSTRUCTURE: tt.ptr_to_int
-// UNSTRUCTURE: tt.int_to_ptr
-// UNSTRUCTURE: tt.splat
-// UNSTRUCTURE: tt.addptr
-// UNSTRUCTURE-NOT: tt.bitcast
+// UNSTRUCTURE: %[[LOOP_BYTES:.*]] = tt.addptr {{.*}} : !tt.ptr<i8>, i64
+// UNSTRUCTURE: %[[LOOP_FIELD:.*]] = tt.addptr %[[LOOP_BYTES]],
+// UNSTRUCTURE: %[[LOOP_BF16:.*]] = tt.bitcast %[[LOOP_FIELD]] : !tt.ptr<i8> -> !tt.ptr<bf16>
+// UNSTRUCTURE: %[[LOOP_BASES:.*]] = tt.splat %[[LOOP_BF16]]
+// UNSTRUCTURE: %[[LOOP_PTRS:.*]] = tt.addptr %[[LOOP_BASES]],
+// UNSTRUCTURE: tt.load %[[LOOP_PTRS]]
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @widen_pointer_inside_loop(
       %src: !tt.ptr<i8> {tt.divisibility = 16 : i32},
@@ -111,6 +122,31 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
       %dst_ptrs = tt.addptr %dsts, %range : tensor<8x!tt.ptr<bf16>>, tensor<8xi32>
       tt.store %dst_ptrs, %values : tensor<8x!tt.ptr<bf16>>
     }
+    tt.return
+  }
+}
+
+// -----
+
+// A caller-supplied even origin remains usable as a dynamic memref offset.
+// CHECK-LABEL: func.func @widen_dynamic_origin
+// CHECK: memref.reinterpret_cast {{.*}} to offset: [%{{.*}}], sizes: [8], strides: [1]
+// CHECK: memref.copy
+// CHECK: return
+module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
+  tt.func public @widen_dynamic_origin(%src: !tt.ptr<i16>, %dst: !tt.ptr<i32>,
+                                       %start: i32) attributes {noinline = false} {
+    %range = tt.make_range {start = 0 : i32, end = 8 : i32} : tensor<8xi32>
+    %two = arith.constant dense<2> : tensor<8xi32>
+    %scaled = arith.muli %range, %two : tensor<8xi32>
+    %shifted = tt.addptr %src, %start : !tt.ptr<i16>, i32
+    %srcs = tt.splat %shifted : !tt.ptr<i16> -> tensor<8x!tt.ptr<i16>>
+    %ptrs = tt.addptr %srcs, %scaled : tensor<8x!tt.ptr<i16>>, tensor<8xi32>
+    %wide = tt.bitcast %ptrs : tensor<8x!tt.ptr<i16>> -> tensor<8x!tt.ptr<i32>>
+    %values = tt.load %wide : tensor<8x!tt.ptr<i32>>
+    %dsts = tt.splat %dst : !tt.ptr<i32> -> tensor<8x!tt.ptr<i32>>
+    %out = tt.addptr %dsts, %range : tensor<8x!tt.ptr<i32>>, tensor<8xi32>
+    tt.store %out, %values : tensor<8x!tt.ptr<i32>>
     tt.return
   }
 }

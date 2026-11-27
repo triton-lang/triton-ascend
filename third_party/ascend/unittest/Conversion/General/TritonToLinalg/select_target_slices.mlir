@@ -1,8 +1,8 @@
 // RUN: triton-opt --triton-to-linalg="compile-on-910-95=false" --split-input-file --verify-each %s | FileCheck %s --check-prefixes=COMMON,A2 --enable-var-scope
 // RUN: triton-opt --triton-to-linalg="compile-on-910-95=true" --split-input-file --verify-each %s | FileCheck %s --check-prefixes=COMMON,A5 --enable-var-scope
 
-// A pure-vector runtime point retains the guard on both targets. On 950,
-// only the selected element is copied; A2/A3 keep every slice start at zero.
+// An arbitrary runtime point retains direct slices on 950. Only loop
+// induction positions use the single-element prefix fallback there.
 module {
   func.func @dynamic_point(%true: tensor<16xi32>, %false: tensor<16xi32>, %position: i32) -> tensor<16xi32> {
     %range = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
@@ -346,3 +346,281 @@ module {
 // COMMON-NEXT: scf.yield %[[INSERT]]
 // COMMON-NEXT: }
 // COMMON-NEXT: return %[[RESULT]], %[[T]]
+
+// -----
+
+// Reproduce mix_fused: each iteration updates one lane of loop-carried scores.
+module {
+  func.func @loop_carried_point(%initial: tensor<64xf32>, %score: f32, %count: i32) -> tensor<64xf32> {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %count_idx = arith.index_cast %count : i32 to index
+    %range = tt.make_range {start = 0 : i32, end = 64 : i32} : tensor<64xi32>
+    %scores = scf.for %row = %zero to %count_idx step %one iter_args(%previous = %initial) -> (tensor<64xf32>) {
+      %row_i32 = arith.index_cast %row : index to i32
+      %rows = tt.splat %row_i32 : i32 -> tensor<64xi32>
+      %value = tt.splat %score : f32 -> tensor<64xf32>
+      %mask = arith.cmpi eq, %range, %rows : tensor<64xi32>
+      %updated = arith.select %mask, %value, %previous : tensor<64xi1>, tensor<64xf32>
+      scf.yield %updated : tensor<64xf32>
+    }
+    return %scores : tensor<64xf32>
+  }
+}
+// COMMON-LABEL: func.func @loop_carried_point(
+// COMMON: scf.for {{.*}} iter_args(%[[PREV:.*]] = {{.*}})
+// COMMON: %[[VALUE:.*]] = linalg.fill
+// COMMON: scf.if
+// COMMON-NEXT: scf.yield %[[PREV]]
+// COMMON-NEXT: } else {
+// COMMON-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[PREV]][0] [%[[POS:.*]]] [1]
+// COMMON-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[VALUE]][0] [%[[POS]]] [1]
+// COMMON-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
+// COMMON-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[PREV]][0] [%[[END]]] [1]
+// COMMON-NEXT: scf.yield %[[INSERT]]
+
+// -----
+
+// A statically positioned single element still uses a direct slice on 950.
+module {
+  func.func @static_point(%true: tensor<16xi32>, %false: tensor<16xi32>) -> tensor<16xi32> {
+    %range = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
+    %position = arith.constant dense<7> : tensor<16xi32>
+    %mask = arith.cmpi eq, %range, %position : tensor<16xi32>
+    %result = arith.select %mask, %true, %false : tensor<16xi1>, tensor<16xi32>
+    return %result : tensor<16xi32>
+  }
+}
+// COMMON-LABEL: func.func @static_point(
+// COMMON-SAME: %[[T:[^ :]+]]: tensor<16xi32>, %[[F:[^ :]+]]: tensor<16xi32>
+// COMMON-NOT: scf.if
+// A5-NEXT: %[[PART:.*]] = tensor.extract_slice %[[T]][7] [1] [1]
+// A5-NEXT: %[[RESULT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][7] [1] [1]
+// A2-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[F]][0] [7] [1]
+// A2-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[T]][0] [7] [1]
+// A2-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [8] [1]
+// A2-NEXT: %[[RESULT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [8] [1]
+// COMMON-NEXT: return %[[RESULT]]
+
+// -----
+
+// The other mix_fused loop selects a probability with the induction variable
+// and reduces it. Its constant false tensor also keeps the prefix path.
+module {
+  func.func @loop_point_probability(%probabilities: tensor<64xf32>, %count: index) -> f32 {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %zero_f32 = arith.constant 0.0 : f32
+    %zeros = arith.constant dense<0.0> : tensor<64xf32>
+    %range = tt.make_range {start = 0 : i32, end = 64 : i32} : tensor<64xi32>
+    %sum = scf.for %row = %zero to %count step %one iter_args(%acc = %zero_f32) -> (f32) {
+      %row_i32 = arith.index_cast %row : index to i32
+      %rows = tt.splat %row_i32 : i32 -> tensor<64xi32>
+      %mask = arith.cmpi eq, %range, %rows : tensor<64xi32>
+      %selected = arith.select %mask, %probabilities, %zeros : tensor<64xi1>, tensor<64xf32>
+      %probability = "tt.reduce"(%selected) ({
+      ^bb0(%lhs: f32, %rhs: f32):
+        %value = arith.addf %lhs, %rhs : f32
+        tt.reduce.return %value : f32
+      }) {axis = 0 : i32} : (tensor<64xf32>) -> f32
+      %next = arith.addf %acc, %probability : f32
+      scf.yield %next : f32
+    }
+    return %sum : f32
+  }
+}
+// COMMON-LABEL: func.func @loop_point_probability(
+// COMMON-SAME: %[[T:[^ :]+]]: tensor<64xf32>
+// COMMON: %[[F:.*]] = linalg.fill {{.*}} -> tensor<64xf32>
+// COMMON: scf.for
+// COMMON: %[[SELECTED:.*]] = scf.if
+// COMMON-NEXT: scf.yield %[[F]]
+// COMMON-NEXT: } else {
+// COMMON-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[F]][0] [%[[POS:.*]]] [1]
+// COMMON-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[T]][0] [%[[POS]]] [1]
+// COMMON-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
+// COMMON-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [%[[END]]] [1]
+// COMMON-NEXT: scf.yield %[[INSERT]]
+// COMMON-NEXT: }
+// COMMON: linalg.reduce ins(%[[SELECTED]]
+
+// -----
+
+// A loop-carried integer position is not the induction variable. Keep its
+// single-element selection direct on 950, even inside an scf.for.
+module {
+  func.func @loop_carried_position(%true: tensor<64xi32>, %initial: tensor<64xi32>, %position: i32, %stride: i32, %count: index) -> tensor<64xi32> {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %range = tt.make_range {start = 0 : i32, end = 64 : i32} : tensor<64xi32>
+    %result:2 = scf.for %iv = %zero to %count step %one iter_args(%previous = %initial, %pos = %position) -> (tensor<64xi32>, i32) {
+      %positions = tt.splat %pos : i32 -> tensor<64xi32>
+      %mask = arith.cmpi eq, %range, %positions : tensor<64xi32>
+      %updated = arith.select %mask, %true, %previous : tensor<64xi1>, tensor<64xi32>
+      %next = arith.addi %pos, %stride : i32
+      scf.yield %updated, %next : tensor<64xi32>, i32
+    }
+    return %result#0 : tensor<64xi32>
+  }
+}
+// COMMON-LABEL: func.func @loop_carried_position(
+// COMMON-SAME: %[[T:[^ :]+]]: tensor<64xi32>
+// COMMON: scf.for {{.*}} iter_args(%[[F:[^ ]+]] =
+// COMMON: scf.if
+// COMMON-NEXT: scf.yield %[[F]]
+// COMMON-NEXT: } else {
+// A5-NEXT: %[[PART:.*]] = tensor.extract_slice %[[T]][%[[POS:.*]]] [1] [1]
+// A5-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][%[[POS]]] [1] [1]
+// A2-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[F]][0] [%[[POS:.*]]] [1]
+// A2-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[T]][0] [%[[POS]]] [1]
+// A2-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
+// A2-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [%[[END]]] [1]
+// COMMON-NEXT: scf.yield %[[INSERT]]
+
+// -----
+
+// An induction position selecting a whole row still uses direct slices on
+// 950: the prefix fallback applies only when the entire region is one element.
+module {
+  func.func @loop_point_row(%true: tensor<16x32xf32>, %initial: tensor<16x32xf32>, %count: index) -> tensor<16x32xf32> {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %range = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
+    %result = scf.for %row = %zero to %count step %one iter_args(%previous = %initial) -> (tensor<16x32xf32>) {
+      %row_i32 = arith.index_cast %row : index to i32
+      %rows = tt.splat %row_i32 : i32 -> tensor<16xi32>
+      %point = arith.cmpi eq, %range, %rows : tensor<16xi32>
+      %expanded = tt.expand_dims %point {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+      %mask = tt.broadcast %expanded : tensor<16x1xi1> -> tensor<16x32xi1>
+      %updated = arith.select %mask, %true, %previous : tensor<16x32xi1>, tensor<16x32xf32>
+      scf.yield %updated : tensor<16x32xf32>
+    }
+    return %result : tensor<16x32xf32>
+  }
+}
+// COMMON-LABEL: func.func @loop_point_row(
+// COMMON: scf.for
+// COMMON: scf.if
+// COMMON-NEXT: scf.yield
+// COMMON-NEXT: } else {
+// A5-NEXT: %[[PART:.*]] = tensor.extract_slice %{{.*}}[%[[POS:.*]], 0] [1, 32] [1, 1]
+// A5-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %{{.*}}[%[[POS]], 0] [1, 32] [1, 1]
+// A2-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %{{.*}}[0, 0] [%[[POS:.*]], 32] [1, 1]
+// A2-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %{{.*}}[0, 0] [%[[POS]], 32] [1, 1]
+// A2-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0, 0] [%[[END:.*]], 32] [1, 1]
+// A2-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %{{.*}}[0, 0] [%[[END]], 32] [1, 1]
+// COMMON-NEXT: scf.yield %[[INSERT]]
+
+// -----
+
+// TopK selects a point obtained from a reduction, not a loop induction
+// variable. Preserve the direct path for its large candidate vectors on 950.
+module {
+  func.func @reduction_point(%true: tensor<1024xi32>, %positions: tensor<1024xi32>) -> tensor<1024xi32> {
+    %position = "tt.reduce"(%positions) ({
+    ^bb0(%lhs: i32, %rhs: i32):
+      %minimum = arith.minsi %lhs, %rhs : i32
+      tt.reduce.return %minimum : i32
+    }) {axis = 0 : i32} : (tensor<1024xi32>) -> i32
+    %range = tt.make_range {start = 0 : i32, end = 1024 : i32} : tensor<1024xi32>
+    %points = tt.splat %position : i32 -> tensor<1024xi32>
+    %mask = arith.cmpi eq, %range, %points : tensor<1024xi32>
+    %false = arith.constant dense<-1> : tensor<1024xi32>
+    %selected = arith.select %mask, %true, %false : tensor<1024xi1>, tensor<1024xi32>
+    return %selected : tensor<1024xi32>
+  }
+}
+// COMMON-LABEL: func.func @reduction_point(
+// COMMON-SAME: %[[T:[^ :]+]]: tensor<1024xi32>
+// COMMON-DAG: %[[F:.*]] = linalg.fill {{.*}} -> tensor<1024xi32>
+// COMMON-DAG: linalg.reduce
+// COMMON: scf.if
+// COMMON-NEXT: scf.yield %[[F]]
+// COMMON-NEXT: } else {
+// A5-NEXT: %[[PART:.*]] = tensor.extract_slice %[[T]][%[[POS:.*]]] [1] [1]
+// A5-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][%[[POS]]] [1] [1]
+// A2-NEXT: %[[PREFIX:.*]] = tensor.extract_slice %[[F]][0] [%[[POS:.*]]] [1]
+// A2-NEXT: %[[TMP:.*]] = tensor.insert_slice %[[PREFIX]] into %[[T]][0] [%[[POS]]] [1]
+// A2-NEXT: %[[PART:.*]] = tensor.extract_slice %[[TMP]][0] [%[[END:.*]]] [1]
+// A2-NEXT: %[[INSERT:.*]] = tensor.insert_slice %[[PART]] into %[[F]][0] [%[[END]]] [1]
+// COMMON-NEXT: scf.yield %[[INSERT]]
+
+// -----
+
+// A fill used only by the select is available as the prefix destination.
+module {
+  func.func @private_fill_row_prefix(%x: tensor<16x32xf32>, %end: i32) -> tensor<16x32xf32> {
+    %rows = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
+    %ends = tt.splat %end : i32 -> tensor<16xi32>
+    %active = arith.cmpi slt, %rows, %ends : tensor<16xi32>
+    %expanded = tt.expand_dims %active {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+    %mask = tt.broadcast %expanded : tensor<16x1xi1> -> tensor<16x32xi1>
+    %zero = arith.constant dense<0.0> : tensor<16x32xf32>
+    %computed = math.exp2 %x : tensor<16x32xf32>
+    %result = arith.select %mask, %computed, %zero : tensor<16x32xi1>, tensor<16x32xf32>
+    return %result : tensor<16x32xf32>
+  }
+}
+// COMMON-LABEL: func.func @private_fill_row_prefix(
+// COMMON-DAG: %[[ZERO:.*]] = linalg.fill {{.*}} -> tensor<16x32xf32>
+// COMMON-DAG: %[[VALUE:.*]] = math.exp2
+// COMMON: %[[PART:.*]] = tensor.extract_slice %[[VALUE]][0, 0] [%[[ROWS:.*]], 32]
+// COMMON: %[[OUT:.*]] = tensor.insert_slice %[[PART]] into %[[ZERO]][0, 0] [%[[ROWS]], 32]
+// COMMON: return %[[OUT]]
+
+// -----
+
+// The fill is also returned. A single-use computed tile can receive the suffix.
+module {
+  func.func @shared_fill_row_prefix(%x: tensor<16x32xf32>, %end: i32) -> (tensor<16x32xf32>, tensor<16x32xf32>) {
+    %rows = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
+    %ends = tt.splat %end : i32 -> tensor<16xi32>
+    %active = arith.cmpi slt, %rows, %ends : tensor<16xi32>
+    %expanded = tt.expand_dims %active {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+    %mask = tt.broadcast %expanded : tensor<16x1xi1> -> tensor<16x32xi1>
+    %zero = arith.constant dense<0.0> : tensor<16x32xf32>
+    %computed = math.exp2 %x : tensor<16x32xf32>
+    %result = arith.select %mask, %computed, %zero : tensor<16x32xi1>, tensor<16x32xf32>
+    return %result, %zero : tensor<16x32xf32>, tensor<16x32xf32>
+  }
+}
+// COMMON-LABEL: func.func @shared_fill_row_prefix(
+// A5-DAG: %[[HEIGHT:.*]] = arith.constant 16 : index
+// COMMON-DAG: %[[ZERO:.*]] = linalg.fill {{.*}} -> tensor<16x32xf32>
+// COMMON-DAG: %[[VALUE:.*]] = math.exp2
+// A5: %[[TAIL:.*]] = arith.subi %[[HEIGHT]], %[[ROWS:.*]] : index
+// A5: %[[PART:.*]] = tensor.extract_slice %[[ZERO]][%[[ROWS]], 0] [%[[TAIL]], 32]
+// A5: %[[OUT:.*]] = tensor.insert_slice %[[PART]] into %[[VALUE]][%[[ROWS]], 0] [%[[TAIL]], 32]
+// A2: %[[PART:.*]] = tensor.extract_slice %[[VALUE]][0, 0] [%[[ROWS:.*]], 32]
+// A2: %[[OUT:.*]] = tensor.insert_slice %[[PART]] into %[[ZERO]][0, 0] [%[[ROWS]], 32]
+// COMMON: return %[[OUT]], %[[ZERO]]
+
+// -----
+
+// A rectangular prefix also leaves invalid columns in otherwise valid rows.
+// Its complement cannot be filled by replacing a suffix of whole rows.
+module {
+  func.func @computed_rectangular_prefix(%x: tensor<16x32xf32>, %rowEnd: i32, %colEnd: i32) -> (tensor<16x32xf32>, tensor<16x32xf32>) {
+    %rows = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
+    %rowEnds = tt.splat %rowEnd : i32 -> tensor<16xi32>
+    %activeRows = arith.cmpi slt, %rows, %rowEnds : tensor<16xi32>
+    %expandedRows = tt.expand_dims %activeRows {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+    %rowMask = tt.broadcast %expandedRows : tensor<16x1xi1> -> tensor<16x32xi1>
+    %cols = tt.make_range {start = 0 : i32, end = 32 : i32} : tensor<32xi32>
+    %colEnds = tt.splat %colEnd : i32 -> tensor<32xi32>
+    %activeCols = arith.cmpi slt, %cols, %colEnds : tensor<32xi32>
+    %expandedCols = tt.expand_dims %activeCols {axis = 0 : i32} : tensor<32xi1> -> tensor<1x32xi1>
+    %colMask = tt.broadcast %expandedCols : tensor<1x32xi1> -> tensor<16x32xi1>
+    %mask = arith.andi %rowMask, %colMask : tensor<16x32xi1>
+    %zero = arith.constant dense<0.0> : tensor<16x32xf32>
+    %computed = math.exp2 %x : tensor<16x32xf32>
+    %result = arith.select %mask, %computed, %zero : tensor<16x32xi1>, tensor<16x32xf32>
+    return %result, %zero : tensor<16x32xf32>, tensor<16x32xf32>
+  }
+}
+// COMMON-LABEL: func.func @computed_rectangular_prefix(
+// COMMON-DAG: %[[ZERO:.*]] = linalg.fill {{.*}} -> tensor<16x32xf32>
+// COMMON-DAG: %[[VALUE:.*]] = math.exp2
+// COMMON: %[[PART:.*]] = tensor.extract_slice %[[VALUE]][0, 0] [%[[ROWS:.*]], %[[COLS:.*]]]
+// COMMON: %[[OUT:.*]] = tensor.insert_slice %[[PART]] into %[[ZERO]][0, 0] [%[[ROWS]], %[[COLS]]]
+// COMMON: return %[[OUT]], %[[ZERO]]

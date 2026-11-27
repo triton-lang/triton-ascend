@@ -38,17 +38,17 @@ W_SCALARS = (0x80000000, 0x80000001, 0xFFFFFFFF)
 
 
 @tla.jit
-def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    xb = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    tb = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    ob = tla.alloc_buffer((6, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (N, )), xb)
-    tla.copy(tla.view(T, (N, )), tb)
+def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    xb = tla.alloc((N, ), tl.float32, space="ub")
+    tb = tla.alloc((N, ), tl.int32, space="ub")
+    ob = tla.alloc((6, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), xb)
+    tla.load_gm_to_ub(tla.view(T, (N, )), tb)
     with tla.scope.simd():
         x = tla.simd.vlds(xb[0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vmaxs(x, 0.0, mode=tla.simd.MODE.ZEROING))
@@ -57,26 +57,26 @@ def vmaxs(X, T, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ob[3, 0], tla.simd.vmaxs(x, 0.0, mask=none, mode=tla.simd.MODE.ZEROING))
         tla.simd.vsts(ob[4, 0], tla.simd.vmaxs(x, 0.0, mask=prefix, mode=tla.simd.MODE.MERGING))
         tla.simd.vsts(ob[5, 0], tla.simd.vmaxs(x, 0.0, mask=arb, mode=tla.simd.MODE.MERGING))
-    tla.copy(ob, tla.view(O, (6, N)))
+    tla.store_ub_to_gm(ob, tla.view(O, (6, N)))
 
 
 @tla.jit
-def vmaxs_bounds(I, U, W, OI, OU, OW, N: tl.constexpr, ACTIVE: tl.constexpr):
-    ib = tla.alloc_buffer((N, ), tl.int64, space="ub")
-    ub = tla.alloc_buffer((N, ), tl.uint64, space="ub")
-    wb = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    oi = tla.alloc_buffer((3, N), tl.int64, space="ub")
-    ou = tla.alloc_buffer((3, N), tl.uint64, space="ub")
-    ow = tla.alloc_buffer((3, N), tl.uint32, space="ub")
-    tla.copy(tla.view(I, (N, )), ib)
-    tla.copy(tla.view(U, (N, )), ub)
-    tla.copy(tla.view(W, (N, )), wb)
+def vmaxs_bounds(I, U, W, OI, OU, OW, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    ib = tla.alloc((N, ), tl.int64, space="ub")
+    ub = tla.alloc((N, ), tl.uint64, space="ub")
+    wb = tla.alloc((N, ), tl.uint32, space="ub")
+    oi = tla.alloc((3, N), tl.int64, space="ub")
+    ou = tla.alloc((3, N), tl.uint64, space="ub")
+    ow = tla.alloc((3, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(I, (N, )), ib)
+    tla.load_gm_to_ub(tla.view(U, (N, )), ub)
+    tla.load_gm_to_ub(tla.view(W, (N, )), wb)
     with tla.scope.simd():
         iv = tla.simd.vlds(ib[0])
         uv = tla.simd.vlds(ub[0])
         wv = tla.simd.vlds(wb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(oi[0, 0], tla.simd.vmaxs(iv, 2**53), dist="NORM_B64")
         tla.simd.vsts(oi[1, 0], tla.simd.vmaxs(iv, 2**53 + 1, mask=prefix), dist="NORM_B64")
@@ -87,13 +87,13 @@ def vmaxs_bounds(I, U, W, OI, OU, OW, N: tl.constexpr, ACTIVE: tl.constexpr):
         tla.simd.vsts(ow[0, 0], tla.simd.vmaxs(wv, 0x80000000))
         tla.simd.vsts(ow[1, 0], tla.simd.vmaxs(wv, 0x80000001, mask=prefix))
         tla.simd.vsts(ow[2, 0], tla.simd.vmaxs(wv, 0xFFFFFFFF, mask=none))
-    tla.copy(oi, tla.view(OI, (3, N)))
-    tla.copy(ou, tla.view(OU, (3, N)))
-    tla.copy(ow, tla.view(OW, (3, N)))
+    tla.store_ub_to_gm(oi, tla.view(OI, (3, N)))
+    tla.store_ub_to_gm(ou, tla.view(OU, (3, N)))
+    tla.store_ub_to_gm(ow, tla.view(OW, (3, N)))
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def test_ir(output_dir=None):

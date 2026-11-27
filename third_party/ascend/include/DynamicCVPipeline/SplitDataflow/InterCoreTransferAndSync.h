@@ -38,6 +38,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "llvm/ADT/SetVector.h"
 #include <optional>
 
 namespace mlir {
@@ -61,19 +62,12 @@ struct TransferSyncInsertPoint {
   mlir::Operation *consEnd = nullptr;
 };
 
-// Information found while matching a VECTOR to_tensor yielded from an SCF op.
-struct VectorToTensorInfo {
-  bufferization::ToTensorOp toTensor;
-  scf::YieldOp yield;
-  int tightlyCoupledBufferId;
-};
-
 // Result of matching a CUBE -> VECTOR direct-store pattern: CUBE data is
 // transferred through UB and directly stored by VECTOR, without VECTOR tensor
 // computation.
 struct CubeToVectorDirectStoreInfo {
-  std::optional<int> tightlyCoupledBufferId;
-  Operation *storeOp = nullptr;
+  Operation *producerOp = nullptr;
+  Operation *consumerOp = nullptr;
 };
 
 // Define pass
@@ -131,8 +125,9 @@ private:
   handleCubeToVector(mlir::OpBuilder &builder, DependencyInfo &dep,
                      FlagIdManager &flagManager,
                      FlagIdReuseManager &flagIdReuseManager);
-  mlir::LogicalResult handleCubeToCube(mlir::OpBuilder &builder,
-                                       DependencyInfo &dep);
+  mlir::LogicalResult
+  handleCubeToCube(mlir::OpBuilder &builder, DependencyInfo &dep,
+                   llvm::SmallSetVector<Operation *, 4> &foldedCasts);
   mlir::LogicalResult handleMemoryDependency(
       mlir::OpBuilder &builder, DependencyInfo &dep, size_t depIndex,
       llvm::SmallVector<DependencyInfo> memDependencies,
@@ -210,11 +205,13 @@ private:
                         TransferSyncInsertPoint &insertPoint, int flag,
                         mlir::Location loc, bool isCubeToVector,
                         FlagIdReuseManager &flagIdReuseManager);
-  // Match the CUBE -> VECTOR direct-store pattern inside the given SCF op:
-  // CUBE data reaches VECTOR through UB and is stored without VECTOR tensor
-  // computation (`scf.for` / `scf.while` / `scf.if`).
+  static bool isNotVFOperation(Operation *op);
+  static std::optional<std::pair<Operation *, Operation *>>
+  getCommonLevelProducerConsumer(Operation *toTensorOp, Operation *storeOp);
+  // Match a tagged VECTOR to_tensor whose user chain passes through only
+  // transparent operations and SCF control-flow forwarding before a store.
   static std::optional<CubeToVectorDirectStoreInfo>
-  matchCubeToVectorDirectStorePattern(Operation *scfOp);
+  matchCubeToVectorDirectStorePattern(bufferization::ToTensorOp toTensor);
   // Detect SCF ops whose yielded data flows out via fixpipe and is then
   // stored by a post-loop materialize_in_destination. Insert a
   // CUBE.PIPE_FIX -> VECTOR.PIPE_MTE3 sync pair to guard the store.

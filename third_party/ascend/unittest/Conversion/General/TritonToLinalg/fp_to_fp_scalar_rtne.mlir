@@ -2,9 +2,19 @@
 
 // CHECK-LABEL: func.func @scalar_fp32_to_fp8_rtne
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: %[[CAST:.*]] = arith.truncf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: %[[CAST:.*]] = arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return %[[CAST]] : f8E4M3FN
+// CHECK-LABEL: func.func @scalar_fp32_to_f8e5m2_rtne
+// CHECK: arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f32 to f8E5M2
+// CHECK-LABEL: func.func @scalar_fp16_to_f8e5m2_rtne
+// CHECK: arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : f16 to f8E5M2
+// CHECK-LABEL: func.func @scalar_bf16_to_f8e4m3fn_rtne
+// CHECK: arith.truncf %{{.*}} {enable_saturate = true, round_mode = #hfusion.round_mode<rint>} : bf16 to f8E4M3FN
+// CHECK-LABEL: func.func @scalar_fp16_nan_to_f8e5m2
+// CHECK: arith.constant 0.000000e+00 : f8E5M2
+// CHECK-LABEL: func.func @scalar_bf16_inf_to_f8e4m3fn
+// CHECK: arith.constant 4.480000e+02 : f8E4M3FN
 // CHECK-LABEL: func.func @scalar_fp8_to_fp32_rtne
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: %[[FP8_TO_F32:.*]] = arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E4M3FN to f32
@@ -14,22 +24,14 @@
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: %[[E4_TO_F32:.*]] = arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E4M3FN to f32
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: %[[E5_ABOVE:.*]] = arith.cmpf ogt, %[[E4_TO_F32]], %[[E5_UPPER:.*]] : f32
-// CHECK: %[[E5_HIGH:.*]] = arith.select %[[E5_ABOVE]], %[[E5_UPPER]], %[[E4_TO_F32]] : f32
-// CHECK: %[[E5_BELOW:.*]] = arith.cmpf olt, %[[E5_HIGH]], %[[E5_LOWER:.*]] : f32
-// CHECK: %[[E5_CLAMPED:.*]] = arith.select %[[E5_BELOW]], %[[E5_LOWER]], %[[E5_HIGH]] : f32
-// CHECK: %[[F32_TO_E5:.*]] = arith.truncf %[[E5_CLAMPED]] {round_mode = #hfusion.round_mode<rint>} : f32 to f8E5M2
+// CHECK: %[[F32_TO_E5:.*]] = arith.truncf %[[E4_TO_F32]] {round_mode = #hfusion.round_mode<rint>} : f32 to f8E5M2
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return %[[F32_TO_E5]] : f8E5M2
 // CHECK-LABEL: func.func @scalar_f8e5m2_to_f8e4m3fn_default
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: %[[E5_TO_F32:.*]] = arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E5M2 to f32
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: %[[E4_ABOVE:.*]] = arith.cmpf ogt, %[[E5_TO_F32]], %[[E4_UPPER:.*]] : f32
-// CHECK: %[[E4_HIGH:.*]] = arith.select %[[E4_ABOVE]], %[[E4_UPPER]], %[[E5_TO_F32]] : f32
-// CHECK: %[[E4_BELOW:.*]] = arith.cmpf olt, %[[E4_HIGH]], %[[E4_LOWER:.*]] : f32
-// CHECK: %[[E4_CLAMPED:.*]] = arith.select %[[E4_BELOW]], %[[E4_LOWER]], %[[E4_HIGH]] : f32
-// CHECK: %[[F32_TO_E4:.*]] = arith.truncf %[[E4_CLAMPED]] {round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
+// CHECK: %[[F32_TO_E4:.*]] = arith.truncf %[[E5_TO_F32]] {round_mode = #hfusion.round_mode<rint>} : f32 to f8E4M3FN
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return %[[F32_TO_E4]] : f8E4M3FN
 // CHECK-LABEL: func.func @scalar_fp16_to_bf16_rtne
@@ -52,6 +54,33 @@
 module {
   tt.func @scalar_fp32_to_fp8_rtne(%arg0: f32) -> f8E4M3FN {
     %0 = tt.fp_to_fp %arg0, rounding = rtne : f32 -> f8E4M3FN
+    tt.return %0 : f8E4M3FN
+  }
+
+  tt.func @scalar_fp32_to_f8e5m2_rtne(%arg0: f32) -> f8E5M2 {
+    %0 = tt.fp_to_fp %arg0, rounding = rtne : f32 -> f8E5M2
+    tt.return %0 : f8E5M2
+  }
+
+  tt.func @scalar_fp16_to_f8e5m2_rtne(%arg0: f16) -> f8E5M2 {
+    %0 = tt.fp_to_fp %arg0, rounding = rtne : f16 -> f8E5M2
+    tt.return %0 : f8E5M2
+  }
+
+  tt.func @scalar_bf16_to_f8e4m3fn_rtne(%arg0: bf16) -> f8E4M3FN {
+    %0 = tt.fp_to_fp %arg0, rounding = rtne : bf16 -> f8E4M3FN
+    tt.return %0 : f8E4M3FN
+  }
+
+  tt.func @scalar_fp16_nan_to_f8e5m2() -> f8E5M2 {
+    %c = arith.constant 0x7E00 : f16
+    %0 = tt.fp_to_fp %c, rounding = rtne : f16 -> f8E5M2
+    tt.return %0 : f8E5M2
+  }
+
+  tt.func @scalar_bf16_inf_to_f8e4m3fn() -> f8E4M3FN {
+    %c = arith.constant 0x7F80 : bf16
+    %0 = tt.fp_to_fp %c, rounding = rtne : bf16 -> f8E4M3FN
     tt.return %0 : f8E4M3FN
   }
 

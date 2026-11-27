@@ -21,30 +21,30 @@ SIGNATURE = {"X": "*u32", "T1": "*u32", "T2": "*u32", "O": "*u32"}
 
 
 @tla.jit
-def psel(X, T1, T2, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    t1 = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    t2 = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    o = tla.alloc_buffer((2, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(T1, (N, )), t1)
-    tla.copy(tla.view(T2, (N, )), t2)
+def psel(X, T1, T2, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    x = tla.alloc((N, ), tl.uint32, space="ub")
+    t1 = tla.alloc((N, ), tl.uint32, space="ub")
+    t2 = tla.alloc((N, ), tl.uint32, space="ub")
+    o = tla.alloc((2, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(T1, (N, )), t1)
+    tla.load_gm_to_ub(tla.view(T2, (N, )), t2)
     with tla.scope.simd():
         xv = tla.simd.vlds(x[0])
         a = tla.simd.vlds(t1[0])
         b = tla.simd.vlds(t2[0])
         p1 = tla.simd.vcmp(xv, a, op=tla.simd.CMP.LT)
         p2 = tla.simd.vcmp(xv, b, op=tla.simd.CMP.GT)
-        prefix = tla.simd.pge(ACTIVE, N)
-        ones = tla.simd.vsplat(1, tl.uint32)
-        zeros = tla.simd.vsplat(0, tl.uint32)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
+        ones = tla.simd.vdup(1, tl.uint32)
+        zeros = tla.simd.vdup(0, tl.uint32)
         tla.simd.vsts(o[0, 0], tla.simd.vsel(tla.simd.psel(p1, p2, prefix), ones, zeros))
         tla.simd.vsts(o[1, 0], tla.simd.vsel(tla.simd.psel(p1, p2, p1), ones, zeros))
-    tla.copy(o, tla.view(O, (2, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (2, N)))
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def test_ir(output_dir=None):

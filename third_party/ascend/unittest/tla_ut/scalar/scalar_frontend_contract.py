@@ -61,6 +61,66 @@ def _ops(module, name):
 
 SCALAR_TYPES = ("i1", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "fp16", "bf16", "fp32", "fp64")
 
+FLOAT8_TYPES = (tl.float8e5, tl.float8e5b16, tl.float8e4nv, tl.float8e4b8, tl.float8e4b15)
+
+
+@pytest.mark.parametrize("dtype", FLOAT8_TYPES)
+def test_scalar_interfaces_reject_float8(dtype):
+    value = tl.tensor(None, dtype)
+    buf = tla.buffer(None, tla.buffer_type((1, ), dtype))
+    int_value = tl.tensor(None, tl.int8)
+    int_buf = tla.buffer(None, tla.buffer_type((1, ), tl.int8))
+    semantic = SimpleNamespace(to_tensor=lambda x: x)
+    for operation, operands in (
+        (tla.load_scalar, (buf, )),
+        (tla.store_scalar, (buf, 1)),
+        (tla.store_scalar, (int_buf, value)),
+        (tla.select, (True, 1, value)),
+        (tla.abs, (value, )),
+        (tla.maximum, (value, 1)),
+        (tla.minimum, (1, value)),
+        (tla.cast, (value, tl.int8)),
+        (tla.cast, (int_value, dtype)),
+        (tla.cdiv, (1, value)),
+        (tla.clamp, (1.0, 0.0, value)),
+    ):
+        with pytest.raises(TypeError, match=rf"tla[.]{operation.__name__}.*float8"):
+            operation(*operands, _semantic=semantic)
+
+
+@tla.jit
+def _store_scalar_value(out, value):
+    tla.store_scalar(tla.view(out, (1, )), value)
+
+
+@pytest.mark.parametrize("source,destination,message", [
+    ("fp64", "fp32", "does not support fp64 narrowing"),
+    ("fp64", "fp16", "does not support fp64 narrowing"),
+    ("bf16", "fp32", "input does not support bfloat16"),
+    ("fp32", "bf16", "does not support bfloat16"),
+])
+def test_store_scalar_rejects_unsupported_conversion(source, destination, message):
+    with pytest.raises(CompilationError, match=f"tla.cast {message}"):
+        compile_offline(_store_scalar_value, {"out": "*" + destination, "value": source}, {})
+
+
+@tla.jit
+def _store_scalar_literal(out, VALUE: tl.constexpr):
+    tla.store_scalar(tla.view(out, (1, )), VALUE)
+
+
+@pytest.mark.parametrize("value", [1e100, 1e-100])
+def test_store_scalar_rejects_fp64_literal_narrowing(value):
+    with pytest.raises(CompilationError, match="tla.cast does not support fp64 narrowing"):
+        compile_offline(_store_scalar_literal, {"out": "*fp32"}, {"VALUE": value})
+
+
+@pytest.mark.parametrize("source,destination,conversion", [("bf16", "bf16", False), ("fp32", "fp16", True)])
+def test_store_scalar_supported_conversion(source, destination, conversion):
+    module = _lower(_store_scalar_value, {"out": "*" + destination, "value": source})
+    assert len(_ops(module, "memref.store")) == 1
+    assert len(_ops(module, "arith.truncf")) == int(conversion)
+
 
 def _scalar_frontend(operation, operands, **kwargs):
     """Emit real scalar IR without requiring the TLA-specific native builder."""
@@ -120,10 +180,9 @@ def test_abs_literals_match_triton(value):
     assert _scalar_frontend(tla.abs, (value, )) == _scalar_frontend(tl.abs, (value, ))
 
 
-@pytest.mark.parametrize("dtype", [tl.float8e5, tl.float8e4nv, tl.float8e4b15, tl.float64])
 @pytest.mark.parametrize("wrapped", [False, True])
-def test_abs_rejects_unsupported_floats(dtype, wrapped):
-    value = tl.tensor(None, dtype)
+def test_abs_rejects_fp64(wrapped):
+    value = tl.tensor(None, tl.float64)
     with pytest.raises(TypeError, match="tla.abs does not support dtype"):
         tla.abs(tl.constexpr(value) if wrapped else value, _semantic=object())
 
@@ -194,8 +253,8 @@ def test_abs_composes_in_jit_helper():
 
 
 @pytest.mark.parametrize("condition", SCALAR_TYPES)
-@pytest.mark.parametrize("left", SCALAR_TYPES + ("fp8e5", ))
-@pytest.mark.parametrize("right", SCALAR_TYPES + ("fp8e5", ))
+@pytest.mark.parametrize("left", SCALAR_TYPES)
+@pytest.mark.parametrize("right", SCALAR_TYPES)
 def test_select_matches_triton_frontend(condition, left, right):
     operands = tuple(tl.str_to_ty(dtype, None) for dtype in (condition, left, right))
     if "bf16" in (condition, left, right):
@@ -233,8 +292,8 @@ def test_select_literals_match_triton(condition, operands):
 
 @pytest.mark.parametrize("is_max", [True, False], ids=["maximum", "minimum"])
 @pytest.mark.parametrize("propagate_nan", [tl.PropagateNan.NONE, tl.PropagateNan.ALL])
-@pytest.mark.parametrize("left", SCALAR_TYPES + ("fp8e5", ))
-@pytest.mark.parametrize("right", SCALAR_TYPES + ("fp8e5", ))
+@pytest.mark.parametrize("left", SCALAR_TYPES)
+@pytest.mark.parametrize("right", SCALAR_TYPES)
 def test_minmax_matches_triton_frontend(left, right, propagate_nan, is_max):
     operands = (tl.str_to_ty(left, None), tl.str_to_ty(right, None))
     operation = tla.maximum if is_max else tla.minimum
@@ -571,6 +630,11 @@ def test_scalar_cast_matches_triton_frontend(source, destination, bitcast):
         assert outcome[0] is TypeError
         assert "does not support bfloat16" in outcome[1]
         return
+    if source == "fp64" and destination in ("fp16", "fp32") and not bitcast:
+        outcome, _ = _scalar_frontend(tla.cast, operands, **kwargs)
+        assert outcome[0] is TypeError
+        assert "tla.cast does not support fp64 narrowing" in outcome[1]
+        return
     assert _scalar_frontend(tla.cast, operands, **kwargs) == _scalar_frontend(tl.cast, operands, **kwargs)
 
 
@@ -600,11 +664,24 @@ def test_scalar_cast_rejects_bfloat16_literals(value):
     assert "does not support bfloat16" in outcome[1]
 
 
+@pytest.mark.parametrize("value", [1e100, 1e-100, tl.constexpr(1e100), tl.constexpr(1e-100)])
+@pytest.mark.parametrize("destination", [tl.float16, tl.float32])
+def test_scalar_cast_rejects_fp64_narrowing_literals(value, destination):
+    outcome, _ = _scalar_frontend(tla.cast, (value, ), dtype=destination)
+    assert outcome[0] is TypeError
+    assert "tla.cast does not support fp64 narrowing" in outcome[1]
+
+
 @pytest.mark.parametrize("source", SCALAR_TYPES)
 @pytest.mark.parametrize("destination", SCALAR_TYPES)
 def test_scalar_cast_numeric_ir(source, destination):
     if "bf16" in (source, destination):
         with pytest.raises(Exception, match="does not support bfloat16"):
+            _lower(_cast_expression, {"x": source},
+                   {"DTYPE": tl.str_to_ty(destination, None), "BITCAST": False, "ROUND": None})
+        return
+    if source == "fp64" and destination in ("fp16", "fp32"):
+        with pytest.raises(CompilationError, match="tla.cast does not support fp64 narrowing"):
             _lower(_cast_expression, {"x": source},
                    {"DTYPE": tl.str_to_ty(destination, None), "BITCAST": False, "ROUND": None})
         return
@@ -615,6 +692,34 @@ def test_scalar_cast_numeric_ir(source, destination):
     assert str(debug.get_operand(0).get_type()) == expected
     assert "tensor<" not in str(module) and "tt." not in str(module)
     assert not _ops(module, "memref.alloc")
+
+
+@pytest.mark.parametrize("destination", [tl.float16, tl.float32])
+@pytest.mark.parametrize("rounding", [None, "rtne", "rtz"])
+def test_scalar_fp64_narrowing_rejected(destination, rounding):
+    outcome, _ = _scalar_frontend(tla.cast, (tl.float64, ), dtype=destination, fp_downcast_rounding=rounding)
+    assert outcome[0] is TypeError
+    assert "tla.cast does not support fp64 narrowing" in outcome[1]
+
+
+@tr.jit
+def _fp64_cast_helper(x):
+    return tla.cast(x, tl.float32)
+
+
+@tr.jit
+def _fp64_cast_caller(x):
+    tla.device_print("result", _fp64_cast_helper(x))
+
+
+def test_scalar_fp64_narrowing_in_jit_helper_rejected():
+    with pytest.raises(CompilationError) as caught:
+        compile_offline(_fp64_cast_caller, {"x": "fp64"}, {})
+    error = caught.value
+    while error.__cause__ is not None:
+        error = error.__cause__
+    assert isinstance(error, TypeError)
+    assert "tla.cast does not support fp64 narrowing" in str(error)
 
 
 @pytest.mark.parametrize("source,destination", [
@@ -1026,7 +1131,7 @@ def test_max_value_reject_string_dtype(dtype, wrapped):
         tla.max_value(dtype, _semantic=SimpleNamespace())
 
 
-@pytest.mark.parametrize("dtype", [tl.void, tl.float8e5, tl.float8e4nv])
+@pytest.mark.parametrize("dtype", (tl.void, ) + FLOAT8_TYPES)
 def test_max_value_reject_unsupported_dtype(dtype):
     with pytest.raises(ValueError, match="tla.max_value does not support dtype"):
         tla.max_value(dtype, _semantic=SimpleNamespace())
@@ -1102,3 +1207,125 @@ def test_infinity_reject_unsupported_dtype(dtype):
 def test_infinity_reject_non_scalar_dtype(value):
     with pytest.raises(TypeError, match="tla.infinity expects a compile-time dtype"):
         tla.infinity(tl.constexpr(value), _semantic=SimpleNamespace())
+
+
+# Execution-domain contracts shared by scalar APIs.
+
+SCALAR_SCOPE_CASES = [
+    (tla.select, (1, 2)),
+    (tla.abs, ()),
+    (tla.maximum, (3, )),
+    (tla.minimum, (3, )),
+    (tla.cast, (tl.int32, )),
+    (tla.cdiv, (3, )),
+    (tla.clamp, (1.0, 3.0)),
+]
+
+
+@tr.jit
+def _scalar_scope_helper(x, OP: tl.constexpr, EXTRA: tl.constexpr):
+    if len(EXTRA) == 0:
+        return OP(x)
+    elif len(EXTRA) == 1:
+        return OP(x, EXTRA[0])
+    else:
+        return OP(x, EXTRA[0], EXTRA[1])
+
+
+@tla.jit
+def _scalar_scope_caller(x, OP: tl.constexpr, EXTRA: tl.constexpr, LITERAL: tl.constexpr, HELPER: tl.constexpr,
+                         PRECALL: tl.constexpr):
+    if LITERAL:
+        x = 2
+    if PRECALL:
+        _scalar_scope_helper(x, OP, EXTRA)
+    with tla.scope.simd():
+        if HELPER:
+            _scalar_scope_helper(x, OP, EXTRA)
+        else:
+            if len(EXTRA) == 0:
+                OP(x)
+            elif len(EXTRA) == 1:
+                OP(x, EXTRA[0])
+            else:
+                OP(x, EXTRA[0], EXTRA[1])
+
+
+@pytest.mark.parametrize("operation,extra", SCALAR_SCOPE_CASES, ids=[op.__name__ for op, _ in SCALAR_SCOPE_CASES])
+@pytest.mark.parametrize("literal", [False, True], ids=["runtime", "literal"])
+@pytest.mark.parametrize("helper,precall", [(False, False), (True, False), (True, True)],
+                         ids=["direct", "helper", "helper_after_outside_call"])
+def test_scalar_operations_reject_simd_scope(operation, extra, literal, helper, precall):
+    with pytest.raises(CompilationError) as caught:
+        compile_offline(_scalar_scope_caller, {"x": "i32"},
+                        dict(OP=operation, EXTRA=extra, LITERAL=literal, HELPER=helper, PRECALL=precall))
+    error = caught.value
+    while error.__cause__ is not None:
+        error = error.__cause__
+    assert isinstance(error, ValueError)
+    assert str(error) == f"tla.{operation.__name__} cannot be used inside SIMD VF"
+
+
+@tla.jit
+def _scalar_in_simd_control_flow(x, LOOP: tl.constexpr):
+    with tla.scope.simd():
+        if LOOP:
+            for i in range(x):
+                tla.cast(i, tl.int32)
+        else:
+            if x > 0:
+                tla.cast(x, tl.int32)
+
+
+@pytest.mark.parametrize("loop", [False, True], ids=["if", "loop"])
+def test_scalar_operations_reject_simd_control_flow(loop):
+    with pytest.raises(CompilationError, match="tla.cast cannot be used inside SIMD VF"):
+        compile_offline(_scalar_in_simd_control_flow, {"x": "i32"}, {"LOOP": loop})
+
+
+@tla.jit
+def _constant_scope_helper(DTYPE: tl.constexpr, MAXIMUM: tl.constexpr):
+    if MAXIMUM:
+        return tla.max_value(DTYPE)
+    else:
+        return tla.infinity(DTYPE)
+
+
+@tla.jit
+def _constant_in_simd_scope(DTYPE: tl.constexpr, MAXIMUM: tl.constexpr, HELPER: tl.constexpr):
+    if HELPER:
+        _constant_scope_helper(DTYPE, MAXIMUM)
+    with tla.scope.simd():
+        if HELPER:
+            value = _constant_scope_helper(DTYPE, MAXIMUM)
+        elif MAXIMUM:
+            value = tla.max_value(DTYPE)
+        else:
+            value = tla.infinity(DTYPE)
+        tl.static_assert(value.dtype == DTYPE)
+        tl.static_assert(len(value.shape) == 0)
+
+
+@pytest.mark.parametrize("dtype", [case["dtype"] for case in MAX_VALUE_CASES])
+@pytest.mark.parametrize("helper", [False, True], ids=["direct", "helper"])
+def test_max_value_allowed_in_simd_scope(dtype, helper):
+    module, _ = compile_offline(_constant_in_simd_scope, {}, dict(DTYPE=dtype, MAXIMUM=True, HELPER=helper))
+    assert _ops(module, "arith.constant")
+
+
+@pytest.mark.parametrize("dtype", [tl.float16, tl.bfloat16, tl.float32])
+@pytest.mark.parametrize("helper", [False, True], ids=["direct", "helper"])
+def test_infinity_allowed_in_simd_scope(dtype, helper):
+    module, _ = compile_offline(_constant_in_simd_scope, {}, dict(DTYPE=dtype, MAXIMUM=False, HELPER=helper))
+    assert _ops(module, "arith.constant")
+
+
+@tla.jit
+def _scalar_after_simd_scope(x):
+    with tla.scope.simd():
+        tla.infinity(tl.float32)
+    tla.device_print("outside", _scalar_helper(x > 0, x, x))
+
+
+def test_scalar_scope_restored_after_simd():
+    _lower(_scalar_after_simd_scope, {"x": "i32"})

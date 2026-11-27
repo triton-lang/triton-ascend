@@ -219,6 +219,7 @@ class NPULauncher(object):
         self.compile_only = knobs.ascend.compile_only
         self.src = src
         self.metadata = metadata
+        self._proton_collection = getattr(metadata, "proton_collection", None)
         self.mix_mode = metadata.mix_mode
         self.shared = metadata.shared
         key_index = lambda key: src.fn.arg_names.index(key) if isinstance(key, str) else key
@@ -228,7 +229,15 @@ class NPULauncher(object):
         self.launch_spec = make_launch_spec(metadata, npu_utils)
         self._argument_types = argument_types(self.signature, constants)
         runtime, self._runtime_path = get_runtime(npu_utils.get_so_path(), metadata.debug)
-        native = runtime.create_launcher(self.launch_spec.as_dict(), self._argument_types)
+        if self.launch_spec.grid_contract_version:
+            capability = getattr(runtime, "capabilities", lambda: {})()
+            if capability.get("program_grid_contract", 0) < 3 or capability.get("launch_spec", 0) < 2:
+                error = NotImplementedError("NATIVE_ABI_MISMATCH")
+                error.ascend_launcher_abi_mismatch = True
+                raise error
+            native = runtime.create_launcher_v2(self.launch_spec.as_dict(), self._argument_types)
+        else:
+            native = runtime.create_launcher(self.launch_spec.as_dict(), self._argument_types)
         self.profile_scratch_size = int(getattr(metadata, "profile_scratch_size", 0) or 0)
         self.profile_scratch_align = int(getattr(metadata, "profile_scratch_align", 128) or 128)
         self.launch = wrap_handle_tensordesc(native, self.signature, bool(self.profile_scratch_size))
@@ -253,6 +262,9 @@ class NPULauncher(object):
             print("[INFO]: skip running kernel")
             print(f"[INFO]: The compiled kernel cache is in {cache_manager.cache_dir}")
             return
+        # A cached kernel can outlive the Proton hook that saw it load.
+        if self._proton_collection is not None and args[6] is not None:
+            args[6]._proton_collection = self._proton_collection
         if self.profile_scratch_size:
             gridX, gridY, gridZ, stream = args[:4]
             if min(gridX, gridY, gridZ) <= 0:
@@ -282,6 +294,9 @@ class NPUDriver(DriverBase):
         self.utils = NPUUtils()
         self.launcher_cls = NPULauncher
         super().__init__()
+        # Install launch/autotune hooks in the device runtime, not as an
+        # accidental side effect of compiler-cache fingerprinting.
+        from . import runtime  # noqa: F401
 
     @classmethod
     def is_active(cls):

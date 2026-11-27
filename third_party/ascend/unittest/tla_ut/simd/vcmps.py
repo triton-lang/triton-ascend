@@ -21,34 +21,34 @@ SIGNATURE = {"X": "*u32", "Y": "*i32", "O": "*u32"}
 
 
 @tla.jit
-def vcmps(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.uint32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.int32, space="ub")
-    o = tla.alloc_buffer((3, N), tl.uint32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(Y, (N, )), y)
+def vcmps(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    x = tla.alloc((N, ), tl.uint32, space="ub")
+    y = tla.alloc((N, ), tl.int32, space="ub")
+    o = tla.alloc((3, N), tl.uint32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         xv = tla.simd.vlds(x[0])
         yv = tla.simd.vlds(y[0])
-        prefix = tla.simd.pge(ACTIVE, N)
-        ones = tla.simd.vsplat(1, tl.uint32)
-        zeros = tla.simd.vsplat(0, tl.uint32)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
+        ones = tla.simd.vdup(1, tl.uint32)
+        zeros = tla.simd.vdup(0, tl.uint32)
         tla.simd.vsts(o[0, 0], tla.simd.vsel(tla.simd.vcmps(xv, 0x80000000, op=tla.simd.CMP.ULT), ones, zeros))
         tla.simd.vsts(o[1, 0], tla.simd.vsel(tla.simd.vcmps(yv, -1, op=tla.simd.CMP.LT), ones, zeros))
         tla.simd.vsts(o[2, 0],
                       tla.simd.vsel(tla.simd.vcmps(xv, 0x80000000, mask=prefix, op=tla.simd.CMP.ULT), ones, zeros))
-    tla.copy(o, tla.view(O, (3, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (3, N)))
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def test_ir(output_dir=None):
     module, ctx = compile_offline(vcmps, SIGNATURE, constexprs(), output_dir=output_dir)
     text = str(module)
     assert text.count("ave.hir.vcmp") == 3
-    assert text.count("ave.hir.broadcast") == 3, "vcmps broadcasts the scalar per row"
+    assert text.count("ave.hir.broadcast") == 5, "two constants and one scalar per vcmps"
     text = str(lower_offline(module, ctx, output_dir=output_dir))
     check_lowered_ir(text, loads=2, stores=1, buffers=None, extra=("ave.hir.vcmp", ))
     print("IR PASS: vcmps broadcast + vcmp composition")

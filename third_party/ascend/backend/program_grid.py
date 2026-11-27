@@ -15,16 +15,19 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Sequence
 
+I32_MAX = (1 << 31) - 1
+
 PROGRAM_GRID_TRANSFORMS_ATTR = "hacc.program_grid_transforms"
 PROGRAM_GRID_TRANSFORMS_VERSION = 2
 
-GRAPH_OPTIMIZATION_KNOWN_RULE_MASK = 0x3FBFF
+GRAPH_OPTIMIZATION_KNOWN_RULE_MASK = 0x7FBFF
 INDEPENDENT_AXIS_TENSORIZE_RULE_BIT = 1 << 9
 PERSISTENT_TASK_STRIP_MINING_RULE_BIT = 1 << 11
 SELECTED_BLOCK_SCAN_RULE_BIT = 1 << 16
 QUERY_ROW_BATCHING_RULE_BIT = 1 << 17
+COALESC_ATOMIC_LOCK_REMOVAL_RULE_BIT = 1 << 18
 DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK = (511 | INDEPENDENT_AXIS_TENSORIZE_RULE_BIT
-                                        | PERSISTENT_TASK_STRIP_MINING_RULE_BIT)
+                                        | PERSISTENT_TASK_STRIP_MINING_RULE_BIT | COALESC_ATOMIC_LOCK_REMOVAL_RULE_BIT)
 
 RUNTIME_ORIGINAL_GRID = "runtime_original_grid"
 HIDDEN_EXTENT_AXES = (0, 1)
@@ -119,19 +122,26 @@ def normalize_program_grid_transforms(raw: Any) -> dict[str, Any]:
                                        (": " + "; ".join(detail) if detail else ""))
 
     version = _integer(contract["version"], "version", minimum=1)
-    if version != PROGRAM_GRID_TRANSFORMS_VERSION:
+    if version not in (2, 3):
         raise ProgramGridContractError(f"unsupported program_grid_transforms version {version}; "
                                        f"expected {PROGRAM_GRID_TRANSFORMS_VERSION}")
+    batch = version == 3
+    axes = (0, 1, 2) if batch else HIDDEN_EXTENT_AXES
+    argument_order = ("originalGridX", "originalGridY", "originalGridZ") if batch else HIDDEN_ARGUMENT_ORDER
+    types = ("i32", "i32", "i32") if batch else HIDDEN_ARGUMENT_TYPES
     if contract["extent_source"] != RUNTIME_ORIGINAL_GRID:
         raise ProgramGridContractError("extent_source must be runtime_original_grid")
-    _exact_sequence(contract["hidden_extent_axes"], HIDDEN_EXTENT_AXES, "hidden_extent_axes")
-    _exact_sequence(contract["hidden_argument_order"], HIDDEN_ARGUMENT_ORDER, "hidden_argument_order")
-    _exact_sequence(contract["hidden_argument_types"], HIDDEN_ARGUMENT_TYPES, "hidden_argument_types")
+    _exact_sequence(contract["hidden_extent_axes"], axes, "hidden_extent_axes")
+    if batch:
+        for item in contract["hidden_extent_axes"]:
+            _integer(item, "hidden_extent_axes", minimum=0)
+    _exact_sequence(contract["hidden_argument_order"], argument_order, "hidden_argument_order")
+    _exact_sequence(contract["hidden_argument_types"], types, "hidden_argument_types")
 
     transforms_raw = contract["transforms"]
     if isinstance(transforms_raw, (str, bytes)) or not isinstance(transforms_raw, Sequence):
         raise ProgramGridContractError("transforms must be a sequence")
-    if len(transforms_raw) not in (1, 2):
+    if len(transforms_raw) not in ((1, ) if batch else (1, 2)):
         raise ProgramGridContractError("transforms must contain one or two entries")
 
     transforms: list[dict[str, Any]] = []
@@ -153,18 +163,22 @@ def normalize_program_grid_transforms(raw: Any) -> dict[str, Any]:
         order = _integer(transform["order"], f"transforms[{expected_order}].order", minimum=0)
         if order != expected_order:
             raise ProgramGridContractError("transform order must be contiguous from zero")
-        if transform["kind"] != "ceil_div":
-            raise ProgramGridContractError(f"transforms[{expected_order}].kind must be 'ceil_div'")
+        kind = transform["kind"]
+        if kind not in ("ceil_div", "cap"):
+            raise ProgramGridContractError(f"invalid program-grid transform kind {kind!r}")
         axis = _integer(transform["axis"], f"transforms[{expected_order}].axis", minimum=0)
-        if axis not in HIDDEN_EXTENT_AXES:
+        if axis not in axes:
             raise ProgramGridContractError("dynamic program-grid transforms support only axes 0 and 1")
         if axis in seen_axes:
             raise ProgramGridContractError("dynamic program-grid transforms may not repeat an axis")
         seen_axes.add(axis)
-        factor = _integer(transform["factor"], f"transforms[{expected_order}].factor", minimum=2)
+        factor = _integer(transform["factor"], f"transforms[{expected_order}].factor",
+                          minimum=1 if kind == "cap" else 2)
         persistent = _boolean(transform["persistent_coverage"], f"transforms[{expected_order}].persistent_coverage")
         grid_stride = _boolean(transform["grid_stride_abi_verified"],
                                f"transforms[{expected_order}].grid_stride_abi_verified")
+        if batch and (kind != "ceil_div" or factor > I32_MAX or persistent or grid_stride):
+            raise ProgramGridContractError("v3 requires one non-persistent i32 ceil-div transform")
         if persistent != grid_stride:
             raise ProgramGridContractError("persistent coverage and grid-stride ABI verification must agree")
         persistent_count += int(persistent)
@@ -173,21 +187,25 @@ def normalize_program_grid_transforms(raw: Any) -> dict[str, Any]:
         sequence.append((axis, factor, persistent, grid_stride))
         transforms.append({
             "order": order,
-            "kind": "ceil_div",
+            "kind": kind,
             "axis": axis,
             "factor": factor,
             "persistent_coverage": persistent,
             "grid_stride_abi_verified": grid_stride,
         })
 
-    if tuple(sequence) not in _SUPPORTED_SEQUENCES:
+    if any(t["kind"] == "cap" for t in transforms):
+        if len(transforms) != 1 or transforms[0]["axis"] != 0 or transforms[0]["factor"] > I32_MAX or transforms[0][
+                "persistent_coverage"]:
+            raise ProgramGridContractError("cap requires a standalone nonpersistent X-axis transform")
+    elif not batch and tuple(sequence) not in _SUPPORTED_SEQUENCES:
         raise ProgramGridContractError("unsupported dynamic IAT/PTSM transform sequence")
     return {
-        "version": PROGRAM_GRID_TRANSFORMS_VERSION,
+        "version": version,
         "extent_source": RUNTIME_ORIGINAL_GRID,
-        "hidden_extent_axes": list(HIDDEN_EXTENT_AXES),
-        "hidden_argument_order": list(HIDDEN_ARGUMENT_ORDER),
-        "hidden_argument_types": list(HIDDEN_ARGUMENT_TYPES),
+        "hidden_extent_axes": list(axes),
+        "hidden_argument_order": list(argument_order),
+        "hidden_argument_types": list(types),
         "transforms": transforms,
     }
 
@@ -211,11 +229,19 @@ def apply_program_grid_transforms(
 ) -> tuple[int, int, int]:
     if len(grid) != 3:
         raise ProgramGridContractError("grid must contain exactly three dimensions")
-    launch_grid = [_integer(value, f"grid[{axis}]", minimum=1) for axis, value in enumerate(grid)]
     normalized = normalize_program_grid_transforms(contract)
+    batch = normalized["version"] == 3
+    launch_grid = [_integer(value, f"grid[{axis}]", minimum=0 if batch else 1) for axis, value in enumerate(grid)]
+    if batch and any(extent > I32_MAX for extent in launch_grid):
+        raise ProgramGridContractError("v3 original grid extent exceeds i32")
     for transform in normalized["transforms"]:
         axis = transform["axis"]
-        launch_grid[axis] = (launch_grid[axis] + transform["factor"] - 1) // transform["factor"]
+        if transform["kind"] == "cap":
+            if launch_grid[1:] != [1, 1]:
+                raise ProgramGridContractError("grouped reduction requires a one-dimensional launch")
+            launch_grid[axis] = min(launch_grid[axis], transform["factor"])
+        else:
+            launch_grid[axis] = (launch_grid[axis] + transform["factor"] - 1) // transform["factor"]
     persistent = get_persistent_transform(normalized)
     if persistent is not None:
         cores = _integer(physical_core_count, "physical_core_count", minimum=1)
@@ -225,4 +251,6 @@ def apply_program_grid_transforms(
             if other_axis != axis:
                 other_programs *= extent
         launch_grid[axis] = min(launch_grid[axis], max(1, cores // max(1, other_programs)))
+    if batch and launch_grid[0] * launch_grid[1] * launch_grid[2] > I32_MAX:
+        raise ProgramGridContractError("v3 batch grid exceeds G0 i32 task count")
     return tuple(launch_grid)

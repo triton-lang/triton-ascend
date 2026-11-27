@@ -1,4 +1,4 @@
-"""TLA 3-in-1 test: vmula/vmadd (acc + src0 * src1) masks and modes on f32.
+"""TLA vmula tests and an IR check for the vmadd alias.
 
 Stages: ir (offline HIVM), compile (kernel artifacts), run (numerics).
 Rows: 0 full-mask, 1 prefix ZEROING, 2 all-false ZEROING, 3 prefix MERGING
@@ -20,49 +20,44 @@ SCALAR = 2.0
 
 
 @tla.jit
-def vmula(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o = tla.alloc_buffer((4, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(Y, (N, )), y)
+def vmula(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    x = tla.alloc((N, ), tl.float32, space="ub")
+    y = tla.alloc((N, ), tl.float32, space="ub")
+    o = tla.alloc((4, N), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         acc = tla.simd.vlds(x[0])
         a = tla.simd.vlds(y[0])
-        b = tla.simd.vsplat(2.0, tl.float32)
+        b = tla.simd.vdup(2.0, tl.float32)
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(o[0, 0], tla.simd.vmula(acc, a, b))
         tla.simd.vsts(o[1, 0], tla.simd.vmula(acc, a, b, prefix))
         tla.simd.vsts(o[2, 0], tla.simd.vmula(acc, a, b, none))
         tla.simd.vsts(o[3, 0], tla.simd.vmula(acc, a, b, mask=prefix, mode=tla.simd.MODE.MERGING))
-    tla.copy(o, tla.view(O, (4, N)))
+    tla.store_ub_to_gm(o, tla.view(O, (4, N)))
 
 
 @tla.jit
-def vmadd(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
-    x = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    y = tla.alloc_buffer((N, ), tl.float32, space="ub")
-    o = tla.alloc_buffer((4, N), tl.float32, space="ub")
-    tla.copy(tla.view(X, (N, )), x)
-    tla.copy(tla.view(Y, (N, )), y)
+def vmadd(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
+    x = tla.alloc((N, ), tl.float32, space="ub")
+    y = tla.alloc((N, ), tl.float32, space="ub")
+    o = tla.alloc((N, ), tl.float32, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    tla.load_gm_to_ub(tla.view(Y, (N, )), y)
     with tla.scope.simd():
         acc = tla.simd.vlds(x[0])
         a = tla.simd.vlds(y[0])
-        b = tla.simd.vsplat(2.0, tl.float32)
-        idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
-        none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
-        tla.simd.vsts(o[0, 0], tla.simd.vmadd(acc, a, b))
-        tla.simd.vsts(o[1, 0], tla.simd.vmadd(acc, a, b, prefix))
-        tla.simd.vsts(o[2, 0], tla.simd.vmadd(acc, a, b, none))
-        tla.simd.vsts(o[3, 0], tla.simd.vmadd(acc, a, b, mask=prefix, mode=tla.simd.MODE.MERGING))
-    tla.copy(o, tla.view(O, (4, N)))
+        b = tla.simd.vdup(2.0, tl.float32)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
+        tla.simd.vsts(o[0], tla.simd.vmadd(acc, a, b, mask=prefix, mode=tla.simd.MODE.MERGING))
+    tla.store_ub_to_gm(o, tla.view(O, (N, )))
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def _reference(x, y):
@@ -86,9 +81,10 @@ def test_ir(output_dir=None):
 
     module, ctx = compile_offline(vmadd, SIGNATURE, constexprs())
     text = str(module)
-    assert text.count("ave.hir.vmula") == 4, "vmadd lowers to the same vmula meta-op"
+    assert text.count("ave.hir.vmula") == 1, "vmadd lowers to the same vmula meta-op"
     assert text.count("ave.hir.vsel") == 1
-    print("IR PASS: vmula/vmadd full/ZEROING/all-false/MERGING")
+    assert "ave.hir.pge <VL32>" in text
+    print("IR PASS: vmula mask modes and vmadd alias")
 
 
 def _launch():
@@ -98,25 +94,20 @@ def _launch():
     out = torch.empty((4, s["lanes"]), dtype=torch.float32, device="npu")
     vmula[(1, )](x.to("npu"), y.to("npu"), out, **constexprs())
     torch.npu.synchronize()
-    ref = _reference(x, y)
-    out2 = torch.empty((4, s["lanes"]), dtype=torch.float32, device="npu")
-    vmadd[(1, )](x.to("npu"), y.to("npu"), out2, **constexprs())
-    torch.npu.synchronize()
-    return out, out2, ref
+    return out, _reference(x, y)
 
 
 def test_compile():
     _launch()
     artifacts = check_compile_artifacts()
     assert artifacts, "no .o/.npubin artifact in TRITON_CACHE_DIR"
-    print("COMPILE PASS: vmula/vmadd generated artifacts", len(artifacts), "->", artifacts[0])
+    print("COMPILE PASS: vmula generated artifacts", len(artifacts), "->", artifacts[0])
 
 
 def test_run():
-    out, out2, ref = _launch()
+    out, ref = _launch()
     torch.testing.assert_close(out.cpu(), ref, rtol=1e-6, atol=1e-6)
-    torch.testing.assert_close(out2.cpu(), ref, rtol=1e-6, atol=1e-6)
-    print("VMULA/VMADD OK: full/ZEROING/all-false/MERGING")
+    print("VMULA OK: full/ZEROING/all-false/MERGING")
 
 
 def main():

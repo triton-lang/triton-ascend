@@ -53,7 +53,7 @@ Adapter &getAdapter() {
   static Adapter adapter;
   return adapter;
 }
-} // namespace
+
 extern "C" void triton_launch_kernel(const char *name, void *function,
                                      void *stream, int gridX, int gridY,
                                      int gridZ, const int64_t *shapes,
@@ -110,4 +110,80 @@ PyMODINIT_FUNC PyInit___triton_launcher() {
                     "unknown exported launcher initialization error");
     return nullptr;
   }
+}
+
+// Runtime entry points shared by the generic AOT C exports below.
+struct SharedRuntime {
+  decltype(&triton_npu_create_plan_v1) create;
+  decltype(&triton_npu_launch_v1) launch;
+  SharedRuntime() {
+    void *runtime = triton::ascend::openRuntime(TRITON_EXPORT_RUNTIME_PATH);
+    create = triton::ascend::resolve<decltype(create)>(
+        runtime, "triton_npu_create_plan_v1");
+    launch = triton::ascend::resolve<decltype(launch)>(runtime,
+                                                       "triton_npu_launch_v1");
+  }
+};
+SharedRuntime &getSharedRuntime() {
+  static SharedRuntime runtime;
+  return runtime;
+}
+} // namespace
+
+// Create a launch plan from the per-kernel spec/types embedded in one
+// generated AOT stub, so one launcher_export.so serves every kernel in the
+// directory. The stub caches the returned handle and reuses it for every
+// launch; returns nullptr on failure.
+extern "C" void *triton_launch_kernel_create(const TritonNpuLaunchSpecV1 *spec,
+                                             const TritonNpuArgTypeV1 *types,
+                                             size_t numTypes) {
+  try {
+    char error[512];
+    TritonNpuLaunchPlan *plan =
+        getSharedRuntime().create(spec, types, numTypes, error, sizeof(error));
+    if (plan == nullptr)
+      std::fprintf(stderr, "Triton C launcher: %s\n", error);
+    return plan;
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "Triton C launcher: %s\n", error.what());
+  } catch (...) {
+    std::fprintf(stderr, "Triton C launcher: unknown native error\n");
+  }
+  return nullptr;
+}
+
+// Launch a kernel through a plan from triton_launch_kernel_create. name and
+// function identify the registered kernel; the plan supplies its launch
+// policy. Returns 0 on success, otherwise the launcher error code (-1 for
+// invalid arguments or an exception).
+extern "C" int triton_launch_kernel_run(void *handle, const char *name,
+                                        void *function, void *stream, int gridX,
+                                        int gridY, int gridZ, void *const *args,
+                                        const size_t *sizes, int num_args) {
+  try {
+    auto *plan = static_cast<TritonNpuLaunchPlan *>(handle);
+    if (plan == nullptr)
+      throw std::invalid_argument("missing launcher plan");
+    if (num_args < 0)
+      throw std::invalid_argument("negative kernel argument count");
+    TritonNpuLaunchRequestV1 request = {
+        1,       sizeof(TritonNpuLaunchRequestV1),
+        name,    function,
+        stream,  {gridX, gridY, gridZ},
+        nullptr, nullptr,
+        nullptr, 0,
+        nullptr};
+    char error[512];
+    int ret = getSharedRuntime().launch(plan, &request, args, sizes,
+                                        static_cast<size_t>(num_args), error,
+                                        sizeof(error));
+    if (ret)
+      std::fprintf(stderr, "Triton C launcher failed (%d): %s\n", ret, error);
+    return ret;
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "Triton C launcher: %s\n", error.what());
+  } catch (...) {
+    std::fprintf(stderr, "Triton C launcher: unknown native error\n");
+  }
+  return -1;
 }

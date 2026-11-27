@@ -166,6 +166,99 @@ def test_get_simt_stack_limit_config_overrides_default(monkeypatch, tmp_path):
     assert result != 1152
 
 
+def test_block_compile_context_preserves_hardware_inputs_and_identity(monkeypatch):
+    backend = compiler.AscendBackend(GPUTarget('npu', 'Ascend950PR_9579', 32))
+    hardware = SimpleNamespace(get_aicore_num=lambda: 12, get_aivector_core_num=lambda: 24, get_device_limit=lambda:
+                               (True, 12, 24))
+    monkeypatch.setattr(compiler, 'NPUUtils', lambda: hardware)
+    values = backend.prepare_block_compile_options(dict(block_batching_factor=2))
+    assert values['block_compile_context'] == (backend.target.arch, 12, (True, 12, 24), None)
+
+    def no_device():
+        pytest.fail('worker must consume the captured target without querying a device')
+
+    monkeypatch.setattr(compiler, 'NPUUtils', no_device)
+    options = backend.parse_options(values)
+    assert compiler._graph_optimize_core_num(options) == 12
+    assert compiler._compile_device_limit(options) == (True, 12, 24)
+    assert backend.prepare_block_compile_options(values) == values
+    identities = {options.hash()}
+    for context in ((backend.target.arch, 13, (True, 12, 24), None), (backend.target.arch, 12, (True, 13, 26), None),
+                    (backend.target.arch, 12, (False, 12, 24), None)):
+        identities.add(backend.parse_options(dict(values, block_compile_context=context)).hash())
+    assert len(identities) == 4
+    with pytest.raises(ValueError, match='architecture'):
+        backend.parse_options(dict(values, block_compile_context=('Ascend910_9391', 12, (True, 12, 24), None)))
+
+
+@pytest.mark.parametrize("compile_only", [False, True])
+@pytest.mark.parametrize("simt", [False, True])
+def test_direct_compilation_preserves_device_queries(monkeypatch, compile_only, simt):
+    from triton import knobs
+    backend = compiler.AscendBackend(GPUTarget('npu', 'Ascend950PR_9579', 32))
+    hardware = SimpleNamespace(get_aicore_num=lambda: 12, get_aivector_core_num=lambda: 24, get_device_limit=lambda:
+                               (True, 12, 24))
+    monkeypatch.setattr(compiler, 'NPUUtils', lambda: hardware)
+    with knobs.ascend.scope():
+        knobs.ascend.compile_only = compile_only
+        options = backend.parse_options(dict(compile_mode='simt_only') if simt else {})
+        assert compiler._graph_optimize_core_num(options) == (24 if simt else 12)
+        assert compiler._compile_device_limit(options) == (True, 12, 24)
+
+
+@pytest.mark.parametrize("compile_only", [False, True])
+def test_direct_compilation_preserves_device_query_failures(monkeypatch, compile_only):
+    from triton import knobs
+    backend = compiler.AscendBackend(GPUTarget('npu', 'Ascend950PR_9579', 32))
+
+    def unavailable():
+        raise RuntimeError('device unavailable')
+
+    monkeypatch.setattr(compiler, 'NPUUtils', unavailable)
+    with knobs.ascend.scope():
+        knobs.ascend.compile_only = compile_only
+        options = backend.parse_options({})
+        assert compiler._graph_optimize_core_num(options) == 0
+        with pytest.raises(RuntimeError, match='device unavailable'):
+            compiler._compile_device_limit(options)
+
+
+def test_compile_only_block_batching_requires_explicit_target_without_runtime_queries(monkeypatch):
+    from triton import knobs
+    backend = compiler.AscendBackend(GPUTarget('npu', 'Ascend950PR_9579', 32))
+    monkeypatch.setattr(compiler, 'NPUUtils', lambda: pytest.fail('offline compilation queried the NPU'))
+    with knobs.ascend.scope():
+        knobs.ascend.compile_only = True
+        with pytest.raises(ValueError, match='explicit block_compile_context'):
+            backend.prepare_block_compile_options(dict(block_batching_factor=2))
+        values = dict(block_batching_factor=2, block_compile_context=(backend.target.arch, 24, (False, 24, 48), None))
+        assert backend.prepare_block_compile_options(values) == values
+        options = backend.parse_options(values)
+        assert compiler._graph_optimize_core_num(options) == 24
+        assert compiler._compile_device_limit(options) == (False, 24, 48)
+        with pytest.raises(ValueError, match='SIMT stack'):
+            backend.parse_options(dict(values, compile_mode='simt_only'))
+        simt = dict(values, compile_mode='simt_only',
+                    block_compile_context=(backend.target.arch, 48, (False, 24, 48), 2048))
+        assert backend.prepare_block_compile_options(simt) == simt
+        changed = dict(simt, block_compile_context=(backend.target.arch, 48, (False, 24, 48), 4096))
+        assert backend.parse_options(simt).hash() != backend.parse_options(changed).hash()
+
+
+def test_a3_auto_compile_only_uses_declared_core_counts(monkeypatch):
+    from triton import knobs
+    arch = 'Ascend910_9391'
+    backend = compiler.AscendBackend(GPUTarget('npu', arch, 32))
+    monkeypatch.setattr(compiler, 'NPUUtils', lambda: pytest.fail('queried a device for an explicit target'))
+    with knobs.ascend.scope():
+        knobs.ascend.compile_only = True
+        values = dict(block_batching_factor='auto', enable_graph_optimize=False)
+        with pytest.raises(ValueError, match='AIC/AIV'):
+            backend.prepare_block_compile_options(dict(values, block_compile_context=(arch, None, None, None)))
+        v = dict(values, block_compile_context=(arch, None, (False, 24, 48), None))
+        assert backend.prepare_block_compile_options(v) == v
+
+
 def test_empty_options_expose_all_legacy_names(backend):
     options = backend.parse_options({})
 
@@ -204,38 +297,6 @@ def test_dynamic_cv_pipeline_is_enabled_only_on_a5(arch, requested, expected):
     options = backend.parse_options(raw)
 
     assert options.enable_dynamic_cv_pipeline is expected
-
-
-@pytest.mark.parametrize("dtype, deprecated", [
-    (tl.float8e5, False),
-    (tl.float8e4nv, False),
-    (tl.float8e4b8, False),
-    (tl.float8e5b16, False),
-    (tl.float8e4b8, True),
-    (tl.float8e5b16, True),
-])
-def test_fp8_dot_frontend_options(backend, dtype, deprecated):
-
-    @triton.jit
-    def kernel(dtype: tl.constexpr):
-        a = tl.full((64, 64), 0.0, dtype)
-        tl.dot(a, a)
-
-    raw = {"deprecated_fp8_dot_operand_dtypes": (str(dtype), )} if deprecated else {}
-    options = backend.parse_options(raw)
-    source = triton.compiler.ASTSource(kernel, {"dtype": "constexpr"}, {"dtype": dtype})
-    context = ir.context()
-    ir.load_dialects(context)
-    backend.load_dialects(context)
-    warning = pytest.warns(UserWarning, match="upcasted to fp16") if deprecated else contextlib.nullcontext()
-    with warning:
-        module = source.make_ir(backend.target, options, backend.get_codegen_implementation(options),
-                                backend.get_module_map(), context)
-
-    assert module.verify()
-    dot = next(line for line in str(module).splitlines() if "tt.dot " in line)
-    software_fp8 = str(dtype) in getattr(options, "software_fp8_dtypes", ())
-    assert ("tensor<64x64xf16>" in dot) == (deprecated or software_fp8)
 
 
 def test_text_pipeline_uses_ttadapter_directly(backend, monkeypatch):
@@ -350,10 +411,7 @@ def test_legacy_stream_is_consumed_without_losing_option_discovery(backend, stre
         ({"force_simt_only": True, "force_simt_template": True}, {"compile_mode": "simt_only"}),
         ({"force_simt_template": True}, {"compile_mode": "simd_simt_template"}),
         ({"force_simt_only": False, "compile_mode": "simd"}, {"compile_mode": "simd"}),
-        ({"intra_cache_num": 4}, {"buf_slot_num_of_veccore": 4}),
-        ({"inter_cache_num": 3}, {"buf_slot_num_of_crosscore": 3}),
         ({"load_cache_num": 2}, {"buf_slot_num_of_gm": 2}),
-        ({"intra_cache_num": 4, "buf_slot_num_of_veccore": 6}, {"buf_slot_num_of_veccore": 6}),
         ({"enable_bishengir_simt_optimization": 101, "compile_mode": "simt_only"
           }, {"simt_optimization_mode": 101, "compile_mode": "simt_only"}),
         ({"enable_bishengir_simt_optimization": 101, "simt_optimization_mode": 100, "compile_mode": "simt_only"

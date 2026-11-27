@@ -143,3 +143,36 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     return
   }
 }
+
+
+// -----
+
+// CHECK-LABEL: func.func @test_c2c_fixpipe_nz2nz_trunc_two_consumers
+// CHECK-NOT: arith.truncf
+// CHECK-COUNT-2: hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>
+// CHECK: [[L1_FIRST:%.*]] = bufferization.to_tensor {{.*}} {ssbuffer.block_id = 5 : i32,
+// CHECK: linalg.matmul {{.*}} ins([[L1_FIRST]],
+// CHECK: [[L1_SECOND:%.*]] = bufferization.to_tensor {{.*}} {ssbuffer.block_id = 6 : i32,
+// CHECK: linalg.matmul {{.*}} ins([[L1_SECOND]],
+// CHECK-NOT: arith.truncf
+// CHECK: return
+
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @test_c2c_fixpipe_nz2nz_trunc_two_consumers(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %a: tensor<32x1xf32>, %b: tensor<1x32xf32>, %c: tensor<32x1xf16>, %arg5: i32 {tt.divisibility = 16 : i32}) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {
+    %c0_i32 = arith.constant {ssbuffer.block_id = 17 : i32, ssbuffer.core_type = "VECTOR"} 0 : i32
+    %c1_i32 = arith.constant {ssbuffer.block_id = 17 : i32, ssbuffer.core_type = "VECTOR"} 1 : i32
+    %cst_f32 = arith.constant {ssbuffer.block_id = 11 : i32, ssbuffer.core_type = "CUBE"} 0.000000e+00 : f32
+    %cst_f16 = arith.constant {ssbuffer.block_id = 11 : i32, ssbuffer.core_type = "CUBE"} 0.000000e+00 : f16
+    %init32x32 = tensor.empty() {ssbuffer.block_id = 11 : i32, ssbuffer.core_type = "CUBE"} : tensor<32x32xf32>
+    %fill32x32 = linalg.fill {ssbuffer.block_id = 11 : i32, ssbuffer.core_type = "CUBE"} ins(%cst_f32 : f32) outs(%init32x32 : tensor<32x32xf32>) -> tensor<32x32xf32>
+    %init32x1 = tensor.empty() {ssbuffer.block_id = 11 : i32, ssbuffer.core_type = "CUBE"} : tensor<32x1xf16>
+    %fill32x1 = linalg.fill {ssbuffer.block_id = 11 : i32, ssbuffer.core_type = "CUBE"} ins(%cst_f16 : f16) outs(%init32x1 : tensor<32x1xf16>) -> tensor<32x1xf16>
+    scf.for %arg6 = %c0_i32 to %arg5 step %c1_i32  : i32 {
+      %mm1 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%a, %b : tensor<32x1xf32>, tensor<1x32xf32>) outs(%fill32x32 : tensor<32x32xf32>) -> tensor<32x32xf32>
+      %trunc = arith.truncf %mm1 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : tensor<32x32xf32> to tensor<32x32xf16>
+      %mm2 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%trunc, %c : tensor<32x32xf16>, tensor<32x1xf16>) outs(%fill32x1 : tensor<32x1xf16>) -> tensor<32x1xf16>
+      %mm3 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%trunc, %c : tensor<32x32xf16>, tensor<32x1xf16>) outs(%fill32x1 : tensor<32x1xf16>) -> tensor<32x1xf16>
+    }
+    return
+  }
+}

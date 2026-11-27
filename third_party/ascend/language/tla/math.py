@@ -115,35 +115,32 @@ def split_fp32(value: float) -> tuple:
 
 def _naive_rsqrt(value, _semantic):
     """1/sqrt(v) from ``rstd.py`` naive_rsqrt (vdiv + vsqrt)."""
-    return S.vdiv(S.vsplat(1.0, value.dtype, _semantic=_semantic), S.vsqrt(value, _semantic=_semantic),
+    return S.vdiv(S.vdup(1.0, value.dtype, _semantic=_semantic), S.vsqrt(value, _semantic=_semantic),
                   _semantic=_semantic)
 
 
 def _compensated_div_add(a, reciprocal_c0_hi, reciprocal_c0_lo, c1_hi, c1_lo, _semantic):
     """
     High/low parts of ``a / c0 + c1`` with TwoSum error recovery
-    (``rstd.py`` compensated_div_add; vmuls/vadds/vsub are expressed through
-    splat + mul/add/neg).
+    (``rstd.py`` compensated_div_add).
     """
-    r_c0_hi_v = S.vsplat(reciprocal_c0_hi, a.dtype, _semantic=_semantic)
+    r_c0_hi_v = S.vdup(reciprocal_c0_hi, a.dtype, _semantic=_semantic)
     product = S.vmul(a, r_c0_hi_v, _semantic=_semantic)
-    value = S.vadd(product, S.vsplat(c1_hi, a.dtype, _semantic=_semantic), _semantic=_semantic)
+    value = S.vadds(product, c1_hi, _semantic=_semantic)
 
     # Error-free TwoSum for product + c1_hi.
     virtual_c1 = S.vadd(value, S.vneg(product, _semantic=_semantic), _semantic=_semantic)
     product_sum_error = S.vadd(
         product, S.vneg(S.vadd(value, S.vneg(virtual_c1, _semantic=_semantic), _semantic=_semantic),
                         _semantic=_semantic), _semantic=_semantic)
-    c1_sum_error = S.vadd(S.vneg(virtual_c1, _semantic=_semantic), S.vsplat(c1_hi, a.dtype, _semantic=_semantic),
-                          _semantic=_semantic)
+    c1_sum_error = S.vadds(S.vneg(virtual_c1, _semantic=_semantic), c1_hi, _semantic=_semantic)
     sum_error = S.vadd(product_sum_error, c1_sum_error, _semantic=_semantic)
 
     # Recover the multiplication error and add the low parts of both constants.
-    product_error = S.vfma(S.vneg(product, _semantic=_semantic), a, r_c0_hi_v, _semantic=_semantic)
-    value_error = S.vadd(
-        S.vadd(product_error, sum_error, _semantic=_semantic),
-        S.vadd(S.vmul(a, S.vsplat(reciprocal_c0_lo, a.dtype, _semantic=_semantic), _semantic=_semantic),
-               S.vsplat(c1_lo, a.dtype, _semantic=_semantic), _semantic=_semantic), _semantic=_semantic)
+    product_error = S.vmula(S.vneg(product, _semantic=_semantic), a, r_c0_hi_v, _semantic=_semantic)
+    value_error = S.vadd(S.vadd(product_error, sum_error, _semantic=_semantic),
+                         S.vadds(S.vmuls(a, reciprocal_c0_lo, _semantic=_semantic), c1_lo, _semantic=_semantic),
+                         _semantic=_semantic)
     return value, value_error
 
 
@@ -155,19 +152,18 @@ def _compensated_rsqrt(value, value_error, estimate, _semantic):
     """
     estimate_squared = S.vmul(estimate, estimate, _semantic=_semantic)
     # square_error starts at -estimate_squared, then vmula adds estimate*estimate.
-    square_error = S.vfma(S.vneg(estimate_squared, _semantic=_semantic), estimate, estimate, _semantic=_semantic)
+    square_error = S.vmula(S.vneg(estimate_squared, _semantic=_semantic), estimate, estimate, _semantic=_semantic)
 
-    residual = S.vsplat(1.0, value.dtype, _semantic=_semantic)
+    residual = S.vdup(1.0, value.dtype, _semantic=_semantic)
     negative_value = S.vneg(value, _semantic=_semantic)
     negative_value_error = S.vneg(value_error, _semantic=_semantic)
-    residual = S.vfma(residual, negative_value, estimate_squared, _semantic=_semantic)
-    residual = S.vfma(residual, negative_value, square_error, _semantic=_semantic)
-    residual = S.vfma(residual, negative_value_error, estimate_squared, _semantic=_semantic)
-    residual = S.vfma(residual, negative_value_error, square_error, _semantic=_semantic)
+    residual = S.vmula(residual, negative_value, estimate_squared, _semantic=_semantic)
+    residual = S.vmula(residual, negative_value, square_error, _semantic=_semantic)
+    residual = S.vmula(residual, negative_value_error, estimate_squared, _semantic=_semantic)
+    residual = S.vmula(residual, negative_value_error, square_error, _semantic=_semantic)
 
     # refined = estimate + (estimate * 0.5) * residual
-    refined = S.vfma(estimate, S.vmul(estimate, S.vsplat(0.5, value.dtype, _semantic=_semantic), _semantic=_semantic),
-                     residual, _semantic=_semantic)
+    refined = S.vmula(estimate, S.vmuls(estimate, 0.5, _semantic=_semantic), residual, _semantic=_semantic)
     return refined
 
 

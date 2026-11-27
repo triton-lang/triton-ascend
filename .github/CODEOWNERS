@@ -52,7 +52,7 @@ third_party/proton/ @LH-123L @hongziqi
 # third_party/ascend
 # -----------
 # backend, launch, runtime
-third_party/ascend/backend/ @LH-123L @zhanwei33 @KanuaK @Cadenza4287
+third_party/ascend/backend/ @LH-123L @zhanwei33 @KanuaK @HinPeng
 # ascend patch & llvm patch
 third_party/ascend/patch/ @LH-123L @hongziqi
 # ascend dialect

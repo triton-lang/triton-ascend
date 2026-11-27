@@ -2238,7 +2238,7 @@ CONSTRAINTS = {
         "example": "triton.language.view",
     },
     "triton.language.where": {
-        "constraints": [],
+        "constraints": ["On Ascend, neither ``x`` nor ``y`` may be a tensor of pointers."],
         "dtype_support": """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |

@@ -10,7 +10,7 @@ Release plans, maintenance policies, and supported version information are out o
 
 | No. | Update | Description | Related Documentation |
 | --- | --- | --- | --- |
-| 1 | New do_bench_npu guide | Added a usage guide for the do_bench_npu performance benchmarking tool, covering performance testing methods and result interpretation in NPU scenarios, and added it to the documentation site navigation index. | [do_bench_npu guide](./debug_guide/do_bench_npu_guide.md) |
+| 1 | New do_bench_npu guide | Added a usage guide for the `do_bench_npu` performance benchmarking tool, covering performance testing methods and result interpretation in NPU scenarios, and added it to the documentation site navigation index. | [do_bench_npu guide](./debug_guide/do_bench_npu_guide.md) |
 | 2 | New "User-defined Autotune Feedback" section | The Autotune guide adds a description of the user-defined autotune feedback mechanism, allowing users to accumulate tuning experience and feed it back into the compilation workflow. | [Autotune guide](./autotune_guide.md) |
 | 3 | New "Source Build Options" description | The Installation Guide adds a description of the source build options, guiding users to configure build parameters as needed when compiling from source. | [Installation Guide](./installation_guide.md) |
 | 4 | Updated the libdevice developer guide | Substantially revised the libdevice developer guide, expanded the operator constraint descriptions, and added examples for operators such as `fast_tanhf`, `float2half_rn`, `half2float`, `max`, `min`, and `nan`. | [libdevice developer guide](./libdevice/libdevice_developer_guide.md) |

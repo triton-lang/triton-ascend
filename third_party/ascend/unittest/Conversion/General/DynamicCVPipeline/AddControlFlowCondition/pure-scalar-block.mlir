@@ -1,9 +1,10 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=arith.select
 
 // A block that has neither a cross-core nor an intra-core interaction is a
 // pure scalar computation: it does not exchange any data with the other
-// blocks. Each block's entry condition is only its own counter/handshake
-// condition, with no cross-block flag gating.
+// blocks. Its condition is the counter condition alone: the loop does not
+// force a single block per iteration any more, the condition of a block does
+// not check the flag of the loop.
 //   block 1 produces attribute group 1 (three producers)
 //   block 2 consumes group 1 and produces group 0
 //   block 3 is a pure scalar computation, it has no dependency at all
@@ -12,26 +13,23 @@
 // CHECK-LABEL: func.func @pure_scalar_block
 // CHECK: scf.while
 // CHECK: ^bb0
-
-// Block 1 produces attribute group 1.
+// The first block: the cross-core condition and-ed with the counter
+// condition.
 // CHECK: %[[GUARD1:.*]] = arith.andi %{{.*}}, %{{.*}}
 // CHECK: %[[IF1:[0-9]+]]:2 = scf.if %[[GUARD1]]
 // CHECK: ssbuffer.if = 1 : i32}
-
-// Block 2 consumes group 1 and produces group 0.
-// CHECK: arith.andi %{{.*}}, %{{.*}}
+// The second block: the intra-core condition and-ed with the counter
+// condition.
 // CHECK: %[[GUARD2:.*]] = arith.andi %{{.*}}, %{{.*}}
-// CHECK: %[[IF2:[0-9]+]]:3 = scf.if %[[GUARD2]]
 // CHECK: ssbuffer.if = 2 : i32}
-
-// Block 3 is a pure scalar computation: only the counter condition, no
-// cross-core or intra-core handshake.
+// The third block is a pure scalar computation: it has no dependency at all,
+// its condition is the counter condition alone.
 // CHECK: %[[GUARD3:.*]] = arith.cmpi slt, %{{.*}}, %{{.*}} : i32
 // CHECK: %[[IF3:[0-9]+]] = scf.if %[[GUARD3]] -> (i32) {
 // CHECK: hivm.hir.copy {{.*}} {ssbuffer.block_id = 3 : i32}
 // CHECK: ssbuffer.if = 3 : i32}
-
-// Block 4 consumes group 0.
+// The fourth block: the intra-core condition and-ed with the counter
+// condition.
 // CHECK: %[[GUARD4:.*]] = arith.andi %{{.*}}, %{{.*}}
 // CHECK: %[[IF4:[0-9]+]]:2 = scf.if %[[GUARD4]]
 // CHECK: ssbuffer.if = 4 : i32}

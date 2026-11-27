@@ -1,4 +1,4 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=arith.select
 
 // UpdateConditionInfo on scf.while: cross-core (核间) buffer conditions.
 // Same dual-scope crossCoreDeps skeleton as while-update-condition-counter;
@@ -45,6 +45,8 @@
 // CHECK: %[[SLE5:.*]] = arith.cmpi sle, %[[DIFF_PRE5]], %{{.*}} : i32
 // CHECK: %[[PRE5:.*]] = arith.andi %[[CROSS5]], %[[SLE5]]
 // CHECK: %[[AND5:.*]] = arith.andi %[[PRE5]], %{{.*}}
+// The loop does not force a single block per iteration any more: the
+// condition of a block does not check the flag of the loop.
 // CHECK: scf.if %[[AND5]]
 // The block bumps only its own counter: the value it already read for the
 // conditions is reused, the counter is not loaded again.
@@ -89,6 +91,8 @@
 // CHECK: %[[SLE0:.*]] = arith.cmpi sle, %[[DIFF_PRE0]], %{{.*}} : i32
 // CHECK: %[[PRE0:.*]] = arith.andi %[[CROSS0]], %[[SLE0]]
 // CHECK: %[[AND0:.*]] = arith.andi %[[PRE0]], %{{.*}}
+// The loop does not force a single block per iteration any more: the
+// condition of a block does not check the flag of the loop.
 // CHECK: scf.if %[[AND0]]
 // The cube reuses the value of its own counter that it already read.
 // CHECK: %[[ADD0:.*]] = arith.addi %[[LD_OWN0]], %{{.*}} : i32

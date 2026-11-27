@@ -4,6 +4,14 @@
 // pairs use different intra groups: one group lists every producer, and
 // calculateFactor looks those producers up inside the current for. Block 5's
 // mulf is inside one splitted_if.
+// The normal scheme does not wrap the ssbuffer.if: the outer scf.if of the
+// block carries the block condition and the ssbuffer.if marker, and the
+// splitted_if stays inside it as the inner data dependent scf.if. The counter
+// of the block is incremented in the then branch of the outer if, outside the
+// inner splitted_if, so it advances on every round of the loop even when the
+// data dependent condition of the block is false. The counter is the
+// induction variable of the scf.while, so a counter that only advances under
+// the data dependent condition would stop the loop.
 // ProcessArgs appends one shared iter_arg, then UpdateLoopOps appends block
 // counters. The first counter is the third iter_arg, initialized to the for
 // lower bound.
@@ -27,12 +35,8 @@
 // CHECK: scf.if %[[SPLIT]]
 // CHECK: arith.mulf {{.*}} : tensor<4xf32>
 // CHECK: } {{.*}}ssbuffer.splitted_if = 0 : i32}
-// CHECK: %[[NEXT_CTR1:[^ ]+]] = arith.addi %[[CTR1]], %[[STEP]] : i32
-// CHECK-NEXT: scf.yield %{{[^ ,]+}}, %{{[^ ,]+}}, %[[NEXT_CTR1]] : i32, i32, i32
-// CHECK-NEXT: } else {
-// CHECK-NEXT: scf.yield %{{[^ ,]+}}, %{{[^ ,]+}}, %[[CTR1]] : i32, i32, i32
-// CHECK-NEXT: } {{.*}}ssbuffer.if = 5 : i32}
-// CHECK: scf.yield %{{[^ ,]+}}, %{{[^ ,]+}}, %{{[^ ,]+}}, %[[BLOCK5]]#2,
+// CHECK: arith.addi %[[CTR1]], %[[STEP]]
+// CHECK: } {{.*}}ssbuffer.if = 5 : i32}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intra_buf_count = 2 : i32} {
   func.func @wrap_for_splitted_if() attributes {global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {

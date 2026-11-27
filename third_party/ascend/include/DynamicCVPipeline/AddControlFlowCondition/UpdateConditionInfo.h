@@ -235,9 +235,6 @@ private:
   SmallVector<std::pair<scf::IfOp, int>> getPreloadTargets(scf::IfOp ifOp,
                                                            bool isAIC);
 
-  // The number of the cross-core buffers, the base of the preload bounds.
-  int getPreloadBufferCount(ModuleOp module);
-
   // Preload conditions of `ifOp`: the block must not run more than
   // j - i + (buffer_num - 1) rounds ahead of the blocks of level j of the
   // same core when it is on the first level, and not more than j - i rounds
@@ -319,8 +316,10 @@ private:
   // chains never do. The preload conditions only compare a block with the
   // blocks that depend on it.
   DenseMap<int, DenseSet<int>> preloadAncestors;
-  // The number of the cross-core buffers, the base of the preload bounds.
-  int preloadBufferCount = 2;
+  // The number of the cross core buffers, the depth of the pipeline between
+  // the two cores. It is the base of the preload bounds, of the flowOpt
+  // threshold and of the cross core throttle.
+  int crossCoreBufferNum = 2;
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createUpdateConditionInfoPass();

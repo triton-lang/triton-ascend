@@ -85,7 +85,6 @@ struct BlockCounterSlot {
 struct CrossCoreBlockEdge {
   scf::IfOp producer;
   scf::IfOp consumer;
-  int bufferNum = 1; // buffer depth of this edge
 };
 
 // Per scf.while block-arg map: whileOp -> block_id -> (new_arg_idx ->

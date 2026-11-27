@@ -127,5 +127,15 @@ void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
 // op is null or is not nested in any scf.if carrying the ssbuffer.if attr.
 scf::IfOp findIfOpContainingOp(Operation *op);
 
+// The number of the cross core buffers, the depth of the pipeline between the
+// two cores.
+//
+// The attribute does not always live on the module: the buffer count manager
+// puts it there, but the function that carries the pipeline may hold it as
+// well. The function is looked at first, it is the more specific one. When
+// neither of them holds the attribute, the default of the buffer count
+// manager is used.
+int getCrossCoreBufferCount(ModuleOp module);
+
 } // namespace mlir
 #endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_UTILS_H

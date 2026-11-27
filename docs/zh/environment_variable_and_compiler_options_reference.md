@@ -300,7 +300,7 @@ configs = [
 | 算子优化 | `vf_fusion_mode` | 选择VF fusion策略。 | `None`，不传开关；`"max-parallel"`、`"all-op"`、`"ub-aware-op"` | — | 常规路径 |
 | 算子优化 | `enable_vf_stack_limit` | 在BiShengIR编译中根据向量函数（VF）的栈占用估算限制融合，降低栈溢出风险。 | `False`；布尔值 | — | 常规路径 |
 | 算子优化 | `hfusion_enable_multiple_consumer_fusion` | 控制多个消费者的HFusion。 | `None`；布尔值 | — | 常规路径 |
-| 算子优化 | `enable_hivm_batch_matmul` | 为BiShengIR编译启用batch matmul。 | `False`；布尔值 | 常规路径（下发开关） | 常规路径 |
+| 算子优化 | `enable_hivm_batch_matmul` | 为BiShengIR编译启用batch matmul。 | `False`；布尔值 | 常规路径 | 常规路径 |
 | 算子优化 | `auto_vectorize_v2_max_fused_ops_num` | 设置AutoVectorizeV2最大融合操作数。 | `None`（默认）或有符号32位整数。`None` 和负值沿用该pass的默认上限。大于或等于 `0` 的值设置显式上限。 | — | 常规路径 |
 | 算子优化 | `prevec_max_fused_ops_num` | 限制预向量化融合中的逐元素操作数。 | `None`（默认）或有符号32位整数。正值设置操作数上限。`None`、`0` 和负值均不设置此上限。 | — | 常规路径 |
 | 纯SIMT | `simt_optimization_mode` | 设置纯SIMT的多位优化模式；在A2/A3或950常规路径显式传入时，会发出 `UserWarning` 并忽略。 | `0`；整数，位语义由NPU编译器定义 | — | 仅纯SIMT |

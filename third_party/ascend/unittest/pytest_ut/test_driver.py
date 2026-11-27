@@ -184,3 +184,25 @@ def test_get_device_limit_throw(monkeypatch, env_value):
     assert hash_limit == False
     assert aic == _MOCK_AICORE_NUM
     assert aiv == _MOCK_AIVECTOR_NUM
+
+
+def test_get_current_target_is_cached():
+    try:
+        from triton.backends.ascend.driver import NPUDriver
+    except ImportError:
+        pytest.skip("Ascend backend not available")
+
+    driver = NPUDriver.__new__(NPUDriver)
+    driver.utils = MagicMock()
+    driver.utils.get_arch.return_value = "Ascend910_958b"
+    get_current_target = NPUDriver.get_current_target
+    get_current_target.cache_clear()
+    try:
+        first = get_current_target(driver)
+        second = get_current_target(driver)
+    finally:
+        get_current_target.cache_clear()
+
+    assert first == second
+    assert first.arch == "Ascend910_958b"
+    driver.utils.get_arch.assert_called_once_with()

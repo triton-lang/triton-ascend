@@ -226,9 +226,8 @@ class _BatchLaunchHandler:
         # without adding a hook to the common JIT frontend.
         bind = None if warmup else lambda: fn.device_caches[device][4](*args, **kwargs)[0]
         grid = _annotate_launch_grid(kwargs, grid, bind=bind)
-        # Both memos below are bookkeeping, not compiled kernels, so they live in
-        # the key cache rather than the kernel cache. Both device slots share one
-        # lifetime, while the kernel cache stays one entry per compiled kernel.
+        # Compilation and selection bookkeeping shares the per-device key-cache
+        # lifetime; executable handles remain in the native kernel cache.
         if "block_batching_factor" not in fn.arg_names and kwargs.get("block_batching_factor", 1) != 1:
             kwargs = backend.prepare_block_compile_options(kwargs, cache=fn.device_caches[device][1])
         from .reuse.config import enabled
@@ -239,17 +238,26 @@ class _BatchLaunchHandler:
             return get_handler().run(fn, args, kwargs, grid, warmup, device, stream, backend, jit_tail)
         if kwargs.get("block_batching_factor") == "auto":
             cache = fn.device_caches[device][1]
-            # The contract reaches compilation through the options, but it
-            # describes one launch, not the artifact. Keeping it out of the
-            # cache identity stops every new shape from re-entering compile().
+            # Keep launch contracts out of ordinary specialization reuse. Once
+            # a family is known to contain CV work, retain its grid-dependent
+            # decisions without splitting every VV shape into a new compilation.
             memory_key = None
+            grid_key = None
             if binding:
                 from triton.runtime.jit import compute_cache_key
 
                 memory_key = compute_cache_key(fn.device_caches[device][1], binding["specialization"],
                                                binding["options"])
+                grid_key = ("block_auto_cache_grid", memory_key)
+                selected_grid = cache.get(grid_key)
+                if selected_grid is not None and selected_grid != kwargs["block_batching_grid"]:
+                    # CV factor selection depends on occupancy. Keep a decision
+                    # per grid, while VV retains ordinary specialization reuse.
+                    memory_key = f"{memory_key}:block_auto_cache_grid={kwargs['block_batching_grid']}"
             kernel = jit_tail(args, kwargs, grid, warmup, device, stream, memory_key=memory_key,
                               initialize=lambda kernel: initialize_auto_kernel(cache, kernel))
+            if grid_key is not None and getattr(kernel, "block_auto_cache_grid", None) is not None:
+                cache.setdefault(grid_key, kernel.block_auto_cache_grid)
             if family is not None and isinstance(kernel, BatchKernel) and hasattr(kernel, "block_auto_data_arguments"):
                 fn.device_caches[device][1][family] = kernel.block_auto_data_arguments
             return kernel
@@ -373,8 +381,17 @@ class BatchKernel:
             self.candidate.hash if self.candidate is not None else None, "request":
             {"factor": self.request.factor, "axis": self.request.axis}, "report": self.block_batching
         }
-        identity = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
-        get_cache_manager(identity).put(json.dumps(manifest, sort_keys=True), "block_batching.bundle.json")
+        payload = json.dumps(manifest, sort_keys=True)
+        identity = hashlib.sha256(payload.encode()).hexdigest()
+        manager = get_cache_manager(identity)
+        # The identity is the digest of this payload, so an entry already stored
+        # under that key is byte-identical. Writing it again would still swap the
+        # inode and bump mtime, which strict AOT cache inventories compare and
+        # report as a modified artifact. get_file() is the CacheManager contract;
+        # has_file() exists on FileCacheManager alone, and refusal bundles still
+        # publish under a custom manager.
+        if manager.get_file("block_batching.bundle.json") is None:
+            manager.put(payload, "block_batching.bundle.json")
 
     def __getattr__(self, name):
         return getattr(self._primary, name)

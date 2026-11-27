@@ -104,3 +104,50 @@ func.func @outer_matmul_shared_empty(%a: tensor<128x128xbf16>, %b: tensor<128x64
   } {ssbuffer.explicit_main_loop, ssbuffer.outer_event_control_count = 0 : i32}
   return
 }
+
+// -----
+
+// A dynamic intermediate defined in the then block cannot supply sizes for
+// a placeholder in the else block. Preserve the original conditional.
+// CHECK-LABEL: func.func @dynamic_placeholder(
+// CHECK: scf.if %{{.*}} {
+// CHECK-NEXT: {{.*}}arith.addf
+// CHECK-NEXT: {{.*}}linalg.matmul
+// CHECK-NEXT: {{.*}}arith.mulf
+func.func @dynamic_placeholder(%a: tensor<?x?xf32>, %b: tensor<?x?xf32>, %c: tensor<?x?xf32>, %d: tensor<?x?xf32>, %cond: i1) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  scf.for %iv = %c0 to %c1 step %c1 {
+    %cube = arith.addf %c, %d {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "CUBE"} : tensor<?x?xf32>
+    scf.if %cond {
+      %v1 = arith.addf %c, %d {ssbuffer.block_id = 94 : i32, ssbuffer.core_type = "VECTOR"} : tensor<?x?xf32>
+      %m = linalg.matmul ins(%v1, %b : tensor<?x?xf32>, tensor<?x?xf32>) outs(%a : tensor<?x?xf32>) {ssbuffer.block_id = 95 : i32, ssbuffer.core_type = "CUBE"} -> tensor<?x?xf32>
+      %v2 = arith.mulf %m, %b {ssbuffer.block_id = 96 : i32, ssbuffer.core_type = "VECTOR"} : tensor<?x?xf32>
+    }
+  }
+  return
+}
+
+// -----
+
+// CHECK-LABEL: func.func @dynamic_matmul_placeholder(
+// CHECK: scf.if %{{.*}} {
+// CHECK-NEXT: {{.*}}arith.addf
+// CHECK-NEXT: {{.*}}linalg.matmul
+// CHECK-NEXT: {{.*}}arith.mulf
+func.func @dynamic_matmul_placeholder(%n: index, %b: tensor<2x?xf32>, %c: tensor<2x2xf32>, %d: tensor<2x2xf32>, %cond: i1) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %cst = arith.constant 0.000000e+00 : f32
+  %init = tensor.empty(%n) : tensor<2x?xf32>
+  %zero = linalg.fill ins(%cst : f32) outs(%init : tensor<2x?xf32>) -> tensor<2x?xf32>
+  scf.for %iv = %c0 to %c1 step %c1 {
+    %cube = arith.addf %c, %d {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "CUBE"} : tensor<2x2xf32>
+    scf.if %cond {
+      %v1 = arith.addf %c, %d {ssbuffer.block_id = 94 : i32, ssbuffer.core_type = "VECTOR"} : tensor<2x2xf32>
+      %m = linalg.matmul ins(%v1, %b : tensor<2x2xf32>, tensor<2x?xf32>) outs(%zero : tensor<2x?xf32>) {ssbuffer.block_id = 95 : i32, ssbuffer.core_type = "CUBE"} -> tensor<2x?xf32>
+      %v2 = arith.mulf %m, %m {ssbuffer.block_id = 96 : i32, ssbuffer.core_type = "VECTOR"} : tensor<2x?xf32>
+    }
+  }
+  return
+}

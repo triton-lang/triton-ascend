@@ -1224,7 +1224,7 @@ rewriteImpl(ModuleOp module, BatchRequest request,
     markVvAggregations(function);
   bool maskedBatch = false;
   if (request.cv) {
-    report.cvLowering = "rank3_batch_v1";
+    report.cvLowering = "batched_matmul";
     for (auto [id, fact] : llvm::enumerate(access.facts->accesses())) {
       Value mask;
       if (auto load = dyn_cast<triton::LoadOp>(access.sourceAccesses()[id]))
@@ -1247,7 +1247,7 @@ rewriteImpl(ModuleOp module, BatchRequest request,
     }
     if (cvControlFlow && !fuseControlFlow) {
       std::string fusionReason = "CV_LOOP_BATCH_MATMUL_DISABLED";
-      if (sharedCV || request.cvBatchMatmul) {
+      if (sharedCV || request.cvBatchMatmul.value_or(false)) {
         // A failed eligibility proof must not leave partly widened regions
         // in the lane-clone fallback. Try the complete region rewrite in a
         // nested sandbox; internal verification errors still propagate.
@@ -1318,9 +1318,9 @@ rewriteImpl(ModuleOp module, BatchRequest request,
       }
       report.cvMode = "spatial_concat_v1";
       if (cvControlFlow) {
-        report.cvLowering = report.cvLowering == "spatial_m_v1"
-                                ? "spatial_m_uniform_control_v1"
-                                : "spatial_n_uniform_control_v1";
+        report.cvLowering = report.cvLowering == "m_concat_matmul"
+                                ? "m_concat_matmul_uniform_control"
+                                : "n_concat_matmul_uniform_control";
         auto guard = llvm::json::parse(report.guardJSON);
         if (!guard || !guard->getAsObject())
           return failure();
@@ -1382,7 +1382,18 @@ rewriteImpl(ModuleOp module, BatchRequest request,
         return failure();
       return report;
     }
-    if (request.cvBatchMatmul) {
+    std::optional<llvm::json::Object> batchContract;
+    bool batchMatmul = request.cvBatchMatmul.value_or(false);
+    if (!request.cvBatchMatmul.has_value() && !cvControlFlow &&
+        !report.structuredMasks && llvm::none_of(validated, [&](Operation *op) {
+          return isSelectedProgramDivision(op, axis);
+        })) {
+      // Reuse the existing coordinate/footprint proof. Other shapes retain
+      // their previous lowering without a second analysis or rewrite.
+      batchContract = cvMaskContract(originals, access);
+      batchMatmul = batchContract.has_value();
+    }
+    if (batchMatmul) {
       // The packaged rank-three consumer miscomputes loop-carried dot
       // accumulators, even with a full reduction tile. Let the enclosing
       // transactional attempt retain independent rank-two lane recurrences.
@@ -1410,8 +1421,9 @@ rewriteImpl(ModuleOp module, BatchRequest request,
           return reject("CV_BATCH_MASK_RECTANGLE_NOT_PROVEN");
         }
       }
-      auto contract = cvMaskContract(originals, access);
-      if (!contract)
+      if (!batchContract)
+        batchContract = cvMaskContract(originals, access);
+      if (!batchContract)
         return reject("CV_MASKED_DOT_COORDINATES_NOT_PROVEN");
       auto guard = llvm::json::parse(report.guardJSON);
       if (!guard) {
@@ -1420,7 +1432,7 @@ rewriteImpl(ModuleOp module, BatchRequest request,
       }
       if (!guard->getAsObject())
         return failure();
-      (*guard->getAsObject())["cv_mask_contract"] = std::move(*contract);
+      (*guard->getAsObject())["cv_mask_contract"] = std::move(*batchContract);
       if (cvControlFlow)
         (*guard->getAsObject())["cv_control_flow_contract"] =
             llvm::json::Object{

@@ -54,7 +54,7 @@ def cast_back(X_ptr, SF_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.cons
         tla.load_gm_to_ub(sf_blk, sf_ub)
         with tla.scope.simd():
             # group mask: first 32 lanes use s0, last 32 use s1.
-            low_half = tla.simd.pge(32, 64)
+            low_half = tla.simd.pset(32, tla.simd.PAT.VL32)
             for c in tl.static_range(HID // 64):
                 s0 = tla.simd.vlds(sf_ub[0, (c * 64) // NPC], dist="BRC_B32")
                 s1 = tla.simd.vlds(sf_ub[0, (c * 64) // NPC + 1], dist="BRC_B32")

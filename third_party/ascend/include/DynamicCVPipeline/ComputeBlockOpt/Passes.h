@@ -55,6 +55,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createSplitIfByBlockIdPass();
 std::unique_ptr<OperationPass<ModuleOp>> createCloneCubeDepInIfPass();
 std::unique_ptr<OperationPass<ModuleOp>> createExpSubfPatternPass();
 std::unique_ptr<OperationPass<ModuleOp>> createExpLoadPatternPass();
+std::unique_ptr<OperationPass<ModuleOp>> createMergeParallelVectorBlockPass();
 void registerSplitIfByBlockIdPass();
 
 } // namespace triton

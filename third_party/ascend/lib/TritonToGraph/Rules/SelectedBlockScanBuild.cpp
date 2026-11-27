@@ -438,6 +438,7 @@ struct ScanBodyInputs {
   Value zeroScores; // [G, BN] f32 zero, the neutral operand of both dots
   ScanWeights weights;
   const ScanPrologue *prologue = nullptr;
+  Value additiveMask;
 };
 
 // ---- [3] The online-softmax (fwd) scan body ----
@@ -668,8 +669,10 @@ static void buildAdditiveBody(IRRewriter &rewriter, Location loc,
       broadcastRow(rewriter, loc, additive.lseVec, tensorTy({G, BN}, f32), 1);
   Value pExp = rewriter.create<math::ExpOp>(
       loc, rewriter.create<arith::SubFOp>(loc, in.scores, lseMatrix));
-  Value validMatrix = broadcastRow(rewriter, loc, in.weights.valid,
-                                   tensorTy({G, BN}, rewriter.getI1Type()), 0);
+  Value validMatrix = in.additiveMask;
+  if (!validMatrix)
+    validMatrix = broadcastRow(rewriter, loc, in.weights.valid,
+                               tensorTy({G, BN}, rewriter.getI1Type()), 0);
   Value pMasked =
       rewriter.create<arith::SelectOp>(loc, validMatrix, pExp, zeroScores);
   Value weightMatrix = broadcastRow(rewriter, loc, in.weights.tokenCounts,
@@ -802,14 +805,24 @@ bool buildSelectedBlockScan(IRRewriter &rewriter, ScanCandidate &candidate) {
                              tokens, BN);
   }
 
+  Value additiveMask;
+  if (additive && G > 1 &&
+      candidate.rowPosition.getDefiningOp<triton::GetProgramIdOp>()) {
+    additiveMask = broadcastRow(rewriter, loc, weights.valid,
+                                tensorTy({G, BN}, rewriter.getI1Type()), 0);
+    additiveMask.getDefiningOp()->setAttr(kStreamingDQMaskAttr,
+                                          rewriter.getUnitAttr());
+  }
+
   // The scores both templates start from: dot(q, k, 0) over the K tile.
   triton::DotOp scoreDot = scoreDotOf(candidate.recurrence);
   Value zeroScores =
       splatConstant(rewriter, loc, {G, BN}, rewriter.getFloatAttr(f32, 0.0));
   Value scores = buildDot(rewriter, loc, tensorTy({G, BN}, f32),
                           scoreDot.getA(), bK, zeroScores, scoreDot);
-  ScanBodyInputs bodyInputs{scan,   G,          BN,      bK,       bV,
-                            scores, zeroScores, weights, &prologue};
+  ScanBodyInputs bodyInputs{scan,      G,           BN,         bK,
+                            bV,        scores,      zeroScores, weights,
+                            &prologue, additiveMask};
   if (AdditiveRecurrence *additive =
           std::get_if<AdditiveRecurrence>(&candidate.recurrence))
     buildAdditiveBody(rewriter, loc, *additive, bodyInputs, accArg, stateType);

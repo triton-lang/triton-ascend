@@ -87,22 +87,39 @@ def _match_arch_entry(arch):
 def arch_generation(arch: str = None) -> AscendArchGen:
     """Resolve the target generation for a (possibly partial) arch string.
 
-    Unknown / empty / non-string targets resolve to ``AscendArchGen.LEGACY``.
+    When *arch* is omitted or empty, query the active driver's current target.
+    Unknown / empty / non-string SOC names resolve to ``AscendArchGen.LEGACY``.
+    Runtime lookup failures fall back to ``AscendArchGen.LEGACY``.
     """
+    if arch is None or (isinstance(arch, str) and not arch):
+        try:
+            from triton.runtime import driver
+            arch = getattr(driver.active.get_current_target(), "arch", None)
+        except Exception:
+            arch = None
     entry = _match_arch_entry(arch)
     return entry[0] if entry is not None else AscendArchGen.LEGACY
 
 
 def is_register_based_arch(arch: str = None) -> bool:
-    """Return whether the target uses the register-based (A5/A6) compile pipeline."""
-    entry = _match_arch_entry(arch)
-    return entry is not None and entry[0] in (AscendArchGen.GEN5, AscendArchGen.GEN6)
+    """Return whether the target uses the register-based (A5/A6) compile pipeline.
+
+    An omitted or empty *arch* resolves to the current runtime target.
+    """
+    gen = arch_generation(arch)
+    return gen in (AscendArchGen.GEN5, AscendArchGen.GEN6)
 
 
 def rf_size_in_kbytes_for_arch(arch: str = None):
-    """Return the raw RF capacity (KiB) for *arch*, or None when not applicable."""
-    entry = _match_arch_entry(arch)
-    return entry[2] if entry is not None else None
+    """Return the raw RF capacity (KiB) for *arch*, or None when not applicable.
+
+    An omitted or empty *arch* resolves to the current runtime target.
+    """
+    generation = arch_generation(arch)
+    for _, gen, _, rf_kb in _ARCH_TABLE:
+        if gen == generation:
+            return rf_kb
+    return None
 
 
 # Cached result of the runtime SOC detection used by is_compile_on_910_95().
@@ -220,8 +237,6 @@ _DEPRECATED_NPU_OPTION_ROUTE_PRECEDENCE = (
 # Renamed value options preserve the complete user value.  A simultaneously
 # supplied canonical option wins via setdefault below.
 _DEPRECATED_NPU_OPTION_ALIASES = {
-    "intra_cache_num": "buf_slot_num_of_veccore",
-    "inter_cache_num": "buf_slot_num_of_crosscore",
     "load_cache_num": "buf_slot_num_of_gm",
     "enable_bishengir_simt_optimization": "simt_optimization_mode",
 }
@@ -256,11 +271,12 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "graph_optimize_emit_remarks": "it is ignored; the backend fixes graph-optimization remarks to False.",
     "graph_optimize_max_rewrites_per_function":
     "it is ignored; the backend fixes the maximum rewrites per function to 64.",
-    "graph_optimize_rule_mask":
-    "it is ignored; the backend fixes the graph-optimization rule mask to 3071 (legacy + IAT + PTSM).",
+    "graph_optimize_rule_mask": "it is ignored; use 'rule_mask' to select graph optimization rules.",
     "graph_optimize_ub_capacity_bytes":
     "it is ignored; the backend derives an 80%-of-raw-UB graph budget from the target architecture.",
     "has_auto_blockify_blacklist_op": "it is ignored; the safety flag is derived by scanning TTIR.",
+    "inter_cache_num": "it is ignored; use 'buf_slot_num_of_crosscore' to set the inter-core buffer count.",
+    "intra_cache_num": "it is ignored; use 'buf_slot_num_of_veccore' to set the intra-core buffer count.",
     "kernel_name": "it is ignored; the kernel name is derived from TTIR.",
     "llvm_version": "it is ignored; this option has no replacement because it had no effective consumer.",
     "mix_mode": "it is ignored; mix mode is derived from Linalg IR as internal metadata.",
@@ -1016,6 +1032,7 @@ def convert_sigtype_to_int(sigty: str):
         "fp32": 0,  # FLOAT
         "fp64": 11,  # DOUBLE
         "fp8e5": 35,  # FLOAT8_E5M2
+        "hif8": 34,  # ACL_HIFLOAT8
         "fp8e4nv": 36,  # FLOAT8_E4M3FN
     }
     if sigty not in MAP_SIGTYPE_TO_INT:

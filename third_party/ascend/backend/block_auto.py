@@ -307,7 +307,11 @@ def _compile_selected(backend, frozen, common, baseline_options, compile_variant
         if candidate is None:
             candidate = compiler.compile(baseline, values, request, positions, allow_layout_retry=False)
         if candidate.candidate is None:
-            declines.append(dict(key=key, reason=candidate.block_batching["reason"]))
+            rejection = dict(key=key, reason=candidate.block_batching["reason"])
+            for name in ("stage", "failure_kind", "backend_diagnostic"):
+                if name in candidate.block_batching:
+                    rejection[name] = candidate.block_batching[name]
+            declines.append(rejection)
             selection["reason"] = "BASELINE_AFTER_CANDIDATE_REJECTION"
             factor = 1
         else:
@@ -320,6 +324,8 @@ def _compile_selected(backend, frozen, common, baseline_options, compile_variant
     selection.pop("factor")
     result.block_auto_selection = dict(selection, selected_factor=factor, candidate_plan=plan,
                                        compile_rejections=declines)
+    if any(row.get("cv") for row in selection["candidates"].values()):
+        result.block_auto_cache_grid = tuple(contract["grid"])
     if "block_auto_data_arguments" in vars(frozen):
         result.block_auto_data_arguments = frozen.block_auto_data_arguments
     return result

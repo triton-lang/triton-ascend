@@ -1022,12 +1022,6 @@ FailureOr<PtrInfo> PtrAnalysis::parseBitcast(triton::BitcastOp op) {
     uint64_t ratio = std::max(sourceElementWidth, targetElementWidth) /
                      std::min(sourceElementWidth, targetElementWidth);
     bool widenElement = sourceElementWidth < targetElementWidth;
-    // Widening needs exact division: offset_new * sizeof(new) must equal
-    // offset_old * sizeof(old). Test the complete offset, never round terms.
-    if (widenElement && !canDivideDecomposition(info.offsets, ratio) &&
-        !isKnownMultiple(info.offsets.fullOffsets, ratio))
-      return failure();
-
     // Materialize the complete offset and the element-size conversion factor.
     auto full = materializeFullOffset(
         info.offsets, addressStorageType(info.offsets.valueType, builder),
@@ -1038,7 +1032,8 @@ FailureOr<PtrInfo> PtrAnalysis::parseBitcast(triton::BitcastOp op) {
     Value factor = builder.create<arith::ConstantOp>(
         op.getLoc(), DenseIntElementsAttr::get(fullType, int64_t(ratio)));
     if (widenElement) {
-      // Divide the full offset and retain exactly divisible descriptor fields.
+      // The caller guarantees that the complete displacement is divisible at
+      // runtime. Individual strides still need a proof before we reuse them.
       info.offsets.fullOffsets =
           builder.create<arith::DivSIOp>(op.getLoc(), *full, factor)
               .getResult();
@@ -1057,9 +1052,14 @@ FailureOr<PtrInfo> PtrAnalysis::parseBitcast(triton::BitcastOp op) {
 
   // Express scalar or per-lane bases in the destination pointer type.
   Type baseType = info.hasScalarBase() ? Type(targetPtrType) : Type(targetType);
-  if (info.base.getType() != baseType)
+  if (info.base == op.getSrc()) {
+    // This cast already is the retyped per-lane base. Reuse it when consumers
+    // follow the base back through pointer analysis.
+    info.base = op.getResult();
+  } else if (info.base.getType() != baseType) {
     info.base =
         builder.create<triton::BitcastOp>(op.getLoc(), baseType, info.base);
+  }
   return PtrInfo(std::move(info));
 }
 

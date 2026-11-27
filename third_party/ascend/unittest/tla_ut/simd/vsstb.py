@@ -19,21 +19,23 @@ SIGNATURE = {"X": "*fp8e5", "O": "*fp8e5"}
 
 
 @tla.jit
-def vsstb(X, O, N: tl.constexpr, STRIDE: tl.constexpr, ACTIVE: tl.constexpr):
+def vsstb(X, O, N: tl.constexpr, STRIDE: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     src = tla.alloc((1, N), tl.float8e5, space="ub")
     dst = tla.alloc((16, STRIDE), tl.float8e5, space="ub")
     tla.load_gm_to_ub(tla.view(X, (1, N)), src)
     tla.load_gm_to_ub(tla.view(O, (16, STRIDE)), dst)
     with tla.scope.simd():
         v = tla.simd.vlds(src[0, 0])
-        mask = tla.simd.pge(ACTIVE, N)
+        mask = tla.simd.pset(2048 // N, MASKPAT)
         tla.simd.vsstb(v, dst[0, N // 8], STRIDE)
         tla.simd.vsstb(v, dst[8, N // 8], STRIDE, mask)
     tla.store_ub_to_gm(dst, tla.view(O, (16, STRIDE)))
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "STRIDE": SHAPE["stride"], "ACTIVE": SHAPE["active"]}
+    return {
+        "N": SHAPE["lanes"], "STRIDE": SHAPE["stride"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])
+    }
 
 
 def test_ir(output_dir=None):

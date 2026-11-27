@@ -28,10 +28,6 @@ import pytest
 
 @triton.jit
 def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr, output_ptr1, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr):
-    xidx = tl.arange(0, XB)
-    yidx = tl.arange(0, YB)
-    zidx = tl.arange(0, ZB)
-    idx = xidx[:, None, None] * YB * ZB + yidx[None, :, None] * ZB + zidx[None, None, :]
     block_ptr_in = tl.make_block_ptr(
         base=x_ptr,
         shape=(XB, YB, ZB),
@@ -41,8 +37,6 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr, output_ptr1, XB: tl.constexpr, YB: 
         order=(2, 1, 0),
     )
     X = tl.load(block_ptr_in)
-
-    oidx = xidx[:, None, None] * YB * ZB + yidx[None, :, None] * ZB + zidx[None, None, :]
 
     block_ptr_out = tl.make_block_ptr(
         base=output_ptr,

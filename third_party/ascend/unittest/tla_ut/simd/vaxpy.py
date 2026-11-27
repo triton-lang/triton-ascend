@@ -23,7 +23,7 @@ SCALAR = 1.5
 
 
 @tla.jit
-def vaxpy(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vaxpy(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     x = tla.alloc((N, ), tl.float32, space="ub")
     y = tla.alloc((N, ), tl.float32, space="ub")
     o = tla.alloc((4, N), tl.float32, space="ub")
@@ -33,7 +33,7 @@ def vaxpy(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         acc = tla.simd.vlds(x[0])
         a = tla.simd.vlds(y[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(o[0, 0], tla.simd.vaxpy(acc, a, 1.5))
         tla.simd.vsts(o[1, 0], tla.simd.vaxpy(acc, a, 1.5, prefix))
@@ -43,7 +43,7 @@ def vaxpy(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def test_ir(output_dir=None):

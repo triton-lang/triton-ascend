@@ -52,7 +52,7 @@ third_party/proton/ @LH-123L @hongziqi
 # third_party/ascend
 # -----------
 # backend, launch, runtime
-third_party/ascend/backend/ @LH-123L @zhanwei33 @KanuaK @Cadenza4287
+third_party/ascend/backend/ @LH-123L @zhanwei33 @KanuaK @HinPeng
 # ascend patch & llvm patch
 third_party/ascend/patch/ @LH-123L @hongziqi
 # ascend dialect
@@ -88,6 +88,11 @@ third_party/ascend/include/TritonToHIVM @WuTYSFG @KanuaK
 third_party/ascend/lib/TritonToHIVM @WuTYSFG @KanuaK
 third_party/ascend/include/TritonToLLVM @WuTYSFG @KanuaK
 third_party/ascend/lib/TritonToLLVM @WuTYSFG @KanuaK
+# TLA
+third_party/ascend/language/tla @patchliu
+third_party/ascend/unittest/tla_ut @patchliu
+third_party/ascend/include/TritonToLinalg/TLAToLinalgPass.h @patchliu
+third_party/ascend/lib/TritonToLinalg/TLAToLinalgPass.cpp @patchliu
 
 # -----------
 # gluon

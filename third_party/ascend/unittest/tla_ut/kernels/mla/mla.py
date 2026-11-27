@@ -666,7 +666,7 @@ def attention(
                 with tla.scope.simd():
                     zero = tla.simd.vdup(0.0, tla.float32)
                     one = tla.simd.vdup(1.0, tla.float32)
-                    merge_mask = tla.simd.pge(ROW_TILE, 64)
+                    merge_mask = tla.simd.pset(32, tla.simd.PAT.VL16 if ROW_TILE == 16 else tla.simd.PAT.VL4)
                     row_maxima = tla.simd.vdup(-3.4028234663852886e38, tla.float32)
                     for merge_split in tla.range(merge_splits):
                         stat = merge_split * ROW_TILE

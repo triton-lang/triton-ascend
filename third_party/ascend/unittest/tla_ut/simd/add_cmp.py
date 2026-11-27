@@ -95,7 +95,7 @@ def add_cmp(A_ptr, B_ptr, C_ptr, S_ptr, MX_ptr, MN_ptr, M_ptr, C2_ptr, I_ptr, J_
 
         # vadd: default zeroing and explicit merging under a half mask.
         tla.simd.vsts(c_ub[0], tla.simd.vadd(av, bv), dist="NORM_B32")
-        half = tla.simd.pge(32, N)
+        half = tla.simd.pset(2048 // N, tla.simd.PAT.VL32)
         tla.simd.vsts(c2_ub[0], tla.simd.vadd(av, bv, mask=half, mode=tla.simd.MODE.MERGING), dist="NORM_B32")
 
         # vadds: vector + scalar.

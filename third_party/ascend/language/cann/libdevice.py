@@ -296,10 +296,11 @@ def tan(arg0, _semantic=None):
     :rtype: ``float32``
     """
     arg0 = _semantic.to_tensor(arg0)
-    if (_is_a5_target(_semantic) or _is_a6_target(_semantic)) and arg0.dtype == core.dtype("fp32"):
-        return core.extern_elementwise("", "", [arg0], {
+    if ((_is_a5_target(_semantic) or _is_a3_target(_semantic) or _is_a6_target(_semantic))
+            and arg0.dtype == core.dtype("fp32")):
+        return _libdevice_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_tan_fp32", core.dtype("fp32")),
-        }, is_pure=True, _semantic=_semantic)
+        }, is_pure=True, workspace=(8, core.float32, True), _semantic=_semantic)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_tanf", core.dtype("fp32")),
@@ -331,12 +332,14 @@ def atan(arg0, _semantic=None):
 
 
 @core.extern
-def tanh(arg0, _semantic=None):
+def tanh(arg0, high_precision=False, _semantic=None):
     """
     Computes the hyperbolic tangent of input parameter x.
 
     :param arg0: ``x``. Supported dtype(s): ``float32``.
     :type arg0: scalar or tl.tensor
+    :param high_precision: Compile-time boolean for float32 inputs on A5. Defaults to ``False``
+        (``fast_tanh_fp32``). Set to ``True`` to use ``tanh_fp32``.
     :return: The hyperbolic tangent of input x.
     :rtype: ``float32``
     """
@@ -345,12 +348,21 @@ def tanh(arg0, _semantic=None):
     if original_dtype == core.dtype("bf16"):
         arg0 = _semantic.cast(arg0, core.float32)
 
+    high_precision = core._unwrap_if_constexpr(high_precision)
+    if not isinstance(high_precision, bool):
+        raise TypeError("libdevice.tanh high_precision must be a bool argument")
+
     if _is_a3_target(_semantic) and original_dtype == core.dtype("fp32"):
         res = _libdevice_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_tanh_fp32", core.dtype("fp32")),
         }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
     else:
-        if (_is_a5_target(_semantic) or _is_a6_target(_semantic)) and original_dtype == core.dtype("fp32"):
+        if _is_a5_target(_semantic) and original_dtype == core.dtype("fp32"):
+            symbol = "__hmf_tanh_fp32" if high_precision else "__hmf_fast_tanh_fp32"
+            dispatch = {
+                (core.dtype("fp32"), ): (symbol, core.dtype("fp32")),
+            }
+        elif _is_a6_target(_semantic) and original_dtype == core.dtype("fp32"):
             dispatch = {
                 (core.dtype("fp32"), ): ("__hmf_tanh_fp32", core.dtype("fp32")),
             }
@@ -376,10 +388,11 @@ def ilogb(arg0, _semantic=None):
     :rtype: ``float32``
     """
     arg0 = _semantic.to_tensor(arg0)
-    if (_is_a5_target(_semantic) or _is_a6_target(_semantic)) and arg0.dtype == core.dtype("fp32"):
-        return core.extern_elementwise("", "", [arg0], {
+    if ((_is_a5_target(_semantic) or _is_a3_target(_semantic) or _is_a6_target(_semantic))
+            and arg0.dtype == core.dtype("fp32")):
+        return _libdevice_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_ilogb_fp32", core.dtype("fp32")),
-        }, is_pure=True, _semantic=_semantic)
+        }, is_pure=True, workspace=(6, core.int32, True), _semantic=_semantic)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_ilogbf", core.dtype("fp32")),
@@ -1599,7 +1612,7 @@ def fast_powf(arg0, arg1, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0, arg1], {
         (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fast_pow_fp32", core.dtype("fp32")),
-    }, is_pure=True, workspace=(8, core.float32, False), _semantic=_semantic)
+    }, is_pure=True, workspace=(5, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -1614,14 +1627,14 @@ def fmod(arg0, arg1, _semantic=None):
     :return: The floating-point modulo result.
     :rtype: ``float32``
     """
-    if not (_is_a5_target(_semantic) or _is_a6_target(_semantic)):
-        arg0 = _semantic.to_tensor(arg0)
-        arg1 = _semantic.to_tensor(arg1)
-        ret = _semantic.mod(arg0, arg1)
-        return ret
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fmod_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if (_is_a5_target(_semantic) or _is_a3_target(_semantic) or _is_a6_target(_semantic)):
+        return _libdevice_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fmod_fp32", core.dtype("fp32")),
+        }, is_pure=True, workspace=(2, core.float32, True), _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    arg1 = _semantic.to_tensor(arg1)
+    ret = _semantic.mod(arg0, arg1)
+    return ret
 
 
 @core.extern
@@ -2165,7 +2178,7 @@ def float2ull_rn(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2ull_rn_fp32", core.dtype("uint64")),
-    }, is_pure=True, workspace=(5, core.int32, False), _semantic=_semantic)
+    }, is_pure=True, workspace=(3, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2183,7 +2196,7 @@ def float2ull_rz(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2ull_rz_fp32", core.dtype("uint64")),
-    }, is_pure=True, workspace=(5, core.int32, False), _semantic=_semantic)
+    }, is_pure=True, workspace=(3, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2201,7 +2214,7 @@ def float2ull_rd(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2ull_rd_fp32", core.dtype("uint64")),
-    }, is_pure=True, workspace=(5, core.int32, False), _semantic=_semantic)
+    }, is_pure=True, workspace=(3, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2219,7 +2232,7 @@ def float2ull_ru(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2ull_ru_fp32", core.dtype("uint64")),
-    }, is_pure=True, workspace=(5, core.int32, False), _semantic=_semantic)
+    }, is_pure=True, workspace=(3, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2308,11 +2321,11 @@ def atan2(arg0, arg1, _semantic=None):
     """
     arg0 = _semantic.to_tensor(arg0)
     arg1 = _semantic.to_tensor(arg1)
-    if (_is_a5_target(_semantic)
-            or _is_a6_target(_semantic)) and arg0.dtype == core.dtype("fp32") and arg1.dtype == core.dtype("fp32"):
-        return core.extern_elementwise("", "", [arg0, arg1], {
+    if ((_is_a5_target(_semantic) or _is_a3_target(_semantic) or _is_a6_target(_semantic))
+            and arg0.dtype == core.dtype("fp32") and arg1.dtype == core.dtype("fp32")):
+        return _libdevice_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_atan2_fp32", core.dtype("fp32")),
-        }, is_pure=True, _semantic=_semantic)
+        }, is_pure=True, workspace=(4, core.float32, True), _semantic=_semantic)
 
     arg0 = _semantic.to_tensor(arg0)
     arg1 = _semantic.to_tensor(arg1)
@@ -2983,10 +2996,11 @@ def cyl_bessel_i0(arg0: core.tensor, _semantic=None):
     :rtype: ``float32``
     """
     arg0 = _semantic.to_tensor(arg0)
-    if (_is_a5_target(_semantic) or _is_a6_target(_semantic)) and arg0.dtype == core.dtype("fp32"):
-        return core.extern_elementwise("", "", [arg0], {
+    if ((_is_a5_target(_semantic) or _is_a3_target(_semantic) or _is_a6_target(_semantic))
+            and arg0.dtype == core.dtype("fp32")):
+        return _libdevice_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_cyl_bessel_i0_fp32", core.dtype("fp32")),
-        }, is_pure=True, _semantic=_semantic)
+        }, is_pure=True, workspace=(6, core.float32, True), _semantic=_semantic)
     else:
         param1 = [
             -4.41534164647933937950e-18,
@@ -3227,10 +3241,11 @@ def erfinv(arg0, _semantic=None):
     :rtype: ``float32``
     """
     arg0 = _semantic.to_tensor(arg0)
-    if (_is_a5_target(_semantic) or _is_a6_target(_semantic)) and arg0.dtype == core.dtype("fp32"):
-        return core.extern_elementwise("", "", [arg0], {
+    if ((_is_a5_target(_semantic) or _is_a3_target(_semantic) or _is_a6_target(_semantic))
+            and arg0.dtype == core.dtype("fp32")):
+        return _libdevice_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_erfinv_fp32", core.dtype("fp32")),
-        }, is_pure=True, _semantic=_semantic)
+        }, is_pure=True, workspace=(4, core.float32, True), _semantic=_semantic)
     else:
         arg0_scalar_ty = arg0.type.scalar
         arg0 = _semantic.to_tensor(arg0)
@@ -3389,7 +3404,7 @@ def gamma(arg0, _semantic=None):
             and arg0.dtype == core.dtype("fp32")):
         return _libdevice_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_tgamma_fp32", core.dtype("fp32")),
-        }, is_pure=True, workspace=(9, core.float32, False), _semantic=_semantic)
+        }, is_pure=True, workspace=(9, core.float32, True), _semantic=_semantic)
     else:
         arg0_scalar_ty = arg0.type.scalar
         arg0 = _semantic.to_tensor(arg0)
@@ -3451,7 +3466,7 @@ def tgamma(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_tgamma_fp32", core.dtype("fp32")),
-    }, is_pure=True, workspace=(9, core.float32, False), _semantic=_semantic)
+    }, is_pure=True, workspace=(9, core.float32, True), _semantic=_semantic)
 
 
 # Note:

@@ -438,9 +438,11 @@ def make_ttir(mod, metadata, opt):
         from .block_batching_report import _has_dot
         cv = _has_dot(mod)
         layout_policy = "semantic_only" if cv else opt.block_batching_layout
+        batch_matmul = opt.enable_hivm_batch_matmul
+        if batch_matmul is None and not opt.target_arch.startswith("Ascend950"):
+            batch_matmul = False
         report = dict(
-            rewrite(mod, opt.block_batching_factor, opt.block_batching_axis, layout_policy, cv, cv
-                    and opt.enable_hivm_batch_matmul))
+            rewrite(mod, opt.block_batching_factor, opt.block_batching_axis, layout_policy, cv, cv and batch_matmul))
         # Selection is done; hivmc rejects hacc.* module attrs it does not know.
         _remove_attr = getattr(ascend.ir, "remove_attr", None)
         if _remove_attr is not None:
@@ -517,6 +519,17 @@ def _export_profile_metadata(mod, metadata):
         metadata.update(ascend.ir.get_kernel_profile_metadata(mod))
 
 
+def _has_proton_records(mod):
+    found = False
+
+    def visit(op):
+        nonlocal found
+        found = found or op.get_name() == "proton.record"
+
+    mod.walk(visit)
+    return found
+
+
 def tla_to_ttadapter(mod, metadata, opt):
     from triton.language.extra.tla.compiler import lower_ttir
 
@@ -554,6 +567,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         # Select analysis is a fixed lowering policy, not a user compile option.
         enable_select_analysis = True
         compile_on_910_95 = metadata["compile_on_910_95"]
+        force_explicit_load_transpose = getattr(opt, "force_explicit_load_transpose", False)
         compile_mode = opt.compile_mode
         metadata["compile_mode"] = compile_mode
         enable_mixed_cv = metadata.get("enable_mixed_cv")
@@ -577,7 +591,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
-        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95)
+        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95, force_explicit_load_transpose)
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, compile_mode)
         ascend.passes.ttir.add_triton_to_annotation(pm)
         ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, compile_mode)
@@ -585,7 +599,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         ascend.passes.ttir.add_triton_to_hfusion(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm, compile_on_910_95)
-        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95)
+        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95, force_explicit_load_transpose)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis, compile_on_910_95,
                                                 compile_mode)
         # MergeConcatLoadBuffer is A5-only; A6 must not be enabled by its register-based flag.
@@ -606,7 +620,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
 
         if AscendBackend.instrumentation:
             if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
-                metadata["proton_collection"] = "perf_monitor"
+                metadata["proton_collection"] = "perf_monitor" if _has_proton_records(mod) else "none"
             else:
                 AscendBackend.instrumentation.patch("ttir_to_linalg", pm, mod.context)
 
@@ -880,6 +894,10 @@ def _masked_batch_compile_options(metadata):
             or report.get("guard", {}).get("require_same_fractal_bounds") is not True):
         return BatchDecline("CV_MASKED_BATCH_MEMORY_LOWERING_UNSUPPORTED", "npubin")
     report["cv_memory_lowering"] = "full_reduction_guard_v3"
+    # Prepared TTIR restores the proof but not stage-local option mutations.
+    # Resolve the default here for both fresh and restored frontend artifacts.
+    if metadata.get("enable_hivm_batch_matmul") is None:
+        metadata["enable_hivm_batch_matmul"] = True
     return []
 
 
@@ -1158,9 +1176,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                                                               _supports_full_row_copy_inlining):
                     if option not in _compile_option_list:
                         _compile_option_list.append(option)
-            # Temporary until the NPU compiler enables batch matmul by default in Q4.
-            if metadata.get("enable_hivm_batch_matmul"):
-                _compile_option_list += ["--enable-hivm-batch-matmul"]
             if metadata.get("enable_vf_stack_limit"):
                 _compile_option_list += ["--enable-vf-stack-limit"]
         bisheng_options = metadata["bisheng_options"]
@@ -1192,6 +1207,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if isinstance(masked_options, BatchDecline):
             return masked_options
         _compile_option_list += masked_options
+        if npu_compiler_path.endswith("bishengir-compile") and metadata.get("enable_hivm_batch_matmul"):
+            _compile_option_list += ["--enable-hivm-batch-matmul"]
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
         if opt.debug or knobs.autotuning.print:
@@ -1568,8 +1585,9 @@ class NPUOptions:
     enable_auto_bind_sub_block: bool = None
     disable_tightly_coupled_buffer_reuse: bool = False
     enable_hivm_auto_cv_balance: bool = None
-    # Temporary 910_95 switch; the NPU compiler plans to make this default in Q4.
-    enable_hivm_batch_matmul: bool = False
+    # None selects batch MMA only for proved full A5 block-batching tiles.
+    # True retains the explicit masked path; False retains the legacy lowering.
+    enable_hivm_batch_matmul: Optional[bool] = None
     # Only takes effect on the Ascend 950 non-pure-SIMT BiShengIR compilation path.
     enable_vf_stack_limit: bool = False
     sync_solver: bool = None
@@ -1626,6 +1644,9 @@ class NPUOptions:
     # Auto-injected from static grid tuples; enables safe coalescing for
     # unmasked kernels whose grid dims are compile-time known.
     grid_num_tiles: int = None
+
+    # Force an explicit restoring transpose for ordinary loads on compile_on_910_95 targets.
+    force_explicit_load_transpose: bool = False
 
     # Deprecated names remain visible to callers that use parse_options({})
     # to distinguish compile options from kernel arguments. Their public
@@ -1718,6 +1739,8 @@ class NPUOptions:
             "compile_on_910_95",
             _is_register_based_target_arch(arch),
         )
+        if not self.compile_on_910_95:
+            object.__setattr__(self, "force_explicit_load_transpose", False)
         try:
             normalized_rule_mask = normalize_graph_optimization_rule_mask(rule_mask)
         except ProgramGridContractError as error:
@@ -2008,7 +2031,10 @@ class AscendBackend(BaseBackend):
     def get_codegen_implementation(self, options):
         # Note: a dict of functions is required to generate vendor-specific code piecies
         #       e.g. convert custom types like fp8e4b15
-        codegen_fns = {"min_dot_size": min_dot_size(self.target)}
+        codegen_fns = {
+            "min_dot_size": min_dot_size(self.target),
+            "get_overflow_check_loc": ascend_ir.get_overflow_check_loc,
+        }
         return codegen_fns
 
     def load_dialects(self, ctx):

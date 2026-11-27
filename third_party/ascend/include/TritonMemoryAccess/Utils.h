@@ -131,11 +131,11 @@ OpFoldResult inferAxisStride(ArrayRef<SubAxisInfo> subAxes, OpBuilder &builder);
 // Divisibility proofs and exact unit conversion.
 bool canDivideDecomposition(const OffsetInfo &info, uint64_t divisor);
 /// Fold or materialize exact division of an index descriptor field.
-/// The caller has proved divisibility by the positive divisor.
+/// The caller guarantees divisibility by the positive divisor.
 OpFoldResult divideIndex(OpFoldResult value, uint64_t divisor,
                          OpBuilder &builder, Location loc);
-/// After the full value is proved divisible, convert descriptor fields whose
-/// exact division can also be proved. Leave fullOffsets to the caller.
+/// Given a divisible full value, convert the descriptor fields whose division
+/// is exact. Leave fullOffsets to the caller.
 void divideDecomposition(OffsetInfo &info, uint64_t divisor, OpBuilder &builder,
                          Location loc);
 

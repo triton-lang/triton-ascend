@@ -87,6 +87,18 @@ def _independent_rows(X, Y, O, N, SX, SO, B: tl.constexpr):
     tl.store(O + row * SO + col, x * tl.sigmoid(x) + y, col < N)
 
 
+@triton.jit
+def batched_dot_grid(A, B, C, AXIS: tl.constexpr, TILE: tl.constexpr = 32):
+    x, y, z = tl.program_id(0), tl.program_id(1), tl.program_id(2)
+    p = x + tl.num_programs(0) * (y + tl.num_programs(1) * z)
+    r = tl.arange(0, TILE)
+    offsets = p * TILE * TILE + r[:, None] * TILE + r[None, :]
+    a = tl.load(A + offsets)
+    b = tl.load(B + offsets)
+    value = tl.dot(a, b, input_precision='ieee') * tl.num_programs(AXIS)
+    tl.store(C + offsets, value)
+
+
 @triton.jit(do_not_specialize=['T'])
 def tiled_reduce(X, Y, T, H: tl.constexpr, D: tl.constexpr, BT: tl.constexpr):
     block, head = tl.program_id(0), tl.program_id(1)
@@ -408,6 +420,122 @@ class TestCV:
     def batching_target(self, monkeypatch):
         require_batching_target(monkeypatch)
 
+    @pytest.mark.parametrize('axis', [0, 1, 2])
+    @pytest.mark.parametrize('factor', [2, 4])
+    @pytest.mark.parametrize('batch_mma', [None, False])
+    def test_batched_matmul_autoblockify_preserves_original_grid(self, axis, factor, batch_mma):
+        # More grouped programs than cores exercises AutoBlockify's loop.
+        grid = [1, 1, 1]
+        grid[axis], grid[(axis + 1) % 3] = 512, 2
+        torch.manual_seed(881)
+        acpu = torch.randint(-4, 5, (1024, 32, 32)).float()
+        bcpu = torch.randint(-4, 5, acpu.shape).float()
+        product = acpu @ bcpu
+        a, b = acpu.npu(), bcpu.npu()
+        storage = torch.full((product.numel() + 128, ), -12345., device='npu')
+        out = storage[64:-64].view(product.shape)
+        options = dict(block_batching_factor=factor, block_batching_axis=axis)
+        if batch_mma is not None:
+            options['enable_hivm_batch_matmul'] = batch_mma
+        warmed = batched_dot_grid.warmup(a, b, out, axis, grid=tuple(grid), **options)
+        torch.npu.synchronize()
+        assert (storage == -12345).all()
+        for _ in range(2):
+            out.fill_(-12345)
+            kernel = batched_dot_grid[tuple(grid)](a, b, out, axis, **options)
+            torch.npu.synchronize()
+            assert kernel is warmed
+            assert_applied(kernel, factor)
+            fast = batch_mma is None and kernel.candidate.metadata.target.arch.startswith('Ascend950')
+            lowering = 'rank3_masked_batch_v1' if fast else 'batched_matmul'
+            assert kernel.block_batching['cv_lowering'] == lowering
+            if fast:
+                assert kernel.candidate.metadata.enable_hivm_batch_matmul is True
+            assert kernel.candidate.metadata.auto_blockify_enabled is True
+            torch.testing.assert_close(out.cpu(), product * grid[axis], rtol=0, atol=0)
+            assert (storage[:64] == -12345).all() and (storage[-64:] == -12345).all()
+
+        # A cached candidate must still reject an incomplete batch group.
+        grid[axis] -= 1
+        out.fill_(-12345)
+        kernel = batched_dot_grid[tuple(grid)](a, b, out, axis, **options)
+        torch.npu.synchronize()
+        assert kernel is warmed
+        assert kernel.last_launch['reason'] == 'CV_GRID_NOT_DIVISIBLE'
+        assert kernel.last_launch['applied_factor'] == 1
+        torch.testing.assert_close(out[:1022].cpu(), product[:1022] * grid[axis], rtol=0, atol=0)
+        assert (out[1022:] == -12345).all()
+        assert (storage[:64] == -12345).all() and (storage[-64:] == -12345).all()
+
+    def test_auto_batch_reselects_large_and_small_grids(self):
+        if not triton.runtime.driver.active.get_current_target().arch.startswith('Ascend950'):
+            pytest.skip('The automatic batch MMA policy is limited to Ascend950')
+        torch.manual_seed(882)
+        acpu = torch.randint(-4, 5, (512, 32, 32)).half()
+        bcpu = torch.randint(-4, 5, acpu.shape).half()
+        a, b = acpu.npu(), bcpu.npu()
+        out = torch.empty(acpu.shape, device='npu', dtype=torch.float32)
+        product = acpu.float() @ bcpu.float()
+        out.fill_(-12345)
+        warmed = batched_dot_grid.warmup(a, b, out, 0, grid=(512, ))
+        torch.npu.synchronize()
+        assert (out == -12345).all()
+        handles = {512: warmed}
+        for groups in (512, 4, 8, 128, 512, 4):
+            out.fill_(-12345)
+            kernel = batched_dot_grid[(groups, )](a, b, out, 0)
+            torch.npu.synchronize()
+            factor = kernel.block_auto_selection['selected_factor']
+            if groups <= 8:
+                assert factor == 2
+            assert kernel.block_auto_cache_grid == (groups, 1, 1)
+            assert kernel.block_auto_selection['candidates']['unmerged']['blocks'] == groups
+            if factor > 1:
+                assert_applied(kernel, factor)
+                assert kernel.candidate.metadata.enable_hivm_batch_matmul is True
+            torch.testing.assert_close(out[:groups].cpu(), product[:groups] * groups, rtol=0, atol=0)
+            assert (out[groups:] == -12345).all()
+            if groups in handles:
+                assert kernel is handles[groups]
+            handles[groups] = kernel
+        assert handles[512] is not handles[4]
+
+    @pytest.mark.parametrize('tile', [64, 128])
+    def test_auto_batch_tile_limit_preserves_warmup_and_explicit_merging(self, tile):
+        torch.manual_seed(883)
+        acpu = torch.randint(-4, 5, (512, tile, tile)).half()
+        bcpu = torch.randint(-4, 5, acpu.shape).half()
+        product = acpu.float() @ bcpu.float()
+        a, b = acpu.npu(), bcpu.npu()
+        out = torch.full(acpu.shape, -12345., device='npu', dtype=torch.float32)
+        warmed = batched_dot_grid.warmup(a, b, out, 0, TILE=tile, grid=(4, ))
+        torch.npu.synchronize()
+        assert (out == -12345).all()
+        for groups in (4, 512, 4):
+            kernel = batched_dot_grid[(groups, )](a, b, out, 0, TILE=tile)
+            torch.npu.synchronize()
+            selection = kernel.block_auto_selection
+            if tile > 64:
+                assert selection['selected_factor'] == 1
+                assert selection['reason'] == 'CV_BATCH_TILE_LIMIT_EXCEEDED'
+                assert kernel.candidate is None
+            elif groups == 4:
+                assert_applied(kernel, 2)
+            torch.testing.assert_close(out[:groups].cpu(), product[:groups] * groups, rtol=0, atol=0)
+            if groups == 4:
+                assert kernel is warmed
+
+        kernel = batched_dot_grid[(4, )](a, b, out, 0, TILE=tile, block_batching_factor=2)
+        torch.npu.synchronize()
+        assert kernel.block_batching['requested_factor'] == 2
+        if tile > 64 and kernel.block_batching['compile_status'] == 'REJECTED':
+            assert kernel.block_batching['reason'] == 'CV_TARGET_RESOURCE_REJECTED'
+            assert kernel.last_launch['runtime_status'] == 'BASELINE_SELECTED'
+            assert kernel.last_launch['applied_factor'] == 1
+        else:
+            assert_applied(kernel, 2)
+        torch.testing.assert_close(out[:4].cpu(), product[:4] * 4, rtol=0, atol=0)
+
     def test_auto_batch_handle_keeps_capture_and_alias_fallbacks(self):
         cpu_a = torch.arange(4 * 32 * 32).reshape(4, 32, 32).remainder(7).float()
         cpu_b = cpu_a.flip([2]).contiguous()
@@ -470,7 +598,8 @@ class TestCV:
             assert kernel.last_launch['reason'] == 'CV_BATCH_REDUCTION_MASK_NOT_PROVEN'
             return
         assert_applied(kernel, 2)
-        expected_lowering = ('spatial_m' if mode == 0 else 'spatial_n') + ('_uniform_control_v1' if loop else '_v1')
+        expected_lowering = ('m_concat_matmul' if mode == 0 else 'n_concat_matmul') + ('_uniform_control'
+                                                                                       if loop else '')
         if mode == 2:
             expected_lowering = 'static_integer_lanes_v1' if integer else (
                 'static_uniform_control_lanes_v1' if loop else 'rank3_masked_batch_v1')

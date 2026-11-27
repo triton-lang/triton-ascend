@@ -51,6 +51,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
@@ -267,29 +268,54 @@ UpdateConditionInfoPassLegacy::allocSSBuffer(ModuleOp module) {
     return ssbufferMemrefs;
   }
 
-  module->walk([&](Operation *op) {
-    if (auto scopeOp = dyn_cast<scope::ScopeOp>(op)) {
-      builder.setInsertionPoint(scopeOp);
-      auto loc = scopeOp.getLoc();
-      auto zeroConst = builder.create<arith::ConstantOp>(
-          scopeOp->getLoc(), i32Type, builder.getIntegerAttr(i32Type, 0));
-
-      for (int i = 0; i < numBuffers; i++) {
-        auto memref0 =
-            createPointerCastOp(builder, loc, i * VALUE_SSBUF_OFFSET);
-        auto memref1 = createPointerCastOp(
-            builder, loc, VECTOR_SSBUF_OFFSET + i * VALUE_SSBUF_OFFSET);
-
-        builder.create<memref::StoreOp>(scopeOp->getLoc(), zeroConst, memref0);
-        builder.create<memref::StoreOp>(scopeOp->getLoc(), zeroConst, memref1);
-
-        ssbufferVec0Memrefs.push_back(memref0.getResult());
-        ssbufferVec1Memrefs.push_back(memref1.getResult());
-      }
-      return mlir::WalkResult::interrupt();
+  scope::ScopeOp firstScope, vectorScope;
+  module.walk<WalkOrder::PreOrder>([&](scope::ScopeOp scopeOp) {
+    if (!firstScope)
+      firstScope = scopeOp;
+    bool isCube, isVector;
+    if (succeeded(getScopeType(scopeOp, isCube, isVector)) && isVector) {
+      vectorScope = scopeOp;
+      return WalkResult::interrupt();
     }
-    return mlir::WalkResult::advance();
+    return WalkResult::advance();
   });
+
+  // Cube accesses both counter banks through these fixed addresses.
+  if (firstScope) {
+    builder.setInsertionPoint(firstScope);
+    auto loc = firstScope.getLoc();
+    for (int i = 0; i < numBuffers; i++) {
+      auto memref0 = createPointerCastOp(builder, loc, i * VALUE_SSBUF_OFFSET);
+      auto memref1 = createPointerCastOp(
+          builder, loc, VECTOR_SSBUF_OFFSET + i * VALUE_SSBUF_OFFSET);
+      ssbufferVec0Memrefs.push_back(memref0.getResult());
+      ssbufferVec1Memrefs.push_back(memref1.getResult());
+    }
+  }
+
+  // Reset the counters at the beginning of the vector block instead of in front
+  // of the first scope: every sub block only resets the copy it owns
+  // (i * 4 + sub_block_idx * 1024). Resetting both copies from every sub block
+  // clears the counters of the other sub block, which may still be consuming
+  // the state of the previous round.
+  if (vectorScope) {
+    builder.setInsertionPointToStart(&vectorScope->getRegion(0).front());
+    auto loc = vectorScope.getLoc();
+    auto zeroConst = builder.create<arith::ConstantOp>(
+        loc, i32Type, builder.getIntegerAttr(i32Type, 0));
+    Value stride = builder.create<arith::ConstantIntOp>(
+        loc, VECTOR_SSBUF_OFFSET, ADDR_INT_TYPE);
+    auto subIdOp = builder.create<GetSubBlockIdxOp>(loc, i64Type);
+    Value subBlockOffset = builder.create<arith::MulIOp>(loc, subIdOp, stride);
+    for (int i = 0; i < numBuffers; i++) {
+      Value baseAddr = builder.create<arith::ConstantIntOp>(
+          loc, i * VALUE_SSBUF_OFFSET, ADDR_INT_TYPE);
+      Value ownAddr =
+          builder.create<arith::AddIOp>(loc, baseAddr, subBlockOffset);
+      auto memref = builder.create<PointerCastOp>(loc, memrefType, ownAddr);
+      builder.create<memref::StoreOp>(loc, zeroConst, memref);
+    }
+  }
 
   ssbufferMemrefs.push_back(ssbufferVec0Memrefs);
   ssbufferMemrefs.push_back(ssbufferVec1Memrefs);
@@ -1251,8 +1277,7 @@ int UpdateConditionInfoPassLegacy::setFlowOptCondition(scf::IfOp currentIfOp,
   // Check if flowOpt condition is needed based on buffer counts
   // - Cross-core buffer count > CROSS_CORE_BUFFER_COUNT_THRESHOLD
   // - Intra-core buffer count > INTRA_CORE_BUFFER_COUNT_THRESHOLD
-  if (info->crossCoreBufferCount <= CROSS_CORE_BUFFER_COUNT_THRESHOLD ||
-      info->intraCoreBufferCount <= INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
+  if (!isFlowOptEnabled(info)) {
     flowOptCond = nullptr;
     return UPDATE_CONDITION_INFO_SUCCESS;
   }

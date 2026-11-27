@@ -35,6 +35,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Debug.h"
 
@@ -46,13 +47,8 @@ static constexpr const char *DEBUG_TYPE = "merge-cube-block";
 #define LDBG(...) LLVM_DEBUG(DBGS() << __VA_ARGS__ << "\n")
 
 static const llvm::DenseSet<llvm::StringRef> kDisableMergeCubeKernel = {
-    "_attn_bwd",
-    "kernel_sdpa_bwd_q",
-    "_sdpa_infer_kernel",
-    "pcb06_tc02_c2v2v2c_chain",
-    "flex_attention_backward_dq_kernel",
-    "parallel_deltaformer_bwd_kernel_qk",
     "chunk_kda_bwd_kernel_intra",
+    "flex_attention_backward_dq_kernel",
 };
 
 void MergeCubeBlockPass::runOnOperation() {
@@ -213,6 +209,42 @@ MergeCubeBlockPass::performMerging(BlockDependencyGraph &graph,
   return llvm::success();
 }
 
+// Trace multiplicands through SSA definitions in the two candidate cube blocks.
+static bool feedsMatmul(const BlockNode *producer, const BlockNode *consumer,
+                        ComputeBlockIdManager &bm) {
+  llvm::SmallVector<Value> worklist;
+  for (Operation *op : consumer->ops) {
+    if (auto matmul = dyn_cast<linalg::MatmulOp>(op))
+      llvm::append_range(worklist, matmul.getInputs());
+  }
+
+  bool foundProducer = false;
+  llvm::DenseSet<Operation *> visited;
+  while (!worklist.empty()) {
+    Operation *def = worklist.pop_back_val().getDefiningOp();
+    if (!def || def->getBlock() != consumer->ops.front()->getBlock() ||
+        !visited.insert(def).second)
+      continue;
+
+    int blockId = bm.getBlockIdByOp(def);
+    if (blockId != consumer->blockId && blockId != producer->blockId)
+      continue;
+    if (isa<linalg::MatmulOp>(def)) {
+      if (blockId == producer->blockId) {
+        if (llvm::any_of(def->getUsers(), isVectorSimpleOpOrCf)) {
+          LDBG("Producer matmul in block " << blockId << " has a vector user");
+          return false;
+        }
+        foundProducer = true;
+      }
+      continue;
+    }
+
+    llvm::append_range(worklist, def->getOperands());
+  }
+  return foundProducer;
+}
+
 bool MergeCubeBlockPass::canMergeBlocks(BlockNode *target, BlockNode *source,
                                         BlockDependencyGraph &graph,
                                         const MemoryDependenceGraph &memGraph,
@@ -223,30 +255,22 @@ bool MergeCubeBlockPass::canMergeBlocks(BlockNode *target, BlockNode *source,
     return false;
   }
 
-  // Step 1: Check if they have common input or output nodes
-  if (!hasCommonInputOrOutput(target, source, graph)) {
-    LDBG("Blocks " << target->blockId << " and " << source->blockId
-                   << " cannot merge: no common input or output nodes\n");
+  bool sameDepthWithCommonIO = hasCommonInputOrOutput(target, source, graph) &&
+                               hasSameDepth(target, source, graph);
+  if (!sameDepthWithCommonIO && !feedsMatmul(target, source, bm))
     return false;
-  }
 
-  // Step 2: Check if merging would create a cycle
   if (!checkNoCycle(target, source, graph, memGraph, bm)) {
     LDBG("Blocks " << target->blockId << " and " << source->blockId
-                   << " cannot merge: would create cycle\n");
+                   << " cannot merge: would create cycle");
     return false;
-  }
-
-  // Step 3: cube blocks at the same depth (with matching successor depths).
-  if (hasSameDepth(target, source, graph)) {
-    LDBG("Blocks " << target->blockId << " and " << source->blockId
-                   << " can merge: cube blocks have same depth\n");
-    return true;
   }
 
   LDBG("Blocks " << target->blockId << " and " << source->blockId
-                 << " cannot merge: unsupport scenario\n");
-  return false;
+                 << " can merge: "
+                 << (sameDepthWithCommonIO ? "same-depth cube blocks"
+                                           : "chained matmuls"));
+  return true;
 }
 
 bool MergeCubeBlockPass::hasSameDepth(BlockNode *node1, BlockNode *node2,

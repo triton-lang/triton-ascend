@@ -125,12 +125,12 @@ def _inttoptr_nested_if_kernel(base_ptrs, steps_ptr, flag_ptr, out):
     tl.store(out, tl.load(ptr))
 
 
-def _compile_to_adapter(kernel, signature, constants):
+def _compile_to_adapter(kernel, signature, constants, *, arch):
     src = ASTSource(kernel, signature, constants)
     context = ir.context()
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
-    options = NPUOptions()
+    options = NPUOptions(arch=arch)
     ttir = ast_to_ttir(kernel, src, context, options, {}, {})
     return str(ttir_to_linalg(ttir, {**options.__dict__}, options, named_ops=True))
 
@@ -159,11 +159,12 @@ def test_inttoptr_static_offset_reset():
 
 
 def test_inttoptr_indirect_load_uses_scalar_view():
-    """An opaque int_to_ptr tensor load keeps the one-element carrier view."""
+    """Legacy lowering keeps the one-element view for opaque int_to_ptr loads."""
     adapter = _compile_to_adapter(
         _inttoptr_indirect_load_kernel,
         {"block_table_ptrs": "*i64", "offsets_ptr": "*i32", "out": "*i32"},
         {"BLOCK": 8},
+        arch="Ascend910B1",
     )
     assert "hivm.hir.pointer_cast" in adapter
     assert "annotation.mark" in adapter

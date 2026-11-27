@@ -219,6 +219,7 @@ class NPULauncher(object):
         self.compile_only = knobs.ascend.compile_only
         self.src = src
         self.metadata = metadata
+        self._proton_collection = getattr(metadata, "proton_collection", None)
         self.mix_mode = metadata.mix_mode
         self.shared = metadata.shared
         key_index = lambda key: src.fn.arg_names.index(key) if isinstance(key, str) else key
@@ -261,6 +262,9 @@ class NPULauncher(object):
             print("[INFO]: skip running kernel")
             print(f"[INFO]: The compiled kernel cache is in {cache_manager.cache_dir}")
             return
+        # A cached kernel can outlive the Proton hook that saw it load.
+        if self._proton_collection is not None and args[6] is not None:
+            args[6]._proton_collection = self._proton_collection
         if self.profile_scratch_size:
             gridX, gridY, gridZ, stream = args[:4]
             if min(gridX, gridY, gridZ) <= 0:
@@ -315,6 +319,7 @@ class NPUDriver(DriverBase):
     def map_python_to_cpp_type(self, ty: str) -> str:
         return ty_to_cpp(ty)
 
+    @functools.lru_cache(maxsize=1)
     def get_current_target(self):
         backend = "npu"
         arch = self.utils.get_arch()

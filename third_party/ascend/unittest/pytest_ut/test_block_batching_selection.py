@@ -275,6 +275,52 @@ for _ in range(20):
         self.assertEqual(result["factor"], 1)
         self.assertFalse(result["model_complete"])
 
+    def test_dot_output_extent_excludes_reduction_and_batch_dimensions(self):
+        for batch, m, n, k in ((1, 64, 32, 128), (128, 32, 64, 32), (2, 128, 32, 32), (2, 32, 128, 32)):
+            with self.subTest(batch=batch, m=m, n=n, k=k):
+                prefix = f"{batch}x" if batch > 1 else ""
+                a, b, out = f"{prefix}{m}x{k}", f"{prefix}{k}x{n}", f"{prefix}{m}x{n}"
+                result = self.score(
+                    f'''module {{
+                  tt.func public @kernel(%a: tensor<{a}xf16>, %b: tensor<{b}xf16>,
+                                         %out: tensor<{out}x!tt.ptr<f32>>) {{
+                    %zero = arith.constant dense<0.0> : tensor<{out}xf32>
+                    %dot = tt.dot %a, %b, %zero : tensor<{a}xf16> * tensor<{b}xf16> -> tensor<{out}xf32>
+                    tt.store %out, %dot : tensor<{out}x!tt.ptr<f32>>
+                    tt.return
+                  }}
+                }}''', cv=True)
+                self.assertEqual(result["status"], "TTIR_COST_ESTIMATED", result)
+                self.assertEqual(result["max_dot_output_extent"], max(m, n))
+
+    def test_large_batch_tiles_are_excluded_from_all_automatic_choices(self):
+        for groups in (4, 256):
+            for cv, kind, extent in ((True, "batch", 32), (True, "batch", 64), (True, "batch", 128), (True, "M", 128),
+                                     (True, "N", 128), (False, "vv", 128)):
+                with self.subTest(groups=groups, cv=cv, kind=kind, extent=extent):
+                    rows = [
+                        dict(factor=f, axis=-1 if f == 1 else 0, status="TTIR_COST_ESTIMATED", score=100 / f, cores=56,
+                             blocks=groups // f, cv=cv, merge_kind="unmerged" if f == 1 else kind,
+                             max_dot_output_extent=extent) for f in (1, 2, 4)
+                    ]
+                    result = json.loads(
+                        ascend.select_block_candidates(
+                            json.dumps(
+                                dict(action="rank_ttir", contract=dict(grid=[groups, 1, 1], core_floor=0),
+                                     candidates=rows))))
+                    limited = cv and kind == "batch" and extent > 64
+                    if limited:
+                        self.assertEqual(result["factor"], 1)
+                        self.assertEqual(result["reason"], "CV_BATCH_TILE_LIMIT_EXCEEDED")
+                        self.assertEqual(result["ranked_candidates"], ["unmerged"])
+                        for factor in (2, 4):
+                            row = result["candidates"][f"a0_f{factor}"]
+                            self.assertEqual(row["status"], "TTIR_COST_ESTIMATED")
+                            self.assertEqual(row["selection_reason"], "CV_BATCH_TILE_LIMIT_EXCEEDED")
+                    else:
+                        self.assertGreater(result["factor"], 1)
+                        self.assertEqual(set(result["ranked_candidates"]), {"unmerged", "a0_f2", "a0_f4"})
+
     def test_supported_targets_share_scores_with_explicit_core_counts(self):
         text = """module { tt.func public @kernel(%out: !tt.ptr<i32>) {
           %zero = arith.constant 0 : i32
@@ -524,7 +570,15 @@ class TestCompileContextCache(unittest.TestCase):
 
 class TestRankedRecovery(unittest.TestCase):
 
-    def run_selection(self, *, selected=4, decline=False, failure=None, arch="Ascend950", saved=None, binary_hit=True):
+    def setUp(self):
+        from triton import knobs
+        scope = knobs.compilation.scope()
+        scope.__enter__()
+        self.addCleanup(scope.__exit__, None, None, None)
+        knobs.compilation.always_compile = False
+
+    def run_selection(self, *, selected=4, decline=False, failure=None, arch="Ascend950", saved=None, binary_hit=True,
+                      baseline_error=None):
         from triton.backends.ascend import block_auto as dispatch, block_batching_worker as worker
         backend = Mock(target=GPUTarget("npu", arch, 32))
         backend.parse_options.side_effect = lambda options: SimpleNamespace(block_batching_backend_revision="test", **
@@ -536,6 +590,8 @@ class TestRankedRecovery(unittest.TestCase):
 
         def compile_f1(*args):
             events.append("f1")
+            if baseline_error is not None:
+                raise baseline_error
             return baseline
 
         plan = dict(candidates=[dict(axis=0, factor=2), dict(axis=0, factor=4)])
@@ -561,8 +617,9 @@ class TestRankedRecovery(unittest.TestCase):
             events.append("binary-hit" if cached_only else request.factor)
             if cached_only and not binary_hit:
                 return None
-            return SimpleNamespace(candidate=None if decline else object(),
-                                   block_batching=dict(reason="VV_TARGET_RESOURCE_REJECTED"))
+            return SimpleNamespace(
+                candidate=None if decline else object(),
+                block_batching=decline if isinstance(decline, dict) else dict(reason="VV_TARGET_RESOURCE_REJECTED"))
 
         contract = dict(grid=[256, 1, 1], arguments=dict(X=dict(kind="tensor")))
         options = dict(block_auto_contract=json.dumps(contract), block_batching_factor="auto")
@@ -641,6 +698,25 @@ class TestRankedRecovery(unittest.TestCase):
         self.assertEqual(events, ["ttir", "f1", 4])
         self.assertEqual(result["selected_factor"], 1)
         self.assertEqual(result["reason"], "BASELINE_AFTER_CANDIDATE_REJECTION")
+
+    def test_candidate_failure_preserves_diagnostics_without_caching_selection(self):
+        decline = dict(reason="CANDIDATE_COMPILATION_FAILED", failure_kind="InternalError", stage="npubin",
+                       backend_diagnostic="ub overflow; operations cannot be fused")
+        for cached in (False, True):
+            with self.subTest(cached=cached):
+                saved = Mock(load=lambda: selection_report() if cached else None)
+                result, events = self.run_selection(decline=decline, saved=saved)
+                self.assertEqual(events, ["f1", "binary-hit"] if cached else ["ttir", "f1", 4])
+                self.assertEqual(result["selected_factor"], 1)
+                self.assertEqual(result["compile_rejections"], [dict(key="a0_f2" if cached else "a0_f4", **decline)])
+                saved.store.assert_not_called()
+                saved.restore_ttir.assert_not_called()
+
+    def test_baseline_failure_is_not_a_candidate_fallback(self):
+        error = RuntimeError("F1 compilation failed")
+        with self.assertRaises(RuntimeError) as caught:
+            self.run_selection(baseline_error=error)
+        self.assertIs(caught.exception, error)
 
     def test_supported_targets_use_the_selection_worker(self):
         for arch in ("Ascend950", "Ascend910_9391", "Ascend910B1", "Ascend910B4"):
@@ -786,6 +862,41 @@ class TestHostIntegration(unittest.TestCase):
         self.assertEqual(contract["grid"], [256, 1, 1])
         self.assertEqual(contract["arguments"]["x"]["shape"], [256, 512])
         self.assertNotIn("block_auto_contract", self.kwargs)
+
+    def test_cv_reselects_changed_grid_and_reuses_warm_decisions(self):
+        compiled = []
+
+        def tail(args, options, grid, *unused, memory_key, **hooks):
+            self.assertIsInstance(memory_key, str)
+            self.assertEqual(json.loads(json.dumps(memory_key)), memory_key)
+            kernels = self.fn.device_caches[0][0]
+            if memory_key not in kernels:
+                compiled.append(tuple(grid))
+                kernels[memory_key] = SimpleNamespace(block_auto_cache_grid=options['block_batching_grid'])
+            return kernels[memory_key]
+
+        self.tail = tail
+        large = self.run_handler((512, ))
+        small = self.run_handler((4, ), warmup=True)
+        self.assertIsNot(large, small)
+        self.assertIs(self.run_handler((4, 1, 1)), small)
+        self.assertIs(self.run_handler((512, )), large)
+        self.assertEqual(compiled, [(512, ), (4, )])
+        self.fn.device_caches[0][0].clear()
+        self.assertIsNot(self.run_handler((4, )), small)
+        self.assertEqual(len(compiled), 3)
+
+    def test_vv_shapes_keep_ordinary_specialization_reuse(self):
+        keys = []
+
+        def tail(*args, memory_key, **hooks):
+            keys.append(memory_key)
+            return self.fn.device_caches[0][0].setdefault(memory_key, SimpleNamespace())
+
+        self.tail = tail
+        first = self.run_handler((512, ))
+        self.assertIs(self.run_handler((4, )), first)
+        self.assertEqual(keys[0], keys[1])
 
     def test_omitted_factor_matches_explicit_auto(self):
         explicit, _ = self.dispatch.prepare_launch(self.fn, (Tensor(), 131072), self.kwargs, (256, ), False, 0,

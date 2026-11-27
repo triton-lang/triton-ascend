@@ -10,6 +10,7 @@
 #include "llvm/ADT/StringRef.h"
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 
 namespace mlir::triton::cfg {
@@ -23,9 +24,9 @@ struct BatchRequest {
   // CV supports independent lanes or a proved shared-operand spatial tile.
   // The dispatcher proves a full group before launching either candidate.
   bool cv = false;
-  // Opt-in independent rank-three lowering. Preserve rectangular masks;
-  // the guard proves complete reduction axes and unchanged padded footprints.
-  bool cvBatchMatmul = false;
+  // An unspecified policy prefers batch MMA for proved full, straight-line
+  // tiles. Explicit opt-in also permits the existing rectangular-mask path.
+  std::optional<bool> cvBatchMatmul = false;
   bool isValid() const { return factor > 0 && axis >= -1 && axis <= 2; }
 };
 

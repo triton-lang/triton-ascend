@@ -19,7 +19,7 @@ SIGNATURE = {"X": "*u32", "Y": "*u32", "O": "*u32"}
 
 
 @tla.jit
-def vand(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
+def vand(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.constexpr):
     x = tla.alloc((N, ), tl.uint32, space="ub")
     y = tla.alloc((N, ), tl.uint32, space="ub")
     o = tla.alloc((4, N), tl.uint32, space="ub")
@@ -29,7 +29,7 @@ def vand(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
         a = tla.simd.vlds(x[0])
         b = tla.simd.vlds(y[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(o[0, 0], tla.simd.vand(a, b))
         tla.simd.vsts(o[1, 0], tla.simd.vand(a, b, prefix))
@@ -39,7 +39,7 @@ def vand(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr):
 
 
 def constexprs():
-    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"]}
+    return {"N": SHAPE["lanes"], "ACTIVE": SHAPE["active"], "MASKPAT": "VL%d" % (SHAPE["active"])}
 
 
 def test_ir(output_dir=None):

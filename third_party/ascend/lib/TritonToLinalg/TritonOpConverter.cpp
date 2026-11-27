@@ -22,6 +22,7 @@
  */
 
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
+#include "ascend/include/TritonMemoryAccess/MemoryAccessTags.h"
 #include "ascend/include/TritonToGraph/BlockBatching/ElementwiseModels.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
@@ -144,6 +145,10 @@ TransposeConverter::matchAndRewrite(triton::TransOp op, OpAdaptor adaptor,
   auto src = adaptor.getSrc();
   auto res = ConverterUtils::getTransposedValue(src, op.getLoc(), rewriter,
                                                 op.getOrder());
+  if (auto marker =
+          op->getAttr(triton::memory_access::ImplicitLoadPermuteTransAttr))
+    res.getDefiningOp()->setAttr(
+        triton::memory_access::ImplicitLoadPermuteTransAttr, marker);
   rewriter.replaceOp(op, res);
   return success();
 }
@@ -660,7 +665,6 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
   if (castBitwidth == 1)
     castBitwidth = 8;
   if (origBitwidth != castBitwidth) {
-    bitcastOp.emitError() << "Casting pointers with unmatched bitwidth!\n";
     return failure();
   }
 
@@ -749,6 +753,9 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
   Value input = op.getSrc();
   auto resultType = op.getResult().getType();
 
+  if (isa<HiFloat8Type>(getElementTypeOrSelf(input.getType())) ||
+      isa<HiFloat8Type>(getElementTypeOrSelf(resultType)))
+    return failure();
   // Check if rounding mode is specified
   auto roundingMode = op.getRounding();
   if (roundingMode.has_value() &&
@@ -810,7 +817,7 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
     rewriter.replaceOp(op, truncOp.getResult());
   } else if (srcBitwidth > dstBitwidth) {
     // Downcast: use arith.truncf with round_mode=rint
-    bool saturate = srcElemType.isF32() &&
+    bool saturate = isa<Float16Type, BFloat16Type, Float32Type>(srcElemType) &&
                     isa<Float8E4M3FNType, Float8E5M2Type>(dstElemType);
     if (saturate) {
       if (auto value =
@@ -1287,13 +1294,13 @@ ClampFConverter::matchAndRewrite(triton::ClampFOp op, OpAdaptor adaptor,
   }
 
   if (propagateNan_para == PropagateNan::NONE) {
-    auto minOp = rewriter.create<arith::MinNumFOp>(loc, input, max_para);
-    auto maxOp = rewriter.create<arith::MaxNumFOp>(loc, min_para, minOp);
-    rewriter.replaceOp(op, ValueRange{maxOp});
+    auto maxOp = rewriter.create<arith::MaxNumFOp>(loc, input, min_para);
+    auto minOp = rewriter.create<arith::MinNumFOp>(loc, maxOp, max_para);
+    rewriter.replaceOp(op, ValueRange{minOp});
   } else if (propagateNan_para == PropagateNan::ALL) {
-    auto minOp = rewriter.create<arith::MinimumFOp>(loc, input, max_para);
-    auto maxOp = rewriter.create<arith::MaximumFOp>(loc, min_para, minOp);
-    rewriter.replaceOp(op, ValueRange{maxOp});
+    auto maxOp = rewriter.create<arith::MaximumFOp>(loc, input, min_para);
+    auto minOp = rewriter.create<arith::MinimumFOp>(loc, maxOp, max_para);
+    rewriter.replaceOp(op, ValueRange{minOp});
   } else {
     return failure();
   }
@@ -2671,14 +2678,6 @@ LogicalResult DeviceAssertConverter::matchAndRewrite(
     triton::AssertOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
   auto msgAttr = op.getMessageAttr();
-  // The frontend marks only sanitize_overflow assertions.  A user may choose
-  // the same text for tl.device_assert, so message matching is not a safe
-  // provenance test here or in the graph rewrite.
-  if (op->hasAttr("tt.auto_overflow_assert")) {
-    rewriter.eraseOp(op);
-    return success();
-  }
-
   auto moduleOp = op->getParentOfType<ModuleOp>();
   rewriter.setInsertionPoint(moduleOp.getBody(),
                              std::prev(moduleOp.getBody()->end()));
@@ -2835,8 +2834,9 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
   // groups (64 elements for FP8, 64 packed bytes for FP4). K < this
   // value or K not divisible by it should fall back to the software
   // decomposed path rather than forming a native MatMulMxOp.
-  constexpr int64_t nativeMxKAlignment = 64;
-  constexpr int64_t minimumNativeFp4StorageK = nativeMxKAlignment;
+  constexpr int64_t NATIVE_MX_K_ALIGNMENT = 64;
+  constexpr int64_t NATIVE_MX_SINGLE_SCALE_BLOCK_K = 32;
+  constexpr int64_t minimumNativeFp4StorageK = NATIVE_MX_K_ALIGNMENT;
   auto hasE8M0Scale = [](Value scale) {
     return !scale || cast<RankedTensorType>(scale.getType())
                          .getElementType()
@@ -2878,10 +2878,11 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
         return op.emitError()
                << "MatMulMx: lhs K (" << lhsK << ") != rhs K (" << rhsK << ")";
       }
-      if (lhsK % nativeMxKAlignment != 0) {
-        return op.emitError()
-               << "MatMulMx: static K = " << lhsK << ", must be divisible by "
-               << nativeMxKAlignment;
+      if (lhsK != NATIVE_MX_SINGLE_SCALE_BLOCK_K &&
+          lhsK % NATIVE_MX_K_ALIGNMENT != 0) {
+        return op.emitError() << "MatMulMx: static K = " << lhsK << ", must be "
+                              << NATIVE_MX_SINGLE_SCALE_BLOCK_K
+                              << " or divisible by " << NATIVE_MX_K_ALIGNMENT;
       }
     }
     if (!rhsScale) {

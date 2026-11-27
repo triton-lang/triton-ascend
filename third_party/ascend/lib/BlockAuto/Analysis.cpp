@@ -155,12 +155,10 @@ std::string mergeKind(const O &metadata, int64_t factor, bool frontend) {
   if (str(report, "cv_mode") == "independent_batch_v1")
     return frontend ? "batch" : "independent_batch";
   std::string lowering = str(report, "cv_lowering");
-  if (frontend && StringRef(lowering).ends_with("_uniform_control"))
-    lowering.resize(lowering.size() - 16);
   if (str(report, "cv_mode") == "spatial_concat_v1") {
-    if (lowering == "spatial_m_v1")
+    if (lowering == "m_concat_matmul")
       return "M";
-    if (lowering == "spatial_n_v1")
+    if (lowering == "n_concat_matmul")
       return "N";
   }
   throw std::runtime_error("compiler CV axis role is not covered");
@@ -258,6 +256,7 @@ O rankTtir(const O &request) {
   O records;
   std::vector<const O *> ready;
   bool baselineReady = false;
+  bool batchTileLimited = false;
   for (const V &value : candidates) {
     const O &candidate = object(value);
     std::string name = key(candidate);
@@ -266,6 +265,17 @@ O rankTtir(const O &request) {
       continue;
     int64_t factor = integer(candidate, "factor");
     baselineReady |= factor == 1;
+    // Temporarily keep large independent matmuls out of automatic BH merging.
+    // Apply this before ranking, short-batch overrides and recovery ordering.
+    if (flag(candidate, "cv") && factor > 1 &&
+        str(candidate, "merge_kind") == "batch" &&
+        integer(candidate, "max_dot_output_extent") > 64) {
+      O record(candidate);
+      record["selection_reason"] = "CV_BATCH_TILE_LIMIT_EXCEEDED";
+      records[name] = std::move(record);
+      batchTileLimited = true;
+      continue;
+    }
     if (!flag(candidate, "cv") && factor > 1) {
       const V &floor = get(contract, "core_floor");
       int64_t minimum =
@@ -293,7 +303,9 @@ O rankTtir(const O &request) {
            {"selected_key", "unmerged"},
            {"reason", "TTIR_BASELINE_MODEL_UNSUPPORTED"}};
   if (selected) {
-    std::string reason = "LOWEST_TTIR_SCORE";
+    std::string reason = batchTileLimited && integer(*selected, "factor") == 1
+                             ? "CV_BATCH_TILE_LIMIT_EXCEEDED"
+                             : "LOWEST_TTIR_SCORE";
     bool spatial = llvm::any_of(ready, [](const O *row) {
       return str(*row, "merge_kind") == "M" || str(*row, "merge_kind") == "N";
     });
@@ -335,6 +347,7 @@ struct TtirWork {
   double vector = 0, vectorPath = 0, cube = 0, scalar = 0;
   double simt = 0;
   double loads = 0, stores = 0, readBytes = 0, writeBytes = 0;
+  int64_t maxDotOutputExtent = 0;
   bool boundedLoops = false;
 };
 
@@ -530,6 +543,7 @@ static TtirWork ttirWork(ModuleOp module, const Profile &profile,
             "unsupported dot shape in TTIR cost model");
       int64_t m = lhs.getShape()[lhs.getRank() - 2];
       int64_t k = lhs.getShape().back(), n = rhs.getShape().back();
+      work.maxDotOutputExtent = std::max({work.maxDotOutputExtent, m, n});
       double batch = double(lhs.getNumElements()) / (m * k);
       // Cube tile work; packing, conversion and scheduling are still estimates.
       work.cube += iterations * batch * std::ceil(m / 16.0) *
@@ -783,6 +797,7 @@ std::string scoreBlockTtir(ModuleOp module, llvm::StringRef request) {
                      {"cores", cores},
                      {"vector_work", work.vector},
                      {"cube_work", work.cube},
+                     {"max_dot_output_extent", work.maxDotOutputExtent},
                      {"vector_critical_path", work.vectorPath},
                      {"memory_cycles", memory},
                      {"compute_cycles", compute},

@@ -111,6 +111,10 @@ bool canSplitWideAccumulators(scf::ForOp loop, int64_t rowsPerProgram,
                               bool enabled,
                               int64_t budgetBytes = kMaxLiftedValueBytes);
 
+// Private marker consumed by row lifting on a streaming dQ mask broadcast.
+inline constexpr llvm::StringLiteral kStreamingDQMaskAttr =
+    "triton_graph.streaming_dq_mask";
+
 class RowLiftBuilder {
 public:
   // rewriter is the IR rewriter; candidate carries the target and budgets.
@@ -137,6 +141,8 @@ private:
   bool rewriteMaskedStore(triton::StoreOp store);
 
   bool rewriteReduce(triton::ReduceOp reduce);
+
+  bool rewriteStreamingDQMask(triton::BroadcastOp broadcast);
 
   bool rewriteTensorPointer(triton::MakeTensorPtrOp makePtr);
 
@@ -260,6 +266,7 @@ private:
   DenseMap<Value, SplitValue> splitValues;
   // Last-row-only mapping used for the loop-bound evidence
   IRMapping lastRowMapping;
+  Value firstRow;
   Value validRows;
   Value rowActiveMask;
   SmallVector<int64_t> plannedSplitIndices;

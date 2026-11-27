@@ -35,20 +35,11 @@ def minimum_with_index(a_value, a_index, b_value, b_index):
 @triton.jit
 def triton_min_5d_dim4_keepdim(in_ptr0, in_ptr1, out_ptr0, out_ptr1, L: tl.constexpr, M: tl.constexpr, N: tl.constexpr,
                                K: tl.constexpr, Z: tl.constexpr):
-    lblk_idx = tl.arange(0, L)
-    mblk_idx = tl.arange(0, M)
-    nblk_idx = tl.arange(0, N)
-    kblk_idx = tl.arange(0, K)
-    zblk_idx = tl.arange(0, Z)
-    idx = lblk_idx[:, None, None, None, None] * Z * K * N * M + mblk_idx[None, :, None, None, None] * Z * K * N + \
-          nblk_idx[None, None, :, None, None] * Z * K + kblk_idx[None, None, None, :, None] * Z + zblk_idx[None, None, None, None, :]
+    idx = tl.arange(0, L * M * N * K * Z).reshape((L, M, N, K, Z))
     x = tl.load(in_ptr0 + idx)
     x1 = tl.load(in_ptr1 + idx)
     ret, ret1 = tl.reduce((x, x1), 4, minimum_with_index, keep_dims=True)
-    zblk_idx = tl.arange(0, 1)
-    odx = lblk_idx[:, None, None, None, None] * K * N * M + mblk_idx[None, :, None, None, None] * K * N + \
-          nblk_idx[None, None, :, None, None] * K + kblk_idx[None, None, None, :, None]  \
-          + zblk_idx[None, None, None, None, :]
+    odx = tl.arange(0, L * M * N * K).reshape((L, M, N, K, 1))
     tl.store(out_ptr0 + odx, ret)
     tl.store(out_ptr1 + odx, ret1)
 

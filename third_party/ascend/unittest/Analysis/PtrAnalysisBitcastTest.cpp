@@ -310,6 +310,32 @@ TEST(PtrAnalysisBitcast, DynamicShapeKeepsSameWidthButRejectsRescaling) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
+TEST(PtrAnalysisBitcast, RetypedPerLaneBaseIsStable) {
+  MLIRContext context;
+  load(context);
+  auto module = parseSourceString<ModuleOp>(R"mlir(
+    module {
+      tt.func @per_lane(%addresses: tensor<4xi64>, %offsets: tensor<4xi32>) {
+        %base = tt.int_to_ptr %addresses : tensor<4xi64> -> tensor<4x!tt.ptr<i16>>
+        %ptrs = tt.addptr %base, %offsets : tensor<4x!tt.ptr<i16>>, tensor<4xi32>
+        %wide = tt.bitcast %ptrs {tag="wide"} : tensor<4x!tt.ptr<i16>> -> tensor<4x!tt.ptr<i32>>
+        tt.return
+      }
+    })mlir",
+                                            &context);
+  ASSERT_TRUE(module);
+  auto f = *module->getOps<triton::FuncOp>().begin();
+  OpBuilder builder(f.getBody().front().getTerminator());
+  PtrAnalysis analysis(builder);
+  auto info = test::getInfo(analysis.analyze(tagged(f, "wide")));
+  ASSERT_TRUE(succeeded(info));
+  ASSERT_FALSE(info->hasScalarBase());
+  auto root = test::getInfo(analysis.analyze(info->base));
+  ASSERT_TRUE(succeeded(root));
+  EXPECT_EQ(root->base, info->base);
+  EXPECT_TRUE(succeeded(verify(*module)));
+}
+
 TEST(PtrAnalysisBitcast, StructuredHalfWidthCastPreservesSubAxes) {
   MLIRContext context;
   load(context);
@@ -397,6 +423,7 @@ TEST(PtrAnalysisBitcast, DifferentWidthsPreserveCombinedByteAddresses) {
       %rest = arith.addi %scaled,%three : tensor<8xi32>
       %p = tt.splat %base : !tt.ptr<i8> -> tensor<8x!tt.ptr<i8>>
       %p1 = tt.addptr %p,%one : tensor<8x!tt.ptr<i8>>,tensor<8xi32>
+      %unaligned = tt.bitcast %p1 {tag="unaligned"} : tensor<8x!tt.ptr<i8>> -> tensor<8x!tt.ptr<f32>>
       %p4 = tt.addptr %p1,%rest : tensor<8x!tt.ptr<i8>>,tensor<8xi32>
       %wide = tt.bitcast %p4 {tag="wide"} : tensor<8x!tt.ptr<i8>> -> tensor<8x!tt.ptr<f32>>
       %advanced = tt.addptr %wide,%r {tag="advanced"} : tensor<8x!tt.ptr<f32>>,tensor<8xi32>
@@ -428,6 +455,8 @@ TEST(PtrAnalysisBitcast, DifferentWidthsPreserveCombinedByteAddresses) {
   auto f = *module->getOps<triton::FuncOp>().begin();
   OpBuilder builder(f.getBody().front().getTerminator());
   PtrAnalysis analysis(builder);
+  // Divisibility is an input precondition, even for a constant displacement.
+  EXPECT_TRUE(succeeded(analysis.analyze(tagged(f, "unaligned"))));
   for (StringRef tag : {"wide", "advanced", "half", "byte", "dynamic",
                         "subaxis", "separate", "wrapped"}) {
     Value value = tagged(f, tag);
@@ -455,7 +484,7 @@ TEST(PtrAnalysisBitcast, DifferentWidthsPreserveCombinedByteAddresses) {
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
-TEST(PtrAnalysisBitcast, WideningKeepsProvenColumnsAndRejectsUnknownUnits) {
+TEST(PtrAnalysisBitcast, WideningKeepsProvenColumnsWithDynamicRowOffsets) {
   MLIRContext context;
   load(context);
   auto module = parseSourceString<ModuleOp>(R"mlir(module {
@@ -477,8 +506,8 @@ TEST(PtrAnalysisBitcast, WideningKeepsProvenColumnsAndRejectsUnknownUnits) {
       %ue = tt.expand_dims %rows {axis=1:i32} : tensor<2xi32> -> tensor<2x1xi32>
       %ub = tt.broadcast %ue : tensor<2x1xi32> -> tensor<2x4xi32>
       %uo = arith.addi %ub,%cb : tensor<2x4xi32>
-      %unknown = tt.addptr %p,%uo {tag="source"} : tensor<2x4x!tt.ptr<i8>>,tensor<2x4xi32>
-      %rejected = tt.bitcast %unknown {tag="rejected"} : tensor<2x4x!tt.ptr<i8>> -> tensor<2x4x!tt.ptr<f32>>
+      %dynamic = tt.addptr %p,%uo : tensor<2x4x!tt.ptr<i8>>,tensor<2x4xi32>
+      %runtime = tt.bitcast %dynamic {tag="runtime"} : tensor<2x4x!tt.ptr<i8>> -> tensor<2x4x!tt.ptr<f32>>
       tt.return
     }
   })mlir",
@@ -489,22 +518,17 @@ TEST(PtrAnalysisBitcast, WideningKeepsProvenColumnsAndRejectsUnknownUnits) {
   PtrAnalysis analysis(builder);
   test::Environment env{
       {f.getArgument(0), {llvm::APInt(64, 4096)}},
-      {f.getArgument(1), {llvm::APInt(32, -7, true), llvm::APInt(32, 19)}}};
-  for (StringRef tag : {"wide", "back"}) {
+      {f.getArgument(1), {llvm::APInt(32, -8, true), llvm::APInt(32, 20)}}};
+  for (StringRef tag : {"wide", "back", "runtime"}) {
     auto info = test::getInfo(analysis.analyze(tagged(f, tag)));
     ASSERT_TRUE(succeeded(info));
     EXPECT_EQ(test::axisKinds(info->offsets),
               (SmallVector<AxisKind>{AxisKind::Unknown, AxisKind::Structured}));
     EXPECT_EQ(
         test::evaluate(info->offsets.axes[1].stride)->front().getSExtValue(),
-        tag == "wide" ? 1 : 4);
+        tag == "back" ? 4 : 1);
     expectAddresses(tagged(f, tag), *info, builder, env);
   }
-  ASSERT_TRUE(succeeded(test::getInfo(analysis.analyze(tagged(f, "source")))));
-  unsigned before = count(f);
-  auto rejected = analysis.analyze(tagged(f, "rejected"));
-  EXPECT_TRUE(failed(rejected));
-  EXPECT_EQ(count(f), before);
   EXPECT_TRUE(succeeded(verify(*module)));
 }
 
@@ -520,7 +544,6 @@ TEST(PtrAnalysisBitcast,
     return triton::PointerType::get(pointee, space);
   };
   SmallVector<std::pair<Type, Type>> types{
-      {ptr(builder.getI8Type()), ptr(builder.getF32Type())},
       {ptr(builder.getIntegerType(4)), ptr(builder.getIntegerType(4))},
       {ptr(builder.getIntegerType(24)), ptr(builder.getIntegerType(24))},
       {ptr(ptr(builder.getI8Type())), ptr(ptr(builder.getI8Type()))}};

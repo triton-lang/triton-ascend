@@ -31,7 +31,8 @@ SIGNATURE_H = {"X": "*fp16", "Y": "*fp16", "I": "*i16", "T": "*i16", "O": "*fp16
 
 
 @tla.jit
-def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
+def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr,
+                MASKPAT: tl.constexpr, TAILPAT: tl.constexpr):
     xb = tla.alloc((TILES, N), tl.float32, space="ub")
     yb = tla.alloc((TILES, N), tl.float32, space="ub")
     tb = tla.alloc((N, ), tl.int32, space="ub")
@@ -44,7 +45,7 @@ def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.con
         y = tla.simd.vlds(yb[0, 0])
         t = tla.simd.vlds(tb[0])
         idx = tla.simd.vci(0)
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vabsdif(x, y))
@@ -58,7 +59,7 @@ def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.con
             vx = tla.simd.vlds(xb[tile, 0])
             vy = tla.simd.vlds(yb[tile, 0])
             if tile == TILES - 1:
-                tail_mask = tla.simd.pge(TAIL, N)
+                tail_mask = tla.simd.pset(2048 // N, TAILPAT)
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vabsdif(vx, vy, mask=tail_mask), mask=tail_mask)
             else:
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vabsdif(vx, vy))
@@ -66,7 +67,8 @@ def vabsdif_f32(X, Y, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.con
 
 
 @tla.jit
-def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr):
+def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.constexpr, TAIL: tl.constexpr,
+                MASKPAT: tl.constexpr, TAILPAT: tl.constexpr):
     xb = tla.alloc((TILES, N), tl.float16, space="ub")
     yb = tla.alloc((TILES, N), tl.float16, space="ub")
     ib = tla.alloc((N, ), tl.int16, space="ub")
@@ -81,7 +83,7 @@ def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.
         y = tla.simd.vlds(yb[0, 0])
         idx = tla.simd.vlds(ib[0])
         t = tla.simd.vlds(tb[0])
-        prefix = tla.simd.pge(ACTIVE, N)
+        prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
         tla.simd.vsts(ob[0, 0], tla.simd.vabsdif(x, y), dist="NORM_B16")
@@ -95,7 +97,7 @@ def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.
             vx = tla.simd.vlds(xb[tile, 0])
             vy = tla.simd.vlds(yb[tile, 0])
             if tile == TILES - 1:
-                tail_mask = tla.simd.pge(TAIL, N)
+                tail_mask = tla.simd.pset(2048 // N, TAILPAT)
                 tla.simd.vsts(ob[TAIL_BASE_C + tile, 0], tla.simd.vabsdif(vx, vy, mask=tail_mask), mask=tail_mask,
                               dist="NORM_B16")
             else:
@@ -105,7 +107,10 @@ def vabsdif_f16(X, Y, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, TILES: tl.
 
 def constexprs(shape=None):
     s = SHAPE if shape is None else shape
-    return {"N": s["lanes"], "ACTIVE": s["active"], "TILES": s["tiles"], "TAIL": s["tail"]}
+    return {
+        "N": s["lanes"], "ACTIVE": s["active"], "MASKPAT": "VL%d" % (s["active"]), "TILES": s["tiles"], "TAIL":
+        s["tail"], "TAILPAT": "VL%d" % (s["tail"])
+    }
 
 
 def test_ir(output_dir=None):

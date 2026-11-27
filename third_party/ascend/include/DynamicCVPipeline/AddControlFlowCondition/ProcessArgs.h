@@ -42,6 +42,9 @@ struct SharedArgInfo {
   int ownerBlockId;
   int newArgIndex;
   int nonOwnerBlockId;
+  // Which result of the shared update op feeds this iter arg. A multi-result
+  // scf.if updates several iter args;
+  unsigned resultNumber = 0;
 
   SharedArgInfo(int arg, int owner, int newIdx, int nonOwner)
       : argIndex(arg), iterArg(Value()), ownerBlockId(owner),
@@ -56,6 +59,8 @@ struct WhileIterArgClonePlan {
   llvm::DenseMap<unsigned, Operation *> compOp;
   llvm::DenseMap<unsigned, llvm::DenseSet<Operation *>> chainOps;
   llvm::DenseMap<unsigned, unsigned> posInClonedVec;
+  // Result index of compOp that the after-yield feeds into this iter arg.
+  llvm::DenseMap<unsigned, unsigned> resultNumber;
   // (blockId, newArgIdx, origIdx) triples in planning order, one per (blockId,
   // cond-used iter_arg) pair
   SmallVector<std::tuple<int, unsigned, unsigned>> newArgDescriptors;

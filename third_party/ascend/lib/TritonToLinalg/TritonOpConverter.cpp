@@ -2837,8 +2837,9 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
   // groups (64 elements for FP8, 64 packed bytes for FP4). K < this
   // value or K not divisible by it should fall back to the software
   // decomposed path rather than forming a native MatMulMxOp.
-  constexpr int64_t nativeMxKAlignment = 64;
-  constexpr int64_t minimumNativeFp4StorageK = nativeMxKAlignment;
+  constexpr int64_t NATIVE_MX_K_ALIGNMENT = 64;
+  constexpr int64_t NATIVE_MX_SINGLE_SCALE_BLOCK_K = 32;
+  constexpr int64_t minimumNativeFp4StorageK = NATIVE_MX_K_ALIGNMENT;
   auto hasE8M0Scale = [](Value scale) {
     return !scale || cast<RankedTensorType>(scale.getType())
                          .getElementType()
@@ -2880,10 +2881,11 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
         return op.emitError()
                << "MatMulMx: lhs K (" << lhsK << ") != rhs K (" << rhsK << ")";
       }
-      if (lhsK % nativeMxKAlignment != 0) {
-        return op.emitError()
-               << "MatMulMx: static K = " << lhsK << ", must be divisible by "
-               << nativeMxKAlignment;
+      if (lhsK != NATIVE_MX_SINGLE_SCALE_BLOCK_K &&
+          lhsK % NATIVE_MX_K_ALIGNMENT != 0) {
+        return op.emitError() << "MatMulMx: static K = " << lhsK << ", must be "
+                              << NATIVE_MX_SINGLE_SCALE_BLOCK_K
+                              << " or divisible by " << NATIVE_MX_K_ALIGNMENT;
       }
     }
     if (!rhsScale) {

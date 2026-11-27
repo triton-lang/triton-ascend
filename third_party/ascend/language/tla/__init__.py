@@ -76,7 +76,6 @@ from .scope import pipeline, scope
 from .alloc import alloc
 from .fill import fill
 from .dma import (
-    PadMode,
     L2CachePolicy,
     AtomicKind,
     UnitFlagMode,
@@ -86,9 +85,8 @@ from .dma import (
     FixpipePreQuantMode,
     FixpipePreReluMode,
     LoadGM2UBParams,
+    LoadGM2L1Mode,
     LoadGM2L1Params,
-    CopyUB2L1Params,
-    CopyL12UBParams,
     CopyL12BTParams,
     CopyL12FBParams,
     CopyL1ToL0Params,
@@ -169,7 +167,6 @@ __all__ = [
     "static_assert",
     "static_range",
     "AddressSpace",
-    "PadMode",
     "L2CachePolicy",
     "AtomicKind",
     "UnitFlagMode",
@@ -179,9 +176,8 @@ __all__ = [
     "FixpipePreQuantMode",
     "FixpipePreReluMode",
     "LoadGM2UBParams",
+    "LoadGM2L1Mode",
     "LoadGM2L1Params",
-    "CopyUB2L1Params",
-    "CopyL12UBParams",
     "CopyL12BTParams",
     "CopyL12FBParams",
     "CopyL1ToL0Params",

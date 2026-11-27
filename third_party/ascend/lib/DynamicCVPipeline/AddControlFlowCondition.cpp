@@ -27,6 +27,7 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessLoopInvariantRead.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/SplittedIfWrapSsbufIf.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfoLegacy.h"
@@ -492,6 +493,10 @@ void AddControlFlowConditionPass::runOnOperation() {
       new SplittedIfWrapSsbufIfPass());
   splittedIfWrapSsbufIfPass->setConditionInfo(&info);
   pm.addPass(std::move(splittedIfWrapSsbufIfPass));
+
+  // Step8: Sink loop-invariant Vector->Cube read waits to their first in-loop
+  // consumer.
+  pm.addPass(createProcessLoopInvariantReadPass());
 
   if (failed(runPipeline(pm, module))) {
     LDBG("Pass failed!");

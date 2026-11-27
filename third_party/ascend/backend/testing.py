@@ -181,8 +181,11 @@ def _collect_prof_result(
 
     df = pd.read_csv(kernel_details_file, keep_default_na=False)
     if use_task_time:
-        # The first and last lines of the task_time*.csv file are PROFILING_DISABLE, which should be deleted.
-        df = df[1:-1]
+        is_placeholder = df["kernel_name"].astype(str).str.strip() == "N/A"
+        if not df.empty and is_placeholder.iloc[0]:
+            df = df.iloc[1:]
+        if not df.empty and is_placeholder.iloc[-1]:
+            df = df.iloc[:-1]
 
     if df.empty:
         print("[WARNING] No profiling data on the device side.")

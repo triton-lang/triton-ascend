@@ -38,6 +38,7 @@ jobs:
               'documentation':   'Changes to documentation',
               'scripts':         'Changes to utility scripts or tooling',
               'release':         'Changes to release process or versioning',
+              'TA-BUG':          'Triton-Ascend bug report (coexists with bug)',
             };
 
             const { data: existing } = await github.rest.issues.listLabelsForRepo({

@@ -1,6 +1,6 @@
 name: 🐛 Report a bug
 description: Report triton failing to compile a kernel, or giving incorrect results
-labels: ["bug"]
+labels: ["bug", "TA-BUG"]
 
 body:
 - type: markdown

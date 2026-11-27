@@ -10,6 +10,13 @@ labels:
     - 'NoTritonConfigsError|assertion failed|unexpected error|traceback'
     - 'install.*(?:fail|error|broken)|pip.*(?:fail|error)|version.*mismatch'
 
+  # Coexists with 'bug'; Triton-Ascend specific bug tracking label
+  'TA-BUG':
+    - 'miscompiled|incorrect result|wrong result|result mismatch|wrong output'
+    - 'compilation error|compile error|build error|coredump|crash|segfault'
+    - 'NoTritonConfigsError|assertion failed|unexpected error|traceback'
+    - 'install.*(?:fail|error|broken)|pip.*(?:fail|error)|version.*mismatch'
+
   'performance':
     - 'precision|accuracy'
     - 'performance|slow|slower|speed|throughput|latency|bottleneck'

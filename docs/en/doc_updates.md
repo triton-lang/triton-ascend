@@ -4,7 +4,7 @@ This page describes the latest launches, additions, and changes to the official 
 
 Release plans, maintenance policies, and supported version information are out of scope for this page; see [Releases](./release_note.md).
 
-> **Security notice**: If you discover a security issue, report it through the channels described in the [Security Notice](./community/SECURITYNOTE.md). Do not disclose it publicly.
+> **Security notice**: If you discover a security issue, report it through the channels described in the [Security Notice](../../SECURITYNOTE.md). Do not disclose it publicly.
 
 ## October 2026 (3.6.0)
 

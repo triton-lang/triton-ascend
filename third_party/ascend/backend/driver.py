@@ -25,6 +25,7 @@ import os
 import os.path
 import re
 import subprocess
+import threading
 from typing import Optional
 import functools
 import hashlib
@@ -51,13 +52,18 @@ def _npu_utils_key(source, fingerprint):
 
 
 _NPU_DEVICE_LIMIT_REGEX = re.compile(r'^\d+ *, *\d+$')
+_npu_utils_lock = threading.Lock()
 
 
 class NPUUtils(object):
 
     def __new__(cls):
         if not hasattr(cls, 'instance'):
-            cls.instance = super(NPUUtils, cls).__new__(cls)
+            with _npu_utils_lock:
+                if not hasattr(cls, 'instance'):
+                    instance = super(NPUUtils, cls).__new__(cls)
+                    instance.npu_utils_mod = None
+                    cls.instance = instance
         return cls.instance
 
     def __init__(self):
@@ -67,8 +73,6 @@ class NPUUtils(object):
         # first path would make the launcher look for npu_utils.so in a newer
         # cache root where it was never built.
         self._cache_path = self._build_or_get_cached_so()
-        if not hasattr(self, "npu_utils_mod"):
-            self.npu_utils_mod = None
 
     def get_so_path(self):
         if self._cache_path is None or not os.path.exists(self._cache_path):
@@ -98,11 +102,14 @@ class NPUUtils(object):
         if self.npu_utils_mod is not None:
             return self.npu_utils_mod
 
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("npu_utils", self.get_so_path())
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        self.npu_utils_mod = mod
+        path = self.get_so_path()
+        with _npu_utils_lock:
+            if self.npu_utils_mod is None:
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("npu_utils", path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                self.npu_utils_mod = mod
         return self.npu_utils_mod
 
     def load_binary(self, name, kernel, shared, device, mix_mode):
@@ -149,7 +156,7 @@ class NPUUtils(object):
                 raise ValueError(
                     f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, both cube_core_num and vector_core_num "
                     f"must be less than or equal to device properties ({num_aic},{num_aiv}).")
-            elif num_aic_env * (num_aiv / num_aic) != num_aiv_env:
+            elif num_aic_env * num_aiv != num_aiv_env * num_aic:
                 env_quotient = num_aiv_env / num_aic_env
                 env_quotient_decimal = round(env_quotient, 1)
                 quotient = num_aiv / num_aic
@@ -183,7 +190,9 @@ class NPUUtils(object):
         num_aic, num_aiv = self.get_device_core()
         try:
             limited_aic, limited_aiv = self._get_npu_device_limit_form_env()
-        except ValueError:
+        except ValueError as exc:
+            import warnings
+            warnings.warn(f"{exc} Using hardware core counts ({num_aic}, {num_aiv}).", RuntimeWarning, stacklevel=2)
             return False, num_aic, num_aiv
         return num_aic != limited_aic or num_aiv != limited_aiv, limited_aic, limited_aiv
 
@@ -304,7 +313,7 @@ class NPUDriver(DriverBase):
         def test_npucompiler():
             from triton.backends.ascend.utils import _get_bisheng_path
             npucompiler = _get_bisheng_path()
-            targets = subprocess.check_output([npucompiler, "-print-targets"]).decode().strip().split()
+            targets = subprocess.check_output([npucompiler, "-print-targets"], timeout=10).decode().strip().split()
             return "hiipu64" in targets
 
         try:

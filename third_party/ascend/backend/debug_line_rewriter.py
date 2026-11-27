@@ -48,7 +48,8 @@ Demotion rules, applied to ``is_stmt=1`` rows in program order:
        drop the rest.
     2. Loops     -- keep every occurrence of a ``for``/``while`` header line
        (detected from the source AST), so the back-edge re-stops each iteration.
-    3a. Foreign  -- drop rows whose file is not the user source file.
+    3a. Foreign  -- when the user source is identified in a v2-v4 file table,
+       drop rows for other files. Unresolved and v5 tables skip this rule.
     3b. line==0  -- drop compiler-generated rows.
     3c. Over-len -- drop rows whose line exceeds the source length (safety net
         for binaries built before ``CanonicalizeDebugLocationsPass`` or without
@@ -66,7 +67,8 @@ Public API
         Exception-safe: any failure logs and returns the artifact unchanged.
 
     rewrite_debug_line_blob(blob, src_path=None) -> (bytes, RewriteResult)
-        Pure in-memory transform (no env gate); the unit-testable core.
+        Supply the kernel source path to protect loop headers and apply the
+        source-file and line-count rules. Embedded paths are used for matching.
 
     rewrite_debug_line_file(path, src_path=None, out_path=None) -> RewriteResult
         File convenience used by the CLI; writes atomically.
@@ -286,8 +288,10 @@ def _parse_header(data: bytes, little: bool, unit_offset: int = 0) -> dict:
             filename, off = _cstring(data, off, program_start, "file name")
             if not filename:
                 break
-            file_names.append(filename)
-            _, off = _uleb(data, off, program_start)
+            directory, off = _uleb(data, off, program_start)
+            if directory >= len(include_dirs):
+                raise ValueError(f"invalid directory index {directory} for {filename!r}")
+            file_names.append(os.path.join(include_dirs[directory], filename))
             _, off = _uleb(data, off, program_start)
             _, off = _uleb(data, off, program_start)
     # DWARF v5 has format-described directory/file tables.  Their extent is
@@ -458,18 +462,20 @@ def _source_length(src_path: str) -> int:
         return sum(1 for _ in handle)
 
 
-def _auto_detect_source(file_names: List[str]) -> Optional[str]:
-    """First user (.py, not site-packages) file from the line table that exists
-    on disk, resolved relative to the current working directory."""
-    for path in file_names:
-        if path.endswith(".py") and "/site-packages/" not in path and os.path.isfile(path):
-            return path
-    return None
-
-
 def _user_file_indices(file_names: List[str], src_path: str) -> set:
-    base = os.path.basename(src_path)
-    return {i for i, p in enumerate(file_names) if os.path.basename(p) == base}
+    source = os.path.normcase(os.path.abspath(src_path))
+    matches = {
+        i
+        for i, path in enumerate(file_names)
+        if os.path.dirname(path) and os.path.normcase(os.path.abspath(path)) == source
+    }
+    # A producer may omit the directory. Such a row can still belong to
+    # the user even when another entry names the source in full.
+    base = os.path.normcase(os.path.basename(src_path))
+    bare = {i for i, path in enumerate(file_names) if os.path.normcase(path) == base}
+    if matches:
+        return matches | bare
+    return bare if len(bare) == 1 else set()
 
 
 # ── demotion planning ─────────────────────────────────────────────────────────
@@ -539,12 +545,8 @@ def rewrite_debug_line_blob(blob: bytes, src_path: Optional[str] = None) -> Tupl
         f"{hdr['unit_start']:#x}-{hdr['unit_end']:#x}/v{hdr['version']}/addr{hdr['address_size']}" for hdr, _ in units
     ])
 
+    # Paths embedded in an object are identifiers, not permission to read files.
     src = src_path
-    if not src:
-        for hdr, _ in units:
-            src = _auto_detect_source(hdr["file_names"])
-            if src:
-                break
     protected = _loop_header_lines(src) if src and os.path.isfile(src) else set()
     src_lines = _source_length(src) if src and os.path.isfile(src) else None
 
@@ -633,8 +635,7 @@ def _enabled() -> bool:
 
 
 def _resolve_source(metadata) -> Optional[str]:
-    """Best-effort source path from compiler metadata; ``None`` falls back to
-    auto-detection from the line table's file_names."""
+    """Best-effort source path supplied by the caller."""
     if metadata is None:
         return None
     for attr in ("src_path", "source_path", "filename"):
@@ -649,7 +650,7 @@ def _resolve_source(metadata) -> Optional[str]:
     return None
 
 
-def rewrite_debug_line(artifact, metadata=None, options=None):
+def rewrite_debug_line(artifact, metadata=None, options=None, *, jit_fn=None):
     """``npubin``-stage post-processor. Returns ``artifact`` unchanged unless
     ``LLVM_EXTRACT_DI_LOCAL_VARIABLES`` is set. Accepts the stage's ``bytes`` (or
     a path) and returns the rewritten ``bytes`` (or the same path, patched in
@@ -658,8 +659,12 @@ def rewrite_debug_line(artifact, metadata=None, options=None):
     if not _enabled():
         return artifact
 
-    src = _resolve_source(metadata)
     try:
+        if jit_fn is not None:
+            from triton.runtime.jit import get_jit_fn_file_line
+            src, _ = get_jit_fn_file_line(jit_fn)
+        else:
+            src = _resolve_source(metadata)
         if isinstance(artifact, (bytes, bytearray)):
             new_blob, result = rewrite_debug_line_blob(bytes(artifact), src)
             if result.changed:

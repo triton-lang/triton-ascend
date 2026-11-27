@@ -5,6 +5,8 @@ import importlib.util
 import json
 import os
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -180,6 +182,51 @@ def test_npu_utils_initialization_refreshes_build_path_without_loading(monkeypat
         (npu_utils, str(producer_cache)),
         (npu_utils, str(consumer_cache)),
     ]
+
+
+def test_concurrent_npu_utils_load_publishes_one_module(monkeypatch, tmp_path):
+    driver = _load_driver_module()
+    cached_so = tmp_path / "npu_utils.so"
+    cached_so.touch()
+    monkeypatch.setattr(driver.NPUUtils, "_build_or_get_cached_so", lambda self: str(cached_so))
+    utils = driver.NPUUtils()
+    started, second_caller = threading.Event(), threading.Event()
+    loaded = []
+
+    def exec_module(module):
+        loaded.append(module)
+        started.set()
+        assert second_caller.wait(timeout=5)
+
+    spec = SimpleNamespace(loader=SimpleNamespace(exec_module=exec_module))
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *args: spec)
+    monkeypatch.setattr(importlib.util, "module_from_spec", lambda spec: SimpleNamespace())
+
+    def load_again():
+        assert started.wait(timeout=5)
+        second_caller.set()
+        return utils._load_mod()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(utils._load_mod)
+        second = pool.submit(load_again)
+        assert first.result() is second.result()
+    assert len(loaded) == 1
+
+
+def test_driver_probe_timeout(monkeypatch):
+    from triton.backends.ascend import utils
+    driver = _load_driver_module()
+    monkeypatch.setattr(utils, "_get_bisheng_path", lambda: "bisheng")
+
+    def timeout_probe(command, *, timeout):
+        assert command == ["bisheng", "-print-targets"]
+        assert 0 < timeout <= 10
+        raise driver.subprocess.TimeoutExpired(command, timeout)
+
+    monkeypatch.setattr(driver.subprocess, "check_output", timeout_probe)
+    with pytest.warns(UserWarning, match="timed out"):
+        assert not driver.NPUDriver.is_active()
 
 
 def test_npu_utils_load_binary_requires_explicit_mix_mode(monkeypatch, tmp_path):

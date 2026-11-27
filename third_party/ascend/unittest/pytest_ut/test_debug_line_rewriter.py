@@ -111,7 +111,7 @@ def enc_sleb(n):
     return bytes(out)
 
 
-def build_debug_line(rows, files=("user_test.py", "internal")):
+def build_debug_line(rows, files=("user_test.py", "internal"), directories=(), file_dirs=None):
     """Build a DWARF-4 .debug_line section mimicking bishengir's encoding:
     one set_address, then per row set_file/set_column/negate_stmt/advance_line/
     fixed_advance_pc/copy. `rows` is a list of dicts {line,file,col,is_stmt}."""
@@ -124,9 +124,12 @@ def build_debug_line(rows, files=("user_test.py", "internal")):
     pro += bytes([14])  # line_range
     pro += bytes([13])  # opcode_base
     pro += SOL
-    pro += bytes([0])  # directory table terminator (empty)
-    for name in files:
-        pro += name.encode() + b"\0" + enc_uleb(0) + enc_uleb(0) + enc_uleb(0)
+    for directory in directories:
+        pro += directory.encode() + b"\0"
+    pro += bytes([0])  # directory table terminator
+    for index, name in enumerate(files):
+        directory = 0 if file_dirs is None else file_dirs[index]
+        pro += name.encode() + b"\0" + enc_uleb(directory) + enc_uleb(0) + enc_uleb(0)
     pro += bytes([0])  # file table terminator
 
     prog = bytearray()
@@ -237,13 +240,9 @@ class TestSourceHelpers(unittest.TestCase):
         files = ["", base, "internal", "/x/site-packages/triton/standard.py"]
         self.assertEqual(dlr._user_file_indices(files, self.tmp.name), {1})
 
-    def test_auto_detect_source_prefers_user(self):
-        files = ["", "/opt/py/site-packages/triton/standard.py", self.tmp.name]
-        self.assertEqual(dlr._auto_detect_source(files), self.tmp.name)
-
-    def test_auto_detect_source_none(self):
-        files = ["", "/opt/py/site-packages/triton/standard.py", "/nope/missing.py"]
-        self.assertIsNone(dlr._auto_detect_source(files))
+    def test_unresolved_basenames(self):
+        self.assertEqual(dlr._user_file_indices(["", "other/kernel.py"], "/user/kernel.py"), set())
+        self.assertEqual(dlr._user_file_indices(["", "kernel.py", "kernel.py"], "/user/kernel.py"), set())
 
 
 # ── demotion rules (pure, synthetic rows) ──────────────────────────────────────
@@ -427,6 +426,36 @@ class TestRewriteBlob(unittest.TestCase):
         new, res = rewrite_debug_line_blob(blob, src_path="/nonexistent/other.py")
         self.assertEqual(res.counts["foreign"], 0)
         self.assertEqual(res.after, [7, 8])
+
+    def test_line_table_paths_are_not_opened(self):
+        rows = [dict(line=7, file=1, col=0, is_stmt=True)]
+        blob = build_elf(build_debug_line(rows, files=(self.src.name, )))
+        with mock.patch("builtins.open", side_effect=AssertionError("unexpected source read")):
+            new, _ = rewrite_debug_line_blob(blob)
+        self.assertEqual(new, blob)
+
+    def test_same_filename_in_different_directories(self):
+        directory, name = os.path.split(self.src.name)
+        rows = [dict(line=7, file=file, col=0, is_stmt=True) for file in (1, 2)]
+        unit = build_debug_line(rows, files=(name, name), directories=(directory, os.path.join(directory, "lib")),
+                                file_dirs=(1, 2))
+        _, res = rewrite_debug_line_blob(build_elf(unit), src_path=self.src.name)
+        self.assertEqual(res.after, [7])
+        self.assertEqual(res.counts["foreign"], 1)
+
+    def test_v5_without_resolved_filenames_keeps_foreign_stop(self):
+        rows = [dict(line=7, file=file, col=0, is_stmt=True) for file in (1, 0)]
+        unit = build_debug_line(rows)
+        program = unit[dlr._parse_header(unit, True)["program_start"]:]
+        # v5 path/string directory and file tables, both indexed from zero.
+        header = (unit[10:28] + b"\x01\x01\x08\x01.\x00" + b"\x01\x01\x08\x02lib.py\x00" + os.fsencode(self.src.name) +
+                  b"\x00")
+        body = struct.pack("<HBBI", 5, 8, 0, len(header)) + header + program
+        blob = build_elf(struct.pack("<I", len(body)) + body)
+        new, res = rewrite_debug_line_blob(blob, src_path=self.src.name)
+        self.assertEqual(new, blob)
+        self.assertEqual(res.after, [7, 7])
+        self.assertEqual(res.counts["foreign"], 0)
 
 
 # ── pipeline entry (env gate, polymorphism, safety) ────────────────────────────

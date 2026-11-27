@@ -296,7 +296,7 @@ def _get_save_temps_dir(hash_key: str) -> str:
     return tempfile.mkdtemp(prefix="bishengir-", dir=get_dump_manager(hash_key).cache_dir)
 
 
-def _with_debug_line(npubin_stage, options):
+def _with_debug_line(npubin_stage, options, jit_fn=None):
     """Wrap an npubin-producing stage so the emitted kernel binary gets
     .debug_line cleanup for msdebug stepping. No-op unless
     LLVM_EXTRACT_DI_LOCAL_VARIABLES is set; never raises (failure returns the
@@ -306,7 +306,7 @@ def _with_debug_line(npubin_stage, options):
         artifact = npubin_stage(src, metadata)
         if isinstance(artifact, BatchDecline):
             return artifact
-        return rewrite_debug_line(artifact, metadata=metadata, options=options)
+        return rewrite_debug_line(artifact, metadata=metadata, options=options, jit_fn=jit_fn)
 
     return stage
 
@@ -737,6 +737,13 @@ def __load_metadata_by_callback(callback_path: str, metadata):
             warnings.warn(f"could not unload {callback_path}: {exc}")
 
 
+def _require_ir_field(pattern, ir_text, field, stage):
+    match = re.search(pattern, ir_text)
+    if match is None:
+        raise ValueError(f"Missing {field} in {stage} IR")
+    return match.group(1)
+
+
 def _parse_linalg_metadata(linalg: str, metadata: dict):
     """
     Parse Linalg IR to extract metadata required for NPU compilation.
@@ -787,9 +794,9 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     # need it nor necessarily have the FFTS runtime resource it requires.
     has_unordered_sync_block_lock = re.search(r"sync_block_lock_unordered", linalg) is not None
     metadata["has_unordered_sync_block_lock"] = has_unordered_sync_block_lock
+    metadata["mix_mode"] = _require_ir_field(MIX_MODE_REGEX, linalg, "mix_mode", "Linalg")
     if has_unordered_sync_block_lock:
-        mix_mode = re.search(MIX_MODE_REGEX, linalg).group(1)
-        if mix_mode != "mix":
+        if metadata["mix_mode"] != "mix":
             metadata["auto_tile_and_bind_subblock"] = False
         # One metadata cache line for runtime participant_num, plus one
         # choosing and one ticket cache line per participant. Each cache line is
@@ -797,10 +804,8 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
         # the exact total after lowering.
         metadata["sync_block_lock_layout"] = 1 << 32
         metadata["lock_init_val"] = 0
-    # the mix mode is also encoded into metadata['name'] for runtime to distinguish
-    metadata["mix_mode"] = re.search(MIX_MODE_REGEX, linalg).group(1)
-    metadata["parallel_mode"] = re.search(PARALLEL_MODE_REGEX, linalg).group(1)
-    metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, linalg).group(1)
+    metadata["parallel_mode"] = _require_ir_field(PARALLEL_MODE_REGEX, linalg, "parallel_mode", "Linalg")
+    metadata["kernel_name"] = _require_ir_field(KERNEL_NAME_REGEX, linalg, "kernel name", "Linalg")
     # Check the function load_binary in npu_driver.py.
     metadata["name"] = metadata["kernel_name"]
     # Parse all tensor kinds from arguments
@@ -835,7 +840,7 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
     metadata["profile_scratch_align"] = 1
     # Note: Currently, for TTIR inputs, we only support vector kernels.
     metadata["mix_mode"] = "aiv"
-    metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, ttir).group(1)
+    metadata["kernel_name"] = _require_ir_field(KERNEL_NAME_REGEX, ttir, "public kernel name", "Triton")
     metadata["name"] = metadata["kernel_name"]
     # Keep this as compiler-derived safety metadata.  In particular, do not
     # trust a caller-provided False value to override an unsafe TTIR pattern.
@@ -2044,6 +2049,9 @@ class AscendBackend(BaseBackend):
         return nullcontext(get_cache_manager(key))
 
     def make_compilation_writer(self, src, options, cache, override_enabled):
+        # The backend instance belongs to this compilation. Keep the source
+        # available to the debug stage without serializing its path in metadata.
+        self._debug_jit_fn = getattr(src, "fn", None)
         if not hasattr(src, "block_batching_source_hash"):
             return nullcontext(cache)
         if options.block_batching_factor > 1 and (override_enabled or options.ir_override):
@@ -2131,7 +2139,7 @@ class AscendBackend(BaseBackend):
                 else:
                     stages["npubin"] = (
                         lambda src, metadata: linalg_to_bin_enable_npu_compile_A2_A3(src, metadata, options))
-                stages["npubin"] = _with_debug_line(stages["npubin"], options)
+                stages["npubin"] = _with_debug_line(stages["npubin"], options, getattr(self, "_debug_jit_fn", None))
         else:
             raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
                                       "Please ensure the target backend is set to 'npu'.")

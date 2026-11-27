@@ -205,15 +205,19 @@ def _get_element_type(ty):
     return ty
 
 
-def _args_to_operands(op, _semantic, args, kwargs):
+def _args_to_operands(op, _semantic, args, kwargs, param_attrs, num_outputs):
     if not op.signature.parameters:
         # Without parameters in signature, use the actual parameter order.
-        return _to_operands(itertools.chain(args, kwargs.values()), _semantic)
+        return _to_operands(itertools.chain(args, kwargs.values()), _semantic), []
 
     # Convert arguments to operands according the signature.
     operands = []
+    input_attrs = []
+    output_attrs = []
     bind = op.signature.bind(*args, **kwargs)
-    for param in op.signature.parameters.values():
+    for param, attrs in zip(op.signature.parameters.values(), param_attrs):
+        if param.name == "out":
+            output_attrs = [attrs] * num_outputs
         value = bind.arguments.get(param.name)
         if value is None:
             continue
@@ -222,9 +226,11 @@ def _args_to_operands(op, _semantic, args, kwargs):
             ty = _get_element_type(ty)
             for item in value:
                 operands.append(_to_value(item, _semantic, ty))
+                input_attrs.append(attrs)
         else:
             operands.append(_to_value(value, _semantic, ty))
-    return operands
+            input_attrs.append(attrs)
+    return operands, input_attrs + output_attrs
 
 
 def _bind_op_arguments(op, args, kwargs):
@@ -459,11 +465,11 @@ def custom_semantic(name: str, *args, _semantic=None, **kwargs):
     out = kwargs.pop('out', [])
     outs = out if isinstance(out, (list, tuple, tl.tuple)) else [out]
     outputs = _to_operands(outs, _semantic)
-    inputs = _args_to_operands(op, _semantic, args, kwargs)
     builder = getattr(_semantic.builder, '_ascend_builder')
+    param_attrs = _make_arg_attrs(op, builder)
+    inputs, arg_attrs = _args_to_operands(op, _semantic, args, kwargs, param_attrs, len(outputs))
     # Setup attributes.
     attrs = _make_attrs(op, builder, is_macro)
-    arg_attrs = _make_arg_attrs(op, builder)
     # Build IR for the custom op.
     # Create the op through the unified (main) builder so its insertion point
     # is synced before delegating to the ascend builder. Calling the ascend

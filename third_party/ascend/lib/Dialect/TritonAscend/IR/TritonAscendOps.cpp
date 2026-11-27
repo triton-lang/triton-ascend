@@ -338,10 +338,12 @@ LogicalResult Conv1dOp::inferReturnTypes(
 // integer array. Returns the raw values, or std::nullopt for an invalid
 // attribute.
 static std::optional<SmallVector<int64_t>>
-parseConv2dParamAttr(Attribute attr) {
+parseConv2dParamAttr(Attribute attr, bool allowFour = false) {
   if (auto intAttr = dyn_cast<IntegerAttr>(attr))
     return SmallVector<int64_t>{intAttr.getInt()};
   if (auto arrayAttr = dyn_cast<DenseI32ArrayAttr>(attr)) {
+    if (arrayAttr.size() != 2 && !(allowFour && arrayAttr.size() == 4))
+      return std::nullopt;
     SmallVector<int64_t> values;
     for (int32_t v : arrayAttr.asArrayRef())
       values.push_back(static_cast<int64_t>(v));
@@ -385,18 +387,18 @@ LogicalResult Conv2dOp::verify() {
   }
 
   auto stride = parseConv2dParamAttr(getStride());
-  auto padding = parseConv2dParamAttr(getPadding());
+  auto padding = parseConv2dParamAttr(getPadding(), /*allowFour=*/true);
   auto dilation = parseConv2dParamAttr(getDilation());
-  if (!stride || stride->empty() || stride->size() > 2) {
+  if (!stride) {
     return emitOpError(
         "stride must be an integer or a 2-element array [stride_h, stride_w]");
   }
-  if (!padding || padding->empty() || padding->size() > 4) {
+  if (!padding) {
     return emitOpError(
         "padding must be an integer, a 2-element array [pad_h, pad_w], or a "
         "4-element array [pad_top, pad_bottom, pad_left, pad_right]");
   }
-  if (!dilation || dilation->empty() || dilation->size() > 2) {
+  if (!dilation) {
     return emitOpError(
         "dilation must be an integer or a 2-element array [dil_h, dil_w]");
   }
@@ -447,11 +449,10 @@ LogicalResult Conv2dOp::inferReturnTypes(
   int64_t kW = weightShape[3];
 
   auto strideAttr = parseConv2dParamAttr(adaptor.getStride());
-  auto paddingAttr = parseConv2dParamAttr(adaptor.getPadding());
+  auto paddingAttr =
+      parseConv2dParamAttr(adaptor.getPadding(), /*allowFour=*/true);
   auto dilationAttr = parseConv2dParamAttr(adaptor.getDilation());
-  if (!strideAttr || strideAttr->empty() || strideAttr->size() > 2 ||
-      !paddingAttr || paddingAttr->empty() || paddingAttr->size() > 4 ||
-      !dilationAttr || dilationAttr->empty() || dilationAttr->size() > 2) {
+  if (!strideAttr || !paddingAttr || !dilationAttr) {
     return failure();
   }
   auto &stride = *strideAttr;

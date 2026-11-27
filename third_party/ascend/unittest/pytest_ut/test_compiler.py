@@ -19,6 +19,21 @@ from triton.backends.compiler import GPUTarget
 pytestmark = pytest.mark.backend("native")
 
 
+@pytest.mark.parametrize(("text", "field"), [
+    ("func.func @kernel", "mix_mode"),
+    ('mix_mode = "aiv" func.func @kernel', "parallel_mode"),
+    ('mix_mode = "aiv" parallel_mode = "simd"', "kernel name"),
+])
+def test_missing_linalg_metadata(text, field):
+    with pytest.raises(ValueError, match=f"Missing {field} in Linalg IR"):
+        compiler._parse_linalg_metadata(text, {})
+
+
+def test_ttir_without_public_kernel():
+    with pytest.raises(ValueError, match="Missing public kernel name"):
+        compiler._parse_ttir_metadata("module {}", {})
+
+
 @pytest.fixture(autouse=True)
 def reset_option_warnings(monkeypatch):
     monkeypatch.setattr(utils, "_WARNED_DEPRECATED_NPU_OPTIONS", set())

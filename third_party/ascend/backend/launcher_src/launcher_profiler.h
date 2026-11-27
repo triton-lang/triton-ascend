@@ -44,6 +44,8 @@ inline int profileControl(unsigned type, void *data, unsigned len) {
   if (!data || !len)
     return 1;
   if (type == 1) {
+    if (len < sizeof(MsprofCommandHandle))
+      return 1;
     auto *command = static_cast<MsprofCommandHandle *>(data);
     if (command->type >= 6)
       return 1;

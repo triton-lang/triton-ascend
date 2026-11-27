@@ -110,6 +110,13 @@ def test_npu_device_limit_env_var_invalid(monkeypatch, env_value):
         NPUUtils._get_npu_device_limit_form_env(mock_utils)
 
 
+def test_npu_device_limit_fractional_hardware_ratio(monkeypatch):
+    mock_utils, NPUUtils = _make_mock_npu_utils()
+    mock_utils.get_device_core.return_value = (22, 30)
+    monkeypatch.setenv("NPU_DEVICE_LIMIT", "11,15")
+    assert NPUUtils._get_npu_device_limit_form_env(mock_utils) == (11, 15)
+
+
 def test_npu_device_limit_get_device_properties(monkeypatch):
     """Test get_device_properties respects NPU_DEVICE_LIMIT."""
     mock_utils, NPUUtils = _make_mock_npu_utils()
@@ -174,13 +181,13 @@ def test_npu_device_limit_get_aicore_num(monkeypatch):
         "abc",
     ],
 )
-def test_get_device_limit_throw(monkeypatch, env_value):
-    """Test get_aicore_num / get_aivector_core_num read from get_device_properties."""
+def test_get_device_limit_warns_and_uses_hardware_counts(monkeypatch, env_value):
     mock_utils, NPUUtils = _make_mock_npu_utils()
     mock_utils.get_device_limit = types.MethodType(NPUUtils.get_device_limit, mock_utils)
     monkeypatch.setenv("NPU_DEVICE_LIMIT", env_value)
 
-    hash_limit, aic, aiv = NPUUtils.get_device_limit(mock_utils)
+    with pytest.warns(RuntimeWarning, match="Using hardware core counts"):
+        hash_limit, aic, aiv = NPUUtils.get_device_limit(mock_utils)
     assert hash_limit == False
     assert aic == _MOCK_AICORE_NUM
     assert aiv == _MOCK_AIVECTOR_NUM

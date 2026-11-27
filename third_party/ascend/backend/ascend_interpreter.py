@@ -479,6 +479,9 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         # Perform index_select: for each index, read the specified data
         for out_idx, in_idx in enumerate(indices):
             in_idx = int(in_idx)
+            if not 0 <= in_idx < src_shape_vals[dim]:
+                raise IndexError(f"index_select_simd index {in_idx} out of bounds for dimension {dim} "
+                                 f"with size {src_shape_vals[dim]}")
             # Generate all coordinates in the tile
             ranges = []
             for d in range(len(src_shape_vals)):
@@ -657,7 +660,7 @@ class AscendInterpreterBuilder(InterpreterBuilder):
             for d in range(index_rank):
                 if d == dim:
                     index_value = index_tensor.data[coord]
-                    if index_value >= index_boundary:
+                    if not 0 <= index_value < index_boundary:
                         src_coord.append(-1)
                     else:
                         src_coord.append(start_offset_vals[d] + index_value)
@@ -726,7 +729,7 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         valid_mask = []
         for _, coord in enumerate(all_coords):
             index_value = index_tensor.data[coord]
-            if index_value >= index_boundary:
+            if not 0 <= index_value < index_boundary:
                 addresses.append(0)
                 valid_mask.append(False)
             else:
@@ -782,11 +785,10 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         #Compute address
         addresses = []
         valid_mask = []
-        values_to_store = []
-        for i, coord in enumerate(all_coords):
+        for coord in all_coords:
             index_pos = coord[dim]
             index_value = index_tensor.data[index_pos]
-            if index_value >= index_boundary:
+            if not 0 <= index_value < index_boundary:
                 addresses.append(0)
                 valid_mask.append(False)
             else:
@@ -801,12 +803,11 @@ class AscendInterpreterBuilder(InterpreterBuilder):
                     offset += dst_coord[d] * dst_stride_vals[d]
                 address = base_addr + offset * element_size
                 addresses.append(address)
-                values_to_store.append(flat_values[i])
                 valid_mask.append(True)
 
         addr_array = np.array(addresses, dtype=np.uint64)
         mask_array = np.array(valid_mask, dtype=bool)
-        values_array = np.array(values_to_store, dtype=dtype_np)
+        values_array = flat_values.astype(dtype_np, copy=False)
 
         _interpreter.store(addr_array, values_array, mask_array)
 

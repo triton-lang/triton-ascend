@@ -192,6 +192,23 @@ if not hasattr(_triton_ir.context, '__enter__'):
   PyGILState_Release(gil);
 }
 
+ArrayAttr buildCustomArgAttrs(OpBuilder &builder, ArrayRef<py::dict> argAttrs,
+                              unsigned numOperands) {
+  SmallVector<Attribute> dicts;
+  for (const auto &attrs : argAttrs.take_front(numOperands)) {
+    SmallVector<NamedAttribute> namedAttrs;
+    if (!attrs.is_none()) {
+      for (const auto &attr : attrs) {
+        namedAttrs.emplace_back(
+            builder.getStringAttr(py::cast<std::string>(attr.first)),
+            py::cast<Attribute>(attr.second));
+      }
+    }
+    dicts.push_back(builder.getDictionaryAttr(namedAttrs));
+  }
+  return builder.getArrayAttr(dicts);
+}
+
 } // namespace
 
 void init_ascend_ir(py::module &&m) {
@@ -973,7 +990,7 @@ void init_ascend_ir(py::module &&m) {
              if (auto ptrTy = dyn_cast<triton::PointerType>(src.getType())) {
                elemType = ptrTy.getPointeeType();
              } else {
-               llvm::report_fatal_error(
+               throw py::type_error(
                    "index_select_simd: src must be pointer type");
              }
 
@@ -1162,6 +1179,10 @@ void init_ascend_ir(py::module &&m) {
               }
               py::sequence seq = param.cast<py::sequence>();
               size_t len = py::len(seq);
+              if (len != 2 && !(allowFour && len == 4))
+                throw py::value_error(name + (allowFour
+                                                  ? " must have 2 or 4 elements"
+                                                  : " must have 2 elements"));
               SmallVector<int32_t> values;
               for (auto item : seq)
                 values.push_back(item.cast<int32_t>());
@@ -1453,31 +1474,9 @@ void init_ascend_ir(py::module &&m) {
                op->setAttr(attr_name, attr_value);
              }
 
-             SmallVector<Attribute> dictAttrs(arg_attrs.size());
-             Attribute emptyDict = self.getBuilder().getDictionaryAttr({});
-             for (const auto &[idx, attrs] : llvm::enumerate(arg_attrs)) {
-               if (idx >= op.getNumOperands())
-                 continue;
-
-               if (attrs.is_none()) {
-                 dictAttrs[idx] = emptyDict;
-                 continue;
-               }
-
-               llvm::SmallVector<NamedAttribute> namedAttrs;
-               for (const auto &attr : attrs) {
-                 std::string attr_name = py::cast<std::string>(attr.first);
-                 Attribute attr_value = py::cast<Attribute>(attr.second);
-                 namedAttrs.push_back(NamedAttribute(
-                     self.getBuilder().getStringAttr(attr_name), attr_value));
-               }
-
-               dictAttrs[idx] = self.getBuilder().getDictionaryAttr(namedAttrs);
-             }
-
-             ArrayAttr arg_attrs_array =
-                 self.getBuilder().getArrayAttr(dictAttrs);
-             op->setAttr("arg_attrs", arg_attrs_array);
+             op->setAttr("arg_attrs",
+                         buildCustomArgAttrs(self.getBuilder(), arg_attrs,
+                                             op.getNumOperands()));
 
              auto results = op->getResults();
              return std::vector<Value>(results.begin(), results.end());
@@ -1500,31 +1499,9 @@ void init_ascend_ir(py::module &&m) {
                op->setAttr(attr_name, attr_value);
              }
 
-             SmallVector<Attribute> dictAttrs(arg_attrs.size());
-             Attribute emptyDict = self.getBuilder().getDictionaryAttr({});
-             for (const auto &[idx, attrs] : llvm::enumerate(arg_attrs)) {
-               if (idx >= op.getNumOperands())
-                 continue;
-
-               if (attrs.is_none()) {
-                 dictAttrs[idx] = emptyDict;
-                 continue;
-               }
-
-               llvm::SmallVector<NamedAttribute> namedAttrs;
-               for (const auto &attr : attrs) {
-                 std::string attr_name = py::cast<std::string>(attr.first);
-                 Attribute attr_value = py::cast<Attribute>(attr.second);
-                 namedAttrs.push_back(NamedAttribute(
-                     self.getBuilder().getStringAttr(attr_name), attr_value));
-               }
-
-               dictAttrs[idx] = self.getBuilder().getDictionaryAttr(namedAttrs);
-             }
-
-             ArrayAttr arg_attrs_array =
-                 self.getBuilder().getArrayAttr(dictAttrs);
-             op->setAttr("arg_attrs", arg_attrs_array);
+             op->setAttr("arg_attrs",
+                         buildCustomArgAttrs(self.getBuilder(), arg_attrs,
+                                             op.getNumOperands()));
 
              auto results = op->getResults();
              return std::vector<Value>(results.begin(), results.end());

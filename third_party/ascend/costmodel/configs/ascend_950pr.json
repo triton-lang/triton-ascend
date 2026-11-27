@@ -438,5 +438,18 @@
     "wave_overhead": {
       "description": "Legacy 910B documentary prior; no measured 950PR validation and not loaded from this object."
     }
+  },
+  "tilesim": {
+    "description": "Knobs for the tilesim-migrated micro-architecture model. The 950PR config carries only the ND2NZ calibration; the full tilesim bandwidth tables remain 910B-only until measured on this device.",
+    "nd2nz_latency": {
+      "description": "ND2NZ GM->L1 fractal-load (Cube MTE2) calibrated model nd2nz_aic_dav_c310_v2: cycles = max(total_bytes/stream_bytes_per_cycle, floor(total_bytes)); floor = floor_small_cycles when bytes <= floor_small_max_bytes else floor_mid_cycles. Pipelined steady-state regime (back-to-back copies, ping-pong L1 destinations). Valid only for b16 tensors with total bytes in [valid_min_bytes, valid_max_bytes]; other shapes stay on the plain bandwidth path.",
+      "stream_bytes_per_cycle": 165.03,
+      "floor_small_cycles": 30.81,
+      "floor_small_max_bytes": 512,
+      "floor_mid_cycles": 49.28,
+      "valid_min_bytes": 128,
+      "valid_max_bytes": 131072,
+      "element_bits": 16
+    }
   }
 }

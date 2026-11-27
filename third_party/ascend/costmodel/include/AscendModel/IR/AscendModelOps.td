@@ -51,11 +51,20 @@ def Ascend_CubeLoadOp : AscendModel_Op<"cube_load", [DeclareOpInterfaceMethods<E
     Loads tensor data from memory to Cube Core's local buffer via MTE2.
     ``src_space``/``dst_space`` select the per-(src,dst,corenum) bandwidth
     (tilesim migration). Defaults: hbm -> l1.
+    When ``rows``/``k_elements`` are present the load describes an ND2NZ
+    (fractal) GM->L1 copy and estimation uses the calibrated model
+    nd2nz_aic_dav_c310_v2 — cycles = max(totalBytes/rate, floor) —
+    instead of the plain bandwidth division (small fractal copies pay a
+    ~30-50 cycle latency floor that the byte rate alone underprices by
+    up to ~35x). Shapes outside the calibrated domain (dtype or byte
+    range) fall back to the plain path.
   }];
 
   let arguments = (ins
     AnyType:$source,
     I64Attr:$bytes,
+    OptionalAttr<I64Attr>:$rows,
+    OptionalAttr<I64Attr>:$k_elements,
     OptionalAttr<StrAttr>:$src_space,
     OptionalAttr<StrAttr>:$dst_space,
     OptionalAttr<I64Attr>:$estimated_cycles,

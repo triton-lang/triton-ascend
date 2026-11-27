@@ -132,6 +132,31 @@ struct SmallPacketCoeffs {
   double a256 = 0, b256 = 0;
 };
 
+/// ND2NZ (GM->L1 fractal load on the Cube MTE2) latency coefficients,
+/// calibrated on real hardware (microbench data_provider/nd2nz_sweep,
+/// model nd2nz_aic_dav_c310_v2; see nd2nz_sweep_raw_20261127.txt and
+/// nd2nz_gap_report_20261127.md). The Phase 2 sweep showed the pipelined
+/// steady-state cost (back-to-back copies, ping-pong L1 destinations —
+/// the double-buffer regime a real kernel sees) collapses onto one curve
+/// keyed by TOTAL bytes, independent of the rows/K split, ndNum and L2
+/// residency:
+///   cycles = max(total_bytes / stream_bytes_per_cycle, floor)
+/// with a two-tier latency floor for small copies (the plain byte
+/// division underprices a 512B copy ~10x and a 128B copy ~35x).
+/// Validity: b16 tensors, total_bytes in [valid_min, valid_max]; outside
+/// the measured domain the estimator returns nullopt and the caller
+/// stays on the plain bandwidth path.
+struct Nd2nzLatencyCoeffs {
+  bool enabled = false;
+  double streamBytesPerCycle = 0.0; // large-copy stream rate (B/cyc)
+  double floorSmallCycles = 0.0;    // latency floor, bytes <= small tier
+  int64_t floorSmallMaxBytes = 0;   // small-tier upper bound (bytes)
+  double floorMidCycles = 0.0;      // latency floor, mid tier (<= crossover)
+  int64_t validMinBytes = 0;        // measured domain lower bound
+  int64_t validMaxBytes = 0;        // measured domain upper bound
+  int elementBits = 0;              // calibrated dtype width (16 = b16)
+};
+
 /// A bandwidth entry keyed by "src:dst" memory spaces.
 /// Either core-independent (singleGbps) or per-core (degrades as more cores
 /// contend for the same off-chip port, e.g. GM<->UB on 910B).
@@ -313,6 +338,17 @@ public:
   int64_t estimateTransferCycles(llvm::StringRef src, llvm::StringRef dst,
                                  int64_t bytes, int coreNum) const;
 
+  /// Estimate cycles of ONE GM->L1 ND2NZ (fractal) copy of a
+  /// (``rows`` x ``kElements``) operand tile of ``elementBits`` elements,
+  /// ``matrices`` descriptors per call (ndNum). Model
+  /// nd2nz_aic_dav_c310_v2: cycles = max(totalBytes/rate, floor). Returns
+  /// std::nullopt when the ND2NZ coefficients are not loaded or the shape
+  /// is outside the calibrated domain (dtype or byte range), leaving the
+  /// caller on the plain bandwidth path.
+  std::optional<int64_t>
+  estimateNd2nzTransferCycles(int64_t rows, int64_t kElements, int elementBits,
+                              int64_t matrices = 1) const;
+
   /// Default number of concurrent cores used for bandwidth degradation of
   /// vector transfers (GM<->UB). Defaults to the 910B1 saturation point (48).
   int getActiveBandwidthCores() const { return activeBandwidthCores; }
@@ -387,6 +423,9 @@ private:
   // overrides it.
   SmallPacketCoeffs globalSmallPacket;
   bool hasGlobalSmallPacket = false;
+  // ND2NZ GM->L1 fractal-load latency coefficients (calibrated; absent
+  // from the config keeps the legacy plain-bandwidth path).
+  Nd2nzLatencyCoeffs nd2nz;
   // Mutex unit groups (tilesim MutexComponents): each group is a clique of
   // unit-name strings that share a pipeline and cannot run in parallel.
   // Default 910B: {"vec_mte2", "mte3"} (AIV MTE2<->MTE3).

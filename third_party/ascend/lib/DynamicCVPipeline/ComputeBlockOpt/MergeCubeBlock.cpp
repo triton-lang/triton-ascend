@@ -47,13 +47,8 @@ static constexpr const char *DEBUG_TYPE = "merge-cube-block";
 #define LDBG(...) LLVM_DEBUG(DBGS() << __VA_ARGS__ << "\n")
 
 static const llvm::DenseSet<llvm::StringRef> kDisableMergeCubeKernel = {
-    "_attn_bwd",
-    "kernel_sdpa_bwd_q",
-    "_sdpa_infer_kernel",
-    "pcb06_tc02_c2v2v2c_chain",
-    "flex_attention_backward_dq_kernel",
-    "parallel_deltaformer_bwd_kernel_qk",
     "chunk_kda_bwd_kernel_intra",
+    "flex_attention_backward_dq_kernel",
 };
 
 void MergeCubeBlockPass::runOnOperation() {

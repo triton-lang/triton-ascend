@@ -666,6 +666,28 @@ struct DiscreteMaskAtomicConversion
   }
 };
 
+// Preserve the original lane predicate before a structured atomic moves it
+// into the update value or an indirect atomic passes it to the template.
+static void zeroDiscreteAtomicResults(ModuleOp module) {
+  module.walk([](triton::AtomicRMWOp op) {
+    Value mask = op.getMask();
+    if (!mask || op.getResult().use_empty())
+      return;
+    OpBuilder builder(op);
+    MaskState state;
+    if (!op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName) &&
+        succeeded(state.parse(mask, op.getLoc(), builder)))
+      return;
+
+    builder.setInsertionPointAfter(op);
+    auto zero = builder.create<arith::ConstantOp>(
+        op.getLoc(), builder.getZeroAttr(op.getType()));
+    auto result = builder.create<arith::SelectOp>(op.getLoc(), mask,
+                                                  op.getResult(), zero);
+    op.getResult().replaceAllUsesExcept(result, result);
+  });
+}
+
 DiscreteMaskAccessConversionPass::DiscreteMaskAccessConversionPass(
     const DiscreteMaskAccessConversionOptions &options)
     : DiscreteMaskAccessConversionBase(options) {}
@@ -707,6 +729,9 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
     signalPassFailure();
     return;
   }
+
+  if (compileOn91095Flag)
+    zeroDiscreteAtomicResults(moduleOp);
 
   RewritePatternSet patterns(&getContext());
   patterns.add<DiscreteMaskLoadConversion, DiscreteMaskStoreConversion,

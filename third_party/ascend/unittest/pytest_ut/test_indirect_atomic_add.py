@@ -117,7 +117,7 @@ def loaded_mask_oob_offset_atomic_add_1d(
     mask = tl.load(mask_ptr + linear) != 0
     value = tl.load(val_ptr + linear)
     old = tl.atomic_add(out_ptr + offset, value, mask=mask)
-    tl.store(old_ptr + linear, old, mask=mask)
+    tl.store(old_ptr + linear, old)
 
 
 @triton.jit(do_not_specialize=["numel"])
@@ -604,10 +604,8 @@ def test_atomic_add_loaded_mask_skips_oob_offsets():
     mask = torch.tensor([1, 0, 1, 0, 1, 0, 1, 0], dtype=torch.int32)
     values = torch.ones(block_size, dtype=torch.int32)
     baseline = torch.tensor([10, 20, 30, 40], dtype=torch.int32)
-    old_sentinel = -777
-
     output = baseline.clone().npu()
-    old = torch.full((block_size, ), old_sentinel, dtype=torch.int32).npu()
+    old = torch.full((block_size, ), -777, dtype=torch.int32).npu()
     loaded_mask_oob_offset_atomic_add_1d[(1, )](
         offsets.npu(),
         mask.npu(),
@@ -620,7 +618,7 @@ def test_atomic_add_loaded_mask_skips_oob_offsets():
 
     expected_output = baseline + 1
     expected_old = torch.tensor(
-        [10, old_sentinel, 20, old_sentinel, 30, old_sentinel, 40, old_sentinel],
+        [10, 0, 20, 0, 30, 0, 40, 0],
         dtype=torch.int32,
     )
     _assert_equal(output, expected_output, "int32", 1, "loaded-mask-oob-offset/output")

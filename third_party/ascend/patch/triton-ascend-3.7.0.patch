@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 43e33fbc80..d45302902e 100644
+index 43e33fbc8..d45302902 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -15,15 +15,24 @@ include(CTest)
@@ -127,7 +127,7 @@ index 43e33fbc80..d45302902e 100644
  add_subdirectory(test)
  add_subdirectory(examples)
 diff --git a/bin/CMakeLists.txt b/bin/CMakeLists.txt
-index 885cffb78e..14bf4e8526 100644
+index 885cffb78..14bf4e852 100644
 --- a/bin/CMakeLists.txt
 +++ b/bin/CMakeLists.txt
 @@ -1,10 +1,35 @@
@@ -246,7 +246,7 @@ index 885cffb78e..14bf4e8526 100644
    TritonTestDialect
    TritonTestProton
 diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
-index a7d60d5dff..4930e8e1fa 100644
+index a7d60d5df..4930e8e1f 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
 @@ -1,6 +1,36 @@
@@ -350,7 +350,7 @@ index a7d60d5dff..4930e8e1fa 100644
 +      mlir::func::FuncDialect>();
  }
 diff --git a/bin/triton-opt.cpp b/bin/triton-opt.cpp
-index 2d2570771a..91ed8b79ae 100644
+index 2d2570771..91ed8b79a 100644
 --- a/bin/triton-opt.cpp
 +++ b/bin/triton-opt.cpp
 @@ -1,4 +1,5 @@
@@ -370,7 +370,7 @@ index 2d2570771a..91ed8b79ae 100644
        argc, argv, "Triton (GPU) optimizer driver\n", registry));
  }
 diff --git a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
-index 5a76a1d7b1..4114df60ce 100644
+index 5a76a1d7b..4114df60c 100644
 --- a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
 +++ b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
 @@ -130,8 +130,9 @@ def TT_InputPrecisionAttr : I32EnumAttr<
@@ -386,7 +386,7 @@ index 5a76a1d7b1..4114df60ce 100644
    let cppNamespace = "::mlir::triton";
  }
 diff --git a/lib/Dialect/Triton/IR/Traits.cpp b/lib/Dialect/Triton/IR/Traits.cpp
-index 857ff4aad7..11997cb952 100644
+index 857ff4aad..11997cb95 100644
 --- a/lib/Dialect/Triton/IR/Traits.cpp
 +++ b/lib/Dialect/Triton/IR/Traits.cpp
 @@ -126,10 +126,11 @@ LogicalResult OpTrait::impl::verifyTensorSize(Operation *op) {
@@ -421,8 +421,30 @@ index 857ff4aad7..11997cb952 100644
      }
    }
    return success();
+diff --git a/lib/Dialect/Triton/Transforms/Combine.cpp b/lib/Dialect/Triton/Transforms/Combine.cpp
+index 1e9830c06..ddf1531da 100644
+--- a/lib/Dialect/Triton/Transforms/Combine.cpp
++++ b/lib/Dialect/Triton/Transforms/Combine.cpp
+@@ -160,7 +160,7 @@ public:
+     auto broadcastLhsShape =
+         cast<ShapedType>(broadcastLhsOp.getType()).getShape();
+     auto broadcastRhsShape =
+-        cast<ShapedType>(broadcastLhsOp.getType()).getShape();
++        cast<ShapedType>(broadcastRhsOp.getType()).getShape();
+     if (broadcastLhsShape[2] < 16 || broadcastRhsShape[0] < 16)
+       return failure();
+     Type newAccType = RankedTensorType::get(
+@@ -173,7 +173,7 @@ public:
+                                                   rewriter.getF32FloatAttr(0)));
+     rewriter.replaceOpWithNewOp<DotOp>(op, expandLhsOp.getSrc(),
+                                        expandRhsOp.getSrc(), newAcc,
+-                                       InputPrecision::TF32, 0);
++                                       InputPrecision::IEEE, 0);
+     return success();
+   }
+ };
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 2c27b5a5ae..74877af626 100644
+index 2c27b5a5a..74877af62 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
 @@ -336,6 +336,7 @@ void init_triton_ir(py::module &&m) {
@@ -453,7 +475,7 @@ index 2c27b5a5ae..74877af626 100644
             [](TritonOpBuilder &self, Value &condition) {
               self.create<LLVM::AssumeOp>(condition);
 diff --git a/python/triton/_utils.py b/python/triton/_utils.py
-index aac0e676fe..9c9afbbeb8 100644
+index aac0e676f..9c9afbbeb 100644
 --- a/python/triton/_utils.py
 +++ b/python/triton/_utils.py
 @@ -64,8 +64,9 @@ def validate_block_shape(shape: List[int]):
@@ -469,7 +491,7 @@ index aac0e676fe..9c9afbbeb8 100644
  
      if numel > TRITON_MAX_TENSOR_NUMEL:
 diff --git a/python/triton/compiler/code_generator.py b/python/triton/compiler/code_generator.py
-index 3ffb904574..d0df0fbf82 100644
+index 3ffb90457..34becd1d9 100644
 --- a/python/triton/compiler/code_generator.py
 +++ b/python/triton/compiler/code_generator.py
 @@ -11,8 +11,16 @@ from dataclasses import dataclass
@@ -639,10 +661,9 @@ index 3ffb904574..d0df0fbf82 100644
  
  
 diff --git a/python/triton/compiler/compiler.py b/python/triton/compiler/compiler.py
-index d6f8dd26fe..eb61008092 100644
 --- a/python/triton/compiler/compiler.py
 +++ b/python/triton/compiler/compiler.py
-@@ -10,6 +10,7 @@ from ..runtime.autotuner import OutOfResources
+@@ -10,12 +10,16 @@
  from ..runtime.cache import get_cache_manager, get_dump_manager, get_override_manager, get_cache_key
  from ..runtime.driver import driver
  from ..tools.disasm import get_sass
@@ -650,35 +671,348 @@ index d6f8dd26fe..eb61008092 100644
  from pathlib import Path
  import re
  import functools
-@@ -324,7 +325,25 @@ def compile(src, target=None, options=None, _env_vars=None):
+ import os
+ import time
+ import copy
++from contextlib import contextmanager, nullcontext
++from contextvars import ContextVar
++import threading
+ 
+ # - ^\s*tt\.func\s+ : match the start of the string, any leading whitespace, the keyword func,
+ #    and any following whitespace
+@@ -223,7 +227,48 @@
+         )
+ 
+ 
++_compilation_listener_observer = ContextVar("triton_compilation_listener_observer", default=None)
++
++
++@contextmanager
++def _compilation_listener_scope(before_listener):
++    """Track callback effects for one synchronous JIT continuation."""
++    token = _compilation_listener_observer.set(before_listener)
++    try:
++        yield
++    finally:
++        _compilation_listener_observer.reset(token)
++
++
++def _notify_compilation_listener(listener, **kwargs):
++    before_listener = _compilation_listener_observer.get()
++    if before_listener is not None:
++        before_listener()
++    listener(**kwargs)
++
++
+ def compile(src, target=None, options=None, _env_vars=None):
++    # Backends may return a guarded bundle with independently cached variants.
++    # The default path and public call signature remain unchanged.
++    if target is None:
++        target = driver.active.get_current_target()
++    assert isinstance(target, GPUTarget), "target must be of GPUTarget type"
++    backend = make_backend(target)
++    hook = getattr(backend, "compile_bundle", None)
++    if hook is not None and options and options.get("block_batching_factor", 1) != 1:
++        if options["block_batching_factor"] == "auto":
++            env = dict(get_cache_invalidating_env_vars() if _env_vars is None else _env_vars)
++
++            def compile_variant(variant, frozen_src=None):
++                return _compile(src if frozen_src is None else frozen_src, target, variant, env)
++
++            return hook(src, options, compile_variant, env_vars=env)
++        return hook(src, options, lambda variant, frozen_src=None: _compile(
++            src if frozen_src is None else frozen_src, target, variant, _env_vars))
++    return _compile(src, target, options, _env_vars)
++
++
++def _compile(src, target=None, options=None, _env_vars=None):
+     compilation_listener = knobs.compilation.listener
      if compilation_listener:
-         timer.finished_ir_initialization()
-     for ext, compile_ir in list(stages.items())[first_stage:]:
--        next_module = compile_ir(module, metadata)
+         timer = CompileTimer()
+@@ -248,7 +293,6 @@
+         inspect_stages_key, inspect_stages_hash = knobs.runtime.add_stages_inspection_hook()
+         key += inspect_stages_key
+     hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+-    fn_cache_manager = get_cache_manager(hash)
+     # For dumping/overriding only hash the source as we want it to be independent of triton
+     # core changes to make it easier to track kernels by hash.
+     enable_override = knobs.compilation.override
+@@ -262,14 +306,20 @@
+     # the file name to 150 characters to be safe.
+     file_name = src.name[:150]
+     metadata_filename = f"{file_name}.json"
+-    metadata_group = fn_cache_manager.get_group(metadata_filename) or {}
+-    metadata_path = metadata_group.get(metadata_filename)
+-    always_compile = knobs.compilation.always_compile
++    cache_scope = getattr(backend, "compilation_cache_scope", None)
++    with (cache_scope(src, hash) if cache_scope is not None else nullcontext(
++            get_cache_manager(hash))) as fn_cache_manager:
++        metadata_group = fn_cache_manager.get_group(metadata_filename) or {}
++        metadata_path = metadata_group.get(metadata_filename)
++        always_compile = knobs.compilation.always_compile
++        if not always_compile and metadata_path is not None:
++            # cache hit!
++            res = CompiledKernel(src, metadata_group, hash)
++
+     if not always_compile and metadata_path is not None:
+-        # cache hit!
+-        res = CompiledKernel(src, metadata_group, hash)
+         if compilation_listener:
+-            compilation_listener(
++            _notify_compilation_listener(
++                compilation_listener,
+                 src=src,
+                 metadata=res.metadata._asdict(),
+                 metadata_group=metadata_group,
+@@ -278,89 +328,119 @@
+             )
+         return res
+ 
+-    # initialize metadata
+-    metadata = {
+-        "hash": hash,
+-        "target": target,
+-        **options.__dict__,
+-        **env_vars,
+-    }
+-    metadata["triton_version"] = __version__
+-    # run compilation pipeline  and populate metadata
+-    stages = dict()
+-    backend.add_stages(stages, options, src.language)
+-    first_stage = list(stages.keys()).index(src.ext)
+-    # when the source is an IR file, don't apply the passes related to this stage. This makes it easier to write IR level tests.
+-    if ir_source:
+-        first_stage += 1
+-
+-    # For IRSource, we have already grabbed the context + called both
+-    # ir.load_dialects and backend.load_dialects.
+-    if not isinstance(src, IRSource):
+-        context = ir.context()
+-        ir.load_dialects(context)
+-        backend.load_dialects(context)
++    writer_factory = getattr(backend, "make_compilation_writer", None)
++    writer_context = (writer_factory(src, options, fn_cache_manager, enable_override)
++                      if writer_factory is not None else nullcontext(fn_cache_manager))
++
++    with writer_context as stage_cache_manager:
++        # initialize metadata
++        metadata = {
++            "hash": hash,
++            "target": target,
++            **options.__dict__,
++            **env_vars,
++        }
++        metadata["triton_version"] = __version__
++        # run compilation pipeline  and populate metadata
++        stages = dict()
++        backend.add_stages(stages, options, src.language)
++        first_stage = list(stages.keys()).index(src.ext)
++        # when the source is an IR file, don't apply the passes related to this stage. This makes it easier to write IR level tests.
++        if ir_source:
++            first_stage += 1
++
++        # For IRSource, we have already grabbed the context + called both
++        # ir.load_dialects and backend.load_dialects.
++        if not isinstance(src, IRSource):
++            context = ir.context()
++            ir.load_dialects(context)
++            backend.load_dialects(context)
++
++        codegen_fns = backend.get_codegen_implementation(options)
++        module_map = backend.get_module_map()
 +        try:
-+            next_module = compile_ir(module, metadata)
++            module = src.make_ir(target, options, codegen_fns, module_map, context)
 +        except Exception as e:
-+            if (ext == "ttadapter"):
-+                stage_name = "ConvertTritonIRToLinalgIR"
-+            elif (ext == "npubin"):
-+                stage_name = "ConvertLinalgIRToBinary"
-+            else:
-+                stage_name = "MLIRCompile"
-+            if hasattr(e, 'stderr') and e.stderr:
-+                error_detail = e.stderr.decode('utf-8') if isinstance(e.stderr, bytes) else e.stderr
-+            else:
-+                error_detail = str(e)
-+            from ..runtime.cache import FileCacheManager
-+            if isinstance(fn_cache_manager, FileCacheManager):
-+                error_detail += f"\n\n[INFO]: The compiled kernel cache is in {fn_cache_manager.cache_dir}\n\n"
-+            else:
-+                error_detail += f"\n\n[INFO]: The compiled kernel cache is {file_name}.{ext}\n\n"
-+            raise MLIRCompilationError(stage_name, error_detail) from e
-         ir_filename = f"{file_name}.{ext}"
-         if fn_override_manager is None:
-             # Users can override kernels at scale by setting `ir_override` in autotune config
-@@ -466,7 +489,7 @@ class CompiledKernel:
-             knobs.runtime.kernel_load_start_hook(self.module, self.function, self.name, self.metadata_group, self.hash)
++            filter_traceback(e)
++            raise
++
++        if ir_source:
++            ir_filename = f"{file_name}.{src.ext}"
++            metadata_group[ir_filename] = stage_cache_manager.put(module, ir_filename)
++        else:
++            ir_filename = f"{file_name}.source"
++            metadata_group[ir_filename] = stage_cache_manager.put(module, ir_filename)
+ 
+-    codegen_fns = backend.get_codegen_implementation(options)
+-    module_map = backend.get_module_map()
+-    try:
+-        module = src.make_ir(target, options, codegen_fns, module_map, context)
+-    except Exception as e:
+-        filter_traceback(e)
+-        raise
++        use_ir_loc = knobs.compilation.use_ir_loc
++        if ir_source and use_ir_loc:
++            module.create_location_snapshot(src.path)
++            print(f"Creating new locations for {src.path}")
+ 
+-    if ir_source:
+-        ir_filename = f"{file_name}.{src.ext}"
+-        metadata_group[ir_filename] = fn_cache_manager.put(module, ir_filename)
+-    else:
+-        ir_filename = f"{file_name}.source"
+-        metadata_group[ir_filename] = fn_cache_manager.put(module, ir_filename)
+-
+-    use_ir_loc = knobs.compilation.use_ir_loc
+-    if ir_source and use_ir_loc:
+-        module.create_location_snapshot(src.path)
+-        print(f"Creating new locations for {src.path}")
++        if compilation_listener:
++            timer.finished_ir_initialization()
++        for ext, compile_ir in list(stages.items())[first_stage:]:
++            try:
++                next_module = compile_ir(module, metadata)
++            except Exception as e:
++                if (ext == "ttadapter"):
++                    stage_name = "ConvertTritonIRToLinalgIR"
++                elif (ext == "npubin"):
++                    stage_name = "ConvertLinalgIRToBinary"
++                else:
++                    stage_name = "MLIRCompile"
++                if hasattr(e, 'stderr') and e.stderr:
++                    error_detail = e.stderr.decode('utf-8') if isinstance(e.stderr, bytes) else e.stderr
++                else:
++                    error_detail = str(e)
++                from ..runtime.cache import FileCacheManager
++                if isinstance(fn_cache_manager, FileCacheManager):
++                    error_detail += f"\n\n[INFO]: The compiled kernel cache is in {fn_cache_manager.cache_dir}\n\n"
++                else:
++                    error_detail += f"\n\n[INFO]: The compiled kernel cache is {file_name}.{ext}\n\n"
++                raise MLIRCompilationError(stage_name, error_detail) from e
++            ir_filename = f"{file_name}.{ext}"
++            if fn_override_manager is None:
++                # Users can override kernels at scale by setting `ir_override` in autotune config
++                # without TRITON_KERNEL_OVERRIDE
++                if (ir_override := metadata.get("ir_override", None)) and ir_override.endswith(f".{ext}"):
++                    next_module = parse(ir_override, ext, context)
++            elif full_name := fn_override_manager.get_file(ir_filename):
++                print(f"\nOverriding kernel with file {full_name}")
++                next_module = parse(full_name, ext, context)
++            # If TRITON_STORE_BINARY_ONLY is 1, only store the final binary.
++            if (not store_only_binary) or (ext in (backend.binary_ext, "json")):
++                metadata_group[ir_filename] = stage_cache_manager.put(next_module, ir_filename)
++            if fn_dump_manager is not None:
++                fn_dump_manager.put(next_module, ir_filename)
++                if ext == "cubin":
++                    sass = get_sass(next_module)
++                    fn_dump_manager.put(sass, file_name + ".sass")
++            # use an env variable to parse ir from file
++            if use_ir_loc == ext:
++                ir_full_name = stage_cache_manager.get_file(ir_filename)
++                next_module.create_location_snapshot(ir_full_name)
++                print(f"Creating new locations for {ir_full_name}")
++            module = next_module
++            if compilation_listener:
++                timer.stage_finished(ext)
++        # write-back metadata
++        metadata_group[metadata_filename] = stage_cache_manager.put(json.dumps(metadata, default=vars),
++                                                                     metadata_filename, binary=False)
++        commit = getattr(stage_cache_manager, "commit", None)
++        if commit is None:
++            fn_cache_manager.put_group(metadata_filename, metadata_group)
++            result = None
++        else:
++            result = commit(src, metadata_group, hash)
++            metadata_group = result.metadata_group
+ 
+-    if compilation_listener:
+-        timer.finished_ir_initialization()
+-    for ext, compile_ir in list(stages.items())[first_stage:]:
+-        next_module = compile_ir(module, metadata)
+-        ir_filename = f"{file_name}.{ext}"
+-        if fn_override_manager is None:
+-            # Users can override kernels at scale by setting `ir_override` in autotune config
+-            # without TRITON_KERNEL_OVERRIDE
+-            if (ir_override := metadata.get("ir_override", None)) and ir_override.endswith(f".{ext}"):
+-                next_module = parse(ir_override, ext, context)
+-        elif full_name := fn_override_manager.get_file(ir_filename):
+-            print(f"\nOverriding kernel with file {full_name}")
+-            next_module = parse(full_name, ext, context)
+-        # If TRITON_STORE_BINARY_ONLY is 1, only store cubin/hsaco/json
+-        if (not store_only_binary) or (ext in ("cubin", "hsaco", "json")):
+-            metadata_group[ir_filename] = fn_cache_manager.put(next_module, ir_filename)
+-        if fn_dump_manager is not None:
+-            fn_dump_manager.put(next_module, ir_filename)
+-            if ext == "cubin":
+-                sass = get_sass(next_module)
+-                fn_dump_manager.put(sass, file_name + ".sass")
+-        # use an env variable to parse ir from file
+-        if use_ir_loc == ext:
+-            ir_full_name = fn_cache_manager.get_file(ir_filename)
+-            next_module.create_location_snapshot(ir_full_name)
+-            print(f"Creating new locations for {ir_full_name}")
+-        module = next_module
++        # notify any listener
+         if compilation_listener:
+-            timer.stage_finished(ext)
+-    # write-back metadata
+-    metadata_group[metadata_filename] = fn_cache_manager.put(json.dumps(metadata, default=vars), metadata_filename,
+-                                                             binary=False)
+-    fn_cache_manager.put_group(metadata_filename, metadata_group)
++            _notify_compilation_listener(compilation_listener, src=src, metadata=metadata,
++                                         metadata_group=metadata_group, times=timer.end(), cache_hit=False)
++        # return handle to compiled kernel
++        return result if result is not None else CompiledKernel(src, metadata_group, hash)
+ 
+-    # notify any listener
+-    if compilation_listener:
+-        compilation_listener(src=src, metadata=metadata, metadata_group=metadata_group, times=timer.end(),
+-                             cache_hit=False)
+-    # return handle to compiled kernel
+-    return CompiledKernel(src, metadata_group, hash)
+ 
+ 
+ def make_backend(target: GPUTarget) -> BaseBackend:
+@@ -405,6 +485,9 @@
+ 
+ 
+ class CompiledKernel:
++    # Only the per-instance RLock below is lazily created on first use;
++    # device loading happens in _init_handles_impl(), which is serialized.
++    _initialization_lock_guard = threading.Lock()
+ 
+     def __init__(self, src, metadata_group, hash):
+         from collections import namedtuple
+@@ -435,8 +518,33 @@
+         self.module = None
+         self.function = None
+         self._run = None
++        self._initialization_complete = False
++        self._initialization_lock = None
++        self._initialization_started = False
++        self._load_hook_started = False
+ 
+     def _init_handles(self):
++        if self._initialization_lock is None:
++            with self._initialization_lock_guard:
++                self._initialization_lock = threading.RLock()
++        with self._initialization_lock:
++            if self._initialization_complete:
++                return
++            if self._initialization_started:
++                # A failed or reentrant initialization cannot be treated as a
++                # usable module, nor can its callbacks safely be replayed.
++                raise RuntimeError("Kernel initialization did not complete; cannot retry or launch this kernel")
++            self._initialization_started = True
++            return self._init_handles_impl()
++
++    def _call_load_hook(self, hook):
++        if hook is not None:
++            # Only the exact empty built-in chain is known to have no effects;
++            # subclasses may override __call__ even when calls is empty.
++            self._load_hook_started |= type(hook) is not knobs.HookChain or bool(hook.calls)
++            hook(self.module, self.function, self.name, self.metadata_group, self.hash)
++
++    def _init_handles_impl(self):
+         if self.module is not None:
+             return
+ 
+@@ -462,20 +570,19 @@
+             max_tmem_size = 512  # tmem size in number of columns
+             if self.metadata.tmem_size > max_tmem_size:
+                 raise_(OutOfResources(self.metadata.tmem_size, max_tmem_size, "tensor memory"))
+-        if knobs.runtime.kernel_load_start_hook is not None:
+-            knobs.runtime.kernel_load_start_hook(self.module, self.function, self.name, self.metadata_group, self.hash)
++        self._call_load_hook(knobs.runtime.kernel_load_start_hook)
          # TODO: n_regs, n_spills should be metadata generated when calling `ptxas`
          self.module, self.function, self.n_regs, self.n_spills, self.n_max_threads = driver.active.utils.load_binary(
 -            self.name, self.kernel, self.metadata.shared, device)
@@ -686,8 +1020,20 @@ index d6f8dd26fe..eb61008092 100644
          warp_size = driver.active.get_current_target().warp_size
          if self.metadata.num_warps * warp_size > self.n_max_threads:
              raise_(OutOfResources(self.metadata.num_warps * warp_size, self.n_max_threads, "threads"))
+-        if knobs.runtime.kernel_load_end_hook is not None:
+-            knobs.runtime.kernel_load_end_hook(self.module, self.function, self.name, self.metadata_group, self.hash)
++        self._call_load_hook(knobs.runtime.kernel_load_end_hook)
++        self._initialization_complete = True
+ 
+     @property
+     def run(self):
+-        if self._run is None:
++        if not self._initialization_complete:
+             self._init_handles()
+         return self._run
+ 
 diff --git a/python/triton/compiler/errors.py b/python/triton/compiler/errors.py
-index 39e6c4dfb0..c72ca65c24 100644
+index 39e6c4dfb..c72ca65c2 100644
 --- a/python/triton/compiler/errors.py
 +++ b/python/triton/compiler/errors.py
 @@ -49,3 +49,24 @@ class CompileTimeAssertionFailure(CompilationError):
@@ -715,8 +1061,31 @@ index 39e6c4dfb0..c72ca65c24 100644
 +
 +    def format_line_delim(self, keyword):
 +        return f"///------------------{keyword}------------------\n"
+diff --git a/python/triton/language/core.py b/python/triton/language/core.py
+index 85e977d03..ddfa33ec9 100644
+--- a/python/triton/language/core.py
++++ b/python/triton/language/core.py
+@@ -1596,8 +1596,16 @@ def _aggregate(cls):
+ 
+     for (name, member) in inspect.getmembers(cls):
+         if inspect.isfunction(member) or inspect.ismethod(member) or isinstance(member, JITCallable):
+-            if name != "__init__":
+-                setattr(aggregate_value, name, member)
++            if name == "__init__":
++                continue
++            # __annotate__ is a Python 3.14+ internal; exclude from hash and
++            # don't copy it onto the aggregate value type.
++            if name == "__annotate__":
++                continue
++            setattr(aggregate_value, name, member)
++
++            # Exclude __annotate_func__ from hash — isn't user facing (Python 3.14+).
++            if name != "__annotate_func__":
+                 hash_attrs.append(member)
+ 
+     aggregate_value.hash_attrs = hash_attrs
 diff --git a/python/triton/language/math.py b/python/triton/language/math.py
-index 582cd876cb..13ff1cef09 100644
+index 582cd876c..13ff1cef0 100644
 --- a/python/triton/language/math.py
 +++ b/python/triton/language/math.py
 @@ -21,8 +21,12 @@ def _check_dtype(dtypes: List[str]) -> T:
@@ -744,10 +1113,9 @@ index 582cd876cb..13ff1cef09 100644
  @core._tensor_member_fn
  def exp(x, _semantic=None):
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 691c471296..d70d629d49 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
-@@ -225,7 +225,7 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -225,7 +225,7 @@
          min_value = self.scalar_constant(min_value, tl.int64)
          cond = self.and_(self.less_equal(ret, max_value), self.greater_equal(ret, min_value))
          msg = f"int{lhs_sca_ty.int_bitwidth} overflow detected for operation {binary_op.__name__}"
@@ -756,171 +1124,16 @@ index 691c471296..d70d629d49 100644
  
      def add(self, input: TensorTy | numbers.Number, other: TensorTy | numbers.Number,
              sanitize_overflow: bool) -> TensorTy:
-@@ -350,6 +350,9 @@ class TritonSemantic(Generic[TensorTy]):
-                 raise TypeError("Cannot mod " + scalar_ty.__repr__() + " by " + other_scalar_ty.__repr__() + " "
-                                 "because they have different signedness;"
-                                 "this is unlikely to result in a useful answer. Cast them to the same signedness.")
-+            if hasattr(input, 'was_bool_to_int8'):
-+                false_val = self.builder.get_int1(False)
-+                return self.tensor(false_val, tl.int1)
-             if scalar_ty.is_int_signed():
-                 return self.tensor(self.builder.create_srem(input.handle, other.handle), input.type)
-             else:
-@@ -435,22 +438,61 @@ class TritonSemantic(Generic[TensorTy]):
-         return self.tensor(self.builder.create_xor(input.handle, other.handle), input.type)
- 
-     def logical_and(self, input: TensorTy, other: TensorTy) -> TensorTy:
-+        dst_sca_ty = tl.dtype("int1")
-+        dst_bits = dst_sca_ty.primitive_bitwidth
-+        if hasattr(input, 'was_bool_to_int8'):
-+            assert input.type.scalar.is_int8(), "input wat bool to int8. However, input.type is not int8."
-+            input = self.cast(input, tl.int1)
-         if not input.type.is_int1():
--            input = self.bitcast(input, tl.int1)
-+            src_sca_ty = input.type.scalar
-+            src_bits = src_sca_ty.primitive_bitwidth
-+            if src_bits == dst_bits or src_sca_ty.is_ptr() or dst_sca_ty.is_ptr():
-+                input = self.bitcast(input, tl.int1)
-+            else:
-+                input = self.not_equal(input, 0)
-+        if hasattr(other, 'was_bool_to_int8'):
-+            assert other.type.scalar.is_int8(), "Other input wat bool to int8. However, other input.type is not int8."
-+            other = self.cast(other, tl.int1)
-         if not other.type.is_int1():
--            other = self.bitcast(other, tl.int1)
-+            src_sca_ty = other.type.scalar
-+            src_bits = src_sca_ty.primitive_bitwidth
-+            if src_bits == dst_bits or src_sca_ty.is_ptr() or dst_sca_ty.is_ptr():
-+                other = self.bitcast(other, tl.int1)
-+            else:
-+                other = self.not_equal(other, 0)
-         return self.and_(input, other)
- 
-     def logical_or(self, input: TensorTy, other: TensorTy) -> TensorTy:
-+        dst_sca_ty = tl.dtype("int1")
-+        dst_bits = dst_sca_ty.primitive_bitwidth
-+        if hasattr(input, 'was_bool_to_int8'):
-+            assert input.type.scalar.is_int8(), "input wat bool to int8. However, input.type is not int8."
-+            input = self.cast(input, tl.int1)
-         if not input.type.is_int1():
--            input = self.bitcast(input, tl.int1)
-+            src_sca_ty = input.type.scalar
-+            src_bits = src_sca_ty.primitive_bitwidth
-+            if src_bits == dst_bits or src_sca_ty.is_ptr() or dst_sca_ty.is_ptr():
-+                input = self.bitcast(input, tl.int1)
-+            else:
-+                input = self.not_equal(input, 0)
-+        if hasattr(other, 'was_bool_to_int8'):
-+            assert other.type.scalar.is_int8(), "Other wat bool to int8. However, other.type is not int8."
-+            other = self.cast(other, tl.int1)
-         if not other.type.is_int1():
--            other = self.bitcast(other, tl.int1)
-+            src_sca_ty = other.type.scalar
-+            src_bits = src_sca_ty.primitive_bitwidth
-+            if src_bits == dst_bits or src_sca_ty.is_ptr() or dst_sca_ty.is_ptr():
-+                other = self.bitcast(other, tl.int1)
-+            else:
-+                other = self.not_equal(other, 0)
-         return self.or_(input, other)
- 
-     def not_(self, input: TensorTy):
--        if not input.type.is_int1():
--            input = self.bitcast(input, tl.int1)
-+        if hasattr(input, 'was_bool_to_int8'):
-+            assert input.type.scalar.is_int8(), "input wat bool to int8. However, input.type is not int8."
-+            input = self.cast(input, tl.int1)
-+        if input.type.scalar.is_floating():
-+            raise TypeError(f"unexpected type {input.type.scalar}")
-         return self.invert(input)
- 
-     def lshr(self, input: TensorTy, other: TensorTy) -> TensorTy:
-@@ -474,14 +516,22 @@ class TritonSemantic(Generic[TensorTy]):
- 
-     def minus(self, input: TensorTy) -> TensorTy:
-         input_sca_ty = input.type.scalar
-+        if hasattr(input, 'was_bool_to_int8'):
-+            if input.type.scalar.is_int8():
-+                raise TypeError("unexpected type bool")
-         if input_sca_ty.is_ptr():
-             raise ValueError("wrong type argument to unary minus (" + input_sca_ty.__repr__() + ")")
-         _0 = self.tensor(self.builder.get_null_value(input_sca_ty.to_ir(self.builder)), input_sca_ty)
-         return self.sub(_0, input, True)
- 
-     def invert(self, input: TensorTy) -> TensorTy:
-+        if hasattr(input, 'was_bool_to_int8'):
-+            assert input.type.scalar.is_int8(), "input wat bool to int8. However, input.type is not int8."
-+            input = self.cast(input, tl.int1)
-         input_sca_ty = input.type.scalar
--        if input_sca_ty.is_ptr() or input_sca_ty.is_floating():
-+        if input_sca_ty.is_floating():
-+            raise TypeError(f"unexpected type {input_sca_ty}")
-+        if input_sca_ty.is_ptr():
-             raise ValueError("wrong type argument to unary invert (" + input_sca_ty.__repr__() + ")")
-         _1 = self.tensor(self.builder.get_all_ones_value(input_sca_ty.to_ir(self.builder)), input_sca_ty)
-         return self.xor_(input, _1)
-@@ -585,8 +635,11 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -585,8 +585,6 @@
          if end <= start:
              raise ValueError("arange's end argument must be greater than the start argument")
          range = end - start
 -        if (range & (range - 1)) != 0:
 -            raise ValueError("arange's range must be a power of 2")
-+        # Check if compile_mode is simt, then range must be a power of 2
-+        if self.builder.is_simt_mode():
-+            # Check if range is a power of 2
-+            if (range & (range - 1)) != 0:
-+                raise ValueError("arange's range must be a power of 2")
          shape = [range]
          if ret_ty is None:
              ret_ty = tl.block_type(tl.int32, shape)
-@@ -1019,6 +1072,8 @@ class TritonSemantic(Generic[TensorTy]):
-         # Check `boundary_check` argument
-         boundary_check = self._canonicalize_boundary_check(boundary_check, dst_ty.get_block_shapes())
- 
-+        if boundary_check and padding is None:
-+            padding = ir.PADDING_OPTION.PAD_ZERO
-         # Build IR
-         return self.tensor(
-             self.builder.create_tensor_pointer_load(ptr.handle, boundary_check, padding, cache, eviction, is_volatile),
-@@ -1036,7 +1091,12 @@ class TritonSemantic(Generic[TensorTy]):
-             raise ValueError("`padding_option` or `boundary_check` argument is not supported for loading a tensor of"
-                              "pointers or loading a scalar. Because the compiler does not know the boundary; please "
-                              "use block pointers (defined by `make_block_ptr`) instead")
--
-+        if mask is not None and other is None:
-+            # Get element type to determine default padding value
-+            elt_ty = ptr.type.scalar.element_ty
-+            # Use 0.0 for floating point types, 0 for integer types
-+            default_value = 0.0 if elt_ty.is_floating() else 0
-+            other = self.to_tensor(default_value)
-         # For a pointer of scalar, check the type of `mask` and `other`
-         if not ptr.type.is_block():
-             if mask and mask.type.is_block():
-@@ -1075,13 +1135,19 @@ class TritonSemantic(Generic[TensorTy]):
- 
-         # Build IR
-         if mask is None:
--            ret = self.tensor(self.builder.create_load(ptr.handle, cache, eviction, is_volatile), dst_ty)
-+            load_handle = self.builder.create_load(ptr.handle, cache, eviction, is_volatile)
-         else:
--            ret = self.tensor(
--                self.builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None, cache,
--                                                eviction, is_volatile), dst_ty)
-+            load_handle = self.builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None,
-+                                                          cache, eviction, is_volatile)
-+
-+        if is_bool:
-+            load_handle.set_attr("was_bool_to_int8", self.builder.get_bool_attr(True))
-+
-+        ret = self.tensor(load_handle, dst_ty)
-+        # Do not cast back to int1 when is_bool=true. We directly use the int8 tensor given by tl.load
-         if is_bool:
--            ret = self.cast(ret, tl.int1)
-+            ret.was_bool_to_int8 = True
-+
-         return ret
- 
-     def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
-@@ -1847,12 +1913,17 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1847,12 +1845,17 @@
          is_signed = [arg.dtype.is_int_signed() for arg in args]
          return self.tensor(self.builder.create_print(prefix, hex, new_args, is_signed), tl.void)
  
@@ -941,7 +1154,7 @@ index 691c471296..d70d629d49 100644
      def assume(self, cond) -> TensorTy:
          return self.tensor(self.builder.create_assume(cond.handle), tl.void)
 diff --git a/python/triton/language/standard.py b/python/triton/language/standard.py
-index 57c22b0d71..b99cd89414 100644
+index 57c22b0d7..b99cd8941 100644
 --- a/python/triton/language/standard.py
 +++ b/python/triton/language/standard.py
 @@ -170,11 +170,17 @@ def _elementwise_max(a, b):
@@ -975,8 +1188,163 @@ index 57c22b0d71..b99cd89414 100644
  
  
  @core._tensor_member_fn
+diff --git a/python/triton/runtime/autotuner.py b/python/triton/runtime/autotuner.py
+index 0c4d71049..f3e55b366 100644
+--- a/python/triton/runtime/autotuner.py
++++ b/python/triton/runtime/autotuner.py
+@@ -5,6 +5,8 @@ import time
+ import inspect
+ import hashlib
+ import json
++from contextlib import contextmanager, nullcontext
++from contextvars import ContextVar
+ from functools import cached_property
+ from typing import Dict, Tuple, List, Optional
+ 
+@@ -16,6 +18,28 @@ from .cache import get_cache_manager, triton_key
+ from triton._C.libtriton import get_cache_invalidating_env_vars
+ 
+ 
++_autotuning_kernel = ContextVar("triton_autotuning_kernel", default=None)
++
++
++@contextmanager
++def _autotune_scope(kernel):
++    # Scope the default policy to this kernel without changing explicit options.
++    token = _autotuning_kernel.set(kernel)
++    try:
++        yield
++    finally:
++        _autotuning_kernel.reset(token)
++
++
++def _exact_request_scope():
++    from ..compiler import make_backend
++    from .driver import driver
++
++    backend = make_backend(driver.active.get_current_target())
++    factory = getattr(backend, "get_exact_request_scope", None)
++    return nullcontext() if factory is None else factory()
++
++
+ class Autotuner(KernelInterface):
+ 
+     def __init__(self, fn, arg_names, configs, key, reset_to_zero, restore_value, pre_hook=None, post_hook=None,
+@@ -126,7 +150,7 @@ class Autotuner(KernelInterface):
+         return self._do_bench
+ 
+     def _bench(self, *args, config, **meta):
+-        from ..compiler.errors import CompileTimeAssertionFailure
++        from ..compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
+ 
+         verbose = knobs.autotuning.print
+         if verbose:
+@@ -147,10 +171,11 @@ class Autotuner(KernelInterface):
+                 config.pre_hook(full_nargs)
+             self.pre_hook(full_nargs)
+             try:
+-                self.fn.run(
+-                    *args,
+-                    **current,
+-                )
++                with _autotune_scope(self.base_fn), _exact_request_scope():
++                    self.fn.run(
++                        *args,
++                        **current,
++                    )
+             except Exception as e:
+                 try:
+                     self.post_hook(full_nargs, exception=e)
+@@ -162,7 +187,7 @@ class Autotuner(KernelInterface):
+ 
+         try:
+             return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+-        except (OutOfResources, CompileTimeAssertionFailure, PTXASError) as e:
++        except (OutOfResources, CompileTimeAssertionFailure, PTXASError, MLIRCompilationError) as e:
+             if verbose:
+                 print(f"Autotuning failed with {e}")
+             return [float("inf"), float("inf"), float("inf")]
+@@ -249,11 +274,12 @@ class Autotuner(KernelInterface):
+         if config.pre_hook is not None:
+             full_nargs = {**self.nargs, **kwargs, **config.all_kwargs()}
+             config.pre_hook(full_nargs)
+-        ret = self.fn.run(
+-            *args,
+-            **kwargs,
+-            **config.all_kwargs(),
+-        )
++        with _autotune_scope(self.base_fn):
++            ret = self.fn.run(
++                *args,
++                **kwargs,
++                **config.all_kwargs(),
++            )
+         self.nargs = None
+         return ret
+ 
+@@ -288,11 +314,12 @@ class Autotuner(KernelInterface):
+         self.nargs = dict(zip(self.arg_names, args))
+         ret = []
+         for autotune_config in self.prune_configs(kwargs):
+-            ret.append(self.fn.warmup(
+-                *args,
+-                **kwargs,
+-                **autotune_config.all_kwargs(),
+-            ))
++            with _autotune_scope(self.base_fn), _exact_request_scope():
++                ret.append(self.fn.warmup(
++                    *args,
++                    **kwargs,
++                    **autotune_config.all_kwargs(),
++                ))
+         self.nargs = None
+         return ret
+ 
+diff --git a/python/triton/runtime/cache.py b/python/triton/runtime/cache.py
+index 186567fed..bcb10aa02 100644
+--- a/python/triton/runtime/cache.py
++++ b/python/triton/runtime/cache.py
+@@ -279,6 +279,16 @@ def make_so_cache_key(version_hash, signature, constants, ids, **kwargs):
+ @functools.lru_cache()
+ def triton_key():
+     import pkgutil
++
++    def module_files(paths, prefix):
++        # walk_packages imports each package to find its children. Fingerprinting
++        # compiler files must not import frameworks or initialize device runtimes.
++        for module in pkgutil.iter_modules(paths, prefix):
++            spec = module.module_finder.find_spec(module.name)
++            yield spec.origin
++            if module.ispkg:
++                yield from module_files(spec.submodule_search_locations, module.name + ".")
++
+     TRITON_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+     contents = []
+     # frontend
+@@ -290,8 +300,8 @@ def triton_key():
+         (os.path.join(TRITON_PATH, "backends"), "triton.backends."),
+     ]
+     for path, prefix in path_prefixes:
+-        for lib in pkgutil.walk_packages([path], prefix=prefix):
+-            with open(lib.module_finder.find_spec(lib.name).origin, "rb") as f:
++        for filename in module_files([path], prefix):
++            with open(filename, "rb") as f:
+                 contents += [hashlib.sha256(f.read()).hexdigest()]
+ 
+     # backend
+@@ -306,8 +316,8 @@ def triton_key():
+     contents.append(libtriton_hash.hexdigest())
+     # language
+     language_path = os.path.join(TRITON_PATH, 'language')
+-    for lib in pkgutil.walk_packages([language_path], prefix="triton.language."):
+-        with open(lib.module_finder.find_spec(lib.name).origin, "rb") as f:
++    for filename in module_files([language_path], "triton.language."):
++        with open(filename, "rb") as f:
+             contents += [hashlib.sha256(f.read()).hexdigest()]
+     return f'{__version__}' + '-'.join(contents)
+ 
 diff --git a/python/triton/runtime/interpreter.py b/python/triton/runtime/interpreter.py
-index e68576b7be..7b215d0caf 100644
+index e68576b7b..7b215d0ca 100644
 --- a/python/triton/runtime/interpreter.py
 +++ b/python/triton/runtime/interpreter.py
 @@ -23,6 +23,25 @@ from .._utils import _tuple_create
@@ -1116,10 +1484,9 @@ index e68576b7be..7b215d0caf 100644
                  if triton.knobs.compilation.front_end_debugging:
                      raise
 diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
-index ba21a58e19..dacab27a95 100644
 --- a/python/triton/runtime/jit.py
 +++ b/python/triton/runtime/jit.py
-@@ -399,33 +399,49 @@ def create_function_from_signature(sig, kparams, backend):
+@@ -399,33 +399,49 @@
      assert len(sig.parameters) == len(kparams)
      # Create the function argument list and the dict entries for the return statement
      specialization = []
@@ -1175,3 +1542,166 @@ index ba21a58e19..dacab27a95 100644
      specialization = [{','.join(specialization)}]
      return params, specialization, options
  """
+@@ -717,26 +733,45 @@
+         for hook in self.pre_run_hooks:
+             hook(*args, **kwargs)
+ 
+-        kernel_cache, kernel_key_cache, target, backend, binder = self.device_caches[device]
++        _, _, _, backend, _ = self.device_caches[device]
++        get_handler = getattr(backend, "get_jit_reuse_handler", None)
++        handler = get_handler() if get_handler is not None else None
++        if handler is not None:
++            return handler.run(self, args, kwargs, grid, warmup, device, stream, backend, self._run_jit_tail)
++        return self._run_jit_tail(args, kwargs, grid, warmup, device, stream)
++
++    def _run_jit_tail(self, args, kwargs, grid, warmup, device, stream, *, owner=None, prepared=None,
++                      bound=None, specialization=None, raw_options=None, memory_key=None,
++                      on_initialized=None, initialize=None, frame=None):
++        # Optional backend continuation; all compilation and launch remain on this path.
++        owner = self if owner is None else owner
++        kernel_cache, kernel_key_cache, target, backend, binder = owner.device_caches[device]
+         # specialization is list[tuple[str, Any]], where first element of tuple is
+         # the type and the second parameter is the 'specialization' value.
+-        bound_args, specialization, options = binder(*args, **kwargs)
++        if bound is None:
++            bound_args, specialization, options = binder(*args, **kwargs)
++        else:
++            bound_args, options = bound, raw_options
+ 
+         # add a cache field to the kernel specializations for kernel specific
+         # pass pipelines
+-        if knobs.runtime.add_stages_inspection_hook is not None:
++        if bound is None and knobs.runtime.add_stages_inspection_hook is not None:
+             inspect_stages_key, inspect_stages_hash = knobs.runtime.add_stages_inspection_hook()
+             specialization.append(f'("custom_pipeline", {inspect_stages_hash})')
+ 
+-        key = compute_cache_key(kernel_key_cache, specialization, options)
+-        kernel = kernel_cache.get(key, None)
++        key = memory_key
++        kernel = prepared
++        if kernel is None:
++            if key is None:
++                key = compute_cache_key(kernel_key_cache, specialization, options)
++            kernel = kernel_cache.get(key, None)
+ 
+         # Kernel is not cached; we have to compile.
+         if kernel is None:
+-            options, signature, constexprs, attrs = self._pack_args(backend, kwargs, bound_args, specialization,
++            options, signature, constexprs, attrs = owner._pack_args(backend, kwargs, bound_args, specialization,
+                                                                     options)
+ 
+-            kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)
++            kernel = owner._do_compile(key, signature, device, constexprs, options, attrs, warmup)
+             if kernel is None:
+                 return None
+ 
+@@ -750,12 +785,24 @@
+         if not warmup:
+             # canonicalize grid
+             assert grid is not None
+-            if callable(grid):
++            if frame is not None:
++                grid = frame.resolve_grid(grid, bound_args)
++            elif callable(grid):
+                 grid = grid(bound_args)
+             grid_size = len(grid)
+             grid_0 = grid[0]
+             grid_1 = grid[1] if grid_size > 1 else 1
+             grid_2 = grid[2] if grid_size > 2 else 1
++            if hasattr(kernel, "result"):
++                kernel = kernel.result()
++            if initialize is not None:
++                kernel = initialize(kernel)
++            elif on_initialized is not None:
++                kernel._init_handles()
++            if on_initialized is not None:
++                on_initialized(kernel)
++            if frame is not None:
++                frame.before_launch()
+             # launch kernel
+             launch_metadata = kernel.launch_metadata(grid, stream, *bound_args.values())
+             kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+diff --git a/python/triton/tools/compile.py b/python/triton/tools/compile.py
+index 03a210a50..008a03be7 100644
+--- a/python/triton/tools/compile.py
++++ b/python/triton/tools/compile.py
+@@ -195,6 +195,11 @@ def compile_kernel(args: CompileArgs):
+         "warp_size": target.warp_size,
+         "backend_name": backend_name,
+     }
++    if target.backend == "npu":
++        # NPU AOT: launcher export and template params live in the NPU tools package.
++        from triton.tools.extra.npu.aot import prepare_params
++
++        prepare_params(ccinfo, kernel, signature, constants, out_path, params, arg_names_not_1)
+     output_files = []
+     template_dir = Path(__file__).parent / "extra" / backend_name
+     for template_path in template_dir.glob('compile.*'):
+diff --git a/python/triton/tools/link.py b/python/triton/tools/link.py
+--- a/python/triton/tools/link.py
++++ b/python/triton/tools/link.py
+@@ -4,6 +4,8 @@
+ 
+ from dataclasses import dataclass
+ 
++from triton.tools.extra.npu import aot
++
+ 
+ def _exists(x):
+     return x is not None
+@@ -36,7 +38,7 @@
+         # [name, hash, suffix]
+         self.kernel_name = re.compile("^([\\w]+)_([\\w]+)_([\\w]*)$")
+         # [(type, name)]
+-        self.c_sig = re.compile("[\\s]*(\\w+)\\s(\\w+)[,]?")
++        self.c_sig = re.compile(aot.c_sig_pattern())
+         # [d|c]
+         self.arg_suffix = re.compile("[c,d]")
+         # [backend_name]
+@@ -180,15 +182,9 @@
+     src += (f"TT_ResultTy {name}(TT_StreamTy stream, {gen_signature_with_full_args(metas[-1])}){{")
+     src += "\n"
+     for meta in sorted(metas, key=lambda m: -m.num_specs):
+-        cond_fn = (  #
+-            lambda val, hint: f"((uintptr_t){val} % {hint} == 0)"  #
+-            if hint == 16  #
+-            else f"({val} == {hint})"  #
+-            if hint == 1  #
+-            else None)
+         conds = " && ".join([  #
+-            cond_fn(val, hint)  #
+-            for val, hint in zip(meta.arg_names, meta.sizes)  #
++            aot.hint_condition(val, hint, ty)  #
++            for val, hint, ty in zip(meta.arg_names, meta.sizes, meta.arg_ctypes)  #
+             if hint is not None
+         ])
+         src += (f"  if ({conds})\n" if any(meta.sizes) else "if (1)\n"
+@@ -298,7 +294,11 @@
+     meta = meta_lists[0][0]
+     get_num_algos_decl = make_get_num_algos_decl(meta)
+     global_decl = make_global_decl(meta)
+-    backend_prelude = (Path(__file__).parent / "extra" / parser.backend_name / "link.h").read_text()
++    # NPU: launcher_cann.h via aot (same as main). CUDA/HIP: backend link.h.
++    if parser.backend_name == "npu":
++        backend_prelude = aot.c_types_include() + "\n"
++    else:
++        backend_prelude = (Path(__file__).parent / "extra" / parser.backend_name / "link.h").read_text()
+     with args.out.with_suffix(".h").open("w") as fp:
+         out = backend_prelude
+         out += "\n".join(algo_decls)
+@@ -306,6 +306,8 @@
+         out += get_num_algos_decl
+         out += "\n"
+         out += global_decl
++        if parser.backend_name == "npu":
++            out = aot.rewrite_types(out)
+         fp.write(out)
+ 
+     # generate source
+@@ -332,4 +334,6 @@
+         out += load_unload_def
+         out += "\n"
+         out += default_algo_kernel
++        if parser.backend_name == "npu":
++            out = aot.rewrite_types(out)
+         fp.write(out)

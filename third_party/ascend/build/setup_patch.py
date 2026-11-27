@@ -129,7 +129,7 @@ def _apply_patch(patch_path, reverse=False):
 
 def _apply_proton_patch(enabled):
     """Toggle the Proton patch without resetting local source changes."""
-    patch_path = _REPO_ROOT / "third_party" / "ascend" / "patch" / "proton_patch.patch"
+    patch_path = _REPO_ROOT / "third_party" / "ascend" / "patch" / "proton_patch-3.7.0.patch"
     command = ["git", "apply", "--check"]
     # Check the opposite direction to detect the desired state already exists.
     already_applied = ["--reverse"] if enabled else []
@@ -198,8 +198,8 @@ def _apply_npuir_adapter_patch():
         # repo-relative --directory so paths match the unified diff headers.
         subprocess.run(["git", "checkout", "--"] + patch_files, check=True, stdout=subprocess.DEVNULL,
                        cwd=str(npuir_dir))
-        subprocess.run(["git", "apply", "--directory", npuir_rel, patch_rel], check=True,
-                       stdout=subprocess.DEVNULL, cwd=str(_REPO_ROOT))
+        subprocess.run(["git", "apply", "--directory", npuir_rel, patch_rel], check=True, stdout=subprocess.DEVNULL,
+                       cwd=str(_REPO_ROOT))
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"npuir adapter patch failed, cmd={e.cmd}, retcode={e.returncode}") from e
 

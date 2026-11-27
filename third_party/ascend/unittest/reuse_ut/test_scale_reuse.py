@@ -20,7 +20,7 @@
 """Device-level observation tests: does changing constexpr SCALE recompile ``scale``?
 
 Run on an NPU with a patched triton-ascend build (the JIT reuse handoff must be
-present, see ``patch/triton-ascend-3.6.0.patch``)::
+present, see ``patch/triton-ascend-3.7.0.patch``)::
 
     python -m pytest -q -s third_party/ascend/unittest/reuse_ut/test_scale_reuse.py
 

@@ -328,7 +328,7 @@ def packaged_entries(tmp_path_factory):
     # CI can run from the already-patched worktree. Otherwise apply the same
     # distribution patch as the package build, restricted to the two inputs.
     if 'def _compile(' not in (staging / files[0]).read_text():
-        patch = root / 'third_party/ascend/patch/triton-ascend-3.6.0.patch'
+        patch = root / 'third_party/ascend/patch/triton-ascend-3.7.0.patch'
         subprocess.run(['git', 'apply', *('--include=' + f for f in files), str(patch)], cwd=staging, check=True)
     compiler, jit = [ast.parse((staging / name).read_text()) for name in files]
     entry = next(n for n in compiler.body if isinstance(n, ast.FunctionDef) and n.name == 'compile')

@@ -386,7 +386,9 @@ static bool isActiveEndNode(int srcNode, int endNode,
   for (int node : dependNodes) {
     if (nodeBlockId[node] != nodeBlockId[endNode] &&
         nodeBlockId[node] != nodeBlockId[srcNode]) {
-      if (linkIn[node].size() != 0) {
+      if (CVPipeline::getCoreTypeOfSimpleOpOrCf(nodeId2op[node]) !=
+              CVPipeline::CoreType::VECTOR_ONLY ||
+          linkIn[node].size() != 0) {
         return false;
       }
     }
@@ -565,11 +567,6 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
             auto dependNodes =
                 findDependency(chain[i], chainPreNode, linkIn, linkStart);
             for (auto node : dependNodes) {
-              Operation *depOp = nodeId2op.at(node);
-              if (CVPipeline::getCoreTypeOfSimpleOpOrCf(depOp) !=
-                  CVPipeline::CoreType::VECTOR_ONLY) {
-                continue;
-              }
               if (nodeBlockId[node] != optBlockId) {
                 recordChange[node] = optBlockId;
               }

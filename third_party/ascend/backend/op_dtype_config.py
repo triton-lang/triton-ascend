@@ -347,7 +347,7 @@ OP_DTYPE_RULES = {
         "names": ["triton.language.cast"],
         "tensor_args": [1],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
+            "a2a3": ["uint16", "uint32", "uint64", "fp64", "fp8e4m3", "fp8e5m2"],
             "a5": ["fp64"],
         },
         "supported": {
@@ -1222,8 +1222,11 @@ OP_DTYPE_RULES = {
     "softmax": {
         "names": ["triton.language.softmax"],
         "unsupported": {
-            "a2a3": ["fp64", "fp8e4m3", "fp8e5m2"],
-            "a5": ["fp64"],
+            "a2a3": [
+                "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64", "fp8e4m3", "fp8e5m2",
+                "bool"
+            ],
+            "a5": ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "fp64", "bool"],
         },
         "supported": {
             "a2a3": ["fp16", "fp32", "bf16"],
@@ -1401,8 +1404,14 @@ OP_DTYPE_RULES = {
     "umulhi": {
         "names": ["triton.language.umulhi"],
         "unsupported": {
-            "a2a3": ["uint8", "int8", "uint16", "int16", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
-            "a5": ["uint8", "int8", "uint16", "int16", "fp16", "fp32", "fp64", "bf16", "fp8e4m3", "fp8e5m2", "bool"],
+            "a2a3": [
+                "uint8", "int8", "uint16", "int16", "uint64", "int64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3",
+                "fp8e5m2", "bool"
+            ],
+            "a5": [
+                "uint8", "int8", "uint16", "int16", "uint64", "int64", "fp16", "fp32", "fp64", "bf16", "fp8e4m3",
+                "fp8e5m2", "bool"
+            ],
         },
         "supported": {
             "a2a3": ["int32"],

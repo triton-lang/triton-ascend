@@ -301,7 +301,7 @@ The table lists Ascend backend defaults and notes any different `triton.Config` 
 | Operator optimization | `vf_fusion_mode` | Selects the VF fusion strategy. | `None`, switch omitted; `"max-parallel"`, `"all-op"`, `"ub-aware-op"` | — | Normal path |
 | Operator optimization | `enable_vf_stack_limit` | Limits fusion based on vector function (VF) stack-usage estimates during BiShengIR compilation to reduce the risk of stack overflow. | `False`; boolean | — | Normal path |
 | Operator optimization | `hfusion_enable_multiple_consumer_fusion` | Controls multiple-consumer HFusion. | `None`; boolean | — | Normal path |
-| Operator optimization | `enable_hivm_batch_matmul` | Enables batch matmul in BiShengIR compilation. | `False`; boolean | Normal path | Normal path |
+| Operator optimization | `enable_hivm_batch_matmul` | Enables batch matmul in BiShengIR compilation. | `False`; boolean | — | Normal path |
 | Operator optimization | `auto_vectorize_v2_max_fused_ops_num` | Sets the maximum number of operations fused by AutoVectorizeV2. | `None` (default) or a signed 32-bit integer. `None` and negative values use the pass default. Values of `0` or greater set the limit explicitly. | — | Normal path |
 | Operator optimization | `prevec_max_fused_ops_num` | Limits the number of elementwise operations fused during pre-vectorization. | `None` (default) or a signed 32-bit integer. Positive values set the limit. `None`, `0`, and negative values leave this limit unset. | — | Normal path |
 | Pure SIMT | `simt_optimization_mode` | Sets the pure-SIMT multi-digit optimization mode. Explicit values on A2/A3 or the 950 normal path emit a `UserWarning` and are ignored. | `0`; toolchain-defined integer | — | Pure SIMT only |

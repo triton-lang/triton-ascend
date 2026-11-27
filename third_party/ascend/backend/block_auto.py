@@ -324,6 +324,8 @@ def _compile_selected(backend, frozen, common, baseline_options, compile_variant
     selection.pop("factor")
     result.block_auto_selection = dict(selection, selected_factor=factor, candidate_plan=plan,
                                        compile_rejections=declines)
+    if any(row.get("cv") for row in selection["candidates"].values()):
+        result.block_auto_cache_grid = tuple(contract["grid"])
     if "block_auto_data_arguments" in vars(frozen):
         result.block_auto_data_arguments = frozen.block_auto_data_arguments
     return result

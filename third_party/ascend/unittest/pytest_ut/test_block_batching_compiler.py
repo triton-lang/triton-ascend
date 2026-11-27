@@ -17,6 +17,34 @@ pytestmark = pytest.mark.backend('native')
 # Normalized computation domains
 
 
+def test_default_batch_mma_keeps_control_flow_on_existing_lowering(tmp_path):
+    path = Path(__file__).parents[1] / 'Conversion/General/BlockBatching/cv.mlir'
+    source = path.read_text().split('//--- cv-batch-loop.mlir\n')[1]
+    module = parse(tmp_path, source)
+    report = dict(ascend.passes.ttir.rewrite_block_batching(module, 2, 0, 'semantic_only', True, None))
+    assert report['compile_status'] == 'REWRITTEN', report
+    assert report['cv_lowering'] == 'static_uniform_control_lanes_v1'
+    assert 'tt.cv_batch_full_mkn' not in str(module)
+
+
+def test_prepared_batch_mma_resolves_default_only_after_target_proof():
+    from triton.backends.ascend.compiler import _masked_batch_compile_options
+    from triton.backends.ascend.block_batching_worker import BatchDecline
+
+    report = dict(cv_lowering='rank3_masked_batch_v1', guard=dict(require_same_fractal_bounds=True))
+    metadata = dict(target=SimpleNamespace(arch='Ascend950'), block_batching=report, enable_hivm_batch_matmul=None)
+    assert _masked_batch_compile_options(metadata) == []
+    assert metadata['enable_hivm_batch_matmul'] is True
+    assert report['cv_memory_lowering'] == 'full_reduction_guard_v3'
+    for arch in ('Ascend910_9391', 'Ascend910B4'):
+        other = dict(metadata, target=SimpleNamespace(arch=arch), enable_hivm_batch_matmul=None)
+        assert isinstance(_masked_batch_compile_options(other), BatchDecline)
+        assert other['enable_hivm_batch_matmul'] is None
+    baseline = dict(target=metadata['target'], enable_hivm_batch_matmul=None)
+    assert _masked_batch_compile_options(baseline) == []
+    assert baseline['enable_hivm_batch_matmul'] is None
+
+
 def rewrite(tmp_path, text, factor=3, axis=0):
     module = parse(tmp_path, text)
     report = dict(ascend.passes.ttir.rewrite_block_batching(module, factor, axis))

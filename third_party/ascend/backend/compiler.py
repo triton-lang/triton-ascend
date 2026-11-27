@@ -438,9 +438,11 @@ def make_ttir(mod, metadata, opt):
         from .block_batching_report import _has_dot
         cv = _has_dot(mod)
         layout_policy = "semantic_only" if cv else opt.block_batching_layout
+        batch_matmul = opt.enable_hivm_batch_matmul
+        if batch_matmul is None and not opt.target_arch.startswith("Ascend950"):
+            batch_matmul = False
         report = dict(
-            rewrite(mod, opt.block_batching_factor, opt.block_batching_axis, layout_policy, cv, cv
-                    and opt.enable_hivm_batch_matmul))
+            rewrite(mod, opt.block_batching_factor, opt.block_batching_axis, layout_policy, cv, cv and batch_matmul))
         # Selection is done; hivmc rejects hacc.* module attrs it does not know.
         _remove_attr = getattr(ascend.ir, "remove_attr", None)
         if _remove_attr is not None:
@@ -891,6 +893,10 @@ def _masked_batch_compile_options(metadata):
             or report.get("guard", {}).get("require_same_fractal_bounds") is not True):
         return BatchDecline("CV_MASKED_BATCH_MEMORY_LOWERING_UNSUPPORTED", "npubin")
     report["cv_memory_lowering"] = "full_reduction_guard_v3"
+    # Prepared TTIR restores the proof but not stage-local option mutations.
+    # Resolve the default here for both fresh and restored frontend artifacts.
+    if metadata.get("enable_hivm_batch_matmul") is None:
+        metadata["enable_hivm_batch_matmul"] = True
     return []
 
 
@@ -1169,9 +1175,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                                                               _supports_full_row_copy_inlining):
                     if option not in _compile_option_list:
                         _compile_option_list.append(option)
-            # Temporary until the NPU compiler enables batch matmul by default in Q4.
-            if metadata.get("enable_hivm_batch_matmul"):
-                _compile_option_list += ["--enable-hivm-batch-matmul"]
             if metadata.get("enable_vf_stack_limit"):
                 _compile_option_list += ["--enable-vf-stack-limit"]
         bisheng_options = metadata["bisheng_options"]
@@ -1203,6 +1206,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if isinstance(masked_options, BatchDecline):
             return masked_options
         _compile_option_list += masked_options
+        if npu_compiler_path.endswith("bishengir-compile") and metadata.get("enable_hivm_batch_matmul"):
+            _compile_option_list += ["--enable-hivm-batch-matmul"]
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
         if opt.debug or knobs.autotuning.print:
@@ -1579,8 +1584,9 @@ class NPUOptions:
     enable_auto_bind_sub_block: bool = None
     disable_tightly_coupled_buffer_reuse: bool = False
     enable_hivm_auto_cv_balance: bool = None
-    # Temporary 910_95 switch; the NPU compiler plans to make this default in Q4.
-    enable_hivm_batch_matmul: bool = False
+    # None selects batch MMA only for proved full A5 block-batching tiles.
+    # True retains the explicit masked path; False retains the legacy lowering.
+    enable_hivm_batch_matmul: Optional[bool] = None
     # Only takes effect on the Ascend 950 non-pure-SIMT BiShengIR compilation path.
     enable_vf_stack_limit: bool = False
     sync_solver: bool = None

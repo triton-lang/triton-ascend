@@ -13,10 +13,10 @@ CV_VALIDATION_POLICY = "ta_cv_integer_rank_two_v23"
 
 CV_MASKED_BATCH_LOWERINGS = ("rank3_masked_batch_v1", "rank3_uniform_control_batch_v1")
 CV_SPATIAL_LOWERINGS = (
-    "spatial_m_v1",
-    "spatial_n_v1",
-    "spatial_m_uniform_control_v1",
-    "spatial_n_uniform_control_v1",
+    "m_concat_matmul",
+    "n_concat_matmul",
+    "m_concat_matmul_uniform_control",
+    "n_concat_matmul_uniform_control",
 )
 
 # Both launch-policy selection and final validation must use the same set.
@@ -24,6 +24,7 @@ CV_SPATIAL_LOWERINGS = (
 # over the transformed grid. Eligibility still requires MIX, no blacklist,
 # no persistent cap, and the owned v3 grid/effect contract below.
 CV_AUTO_BLOCKIFY_LOWERINGS = (
+    "batched_matmul",
     *CV_MASKED_BATCH_LOWERINGS,
     *CV_SPATIAL_LOWERINGS,
     "static_uniform_control_lanes_v1",
@@ -233,7 +234,7 @@ def _validate_cv_contract(metadata):
     report = metadata["block_batching"]
     full_tile_lowerings = ("rank3_full_tile_batch_v1", "rank3_full_tile_batch_v2")
     lowerings = {
-        "independent_batch_v1": ("rank3_batch_v1", "static_masked_lanes_v1", "static_uniform_control_lanes_v1",
+        "independent_batch_v1": ("batched_matmul", "static_masked_lanes_v1", "static_uniform_control_lanes_v1",
                                  "static_integer_lanes_v1", *CV_MASKED_BATCH_LOWERINGS, *full_tile_lowerings),
         "spatial_concat_v1":
         CV_SPATIAL_LOWERINGS,
@@ -249,8 +250,8 @@ def _validate_cv_contract(metadata):
             raise BatchCompileError("CV_INTEGER_LANE_CONTRACT_MISSING", kind='InvalidArtifact', stage='validate')
     uniform_contracts = {
         "static_uniform_control_lanes_v1": ("original_program_clone", 2),
-        "spatial_m_uniform_control_v1": ("spatial_concatenation", 2),
-        "spatial_n_uniform_control_v1": ("spatial_concatenation", 2),
+        "m_concat_matmul_uniform_control": ("spatial_concatenation", 2),
+        "n_concat_matmul_uniform_control": ("spatial_concatenation", 2),
         "rank3_uniform_control_batch_v1": ("independent_batch", 3),
     }
     if report.get("cv_lowering") in uniform_contracts:

@@ -450,7 +450,7 @@ class SpatialBuilder {
                 wider(dot.getType(), d));
       mapped.map(dot.getResult(), copy->getResult(0));
       expanded[dot.getResult()] = d;
-      lowering = d == 0 ? "spatial_m_v1" : "spatial_n_v1";
+      lowering = d == 0 ? "m_concat_matmul" : "n_concat_matmul";
       return success();
     }
     if (auto store = dyn_cast<triton::StoreOp>(op);

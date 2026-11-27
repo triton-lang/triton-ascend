@@ -6,7 +6,7 @@
 
 //--- cv-spatial-m.mlir
 // M: compile_status: REWRITTEN
-// M: cv_lowering: spatial_m_v1
+// M: cv_lowering: m_concat_matmul
 // M: tt.func public @not_a_kernel_name
 // M: tt.dot {{.*}} : tensor<8x4xf32> * tensor<4x4xf32> -> tensor<8x4xf32>
 // M-NOT: tt.dot
@@ -59,7 +59,7 @@ module {
 
 //--- cv-spatial-n.mlir
 // N: compile_status: REWRITTEN
-// N: cv_lowering: spatial_n_v1
+// N: cv_lowering: n_concat_matmul
 // N: tt.func public @not_a_kernel_name
 // N: tt.dot {{.*}} : tensor<4x4xf32> * tensor<4x8xf32> -> tensor<4x8xf32>
 // N-NOT: tt.dot
@@ -112,7 +112,7 @@ module {
 
 //--- cv-spatial-loop.mlir
 // SPATIAL-LOOP: compile_status: REWRITTEN
-// SPATIAL-LOOP: cv_lowering: spatial_m_uniform_control_v1
+// SPATIAL-LOOP: cv_lowering: m_concat_matmul_uniform_control
 // SPATIAL-LOOP: scf.for
 // SPATIAL-LOOP-SAME: tensor<8x4xf32>
 // SPATIAL-LOOP: scf.if

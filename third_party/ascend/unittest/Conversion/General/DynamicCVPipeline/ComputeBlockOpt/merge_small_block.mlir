@@ -117,4 +117,53 @@ module {
 
     return
   }
+
+  // =============================================================
+  // Relaxed pattern: small VECTOR block v2 merges into v1 when the
+  // dependencies are c1 -> v1 -> v2 and c1 -> c2 -> v2, where c1 is a CUBE
+  // source block, c2's only predecessor is c1, and v2 has no VECTOR
+  // predecessor besides v1.
+  // =============================================================
+  // CHECK-LABEL: func.func @test_merge_c1_v1_v2_c2_v2
+  // CHECK-NOT: ssbuffer.block_id = 103 : i32
+  // CHECK: arith.addf %{{.*}}, %{{.*}} {ssbuffer.block_id = 101 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+  func.func @test_merge_c1_v1_v2_c2_v2(%arg0: tensor<128x64xbf16>, %arg1: tensor<64x128xbf16>, %arg2: tensor<128x128xf32>) {
+    // c1 (block 100, CUBE) — source block, no predecessors.
+    %c1 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 100 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%arg0, %arg1 : tensor<128x64xbf16>, tensor<64x128xbf16>) outs(%arg2 : tensor<128x128xf32>) -> tensor<128x128xf32>
+    // c2 (block 102, CUBE) — only predecessor is c1 (c1 -> c2).
+    %c2 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 102 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%c1, %c1 : tensor<128x128xf32>, tensor<128x128xf32>) outs(%arg2 : tensor<128x128xf32>) -> tensor<128x128xf32>
+
+    // v1 (block 101, VECTOR) — consumes c1; four compute ops keep it non-small.
+    %v1a = arith.mulf %c1, %c1 {ssbuffer.block_id = 101 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+    %v1b = arith.subf %v1a, %c1 {ssbuffer.block_id = 101 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+    %v1c = arith.mulf %v1b, %v1a {ssbuffer.block_id = 101 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+    %v1out = arith.subf %v1c, %v1b {ssbuffer.block_id = 101 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+
+    // v2 (block 103, VECTOR, small) — consumes v1 (VECTOR) and c2 (CUBE).
+    %v2out = arith.addf %v1out, %c2 {ssbuffer.block_id = 103 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+
+    return
+  }
+
+  // =============================================================
+  // Negative pattern: v1 -> v2 and c2 -> v2 with no c1 -> v1. v1 has no CUBE
+  // predecessor, so the relaxed merge must not fire and v2 keeps its block.
+  // =============================================================
+  // CHECK-LABEL: func.func @test_no_merge_v1_v2_c2_v2
+  // CHECK: arith.addf %{{.*}}, %{{.*}} {ssbuffer.block_id = 202 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+  func.func @test_no_merge_v1_v2_c2_v2(%arg0: tensor<128x128xf32>, %arg1: tensor<128x64xbf16>, %arg2: tensor<64x128xbf16>, %arg3: tensor<128x128xf32>) {
+    // c2 (block 201, CUBE) — no predecessors.
+    %c2 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 201 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%arg1, %arg2 : tensor<128x64xbf16>, tensor<64x128xbf16>) outs(%arg3 : tensor<128x128xf32>) -> tensor<128x128xf32>
+
+    // v1 (block 200, VECTOR) — no CUBE predecessor; four compute ops.
+    %v1a = arith.mulf %arg0, %arg0 {ssbuffer.block_id = 200 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+    %v1b = arith.subf %v1a, %arg0 {ssbuffer.block_id = 200 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+    %v1c = arith.mulf %v1b, %v1a {ssbuffer.block_id = 200 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+    %v1out = arith.subf %v1c, %v1b {ssbuffer.block_id = 200 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+
+    // v2 (block 202, VECTOR, small) — consumes v1 (VECTOR) and c2 (CUBE).
+    %v2out = arith.addf %v1out, %c2 {ssbuffer.block_id = 202 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
+
+    return
+  }
 }

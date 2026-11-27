@@ -157,3 +157,11 @@ sync_intra[(1, )](A, B, O, N=64, enable_tla_mode=True)
 4. `tla.copy` 只接受 `tla.buffer`，不支持指针或 tensor 直接拷贝。
 5. `tla.device_print` 不能在 `tla.scope` 内使用，且只支持 UB 上的值。
 6. 各接口的具体约束和用例见 {doc}`../python-api/triton.language.extra.tla`。
+
+接口的类型与参数组合校验，以及新增公共规则的方法，见 [TLA 类型与参数组合校验](tla_type_contracts.md)。
+
+```{toctree}
+:hidden:
+
+tla_type_contracts
+```

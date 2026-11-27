@@ -51,7 +51,7 @@ API                           AVE op
 ``vcgadd/max/min``            ``ave.hir.group_reduction`` (Ascend950 only)
 ============================  ==========================================
 
-Element-type support is per op (``_OP_ELEM_SUPPORT``) because the AVE
+Element-type support is per op (``simd_semantic`` contracts) because the AVE
 lowering -- not the name -- decides: ``vexp`` is f16/f32 only, scalar
 ``vdup``/``vdups`` are 8/16/32-bit only (the 64-bit scalar wrapper drops the
 predicate), ``vdupv`` additionally has a real 64-lane i64/u64 form, and
@@ -317,181 +317,6 @@ class POS:
 
 _POS_LOWEST_ALIASES = ("POS_LOWEST", "LOWEST")
 _POS_HIGHEST_ALIASES = ("POS_HIGHEST", "HIGHEST")
-
-# Per-op element-type support, derived from the AVE lowering rather than from
-# the TileLang function names:
-#   * HIVMAVEToAVEIntrin registries (vector-vector / unary / vector-scalar)
-#     pick the *XInstr checks per element width,
-#   * the regbase library (bishengir/lib/Template/.../RegBase) only provides
-#     64-bit vector-vector / vector-scalar wrappers.
-# "unsigned" is the frontend dtype's signedness (``dtype.is_int_unsigned()``);
-# MLIR element types are signless, so the frontend must select the unsigned AVE
-# op / cast attribute itself.
-_OP_ELEM_SUPPORT = {
-    # VFDivOp: f16/f32 lower to the VdivSX intrinsic.  HIVMAVEToStandard
-    # forces 16/32-bit integer VFDivOp to the library wrappers
-    # _mlir_ciface_vdiv_{int,uint}{16,32}_t (not to VdivS/VdivU intrinsics),
-    # and i64/u64 use _mlir_ciface_vdiv_{int,uint}64_t.  i8/u8/bf16/f8 have
-    # no lowering.
-    "vdiv": {
-        "float": ("f16", "f32"),
-        "signed": ("i16", "i32", "i64"),
-        "unsigned": ("i16", "i32", "i64"),
-        "hint": "f16/f32/i16/i32/i64 and u16/u32/u64",
-    },
-    # VFExpOp lowers only for F16/F32 (no lib fallback: the op has no
-    # getOpLibraryCallName override), so everything else is rejected up front.
-    "vexp": {
-        "float": ("f16", "f32"),
-        "signed": (),
-        "unsigned": (),
-        "hint": "f16/f32",
-    },
-    # VFAbsOp lowers to VabsXInstrOp for 8/16/32-bit elements and to the
-    # 64-bit library wrapper for i64.  It is a signed absolute value, so
-    # unsigned integer inputs are rejected rather than silently using signed
-    # hardware semantics.
-    "vabs": {
-        "float": ("f16", "f32"),
-        "signed": ("i8", "i16", "i32", "i64"),
-        "unsigned": (),
-        "hint": "f16/f32/i8/i16/i32/i64",
-    },
-    # VFNegOp is two's-complement negation; the bit pattern is the same for
-    # signed and unsigned integers, so both frontend signedness variants are
-    # accepted.  i64/u64 use the dedicated 64-bit library wrappers.
-    "vneg": {
-        "float": ("f16", "f32"),
-        "signed": ("i8", "i16", "i32", "i64"),
-        "unsigned": ("i8", "i16", "i32", "i64"),
-        "hint": "f16/f32/i8/i16/i32/i64 and u8/u16/u32/u64",
-    },
-    # VFNotOp is bitwise-not; all integer widths and float bit patterns are
-    # accepted, including the 64-bit library wrappers.
-    "vnot": {
-        "float": ("f16", "f32"),
-        "signed": ("i8", "i16", "i32", "i64"),
-        "unsigned": ("i8", "i16", "i32", "i64"),
-        "hint": "f16/f32/i8/i16/i32/i64 and u8/u16/u32/u64",
-    },
-    # VFReluOp has no dedicated 8/16/64-bit lowering; the direct RegBase
-    # intrinsic covers f16/f32/i32 only.  Unsigned i32 would use signed
-    # semantics, so it is rejected as well.
-    "vrelu": {
-        "float": ("f16", "f32"),
-        "signed": ("i32", ),
-        "unsigned": (),
-        "hint": "f16/f32/i32",
-    },
-    # VFSqrtOp lowers only to the f16/f32 SFU intrinsic; there is no integer
-    # or 64-bit library fallback.
-    "vsqrt": {
-        "float": ("f16", "f32"),
-        "signed": (),
-        "unsigned": (),
-        "hint": "f16/f32",
-    },
-    # VFAbsDiffOp covers f16/f32 through VabsdifSXInstrOp.  The unsigned
-    # intrinsic exists in the dialect but is not wired into the lowering yet.
-    "vabsdif": {
-        "float": ("f16", "f32"),
-        "signed": (),
-        "unsigned": (),
-        "hint": "f16/f32",
-    },
-    # VFExpdifOp computes exp(lhs - rhs) and lowers only for f16/f32.
-    "vexpdif": {
-        "float": ("f16", "f32"),
-        "signed": (),
-        "unsigned": (),
-        "hint": "f16/f32",
-    },
-    # AVE_ShiftOp / AVE_ShiftVecScalarOp lower only the 8/16/32-bit
-    # register forms.  The AVE TD accepts I64, but HIVMVShiftOpLowering has no
-    # 64-bit path; CCE vector vshl/vshr also has no i64 overload.
-    "vshl": {
-        "float": (),
-        "signed": ("i8", "i16", "i32"),
-        "unsigned": ("i8", "i16", "i32"),
-        "hint": "i8/i16/i32 and u8/u16/u32",
-    },
-    "vshr": {
-        "float": (),
-        "signed": ("i8", "i16", "i32"),
-        "unsigned": ("i8", "i16", "i32"),
-        "hint": "i8/i16/i32 and u8/u16/u32",
-    },
-    "vshls": {
-        "float": (),
-        "signed": ("i8", "i16", "i32"),
-        "unsigned": ("i8", "i16", "i32"),
-        "hint": "i8/i16/i32 and u8/u16/u32",
-    },
-    "vshrs": {
-        "float": (),
-        "signed": ("i8", "i16", "i32"),
-        "unsigned": ("i8", "i16", "i32"),
-        "hint": "i8/i16/i32 and u8/u16/u32",
-    },
-    # AVE_VFLRelusOp / AVE_VFPReluOp: f16/f32 only.
-    "vlrelu": {
-        "float": ("f16", "f32"),
-        "signed": (),
-        "unsigned": (),
-        "hint": "f16/f32",
-    },
-    "vprelu": {
-        "float": ("f16", "f32"),
-        "signed": (),
-        "unsigned": (),
-        "hint": "f16/f32",
-    },
-    # VFMaxOp/VFMinOp cover f16/bf16 and 8/16/32-bit ints; i64/u64 go through
-    # _mlir_ciface_vmax|vmin_int64_t|uint64_t.
-    "vmax": {
-        "float": ("f16", "bf16", "f32"),
-        "signed": ("i8", "i16", "i32", "i64"),
-        "unsigned": ("i8", "i16", "i32", "i64"),
-        "hint": "f16/bf16/f32/i8/i16/i32/i64 and u8/u16/u32/u64",
-    },
-    "vmin": {
-        "float": ("f16", "bf16", "f32"),
-        "signed": ("i8", "i16", "i32", "i64"),
-        "unsigned": ("i8", "i16", "i32", "i64"),
-        "hint": "f16/bf16/f32/i8/i16/i32/i64 and u8/u16/u32/u64",
-    },
-    # VFMaxsOp/VMaxsUIOp: the AVE vector-scalar contract has no bf16/f8 scalar
-    # slot; i64/u64 use the int64/uint64 library wrappers.
-    "vmaxs": {
-        "float": ("f16", "f32"),
-        "signed": ("i8", "i16", "i32", "i64"),
-        "unsigned": ("i8", "i16", "i32", "i64"),
-        "hint": "f16/f32/i8/i16/i32/i64 and u8/u16/u32/u64",
-    },
-    # VFBroadcastScalarMaskOp lowers to the VdupsZ intrinsic, which is
-    # 8/16/32-bit only.  The 64-bit library fallback
-    # (_mlir_ciface_vdups_int64_t) calls vbr() and drops the predicate, so
-    # i64/u64 are rejected instead of producing a silently unmasked broadcast.
-    "vdup": {
-        "float": ("f16", "bf16", "f32", "fp8e4nv"),
-        "signed": ("i8", "i16", "i32"),
-        "unsigned": ("i8", "i16", "i32"),
-        "hint": "i8/i16/i32/bf16/f16/f32/fp8e4nv and u8/u16/u32",
-    },
-    # VFBroadcastVectorOp (vector_broadcast) uses the same
-    # _mlir_ciface_vdup_<elem> library entry as the scalar form, but the
-    # 64-bit entry is a real 64-lane vector broadcast
-    # (_mlir_ciface_vdup_int64_t -> ave_vdup_i64 -> vdup POS_LOWEST/HIGHEST)
-    # that honours the predicate.  Unlike the VdupsZ scalar path, i64/u64 are
-    # therefore representable; see the vdupv docstring for the verified
-    # prefix/all-false/arbitrary simulator evidence.
-    "vdupv": {
-        "float": ("f16", "bf16", "f32", "fp8e4nv"),
-        "signed": ("i8", "i16", "i32", "i64"),
-        "unsigned": ("i8", "i16", "i32", "i64"),
-        "hint": "i8/i16/i32/i64/bf16/f16/f32/fp8e4nv and u8/u16/u32/u64",
-    },
-}
 
 
 def _elem_tag(dtype_):
@@ -765,16 +590,8 @@ def _is_unsigned(dtype_):
 
 
 def _require_elem_support(op, tag, unsigned):
-    """Reject element types the AVE lowering cannot express for ``op``."""
-    table = _OP_ELEM_SUPPORT[op]
-    if tag in ("f16", "bf16", "f32", "fp8e4nv"):
-        supported = tag in table["float"]
-    else:
-        supported = tag in (table["unsigned"] if unsigned else table["signed"])
-    if not supported:
-        sign = " (unsigned)" if unsigned else ""
-        raise ValueError(f"{op} does not support element type {tag}{sign}; "
-                         f"supported: {table['hint']}")
+    """Check the shared element-type contract before calling the builder."""
+    ss.check_element_type(op, tag, unsigned)
 
 
 def _resolve_element_dtype(dtype_):
@@ -2530,7 +2347,8 @@ class ROUND:
     """Rounding modes for :func:`vcvt` (hivm RoundMode spellings).
 
     ``R`` nearest-ties-even, ``A`` nearest-ties-away, ``F`` floor,
-    ``C`` ceil, ``Z`` toward zero, ``O`` round to odd.
+    ``C`` ceil, ``Z`` toward zero, ``O`` Von Neumann round-to-odd.
+    Allowed modes depend on the source and destination types.
     """
     R = "rint"
     A = "round"
@@ -2669,7 +2487,9 @@ def vcvt(src: vector, target_dtype, mask: vector = None, round: tl.constexpr = R
     :param target_dtype: destination element dtype
     :param mask: predicate register over the narrower element's lanes;
         defaults to an all-true mask
-    :param round: :class:`ROUND` rounding mode (fp -> int and narrowing)
+    :param round: :class:`ROUND` rounding mode (fp -> int and narrowing).
+        f32 -> int32 and f16 -> int16 accept R/A/F/C/Z, not O.
+        O remains available for supported floating-point narrowing conversions.
     :param sat: saturate on fp -> int conversion
     :param part: :class:`PART` sub-register selector for width changes
     :param mode: only ``MODE.ZEROING`` is supported.  The result dtype
@@ -2703,6 +2523,7 @@ def vcvt(src: vector, target_dtype, mask: vector = None, round: tl.constexpr = R
         kind = "f2u" if out_unsigned else "f2s"
     else:
         raise ValueError("vcvt between two integer dtypes is not supported; use vbitcast")
+    ss.check_conversion(src_tag, out_tag, _is_unsigned(src.dtype), out_unsigned, round_s)
     lanes = src.type.lanes
     mask = _resolve_mask(mask, lanes, _semantic)
     handle = _semantic.builder.create_simd_vcvt(kind, src.handle, mask.handle, out_tag, part_s, round_s, sat_b,

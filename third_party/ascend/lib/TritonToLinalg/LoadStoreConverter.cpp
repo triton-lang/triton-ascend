@@ -1004,9 +1004,12 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
 
   bool needsReturnValueLock =
       hasUsedReturn && hasContinuousMaskSubview && isHardwareSupported;
-  hivm::SyncBlockLockOp returnValueLock;
-  Value oldValues;
-  memref::SubViewOp activeSnapshot;
+  auto markUnordered = [&](Operation *lockOp) {
+    if (compileOn91095Flag)
+      lockOp->setAttr(hivm::SyncBlockLockUnorderedAttr::name,
+                      rewriter.getUnitAttr());
+  };
+  Value returnValueLock;
   if (hasUsedReturn) {
     auto tensorType =
         RankedTensorType::get(ptrType.getShape(), ptrType.getElementType());
@@ -1015,20 +1018,24 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
     Value copySrc = ptr;
     Value copyDst = alloc;
     if (hasContinuousMaskSubview) {
-      // Read old values from the same active GM region as the atomic update.
+      // Masked-off atomic results are undefined. Copy only the active region
+      // so the old-value read and the atomic store use the same address view.
       copySrc = dstMemref;
-      activeSnapshot = mstate.getSubview(alloc, loc, rewriter);
-      copyDst = activeSnapshot;
+      copyDst = mstate.getSubview(alloc, loc, rewriter);
     }
     if (needsReturnValueLock) {
       auto lockType = MemRefType::get({1}, rewriter.getI64Type());
       auto lockVar =
           rewriter.create<hivm::CreateSyncBlockLockOp>(loc, lockType, Value());
-      returnValueLock = rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
+      markUnordered(lockVar);
+      returnValueLock = lockVar.getResult();
+      markUnordered(
+          rewriter.create<hivm::SyncBlockLockOp>(loc, returnValueLock));
     }
     rewriter.create<memref::CopyOp>(loc, copySrc, copyDst);
-    oldValues = rewriter.create<bufferization::ToTensorOp>(
+    Value tensorToReplace = rewriter.create<bufferization::ToTensorOp>(
         loc, tensorType, alloc, true /* restrict */, true /* writable */);
+    rewriter.replaceOp(op, tensorToReplace);
   }
 
   if (isDiscreteMask) {
@@ -1054,15 +1061,8 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
         // The return-value copy and the atomic update must be one critical
         // section. Mark the store so HIVM does not add another lock.
         storeOp->setAttr(kAlreadySyncAttr, rewriter.getUnitAttr());
-        Value lockVar = returnValueLock.getLockVar();
-        auto unlock = rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
-        if (compileOn91095Flag) {
-          for (Operation *lockOp :
-               {lockVar.getDefiningOp(), returnValueLock.getOperation(),
-                unlock.getOperation()})
-            lockOp->setAttr(hivm::SyncBlockLockUnorderedAttr::name,
-                            rewriter.getUnitAttr());
-        }
+        markUnordered(
+            rewriter.create<hivm::SyncBlockUnlockOp>(loc, returnValueLock));
       }
     } else if (rmwOp == RMWOp::XCHG)
       rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),
@@ -1092,30 +1092,9 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
     }
   }
 
-  if (activeSnapshot) {
-    // Define inactive return lanes without accessing masked-off GM addresses.
-    // Assemble the result after the atomic update and outside its lock.
-    auto type = cast<RankedTensorType>(oldValues.getType());
-    Value zero = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getZeroAttr(type.getElementType()));
-    Value empty = rewriter.create<tensor::EmptyOp>(loc, type.getShape(),
-                                                   type.getElementType());
-    Value zeros =
-        rewriter
-            .create<linalg::FillOp>(loc, ValueRange{zero}, ValueRange{empty})
-            .getResult(0);
-    auto offsets = activeSnapshot.getMixedOffsets();
-    auto sizes = activeSnapshot.getMixedSizes();
-    auto strides = activeSnapshot.getMixedStrides();
-    Value active = rewriter.create<tensor::ExtractSliceOp>(
-        loc, oldValues, offsets, sizes, strides);
-    oldValues = rewriter.create<tensor::InsertSliceOp>(loc, active, zeros,
-                                                       offsets, sizes, strides);
-  }
-  if (oldValues)
-    rewriter.replaceOp(op, oldValues);
-  else
+  if (op.getResult().use_empty()) {
     rewriter.eraseOp(op);
+  }
   return success();
 }
 

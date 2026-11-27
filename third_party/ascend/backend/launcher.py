@@ -405,10 +405,10 @@ def export_launcher(spec, types, runtime_path, debug=False):
 
 def extract_device_print_code_from_cann():
     from triton.backends.ascend.utils import _get_bisheng_path
-    clang_dir = Path(_get_bisheng_path()).resolve().parents[1] / "lib" / "clang"
-    ccelib_path = next((path for path in clang_dir.glob("*/include/ccelib") if path.is_dir()), None)
-    if ccelib_path is None:
-        raise RuntimeError(f"Cannot find CANN device-print headers under {clang_dir}")
+    ccec_compiler_bin_folder, _ = os.path.split(os.path.realpath(_get_bisheng_path()))
+    ccec_compiler_folder, _ = os.path.split(ccec_compiler_bin_folder)
+    clang_version = os.listdir(os.path.join(ccec_compiler_folder, "lib/clang/"))[0]
+    ccelib_path = os.path.join(ccec_compiler_folder, f"lib/clang/{clang_version}/include/ccelib")
 
     def read_header(header_path):
         with open(os.path.join(ccelib_path, header_path), 'r') as f:
@@ -429,19 +429,21 @@ def extract_device_print_code_from_cann():
             aicore_positions.append(m.start())
 
         def find_aicore_function_span(src, pos):
-            # The CANN headers place [aicore] definitions after a host function.
-            previous_end = src.rfind('}', 0, pos)
-            if previous_end < 0:
-                raise ValueError(f"Cannot locate the start of the [aicore] function in {header_path}")
+            for i in range(pos - 1, -1, -1):
+                if src[i] == '}':  # this relies on that all [aicore] functions come after normal functions
+                    left = i + 1
+                    break
+            n = len(src)
             brace_nest = 0
-            for j in range(pos, len(src)):
+            for j in range(pos, n, 1):
                 if src[j] == '{':
                     brace_nest += 1
                 elif src[j] == '}':
                     brace_nest -= 1
                     if brace_nest == 0:
-                        return previous_end + 1, j
-            raise ValueError(f"Cannot locate the end of the [aicore] function in {header_path}")
+                        right = j
+                        break
+            return left, right
 
         new_code = ''
         segment_start = 0

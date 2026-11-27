@@ -48,8 +48,7 @@ Demotion rules, applied to ``is_stmt=1`` rows in program order:
        drop the rest.
     2. Loops     -- keep every occurrence of a ``for``/``while`` header line
        (detected from the source AST), so the back-edge re-stops each iteration.
-    3a. Foreign  -- when the user source is identified in a v2-v4 file table,
-       drop rows for other files. Unresolved and v5 tables skip this rule.
+    3a. Foreign  -- drop rows whose file is not the user source file.
     3b. line==0  -- drop compiler-generated rows.
     3c. Over-len -- drop rows whose line exceeds the source length (safety net
         for binaries built before ``CanonicalizeDebugLocationsPass`` or without
@@ -288,10 +287,8 @@ def _parse_header(data: bytes, little: bool, unit_offset: int = 0) -> dict:
             filename, off = _cstring(data, off, program_start, "file name")
             if not filename:
                 break
-            directory, off = _uleb(data, off, program_start)
-            if directory >= len(include_dirs):
-                raise ValueError(f"invalid directory index {directory} for {filename!r}")
-            file_names.append(os.path.join(include_dirs[directory], filename))
+            file_names.append(filename)
+            _, off = _uleb(data, off, program_start)
             _, off = _uleb(data, off, program_start)
             _, off = _uleb(data, off, program_start)
     # DWARF v5 has format-described directory/file tables.  Their extent is
@@ -463,19 +460,8 @@ def _source_length(src_path: str) -> int:
 
 
 def _user_file_indices(file_names: List[str], src_path: str) -> set:
-    source = os.path.normcase(os.path.abspath(src_path))
-    matches = {
-        i
-        for i, path in enumerate(file_names)
-        if os.path.dirname(path) and os.path.normcase(os.path.abspath(path)) == source
-    }
-    # A producer may omit the directory. Such a row can still belong to
-    # the user even when another entry names the source in full.
-    base = os.path.normcase(os.path.basename(src_path))
-    bare = {i for i, path in enumerate(file_names) if os.path.normcase(path) == base}
-    if matches:
-        return matches | bare
-    return bare if len(bare) == 1 else set()
+    base = os.path.basename(src_path)
+    return {i for i, p in enumerate(file_names) if os.path.basename(p) == base}
 
 
 # ── demotion planning ─────────────────────────────────────────────────────────

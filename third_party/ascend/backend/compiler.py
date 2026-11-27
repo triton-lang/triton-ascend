@@ -737,13 +737,6 @@ def __load_metadata_by_callback(callback_path: str, metadata):
             warnings.warn(f"could not unload {callback_path}: {exc}")
 
 
-def _require_ir_field(pattern, ir_text, field, stage):
-    match = re.search(pattern, ir_text)
-    if match is None:
-        raise ValueError(f"Missing {field} in {stage} IR")
-    return match.group(1)
-
-
 def _parse_linalg_metadata(linalg: str, metadata: dict):
     """
     Parse Linalg IR to extract metadata required for NPU compilation.
@@ -794,9 +787,9 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     # need it nor necessarily have the FFTS runtime resource it requires.
     has_unordered_sync_block_lock = re.search(r"sync_block_lock_unordered", linalg) is not None
     metadata["has_unordered_sync_block_lock"] = has_unordered_sync_block_lock
-    metadata["mix_mode"] = _require_ir_field(MIX_MODE_REGEX, linalg, "mix_mode", "Linalg")
     if has_unordered_sync_block_lock:
-        if metadata["mix_mode"] != "mix":
+        mix_mode = re.search(MIX_MODE_REGEX, linalg).group(1)
+        if mix_mode != "mix":
             metadata["auto_tile_and_bind_subblock"] = False
         # One metadata cache line for runtime participant_num, plus one
         # choosing and one ticket cache line per participant. Each cache line is
@@ -804,8 +797,10 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
         # the exact total after lowering.
         metadata["sync_block_lock_layout"] = 1 << 32
         metadata["lock_init_val"] = 0
-    metadata["parallel_mode"] = _require_ir_field(PARALLEL_MODE_REGEX, linalg, "parallel_mode", "Linalg")
-    metadata["kernel_name"] = _require_ir_field(KERNEL_NAME_REGEX, linalg, "kernel name", "Linalg")
+    # the mix mode is also encoded into metadata['name'] for runtime to distinguish
+    metadata["mix_mode"] = re.search(MIX_MODE_REGEX, linalg).group(1)
+    metadata["parallel_mode"] = re.search(PARALLEL_MODE_REGEX, linalg).group(1)
+    metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, linalg).group(1)
     # Check the function load_binary in npu_driver.py.
     metadata["name"] = metadata["kernel_name"]
     # Parse all tensor kinds from arguments
@@ -840,7 +835,7 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
     metadata["profile_scratch_align"] = 1
     # Note: Currently, for TTIR inputs, we only support vector kernels.
     metadata["mix_mode"] = "aiv"
-    metadata["kernel_name"] = _require_ir_field(KERNEL_NAME_REGEX, ttir, "public kernel name", "Triton")
+    metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, ttir).group(1)
     metadata["name"] = metadata["kernel_name"]
     # Keep this as compiler-derived safety metadata.  In particular, do not
     # trust a caller-provided False value to override an unsafe TTIR pattern.

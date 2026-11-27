@@ -486,33 +486,6 @@ def test_device_print_configuration_invalidates_runtime(prepared_backend, monkey
     assert state.driver.NPULauncher(state.src, metadata())._runtime_path == first._runtime_path
 
 
-def test_device_print_missing_resource_directory(tmp_path, monkeypatch):
-    monkeypatch.setattr(utils, "_get_bisheng_path", lambda: str(tmp_path / "bin" / "bisheng"))
-    (tmp_path / "lib/clang").mkdir(parents=True)
-    with pytest.raises(RuntimeError, match="Cannot find CANN device-print headers"):
-        launcher.extract_device_print_code_from_cann()
-
-
-@pytest.mark.parametrize(("definition", "missing"), [
-    ("host() {}\n[aicore] device() { if (true) {} }\nkeep();", None),
-    ("[aicore] device() {}", "start"),
-    ("host() {}\n[aicore] device() {", "end"),
-])
-def test_device_print_function_boundaries(tmp_path, monkeypatch, definition, missing):
-    monkeypatch.setattr(utils, "_get_bisheng_path", lambda: str(tmp_path / "bin" / "bisheng"))
-    includes = tmp_path / "lib/clang/15/include/ccelib"
-    for name in ("common/common_impl.h", "internal/debug_tunnel/payload.h", "internal/debug_tunnel/payload_impl.h",
-                 "internal/debug_tunnel/tunnel.h", "internal/debug_tunnel/tunnel_impl.h"):
-        header = includes / name
-        header.parent.mkdir(parents=True, exist_ok=True)
-        header.write_text(definition if name == "common/common_impl.h" else "")
-    if missing:
-        with pytest.raises(ValueError, match=rf"{missing} of the \[aicore\] function in common/common_impl.h"):
-            launcher.extract_device_print_code_from_cann()
-    else:
-        assert launcher.extract_device_print_code_from_cann().strip() == "host() {}\nkeep();"
-
-
 def test_custom_cache_queries_and_materialization_are_not_bypassed(prepared_backend, monkeypatch):
     from triton.runtime.cache import FileCacheManager, get_cache_manager
     state = prepared_backend

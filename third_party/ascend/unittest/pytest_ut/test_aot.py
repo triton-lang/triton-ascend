@@ -167,12 +167,12 @@ def gen_kernel_library_npu(dir, libname):
     # against the CANN/torch_npu runtime libs its rt*/aclrt* calls need
     # (they are referenced, so --as-needed keeps them).
     subprocess.run(
-        ["gcc"] + c_files + include_flags + ["-c", "-fPIC", "-pthread"],
+        ["gcc"] + c_files + include_flags + ["-c", "-fPIC"],
         check=True,
         cwd=dir,
     )
     o_files = glob.glob(os.path.join(dir, "*.o"))
-    command = ["gcc", *o_files, "-shared", "-pthread", "-o", libname]
+    command = ["gcc", *o_files, "-shared", "-o", libname]
     for lib_dir in lib_dirs:
         command += [f"-L{lib_dir}", f"-Wl,-rpath,{lib_dir}"]
     command += link_flags + ["-ldl"]

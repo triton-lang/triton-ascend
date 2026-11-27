@@ -175,6 +175,13 @@ def _compute_strides(shape):
     return strides
 
 
+def _normalize_bounded_index(index, boundary):
+    index = int(index)
+    if index < 0:
+        index += boundary
+    return index if 0 <= index < boundary else -1
+
+
 class AscendInterpreterBuilder(InterpreterBuilder):
     """
     Extended InterpreterBuilder with Ascend-specific extension operations.
@@ -479,9 +486,6 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         # Perform index_select: for each index, read the specified data
         for out_idx, in_idx in enumerate(indices):
             in_idx = int(in_idx)
-            if not 0 <= in_idx < src_shape_vals[dim]:
-                raise IndexError(f"index_select_simd index {in_idx} out of bounds for dimension {dim} "
-                                 f"with size {src_shape_vals[dim]}")
             # Generate all coordinates in the tile
             ranges = []
             for d in range(len(src_shape_vals)):
@@ -659,8 +663,8 @@ class AscendInterpreterBuilder(InterpreterBuilder):
             src_coord = []
             for d in range(index_rank):
                 if d == dim:
-                    index_value = index_tensor.data[coord]
-                    if not 0 <= index_value < index_boundary:
+                    index_value = _normalize_bounded_index(index_tensor.data[coord], index_boundary)
+                    if index_value == -1:
                         src_coord.append(-1)
                     else:
                         src_coord.append(start_offset_vals[d] + index_value)
@@ -728,8 +732,8 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         addresses = []
         valid_mask = []
         for _, coord in enumerate(all_coords):
-            index_value = index_tensor.data[coord]
-            if not 0 <= index_value < index_boundary:
+            index_value = _normalize_bounded_index(index_tensor.data[coord], index_boundary)
+            if index_value == -1:
                 addresses.append(0)
                 valid_mask.append(False)
             else:
@@ -787,8 +791,8 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         valid_mask = []
         for coord in all_coords:
             index_pos = coord[dim]
-            index_value = index_tensor.data[index_pos]
-            if not 0 <= index_value < index_boundary:
+            index_value = _normalize_bounded_index(index_tensor.data[index_pos], index_boundary)
+            if index_value == -1:
                 addresses.append(0)
                 valid_mask.append(False)
             else:

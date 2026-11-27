@@ -22,7 +22,6 @@
 
 /* clang-format off */
 // Per-kernel AOT stub; registration and launch plumbing live in launcher_cann.h.
-// Compile and link the generated kernel library with -pthread.
 #define NPU_AOT_USE_ACL {use_acl_load}
 #include "launcher_cann.h"
 
@@ -31,22 +30,17 @@
 unsigned char NPUBIN_NAME[{bin_size}] = {{ {bin_data} }};
 static size_t {kernel_name}_stub = 0;
 static void *{kernel_name}_func = NULL;
-static pthread_once_t {kernel_name}_once = PTHREAD_ONCE_INIT;
-static struct npu_aot_launcher_t {kernel_name}_launcher = {{PTHREAD_MUTEX_INITIALIZER, NULL, NULL}};
 // Per-kernel launch policy; field order must match TritonNpuLaunchSpecV1.
 static const npu_aot_launch_spec_t {kernel_name}_spec = {{1, sizeof(npu_aot_launch_spec_t), {launch_spec_fields}}};
 static const npu_aot_arg_type_t {kernel_name}_types[] = {{ {launch_types_init} }};
 
-static void register_{kernel_name}(void) {{
+void load_{kernel_name}(void) {{
+    if ({kernel_name}_func != NULL) return;
     npuAotSetDevice();
     {kernel_name}_func = npuAotRegister((const unsigned char *)&NPUBIN_NAME,
                                         sizeof(NPUBIN_NAME),
                                         "{register_kernel_name}", "{register_kernel_name}_0",
                                         {mix_aiv}, &{kernel_name}_stub);
-}}
-
-void load_{kernel_name}(void) {{
-    pthread_once(&{kernel_name}_once, register_{kernel_name});
 }}
 
 void unload_{kernel_name}(void) {{
@@ -57,10 +51,12 @@ void unload_{kernel_name}(void) {{
 {kernel_docstring}
 */
 NPUresult {kernel_name}(NPUstream stream, {signature}) {{
-    load_{kernel_name}();
+    if ({kernel_name}_func == NULL)
+       load_{kernel_name}();
     void *args[{num_args}] = {{ {arg_pointers} }};
     size_t arg_sizes[{num_args}] = {{ {arg_sizes} }};
-    return npuAotLaunch(&{kernel_name}_launcher, "{packed_kernel_name}", {kernel_name}_func, stream,
+    // Pass this kernel's own policy; the shared launcher caches a plan for it.
+    return npuAotLaunch("{packed_kernel_name}", {kernel_name}_func, stream,
                         {gridX}, {gridY}, {gridZ}, &{kernel_name}_spec,
                         {kernel_name}_types, {num_types}, args, arg_sizes,
                         {num_args});

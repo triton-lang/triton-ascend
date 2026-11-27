@@ -123,5 +123,57 @@ bool canEnableDynamicPlan(ModuleOp module) {
          queues[0] == queues[1];
 }
 
+// The scheduling if returns its updated iteration counter as its last result.
+static bool testsTaskCounter(Value condition, scf::IfOp producer) {
+  if (auto cmp = condition.getDefiningOp<arith::CmpIOp>()) {
+    auto *update =
+        getLoopCarriedUpdateOperand(cmp.getLhs(), producer->getBlock());
+    return cmp.getPredicate() == arith::CmpIPredicate::sge && update &&
+           producer.getNumResults() &&
+           update->get() == producer.getResults().back();
+  }
+  Operation *op = condition.getDefiningOp();
+  return op && isa<arith::AndIOp, arith::OrIOp>(op) &&
+         llvm::any_of(op->getOperands(), [&](Value operand) {
+           return testsTaskCounter(operand, producer);
+         });
+}
+
+bool canEnableLoadBufferPool(ModuleOp module) {
+  DenseMap<Block *, SmallVector<scf::IfOp, 2>> tasks;
+  auto gm =
+      hivm::AddressSpaceAttr::get(module.getContext(), hivm::AddressSpace::GM);
+  module.walk([&](scope::ScopeOp scopeOp) {
+    auto core =
+        scopeOp->getAttrOfType<hivm::TCoreTypeAttr>(hivm::TCoreTypeAttr::name);
+    if (!core || core.getTcoretype() != hivm::TCoreType::CUBE)
+      return;
+    scopeOp.walk([&](scf::IfOp task) {
+      Operation *loop = task->getParentOp();
+      if (!task->hasAttr(kIf) || !isa<scf::ForOp, scf::WhileOp>(loop))
+        return;
+      auto copies = task.getThenRegion().walk([&](memref::CopyOp copy) {
+        Value root = traceMemDef(copy.getSource());
+        auto space = cast<BaseMemRefType>(root.getType()).getMemorySpace();
+        bool fromGM = space ? space == gm : isa<BlockArgument>(root);
+        auto enclosingLoop = copy->getParentOfType<LoopLikeOpInterface>();
+        if (fromGM && enclosingLoop.getOperation() == loop)
+          return WalkResult::interrupt();
+        return WalkResult::advance();
+      });
+      if (copies.wasInterrupted())
+        tasks[task->getBlock()].push_back(task);
+    });
+  });
+  return llvm::all_of(tasks, [](const auto &entry) {
+    const auto &pair = entry.second;
+    if (pair.size() != 2)
+      return pair.size() == 1;
+    auto first = pair[0], second = pair[1];
+    return testsTaskCounter(first.getCondition(), second) !=
+           testsTaskCounter(second.getCondition(), first);
+  });
+}
+
 } // namespace CVPipeline
 } // namespace mlir

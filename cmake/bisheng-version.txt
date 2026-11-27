@@ -1,4 +1,4 @@
-aarch64: ascendnpu-ir_2.0.0_linux-aarch64.run
-aarch64_sha256: 0f94b17fef402a58013987b0a0ae612d48406cd6e265655c43dbb88ce49bc78f
-x86_64: ascendnpu-ir_2.0.0_linux-x86.run
-x86_64_sha256: 6466a8c54705639515226476b2ec47e0aba2ebdfd818cd53baa13dbeb944359f
+aarch64: ascendnpu-ir_2.0.0_linux-aarch64-1126.tar.gz
+aarch64_sha256: e3391524800e5b4e8961592548803ded38d227f66ece66dcc0a05857e9f201d7
+x86_64: ascendnpu-ir_2.0.0_linux-x86-1126.tar.gz
+x86_64_sha256: 38ef3ab5408de3f25887e44d801f82263e9874ff786f81f7887357f38679d014

@@ -730,8 +730,7 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
     return;
   }
 
-  if (compileOn91095Flag)
-    zeroDiscreteAtomicResults(moduleOp);
+  zeroDiscreteAtomicResults(moduleOp);
 
   RewritePatternSet patterns(&getContext());
   patterns.add<DiscreteMaskLoadConversion, DiscreteMaskStoreConversion,

@@ -1,14 +1,10 @@
-// RUN: triton-opt --discrete-mask-access-conversion --split-input-file %s | FileCheck %s --check-prefixes=CHECK,LEGACY
-// RUN: triton-opt --discrete-mask-access-conversion='compile-on-910-95=true' --split-input-file %s | FileCheck %s --check-prefixes=CHECK,A5
+// RUN: triton-opt --discrete-mask-access-conversion --split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: tt.func @atomic_add_i32
 // CHECK: %[[default:.*]] = arith.constant dense<0> : tensor<1024xi32>
 // CHECK: %[[value:.*]] = arith.select %[[mask:.*]], %[[origin:.*]], %[[default]]
 // CHECK: %[[result:.*]] = tt.atomic_rmw add, acq_rel, gpu, %[[ptr:.*]], %[[value]]
-// A5: %[[old:.*]] = arith.select %[[mask]], %[[result]], %[[default]]
-// A5: tt.return %[[old]]
-// LEGACY: tt.return %[[result]]
-tt.func @atomic_add_i32(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) -> tensor<1024xi32> {
+tt.func @atomic_add_i32(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
   %cst = arith.constant dense<200> : tensor<1024xi32>
   %cst_0 = arith.constant dense<400> : tensor<1024xi32>
   %0 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32>
@@ -21,15 +17,13 @@ tt.func @atomic_add_i32(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) -> tensor<1024
   %7 = tt.addptr %6, %0 : tensor<1024x!tt.ptr<i32>>, tensor<1024xi32>
   %8 = tt.load %7 : tensor<1024x!tt.ptr<i32>>
   %9 = tt.atomic_rmw add, acq_rel, gpu, %5, %8, %3 : (tensor<1024x!tt.ptr<i32>>, tensor<1024xi32>, tensor<1024xi1>) -> tensor<1024xi32>
-  tt.return %9 : tensor<1024xi32>
+  tt.return
 }
 
 // CHECK-LABEL: tt.func @atomic_fadd_f32
 // CHECK: %[[default:.*]] = arith.constant dense<0.000000e+00> : tensor<1024xf32>
 // CHECK: %[[value:.*]] = arith.select %[[mask:.*]], %[[origin:.*]], %[[default]]
 // CHECK: %[[result:.*]] = tt.atomic_rmw fadd, acq_rel, gpu, %[[ptr:.*]], %[[value]]
-// A5-NOT: arith.select
-// A5: tt.return
 tt.func @atomic_fadd_f32(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>) {
   %cst = arith.constant dense<200> : tensor<1024xi32>
   %cst_0 = arith.constant dense<400> : tensor<1024xi32>
@@ -212,13 +206,9 @@ tt.func @atomic_max_f16(%arg0: !tt.ptr<f16>, %arg1: !tt.ptr<f16>) {
 // CHECK: %[[DEFAULT:.*]] = arith.constant dense<0> : tensor<8x8xi32>
 // CHECK: %[[CONT_MASK:.*]] = tt.broadcast {{.*}} : tensor<8x1xi1> -> tensor<8x8xi1>
 // CHECK: %[[DISC_MASK:.*]] = tt.broadcast {{.*}} : tensor<1x8xi1> -> tensor<8x8xi1>
-// A5: %[[MASK:.*]] = arith.andi %[[CONT_MASK]], %[[DISC_MASK]]
 // CHECK: %[[VALUE:.*]] = arith.select %[[DISC_MASK]], %{{.*}}, %[[DEFAULT]] : tensor<8x8xi1>, tensor<8x8xi32>
-// CHECK: %[[RAW:.*]] = tt.atomic_rmw add, acq_rel, gpu, %{{.*}}, %[[VALUE]], %[[CONT_MASK]] : (tensor<8x8x!tt.ptr<i32>>, tensor<8x8xi32>, tensor<8x8xi1>) -> tensor<8x8xi32>
-// A5: %[[OLD:.*]] = arith.select %[[MASK]], %[[RAW]], %[[DEFAULT]]
-// A5: tt.return %[[OLD]]
-// LEGACY: tt.return %[[RAW]]
-tt.func @atomic_add_cont_disc_i32(%arg0: !tt.ptr<i32>, %arg1: i32) -> tensor<8x8xi32> {
+// CHECK: tt.atomic_rmw add, acq_rel, gpu, %{{.*}}, %[[VALUE]], %[[CONT_MASK]] : (tensor<8x8x!tt.ptr<i32>>, tensor<8x8xi32>, tensor<8x8xi1>) -> tensor<8x8xi32>
+tt.func @atomic_add_cont_disc_i32(%arg0: !tt.ptr<i32>, %arg1: i32) {
   %cst_0 = arith.constant dense<8> : tensor<8x1xi32>
   %cst_1 = arith.constant dense<2> : tensor<1x8xi32>
   %cst_2 = arith.constant dense<8> : tensor<1x8xi32>
@@ -240,7 +230,7 @@ tt.func @atomic_add_cont_disc_i32(%arg0: !tt.ptr<i32>, %arg1: i32) -> tensor<8x8
   %14 = tt.splat %arg0 : !tt.ptr<i32> -> tensor<8x8x!tt.ptr<i32>>
   %15 = tt.addptr %14, %13 : tensor<8x8x!tt.ptr<i32>>, tensor<8x8xi32>
   %16 = tt.atomic_rmw add, acq_rel, gpu, %15, %cst_3, %9 : (tensor<8x8x!tt.ptr<i32>>, tensor<8x8xi32>, tensor<8x8xi1>) -> tensor<8x8xi32>
-  tt.return %16 : tensor<8x8xi32>
+  tt.return
 }
 
 // -----

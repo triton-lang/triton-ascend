@@ -74,6 +74,7 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_copy_tensor',
         'create_fixpipe',
         'create_annotation_mark',
+        'create_packed_mask_load',
         'create_bind_buffer',
         'create_debug_barrier',
         "sync_block_set",

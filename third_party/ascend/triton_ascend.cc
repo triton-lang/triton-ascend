@@ -271,6 +271,9 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
           pm.addPass(mlir::triton::createTritonToUnstructurePass(opts));
         });
 
+  m.def("add_expand_packed_mask_load", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createExpandPackedMaskLoadPass());
+  });
   m.def("add_triton_to_hfusion",
         [](mlir::PassManager &pm, bool compileOn91095) {
           pm.addPass(mlir::triton::createTritonToHFusionPass(compileOn91095));

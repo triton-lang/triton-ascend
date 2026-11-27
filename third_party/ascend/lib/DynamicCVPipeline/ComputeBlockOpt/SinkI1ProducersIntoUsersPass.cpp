@@ -20,19 +20,25 @@
  * THE SOFTWARE.
  */
 
+#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/WalkResult.h"
 #include "llvm/ADT/STLExtras.h"
@@ -71,6 +77,109 @@ public:
 
 namespace {
 
+// A constant select has no independent payload to preload. Keep it with its
+// consumers, then let the existing i1 sinking move the predicate chain to the
+// same compute block. The packed byte load retains its own block.
+static bool isConstantTile(Value value) {
+  if (auto constant = value.getDefiningOp<arith::ConstantOp>()) {
+    auto elements = dyn_cast<DenseElementsAttr>(constant.getValue());
+    return elements && elements.isSplat();
+  }
+  if (auto fill = value.getDefiningOp<linalg::FillOp>())
+    return fill.getInputs().size() == 1 &&
+           fill.getInputs().front().getDefiningOp<arith::ConstantOp>();
+  return false;
+}
+
+static bool comesFromPackedMaskView(Value value) {
+  SmallVector<std::pair<Value, unsigned>> worklist{{value, 0}};
+  DenseMap<Value, unsigned> visitedDepth;
+  unsigned remainingWork = 256;
+  while (!worklist.empty()) {
+    auto [current, depth] = worklist.pop_back_val();
+    if (depth > 32)
+      continue;
+    auto seen = visitedDepth.find(current);
+    if (seen != visitedDepth.end() && seen->second <= depth)
+      continue;
+    // Revisit only when a shorter path leaves more of the depth budget.
+    // The work budget also bounds distinct nodes in wide shared DAGs.
+    if (remainingWork == 0)
+      return false;
+    --remainingWork;
+    visitedDepth[current] = depth;
+    Operation *producer = current.getDefiningOp();
+    if (!producer)
+      continue;
+    if (producer->getName().getStringRef() == "hfusion.packed_mask_view")
+      return true;
+    if (!isa<arith::CmpIOp, arith::AndIOp, arith::OrIOp, arith::XOrIOp,
+             arith::SelectOp, arith::TruncIOp, arith::ExtUIOp,
+             tensor::CollapseShapeOp, tensor::ExpandShapeOp,
+             tensor::ExtractSliceOp, tensor::InsertSliceOp,
+             linalg::BroadcastOp>(producer))
+      continue;
+    for (Value operand : llvm::reverse(producer->getOperands()))
+      worklist.emplace_back(operand, depth + 1);
+  }
+  return false;
+}
+
+static Operation *
+findCommonSelectConsumer(arith::SelectOp select,
+                         CVPipeline::ComputeBlockIdManager &bm) {
+  Operation *firstUser = nullptr;
+  int targetBlock = -1;
+  for (Operation *user : select.getResult().getUsers()) {
+    // Keep control flow, memory operations and Cube consumers out of this
+    // local sinking. Multiple uses are allowed only in one Vector block.
+    if (user->getBlock() != select->getBlock() || user->getNumRegions() != 0 ||
+        !user->hasTrait<OpTrait::Elementwise>() || !isMemoryEffectFree(user) ||
+        CVPipeline::getCoreTypeOfSimpleOpOrCf(user) !=
+            CVPipeline::CoreType::VECTOR_ONLY)
+      return nullptr;
+    int blockId = bm.getBlockIdByOp(user);
+    if (blockId < 0 || (firstUser && blockId != targetBlock))
+      return nullptr;
+    targetBlock = blockId;
+    if (!firstUser || user->isBeforeInBlock(firstUser))
+      firstUser = user;
+  }
+  return firstUser;
+}
+
+static void
+sinkPackedConstantSelects(ModuleOp module,
+                          CVPipeline::ComputeBlockIdManager &bm,
+                          CVPipeline::MemoryDependenceGraph &memGraph) {
+  SmallVector<arith::SelectOp> candidates;
+  module.walk([&](arith::SelectOp select) {
+    auto type = dyn_cast<RankedTensorType>(select.getType());
+    if (type && isa<FloatType>(type.getElementType()) &&
+        !select.getResult().use_empty() &&
+        isConstantTile(select.getTrueValue()) &&
+        isConstantTile(select.getFalseValue()) &&
+        comesFromPackedMaskView(select.getCondition()))
+      candidates.push_back(select);
+  });
+  for (auto select : candidates) {
+    if (CVPipeline::getOpCoreType(select) != CVPipeline::CoreType::VECTOR_ONLY)
+      continue;
+    Operation *firstUser = findCommonSelectConsumer(select, bm);
+    if (!firstUser)
+      continue;
+    int sourceBlock = bm.getBlockIdByOp(select);
+    int targetBlock = bm.getBlockIdByOp(firstUser);
+    if (sourceBlock < 0 || targetBlock < 0 || sourceBlock == targetBlock)
+      continue;
+    SmallVector<Operation *> group{select};
+    if (CVPipeline::willCreateCycle(group, memGraph, targetBlock, bm))
+      continue;
+    select->moveBefore(firstUser);
+    bm.updateBlockId(select, targetBlock);
+  }
+}
+
 static bool isValidI1Producer(Operation *op) {
   if (isa<scf::SCFDialect>(op->getDialect())) {
     return false;
@@ -108,6 +217,9 @@ void SinkI1ProducersIntoUsersPass::runOnOperation() {
   ModuleOp moduleOp = getOperation();
   LOG_DEBUG(moduleOp);
   CVPipeline::ComputeBlockIdManager bm(moduleOp);
+  auto &aa = getAnalysis<AliasAnalysis>();
+  CVPipeline::MemoryDependenceGraph memGraph(moduleOp, aa);
+  sinkPackedConstantSelects(moduleOp, bm, memGraph);
   SmallVector<Operation *> producers;
   // find single-result and regionless op with i1 tensor result-type
   moduleOp.walk([&](Operation *op) {

@@ -1005,9 +1005,8 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
   bool needsReturnValueLock =
       hasUsedReturn && hasContinuousMaskSubview && isHardwareSupported;
   auto markUnordered = [&](Operation *lockOp) {
-    if (compileOn91095Flag)
-      lockOp->setAttr(hivm::SyncBlockLockUnorderedAttr::name,
-                      rewriter.getUnitAttr());
+    lockOp->setAttr(hivm::SyncBlockLockUnorderedAttr::name,
+                    rewriter.getUnitAttr());
   };
   Value returnValueLock;
   if (hasUsedReturn) {

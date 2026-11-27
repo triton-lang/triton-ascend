@@ -63,8 +63,6 @@ constexpr int kBufferCountOne = 1;
 namespace mlir {
 namespace triton {
 
-static constexpr llvm::StringLiteral selectDisabledFunc[1]{
-    "chunk_fwd_kernel_o_npu_kernel"};
 // Collect main_loop loops (forOp / whileOp) in a single block
 static int collectMainLoopsInBlock(Block &block,
                                    SmallVector<Operation *> &mainLoops) {
@@ -960,50 +958,6 @@ insertProducerLogic(OpBuilder &builder, Value depVal,
   return newOps;
 }
 
-static SmallVector<Operation *>
-insertProducerLogicIfChain(OpBuilder &builder, Value depVal,
-                           SmallVector<BufferPair> &buffers,
-                           const MainLoop &loop, int groupId = -1) {
-  SmallVector<Operation *> newOps;
-  int N = buffers.size();
-  Location loc = depVal.getLoc();
-  // Single buffer producer logic
-  if (N == kBufferCountOne) {
-    Operation *producerOp = builder.create<hivm::CopyOp>(
-        loc, mlir::TypeRange{}, depVal, buffers[0].second);
-    if (!producerOp)
-      return newOps;
-    if (groupId >= 0) {
-      producerOp->setAttr(
-          kIntraDeps, builder.getI32ArrayAttr({groupId, crossCoreProducerId}));
-    }
-    newOps.push_back(producerOp);
-    return newOps;
-  }
-
-  Value bufIdx = computeBufferIndex(builder, loop, loc, N, &newOps);
-  SmallVector<Operation *> outIfOps;
-  if (buildIfChain(
-          builder, loc, bufIdx, buffers, newOps, outIfOps,
-          [&](OpBuilder &b, Location l, Value buffer) -> Operation * {
-            return b.create<hivm::CopyOp>(l, mlir::TypeRange{}, depVal, buffer);
-          },
-          nullptr) != 0) {
-    return {};
-  }
-  // Multi-buffer: tag each inner-branch hivm.copy with [gid, 1]. The scf.if
-  // wrapper itself is just `remsi % N` dispatch and is not a write op.
-  if (groupId >= 0) {
-    for (Operation *op : newOps) {
-      if (isa<hivm::CopyOp>(op)) {
-        op->setAttr(kIntraDeps,
-                    builder.getI32ArrayAttr({groupId, crossCoreProducerId}));
-      }
-    }
-  }
-  return newOps;
-}
-
 // Check if depUser is a multi-region op and depVal is not a direct operand
 // Returns true when op was added as consumer due to yield using depVal
 // Generic version: supports any op with >= 2 regions (scf.if, scf.while, etc.)
@@ -1078,53 +1032,25 @@ static int processDepVal(Value depVal, const MainLoop &loop,
   if (mlir::ModuleOp mod = loop->getParentOfType<mlir::ModuleOp>())
     enableOpt = mod->hasAttr(CVPipeline::kInsertionOptimization);
 
-  func::FuncOp funcOp = loop->getParentOfType<func::FuncOp>();
-  // Create producer.
-  if (funcOp && llvm::is_contained(selectDisabledFunc, funcOp.getSymName())) {
-    // Legacy chunk_o route: place the scf.if + hivm.hir.copy dispatch after
-    // depDefinedOp's block_id=X region (after the last op with that block_id).
-    Operation *producerAnchor = depDefinedOp;
-    if (enableOpt) {
-      if (auto prodId = getOpBlockId(depDefinedOp); prodId.has_value()) {
-        if (Operation *lastInRegion =
-                findLastOpWithBlockIdInBlock(depDefinedOp, *prodId))
-          producerAnchor = lastInRegion;
-      }
+  // When enable_buffer_insert_optimization is on:
+  //   - select chain stays tightly before depDefinedOp (no region-start
+  //     relocation — firstAnchor remains depDefinedOp).
+  //   - materialize_in_destination is moved to the END of depDefinedOp's
+  //     block_id=X region (after lastInRegion)
+  Operation *firstAnchor = depDefinedOp;
+  Operation *producerAnchor = depDefinedOp;
+  if (enableOpt) {
+    if (auto prodId = getOpBlockId(depDefinedOp); prodId.has_value()) {
+      if (Operation *lastWithBlockId =
+              findLastOpWithBlockIdInBlock(depDefinedOp, *prodId))
+        producerAnchor = lastWithBlockId; // materialize moves to region end
     }
-    OpBuilder producedBuffers(loop.getContext());
-    producedBuffers.setInsertionPointAfter(producerAnchor);
-    SmallVector<Operation *> producerNewOps = insertProducerLogicIfChain(
-        producedBuffers, depVal, buffers, loop, groupId);
-    addBlockAttrForOps(producerNewOps, producerId, globalBuilder);
-    if (buffers.size() > kBufferCountOne) {
-      for (auto *op : producerNewOps) {
-        if (isa<scf::IfOp>(op))
-          op->setAttr(kIntraBuffer, globalBuilder.getUnitAttr());
-      }
-    } else {
-      addIntraBufferAttr(producerNewOps, globalBuilder);
-    }
-  } else {
-    // When enable_buffer_insert_optimization is on:
-    //   - select chain stays tightly before depDefinedOp (no region-start
-    //     relocation — firstAnchor remains depDefinedOp).
-    //   - materialize_in_destination is moved to the END of depDefinedOp's
-    //     block_id=X region (after lastInRegion)
-    Operation *firstAnchor = depDefinedOp;
-    Operation *producerAnchor = depDefinedOp;
-    if (enableOpt) {
-      if (auto prodId = getOpBlockId(depDefinedOp); prodId.has_value()) {
-        if (Operation *lastWithBlockId =
-                findLastOpWithBlockIdInBlock(depDefinedOp, *prodId))
-          producerAnchor = lastWithBlockId; // materialize moves to region end
-      }
-    }
-    OpBuilder producedBuffers(loop.getContext());
-    SmallVector<Operation *> producerNewOps =
-        insertProducerLogic(producedBuffers, depVal, buffers, firstAnchor,
-                            producerAnchor, loop, groupId);
-    addBlockAttrForOps(producerNewOps, producerId, globalBuilder);
   }
+  OpBuilder producedBuffers(loop.getContext());
+  SmallVector<Operation *> producerNewOps =
+      insertProducerLogic(producedBuffers, depVal, buffers, firstAnchor,
+                          producerAnchor, loop, groupId);
+  addBlockAttrForOps(producerNewOps, producerId, globalBuilder);
 
   // Single pass: process both normal ops and multi-region ops
   // For normal ops: generate one buffer selection per block_id and share among

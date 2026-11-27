@@ -976,6 +976,35 @@ bool HardwareConfig::parseJSON(const llvm::json::Value &json,
       globalSmallPacket = c;
       hasGlobalSmallPacket = true;
     }
+    // ND2NZ GM->L1 fractal-load latency coefficients (model
+    // nd2nz_aic_dav_c310_v2, calibrated on Ascend950PR; see
+    // profiles/microbench/data_provider/nd2nz_sweep_raw_20261127.txt).
+    // Absent -> legacy bandwidth path.
+    if (const auto *nz = ts->getObject("nd2nz_latency")) {
+      Nd2nzLatencyCoeffs c;
+      c.enabled = true;
+      if (auto v = nz->getNumber("stream_bytes_per_cycle"))
+        c.streamBytesPerCycle = *v;
+      if (auto v = nz->getNumber("floor_small_cycles"))
+        c.floorSmallCycles = *v;
+      if (auto v = nz->getInteger("floor_small_max_bytes"))
+        c.floorSmallMaxBytes = *v;
+      if (auto v = nz->getNumber("floor_mid_cycles"))
+        c.floorMidCycles = *v;
+      if (auto v = nz->getInteger("valid_min_bytes"))
+        c.validMinBytes = *v;
+      if (auto v = nz->getInteger("valid_max_bytes"))
+        c.validMaxBytes = *v;
+      if (auto v = nz->getInteger("element_bits"))
+        c.elementBits = static_cast<int>(*v);
+      // Every coefficient must be present and positive; a half-loaded
+      // entry would silently fall back mid-model, so reject the whole
+      // block instead.
+      if (c.streamBytesPerCycle > 0 && c.floorSmallCycles > 0 &&
+          c.floorSmallMaxBytes > 0 && c.floorMidCycles > 0 &&
+          c.validMinBytes > 0 && c.validMaxBytes > 0 && c.elementBits > 0)
+        nd2nz = c;
+    }
     // Mutex unit cliques (tilesim MutexComponents): object with a "cliques"
     // array of unit-name arrays, e.g. {"cliques":[["vec_mte2","mte3"]]}.
     // Units in a clique share a pipeline and cannot run in parallel.
@@ -1488,6 +1517,30 @@ int64_t HardwareConfig::estimateTransferCycles(llvm::StringRef src,
   double latencyUs = static_cast<double>(bytes) / bwBus;
   double cycles = latencyUs * (clockFreqGHz * 1000.0);
   return static_cast<int64_t>(std::ceil(cycles));
+}
+
+std::optional<int64_t> HardwareConfig::estimateNd2nzTransferCycles(
+    int64_t rows, int64_t kElements, int elementBits, int64_t matrices) const {
+  if (!nd2nz.enabled || rows <= 0 || kElements <= 0 || elementBits <= 0 ||
+      matrices <= 0)
+    return std::nullopt;
+  // Calibrated domain gate (house rule: never extrapolate past the
+  // measured grid): dtype and total byte range must match the sweep.
+  if (elementBits != nd2nz.elementBits)
+    return std::nullopt;
+  const int64_t totalBytes = rows * kElements * (elementBits / 8) * matrices;
+  if (totalBytes < nd2nz.validMinBytes || totalBytes > nd2nz.validMaxBytes)
+    return std::nullopt;
+  // Model nd2nz_aic_dav_c310_v2: pipelined steady state is byte-linear
+  // with a two-tier latency floor for small copies (see
+  // nd2nz_sweep_raw_20261127.txt; the rows/K/ndNum axes collapse onto
+  // the total-bytes curve).
+  const double bytesF = static_cast<double>(totalBytes);
+  const double streamCycles = bytesF / nd2nz.streamBytesPerCycle;
+  const double floor = totalBytes <= nd2nz.floorSmallMaxBytes
+                           ? nd2nz.floorSmallCycles
+                           : nd2nz.floorMidCycles;
+  return static_cast<int64_t>(std::ceil(std::max(streamCycles, floor)));
 }
 
 void HardwareConfig::getCubeModelThroughput(int elementBits, int &basicM,

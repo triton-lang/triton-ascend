@@ -236,6 +236,24 @@ int64_t MatmulOp::getFlops() { return 2 * getM() * getN() * getK(); }
 // correct mover bandwidth instead of the aggregate HBM figure.
 
 int64_t CubeLoadOp::estimateCycles(const HardwareConfig &config) {
+  // A fractal (ND2NZ) load with a known tile geometry uses the calibrated
+  // model nd2nz_aic_dav_c310_v2: cycles = max(totalBytes/rate, floor).
+  // The plain byte/bandwidth division underprices small fractal copies
+  // by up to ~35x (see the microbench nd2nz_sweep / gap report). No
+  // rows/k attributes or a shape outside the calibrated domain -> legacy
+  // plain path.
+  if (auto rows = getRows()) {
+    if (auto kElements = getKElements()) {
+      auto elementBits = [&]() -> int64_t {
+        if (auto tensor = dyn_cast<RankedTensorType>(getType()))
+          return tensor.getElementTypeBitWidth();
+        return 0;
+      }();
+      if (auto nd2nzCycles = config.estimateNd2nzTransferCycles(
+              *rows, *kElements, static_cast<int>(elementBits)))
+        return *nd2nzCycles + config.getMTE2StartupLatency();
+    }
+  }
   return config.estimateTransferCycles(getSrcMemSpace(), getDstMemSpace(),
                                        getBytes(),
                                        config.getActiveBandwidthCores()) +

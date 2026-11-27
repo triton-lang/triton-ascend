@@ -157,9 +157,22 @@ struct InsertDataTransfersPass
           if (it2 != hbmToL1.end()) {
             l1Value = it2->second;
           } else {
-            // Insert cube_load: HBM → L1 (MTE2)
+            // Insert cube_load: HBM → L1 (MTE2). A rank-2 static operand
+            // tile carries its (rows, K) geometry so the estimator can
+            // price the fractal (ND2NZ) path with the calibrated
+            // max(bytes/rate, floor) model instead of the plain byte
+            // division.
+            IntegerAttr rowsAttr;
+            IntegerAttr kElemsAttr;
+            if (tensorType.getShape().size() == 2 &&
+                tensorType.hasStaticShape() && tensorType.getShape()[0] > 0 &&
+                tensorType.getShape()[1] > 0) {
+              rowsAttr = builder.getI64IntegerAttr(tensorType.getShape()[0]);
+              kElemsAttr = builder.getI64IntegerAttr(tensorType.getShape()[1]);
+            }
             auto cubeLoad = builder.create<CubeLoadOp>(
-                loc, tensorType, hbmValue, bytes, hbm, l1, nullAttr, nullAttr);
+                loc, tensorType, hbmValue, bytes, rowsAttr, kElemsAttr, hbm, l1,
+                nullAttr, nullAttr);
             l1Value = cubeLoad.getResult();
             hbmToL1[hbmValue] = l1Value;
           }

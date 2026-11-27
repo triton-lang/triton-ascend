@@ -197,10 +197,19 @@ struct ConvertTritonDot : public RewritePattern {
 
       // Cube load (read into cube core L1 via MTE2)
       Value placeholder = createPlaceholderSource(tensorType, loc, rewriter);
+      // A rank-2 static operand tile carries its (rows, K) geometry so
+      // the estimator can price the fractal (ND2NZ) path with the
+      // calibrated model instead of the plain byte division.
+      IntegerAttr rowsAttr, kElemsAttr;
+      if (tensorType.getShape().size() == 2 && tensorType.hasStaticShape() &&
+          tensorType.getShape()[0] > 0 && tensorType.getShape()[1] > 0) {
+        rowsAttr = rewriter.getI64IntegerAttr(tensorType.getShape()[0]);
+        kElemsAttr = rewriter.getI64IntegerAttr(tensorType.getShape()[1]);
+      }
       auto cubeLoad = rewriter.create<CubeLoadOp>(
-          loc, tensorType, placeholder ? placeholder : operand, bytes,
-          rewriter.getStringAttr("hbm"), rewriter.getStringAttr("l1"), nullptr,
-          nullptr);
+          loc, tensorType, placeholder ? placeholder : operand, bytes, rowsAttr,
+          kElemsAttr, rewriter.getStringAttr("hbm"),
+          rewriter.getStringAttr("l1"), nullptr, nullptr);
 
       return cubeLoad.getResult();
     };
@@ -305,9 +314,20 @@ struct ConvertTritonLoad : public RewritePattern {
     bool usedByDot = op->hasAttr("ascend.used_by_dot");
 
     if (usedByDot) {
+      // A dot operand is an ND2NZ (fractal) GM->L1 copy: a rank-2 static
+      // result carries its (rows, K) geometry for the calibrated model.
+      IntegerAttr rowsAttr, kElemsAttr;
+      if (auto tensorType = dyn_cast<RankedTensorType>(resultType);
+          tensorType && tensorType.getShape().size() == 2 &&
+          tensorType.hasStaticShape() && tensorType.getShape()[0] > 0 &&
+          tensorType.getShape()[1] > 0) {
+        rowsAttr = rewriter.getI64IntegerAttr(tensorType.getShape()[0]);
+        kElemsAttr = rewriter.getI64IntegerAttr(tensorType.getShape()[1]);
+      }
       auto cubeLoad = rewriter.create<CubeLoadOp>(
-          loc, resultType, source, bytes, rewriter.getStringAttr("hbm"),
-          rewriter.getStringAttr("l1"), nullptr, nullptr);
+          loc, resultType, source, bytes, rowsAttr, kElemsAttr,
+          rewriter.getStringAttr("hbm"), rewriter.getStringAttr("l1"), nullptr,
+          nullptr);
       rewriter.replaceOp(op, cubeLoad.getResult());
     } else {
       auto vecLoad = rewriter.create<VectorLoadOp>(

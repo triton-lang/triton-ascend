@@ -38,6 +38,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/Debug.h"
+#include <algorithm>
 
 static constexpr const char *DEBUG_TYPE = "UpdateLoopIterTimesLegacy";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -346,7 +347,9 @@ UpdateLoopIterTimesPassLegacy::calculateFactor(scf::ForOp forOp) {
     }
 
     // Update maxRequiredBuffers/maxX
-    if (crossRequiredBuffers * maxX > maxRequiredBuffers * crossX) {
+    if (crossRequiredBuffers * maxX > maxRequiredBuffers * crossX ||
+        (crossRequiredBuffers * maxX == maxRequiredBuffers * crossX &&
+         crossRequiredBuffers > maxRequiredBuffers)) {
       maxRequiredBuffers = crossRequiredBuffers;
       maxX = crossX;
     }
@@ -368,7 +371,9 @@ UpdateLoopIterTimesPassLegacy::calculateFactor(scf::ForOp forOp) {
     }
     // Compare iterRequiredBuffers/iterX vs maxRequiredBuffers/maxX
     // Take the larger fraction
-    if (iterRequiredBuffers * maxX > maxRequiredBuffers * iterX) {
+    if (iterRequiredBuffers * maxX > maxRequiredBuffers * iterX ||
+        (iterRequiredBuffers * maxX == maxRequiredBuffers * iterX &&
+         iterRequiredBuffers > maxRequiredBuffers)) {
       maxRequiredBuffers = iterRequiredBuffers;
       maxX = iterX;
     }
@@ -465,7 +470,9 @@ std::pair<int, int> UpdateLoopIterTimesPassLegacy::calculateIntraDepsFactor(
     int requiredBuffers = ConsumerIdx - producerIdx + 1;
 
     // Update maxRequiredBuffers/maxX
-    if (requiredBuffers * maxX > maxRequiredBuffers * x) {
+    if (requiredBuffers * maxX > maxRequiredBuffers * x ||
+        (requiredBuffers * maxX == maxRequiredBuffers * x &&
+         requiredBuffers > maxRequiredBuffers)) {
       maxRequiredBuffers = requiredBuffers;
       maxX = x;
     }
@@ -565,7 +572,9 @@ std::pair<int, int> UpdateLoopIterTimesPassLegacy::calculateCrossDepsFactor(
       // Update max value using fraction comparison to avoid precision issues
       // Comparing requiredBuffers/maxX vs maxRequiredBuffers/x is equivalent to
       // comparing requiredBuffers * maxX vs maxRequiredBuffers * x
-      if (requiredBuffers * maxX > maxRequiredBuffers * x) {
+      if (requiredBuffers * maxX > maxRequiredBuffers * x ||
+          (requiredBuffers * maxX == maxRequiredBuffers * x &&
+           requiredBuffers > maxRequiredBuffers)) {
         maxRequiredBuffers = requiredBuffers;
         maxX = x;
       }
@@ -644,7 +653,9 @@ std::pair<int, int> UpdateLoopIterTimesPassLegacy::calculateIterDepsFactor(
                                     << ", producerIdx: " << producerIdx);
       LDBG("requiredBuffers: " << requiredBuffers);
 
-      if (requiredBuffers * maxX > maxRequiredBuffers * x) {
+      if (requiredBuffers * maxX > maxRequiredBuffers * x ||
+          (requiredBuffers * maxX == maxRequiredBuffers * x &&
+           requiredBuffers > maxRequiredBuffers)) {
         maxRequiredBuffers = requiredBuffers;
         maxX = x;
       }
@@ -1135,6 +1146,17 @@ int UpdateLoopIterTimesPassLegacy::ComputeMainLoopTimes(
       }
       iterInfo.requiredBuffers = requiredBuffers;
       iterInfo.x = x;
+
+      // If flowOpt optimization is enabled, reserve extra iterations to host
+      // the flowOpt condition's third if block.
+      if (isFlowOptEnabled(info) && iterInfo.requiredBuffers > 1) {
+        int optNum = std::min(info->intraCoreBufferCount - 1,
+                              info->crossCoreBufferCount);
+        iterInfo.ifCount += (optNum - 1);
+        LDBG("flowOpt enabled, optNum=" << optNum
+                                        << ", ifCount=" << iterInfo.ifCount);
+      }
+
       infoMap[loopOp] = iterInfo;
     }
   }
@@ -1160,7 +1182,10 @@ int UpdateLoopIterTimesPassLegacy::collectForOpsAndUpdateMax(
         }
         // requiredBuffers/x > maxRequiredBuffers/maxX =
         // requiredBuffers * maxX > maxRequiredBuffers * x
-        if (iterInfo.requiredBuffers * maxX > maxRequiredBuffers * iterInfo.x) {
+        if (iterInfo.requiredBuffers * maxX > maxRequiredBuffers * iterInfo.x ||
+            (iterInfo.requiredBuffers * maxX ==
+                 maxRequiredBuffers * iterInfo.x &&
+             iterInfo.requiredBuffers > maxRequiredBuffers)) {
           maxRequiredBuffers = iterInfo.requiredBuffers;
           maxX = iterInfo.x;
         }

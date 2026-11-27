@@ -127,5 +127,10 @@ void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
 // op is null or is not nested in any scf.if carrying the ssbuffer.if attr.
 scf::IfOp findIfOpContainingOp(Operation *op);
 
+// Whether flowOpt optimization is enabled for the given condition info:
+// cross-core buffer count exceeds CROSS_CORE_BUFFER_COUNT_THRESHOLD and
+// intra-core buffer count exceeds INTRA_CORE_BUFFER_COUNT_THRESHOLD.
+bool isFlowOptEnabled(const triton::ControlFlowConditionInfo *info);
+
 } // namespace mlir
 #endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_UTILS_H

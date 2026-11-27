@@ -52,8 +52,8 @@ def simd_elementwise(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, BLK: tl.const
         o = tla.view(O_ptr, (BLK, ), strides=(1, ), offsets=(p * BLK, ))
         tla.load_gm_to_ub(xy, xy_ub)
         with tla.scope.simd():
-            a = tla.simd.vlds(xy_ub[0, 0], dist="NORM")
-            b = tla.simd.vlds(xy_ub[1, 0], dist="NORM")
+            a = tla.simd.vlds(xy_ub[0, 0], dist=tla.simd.LOAD_DIST.NORM)
+            b = tla.simd.vlds(xy_ub[1, 0], dist=tla.simd.LOAD_DIST.NORM)
             zero = tla.simd.vdup(0.0, tl.float32)
             half = tla.simd.vdup(0.5, tl.float32)
             q = tla.simd.vdiv(a, b)

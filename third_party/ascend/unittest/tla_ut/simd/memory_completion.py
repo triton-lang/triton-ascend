@@ -49,7 +49,9 @@ def memory_completion(X, I, M, D, O, DT: tl.constexpr, W: tl.constexpr, OP: tl.c
             r0 = tla.simd.vcadd(a, mask)
             r1 = r0
         elif OP == "vld2":
-            r0, r1 = tla.simd.vld2(x[BASE], dist="DINTLV_B16" if W == 16 else "DINTLV_B32", off=16)
+            r0, r1 = tla.simd.vld2(x[BASE],
+                                   dist=tla.simd.LOAD_DIST.DINTLV_B16 if W == 16 else tla.simd.LOAD_DIST.DINTLV_B32,
+                                   off=16)
         elif OP == "vgatherb":
             r0 = tla.simd.vgatherb(x[BASE], index, mask)
             r1 = r0

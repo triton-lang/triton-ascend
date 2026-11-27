@@ -70,8 +70,11 @@ def vexp_f16(X, I, T, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.cons
         prefix = tla.simd.pset(2048 // N, MASKPAT)
         arb = tla.simd.vcmp(idx, t, op=tla.simd.CMP.LT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
-        tla.simd.vsts(ob[0, 0], tla.simd.vexp(x, mode=tla.simd.MODE.ZEROING), dist="NORM_B16")
-        tla.simd.vsts(ob[1, 0], tla.simd.vexp(x, mask=prefix, mode=tla.simd.MODE.ZEROING), dist="NORM_B16")
+        tla.simd.vsts(ob[0, 0], tla.simd.vexp(x, precision=tla.simd.PRECISION.FTZ_TRUE, mode=tla.simd.MODE.ZEROING),
+                      dist="NORM_B16")
+        tla.simd.vsts(ob[1, 0],
+                      tla.simd.vexp(x, precision=tla.simd.PRECISION.FTZ_TRUE, mask=prefix, mode=tla.simd.MODE.ZEROING),
+                      dist="NORM_B16")
         tla.simd.vsts(ob[2, 0], tla.simd.vexp(x, mask=arb, mode=tla.simd.MODE.ZEROING), dist="NORM_B16")
         tla.simd.vsts(ob[3, 0], tla.simd.vexp(x, mask=none, mode=tla.simd.MODE.ZEROING), dist="NORM_B16")
         tla.simd.vsts(ob[4, 0], tla.simd.vexp(x, mask=prefix, mode=tla.simd.MODE.MERGING), dist="NORM_B16")

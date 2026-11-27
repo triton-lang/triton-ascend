@@ -79,10 +79,10 @@ def vdiv_exact(X, Y, O, N: tl.constexpr, ACTIVE: tl.constexpr, MASKPAT: tl.const
         idx = tla.simd.vci(0)
         prefix = tla.simd.pset(2048 // N, MASKPAT)
         none = tla.simd.vcmp(idx, idx, op=tla.simd.CMP.NE)
-        tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, precision="exact"))
-        tla.simd.vsts(ob[1, 0], tla.simd.vdiv(a, b, mask=prefix, precision="exact"))
-        tla.simd.vsts(ob[2, 0], tla.simd.vdiv(a, b, mask=none, precision="exact"))
-        tla.simd.vsts(ob[3, 0], tla.simd.vdiv(a, b, mask=prefix, precision="vdiv_0ulp_ftz_true"))
+        tla.simd.vsts(ob[0, 0], tla.simd.vdiv(a, b, precision=tla.simd.PRECISION.EXACT))
+        tla.simd.vsts(ob[1, 0], tla.simd.vdiv(a, b, mask=prefix, precision=tla.simd.PRECISION.EXACT))
+        tla.simd.vsts(ob[2, 0], tla.simd.vdiv(a, b, mask=none, precision=tla.simd.PRECISION.EXACT))
+        tla.simd.vsts(ob[3, 0], tla.simd.vdiv(a, b, mask=prefix, precision=tla.simd.PRECISION.VDIV_0ULP_FTZ_TRUE))
     tla.store_ub_to_gm(ob, tla.view(O, (4, N)))
 
 

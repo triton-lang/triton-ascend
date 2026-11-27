@@ -89,9 +89,9 @@ def simd_tail_f32(A, B, C, O, N, ROW0, CAP: tl.constexpr, CHUNK: tl.constexpr, C
         # keep this non-zero sentinel in every lane >= N.
         tla.load_gm_to_ub(o, o_ub)
         with tla.scope.simd():
-            av = tla.simd.vlds(a_ub[0], dist="NORM")
-            bv = tla.simd.vlds(b_ub[0], dist="NORM")
-            cv = tla.simd.vlds(c_ub[0], dist="NORM")
+            av = tla.simd.vlds(a_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+            bv = tla.simd.vlds(b_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+            cv = tla.simd.vlds(c_ub[0], dist=tla.simd.LOAD_DIST.NORM)
             idx = tla.simd.vci(off)
             nv = tla.simd.vdup(N, tl.int32)
             # Signed lane index vs signed runtime N: a single vcmp <LT>.
@@ -136,10 +136,10 @@ def simd_tail_f16(A, B, C, I, O, N, ROW0, CAP: tl.constexpr, CHUNK: tl.constexpr
         tla.load_gm_to_ub(i, i_ub)
         tla.load_gm_to_ub(o, o_ub)
         with tla.scope.simd():
-            av = tla.simd.vlds(a_ub[0], dist="NORM")
-            bv = tla.simd.vlds(b_ub[0], dist="NORM")
-            cv = tla.simd.vlds(c_ub[0], dist="NORM")
-            iv = tla.simd.vlds(i_ub[0], dist="NORM")
+            av = tla.simd.vlds(a_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+            bv = tla.simd.vlds(b_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+            cv = tla.simd.vlds(c_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+            iv = tla.simd.vlds(i_ub[0], dist=tla.simd.LOAD_DIST.NORM)
             # f16 has 128 lanes: the i16 lane index keeps the compare signed.
             nv = tla.simd.vdup(N, tl.int16)
             tail = tla.simd.vcmp(iv, nv, op=tla.simd.CMP.LT)

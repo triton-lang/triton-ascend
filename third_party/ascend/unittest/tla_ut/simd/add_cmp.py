@@ -88,10 +88,10 @@ def add_cmp(A_ptr, B_ptr, C_ptr, S_ptr, MX_ptr, MN_ptr, M_ptr, C2_ptr, I_ptr, J_
     tla.load_gm_to_ub(j, j_ub)
 
     with tla.scope.simd():
-        av = tla.simd.vlds(a_ub[0], dist="NORM")
-        bv = tla.simd.vlds(b_ub[0], dist="NORM")
-        iv = tla.simd.vlds(i_ub[0], dist="NORM")
-        jv = tla.simd.vlds(j_ub[0], dist="NORM")
+        av = tla.simd.vlds(a_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+        bv = tla.simd.vlds(b_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+        iv = tla.simd.vlds(i_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+        jv = tla.simd.vlds(j_ub[0], dist=tla.simd.LOAD_DIST.NORM)
 
         # vadd: default zeroing and explicit merging under a half mask.
         tla.simd.vsts(c_ub[0], tla.simd.vadd(av, bv), dist="NORM_B32")

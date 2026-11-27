@@ -102,6 +102,9 @@ from . import simd_semantic as ss
 
 __all__ = [
     "MODE",
+    "LOAD_DIST",
+    "PRECISION",
+    "PRED_DIST",
     "SQUEEZE_STORE",
     "CMP",
     "POS",
@@ -285,6 +288,78 @@ _MODE_MERGING_ALIASES = ("MODE_MERGING", "MERGING")
 # Builder-side spelling for wrappers using tla_builder.cc::applySimdMode.
 # Each API defines its merge source and whether the two modes need distinct IR.
 _MODE_BUILDER_NAMES = {MODE.ZEROING: "zeroing", MODE.MERGING: "merging"}
+
+
+class LOAD_DIST(str, enum.Enum):
+    """Load distribution of :func:`vlds` (``ave.hir.vload`` ``dist``).
+
+    Mirrors ``simd_semantic.LOAD_DISTS`` one-to-one, so a member and the plain
+    string of the same name are interchangeable; strings stay accepted for
+    compatibility with existing kernels.  Only the members listed by a given
+    interface are legal there.
+    """
+
+    NORM = "NORM"
+    UNPK_B8 = "UNPK_B8"
+    UNPK_B16 = "UNPK_B16"
+    UNPK_B32 = "UNPK_B32"
+    UNPK4_B8 = "UNPK4_B8"
+    BLK = "BLK"
+    BRC_B8 = "BRC_B8"
+    BRC_B16 = "BRC_B16"
+    BRC_B32 = "BRC_B32"
+    BRC_B64 = "BRC_B64"
+    DINTLV_B8 = "DINTLV_B8"
+    DINTLV_B16 = "DINTLV_B16"
+    DINTLV_B32 = "DINTLV_B32"
+    BDINTLV = "BDINTLV"
+    E2B_B16 = "E2B_B16"
+    E2B_B32 = "E2B_B32"
+    SPLT2CHN_B8 = "SPLT2CHN_B8"
+    SPLT2CHN_B16 = "SPLT2CHN_B16"
+    SPLT4CHN_B8 = "SPLT4CHN_B8"
+    US_B8 = "US_B8"
+    US_B16 = "US_B16"
+    DS_B8 = "DS_B8"
+    DS_B16 = "DS_B16"
+    US = "US"
+    DS = "DS"
+    PK = "PK"
+
+    def __str__(self):
+        return self.value
+
+
+class PRED_DIST(str, enum.Enum):
+    """Distribution of :func:`pld` (``ave.hir.vload`` predicate patterns).
+
+    Mirrors ``simd_semantic.PRED_DISTS``.  The names overlap with
+    :class:`LOAD_DIST` but the semantics are bit-level predicate reads, not
+    element distribution.
+    """
+
+    NORM = "NORM"
+    US = "US"
+    DS = "DS"
+
+    def __str__(self):
+        return self.value
+
+
+class PRECISION(str, enum.Enum):
+    """Precision / FTZ selector of :func:`vdiv`, :func:`vexp` and :func:`vsqrt`.
+
+    Mirrors the documented ``tla.simd.PRECISION`` members; the plain string of
+    the same name (any case) stays accepted for compatibility.  ``None`` keeps
+    the hardware SFU instruction.
+    """
+
+    FTZ_TRUE = "FTZ_TRUE"
+    EXACT = "EXACT"
+    VDIV_0ULP_FTZ_TRUE = "VDIV_0ULP_FTZ_TRUE"
+
+    def __str__(self):
+        return self.value
 
 
 class SQUEEZE_STORE(str, enum.Enum):
@@ -702,6 +777,22 @@ def _resolve_squeeze_store(mode):
                      "SQUEEZE_STORE.STORED (MODE_STORED), SQUEEZE_STORE.NO_STORED (MODE_NO_STORED)")
 
 
+def _resolve_load_dist(dist):
+    """Return the canonical ``LOAD_DIST`` string for an enum member or string."""
+    dist = _unwrap_if_constexpr(dist)
+    if isinstance(dist, LOAD_DIST):
+        return dist.value
+    return ss.check_dist(dist, ss.LOAD_DISTS, "load")
+
+
+def _resolve_pred_dist(dist):
+    """Return the canonical ``PRED_DIST`` string for an enum member or string."""
+    dist = _unwrap_if_constexpr(dist)
+    if isinstance(dist, PRED_DIST):
+        return dist.value
+    return ss.check_dist(dist, ss.PRED_DISTS, "pld")
+
+
 def _check_zeroing_only(mode, op):
     """Reject ``MODE.MERGING`` for ``op`` and return ``MODE.ZEROING``.
 
@@ -743,7 +834,10 @@ def _normalize_precision(precision, op):
     """
     if precision is None:
         return None
-    name = str(_unwrap_if_constexpr(precision)).upper()
+    if isinstance(precision, PRECISION):
+        name = precision.value
+    else:
+        name = str(_unwrap_if_constexpr(precision)).upper()
     if name in _PRECISION_HW:
         return None
     if op == "vdiv" and name in _PRECISION_VDIV_EXACT:
@@ -755,7 +849,8 @@ def _normalize_precision(precision, op):
                                   "instead of emitting the FTZ hardware instruction. supported: "
                                   "precision=None, 'ftz_true'")
     raise ValueError(f"{op}: invalid precision {precision!r}; "
-                     f"supported: None, 'ftz_true'" + (", 'exact'/'vdiv_0ulp_ftz_true'" if op == "vdiv" else ""))
+                     f"supported: None, PRECISION.FTZ_TRUE" +
+                     (", PRECISION.EXACT, PRECISION.VDIV_0ULP_FTZ_TRUE" if op == "vdiv" else ""))
 
 
 def _is_unsigned(dtype_):
@@ -848,12 +943,14 @@ def _make_scalar(scalar, dtype, tag, op, _semantic):
 
 
 @builtin
-def pld(ptr, offsets=None, *, width=8, dist="NORM", _semantic=None) -> vector:
+def pld(ptr, offsets=None, *, width=8, dist=PRED_DIST.NORM, _semantic=None) -> vector:
     """Load a packed predicate from a contiguous byte UB buffer.
 
     ``width`` (8/16/32) sets the data-lane density and the returned predicate
-    has 2048/width lanes. Bits are LSB-first within bytes: NORM reads bit i,
-    US reads bit i//2, DS reads bit 2*i. Offsets are in bytes. Reserve 32
+    has 2048/width lanes. ``dist`` is a :class:`PRED_DIST` member (default
+    ``PRED_DIST.NORM``); the plain string of the same name is also accepted.
+    Bits are LSB-first within bytes: NORM reads bit i, US reads bit i//2,
+    DS reads bit 2*i. Offsets are in bytes. Reserve 32
     readable bytes (64 for DS) at the address, aligned to 32 bytes.
     Dynamic addresses must satisfy the same bounds and alignment constraints.
     This is an unmasked load with no destination-preserving merging mode.
@@ -861,8 +958,7 @@ def pld(ptr, offsets=None, *, width=8, dist="NORM", _semantic=None) -> vector:
     width = _unwrap_if_constexpr(width)
     if type(width) is not int or width not in (8, 16, 32):
         raise ValueError("pld width must be 8, 16 or 32")
-    dist = _unwrap_if_constexpr(dist)
-    ss.check_dist(dist, ("NORM", "US", "DS"), "pld")
+    dist = _resolve_pred_dist(dist)
     if isinstance(ptr, buffer_access):
         ptr, offsets = ptr.buffer, list(ptr.indices)
     if not isinstance(ptr, buffer) or ptr.space != "ub" or ptr.dtype not in (tl.int8, tl.uint8):
@@ -972,10 +1068,13 @@ def vld(ptr, index, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
 
 
 @builtin
-def vld2(src, dist="DINTLV_B16", off=None, _semantic=None) -> tuple[vector, vector]:
+def vld2(src, dist=LOAD_DIST.DINTLV_B16, off=None, _semantic=None) -> tuple[vector, vector]:
     """Load two contiguous registers and return their even/odd lanes.
 
-    Supports DINTLV_B16/B32 on a contiguous one-dimensional UB buffer.
+    ``dist`` is a :class:`LOAD_DIST` member (default ``LOAD_DIST.DINTLV_B16``);
+    only ``DINTLV_B16`` / ``DINTLV_B32`` are legal and must match the element
+    width.  The plain string of the same name is also accepted.  Loads a
+    contiguous one-dimensional UB buffer.
     ``off`` is an additional element offset. The complete two-register
     range must be readable; this load has no mask or address update.
     """
@@ -988,7 +1087,7 @@ def vld2(src, dist="DINTLV_B16", off=None, _semantic=None) -> tuple[vector, vect
     if not isinstance(src, buffer) or src.space != "ub" or len(src.shape) != 1 or src.strides != (1, ):
         raise ValueError("vld2 requires a contiguous one-dimensional UB buffer")
     bits = _ELEM_SPECS[_elem_tag(src.dtype)]
-    dist = _unwrap_if_constexpr(dist)
+    dist = _resolve_load_dist(dist)
     if bits not in (16, 32) or dist != f"DINTLV_B{bits}":
         raise ValueError("vld2 distribution must match 16/32-bit data")
     if off is not None:
@@ -1056,7 +1155,7 @@ def vscatter(src, dst, index, mask=None, _semantic=None):
 
 
 @builtin
-def vlds(ptr, offsets=None, *, dist="NORM", elem=None, _semantic=None) -> vector:
+def vlds(ptr, offsets=None, *, dist=LOAD_DIST.NORM, elem=None, _semantic=None) -> vector:
     """
     Vector-register load from UB (``ave.hir.vload``).
 
@@ -1064,7 +1163,9 @@ def vlds(ptr, offsets=None, *, dist="NORM", elem=None, _semantic=None) -> vector
         ``buf[i0, i1, ...]`` whose indices become the offsets
     :param offsets: index values (int / constexpr / tensor), one per memref
         dim; omit when ``ptr`` is a subscripted buffer
-    :param dist: load distribution; defaults to ``NORM``
+    :param dist: load distribution, a :class:`LOAD_DIST` member (default
+        ``LOAD_DIST.NORM``); the plain string of the same name is also
+        accepted
     :param elem: result element dtype; defaults to the buffer element type.
         Use ``tl.float8e4nv`` (E4M3FN) for the packed FP8 profile.
     :return: full vector register (2048 bits, or 4096 bits for i64/u64)
@@ -1076,10 +1177,9 @@ def vlds(ptr, offsets=None, *, dist="NORM", elem=None, _semantic=None) -> vector
     if not isinstance(ptr, buffer):
         raise TypeError("simd.vlds expects a tla.buffer")
     elem_ty = ptr.dtype if elem is None else elem
-    dist = _unwrap_if_constexpr(dist)
+    dist = _resolve_load_dist(dist)
     elem_tag = _elem_tag(elem_ty)
     lanes = _lanes_for(elem_tag)
-    ss.check_dist(dist, ss.LOAD_DISTS, "load")
     base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
     handle = _semantic.builder.create_simd_vlds(base, indices, elem_tag, lanes, dist)
     return vector(handle, vector_type(lanes, elem_ty))
@@ -1804,7 +1904,8 @@ def vdiv(src0, src1, mask=None, mode=MODE.ZEROING, precision=None, _semantic=Non
         merges a same-typed ``+0`` SSA vector into the inactive lanes.
         MERGING is not CANN's native dst-preserving predicate and does not keep
         the old dst/``src0`` lanes (see :class:`MODE`)
-    :param precision: ``None``/``'ftz_true'`` keep the hardware SFU
+    :param precision: ``None`` or ``PRECISION.FTZ_TRUE`` (also accepted as the
+        string ``'ftz_true'``, case-insensitive) keep the hardware SFU
         instruction.  ``'exact'``/``'vdiv_0ulp_ftz_true'`` select the real
         high-precision AVE op (``ave.hir.vdivfhp``, VFDivFHPOp), whose pinned
         regbase lowering is TileLang's 0ULP ``vdiv_0ulp_ftz_true`` sequence;
@@ -3000,10 +3101,11 @@ def vsqrt(src, mask=None, mode=MODE.ZEROING, precision=None, _semantic=None) -> 
         merge source selected by ``ave.hir.vsel``.  ``MERGING`` does not
         preserve previous destination lanes.
     :type mode: tla.simd.MODE
-    :param precision: ``None`` or ``'ftz_true'`` keeps the hardware SFU
+    :param precision: ``None`` or ``PRECISION.FTZ_TRUE`` (also accepted as the
+        string ``'ftz_true'``, case-insensitive) keeps the hardware SFU
         instruction.  Other precision tiers have no committed AVE lowering
         and are rejected.
-    :type precision: str or None
+    :type precision: tla.simd.PRECISION or str or None
     :return: Vector with the same dtype and lane count as ``src``.
     :rtype: tla.vector
     """

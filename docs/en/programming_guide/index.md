@@ -6,7 +6,7 @@ This document focuses on the issues that need to be paid attention to during Tri
 
 This guide separates common development rules, operator-specific development paths, and compile-time utilities:
 
-- This page covers common Triton-Ascend concerns, including core allocation, on-chip memory, memory access, tiling, and autotune.
+- This page covers common Triton Ascend concerns, including core allocation, on-chip memory, memory access, tiling, and autotune.
 - [Vector Operator Development](./vector_operator.md) describes element-wise, reduction, gather/scatter, and other operators mainly executed on Vector Cores.
 - [Cube Operator Development](./cube_operator.md) describes operators whose main computation is `tl.dot`, matrix multiplication, or batched matrix multiplication.
 - [CV Fusion Operator Development](./cv_fusion_operator.md) describes operators that combine Cube computation with Vector post-processing, reductions, softmax, or cross-core coordination.
@@ -89,7 +89,7 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
 
 ### Setting the Proper Data Block Size (BLOCK SIZE)
 
-Take **add_kernel** as an example. The variables and operations determine the on-chip memory usage. You can change the value of **BLOCK_SIZE** to adjust the size of the data block in the loop and the size of the intermediate result. If the upper limit is exceeded, the expected usage size is displayed and an error is reported during operator compilation. To achieve the maximum compute-to-memory ratio, **BLOCK_SIZE** needs to be as large as possible without exceeding the on-chip space. You can set different **BLOCK_SIZE** values in advance by using [autotune](../examples/06_autotune_example.md) of Triton-Ascend. The optimal setting is automatically selected during running.
+Take **add_kernel** as an example. The variables and operations determine the on-chip memory usage. You can change the value of **BLOCK_SIZE** to adjust the size of the data block in the loop and the size of the intermediate result. If the upper limit is exceeded, the expected usage size is displayed and an error is reported during operator compilation. To achieve the maximum compute-to-memory ratio, **BLOCK_SIZE** needs to be as large as possible without exceeding the on-chip space. You can set different **BLOCK_SIZE** values in advance by using [autotune](../examples/06_autotune_example.md) of Triton Ascend. The optimal setting is automatically selected during running.
 
 ```python
 import triton.language as tl
@@ -193,7 +193,7 @@ According to the data in the table, the values of aiv_mte2_time(μs) and aiv_mte
 
 ### Parallel Storage and Computation
 
-Triton-Ascend supports two data processing modes: serial storage and computation and parallel storage and computation.
+Triton Ascend supports two data processing modes: serial storage and computation and parallel storage and computation.
 
 Serial storage and computation: Data is first transferred from the global memory to the on-chip memory, and then the next batch of data is transferred after the computation is complete. This mode has a significant idle waiting time, and the efficiency is low.
 
@@ -245,7 +245,7 @@ Before the AI Core performs computation, data needs to be transferred to the on-
 
 In tiling block optimization, the values of block parameters such as **BLOCK_SIZE** and **BLOCK_SIZE_SUB** directly affect operator performance. However, manually trying parameter combinations is inefficient and makes it difficult to find the best values. `triton.autotune` is the autotuning utility provided by the Triton framework. It can sweep over preset parameter configurations, compare their performance, and automatically select the best combination. It is a core tool for tiling optimization.
 
-For the recommended Triton-Ascend usage of `configs=[]`, the scope of automatic tiling, see the [Triton-Ascend Autotune Guide](./../autotune_guide.md).
+For the recommended Triton Ascend usage of `configs=[]`, the scope of automatic tiling, see the [Triton Ascend Autotune Guide](./../autotune_guide.md).
 
 - Core functions
 Automatic exploration of the parameter space: Test different values of constexpr block parameters such as **BLOCK_SIZE** and **BLOCK_SIZE_SUB** in batches.

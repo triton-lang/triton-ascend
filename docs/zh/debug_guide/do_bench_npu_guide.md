@@ -1,16 +1,16 @@
-# Triton-Ascend `do_bench_npu` 指导文档
+# Triton Ascend `do_bench_npu` 指导文档
 
 ## 文档定位
 
 本指南面向已经掌握如何编写Triton算子，并已了解社区`triton.testing.do_bench`基本概念的用户。主要介绍在昇腾NPU上进行性能基准测试的推荐用法：
 
-- Triton-Ascend上`do_bench_npu`的推荐用法；
+- Triton Ascend上`do_bench_npu`的推荐用法；
 - 在Ascend后端中“纯Device侧执行时间”的含义；
 - 何时使用默认的`mspti`路径，以及何时需要回退到`torch_npu.profiler`路径。
 
 ## 快速上手
 
-在Triton-Ascend中，当您需要构建算子性能基线或测量kernel的纯硬件执行时间时，推荐导入并使用`do_bench_npu`：
+在Triton Ascend中，当您需要构建算子性能基线或测量kernel的纯硬件执行时间时，推荐导入并使用`do_bench_npu`：
 
 ```python
 import torch
@@ -38,7 +38,7 @@ print(f"Kernel execution time: {ms} ms")
 这表示：
 
 - `fn`的语义与社区`do_bench`相同，代表要进行基准测试的可调用函数；
-- `do_bench_npu`在Triton-Ascend上的意思是“让NPU性能分析工具捕获纯Device侧kernel执行时间”，从而有效消除Host侧开销对测量的影响。
+- `do_bench_npu`在Triton Ascend上的意思是“让NPU性能分析工具捕获纯Device侧kernel执行时间”，从而有效消除Host侧开销对测量的影响。
 
 ## 参数说明
 
@@ -163,7 +163,7 @@ ms = do_bench_npu(fn, warmup=1, active=1)
 
 ## 高级用法：与Triton Autotune集成
 
-Triton-Ascend的Autotune扩展支持切换autotune基准测试期间使用的性能收集方法。通过设置环境变量`TRITON_BENCH_METHOD="npu"`，Autotune机制将在内部调用`do_bench_npu`来评估候选配置。
+Triton Ascend的Autotune扩展支持切换autotune基准测试期间使用的性能收集方法。通过设置环境变量`TRITON_BENCH_METHOD="npu"`，Autotune机制将在内部调用`do_bench_npu`来评估候选配置。
 
 ```bash
 export TRITON_BENCH_METHOD="npu"

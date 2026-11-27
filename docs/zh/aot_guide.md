@@ -1,4 +1,4 @@
-# Triton-Ascend AOT编译使用指南
+# Triton Ascend AOT编译使用指南
 
 ## 简介
 
@@ -14,7 +14,7 @@ AOT不用于运行期调优：特化参数在构建期固化，运行期不会�
 
 ## 使用前准备
 
-- **构建环境**：与JIT相同的依赖（Python、CANN、torch_npu、triton-ascend），另需gcc（以及可选的g++）用于编译生成的C代码或C++调用程序；工具以模块方式提供：`python -m triton.tools.compile`与`python -m triton.tools.link`；
+- **构建环境**：与JIT相同的依赖（Python、CANN、torch_npu、Triton Ascend），另需gcc（以及可选的g++）用于编译生成的C代码或C++调用程序；工具以模块方式提供：`python -m triton.tools.compile`与`python -m triton.tools.link`；
 - **运行环境**：昇腾驱动与CANN运行库，以及launcher运行时依赖的动态库（torch_npu/torch的库目录与libpython共享库）；不需要Python解释器与编译器工具链。
 
 一次编译的产物包括：
@@ -31,7 +31,7 @@ AOT不用于运行期调优：特化参数在构建期固化，运行期不会�
 本文以固定形状的fp16矩阵乘为例，从编写kernel开始，到用`torch.matmul`完成精度比对结束：
 
 1. 构建环境完成“编写kernel、编译特化、链接分发器、构建调用程序”四步；
-2. 运行环境执行kernel并导出结果，再由Python脚本在具备torch的环境（通常是构建环境）做精度比对。示例代码用C编写，C++的调用方式见4.2末尾。
+2. 运行环境执行kernel并导出结果，再由Python脚本在具备Torch的环境（通常是构建环境）做精度比对。示例代码用C编写，C++的调用方式见4.2末尾。
 
 ### 1. 编写kernel
 
@@ -106,7 +106,7 @@ python -m triton.tools.link matmul_fp16.*.h -o kernel --backend npu
 
 下面的`main.c`是完整的调用示例（C++调用见4.2末尾）：生成fp16输入、启动AOT kernel，并把输入与结果导出为`A.bin`/`B.bin`/`C.bin`。`main.c`和`torch.matmul`的精度比对由4.3的Python脚本完成。
 
-#### 4.1 编写main.c
+#### 4.1编写main.c
 
 ```c
 // main.c
@@ -195,7 +195,7 @@ int main(void) {
 }
 ```
 
-#### 4.2 生成编译/链接参数并构建
+#### 4.2生成编译/链接参数并构建
 
 C程序需要CANN、torch_npu与Python头文件/库的路径。为避免硬编码，下面这段脚本在构建环境中查询后端构建`npu_utils`时使用的同一套参数，并写成`aot_flags.sh`导入这些参数（只需要在构建环境执行一次，运行环境不需要执行该脚本）：
 
@@ -264,7 +264,7 @@ gcc main.c matmul_fp16.*.c kernel.c -I. $INC $LINK $PYLIB -Wl,-rpath,'$ORIGIN' -
 
 两种方式得到的调用签名、运行方式与运行结果都与上面的C程序一致。
 
-#### 4.3 精度对比脚本
+#### 4.3精度对比脚本
 
 `main.c`导出三个按行主序连续存放的二进制文件：`A.bin`（M×K，fp16）、`B.bin`（K×N，fp16）、`C.bin`（M×N，fp32）。下面的脚本读取这三个文件，用`torch.matmul`以float32累加计算作为参考结果，与kernel输出的全部M×N个元素逐一比较（不是抽样）：
 
@@ -300,9 +300,9 @@ print(f"matmul_fp16 M={M} N={N} K={K}: {'PASS' if mismatches == 0 else 'FAIL'}")
 sys.exit(0 if mismatches == 0 else 1)
 ```
 
-脚本需要Python与torch，在具备该环境的位置执行（通常是构建环境；独立运行环境可以把三个`.bin`文件拷回构建环境再比对）。
+脚本需要Python与Torch，在具备该环境的位置执行（通常是构建环境；独立运行环境可以把三个`.bin`文件拷回构建环境再比对）。
 
-#### 4.4 运行并比对精度
+#### 4.4运行并比对精度
 
 ```bash
 # Load CANN environment variables (replace with the actual installation path)
@@ -330,7 +330,7 @@ max_abs_err=0.000000e+00 at out[0,0]  max_rel_err=0.000000e+00  mismatches(>0.00
 matmul_fp16 M=32 N=32 K=32: PASS
 ```
 
-#### 4.5 部署到运行环境
+#### 4.5部署到运行环境
 
 运行环境只需要可执行文件与运行时文件，不需要Python解释器、gcc或生成的C源码：
 
@@ -338,7 +338,7 @@ matmul_fp16 M=32 N=32 K=32: PASS
 |---|---|
 | `demo` | 已链接AOT产物的可执行文件 |
 | `launcher_export.so` | 通用launcher运行时，与可执行文件放在同一目录（经`$ORIGIN`找到） |
-| `npu_utils.so` | launcher运行时依赖的辅助库，构建时生成在triton缓存中 |
+| `npu_utils.so` | launcher运行时依赖的辅助库，构建时生成在Triton缓存中 |
 
 `npu_utils.so`的路径可以在构建环境中查询：
 
@@ -348,11 +348,11 @@ python -c "from triton.backends.ascend.driver import NPUUtils; print(NPUUtils().
 
 把它按`<TRITON_CACHE_DIR>/<hash>/npu_utils.so`的布局拷贝到运行环境，并设置`TRITON_CACHE_DIR`指向缓存根目录（运行环境与构建环境相同时，缓存已存在，无需额外设置）。运行环境还需要设置好`LD_LIBRARY_PATH`：CANN运行库、torch_npu/torch的库目录与libpython共享库。
 
-`./demo`运行后在当前目录写出`A.bin`/`B.bin`/`C.bin`；`compare_precision.py`属于验证工具（需要Python与torch），不随运行环境部署。
+`./demo`运行后在当前目录写出`A.bin`/`B.bin`/`C.bin`；`compare_precision.py`属于验证工具（需要Python与Torch），不随运行环境部署。
 
 如果把多个kernel打包成共享库，部署时还需把`libkernel.so`与可执行文件放在同一目录。
 
-#### 4.6 多个kernel打包到同一个库
+#### 4.6多个kernel打包到同一个库
 
 一个`kernel.py`里可以有多个`@triton.jit` kernel。把它们编进同一个库（或同一个可执行文件）时，对每个kernel各执行一次compile即可（例如用一个for循环依次编译），关键是`--out-name`（以及`-o`）要按kernel取不同的值。例如在matmul之外再增加一个relu kernel（示例取n=1024）：
 
@@ -419,6 +419,6 @@ relu_fp32_default(stream, dX, dY, n);
 ## 约束
 
 - 多kernel需分别链接：link.py的模型是“单kernel多特化”，同一文件里的多个不同kernel应逐个单独link（`-o dispatch_<name>`），再把各自的`dispatch_*.c`一起编入同一个程序（可执行文件或共享库）；
-- 并行执行多个编译进程时，torch的privateuse1后端自动加载可能静默失败，建议编译进程先显式`import torch_npu`；
+- 并行执行多个编译进程时，Torch的privateuse1后端自动加载可能静默失败，建议编译进程先显式`import torch_npu`；
 - 生成的C stub自包含（`launcher_cann.h`提供`NPUresult/NPUstream`与`ASCEND_*`定义）；`launcher_cann.h`只在编译C程序时需要，运行环境不需要提供；
 - 构建环境与运行环境的配置建议保持一致（如CANN版本、驱动版本、环境变量等），若不一致可能出现未知问题。

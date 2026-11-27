@@ -1,4 +1,4 @@
-# Triton-Ascend AOT Compile User Guide
+# Triton Ascend AOT Compile User Guide
 
 ## Introduction
 
@@ -14,7 +14,7 @@ AOT is not for runtime tuning: specialization parameters are frozen at build tim
 
 ## Preparation
 
-- **Build environment**: the same dependencies as JIT (Python, CANN, torch_npu, triton-ascend), plus gcc (and optionally g++) for compiling the generated C sources or a C++ caller; the tools are available as modules: `python -m triton.tools.compile` and `python -m triton.tools.link`;
+- **Build environment**: the same dependencies as JIT (Python, CANN, torch_npu, Triton Ascend), plus gcc (and optionally g++) for compiling the generated C sources or a C++ caller; the tools are available as modules: `python -m triton.tools.compile` and `python -m triton.tools.link`;
 - **Runtime environment**: the Ascend driver and CANN runtime libraries, plus the shared libraries the launcher runtime depends on (the torch_npu/torch library directories and the libpython shared library); no Python interpreter and no compiler toolchain.
 
 One compilation produces:
@@ -28,7 +28,7 @@ One compilation produces:
 
 ## Usage
 
-The following fixed-shape fp16 matmul example goes from writing the kernel to a precision comparison against `torch.matmul`: the build environment performs four steps (write the kernel, compile the specializations, link the dispatcher, build the caller); the runtime environment runs the kernel and exports its results, and a Python script then compares them in an environment with torch (usually the build environment). The example is written in C; see the end of 4.2 for C++.
+The following fixed-shape fp16 matmul example goes from writing the kernel to a precision comparison against `torch.matmul`: the build environment performs four steps (write the kernel, compile the specializations, link the dispatcher, build the caller); the runtime environment runs the kernel and exports its results, and a Python script then compares them in an environment with Torch (usually the build environment). The example is written in C; see the end of 4.2 for C++.
 
 ### 1. Write the kernel
 
@@ -302,7 +302,7 @@ print(f"matmul_fp16 M={M} N={N} K={K}: {'PASS' if mismatches == 0 else 'FAIL'}")
 sys.exit(0 if mismatches == 0 else 1)
 ```
 
-The script needs Python and torch; run it where they are available (usually the build environment; on a separate runtime environment, copy the three `.bin` files back to the build environment first).
+The script needs Python and Torch; run it where they are available (usually the build environment; on a separate runtime environment, copy the three `.bin` files back to the build environment first).
 
 #### 4.4 Run and compare precision
 
@@ -339,7 +339,7 @@ The runtime environment needs only the executable and the runtime files — no P
 |---|---|
 | `demo` | The executable with the AOT artifacts linked in |
 | `launcher_export.so` | Generic launcher runtime, placed in the same directory as the executable (found via `$ORIGIN`) |
-| `npu_utils.so` | Helper library the launcher runtime depends on, produced in the triton cache at build time |
+| `npu_utils.so` | Helper library the launcher runtime depends on, produced in the Triton cache at build time |
 
 The path of `npu_utils.so` can be queried in the build environment:
 
@@ -349,7 +349,7 @@ python -c "from triton.backends.ascend.driver import NPUUtils; print(NPUUtils().
 
 Copy it to the runtime environment in the layout `<TRITON_CACHE_DIR>/<hash>/npu_utils.so` and point `TRITON_CACHE_DIR` at the cache root (when the runtime environment is the build environment, the cache already exists and no extra setup is needed). The runtime environment also needs `LD_LIBRARY_PATH` set for the CANN runtime libraries, the torch_npu/torch library directories and the libpython shared library.
 
-At run time `./demo` writes `A.bin`/`B.bin`/`C.bin` to the current directory; `compare_precision.py` is a verification tool (it needs Python and torch) and is not deployed with the runtime environment.
+At run time `./demo` writes `A.bin`/`B.bin`/`C.bin` to the current directory; `compare_precision.py` is a verification tool (it needs Python and Torch) and is not deployed with the runtime environment.
 
 If multiple kernels are packaged into a shared library, also place `libkernel.so` in the same directory as the executable.
 
@@ -420,6 +420,6 @@ Notes:
 ## Constraints
 
 - Multiple kernels must be linked separately: link.py's model is "one kernel with multiple specializations". Link distinct kernels in one file one at a time (`-o dispatch_<name>`) and compile their `dispatch_*.c` files together into one program (executable or shared library);
-- When several compile processes run in parallel, torch's privateuse1 backend autoload can fail silently; compile processes should import `torch_npu` explicitly first;
+- When several compile processes run in parallel, Torch's privateuse1 backend autoload can fail silently; compile processes should import `torch_npu` explicitly first;
 - The generated C stubs are self-contained (`launcher_cann.h` provides `NPUresult/NPUstream` and the `ASCEND_*` definitions); `launcher_cann.h` is only needed when compiling the C program and does not need to be provided in the runtime environment;
 - Keep the build environment and the runtime environment configured consistently (for example, the same CANN version, driver version and environment variables); otherwise unknown problems may occur.

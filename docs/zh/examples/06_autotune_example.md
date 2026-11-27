@@ -1,11 +1,11 @@
 # 自动调优（Autotune）
 
-若想先了解Triton-Ascend autotune的推荐用法、`configs=[]` 的含义，以及自动Tiling的适用边界，建议先阅读 [Triton-Ascend autotune使用指南](../autotune_guide.md)。
+若想先了解Triton Ascend autotune的推荐用法、`configs=[]` 的含义，以及自动Tiling的适用边界，建议先阅读 [Triton Ascend autotune使用指南](../autotune_guide.md)。
 
-本文档介绍如何使用Triton的autotune方法自动选择最优的Kernel配置参数。当前Triton-Ascend autotune完全兼容社区autotune的使用方法（参考[社区文档](https://triton-lang.org/main/python-api/generated/triton.autotune.html)），即需要用户手动传入一些定义好的triton.Config，然后autotune会通过benchmark的方式选择其中的最优Kernel配置；此外Triton-Ascend提供了**进阶的autotune** 用法，用户无需提供Triton Kernel的切分轴、Tiling轴等信息，autotune会根据Triton Kernel语义自动解析切分轴、Tiling轴等信息，并自动生成一些可能最优的Kernel配置，然后通过benchmark或者profiling的方式选择其中的最优配置。
+本文档介绍如何使用Triton的autotune方法自动选择最优的Kernel配置参数。当前Triton Ascend autotune完全兼容社区autotune的使用方法（参考[社区文档](https://triton-lang.org/main/python-api/generated/triton.autotune.html)），即需要用户手动传入一些定义好的triton.Config，然后autotune会通过benchmark的方式选择其中的最优Kernel配置；此外Triton Ascend提供了**进阶的autotune** 用法，用户无需提供Triton Kernel的切分轴、Tiling轴等信息，autotune会根据Triton Kernel语义自动解析切分轴、Tiling轴等信息，并自动生成一些可能最优的Kernel配置，然后通过benchmark或者profiling的方式选择其中的最优配置。
 
 说明：
-当前Triton-Ascend autotune支持block size、multibuffer（编译器的优化），因为硬件架构差异不支持num_warps、num_stages参数，未来还会持续增加autotune可调项。
+当前Triton Ascend autotune支持block size、multibuffer（编译器的优化），因为硬件架构差异不支持num_warps、num_stages参数，未来还会持续增加autotune可调项。
 
 ## 社区autotune使用示例
 
@@ -156,7 +156,7 @@ def add_kernel(
 
 说明：
 
-1. Triton-Ascend默认采取benchmark的方式获取片上计算时间，当设置环境变量`export TRITON_BENCH_METHOD="npu"`后，会通过`torch_npu.profiler.profile`的方式获取每个Kernel配置下的片上计算时间，对于一些Triton Kernel计算快速的情况，例如小shape算子，相较于默认方式能够获取更准确的计算时间。但是会显著增加整体autotune的时间，请谨慎开启。
+1. Triton Ascend默认采取benchmark的方式获取片上计算时间，当设置环境变量`export TRITON_BENCH_METHOD="npu"`后，会通过`torch_npu.profiler.profile`的方式获取每个Kernel配置下的片上计算时间，对于一些Triton Kernel计算快速的情况，例如小shape算子，相较于默认方式能够获取更准确的计算时间。但是会显著增加整体autotune的时间，请谨慎开启。
 2. 目前该进阶用法支持Vector类、Cube类以及CV融合类算子。更多进阶使用示例可以参考[autotune进阶使用示例](https://gitcode.com/Ascend/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut/)。
 
 ### 参数自动解析

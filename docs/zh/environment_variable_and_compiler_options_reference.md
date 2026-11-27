@@ -1,6 +1,6 @@
 # 环境变量与编译选项
 
-本文面向Triton-Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及A2/A3、950支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel；环境变量也可以不经启动脚本，直接通过 `triton.knobs`（含Ascend专用的 `triton.knobs.ascend` 分组）在进程内读写。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。
+本文面向Triton Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及A2/A3、950支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel；环境变量也可以不经启动脚本，直接通过 `triton.knobs`（含Ascend专用的 `triton.knobs.ascend` 分组）在进程内读写。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。
 
 ## 环境变量
 
@@ -36,7 +36,7 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 调试 | `TRITON_MEMORY_DISPLAY` | 请求编译器输出内存使用信息。 | 关闭 | 支持 | — |
 | 调试 | `ENABLE_PRINT_UB_BITS` | 请求编译器打印UB占用位数。 | 关闭 | 支持 | 常规路径 |
 | 调试 | `TRITON_INTERPRET` | 在CPU解释器中执行其支持的Triton操作，便于Python断点调试。 | 关闭 | 支持 | 支持 |
-| 调试 | `TRITON_ENABLE_SANITIZER` | 向Ascend NPU编译器传入sanitizer开关。在 Atlas A2 products/Atlas A3 products 上运行静态插桩后的kernel时，须通过 `mssanitizer python3 run_kernel.py` 启动脚本。 | 关闭 | 支持 | 常规路径 |
+| 调试 | `TRITON_ENABLE_SANITIZER` | 向Ascend NPU编译器传入sanitizer开关。在Atlas A2 products/Atlas A3 products上运行静态插桩后的kernel时，须通过 `mssanitizer python3 run_kernel.py` 启动脚本。 | 关闭 | 支持 | 常规路径 |
 | 编译 | `TRITON_ALWAYS_COMPILE` | 忽略命中的编译缓存，强制重新编译。 | 关闭 | 支持 | 支持 |
 | 编译 | `TRITON_KERNEL_OVERRIDE` | 从覆盖目录读取与编译阶段同名的外部IR/二进制文件。 | 关闭 | 支持 | 支持 |
 | 编译 | `TRITON_OVERRIDE_DIR` | 指定覆盖文件目录。 | `$TRITON_HOME/.triton/override` | 支持 | 支持 |
@@ -58,13 +58,13 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 运行 | `TRITON_GRID_WARN_PRINT` | 打印Ascend launcher的grid大小警告。 | 关闭 | 支持 | 支持 |
 | 运行 | `NPU_DEVICE_LIMIT` | 按 `AI Core数,Vector Core数` 限制可用核心数，例如 `14,28`；需符合设备比例。 | 未设置，使用设备值 | 支持 | 支持 |
 | 工具链选择 | `CC` | 设置CPU launcher扩展的C/C++编译器。 | 未设置，使用系统默认编译器 | 支持 | 支持 |
-| 工具链选择 | `ASCEND_HOME_PATH` | CANN Toolkit根目录。启动Python前加载CANN的 `set_env.sh`。Triton-Ascend从此目录查找构建launcher扩展所需的头文件、库和CANN版本文件。 | 由 `set_env.sh` 设置 | 支持 | 支持 |
+| 工具链选择 | `ASCEND_HOME_PATH` | CANN Toolkit根目录。启动Python前加载CANN的 `set_env.sh`。Triton Ascend从此目录查找构建launcher扩展所需的头文件、库和CANN版本文件。 | 由 `set_env.sh` 设置 | 支持 | 支持 |
 | 工具链选择 | `TRITON_NPU_COMPILER_PATH` | 仅当随包工具与 `PATH` 查找均失败时，作为Ascend编译器工具目录的后备路径。 | 未设置 | 支持 | 支持 |
 | 工具链选择 | `TRITON_BUILD_DIR` | 查找 `triton-opt`、`triton-mlir-opt` 时，在随包工具之后、`PATH` 之前查找该目录的 `bin/`。 | 未设置 | 支持 | 支持 |
 
 ### triton.knobs接口
 
-`triton.knobs` 是社区Triton 3.4引入的类型化配置接口：描述符字段对应一个环境变量，少数条目是Python对象（如回调函数），不对应环境变量，只能在进程内设置。如果只需要在启动前配置一次，直接设置环境变量即可；需要在进程内读取当前取值、临时修改或按作用域恢复时，使用 `triton.knobs`。上游分组由 `triton.knobs` 直接提供；Triton-Ascend在Triton 3.6增加了 `triton.knobs.ascend` 分组，导入Ascend后端后即可使用。
+`triton.knobs` 是社区Triton 3.4引入的类型化配置接口：描述符字段对应一个环境变量，少数条目是Python对象（如回调函数），不对应环境变量，只能在进程内设置。如果只需要在启动前配置一次，直接设置环境变量即可；需要在进程内读取当前取值、临时修改或按作用域恢复时，使用 `triton.knobs`。上游分组由 `triton.knobs` 直接提供；Triton Ascend在Triton 3.6增加了 `triton.knobs.ascend` 分组，导入Ascend后端后即可使用。
 
 #### 快速上手
 
@@ -134,7 +134,7 @@ triton.knobs.propagate_env = False  # 之后的赋值不再写回os.environ
 
 | 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
 |------|----------|--------|----------|------|
-| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | 向Ascend NPU编译器传入sanitizer开关。在 Atlas A2 products/Atlas A3 products 上运行静态插桩后的kernel时，须通过 `mssanitizer` 运行脚本。 |
+| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | 向Ascend NPU编译器传入sanitizer开关。在Atlas A2 products/Atlas A3 products上运行静态插桩后的kernel时，须通过 `mssanitizer` 运行脚本。 |
 | `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | `True` / `False` | 请求编译器打印UB占用位数。 |
 | `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | `True` / `False` | 请求编译器输出内存使用信息。 |
 | `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | 目录路径 / `None` | 仅当随包工具与 `PATH` 查找均失败时，作为Ascend编译器工具目录的后备路径。 |
@@ -314,7 +314,7 @@ configs = [
 
 本节列出的旧编译选项仅在兼容期内接受。**未来版本彻底移除这些选项后，继续通过kernel启动参数或 `triton.Config` 传入它们将导致报错。** 请在升级前按下表迁移或删除旧选项。
 
-由Triton-Ascend处理的更名和废弃项会发出 `FutureWarning`，同一名称在进程内只告警一次。旧多缓冲选项由NPU IR输出废弃提示。
+由Triton Ascend处理的更名和废弃项会发出 `FutureWarning`，同一名称在进程内只告警一次。旧多缓冲选项由NPU IR输出废弃提示。
 
 ### 旧多缓冲选项迁移
 

@@ -1,6 +1,6 @@
 # Issue Workflow Guidelines
 
-This document defines the standard lifecycle for Issues in the Triton-Ascend project — from creation through triage, active handling, and final closure. It establishes consistent label usage, owner assignment, and communication expectations to ensure smooth collaboration between contributors and maintainers.
+This document defines the standard lifecycle for Issues in the Triton Ascend project — from creation through triage, active handling, and final closure. It establishes consistent label usage, owner assignment, and communication expectations to ensure smooth collaboration between contributors and maintainers.
 
 ## 1. Label Categories
 

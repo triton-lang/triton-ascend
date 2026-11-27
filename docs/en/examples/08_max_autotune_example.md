@@ -1,6 +1,6 @@
 # max_autotune Usage Example
 
-`max_autotune` is an enhanced autotuning decorator provided by Triton-Ascend, designed to simplify code writing for multi-parameter tuning. Unlike the community version `autotune` which requires users to manually enumerate all `triton.Config` combinations, `max_autotune` allows users to provide only a few base configurations (such as block sizes), and automatically includes related compiler options (such as `num_stages`, `enable_hivm_auto_cv_balance`, etc.) in the optimal combination search space. Users can also explicitly control the search range through parameter lists.
+`max_autotune` is an enhanced autotuning decorator provided by Triton Ascend, designed to simplify code writing for multi-parameter tuning. Unlike the community version `autotune` which requires users to manually enumerate all `triton.Config` combinations, `max_autotune` allows users to provide only a few base configurations (such as block sizes), and automatically includes related compiler options (such as `num_stages`, `enable_hivm_auto_cv_balance`, etc.) in the optimal combination search space. Users can also explicitly control the search range through parameter lists.
 
 **Applicable Scenarios**: `cube`, `mix`, and `vector` operators on Ascend NPU, especially suitable for scenarios requiring simultaneous adjustment of multiple hardware-related parameters.
 

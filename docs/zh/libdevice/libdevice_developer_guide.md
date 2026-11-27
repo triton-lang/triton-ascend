@@ -1,8 +1,8 @@
-# Libdevice 开发者手册
+# Libdevice开发者手册
 
-## SIMT 编译示例
+## SIMT编译示例
 
-使用 SIMT 编译的 Triton Kernel 示例。通过 Kernel 启动参数设置 `compile_mode='simt_only'`，即可启用纯 SIMT 编译。
+使用SIMT编译的Triton Kernel示例。通过Kernel启动参数设置 `compile_mode='simt_only'`，即可启用纯SIMT编译。
 
 ```python
 # Enable libdevice SIMT compilation
@@ -257,7 +257,7 @@ triton.language.extra.cann.libdevice.atan(x, _builder=None)
 
 ### OP概述
 
-反正切函数，计算 x / y 的反正切值。
+反正切函数，计算x / y的反正切值。
 
 原型：
 
@@ -270,7 +270,7 @@ triton.language.extra.cann.libdevice.atan2(x, y, _builder=None)
 - x: `float32`
 - y: `float32`
 
-返回值： `tl.tensor`, 返回 x / y 的反正切值，取值范围 \[-π, π] 弧度。
+返回值： `tl.tensor`, 返回x / y的反正切值，取值范围 \[-π, π] 弧度。
 
 返回类型：`float32`
 
@@ -324,7 +324,7 @@ triton.language.extra.cann.libdevice.brev(x, _builder=None)
 
 ### OP概述
 
-字节排列操作，从两个32位整数中选择字节组成新整数。输入整数 x 和 y 的字节顺序如下。
+字节排列操作，从两个32位整数中选择字节组成新整数。输入整数x和y的字节顺序如下。
 
 ```cpp
 input[0] = x<7:0>     input[1] = x<15:8>
@@ -333,7 +333,7 @@ input[4] = y<7:0>     input[5] = y<15:8>
 input[6] = y<23:16>   input[7] = y<31:24>
 ```
 
-字节选择参数 s 为32位整数，各比特位与字节选择对应关系如下。
+字节选择参数s为32位整数，各比特位与字节选择对应关系如下。
 
 ```cpp
 selector[0] = s<2:0>    selector[1] = s<6:4>
@@ -354,7 +354,7 @@ triton.language.extra.cann.libdevice.byte_perm(x, y, s, _builder=None)
 - y: `int32`
 - s: `int32`
 
-返回值： `tl.tensor`, 返回值 return\[n] := input\[selector\[n]]，n 表示输出整数的第 n 个字节。
+返回值： `tl.tensor`, 返回值 return\[n] := input\[selector\[n]]，n表示输出整数的第n个字节。
 
 返回类型：`int32`
 
@@ -386,7 +386,7 @@ triton.language.extra.cann.libdevice.cbrt(x, _builder=None)
 
 ### OP概述
 
-向上取整，返回大于或等于 x 的最小整数。
+向上取整，返回大于或等于x的最小整数。
 
 原型：
 
@@ -430,7 +430,7 @@ triton.language.extra.cann.libdevice.clz(x, _builder=None)
 
 ### OP概述
 
-生成一个浮点数，其绝对值等于 x 的绝对值，符号与 y 相同。
+生成一个浮点数，其绝对值等于x的绝对值，符号与y相同。
 
 原型：
 
@@ -443,7 +443,7 @@ triton.language.extra.cann.libdevice.copysign(x, y, _builder=None)
 - x: `float32`
 - y: `float32`
 
-返回值： `tl.tensor`, 返回一个浮点数，其绝对值等于 x 的绝对值，符号与 y 相同。
+返回值： `tl.tensor`, 返回一个浮点数，其绝对值等于x的绝对值，符号与y相同。
 
 返回类型：`float32`
 
@@ -497,7 +497,7 @@ triton.language.extra.cann.libdevice.cosh(x, _builder=None)
 
 ### OP概述
 
-计算 cos(π × x) 的值。
+计算cos(π × x) 的值。
 
 原型：
 
@@ -509,7 +509,7 @@ triton.language.extra.cann.libdevice.cospi(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 cos(π × x) 的值。
+返回值： `tl.tensor`, 返回cos(π × x) 的值。
 
 返回类型：`float32`
 
@@ -677,7 +677,7 @@ triton.language.extra.cann.libdevice.erf(x, _builder=None)
 
 ### OP概述
 
-计算输入参数的互补误差函数值，即 1 - erf(x)。
+计算输入参数的互补误差函数值，即1 - erf(x)。
 
 原型：
 
@@ -699,7 +699,7 @@ triton.language.extra.cann.libdevice.erfc(x, _builder=None)
 
 ### OP概述
 
-逆互补误差函数，找到满足 x = erfc(y) 的值 y。
+逆互补误差函数，找到满足x = erfc(y) 的值y。
 
 原型：
 
@@ -721,7 +721,7 @@ triton.language.extra.cann.libdevice.erfcinv(x, _builder=None)
 
 ### OP概述
 
-计算输入参数的缩放互补误差函数值，即 exp(x²) × erfc(x)。
+计算输入参数的缩放互补误差函数值，即exp(x²) × erfc(x)。
 
 原型：
 
@@ -743,7 +743,7 @@ triton.language.extra.cann.libdevice.erfcx(x, _builder=None)
 
 ### OP概述
 
-逆误差函数，找到满足 x = erf(y) 的值 y。
+逆误差函数，找到满足x = erf(y) 的值y。
 
 原型：
 
@@ -765,7 +765,7 @@ triton.language.extra.cann.libdevice.erfinv(x, _builder=None)
 
 ### OP概述
 
-指数函数，计算 e 的 x 次方。
+指数函数，计算e的x次方。
 
 原型：
 
@@ -777,7 +777,7 @@ triton.language.extra.cann.libdevice.exp(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 e 的 x 次方的计算结果。
+返回值： `tl.tensor`, 返回e的x次方的计算结果。
 
 返回类型：`float32`
 
@@ -787,7 +787,7 @@ triton.language.extra.cann.libdevice.exp(x, _builder=None)
 
 ### OP概述
 
-以 10 为底的指数函数，计算 10 的 x 次方。
+以10为底的指数函数，计算10的x次方。
 
 原型：
 
@@ -799,7 +799,7 @@ triton.language.extra.cann.libdevice.exp10(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 10 的 x 次方的计算结果。
+返回值： `tl.tensor`, 返回10的x次方的计算结果。
 
 返回类型：`float32`
 
@@ -809,7 +809,7 @@ triton.language.extra.cann.libdevice.exp10(x, _builder=None)
 
 ### OP概述
 
-以 2 为底的指数函数，计算 2 的 x 次方。
+以2为底的指数函数，计算2的x次方。
 
 原型：
 
@@ -821,7 +821,7 @@ triton.language.extra.cann.libdevice.exp2(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 2 的 x 次方的计算结果。
+返回值： `tl.tensor`, 返回2的x次方的计算结果。
 
 返回类型：`float32`
 
@@ -831,7 +831,7 @@ triton.language.extra.cann.libdevice.exp2(x, _builder=None)
 
 ### OP概述
 
-计算 e 的 x 次方减 1 的结果。
+计算e的x次方减1的结果。
 
 原型：
 
@@ -843,7 +843,7 @@ triton.language.extra.cann.libdevice.expm1(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 e 的 x 次方减 1 的计算结果。
+返回值： `tl.tensor`, 返回e的x次方减1的计算结果。
 
 返回类型：`float32`
 
@@ -920,7 +920,7 @@ triton.language.extra.cann.libdevice.fast_expf(x, _builder=None)
 
 ### OP概述
 
-快速近似以 10 为底的指数函数。
+快速近似以10为底的指数函数。
 
 原型：
 
@@ -932,7 +932,7 @@ triton.language.extra.cann.libdevice.fast_exp10f(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回快速近似以 10 为底的指数函数的结果。
+返回值： `tl.tensor`, 返回快速近似以10为底的指数函数的结果。
 
 返回类型：`float32`
 
@@ -964,7 +964,7 @@ triton.language.extra.cann.libdevice.fast_logf(x, _builder=None)
 
 ### OP概述
 
-快速近似以 10 为底的对数函数。
+快速近似以10为底的对数函数。
 
 原型：
 
@@ -976,7 +976,7 @@ triton.language.extra.cann.libdevice.fast_log10f(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回快速近似以 10 为底的对数函数的结果。
+返回值： `tl.tensor`, 返回快速近似以10为底的对数函数的结果。
 
 返回类型：`float32`
 
@@ -986,7 +986,7 @@ triton.language.extra.cann.libdevice.fast_log10f(x, _builder=None)
 
 ### OP概述
 
-快速近似以 2 为底的对数函数。
+快速近似以2为底的对数函数。
 
 原型：
 
@@ -998,7 +998,7 @@ triton.language.extra.cann.libdevice.fast_log2f(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回快速近似以 2 为底的对数函数的结果。
+返回值： `tl.tensor`, 返回快速近似以2为底的对数函数的结果。
 
 返回类型：`float32`
 
@@ -1075,7 +1075,7 @@ triton.language.extra.cann.libdevice.fast_tanf(x, _builder=None)
 
 ### OP概述
 
-使用快速近似算法计算 x 的双曲正切值。
+使用快速近似算法计算x的双曲正切值。
 
 原型：
 
@@ -1087,7 +1087,7 @@ triton.language.extra.cann.libdevice.fast_tanhf(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的双曲正切快速近似值。
+返回值： `tl.tensor`, 返回x的双曲正切快速近似值。
 
 返回类型：`float32`
 
@@ -1097,7 +1097,7 @@ triton.language.extra.cann.libdevice.fast_tanhf(x, _builder=None)
 
 ### OP概述
 
-计算 x 与 y 的正差。当 x > y 时，返回 x - y，否则返回 0。
+计算x与y的正差。当x > y时，返回x - y，否则返回0。
 
 原型：
 
@@ -1110,7 +1110,7 @@ triton.language.extra.cann.libdevice.fdim(x, y, _builder=None)
 - x: `float32`
 - y: `float32`
 
-返回值： `tl.tensor`, 返回 x 与 y 之间的正差。
+返回值： `tl.tensor`, 返回x与y之间的正差。
 
 返回类型：`float32`
 
@@ -1154,7 +1154,7 @@ triton.language.extra.cann.libdevice.finitef(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 若输入为有限值返回 True，否则返回 False。
+返回值： `tl.tensor`, 若输入为有限值返回True，否则返回False。
 
 返回类型：`bool`
 
@@ -1208,7 +1208,7 @@ triton.language.extra.cann.libdevice.float_as_uint(x, _builder=None)
 
 ### OP概述
 
-使用最近偶数舍入模式将 x 从 32 位浮点数转换为 16 位浮点数。
+使用最近偶数舍入模式将x从32位浮点数转换为16位浮点数。
 
 原型：
 
@@ -1220,7 +1220,7 @@ triton.language.extra.cann.libdevice.float2half_rn(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回转换后的 16 位浮点数。
+返回值： `tl.tensor`, 返回转换后的16位浮点数。
 
 返回类型：`float16`
 
@@ -1582,7 +1582,7 @@ triton.language.extra.cann.libdevice.float2ull_rz(x, _builder=None)
 
 ### OP概述
 
-向下取整，返回小于或等于 x 的最大整数。
+向下取整，返回小于或等于x的最大整数。
 
 原型：
 
@@ -1604,7 +1604,7 @@ triton.language.extra.cann.libdevice.floor(x, _builder=None)
 
 ### OP概述
 
-融合乘加，计算 x × y + z。
+融合乘加，计算x × y + z。
 
 原型：
 
@@ -1724,7 +1724,7 @@ triton.language.extra.cann.libdevice.fma_rz(x, y, z, _builder=None)
 
 ### OP概述
 
-浮点数取模，计算 x / y 的余数，结果与 x 同号。
+浮点数取模，计算x / y的余数，结果与x同号。
 
 原型：
 
@@ -1769,7 +1769,7 @@ triton.language.extra.cann.libdevice.gamma(x, _builder=None)
 
 ### OP概述
 
-计算 x 和 y 的平均值。
+计算x和y的平均值。
 
 原型：
 
@@ -1780,9 +1780,9 @@ triton.language.extra.cann.libdevice.hadd(x, y, _builder=None)
 输入类型：
 
 - x: `int32` 或 `uint32`
-- y: `int32` 或 `uint32`，类型必须与 x 相同
+- y: `int32` 或 `uint32`，类型必须与x相同
 
-返回值： `tl.tensor`, 返回 x 和 y 的平均值。
+返回值： `tl.tensor`, 返回x和y的平均值。
 
 返回类型：与输入类型相同（`int32` 或 `uint32`）。
 
@@ -1792,7 +1792,7 @@ triton.language.extra.cann.libdevice.hadd(x, y, _builder=None)
 
 ### OP概述
 
-将 x 从 16 位浮点数转换为 32 位浮点数。
+将x从16位浮点数转换为32位浮点数。
 
 原型：
 
@@ -1804,7 +1804,7 @@ triton.language.extra.cann.libdevice.half2float(x, _builder=None)
 
 - x: `float16`
 
-返回值： `tl.tensor`, 返回转换后的 32 位浮点数。
+返回值： `tl.tensor`, 返回转换后的32位浮点数。
 
 返回类型：`float32`
 
@@ -1814,7 +1814,7 @@ triton.language.extra.cann.libdevice.half2float(x, _builder=None)
 
 ### OP概述
 
-计算 x 和 y 之间的欧几里得距离。
+计算x和y之间的欧几里得距离。
 
 原型：
 
@@ -1827,7 +1827,7 @@ triton.language.extra.cann.libdevice.hypot(x, y, _builder=None)
 - x: `float32`
 - y: `float32`
 
-返回值： `tl.tensor`, 返回 x 和 y 之间的欧几里得距离。
+返回值： `tl.tensor`, 返回x和y之间的欧几里得距离。
 
 返回类型：`float32`
 
@@ -1981,7 +1981,7 @@ triton.language.extra.cann.libdevice.isinf(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 若输入为无穷大返回 True，否则返回 False。
+返回值： `tl.tensor`, 若输入为无穷大返回True，否则返回False。
 
 返回类型：`bool`
 
@@ -1991,7 +1991,7 @@ triton.language.extra.cann.libdevice.isinf(x, _builder=None)
 
 ### OP概述
 
-判断输入是否为 NaN（非数值）。
+判断输入是否为NaN（非数值）。
 
 原型：
 
@@ -2003,7 +2003,7 @@ triton.language.extra.cann.libdevice.isnan(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 若输入为 NaN 返回 True，否则返回 False。
+返回值： `tl.tensor`, 若输入为NaN返回True，否则返回False。
 
 返回类型：`bool`
 
@@ -2057,7 +2057,7 @@ triton.language.extra.cann.libdevice.j1(x, _builder=None)
 
 ### OP概述
 
-计算输入参数的 n 阶第一类贝塞尔函数值。
+计算输入参数的n阶第一类贝塞尔函数值。
 
 原型：
 
@@ -2070,7 +2070,7 @@ triton.language.extra.cann.libdevice.jn(n, x, _builder=None)
 - n: `int32`
 - x: `float32`
 
-返回值： `tl.tensor`, 返回输入参数的 n 阶第一类贝塞尔函数值。
+返回值： `tl.tensor`, 返回输入参数的n阶第一类贝塞尔函数值。
 
 返回类型：`float32`
 
@@ -2080,7 +2080,7 @@ triton.language.extra.cann.libdevice.jn(n, x, _builder=None)
 
 ### OP概述
 
-计算 x × 2^exp 的值。
+计算x × 2^exp的值。
 
 原型：
 
@@ -2093,7 +2093,7 @@ triton.language.extra.cann.libdevice.ldexp(x, exp, _builder=None)
 - x: `float32`
 - exp: `int32`
 
-返回值： `tl.tensor`, 返回 x × 2^exp 的计算结果。
+返回值： `tl.tensor`, 返回x × 2^exp的计算结果。
 
 返回类型：`float32`
 
@@ -2103,7 +2103,7 @@ triton.language.extra.cann.libdevice.ldexp(x, exp, _builder=None)
 
 ### OP概述
 
-计算输入为 x 的伽马函数绝对值的自然对数。
+计算输入为x的伽马函数绝对值的自然对数。
 
 原型：
 
@@ -2115,7 +2115,7 @@ triton.language.extra.cann.libdevice.lgamma(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回输入为 x 的伽马函数绝对值的自然对数。
+返回值： `tl.tensor`, 返回输入为x的伽马函数绝对值的自然对数。
 
 返回类型：`float32`
 
@@ -2257,7 +2257,7 @@ triton.language.extra.cann.libdevice.llround(x, _builder=None)
 
 ### OP概述
 
-计算输入为 x 的以 e 为底的对数。
+计算输入为x的以e为底的对数。
 
 原型：
 
@@ -2269,7 +2269,7 @@ triton.language.extra.cann.libdevice.log(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回输入为 x 的以 e 为底的对数。
+返回值： `tl.tensor`, 返回输入为x的以e为底的对数。
 
 返回类型：`float32`
 
@@ -2279,7 +2279,7 @@ triton.language.extra.cann.libdevice.log(x, _builder=None)
 
 ### OP概述
 
-计算输入为 x 的以 10 为底的对数。
+计算输入为x的以10为底的对数。
 
 原型：
 
@@ -2291,7 +2291,7 @@ triton.language.extra.cann.libdevice.log10(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回输入为 x 的以 10 为底的对数。
+返回值： `tl.tensor`, 返回输入为x的以10为底的对数。
 
 返回类型：`float32`
 
@@ -2301,7 +2301,7 @@ triton.language.extra.cann.libdevice.log10(x, _builder=None)
 
 ### OP概述
 
-计算 log(1 + x) 的值。
+计算log(1 + x) 的值。
 
 原型：
 
@@ -2313,7 +2313,7 @@ triton.language.extra.cann.libdevice.log1p(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 log(1 + x) 的计算结果。
+返回值： `tl.tensor`, 返回log(1 + x) 的计算结果。
 
 返回类型：`float32`
 
@@ -2323,7 +2323,7 @@ triton.language.extra.cann.libdevice.log1p(x, _builder=None)
 
 ### OP概述
 
-计算输入为 x 的以 2 为底的对数。
+计算输入为x的以2为底的对数。
 
 原型：
 
@@ -2335,7 +2335,7 @@ triton.language.extra.cann.libdevice.log2(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回输入为 x 的以 2 为底的对数。
+返回值： `tl.tensor`, 返回输入为x的以2为底的对数。
 
 返回类型：`float32`
 
@@ -2367,7 +2367,7 @@ triton.language.extra.cann.libdevice.logb(x, _builder=None)
 
 ### OP概述
 
-逐元素计算 x 和 y 的最大值。
+逐元素计算x和y的最大值。
 
 原型：
 
@@ -2378,9 +2378,9 @@ triton.language.extra.cann.libdevice.max(x, y, _builder=None)
 输入类型：
 
 - x: `int32`, `float32`
-- y: `int32`, `float32`，类型必须与 x 相同
+- y: `int32`, `float32`，类型必须与x相同
 
-返回值： `tl.tensor`, 返回 x 和 y 的逐元素最大值。
+返回值： `tl.tensor`, 返回x和y的逐元素最大值。
 
 返回类型：与输入类型相同（`int32` 或 `float32`）。
 
@@ -2390,7 +2390,7 @@ triton.language.extra.cann.libdevice.max(x, y, _builder=None)
 
 ### OP概述
 
-逐元素计算 x 和 y 的最小值。
+逐元素计算x和y的最小值。
 
 原型：
 
@@ -2401,9 +2401,9 @@ triton.language.extra.cann.libdevice.min(x, y, _builder=None)
 输入类型：
 
 - x: `int32`, `float32`
-- y: `int32`, `float32`，类型必须与 x 相同
+- y: `int32`, `float32`，类型必须与x相同
 
-返回值： `tl.tensor`, 返回 x 和 y 的逐元素最小值。
+返回值： `tl.tensor`, 返回x和y的逐元素最小值。
 
 返回类型：与输入类型相同（`int32` 或 `float32`）。
 
@@ -2505,7 +2505,7 @@ triton.language.extra.cann.libdevice.mul_rz(x, y, _builder=None)
 
 ### OP概述
 
-计算 x 和 y 的低24位乘法结果。
+计算x和y的低24位乘法结果。
 
 原型：
 
@@ -2516,9 +2516,9 @@ triton.language.extra.cann.libdevice.mul24(x, y, _builder=None)
 输入类型：
 
 - x: `int32` 或 `uint32`
-- y: `int32` 或 `uint32`，类型必须与 x 相同
+- y: `int32` 或 `uint32`，类型必须与x相同
 
-返回值： `tl.tensor`, 返回 x 和 y 的低24位乘法结果。
+返回值： `tl.tensor`, 返回x和y的低24位乘法结果。
 
 返回类型：与输入类型相同（`int32` 或 `uint32`）。
 
@@ -2528,7 +2528,7 @@ triton.language.extra.cann.libdevice.mul24(x, y, _builder=None)
 
 ### OP概述
 
-计算 x 和 y 的乘法结果的高 32 位。
+计算x和y的乘法结果的高32位。
 
 原型：
 
@@ -2539,9 +2539,9 @@ triton.language.extra.cann.libdevice.mulhi(x, y, _builder=None)
 输入类型：
 
 - x: `int32` 或 `uint32`
-- y: `int32` 或 `uint32`，类型必须与 x 相同
+- y: `int32` 或 `uint32`，类型必须与x相同
 
-返回值： `tl.tensor`, 返回 x 和 y 的乘法结果的高 32 位。
+返回值： `tl.tensor`, 返回x和y的乘法结果的高32位。
 
 返回类型：与输入类型相同（`int32` 或 `uint32`）。
 
@@ -2551,7 +2551,7 @@ triton.language.extra.cann.libdevice.mulhi(x, y, _builder=None)
 
 ### OP概述
 
-根据 x 生成 NaN 值。
+根据x生成NaN值。
 
 原型：
 
@@ -2563,7 +2563,7 @@ triton.language.extra.cann.libdevice.nan(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回生成的 NaN 值。
+返回值： `tl.tensor`, 返回生成的NaN值。
 
 返回类型：`float32`
 
@@ -2573,7 +2573,7 @@ triton.language.extra.cann.libdevice.nan(x, _builder=None)
 
 ### OP概述
 
-将 x 转换为最近邻整数。
+将x转换为最近邻整数。
 
 原型：
 
@@ -2595,7 +2595,7 @@ triton.language.extra.cann.libdevice.nearbyint(x, _builder=None)
 
 ### OP概述
 
-计算从 x 方向朝 y 的下一个可表示浮点数。
+计算从x方向朝y的下一个可表示浮点数。
 
 原型：
 
@@ -2618,7 +2618,7 @@ triton.language.extra.cann.libdevice.nextafter(x, y, _builder=None)
 
 ### OP概述
 
-计算三维向量的欧几里得范数，即 sqrt(x² + y² + z²)。
+计算三维向量的欧几里得范数，即sqrt(x² + y² + z²)。
 
 原型：
 
@@ -2642,7 +2642,7 @@ triton.language.extra.cann.libdevice.norm3d(x, y, z, _builder=None)
 
 ### OP概述
 
-计算四维向量的欧几里得范数，即 sqrt(x² + y² + z² + w²)。
+计算四维向量的欧几里得范数，即sqrt(x² + y² + z² + w²)。
 
 原型：
 
@@ -2711,7 +2711,7 @@ triton.language.extra.cann.libdevice.normcdfinv(x, _builder=None)
 
 ### OP概述
 
-计算 x 中置位为 1 的数量。
+计算x中置位为1的数量。
 
 原型：
 
@@ -2723,7 +2723,7 @@ triton.language.extra.cann.libdevice.popc(x, _builder=None)
 
 - x: `int32`
 
-返回值： `tl.tensor`, 返回 x 中置位为 1 的数量，取值范围 \[0, 32]。
+返回值： `tl.tensor`, 返回x中置位为1的数量，取值范围 \[0, 32]。
 
 返回类型：`int32`
 
@@ -2733,7 +2733,7 @@ triton.language.extra.cann.libdevice.popc(x, _builder=None)
 
 ### OP概述
 
-幂函数，计算 x 的 y 次方。
+幂函数，计算x的y次方。
 
 原型：
 
@@ -2746,7 +2746,7 @@ triton.language.extra.cann.libdevice.pow(x, y, _builder=None)
 - x: `float32`
 - y: `float32`
 
-返回值： `tl.tensor`, 返回 x 的 y 次方。
+返回值： `tl.tensor`, 返回x的y次方。
 
 返回类型：`float32`
 
@@ -2756,7 +2756,7 @@ triton.language.extra.cann.libdevice.pow(x, y, _builder=None)
 
 ### OP概述
 
-计算 x 的立方根倒数。
+计算x的立方根倒数。
 
 原型：
 
@@ -2768,7 +2768,7 @@ triton.language.extra.cann.libdevice.rcbrt(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的立方根倒数。
+返回值： `tl.tensor`, 返回x的立方根倒数。
 
 返回类型：`float32`
 
@@ -2790,7 +2790,7 @@ triton.language.extra.cann.libdevice.rcp_rd(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 1 / x。
+返回值： `tl.tensor`, 返回1 / x。
 
 返回类型：`float32`
 
@@ -2812,7 +2812,7 @@ triton.language.extra.cann.libdevice.rcp_rn(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 1 / x。
+返回值： `tl.tensor`, 返回1 / x。
 
 返回类型：`float32`
 
@@ -2834,7 +2834,7 @@ triton.language.extra.cann.libdevice.rcp_ru(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 1 / x。
+返回值： `tl.tensor`, 返回1 / x。
 
 返回类型：`float32`
 
@@ -2856,7 +2856,7 @@ triton.language.extra.cann.libdevice.rcp_rz(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 1 / x。
+返回值： `tl.tensor`, 返回1 / x。
 
 返回类型：`float32`
 
@@ -2866,7 +2866,7 @@ triton.language.extra.cann.libdevice.rcp_rz(x, _builder=None)
 
 ### OP概述
 
-计算 x 的倒数（即 1 / x）。
+计算x的倒数（即1 / x）。
 
 原型：
 
@@ -2878,7 +2878,7 @@ triton.language.extra.cann.libdevice.reciprocal(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 1 / x。
+返回值： `tl.tensor`, 返回1 / x。
 
 返回类型：`float32`
 
@@ -2888,7 +2888,7 @@ triton.language.extra.cann.libdevice.reciprocal(x, _builder=None)
 
 ### OP概述
 
-修正线性单元函数，当 x > 0 时返回 x，否则返回 0。
+修正线性单元函数，当x > 0时返回x，否则返回0。
 
 原型：
 
@@ -2910,7 +2910,7 @@ triton.language.extra.cann.libdevice.relu(x, _builder=None)
 
 ### OP概述
 
-计算 x 对 y 的余数，满足 r = x - ny，其中 n 是 x / y 的最近邻整数。
+计算x对y的余数，满足r = x - ny，其中n是x / y的最近邻整数。
 
 原型：
 
@@ -2923,7 +2923,7 @@ triton.language.extra.cann.libdevice.remainder(x, y, _builder=None)
 - x: `float32`
 - y: `float32`
 
-返回值： `tl.tensor`, 返回 x 对 y 的余数。
+返回值： `tl.tensor`, 返回x对y的余数。
 
 返回类型：`float32`
 
@@ -2933,7 +2933,7 @@ triton.language.extra.cann.libdevice.remainder(x, y, _builder=None)
 
 ### OP概述
 
-计算 x 和 y 平均值的取整结果。
+计算x和y平均值的取整结果。
 
 原型：
 
@@ -2944,9 +2944,9 @@ triton.language.extra.cann.libdevice.rhadd(x, y, _builder=None)
 输入类型：
 
 - x: `int32` 或 `uint32`
-- y: `int32` 或 `uint32`，类型必须与 x 相同
+- y: `int32` 或 `uint32`，类型必须与x相同
 
-返回值： `tl.tensor`, 返回 x 和 y 平均值的取整结果。
+返回值： `tl.tensor`, 返回x和y平均值的取整结果。
 
 返回类型：与输入类型相同（`int32` 或 `uint32`）。
 
@@ -2956,7 +2956,7 @@ triton.language.extra.cann.libdevice.rhadd(x, y, _builder=None)
 
 ### OP概述
 
-计算 x 和 y 之间的欧几里得距离的倒数。
+计算x和y之间的欧几里得距离的倒数。
 
 原型：
 
@@ -2969,7 +2969,7 @@ triton.language.extra.cann.libdevice.rhypot(x, y, _builder=None)
 - x: `float32`
 - y: `float32`
 
-返回值： `tl.tensor`, 返回 x 和 y 之间的欧几里得距离的倒数。
+返回值： `tl.tensor`, 返回x和y之间的欧几里得距离的倒数。
 
 返回类型：`float32`
 
@@ -2979,7 +2979,7 @@ triton.language.extra.cann.libdevice.rhypot(x, y, _builder=None)
 
 ### OP概述
 
-按银行家舍入模式（就近取整，.5时取就近偶数）计算 x 的最近邻整数。
+按银行家舍入模式（就近取整，.5时取就近偶数）计算x的最近邻整数。
 
 原型：
 
@@ -2991,7 +2991,7 @@ triton.language.extra.cann.libdevice.rint(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的最近邻整数。
+返回值： `tl.tensor`, 返回x的最近邻整数。
 
 返回类型：`float32`
 
@@ -3050,7 +3050,7 @@ triton.language.extra.cann.libdevice.rnorm4d(x, y, z, w, _builder=None)
 
 ### OP概述
 
-按银行家舍入模式（就近取整，.5时取就近偶数）计算 x 的最近邻整数。
+按银行家舍入模式（就近取整，.5时取就近偶数）计算x的最近邻整数。
 
 原型：
 
@@ -3062,7 +3062,7 @@ triton.language.extra.cann.libdevice.round(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的最近邻整数。
+返回值： `tl.tensor`, 返回x的最近邻整数。
 
 返回类型：`float32`
 
@@ -3072,7 +3072,7 @@ triton.language.extra.cann.libdevice.round(x, _builder=None)
 
 ### OP概述
 
-计算 x 的平方根倒数。
+计算x的平方根倒数。
 
 原型：
 
@@ -3084,7 +3084,7 @@ triton.language.extra.cann.libdevice.rsqrt(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的平方根倒数。
+返回值： `tl.tensor`, 返回x的平方根倒数。
 
 返回类型：`float32`
 
@@ -3094,7 +3094,7 @@ triton.language.extra.cann.libdevice.rsqrt(x, _builder=None)
 
 ### OP概述
 
-按银行家舍入模式（就近取整，.5时取就近偶数）计算 x 的平方根倒数。
+按银行家舍入模式（就近取整，.5时取就近偶数）计算x的平方根倒数。
 
 原型：
 
@@ -3106,7 +3106,7 @@ triton.language.extra.cann.libdevice.rsqrt_rn(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的平方根倒数。
+返回值： `tl.tensor`, 返回x的平方根倒数。
 
 返回类型：`float32`
 
@@ -3116,7 +3116,7 @@ triton.language.extra.cann.libdevice.rsqrt_rn(x, _builder=None)
 
 ### OP概述
 
-计算有符号或无符号 32 位整数的 |x-y|+z。
+计算有符号或无符号32位整数的 |x-y|+z。
 
 原型：
 
@@ -3140,7 +3140,7 @@ triton.language.extra.cann.libdevice.sad(x, y, z, _builder=None)
 
 ### OP概述
 
-将 x 限制在 \[+0.0, 1.0] 范围内。
+将x限制在 \[+0.0, 1.0] 范围内。
 
 原型：
 
@@ -3152,7 +3152,7 @@ triton.language.extra.cann.libdevice.saturatef(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的饱和值，取值范围 \[+0.0, 1.0]。
+返回值： `tl.tensor`, 返回x的饱和值，取值范围 \[+0.0, 1.0]。
 
 返回类型：`float32`
 
@@ -3162,7 +3162,7 @@ triton.language.extra.cann.libdevice.saturatef(x, _builder=None)
 
 ### OP概述
 
-计算 x × 2^n 的值。
+计算x × 2^n的值。
 
 原型：
 
@@ -3175,7 +3175,7 @@ triton.language.extra.cann.libdevice.scalbn(x, n, _builder=None)
 - x: `float32`
 - n: `int32`
 
-返回值： `tl.tensor`, 返回 x × 2^n 的计算结果。
+返回值： `tl.tensor`, 返回x × 2^n的计算结果。
 
 返回类型：`float32`
 
@@ -3185,7 +3185,7 @@ triton.language.extra.cann.libdevice.scalbn(x, n, _builder=None)
 
 ### OP概述
 
-获取 x 的符号位。
+获取x的符号位。
 
 原型：
 
@@ -3197,7 +3197,7 @@ triton.language.extra.cann.libdevice.signbit(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的符号位。
+返回值： `tl.tensor`, 返回x的符号位。
 
 返回类型：`int32`
 
@@ -3207,7 +3207,7 @@ triton.language.extra.cann.libdevice.signbit(x, _builder=None)
 
 ### OP概述
 
-计算输入参数 x （弧度）的正弦值。
+计算输入参数x（弧度）的正弦值。
 
 原型：
 
@@ -3219,7 +3219,7 @@ triton.language.extra.cann.libdevice.sin(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回输入 x 的正弦值。
+返回值： `tl.tensor`, 返回输入x的正弦值。
 
 返回类型：`float32`
 
@@ -3229,7 +3229,7 @@ triton.language.extra.cann.libdevice.sin(x, _builder=None)
 
 ### OP概述
 
-计算输入参数 x 的双曲正弦值。
+计算输入参数x的双曲正弦值。
 
 原型：
 
@@ -3241,7 +3241,7 @@ triton.language.extra.cann.libdevice.sinh(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回输入 x 的双曲正弦值。
+返回值： `tl.tensor`, 返回输入x的双曲正弦值。
 
 返回类型：`float32`
 
@@ -3251,7 +3251,7 @@ triton.language.extra.cann.libdevice.sinh(x, _builder=None)
 
 ### OP概述
 
-计算 sin(π × x) 的值。
+计算sin(π × x) 的值。
 
 原型：
 
@@ -3263,7 +3263,7 @@ triton.language.extra.cann.libdevice.sinpi(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 sin(π × x) 的值。
+返回值： `tl.tensor`, 返回sin(π × x) 的值。
 
 返回类型：`float32`
 
@@ -3273,7 +3273,7 @@ triton.language.extra.cann.libdevice.sinpi(x, _builder=None)
 
 ### OP概述
 
-计算 x 的平方根值。
+计算x的平方根值。
 
 原型：
 
@@ -3285,7 +3285,7 @@ triton.language.extra.cann.libdevice.sqrt(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的平方根值。
+返回值： `tl.tensor`, 返回x的平方根值。
 
 返回类型：`float32`
 
@@ -3295,7 +3295,7 @@ triton.language.extra.cann.libdevice.sqrt(x, _builder=None)
 
 ### OP概述
 
-向下舍入模式计算 x 的平方根值。
+向下舍入模式计算x的平方根值。
 
 原型：
 
@@ -3307,7 +3307,7 @@ triton.language.extra.cann.libdevice.sqrt_rd(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的平方根值。
+返回值： `tl.tensor`, 返回x的平方根值。
 
 返回类型：`float32`
 
@@ -3317,7 +3317,7 @@ triton.language.extra.cann.libdevice.sqrt_rd(x, _builder=None)
 
 ### OP概述
 
-最近偶数舍入模式计算 x 的平方根值。
+最近偶数舍入模式计算x的平方根值。
 
 原型：
 
@@ -3329,7 +3329,7 @@ triton.language.extra.cann.libdevice.sqrt_rn(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的平方根值。
+返回值： `tl.tensor`, 返回x的平方根值。
 
 返回类型：`float32`
 
@@ -3339,7 +3339,7 @@ triton.language.extra.cann.libdevice.sqrt_rn(x, _builder=None)
 
 ### OP概述
 
-向上舍入模式计算 x 的平方根值。
+向上舍入模式计算x的平方根值。
 
 原型：
 
@@ -3351,7 +3351,7 @@ triton.language.extra.cann.libdevice.sqrt_ru(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的平方根值。
+返回值： `tl.tensor`, 返回x的平方根值。
 
 返回类型：`float32`
 
@@ -3361,7 +3361,7 @@ triton.language.extra.cann.libdevice.sqrt_ru(x, _builder=None)
 
 ### OP概述
 
-向零舍入模式计算 x 的平方根值。
+向零舍入模式计算x的平方根值。
 
 原型：
 
@@ -3373,7 +3373,7 @@ triton.language.extra.cann.libdevice.sqrt_rz(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回 x 的平方根值。
+返回值： `tl.tensor`, 返回x的平方根值。
 
 返回类型：`float32`
 
@@ -3475,7 +3475,7 @@ triton.language.extra.cann.libdevice.sub_rz(x, y, _builder=None)
 
 ### OP概述
 
-计算输入参数 x （弧度）的正切值。
+计算输入参数x（弧度）的正切值。
 
 原型：
 
@@ -3487,7 +3487,7 @@ triton.language.extra.cann.libdevice.tan(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回输入 x 的正切值。
+返回值： `tl.tensor`, 返回输入x的正切值。
 
 返回类型：`float32`
 
@@ -3497,7 +3497,7 @@ triton.language.extra.cann.libdevice.tan(x, _builder=None)
 
 ### OP概述
 
-计算输入参数 x 的双曲正切值。
+计算输入参数x的双曲正切值。
 
 原型：
 
@@ -3509,7 +3509,7 @@ triton.language.extra.cann.libdevice.tanh(x, _builder=None)
 
 - x: `float32`
 
-返回值： `tl.tensor`, 返回输入 x 的双曲正切值。
+返回值： `tl.tensor`, 返回输入x的双曲正切值。
 
 返回类型：`float32`
 
@@ -3805,7 +3805,7 @@ triton.language.extra.cann.libdevice.y1(x, _builder=None)
 
 ### OP概述
 
-计算输入参数的 n 阶第二类贝塞尔函数值。
+计算输入参数的n阶第二类贝塞尔函数值。
 
 原型：
 
@@ -3818,7 +3818,7 @@ triton.language.extra.cann.libdevice.yn(n, x, _builder=None)
 - n: `int32`
 - x: `float32`
 
-返回值： `tl.tensor`，返回输入参数的 n 阶第二类贝塞尔函数值。
+返回值： `tl.tensor`，返回输入参数的n阶第二类贝塞尔函数值。
 
 返回类型：`float32`
 

@@ -37,7 +37,7 @@ msDebug does not debug Triton compiler passes themselves. If compilation fails b
 
 ### Generating Debug Information for a Triton Kernel
 
-To enable msDebug support in Triton-Ascend, set the following environment variables:
+To enable msDebug support in Triton Ascend, set the following environment variables:
 
 ```bash
 export LLVM_EXTRACT_DI_LOCAL_VARIABLES=1
@@ -59,7 +59,7 @@ The current implementation passes `--enable-debug-info=true` and `--enable-debug
 - For initial troubleshooting, disable autotuning and use fixed compilation parameters such as `BLOCK_SIZE` and `num_warps`.
 - Online msDebug sessions and exception dumps may conflict when using the same debug channel. Do not enable both at once.
 - Optimizations can change variable lifetimes. Enabling variable debug information does not guarantee that every source variable is available at every stop.
-- Use compatible versions of msDebug, CANN, the driver, firmware, hardware, and Triton-Ascend.
+- Use compatible versions of msDebug, CANN, the driver, firmware, hardware, and Triton Ascend.
 
 For an official introduction, see the [msDebug Quick Start](https://www.hiascend.com/document/detail/zh/mindstudio/latest/msOT/Operatordevelopmenttools/docs/zh/quick_start/msdebug_quick_start.md).
 
@@ -67,7 +67,7 @@ For an official introduction, see the [msDebug Quick Start](https://www.hiascend
 
 The official msDebug documentation lists Ascend A2, A3, 310P, and 950 series products. The available features depend on the msDebug, driver, and CANN versions.
 
-For Triton workloads, also confirm that the Triton-Ascend backend supports the target chip. Check the architecture in compiler logs, kernel dump metadata, or the Triton backend target information.
+For Triton workloads, also confirm that the Triton Ascend backend supports the target chip. Check the architecture in compiler logs, kernel dump metadata, or the Triton backend target information.
 
 Support may differ for SIMD, SIMT, AIC, AIV, core dumps, and local-variable inspection. Refer to the installed msDebug version's `help` output and release notes for the features described in this guide.
 
@@ -886,7 +886,7 @@ llvm-dwarfdump --debug-line "$KERNEL_O" > dwarf-line.txt
 llvm-dwarfdump --debug-loc "$KERNEL_O" > dwarf-locations.txt
 ```
 
-When reporting a Triton-Ascend debugging issue, include a minimal Python example, version information, environment variables, the exact matching `kernel.o`, the DWARF output above, msDebug session logs, the target device/core/block, and the actual stop PC.
+When reporting a Triton Ascend debugging issue, include a minimal Python example, version information, environment variables, the exact matching `kernel.o`, the DWARF output above, msDebug session logs, the target device/core/block, and the actual stop PC.
 
 ## References
 

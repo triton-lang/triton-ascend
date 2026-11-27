@@ -37,7 +37,7 @@ msDebug不用于调试Triton编译器Pass本身。如果程序在生成 `kernel.
 
 ### 为Triton Kernel生成调试信息
 
-当前Triton-Ascend启用msDebug功能需要开启以下环境变量：
+当前Triton Ascend启用msDebug功能需要开启以下环境变量：
 
 ```bash
 export LLVM_EXTRACT_DI_LOCAL_VARIABLES=1
@@ -59,7 +59,7 @@ export TRITON_DISABLE_LINE_INFO=0
 - 首次排查时建议关闭Autotune，固定一组 `BLOCK_SIZE`、`num_warps` 等编译参数；
 - 在线msDebug和异常算子Dump使用同一调试通道时可能冲突，不应同时开启；
 - 部分优化会改变变量生命周期，即使开启变量调试信息，也不能保证每个源码变量始终可打印；
-- msDebug、CANN、驱动、固件、芯片和Triton-Ascend需要使用相互兼容的版本。
+- msDebug、CANN、驱动、固件、芯片和Triton Ascend需要使用相互兼容的版本。
 
 官方快速入门可参考 [msDebug快速入门](https://www.hiascend.com/document/detail/zh/mindstudio/latest/msOT/Operatordevelopmenttools/docs/zh/quick_start/msdebug_quick_start.md)。
 
@@ -67,7 +67,7 @@ export TRITON_DISABLE_LINE_INFO=0
 
 官方msDebug当前文档列出了昇腾A2、A3、310P以及950系列等产品形态，但具体功能范围仍取决于msDebug、驱动和CANN版本。
 
-对于Triton场景，还必须确认当前Triton-Ascend后端支持目标芯片。可以通过编译日志、Kernel Dump中的目标信息或Triton后端Target信息确认实际架构。
+对于Triton场景，还必须确认当前Triton Ascend后端支持目标芯片。可以通过编译日志、Kernel Dump中的目标信息或Triton后端Target信息确认实际架构。
 
 SIMD、SIMT、AIC、AIV、Core Dump和局部变量打印的支持范围可能不同。本文中的功能均应以本机msDebug的 `help` 输出和对应版本发行说明为准。
 
@@ -886,7 +886,7 @@ llvm-dwarfdump --debug-line "$KERNEL_O" > dwarf-line.txt
 llvm-dwarfdump --debug-loc "$KERNEL_O" > dwarf-locations.txt
 ```
 
-提交Triton-Ascend调试问题时，建议同时提供最小Python用例、版本信息、环境变量、完全匹配的`kernel.o`、上述DWARF输出、msDebug会话日志、目标Device/核/Block和实际停止PC。
+提交Triton Ascend调试问题时，建议同时提供最小Python用例、版本信息、环境变量、完全匹配的`kernel.o`、上述DWARF输出、msDebug会话日志、目标Device/核/Block和实际停止PC。
 
 ## 参考资料
 

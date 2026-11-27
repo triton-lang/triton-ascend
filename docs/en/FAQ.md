@@ -1,8 +1,8 @@
-# Triton-Ascend FAQ
+# Triton Ascend FAQ
 
 ## 1. Installation and Environment Configuration
 
-**Q: How can I correctly install Triton-Ascend? Is it possible to install it directly using pip?**
+**Q: How can I correctly install Triton Ascend? Is it possible to install it directly using pip?**
 
 A: You can directly use pip to install it.
 
@@ -10,17 +10,17 @@ A: You can directly use pip to install it.
 pip install triton-ascend
 ```
 
-**Q: Can community Triton and Triton-Ascend coexist?**
+**Q: Can community Triton and Triton Ascend coexist?**
 
-A: For Triton-Ascend 3.2.0 and earlier versions, you need to uninstall the community Triton first before installing Triton-Ascend.
- For Triton-Ascend 3.2.1 and later versions, Triton-Ascend declares Triton as an installation dependency to mitigate the installation overwriting issue. When installing
-Triton-Ascend, the community Triton is installed first,and the Triton-Ascend overwrites the directory with the same name.
-This prevents the installation of triton from overwriting Triton-Ascend when other software packages that depend on Triton are installed.
+A: For Triton Ascend 3.2.0 and earlier versions, you need to uninstall the community Triton first before installing Triton Ascend.
+ For Triton Ascend 3.2.1 and later versions, Triton Ascend declares Triton as an installation dependency to mitigate the installation overwriting issue. When installing
+Triton Ascend, the community Triton is installed first,and the Triton Ascend overwrites the directory with the same name.
+This prevents the installation of Triton from overwriting Triton Ascend when other software packages that depend on Triton are installed.
 The reason why x86 and arm use different versions of the community Triton installation package is that the community provides the arm installation package only from version 3.2.1 onwards.
 Specifically,x86 depends on triton==3.2.0,and arm depends on triton==3.5.0.
 
-- Note: If you install a third-party software or triton itself that depends on Triton after installing Triton-Ascend,the installed Triton-Ascend directory will be overwritten.
-In this case, you also need to uninstall the community Triton and Triton-Ascend first before installing Triton-Ascend.
+- Note: If you install a third-party software or Triton itself that depends on Triton after installing Triton Ascend,the installed Triton Ascend directory will be overwritten.
+In this case, you also need to uninstall the community Triton and Triton Ascend first before installing Triton Ascend.
 
 ```bash
 pip uninstall triton
@@ -28,9 +28,9 @@ pip uninstall triton-ascend
 pip install triton-ascend
 ```
 
-**Q: Can Triton-Ascend be used on non-Ascend hardware (such as CUDA AMD)?**
+**Q: Can Triton Ascend be used on non-Ascend hardware (such as CUDA AMD)?**
 
-A: No. Triton-Ascend can be used only in the Ascend NPU hardware environment.
+A: No. Triton Ascend can be used only in the Ascend NPU hardware environment.
 
 ## 2. Accuracy and Numerical Consistency Issues
 
@@ -57,9 +57,9 @@ A: You can use tl.device_print to print the tensor in the kernel. For details, s
 
 ## 5. Development and Contributions
 
-**Q: How can I build and test Triton-Ascend locally?**
+**Q: How can I build and test Triton Ascend locally?**
 
-A: For details about the local build and test methods, see [Installing Triton-Ascend Using the Source Code](./installation_guide.md#install-from-source).
+A: For details about the local build and test methods, see [Installing Triton Ascend Using the Source Code](./installation_guide.md#install-from-source).
 
 **Q: What CI checks are required for submitting a PR?**
 
@@ -75,7 +75,7 @@ A: There is an integrated performance analysis tool (profiler). For details, see
 
 **Q: How to resolve "UB Overflow" errors during compilation?**
 
-A: UB Overflow is a common issue in Triton-Ascend development. For details, see [UB Overflow Troubleshooting Guide](./debug_guide/ub_overflow.md) to troubleshoot the issue. If you're unsure how to reduce tiling to lower UB usage, you can use Autotune to automatically select the optimal configuration. For details, see [Triton-Ascend Autotune Guide](./autotune_guide.md).
+A: UB Overflow is a common issue in Triton Ascend development. For details, see [UB Overflow Troubleshooting Guide](./debug_guide/ub_overflow.md) to troubleshoot the issue. If you're unsure how to reduce tiling to lower UB usage, you can use Autotune to automatically select the optimal configuration. For details, see [Triton Ascend Autotune Guide](./autotune_guide.md).
 
 When migrating operators from Ascend 950PR&950DT products to Atlas A2 products/Atlas A3 products, UB size differences may cause UB Overflow. If manual troubleshooting doesn't resolve the issue, Autotune can also be used to automatically select the optimal configuration.
 
@@ -83,7 +83,7 @@ When migrating operators from Ascend 950PR&950DT products to Atlas A2 products/A
 
 **Q: What are the usage constraints for pointer parameters in Triton kernels?**
 
-A: The Triton-Ascend compiler assumes at compile time that all externally input pointer parameters essentially point to different memory regions and cannot identify pointer alias scenarios. When multiple pointer parameters actually point to the same memory at runtime but this fact cannot be known at compile time, it may result in optimization failures or abnormal runtime results. For example:
+A: The Triton Ascend compiler assumes at compile time that all externally input pointer parameters essentially point to different memory regions and cannot identify pointer alias scenarios. When multiple pointer parameters actually point to the same memory at runtime but this fact cannot be known at compile time, it may result in optimization failures or abnormal runtime results. For example:
 
 ```Python
 @triton.jit

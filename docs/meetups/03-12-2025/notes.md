@@ -86,10 +86,10 @@ Notes:
 
 ### Goal
 
-* Lower Triton IR to mlir core dialects (linalg, memref, …)  Easier path to running on CPUs.
+* Lower Triton IR to MLIR core dialects (linalg, memref, …)  Easier path to running on CPUs.
 * Focus on supporting strided memory access for accelerators
 * Open-sourced at <https://github.com/microsoft/triton-shared>
-  * Trying to keep it in sync with OSS triton (albeit a little delayed)
+  * Trying to keep it in sync with OSS Triton (albeit a little delayed)
 
 ### Progress
 
@@ -101,7 +101,7 @@ Notes:
   * Supports nested loops
   * Non-contiguous memory access.
 * Support for lowering unstructured access with single base pointer
-* Support lowering triton ops to linalg/mlir (split, join, cat, etc.)
+* Support lowering Triton ops to linalg/mlir (split, join, cat, etc.)
 
 ### Roadmap
 
@@ -116,7 +116,7 @@ Meta, Qualcomm and community
 ### Questions
 
 * Q> Future plans, what are the higher priority items you want to work on?
-* A> Many Triton kernel have memory access patterns  that can’t be detected. We don’t have fall back solutions (e.g. gather-scatter support). Need to wait for the mlir pointer dialect to land so we can use it.  MxN loads pointer analysis fails if loads are contiguous. But rows may be contiguous so we can split analysis into multiple chunks (row scatter, row gather).
+* A> Many Triton kernel have memory access patterns  that can’t be detected. We don’t have fall back solutions (e.g. gather-scatter support). Need to wait for the MLIR pointer dialect to land so we can use it.  MxN loads pointer analysis fails if loads are contiguous. But rows may be contiguous so we can split analysis into multiple chunks (row scatter, row gather).
 * A> In places where pointer analysis can’t extract information, we leave the IR intact so existing passes that can deal with them. We can handle loop iteration over tensors of pointers (common patterns). More complicated operations like if/else look like low hanging fruit.
 
 ## Questions about Generic Tensor Descriptor

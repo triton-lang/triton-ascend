@@ -1,4 +1,4 @@
-# Triton-Ascend性能分析方法
+# Triton Ascend性能分析方法
 
 ## 获取性能数据
 
@@ -115,7 +115,7 @@ visualize_data.bin支持在MindStudio Insight可视化呈现：
 [WARN] Lack of code info of files
 ```
 
-Triton算子无需手动添加`-g`，Triton-Ascend后端通过环境变量`TRITON_DISABLE_LINE_INFO`控制是否在`bishengir-compile`命令中追加`--enable-debug-info=true`。注意triton-ascend默认值为`true`（即默认**关闭**行号信息，与社区Triton默认开启相反），需显式置为`False`：
+Triton算子无需手动添加`-g`，Triton Ascend后端通过环境变量`TRITON_DISABLE_LINE_INFO`控制是否在`bishengir-compile`命令中追加`--enable-debug-info=true`。注意Triton Ascend默认值为`true`（即默认**关闭**行号信息，与社区Triton默认开启相反），需显式置为`False`：
 
 ```bash
 export TRITON_DISABLE_LINE_INFO=0

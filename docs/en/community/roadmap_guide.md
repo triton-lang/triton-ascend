@@ -77,7 +77,7 @@ Issue: [Related Issue link]
 
 ### 2.1 Opening Description (optional)
 
-Provide a project overview, vision, or brief summary of the overall direction. For example, a brief description of Triton-Ascend's current quarter goals in upstream alignment, backend performance, and operator coverage.
+Provide a project overview, vision, or brief summary of the overall direction. For example, a brief description of Triton Ascend's current quarter goals in upstream alignment, backend performance, and operator coverage.
 
 ### 2.2 Focus Section
 

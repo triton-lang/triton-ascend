@@ -20,7 +20,7 @@ Speakers: Jianhui Li (Intel), Keren Zhou (George Mason Univ)
 * A> You want to know why we have one device side and one host side.
 * Q> Ok to have tensor descriptors in global memory. We want tensor descriptors to reside on the device.
 * A> We have descriptor API on device because when you update the descriptor from the kernel and not from the device.
-* Q> Performance. Would like to limit choices to programmer. Don't need to enable other programming models. Makes it easier to support triton on other platforms.
+* Q> Performance. Would like to limit choices to programmer. Don't need to enable other programming models. Makes it easier to support Triton on other platforms.
 * A> Is it a problem if you only support device side descriptor and update?
 * Q> No.
 * A> Probably still need to keep 2 APIs.
@@ -47,14 +47,14 @@ Speaker: Sayce Falk (Google), Cicie Wang (Meta), Jason Knight (Nvidia), Keren Zh
 
 * Q> Any near term plans for setting up public benchmarks for Nvidia's newest hardware? Maybe through PyTorch or TorchBench.
 * A> Cicie Wang (Meta): Meta discussed with Nvidia about running TritonBench on B200. Nvidia suggested working with OpenAI (OpenAI has hardware). We now have hardware. Jason from Nvidia working on setting up CI. First steps: get TritonBench running on this hardware.
-* Q> Need devops/infra side to setup devrunners (complexity/security of setting up these machines is high). Possible to use existing GB200 triton runner in triton CI.
-* Q> You want to run torchbench? Is this on the triton main project?
+* Q> Need devops/infra side to setup devrunners (complexity/security of setting up these machines is high). Possible to use existing GB200 Triton runner in Triton CI.
+* Q> You want to run torchbench? Is this on the Triton main project?
 * A> Possibly using the facebookexperimental/triton repo. Maybe a second repo. Maybe the PyTorch repo?
 * A> Also looking at the AMD MI300x and AMD MI350x.
-* Q> Xu Zhao (Meta) is currently running triton bench.
+* Q> Xu Zhao (Meta) is currently running Triton bench.
 * A> Yes. But only for internal Meta consumption. Goal is to expose this externally.
 * Q> Maybe we can leverage Intel's backend? (to Jason Knight).
-* A> We currently have OpenAI's hosted triton CI, PyTorch's CI & performance.
+* A> We currently have OpenAI's hosted Triton CI, PyTorch's CI & performance.
 * Q> Intel has its own repo. Interested in contributing data to a shared dashboard.
 * A> Maybe talk to the PyTorch folks
 * A> DevOps support not up and running (months out) for B200.
@@ -83,14 +83,14 @@ Speaker: Sayce Falk (Google), Cicie Wang (Meta), Jason Knight (Nvidia), Keren Zh
 Speaker: Adnan Aziz (Meta)
 
 * Phil, Elena Mithra & Adnan Aziz pulled together last year's Triton Developers' Summit.
-* Mlir tutorials, keynotes, closed-end backends, OSS projects, Intel triton efforts.
+* Mlir tutorials, keynotes, closed-end backends, OSS projects, Intel Triton efforts.
 * Heterogeneous hardware.
 * Over 500 people attended!
 * Microsoft running it in 2025.
 * Ideas:
-  * Tutorials for users: writing triton code, kernel profilers
-  * Panel of triton users: power users and new users.
-  * Keren: academic/scientific domains. Physicists are using triton for simulations. Broader HPC.
+  * Tutorials for users: writing Triton code, kernel profilers
+  * Panel of Triton users: power users and new users.
+  * Keren: academic/scientific domains. Physicists are using Triton for simulations. Broader HPC.
   * Jason: EVO and mosaic talks (embracing sharing). Cutlass dsl, we should be learning from them.
   * Cicie: do we have proposal submission process? No. We had a compressed timeframe-10 weeks. Some proposals didn't make it due to time.
 * Please give us feedback.

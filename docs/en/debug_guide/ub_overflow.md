@@ -2,7 +2,7 @@
 
 ## Overview
 
-UB space insufficiency is a common issue in Triton-Ascend development. This document provides detailed information about common causes, solutions, and debugging methods for UB Overflow.
+UB space insufficiency is a common issue in Triton Ascend development. This document provides detailed information about common causes, solutions, and debugging methods for UB Overflow.
 
 ## Common Causes and Solutions
 

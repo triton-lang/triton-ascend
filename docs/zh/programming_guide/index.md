@@ -6,12 +6,12 @@
 
 本指南将通用开发原则和按硬件执行单元划分的算子开发路径分开组织：
 
-- 本页介绍所有 Triton-Ascend 算子都需要关注的通用问题，包括分核、片上内存、访存、Tiling 和 Autotune。
-- [Vector 算子开发](./vector_operator.md) 介绍主要由 Vector Core 执行的逐元素、归约、Gather/Scatter 等算子。
-- [Cube 算子开发](./cube_operator.md) 介绍以 `tl.dot`、矩阵乘、批量矩阵乘为核心的算子。
-- [CV 融合算子开发](./cv_fusion_operator.md) 介绍同一个算子中同时存在 Cube 计算和 Vector 后处理、归约、Softmax 或跨核协同的场景。
+- 本页介绍所有Triton Ascend算子都需要关注的通用问题，包括分核、片上内存、访存、Tiling和Autotune。
+- [Vector算子开发](./vector_operator.md) 介绍主要由Vector Core执行的逐元素、归约、Gather/Scatter 等算子。
+- [Cube算子开发](./cube_operator.md) 介绍以 `tl.dot`、矩阵乘、批量矩阵乘为核心的算子。
+- [CV融合算子开发](./cv_fusion_operator.md) 介绍同一个算子中同时存在Cube计算和Vector后处理、归约、Softmax或跨核协同的场景。
 
-简单算子优先参考本仓 `docs/zh/examples/` 和 `third_party/ascend/tutorials/`；复杂算子优先参考 GitHub 上的 [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops) 中 `tutorial/best_practice/` 的完整优化案例。
+简单算子优先参考本仓 `docs/zh/examples/` 和 `third_party/ascend/tutorials/`；复杂算子优先参考GitHub上的 [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops) 中 `tutorial/best_practice/` 的完整优化案例。
 
 ## 通用多核任务并行
 
@@ -88,7 +88,7 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
 
 ### 设置合适的循环内数据分块大小（BLOCK_SIZE）
 
-以add_kernel为例，变量和操作共同决定了片上内存的空间占用大小，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上内存的空间时尽可能大，这可以通过Triton-Ascend的[Autotune](../examples/06_autotune_example.md)预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。
+以add_kernel为例，变量和操作共同决定了片上内存的空间占用大小，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上内存的空间时尽可能大，这可以通过Triton Ascend的[Autotune](../examples/06_autotune_example.md)预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。
 
 ```python
 import triton.language as tl
@@ -183,16 +183,16 @@ def pick_kernel(
 
 各指标含义说明：
 
-- **aiv_mte2_time(μs)**：AI Vector（AIV）核上 MTE2（Memory Transfer Engine 2）搬运阶段耗时，单位为微秒（μs），反映数据从全局内存搬运到片上内存（UB）的时间开销。
-- **aiv_mte2_ratio**：MTE2 搬运时间占算子总执行时间的比例，数值越大说明搬运耗时占比越高，可用于评估搬运与计算的重叠程度。
+- **aiv_mte2_time(μs)**：AI Vector（AIV）核上MTE2（Memory Transfer Engine 2）搬运阶段耗时，单位为微秒（μs），反映数据从全局内存搬运到片上内存（UB）的时间开销。
+- **aiv_mte2_ratio**：MTE2搬运时间占算子总执行时间的比例，数值越大说明搬运耗时占比越高，可用于评估搬运与计算的重叠程度。
 
 通过分析表格中的数据可以发现，优化前后的aiv_mte2_time(μs)和aiv_mte2_ratio差距较大，优化方案通过先将大部分数据搬运到UB上，减少小批量数据通过L2搬运到UB的次数，减少了L2搬运到UB上的总时间。
 
-> 注意：优化后的 aiv_mte2_time 反而更高，这是因为优化方案一次性将大量数据搬运到 UB（增加 MTE2 耗时），但消除了原先通过 L2 逐条搬运到 UB 的低效路径，整体性能更优。
+> 注意：优化后的aiv_mte2_time反而更高，这是因为优化方案一次性将大量数据搬运到UB（增加MTE2耗时），但消除了原先通过L2逐条搬运到UB的低效路径，整体性能更优。
 
 ### 存算并行
 
-Triton-Ascend支持两种数据处理模式：存算串行和存算并行。
+Triton Ascend支持两种数据处理模式：存算串行和存算并行。
 
 存算串行：先从全局内存搬运数据到片上内存，完成计算后，再搬运下一批数据。这种方式存在明显的空闲等待时间，效率较低。
 
@@ -239,14 +239,14 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
         tl.store(out + offsets, overwrite_vals, mask=mask)
 ```
 
-### Triton Autotune 自动调优
+### Triton Autotune自动调优
 
-在 Tiling 分块优化中，BLOCK_SIZE、BLOCK_SIZE_SUB等分块参数的取值直接影响算子性能，但手动调试参数组合效率低且难以找到最优值。triton.autotune是Triton框架提供的自动调优工具，能遍历预设的参数配置，通过实际运行对比性能，自动选择最优参数组合，是Tiling优化的核心配套手段。
+在Tiling分块优化中，BLOCK_SIZE、BLOCK_SIZE_SUB等分块参数的取值直接影响算子性能，但手动调试参数组合效率低且难以找到最优值。triton.autotune是Triton框架提供的自动调优工具，能遍历预设的参数配置，通过实际运行对比性能，自动选择最优参数组合，是Tiling优化的核心配套手段。
 
-如果你关注 Triton-Ascend 上 `configs=[]` 的推荐用法、自动 Tiling 的适用边界，可进一步参考 [Triton-Ascend autotune 使用指南](../autotune_guide.md)。
+如果你关注Triton Ascend上 `configs=[]` 的推荐用法、自动Tiling的适用边界，可进一步参考 [Triton Ascend autotune使用指南](../autotune_guide.md)。
 
 - 核心作用
-自动遍历参数空间：针对BLOCK_SIZE、BLOCK_SIZE_SUB等 constexpr 类型的分块参数，批量测试不同取值的性能。
+自动遍历参数空间：针对BLOCK_SIZE、BLOCK_SIZE_SUB等constexpr类型的分块参数，批量测试不同取值的性能。
 性能基准对比：以算子的执行耗时为指标，筛选出适配当前硬件的最优参数。
 缓存调优结果：调优后的最优配置会被缓存，后续调用算子时直接复用，避免重复调优。
 
@@ -282,14 +282,14 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
     export TRITON_PRINT_AUTOTUNING=1
     ```
 
-### 进阶：使用 max_autotune 自动调优
+### 进阶：使用max_autotune自动调优
 
-对于 Ascend NPU 算子，要想达到最优性能，除BLOCK_SIZE外，还需调优 num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop 等多个硬件相关参数。若使用 @triton.autotune 手动枚举所有组合，会导致配置列表爆炸式增长，代码难以维护。
+对于Ascend NPU算子，要想达到最优性能，除BLOCK_SIZE外，还需调优num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop等多个硬件相关参数。若使用 @triton.autotune手动枚举所有组合，会导致配置列表爆炸式增长，代码难以维护。
 
-max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backends.ascend.runtime），允许用户仅提供基础配置，其余调优参数以列表形式传入，装饰器自动生成全部组合的 Config 列表。
+max_autotune是专为Ascend NPU设计的扩展装饰器（位于triton.backends.ascend.runtime），允许用户仅提供基础配置，其余调优参数以列表形式传入，装饰器自动生成全部组合的Config列表。
 
 - 核心作用
-开发者只需提供少量基础配置（如BLOCK_SIZE），所有与该算子类型相关的编译器选项（例如 num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop、enable_ubuf_saving 等）都会通过内置的合理默认值自动纳入最优组合的搜索范围，无需开发者显式列举，一次性完成最优 tiling 和编译器选项组合的自动寻优。若开发者希望对某些参数进行限定，也可通过显式传入列表来覆盖默认搜索范围。
+开发者只需提供少量基础配置（如BLOCK_SIZE），所有与该算子类型相关的编译器选项（例如num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop、enable_ubuf_saving等）都会通过内置的合理默认值自动纳入最优组合的搜索范围，无需开发者显式列举，一次性完成最优tiling和编译器选项组合的自动寻优。若开发者希望对某些参数进行限定，也可通过显式传入列表来覆盖默认搜索范围。
 
 - 简单示例
 
@@ -432,7 +432,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 | 预防措施 | 说明 |
 | --- | --- |
 | 编码前估算UB占用 | 单个tile的UB占用（bit）≈ tile元素数 × 每元素字节数 × buffer份数 × 8；实际还需叠加多个中间张量与对齐开销，应预留充足余量。建议BLOCK_SIZE_SUB从1024~4096起步并以autotune实测为准 |
-| 优先使用autotune | 用`triton.autotune`枚举多组BLOCK_SIZE（可含`multibuffer`开关）配置，由运行时自动选择不溢出且性能最优的组合，避免手工反复试错（参见本文档「Triton Autotune 自动调优」章节） |
+| 优先使用autotune | 用`triton.autotune`枚举多组BLOCK_SIZE（可含`multibuffer`开关）配置，由运行时自动选择不溢出且性能最优的组合，避免手工反复试错（参见本文档「Triton Autotune自动调优」章节） |
 | 关注multi-buffer影响 | 编译器默认开启存算并行（`multiBuffer=True`），多缓冲使UB占用按buffer份数成倍增加；UB紧张时在Config中设置`multibuffer=False`（参见本文档「存算并行」章节） |
 | 长序列分批处理 | 当序列长度导致单tile估算占用接近或超过UB上限时，在核函数内用for循环按序列维度分块load/计算/store，避免单次整段搬运 |
 
@@ -493,7 +493,7 @@ UB占用估算示例：65536个float32元素（4Byte）、双缓冲（2份）时
         return output
     ```
 
-    使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性。
+    使用上述函数计算两个torch.tensor对象的element-wise sum，并测试其正确性。
 
     ```python
     torch.manual_seed(0)
@@ -516,17 +516,17 @@ UB占用估算示例：65536个float32元素（4Byte）、双缓冲（2份）时
 
     - 块级数据处理：每个计算块负责一小段数据，保证并行性。
 
-    - 边界检查：使用 mask 或 if (tid < N) 避免越界。
+    - 边界检查：使用mask或if (tid < N) 避免越界。
 
-    - 块大小选择：合理设置 block 和 grid。
+    - 块大小选择：合理设置block和grid。
 
 4. 性能要点：
 
     （1）访存优化
     - 保证连续访问。
-    - 使用对齐的 stride，避免跨行/跨列跳跃式访问。
-    - 尽量让数据块大小对齐到 32 字节边界。
-    输入输出 buffer 在分配时保证对齐，避免访存性能下降。
+    - 使用对齐的stride，避免跨行/跨列跳跃式访问。
+    - 尽量让数据块大小对齐到32字节边界。
+    输入输出buffer在分配时保证对齐，避免访存性能下降。
     例：
 
     ```python
@@ -569,7 +569,7 @@ UB占用估算示例：65536个float32元素（4Byte）、双缓冲（2份）时
     ```
 
     （2）子块划分
-    - 将大矩阵分解为小block，每个block在 UB 内完成计算。
+    - 将大矩阵分解为小block，每个block在UB内完成计算。
     - 子块划分要兼顾访存连续性和计算单元利用率。
     例：
 
@@ -619,7 +619,7 @@ UB占用估算示例：65536个float32元素（4Byte）、双缓冲（2份）时
 
 ## 通用多维张量切分
 
-Triton 算子处理多维张量时，核心思想是按维度切分为若干数据块（Block），每个数据块由一个 program 处理，并行调度到硬件 Core 执行。本节提供二维与三维张量的典型处理示例。
+Triton算子处理多维张量时，核心思想是按维度切分为若干数据块（Block），每个数据块由一个program处理，并行调度到硬件Core执行。本节提供二维与三维张量的典型处理示例。
 
 ### 二维张量切分：以矩阵乘法（GEMM）为例
 
@@ -659,15 +659,15 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K,
 
 **要点**：
 
-- `pid_m` / `pid_n` 分别对应 M / N 维度上的 block 编号
+- `pid_m` / `pid_n` 分别对应M / N维度上的block编号
 
 - `stride_*` 显式处理多维步长，避免假设连续内存
 
-- K 维度通过循环分块累加
+- K维度通过循环分块累加
 
-### 三维及以上张量切分：以 Batched GEMM 为例
+### 三维及以上张量切分：以Batched GEMM为例
 
-处理三维张量（如 `[Batch, M, N]`）时，可以将 `Batch` 维度（B）直接映射到 Triton 的 `Grid` 维度上，或者将其与 `M/N` 维度展平后重新映射。
+处理三维张量（如 `[Batch, M, N]`）时，可以将 `Batch` 维度（B）直接映射到Triton的 `Grid` 维度上，或者将其与 `M/N` 维度展平后重新映射。
 
 #### 启动 `Grid` 时增加 `Batch` 维度
 
@@ -694,8 +694,8 @@ def batched_matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K, B, ...):
 
 **要点**：
 
-- `tl.program_id(2)` 取得 Batch 维度的索引
+- `tl.program_id(2)` 取得Batch维度的索引
 
-- 每个 Batch 独立计算自己的 `a_batch_ptr` / `b_batch_ptr` / `c_batch_ptr`
+- 每个Batch独立计算自己的 `a_batch_ptr` / `b_batch_ptr` / `c_batch_ptr`
 
-- 后续 M / N / K 维度的切分逻辑与二维 GEMM 一致
+- 后续M / N / K维度的切分逻辑与二维GEMM一致

@@ -1,16 +1,16 @@
-# Triton-Ascend autotune使用指南
+# Triton Ascend autotune使用指南
 
 ## 文档定位
 
-本文面向已经会写Triton kernel，也了解社区版 `triton.autotune` 基本概念的用户，重点说明Triton-Ascend的推荐用法：
+本文面向已经会写Triton kernel，也了解社区版 `triton.autotune` 基本概念的用户，重点说明Triton Ascend的推荐用法：
 
-- Triton-Ascend上的推荐autotune写法；
+- Triton Ascend上的推荐autotune写法；
 - `configs=[]` 在Ascend backend中的含义；
 - 自动Tiling模式的适用边界，以及何时回到手写 `triton.Config`。
 
 ## 快速上手
 
-在Triton-Ascend上，推荐保留社区版 `@triton.autotune` 的基本写法；当希望系统自动生成并评估候选配置时，将 `configs` 设为 `[]`：
+在Triton Ascend上，推荐保留社区版 `@triton.autotune` 的基本写法；当希望系统自动生成并评估候选配置时，将 `configs` 设为 `[]`：
 
 ```python
 """
@@ -88,11 +88,11 @@ if __name__ == "__main__":
 这表示：
 
 - `key` 的语义与社区版保持一致，用于决定哪些输入变化会触发重新选择配置；
-- `configs=[]` 在Triton-Ascend中表示“由Ascend backend自动生成候选配置并完成寻优”，而不是“没有可选配置”。
+- `configs=[]` 在Triton Ascend中表示“由Ascend backend自动生成候选配置并完成寻优”，而不是“没有可选配置”。
 
 ### 1. 先启用Ascend对autotune的扩展
 
-只有导入下面这行后，才会进入Triton-Ascend的autotune扩展路径：
+只有导入下面这行后，才会进入Triton Ascend的autotune扩展路径：
 
 ```python
 import triton.backends.ascend.runtime
@@ -111,7 +111,7 @@ def kernel(...):
     ...
 ```
 
-`@triton.autotune` 必须直接包在 `@triton.jit` 外层，不能在两者之间插入其他decorator。否则会导致无法对kernel DSL进行解析，从而无法进入Triton-Ascend的自动Tiling生成与寻优链路。
+`@triton.autotune` 必须直接包在 `@triton.jit` 外层，不能在两者之间插入其他decorator。否则会导致无法对kernel DSL进行解析，从而无法进入Triton Ascend的自动Tiling生成与寻优链路。
 
 ### 3. `key` 的含义与社区一致
 
@@ -181,11 +181,11 @@ grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]),)
 
 autotune的benchmark语义与社区一致，会多次执行kernel。如果kernel存在副作用，例如包含原子操作、in-place写入，或会修改输入/输出buffer的累积状态，仍然需要通过社区已有的hook机制处理。
 
-## Triton-Ascend相比社区autotune的扩展
+## Triton Ascend相比社区autotune的扩展
 
 社区版 `triton.autotune` 的典型模式是：用户手工提供一组 `triton.Config`，框架做benchmark，然后缓存最优结果。
 
-Triton-Ascend在保持这套接口习惯不变的前提下，主要扩展了下面几件事：
+Triton Ascend在保持这套接口习惯不变的前提下，主要扩展了下面几件事：
 
 ### 1. 支持 `configs=[]` 自动生成候选配置
 
@@ -193,17 +193,17 @@ Triton-Ascend在保持这套接口习惯不变的前提下，主要扩展了下�
 
 ### 2. 支持多个config的并行编译
 
-当autotune需要评估多个候选配置时，Triton-Ascend默认会并行编译这些候选配置，以缩短首次调优时延。
+当autotune需要评估多个候选配置时，Triton Ascend默认会并行编译这些候选配置，以缩短首次调优时延。
 
 这一能力默认开启，可通过环境变量 `TRITON_AUTOTUNE_PARALLEL_COMPILE=0` 关闭。
 
 ### 3. 支持使用profiler采集kernel性能
 
-Triton-Ascend支持在autotune做benchmark时切换性能采集方式：除了默认benchmark模式外，还可以使用profiler来采集每个候选config的kernel性能数据，它只关注kernel的片上计算时间，对于执行时间较短的kernel比默认性能采集方式更加精确，但会增加一些耗时。这项能力可通过环境变量 `TRITON_BENCH_METHOD='npu'` 开启。
+Triton Ascend支持在autotune做benchmark时切换性能采集方式：除了默认benchmark模式外，还可以使用profiler来采集每个候选config的kernel性能数据，它只关注kernel的片上计算时间，对于执行时间较短的kernel比默认性能采集方式更加精确，但会增加一些耗时。这项能力可通过环境变量 `TRITON_BENCH_METHOD='npu'` 开启。
 
 ## 自动Tiling生成能力的范围与行为
 
-前面的第1点说明了Triton-Ascend支持 `configs=[]` 自动生成候选配置。对这项能力，进行以下几点说明：
+前面的第1点说明了Triton Ascend支持 `configs=[]` 自动生成候选配置。对这项能力，进行以下几点说明：
 
 ### 1. 自动生成范围聚焦在Tiling参数
 
@@ -223,11 +223,11 @@ Ascend backend在生成候选时，会结合NPU的片上内存容量、对齐约
 
 ### 4. 自动Tiling生成失败时需要用户手写 `triton.Config`
 
-如果自动Tiling模式无法生成任何可用候选配置，这时需要用户改为手写 `triton.Config`。同时也建议对这类场景提issue，帮助Triton-Ascend后续补齐解析和自动生成能力。
+如果自动Tiling模式无法生成任何可用候选配置，这时需要用户改为手写 `triton.Config`。同时也建议对这类场景提issue，帮助Triton Ascend后续补齐解析和自动生成能力。
 
 ## 手写 `triton.Config` 模式
 
-如果自动Tiling模式生成失败，或生成的Tiling性能未达到预期，直接回到社区标准写法即可。Triton-Ascend对这部分语义保持兼容：
+如果自动Tiling模式生成失败，或生成的Tiling性能未达到预期，直接回到社区标准写法即可。Triton Ascend对这部分语义保持兼容：
 
 ```python
 @triton.autotune(
@@ -303,9 +303,9 @@ def matmul_kernel(a, b, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, GROUP_SIZE_M):
     ...
 ```
 
-### 2. Triton-Ascend：手工枚举Tiling参数和Ascend编译参数
+### 2. Triton Ascend：手工枚举Tiling参数和Ascend编译参数
 
-在Triton-Ascend中，如果希望继续走手工枚举模式，也可以把Ascend侧参数一起放进手工配置空间：
+在Triton Ascend中，如果希望继续走手工枚举模式，也可以把Ascend侧参数一起放进手工配置空间：
 
 ```python
 @triton.autotune(
@@ -332,7 +332,7 @@ def matmul_kernel(a, b, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, GROUP_SIZE_M):
     ...
 ```
 
-### 3. Triton-Ascend：自动生成Tiling，同时联合调优其他参数
+### 3. Triton Ascend：自动生成Tiling，同时联合调优其他参数
 
 如果希望Tiling参数继续由 `configs=[]` 自动生成，但又希望同时调优其他非Tiling参数或编译参数，可以把这些额外搜索维度通过 `hints` 传入：
 
@@ -356,7 +356,7 @@ matmul_kernel[grid](a, b, M, N, K)
 
 这种方式的含义是：
 
-- Tiling相关参数仍然由Triton-Ascend自动生成；
+- Tiling相关参数仍然由Triton Ascend自动生成；
 - 非Tiling参数或编译参数（如 `GROUP_SIZE_M` 和 `multibuffer`）由用户通过 `hints` 显式给出候选集合；
 - autotune会对两部分组合后的配置空间做评估。
 
@@ -370,7 +370,7 @@ matmul_kernel[grid](a, b, M, N, K)
 
 ## 小结
 
-Triton-Ascend相比社区autotune的关键扩展，不是改变用户接口，而是在社区接口之上增加了“自动生成Tiling候选并完成寻优”的能力。对大多数用户来说，最推荐的使用方式就是：
+Triton Ascend相比社区autotune的关键扩展，不是改变用户接口，而是在社区接口之上增加了“自动生成Tiling候选并完成寻优”的能力。对大多数用户来说，最推荐的使用方式就是：
 
 - 保持社区版 `@triton.autotune` 的写法；
 - 将 `configs` 设为 `[]`；

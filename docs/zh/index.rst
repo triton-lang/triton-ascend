@@ -14,7 +14,7 @@ Triton Ascend
    <a href="https://deepwiki.com/triton-lang/triton-ascend"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
    </p>
 
-**Triton-Ascend** 是适配华为昇腾处理器的Triton优化版本，主要用于提供高效的核函数自动调优、算子编译及部署能力，支持Atlas A2/A3和Ascend 950PR&950DT系列产品，兼容Triton核心语法的同时，针对华为昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。
+**Triton Ascend** 是适配华为昇腾处理器的Triton优化版本，主要用于提供高效的核函数自动调优、算子编译及部署能力，支持Atlas A2/A3和Ascend 950PR&950DT系列产品，兼容Triton核心语法的同时，针对华为昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。
 
 .. toctree::
    :maxdepth: 1
@@ -33,8 +33,8 @@ Triton Ascend
    Vector算子开发 <programming_guide/vector_operator>
    Cube算子开发 <programming_guide/cube_operator>
    融合算子开发 <programming_guide/cv_fusion_operator>
-   Triton-Ascend autotune <autotune_guide>
-   Triton-Ascend AOT 编译 <aot_guide>
+   Triton Ascend Autotune <autotune_guide>
+   Triton Ascend AOT编译 <aot_guide>
    典型算子样例 <examples/index>
 
 .. toctree::
@@ -42,9 +42,9 @@ Triton Ascend
    :titlesonly:
    :caption: 开发指南
 
-   Triton-Ascend算子开发 <programming_guide/index>
-   Triton-Ascend算子迁移 <migration_guide/index>
-   Triton-Ascend算子调试与调优 <debug_guide/index>
+   Triton Ascend算子开发 <programming_guide/index>
+   Triton Ascend算子迁移 <migration_guide/index>
+   Triton Ascend算子调试与调优 <debug_guide/index>
    环境变量与编译选项 <environment_variable_and_compiler_options_reference>
 
 .. toctree::
@@ -72,7 +72,7 @@ Triton Ascend
    :titlesonly:
    :caption: 常见问题
 
-   Triton-Ascend FAQ <FAQ>
+   Triton Ascend FAQ <FAQ>
 
 .. toctree::
    :maxdepth: 1

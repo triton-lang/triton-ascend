@@ -1,8 +1,8 @@
 # Installation Guide
 
-**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It provides automatic kernel tuning, operator compilation and deployment capabilities. It supports Atlas A2 products/Atlas A3 products/Ascend 950PR&950DT products, is compatible with core Triton syntax, and has been deeply optimized for Huawei Ascend NPU features, including automatic parsing of kernel parameters, optimized memory access logic, and improved secure deployment mechanisms.
+**Triton Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It provides automatic kernel tuning, operator compilation and deployment capabilities. It supports Atlas A2 products/Atlas A3 products/Ascend 950PR&950DT products, is compatible with core Triton syntax, and has been deeply optimized for Huawei Ascend NPU features, including automatic parsing of kernel parameters, optimized memory access logic, and improved secure deployment mechanisms.
 
-This guide instructs developers to install **Triton-Ascend** on **Ubuntu**, covering three installation methods: quick installation, source installation and container image installation. It also includes environment validation and common issue troubleshooting.
+This guide instructs developers to install **Triton Ascend** on **Ubuntu**, covering three installation methods: quick installation, source installation and container image installation. It also includes environment validation and common issue troubleshooting.
 
 ## Environment Preparation
 
@@ -45,7 +45,7 @@ update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100
 pip install ninja cmake wheel pybind11 # build-time dependencies
 ```
 
-### Compile Triton-Ascend
+### Compile Triton Ascend
 
 ```bash
 git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
@@ -57,7 +57,7 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
 
 ### Custom LLVM Build (Optional)
 
-If you need to customize the LLVM build process, follow the steps below to compile Triton-Ascend.
+If you need to customize the LLVM build process, follow the steps below to compile Triton Ascend.
 
 1. **Prepare the source code**: Check out the LLVM source code of the specified version with `git checkout` and apply the patch.
 
@@ -92,7 +92,7 @@ If you need to customize the LLVM build process, follow the steps below to compi
     cp  {PATH_TO}/llvm-project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
     ```
 
-3. **Compile Triton-Ascend**
+3. **Compile Triton Ascend**
 
     ```bash
     git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
@@ -138,7 +138,7 @@ Refer to the **'Installation' -> 'Method 3: Source Code Compilation'** section i
 
 ## Container Image Installation
 
-**Table 2** Selected Triton-Ascend Container Images
+**Table 2** Selected Triton Ascend Container Images
 
 | Chip | Image Tag | Pull Command |
 |----------|----------|-------------|
@@ -203,7 +203,7 @@ If the output is:
 triton-ascend version: <version>
 ```
 
-The Triton-Ascend package is installed successfully. Continue by running the vector-add example in the tutorials to verify that the backend compiled successfully. Vector-add example: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py).
+The Triton Ascend package is installed successfully. Continue by running the vector-add example in the tutorials to verify that the backend compiled successfully. Vector-add example: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py).
 
 ```bash
 # Set CANN environment variables (using root user default install path `/usr/local/Ascend` as example)
@@ -261,13 +261,13 @@ python -m pytest -sv -n 8 third_party/ascend/unittest/pytest_ut
 
 **Solution**
 
-You can try installing torch manually first and then installing TorchNPU:
+You can try installing Torch manually first and then installing TorchNPU:
 
 ```bash
 pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu
 ```
 
-**Question 2: When compiling and installing Triton-Ascend, if GCC < 9.4.0, the error "ld.lld: error: unable to find library -lstdc++fs" may be reported**
+**Question 2: When compiling and installing Triton Ascend, if GCC < 9.4.0, the error "ld.lld: error: unable to find library -lstdc++fs" may be reported**
 
 **Solution**
 
@@ -284,20 +284,20 @@ endif()
 
 **Root Cause Analysis**
 
-The triton-ascend directory is overwritten by triton, which damages the functionality of triton-ascend.
+The Triton Ascend directory is overwritten by Triton, which damages the functionality of Triton Ascend.
 
 **Solution**
 
-Uninstall the corrupted triton-ascend and reinstall it. Taking version 3.2.1 as an example, you can run the following commands to fix the issue:
+Uninstall the corrupted Triton Ascend and reinstall it. Taking version 3.2.1 as an example, you can run the following commands to fix the issue:
 
 ```bash
 pip uninstall triton-ascend triton
 pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
-**Question 4: Why does Triton-Ascend 3.2.1 add a dependency on triton?**
+**Question 4: Why does Triton Ascend 3.2.1 add a dependency on Triton?**
 
-Answer: Triton-Ascend is a secondary development based on Triton and shares the same name as the Triton installation directory. If users install Triton or third-party packages that depend on Triton after installing Triton-Ascend, the Triton directory will be overwritten, which damages the functionality of Triton-Ascend.
+Answer: Triton Ascend is a secondary development based on Triton and shares the same name as the Triton installation directory. If users install Triton or third-party packages that depend on Triton after installing Triton Ascend, the Triton directory will be overwritten, which damages the functionality of Triton Ascend.
 Therefore, by adding a dependency on Triton, the following reminder will be shown when Triton is overwritten:
 
 ```text
@@ -305,7 +305,7 @@ ERROR: pip's dependency resolver does not currently take into account all the pa
 triton-ascend 3.2.1 requires triton==3.5.0, but you have triton 3.5.1 which is incompatible.
 ```
 
-If you encounter this issue and want to restore the functionality of Triton-Ascend, you can do the following:
+If you encounter this issue and want to restore the functionality of Triton Ascend, you can do the following:
 
 ```bash
 pip uninstall triton-ascend triton
@@ -313,7 +313,7 @@ pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.c
 
 ```
 
-**Question 5: Why are the Triton versions depended on by Triton-Ascend 3.2.1 inconsistent?**
+**Question 5: Why are the Triton versions depended on by Triton Ascend 3.2.1 inconsistent?**
 
 Answer: X86 and Arm use different versions of community Triton installation packages because the community has provided X86 installation packages since Triton 3.2, while Arm installation packages have been provided only since Triton 3.5.
 

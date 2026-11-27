@@ -2,7 +2,7 @@
 
 ## Mission
 
-As an important component of the Triton ecosystem, the Triton-Ascend project is committed to providing an efficient and user-friendly Triton compilation framework for all Ascend NPU users, enabling Triton code to run efficiently on Ascend hardware and actively contributing to enriching the Triton and Ascend ecosystems.
+As an important component of the Triton ecosystem, the Triton Ascend project is committed to providing an efficient and user-friendly Triton compilation framework for all Ascend NPU users, enabling Triton code to run efficiently on Ascend hardware and actively contributing to enriching the Triton and Ascend ecosystems.
 
 ## Principles
 
@@ -12,7 +12,7 @@ As an important component of the Triton ecosystem, the Triton-Ascend project is 
 
 ## Governance Structure
 
-Triton-Ascend is an open-source project under the Triton community, with role appointments ultimately decided by the Triton community. The project adopts a layered technical governance structure:
+Triton Ascend is an open-source project under the Triton community, with role appointments ultimately decided by the Triton community. The project adopts a layered technical governance structure:
 
 ### Contributor
 
@@ -43,7 +43,7 @@ Triton-Ascend is an open-source project under the Triton community, with role ap
 
 **Requirements**:
 
-- Deep understanding of the Triton and Triton-Ascend codebase
+- Deep understanding of the Triton and Triton Ascend codebase
 - Commitment to continuous code contribution, with capabilities in design, development, and PR review workflows
 - Actively participate in community code reviews, deliver at least one major feature, and maintain continuous high-quality contributions
 - Actively handle `Issues`, respond to inquiries, and participate in discussions
@@ -59,7 +59,7 @@ Promotion is collectively reviewed by existing `Maintainers`, considering contri
 ### Operational Principles
 
 - Membership is based on individual capability, demonstrated through contributions, reviews, and discussions
-- Candidates must agree with Triton-Ascend's principles and maintain consistent behavior
+- Candidates must agree with Triton Ascend's principles and maintain consistent behavior
 - `Maintainers` who have not contributed to the project for **6 consecutive months** may be transitioned to Emeritus status
 - Membership is granted to individuals, not tied to employers
 

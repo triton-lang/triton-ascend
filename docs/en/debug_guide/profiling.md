@@ -1,4 +1,4 @@
-# Triton-Ascend Performance Analysis Method
+# Triton Ascend Performance Analysis Method
 
 ## Obtaining Performance Data
 
@@ -111,7 +111,7 @@ By default, the simulation pipeline files (`trace.json` / `visualize_data.bin`) 
 [WARN] Lack of code info of files
 ```
 
-A Triton kernel does not need a manual `-g`. The triton-ascend backend controls whether `--enable-debug-info=true` is appended to the `bishengir-compile` command via the environment variable `TRITON_DISABLE_LINE_INFO`. Note that triton-ascend defaults this to `true` (i.e. line-number information is **off** by default, the opposite of upstream Triton, which enables it by default), so it must be set to `false` explicitly:
+A Triton kernel does not need a manual `-g`. The Triton Ascend backend controls whether `--enable-debug-info=true` is appended to the `bishengir-compile` command via the environment variable `TRITON_DISABLE_LINE_INFO`. Note that Triton Ascend defaults this to `true` (i.e. line-number information is **off** by default, the opposite of upstream Triton, which enables it by default), so it must be set to `false` explicitly:
 
 ```bash
 export TRITON_DISABLE_LINE_INFO=0

@@ -301,7 +301,7 @@ The table lists Ascend backend defaults and notes any different `triton.Config` 
 | Operator optimization | `vf_fusion_mode` | Selects the VF fusion strategy. | `None`, switch omitted; `"max-parallel"`, `"all-op"`, `"ub-aware-op"` | — | Normal path |
 | Operator optimization | `enable_vf_stack_limit` | Limits fusion based on vector function (VF) stack-usage estimates during BiShengIR compilation to reduce the risk of stack overflow. | `False`; boolean | — | Normal path |
 | Operator optimization | `hfusion_enable_multiple_consumer_fusion` | Controls multiple-consumer HFusion. | `None`; boolean | — | Normal path |
-| Operator optimization | `enable_hivm_batch_matmul` | Enables batch matmul in BiShengIR compilation. | `False`; boolean | — | Normal path |
+| Operator optimization | `enable_hivm_batch_matmul` | Passes `--enable-hivm-batch-matmul` to the NPU compiler when set to `True`. TTIR rewriting also uses this option for block-batching candidates that contain `tt.dot`. | `False`, boolean | Normal path (flag forwarding) | Normal path (`bishengir-compile`) |
 | Operator optimization | `auto_vectorize_v2_max_fused_ops_num` | Sets the maximum number of operations fused by AutoVectorizeV2. | `None` (default) or a signed 32-bit integer. `None` and negative values use the pass default. Values of `0` or greater set the limit explicitly. | — | Normal path |
 | Operator optimization | `prevec_max_fused_ops_num` | Limits the number of elementwise operations fused during pre-vectorization. | `None` (default) or a signed 32-bit integer. Positive values set the limit. `None`, `0`, and negative values leave this limit unset. | — | Normal path |
 | Pure SIMT | `simt_optimization_mode` | Sets the pure-SIMT multi-digit optimization mode. Explicit values on A2/A3 or the 950 normal path emit a `UserWarning` and are ignored. | `0`; toolchain-defined integer | — | Pure SIMT only |
@@ -341,8 +341,6 @@ Replace the following old names with the corresponding names or values:
 |-----------------|-------------------------|------------------------|
 | `force_simt_only` | `compile_mode="simt_only"` | `True` overrides an existing `compile_mode`; `False` leaves the mode unchanged. This option takes precedence when both legacy force switches are `True`. |
 | `force_simt_template` | `compile_mode="simd_simt_template"` | `True` overrides an existing `compile_mode`; `False` leaves the mode unchanged. |
-| `intra_cache_num` | `buf_slot_num_of_veccore` | Preserves the value; the new name wins when both names are supplied. |
-| `inter_cache_num` | `buf_slot_num_of_crosscore` | Preserves the value; the new name wins when both names are supplied. |
 | `load_cache_num` | `buf_slot_num_of_gm` | Preserves the value; the new name wins when both names are supplied. |
 | `enable_bishengir_simt_optimization` | `simt_optimization_mode` | Preserves the value; the new name wins when both names are supplied. Effective only on the 950 pure-SIMT path. |
 
@@ -382,6 +380,8 @@ Remove the following options from kernel launch arguments and `triton.Config`; t
 | `graph_optimize_ub_capacity_bytes` | The Graph Optimization UB budget is derived from the target product. |
 | `grid_num_tiles` | The backend injects this value automatically from a static grid. |
 | `has_auto_blockify_blacklist_op` | The compiler derives the safety marker by scanning TTIR. |
+| `inter_cache_num` | Set `buf_slot_num_of_crosscore` directly. |
+| `intra_cache_num` | Set `buf_slot_num_of_veccore` directly. |
 | `kernel_name` | The kernel name is derived from TTIR. |
 | `llvm_version` | No replacement. |
 | `mix_mode` | Derived automatically by the compiler. |

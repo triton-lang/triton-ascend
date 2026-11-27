@@ -300,7 +300,7 @@ configs = [
 | 算子优化 | `vf_fusion_mode` | 选择VF fusion策略。 | `None`，不传开关；`"max-parallel"`、`"all-op"`、`"ub-aware-op"` | — | 常规路径 |
 | 算子优化 | `enable_vf_stack_limit` | 在BiShengIR编译中根据向量函数（VF）的栈占用估算限制融合，降低栈溢出风险。 | `False`；布尔值 | — | 常规路径 |
 | 算子优化 | `hfusion_enable_multiple_consumer_fusion` | 控制多个消费者的HFusion。 | `None`；布尔值 | — | 常规路径 |
-| 算子优化 | `enable_hivm_batch_matmul` | 为BiShengIR编译启用batch matmul。 | `False`；布尔值 | — | 常规路径 |
+| 算子优化 | `enable_hivm_batch_matmul` | 为 `True` 时向NPU编译器下发 `--enable-hivm-batch-matmul`。含 `tt.dot` 的分块批处理候选在TTIR改写时也使用此项。 | `False`，布尔值 | 常规路径（下发开关） | 常规路径（`bishengir-compile`） |
 | 算子优化 | `auto_vectorize_v2_max_fused_ops_num` | 设置AutoVectorizeV2最大融合操作数。 | `None`（默认）或有符号32位整数。`None` 和负值沿用该pass的默认上限。大于或等于 `0` 的值设置显式上限。 | — | 常规路径 |
 | 算子优化 | `prevec_max_fused_ops_num` | 限制预向量化融合中的逐元素操作数。 | `None`（默认）或有符号32位整数。正值设置操作数上限。`None`、`0` 和负值均不设置此上限。 | — | 常规路径 |
 | 纯SIMT | `simt_optimization_mode` | 设置纯SIMT的多位优化模式；在A2/A3或950常规路径显式传入时，会发出 `UserWarning` 并忽略。 | `0`；整数，位语义由NPU编译器定义 | — | 仅纯SIMT |
@@ -340,8 +340,6 @@ triton.Config({"multibuffer_mode": {"gm": 1, "l1": 2, "l0c": 1, "ub": 1}})
 |----------|----------------|----------|
 | `force_simt_only` | `compile_mode="simt_only"` | 旧值为 `True` 时覆盖已传入的 `compile_mode`，为 `False` 时不改变模式。两个旧force开关都为 `True` 时，本项优先。 |
 | `force_simt_template` | `compile_mode="simd_simt_template"` | 旧值为 `True` 时覆盖已传入的 `compile_mode`，为 `False` 时不改变模式。 |
-| `intra_cache_num` | `buf_slot_num_of_veccore` | 沿用原值；同时传入新旧名称时使用新名称。 |
-| `inter_cache_num` | `buf_slot_num_of_crosscore` | 沿用原值；同时传入新旧名称时使用新名称。 |
 | `load_cache_num` | `buf_slot_num_of_gm` | 沿用原值；同时传入新旧名称时使用新名称。 |
 | `enable_bishengir_simt_optimization` | `simt_optimization_mode` | 沿用原值；同时传入新旧名称时使用新名称。仅在950纯SIMT路径生效。 |
 
@@ -381,6 +379,8 @@ triton.Config({"multibuffer_mode": {"gm": 1, "l1": 2, "l0c": 1, "ub": 1}})
 | `graph_optimize_ub_capacity_bytes` | Graph Optimization UB预算由后端根据目标产品推导。 |
 | `grid_num_tiles` | 该值由后端根据静态grid自动注入。 |
 | `has_auto_blockify_blacklist_op` | 安全标记由编译器扫描TTIR生成。 |
+| `inter_cache_num` | 直接设置 `buf_slot_num_of_crosscore`。 |
+| `intra_cache_num` | 直接设置 `buf_slot_num_of_veccore`。 |
 | `kernel_name` | kernel名称由TTIR推导。 |
 | `llvm_version` | 无替代项。 |
 | `mix_mode` | 由编译器自动推导。 |

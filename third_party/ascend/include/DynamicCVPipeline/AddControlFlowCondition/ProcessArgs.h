@@ -53,13 +53,12 @@ struct SharedArgInfo {
 // cloneWhileBlockChains, buildNewWhileYield, recordWhileBlockArgMap.
 struct WhileIterArgClonePlan {
   // Per-origIdx metadata, keyed on the original iter_arg index.
-  llvm::DenseMap<unsigned, Operation *> compOp;
   llvm::DenseMap<unsigned, llvm::DenseSet<Operation *>> chainOps;
   llvm::DenseMap<unsigned, unsigned> posInClonedVec;
   // (blockId, newArgIdx, origIdx) triples in planning order, one per (blockId,
   // cond-used iter_arg) pair
   SmallVector<std::tuple<int, unsigned, unsigned>> newArgDescriptors;
-  // Output: cloned compOp results per blockId, indexed by posInClonedVec
+  // Output: cloned yield values per blockId, indexed by posInClonedVec
   llvm::DenseMap<int, SmallVector<Value>> clonedPerBlock;
 };
 

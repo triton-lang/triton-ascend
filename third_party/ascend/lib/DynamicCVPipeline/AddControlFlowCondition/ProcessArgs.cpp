@@ -85,29 +85,20 @@ static LogicalResult collectArgIndexToBlockIds(
   return success();
 }
 
-// Finds iter_args used by multiple block_ids. Owner = first block in order;
-// each non-owner gets its own extra iter_arg via SharedArgInfo.
+// Each non-owner stage gets its own extra iter_arg. Dependencies used only by
+// scf.yield have no original owning stage and need a copy in every consumer.
 static LogicalResult findSharedArgs(
     const llvm::DenseMap<int, llvm::DenseSet<int>> &argIndexToBlockIds,
-    const SmallVector<int> &idsInOrder,
+    const llvm::DenseMap<int, int> &originalOwners,
     SmallVector<SharedArgInfo> &sharedArgsInfo) {
   int extraArgCount = 0;
   for (auto &p : argIndexToBlockIds) {
     int argIndex = p.first;
     const llvm::DenseSet<int> &blockIds = p.second;
 
-    if (blockIds.size() <= 1)
-      continue;
-
     int ownerBlockId = -1;
-    for (int id : idsInOrder) {
-      if (blockIds.contains(id)) {
-        ownerBlockId = id;
-        break;
-      }
-    }
-    if (ownerBlockId == -1)
-      continue;
+    if (auto it = originalOwners.find(argIndex); it != originalOwners.end())
+      ownerBlockId = it->second;
 
     // Each non-owner block for this argIndex gets its own extra iter_arg
     for (int bid : blockIds) {
@@ -135,6 +126,8 @@ static Operation *findYieldDefiningOp(Block *body, unsigned argIndex) {
 // from compOp, scoped to ops inside `loopOp`'s body.
 static void collectChainOps(Operation *loopOp, Operation *compOp,
                             llvm::DenseSet<Operation *> &chainOps) {
+  if (!compOp || compOp->getParentOp() != loopOp)
+    return;
   SmallVector<Operation *> worklist;
   worklist.push_back(compOp);
 
@@ -154,6 +147,35 @@ static void collectChainOps(Operation *loopOp, Operation *compOp,
       }
     });
   }
+}
+
+// A stage needs its own copy of every scalar used to advance its state,
+// including values captured inside a multi-result scf.if.
+static SmallVector<SmallVector<unsigned>>
+collectIterArgDependencies(Operation *loopOp, Block *body, unsigned ivOffset) {
+  auto yieldOp = cast<scf::YieldOp>(body->getTerminator());
+  SmallVector<SmallVector<unsigned>> dependencies(yieldOp.getNumOperands());
+  for (auto [index, value] : llvm::enumerate(yieldOp.getOperands())) {
+    if (isa<TensorType>(value.getType()))
+      continue;
+    llvm::SmallSetVector<unsigned, 8> args;
+    auto collectArg = [&](Value operand) {
+      auto arg = dyn_cast<BlockArgument>(operand);
+      if (arg && arg.getOwner() == body && arg.getArgNumber() >= ivOffset &&
+          !isa<TensorType>(arg.getType()))
+        args.insert(arg.getArgNumber() - ivOffset);
+    };
+    collectArg(value);
+    llvm::DenseSet<Operation *> chain;
+    collectChainOps(loopOp, value.getDefiningOp(), chain);
+    for (Operation *op : chain)
+      op->walk([&](Operation *nested) {
+        for (Value operand : nested->getOperands())
+          collectArg(operand);
+      });
+    dependencies[index].append(args.begin(), args.end());
+  }
+  return dependencies;
 }
 
 // Builds compOp + chainOps for each shared arg. `body` is the loop body
@@ -181,53 +203,31 @@ static LogicalResult buildCompInfoForSharedArgs(
   return success();
 }
 
-// Clones the computation chain for a non-owner block (topo-sorted, operands
-// remapped). argRemapping: iter_arg -> new extra. clonedArgIdx: this block's
-// arg.
+// Clone a stage's complete update graph with one mapping. OpBuilder::clone
+// maps every result and uses the same mapping for nested regions.
 static LogicalResult
-cloneChainForBlock(SharedArgInfo &info, Operation *compOp,
-                   const llvm::DenseSet<Operation *> &chainOps, Block *newBlock,
-                   IRMapping &argRemapping, OpBuilder &cloneBuilder,
-                   IRMapping &resultMapper, int clonedArgIdx) {
-  if (!compOp || chainOps.empty()) {
-    return failure();
+cloneStateUpdateGraph(Block *body, int blockId,
+                      const llvm::DenseMap<Operation *, unsigned> &chainArgs,
+                      StringRef argAttr, IRMapping &mapping) {
+  SmallVector<Operation *> sortedChain;
+  Operation *lastOp = nullptr;
+  for (Operation &op : body->without_terminator()) {
+    if (chainArgs.contains(&op))
+      sortedChain.push_back(&op);
+    auto attr = op.getAttrOfType<IntegerAttr>(CVPipeline::kBlockId);
+    if (attr && attr.getInt() == blockId)
+      lastOp = &op;
   }
-
-  SmallVector<Operation *> sortedChain(chainOps.begin(), chainOps.end());
-  if (failed(topologicalSort(sortedChain))) {
-    return failure();
-  }
-
+  // The original body order already satisfies SSA dependencies, including
+  // captures inside nested regions. Keep independent updates in that order.
+  OpBuilder builder(body, body->end());
+  if (lastOp)
+    builder.setInsertionPointAfter(lastOp);
   for (Operation *op : sortedChain) {
-    IRMapping opMapper;
-    for (OpOperand &operand : op->getOpOperands()) {
-      Value oldVal = operand.get();
-      Value newVal = oldVal;
-      if (argRemapping.contains(oldVal)) {
-        newVal = argRemapping.lookup(oldVal);
-      } else if (resultMapper.contains(oldVal)) {
-        // Operand is a result from earlier in the owner chain, use cloned
-        // result
-        newVal = resultMapper.lookup(oldVal);
-      }
-      opMapper.map(oldVal, newVal);
-    }
-
-    if (resultMapper.contains(op->getResult(0)))
-      continue;
-
-    Operation *cloned = cloneBuilder.clone(*op, opMapper);
-    if (!cloned) {
-      LDBG("Clone chain failed when cloning op " << *op);
-      return failure();
-    }
-    cloned->setAttr(CVPipeline::kBlockId,
-                    cloneBuilder.getI32IntegerAttr(info.nonOwnerBlockId));
-    cloned->setAttr(CVPipeline::kArg,
-                    cloneBuilder.getI32IntegerAttr(info.argIndex));
-
-    resultMapper.map(op->getResult(0), cloned->getResult(0));
-    cloneBuilder.setInsertionPointAfter(cloned);
+    Operation *cloned = builder.clone(*op, mapping);
+    cloned->setAttr(CVPipeline::kBlockId, builder.getI32IntegerAttr(blockId));
+    cloned->setAttr(argAttr, builder.getI32IntegerAttr(chainArgs.lookup(op)));
+    builder.setInsertionPointAfter(cloned);
   }
   return success();
 }
@@ -265,13 +265,14 @@ static LogicalResult replaceIterArgsInBlock(SharedArgInfo &info,
 // iter_args. `ivOffset` is 1 for scf.for (IV at arg 0), 0 for scf.while.
 static LogicalResult processSharedArgsIteration(
     Block *newBlock, SmallVector<SharedArgInfo> &sharedArgsInfo,
-    const llvm::DenseMap<int, Operation *> &sharedArgToCompOp,
     const llvm::DenseMap<int, llvm::DenseSet<Operation *>> &sharedArgToChainOps,
-    ValueRange iterArgs, unsigned ivOffset, SmallVector<Value> &clonedResults) {
+    ValueRange iterArgs, ValueRange yieldValues, unsigned ivOffset,
+    SmallVector<Value> &clonedResults) {
   unsigned numOriginalIterArgs = iterArgs.size();
   unsigned extraIterArgsBase = ivOffset + numOriginalIterArgs;
 
-  int clonedArgIdx = clonedResults.size();
+  llvm::DenseMap<int, IRMapping> blockMappings;
+  SmallVector<int> blockIds;
   for (auto &info : sharedArgsInfo) {
     int argIndex = info.argIndex;
     info.iterArg = iterArgs[argIndex];
@@ -282,40 +283,38 @@ static LogicalResult processSharedArgsIteration(
     unsigned newExtraBlockArgIdx = extraIterArgsBase + info.newArgIndex;
     Value newExtraIterArg = newBlock->getArgument(newExtraBlockArgIdx);
 
-    // Build argRemapping: migratedIterArg -> newExtraIterArg
-    IRMapping argRemapping;
-    argRemapping.map(migratedIterArg, newExtraIterArg);
+    if (!blockMappings.count(info.nonOwnerBlockId))
+      blockIds.push_back(info.nonOwnerBlockId);
+    blockMappings[info.nonOwnerBlockId].map(migratedIterArg, newExtraIterArg);
+  }
 
-    Operation *lastOpInBlock = nullptr;
-    for (Operation &op : newBlock->without_terminator()) {
-      auto blockIdAttr = op.getAttrOfType<IntegerAttr>(CVPipeline::kBlockId);
-      if (blockIdAttr && blockIdAttr.getInt() == info.nonOwnerBlockId) {
-        lastOpInBlock = &op;
-      }
+  clonedResults.resize(sharedArgsInfo.size());
+  for (int blockId : blockIds) {
+    auto &mapping = blockMappings[blockId];
+    llvm::DenseMap<Operation *, unsigned> chainArgs;
+    for (const auto &info : sharedArgsInfo) {
+      if (info.nonOwnerBlockId != blockId)
+        continue;
+      for (Operation *op : sharedArgToChainOps.lookup(info.argIndex))
+        chainArgs.try_emplace(op, info.argIndex);
     }
+    if (failed(cloneStateUpdateGraph(newBlock, blockId, chainArgs,
+                                     CVPipeline::kArg, mapping)))
+      return failure();
+    for (const auto &info : sharedArgsInfo)
+      if (info.nonOwnerBlockId == blockId)
+        clonedResults[info.newArgIndex] =
+            mapping.lookupOrDefault(yieldValues[info.argIndex]);
+  }
 
-    OpBuilder cloneBuilder(newBlock, newBlock->end());
-    if (lastOpInBlock) {
-      cloneBuilder.setInsertionPointAfter(lastOpInBlock);
-    }
-
-    IRMapping resultMapper;
-    if (failed(cloneChainForBlock(info, sharedArgToCompOp.lookup(argIndex),
-                                  sharedArgToChainOps.lookup(argIndex),
-                                  newBlock, argRemapping, cloneBuilder,
-                                  resultMapper, clonedArgIdx))) {
-      continue;
-    }
-
-    if (failed(replaceIterArgsInBlock(info, newBlock, argRemapping,
-                                      cloneBuilder))) {
-      continue;
-    }
-
-    Value clonedResult =
-        resultMapper.lookup(sharedArgToCompOp.lookup(argIndex)->getResult(0));
-    clonedResults.push_back(clonedResult);
-    clonedArgIdx++;
+  // All stages must clone the original graph before its operands are rewritten.
+  OpBuilder builder(newBlock, newBlock->end());
+  for (auto &info : sharedArgsInfo) {
+    IRMapping mapping;
+    mapping.map(newBlock->getArgument(info.argIndex + ivOffset),
+                newBlock->getArgument(extraIterArgsBase + info.newArgIndex));
+    if (failed(replaceIterArgsInBlock(info, newBlock, mapping, builder)))
+      return failure();
   }
   return success();
 }
@@ -340,11 +339,41 @@ static LogicalResult prepareSharedArgsData(
   }
 
   SmallVector<int> idsInOrder = getBlockIdsInOrder(loopOp);
+  llvm::DenseMap<int, int> originalOwners;
+  for (const auto &[index, blocks] : argIndexToBlockIds)
+    for (int blockId : idsInOrder)
+      if (blocks.contains(blockId)) {
+        originalOwners[index] = blockId;
+        break;
+      }
+
+  auto dependencies = collectIterArgDependencies(loopOp, body, ivOffset);
+  bool changed;
+  do {
+    changed = false;
+    for (unsigned i = 0; i < dependencies.size(); ++i) {
+      auto it = argIndexToBlockIds.find(i);
+      if (it == argIndexToBlockIds.end())
+        continue;
+      SmallVector<int> blocks(it->second.begin(), it->second.end());
+      for (int blockId : blocks) {
+        // Only cloned updates need additional state. Leave the original
+        // update graph and its owning stage unchanged.
+        auto owner = originalOwners.find(i);
+        if (owner != originalOwners.end() && owner->second == blockId)
+          continue;
+        for (unsigned dep : dependencies[i])
+          changed |= argIndexToBlockIds[dep].insert(blockId).second;
+      }
+    }
+  } while (changed);
+
   if (idsInOrder.empty() && !MainLoop(loopOp).getBody()) {
     LDBG("[Error]: loopOp is neither scf::ForOp nor scf::WhileOp");
     return failure();
   }
-  if (failed(findSharedArgs(argIndexToBlockIds, idsInOrder, sharedArgsInfo))) {
+  if (failed(
+          findSharedArgs(argIndexToBlockIds, originalOwners, sharedArgsInfo))) {
     return failure();
   }
 
@@ -408,8 +437,9 @@ static LogicalResult processSharedArgsInForOp(
 
   SmallVector<Value> clonedResults;
   if (failed(processSharedArgsIteration(
-          newBlock, sharedArgsInfo, sharedArgToCompOp, sharedArgToChainOps,
-          MainLoop(forOp).getIterArgs(), 1, clonedResults))) {
+          newBlock, sharedArgsInfo, sharedArgToChainOps,
+          MainLoop(forOp).getIterArgs(),
+          oldBlock->getTerminator()->getOperands(), 1, clonedResults))) {
     return failure();
   }
   if (failed(buildNewYieldOp(oldBlock, newBlock, newForOp, clonedResults))) {
@@ -430,8 +460,9 @@ LogicalResult ProcessArgsPass::processSharedArgsInWhileOp(
 
   SmallVector<Value> clonedResults;
   if (failed(processSharedArgsIteration(
-          newWhileOp.getAfterBody(), sharedArgsInfo, sharedArgToCompOp,
-          sharedArgToChainOps, MainLoop(whileOp).getIterArgs(), 0,
+          newWhileOp.getAfterBody(), sharedArgsInfo, sharedArgToChainOps,
+          MainLoop(whileOp).getIterArgs(),
+          whileOp.getAfterBody()->getTerminator()->getOperands(), 0,
           clonedResults))) {
     return failure();
   }
@@ -617,78 +648,19 @@ static llvm::DenseSet<unsigned> collectConditionUsedIterArgIndices(
   return used;
 }
 
-// (findYieldCompOpForWhile folded into findYieldDefiningOp — see top of
-// file. Callers now pass `whileOp.getAfterBody()` directly.)
-
-// Returns the last op in `body` whose `ssbuffer.block_id` matches `blockId`
-// (i.e., end of the block's run of consecutive ops).
+// Returns the last operation belonging to a scheduled block.
 static Operation *findLastOpWithBlockId(Block *body, int blockId) {
   Operation *last = nullptr;
   for (Operation &op : body->without_terminator()) {
     auto attr = op.getAttrOfType<IntegerAttr>(CVPipeline::kBlockId);
-    if (attr && attr.getInt() == blockId) {
+    if (attr && attr.getInt() == blockId)
       last = &op;
-    }
   }
   return last;
 }
 
-// Builds a clone of the update chain after the last op with `blockId` in
-// `body`. Annotates with ssbuffer.while_arg/block_id; remaps operands.
-static LogicalResult cloneUpdateChainForWhileBlock(
-    scf::WhileOp whileOp, Block *body, Operation *compOp, int blockId,
-    unsigned originalArgIndex, unsigned newArgIndex,
-    const llvm::DenseSet<Operation *> &chainOps, Value &cloned) {
-  SmallVector<Operation *> sortedChain(chainOps.begin(), chainOps.end());
-  if (failed(topologicalSort(sortedChain))) {
-    cloned = Value();
-    return failure();
-  }
-
-  // Find insertion point: after the last op with this block_id.
-  Operation *lastOp = findLastOpWithBlockId(body, blockId);
-  OpBuilder builder(body, body->end());
-  if (lastOp) {
-    builder.setInsertionPointAfter(lastOp);
-  }
-  // If no op has this block_id, the builder is at body->end() (set by ctor);
-  // avoid setInsertionPoint(terminator) since it may not exist yet.
-
-  IRMapping resultMapper;
-  for (Operation *op : sortedChain) {
-    IRMapping opMapper;
-    for (OpOperand &operand : op->getOpOperands()) {
-      Value oldVal = operand.get();
-      Value newVal = oldVal;
-      // Remap the original iter_arg to the new iter_arg for this block;
-      // chain-internal operands remap to the corresponding cloned value.
-      auto blockArg = dyn_cast<BlockArgument>(oldVal);
-      if (blockArg && blockArg.getOwner() == body &&
-          (unsigned)blockArg.getArgNumber() == originalArgIndex) {
-        newVal = body->getArgument(newArgIndex);
-      } else if (resultMapper.contains(oldVal)) {
-        newVal = resultMapper.lookup(oldVal);
-      }
-      opMapper.map(oldVal, newVal);
-    }
-
-    if (resultMapper.contains(op->getResult(0)))
-      continue;
-
-    Operation *cloned = builder.clone(*op, opMapper);
-    cloned->setAttr(CVPipeline::kBlockId, builder.getI32IntegerAttr(blockId));
-    cloned->setAttr(CVPipeline::kWhileArg,
-                    builder.getI32IntegerAttr(originalArgIndex));
-    resultMapper.map(op->getResult(0), cloned->getResult(0));
-    builder.setInsertionPointAfter(cloned);
-  }
-
-  cloned = resultMapper.lookup(compOp->getResult(0));
-  return success();
-}
-
 // For each cond-used iter_arg, plans one new iter_arg per (block_id, origIdx).
-// compOp + def-chain must be computed BEFORE migrateBody (caused lookup crash).
+// The def-chain must be computed before migrateBody.
 static WhileIterArgClonePlan
 planWhileIterArgDescriptors(scf::WhileOp whileOp,
                             const SmallVector<unsigned> &originalIndices,
@@ -705,23 +677,16 @@ planWhileIterArgDescriptors(scf::WhileOp whileOp,
     plan.posInClonedVec[origIdx] = descIdx++;
 
     Operation *compOp = findYieldDefiningOp(whileOp.getAfterBody(), origIdx);
-    if (!compOp) {
-      LDBG("[WARN]: no compOp for while iter_arg idx=" << origIdx);
-      continue;
-    }
-
     llvm::DenseSet<Operation *> chainOps;
     collectChainOps(whileOp, compOp, chainOps);
-    plan.compOp[origIdx] = compOp;
     plan.chainOps[origIdx] = chainOps;
 
     for (int blockId : blockIdsInOrder) {
       plan.newArgDescriptors.push_back({blockId, nextNewArgIdx++, origIdx});
     }
   }
-  // Pre-size clonedPerBlock so cloneWhileBlockChains can assign by index
-  // without a placeholder. Slots for cond-used origIdx with no compOp stay
-  // null and are never read (newArgDescriptors skips them).
+  // Directly forwarded arguments have no defining operation but still need
+  // a corresponding per-block yield value.
   unsigned numOrigIds = descIdx;
   for (int blockId : blockIdsInOrder) {
     plan.clonedPerBlock[blockId].resize(numOrigIds);
@@ -729,50 +694,42 @@ planWhileIterArgDescriptors(scf::WhileOp whileOp,
   return plan;
 }
 
-// Clones update chains into newAfter per (block_id, origIdx); reuses compOp/
-// chainOps from before migrateBody; records into plan.clonedPerBlock.
+// Clones one update graph per block using the chains from before migrateBody,
+// and records the mapped yield values in plan.clonedPerBlock.
 static LogicalResult cloneWhileBlockChains(scf::WhileOp newWhileOp,
+                                           ValueRange yieldValues,
                                            WhileIterArgClonePlan &plan) {
   Block *newAfter = newWhileOp.getAfterBody();
   // Derive (blockId, origIdx) -> newArgIdx and the ordered blockId list from
   // newArgDescriptors (first-appearance order matches getBlockIdsInOrder).
-  llvm::DenseMap<std::pair<int, unsigned>, unsigned> blockOrigToNewArg;
-  llvm::DenseSet<int> seenBlocks;
+  llvm::DenseMap<int, IRMapping> blockMappings;
   SmallVector<int> blockIdsInOrder;
   for (auto &desc : plan.newArgDescriptors) {
     int blockId;
     unsigned newArgIdx, origIdx;
     std::tie(blockId, newArgIdx, origIdx) = desc;
-    blockOrigToNewArg[{blockId, origIdx}] = newArgIdx;
-    if (seenBlocks.insert(blockId).second)
+    if (!blockMappings.count(blockId))
       blockIdsInOrder.push_back(blockId);
+    blockMappings[blockId].map(newAfter->getArgument(origIdx),
+                               newAfter->getArgument(newArgIdx));
   }
 
-  // Iterate unique origIdx in first-appearance order;
-  // planWhileIterArgDescriptors pushes (blockId, origIdx) in originalIndices x
-  // blockIdsInOrder order.
-  llvm::DenseSet<unsigned> seenOrig;
-  for (auto &desc : plan.newArgDescriptors) {
-    unsigned origIdx;
-    std::tie(std::ignore, std::ignore, origIdx) = desc;
-    if (!seenOrig.insert(origIdx).second)
-      continue;
-    Operation *compOp = plan.compOp.lookup(origIdx);
-    if (!compOp)
-      continue;
-    const llvm::DenseSet<Operation *> &chainOps = plan.chainOps.lookup(origIdx);
-
-    for (int blockId : blockIdsInOrder) {
-      unsigned newArgIdx = blockOrigToNewArg.lookup({blockId, origIdx});
-      Value cloned;
-      if (failed(cloneUpdateChainForWhileBlock(newWhileOp, newAfter, compOp,
-                                               blockId, origIdx, newArgIdx,
-                                               chainOps, cloned))) {
-        return failure();
-      }
-      plan.clonedPerBlock[blockId][plan.posInClonedVec.lookup(origIdx)] =
-          cloned;
+  for (int blockId : blockIdsInOrder) {
+    auto &mapping = blockMappings[blockId];
+    llvm::DenseMap<Operation *, unsigned> chainArgs;
+    for (const auto &[id, newArgIdx, origIdx] : plan.newArgDescriptors) {
+      if (id != blockId)
+        continue;
+      for (Operation *op : plan.chainOps.lookup(origIdx))
+        chainArgs.try_emplace(op, origIdx);
     }
+    if (failed(cloneStateUpdateGraph(newAfter, blockId, chainArgs,
+                                     CVPipeline::kWhileArg, mapping)))
+      return failure();
+    for (const auto &[id, newArgIdx, origIdx] : plan.newArgDescriptors)
+      if (id == blockId)
+        plan.clonedPerBlock[blockId][plan.posInClonedVec.lookup(origIdx)] =
+            mapping.lookupOrDefault(yieldValues[origIdx]);
   }
   return success();
 }
@@ -1133,6 +1090,16 @@ ProcessArgsPass::processWhileIterArgsInWhileOp(scf::WhileOp whileOp,
   if (condUsed.empty())
     return success();
 
+  auto dependencies =
+      collectIterArgDependencies(whileOp, whileOp.getAfterBody(), 0);
+  SmallVector<unsigned> worklist(condUsed.begin(), condUsed.end());
+  while (!worklist.empty()) {
+    unsigned index = worklist.pop_back_val();
+    for (unsigned dep : dependencies[index])
+      if (condUsed.insert(dep).second)
+        worklist.push_back(dep);
+  }
+
   WhileIterArgClonePlan plan =
       planWhileIterArgDescriptors(whileOp, originalIndices, condUsed);
   if (plan.newArgDescriptors.empty()) {
@@ -1153,7 +1120,9 @@ ProcessArgsPass::processWhileIterArgsInWhileOp(scf::WhileOp whileOp,
   auto newWhileOp =
       cast<scf::WhileOp>(createMainLoopOpWithExtras(whileOp, extraInitArgs));
   migrateWhileBodies(whileOp, newWhileOp);
-  if (failed(cloneWhileBlockChains(newWhileOp, plan))) {
+  if (failed(cloneWhileBlockChains(
+          newWhileOp, whileOp.getAfterBody()->getTerminator()->getOperands(),
+          plan))) {
     return failure();
   }
   buildNewWhileCondition(whileOp, newWhileOp);

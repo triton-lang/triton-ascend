@@ -31,8 +31,8 @@ def torch_pointwise(x0, x1, dtype):
         x0 = x0.to(torch.float32)
         x1 = x1.to(torch.float32)
     elif dtype == 'float32':
-        x0 = x0.to(torch.float64)
-        x1 = x1.to(torch.float64)
+        # Compute the reference on the CPU so the float64 calculation retains its precision.
+        return torch.fmod(x0.cpu().double(), x1.cpu().double()).float().to(x0.device)
     res = torch.div(x0, x1, rounding_mode="trunc")
     res = x0 - x1 * res
     return res

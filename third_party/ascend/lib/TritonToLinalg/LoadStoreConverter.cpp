@@ -55,7 +55,6 @@
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Value.h"
-#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "llvm/ADT/DenseMap.h"
@@ -82,28 +81,6 @@ using namespace triton;
 const std::string MayImplicitTransposeWithLastAxisTAG =
     "MayImplicitTransposeWithLastAxis";
 static constexpr llvm::StringLiteral kAlreadySyncAttr = "already_sync";
-
-// NPU-IR hoists ordered locks around the outermost loop. In a mixed kernel
-// that can put Cube/Vector synchronization inside the atomic critical section.
-// Hoisting considers every lock in that loop together, so preserve an
-// independent ordered critical section if the input already contains one.
-static bool canUseUnorderedSnapshotLock(hivm::SyncBlockLockOp lock) {
-  if (!compileOn91095Flag || !existDotFlag)
-    return false;
-  auto loop = lock->getParentOfType<LoopLikeOpInterface>();
-  if (!loop)
-    return false;
-  while (auto outer = loop->getParentOfType<LoopLikeOpInterface>())
-    loop = outer;
-  WalkResult result = loop->walk([&](hivm::SyncBlockLockOp other) {
-    if (other != lock &&
-        !other->hasAttr(hivm::SyncBlockLockUnorderedAttr::name) &&
-        other.getOrdering() == hivm::SyncBlockLockOrdering::Ordered)
-      return WalkResult::interrupt();
-    return WalkResult::advance();
-  });
-  return !result.wasInterrupted();
-}
 
 // During dialect conversion the adaptor may expose the converted memref
 // directly, while a failed rewrite later leaves a one-input, one-output UCC in
@@ -1079,7 +1056,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
         storeOp->setAttr(kAlreadySyncAttr, rewriter.getUnitAttr());
         Value lockVar = returnValueLock.getLockVar();
         auto unlock = rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
-        if (canUseUnorderedSnapshotLock(returnValueLock)) {
+        if (compileOn91095Flag) {
           for (Operation *lockOp :
                {lockVar.getDefiningOp(), returnValueLock.getOperation(),
                 unlock.getOperation()})

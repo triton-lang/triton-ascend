@@ -22,14 +22,16 @@
 // CHECK: %[[HALF:.*]] = arith.truncf %[[BCAST]]
 // CHECK: linalg.matmul {{.*}}ins(%[[HALF]], %[[HALF]] :
 
-// Hoisting considers all locks in an outer loop together. An independent
-// ordered lock in the second loop must keep both critical sections ordered.
+// The second loop has an explicit ordered lock alongside the snapshot lock.
 // CHECK: scf.for
-// CHECK: %[[SNAP:.*]] = hivm.hir.create_sync_block_lock :
-// CHECK: hivm.hir.sync_block_lock lock_var(%[[SNAP]] :
+// A5: %[[SNAP:.*]] = hivm.hir.create_sync_block_lock {hivm.sync_block_lock_unordered}
+// A5: hivm.hir.sync_block_lock {hivm.sync_block_lock_unordered} lock_var(%[[SNAP]] :
+// ORDERED: %[[SNAP:.*]] = hivm.hir.create_sync_block_lock :
+// ORDERED: hivm.hir.sync_block_lock lock_var(%[[SNAP]] :
 // CHECK: memref.copy %[[GM2:[^,]+]],
 // CHECK: hivm.hir.store {{.*}} outs(%[[GM2]] : {{.*}}) {already_sync} atomic = <add>
-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[SNAP]] :
+// A5: hivm.hir.sync_block_unlock {hivm.sync_block_lock_unordered} lock_var(%[[SNAP]] :
+// ORDERED: hivm.hir.sync_block_unlock lock_var(%[[SNAP]] :
 // CHECK: %[[EXPLICIT:.*]] = hivm.hir.create_sync_block_lock :
 // CHECK: hivm.hir.sync_block_lock lock_var(%[[EXPLICIT]] :
 // CHECK: hivm.hir.sync_block_unlock lock_var(%[[EXPLICIT]] :

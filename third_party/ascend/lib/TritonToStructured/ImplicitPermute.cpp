@@ -108,7 +108,8 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
     return success();
   }
 
-  // Ordinary register-based loads use the existing permutation only when forced.
+  // Ordinary register-based loads use the existing permutation only when
+  // forced.
   if (compileOn91095Flag && !existDotFlag && !forceExplicitLoadTranspose &&
       tf.ptrState.dynamicOffsets.empty()) {
     LLVM_DEBUG({

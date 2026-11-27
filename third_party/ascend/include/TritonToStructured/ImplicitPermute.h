@@ -42,8 +42,8 @@ inline constexpr const char *ImplicitPermuteHandledTAG =
 
 class LoadConverter : public OpRewritePattern<triton::LoadOp> {
 public:
-  LoadConverter(MLIRContext *context, bool compileOn91095Flag, bool existDotFlag,
-                bool forceExplicitLoadTranspose)
+  LoadConverter(MLIRContext *context, bool compileOn91095Flag,
+                bool existDotFlag, bool forceExplicitLoadTranspose)
       : OpRewritePattern<triton::LoadOp>(context),
         compileOn91095Flag(compileOn91095Flag), existDotFlag(existDotFlag),
         forceExplicitLoadTranspose(forceExplicitLoadTranspose) {}

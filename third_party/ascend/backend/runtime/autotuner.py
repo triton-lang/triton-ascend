@@ -2598,7 +2598,7 @@ class AutoTilingTuner(Autotuner):
                             e2.__context__ = None
                             e2.__cause__ = None
                     for fk in mode_obj.future_kernels.values():
-                        raw = getattr(fk, "_future", None) or getattr(fk, "future", None)
+                        raw = getattr(fk, "future", None)
                         if raw is not None:
                             e2 = getattr(raw, "_exception", None)
                             if e2 is not None:

@@ -127,6 +127,7 @@ jobs:
           echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
 
       - name: Build and install triton-ascend
+        id: build
         shell: bash
         env:
           TRITON_BUILD_WITH_CCACHE: "true"
@@ -163,48 +164,75 @@ jobs:
             echo "ERROR: setup.py or setup_ascend.py not found" >&2
             exit 1
           fi
+          cmake_dir=$("$PYTHON" -c 'from python.build_helpers import get_cmake_dir; print(get_cmake_dir().resolve())')
+          export TRITON_BUILD_DIR="$cmake_dir"
           cd "$SETUP_DIR"
           MAX_JOBS="$NUM_PROCS" \
           ${PYTHON} ${SETUP_PY} bdist_wheel
           ${PYTHON} -m pip install dist/*.whl
 
+          mlir_test_dir="$cmake_dir/third_party/ascend/unittest"
+          if [[ ! -s "$mlir_test_dir/lit.site.cfg.py" ]]; then
+            echo "::error::Build did not generate $mlir_test_dir/lit.site.cfg.py"
+            exit 1
+          fi
+          echo "mlir_test_dir=$mlir_test_dir" >> "$GITHUB_OUTPUT"
+
       - name: CCache stats
         run: ccache --print-stats
 
       - name: Run unit tests on NPU
+        id: pytest
+        if: steps.build.outputs.mlir_test_dir != ''
         shell: bash
         run: |
           source /usr/local/Ascend/cann/set_env.sh
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
           NUM_PROCS=$(( $(nproc) / 9 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
-          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
-          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut
-          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/reuse_ut
+          reports_dir=$(mktemp -d npu-test-reports.XXXXXXXX)
+          echo "reports_dir=$reports_dir" >> "$GITHUB_OUTPUT"
+          for suite in pytest_ut autotune_ut reuse_ut; do
+            "$PYTHON" -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile \
+              --junitxml="$reports_dir/$suite.xml" "third_party/ascend/unittest/$suite"
+            if [[ ! -s "$reports_dir/$suite.xml" ]]; then
+              echo "::error::pytest returned without writing a report for $suite"
+              exit 1
+            fi
+          done
           # NOTE: kernel tests are temporarily disabled due to intermittent failures
           # that cause CI instability. TODO: Fix flaky kernel tests and re-enable.
           # ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/kernels/test_triton_kernel.py
+          echo "completed=true" >> "$GITHUB_OUTPUT"
 
       - name: Run compiler unit and MLIR tests
+        id: compiler_tests
+        if: steps.pytest.outputs.completed == 'true'
         shell: bash
+        env:
+          TEST_MLIR_DIR: ${{ steps.build.outputs.mlir_test_dir }}
         run: |
           source /usr/local/Ascend/cann/set_env.sh
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
-          TEST_MLIR_DIR=$(ls -d build/cmake.*/third_party/ascend/unittest 2>/dev/null | head -1 || true)
-          echo "TEST_MLIR_DIR=${TEST_MLIR_DIR:-<not found>}"
-          if [ -n "${TEST_MLIR_DIR}" ] && [ -d "${TEST_MLIR_DIR}" ]; then
-            ctest --test-dir "${TEST_MLIR_DIR}" --output-on-failure \
-              --no-tests=error -R '^TestTritonOffsetCacheLifetime$'
-            lit -v "${TEST_MLIR_DIR}"
-          else
-            echo "MLIR test directory not found."
-            echo "Expected to match: build/cmake.*/third_party/ascend/unittest"
-            echo "Working directory: $(pwd)"
-            if [ -d build ]; then
-              echo "Contents of build directory:"
-              find build -maxdepth 4 -print
-            else
-              echo "build directory does not exist"
-            fi
-            exit 1
-          fi
+          ctest --test-dir "$TEST_MLIR_DIR" --output-on-failure \
+            --no-tests=error -R '^TestTritonOffsetCacheLifetime$'
+          lit -v "$TEST_MLIR_DIR"
+          echo "completed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Check that all NPU test steps ran
+        if: success() && steps.compiler_tests.outputs.completed != 'true'
+        uses: actions/github-script@v7
+        env:
+          MISSING_STEP: >-
+            ${{ !steps.build.outputs.mlir_test_dir && 'Build and install triton-ascend' ||
+                !steps.pytest.outputs.completed && 'Run unit tests on NPU' ||
+                'Run compiler unit and MLIR tests' }}
+        with:
+          script: core.setFailed(`The runner returned without recording completion of "${process.env.MISSING_STEP}".`)
+
+      - name: Upload NPU pytest reports
+        if: "!cancelled() && steps.pytest.outputs.reports_dir != ''"
+        uses: actions/upload-artifact@v4
+        with:
+          name: npu-pytest-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-${{ github.run_attempt }}
+          path: ${{ steps.pytest.outputs.reports_dir }}

@@ -185,7 +185,7 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
       tf.materializeImplicitPermute(broadCastResult, loc, rewriter);
 
   if (auto trans = permuteResult.getDefiningOp<triton::TransOp>())
-    trans->setAttr(triton::memory_access::ImplicitLoadPermuteAttr,
+    trans->setAttr(triton::memory_access::ImplicitLoadPermuteTransAttr,
                    rewriter.getUnitAttr());
   rewriter.replaceOp(op, permuteResult);
   return success();

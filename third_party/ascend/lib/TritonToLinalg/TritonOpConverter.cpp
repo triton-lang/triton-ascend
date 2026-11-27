@@ -145,9 +145,10 @@ TransposeConverter::matchAndRewrite(triton::TransOp op, OpAdaptor adaptor,
   auto src = adaptor.getSrc();
   auto res = ConverterUtils::getTransposedValue(src, op.getLoc(), rewriter,
                                                 op.getOrder());
-  if (auto marker = op->getAttr(triton::memory_access::ImplicitLoadPermuteAttr))
-    res.getDefiningOp()->setAttr(triton::memory_access::ImplicitLoadPermuteAttr,
-                                 marker);
+  if (auto marker =
+          op->getAttr(triton::memory_access::ImplicitLoadPermuteTransAttr))
+    res.getDefiningOp()->setAttr(
+        triton::memory_access::ImplicitLoadPermuteTransAttr, marker);
   rewriter.replaceOp(op, res);
   return success();
 }

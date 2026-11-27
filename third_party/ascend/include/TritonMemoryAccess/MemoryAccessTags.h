@@ -26,7 +26,8 @@
 namespace mlir::triton::memory_access {
 
 // Marks a transpose inserted to restore the logical layout of a load.
-inline constexpr const char *ImplicitLoadPermuteAttr = "implicit_load_permute";
+inline constexpr const char *ImplicitLoadPermuteTransAttr =
+    "implicit_load_permute";
 
 inline constexpr const char *ImplicitPermuteHandledTAG =
     "ImplicitPermuteHandled";

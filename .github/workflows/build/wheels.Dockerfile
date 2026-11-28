@@ -24,7 +24,7 @@ ARG BUILD_DATE=00000000
 # follows the old RECORD, leaving empty namespace dirs behind) and breaks
 # downstream imports like triton_dist.language.extra.libshmem_device.
 ARG TRITON_BUILD_TD=ON
-ARG ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.2.0-beta.2
+ARG ASCEND_HOME_PATH
 # The wheel workflow passes the source commit from the OBS package manifest.
 ARG NPUIR_REF=stable
 
@@ -55,7 +55,6 @@ ENV TRITON_BUILD_WITH_CLANG_LLD=true \
     TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX}${BUILD_DATE} \
     TRITON_BUILD_NPUIR=OFF \
     TRITON_ASCEND_BISHENGIR_PATH=/project/.npuir-payload \
-    ASCEND_HOME_PATH=${ASCEND_HOME_PATH} \
     IS_MANYLINUX=TRUE
 
 # ---------------------------------------------------------------------------
@@ -92,6 +91,7 @@ RUN set -eu; \
 # headroom if the 32-core quota is shared with other matrix jobs. If the
 # nightly numbers show the quota is shared (no speedup), drop back to 16.
 # The BuildKit cache mount preserves ccache across nightly rebuilds.
+SHELL ["/bin/bash", "-c"]
 RUN --mount=type=cache,target=/root/.cache/ccache \
     . /project/.github/workflows/build/cgroup-resources.sh \
     || { echo "FAILED to source cgroup-resources.sh; build dir contents:"; ls -la /project/.github/workflows/build/ 2>/dev/null || true; exit 1; } \
@@ -103,6 +103,7 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     && export CCACHE_DIR=/root/.cache/ccache \
     && export CCACHE_MAXSIZE=20G \
     && echo "cgroup: $(cg_cpus) CPUs, mem $(( $(cg_mem_bytes) / (1024*1024*1024) )) GiB -> MAX_JOBS=$MAX_JOBS, ccache at ${CCACHE_DIR} (max ${CCACHE_MAXSIZE})" \
+    && if [ -z "${ASCEND_HOME_PATH:-}" ]; then source /usr/local/Ascend/cann/set_env.sh; fi \
     && export PATH="/opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin:${PATH}" \
     && if [ -f setup_ascend.py ]; then \
          SETUP_DIR="./"; SETUP_PY="setup_ascend.py"; \

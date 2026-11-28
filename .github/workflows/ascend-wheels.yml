@@ -2,13 +2,17 @@ name: Wheels
 
 on:
   workflow_dispatch:
+    inputs:
+      npuir_archive:
+        description: "NPUIR archive directory (npu-ir-latest or stable_YYYYMMDDhhmmss)"
+        type: string
+        default: npu-ir-latest
   push:
     branches: [release/**]
   pull_request:
     paths:
       - .github/workflows/ascend-wheels.yml
       - .github/workflows/build/wheels.Dockerfile
-      - .github/workflows/build/fetch-npuir-stable.sh
       - setup.py
       - pyproject.toml
       - version.txt
@@ -44,19 +48,13 @@ jobs:
       max-parallel: 8
       matrix:
         config:
-        - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64'}
-        - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64'}
+        - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64', image_tag: 'x86-v1'}
+        - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64', image_tag: 'arm64-v1'}
         python: ["cp310", "cp311", "cp312", "cp313"]
         branch:
-        # npuir: OFF uses the prebuilt payload from npuir-build.yml, which
-        # tracks the AscendNPU-IR stable branch and is branch-independent (all
-        # matrix branches share the same payload); ON (only as the fallback
-        # when no artifact is available) builds the payload in-image via
-        # build_npuir.py, against the stable sources the wheels.Dockerfile
-        # pre-fetches (local builds use the pinned submodule instead).
-        - {ref: 'main', tag: 'main', local: 'dev', npuir: 'OFF'}
-        - {ref: 'main-dev', tag: 'main-dev', local: 'dev', npuir: 'OFF'}
-        - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release', npuir: 'OFF'}
+        - {ref: 'main', tag: 'main', local: 'dev'}
+        - {ref: 'main-dev', tag: 'main-dev', local: 'dev'}
+        - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release'}
 
     permissions:
       id-token: write
@@ -88,159 +86,51 @@ jobs:
           # push/workflow_dispatch/schedule: use the matrix branch ref.
           ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
 
-      - name: Restore npuir payload from local cache
-        id: npuir-cache
-        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
+      - name: Set up Python for the NPUIR manifest
+        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Download NPUIR payload from OBS
+        id: npuir
+        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
         shell: bash
+        env:
+          NPUIR_ARCHIVE: ${{ inputs.npuir_archive || 'npu-ir-latest' }}
+          ARCH: ${{ matrix.config.arch }}
         run: |
-          set -eu
-          # The payload is the BishengIR compiler built by npuir-build.yml from
-          # the AscendNPU-IR stable branch (no longer the pinned submodule
-          # gitlink); key the cache on stable's HEAD SHA so it invalidates only
-          # when the upstream source actually moves, and is shared across all
-          # matrix branches (the payload no longer depends on the triton-ascend
-          # branch). Cached on the shared-volume PVC (/root/.cache).
-          NPUIR_SHA=""
-          for attempt in 1 2 3; do
-            NPUIR_SHA=$(git ls-remote https://gitcode.com/Ascend/AscendNPU-IR.git refs/heads/stable | awk '{print $1}') && [ -n "$NPUIR_SHA" ] && break || true
-            echo "ls-remote attempt ${attempt}/3 failed; retrying in 10s..."
-            sleep 10
-          done
-          if [ -z "$NPUIR_SHA" ]; then
-            echo "::error::cannot resolve AscendNPU-IR stable HEAD from gitcode"
+          set -euo pipefail
+          if [[ "$NPUIR_ARCHIVE" != npu-ir-latest && ! "$NPUIR_ARCHIVE" =~ ^stable_[0-9]{14}$ ]]; then
+            echo "::error::Expected npu-ir-latest or stable_YYYYMMDDhhmmss"
             exit 1
           fi
-          echo "AscendNPU-IR stable HEAD: ${NPUIR_SHA}"
-          echo "npuir_sha=${NPUIR_SHA}" >> "$GITHUB_OUTPUT"
-          CACHE_DIR="/root/.cache/npuir-payload/${NPUIR_SHA}-${{ matrix.config.arch }}"
-          echo "cache_dir=${CACHE_DIR}" >> "$GITHUB_OUTPUT"
-          CACHE_OK=false
-          if [ -x "${CACHE_DIR}/bin/bishengir-compile" ]; then
-            # A valid entry must self-identify as built from exactly this
-            # stable HEAD. Entries seeded before the npuir-sha.txt guard (or
-            # poisoned with a stale payload) carry no/foreign sha file and are
-            # discarded here, so the download path below can refresh them.
-            CACHED_SHA=$(cat "${CACHE_DIR}/npuir-sha.txt" 2>/dev/null || true)
-            if [ "${CACHED_SHA}" = "${NPUIR_SHA}" ]; then
-              CACHE_OK=true
-            else
-              echo "discarding cache entry built from '${CACHED_SHA:-<no npuir-sha.txt>}' (stable HEAD is ${NPUIR_SHA})"
-              rm -rf "${CACHE_DIR}"
-            fi
-          fi
-          if [ "${CACHE_OK}" = "true" ]; then
-            echo "npuir payload cache hit: ${CACHE_DIR}"
-            rm -rf .npuir-payload
-            mkdir -p .npuir-payload
-            cp -a "${CACHE_DIR}/bin" .npuir-payload/
-            cp -a "${CACHE_DIR}/lib" .npuir-payload/
-            chmod -R a+x .npuir-payload/bin
-            echo "cache_hit=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "npuir payload cache miss (npuir sha=${NPUIR_SHA})"
-            echo "cache_hit=false" >> "$GITHUB_OUTPUT"
+          base_url="https://ascend-cann-open.obs.cn-north-4.myhuaweicloud.com/Triton_Innersource/npu-ir/version"
+          url="$base_url/$NPUIR_ARCHIVE/ascendnpu-ir_2.0.0_linux-${ARCH}.tar.gz"
+          archive="$RUNNER_TEMP/ascendnpu-ir.tar.gz"
+          echo "Downloading $url"
+          curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 "$url" -o "$archive"
+          mkdir .npuir-payload
+          tar -xzf "$archive" -C .npuir-payload
+          rm "$archive"
+          if [[ ! -x .npuir-payload/bin/bishengir-compile || ! -x .npuir-payload/bin/bishengir-opt || ! -d .npuir-payload/lib ]]; then
+            echo "::error::Missing BishengIR compiler, optimizer or lib directory in $url"
+            exit 1
           fi
 
-      - name: Download npuir payload from this PR's npuir-build run
-        id: payload-head
-        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF' && steps.npuir-cache.outputs.cache_hit != 'true' && github.event_name == 'pull_request'
-        # Pre-merge testing only: a PR that changes npuir-build.yml or the
-        # fetch script gets its own npuir-build run on the PR head branch;
-        # for fork PRs that run lives on the fork, so allow_forks is required.
-        # Ordinary PRs have no such run — the next step falls back to main.
-        uses: dawidd6/action-download-artifact@v9
-        continue-on-error: true
-        with:
-          workflow: npuir-build.yml
-          workflow_conclusion: success
-          allow_forks: true
-          branch: ${{ github.head_ref }}
-          name: npuir-payload-manylinux-${{ matrix.config.arch }}
-          path: npuir-artifacts
+          # Compile the Triton plugin's dialects at the same revision as the bundled tools.
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          import xml.etree.ElementTree as ET
 
-      - name: Download npuir payload from main
-        id: payload-main
-        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF' && steps.npuir-cache.outputs.cache_hit != 'true' && steps.payload-head.outcome != 'success'
-        # Canonical source for every event and branch: the payload tracks
-        # AscendNPU-IR stable and is produced by npuir-build.yml's daily
-        # schedule on main, so main-dev/release branches consume main's
-        # payload too (they never run npuir-build themselves). Skipped only
-        # when the PR-head step above already found this PR's own payload.
-        uses: dawidd6/action-download-artifact@v9
-        continue-on-error: true
-        with:
-          workflow: npuir-build.yml
-          workflow_conclusion: success
-          branch: main
-          name: npuir-payload-manylinux-${{ matrix.config.arch }}
-          path: npuir-artifacts
-
-      - name: Prepare npuir payload
-        id: prepare-payload
-        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
-        shell: bash
-        run: |
-          set -eu
-          # Cache hit already populated .npuir-payload in the restore step.
-          if [ "${{ steps.npuir-cache.outputs.cache_hit }}" = "true" ]; then
-            echo "Using locally cached npuir payload."
-            echo "build_npuir=OFF" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Bundled into the wheel via TRITON_ASCEND_BISHENGIR_PATH in
-          # wheels.Dockerfile. Sourced from the npuir-build GitHub artifact
-          # downloaded above; when it is missing (expired artifact, no
-          # successful npuir-build run on main yet) fall back to compiling
-          # the payload in-image (also from stable) so the build still
-          # produces a correct wheel instead of failing.
-          BIN=$(find npuir-artifacts -name bishengir-compile -type f 2>/dev/null | head -1 || true)
-          if [ -z "${BIN}" ]; then
-            echo "No npuir-payload artifact for ${{ matrix.config.arch }}; falling back to in-image build (slow)."
-            echo "build_npuir=ON" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          PAYLOAD_DIR=$(dirname "$(dirname "${BIN}")")
-          echo "Using npuir-build payload at ${PAYLOAD_DIR}"
-          rm -rf .npuir-payload
-          mkdir -p .npuir-payload
-          cp -a "${PAYLOAD_DIR}/bin" .npuir-payload/
-          cp -a "${PAYLOAD_DIR}/lib" .npuir-payload/
-          # GitHub artifact zips carry no unix permission bits (upload-artifact
-          # zips without setUnixMode) and action-download-artifact extracts
-          # via adm-zip as 0644, so restore the exec bit explicitly.
-          chmod -R a+x .npuir-payload/bin
-          # Seed the PVC cache only when the payload self-identifies as built
-          # from exactly the stable HEAD we keyed on (npuir-build.yml writes
-          # npuir-sha.txt into the artifact). A stale payload — e.g. the old
-          # pin-built one from main while this PR's npuir-build is still
-          # running — is still used for this wheel, but must NOT be cached
-          # under the stable-HEAD key: a poisoned entry would mask the real
-          # payload on every later run until stable moves again.
-          WANT_SHA="${{ steps.npuir-cache.outputs.npuir_sha }}"
-          HAVE_SHA=$(cat "${PAYLOAD_DIR}/npuir-sha.txt" 2>/dev/null || true)
-          if [ "${HAVE_SHA}" != "${WANT_SHA}" ]; then
-            echo "WARNING: payload built from npuir '${HAVE_SHA:-<unknown, legacy artifact>}' but stable HEAD is ${WANT_SHA}; using it without caching"
-          else
-            # Seed the shared-volume PVC cache atomically (write a per-process
-            # temp dir, then mv) so the next run skips the slow download and the
-            # concurrent same-arch jobs (same key, identical content) never
-            # clobber each other's temp or expose a half-written dir.
-            CACHE_DIR="${{ steps.npuir-cache.outputs.cache_dir }}"
-            TMP_DIR="${CACHE_DIR}.tmp.$$"
-            rm -rf "${TMP_DIR}"
-            mkdir -p "${TMP_DIR}"
-            cp -a .npuir-payload/bin "${TMP_DIR}/"
-            cp -a .npuir-payload/lib "${TMP_DIR}/"
-            # Mark the entry with its source SHA (HAVE == WANT inside this
-            # branch) so the restore step can validate it on later runs.
-            cp "${PAYLOAD_DIR}/npuir-sha.txt" "${TMP_DIR}/npuir-sha.txt"
-            chmod -R a+x "${TMP_DIR}/bin"
-            rm -rf "${CACHE_DIR}"
-            mv "${TMP_DIR}" "${CACHE_DIR}"
-            echo "Saved npuir payload to local cache ${CACHE_DIR}"
-          fi
-          ls -la .npuir-payload/bin
-          echo "build_npuir=OFF" >> "$GITHUB_OUTPUT"
+          manifest = ET.parse(".npuir-payload/manifest.xml")
+          project = manifest.find("./project[@name='Ascend/AscendNPU-IR']")
+          # OBS manifests use "reversion" for the commit SHA.
+          revision = project.get("reversion", "") if project is not None else ""
+          if not re.fullmatch(r"[0-9a-fA-F]{40}", revision):
+              raise SystemExit("Missing AscendNPU-IR commit in manifest.xml")
+          print(f"revision={revision}")
+          PY
 
       - name: Compute build variables
         id: vars
@@ -259,9 +149,9 @@ jobs:
           context: .
           file: .github/workflows/build/wheels.Dockerfile
           build-args: |
-            MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
+            MANYLINUX_IMAGE=swr.cn-north-4.myhuaweicloud.com/triton-build/triton:${{ matrix.config.image_tag }}
             PYTHON_VERSION=${{ matrix.python }}
-            TRITON_BUILD_NPUIR=${{ steps.prepare-payload.outputs.build_npuir || matrix.branch.npuir }}
+            NPUIR_REF=${{ steps.npuir.outputs.revision }}
             TRITON_WHEEL_VERSION_SUFFIX=+${{ matrix.branch.local }}
             BUILD_DATE=${{ steps.vars.outputs.build_date }}
           # Same registry-cache pattern as build-docker-image.yml: the dnf and
@@ -353,11 +243,10 @@ jobs:
 
           backend_dir = os.path.join(os.path.dirname(triton.__file__), "backends", "ascend", "bishengir")
           print("bundled bishengir dir:", backend_dir)
-          print("exists:", os.path.isdir(backend_dir))
-          if os.path.isdir(backend_dir):
-              print("contents:", sorted(os.listdir(backend_dir)))
-              bin_dir = os.path.join(backend_dir, "bin")
-              print("bin:", sorted(os.listdir(bin_dir)) if os.path.isdir(bin_dir) else "<no bin/>")
+          for tool in ("bishengir-compile", "bishengir-opt"):
+              path = os.path.join(backend_dir, "bin", tool)
+              assert os.path.isfile(path) and os.access(path, os.X_OK), f"missing executable {path}"
+          assert os.path.isdir(os.path.join(backend_dir, "lib")), f"missing libraries in {backend_dir}"
 
           # Verify the TD build (wheels.Dockerfile TRITON_BUILD_TD=ON) bundled
           # triton_dist next to triton. File-existence check only: importing
@@ -403,7 +292,7 @@ jobs:
         - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64'}
         python: ["cp310", "cp311", "cp312", "cp313"]
         branch:
-        - {ref: 'main', tag: 'main', local: 'dev', npuir: 'OFF'}
+        - {ref: 'main', tag: 'main', local: 'dev'}
     steps:
       - name: Download built wheel
         id: download

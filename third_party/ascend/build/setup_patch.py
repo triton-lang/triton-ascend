@@ -420,9 +420,8 @@ def _copy_ascend_tools(extdir, cmake_dir):
 
 
 def _get_bishengir_payload_source():
-    # Priority: an explicit external payload dir (TRITON_ASCEND_BISHENGIR_PATH,
-    # the prebuilt npuir-build artifact flow), else the in-repo output of
-    # build_npuir.py when TRITON_BUILD_NPUIR=ON.
+    # The wheel CI supplies the unpacked OBS package via TRITON_ASCEND_BISHENGIR_PATH.
+    # Source builds can use the output of build_npuir.py when TRITON_BUILD_NPUIR=ON.
     raw_path = os.getenv(_BISHENGIR_PAYLOAD_ENV)
     if raw_path:
         source = Path(raw_path).expanduser().resolve()
@@ -715,10 +714,11 @@ def _robust_open_url(url, retries=5):
     tmp.close()
     last_error = None
     for attempt in range(1, retries + 1):
+        # The outer loop also retries partial transfers on older manylinux curl versions.
         proc = subprocess.run(
             [
-                "curl", "-fsSL", "-C", "-", "--retry", "2", "--retry-all-errors", "--connect-timeout", "30",
-                "--max-time", "1000", "-o", tmp.name, url
+                "curl", "-fsSL", "-C", "-", "--retry", "2", "--connect-timeout", "30", "--max-time", "1000", "-o",
+                tmp.name, url
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

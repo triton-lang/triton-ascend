@@ -25,6 +25,7 @@
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/BuiltinOps.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
@@ -47,15 +48,95 @@ static constexpr const char *DEBUG_TYPE = "pre-check-blacklist";
   })
 
 // Sliced-tile accumulation idiom: a scf.for carrying tensor iter_args whose
-// body slices a carried tensor itself (tensor.extract_slice of the
-// loop-carried value, or tensor.insert_slice into it). Kernels written this
-// way (e.g. the HEAD_DIM >= 256 fused-attention accumulator update, which
-// sub-tiles by 1/4 of BLOCK_M) tile their accumulators manually to fit the
-// vector-core UB budget of the legacy SSBUFFER plan. The dynamic CV
-// pipeline instead plans whole-tile cross-core UB buffers and multi-buffers
-// them, which exceeds UB capacity at the BiShengIR regbase stage ("ub
-// overflow") and fails the compile. Decline such kernels so they keep the
-// legacy plan their tiling was designed against.
+// body performs a read-modify-write of a carried tensor through *matching*
+// slices - a tensor.extract_slice of the loop-carried value and a
+// tensor.insert_slice into the same carried value at the same window
+// (offsets, sizes and strides all equal), where the slice is a proper
+// sub-tile of the carried tensor and the inserted value is not the extracted
+// value itself (that would be a pure copy). Kernels tile their accumulators
+// this way to fit the vector-core UB budget of the legacy SSBUFFER plan
+// (e.g. the HEAD_DIM >= 256 fused-attention accumulator update, sub-tiled by
+// 1/4 of BLOCK_M: extract [BLOCK_M/4, HEAD_DIM], accumulate, insert back at
+// the same offset). The dynamic CV pipeline instead plans whole-tile
+// cross-core UB buffers and multi-buffers them, which exceeds UB capacity at
+// the BiShengIR regbase stage ("ub overflow") and fails the compile. Decline
+// such kernels so they keep the legacy plan their tiling was designed
+// against.
+//
+// Only the paired same-window read-modify-write matches. Slicing a carried
+// tensor in any other shape is NOT manual UB-driven sub-tiling and must keep
+// the dynamic pipeline, e.g.:
+//   - insert-only moving windows (index_select-style gather filling
+//     buf[scatterRow, :] row by row, the window offset comes from the data);
+//   - extract-only reads, or slicing of tiles that are not loop-carried.
+static bool isSameOFR(OpFoldResult a, OpFoldResult b) {
+  if (a == b) {
+    return true; // same SSA value, or the same uniqued attribute
+  }
+  std::optional<int64_t> ca = getConstantIntValue(a);
+  std::optional<int64_t> cb = getConstantIntValue(b);
+  return ca && cb && *ca == *cb;
+}
+
+static bool isSameWindow(ArrayRef<OpFoldResult> extractWindow,
+                         ArrayRef<OpFoldResult> insertWindow) {
+  if (extractWindow.size() != insertWindow.size()) {
+    return false;
+  }
+  for (auto [e, i] : llvm::zip(extractWindow, insertWindow)) {
+    if (!isSameOFR(e, i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The slice must be a strict sub-tile of the carried tensor (at least one
+// static dimension strictly smaller, none larger), not a whole-tile
+// reshuffle.
+static bool isProperSubtile(Type carriedType, Type sliceType) {
+  auto carried = dyn_cast<RankedTensorType>(carriedType);
+  auto slice = dyn_cast<RankedTensorType>(sliceType);
+  if (!carried || !slice || carried.getRank() != slice.getRank()) {
+    return false;
+  }
+  ArrayRef<int64_t> carriedShape = carried.getShape();
+  ArrayRef<int64_t> sliceShape = slice.getShape();
+  bool strictlySmaller = false;
+  for (size_t d = 0; d < carriedShape.size(); ++d) {
+    if (ShapedType::isDynamic(carriedShape[d]) ||
+        ShapedType::isDynamic(sliceShape[d])) {
+      continue;
+    }
+    if (sliceShape[d] > carriedShape[d]) {
+      return false;
+    }
+    if (sliceShape[d] < carriedShape[d]) {
+      strictlySmaller = true;
+    }
+  }
+  return strictlySmaller;
+}
+
+// Whether the (extractOp, insertOp) pair is a same-window read-modify-write
+// of the loop-carried iterArg: read a sub-tile, compute something new from
+// it, write the result back to the very same window.
+static bool isAccumulationPair(BlockArgument iterArg,
+                               tensor::ExtractSliceOp extractOp,
+                               tensor::InsertSliceOp insertOp) {
+  if (insertOp.getSource() == extractOp.getResult()) {
+    return false; // pure copy through, no computation in between
+  }
+  if (!isProperSubtile(iterArg.getType(), extractOp.getResult().getType())) {
+    return false;
+  }
+  return isSameWindow(extractOp.getMixedOffsets(),
+                      insertOp.getMixedOffsets()) &&
+         isSameWindow(extractOp.getMixedSizes(), insertOp.getMixedSizes()) &&
+         isSameWindow(extractOp.getMixedStrides(),
+                      insertOp.getMixedStrides());
+}
+
 static bool hasSlicedTileAccumulation(ModuleOp module) {
   bool found = false;
   module->walk([&](scf::ForOp forOp) -> WalkResult {
@@ -63,20 +144,27 @@ static bool hasSlicedTileAccumulation(ModuleOp module) {
       if (!isa<TensorType>(iterArg.getType())) {
         continue;
       }
-      forOp.getBody()->walk([&](Operation *op) -> WalkResult {
+      SmallVector<tensor::ExtractSliceOp> extracts;
+      SmallVector<tensor::InsertSliceOp> inserts;
+      forOp.getBody()->walk([&](Operation *op) {
         if (auto extractOp = dyn_cast<tensor::ExtractSliceOp>(op)) {
           if (extractOp.getSource() == iterArg) {
-            found = true;
-            return WalkResult::interrupt();
+            extracts.push_back(extractOp);
           }
         } else if (auto insertOp = dyn_cast<tensor::InsertSliceOp>(op)) {
           if (insertOp.getDest() == iterArg) {
+            inserts.push_back(insertOp);
+          }
+        }
+      });
+      for (const auto &extractOp : extracts) {
+        for (const auto &insertOp : inserts) {
+          if (isAccumulationPair(iterArg, extractOp, insertOp)) {
             found = true;
             return WalkResult::interrupt();
           }
         }
-        return WalkResult::advance();
-      });
+      }
       if (found) {
         return WalkResult::interrupt();
       }
@@ -115,8 +203,9 @@ void PreCheckBlacklistPass::runOnOperation() {
   if (!foundBlacklistOp) {
     if (hasSlicedTileAccumulation(module)) {
       LDBG("SSBUFFER will be skipped because a scf.for carries tensor "
-           "iter_args that are sliced in-body (sliced-tile accumulation); "
-           "the kernel is tiled against the legacy UB budget.");
+           "iter_args that are read-modify-written through matching "
+           "extract/insert_slice windows (sliced-tile accumulation); the "
+           "kernel is tiled against the legacy UB budget.");
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
       return;
     }

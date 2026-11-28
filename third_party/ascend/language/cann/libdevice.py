@@ -1135,6 +1135,26 @@ def div_rz(arg0, arg1, _semantic=None):
         arg1 = _semantic.to_tensor(arg1)
         ret = _semantic.fdiv(arg0, arg1, False)
         return ret
+    arg0 = _semantic.to_tensor(arg0)
+    arg1 = _semantic.to_tensor(arg1)
+    if arg0.dtype == core.dtype("fp32") and arg1.dtype == core.dtype("fp32"):
+        # Round-toward-zero: start from round-to-nearest, then step one ulp
+        # toward zero when round-to-nearest rounded away from zero.
+        q = _semantic.truediv(arg0, arg1)
+        zero = _semantic.full(arg0.shape, 0.0, arg0.type.scalar)
+        neg_q = _semantic.sub(zero, q, False)
+        r = math.fma(neg_q, arg1, arg0, _semantic=_semantic)
+        sb = _semantic.less_than(arg1, 0.0)
+        sr = _semantic.less_than(r, 0.0)
+        qp = _semantic.greater_than(q, 0.0)
+        away = _semantic.where(qp, _semantic.not_equal(sr, sb), _semantic.equal(sr, sb))
+        away = _semantic.and_(away, _semantic.not_equal(r, 0.0))
+        qi = _semantic.bitcast(q, core.dtype("int32"))
+        neg_one = _semantic.full(arg0.shape, -1, core.dtype("int32"))
+        zero_i = _semantic.full(arg0.shape, 0, core.dtype("int32"))
+        step = _semantic.where(away, neg_one, zero_i)
+        qint = _semantic.add(qi, step, False)
+        return _semantic.bitcast(qint, core.dtype("fp32"))
     return core.extern_elementwise("", "", [arg0, arg1], {
         (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_rz_fp32", core.dtype("fp32")),
     }, is_pure=True, _semantic=_semantic)

@@ -34,6 +34,7 @@ from types import SimpleNamespace
 import pytest
 import triton as tr
 import triton.language as tl
+from triton.backends.ascend import _apply_ascend_patch
 from triton.language.extra import tla
 from triton.compiler.errors import CompilationError
 from triton.language.core import builtin
@@ -41,6 +42,12 @@ from triton.language.semantic import TritonSemantic
 from triton._C.libtriton import ir
 
 from utils.tla_test_utils import compile_offline, lower_offline, make_context, matrix
+
+
+@pytest.fixture(scope="module", autouse=True)
+def install_ascend_frontend_checks():
+    """Use the same dtype checks as backend compilation in standalone IR runs."""
+    _apply_ascend_patch()
 
 
 @tr.jit
@@ -195,7 +202,7 @@ def _abs_expression(x):
 @pytest.mark.parametrize("dtype", SCALAR_TYPES)
 def test_abs_scalar_ir(dtype):
     if dtype in ("bf16", "fp64"):
-        message = "does not support bfloat16" if dtype == "bf16" else "does not support dtype fp64"
+        message = "does not support bfloat16" if dtype == "bf16" else "operator 'abs' does not support dtype 'float64'"
         with pytest.raises(CompilationError, match=message):
             _lower(_abs_expression, {"x": dtype})
         return
@@ -357,6 +364,10 @@ def test_minmax_rejects_16bit_float_inputs(is_max, position, name, dtype, dtype_
 
 @pytest.mark.parametrize("dtype", SCALAR_TYPES)
 def test_select_ir(dtype):
+    if dtype == "fp64":
+        with pytest.raises(CompilationError, match="operator 'device_print' does not support dtype 'float64'"):
+            _lower(_select_expression, {"condition": "i1", "x": dtype, "y": dtype})
+        return
     if dtype == "bf16":
         with pytest.raises(Exception, match="does not support bfloat16"):
             _lower(_select_expression, {"condition": "i1", "x": dtype, "y": dtype})
@@ -492,6 +503,11 @@ def _extremum_opcode(dtype, is_max):
 @pytest.mark.parametrize("is_max", [True, False], ids=["maximum", "minimum"])
 @pytest.mark.parametrize("dtype", SCALAR_TYPES)
 def test_minmax_ir(dtype, is_max):
+    if dtype == "fp64":
+        operator = "maximum" if is_max else "minimum"
+        with pytest.raises(CompilationError, match=f"operator '{operator}' does not support dtype 'float64'"):
+            _lower(_minmax_expression, {"x": dtype, "y": dtype}, {"IS_MAX": is_max})
+        return
     if dtype in ("fp16", "bf16"):
         name = "float16" if dtype == "fp16" else "bfloat16"
         with pytest.raises(Exception, match=f"does not support {name}"):
@@ -520,6 +536,11 @@ def test_minmax_ir(dtype, is_max):
     ("fp64", "u64", "fp64"),
 ])
 def test_minmax_type_matching(left, right, result, is_max):
+    if "fp64" in (left, right):
+        operator = "maximum" if is_max else "minimum"
+        with pytest.raises(CompilationError, match=f"operator '{operator}' does not support dtype 'float64'"):
+            _lower(_minmax_expression, {"x": left, "y": right}, {"IS_MAX": is_max})
+        return
     if "fp16" in (left, right):
         with pytest.raises(Exception, match="does not support float16"):
             _lower(_minmax_expression, {"x": left, "y": right}, {"IS_MAX": is_max})
@@ -675,6 +696,10 @@ def test_scalar_cast_rejects_fp64_narrowing_literals(value, destination):
 @pytest.mark.parametrize("source", SCALAR_TYPES)
 @pytest.mark.parametrize("destination", SCALAR_TYPES)
 def test_scalar_cast_numeric_ir(source, destination):
+    if destination == "fp64":
+        with pytest.raises(CompilationError, match="operator 'cast' does not support dtype 'float64'"):
+            _lower(_cast_expression, {"x": source}, {"DTYPE": tl.float64, "BITCAST": False, "ROUND": None})
+        return
     if "bf16" in (source, destination):
         with pytest.raises(Exception, match="does not support bfloat16"):
             _lower(_cast_expression, {"x": source},
@@ -731,6 +756,10 @@ def test_scalar_fp64_narrowing_in_jit_helper_rejected():
     ("u64", "fp64"),
 ])
 def test_scalar_cast_bitcast_ir(source, destination):
+    if destination == "fp64":
+        with pytest.raises(CompilationError, match="operator 'cast' does not support dtype 'float64'"):
+            _lower(_cast_expression, {"x": source}, {"DTYPE": tl.float64, "BITCAST": True, "ROUND": None})
+        return
     module = _lower(_cast_expression, {"x": source},
                     {"DTYPE": tl.str_to_ty(destination, None), "BITCAST": True, "ROUND": None})
     op, = _ops(module, "arith.bitcast")
@@ -1001,13 +1030,13 @@ def _clamp_expression(x, lo, hi, PROPAGATE_NAN: tl.constexpr):
 def test_clamp_scalar_lowering(propagate_nan):
     module = _lower(_clamp_expression, {"x": "fp32", "lo": "fp32", "hi": "fp32"}, {"PROPAGATE_NAN": propagate_nan})
     suffix = "numf" if propagate_nan == tl.PropagateNan.NONE else "imumf"
-    minimum, = _ops(module, "arith.min" + suffix)
     maximum, = _ops(module, "arith.max" + suffix)
-    assert maximum.get_operand(1).id() == minimum.get_result(0).id()
-    assert str(maximum.get_result(0).get_type()) == "f32"
+    minimum, = _ops(module, "arith.min" + suffix)
+    assert minimum.get_operand(0).id() == maximum.get_result(0).id()
+    assert str(minimum.get_result(0).get_type()) == "f32"
     debug, = _ops(module, "hivm.hir.debug")
     assert str(debug.get_operand(0).get_type()) == "f32"
-    assert debug.get_operand(0).id() == maximum.get_result(0).id()
+    assert debug.get_operand(0).id() == minimum.get_result(0).id()
     assert not _ops(module, "arith.cmpf") and not _ops(module, "arith.select")
     text = str(module)
     assert "tt." not in text and "tensor<" not in text and "memref.alloc" not in text

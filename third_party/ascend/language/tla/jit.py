@@ -40,7 +40,7 @@ class TLASTSource(ASTSource):
         from triton.language.extra.tla.compiler import ast_to_ttir
 
         constexprs = {self.fn.arg_names[i[0]]: value for i, value in self.constants.items()}
-        return ast_to_ttir(self.fn, self.signature, constexprs, context=context, options=options)
+        return ast_to_ttir(self.fn, self.signature, constexprs, context=context, options=options, attrs=self.attrs)
 
 
 class TLAJITFunction(JITFunction):

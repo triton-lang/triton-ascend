@@ -175,6 +175,13 @@ def _compute_strides(shape):
     return strides
 
 
+def _normalize_bounded_index(index, boundary):
+    index = int(index)
+    if index < 0:
+        index += boundary
+    return index if 0 <= index < boundary else -1
+
+
 class AscendInterpreterBuilder(InterpreterBuilder):
     """
     Extended InterpreterBuilder with Ascend-specific extension operations.
@@ -656,8 +663,8 @@ class AscendInterpreterBuilder(InterpreterBuilder):
             src_coord = []
             for d in range(index_rank):
                 if d == dim:
-                    index_value = index_tensor.data[coord]
-                    if index_value >= index_boundary:
+                    index_value = _normalize_bounded_index(index_tensor.data[coord], index_boundary)
+                    if index_value == -1:
                         src_coord.append(-1)
                     else:
                         src_coord.append(start_offset_vals[d] + index_value)
@@ -725,8 +732,8 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         addresses = []
         valid_mask = []
         for _, coord in enumerate(all_coords):
-            index_value = index_tensor.data[coord]
-            if index_value >= index_boundary:
+            index_value = _normalize_bounded_index(index_tensor.data[coord], index_boundary)
+            if index_value == -1:
                 addresses.append(0)
                 valid_mask.append(False)
             else:
@@ -782,11 +789,10 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         #Compute address
         addresses = []
         valid_mask = []
-        values_to_store = []
-        for i, coord in enumerate(all_coords):
+        for coord in all_coords:
             index_pos = coord[dim]
-            index_value = index_tensor.data[index_pos]
-            if index_value >= index_boundary:
+            index_value = _normalize_bounded_index(index_tensor.data[index_pos], index_boundary)
+            if index_value == -1:
                 addresses.append(0)
                 valid_mask.append(False)
             else:
@@ -801,12 +807,11 @@ class AscendInterpreterBuilder(InterpreterBuilder):
                     offset += dst_coord[d] * dst_stride_vals[d]
                 address = base_addr + offset * element_size
                 addresses.append(address)
-                values_to_store.append(flat_values[i])
                 valid_mask.append(True)
 
         addr_array = np.array(addresses, dtype=np.uint64)
         mask_array = np.array(valid_mask, dtype=bool)
-        values_array = np.array(values_to_store, dtype=dtype_np)
+        values_array = flat_values.astype(dtype_np, copy=False)
 
         _interpreter.store(addr_array, values_array, mask_array)
 

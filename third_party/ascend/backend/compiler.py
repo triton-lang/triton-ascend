@@ -296,7 +296,7 @@ def _get_save_temps_dir(hash_key: str) -> str:
     return tempfile.mkdtemp(prefix="bishengir-", dir=get_dump_manager(hash_key).cache_dir)
 
 
-def _with_debug_line(npubin_stage, options):
+def _with_debug_line(npubin_stage, options, jit_fn=None):
     """Wrap an npubin-producing stage so the emitted kernel binary gets
     .debug_line cleanup for msdebug stepping. No-op unless
     LLVM_EXTRACT_DI_LOCAL_VARIABLES is set; never raises (failure returns the
@@ -306,7 +306,7 @@ def _with_debug_line(npubin_stage, options):
         artifact = npubin_stage(src, metadata)
         if isinstance(artifact, BatchDecline):
             return artifact
-        return rewrite_debug_line(artifact, metadata=metadata, options=options)
+        return rewrite_debug_line(artifact, metadata=metadata, options=options, jit_fn=jit_fn)
 
     return stage
 
@@ -2056,6 +2056,9 @@ class AscendBackend(BaseBackend):
         return nullcontext(get_cache_manager(key))
 
     def make_compilation_writer(self, src, options, cache, override_enabled):
+        # The backend instance belongs to this compilation. Keep the source
+        # available to the debug stage without serializing its path in metadata.
+        self._debug_jit_fn = getattr(src, "fn", None)
         if not hasattr(src, "block_batching_source_hash"):
             return nullcontext(cache)
         if options.block_batching_factor > 1 and (override_enabled or options.ir_override):
@@ -2143,7 +2146,7 @@ class AscendBackend(BaseBackend):
                 else:
                     stages["npubin"] = (
                         lambda src, metadata: linalg_to_bin_enable_npu_compile_A2_A3(src, metadata, options))
-                stages["npubin"] = _with_debug_line(stages["npubin"], options)
+                stages["npubin"] = _with_debug_line(stages["npubin"], options, getattr(self, "_debug_jit_fn", None))
         else:
             raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
                                       "Please ensure the target backend is set to 'npu'.")

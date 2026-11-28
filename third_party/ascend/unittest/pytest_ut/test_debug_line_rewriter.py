@@ -237,14 +237,6 @@ class TestSourceHelpers(unittest.TestCase):
         files = ["", base, "internal", "/x/site-packages/triton/standard.py"]
         self.assertEqual(dlr._user_file_indices(files, self.tmp.name), {1})
 
-    def test_auto_detect_source_prefers_user(self):
-        files = ["", "/opt/py/site-packages/triton/standard.py", self.tmp.name]
-        self.assertEqual(dlr._auto_detect_source(files), self.tmp.name)
-
-    def test_auto_detect_source_none(self):
-        files = ["", "/opt/py/site-packages/triton/standard.py", "/nope/missing.py"]
-        self.assertIsNone(dlr._auto_detect_source(files))
-
 
 # ── demotion rules (pure, synthetic rows) ──────────────────────────────────────
 
@@ -428,6 +420,13 @@ class TestRewriteBlob(unittest.TestCase):
         self.assertEqual(res.counts["foreign"], 0)
         self.assertEqual(res.after, [7, 8])
 
+    def test_line_table_paths_are_not_opened(self):
+        rows = [dict(line=7, file=1, col=0, is_stmt=True)]
+        blob = build_elf(build_debug_line(rows, files=(self.src.name, )))
+        with mock.patch("builtins.open", side_effect=AssertionError("unexpected source read")):
+            new, _ = rewrite_debug_line_blob(blob)
+        self.assertEqual(new, blob)
+
 
 # ── pipeline entry (env gate, polymorphism, safety) ────────────────────────────
 
@@ -460,6 +459,19 @@ class TestPipelineEntry(unittest.TestCase):
             out = rewrite_debug_line(self.blob, metadata=md)
             self.assertNotEqual(out, self.blob)
             self.assertIsInstance(out, (bytes, bytearray))
+
+    def test_jit_source_protects_loop_headers(self):
+        rows = [dict(line=n, file=1, col=0, is_stmt=True) for n in (10, 11, 10, 11)]
+        blob = build_elf(build_debug_line(rows, files=(os.path.basename(self.src.name), )))
+        jit = mock.Mock()
+        jit.get_jit_fn_file_line.return_value = (self.src.name, 1)
+        kernel = object()
+        with mock.patch.dict(sys.modules, {"triton.runtime.jit": jit}), mock.patch.dict(os.environ, {ENV_FLAG: "1"}):
+            out = rewrite_debug_line(blob, jit_fn=kernel)
+        jit.get_jit_fn_file_line.assert_called_once_with(kernel)
+        expected, result = rewrite_debug_line_blob(blob, src_path=self.src.name)
+        self.assertEqual(result.after, [10, 11, 10])
+        self.assertEqual(out, expected)
 
     def test_garbage_blob_safe(self):
         with mock.patch.dict(os.environ, {ENV_FLAG: "1"}):

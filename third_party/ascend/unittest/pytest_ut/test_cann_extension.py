@@ -23,6 +23,7 @@ import os
 import re
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 import triton
 import torch
@@ -63,6 +64,37 @@ def compile_kernel(kernel, signature, constants):
     module = ast_to_ttir(kernel, src, context, Options(), {"create_address_space": al.semantic.create_address_space},
                          {})
     return str(module)
+
+
+@pytest.mark.parametrize("operation", ["gather", "scatter", "index_put"])
+def test_interpreter_index_boundary(monkeypatch, operation):
+    from triton.backends.ascend import ascend_interpreter
+    from triton.runtime.interpreter import TensorHandle
+
+    builder = ascend_interpreter.AscendInterpreterBuilder()
+    storage = np.zeros(3, dtype=np.float32)
+    ptr = TensorHandle(np.array([storage.ctypes.data], dtype=np.uint64), tl.pointer_type(tl.float32))
+    indices = np.array([-4, -3, -1, 0, 2, 3], dtype=np.int32)
+    shape = (len(indices), 1)
+    index_tile = TensorHandle(indices if operation == "index_put" else indices.reshape(shape), tl.int32)
+    values = TensorHandle(np.arange(len(indices), dtype=np.float32).reshape(shape), tl.float32)
+    memory = Mock()
+    if operation == "gather":
+        monkeypatch.setattr(ascend_interpreter._interpreter, "load", memory)
+        memory.return_value = np.zeros(len(indices), dtype=np.float32)
+        builder.create_gather_out_to_ub(ptr, index_tile, 3, 0, [1, 1], shape, [0, 0], other=-7)
+        addresses, mask, other, _ = memory.call_args.args
+        np.testing.assert_array_equal(other, -7)
+    else:
+        monkeypatch.setattr(ascend_interpreter._interpreter, "store", memory)
+        if operation == "scatter":
+            builder.create_scatter_ub_to_out(ptr, values, index_tile, 3, 0, [1, 1], shape, [0, 0])
+        else:
+            builder.create_index_put(ptr, index_tile, values, 0, 3, shape, [0, 0], [1, 1])
+        addresses, data, mask = memory.call_args.args
+        np.testing.assert_array_equal(data, values.data.ravel())
+    np.testing.assert_array_equal(mask, [False, True, True, True, True, False])
+    np.testing.assert_array_equal(addresses[mask], storage.ctypes.data + storage.itemsize * np.array([0, 2, 0, 2]))
 
 
 @pytest.mark.parametrize("batched", [False, True])

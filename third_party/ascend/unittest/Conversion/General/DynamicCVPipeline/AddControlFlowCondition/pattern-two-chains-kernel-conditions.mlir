@@ -1,23 +1,23 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.while
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.for
 
-// The normal preload scheme is enabled for the kernels whose pipeline
-// dependency is a single chain of four computation blocks that alternates the
-// cores. A kernel that holds two such chains keeps the conditions of the
-// upstream implementation when only one of the chains carries a condition: the
-// scheme is validated on a single chain.
+// The cross core pattern describes the pipeline dependency of the kernel: a
+// single chain of four computation blocks that alternates the cores. A kernel
+// that holds two such chains does not match the pattern when only one of the
+// chains carries a condition. The pattern no longer gates the control flow
+// scheme, this test checks that such a kernel still uses the normal preload
+// scheme.
 //
 // This kernel has the dependency chain of the test
 // pattern-kernel-conditions.mlir:
 //   cube block 0 -> vector block 1 -> cube block 2 -> vector block 3
 // and a second chain that shares no block with it:
 //   cube block 4 -> vector block 5 -> cube block 6 -> vector block 7
-// Both chains are double buffered, so both of them match the pattern. The
-// blocks of the second chain live outside the main loop, so only the four
-// blocks of the first chain carry a condition: the graph holds two chains
-// and the conditions are computed for the blocks of one of them. The kernel
-// keeps the upstream scheme, the main loop stays an scf.for and the blocks
-// handshake through PIPE_S. The implicit check forbids the scf.while of the
-// normal preload scheme.
+// Both chains are double buffered, so the graph holds two chains, but the
+// blocks of the second chain live outside the main loop: only one pair of
+// main loops runs, so the main loops do not match the pattern. The pattern no
+// longer gates the control flow scheme, the kernel uses the normal preload
+// scheme and the main loop is an scf.while. The implicit check forbids the
+// scf.for of the upstream scheme.
 //
 // The test pattern-two-pipelines-kernel-conditions.mlir holds the two chains
 // of a kernel that runs two pipelines at the same time: both of them carry a
@@ -25,12 +25,9 @@
 
 // CHECK-LABEL: func.func @pattern_two_chains_kernel_conditions
 
-// The upstream scheme: the main loop stays an scf.for, the flags of the
-// blocks are published through the PIPE_S handshake.
-// CHECK: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_set[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
+// The normal preload scheme: the main loop of every core is an scf.while.
+// CHECK: scf.while
+// CHECK: scf.while
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @pattern_two_chains_kernel_conditions(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {

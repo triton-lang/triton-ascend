@@ -1,4 +1,4 @@
-// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.while
+// RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.for
 
 // The pattern of AddControlFlowCondition is the dependency graph plus the
 // number of the tightly coupled buffers: every transfer of the chain has to
@@ -11,21 +11,16 @@
 // by two cross core groups instead of one, so it holds four tightly coupled
 // buffers and not two. The buffers of a direction are the total of the groups
 // that carry it, and every transfer of the chain has to carry the same number
-// of buffers, so the pattern does not match and the kernel keeps the upstream
-// scheme: the main loop is an scf.for and the blocks handshake through
-// PIPE_S. The implicit check forbids the scf.while of the normal preload
-// scheme.
+// of buffers, so the pattern does not match. The pattern no longer gates the
+// control flow scheme, the kernel uses the normal preload scheme and the
+// main loop is an scf.while. The implicit check forbids the scf.for of the
+// upstream scheme.
 
 // CHECK-LABEL: func.func @pattern_wide_transfer_kernel_conditions
 
-// The upstream scheme: the main loop stays an scf.for, the flags of the
-// blocks are published through the PIPE_S handshake.
-// CHECK: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_set[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
+// The normal preload scheme: the main loop of every core is an scf.while.
+// CHECK: scf.while
+// CHECK: scf.while
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @pattern_wide_transfer_kernel_conditions(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {

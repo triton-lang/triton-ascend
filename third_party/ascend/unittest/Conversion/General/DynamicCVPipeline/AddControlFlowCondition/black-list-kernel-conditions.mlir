@@ -1,17 +1,16 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s --implicit-check-not=scf.while --implicit-check-not=arith.select
 
-// A kernel whose cross-core dependency is a CUBE -> VECTOR -> CUBE -> VECTOR
-// chain is recognized by the pattern, but the name of the kernel is in the
-// black list of AddControlFlowCondition. The black list has the priority: the
-// kernel keeps the conditions of the upstream implementation, its main loop is
-// an scf.for and the cores are synchronized with PIPE_S. The normal preload
-// scheme is not used, the implicit checks forbid the scf.while loop and the
-// arith.select of the flags.
+// The name of the kernel is in the black list of AddControlFlowCondition, so
+// the kernel keeps the conditions of the upstream implementation whatever the
+// cross core pattern of its dependency is: its main loop is an scf.for and the
+// cores are synchronized with PIPE_S. The black list has the priority, the
+// normal preload scheme is not used, the implicit checks forbid the scf.while
+// loop and the arith.select of the flags.
 //
 // The dependency chain of this test is:
 //   cube block 0 -> vector block 1 -> cube block 2 -> vector block 3
 
-// CHECK-LABEL: func.func @paged_decode_fd_kernel
+// CHECK-LABEL: func.func @fwd_kernel
 
 // The upstream scheme: the main loop stays an scf.for and the cores are
 // synchronized with PIPE_S.
@@ -21,7 +20,7 @@
 // CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
-  func.func @paged_decode_fd_kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {
+  func.func @fwd_kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {
     %c8192_i32 = arith.constant {ssbuffer.block_id = 8 : i32} 8192 : i32
     %c128_i32 = arith.constant {ssbuffer.block_id = 8 : i32} 128 : i32
     %c0_i32 = arith.constant {ssbuffer.block_id = 8 : i32} 0 : i32

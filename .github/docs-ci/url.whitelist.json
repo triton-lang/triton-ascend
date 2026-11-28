@@ -4,6 +4,5 @@
   "^(https?://)?192\\.168\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?).*",
   "https://example.com/*",
   "https://pytorch.org/*",
-  "^https://st8tp3ajl0df3n8b8l8qu\\.apigateway-cn-beijing\\.volceapi\\.com/.*",
   "^https://swr\\.cn-southwest-2\\.myhuaweicloud\\.com.*"
 ]

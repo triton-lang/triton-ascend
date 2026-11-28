@@ -58,13 +58,6 @@ Triton-Ascend支持源码编译安装，在编译时会下载依赖的第三方�
 
 | 类型     | 开源代码地址                                                                                     | 文件名                                      | 公网IP地址/公网URL地址/域名/邮箱地址                                                                 | 用途说明                          |
 |----------|------------------------------------------------------------------------------------------------|-------------------------------------------|------------------------------------------------------------------------------------------------------|-----------------------------------|
-| 自主创新 | 不涉及 | .github/workflows/{DynamicCVPipeline-ci,ascend-documentation,integration-tests-ascend,sync-upstream,tla-tests,upload-wheels}.yml | <https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com> | 用于下载CANN软件包和CI构建产物的OBS桶。 |
-| 开源引入 | <https://repo.huaweicloud.com> | .github/workflows/{ascend-documentation,ascend-wheels,integration-tests-ascend,sync-upstream,tla-tests}.yml | <https://repo.huaweicloud.com/ascend/repos/pypi> | CI安装依赖使用的Ascend PyPI源。 |
-| 开源引入 | 不涉及 | .github/workflows/{ascend-llvm-build,ascend-wheels,npuir-build,upload-wheels}.yml | <https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${ARCH}.tar.gz> | obsutil客户端下载地址（x86_64工作流使用obsutil_linux_amd64.tar.gz）。 |
-| 自主创新 | 不涉及 | .github/workflows/{ascend-llvm-build,npuir-build,upload-wheels}.yml | <https://obs.cn-southwest-2.myhuaweicloud.com> | obsutil配置的cn-southwest-2区域OBS端点。 |
-| 自主创新 | 不涉及 | .github/workflows/{ascend-wheels,upload-wheels}.yml | <https://obs.cn-north-4.myhuaweicloud.com> | obsutil配置的OBS端点，用于上传和下载wheel制品。 |
-| 开源引入 | 不涉及 | .github/workflows/doc-review.yml | <https://st8tp3ajl0df3n8b8l8qu.apigateway-cn-beijing.volceapi.com/v1> | 文档评审工作流调用deepseek-v4-flash模型的火山引擎API网关地址（可通过DOC_REVIEW_LLM_API_BASE覆盖）。 |
-| 开源引入 | <https://github.com/triton-lang/triton.git> | .github/workflows/sync-upstream.yml | <https://github.com/triton-lang/triton.git> | 源码同步工作流使用的Triton上游仓库。 |
 | 开源引入 | <https://gitcode.com/Ascend/AscendNPU-IR.git> | .gitmodules | <https://gitcode.com/Ascend/AscendNPU-IR.git> | AscendNPU IR源码仓地址。 |
 | 自主创新 | 不涉及 | docker/3.2.1-*/Dockerfile & docker/3.2.2-*/Dockerfile & docker/triton_ascend-cann-torch_npu.Dockerfile | <https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/> | CANN工具包与算子包：Ascend-cann-{toolkit,910b-ops,950-ops,A3-ops}_{version}_linux-${ARCH}.run。 |
 | 开源引入 | <https://mirrors.ustc.edu.cn> | docker/3.2.1-*/Dockerfile & docker/3.2.2-*/Dockerfile & docker/triton_ascend-cann-torch_npu.Dockerfile | <https://mirrors.ustc.edu.cn/pypi/simple> | 默认Python pip源（PIP_SOURCE）。 |

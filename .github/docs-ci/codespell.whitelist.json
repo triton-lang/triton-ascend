@@ -290,9 +290,6 @@
   "deinterleave",
   "Tensorize",
   "PTSM",
-  "npuir",
-  "obsutil",
-  "Volcengine",
   "Referer",
   "dagre"
 ]

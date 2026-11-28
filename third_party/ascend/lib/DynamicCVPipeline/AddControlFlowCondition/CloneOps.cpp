@@ -50,23 +50,15 @@ using namespace hivm;
 using MemDepGraph = std::unique_ptr<CVPipeline::MemoryDependenceGraph>;
 using MemDepGraphT = CVPipeline::MemoryDependenceGraph;
 
-// Updates op operands via value mapping; skips main-loop body yield values
-// (yieldValues collected once per main-loop from the body's terminator).
+// Updates uses inside each block to that block's cloned values.
 static LogicalResult
-updateCloneMapping(Operation *op, llvm::DenseMap<Value, Value> &valueMap,
-                   const llvm::DenseSet<Value> &yieldValues) {
+updateCloneMapping(Operation *op, llvm::DenseMap<Value, Value> &valueMap) {
   if (!op) {
     return failure();
   }
 
   for (OpOperand &operand : op->getOpOperands()) {
-    // Only skip if this operand is a yield value from the main_loop body.
-    // Nested yield ops (in scf.if/scf.for) should have their operands updated.
     Value v = operand.get();
-    if (yieldValues.contains(v)) {
-      continue;
-    }
-
     auto it = valueMap.find(v);
     if (it != valueMap.end()) {
       if (it->second.getType() != v.getType()) {
@@ -81,7 +73,7 @@ updateCloneMapping(Operation *op, llvm::DenseMap<Value, Value> &valueMap,
   for (Region &region : op->getRegions()) {
     for (Block &block : region) {
       for (Operation &nestedOp : block) {
-        if (failed(updateCloneMapping(&nestedOp, valueMap, yieldValues))) {
+        if (failed(updateCloneMapping(&nestedOp, valueMap))) {
           return failure();
         }
       }
@@ -109,13 +101,11 @@ static Operation *cloneOpWithMapping(Operation *op, OpBuilder &builder,
   return cloned;
 }
 
-// Clones ops for a single block in vector/cube mode. `bodyBlock` (forOp body
-// or whileOp after-region) only supplies iter-arg yields not to be remapped.
-static LogicalResult
-cloneOpsForBlock(int curId, SmallVector<Operation *> &curOps,
-                 const SmallVector<int> &earlierIds,
-                 const llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
-                 Block *bodyBlock) {
+// Clones ops for a single block in vector/cube mode.
+static LogicalResult cloneOpsForBlock(
+    int curId, SmallVector<Operation *> &curOps,
+    const SmallVector<int> &earlierIds,
+    const llvm::DenseMap<int, SmallVector<Operation *>> &blockOps) {
   if (curOps.empty() || earlierIds.empty()) {
     return success();
   }
@@ -146,17 +136,9 @@ cloneOpsForBlock(int curId, SmallVector<Operation *> &curOps,
 
   curOps.insert(curOps.begin(), clonedOps.begin(), clonedOps.end());
 
-  llvm::DenseSet<Value> yieldValues;
-  if (bodyBlock) {
-    if (auto yieldOp = dyn_cast<scf::YieldOp>(bodyBlock->getTerminator())) {
-      for (Value operand : yieldOp.getOperands()) {
-        yieldValues.insert(operand);
-      }
-    }
-  }
-
+  // curOps excludes the main-loop terminator, so its yield remains unchanged.
   for (Operation *op : curOps) {
-    if (failed(updateCloneMapping(op, valueMap, yieldValues))) {
+    if (failed(updateCloneMapping(op, valueMap))) {
       return failure();
     }
   }
@@ -187,8 +169,8 @@ LogicalResult CloneOpsPass::cloneOpsInMainLoop(Operation *op) {
     int curId = idsInOrder[i];
     SmallVector<int> earlierIds(idsInOrder.begin(), idsInOrder.begin() + i);
 
-    if (failed(cloneOpsForBlock(curId, blockOps[curId], earlierIds, blockOps,
-                                bodyBlock))) {
+    if (failed(
+            cloneOpsForBlock(curId, blockOps[curId], earlierIds, blockOps))) {
       return failure();
     }
   }

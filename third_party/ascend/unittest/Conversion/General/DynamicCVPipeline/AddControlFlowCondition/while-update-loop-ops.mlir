@@ -2,25 +2,25 @@
 
 // Test UpdateLoopOps on an scf.while main loop after CreateIfOps. The loop's do
 // region already holds the per-block scf.if wrappers with their while_arg
-// update chains. The pass emits a prologue sync_block_set, grows the loop from
-// 5 to 8 iter_args (adding 3 pipeline sync args), and brackets the body with a
-// sync_block_wait / sync_block_set pair while preserving the guarded ifs.
+// update chains. The pass grows the loop from 5 to 8 iter_args (adding 3 block
+// counter args) and preserves the guarded ifs.
+//
+// The per iteration PIPE_S handshake is gone: every cross-core block counter
+// has a single writer now, so the read-modify-write race between the two
+// cores does not exist any more. The PIPE_S is only used once, to hand over
+// the initialized counters, and that needs both a cube and a vector scope.
 
 // CHECK: func.func @pcb12_tc01_while_matmul_fill
-// A prologue sync_block_set is emitted before the loop.
-// CHECK: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
-// The while op grows to 8 iter_args (5 from ProcessArgs + 3 sync args).
+// CHECK-NOT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>]
+// CHECK-NOT: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>]
+// The while op grows to 8 iter_args (5 from ProcessArgs + 3 block counters).
 // CHECK: %{{.*}}:8 = scf.while (%arg17 = %c0_i32, %arg18 = %c0_i32, %arg19 = %c0_i32, %arg20 = %c0_i32, %arg21 = %c0_i32, %arg22 = %c0_i32_5, %arg23 = %c0_i32_6, %arg24 = %c0_i32_7) : (i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32)
 // CHECK: scf.condition(%{{.*}}) %arg17, %arg18, %arg19, %arg20, %arg21, %arg22, %arg23, %arg24
 // CHECK: ^bb0(%arg17: i32, %arg18: i32, %arg19: i32, %arg20: i32, %arg21: i32, %arg22: i32, %arg23: i32, %arg24: i32):
-// The body opens with a sync_block_wait matching the prologue set.
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
 // Per-block while_arg update chains survive inside the guarded ifs.
 // CHECK: arith.addi %{{.*}}, %arg19 {ssbuffer.block_id = 9 : i32, ssbuffer.while_arg = 0 : i32} : i32
 // CHECK: arith.addi %{{.*}}, %arg20 {ssbuffer.block_id = 7 : i32, ssbuffer.while_arg = 0 : i32} : i32
 // CHECK: arith.addi %{{.*}}, %arg21 {ssbuffer.block_id = 8 : i32, ssbuffer.while_arg = 0 : i32} : i32
-// A trailing sync_block_set closes the body before the terminator.
-// CHECK: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
 // CHECK: scf.yield %{{.*}}#0, %{{.*}}#0, %{{.*}}, %{{.*}}#1, %{{.*}}#1, %arg22, %arg23, %arg24 : i32, i32, i32, i32, i32, i32, i32, i32
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {

@@ -32,7 +32,7 @@ GPU上常见的写法会把grid设计为大量逻辑program，由硬件和运行
 
 完成设备替换后，需要继续检查单个program内的数据搬运方式：
 
-- Vector算子场景下要求32Byte访存对齐，cube-vector融合算子场景下要求512字节对齐。
+- Vector算子场景下要求32Byte访存对齐，Cube-Vector融合算子场景下要求512Byte对齐。
 - 保留tail mask，确认边界元素不会越界访问。
 - 检查一次tile的片上内存占用，避免触发UB空间溢出。
 - 移除或替换GPU专属同步API，例如CUDA thread、stream、event或kernel synchronize相关接口。
@@ -51,7 +51,7 @@ NPU与GPU的计算单元和支持的数据类型存在差异。迁移后应先�
 
 以下示例展示将向量加法算子从CUDA迁移到NPU后，通过对比PyTorch原生计算与Triton kernel结果进行正确性验证：
 
-```diff
+```python
 import torch
 import torch_npu  # 【新增】导入昇腾NPU PyTorch适配库，提供NPU设备支持
 import triton
@@ -104,7 +104,7 @@ print(
 
 以下示例展示将设备从CUDA替换为NPU后，对单核数据搬运场景进行正确性验证：
 
-```diff
+```python
 import pytest
 import torch
 import torch_npu
@@ -113,6 +113,9 @@ import triton.language as tl
 
 @triton.jit
 def fn_broadcast_1d(output_ptr, x_ptr, XS: tl.constexpr, YS: tl.constexpr):
+    # 用途：把一维输入张量x沿行方向广播为(YS, XS)二维结果并写入output_ptr
+    # 输入：x_ptr为一维输入张量指针，XS为输入长度，YS为广播行数；输出：output_ptr为(YS, XS)结果张量指针
+    # 预期结果：output与torch.broadcast_to(x, (YS, XS))完全相等
     xidx = tl.arange(0, XS)[None, :]
     base = tl.load(x_ptr + xidx)
     out = base.broadcast_to((YS, XS))
@@ -140,7 +143,7 @@ def test_npu_1d(shape, dtype):
 
 1. coreDim限制问题
 
-   当网格维度超过NPU硬件限制时触发。
+   当grid维度超过NPU硬件限制时触发。
    典型错误信息：`coreDim=xxxx can't be greater than UINT16_MAX`。
 
 2. UB空间溢出
@@ -180,7 +183,7 @@ triton.next_power_of_2(16385) = 32768
 
 优化前的代码：
 
-```diff
+```python
 import logging
 import torch
 import torch_npu
@@ -210,13 +213,13 @@ def zeros_like(x, *, dtype=None, layout=None, device=None, pin_memory=None, memo
     N = x.numel()
     grid_fn = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
 
-    zeros_kernel[grid_fn](out, N, BLOCK_SIZE=1024)  # 原始值过小
+    zeros_kernel[grid_fn](out, N, BLOCK_SIZE=2048)  # 原始值过小
     return out
 ```
 
 优化后的代码：
 
-```diff
+```python
 import logging
 import torch
 import torch_npu
@@ -254,7 +257,7 @@ def zeros_like(x, *, dtype=None, layout=None, device=None, pin_memory=None, memo
 
 ### 动态计算合适的BLOCK_SIZE以避免coreDim超限
 
-```diff
+```python
 optimal_block_size = 32768  # 根据计算得出的优化值
 
 grid_fn = lambda meta: (triton.cdiv(N, optimal_block_size),)
@@ -273,9 +276,9 @@ return out
 
 解决思路：
 引入BLOCK_SIZE_SUB参数，将大块进一步细分，在保持合理coreDim的同时控制内存使用。
-优化前代码：
+优化前的代码：
 
-```diff
+```python
 import logging
 import torch
 import torch_npu
@@ -308,7 +311,7 @@ def masked_fill(inp, mask, value):
 
 优化后代码：
 
-```diff
+```python
 import logging
 import torch
 import torch_npu
@@ -360,13 +363,13 @@ def masked_fill(inp, expand_mask, value):
 
 ### 为什么会出现UBSIZE超出内存的错误
 
-切分不合理，存在过多的非对齐访存或者运算，例如对(64, 32)二维数据搬运，对应stride(128, 32)，如果是对齐数据的访存，对应的stride(32, 1)。对于非对齐访问的数据，在最内轴新增一个大小为1的轴，变为(64, 32, 4)，由于硬件要求Vector算子场景ub内存32Byte对齐，假设type=float16，对应stride应该为(12832, 128, 1)。
+切分不合理，存在过多的非对齐访存或者运算，例如对(64, 32)二维数据搬运，对应stride(12832, 128)，如果是对齐数据的访存，对应的stride(32, 1)。对于非对齐访问的数据，在最内轴新增一个大小为16的轴，变为(64, 32, 16)，由于硬件要求Vector算子场景UB内存32Byte对齐，假设type=float16，对应stride应该为(512, 16, 1)。
 
 ### 离散访存代码逐行对比观察scalar低效映射
 
 设置环境变量TRITON_DEBUG=1，保存~/.triton/cache/xxx.ttadapter，然后执行：
 
-```diff
+```bash
 bishengir-compile xxx.ttadapter --target=Ascend910B3 --enable-auto-multi-buffer=True --enable-hfusion-compile=true --enable-hivm-compile=true --enable-triton-kernel-compile=true --hivm-compile-args=bishengir-print-ir-after=hivm-inject-sync
 ```
 
@@ -376,7 +379,7 @@ bishengir-compile xxx.ttadapter --target=Ascend910B3 --enable-auto-multi-buffer=
 问题：离散访存 && scalar低效映射
 b[1024, 32] = a[1024, 32] Triton原先写法利用thread的方式将线程块绑定到[1024, 32]中的最低维度32，再对1024切16，分为[64, 16, 32]，再对64绑定线程块。
 
-```diff
+```python
 chunk_fwd_kernel_o[(NT, B * H)](
     p_g = tl.make_block_ptr(g, (T,), (H,), (i_t * BT,), (BT,), (0,))
     block_ptr = tl.make_block_ptr(
@@ -397,7 +400,7 @@ chunk_fwd_kernel_o[(NT, B * H)](
 
 比如：
 
-```diff
+```python
 block_ptr = tl.make_block_ptr(
     base=input_ptr,
     shape=(1024, 32),

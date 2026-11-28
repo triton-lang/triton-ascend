@@ -63,11 +63,11 @@ float ArgMinConverter::getBaseReductionValue() {
   return std::numeric_limits<float>::infinity();
 }
 
-int8_t ArgMinConverter::getBaseReductionIntValue() {
-  return std::numeric_limits<int8_t>::max();
+APInt ArgMinConverter::getBaseReductionIntValue(unsigned bitWidth) {
+  return APInt::getSignedMaxValue(bitWidth);
 }
-uint8_t ArgMinConverter::getBaseReductionUIntValue() {
-  return std::numeric_limits<uint8_t>::max();
+APInt ArgMinConverter::getBaseReductionUIntValue(unsigned bitWidth) {
+  return APInt::getMaxValue(bitWidth);
 }
 
 // ArgMaxConverter functions
@@ -103,11 +103,11 @@ float ArgMaxConverter::getBaseReductionValue() {
   return -std::numeric_limits<float>::infinity();
 }
 
-int8_t ArgMaxConverter::getBaseReductionIntValue() {
-  return std::numeric_limits<int8_t>::min();
+APInt ArgMaxConverter::getBaseReductionIntValue(unsigned bitWidth) {
+  return APInt::getSignedMinValue(bitWidth);
 }
-uint8_t ArgMaxConverter::getBaseReductionUIntValue() {
-  return std::numeric_limits<uint8_t>::min();
+APInt ArgMaxConverter::getBaseReductionUIntValue(unsigned bitWidth) {
+  return APInt::getMinValue(bitWidth);
 }
 
 } // namespace TTOpConverters

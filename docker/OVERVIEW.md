@@ -20,7 +20,7 @@ Triton-Ascend is a Triton compilation framework built for the Ascend platform, a
 
 ## Tag specifications
 
-Tag follow the following format：<br/>
+Tags follow the following format：<br/>
 `{triton-ascend version}-{CANN version}-{torch_npu version}-{applicable product}-{os version}-{python version}`
 
 | Field                 | Example Value               |

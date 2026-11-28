@@ -282,7 +282,12 @@ def _inactive_zero(got, masks):
     """Every lane outside the mask must be bitwise +0 (not merely close)."""
     for row, name in ((1, "prefix"), (2, "arb"), (3, "none"), (4, "prefix"), (5, "arb")):
         keep = masks[name]
-        inactive = got[row][~keep] if keep.any() else got[row]
+        # Boolean indexing has no CPU kernel for uint32; the u16/u32 rows are
+        # bit-pattern checks, so read them through their signed twin.
+        values = got[row]
+        if values.dtype in (torch.uint16, torch.uint32):
+            values = values.view(torch.int16 if values.dtype == torch.uint16 else torch.int32)
+        inactive = values[~keep] if keep.any() else values
         assert _bitwise_zero(inactive), f"row {row} ({name}) has a non-zero inactive lane"
 
 
@@ -301,7 +306,12 @@ def test_run():
     for key in ("exact", "u32"):
         got, ref, masks = runs[key]
         torch.testing.assert_close(got.view(torch.int32), ref.view(torch.int32), rtol=0, atol=0)
-        _inactive_zero(got, masks)
+        if key == "u32":
+            # Only the u32 kernel uses the six-row prefix/arb/none layout.  The
+            # exact kernel has four rows ([ALL, prefix, none, prefix(0ulp)]) and
+            # forwards the caller mask without an extra select, so the shared
+            # row/mask table does not describe it.
+            _inactive_zero(got, masks)
     hgot, href, hmasks = runs["u16"]
     torch.testing.assert_close(hgot, href, rtol=0, atol=0)
     _inactive_zero(hgot, hmasks)

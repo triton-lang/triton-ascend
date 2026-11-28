@@ -32,6 +32,7 @@ if(TRITON_ENABLE_COVERAGE_HITEST)
       MLIRTritonNPUUtils           # from Utils
       TritonMemoryAccessCore
       TritonMemoryAccessAnalysis
+      TritonPtrAnalysis
       TritonAscendIR               # from Dialect/TritonAscend/IR
       TritonStructuredIR           # from Dialect/TritonStructured/IR
       AutoBlockify
@@ -49,4 +50,8 @@ if(TRITON_ENABLE_COVERAGE_HITEST)
           message(WARNING "Target ${_target} not found, please check the actual target name")
       endif()
   endforeach()
+endif()
+
+if(TRITON_BUILD_PROTON)
+  add_subdirectory(ProtonToHIVM)
 endif()

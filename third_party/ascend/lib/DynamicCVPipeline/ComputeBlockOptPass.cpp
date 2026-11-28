@@ -23,6 +23,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/MergeCubeBlockPass.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
@@ -69,8 +70,6 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createReorderOpsByBlockIdPass());
 
   pm.addPass(createFixpipeOptPass());
-  pm.addPass(createCloneCubeDepInIfPass());
-  pm.addPass(createSplitIfByBlockIdPass());
   pm.addPass(createReorderOpsByBlockIdPass());
   pm.addPass(createMoveLoadIntoUserPass());
   pm.addPass(createUnifyStoreBlockPass());
@@ -85,6 +84,11 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createMergeCubeBlockPass());
   pm.addPass(createMergeInputInitSharedCubeBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
+
+  pm.addPass(createCloneCubeDepInIfPass());
+  pm.addPass(createSplitIfByBlockIdPass());
+  if (CVPipeline::hasOuterMainLoop(module))
+    pm.addPass(createMergeOuterVectorBlockPass());
   pm.addPass(createRelocateMemrefDeclPass());
 
   pm.addPass(createUnpackScopePass());

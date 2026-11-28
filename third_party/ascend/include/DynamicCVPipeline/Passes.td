@@ -25,6 +25,20 @@ def PreCheckAvailablePass : Pass<"pre-check-dynamic-cv-pipeline-available", "mli
   let dependentDialects = ["scope::ScopeDialect"];
 }
 
+def NormalizeOuterLoopPass : Pass<"normalize-outer-main-loop", "mlir::ModuleOp"> {
+  let summary = "Normalize explicitly selected outer loops for dynamic CV scheduling";
+  let constructor = "triton::createNormalizeOuterLoopPass()";
+  let options = [
+    Option<"discoverMainLoop", "discover-main-loop", "bool", "false",
+           "Classify operations to find the original main loop before normalization">
+  ];
+}
+
+def MergeOuterVectorBlockPass : Pass<"merge-outer-vector-block", "mlir::ModuleOp"> {
+  let summary = "Merge acyclic VECTOR tensor dependencies in explicit outer loops";
+  let constructor = "triton::createMergeOuterVectorBlockPass()";
+}
+
 def OpClassifierPass : Pass<"op-classifier", "mlir::ModuleOp"> {
   let summary = "Classify operations as CUBE or VECTOR";
   let constructor = "triton::createOpClassifierPass()";

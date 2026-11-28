@@ -23,3 +23,21 @@ add_triton_library(TritonMemoryAccessAnalysis
   TritonIR
   TritonMemoryAccessCore
 )
+
+# Consumer-independent numerical analysis for all Triton pointer forms.
+add_triton_library(TritonPtrAnalysis
+  PtrAnalysis.cpp
+  PtrAnalysisInfo.cpp
+  Utils.cpp
+
+  LINK_LIBS PUBLIC
+  LLVMCore
+  MLIRArithDialect
+  MLIRIR
+  MLIRSCFDialect
+  MLIRSideEffectInterfaces
+  MLIRTensorDialect
+  MLIRSupport
+  TritonIR
+  TritonMemoryAccessCore
+)

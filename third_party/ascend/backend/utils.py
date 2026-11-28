@@ -25,7 +25,6 @@ import os
 import re
 import shutil
 import subprocess
-import struct
 import sysconfig
 import warnings
 from pathlib import Path
@@ -617,53 +616,51 @@ def _is_valid_bishengir_path(path: str) -> bool:
     return True
 
 
+@functools.lru_cache(None)
+def _get_bishengir_compile_help(bishengir_path: str) -> str:
+    """Return bishengir-compile --help stdout, cached per compiler path.
+
+    All feature probes (api change, reg-based, full-row-copy inlining) parse the
+    same help text. Forking the compiler once per probe dominated per-kernel
+    compile latency, so the subprocess result is memoized by compiler path.
+    """
+    result = subprocess.run(
+        [bishengir_path, "--help"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def _probe_bishengir_compile_help() -> str:
+    """Validate the resolved compiler path and return its cached help text."""
+    bishengir_path, _ = _get_npucompiler_path()
+    if not _is_valid_bishengir_path(bishengir_path):
+        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
+        return ""
+    try:
+        return _get_bishengir_compile_help(bishengir_path)
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return ""
+
+
 # grep bishengir-compile's option limit-auto-multi-buffer-buffer to check
 # if bishengir-compile is a newer version which does not generate kernel_reloc.o
 # any more.
 def _check_bishengir_api_change() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'limit-auto-multi-buffer-buffer' in result.stdout:
-            # bishengir-compile is newer version
-            return True
-        else:
-            # bishengir-compile is older version
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    # newer version emits the option, older version does not.
+    return bool(help_text) and 'limit-auto-multi-buffer-buffer' in help_text
 
 
 def _check_bishengir_is_regbased() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'reg-based' in result.stdout:
-            # bishengir-compile is regbased version
-            return True
-        else:
-            # bishengir-compile is membased version
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    # regbased version emits 'reg-based', membased version does not.
+    return bool(help_text) and 'reg-based' in help_text
 
 
 # grep bishengir-compile's --enable-optimized-metaop option to check if the
@@ -815,6 +812,8 @@ def _npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_head
         "-lruntime",
         "-lascendcl",
     ]
+    if obj_name == "npu_utils":
+        cc_cmd.append("-ldl")
     if kernel_launcher == "torch":
         if obj_name == "npu_utils":
             cc_cmd += get_backend_func("get_cc_cmd_npu_utils")
@@ -834,45 +833,14 @@ def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_l
     return so_path
 
 
-def _npu_elf_info(path):
-    """Read installation identifiers without hashing large LLVM shared libraries."""
+def _is_elf_file(path):
+    """Distinguish a real ELF compiler from a shell wrapper using only the magic.
+
+    No program-header or note parsing, so this works across glibc/musl and other
+    ELF loaders without invoking the dynamic linker.
+    """
     with open(path, "rb") as stream:
-        header = stream.read(64)
-        if header[:6] != b"\x7fELF\x02\x01":
-            raise ValueError("not a little-endian ELF64 file")
-        offset, = struct.unpack_from("<Q", header, 32)
-        entry_size, count = struct.unpack_from("<HH", header, 54)
-        if entry_size != 56 or count > 128:
-            raise ValueError("unsupported ELF program headers")
-        stream.seek(offset)
-        headers = stream.read(entry_size * count)
-        interpreter, build_id = None, None
-        for offset in range(0, len(headers), entry_size):
-            kind, _, start, _, _, size, _, _ = struct.unpack_from("<IIQQQQQQ", headers, offset)
-            if kind not in (3, 4):  # PT_INTERP, PT_NOTE
-                continue
-            if size > 65536:
-                raise ValueError("unsupported ELF note/interpreter size")
-            stream.seek(start)
-            data = stream.read(size)
-            if len(data) != size:
-                raise ValueError("truncated ELF segment")
-            if kind == 3:
-                interpreter = os.fsdecode(data.rstrip(b"\0"))
-                continue
-            pos = 0
-            while pos < len(data):
-                name_size, desc_size, note_type = struct.unpack_from("<III", data, pos)
-                name_start = pos + 12
-                desc_start = name_start + ((name_size + 3) & ~3)
-                pos = desc_start + ((desc_size + 3) & ~3)
-                if pos > len(data):
-                    raise ValueError("truncated ELF note")
-                if note_type == 3 and data[name_start:name_start + name_size] == b"GNU\0":
-                    build_id = data[desc_start:desc_start + desc_size].hex()
-        if not build_id:
-            raise ValueError("missing GNU build ID")
-        return interpreter, build_id
+        return stream.read(4) == b"\x7fELF"
 
 
 def _npu_compiler_environment():
@@ -881,12 +849,13 @@ def _npu_compiler_environment():
 
 
 def _npu_compiler_identity(compiler):
-    """Identify a normally installed GNU/Linux compiler; unknown setups query live.
+    """Identify a normally installed ELF compiler; unknown setups query live.
 
-    Installation updates must change file attributes or GNU build IDs. These are
-    not content hashes: manually patched binaries preserving both are unsupported.
-    Compiler configuration is part of the fixed installation, not a live wrapper.
-    Source files continue to use content hashes in the extension cache keys.
+    A portable, loader-independent identity: the resolved compiler path plus its
+    stat identity, sampled twice to reject a binary that is replaced mid-flight.
+    Normal package updates change the realpath inode or mtime; manually patched
+    binaries that preserve every stat attribute are unsupported. Source files
+    continue to use content hashes in the extension cache keys.
     """
     if not re.fullmatch(r"(?:.*-)?(?:clang(?:\+\+)?|gcc|g\+\+)(?:-\d+(?:\.\d+)*)?", os.path.basename(compiler)):
         return None
@@ -898,32 +867,14 @@ def _npu_compiler_identity(compiler):
         if (name == "LANG" or name.startswith("LC_")) and value not in ("", "C", "POSIX", "C.UTF-8", "C.utf8"):
             return None
     try:
-        interpreter, _ = _npu_elf_info(compiler)
-        if not interpreter or not os.path.basename(interpreter).startswith("ld-linux-"):
+        resolved = os.path.realpath(compiler)
+        if not _is_elf_file(resolved):
             return None
-        # Resolve dependencies again in every new process, including changes to
-        # LD_LIBRARY_PATH and ld.so.cache, without running compiler initialization.
-        output = subprocess.check_output([interpreter, "--list", compiler], text=True, stderr=subprocess.PIPE)
-        if not output.strip():
+        identity = _file_identity(resolved)
+        if identity != _file_identity(resolved):
             return None
-        paths = {compiler, interpreter}
-        for line in output.splitlines():
-            if re.fullmatch(r"\s*linux-vdso\.so\.\d+ \(0x[0-9a-f]+\)\s*", line):
-                continue
-            match = re.fullmatch(r"\s*(?:\S+ => )?(/\S+) \(0x[0-9a-f]+\)\s*", line)
-            if not match:
-                return None
-            paths.add(match[1])
-        files = []
-        for path in sorted(paths):
-            resolved = os.path.realpath(path)
-            before = _file_identity(resolved)
-            _, build_id = _npu_elf_info(resolved)
-            if before != _file_identity(resolved):
-                return None
-            files.append((path, resolved, before, build_id))
-        return {"schema": 1, "environment": environment, "files": files}
-    except (OSError, ValueError, struct.error, subprocess.SubprocessError):
+        return {"schema": 2, "path": resolved, "stat": identity, "environment": environment}
+    except OSError:
         return None
 
 
@@ -956,7 +907,7 @@ def _npu_compiler_version(compiler, identity):
     installation = _npu_compiler_identity(compiler)
     if installation is None:
         return query()
-    key = hashlib.sha256(json.dumps(["host-compiler-version-v1", installation], sort_keys=True).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps(["host-compiler-version-v2", installation], sort_keys=True).encode()).hexdigest()
     version = None
     try:
         cache = get_cache_manager(key)
@@ -1112,24 +1063,8 @@ def convert_dtype_to_numpy(dtype):
 
 
 def _check_bishengir_able_save_ir() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'save-linked-ir' in result.stdout:
-            return True
-        else:
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    return bool(help_text) and 'save-linked-ir' in help_text
 
 
 def get_ascend_arch_from_env():
@@ -1146,6 +1081,25 @@ def ub_size_in_kbytes_for_arch(arch: str) -> int:
     """
     entry = _match_arch_entry(arch)
     return entry[1] if entry is not None else 0
+
+
+def l0_size_in_kbytes_for_arch(arch: str) -> tuple:
+    """Return the raw (L0A, L0B, L0C) cube-buffer capacities in KiB.
+
+    L0A holds the cube lhs tile, L0B the cube rhs tile, and L0C the
+    accumulator. Known targets: Ascend950/Ascend910_95 (A5) provide
+    64/64/256 KiB; the Ascend910 (A3) family provides 64/64/128 KiB.
+    Unknown and empty targets fail closed (zero capacities) so the
+    graph-optimization L0A/L0B/L0C checks stay disabled rather than
+    guessing a capacity.
+    """
+    if not isinstance(arch, str) or not arch:
+        return (0, 0, 0)
+    if arch.startswith(("Ascend910_95", "Ascend950")):
+        return (64, 64, 256)
+    if arch.startswith(("Ascend910A", "Ascend910B", "Ascend910D", "Ascend910_93", "Ascend310B")):
+        return (64, 64, 128)
+    return (0, 0, 0)
 
 
 def graph_ub_budget_bytes_for_arch(arch: str) -> int:
@@ -1247,11 +1201,6 @@ def cann_version_compile_args():
     if is_cann_version_at_least(9, 1, 0):
         return ["-DTRITON_CANN_910"]
     return []
-
-
-def triton_enable_libdevice_simt(arch: str = None) -> bool:
-    """Return whether the environment switch selects SIMT libdevice."""
-    return bool(os.getenv("TRITON_ENABLE_LIBDEVICE_SIMT", False)) and is_register_based_arch(arch)
 
 
 def get_cann_version_file_hash():

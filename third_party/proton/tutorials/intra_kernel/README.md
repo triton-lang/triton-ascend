@@ -72,7 +72,7 @@ python3 example_dsl.py --increase-accuracy
 ### Time Representation
 
 - **Scope Duration**: Displayed in cycles for precise measurement
-- **Threadblock Start Times**: Measured in nanoseconds using global timing
+- **Thread Block Start Times**: Measured in nanoseconds using global timing
 - **Chrome Trace Format**: Assumes 1GHz GPU frequency for consistent time units (ns)
 
 ### Circular Buffer System

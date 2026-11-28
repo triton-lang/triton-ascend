@@ -38,14 +38,15 @@ def kernel(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constex
 def test_make_block_ptr():
     XB, YB, ZB = 4, 4, 4
     x = torch.arange(XB * YB * ZB, dtype=torch.float32).reshape(XB, YB, ZB).npu()
-    output = torch.zeros_like(x)
+    out = torch.zeros_like(x)
 
-    kernel[(1, )](output, x, XB, YB, ZB)
+    kernel[(1, )](out, x, XB, YB, ZB)
 
     ref = torch.zeros((2, 2, 2), dtype=torch.float32).npu()
     ref[:, :, :1] = x[1:3, 2:4, 3:4]
-    assert torch.allclose(output[:2, :2, :2].cpu(), ref.cpu())
+    torch.testing.assert_close(out[:2, :2, :2].cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_make_block_ptr()
+    print("test_make_block_ptr passed!")

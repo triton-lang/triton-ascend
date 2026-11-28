@@ -1,4 +1,3 @@
-import pytest
 import torch
 import torch_npu
 import triton
@@ -6,8 +5,8 @@ import triton.language as tl
 
 
 @triton.jit
-def fn_npu_(output_ptr, x_ptr, y_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr, XNUMEL: tl.constexpr,
-            YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
+def fn_npu_(output_ptr, x_ptr, y_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr, YNUMEL: tl.constexpr,
+            ZNUMEL: tl.constexpr):
     xoffs = tl.program_id(0) * XB
     yoffs = tl.program_id(1) * YB
     zoffs = tl.program_id(2) * ZB
@@ -30,11 +29,12 @@ def test_and():
     dtype = 'int32'
     x = torch.randint(low=0, high=256, size=(M, N), dtype=eval(f'torch.{dtype}')).npu()
     y = torch.randint(low=0, high=256, size=(M, N), dtype=eval(f'torch.{dtype}')).npu()
-    ans = x & y
-    output = torch.zeros_like(ans)
-    fn_npu_[1, 1, N](output, x, y, 1, M, 1, 1, M, N)
-    torch.testing.assert_close(ans, output)
+    ref = x & y
+    out = torch.zeros_like(ref)
+    fn_npu_[1, 1, N](out, x, y, 1, M, 1, M, N)
+    torch.testing.assert_close(out, ref)
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     test_and()
+    print("test_and passed!")

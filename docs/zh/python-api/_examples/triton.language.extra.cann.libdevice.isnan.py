@@ -11,7 +11,7 @@ _SIMT_SKIP_MSG = ("SIMT libdevice ops are not supported on A3; "
 
 
 @triton.jit
-def triton_kernel(input, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
+def triton_kernel(input, out, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
     base = tl.arange(0, XBLOCK_SUB)
     loops: tl.constexpr = XBLOCK // XBLOCK_SUB
@@ -20,7 +20,7 @@ def triton_kernel(input, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: t
         mask = x0 < n_elements
         tmp0 = tl.load(input + (x0), mask=mask)
         tmp1 = libdevice.isnan(tmp0)
-        tl.store(output + (x0), tmp1, mask=mask)
+        tl.store(out + (x0), tmp1, mask=mask)
 
 
 @pytest.mark.skipif(not _is_a5_target_arch(NPUUtils().get_arch()), reason=_SIMT_SKIP_MSG)
@@ -32,13 +32,13 @@ def test_isnan():
     x0.view(-1)[1] = float("inf")
     x0 = x0.npu()
 
-    torch_res = torch.isnan(x0).to(torch.int32)
-    triton_res = torch.empty(shape, dtype=torch.int32, device='npu')
-    triton_kernel[ncore, 1, 1](x0, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simt_only')
+    ref = torch.isnan(x0).to(torch.int32)
+    out = torch.empty(shape, dtype=torch.int32, device='npu')
+    triton_kernel[ncore, 1, 1](x0, out, x0.numel(), xblock, xblock_sub, compile_mode='simt_only')
 
-    torch_res = torch_res.cpu()
-    triton_res = triton_res.cpu()
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04)
+    ref = ref.cpu()
+    out = out.cpu()
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04)
 
 
 def test_isnan_simd():
@@ -49,18 +49,20 @@ def test_isnan_simd():
     x0.view(-1)[1] = float("inf")
     x0 = x0.npu()
 
-    torch_res = torch.isnan(x0).to(torch.int32)
-    triton_res = torch.empty(shape, dtype=torch.int32, device='npu')
-    triton_kernel[ncore, 1, 1](x0, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simd')
+    ref = torch.isnan(x0).to(torch.int32)
+    out = torch.empty(shape, dtype=torch.int32, device='npu')
+    triton_kernel[ncore, 1, 1](x0, out, x0.numel(), xblock, xblock_sub, compile_mode='simd')
 
-    torch_res = torch_res.cpu()
-    triton_res = triton_res.cpu()
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04)
+    ref = ref.cpu()
+    out = out.cpu()
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04)
 
 
 if __name__ == "__main__":
     test_isnan_simd()
+    print("test_isnan_simd passed!")
     if not _is_a5_target_arch(NPUUtils().get_arch()):
         print(_SIMT_SKIP_MSG)
     else:
         test_isnan()
+        print("test_isnan passed!")

@@ -24,12 +24,13 @@ def triton_argmax_2d(in_ptr0, out_ptr0, dim: tl.constexpr, M: tl.constexpr, N: t
 def test_argmax():
     M, N, dim = 4, 8, 1
     x = torch.randn(M, N, dtype=torch.float32).npu()
-    out = torch.empty(M, dtype=torch.int32).npu()
+    out = torch.empty(N if dim == 0 else M, dtype=torch.int32).npu()
     triton_argmax_2d[1, 1, 1](x, out, dim, M, N, M, N)
     ref = torch.argmax(x, dim=dim).to(torch.int32)
-    assert torch.equal(out.cpu(), ref.cpu()), "argmax result mismatch"
+    torch.testing.assert_close(out.cpu(), ref.cpu())
     print("argmax result:", out)
 
 
 if __name__ == "__main__":
     test_argmax()
+    print("test_argmax passed!")

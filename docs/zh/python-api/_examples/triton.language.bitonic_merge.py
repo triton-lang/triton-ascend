@@ -17,10 +17,10 @@ def test_bitonic_merge():
     input = torch.tensor([1, 3, 5, 7, 9, 11, 13, 15], dtype=torch.float32, device='npu')
     out = torch.empty_like(input)
     bitonic_merge_kernel[(1, )](input, out, N=N, descending=True)
-    expected = torch.sort(input, descending=True)[0]
-    assert torch.allclose(out, expected), f"bitonic_merge error: {out} vs {expected}"
-    print("PASS: test_bitonic_merge_basic")
+    ref = torch.sort(input, descending=True)[0]
+    torch.testing.assert_close(out, ref)
 
 
 if __name__ == "__main__":
     test_bitonic_merge()
+    print("test_bitonic_merge passed!")

@@ -25,8 +25,10 @@ def test_config():
     out = torch.empty(N, dtype=torch.float32, device='npu')
     grid = lambda meta: (triton.cdiv(N, meta['BLOCK_SIZE']), )
     vec_add_kernel[grid](x, y, out, N)
-    torch.testing.assert_close(out.cpu(), (x + y).cpu())
+    ref = (x + y).cpu()
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_config()
+    print("test_config passed!")

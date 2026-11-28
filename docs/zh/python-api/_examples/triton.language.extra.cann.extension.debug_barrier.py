@@ -28,12 +28,13 @@ def test_debug_barrier():
     x0 = torch.randn(size=shape, dtype=eval('torch.' + dtype)).npu()
     x1 = torch.randn(size=shape, dtype=eval('torch.' + dtype)).npu()
 
-    torch_res = torch_debug_barrier(x0, x1)
-    triton_res = torch.empty_like(x0)
-    triton_sub[ncore, 1, 1](x0, x1, triton_res, xblock, xblock_sub)
+    ref = torch_debug_barrier(x0, x1)
+    out = torch.empty_like(x0)
+    triton_sub[ncore, 1, 1](x0, x1, out, xblock, xblock_sub)
 
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == '__main__':
     test_debug_barrier()
+    print("test_debug_barrier passed!")

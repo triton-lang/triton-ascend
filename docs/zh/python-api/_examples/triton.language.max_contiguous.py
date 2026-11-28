@@ -1,7 +1,5 @@
-import pytest
 import torch
 import torch_npu
-from torch.testing import assert_close
 
 import triton
 import triton.language as tl
@@ -25,9 +23,10 @@ def test_max_contiguous():
     torch.npu.synchronize()
 
     # max_contiguous is only a compiler hint and does not change the result
-    assert_close(out, x * 2, rtol=1e-3, atol=1e-3)
+    ref = x * 2
+    torch.testing.assert_close(out, ref, rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":
     test_max_contiguous()
-    print("test_max_contiguous PASSED!")
+    print("test_max_contiguous passed!")

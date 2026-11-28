@@ -1,6 +1,6 @@
 # Environment Variables and Compiler Options
 
-This page is a configuration reference for Triton-Ascend kernel developers. It lists settings for compilation, execution, debugging, and autotuning, with their purpose, defaults, and support on A2/A3 and 950. Environment variables configure compilation and runtime behavior within a process; compiler options configure individual kernels. Environment variables can also be read and written in-process through `triton.knobs` (including the Ascend-specific `triton.knobs.ascend` group), without editing startup scripts. Migration advice for existing configurations appears under [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility).
+This page is a configuration reference for Triton-Ascend kernel developers. It lists settings for compilation, execution, debugging, and autotuning, with their purpose, defaults, and support on Atlas A2 products/Atlas A3 products and Ascend 950PR&950DT products. Environment variables configure compilation and runtime behavior within a process; compiler options configure individual kernels. Environment variables can also be read and written in-process through `triton.knobs` (including the Ascend-specific `triton.knobs.ascend` group), without editing startup scripts. Migration advice for existing configurations appears under [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility).
 
 ## Environment Variables
 
@@ -21,9 +21,9 @@ TRITON_DEBUG=1 python3 run_kernel.py
 
 ### Environment Variable Reference Table
 
-The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilation mode restrictions are defined before the [compiler option table](#compiler-options-reference). Unless noted otherwise, boolean environment variables accept `1` to enable them.
+Compilation mode restrictions are defined before the [compiler option table](#compiler-options-reference). Unless noted otherwise, boolean environment variables accept `1` to enable them. "—" means not applicable.
 
-| Category | Environment variable | Description | Default | A2/A3 | 950 |
+| Category | Environment variable | Description | Default | Atlas A2 products/Atlas A3 products | Ascend 950PR&950DT products |
 |----------|----------------------|-------------|---------|-------|-----|
 | Debugging | `TRITON_DEBUG` | Enables JIT debugging and device assertions and saves TTIR; the normal path also logs compilation and saves backend IR and binaries. | Off | Yes | Yes |
 | Debugging | `USE_IR_LOC` | Set to `ttir` when compiling a Python kernel to rebuild locations from TTIR file line numbers. Compiling directly from a text IR file can create a location snapshot for the input file. The values `ttadapter` and `npubin` are unsupported. | Unset | Yes | Yes |
@@ -42,8 +42,8 @@ The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilatio
 | Compilation | `TRITON_OVERRIDE_DIR` | Sets the directory containing override files. | `$TRITON_HOME/.triton/override` | Yes | Yes |
 | Compilation | `TRITON_F32_DEFAULT` | Sets the default F32 input precision for `tl.dot`; Ascend uses `ieee` or `hf32`, and maps compatibility input `tf32` to `hf32`. | Unset; backend uses `ieee` | Yes | Yes |
 | Compilation | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | Allows non-`constexpr` globals in the JIT frontend. | Off | Yes | Yes |
-| Compilation | `TRITON_ENABLE_LIBDEVICE` | Adds a libdevice link on the A2/A3 compiler path. Any nonempty value, including `"0"`, enables it. | Unset | Yes | — |
-| Compilation | `TRITON_ENABLE_LIBDEVICE_SIMT` | Selects SIMT libdevice extern symbols on Ascend 950. Any nonempty value, including `"0"`, enables it. | Unset | — | Yes |
+| Compilation | `TRITON_ENABLE_LIBDEVICE` | Adds a libdevice link on the Atlas A2 products/Atlas A3 products compiler path. Any nonempty value, including `"0"`, enables it. | Unset | Yes | — |
+| Compilation | `TRITON_ENABLE_LIBDEVICE_SIMT` | Selects SIMT libdevice extern symbols on Ascend 950PR&950DT products. Any nonempty value, including `"0"`, enables it. | Unset | — | Yes |
 | Cache and autotuning | `TRITON_ASCEND_ENABLE_DYNAMIC_REUSE` | Controls automatic reuse of kernels across changes to eligible `constexpr` parameters: `0` disables reuse, `1` enables dynamic reuse, and `2` also enables tile reuse and background compilation. | `0` | Yes | Yes; tile reuse excludes `simt_only` |
 | Cache and autotuning | `TRITON_HOME` | Sets the base for cache, dump, and override directories. | User home | Yes | Yes |
 | Cache and autotuning | `TRITON_CACHE_DIR` | Sets the compilation cache directory. | `$TRITON_HOME/.triton/cache` | Yes | Yes |
@@ -263,17 +263,17 @@ See the [Autotune Guide](./autotune_guide.md) for how to use the candidate confi
 The table lists Ascend backend defaults and notes any different `triton.Config` defaults. `None` usually leaves the decision to the backend or toolchain.
 
 - **Normal path**: `compile_mode="simd"` or `"simd_simt_template"`.
-- **Pure SIMT only**: `compile_mode="simt_only"`, available only on 950.
-- **Requires active DynamicCV**: the compiler has successfully applied [DynamicCV pipelining](./architecture_design_and_core_features.md#dynamic-cv-pipeline), meaning `enable_dynamic_cv_pipeline=True` is enabled on the 950 normal path and no fallback has occurred.
+- **Pure SIMT only**: `compile_mode="simt_only"`, available only on Ascend 950PR&950DT products.
+- **Requires active DynamicCV**: the compiler has successfully applied [DynamicCV pipelining](./architecture_design_and_core_features.md#dynamic-cv-pipeline), meaning `enable_dynamic_cv_pipeline=True` is enabled on the Ascend 950PR&950DT products normal path and no fallback has occurred.
 
-| Category | Compiler option | Description | Default / values | A2/A3 | 950 |
+| Category | Compiler option | Description | Default / values | Atlas A2 products/Atlas A3 products | Ascend 950PR&950DT products |
 |----------|-----------------|-------------|------------------|-------|-----|
 | Shared Triton | `debug` | Enables device assertions and compilation debugging. Under JIT, enabling either this option or `TRITON_DEBUG` enables debugging. | `False`; boolean | Yes | Yes |
 | Shared Triton | `sanitize_overflow` | Enables integer-overflow checks implemented with device assertions; also requires `debug`. | `True`; boolean | Yes | Yes |
 | Shared Triton | `num_stages` | Setting `1` disables automatic multi-buffering; other values use automatic mode without specifying a buffer count per level. | When `multibuffer_mode` is unset: backend `2`, `triton.Config` `3`; integer | Yes | Normal path |
 | Shared Triton | `num_warps` | Sets the warp count for pure-SIMT compilation. | Backend `32`; `triton.Config` `4`; positive integer | — | Pure SIMT only |
 | Shared Triton | `ir_override` | Replaces a compilation-stage artifact with a file of the same extension. | `None`; file path | Yes | Yes |
-| Compilation mode and graph optimization | `compile_mode` | `simd` uses SIMD; `simd_simt_template` uses SIMD on A2/A3 and enables template-SIMT subpaths on 950; `simt_only` uses pure SIMT. | `"simd_simt_template"`; also `"simd"`, `"simt_only"` | First two | All three |
+| Compilation mode and graph optimization | `compile_mode` | `simd` uses SIMD; `simd_simt_template` uses SIMD on Atlas A2 products/Atlas A3 products and enables template-SIMT subpaths on Ascend 950PR&950DT products; `simt_only` uses pure SIMT. | `"simd_simt_template"`; also `"simd"`, `"simt_only"` | First two | All three |
 | Compilation mode and graph optimization | `enable_graph_optimize` | Controls TTIR Graph Optimization. | `True`; boolean | Yes | Yes |
 | Multibuffering | `multibuffer` | Controls the automatic multi-buffering master switch; `num_stages=1` also turns it off. | `True`; boolean | Yes | Normal path |
 | Multibuffering | `multibuffer_mode` | Sets multi-buffer slot counts for `gm`, `l1`, `l0c`, and `ub`; `1` disables multi-buffering at that level, and values greater than `1` specify the slot count. Controlled by `multibuffer`; cannot be explicitly combined with `num_stages`. | `None`; a dictionary containing all four levels, with positive signed 32-bit integer values | Yes | Normal path |
@@ -287,7 +287,7 @@ The table lists Ascend backend defaults and notes any different `triton.Config` 
 | Scheduling and pipelines | `tile_mix_vector_loop` | Sets the Vector loop split count. | `None`; integer | Yes | — |
 | Scheduling and pipelines | `tile_mix_cube_loop` | Sets the Cube loop split count. | `None`; integer | Yes | — |
 | Scheduling and pipelines | `enable_mixed_cv` | Controls the NPU compiler's mixed-CV path. | `None`; boolean | — | Normal path |
-| Scheduling and pipelines | `enable_dynamic_cv_pipeline` | Enables [DynamicCV pipelining](./architecture_design_and_core_features.md#dynamic-cv-pipeline) on 950. When applied, it sets `set_workspace_multibuffer=0`, `enable_mixed_cv=True`, and `disable_auto_inject_block_sync=True`. If the optimization cannot be applied, the compiler restores these options to their original values and continues compilation. | `None`, resolved by target: A2/A3 `False`, 950 `True`; boolean | — | Normal path |
+| Scheduling and pipelines | `enable_dynamic_cv_pipeline` | Enables [DynamicCV pipelining](./architecture_design_and_core_features.md#dynamic-cv-pipeline) on Ascend 950PR&950DT products. When applied, it sets `set_workspace_multibuffer=0`, `enable_mixed_cv=True`, and `disable_auto_inject_block_sync=True`. If the optimization cannot be applied, the compiler restores these options to their original values and continues compilation. | `None`, resolved by target: Atlas A2 products/Atlas A3 products `False`, Ascend 950PR&950DT products `True`; boolean | — | Normal path |
 | Scheduling and pipelines | `buf_slot_num_of_veccore` | Sets Vector-core-local buffer slots. | `None`; integer | — | Requires active DynamicCV |
 | Scheduling and pipelines | `buf_slot_num_of_crosscore` | Sets cross-core buffer slots. | `None`; integer | — | Requires active DynamicCV |
 | Scheduling and pipelines | `buf_slot_num_of_gm` | Sets GM load buffer slots. | `None`; integer | — | Requires active DynamicCV |
@@ -304,7 +304,7 @@ The table lists Ascend backend defaults and notes any different `triton.Config` 
 | Operator optimization | `enable_hivm_batch_matmul` | Enables batch matmul in BiShengIR compilation. | `False`; boolean | — | Normal path |
 | Operator optimization | `auto_vectorize_v2_max_fused_ops_num` | Sets the maximum number of operations fused by AutoVectorizeV2. | `None` (default) or a signed 32-bit integer. `None` and negative values use the pass default. Values of `0` or greater set the limit explicitly. | — | Normal path |
 | Operator optimization | `prevec_max_fused_ops_num` | Limits the number of elementwise operations fused during pre-vectorization. | `None` (default) or a signed 32-bit integer. Positive values set the limit. `None`, `0`, and negative values leave this limit unset. | — | Normal path |
-| Pure SIMT | `simt_optimization_mode` | Sets the pure-SIMT multi-digit optimization mode. Explicit values on A2/A3 or the 950 normal path emit a `UserWarning` and are ignored. | `0`; toolchain-defined integer | — | Pure SIMT only |
+| Pure SIMT | `simt_optimization_mode` | Sets the pure-SIMT multi-digit optimization mode. Explicit values on Atlas A2 products/Atlas A3 products or the Ascend 950PR&950DT products normal path emit a `UserWarning` and are ignored. | `0`; toolchain-defined integer | — | Pure SIMT only |
 | Pure SIMT | `shared_mem_dynamic_size` | Sets pure-SIMT dynamic shared memory size. | Uses `122880` bytes when omitted or set to `None`. Explicit values must be integers from `122880` to `221184` bytes, inclusive. | — | Pure SIMT only |
 | Pure SIMT | `disable_fma` | Disables FMA optimization on the pure-SIMT path. | `False`; boolean | — | Pure SIMT only |
 | Pure SIMT | `superblock_factor` | Sets the pure-SIMT superblock factor. The backend forwards values greater than `1` when automatic block mapping is active and row coalescing has not applied. | A power of two greater than or equal to `1`. The default `1` disables superblocking. | — | Pure SIMT only |
@@ -325,7 +325,7 @@ NPU IR deprecates the following three options. Their legacy behavior remains eff
 |---------------|--------------------------------------------|
 | `limit_auto_multi_buffer_only_for_local_buffer` | `True` corresponds to `gm=1`, disabling GM multi-buffering. |
 | `limit_auto_multi_buffer_of_local_buffer` | `"no-l0c"` corresponds to `l0c=1`; `"no-limit"` corresponds to `l0c>1`. |
-| `limit_auto_multi_buffer_buffer` | On the 950 normal path: `"only-cube"` corresponds to `ub=1`; `"only-vector"` corresponds to `l1=1` and `l0c=1`; `"no-limit"` corresponds to `l1>1` and `ub>1`. |
+| `limit_auto_multi_buffer_buffer` | On the Ascend 950PR&950DT products normal path: `"only-cube"` corresponds to `ub=1`; `"only-vector"` corresponds to `l1=1` and `l0c=1`; `"no-limit"` corresponds to `l1>1` and `ub>1`. |
 
 For example, to enable double-buffering only for L1:
 
@@ -342,7 +342,7 @@ Replace the following old names with the corresponding names or values:
 | `force_simt_only` | `compile_mode="simt_only"` | `True` overrides an existing `compile_mode`; `False` leaves the mode unchanged. This option takes precedence when both legacy force switches are `True`. |
 | `force_simt_template` | `compile_mode="simd_simt_template"` | `True` overrides an existing `compile_mode`; `False` leaves the mode unchanged. |
 | `load_cache_num` | `buf_slot_num_of_gm` | Preserves the value; the new name wins when both names are supplied. |
-| `enable_bishengir_simt_optimization` | `simt_optimization_mode` | Preserves the value; the new name wins when both names are supplied. Effective only on the 950 pure-SIMT path. |
+| `enable_bishengir_simt_optimization` | `simt_optimization_mode` | Preserves the value; the new name wins when both names are supplied. Effective only on the Ascend 950PR&950DT products pure-SIMT path. |
 
 The compatibility value `compile_mode="unstructured_in_simt"` is equivalent to `compile_mode="simd_simt_template"` and remains accepted without a `FutureWarning`. Use `simd_simt_template` in new code.
 
@@ -390,7 +390,7 @@ Remove the following options from kernel launch arguments and `triton.Config`; t
 | `parallel_mode` | Parallel mode is derived from `compile_mode` and Linalg IR. |
 | `storage_align` | No replacement. |
 | `stream` | Execution streams are managed by the runtime and driver. |
-| `sync_solver` | Synchronization uses the NPU compiler defaults on A2/A3 and Ascend 950. |
+| `sync_solver` | Synchronization uses the NPU compiler defaults on Atlas A2 products/Atlas A3 products and Ascend 950PR&950DT products. |
 | `use_bytecode` | The bytecode pipeline is always enabled by the backend. |
 | `vf_merge_level` | The backend default VF merge level is used. |
 | `warp_size` | The Ascend backend fixes the warp size to 32. |

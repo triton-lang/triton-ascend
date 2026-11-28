@@ -1,5 +1,4 @@
 import torch
-
 import triton
 import triton.language as tl
 
@@ -13,8 +12,7 @@ def triton_gt_3d(in_ptr0, in_ptr1, out_ptr0, L: tl.constexpr, M: tl.constexpr, N
     x0 = tl.load(in_ptr0 + idx)
     x1 = tl.load(in_ptr1 + idx)
     ret = x0 > x1
-    odx = lblk_idx[:, None, None] * N * M + mblk_idx[None, :, None] * N + nblk_idx[None, None, :]
-    tl.store(out_ptr0 + odx, ret)
+    tl.store(out_ptr0 + idx, ret)
 
 
 def test_gt():
@@ -26,8 +24,10 @@ def test_gt():
     out = torch.empty(shape, dtype=torch.bool, device="npu")
     triton_gt_3d[(1, 1, 1)](x_cpu.npu(), y_cpu.npu(), out, L=shape[0], M=shape[1], N=shape[2], debug=True)
 
-    assert torch.equal(out.cpu(), torch.gt(x_cpu, y_cpu))
+    ref = torch.gt(x_cpu, y_cpu)
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_gt()
+    print("test_gt passed!")

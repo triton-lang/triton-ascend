@@ -25,14 +25,15 @@ def test_zeros_like_2d():
     YB = 8
 
     x = torch.randn((XB, YB), dtype=torch.float32).npu()
-    output = torch.zeros_like(x)
+    out = torch.zeros_like(x)
 
-    zeros_like_2d_kernel[(1, )](output, x, XB=XB, YB=YB)
+    zeros_like_2d_kernel[(1, )](out, x, XB=XB, YB=YB)
 
-    expected = torch.zeros_like(x.cpu())
+    ref = torch.zeros_like(x.cpu())
 
-    assert torch.allclose(output.cpu(), expected.cpu())
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_zeros_like_2d()
+    print("test_zeros_like_2d passed!")

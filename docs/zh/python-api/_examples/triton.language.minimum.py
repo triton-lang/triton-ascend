@@ -1,7 +1,6 @@
 import triton
 import triton.language as tl
 import torch
-import pytest
 
 
 def torch_minimum(x0, x1):
@@ -27,12 +26,13 @@ def test_minimum():
     x0 = torch.randn(size=shape, dtype=eval('torch.' + dtype)).npu()
     x1 = torch.randn(size=shape, dtype=eval('torch.' + dtype)).npu()
 
-    torch_res = torch_minimum(x0, x1)
-    triton_res = torch.empty_like(x0)
-    triton_minimum[ncore, 1, 1](x0, x1, triton_res, x0.numel(), xblock, xblock_sub)
+    ref = torch_minimum(x0, x1)
+    out = torch.empty_like(x0)
+    triton_minimum[ncore, 1, 1](x0, x1, out, x0.numel(), xblock, xblock_sub)
 
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == '__main__':
     test_minimum()
+    print("test_minimum passed!")

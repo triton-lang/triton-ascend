@@ -17,8 +17,10 @@ def test_jit():
     y = torch.randn(N, dtype=torch.float32, device='npu')
     out = torch.empty(N, dtype=torch.float32, device='npu')
     add_kernel[(1, )](x, y, out, N=N)
-    torch.testing.assert_close(out.cpu(), (x + y).cpu())
+    ref = (x + y).cpu()
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_jit()
+    print("test_jit passed!")

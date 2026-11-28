@@ -32,9 +32,10 @@ def test_xor_sum():
         for j in range(N):
             val ^= x[i, j].item()
         ref[i] = val
-    assert torch.equal(out.cpu(), ref), "xor_sum result mismatch"
+    torch.testing.assert_close(out.cpu(), ref)
     print("xor_sum result:", out)
 
 
 if __name__ == "__main__":
     test_xor_sum()
+    print("test_xor_sum passed!")

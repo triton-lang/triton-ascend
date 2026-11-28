@@ -14,16 +14,37 @@ import os
 from typing import Any, Dict, List, Optional
 
 
-def _annotation_to_str(node: Optional[ast.AST]) -> Optional[str]:
-    """Convert an AST annotation node back to its source-code string."""
+class _SourceExpr:
+    """A default value that renders as its original source expression.
+
+    Signature formatters render defaults with ``repr()``. Returning the
+    expression text as a plain ``str`` would therefore show it quoted
+    (``'None'``); this wrapper's ``repr()`` is the expression itself.
+    """
+
+    __slots__ = ("text", )
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def __repr__(self) -> str:
+        return self.text
+
+
+def _annotation_to_str(node: Optional[ast.AST]) -> Any:
+    """Convert an AST annotation node back to its source-code string.
+
+    ``None`` means the parameter is unannotated; return the ``empty``
+    sentinel so formatters omit the annotation instead of rendering ``None``.
+    """
     if node is None:
-        return None
+        return _inspect.Parameter.empty
     return ast.unparse(node)
 
 
-def _default_to_repr(node: ast.AST) -> str:
-    """Convert a default-value AST node to its repr string."""
-    return ast.unparse(node)
+def _default_to_repr(node: ast.AST) -> _SourceExpr:
+    """Wrap a default-value AST node so ``repr()`` yields its source text."""
+    return _SourceExpr(ast.unparse(node))
 
 
 def _build_signature(

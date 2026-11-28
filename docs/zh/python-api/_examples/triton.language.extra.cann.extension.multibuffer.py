@@ -48,3 +48,4 @@ def test_multibuffer():
 
 if __name__ == "__main__":
     test_multibuffer()
+    print("test_multibuffer passed!")

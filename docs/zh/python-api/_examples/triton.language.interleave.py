@@ -21,11 +21,12 @@ def test_interleave():
     y = torch.zeros([M, N], dtype=torch.float32).npu()
 
     out = torch.empty((M, 2 * N), dtype=torch.float32, device="npu")
-    interleave_2d_kernel[(1, )](out, x, y, M=M, N=N)
+    interleave_2d_kernel[(1, )](x, y, out, M=M, N=N)
 
-    assert out.shape == (M, 2 * N), f"Shape mismatch: expected {(M, 2*N)}, but got {out.shape}."
-    print("Test passed.")
+    ref = torch.stack((x, y), dim=-1).reshape(M, 2 * N)
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_interleave()
+    print("test_interleave passed!")

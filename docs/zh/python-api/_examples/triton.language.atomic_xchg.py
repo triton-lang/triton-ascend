@@ -30,3 +30,4 @@ def test_atomic_xchg():
 
 if __name__ == "__main__":
     test_atomic_xchg()
+    print("test_atomic_xchg passed!")

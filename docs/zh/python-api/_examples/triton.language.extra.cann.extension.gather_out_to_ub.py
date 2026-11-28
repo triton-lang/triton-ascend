@@ -49,10 +49,10 @@ def test_gather_out_to_ub():
     # out[0,1] = src[index[0,1]=1, 1] = 4.0
     # out[1,0] = src[index[1,0]=2, 0] = 5.0
     # out[1,1] = src[index[1,1]=3, 1] = 8.0
-    expected = torch.tensor([[1., 4.], [5., 8.]], device='cpu')
-    assert torch.allclose(out.cpu(), expected), \
-        f"Mismatch: expected {expected}, got {out.cpu()}"
+    ref = torch.tensor([[1., 4.], [5., 8.]], device='cpu')
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_gather_out_to_ub()
+    print("test_gather_out_to_ub passed!")

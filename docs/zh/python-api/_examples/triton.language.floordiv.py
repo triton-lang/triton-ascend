@@ -23,12 +23,13 @@ def test_floordiv():
     x0 = torch.randint(1, 10, size=shape, dtype=eval('torch.' + dtype)).npu()
     x1 = torch.randint(1, 10, size=shape, dtype=eval('torch.' + dtype)).npu()
 
-    torch_res = torch_floordiv(x0, x1)
-    triton_res = torch.empty_like(x0)
-    triton_kernel[ncore, 1, 1](triton_res, x0, x1, N=x0.numel())
+    ref = torch_floordiv(x0, x1)
+    out = torch.empty_like(x0)
+    triton_kernel[ncore, 1, 1](out, x0, x1, N=x0.numel())
 
-    torch.testing.assert_close(torch_res, triton_res, rtol=0, atol=0, equal_nan=True)
+    torch.testing.assert_close(out, ref, rtol=0, atol=0, equal_nan=True)
 
 
 if __name__ == '__main__':
     test_floordiv()
+    print("test_floordiv passed!")

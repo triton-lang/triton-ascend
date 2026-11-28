@@ -34,13 +34,13 @@ def test_scatter_ub_to_out():
     # pytest.raises(MLIRCompilationError).
     pytest.skip("scatter_ub_to_out is currently broken on Ascend 950PR&950DT products")
     # dst: (4,2) of zeros
-    dst = torch.zeros((4, 2), device='npu', dtype=torch.float32)
+    out = torch.zeros((4, 2), device='npu', dtype=torch.float32)
     # value(2,2) = [[1.,2.],[3.,4.]]
     value = torch.tensor([[1., 2.], [3., 4.]], device='npu')
     # index(2,2) = [[1,2],[3,0]]
     index = torch.tensor([[1, 2], [3, 0]], device='npu')
 
-    kernel[(1, )](value, index, dst)
+    kernel[(1, )](value, index, out)
 
     # Reference: scatter along dim=0 with dst(4,2) and value/index(2,2)
     # dst[index[i,j], j] = value[i,j]
@@ -52,10 +52,10 @@ def test_scatter_ub_to_out():
     #             [1., 0.],
     #             [0., 2.],
     #             [3., 0.]]
-    expected = torch.tensor([[0., 4.], [1., 0.], [0., 2.], [3., 0.]], device='cpu')
-    assert torch.allclose(dst.cpu(), expected), \
-        f"Mismatch: expected {expected}, got {dst.cpu()}"
+    ref = torch.tensor([[0., 4.], [1., 0.], [0., 2.], [3., 0.]], device='cpu')
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_scatter_ub_to_out()
+    print("test_scatter_ub_to_out passed!")

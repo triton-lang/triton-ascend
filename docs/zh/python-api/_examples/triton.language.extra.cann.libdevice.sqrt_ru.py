@@ -16,7 +16,7 @@ def torch_sqrt_ru_reference(x0):
 
 
 @triton.jit
-def triton_kernel(input0, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
+def triton_kernel(input0, out, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
     base = tl.arange(0, XBLOCK_SUB)
     loops: tl.constexpr = XBLOCK // XBLOCK_SUB
@@ -25,35 +25,37 @@ def triton_kernel(input0, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: 
         mask = x0 < n_elements
         tmp0 = tl.load(input0 + (x0), mask=mask)
         tmp1 = libdevice.sqrt_ru(tmp0)
-        tl.store(output + (x0), tmp1, mask=mask)
+        tl.store(out + (x0), tmp1, mask=mask)
 
 
 @pytest.mark.skipif(not _is_a5_target_arch(NPUUtils().get_arch()), reason=_SIMT_SKIP_MSG)
 def test_sqrt_ru():
     x0 = (torch.rand((8, )) + 0.1).to(torch.float32)
-    expected = (torch_sqrt_ru_reference(x0)).npu()
+    ref = (torch_sqrt_ru_reference(x0)).npu()
     x0 = x0.npu()
-    output = torch.empty(8, dtype=torch.float32, device='npu')
-    triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
-    output = output.cpu()
-    expected = expected.cpu()
-    torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04, equal_nan=True)
+    out = torch.empty(8, dtype=torch.float32, device='npu')
+    triton_kernel[(1, )](x0, out, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
+    out = out.cpu()
+    ref = ref.cpu()
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 def test_sqrt_ru_simd():
     x0 = (torch.rand((8, )) + 0.1).to(torch.float32)
-    expected = (torch_sqrt_ru_reference(x0)).npu()
+    ref = (torch_sqrt_ru_reference(x0)).npu()
     x0 = x0.npu()
-    output = torch.empty(8, dtype=torch.float32, device='npu')
-    triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simd')
-    output = output.cpu()
-    expected = expected.cpu()
-    torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04, equal_nan=True)
+    out = torch.empty(8, dtype=torch.float32, device='npu')
+    triton_kernel[(1, )](x0, out, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simd')
+    out = out.cpu()
+    ref = ref.cpu()
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == "__main__":
     test_sqrt_ru_simd()
+    print("test_sqrt_ru_simd passed!")
     if not _is_a5_target_arch(NPUUtils().get_arch()):
         print(_SIMT_SKIP_MSG)
     else:
         test_sqrt_ru()
+        print("test_sqrt_ru passed!")

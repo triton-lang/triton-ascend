@@ -26,16 +26,14 @@ def test_index_select():
     torch.manual_seed(0)
     embed = torch.randn(vocab_size, embed_dim, dtype=torch.float32).npu()
     indices = torch.randint(0, vocab_size, (batch_size, ), dtype=torch.int64).npu()
-    output = torch.empty((batch_size, embed_dim), dtype=torch.float32, device="npu")
+    out = torch.empty((batch_size, embed_dim), dtype=torch.float32, device="npu")
 
-    embedding_kernel[(1, )](embed, indices, output, vocab_size, embed_dim, batch_size)
+    embedding_kernel[(1, )](embed, indices, out, vocab_size, embed_dim, batch_size)
 
-    out_cpu = output.cpu()
     ref = embed.cpu()[indices.cpu()]
-
-    torch.testing.assert_close(out_cpu, ref)
-    print("Test passed.")
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_index_select()
+    print("test_index_select passed!")

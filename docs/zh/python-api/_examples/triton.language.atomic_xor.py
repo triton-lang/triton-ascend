@@ -22,19 +22,20 @@ def test_atomic_xor():
     split_size = shape[0] // ncore
     val_value = 3
     val = torch.full(shape, val_value, dtype=eval(f'torch.{dtype}')).npu()
-    pointer_value = 5
-    pointer = torch.full((split_size, shape[1]), pointer_value, dtype=eval(f'torch.{dtype}')).npu()
-    pointer_old = torch.full_like(pointer, -10)
-    pointer_result = pointer_value
+    init_value = 5
+    out = torch.full((split_size, shape[1]), init_value, dtype=eval(f'torch.{dtype}')).npu()
+    out_old = torch.full_like(out, -10)
+    ref_value = init_value
     for _ in range(ncore):
-        pointer_result ^= val_value
+        ref_value ^= val_value
 
-    pointer_ref = torch.full_like(pointer, pointer_result)
+    ref = torch.full_like(out, ref_value)
 
     n_elements = shape[0] * shape[1]
-    atomic_xor[ncore, 1, 1](val, pointer, pointer_old, n_elements, BLOCK_SIZE=split_size * shape[1])
-    assert torch.equal(pointer, pointer_ref)
+    atomic_xor[ncore, 1, 1](val, out, out_old, n_elements, BLOCK_SIZE=split_size * shape[1])
+    torch.testing.assert_close(out, ref)
 
 
 if __name__ == "__main__":
     test_atomic_xor()
+    print("test_atomic_xor passed!")

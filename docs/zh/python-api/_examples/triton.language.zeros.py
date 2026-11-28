@@ -22,14 +22,15 @@ def test_zeros_2d():
     XB = 4
     YB = 8
 
-    output = torch.zeros((XB, YB), dtype=torch.float32).npu()
+    out = torch.ones((XB, YB), dtype=torch.float32).npu()
 
-    zeros_2d_kernel[(1, )](output, XB=XB, YB=YB)
+    zeros_2d_kernel[(1, )](out, XB=XB, YB=YB)
 
-    expected = torch.zeros((XB, YB), dtype=torch.float32)
+    ref = torch.zeros((XB, YB), dtype=torch.float32)
 
-    assert torch.allclose(output.cpu(), expected.cpu())
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_zeros_2d()
+    print("test_zeros_2d passed!")

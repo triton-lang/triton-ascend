@@ -1,5 +1,4 @@
 import torch
-
 import triton
 import triton.language as tl
 
@@ -28,8 +27,10 @@ def test_ne():
     out = torch.empty(numel, dtype=torch.bool, device="npu")
     triton_ne[(1, 1, 1)](x_cpu.npu(), y_cpu.npu(), out, N=numel, XBLOCK=block, XBLOCK_SUB=sub_block, debug=True)
 
-    assert torch.equal(out.cpu(), torch.ne(x_cpu, y_cpu))
+    ref = torch.ne(x_cpu, y_cpu)
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_ne()
+    print("test_ne passed!")

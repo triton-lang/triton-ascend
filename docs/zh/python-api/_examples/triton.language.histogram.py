@@ -19,11 +19,12 @@ def test_histogram():
 
     torch.manual_seed(17)
     x = torch.randint(low=0, high=N, size=(M, ), dtype=eval(f'torch.{dtype}')).npu()
-    y_cal = torch.histc(x.float(), bins=N, min=0, max=N - 1)
-    y_ref = torch.empty(N, dtype=eval(f'torch.{dtype}'), device="npu")
-    histogram_kernel[(1, )](x, y_ref, M=M, N=N)
-    assert torch.equal(y_cal, y_ref)
+    ref = torch.histc(x.float(), bins=N, min=0, max=N - 1).to(torch.int32)
+    out = torch.empty(N, dtype=eval(f'torch.{dtype}'), device="npu")
+    histogram_kernel[(1, )](x, out, M=M, N=N)
+    torch.testing.assert_close(out, ref)
 
 
 if __name__ == "__main__":
     test_histogram()
+    print("test_histogram passed!")

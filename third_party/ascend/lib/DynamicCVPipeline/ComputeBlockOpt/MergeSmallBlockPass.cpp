@@ -513,6 +513,64 @@ public:
   }
 };
 
+// For a v1 (upBlock) -> v2 (smallBlock) merge where v2 also has a Cube
+// predecessor, allow the merge only in the constrained pattern:
+//   c1 -> v1 -> v2, c1 -> c2 -> v2
+// where:
+//   - v2 has exactly one Cube predecessor c2, and c2's only predecessor is c1
+//   - v2 has no other VECTOR predecessors besides v1 (upBlockIds.size() == 1).
+static bool allowMergeWithSingleCubePredecessor(
+    int smallBlockId, const llvm::SmallDenseSet<int> &upBlockIds, Block *block,
+    CVPipeline::ComputeBlockIdManager &bm,
+    const CVPipeline::MemoryDependenceGraph &memGraph) {
+  if (upBlockIds.size() != 1) {
+    return false;
+  }
+  int upBlockId = *upBlockIds.begin();
+
+  CVPipeline::BlockDependencyGraph graph(block, memGraph, bm);
+  if (failed(graph.buildGraph())) {
+    return false;
+  }
+
+  CVPipeline::BlockNode *smallNode = graph.getBlockNode(smallBlockId);
+  CVPipeline::BlockNode *upNode = graph.getBlockNode(upBlockId);
+  if (!smallNode || !upNode) {
+    return false;
+  }
+
+  // Returns the node's single Cube predecessor, or nullptr if it has none or
+  // more than one.
+  auto getSingleCubePred =
+      [](CVPipeline::BlockNode *node) -> CVPipeline::BlockNode * {
+    CVPipeline::BlockNode *cubePred = nullptr;
+    for (CVPipeline::BlockNode *pred : node->predecessors) {
+      if (pred->isCube) {
+        if (cubePred) {
+          return nullptr;
+        }
+        cubePred = pred;
+      }
+    }
+    return cubePred;
+  };
+
+  // v1 must have exactly one Cube predecessor c1, and c1 must have no
+  // predecessors.
+  CVPipeline::BlockNode *c1 = getSingleCubePred(upNode);
+  if (!c1 || !c1->predecessors.empty()) {
+    return false;
+  }
+
+  // v2 must have exactly one Cube predecessor c2. c2 either has no
+  // predecessor, or its only predecessor is c1.
+  CVPipeline::BlockNode *c2 = getSingleCubePred(smallNode);
+  if (!c2 || c2->predecessors.size() > 1) {
+    return false;
+  }
+  return c2->predecessors.empty() || *c2->predecessors.begin() == c1;
+}
+
 static void collectUpstream(int smallBlockId, Block *block,
                             CVPipeline::ComputeBlockIdManager &bm,
                             SmallVector<int> &candidates,
@@ -535,7 +593,7 @@ static void collectUpstream(int smallBlockId, Block *block,
           CVPipeline::getCoreTypeOfSimpleOpOrCf(defInBlock) !=
               CVPipeline::CoreType::VECTOR_ONLY) {
         haveCubeLink = true;
-        break;
+        continue;
       }
       int bid = bm.getBlockIdByOp(defInBlock);
       if (bid != -1 && bid != smallBlockId) {
@@ -543,11 +601,9 @@ static void collectUpstream(int smallBlockId, Block *block,
         allDepValues.push_back(operand);
       }
     }
-    if (haveCubeLink) {
-      break;
-    }
   }
-  if (haveCubeLink) {
+  if (haveCubeLink && !allowMergeWithSingleCubePredecessor(
+                          smallBlockId, upBlockIds, block, bm, memGraph)) {
     LOG_DEBUG("Block " << smallBlockId
                        << " has operand defined by CUBE, no up candidates.");
     upBlockIds.clear();

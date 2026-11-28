@@ -749,7 +749,7 @@ def test_exact_i64_scalar_has_no_double_roundtrip():
 def test_vdup_rejects_i64():
     with pytest.raises(ValueError, match="vdup does not support element type i64"):
         simd.vdup(1, tl.int64, _semantic=_Semantic())
-    with pytest.raises(ValueError, match="vdup does not support element type i64"):
+    with pytest.raises(ValueError, match="vdup does not support element type u64"):
         simd.vdup(1, tl.uint64, _semantic=_Semantic())
 
 
@@ -919,6 +919,34 @@ def test_vcvt_rejects_merging():
         simd.vcvt(_vec(64, tl.float32), tl.float16, mode=simd.MODE.MERGING, _semantic=_Semantic())
     with pytest.raises(ValueError, match="invalid mode"):
         simd.vcvt(_vec(64, tl.float32), tl.float16, mode="MODE_WHATEVER", _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("src_dtype,dst_dtype,lanes", [(tl.float32, tl.int32, 64), (tl.float16, tl.int16, 128)])
+@pytest.mark.parametrize("rounding", [simd.ROUND.O, "ODD", tl.constexpr(simd.ROUND.O)])
+def test_vcvt_rejects_unsupported_round_before_building_ir(src_dtype, dst_dtype, lanes, rounding):
+    with pytest.raises(ValueError, match=r"tla.simd.vcvt .* does not support round=ROUND.O; supported round: ROUND.R"):
+        simd.vcvt(_vec(lanes, src_dtype), dst_dtype, round=rounding, _semantic=_NoBuilder())
+
+
+@pytest.mark.parametrize("src_dtype,dst_dtype,lanes", [(tl.float32, tl.int32, 64), (tl.float16, tl.int16, 128)])
+@pytest.mark.parametrize("rounding", [simd.ROUND.R, simd.ROUND.A, simd.ROUND.F, simd.ROUND.C, simd.ROUND.Z])
+@pytest.mark.parametrize("sat", [False, True])
+def test_vcvt_supported_rounds_reach_builder(src_dtype, dst_dtype, lanes, rounding, sat):
+    sem = _Semantic()
+    result = simd.vcvt(_vec(lanes, src_dtype), dst_dtype, round=rounding, sat=sat, _semantic=sem)
+    name, args = _last(sem)
+    assert result.dtype == dst_dtype
+    assert name == "vcvt"
+    assert args[0] == "f2s"
+    assert args[5:7] == (rounding, sat)
+
+
+def test_vcvt_odd_remains_available_for_fp32_to_fp16():
+    sem = _Semantic()
+    result = simd.vcvt(_vec(64, tl.float32), tl.float16, round=simd.ROUND.O, _semantic=sem)
+    name, args = _last(sem)
+    assert result.dtype == tl.float16
+    assert name == "vcvt" and args[0] == "truncf" and args[5] == "odd"
 
 
 def test_precision_tiers():

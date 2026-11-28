@@ -5,18 +5,29 @@
 Reads doc-quality/skills/01.评估标准/common/h2_registry.json and the rule
 markdown files it points at, then emits a ProjectRule JSON that
 `ocr review --rule <file>` consumes. The rule targets Markdown/RST docs and
+gettext .po translations under docs/ plus the two root READMEs
+(README.md / README_zh.md) and
 injects doc-quality's 3-dimension (正确性/完整性/易理解) checklist as the
 review guidance, with a severity mapping table so LLM output maps to OCR's
 critical/high/medium/low vocabulary.
+
+Every H2 rule also gets a stable rule ID (维度-序号, e.g. 正确性-3). The rule
+text carries a rule index (规则编号/检测项/规则文件路径) and its output
+requirements force the LLM to end every finding's content with a
+「违反规则」attribution line citing the doc-quality rule(s) it violates, so
+each PR review comment is traceable to the exact rule it breached.
 
 Usage:
     python generate_rule.py <doc-quality-repo-path> <output-rule.json>
 """
 
 import json
-import os
 import sys
 from pathlib import Path
+
+# Repo-relative root of the evaluation rules, used for both locating the
+# registry and building citable rule file paths.
+RULES_DIR = "skills/01.评估标准"
 
 DIMENSION_WEIGHTS = {
     "正确性": 0.4,
@@ -52,14 +63,37 @@ def read_text(path: Path) -> str:
 
 
 def load_registry(repo: Path) -> dict:
-    p = repo / "skills" / "01.评估标准" / "common" / "h2_registry.json"
+    p = repo / RULES_DIR / "common" / "h2_registry.json"
     if not p.exists():
         raise FileNotFoundError(f"h2_registry.json not found at {p}")
     return json.loads(read_text(p))
 
 
+def rule_path(rule_file: str) -> str:
+    """Repo-relative path of a rule file, as cited in findings."""
+    return f"{RULES_DIR}/{rule_file}"
+
+
+def build_rule_index(registry: dict) -> list:
+    """Rule ID -> detection item -> rule file, for citation in every finding."""
+    lines = [
+        "## 规则索引（标注违反规则时必须逐字引用）\n",
+        "每个检测项有唯一「规则编号」（维度-序号）。每条反馈必须按编号引用其违反的规则：\n",
+        "| 规则编号 | 检测项 | 规则文件（doc-quality 仓内路径） |",
+        "|---|---|---|",
+    ]
+    for dim in ("正确性", "完整性", "易理解"):
+        for entry in registry.get(dim) or []:
+            seq = entry.get("seq", "?")
+            rf = entry.get("rule_file", "")
+            rf_text = rule_path(rf) if rf else "（规则文件缺失）"
+            lines.append(f"| {dim}-{seq} | {entry.get('h2', '')} | {rf_text} |")
+    lines.append("")
+    return lines
+
+
 def build_rule_text(repo: Path, registry: dict) -> str:
-    rules_root = repo / "skills" / "01.评估标准"
+    rules_root = repo / RULES_DIR
     common_dir = rules_root / "common"
 
     parts = []
@@ -68,7 +102,8 @@ def build_rule_text(repo: Path, registry: dict) -> str:
                  "\n"
                  "你是文档质量审查员。对当前 PR 中变更的文档逐条执行下列\n"
                  "检测规则，覆盖正确性、完整性、易理解三个维度。每个维度包含若干 H2\n"
-                 "检测项，请对照其规则文件内容逐项检查，命中即报。\n"
+                 "检测项，请对照其规则文件内容逐项检查，命中即报，并在每条反馈的末尾\n"
+                 "标注其违反的规则（规则编号+名称，见「规则索引」）。\n"
                  "\n"
                  "## 检测范围\n"
                  "\n"
@@ -103,6 +138,8 @@ def build_rule_text(repo: Path, registry: dict) -> str:
     else:
         print(f"warning: common spec missing: {common_spec}", file=sys.stderr)
 
+    parts.extend(build_rule_index(registry))
+
     for dim in ("正确性", "完整性", "易理解"):
         h2_list = registry.get(dim)
         if not h2_list:
@@ -120,23 +157,25 @@ def build_rule_text(repo: Path, registry: dict) -> str:
             script_rule_file = entry.get("script_rule_file")
 
             rf_path = rules_root / rule_file if rule_file else None
-            if rf_path and not rf_path.exists():
+            if rf_path is None or not rf_path.exists():
+                where = rule_path(rule_file) if rule_file else "(not configured)"
                 print(
-                    f"warning: rule_file missing for {dim} seq {seq}: {rf_path}",
+                    f"warning: rule_file missing for {dim} seq {seq}: {where}",
                     file=sys.stderr,
                 )
-                parts.append(f"### {seq}. {h2_name}\n")
-                parts.append(f"（规则文件缺失：{rule_file}）\n")
+                parts.append(f"### 规则 {dim}-{seq}：{h2_name}\n")
+                parts.append(f"（规则文件缺失：{where}）\n")
                 continue
 
-            parts.append(f"### {dim} - {seq}. {h2_name}\n")
+            parts.append(f"### 规则 {dim}-{seq}：{h2_name}\n")
+            parts.append(f"规则文件：{rule_path(rule_file)}\n")
             parts.append(read_text(rf_path).strip())
             parts.append("")
 
             if script_rule_file:
                 srf_path = rules_root / script_rule_file
                 if srf_path.exists():
-                    parts.append(f"#### 补充：脚本检测规则（{script_rule_file}）\n")
+                    parts.append(f"#### 补充：脚本检测规则（{rule_path(script_rule_file)}）\n")
                     parts.append(read_text(srf_path).strip())
                     parts.append("")
                 else:
@@ -146,11 +185,20 @@ def build_rule_text(repo: Path, registry: dict) -> str:
                     )
 
     parts.append("## 输出要求\n")
-    parts.append("- 每条 finding 的 severity 必须按上面的映射表填写 critical/high/medium/low\n"
-                 "- category 固定填 documentation\n"
-                 "- 仅报告命中的问题，不要报告通过项\n"
-                 "- 引用具体行号和原文片段\n"
-                 "- 优先给出可执行的修复建议\n")
+    parts.extend([
+        "- 每条 finding 的 severity 必须按上面的映射表填写 critical/high/medium/low",
+        "- category 固定填 documentation",
+        "- 仅报告命中的问题，不要报告通过项；无法对应到规则索引中任何一条规则的问题不上报",
+        "- 引用具体行号和原文片段",
+        "- 优先给出可执行的修复建议",
+        "- 每条 finding 的 content 最后一行必须是「违反规则」标注，格式固定：",
+        "  **违反规则**：<规则编号> <检测项名称>（<规则文件路径>）",
+        "  命中多条规则时全部列出，用「；」分隔，例如：",
+        "  **违反规则**：正确性-3 标点符号错误（"
+        "skills/01.评估标准/00.正确性/标点符号/punctuation-check_llm.md）；"
+        "易理解-5 跳转多（skills/01.评估标准/02.易理解/跳转多/too-many-jumps.md）",
+        "  <规则编号>、<检测项名称>、<规则文件路径> 必须逐字取自「规则索引」，不得编造或改写\n",
+    ])
 
     return "\n".join(parts)
 
@@ -168,38 +216,54 @@ def main():
         sys.exit(1)
 
     registry = load_registry(repo)
-    total = sum(len(v) for v in registry.values())
-    print(f"loaded h2_registry.json: {total} H2 entries across "
-          f"{len(registry)} dimensions", file=sys.stderr)
+    dims = ("正确性", "完整性", "易理解")
+    total = sum(len(registry.get(dim) or []) for dim in dims)
+    print(f"loaded h2_registry.json: {total} H2 entries across {len(dims)} dimensions", file=sys.stderr)
 
     rule_text = build_rule_text(repo, registry)
     rule_json = {
         "rules": [
             {
-                "path": "**/*.md",
+                "path": "docs/**/*.md",
                 "rule": rule_text,
                 "merge_system_rule": False,
             },
             {
-                "path": "**/*.rst",
+                "path": "docs/**/*.rst",
                 "rule": rule_text,
                 "merge_system_rule": False,
             },
             {
-                "path": "**/*.po",
+                "path": "docs/**/*.po",
+                "rule": rule_text,
+                "merge_system_rule": False,
+            },
+            {
+                "path": "README.md",
+                "rule": rule_text,
+                "merge_system_rule": False,
+            },
+            {
+                "path": "README_zh.md",
                 "rule": rule_text,
                 "merge_system_rule": False,
             },
         ],
         "include": [
-            "**/*.md",
-            "**/*.rst",
-            "**/*.po",
+            "docs/**/*.md",
+            "docs/**/*.rst",
+            "docs/**/*.po",
+            "README.md",
+            "README_zh.md",
         ],
-        # include is force-include (additive), not an allowlist — non-matching
-        # files still fall through to OCR's built-in extension allowlist. To
-        # achieve a strict "docs-only" whitelist, exclude all code/config/binary
-        # extensions that OCR would otherwise review with default rules.
+        # include is force-include (additive), not an allowlist. Scope control
+        # relies on two facts about OCR's built-in extension allowlist
+        # (supported_file_types.json): .md/.rst are NOT in it, so Markdown/RST
+        # files outside the patterns above (e.g. CONTRIBUTING.md) are never
+        # reviewed; .po/.pot ARE in it, so .po stays out of the exclude list
+        # (in scope via docs/**/*.po) while .pot/.mo remain excluded, together
+        # with all code/config/binary extensions that OCR would otherwise
+        # review with default rules.
         "exclude": [
             "**/*.{go,py,pyi,ipynb,java,kt,scala,rs,c,cpp,cc,cxx,h,hpp,hxx,cs,rb,php,swift,ts,tsx,js,jsx,mjs,cjs,vue,svelte,lua,pl,sh,bash,zsh,fish,ps1,bat,cmd,sql,json,jsonc,yaml,yml,toml,ini,cfg,conf,xml,html,htm,css,scss,sass,less,mo,pot,lock,sum,mod,work,gradle,cmake,make,Dockerfile,Makefile}",
         ],

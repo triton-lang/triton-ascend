@@ -181,8 +181,15 @@ def _collect_prof_result(
 
     df = pd.read_csv(kernel_details_file, keep_default_na=False)
     if use_task_time:
-        # The first and last lines of the task_time*.csv file are PROFILING_DISABLE, which should be deleted.
-        df = df[1:-1]
+        # Some captures add PROFILING_ENABLE/PROFILING_DISABLE control rows at both ends,
+        # while others (for example Ascend 950DT) only contain kernel records. Strip the
+        # first and last rows only when they actually carry a control marker, otherwise
+        # valid kernel records would be dropped.
+        control_markers = {"PROFILING_ENABLE", "PROFILING_DISABLE"}
+        if len(df) > 0 and any(str(value).strip() in control_markers for value in df.iloc[0]):
+            df = df.iloc[1:]
+        if len(df) > 0 and any(str(value).strip() in control_markers for value in df.iloc[-1]):
+            df = df.iloc[:-1]
 
     if df.empty:
         print("[WARNING] No profiling data on the device side.")

@@ -20,6 +20,7 @@
 
 import glob
 import os
+from pathlib import Path
 import pytest
 import re
 import subprocess
@@ -160,6 +161,29 @@ def _npu_toolchain():
     return include_flags, link_flags, lib_dirs, python_libdir, python_lib, ld_library_path
 
 
+def test_aot_concurrent_first_launch(tmp_path):
+    ascend = Path(__file__).resolve().parents[2]
+    template = (ascend / "tools/npu/compile.c").read_text()
+    for name in ("first", "second"):
+        source = template.format(kernel_name=name, register_kernel_name=name, packed_kernel_name=name, use_acl_load=0,
+                                 bin_size=1, bin_data="0", mix_aiv=1, kernel_docstring="", launch_spec_fields="0",
+                                 launch_types_init="{0, -1}", num_types=1, signature="int value", num_args=1,
+                                 arg_pointers="&value", arg_sizes="sizeof(value)", gridX=1, gridY=1, gridZ=1)
+        (tmp_path / f"{name}.c").write_text(source)
+
+    include_flags, *_ = _npu_toolchain()
+    fixture = Path(__file__).with_name("aot_first_launch.c")
+    executable = tmp_path / "aot_first_launch"
+    subprocess.run([
+        "gcc", "-std=gnu11", "-pthread", *include_flags, "-I",
+        str(ascend / "backend/launcher_src"), "-I",
+        str(tmp_path),
+        str(fixture), "-Wl,--wrap=dlopen,--wrap=dlsym", "-rdynamic", "-ldl", "-o",
+        str(executable)
+    ], check=True)
+    subprocess.run([str(executable)], check=True, timeout=30)
+
+
 def gen_kernel_library_npu(dir, libname):
     include_flags, link_flags, lib_dirs, _, _, _ = _npu_toolchain()
     c_files = glob.glob(os.path.join(dir, "*.c"))
@@ -167,12 +191,12 @@ def gen_kernel_library_npu(dir, libname):
     # against the CANN/torch_npu runtime libs its rt*/aclrt* calls need
     # (they are referenced, so --as-needed keeps them).
     subprocess.run(
-        ["gcc"] + c_files + include_flags + ["-c", "-fPIC"],
+        ["gcc"] + c_files + include_flags + ["-c", "-fPIC", "-pthread"],
         check=True,
         cwd=dir,
     )
     o_files = glob.glob(os.path.join(dir, "*.o"))
-    command = ["gcc", *o_files, "-shared", "-o", libname]
+    command = ["gcc", *o_files, "-shared", "-pthread", "-o", libname]
     for lib_dir in lib_dirs:
         command += [f"-L{lib_dir}", f"-Wl,-rpath,{lib_dir}"]
     command += link_flags + ["-ldl"]

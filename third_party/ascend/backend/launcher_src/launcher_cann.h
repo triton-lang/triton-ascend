@@ -166,6 +166,8 @@ static inline bool cann_stream_is_capturing(cann_stream stream) {
 // binary-load API to match aclrtLaunchKernelWithHostArgs; older CANN uses
 // rt-style registration passed through to rtKernelLaunch.
 #ifdef NPU_AOT_USE_ACL
+#include <pthread.h>
+
 static inline void npuAotSetDevice(void) {
   // Re-assert the device selected by the embedding process instead of
   // assuming device 0.
@@ -279,60 +281,74 @@ struct npu_aot_plan_entry_t {
   struct npu_aot_plan_entry_t *next;
 };
 
-// Launch through the generic C export, caching one plan per spec/types.
-// Each stub passes its own static spec/types, so the pointer tuple identifies
-// its plan.
+// Called with the cache mutex held. Each generated spec/types pair has static
+// storage and identifies one immutable plan.
+static inline void *npuAotGetPlan(const npu_aot_launch_spec_t *spec,
+                                  const npu_aot_arg_type_t *types,
+                                  size_t num_types, npu_aot_run_plan_t *run) {
+  static npu_aot_create_plan_t create_plan = NULL;
+  static npu_aot_run_plan_t run_plan = NULL;
+  static struct npu_aot_plan_entry_t *plans = NULL;
+  if (create_plan == NULL) {
+    void *library = dlopen("launcher_export.so", RTLD_LAZY | RTLD_LOCAL);
+    if (library == NULL) {
+      fprintf(stderr,
+              "Triton Error [NPU]: cannot dlopen launcher_export.so: %s\n",
+              dlerror());
+      return NULL;
+    }
+    npu_aot_create_plan_t create =
+        (npu_aot_create_plan_t)dlsym(library, "triton_launch_kernel_create");
+    npu_aot_run_plan_t launch =
+        (npu_aot_run_plan_t)dlsym(library, "triton_launch_kernel_run");
+    if (create == NULL || launch == NULL) {
+      fprintf(stderr,
+              "Triton Error [NPU]: cannot resolve the generic C launcher\n");
+      dlclose(library);
+      return NULL;
+    }
+    // Keep the library loaded for the lifetime of the cached function pointers.
+    create_plan = create;
+    run_plan = launch;
+  }
+  *run = run_plan;
+  for (struct npu_aot_plan_entry_t *entry = plans; entry != NULL;
+       entry = entry->next) {
+    if (entry->spec == spec && entry->types == types &&
+        entry->num_types == num_types)
+      return entry->plan;
+  }
+  struct npu_aot_plan_entry_t *entry =
+      (struct npu_aot_plan_entry_t *)malloc(sizeof(*entry));
+  if (entry == NULL) {
+    fprintf(stderr, "Triton Error [NPU]: cannot cache the launch plan\n");
+    return NULL;
+  }
+  entry->plan = create_plan(spec, types, num_types);
+  if (entry->plan == NULL) {
+    free(entry);
+    return NULL;
+  }
+  entry->spec = spec;
+  entry->types = types;
+  entry->num_types = num_types;
+  entry->next = plans;
+  plans = entry;
+  return entry->plan;
+}
+
 static inline NPUresult
 npuAotLaunch(const char *name, void *function, void *stream, int gridX,
              int gridY, int gridZ, const npu_aot_launch_spec_t *spec,
              const npu_aot_arg_type_t *types, size_t num_types,
              void *const *args, const size_t *sizes, int num_args) {
-  static void *lib_handle = NULL;
-  static npu_aot_create_plan_t create_plan = NULL;
-  static npu_aot_run_plan_t run_plan = NULL;
-  static struct npu_aot_plan_entry_t *plans = NULL;
-  struct npu_aot_plan_entry_t *entry = NULL;
-  if (create_plan == NULL) {
-    lib_handle = dlopen("launcher_export.so", RTLD_LAZY | RTLD_LOCAL);
-    if (lib_handle == NULL) {
-      fprintf(stderr,
-              "Triton Error [NPU]: cannot dlopen launcher_export.so: %s\n",
-              dlerror());
-      return ASCEND_ERROR_UNKNOWN;
-    }
-    create_plan =
-        (npu_aot_create_plan_t)dlsym(lib_handle, "triton_launch_kernel_create");
-    run_plan =
-        (npu_aot_run_plan_t)dlsym(lib_handle, "triton_launch_kernel_run");
-    if (create_plan == NULL || run_plan == NULL) {
-      fprintf(stderr,
-              "Triton Error [NPU]: cannot resolve the generic C launcher\n");
-      return ASCEND_ERROR_UNKNOWN;
-    }
-  }
-  for (entry = plans; entry != NULL; entry = entry->next) {
-    if (entry->spec == spec && entry->types == types &&
-        entry->num_types == num_types)
-      break;
-  }
-  if (entry == NULL) {
-    void *plan = create_plan(spec, types, num_types);
-    if (plan == NULL)
-      return ASCEND_ERROR_UNKNOWN;
-    entry = (struct npu_aot_plan_entry_t *)malloc(sizeof(*entry));
-    if (entry == NULL) {
-      fprintf(stderr, "Triton Error [NPU]: cannot cache the launch plan\n");
-      return ASCEND_ERROR_UNKNOWN;
-    }
-    entry->spec = spec;
-    entry->types = types;
-    entry->num_types = num_types;
-    entry->plan = plan;
-    entry->next = plans;
-    plans = entry;
-  }
-  if (run_plan(entry->plan, name, function, stream, gridX, gridY, gridZ, args,
-               sizes, num_args) != 0)
+  static pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+  npu_aot_run_plan_t run = NULL;
+  pthread_mutex_lock(&cache_mutex);
+  void *plan = npuAotGetPlan(spec, types, num_types, &run);
+  pthread_mutex_unlock(&cache_mutex);
+  if (plan == NULL || run(plan, name, function, stream, gridX, gridY, gridZ,
+                          args, sizes, num_args) != 0)
     return ASCEND_ERROR_UNKNOWN;
   return ASCEND_SUCCESS;
 }

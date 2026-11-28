@@ -174,3 +174,31 @@ def test_mixed_axis_row_gate(lower, upper, equality, gate):
     _mixed_axis_row_gate[(1, )](source.npu(), output, lower, upper, width, gate, equality, multibuffer=False)
     torch.npu.synchronize()
     torch.testing.assert_close(output.cpu(), expected, rtol=0, atol=0)
+
+
+@triton.jit
+def _gather_rows(src_ptr, index_ptr, out_ptr, num_out_rows, num_src_rows, hidden, ROWS: tl.constexpr,
+                 BLOCK_H: tl.constexpr):
+    rows = tl.program_id(0).to(tl.int64) * ROWS + tl.arange(0, ROWS)
+    row_mask = rows < num_out_rows
+    index = tl.load(index_ptr + rows, mask=row_mask, other=-1).to(tl.int64)
+    valid = (index >= 0) & (index < num_src_rows)
+    for start in range(0, hidden, BLOCK_H):
+        columns = start + tl.arange(0, BLOCK_H)
+        mask = row_mask[:, None] & (columns[None, :] < hidden)
+        values = tl.load(src_ptr + index[:, None] * hidden + columns[None, :], mask=mask & valid[:, None], other=0.0)
+        tl.store(out_ptr + rows[:, None] * hidden + columns[None, :], values, mask=mask)
+
+
+def test_gather_rows_masked_indices():
+    hidden = 128
+    # Guard rows keep even the masked indices -1 and 5 inside the physical allocation.
+    backing = torch.arange(1, 7 * hidden + 1, dtype=torch.float16).reshape(7, hidden)
+    source = backing.npu()[1:-1]
+    indices = torch.tensor([4, -1, 2, 0, 3, 5, 1, -1], dtype=torch.int32)
+    expected = torch.zeros((len(indices), hidden), dtype=torch.float16)
+    valid = (indices >= 0) & (indices < len(source))
+    expected[valid] = backing[1:-1][indices[valid].long()]
+    output = torch.full_like(expected, -7.0, device="npu")
+    _gather_rows[(2, )](source, indices.npu(), output, len(indices), len(source), hidden, ROWS=4, BLOCK_H=128)
+    torch.testing.assert_close(output.cpu(), expected, rtol=0, atol=0)

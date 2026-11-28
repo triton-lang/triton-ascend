@@ -23,6 +23,8 @@
 #include "llvm/Support/Debug.h"
 
 #include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
@@ -43,6 +45,46 @@ static constexpr const char *DEBUG_TYPE = "pre-check-blacklist";
     DBGS();                                                                    \
     llvm::dbgs() << __VA_ARGS__ << "\n";                                       \
   })
+
+// Sliced-tile accumulation idiom: a scf.for carrying tensor iter_args whose
+// body slices a carried tensor itself (tensor.extract_slice of the
+// loop-carried value, or tensor.insert_slice into it). Kernels written this
+// way (e.g. the HEAD_DIM >= 256 fused-attention accumulator update, which
+// sub-tiles by 1/4 of BLOCK_M) tile their accumulators manually to fit the
+// vector-core UB budget of the legacy SSBUFFER plan. The dynamic CV
+// pipeline instead plans whole-tile cross-core UB buffers and multi-buffers
+// them, which exceeds UB capacity at the BiShengIR regbase stage ("ub
+// overflow") and fails the compile. Decline such kernels so they keep the
+// legacy plan their tiling was designed against.
+static bool hasSlicedTileAccumulation(ModuleOp module) {
+  bool found = false;
+  module->walk([&](scf::ForOp forOp) -> WalkResult {
+    for (BlockArgument iterArg : forOp.getRegionIterArgs()) {
+      if (!isa<TensorType>(iterArg.getType())) {
+        continue;
+      }
+      forOp.getBody()->walk([&](Operation *op) -> WalkResult {
+        if (auto extractOp = dyn_cast<tensor::ExtractSliceOp>(op)) {
+          if (extractOp.getSource() == iterArg) {
+            found = true;
+            return WalkResult::interrupt();
+          }
+        } else if (auto insertOp = dyn_cast<tensor::InsertSliceOp>(op)) {
+          if (insertOp.getDest() == iterArg) {
+            found = true;
+            return WalkResult::interrupt();
+          }
+        }
+        return WalkResult::advance();
+      });
+      if (found) {
+        return WalkResult::interrupt();
+      }
+    }
+    return WalkResult::advance();
+  });
+  return found;
+}
 
 void PreCheckBlacklistPass::getDependentDialects(
     DialectRegistry &registry) const {
@@ -71,6 +113,13 @@ void PreCheckBlacklistPass::runOnOperation() {
   });
 
   if (!foundBlacklistOp) {
+    if (hasSlicedTileAccumulation(module)) {
+      LDBG("SSBUFFER will be skipped because a scf.for carries tensor "
+           "iter_args that are sliced in-body (sliced-tile accumulation); "
+           "the kernel is tiled against the legacy UB budget.");
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+      return;
+    }
     LDBG("No blacklist operations found, passed.");
     return;
   }

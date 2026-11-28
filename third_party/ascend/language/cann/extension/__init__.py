@@ -44,6 +44,7 @@ from .core import (
     conv1d,
     dot,
     conv2d,
+    dot_s4,
     AddressSpace,
     DataLayout,
 )
@@ -170,4 +171,5 @@ __all__ = [
 
     # dot ops
     "dot",
+    "dot_s4",
 ]

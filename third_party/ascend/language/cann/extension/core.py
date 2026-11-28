@@ -48,6 +48,7 @@ __all__ = [
     "conv1d",
     "dot",
     "conv2d",
+    "dot_s4",
     "AddressSpace",
     "DataLayout",
 ]
@@ -917,3 +918,67 @@ def conv2d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=N
         output_shape = [C_out, H_out_val, W_out_val]
 
     return semantic.conv2d(input, weight, bias, stride, padding_int, dilation, groups, output_shape, _semantic)
+
+
+@builtin
+def dot_s4(input: tl.tensor, other: tl.tensor, acc: tl.tensor = None, _semantic=None) -> tl.tensor:
+    """
+    Compute ``D = input @ other + acc`` over packed signed 4-bit integers.
+
+    Each int8 container holds two signed int4 values in the range [-8, 7].
+    The low 4 bits hold the first value, and the high 4 bits hold the second.
+
+    - ``input`` (A) packs along K: an ``[M, K]`` int4 matrix is an
+      ``[M, K/2]`` int8 tensor.
+    - ``other`` (B) packs along N: a ``[K, N]`` int4 matrix is a
+      ``[K, N/2]`` int8 tensor.
+
+    ``K`` must be even.
+
+    :param input: The first tensor to be multiplied, ``[M, K/2]``.
+    :type input: 2D tensor of scalar-type in {:code:`int8`}
+    :param other: The second tensor to be multiplied, ``[K, N/2]``.
+    :type other: 2D tensor of scalar-type in {:code:`int8`}
+    :param acc: The accumulator tensor, ``[M, N]``. If not None, the result is
+        added to this tensor.
+    :type acc: 2D tensor of scalar-type in {:code:`int32`}
+
+    :return: ``[M, N]`` int32 product.
+    :rtype: tensor
+    """
+    acc = _unwrap_if_constexpr(acc)
+
+    if is_register_based_arch(_semantic.builder.options.arch):
+        raise RuntimeError("dot_s4 is not supported on the register-based arches")
+
+    for name, operand in (("input", input), ("other", other)):
+        if not isinstance(operand, tl.tensor):
+            raise TypeError(f"dot_s4 operand `{name}` must be a tensor, got {type(operand)}")
+        if len(operand.shape) != 2:
+            raise ValueError(f"dot_s4 operand `{name}` must be 2D, got rank {len(operand.shape)}")
+        if operand.dtype != tl.int8:
+            raise TypeError(f"dot_s4 operand `{name}` must hold packed int4 values as int8, got {operand.dtype}")
+
+    M = _unwrap_if_constexpr(input.shape[0])
+    k_packed = _unwrap_if_constexpr(input.shape[1])
+    K = _unwrap_if_constexpr(other.shape[0])
+    n_packed = _unwrap_if_constexpr(other.shape[1])
+
+    if K != 2 * k_packed:
+        raise ValueError(f"dot_s4 shapes are not compatible: `input` is {list(input.shape)}, "
+                         f"but `other` is {list(other.shape)} with {K} rows; K must be even and "
+                         f"`other` must have 2 * {k_packed} = {2 * k_packed} rows")
+
+    N = 2 * n_packed
+    output_shape = [M, N]
+
+    if acc is not None:
+        if not isinstance(acc, tl.tensor):
+            raise TypeError(f"dot_s4 `acc` must be a tensor, got {type(acc)}")
+        if acc.dtype != tl.int32:
+            raise TypeError(f"dot_s4 `acc` must be int32, got {acc.dtype}")
+        acc_shape = [_unwrap_if_constexpr(s) for s in acc.shape]
+        if acc_shape != output_shape:
+            raise ValueError(f"dot_s4 `acc` must be {output_shape}, got {acc_shape}")
+
+    return semantic.dot_s4(input, other, acc, output_shape, _semantic=_semantic)

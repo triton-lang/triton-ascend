@@ -47,6 +47,7 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LLVM.h"
@@ -1138,6 +1139,31 @@ void init_ascend_ir(py::module &&m) {
           },
           py::arg("a"), py::arg("b"), py::arg("fractal_a"),
           py::arg("fractal_b"), py::arg("fractal_c"))
+      // dot_s4 operation
+      .def(
+          "create_dot_s4",
+          [](AscendNPUIROpBuilder &self, Value &a, Value &b,
+             Value &c) -> Value {
+            auto &builder = self.getBuilder();
+            auto aType = cast<RankedTensorType>(a.getType());
+            auto bType = cast<RankedTensorType>(b.getType());
+            auto cType = cast<RankedTensorType>(c.getType());
+            auto i4Type = builder.getIntegerType(4);
+            int64_t m = aType.getDimSize(0);
+            int64_t k = bType.getDimSize(0);
+            int64_t n = cType.getDimSize(1);
+            auto aCast = self.create<UnrealizedConversionCastOp>(
+                                 RankedTensorType::get({m, k}, i4Type), a)
+                             .getResult(0);
+            auto bCast = self.create<UnrealizedConversionCastOp>(
+                                 RankedTensorType::get({k, n}, i4Type), b)
+                             .getResult(0);
+            auto dotOp = self.create<triton::DotOp>(
+                cType, aCast, bCast, c, triton::InputPrecision::IEEE,
+                /*maxNumImpreciseAcc=*/0);
+            return dotOp.getResult();
+          },
+          py::arg("a"), py::arg("b"), py::arg("c"))
       // conv2d operation
       .def(
           "create_conv2d",

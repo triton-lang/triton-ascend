@@ -9,7 +9,7 @@
 # 标准更新随上游仓库同步，无需手动维护本地规则文件。
 #
 # 触发方式（仅目标分支为 main 的 PR）：
-#   - PR 自动触发：opened / synchronize / reopened
+#   - PR 自动触发：opened / reopened（push 新 commit 不自动检测，如需检测请评论手动触发）
 #   - 评论手动触发：/doc-review 或 @doc-review（目标分支非 main 时取消本次运行，状态为 Cancelled）
 #
 # LLM credentials (shared with schedule_doc_translate.yaml):
@@ -53,14 +53,14 @@ concurrency:
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, reopened]
     branches: [main]
     paths:
-      - 'docs/zh/**/*.md'
-      - 'docs/zh/**/*.rst'
-      - '*.md'
-      - '*.rst'
-      - 'docs/locale/en/LC_MESSAGES/**/*.po'
+      - 'docs/**/*.md'
+      - 'docs/**/*.rst'
+      - 'docs/**/*.po'
+      - 'README.md'
+      - 'README_zh.md'
   issue_comment:
     types: [created]
 

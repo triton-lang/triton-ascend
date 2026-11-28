@@ -289,5 +289,7 @@
   "addptr",
   "deinterleave",
   "Tensorize",
-  "PTSM"
+  "PTSM",
+  "Referer",
+  "dagre"
 ]

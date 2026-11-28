@@ -23,11 +23,13 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMPUTE_BLOCK_OPT_COMMON_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMPUTE_BLOCK_OPT_COMMON_H
 
-#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "llvm/ADT/ArrayRef.h"
+
 #include "mlir/IR/Operation.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
-#include "llvm/ADT/ArrayRef.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 namespace mlir {
 namespace CVPipeline {
@@ -43,8 +45,8 @@ namespace CVPipeline {
  * the function leaves
  * @p bm in its original state regardless of the result.
  *
- * Shared by the ComputeBlockOpt passes (e.g. UnifyAllocBlockPass and
- * MergeVectorIfBlockPass) that merge operations into a common block_id.
+ * Shared by the ComputeBlockOpt passes that merge ops into one block_id,
+ * e.g. MergeVectorIfBlockPass and MergeComputeBlockPass.
  *
  * @param opsToUnify Block-level operations to add to the safe set (okSet)
  * @param memGraph Memory dependence graph for RAW/WAW/WAR dependency analysis

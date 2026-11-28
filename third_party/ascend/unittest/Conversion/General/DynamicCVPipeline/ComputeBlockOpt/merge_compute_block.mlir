@@ -1,14 +1,39 @@
 // RUN: triton-opt --allow-unregistered-dialect --merge-compute-block %s | FileCheck %s
 
 // Test merge-compute-block pass: merges adjacent VECTOR blocks between CUBE blocks,
-// cloning CUBE ops that downstream blocks depend on.
+// cloning packed CUBE load scopes that downstream blocks depend on.
 //
 // Pattern: C1(6,CUBE) → V1(32,VECTOR) → C2(8,CUBE) → V2(33,VECTOR) → C3(10,CUBE) → C4(12,CUBE)
 // After pass:
 //   - V2(33) merged into V1(32): all block_id 33 → 32
-//   - C3(10) gets cloned alloc/copy/to_tensor chain from C2(8)
+//   - C3(10) gets a cloned ssbuffer.load scope from C2(8)
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intra_buf_count = 3 : i32, ssbuffer.inter_core_buf_count = 2 : i32} {
+  // CHECK-LABEL: func.func @_swa_bwd_dkdv_kernel(
+  // CHECK: arith.mulf {{.*}} {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 32 : i32}
+  // CHECK: math.exp {{.*}} {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 32 : i32}
+  // CHECK: arith.truncf {{.*}} {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 32 : i32}
+  // CHECK: %[[ORIGINAL:.*]] = scope.scope : () -> tensor<64x64xbf16> {
+  // CHECK: } {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
+  // CHECK: linalg.matmul {{.*}} ins({{.*}}, %[[ORIGINAL]] :
+  // CHECK: %[[CLONE:.*]] = scope.scope : () -> tensor<64x64xbf16> {
+  // CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<64x64xbf16>
+  // CHECK: scf.if {{.*}} {
+  // CHECK: linalg.fill ins({{.*}}) outs(%[[ALLOC]] :
+  // CHECK: arith.index_cast
+  // CHECK: arith.muli
+  // CHECK: arith.addi
+  // CHECK: memref.reinterpret_cast
+  // CHECK: memref.subview
+  // CHECK: memref.subview
+  // CHECK: memref.copy
+  // CHECK: bufferization.to_tensor %[[ALLOC]] restrict writable :
+  // CHECK: scope.return
+  // CHECK: } {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
+  // CHECK: linalg.matmul {{.*}} ins(%[[CLONE]], %[[CLONE]] :
+  // CHECK: arith.subf {{.*}} {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 33 : i32}
+  // CHECK: arith.mulf {{.*}} {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 33 : i32}
+  // CHECK: arith.truncf {{.*}} {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 33 : i32}
   func.func @_swa_bwd_dkdv_kernel(
     %arg0: memref<?xbf16> {tt.tensor_kind = 0 : i32},
     %arg1: memref<?xbf16> {tt.tensor_kind = 0 : i32},
@@ -46,88 +71,69 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intr
       // ==========================================
       // C1: Block 6 (CUBE) — produces %tensor_c1 used by V1(32) and C4(12)
       // ==========================================
-      // CHECK: memref.alloc() {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"}
-      %alloc_c1 = memref.alloc() {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16>
-      %cond_c1 = arith.cmpi slt, %iv_idx, %c64 {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : index
-      scf.if %cond_c1 {
-        linalg.fill {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} ins(%cst_bf16 : bf16) outs(%alloc_c1 : memref<64x64xbf16>)
-      } {hivm.unlikely_condition, ssbuffer.block_id = 6 : i32}
-      %reint_c1 = memref.reinterpret_cast %arg0 to offset: [%offset64], sizes: [64, 64], strides: [%stride_idx, 1] {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<?xbf16> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
-      %subv_c1_src = memref.subview %reint_c1[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
-      %subv_c1_dst = memref.subview %alloc_c1[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16> to memref<64x64xbf16, strided<[64, 1]>>
-      memref.copy %subv_c1_src, %subv_c1_dst {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[64, 1]>>
-      %tensor_c1 = bufferization.to_tensor %alloc_c1 restrict writable {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16> to tensor<64x64xbf16>
+      %tensor_c1 = scope.scope : () -> tensor<64x64xbf16> {
+        %alloc_c1 = memref.alloc() : memref<64x64xbf16>
+        %cond_c1 = arith.cmpi slt, %iv_idx, %c64 : index
+        scf.if %cond_c1 {
+          linalg.fill ins(%cst_bf16 : bf16) outs(%alloc_c1 : memref<64x64xbf16>)
+        } {hivm.unlikely_condition}
+        %reint_c1 = memref.reinterpret_cast %arg0 to offset: [%offset64], sizes: [64, 64], strides: [%stride_idx, 1] : memref<?xbf16> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
+        %subv_c1_src = memref.subview %reint_c1[0, 0] [64, 64] [1, 1] : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
+        %subv_c1_dst = memref.subview %alloc_c1[0, 0] [64, 64] [1, 1] : memref<64x64xbf16> to memref<64x64xbf16, strided<[64, 1]>>
+        memref.copy %subv_c1_src, %subv_c1_dst : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[64, 1]>>
+        %loaded_c1 = bufferization.to_tensor %alloc_c1 restrict writable : memref<64x64xbf16> to tensor<64x64xbf16>
+        scope.return %loaded_c1 : tensor<64x64xbf16>
+      } {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
       %matmul_c1 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%tensor_c1, %tensor_c1 : tensor<64x64xbf16>, tensor<64x64xbf16>) outs(%cube_init : tensor<64x64xf32>) -> tensor<64x64xf32>
 
       // ==========================================
       // V1: Block 32 (VECTOR) — CUBE pred=6, CUBE succ=8, edge 32→33 via %v1_exp
       // ==========================================
-      // CHECK: arith.mulf {{%.*}}, {{%.*}} {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 32 : i32}
       %v1_mul = arith.mulf %matmul_c1, %scale {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
-      // CHECK: math.exp {{%.*}} {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 32 : i32}
       %v1_exp = math.exp %v1_mul {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
-      // CHECK: arith.truncf {{%.*}} {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 32 : i32}
       %v1_trunc = arith.truncf %v1_exp {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xbf16>
 
       // ==========================================
       // C2: Block 8 (CUBE) — has copy chain with dedicated arith ops that C3(10) depends on
       // ==========================================
-      // CHECK: memref.alloc() {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"}
-      %alloc_c2 = memref.alloc() {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16>
-      scf.if %cond_c2 {
-        linalg.fill {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} ins(%cst_bf16 : bf16) outs(%alloc_c2 : memref<64x64xbf16>)
-      } {hivm.unlikely_condition, ssbuffer.block_id = 8 : i32}
-      // Dedicated arith ops in C2 for the reinterpret_cast offset computation
-      %c2_stride = arith.index_cast %arg2 {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : i32 to index
-      %c2_mul = arith.muli %iv_idx, %c2_stride {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : index
-      %c2_offset = arith.addi %offset64, %c2_mul {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : index
-      %reint_c2 = memref.reinterpret_cast %arg1 to offset: [%c2_offset], sizes: [64, 64], strides: [%c2_stride, 1] {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<?xbf16> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
-      %subv_c2_src = memref.subview %reint_c2[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
-      %subv_c2_dst = memref.subview %alloc_c2[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16> to memref<64x64xbf16, strided<[64, 1]>>
-      // CHECK: memref.copy {{%.*}}, {{%.*}} {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"}
-      memref.copy %subv_c2_src, %subv_c2_dst {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[64, 1]>>
-      // CHECK: bufferization.to_tensor {{%.*}} {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"}
-      %tensor_c2 = bufferization.to_tensor %alloc_c2 restrict writable {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16> to tensor<64x64xbf16>
+      %tensor_c2 = scope.scope : () -> tensor<64x64xbf16> {
+        %alloc_c2 = memref.alloc() : memref<64x64xbf16>
+        scf.if %cond_c2 {
+          linalg.fill ins(%cst_bf16 : bf16) outs(%alloc_c2 : memref<64x64xbf16>)
+        } {hivm.unlikely_condition}
+        // Dedicated arith ops in C2 for the reinterpret_cast offset computation
+        %c2_stride = arith.index_cast %arg2 : i32 to index
+        %c2_mul = arith.muli %iv_idx, %c2_stride : index
+        %c2_offset = arith.addi %offset64, %c2_mul : index
+        %reint_c2 = memref.reinterpret_cast %arg1 to offset: [%c2_offset], sizes: [64, 64], strides: [%c2_stride, 1] : memref<?xbf16> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
+        %subv_c2_src = memref.subview %reint_c2[0, 0] [64, 64] [1, 1] : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
+        %subv_c2_dst = memref.subview %alloc_c2[0, 0] [64, 64] [1, 1] : memref<64x64xbf16> to memref<64x64xbf16, strided<[64, 1]>>
+        memref.copy %subv_c2_src, %subv_c2_dst : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[64, 1]>>
+        %loaded_c2 = bufferization.to_tensor %alloc_c2 restrict writable : memref<64x64xbf16> to tensor<64x64xbf16>
+        scope.return %loaded_c2 : tensor<64x64xbf16>
+      } {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
       %transposed_v1 = linalg.transpose ins(%v1_trunc : tensor<64x64xbf16>) outs(%empty_2d_bf16 : tensor<64x64xbf16>) permutation = [1, 0]  {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"}
       %matmul_c2 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%transposed_v1, %tensor_c2 : tensor<64x64xbf16>, tensor<64x64xbf16>) outs(%cube_init : tensor<64x64xf32>) -> tensor<64x64xf32>
 
       // ==========================================
       // C3: Block 10 (CUBE) — uses %tensor_c2 from C2, triggers clone from C2
-      // After pass: cloned alloc/index_cast/muli/addi/reinterpret_cast/subview×2/copy/to_tensor from C2
+      // After pass: cloned load scope, including address math, padding and copy, from C2
       // ==========================================
-      // CHECK: memref.alloc() {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-      // CHECK: scf.if {{%.*}} {
-      // CHECK:   linalg.fill {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-      // CHECK: } {hivm.unlikely_condition, ssbuffer.block_id = 10 : i32}
-      // CHECK: arith.index_cast {{%.*}} {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-      // CHECK: arith.muli {{%.*}}, {{%.*}} {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-      // CHECK: arith.addi {{%.*}}, {{%.*}} {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-      // CHECK: memref.reinterpret_cast {{%.*}} to offset: [{{%.*}}], sizes: [64, 64], strides: [{{%.*}}, 1] {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-      // CHECK: memref.subview {{%.*}}[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-      // CHECK: memref.subview {{%.*}}[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-      // CHECK: memref.copy {{%.*}}, {{%.*}} {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-      // CHECK: bufferization.to_tensor {{%.*}} {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-      // CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"
       %matmul_c3 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%tensor_c2, %tensor_c2 : tensor<64x64xbf16>, tensor<64x64xbf16>) outs(%cube_init : tensor<64x64xf32>) -> tensor<64x64xf32>
 
       // ==========================================
       // V2: Block 33 (VECTOR) — uses %v1_exp (edge 32→33), %matmul_c3 (edge 10→33)
       // After pass: merged into V1(32), all block_id 33 → 32
       // ==========================================
-      // CHECK: arith.subf {{%.*}}, {{%.*}} {{{.*}}ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 33 : i32}
       %v2_sub = arith.subf %matmul_c3, %v1_exp {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
-      // CHECK: arith.mulf {{%.*}}, {{%.*}} {{{.*}}ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 33 : i32}
       %v2_mul = arith.mulf %v1_exp, %v2_sub {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
-      // CHECK: arith.mulf {{%.*}}, {{%.*}} {{{.*}}ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 33 : i32}
       %v2_mul2 = arith.mulf %v2_mul, %scale {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
-      // CHECK: arith.truncf {{%.*}} {{{.*}}ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 33 : i32}
       %v2_trunc = arith.truncf %v2_mul2 {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xbf16>
 
       // ==========================================
       // C4: Block 12 (CUBE) — uses %v2_trunc (edge 33→12) and %tensor_c1 (edge 6→12)
       // ==========================================
       %transposed_v2 = linalg.transpose ins(%v2_trunc : tensor<64x64xbf16>) outs(%empty_2d_bf16 : tensor<64x64xbf16>) permutation = [1, 0]  {ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "CUBE"}
-      // CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "CUBE"
       %matmul_c4 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%transposed_v2, %tensor_c1 : tensor<64x64xbf16>, tensor<64x64xbf16>) outs(%cube_init : tensor<64x64xf32>) -> tensor<64x64xf32>
 
       // Store output to prevent DCE
@@ -138,17 +144,21 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intr
     return
   }
 
-  // Test case 2: same topology, but C3(10) consumes %matmul_c2 (the L0C result of
-  // C2's matmul) instead of %tensor_c2. C3 now depends on C2's matmul result
-  // rather than C2's GM->UB copy chain, so no clone of the alloc/copy/to_tensor
-  // chain is expected for C3: the cross-Cube clone still leaves a cycle via
+  // Test case 2: C3(10) consumes BOTH %matmul_c2 (C2's L0C result) and
+  // %tensor_c2 (C2's packed load). Cloning the load cannot remove the matmul
+  // dependency, so the cross-Cube clone still leaves a cycle via
   // %matmul_c2 (C2 -> C3), so the clone attempt fails and must be rolled back
-  // without leaving residual cloned GM->UB ops in block 10.
+  // without leaving a residual cloned load scope in block 10.
   // CHECK-LABEL: func.func @_swa_bwd_dkdv_kernel_l0c(
-  // CHECK-NOT: memref.alloc() {ssbuffer.block_id = 10 : i32
-  // CHECK-NOT: memref.copy {{.*}} {ssbuffer.block_id = 10 : i32
-  // CHECK-NOT: bufferization.to_tensor {{.*}} {ssbuffer.block_id = 10 : i32
-  // CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 10 : i32
+  // CHECK: arith.mulf {{.*}} {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK: %[[LOAD:.*]] = scope.scope : () -> tensor<64x64xbf16> {
+  // CHECK: } {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
+  // CHECK: %[[MM:.*]] = linalg.matmul {{.*}}ssbuffer.block_id = 8 : i32{{.*}} ins({{.*}}, %[[LOAD]] :
+  // CHECK-NOT: scope.scope
+  // CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 10 : i32{{.*}} ins(%[[MM]], %[[LOAD]] :
+  // CHECK: arith.subf {{.*}} {ssbuffer.block_id = 33 : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK-NOT: scope.scope
+  // CHECK: return
   func.func @_swa_bwd_dkdv_kernel_l0c(
     %arg0: memref<?xbf16> {tt.tensor_kind = 0 : i32},
     %arg1: memref<?xbf16> {tt.tensor_kind = 0 : i32},
@@ -184,16 +194,19 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intr
       // ==========================================
       // C1: Block 6 (CUBE) — produces %tensor_c1 used by V1(32) and C4(12)
       // ==========================================
-      %alloc_c1 = memref.alloc() {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16>
-      %cond_c1 = arith.cmpi slt, %iv_idx, %c64 {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : index
-      scf.if %cond_c1 {
-        linalg.fill {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} ins(%cst_bf16 : bf16) outs(%alloc_c1 : memref<64x64xbf16>)
-      } {hivm.unlikely_condition, ssbuffer.block_id = 6 : i32}
-      %reint_c1 = memref.reinterpret_cast %arg0 to offset: [%offset64], sizes: [64, 64], strides: [%stride_idx, 1] {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<?xbf16> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
-      %subv_c1_src = memref.subview %reint_c1[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
-      %subv_c1_dst = memref.subview %alloc_c1[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16> to memref<64x64xbf16, strided<[64, 1]>>
-      memref.copy %subv_c1_src, %subv_c1_dst {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[64, 1]>>
-      %tensor_c1 = bufferization.to_tensor %alloc_c1 restrict writable {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16> to tensor<64x64xbf16>
+      %tensor_c1 = scope.scope : () -> tensor<64x64xbf16> {
+        %alloc_c1 = memref.alloc() : memref<64x64xbf16>
+        %cond_c1 = arith.cmpi slt, %iv_idx, %c64 : index
+        scf.if %cond_c1 {
+          linalg.fill ins(%cst_bf16 : bf16) outs(%alloc_c1 : memref<64x64xbf16>)
+        } {hivm.unlikely_condition}
+        %reint_c1 = memref.reinterpret_cast %arg0 to offset: [%offset64], sizes: [64, 64], strides: [%stride_idx, 1] : memref<?xbf16> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
+        %subv_c1_src = memref.subview %reint_c1[0, 0] [64, 64] [1, 1] : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
+        %subv_c1_dst = memref.subview %alloc_c1[0, 0] [64, 64] [1, 1] : memref<64x64xbf16> to memref<64x64xbf16, strided<[64, 1]>>
+        memref.copy %subv_c1_src, %subv_c1_dst : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[64, 1]>>
+        %loaded_c1 = bufferization.to_tensor %alloc_c1 restrict writable : memref<64x64xbf16> to tensor<64x64xbf16>
+        scope.return %loaded_c1 : tensor<64x64xbf16>
+      } {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
       %matmul_c1 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%tensor_c1, %tensor_c1 : tensor<64x64xbf16>, tensor<64x64xbf16>) outs(%cube_init : tensor<64x64xf32>) -> tensor<64x64xf32>
 
       // ==========================================
@@ -204,26 +217,29 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intr
       %v1_trunc = arith.truncf %v1_exp {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xbf16>
 
       // ==========================================
-      // C2: Block 8 (CUBE) — copy chain only feeds its own matmul
+      // C2: Block 8 (CUBE) — packed load feeds both its own matmul and C3
       // ==========================================
-      %alloc_c2 = memref.alloc() {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16>
-      scf.if %cond_c2 {
-        linalg.fill {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} ins(%cst_bf16 : bf16) outs(%alloc_c2 : memref<64x64xbf16>)
-      } {hivm.unlikely_condition, ssbuffer.block_id = 8 : i32}
-      %c2_stride = arith.index_cast %arg2 {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : i32 to index
-      %c2_mul = arith.muli %iv_idx, %c2_stride {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : index
-      %c2_offset = arith.addi %offset64, %c2_mul {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : index
-      %reint_c2 = memref.reinterpret_cast %arg1 to offset: [%c2_offset], sizes: [64, 64], strides: [%c2_stride, 1] {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<?xbf16> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
-      %subv_c2_src = memref.subview %reint_c2[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
-      %subv_c2_dst = memref.subview %alloc_c2[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16> to memref<64x64xbf16, strided<[64, 1]>>
-      memref.copy %subv_c2_src, %subv_c2_dst {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[64, 1]>>
-      %tensor_c2 = bufferization.to_tensor %alloc_c2 restrict writable {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16> to tensor<64x64xbf16>
+      %tensor_c2 = scope.scope : () -> tensor<64x64xbf16> {
+        %alloc_c2 = memref.alloc() : memref<64x64xbf16>
+        scf.if %cond_c2 {
+          linalg.fill ins(%cst_bf16 : bf16) outs(%alloc_c2 : memref<64x64xbf16>)
+        } {hivm.unlikely_condition}
+        %c2_stride = arith.index_cast %arg2 : i32 to index
+        %c2_mul = arith.muli %iv_idx, %c2_stride : index
+        %c2_offset = arith.addi %offset64, %c2_mul : index
+        %reint_c2 = memref.reinterpret_cast %arg1 to offset: [%c2_offset], sizes: [64, 64], strides: [%c2_stride, 1] : memref<?xbf16> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
+        %subv_c2_src = memref.subview %reint_c2[0, 0] [64, 64] [1, 1] : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[?, 1], offset: ?>>
+        %subv_c2_dst = memref.subview %alloc_c2[0, 0] [64, 64] [1, 1] : memref<64x64xbf16> to memref<64x64xbf16, strided<[64, 1]>>
+        memref.copy %subv_c2_src, %subv_c2_dst : memref<64x64xbf16, strided<[?, 1], offset: ?>> to memref<64x64xbf16, strided<[64, 1]>>
+        %loaded_c2 = bufferization.to_tensor %alloc_c2 restrict writable : memref<64x64xbf16> to tensor<64x64xbf16>
+        scope.return %loaded_c2 : tensor<64x64xbf16>
+      } {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
       %transposed_v1 = linalg.transpose ins(%v1_trunc : tensor<64x64xbf16>) outs(%empty_2d_bf16 : tensor<64x64xbf16>) permutation = [1, 0]  {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"}
       %matmul_c2 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%transposed_v1, %tensor_c2 : tensor<64x64xbf16>, tensor<64x64xbf16>) outs(%cube_init : tensor<64x64xf32>) -> tensor<64x64xf32>
 
       // ==========================================
-      // C3: Block 10 (CUBE) — consumes %matmul_c2 (C2's L0C result) instead of
-      // %tensor_c2, so it does not trigger cloning of C2's copy chain
+      // C3: Block 10 (CUBE) — consumes both the L0C result and packed load.
+      // The load clone is rolled back because the L0C dependency keeps a cycle.
       // ==========================================
       %matmul_c3 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%matmul_c2, %tensor_c2 : tensor<64x64xf32>, tensor<64x64xbf16>) outs(%cube_init : tensor<64x64xf32>) -> tensor<64x64xf32>
 
@@ -252,10 +268,16 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intr
   // Test case 3: C3(10) depends on BOTH C1(6)'s tensor.empty() (transpose
   // outs) and C2(8)'s to_tensor (transpose ins).
   // CHECK-LABEL: func.func @kernel_cross_cube_empty(
-  // CHECK: memref.alloc() {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-  // CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-  // CHECK: linalg.transpose {{.*}} {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"}
-  // CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"
+  // CHECK: %[[EMPTY:.*]] = tensor.empty() {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"}
+  // CHECK: } {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
+  // CHECK: %[[CLONE_EMPTY_CASE:.*]] = scope.scope : () -> tensor<64x64xbf16> {
+  // CHECK: memref.alloc() : memref<64x64xbf16>
+  // CHECK: memref.copy
+  // CHECK: bufferization.to_tensor
+  // CHECK: scope.return
+  // CHECK: } {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
+  // CHECK: linalg.transpose ins(%[[CLONE_EMPTY_CASE]] : {{.*}}) outs(%[[EMPTY]] : {{.*}})
+  // CHECK: linalg.matmul {{.*}}ssbuffer.block_id = 10 : i32
   // CHECK: arith.subf {{.*}} {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.subBlock = 33 : i32}
   func.func @kernel_cross_cube_empty(
     %arg0: memref<?xbf16> {tt.tensor_kind = 0 : i32},
@@ -285,8 +307,13 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intr
       %v1_trunc = arith.truncf %v1_exp {ssbuffer.block_id = 32 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xbf16>
 
       // C2: block 8 — %tensor_c2 reused by C3 (transpose ins)
-      %alloc_c2 = memref.alloc() {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16>
-      %tensor_c2 = bufferization.to_tensor %alloc_c2 restrict writable {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xbf16> to tensor<64x64xbf16>
+      %tensor_c2 = scope.scope : () -> tensor<64x64xbf16> {
+        %alloc_c2 = memref.alloc() : memref<64x64xbf16>
+        %src_c2 = memref.reinterpret_cast %arg1 to offset: [%c0], sizes: [64, 64], strides: [64, 1] : memref<?xbf16> to memref<64x64xbf16, strided<[64, 1], offset: ?>>
+        memref.copy %src_c2, %alloc_c2 : memref<64x64xbf16, strided<[64, 1], offset: ?>> to memref<64x64xbf16>
+        %loaded_c2 = bufferization.to_tensor %alloc_c2 restrict writable : memref<64x64xbf16> to tensor<64x64xbf16>
+        scope.return %loaded_c2 : tensor<64x64xbf16>
+      } {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
       %matmul_c2 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE", ssbuffer.loop_carried_l0c} ins(%v1_trunc, %tensor_c2 : tensor<64x64xbf16>, tensor<64x64xbf16>) outs(%cube_init : tensor<64x64xf32>) -> tensor<64x64xf32>
 
       // C3: block 10 — depends on C1's %empty_c1 (outs) and C2's %tensor_c2 (ins)

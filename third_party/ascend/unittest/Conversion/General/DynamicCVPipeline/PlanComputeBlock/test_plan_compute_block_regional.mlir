@@ -3,14 +3,20 @@
 module {
   // ============================================================================
   // 1. extracted_load_store_stays_vector
+  // The load unit is already packed by PackMemrefPass, so it reaches
+  // PlanComputeBlock as a single `ssbuffer.load` scope stamped VECTOR. The
+  // planner must keep the scope atomic and leave its body untouched.
   // ============================================================================
   //
   // CHECK-LABEL: func.func @extracted_load_store_stays_vector(
-  // CHECK: %[[ALLOC:[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[B_ID:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-  // CHECK: scf.for
-  // CHECK:   %[[SUBVIEW:[A-Za-z0-9_]+]] = memref.subview %[[ALLOC]]
-  // CHECK:   memref.copy %{{.*}}, %[[SUBVIEW]] {ssbuffer.block_id = [[B_ID]] : i32, ssbuffer.core_type = "VECTOR"}
-  // CHECK: %[[LHS:[A-Za-z0-9_]+]] = bufferization.to_tensor %[[ALLOC]] restrict writable {ssbuffer.block_id = [[B_ID]] : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK: %[[SCOPE:[A-Za-z0-9_]+]] = scope.scope : () -> tensor<32x64xf16> {
+  // CHECK:   %[[ALLOC:[A-Za-z0-9_]+]] = memref.alloc() : memref<32x64xf16>
+  // CHECK:   scf.for
+  // CHECK:     %[[SUBVIEW:[A-Za-z0-9_]+]] = memref.subview %[[ALLOC]]
+  // CHECK:     memref.copy %{{.*}}, %[[SUBVIEW]]
+  // CHECK:   %[[LHS:[A-Za-z0-9_]+]] = bufferization.to_tensor %[[ALLOC]] restrict writable : memref<32x64xf16>
+  // CHECK:   scope.return %[[LHS]] : tensor<32x64xf16>
+  // CHECK: } {ssbuffer.block_id = [[B_ID:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR", ssbuffer.load}
   // CHECK: linalg.matmul {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE"}
   func.func @extracted_load_store_stays_vector(
       %arg0: memref<?xf16>,
@@ -18,15 +24,16 @@ module {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c32 = arith.constant 32 : index
-    %alloc = memref.alloc() : memref<32x64xf16>
-
-    scf.for %arg1 = %c0 to %c32 step %c1 {
-      %subview = memref.subview %alloc[%arg1, 0] [1, 64] [1, 1] : memref<32x64xf16> to memref<1x64xf16, strided<[64, 1], offset: ?>>
-      %reinterpret_cast = memref.reinterpret_cast %arg0 to offset: [0], sizes: [1, 64], strides: [64, 1] : memref<?xf16> to memref<1x64xf16, strided<[64, 1], offset: ?>>
-      memref.copy %reinterpret_cast, %subview : memref<1x64xf16, strided<[64, 1], offset: ?>> to memref<1x64xf16, strided<[64, 1], offset: ?>>
-    } {ExtractedLoadOrStore}
-
-    %lhs = bufferization.to_tensor %alloc restrict writable : memref<32x64xf16> to tensor<32x64xf16>
+    %lhs = scope.scope : () -> tensor<32x64xf16> {
+      %alloc = memref.alloc() : memref<32x64xf16>
+      scf.for %arg1 = %c0 to %c32 step %c1 {
+        %subview = memref.subview %alloc[%arg1, 0] [1, 64] [1, 1] : memref<32x64xf16> to memref<1x64xf16, strided<[64, 1], offset: ?>>
+        %reinterpret_cast = memref.reinterpret_cast %arg0 to offset: [0], sizes: [1, 64], strides: [64, 1] : memref<?xf16> to memref<1x64xf16, strided<[64, 1], offset: ?>>
+        memref.copy %reinterpret_cast, %subview : memref<1x64xf16, strided<[64, 1], offset: ?>> to memref<1x64xf16, strided<[64, 1], offset: ?>>
+      } {ExtractedLoadOrStore}
+      %to_tensor = bufferization.to_tensor %alloc restrict writable : memref<32x64xf16> to tensor<32x64xf16>
+      scope.return %to_tensor : tensor<32x64xf16>
+    } {ssbuffer.core_type = "VECTOR", ssbuffer.load}
     %out = tensor.empty() : tensor<32x64xf32>
     %cst_f32 = arith.constant 0.0 : f32
     %init = linalg.fill ins(%cst_f32 : f32) outs(%out : tensor<32x64xf32>) -> tensor<32x64xf32>

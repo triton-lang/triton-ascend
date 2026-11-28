@@ -502,11 +502,12 @@ class TestSelectedDispatch(unittest.TestCase):
         self.bundle = self.make_bundle('independent_batch_v1')
         self.knobs = SimpleNamespace(ascend=SimpleNamespace(compile_only=False))
 
-    def make_bundle(self, cv_mode):
+    def make_bundle(self, cv_mode, *, automatic=True):
         report = dict(cv_mode=cv_mode, selected_axis=0, lane_width=2, guard={}, owner='block_batching')
         bundle = self.batching.BatchKernel(self.baseline, self.candidate, self.batching.BatchRequest(2, 0), report, [0],
                                            publish_manifest=False)
-        bundle.block_auto_selection = dict(model_complete=True, selected_factor=2)
+        if automatic:
+            bundle.block_auto_selection = dict(model_complete=True, selected_factor=2)
         return bundle
 
     def dispatch(self, grid=4, capture=False):
@@ -514,31 +515,48 @@ class TestSelectedDispatch(unittest.TestCase):
         triton.knobs = self.knobs
         with patch.dict(sys.modules, {'triton': triton}), \
              patch.object(self.batching, '_capture_state', return_value=capture), \
-             patch.object(self.batching, '_core_floor', return_value=56):
+             patch.object(self.batching, '_core_floor', return_value=56) as core_query:
             self.bundle._dispatch(grid, 1, 1, 0, None, None, None, None, None, 1234)
+        self.core_queries = core_query.call_count
         return self.bundle.last_launch
 
-    def test_automatic_cv_uses_the_scored_small_grid_candidate(self):
-        launch = self.dispatch()
-        self.assertEqual(self.events, ['candidate'])
-        self.assertEqual(launch['applied_factor'], 2)
+    def test_manual_and_automatic_cv_accept_small_grids(self):
+        for mode in ('independent_batch_v1', 'spatial_concat_v1'):
+            for automatic in (False, True):
+                with self.subTest(mode=mode, automatic=automatic):
+                    self.bundle = self.make_bundle(mode, automatic=automatic)
+                    launch = self.dispatch(grid=2)
+                    self.assertEqual(self.events[-1], 'candidate')
+                    self.assertEqual(launch['applied_factor'], 2)
+                    self.assertEqual(launch['batch_grid'], (1, 1, 1))
+                    self.assertEqual(self.core_queries, 0)
 
-    def test_manual_cv_and_automatic_vv_retain_the_existing_floor(self):
-        del self.bundle.block_auto_selection
-        self.assertEqual(self.dispatch()['reason'], 'GRID_BELOW_CORE_FLOOR')
-        self.bundle = self.make_bundle('disabled')
-        self.assertEqual(self.dispatch()['reason'], 'GRID_BELOW_CORE_FLOOR')
+    def test_manual_and_automatic_vv_retain_the_existing_floor(self):
+        for automatic in (False, True):
+            with self.subTest(automatic=automatic):
+                self.bundle = self.make_bundle('disabled', automatic=automatic)
+                self.assertEqual(self.dispatch()['reason'], 'GRID_BELOW_CORE_FLOOR')
+                self.assertEqual(self.core_queries, 1)
         self.assertEqual(self.events, ['baseline', 'baseline'])
 
-    def test_selected_cv_still_checks_aliases(self):
+    def test_manual_and_automatic_cv_still_check_aliases(self):
         self.guard.return_value = (False, 'WRITE_ALIAS')
-        self.assertEqual(self.dispatch()['reason'], 'WRITE_ALIAS')
-        self.assertEqual(self.events, ['baseline'])
+        for mode in ('independent_batch_v1', 'spatial_concat_v1'):
+            for automatic in (False, True):
+                with self.subTest(mode=mode, automatic=automatic):
+                    self.bundle = self.make_bundle(mode, automatic=automatic)
+                    self.assertEqual(self.dispatch()['reason'], 'WRITE_ALIAS')
+                    self.assertEqual(self.events[-1], 'baseline')
 
-    def test_selected_cv_still_checks_divisibility_and_capture(self):
-        self.assertEqual(self.dispatch(grid=3)['reason'], 'CV_GRID_NOT_DIVISIBLE')
-        self.assertEqual(self.dispatch(capture=True)['reason'], 'CAPTURE_BASELINE')
-        self.assertEqual(self.events, ['baseline', 'baseline'])
+    def test_manual_and_automatic_cv_still_check_divisibility_and_capture(self):
+        for mode in ('independent_batch_v1', 'spatial_concat_v1'):
+            for automatic in (False, True):
+                with self.subTest(mode=mode, automatic=automatic):
+                    self.bundle = self.make_bundle(mode, automatic=automatic)
+                    self.assertEqual(self.dispatch(grid=3)['reason'], 'CV_GRID_NOT_DIVISIBLE')
+                    self.assertEqual(self.dispatch(capture=True)['reason'], 'CAPTURE_BASELINE')
+                    self.assertEqual(self.dispatch(capture=None)['reason'], 'CAPTURE_QUERY_UNAVAILABLE')
+                    self.assertEqual(self.events[-3:], ['baseline'] * 3)
 
 
 class TestPreparedFallback(unittest.TestCase):

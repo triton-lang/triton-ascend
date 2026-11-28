@@ -321,7 +321,7 @@ def _reduces_blocks(grid, axis, factor):
     return _batched_blocks(grid, axis, factor) < _batched_blocks(grid, axis, 1)
 
 
-def candidate_launch_refusal(request, report, grid, preserve_grid, capture, *, cv, auto_selected=False):
+def candidate_launch_refusal(request, report, grid, preserve_grid, capture, *, cv):
     """Return a refusal or None, preserving lazy queries and refusal precedence.
 
     The caller queries capture only after finding a candidate. The core query
@@ -334,8 +334,8 @@ def candidate_launch_refusal(request, report, grid, preserve_grid, capture, *, c
         return "CV_GRID_NOT_DIVISIBLE"
     if not preserve_grid and not _reduces_blocks(grid, report["selected_axis"], request.factor):
         return "GRID_NOT_REDUCED"
-    # The native selector scores small CV grids. Manual CV and VV keep the floor.
-    if (not (cv and auto_selected)
+    # Manual and automatic CV use the same gates; only VV keeps the core floor.
+    if (not cv
             and _batched_blocks(grid, report["selected_axis"], 1 if preserve_grid else request.factor) < _core_floor()):
         return "GRID_BELOW_CORE_FLOOR"
     if capture is not False:
@@ -455,8 +455,7 @@ class BatchKernel:
             request = contract._legacy_request if live is not None else contract
             report = live if live is not None else {'selected_axis': contract.axis}
             reason = candidate_launch_refusal(request, report, grid, contract.preserve_grid, capture,
-                                              cv=_is_cv_report(live) if live is not None else False,
-                                              auto_selected=hasattr(self, "block_auto_selection"))
+                                              cv=_is_cv_report(live) if live is not None else False)
             if reason is None:
                 accepted, reason = contract.guard([arguments[index] for index in contract.positions], grid)
                 if accepted:

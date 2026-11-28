@@ -32,6 +32,9 @@ jobs:
   Build-Wheels:
     name: Build wheels for ${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}
     runs-on: ${{ matrix.config.runs_on }}
+    outputs:
+      branch_ref: ${{ matrix.branch.ref }}
+      branch_tag: ${{ matrix.branch.tag }}
     container:
       image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
       # PYTHON must live under container.env (not job env) so ARC maps it into
@@ -203,7 +206,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event_name != 'pull_request' && 'main' || '' }}
+          ref: ${{ github.event_name != 'pull_request' && needs.Build-Wheels.outputs.branch_ref || '' }}
           submodules: "true"
 
       - name: Add git safe directory
@@ -214,7 +217,7 @@ jobs:
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          name: cibw-wheels-manylinux_2_34_${{ matrix.config.arch }}-${{ matrix.config.python }}-main-wheels-upload
+          name: cibw-wheels-manylinux_2_34_${{ matrix.config.arch }}-${{ matrix.config.python }}-${{ needs.Build-Wheels.outputs.branch_tag }}-wheels-upload
           path: wheelhouse
 
       - name: Test wheel on NPU

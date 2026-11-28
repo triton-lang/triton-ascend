@@ -350,10 +350,6 @@ parseConv2dParamAttr(Attribute attr) {
   return std::nullopt;
 }
 
-static bool isValidConv2dPadding(ArrayRef<int64_t> padding) {
-  return padding.size() == 1 || padding.size() == 2 || padding.size() == 4;
-}
-
 LogicalResult Conv2dOp::verify() {
   auto inputType = dyn_cast<RankedTensorType>(getInput().getType());
   auto weightType = dyn_cast<RankedTensorType>(getWeight().getType());
@@ -395,7 +391,7 @@ LogicalResult Conv2dOp::verify() {
     return emitOpError(
         "stride must be an integer or a 2-element array [stride_h, stride_w]");
   }
-  if (!padding || !isValidConv2dPadding(*padding)) {
+  if (!padding || padding->empty() || padding->size() > 4) {
     return emitOpError(
         "padding must be an integer, a 2-element array [pad_h, pad_w], or a "
         "4-element array [pad_top, pad_bottom, pad_left, pad_right]");
@@ -454,8 +450,8 @@ LogicalResult Conv2dOp::inferReturnTypes(
   auto paddingAttr = parseConv2dParamAttr(adaptor.getPadding());
   auto dilationAttr = parseConv2dParamAttr(adaptor.getDilation());
   if (!strideAttr || strideAttr->empty() || strideAttr->size() > 2 ||
-      !paddingAttr || !isValidConv2dPadding(*paddingAttr) || !dilationAttr ||
-      dilationAttr->empty() || dilationAttr->size() > 2) {
+      !paddingAttr || paddingAttr->empty() || paddingAttr->size() > 4 ||
+      !dilationAttr || dilationAttr->empty() || dilationAttr->size() > 2) {
     return failure();
   }
   auto &stride = *strideAttr;

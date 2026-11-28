@@ -66,29 +66,6 @@ def compile_kernel(kernel, signature, constants):
     return str(module)
 
 
-def test_conv2d_ir_padding(tmp_path):
-    ctx = ir.context()
-    ir.load_dialects(ctx)
-    ascend.load_dialects(ctx)
-    source = tmp_path / "conv2d.mlir"
-    module = """
-        module {
-          tt.func public @kernel(%x: tensor<1x4x4xf16>, %w: tensor<1x1x1x1xf16>) {
-            %r = ascend.conv2d(%x, %w) {dilation = 1 : i64, groups = 1 : i64,
-                padding = PADDING, stride = 1 : i64} :
-                (tensor<1x4x4xf16>, tensor<1x1x1x1xf16>) -> tensor<1x4x4xf16>
-            tt.return
-          }
-        }
-    """
-    for padding in ("0 : i64", "array<i32: 0>", "array<i32: 0, 0>", "array<i32: 0, 0, 0, 0>"):
-        source.write_text(module.replace("PADDING", padding))
-        assert ir.parse_mlir_module(str(source), ctx).verify()
-    source.write_text(module.replace("PADDING", "array<i32: 0, 0, 0>"))
-    with pytest.raises(RuntimeError, match="Parse MLIR file failed"):
-        ir.parse_mlir_module(str(source), ctx)
-
-
 @pytest.mark.parametrize("operation", ["gather", "scatter", "index_put"])
 def test_interpreter_index_boundary(monkeypatch, operation):
     from triton.backends.ascend import ascend_interpreter

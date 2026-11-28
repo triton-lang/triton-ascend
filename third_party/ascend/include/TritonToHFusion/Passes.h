@@ -37,6 +37,9 @@ namespace triton {
 std::unique_ptr<OperationPass<ModuleOp>>
 createTritonToHFusionPass(bool compileOn91095 = false);
 
+#define GEN_PASS_DECL_TRITONTOHFUSION
+#include "ascend/include/TritonToHFusion/Passes.h.inc"
+
 #define GEN_PASS_REGISTRATION
 #include "ascend/include/TritonToHFusion/Passes.h.inc"
 

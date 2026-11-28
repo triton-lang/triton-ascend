@@ -14,6 +14,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/LogicalResult.h"
 #include <optional>
@@ -47,6 +48,47 @@ struct TritonModToHFusionConversion : OpRewritePattern<triton::ascend::ModOp> {
                                 hfusion::BinaryFnAttr>(
             rewriter, op.getLoc(), hfusion::BinaryFn::mod,
             ValueRange({op.getLhs(), op.getRhs()}),
+            ValueRange({emptyTensor.getResult()}));
+
+    rewriter.replaceOp(op, newOp->getResult(0));
+    return success();
+  }
+};
+
+/// Lower `tt.precise_divf` (IEEE round-to-nearest division) to the HFusion high
+/// precision divide.  Otherwise PreciseDivConverter rewrites the operation to a
+/// plain `arith.divf`, and the A5 backend can only emit `llvm.hivm.vdiv`, whose
+/// result is up to one ulp off.  That error is enough to cross an integer
+/// boundary and makes trunc/floor based operators wrong:
+///
+///   0x3ff2b021 / 0.001 -> exact 1895.9998779296875
+///                         vdiv  1896.0, trunc 1896 (reference 1895)
+///
+/// `divfhp` reaches `ave.hir.vdivfhp` / `vdiv_float_hp`, which recovers the
+/// last ulps; it is the same path the f32 `mod` normalization relies on.
+struct TritonPreciseDivToHFusionConversion
+    : OpRewritePattern<triton::PreciseDivFOp> {
+  using OpRewritePattern<triton::PreciseDivFOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(triton::PreciseDivFOp op,
+                                PatternRewriter &rewriter) const final {
+    auto lhsType = dyn_cast<RankedTensorType>(op.getX().getType());
+    auto rhsType = dyn_cast<RankedTensorType>(op.getY().getType());
+    if (!lhsType || !rhsType || lhsType != rhsType) {
+      return failure();
+    }
+    // The high precision divide template only covers f32.
+    if (!lhsType.getElementType().isF32()) {
+      return failure();
+    }
+
+    auto emptyTensor = rewriter.create<tensor::EmptyOp>(
+        op.getLoc(), lhsType.getShape(), lhsType.getElementType());
+    auto newOp =
+        hfusion::createBinaryOp<hfusion::ElemwiseBinaryOp, hfusion::BinaryFn,
+                                hfusion::BinaryFnAttr>(
+            rewriter, op.getLoc(), hfusion::BinaryFn::divfhp,
+            ValueRange({op.getX(), op.getY()}),
             ValueRange({emptyTensor.getResult()}));
 
     rewriter.replaceOp(op, newOp->getResult(0));
@@ -383,7 +425,10 @@ struct TritonConv2dToHFusionConversion
 namespace {
 struct TritonToHFusionPass
     : public mlir::triton::impl::TritonToHFusionBase<TritonToHFusionPass> {
-  bool compileOn91095 = false;
+  explicit TritonToHFusionPass(bool compileOn91095) {
+    this->compileOn91095 = compileOn91095;
+  }
+
   void runOnOperation() override;
 };
 } // namespace
@@ -401,6 +446,11 @@ void TritonToHFusionPass::runOnOperation() {
   if (!compileOn91095) {
     patterns.add<TritonHistogramToHFusionConversion>(patterns.getContext());
   }
+  // Only the register based targets (950/960) have the high precision divide
+  // template, keep the existing lowering everywhere else.
+  if (compileOn91095) {
+    patterns.add<TritonPreciseDivToHFusionConversion>(patterns.getContext());
+  }
   patterns.add<TritonFpToFpToHFusionConversion>(patterns.getContext());
   patterns.add<TritonModToHFusionConversion>(patterns.getContext());
   patterns.add<TritonConv1dToHFusionConversion>(patterns.getContext());
@@ -415,7 +465,5 @@ void TritonToHFusionPass::runOnOperation() {
 
 std::unique_ptr<OperationPass<ModuleOp>>
 mlir::triton::createTritonToHFusionPass(bool compileOn91095) {
-  auto pass = std::make_unique<TritonToHFusionPass>();
-  pass->compileOn91095 = compileOn91095;
-  return pass;
+  return std::make_unique<TritonToHFusionPass>(compileOn91095);
 }

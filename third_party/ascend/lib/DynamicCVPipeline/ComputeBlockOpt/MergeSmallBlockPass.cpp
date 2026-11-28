@@ -562,12 +562,13 @@ static bool allowMergeWithSingleCubePredecessor(
     return false;
   }
 
-  // v2 must have exactly one Cube predecessor c2, whose only predecessor is c1.
+  // v2 must have exactly one Cube predecessor c2. c2 either has no
+  // predecessor, or its only predecessor is c1.
   CVPipeline::BlockNode *c2 = getSingleCubePred(smallNode);
-  if (!c2 || c2->predecessors.size() != 1) {
+  if (!c2 || c2->predecessors.size() > 1) {
     return false;
   }
-  return *c2->predecessors.begin() == c1;
+  return c2->predecessors.empty() || *c2->predecessors.begin() == c1;
 }
 
 static void collectUpstream(int smallBlockId, Block *block,

@@ -1178,16 +1178,12 @@ def test_sqrt_runtime_scalar_and_large_literal():
 
 
 @pytest.mark.parametrize("dtype,lanes", [(tl.float16, 128), (tl.float32, 64)])
-def test_sqrt_vector_preserves_type(dtype, lanes):
+def test_sqrt_rejects_vector(dtype, lanes):
     sem = _Semantic()
     value = _vec(lanes, dtype)
-    result = math_src.sqrt(value, _semantic=sem)
-    assert isinstance(result, simd.vector) and result.type == value.type
-    assert sem.builder.calls[0] == ("pge", ("ALL", lanes))
-    name, args = _last(sem)
-    assert name == "unary" and args[0] == "sqrt"
-    assert args[1] is value.handle and args[2].ty == "pge"
-    assert args[3] == "zeroing"
+    with pytest.raises(TypeError, match="sqrt expects a float32 scalar"):
+        math_src.sqrt(value, _semantic=sem)
+    assert not sem.builder.calls
 
 
 def test_sqrt_rejects_invalid_inputs_before_builder():
@@ -1204,8 +1200,12 @@ def test_sqrt_rejects_invalid_inputs_before_builder():
     ]
     values += [_vec(64, dtype) for dtype in (tl.int32, tl.uint32, tl.bfloat16, tl.float64, tl.int1)]
     for value in values:
+        # The execution-domain guard reads builder context before validation,
+        # but invalid operands must not emit IR or implicitly access memory.
+        sem, builder = _scalar_semantic()
         with pytest.raises(TypeError, match="sqrt"):
-            math_src.sqrt(value, _semantic=_NoBuilder())
+            math_src.sqrt(value, _semantic=sem)
+        assert not builder.calls
 
 
 # --------------------------------------------------------------------------

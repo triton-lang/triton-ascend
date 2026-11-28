@@ -38,7 +38,7 @@ import triton.language as tl
 from triton.language.core import builtin, tensor, _unwrap_if_constexpr
 
 from . import simd as S
-from .core import vector
+from .scope import _check_not_in_simd
 
 __all__ = ["compensated_rstd", "truncmod", "sqrt"]
 
@@ -77,29 +77,25 @@ def truncmod(a, b, _semantic=None):
 
 @builtin
 def sqrt(x, _semantic=None):
-    """
-    Square root of a scalar or each lane of a SIMD vector.
+    """Return the fast square root of a float32 scalar, following ``tl.sqrt``.
 
-    Like TileLang's ``T.sqrt``, this returns an IR expression, preserves the
-    input dtype, and does not implicitly convert integers to floating point.
+    Accepts runtime float32 scalars and Python/constexpr floats inferred as
+    float32 by Triton. Integers, other floating-point types, Buffers, memory
+    access positions, SIMD registers and Blocks are unsupported. Use
+    ``tla.simd.vsqrt`` for SIMD registers.
 
-    :param x: f32 scalar tensor, Python/constexpr float inferred as f32 by
-        Triton, or f16/f32 vector register. Block tensors are not supported
-    :return: scalar ``tl.tensor`` or vector register, same dtype as ``x``;
-        vector results also preserve the lane count
+    This operation cannot be used inside a SIMD VF. It allocates no buffer
+    and performs no SIMD broadcast.
     """
+    _check_not_in_simd("tla.sqrt", _semantic)
     x = _unwrap_if_constexpr(x)
-    if isinstance(x, vector):
-        if x.dtype not in (tl.float16, tl.float32):
-            raise TypeError(f"sqrt supports float16/float32 vectors, got {x.dtype}")
-        return S.vsqrt(x, _semantic=_semantic)
     if isinstance(x, tensor):
         if x.type.is_block():
-            raise TypeError("sqrt does not support block tensors; use a tla.vector")
+            raise TypeError("sqrt does not support block tensors")
         if x.dtype != tl.float32:
             raise TypeError(f"sqrt supports float32 scalars, got {x.dtype}")
     elif not isinstance(x, float):
-        raise TypeError("sqrt expects a float32 scalar or a float16/float32 tla.vector")
+        raise TypeError("sqrt expects a float32 scalar")
     x = _semantic.to_tensor(x)
     if x.dtype != tl.float32:
         raise TypeError(f"sqrt supports float32 scalars, got {x.dtype}")

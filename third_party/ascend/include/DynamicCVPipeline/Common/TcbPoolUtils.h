@@ -31,6 +31,9 @@ namespace CVPipeline {
 /// Check for matching Cube/Vector scopes with two ping-pong UB TCB queues.
 bool canEnableDynamicPlan(ModuleOp module);
 
+/// Check for a cross-task counter guard on Cube GM loads in the same loop.
+bool canEnableLoadBufferPool(ModuleOp module);
+
 } // namespace CVPipeline
 } // namespace mlir
 

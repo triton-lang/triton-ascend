@@ -157,7 +157,9 @@ void AddDynamicCVPipelinePass::runOnOperation() {
       }
       if (CVPipeline::canEnableDynamicPlan(moduleOp)) {
         moduleOp->setAttr("hivm.dynamic_plan", builder.getBoolAttr(true));
-        moduleOp->setAttr("hivm.load_buffer_pool", builder.getBoolAttr(true));
+        if (CVPipeline::canEnableLoadBufferPool(moduleOp)) {
+          moduleOp->setAttr("hivm.load_buffer_pool", builder.getBoolAttr(true));
+        }
       }
       LDBG("Process successfully");
       return;

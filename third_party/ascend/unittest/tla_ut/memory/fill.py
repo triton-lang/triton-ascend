@@ -45,7 +45,7 @@ from utils.tla_test_utils import get_stages, compile_offline, lower_offline, che
 N = 256
 DTYPES = {
     "f32": dict(dtype=tl.float32, torch_dtype=torch.float32, signature="*fp32", values=(0.0, 1.0, -1.0)),
-    "bf16": dict(dtype=tl.bfloat16, torch_dtype=torch.bfloat16, signature="*bf16", values=(0.0, 1.0, -1.0)),
+    "bf16": dict(dtype=tl.bfloat16, torch_dtype=torch.bfloat16, signature="*bf16", values=(0, 1, -1)),
     "i32": dict(dtype=tl.int32, torch_dtype=torch.int32, signature="*i32", values=(0, 1, -1)),
 }
 

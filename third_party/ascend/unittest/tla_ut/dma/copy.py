@@ -23,11 +23,11 @@ def transfer(X, Y, N: tl.constexpr):
         if tla.sub_block_id() == 0:
             src = tla.alloc((N // 16, 1, 16, 16), tl.float16)
             tla.load_gm_to_ub(tla.view(X, (N // 16, 1, 16, 16)), src)
-            tla.copy_ub_to_l1(src, l1, tla.CopyUB2L1Params())
+            tla.copy_ub_to_l1(src, l1)
         tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, 0)
     with tla.scope.cube():
         tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 0)
-        tla.copy_l1_to_ub(l1, out, tla.CopyL12UBParams())
+        tla.copy_l1_to_ub(l1, out)
         tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE1, 1)
     with tla.scope.vector():
         tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 1)
@@ -79,7 +79,8 @@ def check_param_contracts():
         assert "memref.alloc" not in text and "pointer_cast" not in text
     text = route_ir("ub", "l1", tla.CopyUB2L1Params(collapse_reassociation=((0, 1), )), "ub_l1")
     assert "collapse_reassociation = [[0, 1]]" in text
-    errors = [("l1", "fb", tla.CopyL12FBParams(), "fb", "no L1->FixBUF"),
+    errors = [("gm", "l1", tla.LoadGM2L1Params(mode="nd2nz"), "l1", "mode must be"),
+              ("l1", "fb", tla.CopyL12FBParams(), "fb", "no L1->FixBUF"),
               ("l1", "l0a", tla.CopyL1ToL0Params(actual_batch=1), "l0", "actual_batch"),
               ("gm", "l1", tla.LoadGM2L1Params(enable_nz2nd=True), "l1", "reverse-layout"),
               ("gm", "l1", tla.LoadGM2L1Params(enable_nz2dn=True), "l1", "reverse-layout"),

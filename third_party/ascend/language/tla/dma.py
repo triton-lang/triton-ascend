@@ -222,6 +222,12 @@ class LoadGM2UBParams:
     l2_cache_ctrl: L2CachePolicy = None
 
 
+class LoadGM2L1Mode(Enum):
+    """Layout conversion supported by GM-to-L1 loads."""
+
+    ENABLE_ND2NZ = "nd2nz"
+
+
 @dataclass(frozen=True)
 class LoadGM2L1Params:
     """Configuration for :func:`load_gm_to_l1`.
@@ -230,6 +236,7 @@ class LoadGM2L1Params:
         a signed 32-bit ``l2_cache_mode`` attribute. ``None`` (default) omits
         it, selecting the backend default. This is not an eviction-policy enum.
     :type l2_cache_ctrl: int or None
+    :param mode: Layout conversion. Only ``LoadGM2L1Mode.ENABLE_ND2NZ`` is supported.
     :param enable_nz2nd: Reserved reverse-layout flag. Must be ``False``
         (default); ``True`` raises ``NotImplementedError``.
     :type enable_nz2nd: bool
@@ -240,6 +247,7 @@ class LoadGM2L1Params:
     l2_cache_ctrl: int = None
     enable_nz2nd: bool = False
     enable_nz2dn: bool = False
+    mode: LoadGM2L1Mode = LoadGM2L1Mode.ENABLE_ND2NZ
 
 
 @dataclass(frozen=True)
@@ -532,6 +540,8 @@ def load_gm_to_l1(src, dst, params=None, _semantic=None):
     """
     _route(src, dst, (("gm", "l1"), ))
     p = _params(params, LoadGM2L1Params)
+    if _unwrap_if_constexpr(p.mode) is not LoadGM2L1Mode.ENABLE_ND2NZ:
+        raise ValueError("mode must be tla.LoadGM2L1Mode.ENABLE_ND2NZ")
     if _boolean(p.enable_nz2nd, "enable_nz2nd") or _boolean(p.enable_nz2dn, "enable_nz2dn"):
         raise NotImplementedError("GM->L1 ND2NZOp has no enable_nz2nd/enable_nz2dn fields; "
                                   "reverse-layout flags require specification review")

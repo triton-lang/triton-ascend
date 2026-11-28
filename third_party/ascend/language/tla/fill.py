@@ -35,7 +35,7 @@ target the allocation origin instead of the requested region.  These cases
 need the offset carried through the buffer type and a lowering review before
 they can be enabled.
 """
-from triton.language.core import builtin, tensor, _unwrap_if_constexpr
+from triton.language.core import builtin, _unwrap_if_constexpr
 from .core import buffer, _row_major_strides
 
 # Element types reviewed for the UB scalar fill.  i1 is excluded on purpose:
@@ -57,6 +57,8 @@ def _check_dst(dst):
     if dst.dtype.name not in _FILL_DTYPES:
         supported = ", ".join(sorted(_FILL_DTYPES))
         raise ValueError(f"tla.fill does not support element type {dst.dtype}; supported: {supported}")
+    if len(dst.shape) not in (1, 2) or any(dim <= 0 for dim in dst.shape):
+        raise ValueError("tla.fill requires a nonempty 1D or 2D buffer")
     if dst.strides != _row_major_strides(dst.shape) or dst.offset != 0:
         raise ValueError("tla.fill requires a contiguous row-major buffer at offset 0 "
                          "(the direct tla.alloc result or a legal reshape of it); "
@@ -69,24 +71,17 @@ def _check_value(value, dtype):
     if isinstance(value, bool):
         raise TypeError("tla.fill value must be a number, got bool")
     if isinstance(value, int):
-        if dtype.is_int():
-            bits = dtype.primitive_bitwidth
-            if not -(1 << (bits - 1)) <= value < (1 << (bits - 1)):
-                raise ValueError(f"tla.fill value {value} does not fit {dtype}")
+        if not -(2**31) <= value < 2**31:
+            raise ValueError(f"tla.fill value {value} does not fit int32")
         return value
     if isinstance(value, float):
+        if dtype.name == "bf16":
+            raise TypeError("tla.fill does not accept Python float for bfloat16; pass an int instead")
         if dtype.is_int():
             raise TypeError(f"tla.fill value {value!r} is a float but the destination "
                             f"element type is {dtype}; pass an int instead")
         return value
-    if isinstance(value, tensor):
-        if value.type.is_block():
-            raise TypeError(f"tla.fill value must be a scalar, got {value.type}")
-        if value.dtype.is_floating() and dtype.is_int():
-            raise TypeError(f"tla.fill value has floating type {value.dtype} but the "
-                            f"destination element type is {dtype}")
-        return value
-    raise TypeError(f"tla.fill value must be a scalar number or a scalar tensor, "
+    raise TypeError(f"tla.fill value must be a Python scalar number, "
                     f"got {type(value).__name__}")
 
 
@@ -103,9 +98,9 @@ def fill(dst, value, _semantic=None):
         offset 0, as produced by :func:`tla.alloc` or a legal
         :func:`tla.reshape` of it.
     :type dst: tla.buffer
-    :param value: Compile-time scalar or scalar tensor, converted to
-        ``dst.dtype``.
-    :type value: int, float or scalar tensor
+    :param value: An int32-range Python integer, or a Python float for a
+        float32 destination.
+    :type value: int or float
     :return: None. ``dst`` is updated in place.
     :rtype: None
     :raises ValueError: if ``dst`` is not a supported UB buffer or ``value``

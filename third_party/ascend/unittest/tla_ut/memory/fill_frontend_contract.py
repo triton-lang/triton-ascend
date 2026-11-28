@@ -89,8 +89,8 @@ def test_supported_dtypes_emit_one_fill(dtype):
 
 def test_value_is_cast_to_the_destination_element_type():
     sem = Semantic()
-    fill_mod.fill(buf(dtype=tl.bfloat16), 1.5, _semantic=sem)
-    assert sem.casts == [(tl.float32, tl.bfloat16)]
+    fill_mod.fill(buf(dtype=tl.float32), 1.5, _semantic=sem)
+    assert sem.casts == [(tl.float32, tl.float32)]
 
     sem = Semantic()
     fill_mod.fill(buf(dtype=tl.float32), -3, _semantic=sem)
@@ -162,24 +162,18 @@ def test_invalid_scalars_are_rejected(value, exc, match):
     assert sem.builder.calls == []
 
 
-def test_float_value_for_integer_destination_is_rejected():
+@pytest.mark.parametrize("dtype", [tl.int32, tl.bfloat16])
+def test_float_value_for_non_fp32_destination_is_rejected(dtype):
     sem = Semantic()
     with pytest.raises(TypeError, match="pass an int instead"):
-        fill_mod.fill(buf(dtype=tl.int32), 1.5, _semantic=sem)
+        fill_mod.fill(buf(dtype=dtype), 1.5, _semantic=sem)
     assert sem.builder.calls == []
 
 
-def test_block_tensor_value_is_rejected():
+@pytest.mark.parametrize("value_type", [tl.float32, tl_core.block_type(tl.float32, [4])])
+def test_tensor_value_is_rejected(value_type):
     sem = Semantic()
-    block = tl_core.tensor(None, tl_core.block_type(tl.float32, [4]))
-    with pytest.raises(TypeError, match="must be a scalar"):
-        fill_mod.fill(buf(dtype=tl.float32), block, _semantic=sem)
-    assert sem.builder.calls == []
-
-
-def test_float_block_value_for_integer_destination_is_rejected():
-    sem = Semantic()
-    block = tl_core.tensor(None, tl_core.block_type(tl.float32, [4]))
-    with pytest.raises(TypeError, match="must be a scalar|floating type"):
-        fill_mod.fill(buf(dtype=tl.int32), block, _semantic=sem)
+    value = tl_core.tensor(None, value_type)
+    with pytest.raises(TypeError, match="Python scalar number"):
+        fill_mod.fill(buf(dtype=tl.float32), value, _semantic=sem)
     assert sem.builder.calls == []

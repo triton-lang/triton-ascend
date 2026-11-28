@@ -11,7 +11,7 @@ import triton.language as tl
 import triton.language.extra.tla as tla
 from utils.tla_test_utils import (compile_offline, lower_offline, get_stages, check_kernel_binary, matrix)
 
-CONFIGS = [dict(name="cache_" + str(cache), cache=cache) for cache in (None, 0, 1, 2, 3)]
+CONFIGS = [dict(name="cache_" + str(cache), cache=cache) for cache in (None, 0, 1, 2, 3, 4)]
 
 
 @tla.jit
@@ -20,7 +20,7 @@ def roundtrip(X, Y, P: tl.constexpr):
     with tla.scope.cube():
         l1 = tla.alloc((2, 1, 16, 16), tl.float16, space="l1")
         tla.load_gm_to_l1(tla.view(X, (16, 32)), l1, P)
-        tla.copy_l1_to_ub(l1, out, tla.CopyL12UBParams())
+        tla.copy_l1_to_ub(l1, out)
         tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE1, 0)
     with tla.scope.vector():
         tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 0)
@@ -30,7 +30,7 @@ def roundtrip(X, Y, P: tl.constexpr):
 
 
 def params(case):
-    return tla.LoadGM2L1Params(l2_cache_ctrl=case["cache"])
+    return tla.LoadGM2L1Params(l2_cache_ctrl=case["cache"], mode=tla.LoadGM2L1Mode.ENABLE_ND2NZ)
 
 
 @matrix(CONFIGS)

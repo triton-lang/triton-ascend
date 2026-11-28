@@ -1,6 +1,8 @@
 // RUN: triton-opt -allow-unregistered-dialect --triton-to-linalg="named-ops=True" --split-input-file %s | FileCheck %s
 // RUN: triton-opt --triton-to-unstructure --triton-to-linalg="named-ops=True" %s | FileCheck %s
+// RUN: sed 's/Ascend910B2/Ascend910_9382/' %s | triton-opt --triton-to-unstructure --triton-to-linalg='named-ops=true' | FileCheck %s
 // RUN: sed 's/Ascend910B2/Ascend950PR_9579/' %s | triton-opt --triton-to-unstructure='compile-on-910-95=true' --triton-to-linalg='named-ops=true compile-on-910-95=true' | FileCheck %s
+// RUN: sed 's/Ascend910B2/Ascend960DT_9691/' %s | triton-opt --triton-to-unstructure='compile-on-910-95=true' --triton-to-linalg='named-ops=true compile-on-910-95=true' | FileCheck %s
 
 // Unstructured lowering makes the final store an indirect-memory consumer
 // of the shared mask. The two loads and atomic must still use its dynamic
@@ -53,8 +55,8 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // CHECK: %[[ATOMIC_VIEW:.*]] = memref.subview %[[ATOMIC_PTR]][0] [%[[MASK_SIZE]]] [1] : memref<1xi32, strided<[1], offset: ?>> to memref<?xi32, strided<[1], offset: ?>>
 // CHECK: %[[ATOMIC_VALUE:.*]] = tensor.extract_slice %{{.*}}[0] [%[[MASK_SIZE]]] [1] : tensor<1xi32> to tensor<?xi32>
 // CHECK: %[[RESULT_VIEW:.*]] = memref.subview %{{.*}}[0] [%[[MASK_SIZE]]] [1] : memref<1xi32> to memref<?xi32, strided<[1]>>
-// CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
+// CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock {hivm.sync_block_lock_unordered} : memref<1xi64>
+// CHECK: hivm.hir.sync_block_lock {hivm.sync_block_lock_unordered} lock_var(%[[LOCK]] : memref<1xi64>)
 // CHECK: memref.copy %[[ATOMIC_VIEW]], %[[RESULT_VIEW]] :
 // CHECK: hivm.hir.store ins(%[[ATOMIC_VALUE]] : tensor<?xi32>) outs(%[[ATOMIC_VIEW]] : memref<?xi32, strided<[1], offset: ?>>) {already_sync} atomic = <add>
-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
+// CHECK: hivm.hir.sync_block_unlock {hivm.sync_block_lock_unordered} lock_var(%[[LOCK]] : memref<1xi64>)

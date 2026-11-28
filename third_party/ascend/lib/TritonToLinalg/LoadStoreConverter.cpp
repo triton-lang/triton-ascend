@@ -1004,6 +1004,10 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
 
   bool needsReturnValueLock =
       hasUsedReturn && hasContinuousMaskSubview && isHardwareSupported;
+  auto markUnordered = [&](Operation *lockOp) {
+    lockOp->setAttr(hivm::SyncBlockLockUnorderedAttr::name,
+                    rewriter.getUnitAttr());
+  };
   Value returnValueLock;
   if (hasUsedReturn) {
     auto tensorType =
@@ -1022,8 +1026,10 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
       auto lockType = MemRefType::get({1}, rewriter.getI64Type());
       auto lockVar =
           rewriter.create<hivm::CreateSyncBlockLockOp>(loc, lockType, Value());
+      markUnordered(lockVar);
       returnValueLock = lockVar.getResult();
-      rewriter.create<hivm::SyncBlockLockOp>(loc, returnValueLock);
+      markUnordered(
+          rewriter.create<hivm::SyncBlockLockOp>(loc, returnValueLock));
     }
     rewriter.create<memref::CopyOp>(loc, copySrc, copyDst);
     Value tensorToReplace = rewriter.create<bufferization::ToTensorOp>(
@@ -1054,7 +1060,8 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
         // The return-value copy and the atomic update must be one critical
         // section. Mark the store so HIVM does not add another lock.
         storeOp->setAttr(kAlreadySyncAttr, rewriter.getUnitAttr());
-        rewriter.create<hivm::SyncBlockUnlockOp>(loc, returnValueLock);
+        markUnordered(
+            rewriter.create<hivm::SyncBlockUnlockOp>(loc, returnValueLock));
       }
     } else if (rmwOp == RMWOp::XCHG)
       rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),

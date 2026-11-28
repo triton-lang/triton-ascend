@@ -7,16 +7,20 @@ on:
       - third_party/ascend/patch/llvm_patch_*.patch
       - .github/workflows/ascend-llvm-build.yml
       - .github/workflows/build/almalinux.Dockerfile
-  pull_request:
-    paths:
-      - cmake/llvm-hash.txt
-      - third_party/ascend/patch/llvm_patch_*.patch
-      - .github/workflows/ascend-llvm-build.yml
-      - .github/workflows/build/almalinux.Dockerfile
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      target-os:
+        description: Target OS to build for the calling PR workflow
+        required: true
+        type: string
+    outputs:
+      use-artifact:
+        description: Whether the PR requires its own LLVM packages
+        value: ${{ jobs.check-pr.outputs.changed }}
 
 concurrency:
-  group: llvm-build-${{ github.ref }}
+  group: llvm-build-${{ inputs.target-os || 'all' }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -24,12 +28,37 @@ env:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
+  check-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          sparse-checkout: cmake
+      - name: Check LLVM inputs against the PR merge commit's base parent
+        id: diff
+        shell: bash
+        run: |
+          files=$(git diff --no-renames --name-only HEAD^1 HEAD -- \
+            cmake/llvm-hash.txt 'third_party/ascend/patch/llvm_patch_*.patch' \
+            .github/workflows/ascend-llvm-build.yml .github/workflows/build/almalinux.Dockerfile \
+            .github/workflows/build/install-llvm-artifact.sh)
+          if [[ -n "$files" ]]; then
+            printf 'LLVM inputs changed:\n%s\n' "$files"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
   build:
-    name: Build on ${{ matrix.config.runner }}
+    needs: check-pr
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.check-pr.outputs.changed == 'true') }}
+    name: Build on ${{ matrix.target-os }}-${{ matrix.config.arch }}
     runs-on: ${{ matrix.config.runs_on }}
     # Cann container provides buildx remote builder config for AlmaLinux.
     # Ubuntu native builds also work inside this container.
@@ -40,18 +69,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        target-os: ${{ fromJSON(inputs.target-os && format('["{0}"]', inputs.target-os) || '["ubuntu", "almalinux"]') }}
         config:
-        - {runner: 'Ubuntu 22.04', runs_on: 'linux-amd64-cpu-4', target-os: 'ubuntu', arch: 'x64'}
-        - {runner: 'Ubuntu 22.04 ARM64', runs_on: 'linux-aarch64-cpu-4', target-os: 'ubuntu', arch: 'arm64'}
-        - {runner: 'AlmaLinux 8', runs_on: 'linux-amd64-cpu-4', target-os: 'almalinux', arch: 'x64'}
-        - {runner: 'AlmaLinux 8 ARM64', runs_on: 'linux-aarch64-cpu-4', target-os: 'almalinux', arch: 'arm64'}
+        - {runs_on: 'linux-amd64-cpu-4', arch: 'x64'}
+        - {runs_on: 'linux-aarch64-cpu-4', arch: 'arm64'}
 
     steps:
     - name: Checkout Repo
       uses: actions/checkout@v5
 
     - name: Install build tools
-      if: matrix.config.target-os == 'ubuntu'
+      if: matrix.target-os == 'ubuntu'
       shell: bash
       run: |
         apt-get update
@@ -87,7 +115,7 @@ jobs:
         echo "Patch hash: ${PATCH_HASH}"
         echo "patch_hash=${PATCH_HASH}" >> ${GITHUB_ENV}
 
-        INSTALL_DIR="llvm-${{ env.short_llvm_commit_hash }}-${PATCH_HASH}-${{ matrix.config.target-os }}-${{ matrix.config.arch }}"
+        INSTALL_DIR="llvm-${{ env.short_llvm_commit_hash }}-${PATCH_HASH}-${{ matrix.target-os }}-${{ matrix.config.arch }}"
         echo "LLVM installation directory name: ${INSTALL_DIR}"
         echo "llvm_install_dir=${INSTALL_DIR}" >> ${GITHUB_ENV}
 
@@ -138,7 +166,7 @@ jobs:
       # Linking mlir-opt with GNU ld needs 6-10GB and gets OOM-killed on the
       # 4-CPU pods.  lld uses far less memory and is required by
       # -DCMAKE_LINKER=lld in the configure step below.
-      if: matrix.config.target-os == 'ubuntu'
+      if: matrix.target-os == 'ubuntu'
       shell: bash
       run: |
         apt-get install -y lld-15
@@ -148,11 +176,11 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ${{ env.SCCACHE_DIR }}
-        key: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-${{ env.short_llvm_commit_hash }}-${{ env.patch_hash }}
-        restore-keys: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-
+        key: ${{ matrix.target-os }}-${{ matrix.config.arch }}-${{ env.short_llvm_commit_hash }}-${{ env.patch_hash }}
+        restore-keys: ${{ matrix.target-os }}-${{ matrix.config.arch }}-
 
     - name: Configure, Build, and Install LLVM (Ubuntu)
-      if: matrix.config.target-os == 'ubuntu'
+      if: matrix.target-os == 'ubuntu'
       shell: bash
       env:
         LLVM_INSTALL_DIR: ${{ env.llvm_install_dir }}
@@ -182,7 +210,7 @@ jobs:
         tar czf "${LLVM_INSTALL_DIR}.tar.gz" "${LLVM_INSTALL_DIR}"
 
     - name: Ensure sccache dir exists
-      if: matrix.config.target-os == 'almalinux'
+      if: matrix.target-os == 'almalinux'
       env:
         SCCACHE_DIR_PATH: ${{ env.SCCACHE_DIR }}
       run: |
@@ -190,7 +218,7 @@ jobs:
         touch "${SCCACHE_DIR_PATH}/.gitkeep"
 
     - name: Build LLVM Image (AlmaLinux)
-      if: matrix.config.target-os == 'almalinux'
+      if: matrix.target-os == 'almalinux'
       uses: docker/build-push-action@v7
       with:
         context: .
@@ -202,7 +230,7 @@ jobs:
         outputs: type=local,dest=.
 
     - name: Extract LLVM Artifacts (AlmaLinux)
-      if: matrix.config.target-os == 'almalinux'
+      if: matrix.target-os == 'almalinux'
       shell: bash
       env:
         SCCACHE_DIR_PATH: ${{ env.SCCACHE_DIR }}
@@ -218,9 +246,11 @@ jobs:
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: llvm-${{ matrix.config.target-os }}-${{ matrix.config.arch }}
-        path: |
-          ${{ github.workspace }}/llvm-*-${{ matrix.config.target-os }}-${{ matrix.config.arch }}.tar.gz
+        name: llvm-${{ matrix.target-os }}-${{ matrix.config.arch }}
+        path: ${{ env.llvm_install_dir }}.tar.gz
+        if-no-files-found: error
+        compression-level: 0
+        overwrite: true
 
     - name: Setup obsutil and upload to OBS
       if: github.event_name == 'push' && github.repository == 'triton-lang/triton-ascend'

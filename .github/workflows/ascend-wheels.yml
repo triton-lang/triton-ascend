@@ -7,12 +7,16 @@ on:
   pull_request:
     paths:
       - .github/workflows/ascend-wheels.yml
+      - .github/workflows/ascend-llvm-build.yml
+      - .github/workflows/build/almalinux.Dockerfile
+      - .github/workflows/build/install-llvm-artifact.sh
       - .github/workflows/build/wheels.Dockerfile
       - .github/workflows/build/fetch-npuir-stable.sh
       - setup.py
       - pyproject.toml
       - version.txt
       - cmake/llvm-hash.txt
+      - third_party/ascend/patch/llvm_patch_*.patch
       - cmake/json-version.txt
   schedule:
     - cron: "0 8 * * *"
@@ -25,8 +29,16 @@ permissions: read-all
 
 jobs:
 
+  pr-llvm:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/ascend-llvm-build.yml
+    with:
+      target-os: almalinux
+
   Build-Wheels:
     name: Build wheels for ${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}
+    needs: pr-llvm
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ matrix.config.runs_on }}
     container:
       image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
@@ -87,6 +99,18 @@ jobs:
           # PR: checkout the PR head, not the matrix.branch ref (main).
           # push/workflow_dispatch/schedule: use the matrix branch ref.
           ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
+
+      - name: Download PR LLVM for the manylinux build
+        if: needs.pr-llvm.outputs.use-artifact == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-almalinux-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+          path: .pr-llvm-artifact
+
+      - name: Install PR LLVM for the manylinux build
+        if: needs.pr-llvm.outputs.use-artifact == 'true'
+        id: llvm
+        run: .github/workflows/build/install-llvm-artifact.sh .pr-llvm-artifact/*.tar.gz
 
       - name: Restore npuir payload from local cache
         id: npuir-cache
@@ -258,8 +282,10 @@ jobs:
         with:
           context: .
           file: .github/workflows/build/wheels.Dockerfile
+          build-contexts: ${{ steps.llvm.outputs.path && format('pr-llvm={0}', steps.llvm.outputs.path) || '' }}
           build-args: |
             MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
+            USE_PR_LLVM=${{ needs.pr-llvm.outputs.use-artifact == 'true' }}
             PYTHON_VERSION=${{ matrix.python }}
             TRITON_BUILD_NPUIR=${{ steps.prepare-payload.outputs.build_npuir || matrix.branch.npuir }}
             TRITON_WHEEL_VERSION_SUFFIX=+${{ matrix.branch.local }}
@@ -293,6 +319,7 @@ jobs:
   Test-Wheels:
     name: Test wheels on NPU (${{ matrix.config.chip_type }})
     needs: Build-Wheels
+    if: ${{ !cancelled() && needs.Build-Wheels.result == 'success' }}
     runs-on: ${{ matrix.config.runs_on }}
     container:
       # Same image as integration-tests-ascend.yml (proven to pull on these
@@ -386,7 +413,7 @@ jobs:
   Publish-Wheels:
     name: Publish wheels (${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }})
     needs: [Build-Wheels, Test-Wheels]
-    if: github.event_name != 'pull_request'
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.Test-Wheels.result == 'success' }}
     runs-on: ${{ matrix.config.runs_on }}
     container:
       image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12

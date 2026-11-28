@@ -20,6 +20,9 @@ on:
       - 'safe_compile.cmake'
       - 'version.txt'
       - '.github/workflows/ascend-ci.yml'
+      - '.github/workflows/ascend-llvm-build.yml'
+      - '.github/workflows/build/almalinux.Dockerfile'
+      - '.github/workflows/build/install-llvm-artifact.sh'
       - '.github/workflows/integration-tests-ascend.yml'
       - '.github/workflows/ascend-runner-preparation.yml'
   merge_group:
@@ -38,9 +41,16 @@ jobs:
   runner-preparation:
     uses: ./.github/workflows/ascend-runner-preparation.yml
 
+  pr-llvm:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/ascend-llvm-build.yml
+    with:
+      target-os: ubuntu
+
   integration-tests-ascend:
-    needs: runner-preparation
-    if: needs.runner-preparation.outputs.matrix-ASCEND != ''
+    needs: [runner-preparation, pr-llvm]
+    if: ${{ !failure() && !cancelled() && needs.runner-preparation.outputs.matrix-ASCEND != '' }}
     uses: ./.github/workflows/integration-tests-ascend.yml
     with:
       matrix: ${{ needs.runner-preparation.outputs.matrix-ASCEND }}
+      use-llvm-artifact: ${{ needs.pr-llvm.outputs.use-artifact == 'true' }}

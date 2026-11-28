@@ -7,6 +7,8 @@
 # COPY of the workspace, so those layers hit the cache across runs.
 
 ARG MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
+# LLVM-changing PRs override this empty stage with a local BuildKit context.
+FROM scratch AS pr-llvm
 FROM ${MANYLINUX_IMAGE} AS builder
 
 # ---------------------------------------------------------------------------
@@ -101,7 +103,9 @@ RUN NPUIR_REPO_BRANCH=${NPUIR_REF} bash .github/workflows/build/fetch-npuir-stab
 # ccache (used by both the npuir build and the triton build) lives on a
 # buildkit cache mount below and is exported via cache-to mode=max, so
 # nightly rebuilds only recompile changed TUs.
+ARG USE_PR_LLVM=false
 RUN --mount=type=cache,target=/root/.cache/ccache \
+    --mount=type=bind,from=pr-llvm,target=/opt/pr-llvm \
     . /project/.github/workflows/build/cgroup-resources.sh \
     || { echo "FAILED to source cgroup-resources.sh; build dir contents:"; ls -la /project/.github/workflows/build/ 2>/dev/null || true; exit 1; } \
     && export MAX_JOBS=$(cg_cpus) \
@@ -124,6 +128,10 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
          exit 1; \
        fi \
     && cd "$SETUP_DIR" \
+    && if [ "$USE_PR_LLVM" = "true" ]; then \
+         export LLVM_SYSPATH=/opt/pr-llvm; \
+         test -x "$LLVM_SYSPATH/bin/llvm-config"; \
+       fi \
     && if [ -d /project/.npuir-payload/bin ] && [ -d /project/.npuir-payload/lib ]; then \
          export TRITON_ASCEND_BISHENGIR_PATH=/project/.npuir-payload; \
          echo "Bundling BishengIR payload from ${TRITON_ASCEND_BISHENGIR_PATH}"; \

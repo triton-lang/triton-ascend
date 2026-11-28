@@ -10,7 +10,6 @@ Currently, Triton-Ascend autotune supports block size and multibuffer (a compile
 ## Community Autotune Usage Example
 
 ```python
-```python
 import torch, torch_npu
 import triton
 import triton.language as tl

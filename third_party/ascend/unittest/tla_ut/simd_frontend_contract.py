@@ -923,9 +923,9 @@ def test_vcvt_rejects_merging():
 
 def test_precision_tiers():
     # hardware tiers are accepted and change nothing
-    for precision in (None, "ftz_true", "FTZ_TRUE", tl.constexpr("ftz_true")):
-        for op, args in ((simd.vdiv, (_vec(64, tl.float32), _vec(64, tl.float32))), (simd.vexp, (_vec(64,
-                                                                                                      tl.float32), ))):
+    for precision in (None, "ftz_true", "FTZ_TRUE", tl.constexpr("ftz_true"), simd.PRECISION.FTZ_TRUE):
+        for op, args in ((simd.vdiv, (_vec(64, tl.float32), _vec(64, tl.float32))),
+                         (simd.vexp, (_vec(64, tl.float32), )), (simd.vsqrt, (_vec(64, tl.float32), ))):
             sem = _Semantic()
             op(*args, precision=precision, _semantic=sem)
             assert "divfhp" not in str(sem.builder.calls[-1])
@@ -934,6 +934,8 @@ def test_precision_tiers():
         simd.vdiv(_vec(64, tl.float32), _vec(64, tl.float32), precision="intrinsic", _semantic=_Semantic())
     with pytest.raises(ValueError, match="invalid precision"):
         simd.vexp(_vec(64, tl.float32), precision="intrinsic", _semantic=_Semantic())
+    with pytest.raises(ValueError, match="invalid precision"):
+        simd.vsqrt(_vec(64, tl.float32), precision="intrinsic", _semantic=_Semantic())
     # vexp's subnormal-preserving algorithm has no committed AVE lowering:
     # explicit NotImplementedError, never a silent FTZ fallback.
     for precision in ("ftz_false", "vexp_1ulp_ftz_false"):
@@ -946,7 +948,7 @@ def test_precision_tiers():
 def test_vdiv_exact_uses_vdivfhp_and_forwards_mask():
     """f32 exact aliases map onto the real VFDivFHPOp, never VFDivOp."""
     mask = _mask(64)
-    for precision in ("exact", "EXACT", "vdiv_0ulp_ftz_true"):
+    for precision in ("exact", "EXACT", "vdiv_0ulp_ftz_true", simd.PRECISION.EXACT, simd.PRECISION.VDIV_0ULP_FTZ_TRUE):
         sem = _Semantic()
         simd.vdiv(_vec(64, tl.float32), _vec(64, tl.float32), mask=mask, precision=precision, _semantic=sem)
         name, call = _last(sem)

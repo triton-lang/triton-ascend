@@ -121,10 +121,10 @@ def hardware_spec(A_ptr, B_ptr, C_ptr, C2_ptr, S_ptr, S2_ptr, MX_ptr, MN_ptr, I_
     tla.load_gm_to_ub(j, j_ub)
 
     with tla.scope.simd():
-        av = tla.simd.vlds(a_ub[0], dist="NORM")
-        bv = tla.simd.vlds(b_ub[0], dist="NORM")
-        iv = tla.simd.vlds(i_ub[0], dist="NORM")
-        jv = tla.simd.vlds(j_ub[0], dist="NORM")
+        av = tla.simd.vlds(a_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+        bv = tla.simd.vlds(b_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+        iv = tla.simd.vlds(i_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+        jv = tla.simd.vlds(j_ub[0], dist=tla.simd.LOAD_DIST.NORM)
         half = tla.simd.pset(2048 // N, tla.simd.PAT.VL32)
         one = tla.simd.vdup(1, tl.int32)
         zero = tla.simd.vdup(0, tl.int32)
@@ -219,10 +219,10 @@ def simd_spec_widths(A16_ptr, B16_ptr, C16_ptr, MX16_ptr, MN16_ptr, M16_ptr, A8_
     tla.load_gm_to_ub(tla.view(B8_ptr, (N8, ), strides=(1, ), offsets=(0, )), b8_ub)
 
     with tla.scope.simd():
-        a16v = tla.simd.vlds(a16_ub[0], dist="NORM")
-        b16v = tla.simd.vlds(b16_ub[0], dist="NORM")
-        a8v = tla.simd.vlds(a8_ub[0], dist="NORM")
-        b8v = tla.simd.vlds(b8_ub[0], dist="NORM")
+        a16v = tla.simd.vlds(a16_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+        b16v = tla.simd.vlds(b16_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+        a8v = tla.simd.vlds(a8_ub[0], dist=tla.simd.LOAD_DIST.NORM)
+        b8v = tla.simd.vlds(b8_ub[0], dist=tla.simd.LOAD_DIST.NORM)
 
         tla.simd.vsts(c16_ub[0], tla.simd.vadd(a16v, b16v), dist="NORM_B16")
         tla.simd.vsts(c16_ub[0], tla.simd.vadds(a16v, 1.0), dist="NORM_B16")

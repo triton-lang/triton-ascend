@@ -34,6 +34,7 @@ Contents:
 __all__ = [
     "VL_BITS",
     "LOAD_DISTS",
+    "PRED_DISTS",
     "STORE_DISTS",
     "PGE_PATTERNS",
     "VCVT_PARTS",
@@ -79,6 +80,12 @@ LOAD_DISTS = frozenset([
     "US",
     "DS",
     "PK",
+])
+
+PRED_DISTS = frozenset([
+    "NORM",
+    "US",
+    "DS",
 ])
 
 # AVE StoreDist whitelist (strings accepted by symbolizeStoreDist).

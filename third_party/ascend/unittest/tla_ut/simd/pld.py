@@ -43,7 +43,10 @@ def load_predicate(X, O, W: tl.constexpr, DIST: tl.constexpr, OFFSET: tl.constex
     tla.store_ub_to_gm(o, tla.view(O, (D, )))
 
 
-CASES = [(w, dist, off) for w in (8, 16, 32) for dist in ("NORM", "US", "DS") for off in (0, 64)]
+CASES = [(w, dist, off)
+         for w in (8, 16, 32)
+         for dist in (tla.simd.PRED_DIST.NORM, tla.simd.PRED_DIST.US, tla.simd.PRED_DIST.DS)
+         for off in (0, 64)]
 
 
 @pytest.mark.parametrize("case", CASES)

@@ -120,6 +120,56 @@ def test_run(case, pattern, masked):
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
+@tla.jit
+def load_dist(X, O, DT: tl.constexpr, N: tl.constexpr, DIST: tl.constexpr):
+    x = tla.alloc((N, ), DT, space="ub")
+    o = tla.alloc((N, ), DT, space="ub")
+    tla.load_gm_to_ub(tla.view(X, (N, )), x)
+    with tla.scope.simd():
+        tla.simd.vsts(o[0], tla.simd.vlds(x[0], dist=DIST))
+    tla.store_ub_to_gm(o, tla.view(O, (N, )))
+
+
+def load_dist_spec(member):
+    """按 LOAD_DIST 名字后缀挑元素类型、lane 数与签名。"""
+    for suffix, dt, n, sig in (("_B8", tl.uint8, 256, "*u8"), ("_B16", tl.uint16, 128, "*u16"),
+                               ("_B32", tl.int32, 64, "*i32"), ("_B64", tl.int64, 32, "*i64")):
+        if member.name.endswith(suffix):
+            return dt, n, sig
+    return tl.int32, 64, "*i32"
+
+
+@pytest.mark.parametrize("member", list(tla.simd.LOAD_DIST), ids=lambda m: m.name)
+def test_ir_load_dist(member):
+    dt, n, sig = load_dist_spec(member)
+    module, _ = compile_offline(load_dist, dict(X=sig, O=sig), dict(DT=dt, N=n, DIST=member))
+    text = str(module)
+    assert "llvm." not in text
+    assert f"ave.hir.vload <{member.name}>" in text
+
+
+# BRC_B64 在 Ascend950 的 bishengir 里不支持（ave_vload_BRC_B64_int64），只做 IR 覆盖
+BRC_CASES = (tla.simd.LOAD_DIST.BRC_B8, tla.simd.LOAD_DIST.BRC_B16, tla.simd.LOAD_DIST.BRC_B32)
+
+
+@pytest.mark.parametrize("member", BRC_CASES, ids=lambda m: m.name)
+def test_run_load_dist_brc(member):
+    dt, n, sig = load_dist_spec(member)
+    tdt = {tl.uint8: torch.uint8, tl.uint16: torch.uint16, tl.int32: torch.int32}[dt]
+    raw = (torch.arange(n, dtype=torch.int64) + 5)
+    if tdt is torch.uint8:
+        src = raw.remainder(256).to(torch.int8).view(torch.uint8)
+    elif tdt is torch.uint16:
+        src = raw.to(torch.int16).view(torch.uint16)
+    else:
+        src = raw.to(torch.int32)
+    out = torch.empty(n, dtype=tdt, device="npu")
+    compiled = load_dist[(1, )](src.npu(), out, DT=dt, N=n, DIST=member)
+    torch.npu.synchronize()
+    torch.testing.assert_close(out.cpu(), src[0].expand(n))
+    return compiled
+
+
 if __name__ == "__main__":
     ir, compile_, run = get_stages()
     for case in CASES:
@@ -131,4 +181,10 @@ if __name__ == "__main__":
             if run:
                 for pattern in ("all", "none", "tail", "mixed"):
                     test_run(case, pattern, masked)
+    for member in tla.simd.LOAD_DIST:
+        if ir:
+            test_ir_load_dist(member)
+    if run:
+        for member in BRC_CASES:
+            test_run_load_dist_brc(member)
     print("ALL PASS: vld/vgather")

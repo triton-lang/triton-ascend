@@ -515,25 +515,26 @@ LogicalResult PtrState::mulState(const PtrState &lhsState,
   SmallVector<Value> newDynamicOffsets;
   SmallVector<StateInfo> newStateInfo;
   if (!lhs->dynamicOffsets.empty()) {
-    Value coeff = materializeValue(builder, loc, rhs->offset);
+    auto elementType =
+        cast<RankedTensorType>(op->getResult(0).getType()).getElementType();
+    Value coeff;
+    if (auto constant = getConstantOfAttr(rhs->offset)) {
+      coeff = builder.create<arith::ConstantOp>(
+          loc, builder.getIntegerAttr(elementType, *constant));
+    } else {
+      auto converted = castIntegerLike(
+          builder, loc, dyn_cast<Value>(rhs->offset), elementType);
+      if (failed(converted))
+        return failure();
+      coeff = *converted;
+    }
+
     for (Value data : lhs->dynamicOffsets) {
       auto dataType = cast<RankedTensorType>(data.getType());
-      Value coeffCast = coeff;
-      if (coeffCast.getType() != dataType.getElementType()) {
-        if (coeffCast.getType().isIndex()) {
-          coeffCast = builder.create<arith::IndexCastOp>(
-              loc, dataType.getElementType(), coeffCast);
-        } else {
-          coeffCast = builder.create<arith::ExtSIOp>(
-              loc, dataType.getElementType(), coeffCast);
-        }
-      }
-      auto splatType =
-          RankedTensorType::get(dataType.getShape(), dataType.getElementType());
-      Value splatCoeff =
-          builder.create<triton::SplatOp>(loc, splatType, coeffCast);
-      Value dataAfterMul =
-          builder.create<arith::MulIOp>(loc, data, splatCoeff).getResult();
+      if (dataType.getElementType() != elementType)
+        return failure();
+      Value splatCoeff = builder.create<triton::SplatOp>(loc, dataType, coeff);
+      Value dataAfterMul = builder.create<arith::MulIOp>(loc, data, splatCoeff);
       newDynamicOffsets.push_back(dataAfterMul);
     }
   }
@@ -1346,6 +1347,18 @@ LogicalResult PtrAnalysis::visitOperandExtSI(arith::ExtSIOp extOp,
 
   if (visitOperand(extOp.getIn(), state, loc, builder).failed()) {
     return failure();
+  }
+
+  if (!state.dynamicOffsets.empty()) {
+    auto inputType = cast<RankedTensorType>(extOp.getIn().getType());
+    auto resultType = cast<RankedTensorType>(extOp.getResult().getType());
+    for (Value &data : state.dynamicOffsets) {
+      auto dataType = cast<RankedTensorType>(data.getType());
+      if (dataType.getElementType() != inputType.getElementType())
+        return failure();
+      auto extendedType = dataType.clone(resultType.getElementType());
+      data = builder.create<arith::ExtSIOp>(extOp.getLoc(), extendedType, data);
+    }
   }
 
   return success();

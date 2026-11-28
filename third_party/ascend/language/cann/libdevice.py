@@ -251,9 +251,9 @@ def relu(arg0, _semantic=None):
     arg0 = _semantic.to_tensor(arg0)
     if ((_is_a5_target(_semantic) or _is_a3_target(_semantic) or _is_a6_target(_semantic))
             and arg0.dtype == core.dtype("fp32")):
-        return core.extern_elementwise("", "", [arg0], {
-            (core.dtype("fp32"), ): ("__hmf_relu_fp32", core.dtype("fp32")),
-        }, is_pure=True, _semantic=_semantic)
+        # Preserve the sign of negative zero (relu(-0.0) must be -0.0).
+        zero = _semantic.full(arg0.shape, 0.0, arg0.type.scalar)
+        return _semantic.where(_semantic.greater_equal(arg0, zero), arg0, zero)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_reluf", core.dtype("fp32")),

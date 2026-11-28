@@ -216,6 +216,22 @@ static bool isExtractedLoadStoreRelated(Operation *op) {
       .Default([](auto) { return false; });
 }
 
+// Ops whose CUBE/VECTOR copies are buffer placements consumed by the
+// memory-side passes (AllocMultiCache & friends), not by IR users:
+//   - bufferization.to_tensor — tensor handle over a memref buffer
+//   - memref-typed results     — allocs, subviews, casts
+//   - scope.scope              — atomic load unit
+// The IR-user census in splitOperationForCubeAndVector Phase 0 cannot judge
+// these dead, so they are exempt from the no-CUBE-user reclassification.
+static bool isMemoryBufferOp(Operation *op) {
+  if (!op) {
+    return false;
+  }
+  return isa<bufferization::ToTensorOp>(op) || isa<scope::ScopeOp>(op) ||
+         llvm::any_of(op->getResultTypes(),
+                      [](Type t) { return isa<MemRefType>(t); });
+}
+
 // ============================================================================
 // Pattern: to_tensor → matmul (Upstream)
 // ============================================================================
@@ -1833,6 +1849,53 @@ void OpClassifierPass::splitOperationForCubeAndVector(
   // Only split ops explicitly marked CUBE_AND_VECTOR
   if (opCoreTypes[op] != OP_CUBE_AND_VECTOR) {
     return;
+  }
+
+  // ------------------------------------------------------------------
+  // Phase 0: A split of a pure dataflow op must leave the CUBE original
+  // with at least one CUBE-side user. When every user of every result is
+  // VECTOR (e.g. a view op colored CUBE upstream whose consumers are all
+  // VECTOR), Phase 4 would redirect all users to the VECTOR clone and
+  // leave a dead CUBE original. That dead op later forms a phantom CUBE
+  // block that CloneCubeDepInIf and DataDependencyAnalysis cannot tell
+  // apart from a real one, materializing duplicate transfer/sync chains.
+  // Reclassify to VECTOR instead: no clone, users stay in place.
+  // Exemptions:
+  //   - pre-classified ops: an explicit core_type stamp is authoritative
+  //     and must still run on the cores it demands;
+  //   - memory-buffer ops (to_tensor / memref results / scope load units):
+  //     their CUBE copy is a buffer placement consumed by the memory-side
+  //     passes (cross-core multi-buffer recurrences), not by IR users, so
+  //     the user census below cannot judge them dead;
+  //   - zero-result ops (e.g. sync ops split on purpose for core pairing):
+  //     their split is not driven by result uses.
+  // ------------------------------------------------------------------
+  if (op->getNumResults() > 0 && !preClassifiedOps.contains(op) &&
+      !isMemoryBufferOp(op)) {
+    bool hasCubeUser = false;
+    for (unsigned i = 0; i < op->getNumResults() && !hasCubeUser; ++i) {
+      for (OpOperand &use : op->getResult(i).getUses()) {
+        Operation *user = use.getOwner();
+        if (!user) {
+          continue;
+        }
+        OpCoreType coreType = getCoreType(user);
+        if (llvm::isa<scf::ForOp, scf::WhileOp>(user)) {
+          coreType = getForInitCoreType(&use);
+        }
+        if (coreType == OP_CUBE_ONLY) {
+          hasCubeUser = true;
+          break;
+        }
+      }
+    }
+    if (!hasCubeUser) {
+      opCoreTypes[op] = OP_VECTOR_ONLY;
+      LOG_DEBUG("skip split for " << *op
+                                  << ": no CUBE user, reclassified as "
+                                     "VECTOR\n");
+      return;
+    }
   }
 
   // ------------------------------------------------------------------

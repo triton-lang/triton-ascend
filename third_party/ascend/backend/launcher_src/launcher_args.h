@@ -321,8 +321,18 @@ inline LockLayout prepareLocks(const TritonNpuLaunchSpecV1 &spec,
                                uint32_t blocks) {
   uint64_t participants = checkedMultiply(blocks, spec.participant_factor);
   uint64_t ordered = checkedMultiply(spec.ordered_locks, 8);
-  uint64_t stride =
-      checkedMultiply(checkedAdd(1, checkedMultiply(2, participants)), 8);
+  // Yang-Anderson arbitration-tree unordered lock (see SyncBlockLock.cpp in
+  // AscendNPU-IR): one lock occupies 3*Np - 2 + L*N cache lines of 8 int64
+  // elements, where Np = next_pow2(participants) and L =
+  // ceil_log2(participants). Must match the device offset formula in
+  // LowerCreateSyncBlockLock.cpp.
+  uint64_t np = 1, levels = 0;
+  while (np < participants) {
+    np <<= 1;
+    ++levels;
+  }
+  uint64_t lockLines = 3 * np - 2 + levels * participants;
+  uint64_t stride = checkedMultiply(lockLines, 8);
   uint64_t elements =
       checkedAdd(ordered, checkedMultiply(spec.unordered_locks, stride));
   return {participants, ordered, stride, elements,

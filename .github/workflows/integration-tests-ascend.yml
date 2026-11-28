@@ -84,8 +84,7 @@ jobs:
           # Two package formats are supported, selected by file extension:
           #   *.run    official self-extracting installer
           #   *.tar.gz plain payload tarball with bin/, lib/, ... at the
-          #            archive root (e.g. extracted from a wheel's bundled
-          #            payload and published by upload-wheels.yml)
+          #            archive root, as published by upload-wheels.yml
           case "${BISHENG_FILENAME}" in
             *.run)
               chmod +x bisheng.pkg

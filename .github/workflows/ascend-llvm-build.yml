@@ -36,9 +36,6 @@ jobs:
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
     timeout-minutes: 240
-    env:
-      PIP_INDEX_URL: http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple
-      PIP_TRUSTED_HOST: cache-service.nginx-pypi-cache.svc.cluster.local
 
     strategy:
       fail-fast: false
@@ -53,13 +50,10 @@ jobs:
     - name: Checkout Repo
       uses: actions/checkout@v5
 
-    - name: Config mirrors & install build tools
+    - name: Install build tools
       if: matrix.config.target-os == 'ubuntu'
       shell: bash
       run: |
-        sed -i 's|http://archive.ubuntu.com|http://cache-service.nginx-pypi-cache.svc.cluster.local:8081|g' /etc/apt/sources.list 2>/dev/null || true
-        sed -i 's|http://ports.ubuntu.com|http://cache-service.nginx-pypi-cache.svc.cluster.local:8081|g' /etc/apt/sources.list 2>/dev/null || true
-        sed -i 's|http://security.ubuntu.com|http://cache-service.nginx-pypi-cache.svc.cluster.local:8081|g' /etc/apt/sources.list 2>/dev/null || true
         apt-get update
         apt-get install -y --no-install-recommends clang lld
 

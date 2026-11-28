@@ -83,9 +83,5 @@ jobs:
             quay.io/ascend/triton:${{ steps.tags.outputs.tag_latest }}-${{ matrix.platforms }}
           build-args: |
             CANN_BASE_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:${{ steps.tags.outputs.cann_tag }}
-            APTMIRROR=http://cache-service.nginx-pypi-cache.svc.cluster.local:8081
-            PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple
-            PIP_TRUSTED_HOST=cache-service.nginx-pypi-cache.svc.cluster.local
-            TORCH_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/whl/cpu
           cache-from: type=registry,ref=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/triton-buildcache:${{ matrix.cann_version }}-${{ matrix.platforms }}
           cache-to: type=registry,ref=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/triton-buildcache:${{ matrix.cann_version }}-${{ matrix.platforms }},mode=max

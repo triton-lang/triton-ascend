@@ -141,8 +141,9 @@ def _apply(value, mask):
 
 
 def _rows(src, mask):
-    low = torch.full_like(src, src[0])
-    high = torch.full_like(src, src[-1])
+    # Slicing avoids scalar indexing, which has no CPU kernel for uint64.
+    low = src[:1].expand_as(src)
+    high = src[-1:].expand_as(src)
     if mask is not None:
         low, high = _apply(low, mask), _apply(high, mask)
     return low, high
@@ -198,7 +199,10 @@ def _inactive_zero(got, masks, names):
         if name is None:
             continue
         keep = masks[name]
-        inactive = got[row][~keep] if keep.any() else got[row]
+        # Boolean indexing has no CPU kernel for uint64; the wide rows are
+        # bit-pattern checks, so read them through int64.
+        values = got[row].view(torch.int64) if got.dtype == torch.uint64 else got[row]
+        inactive = values[~keep] if keep.any() else values
         assert _bitwise_zero(inactive), f"row {row} ({name}) has a non-zero inactive lane"
 
 

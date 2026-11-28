@@ -1,0 +1,2210 @@
+diff --git a/third_party/proton/CMakeLists.txt b/third_party/proton/CMakeLists.txt
+index abd90d689f4f4b808bfafc624f3764f8985cba36..9eff31cfa56fe5401fd7fa338b2c5a6cd620a87d 100644
+--- a/third_party/proton/CMakeLists.txt
++++ b/third_party/proton/CMakeLists.txt
+@@ -3,13 +3,38 @@ project(Proton LANGUAGES CXX)
+ set(PROTON_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/csrc")
+ set(PROTON_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
+ 
+-# ============ Check for includes =============
+-if(NOT CUPTI_INCLUDE_DIR)
+-  message(FATAL_ERROR "CUPTI include directory not defined")
++# ============ Configure optional backends =============
++# Community builds retain both GPU backends. Downstream builds opt out explicitly.
++option(PROTON_BUILD_CUDA "Build the CUPTI and CUDA instrumentation backends" ON)
++option(PROTON_BUILD_HIP "Build the ROCtracer and HIP instrumentation backends" ON)
++option(PROTON_BUILD_MSPTI "Build the MSPTI backend" OFF)
++option(PROTON_BUILD_CANN "Build the CANN device and instrumentation runtime" OFF)
++
++function(proton_require_header directory header backend)
++  if(NOT DEFINED ${directory} OR NOT EXISTS "${${directory}}/${header}")
++    message(FATAL_ERROR "${backend} is enabled but ${header} is missing from ${directory}. Set ${directory} or explicitly disable ${backend}.")
++  endif()
++endfunction()
++
++if(PROTON_BUILD_CUDA)
++  proton_require_header(CUPTI_INCLUDE_DIR cupti.h PROTON_BUILD_CUDA)
++  proton_require_header(CUPTI_INCLUDE_DIR cuda.h PROTON_BUILD_CUDA)
++endif()
++if(PROTON_BUILD_HIP)
++  proton_require_header(ROCTRACER_INCLUDE_DIR roctracer/roctracer.h PROTON_BUILD_HIP)
++  proton_require_header(ROCTRACER_INCLUDE_DIR hip/hip_runtime_api.h PROTON_BUILD_HIP)
+ endif()
+-if(NOT ROCTRACER_INCLUDE_DIR)
+-  message(FATAL_ERROR "ROCTRACER include directory not defined")
++if(PROTON_BUILD_MSPTI)
++  if(NOT PROTON_BUILD_CANN)
++    message(FATAL_ERROR "PROTON_BUILD_MSPTI requires PROTON_BUILD_CANN")
++  endif()
++  proton_require_header(MSPTI_INCLUDE_DIR mspti.h PROTON_BUILD_MSPTI)
+ endif()
++if(PROTON_BUILD_CANN)
++  proton_require_header(CANN_INCLUDE_DIR acl/acl.h PROTON_BUILD_CANN)
++endif()
++message(STATUS "Proton backends: CUDA=${PROTON_BUILD_CUDA}; HIP=${PROTON_BUILD_HIP}; MSPTI=${PROTON_BUILD_MSPTI}; CANN=${PROTON_BUILD_CANN}")
++
+ if(NOT JSON_INCLUDE_DIR)
+   message(FATAL_ERROR "JSON include directory not defined")
+ endif()
+@@ -27,23 +52,33 @@ function(add_proton_library name)
+ 
+   target_link_libraries(${name} PRIVATE Python3::Module pybind11::headers)
+ 
+-  # Use system to skip warnings caused by legacy clang compilers
+-  target_include_directories(${name}
+-    SYSTEM PRIVATE
+-      "${ROCTRACER_INCLUDE_DIR}"
+-  )
+-
+   target_include_directories(${name}
+     PRIVATE
+-      "${CUPTI_INCLUDE_DIR}"
+       "${JSON_INCLUDE_DIR}"
+       "${PROTON_COMMON_DIR}/include"
+       "${PROTON_SRC_DIR}/include"
+   )
+ 
+-  # If HIP is AMD-based
+-  target_compile_definitions(${name} PRIVATE __HIP_PLATFORM_AMD__)
+-
++  if(PROTON_BUILD_CUDA)
++    target_include_directories(${name} PRIVATE "${CUPTI_INCLUDE_DIR}")
++    target_compile_definitions(${name} PRIVATE PROTON_BUILD_CUDA)
++  endif()
++  if(PROTON_BUILD_HIP)
++    # Use system to skip warnings caused by legacy clang compilers.
++    target_include_directories(${name} SYSTEM PRIVATE "${ROCTRACER_INCLUDE_DIR}")
++    target_compile_definitions(${name} PRIVATE PROTON_BUILD_HIP __HIP_PLATFORM_AMD__)
++  endif()
++  if(PROTON_BUILD_MSPTI)
++    target_include_directories(${name} PRIVATE "${MSPTI_INCLUDE_DIR}")
++    target_compile_definitions(${name} PRIVATE PROTON_BUILD_MSPTI)
++    if(DEFINED MSPTI_LIB_DIR)
++      target_compile_definitions(${name} PRIVATE MSPTI_LIB_DIR=${MSPTI_LIB_DIR})
++    endif()
++  endif()
++  if(PROTON_BUILD_CANN)
++    target_include_directories(${name} PRIVATE "${CANN_INCLUDE_DIR}")
++    target_compile_definitions(${name} PRIVATE PROTON_BUILD_CANN)
++  endif()
+   # Append this library name to the GLOBAL property "PROTON_LIBS"
+   set_property(GLOBAL APPEND PROPERTY PROTON_LIBS ${name})
+ endfunction()
+@@ -78,6 +113,10 @@ endforeach()
+ add_library(proton SHARED ${_proton_obj_sources})
+ 
+ target_link_libraries(proton PRIVATE Python3::Module)
++
++if(PROTON_BUILD_CANN)
++  target_link_libraries(proton PRIVATE ${CMAKE_DL_LIBS})
++endif()
+ # Apply any macOS linker flags or extra link options
+ if(PROTON_PYTHON_LDFLAGS)
+   target_link_options(proton PRIVATE ${PROTON_PYTHON_LDFLAGS})
+diff --git a/third_party/proton/common/include/Device.h b/third_party/proton/common/include/Device.h
+index 2c02f2b9bd6d603f1bf939f9fa8fe88e419c220c..a2298ace6d46e7fbbf629952aa05fc530baeb46e 100644
+--- a/third_party/proton/common/include/Device.h
++++ b/third_party/proton/common/include/Device.h
+@@ -6,7 +6,7 @@
+ 
+ namespace proton {
+ 
+-enum class DeviceType { HIP, CUDA, COUNT };
++enum class DeviceType { HIP, CUDA, NPU, COUNT };
+ 
+ template <DeviceType T> struct DeviceTraits;
+ 
+@@ -20,6 +20,11 @@ template <> struct DeviceTraits<DeviceType::HIP> {
+   constexpr static const char *name = "HIP";
+ };
+ 
++template <> struct DeviceTraits<DeviceType::NPU> {
++  constexpr static DeviceType type = DeviceType::NPU;
++  constexpr static const char *name = "NPU";
++};
++
+ struct Device {
+   DeviceType type;
+   uint64_t id;
+diff --git a/third_party/proton/common/include/TraceDataIO/Parser.h b/third_party/proton/common/include/TraceDataIO/Parser.h
+index c774e5f41d85c09a929e0fca56f7fc1f2312c0be..2dba446281781b29325fb6e2cd6b1d4f0278dfd0 100644
+--- a/third_party/proton/common/include/TraceDataIO/Parser.h
++++ b/third_party/proton/common/include/TraceDataIO/Parser.h
+@@ -10,6 +10,7 @@
+ namespace proton {
+ 
+ struct ParserConfig {
++  enum class ErrorPolicy { Strict, BestEffort };
+   enum class PrintMode {
+     SILENT, // Don't print anything
+     ALL     // Print all messages
+@@ -17,6 +18,7 @@ struct ParserConfig {
+ 
+   // Configure exception message visibility
+   PrintMode printLevel = PrintMode::SILENT;
++  ErrorPolicy errorPolicy = ErrorPolicy::Strict;
+ 
+   // Device type that generated the trace
+   Device device;
+diff --git a/third_party/proton/common/include/TraceDataIO/TraceWriter.h b/third_party/proton/common/include/TraceDataIO/TraceWriter.h
+index 9558661f8a62fd41853fafcd5a91e63bbfd3a2b5..a00827b5a854235297f126ea8f1d0ae01ec2fb85 100644
+--- a/third_party/proton/common/include/TraceDataIO/TraceWriter.h
++++ b/third_party/proton/common/include/TraceDataIO/TraceWriter.h
+@@ -16,6 +16,8 @@ struct KernelMetadata {
+   std::map<int, std::string> scopeName;
+   std::string kernelName;
+   std::vector<std::string> callStack;
++  double cycleCounterFreqMhz = 1000.0;
++  bool channelTrace = false;
+ };
+ 
+ using KernelTrace = std::pair<std::shared_ptr<CircularLayoutParserResult>,
+diff --git a/third_party/proton/common/lib/TraceDataIO/CircularLayoutParser.cpp b/third_party/proton/common/lib/TraceDataIO/CircularLayoutParser.cpp
+index 3573921ac31ed2576ac70777571b491d15666e9c..3002567051e1622970d973c92f3e9a387f491916 100644
+--- a/third_party/proton/common/lib/TraceDataIO/CircularLayoutParser.cpp
++++ b/third_party/proton/common/lib/TraceDataIO/CircularLayoutParser.cpp
+@@ -171,6 +171,10 @@ Device decodeDevice(const uint32_t dev) {
+     device.type = DeviceType::HIP;
+     device.arch = "";
+     break;
++  case 3:
++    device.type = DeviceType::NPU;
++    device.arch = "";
++    break;
+   default:
+     break;
+   }
+@@ -249,6 +253,9 @@ uint64_t proton::getTimeShiftCost(const CircularLayoutParserConfig &config) {
+     return 7;
+   else if (config.device.type == DeviceType::HIP)
+     return 36;
++  else if (config.device.type == DeviceType::NPU)
++    // GetSysCntOp + PipeBarrier overhead on the in-order AICore pipeline.
++    return 12;
+ 
+   return 0;
+ }
+diff --git a/third_party/proton/common/lib/TraceDataIO/Parser.cpp b/third_party/proton/common/lib/TraceDataIO/Parser.cpp
+index 819db452449f47d12fe62255d223d31ee2d5c081..1f44a4acd9451a67cb7b12b9128201c6ac432810 100644
+--- a/third_party/proton/common/lib/TraceDataIO/Parser.cpp
++++ b/third_party/proton/common/lib/TraceDataIO/Parser.cpp
+@@ -16,7 +16,8 @@ void ParserBase::reportException(const ParserException &e, size_t pos) {
+               << std::endl;
+   }
+ 
+-  if (e.severity == ExceptionSeverity::WARNING)
++  if (e.severity == ExceptionSeverity::WARNING ||
++      config.errorPolicy == ParserConfig::ErrorPolicy::BestEffort)
+     return;
+ 
+   throw e;
+diff --git a/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp b/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
+index 320a4f193a0f857cb86479cacd1ce67cec1cb1a2..99c62f93696235499f4c0c903a4558cd6f1a1985 100644
+--- a/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
++++ b/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
+@@ -1,5 +1,6 @@
+ #include "TraceDataIO/TraceWriter.h"
+ #include <algorithm>
++#include <cmath>
+ #include <iostream>
+ #include <limits>
+ #include <sstream>
+@@ -165,6 +166,10 @@ void StreamChromeTraceWriter::writeKernel(json &object,
+                                           const uint64_t minInitTime) {
+   auto result = kernelTrace.first;
+   auto metadata = kernelTrace.second;
++  if (!std::isfinite(metadata->cycleCounterFreqMhz) ||
++      metadata->cycleCounterFreqMhz <= 0)
++    throw std::invalid_argument(
++        "Cycle counter frequency must be positive and finite");
+ 
+   json callStack = json::array();
+   for (auto const &frame : metadata->callStack) {
+@@ -204,14 +209,20 @@ void StreamChromeTraceWriter::writeKernel(json &object,
+                 " CTA" + std::to_string(ctaId);
+           tid = "warp " + std::to_string(warpId) + " (line " +
+                 std::to_string(lineId) + ")";
++          if (metadata->channelTrace) {
++            pid = metadata->kernelName + " profiling channel " +
++                  std::to_string(ctaId);
++            tid = "pipe " + std::to_string(warpId) + " (line " +
++                  std::to_string(lineId) + ")";
++          }
+           category = metadata->kernelName;
+           if (!metadata->scopeName.count(scopeId))
+             name = "scope_" + std::to_string(scopeId);
+           else
+             name = metadata->scopeName.at(scopeId);
+ 
+-          // Unit: MHz, we assume freq is 1000MHz (1GHz)
+-          double freq = 1000.0;
++          // Unit: MHz; backends override the 1GHz default via KernelMetadata.
++          double freq = metadata->cycleCounterFreqMhz;
+ 
+           // Global time is in `ns` unit. With 1GHz assumption, we
+           // could subtract with blockToMInCycle: (ns - ns) / 1GHz - cycle
+@@ -236,6 +247,17 @@ void StreamChromeTraceWriter::writeKernel(json &object,
+           args["Frequency (MHz)"] = freq;
+           element["args"] = args;
+           element["args"]["call_stack"] = callStack;
++          if (metadata->channelTrace) {
++            element["args"]["coverage"] = "sampled_hardware_channels";
++            element["args"]["all_logical_blocks"] = false;
++            element["args"]["channel_id_is_core_id"] = false;
++            element["args"]["clock_domain"] =
++                "channel-relative; not host synchronized";
++            element["args"]["start_cycle"] = event.first->cycle;
++            element["args"]["end_cycle"] = event.second->cycle;
++            element["args"]["channel_id"] = ctaId;
++            element["args"]["pipe_id"] = warpId;
++          }
+ 
+           object["traceEvents"].push_back(element);
+ 
+diff --git a/third_party/proton/csrc/Proton.cpp b/third_party/proton/csrc/Proton.cpp
+index 62468da69925478388f3d944c889175a0fd147b2..1e9c8f3e1209eb2528e8d3780f82fc67fe512542 100644
+--- a/third_party/proton/csrc/Proton.cpp
++++ b/third_party/proton/csrc/Proton.cpp
+@@ -1,4 +1,5 @@
+ #include "Proton.h"
++#include "Profiler/Instrumentation/InstrumentationProfiler.h"
+ 
+ #include <map>
+ #include <stdexcept>
+@@ -83,6 +84,13 @@ static void initProton(pybind11::module &&m) {
+         streamId, functionId, reinterpret_cast<uint8_t *>(buffer), size);
+   });
+ 
++  m.def("record_instrumentation_events",
++        [](uint64_t functionId,
++           const std::vector<std::array<uint64_t, 6>> &records) {
++          InstrumentationProfiler::instance().recordInstrumentationEvents(
++              functionId, records);
++        });
++
+   m.def("exit_instrumented_op", [](uint64_t streamId, uint64_t functionId,
+                                    uint64_t buffer, size_t size) {
+     SessionManager::instance().exitInstrumentedOp(
+diff --git a/third_party/proton/csrc/include/Context/Context.h b/third_party/proton/csrc/include/Context/Context.h
+index 134ec7579b54be83744671375f77ef69ef90fc54..c7a8dfbe3aae1187d7c28305fed5572ba8d42723 100644
+--- a/third_party/proton/csrc/include/Context/Context.h
++++ b/third_party/proton/csrc/include/Context/Context.h
+@@ -7,6 +7,7 @@
+ #include <mutex>
+ #include <optional>
+ #include <string>
++#include <utility>
+ #include <vector>
+ 
+ namespace proton {
+@@ -43,6 +44,12 @@ public:
+ 
+   void setState(std::optional<Context> state) { ContextSource::state = state; }
+ 
++  static std::optional<Context> getThreadState() { return state; }
++
++  static void setThreadState(std::optional<Context> newState) {
++    state = std::move(newState);
++  }
++
+   virtual size_t getDepth() = 0;
+ 
+ protected:
+@@ -50,6 +57,14 @@ protected:
+   static thread_local std::optional<Context> state;
+ };
+ 
++/// Optional notifications for profilers whose callbacks need launch-thread
++/// state.
++class StateInterface {
++public:
++  virtual ~StateInterface() = default;
++  virtual void setState(std::optional<Context> state) = 0;
++};
++
+ /// A scope is a context with a unique identifier.
+ struct Scope : public Context {
+   const static size_t DummyScopeId = std::numeric_limits<size_t>::max();
+diff --git a/third_party/proton/csrc/include/Data/Metric.h b/third_party/proton/csrc/include/Data/Metric.h
+index 039b3006d2bf00c2726826c0f29c7c43f96d3824..47620bee17cf1122e452740337fcc7f44124d934 100644
+--- a/third_party/proton/csrc/include/Data/Metric.h
++++ b/third_party/proton/csrc/include/Data/Metric.h
+@@ -3,6 +3,7 @@
+ 
+ #include "Utility/String.h"
+ #include "Utility/Traits.h"
++#include <cstdint>
+ #include <stdexcept>
+ #include <variant>
+ #include <vector>
+@@ -296,7 +297,8 @@ public:
+               const std::string &kernelName, uint64_t blockId,
+               uint64_t processorId, uint64_t unitId, uint64_t deviceId,
+               uint64_t deviceType, uint64_t timeShiftCost, uint64_t initTime,
+-              uint64_t preFinalTime, uint64_t postFinalTime)
++              uint64_t preFinalTime, uint64_t postFinalTime,
++              double cycleCounterFreqMhz = 1000.0, bool channelTrace = false)
+       : CycleMetric() {
+     this->values[StartCycle] = startCycle;
+     this->values[EndCycle] = endCycle;
+@@ -313,8 +315,13 @@ public:
+     this->values[InitTime] = initTime;
+     this->values[PreFinalTime] = preFinalTime;
+     this->values[PostFinalTime] = postFinalTime;
++    this->cycleCounterFreqMhz = cycleCounterFreqMhz;
++    this->channelTrace = channelTrace;
+   }
+ 
++  double getCycleCounterFreqMhz() const { return cycleCounterFreqMhz; }
++  bool isChannelTrace() const { return channelTrace; }
++
+   virtual const std::string getName() const { return "CycleMetric"; }
+ 
+   virtual const std::string getValueName(int valueId) const {
+@@ -326,6 +333,8 @@ public:
+   virtual bool isExclusive(int valueId) const { return EXCLUSIVE[valueId]; }
+ 
+ private:
++  double cycleCounterFreqMhz{1000.0};
++  bool channelTrace{false};
+   const static inline bool PROPERTY[CycleMetricKind::Count] = {
+       false, false, false, false, true,  true,  true, true,
+       true,  true,  true,  true,  false, false, false};
+diff --git a/third_party/proton/csrc/include/Driver/GPU/CannApi.h b/third_party/proton/csrc/include/Driver/GPU/CannApi.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..5b3fdde057add2b1925cd97bbe4d40ab914a3d54
+--- /dev/null
++++ b/third_party/proton/csrc/include/Driver/GPU/CannApi.h
+@@ -0,0 +1,16 @@
++#ifndef PROTON_DRIVER_GPU_CANN_H_
++#define PROTON_DRIVER_GPU_CANN_H_
++
++#include "Device.h"
++
++namespace proton {
++
++namespace cann {
++
++Device getDevice(uint64_t index);
++
++} // namespace cann
++
++} // namespace proton
++
++#endif // PROTON_DRIVER_GPU_CANN_H_
+diff --git a/third_party/proton/csrc/include/Driver/GPU/MsptiApi.h b/third_party/proton/csrc/include/Driver/GPU/MsptiApi.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..e4f205b1a22709cc8fab3fbf1c7bcf4402084792
+--- /dev/null
++++ b/third_party/proton/csrc/include/Driver/GPU/MsptiApi.h
+@@ -0,0 +1,49 @@
++#ifndef PROTON_DRIVER_GPU_MSPTI_H_
++#define PROTON_DRIVER_GPU_MSPTI_H_
++
++#include "mspti.h"
++
++namespace proton {
++
++namespace mspti {
++
++template <bool CheckSuccess>
++msptiResult subscribe(msptiSubscriberHandle *subscriber,
++                      msptiCallbackFunc callback, void *userdata);
++
++template <bool CheckSuccess>
++msptiResult unsubscribe(msptiSubscriberHandle subscriber);
++
++template <bool CheckSuccess>
++msptiResult enableCallback(uint32_t enable, msptiSubscriberHandle subscriber,
++                           msptiCallbackDomain domain, msptiCallbackId cbid);
++
++template <bool CheckSuccess>
++msptiResult
++activityRegisterCallbacks(msptiBuffersCallbackRequestFunc funcBufferRequested,
++                          msptiBuffersCallbackCompleteFunc funcBufferCompleted);
++
++template <bool CheckSuccess> msptiResult activityEnable(msptiActivityKind kind);
++
++template <bool CheckSuccess>
++msptiResult activityDisable(msptiActivityKind kind);
++
++template <bool CheckSuccess> msptiResult activityFlushAll(uint32_t flag);
++
++template <bool CheckSuccess>
++msptiResult activityGetNextRecord(uint8_t *buffer, size_t validBufferSizeBytes,
++                                  msptiActivity **record);
++
++template <bool CheckSuccess>
++msptiResult activityPushExternalCorrelationId(msptiExternalCorrelationKind kind,
++                                              uint64_t id);
++
++template <bool CheckSuccess>
++msptiResult activityPopExternalCorrelationId(msptiExternalCorrelationKind kind,
++                                             uint64_t *lastId);
++
++} // namespace mspti
++
++} // namespace proton
++
++#endif // PROTON_EXTERN_DISPATCH_H_
+diff --git a/third_party/proton/csrc/include/Profiler/Instrumentation/AscendRuntime.h b/third_party/proton/csrc/include/Profiler/Instrumentation/AscendRuntime.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..c22544d69ae8ece9418fcc6e89cbf1484aeca192
+--- /dev/null
++++ b/third_party/proton/csrc/include/Profiler/Instrumentation/AscendRuntime.h
+@@ -0,0 +1,33 @@
++#ifndef PROTON_PROFILER_INSTRUMENTATION_ASCEND_RUNTIME_H_
++#define PROTON_PROFILER_INSTRUMENTATION_ASCEND_RUNTIME_H_
++
++#include "Runtime.h"
++
++namespace proton {
++
++class AscendRuntime : public Runtime {
++public:
++  AscendRuntime() : Runtime(DeviceType::NPU) {}
++  ~AscendRuntime() = default;
++
++  void allocateHostBuffer(uint8_t **buffer, size_t size) override;
++  void freeHostBuffer(uint8_t *buffer) override;
++  uint64_t getDevice() override;
++  void *getPriorityStream() override;
++  void synchronizeStream(void *stream) override;
++  void
++  processHostBuffer(uint8_t *hostBuffer, size_t hostBufferSize,
++                    uint8_t *deviceBuffer, size_t deviceBufferSize,
++                    void *stream,
++                    std::function<void(uint8_t *, size_t)> callback) override;
++  ParserConfig::ErrorPolicy getParserErrorPolicy() const override {
++    return ParserConfig::ErrorPolicy::BestEffort;
++  }
++  bool allowRepeatedFunctionMetadata() const override { return true; }
++  double getCycleCounterFreqMhz() const override { return 50.0; }
++  std::optional<int64_t> getTimeShiftCost() const override;
++};
++
++} // namespace proton
++
++#endif // PROTON_PROFILER_INSTRUMENTATION_ASCEND_RUNTIME_H
+diff --git a/third_party/proton/csrc/include/Profiler/Instrumentation/InstrumentationProfiler.h b/third_party/proton/csrc/include/Profiler/Instrumentation/InstrumentationProfiler.h
+index 5e85eb8e1b6e22c55476af45465d736fe4cb29de..bb6f942bc1b208adaf8b2bb6f16df8661383ec9a 100644
+--- a/third_party/proton/csrc/include/Profiler/Instrumentation/InstrumentationProfiler.h
++++ b/third_party/proton/csrc/include/Profiler/Instrumentation/InstrumentationProfiler.h
+@@ -8,6 +8,7 @@
+ #include "Runtime.h"
+ #include "TraceDataIO/Parser.h"
+ #include "Utility/Singleton.h"
++#include <array>
+ 
+ namespace proton {
+ 
+@@ -18,6 +19,8 @@ class InstrumentationProfiler : public Profiler,
+ public:
+   InstrumentationProfiler() = default;
+   virtual ~InstrumentationProfiler();
++  void recordInstrumentationEvents(
++      uint64_t functionId, const std::vector<std::array<uint64_t, 6>> &records);
+ 
+ protected:
+   // Profiler
+@@ -58,6 +61,7 @@ private:
+   uint8_t *hostBuffer{nullptr};
+   // functionId -> scopeId -> scopeName
+   std::map<uint64_t, std::map<size_t, std::string>> functionScopeIdNames;
++  std::map<uint64_t, std::map<size_t, size_t>> functionScopeIdParents;
+   // functionId -> scopeId -> contexts
+   std::map<uint64_t, std::map<size_t, std::vector<Context>>>
+       functionScopeIdContexts;
+diff --git a/third_party/proton/csrc/include/Profiler/Instrumentation/Metadata.h b/third_party/proton/csrc/include/Profiler/Instrumentation/Metadata.h
+index eddea3f933e7cbdcbbbbfd1a1637a06f657b03d8..83e5270ac5847c0c74e655c9b846160f3a07cf27 100644
+--- a/third_party/proton/csrc/include/Profiler/Instrumentation/Metadata.h
++++ b/third_party/proton/csrc/include/Profiler/Instrumentation/Metadata.h
+@@ -17,12 +17,21 @@ public:
+ 
+   size_t getNumWarps() const { return numWarps; }
+ 
++  size_t getNumUnits() const { return numUnits; }
++
++  bool operator==(const InstrumentationMetadata &other) const {
++    return metadataPath == other.metadataPath &&
++           scratchMemorySize == other.scratchMemorySize &&
++           numWarps == other.numWarps && numUnits == other.numUnits;
++  }
++
+ private:
+   void parse();
+ 
+   const std::string metadataPath;
+   size_t scratchMemorySize{};
+   size_t numWarps{};
++  size_t numUnits{};
+ };
+ 
+ } // namespace proton
+diff --git a/third_party/proton/csrc/include/Profiler/Instrumentation/Runtime.h b/third_party/proton/csrc/include/Profiler/Instrumentation/Runtime.h
+index 35d7318e0850ea1d573eba46c15fb97b1f3adbee..c94fd7ec5590f69b7ac9b626da820b53d453a87b 100644
+--- a/third_party/proton/csrc/include/Profiler/Instrumentation/Runtime.h
++++ b/third_party/proton/csrc/include/Profiler/Instrumentation/Runtime.h
+@@ -4,8 +4,10 @@
+ #include <cstddef>
+ #include <cstdlib>
+ #include <functional>
++#include <optional>
+ 
+ #include "Device.h"
++#include "TraceDataIO/Parser.h"
+ 
+ namespace proton {
+ class Runtime {
+@@ -29,6 +31,16 @@ public:
+                     void *stream,
+                     std::function<void(uint8_t *, size_t)> callback) = 0;
+ 
++  // Preserve the upstream policies unless a runtime explicitly opts in.
++  virtual ParserConfig::ErrorPolicy getParserErrorPolicy() const {
++    return ParserConfig::ErrorPolicy::Strict;
++  }
++  virtual bool allowRepeatedFunctionMetadata() const { return false; }
++  virtual double getCycleCounterFreqMhz() const { return 1000.0; }
++  virtual std::optional<int64_t> getTimeShiftCost() const {
++    return std::nullopt;
++  }
++
+   DeviceType getDeviceType() const { return deviceType; }
+ 
+ protected:
+diff --git a/third_party/proton/csrc/include/Profiler/Mspti/MsptiProfiler.h b/third_party/proton/csrc/include/Profiler/Mspti/MsptiProfiler.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..650d62e9bb3ecd616f5bd37eaee71fa34adac641
+--- /dev/null
++++ b/third_party/proton/csrc/include/Profiler/Mspti/MsptiProfiler.h
+@@ -0,0 +1,27 @@
++#ifndef PROTON_PROFILER_MSPTI_PROFILER_H_
++#define PROTON_PROFILER_MSPTI_PROFILER_H_
++
++#include "Profiler/GPUProfiler.h"
++
++namespace proton {
++
++class MsptiProfiler : public GPUProfiler<MsptiProfiler>, public StateInterface {
++public:
++  MsptiProfiler();
++  virtual ~MsptiProfiler();
++
++  void setState(std::optional<Context> state) override;
++
++protected:
++  void startOp(const Scope &scope) override;
++  void stopOp(const Scope &scope) override;
++
++private:
++  struct MsptiProfilerPimpl;
++  virtual void
++  doSetMode(const std::vector<std::string> &modeAndOptions) override;
++};
++
++} // namespace proton
++
++#endif // PROTON_PROFILER_MSPTI_PROFILER_H_
+diff --git a/third_party/proton/csrc/include/Session/Session.h b/third_party/proton/csrc/include/Session/Session.h
+index e9d2cdefcdb7698f74420a83cb922e8540ee22a5..24405bb26496f363453a56ec32c2056867468103 100644
+--- a/third_party/proton/csrc/include/Session/Session.h
++++ b/third_party/proton/csrc/include/Session/Session.h
+@@ -216,6 +216,7 @@ private:
+       instrumentationInterfaceCounts;
+   // {context source, active count}
+   std::vector<std::pair<ContextSource *, size_t>> contextSourceCounts;
++  std::vector<std::pair<StateInterface *, size_t>> stateInterfaceCounts;
+ };
+ 
+ } // namespace proton
+diff --git a/third_party/proton/csrc/lib/Context/Context.cpp b/third_party/proton/csrc/lib/Context/Context.cpp
+index ba3d67f44e4a21d9d9d1f39f48ae7b78bf143f6c..2d7ade79ad294ea280cb3bf27c2bea6b9b45f3e6 100644
+--- a/third_party/proton/csrc/lib/Context/Context.cpp
++++ b/third_party/proton/csrc/lib/Context/Context.cpp
+@@ -4,7 +4,6 @@ namespace proton {
+ 
+ /*static*/ thread_local std::optional<Context> ContextSource::state =
+     std::nullopt;
+-
+ std::atomic<size_t> Scope::scopeIdCounter{1};
+ 
+ /*static*/ thread_local std::map<OpInterface *, bool> OpInterface::opInProgress;
+diff --git a/third_party/proton/csrc/lib/Data/TraceData.cpp b/third_party/proton/csrc/lib/Data/TraceData.cpp
+index 38728127faa7b73f058a8f683833ce3054651031..662323a1b714b42cf8cb4ad91349f151b27107e9 100644
+--- a/third_party/proton/csrc/lib/Data/TraceData.cpp
++++ b/third_party/proton/csrc/lib/Data/TraceData.cpp
+@@ -404,6 +404,9 @@ convertToTimelineTrace(TraceData::Trace *trace,
+         getStringValue(kernelEvent.cycleMetric, CycleMetric::KernelName);
+     metadata->scopeName = scopeIdToName;
+     metadata->callStack = std::move(callStack);
++    metadata->cycleCounterFreqMhz =
++        kernelEvent.cycleMetric->getCycleCounterFreqMhz();
++    metadata->channelTrace = kernelEvent.cycleMetric->isChannelTrace();
+     if (timeShiftCost > 0)
+       timeShift(timeShiftCost, parserResult);
+     results.emplace_back(parserResult, metadata);
+diff --git a/third_party/proton/csrc/lib/Driver/CMakeLists.txt b/third_party/proton/csrc/lib/Driver/CMakeLists.txt
+index 3f561e8eff5ab8ba8b6ae683d82590980667cc52..40fe0924bceb2a60995d972dafae2ff07dc9175f 100644
+--- a/third_party/proton/csrc/lib/Driver/CMakeLists.txt
++++ b/third_party/proton/csrc/lib/Driver/CMakeLists.txt
+@@ -1,9 +1,29 @@
+-add_proton_library(ProtonDriver
+-	Device.cpp
+-	GPU/CudaApi.cpp
+-	GPU/CuptiApi.cpp
+-	GPU/HipApi.cpp
+-	GPU/HsaApi.cpp
+-	GPU/RoctracerApi.cpp
+-	GPU/NvtxApi.cpp
++set(PROTON_DRIVER_SOURCES
++  Device.cpp
+ )
++
++if(PROTON_BUILD_CANN)
++  list(APPEND PROTON_DRIVER_SOURCES GPU/CannApi.cpp)
++endif()
++
++if(PROTON_BUILD_CUDA)
++  list(APPEND PROTON_DRIVER_SOURCES
++    GPU/CudaApi.cpp
++    GPU/CuptiApi.cpp
++    GPU/NvtxApi.cpp
++  )
++endif()
++
++if(PROTON_BUILD_HIP)
++  list(APPEND PROTON_DRIVER_SOURCES
++    GPU/HipApi.cpp
++    GPU/HsaApi.cpp
++    GPU/RoctracerApi.cpp
++  )
++endif()
++
++if(PROTON_BUILD_MSPTI)
++  list(APPEND PROTON_DRIVER_SOURCES GPU/MsptiApi.cpp)
++endif()
++
++add_proton_library(ProtonDriver ${PROTON_DRIVER_SOURCES})
+diff --git a/third_party/proton/csrc/lib/Driver/Device.cpp b/third_party/proton/csrc/lib/Driver/Device.cpp
+index 24f4d1612623ff763384aaea28374834b4bce765..579583769c27b10d1fd2ac913e7bafd3c74d0a29 100644
+--- a/third_party/proton/csrc/lib/Driver/Device.cpp
++++ b/third_party/proton/csrc/lib/Driver/Device.cpp
+@@ -1,18 +1,34 @@
+ #include "Device.h"
++#ifdef PROTON_BUILD_CANN
++#include "Driver/GPU/CannApi.h"
++#endif
++#ifdef PROTON_BUILD_CUDA
+ #include "Driver/GPU/CudaApi.h"
++#endif
++#ifdef PROTON_BUILD_HIP
+ #include "Driver/GPU/HipApi.h"
++#endif
+ 
+ #include "Utility/Errors.h"
+ 
+ namespace proton {
+ 
+ Device getDevice(DeviceType type, uint64_t index) {
++#ifdef PROTON_BUILD_CUDA
+   if (type == DeviceType::CUDA) {
+     return cuda::getDevice(index);
+   }
++#endif
++#ifdef PROTON_BUILD_HIP
+   if (type == DeviceType::HIP) {
+     return hip::getDevice(index);
+   }
++#endif
++#ifdef PROTON_BUILD_CANN
++  if (type == DeviceType::NPU) {
++    return cann::getDevice(index);
++  }
++#endif
+   throw std::runtime_error("DeviceType not supported");
+ }
+ 
+@@ -21,6 +37,8 @@ const std::string getDeviceTypeString(DeviceType type) {
+     return DeviceTraits<DeviceType::CUDA>::name;
+   } else if (type == DeviceType::HIP) {
+     return DeviceTraits<DeviceType::HIP>::name;
++  } else if (type == DeviceType::NPU) {
++    return DeviceTraits<DeviceType::NPU>::name;
+   }
+   throw std::runtime_error("DeviceType not supported");
+ }
+diff --git a/third_party/proton/csrc/lib/Driver/GPU/CannApi.cpp b/third_party/proton/csrc/lib/Driver/GPU/CannApi.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..7fbde92189c16f59a851788a32e2ed402d9bca0b
+--- /dev/null
++++ b/third_party/proton/csrc/lib/Driver/GPU/CannApi.cpp
+@@ -0,0 +1,21 @@
++#include "Driver/GPU/CannApi.h"
++#include "pybind11/pybind11.h"
++
++namespace proton::cann {
++
++Device getDevice(uint64_t index) {
++  pybind11::gil_scoped_acquire gil;
++  auto utils = pybind11::module_::import("triton.runtime")
++                   .attr("driver")
++                   .attr("active")
++                   .attr("utils");
++  auto arch = utils.attr("get_arch")().cast<std::string>();
++  auto vectorCoreCount = utils.attr("get_aivector_core_num")().cast<uint64_t>();
++  auto vectorClockRate =
++      utils.attr("get_vector_clock_rate")(index).cast<uint64_t>();
++  auto hbmClockRate = utils.attr("get_hbm_clock_rate")(index).cast<uint64_t>();
++  return Device(DeviceType::NPU, index, vectorClockRate, hbmClockRate,
++                /*busWidth=*/0, vectorCoreCount, arch);
++}
++
++} // namespace proton::cann
+diff --git a/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp b/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..63721ba512d3c8cae6da0911d5d603aae995ab1c
+--- /dev/null
++++ b/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp
+@@ -0,0 +1,61 @@
++#include "Driver/GPU/MsptiApi.h"
++#include "Device.h"
++#include "Driver/Dispatch.h"
++
++namespace proton {
++
++namespace mspti {
++
++#define STRINGIFY(x) #x
++#define TOSTRING(x) STRINGIFY(x)
++
++struct ExternLibMspti : public ExternLibBase {
++  using RetType = msptiResult;
++  static constexpr const char *name = "libmspti.so";
++#ifdef MSPTI_LIB_DIR
++  static constexpr const char *defaultDir = TOSTRING(MSPTI_LIB_DIR);
++#else
++  static constexpr const char *defaultDir = "";
++#endif
++  static constexpr RetType success = MSPTI_SUCCESS;
++  static void *lib;
++};
++
++void *ExternLibMspti::lib = nullptr;
++
++DEFINE_DISPATCH(ExternLibMspti, subscribe, msptiSubscribe,
++                msptiSubscriberHandle *, msptiCallbackFunc, void *)
++
++DEFINE_DISPATCH(ExternLibMspti, unsubscribe, msptiUnsubscribe,
++                msptiSubscriberHandle)
++
++DEFINE_DISPATCH(ExternLibMspti, enableCallback, msptiEnableCallback, uint32_t,
++                msptiSubscriberHandle, msptiCallbackDomain, msptiCallbackId)
++
++DEFINE_DISPATCH(ExternLibMspti, activityRegisterCallbacks,
++                msptiActivityRegisterCallbacks, msptiBuffersCallbackRequestFunc,
++                msptiBuffersCallbackCompleteFunc)
++
++DEFINE_DISPATCH(ExternLibMspti, activityEnable, msptiActivityEnable,
++                msptiActivityKind)
++
++DEFINE_DISPATCH(ExternLibMspti, activityDisable, msptiActivityDisable,
++                msptiActivityKind)
++
++DEFINE_DISPATCH(ExternLibMspti, activityFlushAll, msptiActivityFlushAll,
++                uint32_t)
++
++DEFINE_DISPATCH(ExternLibMspti, activityGetNextRecord,
++                msptiActivityGetNextRecord, uint8_t *, size_t, msptiActivity **)
++
++DEFINE_DISPATCH(ExternLibMspti, activityPushExternalCorrelationId,
++                msptiActivityPushExternalCorrelationId,
++                msptiExternalCorrelationKind, uint64_t)
++
++DEFINE_DISPATCH(ExternLibMspti, activityPopExternalCorrelationId,
++                msptiActivityPopExternalCorrelationId,
++                msptiExternalCorrelationKind, uint64_t *)
++
++} // namespace mspti
++
++} // namespace proton
+diff --git a/third_party/proton/csrc/lib/Profiler/CMakeLists.txt b/third_party/proton/csrc/lib/Profiler/CMakeLists.txt
+index 9ebee5d9131ec5da9fafeb4e150c54710b61b5cf..0211aaea3689e271d2188587f0946d92aa574380 100644
+--- a/third_party/proton/csrc/lib/Profiler/CMakeLists.txt
++++ b/third_party/proton/csrc/lib/Profiler/CMakeLists.txt
+@@ -1,9 +1,29 @@
+-add_proton_library(ProtonProfiler
+-	Cupti/CuptiPCSampling.cpp
+-	Cupti/CuptiProfiler.cpp
+-	RocTracer/RoctracerProfiler.cpp
+-	Instrumentation/InstrumentationProfiler.cpp
+-	Instrumentation/CudaRuntime.cpp
+-	Instrumentation/HipRuntime.cpp
+-	Instrumentation/Metadata.cpp
++set(PROTON_PROFILER_SOURCES
++  Instrumentation/InstrumentationProfiler.cpp
++  Instrumentation/Metadata.cpp
+ )
++
++if(PROTON_BUILD_CUDA)
++  list(APPEND PROTON_PROFILER_SOURCES
++    Cupti/CuptiPCSampling.cpp
++    Cupti/CuptiProfiler.cpp
++    Instrumentation/CudaRuntime.cpp
++  )
++endif()
++
++if(PROTON_BUILD_HIP)
++  list(APPEND PROTON_PROFILER_SOURCES
++    RocTracer/RoctracerProfiler.cpp
++    Instrumentation/HipRuntime.cpp
++  )
++endif()
++
++if(PROTON_BUILD_MSPTI)
++  list(APPEND PROTON_PROFILER_SOURCES Mspti/MsptiProfiler.cpp)
++endif()
++
++if(PROTON_BUILD_CANN)
++  list(APPEND PROTON_PROFILER_SOURCES Instrumentation/AscendRuntime.cpp)
++endif()
++
++add_proton_library(ProtonProfiler ${PROTON_PROFILER_SOURCES})
+diff --git a/third_party/proton/csrc/lib/Profiler/Instrumentation/AscendRuntime.cpp b/third_party/proton/csrc/lib/Profiler/Instrumentation/AscendRuntime.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..70f1dc719d0253d28d5fb055d75412ba415c6f2b
+--- /dev/null
++++ b/third_party/proton/csrc/lib/Profiler/Instrumentation/AscendRuntime.cpp
+@@ -0,0 +1,119 @@
++#include "Profiler/Instrumentation/AscendRuntime.h"
++#include "Driver/Dispatch.h"
++
++#include <acl/acl.h>
++#include <acl/acl_rt.h>
++#include <algorithm>
++#include <stdexcept>
++
++namespace proton {
++
++namespace {
++struct ExternLibAcl : public ExternLibBase {
++  using RetType = aclError;
++  static constexpr const char *name = "libascendcl.so";
++  static constexpr RetType success = ACL_ERROR_NONE;
++  static inline void *lib = nullptr;
++};
++} // namespace
++
++void AscendRuntime::allocateHostBuffer(uint8_t **buffer, size_t size) {
++  static decltype(&aclrtMallocHost) mallocHost = nullptr;
++  aclError ret = Dispatch<ExternLibAcl>::exec<false>(
++      mallocHost, "aclrtMallocHost", reinterpret_cast<void **>(buffer), size);
++  if (ret != ACL_ERROR_NONE) {
++    throw std::runtime_error("Failed to allocate host buffer: " +
++                             std::to_string(ret));
++  }
++}
++
++void AscendRuntime::freeHostBuffer(uint8_t *buffer) {
++  static decltype(&aclrtFreeHost) freeHost = nullptr;
++  aclError ret =
++      Dispatch<ExternLibAcl>::exec<false>(freeHost, "aclrtFreeHost", buffer);
++  if (ret != ACL_ERROR_NONE) {
++    throw std::runtime_error("Failed to free host buffer: " +
++                             std::to_string(ret));
++  }
++}
++
++uint64_t AscendRuntime::getDevice() {
++  static decltype(&aclrtGetDevice) getDevice = nullptr;
++  int32_t deviceId;
++  aclError ret = Dispatch<ExternLibAcl>::exec<false>(
++      getDevice, "aclrtGetDevice", &deviceId);
++  if (ret != ACL_ERROR_NONE) {
++    throw std::runtime_error("Failed to get device: " + std::to_string(ret));
++  }
++  return static_cast<uint64_t>(deviceId);
++}
++
++void *AscendRuntime::getPriorityStream() {
++  static decltype(&aclrtCreateStreamWithConfig) createStream = nullptr;
++  aclrtStream stream;
++  aclError ret = Dispatch<ExternLibAcl>::exec<false>(
++      createStream, "aclrtCreateStreamWithConfig", &stream, 0,
++      ACL_STREAM_FAST_LAUNCH);
++  if (ret != ACL_ERROR_NONE) {
++    throw std::runtime_error("Failed to create stream: " + std::to_string(ret));
++  }
++  return reinterpret_cast<void *>(stream);
++}
++
++void AscendRuntime::synchronizeStream(void *stream) {
++  static decltype(&aclrtSynchronizeStream) synchronizeStream = nullptr;
++  aclError ret = Dispatch<ExternLibAcl>::exec<false>(
++      synchronizeStream, "aclrtSynchronizeStream",
++      reinterpret_cast<aclrtStream>(stream));
++  if (ret != ACL_ERROR_NONE) {
++    throw std::runtime_error("Failed to synchronize stream: " +
++                             std::to_string(ret));
++  }
++}
++
++std::optional<int64_t> AscendRuntime::getTimeShiftCost() const {
++  // Uncalibrated subtraction can invert short and nested scope intervals.
++  // Keep raw timestamps until a device-specific calibration is validated.
++  return 0;
++}
++
++void AscendRuntime::processHostBuffer(
++    uint8_t *hostBuffer, size_t hostBufferSize, uint8_t *deviceBuffer,
++    size_t deviceBufferSize, void *stream,
++    std::function<void(uint8_t *, size_t)> callback) {
++  static decltype(&aclrtMemcpyAsync) memcpyAsync = nullptr;
++  static decltype(&aclrtSynchronizeStream) synchronizeStream = nullptr;
++  int64_t chunkSize = std::min(hostBufferSize, deviceBufferSize);
++  int64_t sizeLeftOnDevice = deviceBufferSize;
++
++  while (chunkSize > 0) {
++    aclError ret = Dispatch<ExternLibAcl>::exec<false>(
++        memcpyAsync, "aclrtMemcpyAsync", reinterpret_cast<void *>(hostBuffer),
++        chunkSize, reinterpret_cast<void *>(deviceBuffer), chunkSize,
++        ACL_MEMCPY_DEVICE_TO_HOST, reinterpret_cast<aclrtStream>(stream));
++
++    if (ret != ACL_ERROR_NONE) {
++      throw std::runtime_error("Failed to copy memory from device to host: " +
++                               std::to_string(ret));
++    }
++
++    // For simplicity, only copy the buffer after the kernel has finished.
++    ret = Dispatch<ExternLibAcl>::exec<false>(
++        synchronizeStream, "aclrtSynchronizeStream",
++        reinterpret_cast<aclrtStream>(stream));
++    if (ret != ACL_ERROR_NONE) {
++      throw std::runtime_error(
++          "Failed to synchronize stream during buffer processing: " +
++          std::to_string(ret));
++    }
++
++    callback(hostBuffer, chunkSize);
++
++    sizeLeftOnDevice -= chunkSize;
++    deviceBuffer += chunkSize;
++    chunkSize =
++        std::min(static_cast<int64_t>(hostBufferSize), sizeLeftOnDevice);
++  }
++}
++
++} // namespace proton
+diff --git a/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp b/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp
+index aa0868fe8fc3a119c528cbcba5d7e9a37ccd36aa..ff47b9472a40b17b37ec6ea48fd43ffa358e2d3f 100644
+--- a/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp
++++ b/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp
+@@ -1,9 +1,16 @@
+ #include "Profiler/Instrumentation/InstrumentationProfiler.h"
+ #include "TraceDataIO/CircularLayoutParser.h"
+ 
++#ifdef PROTON_BUILD_CUDA
+ #include "Driver/GPU/CudaApi.h"
+ #include "Profiler/Instrumentation/CudaRuntime.h"
++#endif
++#ifdef PROTON_BUILD_HIP
+ #include "Profiler/Instrumentation/HipRuntime.h"
++#endif
++#ifdef PROTON_BUILD_CANN
++#include "Profiler/Instrumentation/AscendRuntime.h"
++#endif
+ #include "Utility/Numeric.h"
+ #include "Utility/String.h"
+ #include <algorithm>
+@@ -13,6 +20,7 @@
+ #include <queue>
+ #include <set>
+ #include <stdexcept>
++#include <string>
+ 
+ namespace proton {
+ 
+@@ -24,6 +32,38 @@ thread_local std::map<Data *, size_t> InstrumentationProfiler::dataScopeIdMap =
+ 
+ InstrumentationProfiler::~InstrumentationProfiler() {}
+ 
++void InstrumentationProfiler::recordInstrumentationEvents(
++    uint64_t functionId, const std::vector<std::array<uint64_t, 6>> &records) {
++  if (!runtime || runtime->getDeviceType() != DeviceType::NPU)
++    throw std::runtime_error(
++        "Instrumentation events require an active NPU instrumentation session");
++  auto &contexts = functionScopeIdContexts.at(functionId);
++  for (const auto &r : records) {
++    if (r[0] < 11 || r[0] > 28 || r[1] > 10 || r[4] < r[3] || r[5] == 0 ||
++        !contexts.count(r[2]))
++      throw std::runtime_error("Invalid instrumentation scope event");
++  }
++  auto device = runtime->getDevice();
++  const auto &name = functionNames.at(functionId);
++  for (auto *data : getDataSet()) {
++    auto kernelId = Scope::getNewScopeId();
++    data->addOp(kernelId, name);
++    for (const auto &r : records) {
++      auto scopeId = data->addOp(kernelId, contexts.at(r[2]));
++      auto duration = r[4] - r[3];
++      data->addMetric(scopeId,
++                      std::make_shared<CycleMetric>(
++                          r[3], r[4], duration, static_cast<double>(duration),
++                          kernelId,
++                          name + " [instrumentation capture " +
++                              std::to_string(kernelId) + "]",
++                          r[0], (r[0] - 11) / 3, r[1], device,
++                          static_cast<uint64_t>(runtime->getDeviceType()), 0, 0,
++                          0, 0, static_cast<double>(r[5]), true));
++    }
++  }
++}
++
+ void InstrumentationProfiler::doStart() {
+   // Start the instrumentation profiler.
+ }
+@@ -56,10 +96,25 @@ void InstrumentationProfiler::doSetMode(
+   }
+   if (proton::toLower(modeAndOptions[0]) ==
+       proton::toLower(DeviceTraits<DeviceType::CUDA>::name)) {
++#ifdef PROTON_BUILD_CUDA
+     runtime = std::make_unique<CudaRuntime>();
++#else
++    throw std::runtime_error("CUDA instrumentation support is not built");
++#endif
+   } else if (proton::toLower(modeAndOptions[0]) ==
+              proton::toLower(DeviceTraits<DeviceType::HIP>::name)) {
++#ifdef PROTON_BUILD_HIP
+     runtime = std::make_unique<HipRuntime>();
++#else
++    throw std::runtime_error("HIP instrumentation support is not built");
++#endif
++  } else if (proton::toLower(modeAndOptions[0]) == "npu" ||
++             proton::toLower(modeAndOptions[0]) == "ascend") {
++#ifdef PROTON_BUILD_CANN
++    runtime = std::make_unique<AscendRuntime>();
++#else
++    throw std::runtime_error("NPU instrumentation support is not built");
++#endif
+   } else {
+     throw std::runtime_error("Unknown device type: " + modeAndOptions[0]);
+   }
+@@ -106,13 +161,14 @@ InstrumentationProfiler::getParserConfig(uint64_t functionId,
+   // Only support circular layout parser for now, but we will extend the support
+   // to other parsers in the future
+   auto config = std::make_shared<CircularLayoutParserConfig>();
++  config->errorPolicy = runtime->getParserErrorPolicy();
+   config->scratchMemSize =
+       functionMetadata.at(functionId).getScratchMemorySize();
+   if (!(modeOptions.count("granularity") == 0 ||
+         modeOptions.at("granularity") == "GRANULARITY.WARP")) {
+     throw std::runtime_error("Only warp granularity is supported for now");
+   }
+-  config->totalUnits = functionMetadata.at(functionId).getNumWarps();
++  config->totalUnits = functionMetadata.at(functionId).getNumUnits();
+   config->numBlocks = bufferSize / config->scratchMemSize;
+   config->uidVec = getUnitIdVector(modeOptions, config->totalUnits);
+ 
+@@ -137,6 +193,18 @@ void InstrumentationProfiler::initFunctionMetadata(
+     const std::vector<std::pair<size_t, size_t>> &scopeIdParentPairs,
+     const std::string &metadataPath) {
+   if (functionScopeIdNames.count(functionId)) {
++    if (runtime->allowRepeatedFunctionMetadata() &&
++        functionNames.at(functionId) == functionName &&
++        scopeIdPairs.size() == functionScopeIdNames.at(functionId).size() &&
++        functionScopeIdNames.at(functionId) ==
++            std::map<size_t, std::string>(scopeIdPairs.begin(),
++                                          scopeIdPairs.end()) &&
++        functionScopeIdParents.at(functionId) ==
++            std::map<size_t, size_t>(scopeIdParentPairs.begin(),
++                                     scopeIdParentPairs.end()) &&
++        functionMetadata.at(functionId) ==
++            InstrumentationMetadata(metadataPath))
++      return;
+     throw std::runtime_error(
+         "Duplicate function id: " + std::to_string(functionId) +
+         " for function " + functionName);
+@@ -159,6 +227,7 @@ void InstrumentationProfiler::initFunctionMetadata(
+     auto parentId = pair.second;
+     scopeIdParentMap[scopeId] = parentId;
+   }
++  functionScopeIdParents[functionId] = scopeIdParentMap;
+   for (auto &[scopeId, name] : functionScopeIdNames[functionId]) {
+     std::vector<Context> contexts = {name};
+     auto currentId = scopeId;
+@@ -224,46 +293,50 @@ void InstrumentationProfiler::exitInstrumentedOp(uint64_t streamId,
+   }
+ 
+   int64_t timeShiftCost = 0;
+-  if (modeOptions.count("optimizations")) {
++  if (auto runtimeCost = runtime->getTimeShiftCost()) {
++    timeShiftCost = *runtimeCost;
++  } else if (modeOptions.count("optimizations")) {
+     auto optimizations = proton::split(modeOptions.at("optimizations"), ",");
+     if (std::find(optimizations.begin(), optimizations.end(), "time_shift") !=
+         optimizations.end())
+-      timeShiftCost = getTimeShiftCost(*circularLayoutConfig);
++      timeShiftCost = proton::getTimeShiftCost(*circularLayoutConfig);
+   }
+   auto &scopeIdContexts = functionScopeIdContexts[functionId];
+ 
+-  runtime->synchronizeStream(reinterpret_cast<void *>(streamId));
+-  runtime->processHostBuffer(
+-      hostBuffer, size, buffer, size, priorityStream,
+-      [&](uint8_t *bufferPtr, size_t size) {
+-        ByteSpan byteSpan(bufferPtr, size);
+-        CircularLayoutParser parser(byteSpan, *circularLayoutConfig);
+-        parser.parse();
+-        for (auto &blockTrace : parser.getResult()->blockTraces) {
+-          for (auto &trace : blockTrace.traces) {
+-            for (auto &event : trace.profileEvents) {
+-              auto &contexts = scopeIdContexts[event.first->scopeId];
+-              auto duration = event.second->cycle - event.first->cycle;
+-              auto normalizedDuration = static_cast<double>(duration) /
+-                                        (circularLayoutConfig->totalUnits *
+-                                         circularLayoutConfig->numBlocks);
+-              for (auto *data : dataSet) {
+-                auto kernelId = dataScopeIdMap[data];
+-                auto scopeId = data->addOp(kernelId, contexts);
+-                data->addMetric(
+-                    scopeId,
+-                    std::make_shared<CycleMetric>(
+-                        event.first->cycle, event.second->cycle, duration,
+-                        normalizedDuration, kernelId, functionName,
+-                        blockTrace.blockId, blockTrace.procId, trace.uid,
+-                        device, static_cast<uint64_t>(runtime->getDeviceType()),
+-                        timeShiftCost, blockTrace.initTime,
+-                        blockTrace.preFinalTime, blockTrace.postFinalTime));
+-              }
+-            }
++  auto parseBuffer = [&](uint8_t *bufferPtr, size_t bufferSize) {
++    ByteSpan byteSpan(bufferPtr, bufferSize);
++    CircularLayoutParser parser(byteSpan, *circularLayoutConfig);
++    parser.parse();
++    for (auto &blockTrace : parser.getResult()->blockTraces) {
++      for (auto &trace : blockTrace.traces) {
++        for (auto &event : trace.profileEvents) {
++          auto &contexts = scopeIdContexts[event.first->scopeId];
++          auto duration = event.second->cycle - event.first->cycle;
++          auto normalizedDuration = static_cast<double>(duration) /
++                                    (circularLayoutConfig->totalUnits *
++                                     circularLayoutConfig->numBlocks);
++          for (auto *data : dataSet) {
++            auto kernelId = dataScopeIdMap[data];
++            auto scopeId = data->addOp(kernelId, contexts);
++            data->addMetric(
++                scopeId,
++                std::make_shared<CycleMetric>(
++                    event.first->cycle, event.second->cycle, duration,
++                    normalizedDuration, kernelId, functionName,
++                    blockTrace.blockId, blockTrace.procId, trace.uid, device,
++                    static_cast<uint64_t>(runtime->getDeviceType()),
++                    timeShiftCost, blockTrace.initTime, blockTrace.preFinalTime,
++                    blockTrace.postFinalTime,
++                    runtime->getCycleCounterFreqMhz()));
+           }
+         }
+-      });
++      }
++    }
++  };
++
++  runtime->synchronizeStream(reinterpret_cast<void *>(streamId));
++  runtime->processHostBuffer(hostBuffer, size, buffer, size, priorityStream,
++                             parseBuffer);
+ 
+   dataScopeIdMap.clear();
+ }
+diff --git a/third_party/proton/csrc/lib/Profiler/Instrumentation/Metadata.cpp b/third_party/proton/csrc/lib/Profiler/Instrumentation/Metadata.cpp
+index 0bf9147b2cfb0ab2c6b157e0fa0c7579b3fb130b..67779b6a3d8807c2a44ea31fea81f76a89bc2cc6 100644
+--- a/third_party/proton/csrc/lib/Profiler/Instrumentation/Metadata.cpp
++++ b/third_party/proton/csrc/lib/Profiler/Instrumentation/Metadata.cpp
+@@ -23,6 +23,11 @@ void InstrumentationMetadata::parse() {
+   if (metadataJson.contains("num_warps")) {
+     numWarps = metadataJson["num_warps"].get<size_t>();
+   }
++
++  numUnits = numWarps;
++  if (metadataJson.contains("profile_num_units")) {
++    numUnits = metadataJson["profile_num_units"].get<size_t>();
++  }
+ }
+ 
+ } // namespace proton
+diff --git a/third_party/proton/csrc/lib/Profiler/Mspti/MsptiProfiler.cpp b/third_party/proton/csrc/lib/Profiler/Mspti/MsptiProfiler.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..959227f5f7061cd4f34dda66186c208bcaadff24
+--- /dev/null
++++ b/third_party/proton/csrc/lib/Profiler/Mspti/MsptiProfiler.cpp
+@@ -0,0 +1,359 @@
++#include "Profiler/Mspti/MsptiProfiler.h"
++#include "Context/Context.h"
++#include "Data/Metric.h"
++#include "Device.h"
++#include "Driver/GPU/MsptiApi.h"
++
++#include <atomic>
++#include <cstdlib>
++#include <deque>
++#include <memory>
++#include <mutex>
++#include <stdexcept>
++#include <string>
++#include <thread>
++#include <utility>
++#include <vector>
++
++namespace proton {
++
++template <>
++thread_local GPUProfiler<MsptiProfiler>::ThreadState
++    GPUProfiler<MsptiProfiler>::threadState(MsptiProfiler::instance());
++
++template <>
++thread_local std::deque<size_t>
++    GPUProfiler<MsptiProfiler>::Correlation::externIdQueue{};
++
++namespace {
++
++thread_local std::vector<bool> callbackOwnsOp;
++thread_local bool callbackCreatingOp = false;
++// Triton launch hooks and MSPTI runtime callbacks can run on different
++// threads. Preserve launch order so callbacks can reuse hook-created ops.
++std::deque<uint64_t> pendingExternalIds;
++std::mutex pendingExternalIdsMutex;
++std::atomic<size_t> pendingKernelActivities{0};
++std::mutex activeStatesMutex;
++std::map<std::thread::id, Context> activeStates;
++
++std::optional<Context> getActiveState() {
++  std::lock_guard<std::mutex> lock(activeStatesMutex);
++  if (activeStates.empty())
++    return std::nullopt;
++  const auto &state = activeStates.begin()->second;
++  for (const auto &entry : activeStates) {
++    if (entry.second != state)
++      return std::nullopt;
++  }
++  return state;
++}
++
++class ScopedCallbackState {
++public:
++  ScopedCallbackState() : previousState(ContextSource::getThreadState()) {
++    if (previousState.has_value())
++      return;
++    auto activeState = getActiveState();
++    if (!activeState.has_value())
++      return;
++    ContextSource::setThreadState(std::move(activeState));
++    installedState = true;
++  }
++
++  ~ScopedCallbackState() {
++    if (installedState)
++      ContextSource::setThreadState(std::move(previousState));
++  }
++
++private:
++  std::optional<Context> previousState;
++  bool installedState{false};
++};
++
++std::shared_ptr<Metric>
++convertActivityToMetric(const msptiActivityKernel *kernel) {
++  if (kernel->start == 0 && kernel->end == 0)
++    return nullptr;
++  if (kernel->start >= kernel->end)
++    return nullptr;
++  return std::make_shared<KernelMetric>(
++      static_cast<uint64_t>(kernel->start), static_cast<uint64_t>(kernel->end),
++      /*invocations=*/1, static_cast<uint64_t>(kernel->ds.deviceId),
++      static_cast<uint64_t>(DeviceType::NPU),
++      static_cast<uint64_t>(kernel->ds.streamId));
++}
++
++void processActivityKernel(MsptiProfiler::CorrIdToExternIdMap &corrIdToExternId,
++                           MsptiProfiler::ApiExternIdSet &apiExternIds,
++                           std::set<Data *> &dataSet,
++                           const msptiActivityKernel *kernel,
++                           const std::string &activityKernelName,
++                           uint64_t &outMaxCorrId) {
++
++  auto corrId = kernel->correlationId;
++  if (corrId > outMaxCorrId)
++    outMaxCorrId = corrId;
++
++  if (!corrIdToExternId.contain(corrId))
++    return;
++
++  auto [parentId, numInstances] = corrIdToExternId.at(corrId);
++  const auto isApiOp = apiExternIds.contain(parentId);
++  const std::string apiKernelName =
++      activityKernelName.empty() ? "kernel" : activityKernelName;
++
++  for (auto *data : dataSet) {
++    auto metric = convertActivityToMetric(kernel);
++    if (!metric)
++      continue;
++    auto scopeId = parentId;
++    if (isApiOp)
++      scopeId = data->addOp(parentId, apiKernelName);
++    data->addMetric(scopeId, metric);
++  }
++
++  apiExternIds.erase(parentId);
++  --numInstances;
++  if (numInstances == 0)
++    corrIdToExternId.erase(corrId);
++  else
++    corrIdToExternId[corrId].second = numInstances;
++
++  auto pending = pendingKernelActivities.load(std::memory_order_relaxed);
++  while (pending != 0 && !pendingKernelActivities.compare_exchange_weak(
++                             pending, pending - 1, std::memory_order_relaxed)) {
++  }
++}
++
++bool isDriverAPILaunch(msptiCallbackId cbId) {
++  return cbId == MSPTI_CBID_RUNTIME_LAUNCH ||
++         cbId == MSPTI_CBID_RUNTIME_AICPU_LAUNCH ||
++         cbId == MSPTI_CBID_RUNTIME_AIV_LAUNCH ||
++         cbId == MSPTI_CBID_RUNTIME_FFTS_LAUNCH ||
++         cbId == MSPTI_CBID_RUNTIME_CPU_LAUNCH;
++}
++
++void setRuntimeCallbacks(msptiSubscriberHandle subscriber, bool enable) {
++#define CALLBACK_ENABLE(id)                                                    \
++  mspti::enableCallback<true>(static_cast<uint32_t>(enable), subscriber,       \
++                              MSPTI_CB_DOMAIN_RUNTIME, (id))
++
++  CALLBACK_ENABLE(MSPTI_CBID_RUNTIME_LAUNCH);
++  CALLBACK_ENABLE(MSPTI_CBID_RUNTIME_AICPU_LAUNCH);
++  CALLBACK_ENABLE(MSPTI_CBID_RUNTIME_AIV_LAUNCH);
++  CALLBACK_ENABLE(MSPTI_CBID_RUNTIME_FFTS_LAUNCH);
++  CALLBACK_ENABLE(MSPTI_CBID_RUNTIME_CPU_LAUNCH);
++#undef CALLBACK_ENABLE
++}
++
++} // namespace
++
++struct MsptiProfiler::MsptiProfilerPimpl
++    : public GPUProfiler<MsptiProfiler>::GPUProfilerPimplInterface {
++
++  MsptiProfilerPimpl(MsptiProfiler &profiler)
++      : GPUProfiler<MsptiProfiler>::GPUProfilerPimplInterface(profiler) {}
++  virtual ~MsptiProfilerPimpl() = default;
++
++  void doStart() override;
++  void doFlush() override;
++  void doStop() override;
++
++  static void allocBuffer(uint8_t **buffer, size_t *bufferSize,
++                          size_t *maxNumRecords);
++  static void completeBuffer(uint8_t *buffer, size_t size, size_t validSize);
++  static void callbackFn(void *userData, msptiCallbackDomain domain,
++                         msptiCallbackId cbId, const msptiCallbackData *cbData);
++
++  static constexpr size_t BufferSize = 64 * 1024 * 1024;
++
++  msptiSubscriberHandle subscriber{};
++};
++
++void MsptiProfiler::MsptiProfilerPimpl::allocBuffer(uint8_t **buffer,
++                                                    size_t *bufferSize,
++                                                    size_t *maxNumRecords) {
++  *buffer = static_cast<uint8_t *>(std::malloc(BufferSize));
++  if (!*buffer)
++    throw std::runtime_error("[proton/mspti] allocBuffer: malloc failed");
++  *bufferSize = BufferSize;
++  *maxNumRecords = 0;
++}
++
++void MsptiProfiler::MsptiProfilerPimpl::completeBuffer(uint8_t *buffer,
++                                                       size_t /*size*/,
++                                                       size_t validSize) {
++  MsptiProfiler &profiler = threadState.profiler;
++  auto &dataSet = profiler.dataSet;
++  if (validSize == 0 || buffer == nullptr) {
++    std::free(buffer);
++    return;
++  }
++
++  uint64_t maxCorrId = 0;
++  msptiActivity *record = nullptr;
++  std::vector<msptiActivityKernel> kernelRecords;
++  std::vector<std::string> kernelNames;
++  do {
++    auto status =
++        mspti::activityGetNextRecord<false>(buffer, validSize, &record);
++    if (status == MSPTI_SUCCESS) {
++      if (record->kind == MSPTI_ACTIVITY_KIND_KERNEL) {
++        auto *kernel = reinterpret_cast<const msptiActivityKernel *>(record);
++        kernelRecords.push_back(*kernel);
++        // The name pointer is only stable while MSPTI owns the current record.
++        kernelNames.emplace_back(kernel->name == nullptr ? "" : kernel->name);
++      } else if (record->kind == MSPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION) {
++        auto *external =
++            reinterpret_cast<const msptiActivityExternalCorrelation *>(record);
++        if (external->externalKind == MSPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0) {
++          profiler.correlation.corrIdToExternId[external->correlationId] = {
++              static_cast<size_t>(external->externalId), 1};
++        }
++      }
++    } else if (status == MSPTI_ERROR_MAX_LIMIT_REACHED) {
++      break;
++    } else {
++      throw std::runtime_error("mspti::activityGetNextRecord failed");
++    }
++  } while (true);
++
++  // MSPTI does not guarantee that external-correlation records precede kernel
++  // records in a completed buffer. Build all mappings before consuming kernels.
++  for (size_t index = 0; index < kernelRecords.size(); ++index) {
++    processActivityKernel(profiler.correlation.corrIdToExternId,
++                          profiler.correlation.apiExternIds, dataSet,
++                          &kernelRecords[index], kernelNames[index], maxCorrId);
++  }
++
++  std::free(buffer);
++  profiler.correlation.complete(maxCorrId);
++}
++
++void MsptiProfiler::MsptiProfilerPimpl::callbackFn(
++    void * /*userData*/, msptiCallbackDomain domain, msptiCallbackId cbId,
++    const msptiCallbackData *cbData) {
++  if (domain != MSPTI_CB_DOMAIN_RUNTIME)
++    return;
++  if (!isDriverAPILaunch(cbId))
++    return;
++
++  if (cbData->callbackSite == MSPTI_API_ENTER) {
++    uint64_t externalId = Scope::DummyScopeId;
++    bool hasHookOp = false;
++    {
++      std::lock_guard<std::mutex> lock(pendingExternalIdsMutex);
++      if (!pendingExternalIds.empty()) {
++        externalId = pendingExternalIds.front();
++        pendingExternalIds.pop_front();
++        hasHookOp = true;
++      }
++    }
++
++    bool ownsOp = false;
++    if (!hasHookOp) {
++      ScopedCallbackState callbackState;
++      callbackCreatingOp = true;
++      threadState.enterOp();
++      callbackCreatingOp = false;
++      externalId = threadState.opId;
++      ownsOp = true;
++    }
++    mspti::activityPushExternalCorrelationId<true>(
++        MSPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, externalId);
++    callbackOwnsOp.push_back(ownsOp);
++    pendingKernelActivities.fetch_add(1, std::memory_order_relaxed);
++  } else if (cbData->callbackSite == MSPTI_API_EXIT) {
++    if (!callbackOwnsOp.empty()) {
++      uint64_t externalId = 0;
++      mspti::activityPopExternalCorrelationId<true>(
++          MSPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, &externalId);
++      if (callbackOwnsOp.back())
++        threadState.exitOp();
++      callbackOwnsOp.pop_back();
++    }
++  }
++}
++
++void MsptiProfiler::MsptiProfilerPimpl::doStart() {
++  {
++    std::lock_guard<std::mutex> lock(pendingExternalIdsMutex);
++    pendingExternalIds.clear();
++  }
++  profiler.correlation.corrIdToExternId.clear();
++  profiler.correlation.apiExternIds.clear();
++  pendingKernelActivities.store(0, std::memory_order_relaxed);
++  mspti::subscribe<true>(&subscriber, callbackFn, nullptr);
++  mspti::activityRegisterCallbacks<true>(allocBuffer, completeBuffer);
++  mspti::activityEnable<true>(MSPTI_ACTIVITY_KIND_KERNEL);
++  mspti::activityEnable<true>(MSPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION);
++  setRuntimeCallbacks(subscriber, /*enable=*/true);
++}
++
++void MsptiProfiler::MsptiProfilerPimpl::doFlush() {
++  mspti::activityFlushAll<true>(/*flag=*/0);
++  if (pendingKernelActivities.load(std::memory_order_relaxed) != 0) {
++    // MSPTI 26.1 flushes its host ActivityBuffer but does not flush the
++    // device profiling channel. Cycling only KERNEL forces those SOC records
++    // through KernelParser while the Proton Data objects are still registered.
++    mspti::activityDisable<true>(MSPTI_ACTIVITY_KIND_KERNEL);
++    mspti::activityFlushAll<true>(/*flag=*/0);
++    mspti::activityEnable<true>(MSPTI_ACTIVITY_KIND_KERNEL);
++  }
++  mspti::activityFlushAll<true>(/*flag=*/1);
++}
++
++void MsptiProfiler::MsptiProfilerPimpl::doStop() {
++  mspti::activityDisable<true>(MSPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION);
++  mspti::activityDisable<true>(MSPTI_ACTIVITY_KIND_KERNEL);
++  setRuntimeCallbacks(subscriber, /*enable=*/false);
++  mspti::unsubscribe<true>(subscriber);
++  subscriber = nullptr;
++  {
++    std::lock_guard<std::mutex> lock(activeStatesMutex);
++    activeStates.clear();
++  }
++  profiler.correlation.corrIdToExternId.clear();
++  profiler.correlation.apiExternIds.clear();
++  pendingKernelActivities.store(0, std::memory_order_relaxed);
++  std::lock_guard<std::mutex> lock(pendingExternalIdsMutex);
++  pendingExternalIds.clear();
++}
++
++MsptiProfiler::MsptiProfiler() {
++  pImpl = std::make_unique<MsptiProfilerPimpl>(*this);
++}
++
++MsptiProfiler::~MsptiProfiler() = default;
++
++void MsptiProfiler::setState(std::optional<Context> state) {
++  std::lock_guard<std::mutex> lock(activeStatesMutex);
++  const auto threadId = std::this_thread::get_id();
++  if (state)
++    activeStates[threadId] = std::move(*state);
++  else
++    activeStates.erase(threadId);
++}
++
++void MsptiProfiler::startOp(const Scope &scope) {
++  GPUProfiler<MsptiProfiler>::startOp(scope);
++  if (callbackCreatingOp)
++    return;
++  std::lock_guard<std::mutex> lock(pendingExternalIdsMutex);
++  pendingExternalIds.push_back(static_cast<uint64_t>(scope.scopeId));
++}
++
++void MsptiProfiler::stopOp(const Scope &scope) {
++  GPUProfiler<MsptiProfiler>::stopOp(scope);
++}
++
++void MsptiProfiler::doSetMode(const std::vector<std::string> &modeAndOptions) {
++  auto mode = modeAndOptions[0];
++  if (!mode.empty()) {
++    throw std::invalid_argument("[PROTON] MsptiProfiler: unsupported mode: " +
++                                mode);
++  }
++}
++
++} // namespace proton
+diff --git a/third_party/proton/csrc/lib/Session/Session.cpp b/third_party/proton/csrc/lib/Session/Session.cpp
+index f26ea57c0f601cb7b961768d06c05c14a5a9f06b..d7c4168bbe3995875b2fd1695f4541600c556fc9 100644
+--- a/third_party/proton/csrc/lib/Session/Session.cpp
++++ b/third_party/proton/csrc/lib/Session/Session.cpp
+@@ -3,9 +3,16 @@
+ #include "Context/Shadow.h"
+ #include "Data/TraceData.h"
+ #include "Data/TreeData.h"
++#ifdef PROTON_BUILD_CUDA
+ #include "Profiler/Cupti/CuptiProfiler.h"
++#endif
+ #include "Profiler/Instrumentation/InstrumentationProfiler.h"
++#ifdef PROTON_BUILD_MSPTI
++#include "Profiler/Mspti/MsptiProfiler.h"
++#endif
++#ifdef PROTON_BUILD_HIP
+ #include "Profiler/Roctracer/RoctracerProfiler.h"
++#endif
+ #include "Utility/String.h"
+ 
+ namespace proton {
+@@ -13,13 +20,24 @@ namespace proton {
+ namespace {
+ 
+ Profiler *makeProfiler(const std::string &name) {
++#ifdef PROTON_BUILD_CUDA
+   if (proton::toLower(name) == "cupti") {
+     return &CuptiProfiler::instance();
+-  } else if (proton::toLower(name) == "roctracer") {
++  }
++#endif
++#ifdef PROTON_BUILD_HIP
++  if (proton::toLower(name) == "roctracer") {
+     return &RoctracerProfiler::instance();
+-  } else if (proton::toLower(name) == "instrumentation") {
++  }
++#endif
++  if (proton::toLower(name) == "instrumentation") {
+     return &InstrumentationProfiler::instance();
+   }
++#ifdef PROTON_BUILD_MSPTI
++  if (proton::toLower(name) == "mspti") {
++    return &MsptiProfiler::instance();
++  }
++#endif
+   throw std::runtime_error("Unknown profiler: " + name);
+ }
+ 
+@@ -135,6 +153,9 @@ void SessionManager::activateSessionImpl(size_t sessionId) {
+   registerInterface<InstrumentationInterface>(sessionId,
+                                               instrumentationInterfaceCounts);
+   registerInterface<ContextSource>(sessionId, contextSourceCounts);
++  registerInterface<StateInterface>(sessionId, stateInterfaceCounts);
++  for (auto *interface : sessions[sessionId]->getInterfaces<StateInterface>())
++    interface->setState(ContextSource::getThreadState());
+ }
+ 
+ void SessionManager::deActivateSessionImpl(size_t sessionId) {
+@@ -149,6 +170,7 @@ void SessionManager::deActivateSessionImpl(size_t sessionId) {
+   unregisterInterface<InstrumentationInterface>(sessionId,
+                                                 instrumentationInterfaceCounts);
+   unregisterInterface<ContextSource>(sessionId, contextSourceCounts);
++  unregisterInterface<StateInterface>(sessionId, stateInterfaceCounts);
+ }
+ 
+ void SessionManager::removeSession(size_t sessionId) {
+@@ -286,6 +308,8 @@ void SessionManager::setState(std::optional<Context> context) {
+       contextSource->setState(context);
+     }
+   }
++  executeInterface(stateInterfaceCounts,
++                   [&](auto *interface) { interface->setState(context); });
+ }
+ 
+ size_t SessionManager::getContextDepth(size_t sessionId) {
+diff --git a/third_party/proton/proton/hooks/__init__.py b/third_party/proton/proton/hooks/__init__.py
+index 5ba3ff539527cd54e488828e92db7c4f7aaed882..830c71e20e412ee0efafee2093d6643635e50d62 100644
+--- a/third_party/proton/proton/hooks/__init__.py
++++ b/third_party/proton/proton/hooks/__init__.py
+@@ -1,4 +1,4 @@
+ # ruff: noqa
+-from .hook import HookManager
++from .hook import HookManager, MsptiCorrelationHook
+ from .instrumentation import InstrumentationHook
+ from .launch import LaunchHook
+diff --git a/third_party/proton/proton/hooks/hook.py b/third_party/proton/proton/hooks/hook.py
+index a672722a1279f68cf80d5fde3d0b654100611d7a..c59e4d63797650f49f014f34f1c7921c1940e30c 100644
+--- a/third_party/proton/proton/hooks/hook.py
++++ b/third_party/proton/proton/hooks/hook.py
+@@ -1,8 +1,12 @@
+ from triton.compiler import LazyDict
+ from abc import abstractmethod
++from contextvars import ContextVar
+ from typing import Dict, Any, Optional
+ from collections import defaultdict
+ import triton.knobs as knobs
++from triton._C.libproton import proton as libproton
++
++_mspti_correlation_op = ContextVar("mspti_correlation_op", default=None)
+ 
+ 
+ class Hook:
+@@ -30,6 +34,42 @@ class Hook:
+         raise NotImplementedError
+ 
+ 
++class MsptiCorrelationHook(Hook):
++    """Capture the Triton launch context without evaluating launch metadata."""
++
++    priority = 100
++    _instance = None
++
++    def __new__(cls):
++        if cls._instance is None:
++            cls._instance = super().__new__(cls)
++        return cls._instance
++
++    def init_handle(self, module, function, name, metadata_group, hash):
++        pass
++
++    def activate(self):
++        pass
++
++    def deactivate(self):
++        pass
++
++    def enter(self, metadata: LazyDict) -> None:
++        kernel_name = metadata.data.get("name")
++        if not kernel_name:
++            return
++        scope_id = libproton.record_scope()
++        libproton.enter_op(scope_id, kernel_name)
++        _mspti_correlation_op.set((scope_id, kernel_name))
++
++    def exit(self, metadata: LazyDict) -> None:
++        op = _mspti_correlation_op.get()
++        if op is None:
++            return
++        libproton.exit_op(*op)
++        _mspti_correlation_op.set(None)
++
++
+ class HookManager:
+     # active hooks
+     active_hooks: list[Hook] = []
+diff --git a/third_party/proton/proton/hooks/instrumentation.py b/third_party/proton/proton/hooks/instrumentation.py
+index aac27ad1887339d44c3d16e47ce48c456b474d4c..a6d715e0107eee995dd92ee12fe0f72ccfd5b6fd 100644
+--- a/third_party/proton/proton/hooks/instrumentation.py
++++ b/third_party/proton/proton/hooks/instrumentation.py
+@@ -42,6 +42,30 @@ class CudaAllocator:
+         return buffer
+ 
+ 
++class NpuAllocator:
++    """Profile scratch allocator for Ascend NPU; torch_npu is imported lazily."""
++
++    def __init__(self, instrumentation_hook):
++        self.instrumentation_hook = instrumentation_hook
++
++    def __call__(self, size: int, alignment: int, stream: Optional[int]):
++        if alignment != self.instrumentation_hook.profile_buffer_alignment:
++            raise RuntimeError(
++                f"Alignment mismatch: {alignment} != {self.instrumentation_hook.profile_buffer_alignment}")
++        aligned_size = (size + alignment - 1) // alignment * alignment
++        # See CudaAllocator for why we take the max with profile_buffer_size.
++        aligned_size = max(aligned_size, self.instrumentation_hook.profile_buffer_size)
++
++        import torch
++        try:
++            import torch_npu  # noqa: F401
++        except ImportError as e:
++            raise RuntimeError("torch_npu is required to allocate the NPU profiling buffer") from e
++        buffer = torch.empty((aligned_size, ), dtype=torch.uint8, device="npu")
++        self.instrumentation_hook.buffer = buffer
++        return buffer
++
++
+ class Instrumentation:
+ 
+     def __init__(self, ir_map: Dict[str, Any]):
+@@ -61,6 +85,20 @@ class Instrumentation:
+         triton_proton.load_dialects(ctx)
+ 
+ 
++class AscendInstrumentation(Instrumentation):
++    """Ascend instrumentation; also loads the Ascend dialects needed to patch
++    Ascend IR, mirroring NPUBackend.load_dialects()."""
++
++    def load_dialects(self, ctx):
++        super().load_dialects(ctx)
++        from triton._C.libtriton import buffer_ir
++        from triton._C.libtriton import ascend as triton_ascend
++        from triton._C.libtriton.ascend import ir as ascend_ir
++        buffer_ir.load_dialects(ctx)
++        ascend_ir.load_dialects(ctx)
++        triton_ascend.load_dialects(ctx)
++
++
+ def _interpret_mode(mode_obj: Union[str, mode.InstrumentationMode]) -> mode.InstrumentationMode:
+     if isinstance(mode_obj, mode.InstrumentationMode):
+         return mode_obj
+@@ -121,6 +159,8 @@ def _get_backend_name() -> str:
+         return "nvidia"
+     elif backend == "hip":
+         return "amd"
++    elif backend == "npu":
++        return "ascend"
+     else:
+         raise RuntimeError(f"Unsupported backend: {backend}")
+ 
+@@ -139,9 +179,15 @@ class InstrumentationHook(Hook):
+         # Mapping of function objects to their scope ID pairs
+         self.mode: mode.InstrumentationMode = _interpret_mode(mode_obj)
+ 
+-        self.allocator = CudaAllocator(self)
++        # HIP tensors live on the "cuda" device; only Ascend NPU needs a
++        # dedicated allocator.
++        self.allocator = NpuAllocator(self) if _get_backend_name() == "ascend" else CudaAllocator(self)
+         self.buffer = None
+         self.metadata_path: Dict[Any, Optional[str]] = {}
++        self._mspti_functions = set()
++        self._mspti_collector = None
++        self._mspti_warmup_remaining = {}
++        self._mspti_skipping_warmup = False
+ 
+     def activate(self):
+         if InstrumentationHook.active_count > 0:
+@@ -152,8 +198,14 @@ class InstrumentationHook(Hook):
+         flags.instrumentation_on = True
+ 
+         device = triton.runtime.driver.active.get_current_device()
+-        max_shared_mem = triton.runtime.driver.active.utils.get_device_properties(device)["max_shared_mem"]
+         backend_name = _get_backend_name()
++        device_props = triton.runtime.driver.active.utils.get_device_properties(device)
++        if backend_name == "ascend":
++            # Ascend profiling uses a global scratch buffer, not shared memory;
++            # tolerate drivers that don't report max_shared_mem.
++            max_shared_mem = device_props.get("max_shared_mem", 0)
++        else:
++            max_shared_mem = device_props["max_shared_mem"]
+ 
+         def to_llvmir_passes(pm):
+             is_long_clk = False if mode.Optimize.CLOCK32 in self.mode.optimizations else True
+@@ -181,12 +233,27 @@ class InstrumentationHook(Hook):
+                 arch = triton.runtime.driver.active.utils.get_device_properties(device)["arch"].split(":")[0]
+                 triton_proton.add_convert_proton_amd_gpu_to_llvm(pm, arch)
+ 
+-        backends[backend_name].compiler.instrumentation = Instrumentation({
+-            "ttgpuir_to_llvmir":
+-            lambda pm: to_llvmir_passes(pm),
+-            "llvmir_to_llvm":
+-            lambda pm: to_llvm_passes(pm),
+-        })
++        if backend_name == "ascend":
++
++            from triton._C.libtriton import ascend as triton_ascend
++
++            def ttir_to_linalg_passes(pm):
++                triton_ascend.passes.ttir.add_lower_ascend_proton_to_hivm(pm, self.mode.buffer_size or 4096)
++
++            backends[backend_name].compiler.instrumentation = AscendInstrumentation({
++                "ttir":
++                triton_ascend.passes.ttir.add_assign_ascend_proton_scope_ids,
++                "ttir_to_linalg":
++                ttir_to_linalg_passes,
++            })
++            self.profile_buffer_alignment = 64
++        else:
++            backends[backend_name].compiler.instrumentation = Instrumentation({
++                "ttgpuir_to_llvmir":
++                lambda pm: to_llvmir_passes(pm),
++                "llvmir_to_llvm":
++                lambda pm: to_llvm_passes(pm),
++            })
+ 
+         # Set up the profiling allocator
+         set_profile_allocator(self.allocator)
+@@ -198,6 +265,9 @@ class InstrumentationHook(Hook):
+         if InstrumentationHook.active_count == 0:
+             return
+ 
++        if self._mspti_collector is not None and self._mspti_collector.handle:
++            self._mspti_collector.stop()
++
+         InstrumentationHook.active_count -= 1
+ 
+         backend_name = _get_backend_name()
+@@ -225,18 +295,55 @@ class InstrumentationHook(Hook):
+             return
+ 
+         # Find the IR path in metadata
+-        ir_path = next((path for key, path in metadata_group.items() if key.endswith(("ttgir"))), None)
++        backend_name = _get_backend_name()
++        # Ascend has no ttgir stage; scope ids are read from the ttir dump.
++        ir_suffix = "ttir" if backend_name == "ascend" else "ttgir"
++        ir_path = next((path for key, path in metadata_group.items() if key.endswith(ir_suffix)), None)
+         metadata_path = next((path for key, path in metadata_group.items() if key.endswith(("json"))), None)
+         self.metadata_path[function] = metadata_path
+ 
++        if backend_name == "ascend" and metadata_path:
++            import json
++            with open(metadata_path) as file:
++                compiled_metadata = json.load(file)
++            if compiled_metadata.get("proton_collection") == "mspti":
++                entries = compiled_metadata.get("proton_metadata", [])
++                if len(entries) != 1 or entries[0]["proton"]["format_version"] != 2:
++                    raise RuntimeError(
++                        "A5 instrumentation capture requires NPU-IR instrumentation drain protocol version 2")
++                scopes = entries[0]["proton"]["scopes"]
++                names = [(s["start_region_id"] & 0x3ff, s["name"]) for s in scopes]
++                parents = [(s["start_region_id"] & 0x3ff, s["parent_id"]) for s in scopes if s["parent_id"] >= 0]
++                libproton.init_function_metadata(function, name, names, parents, metadata_path)
++                self._mspti_functions.add(function)
++                import os
++                import warnings
++                warmup = int(os.environ.get("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES", "0"))
++                if not 0 <= warmup <= 100:
++                    raise ValueError("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES must be between 0 and 100")
++                self._mspti_warmup_remaining[function] = warmup
++                if warmup:
++                    warnings.warn(
++                        f"A5 instrumentation PoC: the first {warmup} launch(es) of {name} are explicit warmup and not collected"
++                    )
++                return
++
+         if ir_path:
+             context = triton_ir.context()
+             triton_ir.load_dialects(context)
+-            backend_name = _get_backend_name()
+             if backend_name == "nvidia":
+                 triton_nvidia.load_dialects(context)
+             elif backend_name == "amd":
+                 triton_amd.load_dialects(context)
++            elif backend_name == "ascend":
++                # The ttir dump carries Ascend dialect attributes (e.g.
++                # hacc.target); load the same dialects as NPUBackend.
++                from triton._C.libtriton import buffer_ir
++                from triton._C.libtriton import ascend as triton_ascend
++                from triton._C.libtriton.ascend import ir as ascend_ir
++                buffer_ir.load_dialects(context)
++                ascend_ir.load_dialects(context)
++                triton_ascend.load_dialects(context)
+             triton_proton.load_dialects(context)
+             module = triton_ir.parse_mlir_module(ir_path, context)
+             module.context = context
+@@ -252,6 +359,16 @@ class InstrumentationHook(Hook):
+ 
+     def enter(self, metadata: LazyDict) -> None:
+         func = metadata.data.get("function")
++        if func in self._mspti_functions:
++            if self._mspti_collector is None:
++                from ..mspti_instrumentation import MsptiInstrumentationCollector
++                self._mspti_collector = MsptiInstrumentationCollector()
++            if self._mspti_warmup_remaining[func]:
++                self._mspti_warmup_remaining[func] -= 1
++                self._mspti_skipping_warmup = True
++                return
++            self._mspti_collector.start()
++            return
+         stream = metadata.data.get("stream")
+         alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
+         libproton.enter_instrumented_op(stream, func, self._data_ptr(), alloc_size)
+@@ -260,6 +377,15 @@ class InstrumentationHook(Hook):
+ 
+     def exit(self, metadata: LazyDict) -> None:
+         func = metadata.data.get("function")
++        if func in self._mspti_functions:
++            if self._mspti_skipping_warmup:
++                import torch
++                torch.npu.synchronize()
++                self._mspti_skipping_warmup = False
++                return
++            records = self._mspti_collector.stop()
++            libproton.record_instrumentation_events(func, records)
++            return
+         stream = metadata.data.get("stream")
+         alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
+         libproton.exit_instrumented_op(stream, func, self._data_ptr(), alloc_size)
+@@ -279,6 +405,9 @@ class InstrumentationHook(Hook):
+                     return 1
+                 elif target["backend"] == "hip":
+                     return 2
++                elif target["backend"] == "npu":
++                    # Matches decodeDevice() case 3 in CircularLayoutParser.cpp.
++                    return 3
+                 return 0
+ 
+             alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
+diff --git a/third_party/proton/proton/mspti_instrumentation.py b/third_party/proton/proton/mspti_instrumentation.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..fadaf923bde18557669bfa993adc44d2227226b7
+--- /dev/null
++++ b/third_party/proton/proton/mspti_instrumentation.py
+@@ -0,0 +1,127 @@
++"""Experimental serialized A5 instrumentation capture through the MSPTI PoC C API."""
++import ctypes as C
++import json
++import os
++import threading
++import time
++import warnings
++from pathlib import Path
++
++_CHANNEL_IDS = range(11, 29)
++
++
++class ScopeRecord(C.Structure):
++    _fields_ = [("start", C.c_uint64), ("end", C.c_uint64), ("channel", C.c_uint32), ("pipe", C.c_uint32),
++                ("scope", C.c_uint32), ("frequency", C.c_uint32)]
++
++
++class CollectionStats(C.Structure):
++    _fields_ = [("bytes", C.c_uint64), ("incomplete", C.c_uint64), ("overflow", C.c_uint64),
++                ("driver_error", C.c_int32), ("flush_error", C.c_int32)]
++
++
++class MsptiInstrumentationCollector:
++    _lock = threading.Lock()
++
++    def __init__(self):
++        self.lib = C.CDLL(os.environ.get("PROTON_MSPTI_LIBRARY_PATH", "libmspti.so"))
++        signatures = {
++            "msptiInstrumentationStart": [C.c_uint32, C.POINTER(C.c_void_p)],
++            "msptiInstrumentationStop": [C.c_void_p],
++            "msptiInstrumentationGetRecords":
++            [C.c_void_p,
++             C.POINTER(C.POINTER(ScopeRecord)),
++             C.POINTER(C.c_size_t),
++             C.POINTER(CollectionStats)],
++            "msptiInstrumentationDestroy": [C.c_void_p],
++            "msptiInstrumentationGetRawData":
++            [C.c_void_p, C.c_uint32, C.POINTER(C.POINTER(C.c_uint8)),
++             C.POINTER(C.c_size_t)],
++        }
++        for name, args in signatures.items():
++            try:
++                fn = getattr(self.lib, name)
++            except AttributeError as error:
++                raise RuntimeError(
++                    f"A5 instrumentation requires the MSPTI instrumentation PoC library with {name}") from error
++            fn.argtypes, fn.restype = args, C.c_int
++        self.handle = C.c_void_p()
++        warnings.warn(
++            "A5 instrumentation samples hardware channels, not every Triton program/block. "
++            "Channel IDs are not core IDs; an empty capture does not prove that the kernel did not execute.",
++            stacklevel=2)
++
++    @staticmethod
++    def _check(rc, operation):
++        if rc:
++            raise RuntimeError(f"MSPTI instrumentation {operation} failed: {rc}")
++
++    def start(self):
++        import torch
++        if not self._lock.acquire(blocking=False):
++            raise RuntimeError("The A5 instrumentation PoC supports only serialized kernel captures")
++        try:
++            torch.npu.synchronize()
++            runtime = C.CDLL("libruntime.so")
++            physical = C.c_uint32()
++            convert = runtime.rtGetDevicePhyIdByIndex
++            convert.argtypes = [C.c_uint32, C.POINTER(C.c_uint32)]
++            convert.restype = C.c_int
++            self._check(convert(torch.npu.current_device(), C.byref(physical)), "physical device lookup")
++            self._check(self.lib.msptiInstrumentationStart(physical.value, C.byref(self.handle)), "start")
++        except BaseException:
++            self._lock.release()
++            raise
++
++    def stop(self):
++        import torch
++        if not self.handle:
++            return []
++        try:
++            torch.npu.synchronize()
++            rc = self.lib.msptiInstrumentationStop(self.handle)
++            records, count, stats = C.POINTER(ScopeRecord)(), C.c_size_t(), CollectionStats()
++            self._check(
++                self.lib.msptiInstrumentationGetRecords(self.handle, C.byref(records), C.byref(count), C.byref(stats)),
++                "read")
++            status = {name: getattr(stats, name) for name, _ in CollectionStats._fields_}
++            values = [(r.channel, r.pipe, r.scope, r.start, r.end, r.frequency) for r in records[:count.value]]
++            self._dump_debug(status, values)
++            if rc or not count.value:
++                raise RuntimeError(
++                    f"Incomplete/empty MSPTI instrumentation capture: rc={rc}, stats={json.dumps(status)}; "
++                    "this is partial hardware sampling, not guaranteed coverage of every logical block")
++            if stats.flush_error:
++                warnings.warn(
++                    f"MSPTI instrumentation flush returned {stats.flush_error}; received records are returned, "
++                    "but their presence does not establish complete capture.", stacklevel=2)
++            if len({row[5] for row in values}) != 1:
++                raise RuntimeError("Mixed AIC/AIV frequencies require separate instrumentation clock domains")
++            return values
++        finally:
++            try:
++                rc = self.lib.msptiInstrumentationDestroy(self.handle)
++            finally:
++                self.handle = C.c_void_p()
++                self._lock.release()
++            self._check(rc, "destroy")
++
++    def _dump_debug(self, status, records):
++        root = os.environ.get("PROTON_INSTRUMENTATION_DEBUG_DIR")
++        if not root:
++            return
++        directory = Path(root) / str(time.time_ns())
++        directory.mkdir(parents=True)
++        observed = sorted({record[0] for record in records})
++        coverage = {
++            "kind": "sampled_hardware_channels", "requested_channels": list(_CHANNEL_IDS), "observed_channels":
++            observed, "all_logical_blocks": False
++        }
++        (directory / "records.json").write_text(
++            json.dumps({"stats": status, "records": records, "coverage": coverage}, indent=2))
++        for channel in _CHANNEL_IDS:
++            raw, size = C.POINTER(C.c_uint8)(), C.c_size_t()
++            self._check(self.lib.msptiInstrumentationGetRawData(self.handle, channel, C.byref(raw), C.byref(size)),
++                        "raw read")
++            if size.value:
++                (directory / f"channel-{channel}.bin").write_bytes(C.string_at(raw, size.value))
+diff --git a/third_party/proton/proton/profile.py b/third_party/proton/proton/profile.py
+index 126b3abbeaf71fed1781f283fd53704cca41b42e..c1ca884d5d09e0453990310d44b42651cbfad2d9 100644
+--- a/third_party/proton/proton/profile.py
++++ b/third_party/proton/proton/profile.py
+@@ -4,7 +4,7 @@ import triton
+ from triton._C.libproton import proton as libproton  # type: ignore
+ from triton._C.libtriton import getenv  # type: ignore
+ from .flags import flags
+-from .hooks import HookManager, LaunchHook, InstrumentationHook
++from .hooks import HookManager, LaunchHook, InstrumentationHook, MsptiCorrelationHook
+ from .mode import BaseMode
+ from typing import Optional, Union
+ 
+@@ -17,6 +17,8 @@ def _select_backend() -> str:
+         return "cupti"
+     elif backend == "hip":
+         return "roctracer"
++    elif backend == "npu":
++        return "mspti"
+     else:
+         raise ValueError("No backend is available for the current target.")
+ 
+@@ -78,18 +80,20 @@ def start(
+                               Available options are ["tree", "trace"].
+                               Defaults to "tree".
+         backend (str, optional): The backend to use for profiling.
+-                                 Available options are [None, "cupti", "roctracer", "instrumentation"].
++                                 Available options are [None, "cupti", "roctracer", "mspti", "instrumentation"].
+                                  Defaults to None, which automatically selects the backend matching the current active runtime.
++                                 On Ascend NPU, explicitly select backend="instrumentation".
+         mode (Union[str, BaseMode], optional): The "mode" to use for profiling, which is specific to the backend.
+                                                Can be a string or an instance of BaseMode (or any subclass thereof).
+                                                Defaults to None.
+                                                For "cupti", available options are [None, "pcsampling"].
+                                                For "roctracer", available options are [None].
++                                               For "mspti", available options are [None].
+                                                For "instrumentation", available options are [None].
+                                                Each mode has a set of control knobs following with the mode name.
+                                                For example, "pcsampling" has an "interval" control knob, expressed as "pcsampling:interval=1000".
+         hook (str, optional): The hook to use for profiling.
+-                              Available options are [None, "launch"].
++                              Available options are [None, "triton"].
+                               Defaults to None.
+     Returns:
+         session (int): The session ID of the profiling session.
+@@ -107,10 +111,18 @@ def start(
+ 
+     _check_env(backend)
+ 
+-    session = libproton.start(name, context, data, backend, mode_str)
++    try:
++        session = libproton.start(name, context, data, backend, mode_str)
++    except RuntimeError as error:
++        if backend == "mspti" and "msptiEnableCallback with error 6" in str(error):
++            raise RuntimeError("MSPTI profiling requires libmspti.so in LD_PRELOAD "
++                               "before the Python process starts") from error
++        raise
+ 
+     if hook == "triton":
+         HookManager.register(LaunchHook(), session)
++    elif backend == "mspti" and hook is None:
++        HookManager.register(MsptiCorrelationHook(), session)
+     if backend == "instrumentation":
+         HookManager.register(InstrumentationHook(mode), session)
+ 
+diff --git a/third_party/proton/proton/proton.py b/third_party/proton/proton/proton.py
+index 80d3a971e92cf9766dd8a82d6a695e8abd8074b2..239b42fd97ea2fde1f1d4f72d9a4974ea9c9a45d 100644
+--- a/third_party/proton/proton/proton.py
++++ b/third_party/proton/proton/proton.py
+@@ -14,7 +14,7 @@ def parse_arguments():
+ """, formatter_class=argparse.RawTextHelpFormatter)
+     parser.add_argument("-n", "--name", type=str, help="Name of the profiling session")
+     parser.add_argument("-b", "--backend", type=str, help="Profiling backend", default=None,
+-                        choices=["cupti", "roctracer", "instrumentation"])
++                        choices=["cupti", "mspti", "roctracer", "instrumentation"])
+     parser.add_argument("-c", "--context", type=str, help="Profiling context", default="shadow",
+                         choices=["shadow", "python"])
+     parser.add_argument("-m", "--mode", type=str, help="Profiling mode", default=None)
+diff --git a/third_party/proton/proton/specs.py b/third_party/proton/proton/specs.py
+index b30c3416d8ebc60351d6a4ce07b711512f3b22ef..c29f5d6ea3da7bcdeaaf14fd5dfb86a47a3bd8ac 100644
+--- a/third_party/proton/proton/specs.py
++++ b/third_party/proton/proton/specs.py
+@@ -64,6 +64,6 @@ def max_bps(device_type, arch, bus_width, memory_clock_rate):
+     """
+     if device_type == "CUDA":
+         return 2 * bus_width * memory_clock_rate * 1e3 / 8
+-    else:
+-        assert device_type == "HIP"
++    if device_type == "HIP":
+         return amd_bps_by_arch[arch]
++    raise ValueError(f"Peak memory bandwidth is unavailable for device type {device_type}")

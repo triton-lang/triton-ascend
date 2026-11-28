@@ -267,6 +267,9 @@ LogicalResult getScopeType(Operation *scopeOp, bool &isCube, bool &isVector) {
 // Check if op is a scf.if whose body only contains hivm.hir.sync_block_wait,
 // hivm.hir.sync_block_set and hivm.fixpipe ops (excluding terminators).
 bool isIfOpWithOnlySyncOps(Operation *op) {
+  if (op->hasAttr(kSplittedIf)) {
+    return true;
+  }
   auto ifOp = dyn_cast<scf::IfOp>(op);
   if (!ifOp) {
     return false;
@@ -450,6 +453,34 @@ void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
       }
     }
   });
+}
+
+// Find the ssbuffer.if computation block that owns `op`.
+scf::IfOp findIfOpContainingOp(Operation *op) {
+  if (!op) {
+    return nullptr;
+  }
+
+  constexpr int maxDepth = 100;
+  int depth = 0;
+
+  Operation *current = op;
+  while (current && depth < maxDepth) {
+    if (auto ifOp = dyn_cast<scf::IfOp>(current)) {
+      if (ifOp->hasAttr(CVPipeline::kIf)) {
+        return ifOp;
+      }
+    }
+    current = current->getParentOp();
+    depth++;
+  }
+
+  if (depth >= maxDepth) {
+    LDBG("Warning: Max depth " << maxDepth
+                               << " exceeded in findIfOpContainingOp");
+  }
+
+  return nullptr;
 }
 
 } // namespace mlir

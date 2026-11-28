@@ -62,6 +62,11 @@ struct PtrState {
   Value source;        // base address (ptr), maintained with visitOps
   OpFoldResult offset; // scalar offset (int), maintained with visitOps
 
+  // Each element is a rank-N integer tensor (usually the result of a tt.load);
+  // semantically addr = affine_part + Σ dynamicOffsets_k, treated as opaque,
+  // its operands are not recursed into.
+  SmallVector<Value> dynamicOffsets;
+
   // whether the record needs to be processed in the current pass, when ignore
   // is true, it indicates that this scenario should not be processed within the
   // current pass
@@ -113,9 +118,16 @@ public:
   bool operandIsScalar(Value operand);
 
   bool optimizeDynamicOffset;
+  // Whether to allow a tt.load result (integer tensor) to be used as an
+  // opaque data-dependent offset (dynamicOffsets). Only enabled by the
+  // ImplicitPermute path (createNewAddPtr) for partially structured pointer
+  // scenarios; all other consumers keep the legacy behavior.
+  bool enableDataTensorOffset = false;
 
-  PtrAnalysis(bool optimizeDynamicOffset = false)
-      : optimizeDynamicOffset(optimizeDynamicOffset) {}
+  PtrAnalysis(bool optimizeDynamicOffset = false,
+              bool enableDataTensorOffset = false)
+      : optimizeDynamicOffset(optimizeDynamicOffset),
+        enableDataTensorOffset(enableDataTensorOffset) {}
 
   LogicalResult initStateByScalar(Value operand, PtrState &state,
                                   const Location loc, OpBuilder &builder);
@@ -143,6 +155,9 @@ public:
   LogicalResult visitOperandExpandDims(triton::ExpandDimsOp expandDimsOp,
                                        PtrState &state, const Location loc,
                                        OpBuilder &builder);
+
+  LogicalResult visitOperandDataTensor(Value operand, PtrState &state,
+                                       const Location loc, OpBuilder &builder);
 
   LogicalResult visitOperandConstSplat(arith::ConstantOp op, PtrState &state,
                                        const Location loc, OpBuilder &builder);
@@ -172,6 +187,15 @@ public:
   // - The resulting state for ptr and offset wil be added
   LogicalResult visitOperandAddptr(triton::AddPtrOp addptrOp, PtrState &state,
                                    const Location loc, OpBuilder &builder);
+
+  // Operand is a pointer element-type cast.
+  // A width-preserving cast (i1 counts as one byte) is a pure reinterpretation,
+  // so the offset arithmetic is unchanged and the analysis can continue on the
+  // cast source. This keeps the broadcast/addptr structure that the frontend
+  // emits before the bool `ptr<i1> -> ptr<i8>` cast visible to the caller.
+  LogicalResult visitOperandBitcast(triton::BitcastOp bitcastOp,
+                                    PtrState &state, const Location loc,
+                                    OpBuilder &builder);
 
   // Operand is the result of tt.make_tensor_ptr.
   // Expected result:

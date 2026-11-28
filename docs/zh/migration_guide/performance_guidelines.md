@@ -1,10 +1,12 @@
 # NPU高性能编程指南
 
+本文档介绍NPU高性能编程，涵盖合并Grid分核、指令并行优化、数据类型优化三类优化原则与配套Triton算子代码示例，适用于将Triton算子从GPU迁移至NPU并进行性能调优的开发者。
+
 ## 合并Grid分核
 
 ### 一、自动合并Grid分核优化原则
 
-部分场景需要将 Triton 算子从 GPU 迁移到 NPU。由于体系结构差异，基于 GPU 开发的 Triton 算子通常具有较大的逻辑 grid，无法在 NPU 上一次全部调度。昇腾后端会自动把符合条件且逻辑核相互独立的任务映射到可用物理核，并根据 IR 安全分析跳过不适用的 Kernel。性能调优时应先检查 grid 大小和编译告警；如果自动 mapping 被跳过，需要通过显式 Tiling 或内层循环减小逻辑 grid。
+部分场景需要将Triton算子从GPU迁移到NPU。由于体系结构差异，基于GPU开发的Triton算子通常具有较大的逻辑grid，无法在NPU上一次全部调度。昇腾后端会自动把符合条件且逻辑核相互独立的任务映射到可用物理核，并根据IR安全分析跳过不适用的Kernel。性能调优时应先检查grid大小和编译告警；如果自动mapping被跳过，需要通过显式Tiling或内层循环减小逻辑grid。
 
 ## 指令并行优化
 
@@ -13,25 +15,25 @@
 Triton算子在NPU上执行时，为了提升性能，NPU底层提供multi buffer、指令并行等并行机制，将“数据搬入/数据计算/数据搬出”并行起来，以此来提升性能；但是某些场景下存在multi buffer无法使能问题，影响并行度，导致算子执行性能降低；在性能优化过程中，存在此类问题时，可以参考以下几点做排查，并按照代码示例优化：\
 1、数据搬运和计算存在数据依赖，产生同步，必须依赖Vector运算后，才能触发MTE搬运，导致并行度低；\
 2、算子内，无多个数据加载或者单次执行完成无Tiling切分，该场景下无法使能multi buffer；\
-3、multi buffer需要额外增加UB空间的使用，计算过程中UB空间不足，无法使能multi buffer；
+3、multi buffer需要额外增加UB空间的使用量，计算过程中UB空间不足，无法使能multi buffer。
 
 ### 二、代码示例
 
 - 示例1：在Triton算子内，使用for循环，增加Tiling，提升并行度
 
-    在Triton算子编程中，Mask运算经常运用在load/store/where等语法中，在性能优化过程中，需要特别注意这类运算导致的性能下降。当Triton算子内逻辑是单次顺序执行，开始->数据搬入->计算->数据搬出->结束，指令无法并行，执行效率低；可以通过在算子内使用for循环增加Tiling，将单次处理量减少，多次处理，能够让"数据搬入/计算/数据搬出"并行起来，减少串行的等待时间，提升整体性能；同时使用for循环增加Tiling，也能降低单次处理消耗的UB空间。
-    需要注意：增加数据Tiling同时也需要考虑改变数据切块后的数学是否等价。
+    在Triton算子编程中，Mask运算经常运用在load/store/where等语法中，在性能优化过程中，需要特别注意这类运算导致的性能下降。当Triton算子内逻辑是单次顺序执行，开始->数据搬入->计算->数据搬出->结束，指令无法并行，执行效率低；可以通过在算子内使用for循环增加Tiling，将单次处理量减少，多次处理，能够让“数据搬入/计算/数据搬出”并行起来，减少串行的等待时间，提升整体性能；同时使用for循环增加Tiling，也能降低单次处理消耗的UB空间。
+    需要注意：增加数据Tiling同时也需要考虑改变数据切块后的数学运算是否等价。
 
-    ```diff
+    ```python
     @triton.jit
     def alloc_extend_kernel(
-            pre_lens_ptr,
-            seq_lens_ptr,
-            free_page_ptr,
-            out_indices,
-            bs_upper: tl.constexpr,
-            page_size: tl.constexpr,
-            max_num_extend_tokens: tl.constexpr,
+            pre_lens_ptr,     # [Tensor] 各请求已完成token数的指针
+            seq_lens_ptr,    # [Tensor] 各请求当前总token数的指针
+            free_page_ptr,    # [Tensor] 空闲page索引表的指针
+            out_indices,         # [Tensor] 输出token到page的映射索引
+            bs_upper: tl.constexpr,  # [Scalar] batch上界，参与mask计算
+            page_size: tl.constexpr,         # [Scalar] 每页可容纳的token数
+            max_num_extend_tokens: tl.constexpr,  # [Scalar] 最大extend token数
             BLOCK_SIZE: tl.constexpr = 1024, # Add Param BLOCK_SIZE
     ):
         pid = tl.program_id(0)
@@ -110,7 +112,7 @@ Atlas A2系列产品、Atlas A3系列产品向量运算单元的部分运算操�
 
     如下Triton算子，当x、y两个input tensor使用int64数据类型时，x1+y1运算会展开为Scalar运算，从而降低性能。在不影响精度的情况下，建议使用int32数据类型。
 
-    ```diff
+    ```python
     @triton.jit
     def npu_vector_add_kernel(
         x,                          # [Tensor] input tensor (1 x col)
@@ -120,7 +122,7 @@ Atlas A2系列产品、Atlas A3系列产品向量运算单元的部分运算操�
         BLOCK_SIZE: tl.constexpr
     ):
         pid = tl.program_id(axis=0)
-        offset = pid * BLOCK_SIZE + tl.arange(BLOCK_SIZE)
+        offset = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
         len_mask = offset < vector_len
         x1 = tl.load(x + offset, mask=len_mask)
         y1 = tl.load(y + offset, mask=len_mask)
@@ -130,10 +132,10 @@ Atlas A2系列产品、Atlas A3系列产品向量运算单元的部分运算操�
 
 - Vector Cmp Triton算子示例代码
 
-    如下Triton算子，做mask运算时，使用到了Cmp操作，Cmp不支持int64/int32数据类型，会导致cols < N运算展开为Scalar运算，降低性能，在不影响精度的情况下，建议使用fp32数据类型。
-    在Triton算子编程中，mask运算经常运用在load/store/where等语法中，在性能优化过程中，需要特别注意这类运算导致的性能下降。
+    如下Triton算子，做Mask运算时，使用到了Cmp操作，Cmp不支持int64/int32数据类型，会导致cols < N运算展开为Scalar运算，降低性能。在不影响精度的情况下，建议使用fp32数据类型。
+    在Triton算子编程中，Mask运算经常运用在load/store/where等语法中，在性能优化过程中，需要特别注意这类运算导致的性能下降。
 
-    ``` diff
+    ```python
     @triton.jit
     def npu_vector_cmp_kernel(
         X,                 # [Tensor] input tensor (row x col)

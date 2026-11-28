@@ -63,13 +63,19 @@ def product(A, B, Y, P: tl.constexpr, TARGET: tl.constexpr, DTYPE: tl.constexpr,
             tla.store_l0c_to_gm(acc, dst, P)
         elif TARGET == "ub":
             tla.copy_l0c_to_ub(acc, out, P)
+            tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 0)
         else:
             l1 = tla.alloc((2, 1, 16, 16), DTYPE, space="l1")
             tla.copy_l0c_to_l1(acc, l1, P)
             tla.copy_l1_to_ub(l1, out)
+            tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE1, 0)
     if TARGET == "ub" or TARGET == "l1":
         with tla.scope.vector():
-            tla.store_ub_to_gm(out, tla.view(Y, (16, 32)))
+            # Both AIVs participate in the block handshake. The default
+            # single-target Fixpipe/L12UB writes only sub-block 0's UB.
+            tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 0)
+            if tla.sub_block_id() == 0:
+                tla.store_ub_to_gm(out, tla.view(Y, (16, 32)))
 
 
 @tla.jit
@@ -121,13 +127,17 @@ def test_ir(case, output_dir=None):
         assert case["mode"].value in text
     if case.get("scale") is not None:
         assert "quant_scale = %" in text and "QF322F32_PRE" in text
+    if case["target"] in ("ub", "l1"):
+        assert text.count("hivm.hir.sync_block_set") == 1
+        assert text.count("hivm.hir.sync_block_wait") == 1
+        assert "hivm.hir.get_sub_block_idx" in text
     if case["name"] == "gm_fp32":
         check_params()
     print("IR PASS:", case["name"])
 
 
-def launch(case, compile_only=False):
-    gen = torch.Generator().manual_seed(42)
+def launch(case, compile_only=False, seed=42):
+    gen = torch.Generator().manual_seed(seed)
     a, b = torch.randn(16, 16, generator=gen).half(), torch.randn(16, 32, generator=gen).half()
     y = torch.full((16, 32), float("nan"), dtype=DTYPES[case["dtype"]][1], device="npu")
     an, bn = a.npu(), b.npu()
@@ -154,9 +164,11 @@ def test_compile(case):
 
 @matrix(CONFIGS)
 def test_run(case):
-    actual, expected = launch(case)
-    torch.testing.assert_close(actual.float(), expected.float(), rtol=8e-3, atol=0.1)
-    print("ACCURACY PASS:", case["name"])
+    for seed in (7, 42, 123):
+        actual, expected = launch(case, seed=seed)
+        assert torch.isfinite(actual).all(), "Fixpipe left unwritten or non-finite output"
+        torch.testing.assert_close(actual.float(), expected.float(), rtol=8e-3, atol=0.1)
+        print("ACCURACY PASS:", case["name"], "seed", seed)
 
 
 def main():

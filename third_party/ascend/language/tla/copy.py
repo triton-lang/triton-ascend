@@ -44,6 +44,34 @@ _FIXPIPE_PARAMS = {
 
 @builtin
 def copy(src, dst, params=None, _semantic=None):
+    """Dispatches a buffer copy by the source and destination address spaces.
+
+    :param src: Source ``tla.buffer``. Its address space selects the route.
+    :type src: tla.buffer
+    :param dst: Destination ``tla.buffer`` with the same element type as
+        ``src``.
+    :type dst: tla.buffer
+    :param params: Optional route configuration object. ``None`` (default)
+        uses the route's default configuration. The object must match the
+        selected route, for example :class:`CopyUB2L1Params` for UB->L1 or
+        :class:`FixpipeL0C2UBParams` for L0C->UB.
+    :type params: object or None
+    :return: None. The destination buffer is updated in place.
+    :rtype: None
+    :raises ValueError: If the ``(src.space, dst.space)`` pair has no route.
+
+    Supported pairs are GM->UB, UB->GM, GM->L1, UB->L1, L1->UB, L1->BT,
+    L1->FB, L1->L0A/L0B, L0C->GM, L0C->UB and L0C->L1. For an L0C source with
+    ``params=None``, the destination space and rank select the default
+    Fixpipe mode.
+
+    .. note::
+        Prefer the explicit route functions (for example
+        :func:`load_gm_to_ub` or :func:`copy_l0c_to_ub`) when a route needs
+        non-default configuration. Emit non-SIMD UB copies in
+        ``tla.scope.vector()`` and L1/L0C transfers in ``tla.scope.cube()``.
+        The backend still checks layout, dtype and alignment restrictions.
+    """
     dma._buffers(src, dst)
     route = _COPY_ROUTES.get((src.space, dst.space))
     if route is None:

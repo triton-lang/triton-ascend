@@ -435,8 +435,9 @@ LogicalResult tryRewriteUnstructuredLoadStoreFastPath(
         loc, op.getType(), base, ptrOffset,
         rewriter.getDenseI64ArrayAttr(unstructuredDims), op.getMask(),
         op.getOther(), op.getCacheAttr(), op.getEvictAttr(),
-        rewriter.getBoolAttr(
-            ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op)));
+        rewriter.getBoolAttr(op.getIsVolatile() ||
+                             ConverterUtils::requiresVolatileIndirectLoad(
+                                 op.getPtr(), op)));
     rewriter.replaceOp(op, unstructuredLoad.getResult());
     LLVM_DEBUG({
       auto &os = llvm::dbgs();
@@ -796,6 +797,37 @@ UnstructuredMemAccessConverter<triton::LoadOp>::splatAndLoadScenario<
   return success();
 }
 
+static triton::LoadOp rewriteSimdDiscreteMaskLoad(triton::LoadOp op,
+                                                  PatternRewriter &rewriter) {
+  auto loc = op.getLoc();
+  auto ptr = op.getPtr();
+  auto mask = op.getMask();
+  auto other = op.getOther();
+  auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
+  if (!other) {
+    FailureOr<Value> constant = specializeTypelessValueToConstant(
+        TypelessValue::Zero, ptr.getType(), loc, rewriter);
+    if (failed(constant))
+      llvm_unreachable("Unsupported type for constant creation");
+    other = *constant;
+  }
+
+  triton::LoadOp load;
+  if (contMask && discMask) {
+    // Bound memory accesses and initialize inactive lanes before selection.
+    load = rewriter.create<triton::LoadOp>(loc, ptr, contMask, other,
+                                           op.getCache(), op.getEvict(),
+                                           op.getIsVolatile());
+    mask = discMask;
+  } else {
+    load = rewriter.create<triton::LoadOp>(loc, ptr, op.getCache(),
+                                           op.getEvict(), op.getIsVolatile());
+  }
+  rewriter.replaceOpWithNewOp<arith::SelectOp>(op, mask, load.getResult(),
+                                               other);
+  return load;
+}
+
 template <typename MemAccOpTy>
 UnstructuredMemAccessConverter<MemAccOpTy>::UnstructuredMemAccessConverter(
     MLIRContext *context, bool forceScalarizeMode,
@@ -820,6 +852,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   bool scopeForcesSimd =
       mlir::ascend::simt_selection::hasEnclosingVectorMode(op, "simd");
   bool modelControlled = mlir::ascend::simt_selection::isModelControlled(op);
+  auto simdDiscreteMask = op->hasAttr(ConverterUtils::simdDiscreteMaskAttrName);
+  auto axisDiscreteMask = op->hasAttr(ConverterUtils::axisDiscreteMaskAttrName);
   bool runtimeLoopMask = op->hasAttr(ConverterUtils::runtimeLoopMaskAttrName);
 
   if (!ptrType || op->hasAttr(ConverterUtils::discreteAttrName))
@@ -896,11 +930,28 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   if (checkUnstructureAnnotated(op, rewriter))
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 
+  bool maskRewritten = false;
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+    if (simdDiscreteMask ||
+        (axisDiscreteMask && ptrOffsetInfo.isStructured())) {
+      op = rewriteSimdDiscreteMaskLoad(op, rewriter);
+      rewriter.setInsertionPoint(op);
+      maskRewritten = true;
+    }
+  }
+
   if (ptrOffsetInfo.isStructured() && !mixCompileDiscreteMask &&
       !routeDiscreteMaskToSimt &&
       (!ptrOffsetInfo.isScalarLike() ||
        llvm::all_of(ptrType.getShape(), [](int64_t dim) { return dim == 1; })))
-    return failure();
+    return success(maskRewritten);
+
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+    if (ptrOffsetInfo.isScalarLike() &&
+        succeeded(splatAndLoadScenario(op, ptrOffsetInfo, rewriter))) {
+      return success();
+    }
+  }
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
@@ -911,13 +962,6 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     os << "\n";
     os << ptrOffsetInfo.isScalarLike() << "\n";
   });
-
-  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    if (ptrOffsetInfo.isScalarLike() &&
-        succeeded(splatAndLoadScenario(op, ptrOffsetInfo, rewriter))) {
-      return success();
-    }
-  }
 
   std::optional<MaskState> mstate = runMaskAnalysis(op, rewriter);
 
@@ -946,20 +990,28 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   auto resultElementType = getResultElementType(ptrType);
   int64_t sizeInByte = getTypeSizeInByte(resultElementType);
 
+  int64_t continuousSize = sizeInByte;
   for (int i = ptrOffsetInfo.getRank() - 1; i >= 0; i--) {
     if (!ptrOffsetInfo.isStructured(i))
       break;
-    sizeInByte *= resultShape[i];
+    continuousSize *= resultShape[i];
+  }
+
+  int64_t discreteSize = sizeInByte;
+  for (int i = 0; i < ptrOffsetInfo.getRank(); ++i) {
+    if (!ptrOffsetInfo.isStructured(i))
+      discreteSize *= resultShape[i];
   }
 
   // Force scalarize if memory is not aligned
-  if (sizeInByte % 32 != 0) {
+  if (continuousSize % 32 != 0) {
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
   }
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "UnStructured Flag check:\n";
+    os << "discrete axis size before scalarization: " << discreteSize << "\n";
     os << "ptrOffsetInfo.isStructured: " << ptrOffsetInfo.isStructured()
        << "\n";
     os << "compileOn91095Flag: " << compileOn91095Flag << "\n";
@@ -980,11 +1032,15 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   // unstructured load/store op in both mixed compilation modes.
   bool simtTemplateLoadStoreFastPathEnabled =
       compileOn91095Flag && forceSimtTemplateFlag && simtRouteRequested &&
-      ((!ptrOffsetInfo.isStructured() && sizeInByte < 64) ||
+      ((!axisDiscreteMask && !ptrOffsetInfo.isStructured() &&
+        continuousSize < 64) ||
+       (axisDiscreteMask && discreteSize > continuousSize) ||
        mixCompileDiscreteMask || routeDiscreteMaskToSimt);
   bool simtTemplateAtomicFastPathEnabled =
       compileOn91095Flag && forceSimtTemplateFlag && simtRouteRequested &&
-      ((!ptrOffsetInfo.isStructured() && sizeInByte < 64) ||
+      ((!axisDiscreteMask && !ptrOffsetInfo.isStructured() &&
+        continuousSize < 64) ||
+       (axisDiscreteMask && discreteSize > continuousSize) ||
        mixCompileDiscreteMask || routeDiscreteMaskToSimt);
   bool rankWithinSimtTemplateLimit = resultShape.size() <= 5;
 
@@ -997,7 +1053,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
         compileOn91095Flag &&
         ((unstructureCompileMode == triton::ascend::CompileMode::SimdSimt &&
           simtRouteRequested &&
-          ((ptrOffsetInfo.hasUnstructuredDim() && sizeInByte < 64) ||
+          ((ptrOffsetInfo.hasUnstructuredDim() && continuousSize < 64) ||
            mixCompileDiscreteMask || routeDiscreteMaskToSimt)) ||
          (unstructureCompileMode ==
               triton::ascend::CompileMode::SimdSimtTemplate &&
@@ -1019,11 +1075,28 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     }
   }
 
+  // A rejected SIMT load still needs its continuous mask to bound fallback
+  // accesses. Continue lowering the replacement load in this rewrite.
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+    if (axisDiscreteMask && !maskRewritten) {
+      op = rewriteSimdDiscreteMaskLoad(op, rewriter);
+      rewriter.setInsertionPoint(op);
+      mstate = runMaskAnalysis(op, rewriter);
+      isLoadLike = !op->use_empty();
+    }
+  }
+
   LLVM_DEBUG({
-    if (forceSimtTemplateFlag && sizeInByte >= 64) {
+    if (triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
+        continuousSize >= 64) {
+      auto &os = llvm::dbgs();
+      os << "Skip template-SIMT indirect fast path because continuous shape "
+            "product is "
+         << continuousSize << " (>=64)\n";
+    } else if (forceSimtTemplateFlag && continuousSize >= 64) {
       auto &os = llvm::dbgs();
       os << "Skip SIMT template fast path because continuous shape product is "
-         << sizeInByte << " (>=64)\n";
+         << continuousSize << " (>=64)\n";
     }
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
                   std::is_same_v<MemAccOpTy, triton::StoreOp>) {

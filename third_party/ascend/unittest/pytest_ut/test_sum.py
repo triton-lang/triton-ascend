@@ -122,3 +122,27 @@ def test_case_1(param_list):
     triton_ret2 = value2
     print(f"triton_ret2 = {triton_ret2[0:8]}")
     torch.testing.assert_close(std_ret2, triton_ret2, rtol=1e-3, atol=1e-3)
+
+
+@triton.jit
+def sum_broadcast_mul_reduce(output_ptr, x_ptr, y_ptr, B: tl.constexpr, C: tl.constexpr, D: tl.constexpr):
+    bidx = tl.arange(0, B)
+    cidx = tl.arange(0, C)
+    didx = tl.arange(0, D)
+    X = tl.load(x_ptr + bidx[:, None] * C + cidx[None, :])
+    Y = tl.load(y_ptr + cidx[:, None] * D + didx[None, :])
+    # sum(x[:, :, None] * y[None, :, :], axis=1) is rewritten to tt.dot.
+    ret = tl.sum(X[:, :, None] * Y[None, :, :], axis=1)
+    oidx = bidx[:, None] * D + didx[None, :]
+    tl.store(output_ptr + oidx, ret)
+
+
+def test_sum_broadcast_mul_reduce_fp32_precision():
+    B, C, D = 32, 32, 32
+    value = 1.0 + 2**-12
+    x = torch.full((B, C), value, dtype=torch.float32)
+    y = torch.full((C, D), value, dtype=torch.float32)
+    z_ref = torch.matmul(x.double(), y.double()).to(torch.float32)
+    z = torch.empty((B, D), dtype=torch.float32, device="npu")
+    sum_broadcast_mul_reduce[1, 1, 1](z, x.npu(), y.npu(), B, C, D)
+    torch.testing.assert_close(z.cpu(), z_ref, rtol=0, atol=1e-4)

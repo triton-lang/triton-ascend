@@ -25,13 +25,13 @@ CONSTRAINTS = {
         ],
         "dtype_support":
         """
-            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
-            | 平台         | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
-            +==============+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
-            | Ascend A2/A3 |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
-            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
-            | Ascend 950   |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
-            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+            +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
+            | Atlas A2 products/Atlas A3 products |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            | Ascend 950PR&950DT products         |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
         "example":
         "triton.extension.buffer.language.alloc",
@@ -51,6 +51,16 @@ CONSTRAINTS = {
             "When using bind_buffer, tensor and bind_buffer must have identical shapes and element types.",
             "A tensor cannot be bound to multiple buffers.",
         ],
+        "dtype_support":
+        """
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+            +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
+            | Atlas A2 products/Atlas A3 products |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            | Ascend 950PR&950DT products         |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            """,
         "example":
         "triton.extension.buffer.language.to_buffer",
     },
@@ -58,10 +68,44 @@ CONSTRAINTS = {
         "constraints": [
             "Same type support constraints as alloc.",
         ],
+        "dtype_support": """
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+            +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
+            | Atlas A2 products/Atlas A3 products |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            | Ascend 950PR&950DT products         |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            """,
         "example": "triton.extension.buffer.language.to_tensor",
     },
-    "triton.extension.buffer.language.subview": {},
-    "triton.extension.buffer.language.address_space": {},
+    "triton.extension.buffer.language.subview": {
+        "constraints": [
+            "The input parameters size and stride must be greater than 0, and offset must be greater than or equal to 0 (negative values are not allowed).",
+            "The size of each dimension in size must not exceed the size of the original buffer.",
+            "The size of each dimension in the subview must not exceed the size of the original buffer.",
+            "The access defined by stride must not exceed the size of src; all elements of stride must be 1.",
+            "The parameters must specify a value for each dimension, and the number of parameter dimensions should match the number of dimensions of the input buffer.",
+            "Offset must be 32-byte aligned.",
+            "In the subview, the offset of the first element of the second row along the last dimension must be 32-byte aligned.",
+        ],
+        "dtype_support":
+        """
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+            +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
+            | Atlas A2 products/Atlas A3 products |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            | Ascend 950PR&950DT products         |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
+            +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            """,
+        "example":
+        "triton.extension.buffer.language.subview",
+    },
+    "triton.extension.buffer.language.address_space": {
+        "constraints": [],
+        "example": "triton.extension.buffer.language.address_space",
+    },
     "triton.extension.buffer.language.buffer_type": {
         "replace_docstring": [
             "Represents the type of a buffer, including its element type, shape,",
@@ -77,7 +121,10 @@ CONSTRAINTS = {
             ":type strides: List[int], optional",
         ],
     },
-    "triton.extension.buffer.language.buffer": {},
+    "triton.extension.buffer.language.buffer": {
+        "constraints": [],
+        "example": "triton.extension.buffer.language.buffer",
+    },
     "triton.language.permute": {
         "constraints": [],
         "dtype_support": """
@@ -717,9 +764,9 @@ CONSTRAINTS = {
             ":param input_precision: How to exercise the Tensor Cores for f32 x f32. If",
             "  the device does not have Tensor Cores or the inputs are not of dtype f32,",
             "  this option is ignored. For devices that do have tensor cores, the",
-            "  default precision is tf32.",
-            ":type input_precision: string. Available options: :code:`\"tf32\"`, :code:`\"tf32x3\"`, :code:`\"ieee\"`. Default: :code:`\"tf32\"`.",
-            ":param allow_tf32: *Deprecated.* If true, input_precision is set to \"tf32\".",
+            "  default precision is hf32.",
+            ":type input_precision: string. Available options: :code:`\"hf32\"`, :code:`\"ieee\"`. Default: :code:`\"hf32\"`.",
+            ":param allow_tf32: *Deprecated.* If true, input_precision is set to \"hf32\".",
             "  Only one of :code:`input_precision` and :code:`allow_tf32` can be",
             "  specified (i.e. at least one must be :code:`None`).",
         ],
@@ -978,6 +1025,10 @@ CONSTRAINTS = {
         "constraints": [
             "core_mode: must be 'vector', 'cube'.",
             "Each kernel supports one cube scope and one vector scope; they execute in parallel.",
+            "``scope.scope`` operations must not be nested.",
+            "A scope with ``core_mode=\"cube\"`` must not contain vector instructions; "
+            "a scope with ``core_mode=\"vector\"`` must not contain cube operations.",
+            "Tensor values defined inside a scope must not be used outside that scope.",
             "Explicit synchronization (sync_block_set/sync_block_wait) required for cross-scope data dependencies.",
         ],
         "example":
@@ -990,16 +1041,6 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.language.extra.cann.extension.sub_vec_id",
-    },
-    "triton.language.extra.cann.extension.subview": {
-        "constraints": [
-            "Offsets, sizes, and strides must be non-negative.",
-            "Each dimension size cannot exceed the original buffer's corresponding dimension.",
-            "All stride elements must be 1.",
-            "Offset must be 32-byte aligned.",
-        ],
-        "example":
-        "triton.language.extra.cann.extension.subview",
     },
     "triton.language.extra.cann.extension.sync_block_all": {
         "constraints": [

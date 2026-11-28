@@ -31,7 +31,9 @@
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/PreserveControlAttrsCanonicalize.h"
 
+#include "DynamicCVPipeline/Common/LoopScheduleAttrs.h"
 #include "DynamicCVPipeline/Common/Utils.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 
 using namespace mlir;
 
@@ -200,9 +202,18 @@ private:
 
   void transferBlockIdToInsertedReplacement(Operation *from,
                                             Operation *to) const {
-    if (!from || !to || from == to || !isTrackedControlFlowOp(from)) {
+    if (!from || !to || from == to)
       return;
-    }
+    // Arithmetic canonicalizations can rebuild pointer-size expressions after
+    // block IDs have been assigned. Their new scalar results retain the block
+    // of the replaced operation, including outside outer-event control chains.
+    bool scalarReplacement =
+        to->getNumResults() != 0 && to->getNumRegions() == 0 &&
+        isMemoryEffectFree(to) &&
+        llvm::all_of(to->getResultTypes(),
+                     [](Type type) { return type.isIntOrIndexOrFloat(); });
+    if (!isTrackedControlFlowOp(from) && !scalarReplacement)
+      return;
 
     Attribute blockId = from->getAttr(CVPipeline::kBlockId);
     if (!blockId || to->hasAttr(CVPipeline::kBlockId)) {
@@ -214,6 +225,12 @@ private:
     }
 
     to->setAttr(CVPipeline::kBlockId, blockId);
+    if (scalarReplacement && from->hasAttr(CVPipeline::kOuterEventControl)) {
+      to->setAttr(CVPipeline::kOuterEventControl,
+                  from->getAttr(CVPipeline::kOuterEventControl));
+      if (auto core = from->getAttr(CVPipeline::kCoreType))
+        to->setAttr(CVPipeline::kCoreType, core);
+    }
   }
 
   llvm::SetVector<Operation *> recentInserts;

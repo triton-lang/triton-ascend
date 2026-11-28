@@ -557,6 +557,17 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   bool hasValidDiscreteLoop = op->hasAttr(ConverterUtils::discreteAttrName) &&
                               parentLoop &&
                               parentLoop->hasAttr("ExtractedLoadOrStore");
+  tensor::InsertSliceOp insertSliceOp;
+  if (hasValidDiscreteLoop) {
+    if (op->hasOneUse())
+      insertSliceOp = dyn_cast<tensor::InsertSliceOp>(*op->getUsers().begin());
+    // Only replace the loop accumulator when its row insertion is known.
+    // Otherwise retain the tensor result and the original insert_slice.
+    hasValidDiscreteLoop =
+        insertSliceOp && parentLoop.getNumRegionIterArgs() == 1 &&
+        insertSliceOp.getSource() == op.getResult() &&
+        insertSliceOp.getDest() == parentLoop.getRegionIterArgs()[0];
+  }
   if (hasValidDiscreteLoop) {
     Operation *loop = op->getParentOp();
     int extractedLoopCount = 1;
@@ -582,13 +593,6 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
         loc, RankedTensorType::get(fullMemRefShape, memRefElementType), allocOp,
         true, true);
     rewriter.replaceAllUsesWith(loopOp->getResult(0), toTensorOp->getResult(0));
-    tensor::InsertSliceOp insertSliceOp = nullptr;
-    for (auto *user : op->getUsers()) {
-      if (auto targetOp = dyn_cast<tensor::InsertSliceOp>(user)) {
-        insertSliceOp = targetOp;
-        break;
-      }
-    }
     auto offsets = insertSliceOp.getMixedOffsets();
     auto sizes = insertSliceOp.getMixedSizes();
     auto strides = insertSliceOp.getMixedStrides();
@@ -605,6 +609,9 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
         loc, MemRefType::get(memRefShape, memRefElementType));
   }
 
+  // Deinterleaving must preserve the write that replaced the discrete loop's
+  // insert_slice. Ordinary loads only need their tensor result.
+  Value writebackDest = hasValidDiscreteLoop ? allocOp : Value{};
   auto tensorType = RankedTensorType::get(memRefShape, memRefElementType);
   // boundary check
   auto boundaryCheck = op.getBoundaryCheck();
@@ -690,7 +697,8 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
       auto [ptrStrides, ptrOffsets] = memRefType.getStridesAndOffset();
       if (ptrStrides.back() == 2 && (memRefShape.back() % 2 == 0) &&
           !skipNonComplementaryStaticDeinterleave(op) &&
-          mlir::triton::DeinterleaveStatusOptimization(op, adaptor, rewriter)
+          mlir::triton::DeinterleaveStatusOptimization(op, adaptor, rewriter,
+                                                       writebackDest)
               .succeeded()) {
         return success();
       }
@@ -750,7 +758,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     auto [ptrStrides, ptrOffsets] = memRefType.getStridesAndOffset();
     if (ptrStrides.back() == 2 && (memRefType.getShape().back() % 2 == 0) &&
         DeinterleaveStatusWithMaskOptimization(op, adaptor, rewriter, mstate,
-                                               allocOp)
+                                               allocOp, writebackDest)
             .succeeded()) {
       return success();
     }

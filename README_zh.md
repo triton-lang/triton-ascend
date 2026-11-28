@@ -32,7 +32,7 @@ Triton-Ascend
 <details>
 <summary>更多最新消息</summary>
 
-- [2025.11.14]Triton-Ascend 3.2.0 rc4预发布版本上线：<br>- [扩展tt.fp_to_fp接口，新增对FP8的类型转换支持](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>- [新增scatter_ub_to_out接口，支持从UB到GM的高效数据分散操作](https://gitcode.com/Ascend/triton-ascend/pull/864)
+- [2025.11.14]Triton-Ascend 3.2.0rc4预发布版本上线：<br>- [扩展tt.fp_to_fp接口，新增对FP8的类型转换支持](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>- [新增scatter_ub_to_out接口，支持从UB到GM的高效数据分散操作](https://gitcode.com/Ascend/triton-ascend/pull/864)
 - [2025.09.30]完善Scan/Sort类Triton Python API，支持非连续访存，完成vLLM、SGLang开源仓中重点Triton算子适配
 - [2025.09.19]支持Triton-Ascend [nightly包](https://test.pypi.org/project/triton-ascend/#history)提取
 - [2025.08.15]完善Atomic类Triton Python API支持，完成Flaggems开源仓重点Triton算子适配，提供Matmul等简单算子高性能实现参考用例
@@ -43,6 +43,10 @@ Triton-Ascend
 </div>
 
 ---
+
+## 介绍
+
+**Triton-Ascend**是适配华为昇腾处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对华为昇腾NPU特性进行深度优化，能够帮助用户在华为昇腾平台上快速开发和部署高性能计算任务。
 
 ## 📖 快速安装
 
@@ -76,6 +80,18 @@ Triton-Ascend
 #以安装triton-ascend 3.6.0 为例
 pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
+
+### Nightly包安装
+
+我们提供每周更新的Nightly测试包，安装命令如下：
+
+```bash
+pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly
+```
+
+所有Nightly包可在[历史列表](https://mirrors.huaweicloud.com/ascend/repos/pypi/nightly/triton-ascend/)中查看。
+
+> 注意：Nightly包为测试版本，不建议生产环境使用。
 
 ### 源码安装
 
@@ -119,7 +135,7 @@ git apply llvm_patch_f6ded0b.patch
 export LLVM_INSTALL_PREFIX=/path/to/llvm-install
 
 # 构建自定义LLVM版本
-cd {PATH_TO}/llvm_project
+cd {PATH_TO}/llvm-project
 mkdir build
 cd build
 cmake ../llvm \
@@ -245,6 +261,6 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 ## 🤝 社区与贡献
 
-- 欢迎参与Triton-Ascend的开发及代码贡献，详情请参阅 [贡献指南](./docs/zh/community/CONTRIBUTING_zh.md)
+- 欢迎参与Triton-Ascend的开发及代码贡献，详情请参阅 [贡献指南](./docs/zh/community/CONTRIBUTING_zh.md)。
 
 - 请通过[Issue](https://github.com/triton-lang/triton-ascend/issues)来反馈遇到的任何Bug。

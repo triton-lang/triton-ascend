@@ -1,143 +1,121 @@
-"""TLA 3-in-1 test: gemm_basic (TLA direct port of tilelang ascend gemm).
+"""Single-tile fp16 GEMM using explicit TLA DMA, with three-stage validation.
 
-Semantics: C[M, N] = A[M, K] @ B[K, N]  (fp16 in, f32 accumulate in L0C)
-
-Stages (env TLA_TEST_STAGE, default all with auto-degrade):
-  ir      : offline-compile the HIVM IR handed to npuir and assert
-            (2 nd2nz / 1 mmadL1 / 1 fixpipe, cbuf/cc alloc, cube scope
-            carries only hivm.tcore_type<CUBE> and is not a VF)
-  compile : full compile, confirm .o/.npubin artifacts exist
-  run     : real-device launch + accuracy (GEMM_BASIC OK; standard Triton
-            reference gemm_triton, same semantics/shape -> TRITON_GEMM_BASIC OK)
-
-v1 scope: single block (M=N=K=64), clear_accum=True one-shot; no K-loop
-pipelining / multi-core.
+C[16, 64] = A[16, 32] @ B[32, 64], accumulated and stored as fp32.
+On NPU, running this file checks IR, compilation and numerical accuracy.
 """
-import sys, os
+import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tests/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import torch
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
-from utils.tla_test_utils import (get_stages, compile_offline, lower_offline, check_lowered_ir, check_compile_artifacts)
+from utils.tla_test_utils import get_stages, compile_offline, lower_offline, check_kernel_binary, matrix
 
-# default shapes: M, N, K (K must be a multiple of 16)
-SHAPE = dict(M=64, N=64, K=64)
+SHAPE = dict(M=16, N=64, K=32)
+SIGNATURE = {"A": "*fp16", "B": "*fp16", "C": "*fp32"}
+CONFIGS = [
+    dict(name="default", unit=None, accumulate=False),
+    dict(name="unit_disabled", unit=tla.UnitFlagMode.DISABLED, accumulate=False),
+    dict(name="unit_update", unit=tla.UnitFlagMode.ENABLED_WITH_UPDATE, accumulate=False),
+    dict(name="unit_accumulate", unit=tla.UnitFlagMode.ENABLED_WITH_UPDATE, accumulate=True),
+]
 
-# offline compile signature (pointer entry takes pointer args).
-SIGNATURE = {"A_ptr": "*fp16", "B_ptr": "*fp16", "C_ptr": "*fp32"}
+
+def constants(case):
+    return dict(SHAPE, UNIT=case["unit"], GROUP=None if case["unit"] is None else 0, ACCUMULATE=case["accumulate"])
 
 
 @tla.jit
-def gemm_basic(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr):
-    tl.static_assert(K % 16 == 0 and M % 16 == 0 and N % 16 == 0, "M/N/K must be multiples of 16 (cube tile)")
-    a_l1 = tla.alloc_buffer((K // 16, M // 16, 16, 16), tl.float16, space="l1")
-    b_l1 = tla.alloc_buffer((N // 16, K // 16, 16, 16), tl.float16, space="l1")
-    c_l0c = tla.alloc_buffer((N // 16, M // 16, 16, 16), tl.float32, space="l0c")
-    a_blk = tla.view(A_ptr, (M, K), strides=(K, 1))
-    b_blk = tla.view(B_ptr, (K, N), strides=(N, 1))
-    c_blk = tla.view(C_ptr, (M, N), strides=(N, 1))
+def gemm_basic(A, B, C, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, UNIT: tl.constexpr, GROUP: tl.constexpr,
+               ACCUMULATE: tl.constexpr):
+    tl.static_assert(M % 16 == 0 and N % 16 == 0 and K % 16 == 0)
     with tla.scope.cube():
-        tla.copy(a_blk, a_l1)  # hivm.hir.nd2nz (ND -> NZ)
-        tla.copy(b_blk, b_l1)  # hivm.hir.nd2nz
-        tla.cube.mmad(a_l1, b_l1, c_l0c, clear_accum=True)  # hivm.hir.mmadL1
-        tla.copy(c_l0c, c_blk)  # hivm.hir.fixpipe (NZ -> ND)
+        a_l1 = tla.alloc((K // 16, M // 16, 16, 16), tl.float16, space="l1")
+        b_l1 = tla.alloc((N // 16, K // 16, 16, 16), tl.float16, space="l1")
+        acc = tla.alloc((N // 16, M // 16, 16, 16), tl.float32, space="l0c")
+        tla.load_gm_to_l1(tla.view(A, (M, K)), a_l1)
+        tla.load_gm_to_l1(tla.view(B, (K, N)), b_l1)
+        if ACCUMULATE:
+            tla.cube.mmad(a_l1, b_l1, acc, clear_accum=True, unit_flag_ctrl=tla.UnitFlagMode.ENABLED_WITHOUT_UPDATE,
+                          unit_flag_group_id=GROUP)
+        tla.cube.mmad(a_l1, b_l1, acc, clear_accum=not ACCUMULATE, unit_flag_ctrl=UNIT, unit_flag_group_id=GROUP)
+        tla.store_l0c_to_gm(
+            acc, tla.view(C, (M, N)),
+            tla.FixpipeL0C2GMParams(dma_mode=tla.FixpipeDMAMode.NZ2ND, unit_flag_ctrl=UNIT, unit_flag_group_id=GROUP))
 
 
-def constexprs():
-    s = SHAPE
-    return {"M": s["M"], "N": s["N"], "K": s["K"]}
+@matrix(CONFIGS)
+def test_ir(case, output_dir=None):
+    module, ctx = compile_offline(gemm_basic, SIGNATURE, constants(case), output_dir=output_dir)
+    text = str(lower_offline(module, ctx, output_dir=output_dir))
+    for op, count in (("nd2nz", 2), ("mmadL1", 2 if case["accumulate"] else 1), ("fixpipe", 1)):
+        assert text.count("hivm.hir." + op + " ") == count, op
+    if case["unit"] is None:
+        assert "unit_flag_mode" not in text and "unit_flag_group_id" not in text
+    else:
+        count = 3 if case["accumulate"] else 2
+        assert text.count("unit_flag_group_id = 0") == count
+        assert text.count("unit_flag<" + case["unit"].name + ">") == 2
+        if case["accumulate"]:
+            assert text.count("unit_flag<ENABLED_WITHOUT_UPDATE>") == 1
+    assert "dma_mode = #hivm.dma_mode<nz2nd>" in text
+    assert text.count("memref.alloc()") == 3
+    assert "#hivm.address_space<cbuf>" in text and "#hivm.address_space<cc>" in text
+    assert "#hivm.tcore_type<CUBE>" in text
+    assert 'mix_mode = "mix"' in text
+    assert "hivm.vector_function" not in text
+    assert "!tt.ptr" not in text and "tt.store" not in text
+    assert "tensor<" not in text and "bufferization." not in text
+    print("IR PASS: gemm_basic", case["name"])
 
 
-# ---- standard Triton reference (same semantics/shape) ----
-
-
-@triton.jit
-def gemm_triton(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr):
-    rows = tl.arange(0, M)
-    cols = tl.arange(0, N)
-    inner = tl.arange(0, K)
-    a = tl.load(A_ptr + rows[:, None] * K + inner[None, :])  # (M, K)
-    b = tl.load(B_ptr + inner[:, None] * N + cols[None, :])  # (K, N)
-    c = tl.dot(a, b)  # (M, N) f32 accumulate
-    tl.store(C_ptr + rows[:, None] * N + cols[None, :], c)
-
-
-def test_ir(output_dir=None):
-    module, ctx = compile_offline(gemm_basic, SIGNATURE, constexprs(), output_dir=output_dir)
-    text = str(module)
-    assert "!tt.ptr" in text, "route A entry must keep pointer args at AST stage"
-    assert text.count("hivm.hir.pointer_cast") == 3, "tla.view(ptr) x3"
-    assert text.count("memref.reinterpret_cast") == 3, "tla.view(ptr) x3"
-    module = lower_offline(module, ctx, output_dir=output_dir)
-    text = str(module)
-    check_lowered_ir(text, loads=0, stores=0, buffers=None,
-                     extra=("#hivm.address_space<cbuf>", "#hivm.address_space<cc>", "#hivm.tcore_type<CUBE>"))
-    assert text.count("hivm.hir.nd2nz") == 2, "GM->L1 x2"
-    assert text.count("hivm.hir.mmadL1") == 1, "one gemm"
-    assert text.count("hivm.hir.fixpipe") == 1, "L0C->GM"
-    assert 'mix_mode = "mix"' in text, "kernel with cube work must be tagged mix"
-    # Pure-cube kernel: AIC scope is not a vector function, so no VF markers
-    # (hivm.vector_function / func_core_type / outline) may appear.
-    assert text.count("hivm.vector_function") == 0, "cube scope must not be a VF"
-    assert "hivm.memory_effect" not in text, "VF effect recording was removed"
-    print("IR PASS: gemm_basic HIVM structure ok (2 nd2nz / 1 mmadL1 / 1 fixpipe)")
-
-
-def _launch():
-    s = SHAPE
-    A = torch.randn(s["M"], s["K"], dtype=torch.float16, device="npu")
-    B = torch.randn(s["K"], s["N"], dtype=torch.float16, device="npu")
-    C = torch.full((s["M"], s["N"]), 7.0, dtype=torch.float32, device="npu")
-    gemm_basic[(1, )](A, B, C, **constexprs())
+def _launch(case, seed=7, compile_only=False):
+    generator = torch.Generator().manual_seed(seed)
+    a = torch.randn((SHAPE["M"], SHAPE["K"]), generator=generator, dtype=torch.float16)
+    b = torch.randn((SHAPE["K"], SHAPE["N"]), generator=generator, dtype=torch.float16)
+    x, y = a.npu(), b.npu()
+    out = torch.full((SHAPE["M"], SHAPE["N"]), float("nan"), dtype=torch.float32, device="npu")
+    # Automatic UnitFlag inference rewrites explicit modes. Disable only that
+    # optimization when exercising manual flags; ordinary pipe sync stays on.
+    options = {} if case["unit"] is None else {"unit_flag": False}
+    if compile_only:
+        kernel = gemm_basic.warmup(x, y, out, grid=(1, ), **constants(case), **options)
+        return kernel, None, None
+    kernel = gemm_basic[(1, )](x, y, out, **constants(case), **options)
     torch.npu.synchronize()
-    return C, (A.float() @ B.float())
+    expected = a.float() @ b.float()
+    return kernel, out.cpu(), expected * (2 if case["accumulate"] else 1)
 
 
-def _launch_triton():
-    s = SHAPE
-    A = torch.randn(s["M"], s["K"], dtype=torch.float16, device="npu")
-    B = torch.randn(s["K"], s["N"], dtype=torch.float16, device="npu")
-    C = torch.full((s["M"], s["N"]), 7.0, dtype=torch.float32, device="npu")
-    gemm_triton[(1, )](A, B, C, **constexprs())
-    torch.npu.synchronize()
-    return C, (A.float() @ B.float())
+@matrix(CONFIGS)
+def test_compile(case):
+    kernel, _, _ = _launch(case, compile_only=True)
+    assert kernel.metadata.mix_mode == "mix", "Cube kernel must use the Cube-capable launcher"
+    check_kernel_binary(kernel)
 
 
-def test_compile():
-    _launch()
-    artifacts = check_compile_artifacts()
-    assert artifacts, "no .o/.npubin artifact in TRITON_CACHE_DIR"
-    print("COMPILE PASS: gemm_basic generated artifacts", len(artifacts), "->", artifacts[0])
-
-
-def test_run():
-    C, ref = _launch()
-    oc, rc = C.cpu(), ref.cpu()
-    print("C[:4,:4]  :", oc[:4, :4].tolist())
-    print("ref[:4,:4]:", rc[:4, :4].tolist())
-    ok = torch.allclose(oc, rc, atol=0.05)
-    print("GEMM_BASIC", "OK" if ok else "MISMATCH", "M", SHAPE["M"], "N", SHAPE["N"], "K", SHAPE["K"])
-    assert ok, "gemm_basic e2e mismatch"
-    # standard Triton reference.
-    Ct, rt = _launch_triton()
-    oc_t, rc_t = Ct.cpu(), rt.cpu()
-    bad_t = ((oc_t - rc_t).abs() > 0.05).nonzero().flatten()
-    print("TRITON_GEMM_BASIC", "OK" if bad_t.numel() == 0 else "MISMATCH", "num_mismatch:", bad_t.numel())
-    assert bad_t.numel() == 0, "standard triton gemm_triton mismatch"
+@matrix(CONFIGS)
+def test_run(case):
+    for seed in (7, 19):
+        _, actual, expected = _launch(case, seed)
+        assert torch.isfinite(actual).all(), "GEMM left unwritten or non-finite output"
+        torch.testing.assert_close(actual, expected, rtol=1e-3, atol=3e-2)
+        print("ACCURACY PASS: gemm_basic", case["name"], SHAPE, "seed", seed, "max_abs_error",
+              (actual - expected).abs().max().item())
 
 
 def main():
     do_ir, do_compile, do_run = get_stages()
-    if do_ir:
-        test_ir()
-    if do_compile:
-        test_compile()
-    if do_run:
-        test_run()
-    print("ALL PASS: gemm_basic", "ir" if do_ir else "", "compile" if do_compile else "", "run" if do_run else "")
+    for case in CONFIGS:
+        if do_ir:
+            test_ir(case)
+        if do_compile:
+            test_compile(case)
+        if do_run:
+            test_run(case)
 
 
 if __name__ == "__main__":

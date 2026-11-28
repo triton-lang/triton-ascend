@@ -1,6 +1,6 @@
 # Contributors
 
-Every release of Triton-Ascend would not have been possible without the following contributors:
+Every release of Triton Ascend would not have been possible without the following contributors:
 
 Updated on 2026-05-06:
 

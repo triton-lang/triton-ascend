@@ -1,16 +1,16 @@
-# Triton-Ascend `do_bench_npu` Guide
+# Triton Ascend `do_bench_npu` Guide
 
 ## Positioning
 
-This guide is intended for users who already know how to write Triton kernels and already understand the basic concepts of community `triton.testing.do_bench`. It focuses on the recommended Triton-Ascend usage for performance benchmarking on NPU:
+This guide is intended for users who already know how to write Triton kernels and already understand the basic concepts of community `triton.testing.do_bench`. It focuses on the recommended Triton Ascend usage for performance benchmarking on NPU:
 
-- the recommended `do_bench_npu` usage on Triton-Ascend;
+- the recommended `do_bench_npu` usage on Triton Ascend;
 - what "pure Device-side execution time" means on the Ascend backend;
 - when to use the default `mspti` path, and when you should fall back to the `torch_npu.profiler` path.
 
 ## Recommended Usage
 
-On Triton-Ascend, the recommended usage is to import and use `do_bench_npu` when you need to build an operator performance baseline or measure the pure device time of a kernel:
+On Triton Ascend, the recommended usage is to import and use `do_bench_npu` when you need to build an operator performance baseline or measure the pure device time of a kernel:
 
 ```python
 import torch
@@ -38,7 +38,7 @@ print(f"Kernel execution time: {ms} ms")
 This means:
 
 - `fn` has the same semantics as in community `do_bench` and represents the callable function to be benchmarked;
-- `do_bench_npu` on Triton-Ascend means “let the NPU profiling tools capture pure Device-side kernel execution time”, effectively eliminating Host-side overhead from the measurement.
+- `do_bench_npu` on Triton Ascend means “let the NPU profiling tools capture pure Device-side kernel execution time”, effectively eliminating Host-side overhead from the measurement.
 
 ## Parameter Reference
 
@@ -162,7 +162,7 @@ In real NPU execution, a single Triton kernel launch might be fragmented into mu
 
 ## Advanced Usage: Integrating with Triton Autotune
 
-Triton-Ascend’s Autotune extension supports switching the performance-collection method used during autotune benchmark. By setting the environment variable `TRITON_BENCH_METHOD="npu"`, the Autotune mechanism will internally call `do_bench_npu` to evaluate candidate configurations.
+Triton Ascend’s Autotune extension supports switching the performance-collection method used during autotune benchmark. By setting the environment variable `TRITON_BENCH_METHOD="npu"`, the Autotune mechanism will internally call `do_bench_npu` to evaluate candidate configurations.
 
 ```python
 export TRITON_BENCH_METHOD="npu"

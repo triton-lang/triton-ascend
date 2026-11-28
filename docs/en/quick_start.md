@@ -2,9 +2,9 @@
 
 ## Project Introduction
 
-**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It is used for efficient automatic kernel tuning, operator compilation, and deployment. By remaining compatible with Triton's core syntax while being deeply optimized for Huawei Ascend NPU features, it helps users quickly develop and deploy high-performance computing tasks on the Huawei Ascend platform.
+**Triton Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It is used for efficient automatic kernel tuning, operator compilation, and deployment. By remaining compatible with Triton's core syntax while being deeply optimized for Huawei Ascend NPU features, it helps users quickly develop and deploy high-performance computing tasks on the Huawei Ascend platform.
 
-This document uses the online installation and running of the vector addition example via the software package deployment method in an **Ubuntu 22.04** environment as an example, guiding users to quickly get started with **Triton-Ascend**. For more installation methods, please refer to the [Installation Guide](./installation_guide.md).
+This document uses the online installation and running of the vector addition example via the software package deployment method in an **Ubuntu 22.04** environment as an example, guiding users to quickly get started with **Triton Ascend**. For more installation methods, please refer to the [Installation Guide](./installation_guide.md).
 
 ## Environment Preparation
 
@@ -71,9 +71,9 @@ This page helps you finish installation and verify the first example. To continu
 
 | Document | Description |
 |----------|-------------|
-| [Triton-Ascend Operator Programming](./programming_guide/index.md) | General principles: multi-core split, on-chip memory, access patterns, and tiling |
-| [Triton-Ascend Operator Migration](./migration_guide/index.md) | Migrate GPU Triton operators to Huawei Ascend NPU |
-| [Triton-Ascend Operator Debugging and Profiling](./debug_guide/index.md) | Debugging, profiling, and accuracy troubleshooting |
+| [Triton Ascend Operator Programming](./programming_guide/index.md) | General principles: multi-core split, on-chip memory, access patterns, and tiling |
+| [Triton Ascend Operator Migration](./migration_guide/index.md) | Migrate GPU Triton operators to Huawei Ascend NPU |
+| [Triton Ascend Operator Debugging and Profiling](./debug_guide/index.md) | Debugging, profiling, and accuracy troubleshooting |
 | [Environment Variables and Compiler Options](./environment_variable_and_compiler_options_reference.md) | Runtime and compilation configuration reference |
 
 ### Tutorials & Examples
@@ -83,5 +83,5 @@ This page helps you finish installation and verify the first example. To continu
 | [Vector Operator Development](./programming_guide/vector_operator.md) | Element-wise, reduction, gather/scatter, and other Vector Core operators |
 | [Cube Operator Development](./programming_guide/cube_operator.md) | Cube operators centered on `tl.dot` and matrix multiplication |
 | [CV Fusion Operator Development](./programming_guide/cv_fusion_operator.md) | Kernels that combine Cube compute with Vector post-processing |
-| [Triton-Ascend Autotune](./autotune_guide.md) | Recommended Autotune usage and automatic tiling scope |
+| [Triton Ascend Autotune](./autotune_guide.md) | Recommended Autotune usage and automatic tiling scope |
 | [Example Operators](./examples/index.md) | End-to-end examples such as Softmax, LayerNorm, Attention, and Matmul |

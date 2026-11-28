@@ -1,10 +1,10 @@
-# Triton-Ascend 版本发布
+# Triton Ascend版本发布
 
-Triton-Ascend 版本提供了一个稳定的代码基础快照，封装成可以通过 PyPI 轻松安装的二进制包。此外，版本发布代表着开发团队可以向社区正式宣布新功能的可用性、已完成的改进以及可能影响用户的变化（例如破坏性变更）。
+Triton Ascend版本提供了一个稳定的代码基础快照，封装成可以通过PyPI轻松安装的二进制包。此外，版本发布代表着开发团队可以向社区正式宣布新功能的可用性、已完成的改进以及可能影响用户的变化（例如破坏性变更）。
 
 ## 发布计划
 
-以下是 Triton-Ascend 的发布计划：请注意，补丁版本是可选的。
+以下是Triton Ascend的发布计划：请注意，补丁版本是可选的。
 
 | 主版本         | 发布分支切出时间    | 发布日期        | 版本性质 |
 |-------------|-------------|-------------|------|
@@ -21,18 +21,18 @@ Triton-Ascend 版本提供了一个稳定的代码基础快照，封装成可以
 
 ### 版本编号
 
-Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范，版本号与上游 Triton 对齐：`vMAJOR.MINOR.PATCH[rcN][.postN]`。
+Triton Ascend遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范，版本号与上游Triton对齐：`vMAJOR.MINOR.PATCH[rcN][.postN]`。
 
-- **MAJOR.MINOR**：与上游 Triton 版本一一对应，例如 Triton-Ascend `3.2` 基于 Triton `3.2`
-- **PATCH**：Triton-Ascend 的 `PATCH` 版本可能高于上游 Triton，用于 `MAJOR.MINOR` 级别的问题修复或改进，例如 Triton-Ascend `3.2.0` 和 `3.2.1` 均基于 Triton `3.2.0`
+- **MAJOR.MINOR**：与上游Triton版本一一对应，例如Triton Ascend `3.2` 基于Triton `3.2`
+- **PATCH**：Triton Ascend的 `PATCH` 版本可能高于上游Triton，用于 `MAJOR.MINOR` 级别的问题修复或改进，例如Triton Ascend `3.2.0` 和 `3.2.1` 均基于Triton `3.2.0`
 - **rcN**：发布候选版本，根据需要发布以供社区早期测试和反馈
 - **postN**：已发布版本的后续补丁，根据需要发布以修复稳定版本中的问题
 
 ### 分支策略
 
-- `main` 分支为最新开发分支，跟踪最新上游 Triton 版本
-- 每个发布版本创建对应的发布开发分支（如 `release/3.2.x`），与社区发布具有相同的 commit id
-- 功能开发应在 fork 仓库中进行，通过 `PR` 合入 Triton-Ascend 仓库
+- `main` 分支为最新开发分支，跟踪最新上游Triton版本
+- 每个发布版本创建对应的发布开发分支（如 `release/3.2.x`），与社区发布具有相同的commit id
+- 功能开发应在fork仓库中进行，通过 `PR` 合入Triton Ascend仓库
 
 ### 维护分支与生命周期
 
@@ -42,7 +42,7 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
 - **维护（Maintenance）**：仅接受关键缺陷修复和安全补丁；不再发布功能改进
 - **停止维护（End of Life）**：不再接受任何修复；分支维护已停止
 
-| 分支                    | 状态     | Triton 版本 | Triton-Ascend 发布                         | 维护截止 |
+| 分支                    | 状态     | Triton版本 | Triton Ascend发布                         | 维护截止 |
 |-----------------------| -------- |-----------|------------------------------------------| -------- |
 | `main`                | `活跃`   | `3.6.0`   | /                                        | /        |
 | `release/3.6.0`       | `活跃`   | `3.6.0`   | `3.6.0.post2`、`3.6.0`                    | /        |
@@ -52,15 +52,15 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
 
 ## 发布周期
 
-- **稳定版本**：按照项目版本节奏发布，并非每个上游 Triton 版本都会有对应的稳定发布
-- **rc 版本**：与上游 Triton 版本节奏同步发布，供用户早期测试
-- **post 版本**：根据需要发布，用于修复现有稳定版本中的问题
+- **稳定版本**：按照项目版本节奏发布，并非每个上游Triton版本都会有对应的稳定发布
+- **rc版本**：与上游Triton版本节奏同步发布，供用户早期测试
+- **post版本**：根据需要发布，用于修复现有稳定版本中的问题
 
 <a id="version-compatibility-matrix"></a>
 
 ## 版本推荐配套
 
-| Triton-Ascend |  PyTorch | TorchNPU安装包     | CANN    | SHMEM  | LLVM commit hash | Python              | LLVM 补丁 |
+| Triton Ascend |  PyTorch | TorchNPU安装包     | CANN    | SHMEM  | LLVM commit hash | Python              | LLVM补丁 |
 |---------------|---------|-----------------|---------|--------|------------------|---------------------|-----------|
 | `main`        | `2.10.0` | `2.10.0.post7`  | `9.2.0` | `v1.7.0` | `f6ded0b`        | `3.9-3.13`          | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
 | `3.6.0`       | `2.10.0` | `2.10.0.post7`  | `9.2.0` | `v1.7.0` | `f6ded0b`        | `3.10~3.13`             | - |
@@ -73,12 +73,12 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
 
 > 本节表格中“/”表示不可配套，“Y”表示可配套。
 
-**表1** Triton-Ascend与TorchNPU安装包版本兼容
+**表1** Triton Ascend与TorchNPU安装包版本兼容
 
 <table class="table">
   <thead>
     <tr>
-      <th rowspan="2">Triton-Ascend</th>
+      <th rowspan="2">Triton Ascend</th>
       <th colspan="8" style="text-align:left">TorchNPU安装包版本</th>
     </tr>
     <tr>
@@ -100,12 +100,12 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
   </tbody>
 </table>
 
-**表2** Triton-Ascend与CANN版本兼容
+**表2** Triton Ascend与CANN版本兼容
 
 <table class="table">
   <thead>
     <tr>
-      <th rowspan="3">Triton-Ascend</th>
+      <th rowspan="3">Triton Ascend</th>
       <th colspan="8" style="text-align:left">CANN版本</th>
     </tr>
     <tr>

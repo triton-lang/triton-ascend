@@ -1,10 +1,10 @@
 # 贡献指南
 
-本文档介绍Triton-Ascend项目的贡献流程与开发规范，涵盖开发者来源认证、编码与单元测试风格、Fork-Pull开发模式、代码门禁异常处理、ISSUE提交与Pull Request合入要求，适用于需要向Triton-Ascend项目提交代码的贡献者。
+本文档介绍Triton Ascend项目的贡献流程与开发规范，涵盖开发者来源认证、编码与单元测试风格、Fork-Pull开发模式、代码门禁异常处理、ISSUE提交与Pull Request合入要求，适用于需要向Triton Ascend项目提交代码的贡献者。
 
 ## 入门
 
-- 在[GitHub](https://github.com/triton-lang/triton-ascend)上fork Triton-Ascend代码库。
+- 在[GitHub](https://github.com/triton-lang/triton-ascend)上fork Triton Ascend代码库。
 - 阅读[README_zh.md](https://github.com/triton-lang/triton-ascend/blob/main/README_zh.md)获取项目信息和构建开发环境。
 
 ## 开发者来源认证（DCO）
@@ -21,15 +21,15 @@ git commit -s -m "your commit message"
 
 ### 代码风格
 
-请遵循以下编码风格，以使得Triton-Ascend易于开发、维护和审查：
+请遵循以下编码风格，以使得Triton Ascend易于开发、维护和审查：
 
 - 编码指南
 
-  请使用Triton-Ascend社区统一的编码风格，Python建议的编码风格是[PEP 8编码样式](https://pep8.org/)，C++编码所建议的风格是[LLVM编码规范](https://llvm.org/docs/CodingStandards.html)。可以使用[clang-tidy](https://github.com/llvm/llvm-project/blob/main/.clang-tidy)，[CppLint](https://github.com/cpplint/cpplint)、[CppCheck](http://cppcheck.sourceforge.net/)、[CMakeLint](https://github.com/cmake-lint/cmake-lint)、[CodeSpell](https://github.com/codespell-project/codespell)、[ShellCheck](https://github.com/koalaman/shellcheck)和[pylint](https://pylint.org/)检查代码的格式，建议在你的IDE中安装这些插件。
+  请使用Triton Ascend社区统一的编码风格，Python建议的编码风格是[PEP 8编码样式](https://pep8.org/)，C++编码所建议的风格是[LLVM编码规范](https://llvm.org/docs/CodingStandards.html)。可以使用[clang-tidy](https://github.com/llvm/llvm-project/blob/main/.clang-tidy)，[CppLint](https://github.com/cpplint/cpplint)、[CppCheck](http://cppcheck.sourceforge.net/)、[CMakeLint](https://github.com/cmake-lint/cmake-lint)、[CodeSpell](https://github.com/codespell-project/codespell)、[ShellCheck](https://github.com/koalaman/shellcheck)和[pylint](https://pylint.org/)检查代码的格式，建议在你的IDE中安装这些插件。
 
 - 单元测试指南
 
-  请使用Triton-Ascend社区统一的单元测试风格，Python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](https://github.com/google/googletest/blob/main/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。Python侧测试用例设计可参考[gather测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/pytest_ut/test_gather.py)、[layer_norm测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/05-layer-norm.py)；编译器/MLIR转换（C++ 后端）的测试用例可参考 [lit MLIR测试目录](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/unittest/Conversion) 下的示例。
+  请使用Triton Ascend社区统一的单元测试风格，Python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](https://github.com/google/googletest/blob/main/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。Python侧测试用例设计可参考[gather测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/pytest_ut/test_gather.py)、[layer_norm测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/05-layer-norm.py)；编译器/MLIR转换（C++ 后端）的测试用例可参考 [lit MLIR测试目录](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/unittest/Conversion) 下的示例。
 
 - 重构指南
 
@@ -37,13 +37,13 @@ git commit -s -m "your commit message"
 
 ### Fork-Pull开发模式
 
-1. Fork Triton-Ascend项目
+1. Fork Triton Ascend项目
 
-    在你向Triton-Ascend项目提交自己的代码之前，请确保已经将Triton-Ascend项目Fork到你自己的仓库。后续你将在自己Fork的项目上进行开发，并通过Pull Request的方式合并到Triton-Ascend项目。这意味着Triton-Ascend仓库和你自己的仓库之间存在并行开发，因此请注意保持仓库之间的一致性。
+    在你向Triton Ascend项目提交自己的代码之前，请确保已经将Triton Ascend项目Fork到你自己的仓库。后续你将在自己Fork的项目上进行开发，并通过Pull Request的方式合并到Triton Ascend项目。这意味着Triton Ascend仓库和你自己的仓库之间存在并行开发，因此请注意保持仓库之间的一致性。
 
 2. 克隆远程仓库
 
-    使用git克隆你fork的Triton-Ascend项目&添加上游仓库upstream：
+    使用git克隆你fork的Triton Ascend项目&添加上游仓库upstream：
 
     ```bash
     git clone https://github.com/{your_forked_repo}/triton-ascend.git && cd triton-ascend && git submodule update --init --depth 1
@@ -52,7 +52,7 @@ git commit -s -m "your commit message"
 
 3. 本地环境开发代码
 
-    在开发你的代码之前，你需要根据[Triton-Ascend安装指南](https://github.com/triton-lang/triton-ascend/blob/main/docs/zh/installation_guide.md)搭建开发环境。
+    在开发你的代码之前，你需要根据[Triton Ascend安装指南](https://github.com/triton-lang/triton-ascend/blob/main/docs/zh/installation_guide.md)搭建开发环境。
     为避免多个分支间的不一致问题，请创建新的本地开发分支进行新特性的开发：
 
     ```bash
@@ -61,7 +61,7 @@ git commit -s -m "your commit message"
     git rebase upstream/main # Rebase onto the latest upstream trunk
     ```
 
-    以main分支为例，Triton-Ascend可能会根据需要创建版本分支或下游开发分支。当你创建完分支&同步上游main分支更新后，就可以开始开发你的代码了。
+    以main分支为例，Triton Ascend可能会根据需要创建版本分支或下游开发分支。当你创建完分支&同步上游main分支更新后，就可以开始开发你的代码了。
 
 4. 代码更改自测
 
@@ -82,9 +82,9 @@ git commit -s -m "your commit message"
     git push origin {your_new_branch_name}
     ```
 
-6. 向Triton-Ascend主仓创建Pull Request
+6. 向Triton Ascend主仓创建Pull Request
 
-    代码推送至你的远程仓库后，你需要在你的新分支和Triton-Ascend main分支之间新建Pull Request。完成新建Pull Request后，“Jenkins CI”将自动为你设置构建流水线测试。你的Pull Request请尽快合并到上游main分支，以降低合并风险。
+    代码推送至你的远程仓库后，你需要在你的新分支和Triton Ascend main分支之间新建Pull Request。完成新建Pull Request后，“Jenkins CI”将自动为你设置构建流水线测试。你的Pull Request请尽快合并到上游main分支，以降低合并风险。
 
 ### 代码门禁异常处理
 
@@ -106,7 +106,7 @@ git commit -s -m "your commit message"
 
 在报告问题时，请参考以下格式：
 
-- 你环境里使用的软件版本（Triton-Ascend、Python、OS等）？
+- 你环境里使用的软件版本（Triton Ascend、Python、OS等）？
 - 这是一个错误报告还是功能请求？
 - 你报告的是什么样的问题，添加对应的标签以便在问题仪表盘上突出显示？
 - 发生了什么？

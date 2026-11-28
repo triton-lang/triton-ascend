@@ -71,7 +71,7 @@ GELU算子开发示例，使用3种方式计算结果。
 
 #### 标准Torch写法
 
-输入tensor x0，经过torch计算实现GELU算子，返回结果值。
+输入tensor x0，经过Torch计算实现GELU算子，返回结果值。
 
 ```Python
 def standard_unary(x0):

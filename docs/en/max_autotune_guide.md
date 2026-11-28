@@ -1,8 +1,8 @@
-# Triton-Ascend max_autotune Usage Guide
+# Triton Ascend max_autotune Usage Guide
 
 ## Document Purpose
 
-This document is intended for users already familiar with Triton-Ascend's autotuning mechanism, introducing advanced usage of the `max_autotune` decorator:
+This document is intended for users already familiar with Triton Ascend's autotuning mechanism, introducing advanced usage of the `max_autotune` decorator:
 
 - Differences and relationships between `max_autotune` and standard `@triton.autotune`;
 - How to leverage the Cartesian product expansion mechanism to batch generate candidate configurations;
@@ -280,7 +280,7 @@ def vector_kernel(...):
 
 ## Summary
 
-`max_autotune` is an advanced autotuning tool provided by Triton-Ascend, suitable for the following scenarios:
+`max_autotune` is an advanced autotuning tool provided by Triton Ascend, suitable for the following scenarios:
 
 1. Known Tiling parameter space, want to reduce the workload of manually enumerating configurations;
 2. Need to jointly tune multiple Ascend compilation parameters (such as `num_stages`, `enable_hivm_auto_cv_balance`, etc.);

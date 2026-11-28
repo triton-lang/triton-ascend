@@ -1,6 +1,6 @@
 # max_autotune使用示例
 
-`max_autotune` 是Triton-Ascend提供的增强自动调优装饰器，旨在简化多参数调优的代码编写。与社区版 `autotune` 要求用户手动枚举所有 `triton.Config` 不同，`max_autotune` 允许用户仅提供少量基础配置（如分块大小），并自动将相关的编译器选项（如 `num_stages`、`enable_hivm_auto_cv_balance` 等）纳入最优组合的搜索空间。用户也可以通过参数列表显式控制搜索范围。
+`max_autotune` 是Triton Ascend提供的增强自动调优装饰器，旨在简化多参数调优的代码编写。与社区版 `autotune` 要求用户手动枚举所有 `triton.Config` 不同，`max_autotune` 允许用户仅提供少量基础配置（如分块大小），并自动将相关的编译器选项（如 `num_stages`、`enable_hivm_auto_cv_balance` 等）纳入最优组合的搜索空间。用户也可以通过参数列表显式控制搜索范围。
 
 **适用场景**：Ascend NPU上的 `cube`、`mix`、`vector` 算子，尤其适合需要同时调整多个硬件相关参数的场景。
 

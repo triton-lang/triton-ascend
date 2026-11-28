@@ -1,6 +1,6 @@
 # Environment Variables and Compiler Options
 
-This page is a configuration reference for Triton-Ascend kernel developers. It lists settings for compilation, execution, debugging, and autotuning, with their purpose, defaults, and support on A2/A3 and 950. Environment variables configure compilation and runtime behavior within a process; compiler options configure individual kernels. Environment variables can also be read and written in-process through `triton.knobs` (including the Ascend-specific `triton.knobs.ascend` group), without editing startup scripts. Migration advice for existing configurations appears under [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility).
+This page is a configuration reference for Triton Ascend kernel developers. It lists settings for compilation, execution, debugging, and autotuning, with their purpose, defaults, and support on A2/A3 and 950. Environment variables configure compilation and runtime behavior within a process; compiler options configure individual kernels. Environment variables can also be read and written in-process through `triton.knobs` (including the Ascend-specific `triton.knobs.ascend` group), without editing startup scripts. Migration advice for existing configurations appears under [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility).
 
 ## Environment Variables
 
@@ -59,13 +59,13 @@ The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilatio
 | Runtime | `TRITON_GRID_WARN_PRINT` | Prints Ascend launcher warnings about grid size. | Off | Yes | Yes |
 | Runtime | `NPU_DEVICE_LIMIT` | Caps AI Core and Vector Core counts with `AIcores,VectorCores`, for example `14,28`; the device ratio must be valid. | Unset; device counts | Yes | Yes |
 | Toolchain selection | `CC` | Sets the C/C++ compiler for the CPU launcher extension. | Unset; system default compiler | Yes | Yes |
-| Toolchain selection | `ASCEND_HOME_PATH` | Points to the CANN Toolkit root. Source the toolkit's `set_env.sh` before starting Python. Triton-Ascend uses this directory to locate headers and libraries for building launcher extensions and to find CANN version files. | Set by `set_env.sh` | Yes | Yes |
+| Toolchain selection | `ASCEND_HOME_PATH` | Points to the CANN Toolkit root. Source the toolkit's `set_env.sh` before starting Python. Triton Ascend uses this directory to locate headers and libraries for building launcher extensions and to find CANN version files. | Set by `set_env.sh` | Yes | Yes |
 | Toolchain selection | `TRITON_NPU_COMPILER_PATH` | Supplies a fallback NPU compiler tool directory when packaged tools and `PATH` lookup fail. | Unset | Yes | Yes |
 | Toolchain selection | `TRITON_BUILD_DIR` | Searches this directory's `bin/` for `triton-opt` and `triton-mlir-opt`, after packaged tools and before `PATH`. | Unset | Yes | Yes |
 
 ### triton.knobs Interface
 
-`triton.knobs` is the typed configuration interface introduced in upstream Triton 3.4: descriptor fields correspond to environment variables, and a few entries are Python objects (such as callbacks) that have no corresponding environment variable and can only be set in-process. If you only need to configure a setting once before startup, set the environment variable directly. Use `triton.knobs` when you need to read the current value in-process, change a setting temporarily, or restore it by scope. Upstream groups are provided directly by `triton.knobs`; Triton-Ascend adds the `triton.knobs.ascend` group in Triton 3.6. It becomes available once the Ascend backend is imported.
+`triton.knobs` is the typed configuration interface introduced in upstream Triton 3.4: descriptor fields correspond to environment variables, and a few entries are Python objects (such as callbacks) that have no corresponding environment variable and can only be set in-process. If you only need to configure a setting once before startup, set the environment variable directly. Use `triton.knobs` when you need to read the current value in-process, change a setting temporarily, or restore it by scope. Upstream groups are provided directly by `triton.knobs`; Triton Ascend adds the `triton.knobs.ascend` group in Triton 3.6. It becomes available once the Ascend backend is imported.
 
 #### Quick start
 
@@ -315,7 +315,7 @@ The table lists Ascend backend defaults and notes any different `triton.Config` 
 
 The legacy compiler options listed below are accepted only during the compatibility period. **Once these options are fully removed in a future release, passing them through kernel launch arguments or `triton.Config` will cause an error.** Migrate or remove them as described below before upgrading.
 
-Renamed and deprecated settings handled by Triton-Ascend emit a `FutureWarning`, once per name per process. NPU IR emits the deprecation diagnostics for legacy multibuffer options.
+Renamed and deprecated settings handled by Triton Ascend emit a `FutureWarning`, once per name per process. NPU IR emits the deprecation diagnostics for legacy multibuffer options.
 
 ### Migrating Legacy Multibuffer Options
 

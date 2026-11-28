@@ -1,4 +1,4 @@
-# Triton-Ascend Operator Migration
+# Triton Ascend Operator Migration
 
 Overview: This document introduces migrating GPU Triton operators to the Ascend NPU platform, including architecture difference analysis and specific migration steps.
 

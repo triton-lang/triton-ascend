@@ -2,10 +2,10 @@
 
 ## Version Numbering
 
-Triton-Ascend follows [PEP 440](https://peps.python.org/pep-0440/) version specification, with version numbers aligned with upstream Triton: `vMAJOR.MINOR.PATCH[rcN][.postN]`
+Triton Ascend follows [PEP 440](https://peps.python.org/pep-0440/) version specification, with version numbers aligned with upstream Triton: `vMAJOR.MINOR.PATCH[rcN][.postN]`
 
-- **MAJOR.MINOR**: Corresponds one-to-one with upstream Triton versions, e.g., Triton-Ascend `3.2` is based on Triton `3.2`
-- **PATCH**: Triton-Ascend's `PATCH` version may be higher than upstream Triton, used for issue fixes or improvements at the `MAJOR.MINOR` level, e.g., both Triton-Ascend `3.2.0` and `3.2.1` are based on Triton `3.2.0`
+- **MAJOR.MINOR**: Corresponds one-to-one with upstream Triton versions, e.g., Triton Ascend `3.2` is based on Triton `3.2`
+- **PATCH**: Triton Ascend's `PATCH` version may be higher than upstream Triton, used for issue fixes or improvements at the `MAJOR.MINOR` level, e.g., both Triton Ascend `3.2.0` and `3.2.1` are based on Triton `3.2.0`
 - **rcN**: Release Candidate, published as needed for early testing and feedback from the community
 - **postN**: Post-release patches for already released versions, published as needed to address issues in stable versions
 
@@ -13,11 +13,11 @@ Triton-Ascend follows [PEP 440](https://peps.python.org/pep-0440/) version speci
 
 - The `main` branch is the latest development branch, tracking the latest upstream Triton version
 - Each release version creates a corresponding release development branch (e.g., `release/3.2.x`), which has the same commit id as the community release
-- Feature development should be done in fork repositories and merged into the Triton-Ascend repository via `PR`
+- Feature development should be done in fork repositories and merged into the Triton Ascend repository via `PR`
 
 **`main` Branch Mapping:**
 
-| Triton-Ascend | Triton commit hash                                           | Python    | CANN  | PyTorch | LLVM commit hash                                             | Patch                                                        |
+| Triton Ascend | Triton commit hash                                           | Python    | CANN  | PyTorch | LLVM commit hash                                             | Patch                                                        |
 | ------------- | ------------------------------------------------------------ | --------- | ----- | ------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | `main`        | [85400f8](https://github.com/triton-lang/triton-ascend/commit/85400f8) | `3.9~3.13` | `9.0.0` | `2.10.0`   | [f6ded0b](https://github.com/llvm/llvm-project/commit/f6ded0b) | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
 
@@ -29,7 +29,7 @@ Maintenance branch statuses include:
 - **Maintenance**: Only accepts critical bug fixes and security patches; no longer releases feature improvements
 - **End of Life**: No longer accepts any fixes; branch maintenance has stopped
 
-| Branch              | Status     | Triton Version | Triton-Ascend Release              | End of Maintenance |
+| Branch              | Status     | Triton Version | Triton Ascend Release              | End of Maintenance |
 | ----------------- | -------- | ---------------- | ----------------------------------- | ------------ |
 | `main`            | `Active`   | `3.6.0`          | /                                   | /            |
 | `release/3.2.1` | `Active`   | `3.2.0`          | `3.2.1`                             | /            |
@@ -53,7 +53,7 @@ Maintenance branch statuses include:
 
 ## Version Compatibility Matrix
 
-| Triton-Ascend | Triton | Python              | CANN  | PyTorch | LLVM commit hash | LLVM Patch |
+| Triton Ascend | Triton | Python              | CANN  | PyTorch | LLVM commit hash | LLVM Patch |
 | ------------- | ------ | ------------------- | ----- | ------- | ---------------- | ---------- |
 | `3.2.1`       | `3.2.0` | `3.9`(x86), `3.10-3.13` | `9.0.0` | `2.7.1`   | `b5cc222`        | -          |
 | `3.2.0`       | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `b5cc222`        | -          |

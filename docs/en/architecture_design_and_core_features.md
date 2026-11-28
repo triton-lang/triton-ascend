@@ -3,7 +3,7 @@
 ## 1. Logical Architecture
 
 ![Image](./figures/architectural_diagram.png)
-**Triton-Ascend Architecture Description**
+**Triton Ascend Architecture Description**
 
 **Core components:**
 
@@ -25,7 +25,7 @@
 
   The compilation flow is divided into two stages:
 
-  - **Triton-Ascend stage (Triton IR → Linalg IR)**: Triton-Ascend's MLIR passes (such as `TritonToLinalg`) lower Triton IR to Linalg IR, converting operator semantics into structured linear algebra representations.
+  - **Triton Ascend stage (Triton IR → Linalg IR)**: Triton Ascend's MLIR passes (such as `TritonToLinalg`) lower Triton IR to Linalg IR, converting operator semantics into structured linear algebra representations.
   - **BiSheng Compiler stage (Linalg IR → AscendNPU IR → `kernel*.o`)**: The BiSheng Compiler takes over the subsequent compilation, lowering Linalg IR to AscendNPU IR tailored for the Ascend NPU, performing hardware-specific instruction selection, memory allocation, and scheduling optimization, and finally generating the device-side executable binary `kernel*.o`.
 
 - **`driver`**
@@ -40,7 +40,7 @@ This project extends the support for Huawei Ascend NPU (using the CANN software 
 **(1) Ownership decision: where the change lands depends on hardware affinity**
 
 > - **If the modification is target independent**, it should be retained in the **Triton core** part (such as general modifications to the language and runtime).
-> - **If the modification is strongly Ascend-target affinitive**, it should be placed in the **Triton-Ascend** part.
+> - **If the modification is strongly Ascend-target affinitive**, it should be placed in the **Triton Ascend** part.
 
 **(2) Landing approach: keep upstream code untouched, carry changes as patches**
 
@@ -56,14 +56,14 @@ To stay synchronized with upstream Triton / LLVM and reduce merge conflicts duri
 | --- | --- | --- |
 | `python/` | Triton core | Contains the common Python implementation from standard Triton, including `triton.language`, JIT, runtime, cache, and tool entry points. Target-independent capabilities should live here first. |
 | `include/` and `lib/` | Triton core | Contains the common C++/MLIR infrastructure, dialects, passes, and conversion logic from standard Triton. Ascend-specific backend code is not placed here. |
-| `third_party/ascend/` | Triton-Ascend | Root directory of the Ascend backend. It contains Ascend NPU, CANN, and BiSheng Compiler-specific language extensions, compiler backend, runtime driver, MLIR passes, examples, and tests. |
-| `third_party/ascend/patch/` | Triton-Ascend | Holds non-invasive patches (`.patch`) against community Triton core and LLVM/MLIR, applied with `git apply` during the build preparation stage so the community source tree stays clean and easy to upgrade with upstream. |
+| `third_party/ascend/` | Triton Ascend | Root directory of the Ascend backend. It contains Ascend NPU, CANN, and BiSheng Compiler-specific language extensions, compiler backend, runtime driver, MLIR passes, examples, and tests. |
+| `third_party/ascend/patch/` | Triton Ascend | Holds non-invasive patches (`.patch`) against community Triton core and LLVM/MLIR, applied with `git apply` during the build preparation stage so the community source tree stays clean and easy to upgrade with upstream. |
 | `third_party/ascend/language/` | Ascend language extension | Contains Ascend language extensions. During installation, this directory is linked under `triton.language.extra`, so Triton kernels can use `triton.language.extra.cann`. |
 | `third_party/ascend/language/cann/libdevice.py` | Ascend language extension | Provides the Ascend NPU-adapted Python `libdevice` interface, including math functions and low-level operator wrappers used by Triton kernels. |
 | `third_party/ascend/backend/compiler.py` | compiler | Main entry of the Ascend compiler backend. It registers compiler options, organizes TTIR lowering to Ascend-adapted IR, Linalg, LLVM, and related stages, and invokes the downstream toolchain to generate executable binaries. |
 | `third_party/ascend/backend/driver.py` | driver | Ascend runtime driver module. It connects Triton runtime with CANN/TorchNPU runtime environments and launches compiled device-side executables. |
 | `third_party/ascend/include/` and `third_party/ascend/lib/` | compiler | Contains Ascend-specific MLIR dialects, passes, and conversions, such as `TritonToLinalg`, `TritonToStructured`, `DynamicCVPipeline`, and `AutoBlockify`. |
-| `third_party/ascend/AscendNPU-IR/` | compiler | Contains Ascend NPU IR and BiSheng compilation-chain integration used by the Triton-Ascend pipeline when lowering further toward hardware code generation. |
+| `third_party/ascend/AscendNPU-IR/` | compiler | Contains Ascend NPU IR and BiSheng compilation-chain integration used by the Triton Ascend pipeline when lowering further toward hardware code generation. |
 | `third_party/ascend/tutorials/` and `third_party/ascend/unittest/` | Examples and tests | Provides Triton examples on Ascend, migration examples, Python unit tests, and MLIR conversion tests for validating Ascend backend capabilities. |
 
 ## 3. Modules
@@ -82,7 +82,7 @@ To support more flexible tensor sub-region operations and single-element access,
 
 The full function signatures, parameter meanings, and examples are maintained in the Python API reference (to avoid duplicating them in the architecture document): see the *Vector/Memory Extension Ops* section of [triton.language.extra.cann.extension](https://triton-ascend.readthedocs.io/en/latest/python-api/triton.language.extra.cann.extension.html).
 
-### 3.2 Triton-Ascend
+### 3.2 Triton Ascend
 
 #### 3.2.1 Compiler Options
 

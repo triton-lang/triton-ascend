@@ -88,7 +88,7 @@ Template:
     Phone conference ID: xxx xxx xxx <- **change this**
     </pre>
 
-4. Copy the event generated from the meeting to [triton #general chat](https://app.slack.com/huddle/T01379XQ9FG/C013E22BPPC) on slack. Use the same text you used when creating the event.
+4. Copy the event generated from the meeting to [Triton #general chat](https://app.slack.com/huddle/T01379XQ9FG/C013E22BPPC) on slack. Use the same text you used when creating the event.
 
 5. Post the event to the [#triton channel on Discord GPU_MODE](https://discord.com/channels/1189498204333543425/1189607595451895918). You will need to join GPU_MODE to post to it.  Discord doesn't allow you to use markdown.  Convert the main urls like the calendar event and the main Microsoft Teams meeting link into short URLs (use <https://tinyurl.com>) and add them to the post.
 
@@ -107,7 +107,7 @@ Reminder, this month's community meetup is tomorrow at 10am PST.
 
 9. During the meeting, keep an eye on the comments section. Some folks might post questions for the speaker there and/or issues they're having with Teams.
 
-10. After the meeting has finished, work with the person with corp Microsoft Teams access to upload the recorded video to youtube.  Post the youtube link in [triton #general chat](https://app.slack.com/huddle/T01379XQ9FG/C013E22BPPC).
+10. After the meeting has finished, work with the person with corp Microsoft Teams access to upload the recorded video to youtube.  Post the youtube link in [Triton #general chat](https://app.slack.com/huddle/T01379XQ9FG/C013E22BPPC).
 
 If this is your first time using Microsoft Teams, work with the meeting creator to test out the UI (e.g. logging in, verifying your camera, audio work, verifying you can present your screen if using that functionality, play around with hand raising, play around with people/attendees/muting others, log off and log back in again.)
 

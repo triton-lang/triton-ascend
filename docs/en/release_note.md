@@ -1,10 +1,10 @@
-# Triton-Ascend Releases
+# Triton Ascend Releases
 
-Triton-Ascend releases provide a stable snapshot of the codebase, packaged as binary distributions that can be easily installed via PyPI. In addition, a release represents the formal announcement by the development team to the community of the availability of new features, completed improvements, and changes that may affect users (e.g., breaking changes).
+Triton Ascend releases provide a stable snapshot of the codebase, packaged as binary distributions that can be easily installed via PyPI. In addition, a release represents the formal announcement by the development team to the community of the availability of new features, completed improvements, and changes that may affect users (e.g., breaking changes).
 
 ## Release Schedule
 
-The following is the Triton-Ascend release schedule. Note that patch releases are optional.
+The following is the Triton Ascend release schedule. Note that patch releases are optional.
 
 | Major Version | Release Branch Cut Date | Release Date     | Version Nature   |
 |-------------|-------------------------|------------------|------------------|
@@ -21,10 +21,10 @@ Note: Version 3.2.0 is archived on [gitcode (AtomGit)](https://gitcode.com/Ascen
 
 ### Version Numbering
 
-Triton-Ascend follows the [PEP 440](https://peps.python.org/pep-0440/) versioning specification, with version numbers aligned with upstream Triton: `vMAJOR.MINOR.PATCH[rcN][.postN]`
+Triton Ascend follows the [PEP 440](https://peps.python.org/pep-0440/) versioning specification, with version numbers aligned with upstream Triton: `vMAJOR.MINOR.PATCH[rcN][.postN]`
 
-- **MAJOR.MINOR**: Corresponds one-to-one with upstream Triton versions; for example, Triton-Ascend `3.2` is based on Triton `3.2`
-- **PATCH**: Triton-Ascend's `PATCH` version may be higher than upstream Triton, used for bug fixes or improvements at the `MAJOR.MINOR` level; for example, both Triton-Ascend `3.2.0` and `3.2.1` are based on Triton `3.2.0`
+- **MAJOR.MINOR**: Corresponds one-to-one with upstream Triton versions; for example, Triton Ascend `3.2` is based on Triton `3.2`
+- **PATCH**: Triton Ascend's `PATCH` version may be higher than upstream Triton, used for bug fixes or improvements at the `MAJOR.MINOR` level; for example, both Triton Ascend `3.2.0` and `3.2.1` are based on Triton `3.2.0`
 - **rcN**: Release candidate versions, published as needed for early community testing and feedback
 - **postN**: Post-releases of already published versions, published as needed to fix issues in stable releases
 
@@ -32,7 +32,7 @@ Triton-Ascend follows the [PEP 440](https://peps.python.org/pep-0440/) versionin
 
 - The `main` branch is the latest development branch, tracking the latest upstream Triton version
 - A release development branch is created for each release (e.g., `release/3.2.x`), sharing the same commit IDs as the community releases
-- Feature development should be done in a fork of the repository and merged into the Triton-Ascend repository via `PR`
+- Feature development should be done in a fork of the repository and merged into the Triton Ascend repository via `PR`
 
 ### Maintenance Branches and Lifecycle
 
@@ -42,7 +42,7 @@ Maintenance branch statuses include:
 - **Maintenance**: Only accepts critical bug fixes and security patches; no feature improvements are released
 - **End of Life**: No fixes are accepted; maintenance of the branch has stopped
 
-| Branch          | Status     | Triton Version | Triton-Ascend Release                       | End of Maintenance |
+| Branch          | Status     | Triton Version | Triton Ascend Release                       | End of Maintenance |
 |-----------------| -------- | ------------ |---------------------------------------------| -------- |
 | `main`          | `Active`   | `3.6.0`      | /                                           | /        |
 | `release/3.6.0` | `Active`   | `3.6.0`   | `3.6.0.post2`,`3.6.0`                       | /        |
@@ -60,7 +60,7 @@ Maintenance branch statuses include:
 
 ## Recommended Version Combinations
 
-| Triton-Ascend | PyTorch  | TorchNPU Package | CANN    | SHMEM  | LLVM commit hash | Python              | LLVM Patch |
+| Triton Ascend | PyTorch  | TorchNPU Package | CANN    | SHMEM  | LLVM commit hash | Python              | LLVM Patch |
 |---------------|----------|------------------|---------|--------|------------------|---------------------|------------|
 | `main`        | `2.10.0` | `2.10.0.post7`   | `9.2.0` | `v1.7.0` | `f6ded0b`        | `3.9~3.13`          | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
 | `3.6.0`       | `2.10.0` | `2.10.0.post7`   | `9.2.0` | `v1.7.0` | `f6ded0b`        | `3.10~3.13`         | - |
@@ -72,12 +72,12 @@ Maintenance branch statuses include:
 
 > In the following tables, "/" means not compatible, and "Y" means compatible.
 
-**Table 1** Triton-Ascend and TorchNPU Package Version Compatibility
+**Table 1** Triton Ascend and TorchNPU Package Version Compatibility
 
 <table class="table">
   <thead>
     <tr>
-      <th rowspan="2">Triton-Ascend</th>
+      <th rowspan="2">Triton Ascend</th>
       <th colspan="8" style="text-align:left">TorchNPU Package Version</th>
     </tr>
     <tr>
@@ -99,12 +99,12 @@ Maintenance branch statuses include:
   </tbody>
 </table>
 
-**Table 2** Triton-Ascend and CANN Version Compatibility
+**Table 2** Triton Ascend and CANN Version Compatibility
 
 <table class="table">
   <thead>
     <tr>
-      <th rowspan="3">Triton-Ascend</th>
+      <th rowspan="3">Triton Ascend</th>
       <th colspan="8" style="text-align:left">CANN Version</th>
     </tr>
     <tr>

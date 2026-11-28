@@ -2,9 +2,9 @@
 
 ## 项目介绍
 
-**Triton-Ascend**是适配华为昇腾处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对华为昇腾NPU特性进行深度优化，能够帮助用户在华为昇腾平台上快速开发和部署高性能计算任务。
+**Triton Ascend**是适配华为昇腾处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对华为昇腾NPU特性进行深度优化，能够帮助用户在华为昇腾平台上快速开发和部署高性能计算任务。
 
-本文以**Ubuntu**环境下通过软件包部署方式在线安装并运行向量加法示例为例，指导用户快速上手使用**Triton-Ascend**。如需了解更多安装方式请阅读[安装指南](./installation_guide.md)文档。
+本文以**Ubuntu**环境下通过软件包部署方式在线安装并运行向量加法示例为例，指导用户快速上手使用**Triton Ascend**。如需了解更多安装方式请阅读[安装指南](./installation_guide.md)文档。
 
 ## 环境准备
 
@@ -70,9 +70,9 @@ The maximum difference between torch and triton is 0.0
 
 | 文档 | 说明 |
 |------|------|
-| [Triton-Ascend算子开发](./programming_guide/index.md) | 分核、片上内存、访存、Tiling等通用开发原则 |
-| [Triton-Ascend算子迁移](./migration_guide/index.md) | GPU Triton算子迁移到华为昇腾NPU |
-| [Triton-Ascend算子调试与调优](./debug_guide/index.md) | 调试、性能分析与精度排查 |
+| [Triton Ascend算子开发](./programming_guide/index.md) | 分核、片上内存、访存、Tiling等通用开发原则 |
+| [Triton Ascend算子迁移](./migration_guide/index.md) | GPU Triton算子迁移到华为昇腾NPU |
+| [Triton Ascend算子调试与调优](./debug_guide/index.md) | 调试、性能分析与精度排查 |
 | [环境变量与编译选项](./environment_variable_and_compiler_options_reference.md) | 运行与编译相关配置说明 |
 
 ### 教程与样例
@@ -82,5 +82,5 @@ The maximum difference between torch and triton is 0.0
 | [Vector算子开发](./programming_guide/vector_operator.md) | 逐元素、归约、Gather/Scatter等Vector Core算子 |
 | [Cube算子开发](./programming_guide/cube_operator.md) | 以 `tl.dot`、矩阵乘为核心的Cube算子 |
 | [融合算子开发](./programming_guide/cv_fusion_operator.md) | 同一Kernel中Cube + Vector协同的CV融合场景 |
-| [Triton-Ascend autotune](./autotune_guide.md) | Autotune推荐用法与自动Tiling适用边界 |
+| [Triton Ascend autotune](./autotune_guide.md) | Autotune推荐用法与自动Tiling适用边界 |
 | [典型算子样例](./examples/index.md) | Softmax、LayerNorm、Attention、Matmul等端到端样例 |

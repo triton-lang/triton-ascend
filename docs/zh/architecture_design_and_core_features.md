@@ -1,11 +1,11 @@
 # 架构设计与核心特性
 
-本文档介绍Triton-Ascend的架构设计与核心特性，涵盖逻辑架构、代码结构与目录划分，以及Triton core语言扩展、编译选项、SIMD/SIMT编译器与Ascend亲和算子等内容，适用于需要了解Triton-Ascend整体设计与实现原理的开发者。
+本文档介绍Triton Ascend的架构设计与核心特性，涵盖逻辑架构、代码结构与目录划分，以及Triton core语言扩展、编译选项、SIMD/SIMT编译器与Ascend亲和算子等内容，适用于需要了解Triton Ascend整体设计与实现原理的开发者。
 
-## 1 逻辑架构
+## 1逻辑架构
 
 ![图像](./figures/architectural_diagram.png)
-**Triton-Ascend架构说明**
+**Triton Ascend架构说明**
 
 **核心组件：**
 
@@ -27,22 +27,22 @@
 
   整个编译流程分为两个阶段：
 
-  - **Triton-Ascend阶段（Triton IR → Linalg IR）**：由Triton-Ascend的MLIR Pass（如 `TritonToLinalg`）将Triton IR降级为Linalg IR，完成算子语义到结构化线性代数表示的转换。
+  - **Triton Ascend阶段（Triton IR → Linalg IR）**：由Triton Ascend的MLIR Pass（如 `TritonToLinalg`）将Triton IR降级为Linalg IR，完成算子语义到结构化线性代数表示的转换。
   - **BiSheng Compiler阶段（Linalg IR → AscendNPU IR → `kernel*.o`）**：BiSheng Compiler接管后续编译，将Linalg IR降级为面向Ascend NPU的AscendNPU IR，执行硬件相关的指令选择、内存分配与调度优化，最终生成设备侧可执行二进制文件 `kernel*.o`。
 
 - **`driver`**
   提供Triton运行时与Ascend软件栈（CANN）之间的对接能力，加载由BiSheng Compiler生成的设备侧可执行内核 `kernel*.o`。
 
-## 2 代码结构
+## 2代码结构
 
-### 2.1 代码结构原则
+### 2.1代码结构原则
 
 本项目在标准Triton基础上，扩展支持华为Ascend NPU（通过CANN软件栈）。整体设计遵循以下**代码原则**：
 
 （1）归属判断：按是否与硬件相关决定落点。
 
 > - **若修改与目标硬件无关**（target independent），应保留在 **Triton core** 部分（如language、runtime的通用修改）；
-> - **若修改与Ascend硬件强相关**（target affinitive），应放在 **Triton-Ascend** 中。
+> - **若修改与Ascend硬件强相关**（target affinitive），应放在 **Triton Ascend** 中。
 
 （2）落地方式：非侵入社区代码，统一以patch承载。
 
@@ -52,27 +52,27 @@
 > - 确需改动社区代码（Triton core或LLVM/MLIR）时，不直接修改源文件，而是沉淀为独立 `.patch`，统一放在 `third_party/ascend/patch/`，在构建准备阶段通过 `git apply` 打入；
 > - 补丁需与明确的社区基线版本 / 提交对应（文件名体现版本号或commit）；硬件无关的通用改进优先向上游社区贡献，从源头减少本地补丁存量。
 
-### 2.2 目录结构与功能说明
+### 2.2目录结构与功能说明
 
 | 目录或文件 | 对应架构层级 | 功能说明 |
 | --- | --- | --- |
 | `python/` | Triton core | 保留标准Triton的Python侧通用实现，包括 `triton.language`、JIT、运行时、缓存、工具链入口等。与硬件无关的通用能力优先放在该目录。 |
 | `include/` 和 `lib/` | Triton core | 保留标准Triton的通用C++/MLIR基础设施、Dialect、Pass和转换逻辑。这里不承载Ascend专属后端实现。 |
-| `third_party/ascend/` | Triton-Ascend | Ascend后端的根目录，集中放置与Ascend NPU、CANN、BiSheng Compiler强相关的语言扩展、编译后端、运行时驱动、MLIR Pass、示例和测试。 |
-| `third_party/ascend/patch/` | Triton-Ascend | 存放对社区Triton core与LLVM/MLIR的非侵入补丁（`.patch`），在构建准备阶段经 `git apply` 打入，使社区源码树保持干净、便于跟随上游升级。 |
+| `third_party/ascend/` | Triton Ascend | Ascend后端的根目录，集中放置与Ascend NPU、CANN、BiSheng Compiler强相关的语言扩展、编译后端、运行时驱动、MLIR Pass、示例和测试。 |
+| `third_party/ascend/patch/` | Triton Ascend | 存放对社区Triton core与LLVM/MLIR的非侵入补丁（`.patch`），在构建准备阶段经 `git apply` 打入，使社区源码树保持干净、便于跟随上游升级。 |
 | `third_party/ascend/language/` | Ascend language extension | Ascend语言扩展目录，安装后会链接到 `triton.language.extra` 下，供Triton kernel通过 `triton.language.extra.cann` 使用。 |
 | `third_party/ascend/language/cann/libdevice.py` | Ascend language extension | 适配Ascend NPU的 `libdevice` Python接口，提供数学函数和底层算子封装，供Triton算子调用。 |
 | `third_party/ascend/backend/compiler.py` | compiler | Ascend编译器后端主入口，负责注册编译选项、组织TTIR到Ascend适配IR、Linalg/LLVM等阶段的转换，并调用后续工具链生成可执行二进制文件。 |
 | `third_party/ascend/backend/driver.py` | driver | Ascend运行时驱动模块，负责与CANN/TorchNPU等运行时环境对接，加载并启动已编译的设备侧可执行文件。 |
 | `third_party/ascend/include/` 和 `third_party/ascend/lib/` | compiler | Ascend专属MLIR Dialect、Pass和转换实现，例如 `TritonToLinalg`、`TritonToStructured`、`DynamicCVPipeline`、`AutoBlockify` 等。 |
-| `third_party/ascend/AscendNPU-IR/` | compiler | Ascend NPU相关IR与BiSheng编译链适配内容，是从Triton-Ascend编译流程继续下沉到硬件侧代码生成的重要组成部分。 |
+| `third_party/ascend/AscendNPU-IR/` | compiler | Ascend NPU相关IR与BiSheng编译链适配内容，是从Triton Ascend编译流程继续下沉到硬件侧代码生成的重要组成部分。 |
 | `third_party/ascend/tutorials/` 和 `third_party/ascend/unittest/` | 示例与测试 | 提供Ascend平台上的Triton示例、迁移样例、Python单元测试和MLIR转换测试，用于验证Ascend后端能力。 |
 
-## 3 模块
+## 3模块
 
 ### 3.1 Triton core增强
 
-#### 3.1.1 语言扩展
+#### 3.1.1语言扩展
 
 为支持更灵活的张量子区域操作与单元素访问，语言层扩展了以下算子：
 
@@ -84,9 +84,9 @@
 
 完整函数签名、各参数含义与示例以Python API参考为准（避免与架构文档两处维护）：见 [triton.language.extra.cann.extension](https://triton-ascend.readthedocs.io/zh-cn/latest/python-api/triton.language.extra.cann.extension.html) 的 *Vector/Memory Extension Ops*。
 
-### 3.2 Triton-Ascend
+### 3.2 Triton Ascend
 
-#### 3.2.1 编译选项
+#### 3.2.1编译选项
 
 NPUOptions是控制**单个kernel编译策略**的参数，可通过 `triton.Config`、Autotune参数或kernel launch meta-parameter传入，在编译期作用于TTIR → Linalg IR → AscendNPU IR的各阶段。按用途可分为以下几类：
 
@@ -209,7 +209,7 @@ TritonToLinalg用于将TTIR转换为Linalg IR。
 | PtrToIntConverter                          | triton::PtrToIntOp to memref::ExtractAlignedPointerAsIndexOp, arith::IndexCastOp |
 | MakeTensorPtrConverter                     | triton::MakeTensorPtrOp to memref::ReinterpretCastOp         |
 
-##### 3.2.2.4 其他Pass
+##### 3.2.2.4其他Pass
 
 | Pass名称 | 功能描述 | 核心转换器 | 转换器描述 |
 |---|---|---|---|
@@ -252,7 +252,7 @@ kernel[grid](..., compile_mode="simd_simt_template")
 kernel[grid](..., compile_mode="simt_only", num_warps=32)
 ```
 
-##### 3.2.3.2 三种模式的编译分流
+##### 3.2.3.2三种模式的编译分流
 
 ```mermaid
 flowchart TD
@@ -301,7 +301,7 @@ flowchart TD
 | 非结构化访存 | 展开为标量循环 | 尽量转为SIMT间接访存（维数 ≤ 5）；失败则回退标量循环 | 不运行 |
 | TritonToLinalg | 常规Linalg IR降级 | 常规Linalg IR降级 | 不运行 |
 
-##### 3.2.3.3 混合模式：只对离散访存走SIMT
+##### 3.2.3.3混合模式：只对离散访存走SIMT
 
 混合模式**不会**把整个kernel切到SIMT，只对离散 / 非结构化访存点走SIMT，其余仍走SIMD：
 
@@ -318,7 +318,7 @@ flowchart TD
 3. **TritonToLinalg**
    - 常规Linalg IR降级。
 
-##### 3.2.3.4 纯SIMT（`simt_only`）
+##### 3.2.3.4纯SIMT（`simt_only`）
 
 `simt_only` 直接下发Triton IR交给AscendNPU IR做纯SIMT编译。
 

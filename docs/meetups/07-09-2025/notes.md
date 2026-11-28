@@ -33,7 +33,7 @@ Recording link [here](https://youtu.be/zoSY_WXHmF0)
     - A> Not planned. Filled schedule with new tech over last year (working with Phil on program). Maybe we should extend to two days next year. Conference for professions. Should this be a conference for non-experts too? Targeting folks who know and live/breathe Triton.
     - A> Should have talks on tooling like Proton and guidelines on performance. Want people to be able to reproduce their results.
     - Q> Last years audience was Triton developers and Triton users but felt like the topic skewed toward developers and get people to contributed.  Any plan to have content for users?
-    - A> First 2 talks on triton internals.  Others include tooling that should be interesting to users (like liger, triton-distributed, helion and GPU mode).  Users will benefit from learning what goes on under the hood.
+    - A> First 2 talks on Triton internals.  Others include tooling that should be interesting to users (like liger, triton-distributed, helion and GPU mode).  Users will benefit from learning what goes on under the hood.
     - Q> Social aspect to Triton conference?
     - A> Full day of talks with coffee breaks/lunch/happy hour for unstructured social interaction. No plans for structured social engagement (like breaking into pods). But still in flux. Would like suggestions for what we can do for other social engagements (send ideas to Ofer).
     - Q> is GPU mode led by Mark Saroufim?
@@ -68,7 +68,7 @@ Recording link [here](https://youtu.be/zoSY_WXHmF0)
         - Need better layout management functions
         - *Not planning on accepting contributions now*
     - Q> Gluon is for specific type of GPU. What about other GPUs/generations?
-    - A> Don't need to rewrite everything. To get best performance on newer generations, yes, you will need to do rewrites.  Kernels have bells and whistles. Triton kernels program are a declarative specification for what the kernel should do. The triton compiler figures out how to make that spec performant. With Gluon, you will need to do this yourself.
+    - A> Don't need to rewrite everything. To get best performance on newer generations, yes, you will need to do rewrites.  Kernels have bells and whistles. Triton kernels program are a declarative specification for what the kernel should do. The Triton compiler figures out how to make that spec performant. With Gluon, you will need to do this yourself.
     - Q> In the future, will certain ops be implemented in Gluon vs in the compiler? E.g. tl.histogram written as a gluon kernel.
     - A> Probably not. Triton ops are tile-level. These aren't exposed in Gluon. Idea of interop between Gluon & Triton exist but may not be implemented.
     - Q> Pushing onus like scheduling to kernel writers, Any thoughts about tooling to help guide the kernel writers like timeline views?

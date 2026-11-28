@@ -2,7 +2,7 @@
 
 ## 使命
 
-作为Triton生态的重要组成部分，Triton-Ascend项目致力于为所有昇腾NPU用户提供高效易用的Triton编译框架，使Triton代码能够在昇腾硬件上高效运行，并积极贡献于丰富Triton和昇腾生态。
+作为Triton生态的重要组成部分，Triton Ascend项目致力于为所有昇腾NPU用户提供高效易用的Triton编译框架，使Triton代码能够在昇腾硬件上高效运行，并积极贡献于丰富Triton和昇腾生态。
 
 ## 原则
 
@@ -12,7 +12,7 @@
 
 ## 治理结构
 
-Triton-Ascend是Triton社区下的开源项目，角色任命最终由Triton社区决定。项目采用分层技术治理结构：
+Triton Ascend是Triton社区下的开源项目，角色任命最终由Triton社区决定。项目采用分层技术治理结构：
 
 ### 贡献者
 
@@ -43,7 +43,7 @@ Triton-Ascend是Triton社区下的开源项目，角色任命最终由Triton社�
 
 **要求**：
 
-- 对Triton和Triton-Ascend代码库有深入理解
+- 对Triton和Triton Ascend代码库有深入理解
 - 承诺持续代码贡献，具备设计、开发及PR审阅流程的能力
 - 积极参与社区代码评审，至少交付一项重大功能，并保持持续高质量贡献
 - 积极处理 `Issue` 、回应咨询并参与讨论
@@ -64,7 +64,7 @@ Triton-Ascend是Triton社区下的开源项目，角色任命最终由Triton社�
 ### 运作原则
 
 - 成员资格基于个人能力，通过贡献、评审和讨论体现
-- 候选人需认同Triton-Ascend的原则并保持行为一致性
+- 候选人需认同Triton Ascend的原则并保持行为一致性
 - 连续 **6个月** 未对项目做出贡献的 `Maintainer` 可转为荣誉身份
 - 成员资格授予个人，不与雇主绑定
 

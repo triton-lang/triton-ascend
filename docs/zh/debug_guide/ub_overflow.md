@@ -2,7 +2,7 @@
 
 ## 概述
 
-UB Overflow是Triton-Ascend开发中常见的问题。本文档详细介绍UB Overflow的常见原因、解决方案和调试方法。
+UB Overflow是Triton Ascend开发中常见的问题。本文档详细介绍UB Overflow的常见原因、解决方案和调试方法。
 
 ## 常见原因及解决方案
 

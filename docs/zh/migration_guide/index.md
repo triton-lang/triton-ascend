@@ -1,4 +1,4 @@
-# Triton-Ascend算子迁移
+# Triton Ascend算子迁移
 
 概述：本文档介绍将GPU Triton算子迁移到昇腾NPU平台的相关内容，包括架构差异分析和具体迁移步骤。
 

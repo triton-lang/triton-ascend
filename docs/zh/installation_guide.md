@@ -1,8 +1,8 @@
 # 安装指南
 
-**Triton-Ascend**是适配华为昇腾处理器的Triton优化版本，提供核函数自动调优、算子编译及部署能力。支持Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品，兼容Triton核心语法，并针对华为昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。
+**Triton Ascend**是适配华为昇腾处理器的Triton优化版本，提供核函数自动调优、算子编译及部署能力。支持Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品，兼容Triton核心语法，并针对华为昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。
 
-本指南指导开发者在**Ubuntu**环境下安装**Triton-Ascend**，涵盖快速安装、源码安装及镜像安装三种方式，并包含环境验证与常见问题排查。
+本指南指导开发者在**Ubuntu**环境下安装**Triton Ascend**，涵盖快速安装、源码安装及镜像安装三种方式，并包含环境验证与常见问题排查。
 
 ## 环境准备
 
@@ -45,7 +45,7 @@ update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100
 pip install ninja cmake wheel pybind11 # build-time dependencies
 ```
 
-### 编译Triton-Ascend
+### 编译Triton Ascend
 
 ```bash
 git clone https://github.com/triton-lang/triton-ascend.git
@@ -58,7 +58,7 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
 
 ### 自定义LLVM构建（可选）
 
-如需自定义构建LLVM，可执行以下步骤编译Triton-Ascend：
+如需自定义构建LLVM，可执行以下步骤编译Triton Ascend：
 
 1. **代码准备**：通过`git checkout`检出指定版本的LLVM源码并应用补丁。
 
@@ -93,7 +93,7 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
     cp  {PATH_TO}/llvm-project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
     ```
 
-3. **编译Triton-Ascend**：通过配置LLVM路径定位依赖库，启用ccache加速编译，并关闭Proton和单元测试来减少构建开销。
+3. **编译Triton Ascend**：通过配置LLVM路径定位依赖库，启用ccache加速编译，并关闭Proton和单元测试来减少构建开销。
 
     ```bash
     git clone https://github.com/triton-lang/triton-ascend.git
@@ -111,22 +111,22 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
 
     | 参数（环境变量）                 | 默认值         | 说明               |
     |-------------------------------|---------------|------------------|
-    | `LLVM_SYSPATH`                | None          | 指定本地已编译好的 LLVM 安装路径。设置后不再下载 LLVM 预编译包，离线构建时必填，即上文构建 LLVM 步骤中的 `${LLVM_INSTALL_PREFIX}`。 |
-    | `TRITON_BUILD_WITH_CLANG_LLD` | true          | 使用 clang/clang++ 作为编译器、lld 作为链接器，需提前安装 clang>=15、lld>=15。 |
-    | `TRITON_BUILD_WITH_CCACHE`    | true          | 启用 ccache 缓存编译结果，加速重复构建，需提前安装 ccache。 |
-    | `TRITON_BUILD_PROTON`         | OFF           | 是否构建 Proton 性能分析器（profiler）。需要时设为 `ON`。 |
-    | `TRITON_BUILD_TD`             | OFF           | 是否构建 TD（Triton-distributed-ascend）相关组件，默认关闭。 |
-    | `TRITON_BUILD_NPUIR`          | OFF           | 是否在安装过程中同步编译 AscendNPU-IR。设为 `ON` 时会触发 `build_npuir.py` 流程；AscendNPU-IR编译依赖CANN，需source /usr/local/Ascend/ascend-toolkit/set_env.sh（以root用户默认安装路径为例）且可用磁盘大于30GB。 |
-    | `TRITON_WHEEL_NAME`           | triton_ascend | 生成的 wheel 包名称，一般无需修改。 |
-    | `TRITON_APPEND_CMAKE_ARGS`    | None          | 追加透传给 CMake 的参数，多个参数用空格分隔。例如追加 `-DTRITON_BUILD_UT=OFF` 可关闭单元测试构建。 |
-    | `TRITON_OFFLINE_BUILD`        | OFF           | 设为 `ON` 后禁止构建过程中访问网络下载依赖（会自动关闭需联网拉取 googletest 的单元测试构建），用于离线环境。 |
+    | `LLVM_SYSPATH`                | None          | 指定本地已编译好的LLVM安装路径。设置后不再下载LLVM预编译包，离线构建时必填，即上文构建LLVM步骤中的 `${LLVM_INSTALL_PREFIX}`。 |
+    | `TRITON_BUILD_WITH_CLANG_LLD` | true          | 使用 clang/clang++ 作为编译器、lld作为链接器，需提前安装clang>=15、lld>=15。 |
+    | `TRITON_BUILD_WITH_CCACHE`    | true          | 启用ccache缓存编译结果，加速重复构建，需提前安装ccache。 |
+    | `TRITON_BUILD_PROTON`         | OFF           | 是否构建Proton性能分析器（profiler）。需要时设为 `ON`。 |
+    | `TRITON_BUILD_TD`             | OFF           | 是否构建TD（Triton-distributed-ascend）相关组件，默认关闭。 |
+    | `TRITON_BUILD_NPUIR`          | OFF           | 是否在安装过程中同步编译AscendNPU-IR。设为 `ON` 时会触发 `build_npuir.py` 流程；AscendNPU-IR编译依赖CANN，需source /usr/local/Ascend/ascend-toolkit/set_env.sh（以root用户默认安装路径为例）且可用磁盘大于30GB。 |
+    | `TRITON_WHEEL_NAME`           | triton_ascend | 生成的wheel包名称，一般无需修改。 |
+    | `TRITON_APPEND_CMAKE_ARGS`    | None          | 追加透传给CMake的参数，多个参数用空格分隔。例如追加 `-DTRITON_BUILD_UT=OFF` 可关闭单元测试构建。 |
+    | `TRITON_OFFLINE_BUILD`        | OFF           | 设为 `ON` 后禁止构建过程中访问网络下载依赖（会自动关闭需联网拉取googletest的单元测试构建），用于离线环境。 |
     | `MAX_JOBS`                    | 2 × CPU core  | 编译并行任务数。内存紧张时可调小，例如 `export MAX_JOBS=8`。 |
     | `TRITON_PARALLEL_LINK_JOBS`   | None          | 并行链接任务数。链接阶段占用内存较大，内存不足时可设为 `1`。 |
-    | `IS_MANYLINUX`                | OFF           | 设为 `ON` 后构建生成的 wheel 包为 manylinux 兼容格式，用于在不同 Linux 发行版上安装。 |
+    | `IS_MANYLINUX`                | OFF           | 设为 `ON` 后构建生成的wheel包为manylinux兼容格式，用于在不同Linux发行版上安装。 |
 
 4. **（可选）Triton-distributed-ascend**：若使用[Triton-distributed-ascend](https://gitcode.com/Ascend/Triton-distributed-ascend)的功能，需源码编译shmem v1.7.0组件。
 
-4.1 获取源码：
+4.1获取源码：
 
   ```bash
     git clone https://gitcode.com/cann/shmem.git
@@ -134,13 +134,13 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
     git checkout v1.7.0
   ```
 
-4.2 源码编译：
+4.2源码编译：
 
 请参考[shmem项目](https://gitcode.com/cann/shmem) README.md中“安装”->“方式三：源码编译”章节。
 
 ## 镜像安装
 
-**表2**Triton-Ascend部分镜像表
+**表2**Triton Ascend部分镜像表
 
 | 芯片类型 | 镜像标签 |  镜像下载命令 |
 |----------|----------|-------------|
@@ -186,7 +186,7 @@ quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3
 docker exec -u root -it triton-ascend_container /bin/bash
 ```
 
-**注**：如需使用该类镜像测试源码编译安装，则先运行`pip uninstall triton-ascend triton`命令卸载已安装的**Triton-Ascend**组件。
+**注**：如需使用该类镜像测试源码编译安装，则先运行`pip uninstall triton-ascend triton`命令卸载已安装的**Triton Ascend**组件。
 
 ## 验证与测试
 
@@ -204,7 +204,7 @@ python3 -c "import triton.backends.ascend as ascend;print('triton-ascend version
 triton-ascend version: 版本号
 ```
 
-说明Triton-Ascend包安装成功了。继续运行tutorials中向量加法示例验证后端是否编译成功。向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)。
+说明Triton Ascend包安装成功了。继续运行tutorials中向量加法示例验证后端是否编译成功。向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)。
 
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
@@ -262,13 +262,13 @@ python -m pytest -sv -n 8 third_party/ascend/unittest/pytest_ut
 
 **解决措施**
 
-可以尝试手动安装torch后再安装TorchNPU：
+可以尝试手动安装Torch后再安装TorchNPU：
 
 ```bash
 pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu
 ```
 
-**问题二：编译安装Triton-Ascend时，如果GCC < 9.4.0，可能报错“ld.lld: error: unable to find library -lstdc++fs”**
+**问题二：编译安装Triton Ascend时，如果GCC < 9.4.0，可能报错“ld.lld: error: unable to find library -lstdc++fs”**
 
 **解决措施**
 
@@ -285,20 +285,20 @@ endif()
 
 **根因分析**
 
-triton-ascend目录被triton覆盖，导致triton-ascend功能受损。
+Triton Ascend目录被Triton覆盖，导致Triton Ascend功能受损。
 
 **解决措施**
 
-卸载已损坏的triton-ascend，重新安装即可。以3.2.1版本为例，可执行如下命令修复：
+卸载已损坏的Triton Ascend，重新安装即可。以3.2.1版本为例，可执行如下命令修复：
 
 ```bash
 pip uninstall triton-ascend triton
 pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
-**问题四：Triton-Ascend 3.2.1版本为何新增依赖triton？**
+**问题四：Triton Ascend 3.2.1版本为何新增依赖Triton？**
 
-答复：Triton-Ascend是基于Triton进行的二次开发，与Triton安装目录同名。若用户安装Triton-Ascend之后，再次安装Triton或依赖Triton的三方件，会覆盖Triton目录，导致Triton-Ascend功能受损。
+答复：Triton Ascend是基于Triton进行的二次开发，与Triton安装目录同名。若用户安装Triton Ascend之后，再次安装Triton或依赖Triton的三方件，会覆盖Triton目录，导致Triton Ascend功能受损。
 因此通过增加Triton依赖，当Triton被覆盖安装时会有如下提醒：
 
 ```text
@@ -306,9 +306,9 @@ ERROR: pip's dependency resolver does not currently take into account all the pa
 triton-ascend 3.2.1 requires triton==3.5.0, but you have triton 3.5.1 which is incompatible.
 ```
 
-若用户遇到该问题且想恢复Triton-Ascend功能，可根据问题三的解决措施进行命令修复。
+若用户遇到该问题且想恢复Triton Ascend功能，可根据问题三的解决措施进行命令修复。
 
-**问题五：Triton-Ascend 3.2.1版本依赖的Triton版本为何不一致？**
+**问题五：Triton Ascend 3.2.1版本依赖的Triton版本为何不一致？**
 
 答复：x86与ARM使用不同版本的社区Triton安装包，是因为社区从Triton 3.2版本开始提供x86安装包，而ARM安装包是从Triton 3.5版本开始提供的。
 

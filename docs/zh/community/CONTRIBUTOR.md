@@ -1,8 +1,8 @@
 # Contributors
 
-This page lists the contributors of Triton-Ascend releases, recording each contributor's ID, first contribution date and pull request link, for community members and maintainers to trace contribution records.
+This page lists the contributors of Triton Ascend releases, recording each contributor's ID, first contribution date and pull request link, for community members and maintainers to trace contribution records.
 
-Every release of Triton-Ascend would not have been possible without the following contributors:
+Every release of Triton Ascend would not have been possible without the following contributors:
 
 Updated on 2026-05-06:
 

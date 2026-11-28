@@ -1,6 +1,6 @@
-# Triton 总览
+# Triton总览
 
-## Triton op 支持度总览
+## Triton op支持度总览
 
 |                          |        Triton Op       | int8 | int16 | int32 | uint32 | int64 | fp16 | fp32 | bf16 | bool |
 |:------------------------:|:----------------------:|------|-------|-------|--------|-------|------|------|------|------|
@@ -143,14 +143,14 @@
 
 - umulhi: 不支持负数输入
 
-- mod: int64仅支持处理 -2^24 ~ 2^24 范围内的数值
+- mod: int64仅支持处理 -2^24 ~ 2^24范围内的数值
 
 - rand类op: 所支持的数据类型仅针对算子的输出。
 
 - tensor_descriptor类op: 当前仅支持绑定使用，即 make/load/store_tensor_descriptor 需配套使用
 
 - ALL: int8类型由于特殊处理，会占用更大的片上空间，编译时容易造成UB overflow报错，通常调整tiling即可解决
-- ALL: triton kernel中同时存在所有tensor总和不能超过96KB，若关闭double buffer，则不能超过192KB
+- ALL: Triton kernel中同时存在所有tensor总和不能超过96KB，若关闭double buffer，则不能超过192KB
 - ALL: 所有tensor不允许某个shape的size小于1
-- ALL: ✓*表示triton内部将bool类型转为int8类型进行运算，并能够执行得到结果的OP
+- ALL: ✓*表示Triton内部将bool类型转为int8类型进行运算，并能够执行得到结果的OP
 - ALL: 不支持使用shape为"[[]]"的标量tensor进行计算

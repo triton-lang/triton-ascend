@@ -393,18 +393,12 @@ void AddControlFlowConditionPass::runOnOperation() {
   // scheme.
   constexpr llvm::StringLiteral legacyKernel[] = {
       "_sdpa_infer_kernel", "fwd_kernel",
-      "parallel_nsa_compression_bwd_kernel_dkv"};
-  // The normal preload scheme is only enabled for the kernels whose pipeline
-  // dependency matches one of the validated shapes of the cross core pattern:
-  // a linear chain of four or five blocks, two independent chains of four
-  // blocks, a chain of three blocks, a tree of six or seven blocks, or a
-  // forest of four chains of three blocks. Every shape carries its own
-  // constraints on the buffers of the transfers and on the number of the
-  // blocks that carry a condition, so that no other kernel matches it by
-  // accident. The shapes and their constraints are described in
-  // CrossCorePattern.h.
-  // The scheme merges the main loop of every core into one scf.while, so the
-  // kernel has to have one main loop per core for every pipeline it runs.
+      "parallel_nsa_compression_bwd_kernel_dkv", "kernel_sda_bwd_q_up"};
+  // The normal preload scheme is enabled for every kernel that is not
+  // blacklisted. The cross core pattern is still analyzed and reported, but
+  // it no longer gates the choice of the control flow scheme: it only
+  // describes the shape of the pipeline of the kernel. The shapes and their
+  // constraints are described in CrossCorePattern.h.
   bool blacklisted = false;
   for (auto &op : module.getOps()) {
     auto funcOp = llvm::dyn_cast<func::FuncOp>(&op);
@@ -417,6 +411,8 @@ void AddControlFlowConditionPass::runOnOperation() {
   const bool corePairMainLoop = hasCorePairMainLoop(module, mainLoopCount);
   const unsigned mainLoopPairs = countCorePairMainLoops(module);
   const CrossCorePattern pattern = analyzeCrossCorePattern(module);
+  // The pattern is only reported below, it does not gate the choice of the
+  // control flow scheme any more.
   const bool patternMatched = pattern.shape != CrossCoreShape::None;
   // The main loops have to run the pipelines of the pattern in lockstep: one
   // pair of main loops, one loop on each core, for every pipeline.
@@ -428,8 +424,7 @@ void AddControlFlowConditionPass::runOnOperation() {
           : ((pattern.shape == CrossCoreShape::TwoChains ||
               pattern.shape == CrossCoreShape::ShortChainForest) &&
              mainLoopPairs == 2);
-  const bool enableNormalPreload =
-      !blacklisted && patternMatched && mainLoopsMatched;
+  const bool enableNormalPreload = !blacklisted;
   LLVM_DEBUG({
     DBGS() << "blacklisted: " << blacklisted
            << ", main loops: " << mainLoopCount

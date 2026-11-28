@@ -1,15 +1,20 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
 
 // Unit Tests for AddControlFlowCondition Pass - Cross Core Dependencies Test
+//
+// The extra iteration of the flowOpt is only computed by the legacy track of
+// the pass, so the kernel of this test is named after one of the legacyKernel
+// names of AddControlFlowCondition.cpp: the black list is the way to reach
+// the legacy path.
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   // ============================================
-  // Test Case 1: @test_extra_iteration_times
+  // Test Case 1: @parallel_nsa_compression_bwd_kernel_dkv
   // ============================================
   // C1 C2 -> V1
   // V1 -> C3
   // C3-> V2
   // flowopt condition will be added on C3 block
-  func.func @test_extra_iteration_times(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg5: memref<?xf32> {tt.divisibility = 16 : i32}, %arg6: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg7: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg8: memref<?xi32> {tt.divisibility = 16 : i32}, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32, %arg14: i32, %arg15: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {
+  func.func @parallel_nsa_compression_bwd_kernel_dkv(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg5: memref<?xf32> {tt.divisibility = 16 : i32}, %arg6: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg7: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg8: memref<?xi32> {tt.divisibility = 16 : i32}, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32, %arg14: i32, %arg15: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {
     %c8192_i32 = arith.constant {ssbuffer.block_id = 8 : i32} 8192 : i32
     %c128_i32 = arith.constant {ssbuffer.block_id = 8 : i32} 128 : i32
     %c0_i32 = arith.constant {ssbuffer.block_id = 8 : i32} 0 : i32

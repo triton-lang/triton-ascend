@@ -1697,7 +1697,7 @@ InterCoreTransferAndSyncPass::matchCubeToVectorDirectStorePattern(
         continue;
       }
 
-      return std::nullopt;
+      continue;
     }
   }
   return std::nullopt;
@@ -2221,7 +2221,7 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToCube(
   for (Operation *user : users) {
     auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
     if (userBlockIdOpt && *userBlockIdOpt == dep.iniConsumerBlockId) {
-      if (user == fixpipeOp) {
+      if (isa<hivm::FixpipeOp>(user)) {
         continue;
       }
       if (auto matmulUser = dyn_cast<linalg::MatmulOp>(user)) {

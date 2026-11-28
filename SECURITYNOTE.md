@@ -71,6 +71,7 @@ Public IP addresses are used in the configuration files and scripts of Triton-As
 | Introduced by open source | <https://ubuntu.com> | docker/Dockerfile | <http://security.ubuntu.com> | Ubuntu security apt source replaced by the Huawei mirror. |
 | Introduced by open source | <https://repo.huaweicloud.com> | docker/Dockerfile | <https://repo.huaweicloud.com/repository/pypi/simple> | Python pip source configured in the image. |
 | Introduced by open source | <https://github.com/pytorch/pytorch> | docker/Dockerfile & docker/3.2.1-*/Dockerfile | <https://download.pytorch.org/whl/cpu> | PyTorch CPU wheel index. |
+| Self-developed | N/A | docker/Dockerfile | <https://swr.cn-southwest-2.myhuaweicloud.com> | Default CANN base image (CANN_BASE_IMAGE) pulled from Huawei Cloud SWR. |
 | Self-developed | N/A | third_party/ascend/build/setup_patch.py | <https://gitcode.com/Ascend/Triton-distributed-ascend.git> | Triton-distributed submodule repository. |
 | Self-developed | N/A | third_party/ascend/build/setup_patch.py | <https://github.com/triton-lang/triton-ascend/> | Triton-Ascend project URL injected into package metadata. |
 | Self-developed | N/A | third_party/ascend/build/setup_patch.py & third_party/ascend/Triton-distributed-ascend/python/setup.py | `https://triton-ascend-artifacts.obs.myhuaweicloud.com/llvm-builds/{name}.tar.gz` | Download address of the prepared LLVM tool. |

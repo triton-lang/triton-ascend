@@ -58,3 +58,19 @@ def test_log1p(param_list):
     triton_log1p[ncore, 1, 1](x0, x1, triton_res, x0.numel(), xblock, xblock_sub)
     # 比较结果
     test_common.validate_cmp(dtype, triton_res, torch_res)
+
+
+def test_log1p_boundary():
+    vals = torch.tensor([1e-8, -1e-8, 1e-6, -1e-6, 1e-3, -1e-3, 0.0, -0.0], dtype=torch.float32)
+    y_ref = torch.log1p(vals)
+    n = vals.numel()
+    zero = torch.zeros(n, dtype=torch.float32).npu()
+    x0 = vals.npu()
+    y_cal = torch.zeros_like(x0).npu()
+    triton_log1p[1, 1, 1](zero, x0, y_cal, n, n, n)
+    y_cal = y_cal.cpu()
+    # Tight relative tolerance (atol=0): a zero result for a tiny input such as
+    # log1p(1e-8) == 0 must not be accepted as matching the ~1e-8 reference.
+    torch.testing.assert_close(y_cal, y_ref, rtol=1e-3, atol=0.0)
+    # log1p(-0.0) must preserve the negative sign of zero.
+    assert torch.signbit(y_cal[-1]), "log1p(-0.0) must be -0.0"

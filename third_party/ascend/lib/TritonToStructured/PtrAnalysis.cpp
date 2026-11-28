@@ -533,10 +533,8 @@ LogicalResult PtrState::mulState(const PtrState &lhsState,
       auto dataType = cast<RankedTensorType>(data.getType());
       if (dataType.getElementType() != elementType)
         return failure();
-      Value splatCoeff =
-          builder.create<triton::SplatOp>(loc, dataType, coeff);
-      Value dataAfterMul =
-          builder.create<arith::MulIOp>(loc, data, splatCoeff);
+      Value splatCoeff = builder.create<triton::SplatOp>(loc, dataType, coeff);
+      Value dataAfterMul = builder.create<arith::MulIOp>(loc, data, splatCoeff);
       newDynamicOffsets.push_back(dataAfterMul);
     }
   }

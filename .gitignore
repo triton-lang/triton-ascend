@@ -14,6 +14,12 @@ python/dist/
 python/triton*.egg-info/
 python/triton_kernels/triton*.egg-info/
 
+# Triton-Ascend builds from the repository root (`pip install .` / setup.py bdist_wheel),
+# which is what this repo documents rather than the upstream `python/` layout. Anchored to
+# the root so a directory named dist/ deeper in the tree is not silently ignored.
+/dist/
+/*.egg-info/
+
 python/triton/_C/*.pyd
 python/triton/_C/*.so
 python/triton/_C/*.dylib

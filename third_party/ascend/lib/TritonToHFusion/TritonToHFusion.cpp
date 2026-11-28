@@ -21,6 +21,7 @@
 namespace mlir {
 namespace triton {
 #define GEN_PASS_DEF_TRITONTOHFUSION
+#define GEN_PASS_DEF_EXPANDPACKEDMASKLOAD
 #include "ascend/include/TritonToHFusion/Passes.h.inc"
 } // namespace triton
 } // namespace mlir
@@ -418,4 +419,32 @@ mlir::triton::createTritonToHFusionPass(bool compileOn91095) {
   auto pass = std::make_unique<TritonToHFusionPass>();
   pass->compileOn91095 = compileOn91095;
   return pass;
+}
+
+namespace {
+struct ExpandPackedMaskLoadPass
+    : public mlir::triton::impl::ExpandPackedMaskLoadBase<
+          ExpandPackedMaskLoadPass> {
+  void runOnOperation() override {
+    SmallVector<triton::ascend::LoadPackedMaskOp> loads;
+    getOperation().walk(
+        [&](triton::ascend::LoadPackedMaskOp op) { loads.push_back(op); });
+    for (auto op : loads) {
+      OpBuilder builder(op);
+      auto load = builder.create<triton::LoadOp>(
+          op.getLoc(), op.getPtr(), op.getMask(), op.getOther(),
+          op.getBoundaryCheck(), op.getPadding(), op.getCache(), op.getEvict(),
+          op.getIsVolatile());
+      auto view = builder.create<hfusion::PackedMaskViewOp>(
+          op.getLoc(), op.getResult().getType(), load.getResult());
+      op.replaceAllUsesWith(view.getResult());
+      op.erase();
+    }
+  }
+};
+} // namespace
+
+std::unique_ptr<OperationPass<ModuleOp>>
+mlir::triton::createExpandPackedMaskLoadPass() {
+  return std::make_unique<ExpandPackedMaskLoadPass>();
 }

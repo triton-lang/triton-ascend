@@ -2109,7 +2109,7 @@ def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None,
 
 @builtin
 def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", cache_modifier="", eviction_policy="",
-         volatile=False, _semantic=None):
+         volatile=False, compile_hint=None, _semantic=None):
     """
     Return a tensor of data whose values are loaded from memory at location defined by `pointer`:
 
@@ -2152,8 +2152,19 @@ def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", c
     :type eviction_policy: str, optional
     :param volatile: changes volatile option in NVIDIA PTX
     :type volatile: bool, optional
+    :param compile_hint: Ascend storage contract. ``"packed_mask_lsb"`` reads a
+        two-dimensional uint8 tile and returns an i1 tile with eight times as
+        many columns, using low-bit-first order within each byte.
+    :type compile_hint: str, optional
     """
     # `mask` and `other` can be constexpr
+    compile_hint = _unwrap_if_constexpr(compile_hint)
+    if compile_hint not in (None, "packed_mask_lsb"):
+        raise ValueError(f"unsupported load compile_hint: {compile_hint!r}")
+    if compile_hint == "packed_mask_lsb" and mask is not None:
+        other_value = _unwrap_if_constexpr(other)
+        if not isinstance(other_value, (int, bool)) or other_value != 0:
+            raise ValueError("packed mask load requires other=0 when mask is supplied")
     mask = _unwrap_if_constexpr(mask)
     other = _unwrap_if_constexpr(other)
     if mask is not None:
@@ -2164,6 +2175,9 @@ def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", c
     cache_modifier = _unwrap_if_constexpr(cache_modifier)
     eviction_policy = _unwrap_if_constexpr(eviction_policy)
     volatile = _unwrap_if_constexpr(volatile)
+    if compile_hint is not None:
+        return _semantic.load(pointer, mask, other, boundary_check, padding_option, cache_modifier, eviction_policy,
+                              volatile, compile_hint=compile_hint)
     return _semantic.load(pointer, mask, other, boundary_check, padding_option, cache_modifier, eviction_policy,
                           volatile)
 

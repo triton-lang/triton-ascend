@@ -1075,7 +1075,11 @@ class TritonSemantic(Generic[TensorTy]):
         return ret
 
     def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
-             padding_option: str, cache_modifier: str, eviction_policy: str, is_volatile: bool) -> TensorTy:
+             padding_option: str, cache_modifier: str, eviction_policy: str, is_volatile: bool,
+             compile_hint=None) -> TensorTy:
+        if compile_hint is not None:
+            return self._load_packed_mask(ptr, mask, other, boundary_check, padding_option, cache_modifier,
+                                          eviction_policy, is_volatile, compile_hint)
         # Cache, eviction and padding options
         cache = self._str_to_load_cache_modifier(cache_modifier)
         eviction = self._str_to_eviction_policy(eviction_policy)
@@ -1087,6 +1091,29 @@ class TritonSemantic(Generic[TensorTy]):
         else:
             # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
             return self._load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile)
+
+    def _load_packed_mask(self, ptr, mask, other, boundary_check, padding_option, cache_modifier, eviction_policy,
+                          is_volatile, compile_hint):
+        if compile_hint != "packed_mask_lsb":
+            raise ValueError(f"unsupported load compile_hint: {compile_hint!r}")
+        if not hasattr(self.builder, "create_packed_mask_load"):
+            raise ValueError("packed_mask_lsb requires the Ascend backend")
+        block_pointer = ptr.type.is_ptr() and ptr.type.element_ty.is_block()
+        if not block_pointer and not ptr.type.scalar.is_ptr():
+            raise ValueError("packed mask load requires uint8 pointers")
+        byte_type = ptr.type.element_ty if block_pointer else ptr.type
+        element_type = byte_type.element_ty if block_pointer else byte_type.scalar.element_ty
+        if element_type != tl.uint8 or not byte_type.is_block() or len(byte_type.shape) != 2:
+            raise ValueError("packed mask load requires a two-dimensional uint8 pointer tile")
+        if block_pointer and boundary_check and padding_option != "zero":
+            raise ValueError("boundary-checked packed mask load requires padding_option='zero'")
+        # Reuse the regular load validation and attribute construction. The builder
+        # replaces its temporary byte load with the dedicated typed load op.
+        packed = self.load(ptr, mask, other, boundary_check, padding_option, cache_modifier, eviction_policy,
+                           is_volatile)
+        shape = [packed.type.shape[0], packed.type.shape[1] * 8]
+        handle = self.builder.create_packed_mask_load(packed.handle)
+        return self.tensor(handle, tl.block_type(tl.int1, shape))
 
     def descriptor_load(self, desc: tl.tensor_descriptor_base, offsets, cache_modifier: str,
                         eviction_policy: str) -> TensorTy:

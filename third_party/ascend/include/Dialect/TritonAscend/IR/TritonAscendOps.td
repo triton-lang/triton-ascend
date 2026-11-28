@@ -679,4 +679,24 @@ def Conv2dOp : TT_Ascend_Op<"conv2d", [
     let hasVerifier = 1;
 }
 
+//
+// Packed mask load
+//
+def LoadPackedMaskOp : TT_Ascend_Op<"load_packed_mask", [
+    AttrSizedOperandSegments, DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Load uint8 bytes and expose their LSB-first bits as i1";
+  let arguments = (ins
+    AnyTypeOf<[TT_PtrLike, TT_TensorPtr]>:$ptr,
+    Optional<TT_BoolLike>:$mask,
+    Optional<TT_Type>:$other,
+    DefaultValuedAttr<DenseI32ArrayAttr, "::llvm::ArrayRef<int32_t>{}">:$boundaryCheck,
+    OptionalAttr<TT_PaddingOptionAttr>:$padding,
+    DefaultValuedAttr<TT_CacheModifierAttr, "::mlir::triton::CacheModifier::NONE">:$cache,
+    DefaultValuedAttr<TT_EvictionPolicyAttr, "::mlir::triton::EvictionPolicy::NORMAL">:$evict,
+    DefaultValuedAttr<BoolAttr, "false">:$isVolatile);
+  let results = (outs TT_Tensor:$result);
+  let assemblyFormat = "`(` operands `)` attr-dict `:` functional-type(operands, results)";
+  let hasVerifier = 1;
+}
+
 #endif // TRITON_ASCEND_OPS

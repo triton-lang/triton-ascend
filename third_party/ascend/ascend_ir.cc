@@ -1404,6 +1404,24 @@ void init_ascend_ir(py::module &&m) {
                return py::none();
              }
            })
+      .def("create_packed_mask_load",
+           [](TritonOpBuilder &self, Value packed) -> Value {
+             auto load = cast<triton::LoadOp>(packed.getDefiningOp());
+             auto byteType = cast<RankedTensorType>(packed.getType());
+             SmallVector<int64_t> shape(byteType.getShape());
+             shape.back() *= 8;
+             auto resultType = RankedTensorType::get(
+                 shape, self.getBuilder().getI1Type(), byteType.getEncoding());
+             OperationState state(
+                 load.getLoc(),
+                 triton::ascend::LoadPackedMaskOp::getOperationName());
+             state.addOperands(load->getOperands());
+             state.addAttributes(load->getAttrs());
+             state.addTypes(resultType);
+             auto result = self.getBuilder().create(state)->getResult(0);
+             load.erase();
+             return result;
+           })
       .def("create_annotation_mark",
            [](TritonOpBuilder &self, Value &ptr, const std::string &attrKey,
               Attribute &attrVal) {

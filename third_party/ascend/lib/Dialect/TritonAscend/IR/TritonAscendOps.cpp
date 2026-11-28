@@ -8,8 +8,10 @@
 
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/Utils/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SPIRV/IR/TargetAndABI.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
+#include "mlir/IR/Matchers.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/ADT/STLExtras.h"
 #include <cstdint>
@@ -498,6 +500,51 @@ LogicalResult Conv2dOp::inferReturnTypes(
   Type elementType = inputType.getElementType();
   auto returnType = RankedTensorType::get(outputShape, elementType);
   inferredReturnTypes.push_back(returnType);
+  return success();
+}
+
+void LoadPackedMaskOp::getEffects(
+    SmallVectorImpl<MemoryEffects::EffectInstance> &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getPtrMutable(),
+                       triton::GlobalMemory::get());
+  if (getIsVolatile())
+    effects.emplace_back(MemoryEffects::Write::get(),
+                         triton::GlobalMemory::get());
+}
+
+LogicalResult LoadPackedMaskOp::verify() {
+  auto byteType =
+      dyn_cast<RankedTensorType>(triton::getPointeeType(getPtr().getType()));
+  auto bitType = dyn_cast<RankedTensorType>(getResult().getType());
+  if (!byteType || byteType.getRank() != 2 || !byteType.hasStaticShape() ||
+      !byteType.getElementType().isInteger(8) || !bitType ||
+      bitType.getRank() != 2 || !bitType.getElementType().isInteger(1) ||
+      bitType.getDimSize(0) != byteType.getDimSize(0) ||
+      bitType.getDimSize(1) != byteType.getDimSize(1) * 8)
+    return emitOpError("requires MxB i8 pointer tile and Mx(8B) i1 result");
+  // Verify the byte access using the ordinary load's rules as well. In
+  // particular, hinting a load must never change its protected address set.
+  if (getMask()) {
+    auto maskType = dyn_cast<RankedTensorType>(getMask().getType());
+    if (!maskType || maskType.getShape() != byteType.getShape() ||
+        !maskType.getElementType().isInteger(1) || !getOther())
+      return emitOpError("requires a byte-shaped mask and zero other");
+    if (getOther().getType() != byteType)
+      return emitOpError("requires byte-shaped i8 other");
+    Value other = getOther();
+    for (unsigned depth = 0; depth < 8; ++depth) {
+      Operation *def = other.getDefiningOp();
+      if (!def || !isa<triton::SplatOp, arith::TruncIOp, arith::ExtUIOp,
+                       arith::ExtSIOp>(def))
+        break;
+      other = def->getOperand(0);
+    }
+    if (!matchPattern(other, m_Zero()))
+      return emitOpError("requires zero other");
+  }
+  if (!getBoundaryCheck().empty() &&
+      getPadding() != triton::PaddingOption::PAD_ZERO)
+    return emitOpError("requires zero padding for boundary-checked loads");
   return success();
 }
 

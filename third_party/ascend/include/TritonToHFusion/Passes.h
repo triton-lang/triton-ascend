@@ -37,6 +37,8 @@ namespace triton {
 std::unique_ptr<OperationPass<ModuleOp>>
 createTritonToHFusionPass(bool compileOn91095 = false);
 
+std::unique_ptr<OperationPass<ModuleOp>> createExpandPackedMaskLoadPass();
+
 #define GEN_PASS_REGISTRATION
 #include "ascend/include/TritonToHFusion/Passes.h.inc"
 

@@ -78,7 +78,6 @@ Triton-Ascend支持源码编译安装，在编译时会下载依赖的第三方�
 | 开源引入 | <https://mirrors.huaweicloud.com> | docker/Dockerfile | <http://mirrors.huaweicloud.com> | 替换Ubuntu apt源的华为镜像站。 |
 | 开源引入 | <https://ubuntu.com> | docker/Dockerfile | <http://security.ubuntu.com> | 被华为镜像替换的Ubuntu安全apt源。 |
 | 开源引入 | <https://repo.huaweicloud.com> | docker/Dockerfile | <https://repo.huaweicloud.com/repository/pypi/simple> | 镜像中配置的Python pip源。 |
-| 开源引入 | <https://hub.docker.com> | docker/Dockerfile & docker/3.2.1-*/Dockerfile | <docker.io> | Docker Hub基础镜像（ubuntu:22.04、library/debian:12、openeuler/openeuler:24.03）。 |
 | 开源引入 | <https://github.com/pytorch/pytorch> | docker/Dockerfile & docker/3.2.1-*/Dockerfile | <https://download.pytorch.org/whl/cpu> | PyTorch CPU wheel索引。 |
 | 自主创新 | 不涉及 | third_party/ascend/build/setup_patch.py | <https://gitcode.com/Ascend/Triton-distributed-ascend.git> | Triton-distributed子模块仓库。 |
 | 自主创新 | 不涉及 | third_party/ascend/build/setup_patch.py | <https://github.com/triton-lang/triton-ascend/> | 写入包元数据的Triton-Ascend项目地址。 |

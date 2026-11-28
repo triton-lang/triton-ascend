@@ -70,7 +70,6 @@ Public IP addresses are used in the configuration files and scripts of Triton-As
 | Introduced by open source | <https://mirrors.huaweicloud.com> | docker/Dockerfile | <http://mirrors.huaweicloud.com> | Huawei mirror replacing the Ubuntu apt sources. |
 | Introduced by open source | <https://ubuntu.com> | docker/Dockerfile | <http://security.ubuntu.com> | Ubuntu security apt source replaced by the Huawei mirror. |
 | Introduced by open source | <https://repo.huaweicloud.com> | docker/Dockerfile | <https://repo.huaweicloud.com/repository/pypi/simple> | Python pip source configured in the image. |
-| Introduced by open source | <https://hub.docker.com> | docker/Dockerfile & docker/3.2.1-*/Dockerfile | <docker.io> | Docker Hub base images (ubuntu:22.04, library/debian:12, openeuler/openeuler:24.03). |
 | Introduced by open source | <https://github.com/pytorch/pytorch> | docker/Dockerfile & docker/3.2.1-*/Dockerfile | <https://download.pytorch.org/whl/cpu> | PyTorch CPU wheel index. |
 | Self-developed | N/A | third_party/ascend/build/setup_patch.py | <https://gitcode.com/Ascend/Triton-distributed-ascend.git> | Triton-distributed submodule repository. |
 | Self-developed | N/A | third_party/ascend/build/setup_patch.py | <https://github.com/triton-lang/triton-ascend/> | Triton-Ascend project URL injected into package metadata. |

@@ -289,5 +289,10 @@
   "addptr",
   "deinterleave",
   "Tensorize",
-  "PTSM"
+  "PTSM",
+  "npuir",
+  "obsutil",
+  "Volcengine",
+  "Referer",
+  "dagre"
 ]

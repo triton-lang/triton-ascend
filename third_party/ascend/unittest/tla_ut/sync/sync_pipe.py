@@ -19,7 +19,6 @@ The IR case checks frontend expansion of ``sync_all`` for both the pure AIV
 hand-synchronized data path and both global barriers.
 """
 import os
-import pytest
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -194,7 +193,6 @@ def _launch_mix():
 
 
 def test_compile():
-    pytest.skip("skipped: NPUIR bd228fae regression (AffinityHIR read-before-write)")
     import torch
     A = torch.randn(N, dtype=torch.float32, device="npu")
     B = torch.randn(N, dtype=torch.float32, device="npu")
@@ -207,7 +205,6 @@ def test_compile():
 
 
 def test_run():
-    pytest.skip("skipped: NPUIR bd228fae regression (AffinityHIR read-before-write)")
     import numpy as np
     A, B, O = _launch(True)
     ref = A.cpu().numpy() + B.cpu().numpy()

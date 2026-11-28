@@ -740,7 +740,7 @@ class CudaDriver(GPUDriver):
     def is_active():
         try:
             import torch
-            return torch.cuda.is_available() and (torch.version.hip is None)
+            return torch.cuda.is_available() and (torch.version.hip is None) and (torch.version.cuda is not None)
         except ImportError:
             return False
 

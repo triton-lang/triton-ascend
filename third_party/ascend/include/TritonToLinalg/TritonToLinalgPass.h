@@ -64,6 +64,10 @@ public:
   explicit TritonTypeConverter();
 };
 
+namespace TensorPointerDemotion {
+mlir::LogicalResult run(mlir::ModuleOp moduleOp);
+} // namespace TensorPointerDemotion
+
 class TritonToLinalgPass : public TritonToLinalgBase<TritonToLinalgPass> {
 
   static auto constexpr LAUNCH_GRID_RANK = getMaxEnumValForProgramIDDim() + 1;
@@ -112,6 +116,7 @@ private:
 
   LogicalResult processDescriptorOperations(ModuleOp moduleOp);
   LogicalResult processPtrBroadcastOperations(ModuleOp moduleOp);
+  LogicalResult processTensorPointerDemotion(ModuleOp moduleOp);
   LogicalResult processStridedLoadStoreRewriteOperations(ModuleOp moduleOp);
   LogicalResult processLegalStrideOperations(ModuleOp moduleOp);
 

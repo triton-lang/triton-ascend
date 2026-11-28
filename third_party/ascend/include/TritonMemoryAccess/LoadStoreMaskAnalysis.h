@@ -50,27 +50,6 @@ public:
   SmallVector<OpFoldResult> dims;
   SmallVector<OpFoldResult> offsets;
   OpFoldResult scalar;
-  // Records the quotient relation `trunc(numerator / divisor) + postScalar`.
-  // `divisor == 1` means the state has not gone through division, and
-  // `start`/`end` are the bounds of the value itself. Otherwise `start`/`end`
-  // are the bounds of the numerator, so parseCmp converts a bound on the
-  // quotient back to numerator bounds. The conversion is piecewise because
-  // `arith.divsi` truncates towards zero.
-  struct DivisionInfo {
-    // Divisor d in `trunc(numerator / d) + postScalar`.
-    int64_t divisor = 1;
-    // Scalar C added to the quotient after `numerator // divisor` is computed:
-    // the state represents `q + postScalar`, so this is an offset on the
-    // quotient q, not on the numerator v. It cannot be folded into
-    // `start`/`end` because truncation is not shift-invariant across zero.
-    // parseCmp subtracts it from the comparison bound (`q + postScalar < B` is
-    // `q < B - postScalar`) before converting that bound back to numerator
-    // bounds. Empty means zero.
-    OpFoldResult postScalar;
-
-    bool hasDivision() const { return divisor != 1; }
-  };
-  DivisionInfo division;
 
   int64_t getRank() const {
     assert(dims.size() == offsets.size() && "dims and offsets rank mismatch!");
@@ -179,13 +158,6 @@ private:
   // Only supports (range - scalar).
   LogicalResult subStates(const MaskState &lhsState, const MaskState &rhsState,
                           const Location &loc, OpBuilder &builder);
-
-  // Accumulate a scalar applied to the division result into
-  // `DivisionInfo::postScalar`, leaving the numerator bounds in start/end
-  // unchanged. Requires an active division.
-  LogicalResult accumulatePostScalar(const OpFoldResult &scalar,
-                                     bool isSubtract, const Location &loc,
-                                     OpBuilder &builder);
 
   LogicalResult divStateScalar(const MaskState &state,
                                const OpFoldResult scalar, const Location &loc,

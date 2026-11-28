@@ -66,6 +66,10 @@ module {
   // CHECK: } {ssbuffer.block_id = [[CUBE_BLOCK:[0-9]+]] : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
   // CHECK: %[[MM:[a-zA-Z0-9_]+]] = linalg.matmul {ssbuffer.block_id = [[CUBE_BLOCK]] : i32, ssbuffer.core_type = "CUBE"} ins(%[[CUBE]],
   // CHECK: %[[VEC:[a-zA-Z0-9_]+]] = scope.scope : () -> tensor<4x4xf16> {
+  // The clone's nested ops keep the flat behavior: nested-body support in
+  // the CUBE_AND_VECTOR split applies only to the single-fill guard shape
+  // (GEN-1571); a pre-classified container's clone body stays unstamped.
+  // CHECK-NOT: ssbuffer.core_type
   // CHECK: } {ssbuffer.block_id = [[VECTOR_BLOCK:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR", ssbuffer.load}
   // CHECK: %[[ADD:[a-zA-Z0-9_]+]] = arith.addf %[[VEC]], %[[VEC]] {ssbuffer.block_id = [[VECTOR_BLOCK]] : i32, ssbuffer.core_type = "VECTOR"}
   // CHECK: return %[[MM]], %[[ADD]]

@@ -710,10 +710,11 @@ def _robust_open_url(url, retries=5):
     tmp.close()
     last_error = None
     for attempt in range(1, retries + 1):
+        # The outer loop also retries partial transfers on older manylinux curl versions.
         proc = subprocess.run(
             [
-                "curl", "-fsSL", "-C", "-", "--retry", "2", "--retry-all-errors", "--connect-timeout", "30",
-                "--max-time", "1000", "-o", tmp.name, url
+                "curl", "-fsSL", "-C", "-", "--retry", "2", "--connect-timeout", "30", "--max-time", "1000", "-o",
+                tmp.name, url
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

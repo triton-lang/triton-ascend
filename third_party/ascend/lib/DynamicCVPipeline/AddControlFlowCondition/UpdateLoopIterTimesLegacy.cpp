@@ -29,9 +29,7 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/OuterEventSchedule.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
-#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
@@ -444,18 +442,11 @@ std::pair<int, int> UpdateLoopIterTimesPassLegacy::calculateIntraDepsFactor(
   int maxRequiredBuffers = 1;
   int maxX = 1;
 
-  if (ifOps.empty()) {
-    return {-1, -1};
-  }
-  auto moduleOp = ifOps[0]->getParentOfType<ModuleOp>();
-  BufferCountManager bcm(moduleOp);
-  int intraBufCount =
-      bcm.getBufferCountByType(BufferCountManager::DepType::IntraCore);
   // Iterate all dependencies and calculate required buffer count
   for (auto &entry : deps) {
     Operation *consumerOp = entry.first;                 // Consumer operation
     SmallVector<Operation *> producerOps = entry.second; // Producer op list
-    int x = intraBufCount;                               // Producer op count
+    int x = producerOps.size();                          // Producer op count
 
     // Find the IfOp index that consumer belongs to (ConsumerIdx)
     int ConsumerIdx = getConsumerIfOpIndex(consumerOp, ifOps, ifOpIndex);

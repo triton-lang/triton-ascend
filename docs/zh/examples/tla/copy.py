@@ -8,8 +8,8 @@ def copy_example(X_ptr, O_ptr, N: tl.constexpr):
     x = tla.view(X_ptr, (N, ), strides=(1, ))
     o = tla.view(O_ptr, (N, ), strides=(1, ))
 
-    x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
+    x_ub = tla.alloc((N, ), tl.float32, space="ub")
 
     # GM -> UB，然后 UB -> GM。
-    tla.copy(x, x_ub)
-    tla.copy(x_ub, o)
+    tla.load_gm_to_ub(x, x_ub)
+    tla.store_ub_to_gm(x_ub, o)

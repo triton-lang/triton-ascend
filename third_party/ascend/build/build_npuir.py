@@ -213,7 +213,13 @@ def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Rele
     if mem_bytes:
         default_jobs = max(1, min(cpus, mem_bytes // (2500 * 1024 * 1024)))
     # (v1 unlimited sentinel shows up as the host MemTotal after clamping)
-    max_jobs = min(max(1, int(os.getenv("MAX_JOBS") or default_jobs)), 32)
+    try:
+        max_jobs = int(os.environ.get("MAX_JOBS", default_jobs))
+    except ValueError:
+        raise ValueError("MAX_JOBS must be a positive integer") from None
+    if max_jobs < 1:
+        raise ValueError("MAX_JOBS must be a positive integer")
+    max_jobs = min(max_jobs, 32)
     _log(f"cgroup: {cpus} CPUs, mem limit "
          f"{round(mem_bytes / (1024**3), 1) if mem_bytes else 'unset'} GiB -> -j {max_jobs}")
     build_path = repo_dir / "build"

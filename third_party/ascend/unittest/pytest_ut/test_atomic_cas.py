@@ -186,3 +186,20 @@ def test_atomic_cas_without_full(n_elements, BLOCK_SIZE, dtype, sigtype):
 
     torch.testing.assert_close(in_ptr, torch.full_like(in_ptr, 1.0))
     torch.testing.assert_close(out_ptr, torch.full_like(out_ptr, 2.0))
+
+
+@triton.jit
+def atomic_cas_spinlock_inc(counter, lock):
+    while tl.atomic_cas(lock, 0, 1) == 1:
+        pass
+    tl.store(counter, tl.load(counter) + 1)
+    tl.atomic_xchg(lock, 0)
+
+
+def test_atomic_cas_spinlock():
+    lock = torch.zeros((1, ), dtype=torch.int32).npu()
+    counter = torch.zeros((1, ), dtype=torch.int32).npu()
+    n_programs = 8
+    atomic_cas_spinlock_inc[(n_programs, )](counter, lock)
+    assert counter.item() == n_programs
+    assert lock.item() == 0

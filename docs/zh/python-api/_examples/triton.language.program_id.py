@@ -15,9 +15,10 @@ def test_program_id():
     ncore = 4
     out = torch.empty(ncore * N, dtype=torch.int32, device='npu')
     kernel[ncore, 1, 1](out, N=N)
-    expected = torch.cat([torch.full((N, ), i, dtype=torch.int32) for i in range(ncore)])
-    assert torch.equal(out.cpu(), expected)
+    ref = torch.cat([torch.full((N, ), i, dtype=torch.int32) for i in range(ncore)])
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_program_id()
+    print("test_program_id passed!")

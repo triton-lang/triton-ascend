@@ -1,7 +1,5 @@
-import pytest
 import torch
 import torch_npu
-from torch.testing import assert_close
 
 import triton
 import triton.language as tl
@@ -23,9 +21,10 @@ def test_static_range():
     static_range_kernel[(1, )](x, out, BLOCK_SIZE=BLOCK_SIZE)
     torch.npu.synchronize()
 
-    assert_close(out, x * x, rtol=1e-3, atol=1e-3)
+    ref = x * x
+    torch.testing.assert_close(out, ref, rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":
     test_static_range()
-    print("test_static_range PASSED!")
+    print("test_static_range passed!")

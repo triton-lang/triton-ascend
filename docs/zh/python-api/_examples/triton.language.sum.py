@@ -23,9 +23,10 @@ def test_sum():
     out = torch.empty(M, dtype=torch.float32).npu()
     tt_sum_2d[1, 1, 1](x, out, M, N, dim)
     ref = torch.sum(x, dim=dim)
-    assert torch.allclose(out.cpu(), ref.cpu()), "sum result mismatch"
+    torch.testing.assert_close(out.cpu(), ref.cpu())
     print("sum result:", out)
 
 
 if __name__ == "__main__":
     test_sum()
+    print("test_sum passed!")

@@ -23,14 +23,15 @@ def test_cat_1d():
 
     x = torch.randn(XB, dtype=torch.float32).npu()
     y = torch.randn(XB, dtype=torch.float32).npu()
-    output = torch.zeros(XB * 2, dtype=torch.float32).npu()
+    out = torch.zeros(XB * 2, dtype=torch.float32).npu()
 
-    cat_1d_kernel[(1, )](output, x, y, XB=XB)
+    cat_1d_kernel[(1, )](out, x, y, XB=XB)
 
-    expected = torch.cat([x.cpu(), y.cpu()], dim=0)
+    ref = torch.cat([x.cpu(), y.cpu()], dim=0)
 
-    assert torch.allclose(output.cpu(), expected.cpu())
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_cat_1d()
+    print("test_cat_1d passed!")

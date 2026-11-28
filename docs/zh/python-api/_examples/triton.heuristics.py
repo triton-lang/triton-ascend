@@ -21,8 +21,10 @@ def test_heuristics():
     out = torch.empty(N, dtype=torch.float32, device='npu')
     grid = lambda meta: (triton.cdiv(N, meta['BLOCK_SIZE']), )
     add_kernel[grid](x, y, out, N)
-    torch.testing.assert_close(out.cpu(), (x + y).cpu())
+    ref = (x + y).cpu()
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_heuristics()
+    print("test_heuristics passed!")

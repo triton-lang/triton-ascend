@@ -20,8 +20,10 @@ def test_static_assert():
     out = torch.empty(BLOCK_SIZE, device="npu", dtype=torch.float32)
     static_assert_kernel[(1, )](x, out, BLOCK_SIZE=BLOCK_SIZE)
     torch.npu.synchronize()
+    ref = x
+    torch.testing.assert_close(out, ref)
 
 
 if __name__ == "__main__":
     test_static_assert()
-    print("test_static_assert PASSED!")
+    print("test_static_assert passed!")

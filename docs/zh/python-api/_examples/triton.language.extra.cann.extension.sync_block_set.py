@@ -1,5 +1,4 @@
 import triton
-import triton.language as tl
 import triton.language.extra.cann.extension as al
 
 

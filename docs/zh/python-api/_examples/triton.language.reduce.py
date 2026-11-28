@@ -25,12 +25,13 @@ def tt_reduce_2d(in_ptr, out_ptr, M: tl.constexpr, N: tl.constexpr, dim: tl.cons
 def test_reduce():
     M, N, dim = 4, 8, 1
     x = torch.randn(M, N, dtype=torch.float32).npu()
-    out = torch.empty(M, dtype=torch.float32).npu()
+    out = torch.empty(N if dim == 0 else M, dtype=torch.float32).npu()
     tt_reduce_2d[1, 1, 1](x, out, M, N, dim)
     ref = torch.sum(x, dim=dim)
-    assert torch.allclose(out.cpu(), ref.cpu()), "reduce result mismatch"
+    torch.testing.assert_close(out.cpu(), ref.cpu())
     print("reduce result:", out)
 
 
 if __name__ == "__main__":
     test_reduce()
+    print("test_reduce passed!")

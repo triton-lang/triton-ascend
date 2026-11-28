@@ -1,4 +1,3 @@
-import pytest
 import torch
 import torch_npu
 import triton
@@ -59,18 +58,19 @@ def test_matmul():
     a = torch.randn((M, K), dtype=eval('torch.' + dtype)).npu()
     b = torch.randn((K, N), dtype=eval('torch.' + dtype)).npu()
 
-    triton_res = torch.zeros((M, N), dtype=eval('torch.' + dtype)).npu()
+    out = torch.zeros((M, N), dtype=eval('torch.' + dtype)).npu()
     accumulator_type = tl.float32
     grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N), )
 
-    matmul_kernel[grid](a.npu(), b.npu(), triton_res, M, N, K, accumulator_type, a.stride(0), a.stride(1), b.stride(0),
-                        b.stride(1), triton_res.stride(0), triton_res.stride(1), BLOCK_M, BLOCK_N, BLOCK_K)
+    matmul_kernel[grid](a.npu(), b.npu(), out, M, N, K, accumulator_type, a.stride(0), a.stride(1), b.stride(0),
+                        b.stride(1), out.stride(0), out.stride(1), BLOCK_M, BLOCK_N, BLOCK_K)
 
-    a_gold = a.to(torch.float32)
-    b_gold = b.to(torch.float32)
-    torch_res = torch.mm(a_gold, b_gold)
-    torch.testing.assert_close(torch_res, triton_res)
+    a_f32 = a.to(torch.float32)
+    b_f32 = b.to(torch.float32)
+    ref = torch.mm(a_f32, b_f32)
+    torch.testing.assert_close(out, ref)
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     test_matmul()
+    print("test_matmul passed!")

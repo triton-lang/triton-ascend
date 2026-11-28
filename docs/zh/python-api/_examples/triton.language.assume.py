@@ -1,7 +1,5 @@
-import pytest
 import torch
 import torch_npu
-from torch.testing import assert_close
 
 import triton
 import triton.language as tl
@@ -28,9 +26,9 @@ def test_assume():
     torch.npu.synchronize()
 
     ref = x // BLOCK_SIZE + y % BLOCK_SIZE
-    assert_close(out, ref)
+    torch.testing.assert_close(out, ref)
 
 
 if __name__ == "__main__":
     test_assume()
-    print("test_assume PASSED!")
+    print("test_assume passed!")

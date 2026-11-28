@@ -38,8 +38,10 @@ def test_store_tensor_descriptor():
     grid = (M // M_BLOCK, N // N_BLOCK)
     abs_kernel[grid](x, out, M, N, M_BLOCK, N_BLOCK)
 
-    torch.testing.assert_close(out, x.abs())
+    ref = x.abs()
+    torch.testing.assert_close(out, ref)
 
 
 if __name__ == "__main__":
     test_store_tensor_descriptor()
+    print("test_store_tensor_descriptor passed!")

@@ -22,9 +22,10 @@ def test_permute():
 
     permute_3d_kernel[(1, )](x, out, M=M, N=N, K=K)
 
-    assert out.shape == (M * N * K, ), "Shape mismatch"
-    print("Test passed.")
+    ref = torch.permute(x, (2, 0, 1)).reshape(M * N * K)
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_permute()
+    print("test_permute passed!")

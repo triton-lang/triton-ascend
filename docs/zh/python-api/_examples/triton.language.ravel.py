@@ -17,11 +17,12 @@ def test_ravel():
     M, N = 2, 3
     x = torch.zeros([M, N], dtype=torch.float32).npu()
     out = torch.empty((M * N, ), dtype=torch.float32, device="npu")
-    flatten_kernel[(1, )](out, x, M=M, N=N)
+    flatten_kernel[(1, )](x, out, M=M, N=N)
 
-    assert out.shape == (M * N, ), f"Shape mismatch: expected {(M*N,)} but got {out.shape}."
-    print("Test passed.")
+    ref = x.reshape(M * N)
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_ravel()
+    print("test_ravel passed!")

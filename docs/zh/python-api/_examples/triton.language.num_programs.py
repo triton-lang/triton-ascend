@@ -13,8 +13,10 @@ def test_num_programs():
     ncore = 4
     out = torch.empty(1, dtype=torch.int32, device='npu')
     kernel[ncore, 1, 1](out)
-    assert out.cpu().item() == ncore
+    ref = torch.full((1, ), ncore, dtype=torch.int32)
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_num_programs()
+    print("test_num_programs passed!")

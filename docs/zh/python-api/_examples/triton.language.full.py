@@ -24,14 +24,15 @@ def test_full_2d():
     YB = 8
     VALUE = 100.0
 
-    output = torch.zeros((XB, YB), dtype=torch.float32).npu()
+    out = torch.zeros((XB, YB), dtype=torch.float32).npu()
 
-    full_2d_kernel[(1, )](output, XB=XB, YB=YB, VALUE=VALUE)
+    full_2d_kernel[(1, )](out, XB=XB, YB=YB, VALUE=VALUE)
 
-    expected = torch.full((XB, YB), VALUE, dtype=torch.float32)
+    ref = torch.full((XB, YB), VALUE, dtype=torch.float32)
 
-    assert torch.allclose(output.cpu(), expected.cpu())
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_full_2d()
+    print("test_full_2d passed!")

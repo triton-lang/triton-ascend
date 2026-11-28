@@ -1,5 +1,4 @@
 import torch
-
 import triton
 import triton.language as tl
 
@@ -38,8 +37,10 @@ def test_logical_and():
         debug=True,
     )
 
-    assert torch.equal(out.cpu(), torch.logical_and(x_cpu, y_cpu))
+    ref = torch.logical_and(x_cpu, y_cpu)
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_logical_and()
+    print("test_logical_and passed!")

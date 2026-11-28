@@ -1,6 +1,5 @@
 import torch
 import torch_npu
-from torch.testing import assert_close
 
 import triton
 import triton.language as tl
@@ -26,9 +25,10 @@ def test_condition():
     condition_kernel[(1, )](x, out, N=N)
     torch.npu.synchronize()
 
-    assert_close(out, x.sum().reshape(1), rtol=1e-3, atol=1e-3)
-    print("test_condition PASSED!")
+    ref = x.sum().reshape(1)
+    torch.testing.assert_close(out, ref, rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":
     test_condition()
+    print("test_condition passed!")

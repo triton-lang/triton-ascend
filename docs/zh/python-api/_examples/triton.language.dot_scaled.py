@@ -1,4 +1,3 @@
-import pytest
 import torch
 import torch_npu
 import triton
@@ -9,7 +8,6 @@ import triton.language as tl
 def dot_scale_kernel(a_base, stride_a0: tl.constexpr, stride_a1: tl.constexpr, a_scale, b_base, stride_b0: tl.constexpr,
                      stride_b1: tl.constexpr, b_scale, out, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
                      BLOCK_K: tl.constexpr, type_a: tl.constexpr, type_b: tl.constexpr):
-    PACKED_BLOCK_K_A: tl.constexpr = BLOCK_K
     PACKED_BLOCK_K_B: tl.constexpr = BLOCK_K
     str_a0: tl.constexpr = stride_a0
     a_ptr = a_base + tl.arange(0, BLOCK_M)[:, None] * stride_a0 + tl.arange(0, str_a0)[None, :] * stride_a1
@@ -32,19 +30,28 @@ def dot_scale_kernel(a_base, stride_a0: tl.constexpr, stride_a1: tl.constexpr, a
 
 
 def test_dot_scaled():
-    shape = (16, 32)
-    dtype = 'float32'
-    x = torch.randn(shape, dtype=torch.bfloat16, device="npu")
-    y = torch.randn(shape, dtype=torch.bfloat16, device="npu")
-    M, K, N = shape[0], shape[1], shape[0]
+    M, K, N = 16, 64, 16
+    x = torch.randn((M, K), dtype=torch.bfloat16, device="npu")
+    y = torch.randn((K, N), dtype=torch.bfloat16, device="npu")
     type_a, type_b = "bf16", "bf16"
-    min_scale, max_scale = (0, 142) if type_a == torch.bfloat16 else (124, 131)
-    scale_x = torch.randint(min_scale - 128, max_scale - 127, (M, K // 32), dtype=torch.int8, device="npu")
-    min_scale, max_scale = (0, 142) if type_b == torch.bfloat16 else (124, 131)
-    scale_y = torch.randint(min_scale - 128, max_scale - 127, (N, K // 32), dtype=torch.int8, device="npu")
-    z = x.new_empty((M, N), dtype=x.dtype)
-    pgm = dot_scale_kernel[(1, )](x, *x.stride(), scale_x, y, *y.stride(), scale_y, z, M, N, K, type_a, type_b)
+    # E8M0 scales: the stored byte is the biased exponent, 2 ** (scale - 127).
+    # Keep the bytes in [124, 127] so they stay positive int8 values.
+    scale_x = torch.randint(124, 128, (M, K // 32), dtype=torch.int8, device="npu")
+    scale_y = torch.randint(124, 128, (N, K // 32), dtype=torch.int8, device="npu")
+    out = x.new_empty((M, N), dtype=x.dtype)
+    dot_scale_kernel[(1, )](x, *x.stride(), scale_x, y, *y.stride(), scale_y, out, M, N, K, type_a, type_b)
+
+    # Reference: operands are converted to BF16 first, then each 32-element K
+    # block is multiplied by its E8M0 scale, and the dot product accumulates
+    # in float32.
+    factor_x = torch.pow(2.0, (scale_x.cpu().to(torch.int32) & 0xFF) - 127).to(torch.bfloat16)
+    factor_y = torch.pow(2.0, (scale_y.cpu().to(torch.int32) & 0xFF) - 127).to(torch.bfloat16)
+    a_scaled = (x.cpu() * factor_x.repeat_interleave(32, dim=1)).float()
+    b_scaled = (y.cpu() * factor_y.repeat_interleave(32, dim=1).T).float()
+    ref = (a_scaled @ b_scaled).to(torch.bfloat16)
+    torch.testing.assert_close(out.cpu(), ref)
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     test_dot_scaled()
+    print("test_dot_scaled passed!")

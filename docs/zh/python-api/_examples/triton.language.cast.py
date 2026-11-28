@@ -25,16 +25,18 @@ def cast_advanced_example_kernel(out0, out1):
 def test_cast():
     out = torch.zeros(6, dtype=torch.int32, device="npu")
     cast_example_kernel[(1, )](out)
-    assert torch.all(out.cpu() == 0), "Simple cast failed"
-    print("cast_example Test passed.")
+    ref = torch.zeros(6, dtype=torch.int32)
+    torch.testing.assert_close(out.cpu(), ref)
 
     out0 = torch.zeros(6, dtype=torch.int32, device="npu")
     out1 = torch.zeros(6, dtype=torch.float16, device="npu")
     cast_advanced_example_kernel[(1, )](out0, out1)
-    assert torch.all(out0.cpu() == 0)
-    assert torch.all(out1.cpu() == 0)
-    print("cast_advanced_example Test passed.")
+    ref0 = torch.zeros(6, dtype=torch.int32)
+    ref1 = torch.zeros(6, dtype=torch.float16)
+    torch.testing.assert_close(out0.cpu(), ref0)
+    torch.testing.assert_close(out1.cpu(), ref1)
 
 
 if __name__ == "__main__":
     test_cast()
+    print("test_cast passed!")

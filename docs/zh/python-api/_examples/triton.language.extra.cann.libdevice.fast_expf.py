@@ -11,7 +11,7 @@ _SIMT_SKIP_MSG = ("SIMT libdevice ops are not supported on A3; "
 
 
 @triton.jit
-def triton_kernel(input, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
+def triton_kernel(input, out, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
     base = tl.arange(0, XBLOCK_SUB)
     loops: tl.constexpr = XBLOCK // XBLOCK_SUB
@@ -20,7 +20,7 @@ def triton_kernel(input, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: t
         mask = x0 < n_elements
         tmp0 = tl.load(input + (x0), mask=mask)
         tmp1 = libdevice.fast_expf(tmp0)
-        tl.store(output + (x0), tmp1, mask=mask)
+        tl.store(out + (x0), tmp1, mask=mask)
 
 
 @pytest.mark.skipif(not _is_a5_target_arch(NPUUtils().get_arch()), reason=_SIMT_SKIP_MSG)
@@ -29,13 +29,13 @@ def test_fast_expf():
     shape, ncore, xblock, xblock_sub = param_list
     x0 = torch.randn(size=shape, dtype=torch.float32).npu() * 0.5
 
-    torch_res = torch.exp(x0)
-    triton_res = torch.empty_like(x0)
-    triton_kernel[ncore, 1, 1](x0, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simt_only')
+    ref = torch.exp(x0)
+    out = torch.empty_like(x0)
+    triton_kernel[ncore, 1, 1](x0, out, x0.numel(), xblock, xblock_sub, compile_mode='simt_only')
 
-    torch_res = torch_res.cpu()
-    triton_res = triton_res.cpu()
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+    ref = ref.cpu()
+    out = out.cpu()
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 def test_fast_expf_simd():
@@ -43,18 +43,20 @@ def test_fast_expf_simd():
     shape, ncore, xblock, xblock_sub = param_list
     x0 = torch.randn(size=shape, dtype=torch.float32).npu() * 0.5
 
-    torch_res = torch.exp(x0)
-    triton_res = torch.empty_like(x0)
-    triton_kernel[ncore, 1, 1](x0, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simd')
+    ref = torch.exp(x0)
+    out = torch.empty_like(x0)
+    triton_kernel[ncore, 1, 1](x0, out, x0.numel(), xblock, xblock_sub, compile_mode='simd')
 
-    torch_res = torch_res.cpu()
-    triton_res = triton_res.cpu()
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+    ref = ref.cpu()
+    out = out.cpu()
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == "__main__":
     test_fast_expf_simd()
+    print("test_fast_expf_simd passed!")
     if not _is_a5_target_arch(NPUUtils().get_arch()):
         print(_SIMT_SKIP_MSG)
     else:
         test_fast_expf()
+        print("test_fast_expf passed!")

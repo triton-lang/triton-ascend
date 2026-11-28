@@ -1,6 +1,6 @@
 # 环境变量与编译选项
 
-本文面向Triton-Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及A2/A3、950支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel；环境变量也可以不经启动脚本，直接通过 `triton.knobs`（含Ascend专用的 `triton.knobs.ascend` 分组）在进程内读写。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。
+本文面向Triton-Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及Atlas A2 products/Atlas A3 products、Ascend 950PR&950DT products支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel；环境变量也可以不经启动脚本，直接通过 `triton.knobs`（含Ascend专用的 `triton.knobs.ascend` 分组）在进程内读写。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。
 
 ## 环境变量
 
@@ -21,9 +21,9 @@ TRITON_DEBUG=1 python3 run_kernel.py
 
 ### 环境变量参考表
 
-950列包含Ascend 950PR/950DT；“—”表示不适用，编译模式限制见[编译选项参考表](#compiler-options-reference)。布尔环境变量除特别注明外可用 `1` 启用。
+950系列包含Ascend 950PR&950DT products；“—”表示不适用，编译模式限制见[编译选项参考表](#compiler-options-reference)。布尔环境变量除特别注明外可用 `1` 启用。
 
-| 类别 | 环境变量 | 功能说明 | 默认值 | A2/A3 | 950 |
+| 类别 | 环境变量 | 功能说明 | 默认值 | Atlas A2 products/Atlas A3 products | Ascend 950PR&950DT products |
 |------|----------|----------|--------|-------|-----|
 | 调试 | `TRITON_DEBUG` | 开启JIT调试及设备断言，保存TTIR；常规路径还输出编译日志并保存后端IR与二进制。 | 关闭 | 支持 | 支持 |
 | 调试 | `USE_IR_LOC` | 编译Python kernel时，设为 `ttir` 可按TTIR文件的行号重建位置信息。直接以文本IR文件为输入时，可为输入文件创建位置快照。`ttadapter` 和 `npubin` 不支持作为阶段值。 | 未设置 | 支持 | 支持 |
@@ -42,8 +42,8 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 编译 | `TRITON_OVERRIDE_DIR` | 指定覆盖文件目录。 | `$TRITON_HOME/.triton/override` | 支持 | 支持 |
 | 编译 | `TRITON_F32_DEFAULT` | 设置 `tl.dot` 的默认F32输入精度；Ascend使用 `ieee`、`hf32`，兼容输入 `tf32` 会映射为 `hf32`。 | 未设置，使用后端的 `ieee` | 支持 | 支持 |
 | 编译 | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | 允许JIT前端引用非 `constexpr` 全局变量。 | 关闭 | 支持 | 支持 |
-| 编译 | `TRITON_ENABLE_LIBDEVICE` | 在A2/A3编译路径额外链接libdevice；非空字符串均视为开启，包括 `"0"`。 | 未设置 | 支持 | — |
-| 编译 | `TRITON_ENABLE_LIBDEVICE_SIMT` | 在950上为libdevice调用选择SIMT版本；非空字符串均视为开启，包括 `"0"`。 | 未设置 | — | 支持 |
+| 编译 | `TRITON_ENABLE_LIBDEVICE` | 在Atlas A2 products/Atlas A3 products编译路径额外链接libdevice；非空字符串均视为开启，包括 `"0"`。 | 未设置 | 支持 | — |
+| 编译 | `TRITON_ENABLE_LIBDEVICE_SIMT` | 在Ascend 950PR&950DT products上为libdevice调用选择SIMT版本；非空字符串均视为开启，包括 `"0"`。 | 未设置 | — | 支持 |
 | 缓存与调优 | `TRITON_HOME` | 设置Triton缓存、dump和override目录的根位置。 | 用户主目录 | 支持 | 支持 |
 | 缓存与调优 | `TRITON_CACHE_DIR` | 指定编译缓存目录。 | `$TRITON_HOME/.triton/cache` | 支持 | 支持 |
 | 缓存与调优 | `TRITON_CACHE_AUTOTUNING` | 缓存autotune的选择结果。 | 关闭 | 支持 | 支持 |
@@ -262,17 +262,17 @@ configs = [
 表中默认值以Ascend后端为准，`triton.Config` 的差异单独注明；`None` 通常表示由后端或工具链决定。
 
 - **常规路径**：`compile_mode="simd"` 或 `"simd_simt_template"`。
-- **仅纯SIMT**：`compile_mode="simt_only"`，仅950支持。
-- **需DynamicCV生效**：编译器成功应用了 [DynamicCV流水优化](./architecture_design_and_core_features.md#dynamic-cv-pipeline)，即950常规路径中启用 `enable_dynamic_cv_pipeline=True`，且未发生回退。
+- **仅纯SIMT**：`compile_mode="simt_only"`，仅Ascend 950PR&950DT products支持。
+- **需DynamicCV生效**：编译器成功应用了 [DynamicCV流水优化](./architecture_design_and_core_features.md#dynamic-cv-pipeline)，即Ascend 950PR&950DT products常规路径中启用 `enable_dynamic_cv_pipeline=True`，且未发生回退。
 
-| 类别 | 编译选项 | 功能说明 | 默认值/可选值 | A2/A3 | 950 |
+| 类别 | 编译选项 | 功能说明 | 默认值/可选值 | Atlas A2 products/Atlas A3 products | Ascend 950PR&950DT products |
 |------|----------|----------|---------------|-------|-----|
 | Triton通用 | `debug` | 开启设备断言与编译调试；JIT下与环境变量 `TRITON_DEBUG` 任一开启即生效。 | `False`；布尔值 | 支持 | 支持 |
 | Triton通用 | `sanitize_overflow` | 启用整数溢出检查；检查通过设备断言执行，还需启用 `debug`。 | `True`；布尔值 | 支持 | 支持 |
 | Triton通用 | `num_stages` | 设为 `1` 时关闭自动多缓冲；其他值使用自动模式，不指定各层缓冲数量。 | 未设置 `multibuffer_mode` 时：后端 `2`，`triton.Config` 为 `3`；整数 | 支持 | 常规路径 |
 | Triton通用 | `num_warps` | 设置纯SIMT编译器的warp数。 | 后端 `32`；`triton.Config` 为 `4`；正整数 | — | 仅纯SIMT |
 | Triton通用 | `ir_override` | 用给定文件覆盖同扩展名的编译阶段产物。 | `None`；文件路径 | 支持 | 支持 |
-| 编译模式与图优化 | `compile_mode` | `simd` 使用SIMD；`simd_simt_template` 在A2/A3使用SIMD，在950启用模板SIMT子路径；`simt_only` 使用纯SIMT。 | `"simd_simt_template"`；另可选 `"simd"`、`"simt_only"` | 支持前两项 | 支持全部 |
+| 编译模式与图优化 | `compile_mode` | `simd` 使用SIMD；`simd_simt_template` 在Atlas A2 products/Atlas A3 products使用SIMD，在Ascend 950PR&950DT products启用模板SIMT子路径；`simt_only` 使用纯SIMT。 | `"simd_simt_template"`；另可选 `"simd"`、`"simt_only"` | 支持前两项 | 支持全部 |
 | 编译模式与图优化 | `enable_graph_optimize` | 控制TTIR Graph Optimization。 | `True`；布尔值 | 支持 | 支持 |
 | 多缓冲 | `multibuffer` | 控制自动多缓冲总开关；`num_stages=1` 也会将其关闭。 | `True`；布尔值 | 支持 | 常规路径 |
 | 多缓冲 | `multibuffer_mode` | 按 `gm`、`l1`、`l0c`、`ub` 设置多缓冲槽数；`1` 关闭该层多缓冲，大于 `1` 指定槽数。受 `multibuffer` 总开关控制，不能与 `num_stages` 同时显式设置。 | `None`；必须包含四个层级的字典，值为正的32位有符号整数 | 支持 | 常规路径 |
@@ -286,7 +286,7 @@ configs = [
 | 调度与流水 | `tile_mix_vector_loop` | 设置Vector循环的切分份数。 | `None`；整数 | 支持 | — |
 | 调度与流水 | `tile_mix_cube_loop` | 设置Cube循环的切分份数。 | `None`；整数 | 支持 | — |
 | 调度与流水 | `enable_mixed_cv` | 控制NPU编译器的mixed CV路径。 | `None`；布尔值 | — | 常规路径 |
-| 调度与流水 | `enable_dynamic_cv_pipeline` | 启用950的 [DynamicCV流水优化](./architecture_design_and_core_features.md#dynamic-cv-pipeline)。优化生效时设置 `set_workspace_multibuffer=0`、`enable_mixed_cv=True`、`disable_auto_inject_block_sync=True`；若无法应用该优化，则恢复这些选项的原值并继续编译。 | `None`，按目标解析：A2/A3 `False`、950 `True`；布尔值 | — | 常规路径 |
+| 调度与流水 | `enable_dynamic_cv_pipeline` | 启用Ascend 950PR&950DT products的 [DynamicCV流水优化](./architecture_design_and_core_features.md#dynamic-cv-pipeline)。优化生效时设置 `set_workspace_multibuffer=0`、`enable_mixed_cv=True`、`disable_auto_inject_block_sync=True`；若无法应用该优化，则恢复这些选项的原值并继续编译。 | `None`，按目标解析：Atlas A2 products/Atlas A3 products `False`、Ascend 950PR&950DT products `True`；布尔值 | — | 常规路径 |
 | 调度与流水 | `buf_slot_num_of_veccore` | 设置Vector Core本地缓冲槽数量。 | `None`；整数 | — | 需DynamicCV生效 |
 | 调度与流水 | `buf_slot_num_of_crosscore` | 设置跨核缓冲槽数量。 | `None`；整数 | — | 需DynamicCV生效 |
 | 调度与流水 | `buf_slot_num_of_gm` | 设置GM加载缓冲槽数量。 | `None`；整数 | — | 需DynamicCV生效 |
@@ -303,7 +303,7 @@ configs = [
 | 算子优化 | `enable_hivm_batch_matmul` | 为BiShengIR编译启用batch matmul。 | `False`；布尔值 | — | 常规路径 |
 | 算子优化 | `auto_vectorize_v2_max_fused_ops_num` | 设置AutoVectorizeV2最大融合操作数。 | `None`（默认）或有符号32位整数。`None` 和负值沿用该pass的默认上限。大于或等于 `0` 的值设置显式上限。 | — | 常规路径 |
 | 算子优化 | `prevec_max_fused_ops_num` | 限制预向量化融合中的逐元素操作数。 | `None`（默认）或有符号32位整数。正值设置操作数上限。`None`、`0` 和负值均不设置此上限。 | — | 常规路径 |
-| 纯SIMT | `simt_optimization_mode` | 设置纯SIMT的多位优化模式；在A2/A3或950常规路径显式传入时，会发出 `UserWarning` 并忽略。 | `0`；整数，位语义由NPU编译器定义 | — | 仅纯SIMT |
+| 纯SIMT | `simt_optimization_mode` | 设置纯SIMT的多位优化模式；在Atlas A2 products/Atlas A3 products或Ascend 950PR&950DT products常规路径显式传入时，会发出 `UserWarning` 并忽略。 | `0`；整数，位语义由NPU编译器定义 | — | 仅纯SIMT |
 | 纯SIMT | `shared_mem_dynamic_size` | 设置纯SIMT动态共享内存大小。 | 省略或传入 `None` 时使用 `122880` 字节。显式值须为 `122880` 至 `221184` 字节的整数，含两个端点。 | — | 仅纯SIMT |
 | 纯SIMT | `disable_fma` | 在纯SIMT编译路径禁用FMA优化。 | `False`；布尔值 | — | 仅纯SIMT |
 | 纯SIMT | `superblock_factor` | 设置纯SIMT superblock因子。在自动block mapping生效且未做row coalescing时，后端会下发大于 `1` 的值。 | 大于或等于 `1` 的2的幂。默认 `1`，表示关闭superblocking。 | — | 仅纯SIMT |
@@ -324,7 +324,7 @@ configs = [
 |--------|--------------------------------|
 | `limit_auto_multi_buffer_only_for_local_buffer` | `True` 对应 `gm=1`，关闭GM多缓冲。 |
 | `limit_auto_multi_buffer_of_local_buffer` | `"no-l0c"` 对应 `l0c=1`；`"no-limit"` 对应 `l0c>1`。 |
-| `limit_auto_multi_buffer_buffer` | 950常规路径：`"only-cube"` 对应 `ub=1`；`"only-vector"` 对应 `l1=1`、`l0c=1`；`"no-limit"` 对应 `l1>1`、`ub>1`。 |
+| `limit_auto_multi_buffer_buffer` | Ascend 950PR&950DT products常规路径：`"only-cube"` 对应 `ub=1`；`"only-vector"` 对应 `l1=1`、`l0c=1`；`"no-limit"` 对应 `l1>1`、`ub>1`。 |
 
 例如，仅为L1配置双缓冲：
 
@@ -341,7 +341,7 @@ triton.Config({"multibuffer_mode": {"gm": 1, "l1": 2, "l0c": 1, "ub": 1}})
 | `force_simt_only` | `compile_mode="simt_only"` | 旧值为 `True` 时覆盖已传入的 `compile_mode`，为 `False` 时不改变模式。两个旧force开关都为 `True` 时，本项优先。 |
 | `force_simt_template` | `compile_mode="simd_simt_template"` | 旧值为 `True` 时覆盖已传入的 `compile_mode`，为 `False` 时不改变模式。 |
 | `load_cache_num` | `buf_slot_num_of_gm` | 沿用原值；同时传入新旧名称时使用新名称。 |
-| `enable_bishengir_simt_optimization` | `simt_optimization_mode` | 沿用原值；同时传入新旧名称时使用新名称。仅在950纯SIMT路径生效。 |
+| `enable_bishengir_simt_optimization` | `simt_optimization_mode` | 沿用原值；同时传入新旧名称时使用新名称。仅在Ascend 950PR&950DT products纯SIMT路径生效。 |
 
 兼容取值 `compile_mode="unstructured_in_simt"` 等同于 `compile_mode="simd_simt_template"`，仍可使用且不触发 `FutureWarning`。新代码使用 `simd_simt_template`。
 
@@ -389,7 +389,7 @@ triton.Config({"multibuffer_mode": {"gm": 1, "l1": 2, "l0c": 1, "ub": 1}})
 | `parallel_mode` | parallel mode由 `compile_mode` 和Linalg IR推导。 |
 | `storage_align` | 无替代项。 |
 | `stream` | 执行流由运行时和驱动管理。 |
-| `sync_solver` | A2/A3和Ascend 950使用NPU编译器默认的同步策略。 |
+| `sync_solver` | Atlas A2 products/Atlas A3 products和Ascend 950PR&950DT products使用NPU编译器默认的同步策略。 |
 | `use_bytecode` | bytecode pipeline由后端固定启用。 |
 | `vf_merge_level` | VF merge level使用后端默认值。 |
 | `warp_size` | Ascend后端将warp size固定为32。 |

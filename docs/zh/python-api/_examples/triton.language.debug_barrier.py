@@ -1,7 +1,5 @@
-import pytest
 import torch
 import torch_npu
-from torch.testing import assert_close
 
 import triton
 import triton.language as tl
@@ -32,9 +30,10 @@ def test_debug_barrier():
     debug_barrier_kernel[(1, )](x, out, BLOCK_SIZE=BLOCK_SIZE)
     torch.npu.synchronize()
 
-    assert_close(out, x * 2, rtol=1e-3, atol=1e-3)
+    ref = x * 2
+    torch.testing.assert_close(out, ref, rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":
     test_debug_barrier()
-    print("test_debug_barrier PASSED!")
+    print("test_debug_barrier passed!")

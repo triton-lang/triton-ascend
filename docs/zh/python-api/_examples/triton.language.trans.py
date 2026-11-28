@@ -21,9 +21,10 @@ def test_trans():
     out = torch.empty((D1 * D2 * D3, ), dtype=torch.float32, device="npu")
     trans_kernel[(1, )](x, out, D1, D2, D3)
 
-    assert out.shape == (D1 * D2 * D3, ), f"Shape mismatch: expected {(D1*D2*D3,)} but got {out.shape}."
-    print("Test passed.")
+    ref = torch.permute(x, (2, 0, 1)).reshape(D1 * D2 * D3)
+    torch.testing.assert_close(out.cpu(), ref.cpu())
 
 
 if __name__ == "__main__":
     test_trans()
+    print("test_trans passed!")

@@ -1,4 +1,3 @@
-import pytest
 import triton
 import triton.language as tl
 import torch
@@ -6,26 +5,26 @@ import torch_npu
 
 
 @triton.jit
-def fn_npu_(output_ptr, x_ptr):
-    i = tl.arange(0, 4)
-    j = tl.arange(0, 4)
-    xx, yy = tl.swizzle2d(i, j, size_i=4, size_j=4, size_g=2)
-
-    tl.store(output_ptr + tl.arange(0, 4), xx)
-    tl.store(x_ptr + tl.arange(0, 4), yy)
+def swizzle2d_kernel(out_ptr, size_i: tl.constexpr, size_j: tl.constexpr, size_g: tl.constexpr):
+    i = tl.arange(0, size_i)[:, None]
+    j = tl.arange(0, size_j)[None, :]
+    # Row-major linear index of each source position
+    value = i * size_j + j
+    # Swizzle the source position to its destination position
+    new_i, new_j = tl.swizzle2d(i, j, size_i=size_i, size_j=size_j, size_g=size_g)
+    tl.store(out_ptr + new_i * size_j + new_j, value)
 
 
 def test_swizzle2d():
-    shape = (2, 256, 16)
-    dtype = 'int32'
-    ncore = 1
-    x = torch.randint(1, (4, ), dtype=eval('torch.' + dtype)).npu()
-    a = torch.tensor([[0, 2, 1, 3], [4, 6, 5, 7], [8, 10, 9, 11], [12, 14, 13, 15]], dtype=eval('torch.' + dtype)).npu()
-    output = torch.randint(1, (4, ), dtype=eval('torch.' + dtype)).npu()
-    fn_npu_[ncore, 1, 1](output, x)
-    triton_ret = output[:, None] * 4 + x[None, :]
-    torch.testing.assert_close(triton_ret, a)
+    size_i, size_j, size_g = 4, 4, 2
+    out = torch.zeros((size_i, size_j), dtype=torch.int32, device="npu")
+    swizzle2d_kernel[(1, )](out, size_i, size_j, size_g)
+
+    # Documented transform for size_i = size_j = 4 and size_g = 2
+    ref = torch.tensor([[0, 2, 4, 6], [1, 3, 5, 7], [8, 10, 12, 14], [9, 11, 13, 15]], dtype=torch.int32, device="npu")
+    torch.testing.assert_close(out, ref)
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     test_swizzle2d()
+    print("test_swizzle2d passed!")

@@ -27,9 +27,10 @@ def test_argmin():
     out = torch.empty(M, dtype=torch.int32).npu()
     triton_argmin_2d[1, 1, 1](x, out, dim, M, N, M, N)
     ref = torch.argmin(x, dim=dim).to(torch.int32)
-    assert torch.equal(out.cpu(), ref.cpu()), "argmin result mismatch"
+    torch.testing.assert_close(out.cpu(), ref.cpu())
     print("argmin result:", out)
 
 
 if __name__ == "__main__":
     test_argmin()
+    print("test_argmin passed!")

@@ -1,4 +1,3 @@
-import pytest
 import torch
 import torch_npu
 import triton
@@ -20,11 +19,12 @@ def test_flip():
     dtype_str = 'int32'
     dim = 1
     x = torch.randint(low=0, high=256, size=(M, N), dtype=eval(f'torch.{dtype_str}')).npu()
-    y = torch.flip(x, (dim, ))
-    z = torch.empty_like(x, device='npu')
-    flip_kernel[(1, )](x, z, M, N, dim, num_warps=8)
-    assert (y == z).all(), (y, z)
+    ref = torch.flip(x, (dim, ))
+    out = torch.empty_like(x, device='npu')
+    flip_kernel[(1, )](x, out, M, N, dim, num_warps=8)
+    torch.testing.assert_close(out, ref)
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     test_flip()
+    print("test_flip passed!")

@@ -1,5 +1,4 @@
 import torch
-
 import triton
 import triton.language as tl
 
@@ -28,6 +27,16 @@ def test_randn4x():
 
     randn4x_kernel[grid](out1, out2, out3, out4, seed, N=N, BLOCK=BLOCK)
 
+    # tl.randn4x is a pure function of (seed, offset): re-running with the same
+    # seed reproduces exactly the same values.
+    ref1 = torch.empty(N, dtype=torch.float32, device="npu")
+    ref2 = torch.empty(N, dtype=torch.float32, device="npu")
+    ref3 = torch.empty(N, dtype=torch.float32, device="npu")
+    ref4 = torch.empty(N, dtype=torch.float32, device="npu")
+    randn4x_kernel[grid](ref1, ref2, ref3, ref4, seed, N=N, BLOCK=BLOCK)
+    for out, ref in [(out1, ref1), (out2, ref2), (out3, ref3), (out4, ref4)]:
+        torch.testing.assert_close(out, ref)
+
     # all 4 outputs should be normally distributed (mean≈0, std≈1)
     cat = torch.cat([out1.cpu(), out2.cpu(), out3.cpu(), out4.cpu()])
     assert -0.2 < cat.mean() < 0.2, f"mean={cat.mean():.4f} not ~0"
@@ -36,3 +45,4 @@ def test_randn4x():
 
 if __name__ == "__main__":
     test_randn4x()
+    print("test_randn4x passed!")

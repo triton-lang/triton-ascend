@@ -6,7 +6,7 @@ These operators are implemented as magic methods on ``triton.language.tensor``
 (``__truediv__`` / ``__floordiv__`` / ``__mod__`` / ``__neg__`` / ``__invert__`` /
 ``__and__`` / ``__or__`` / ``__xor__`` / ``__not__`` / ``__lshift__`` /
 ``__rshift__`` / comparison methods) and have **no** ``tl.``-prefixed top-level
-functions.  To render them in the ``triton.language`` autosummary index (like
+functions. To render them in the ``triton.language`` autosummary index (like
 ``add`` / ``sub`` / ``mul``), conf.py attaches these lightweight stubs to
 ``triton.language`` at doc-build time.
 
@@ -27,9 +27,9 @@ def _div(x, y):
     * ``float / float`` — both operands are unified to the higher-precision float type
 
     :param x: the dividend
-    :type x: Block or scalar number
+    :type x: Block or scalar
     :param y: the divisor
-    :type y: Block or scalar number
+    :type y: Block or scalar
     """
 
 
@@ -37,14 +37,14 @@ def _floordiv(x, y):
     """
     Element-wise integer division of :code:`x` by :code:`y`, the ``//`` operator on tensors.
 
-    The result truncates toward zero.  Only integer operands are supported.  Signed integers use
+    The result truncates toward zero. Signed integers use
     signed division (:code:`sdiv`); unsigned integers use unsigned division
-    (:code:`udiv`).  Floating-point operands raise :code:`TypeError`.
+    (:code:`udiv`). Floating-point operands raise :code:`TypeError`.
 
     :param x: the dividend
-    :type x: Block or scalar number
+    :type x: Block or scalar
     :param y: the divisor
-    :type y: Block or scalar number
+    :type y: Block or scalar
     """
 
 
@@ -54,13 +54,13 @@ def _mod(x, y):
 
     * float % float — floating-point remainder (:code:`frem`)
     * int % int — integer remainder; signed integers use :code:`srem`,
-      unsigned integers use :code:`urem`.  Operands with mismatched
+      unsigned integers use :code:`urem`. Operands with mismatched
       signedness raise :code:`TypeError`.
 
     :param x: the dividend
-    :type x: Block or scalar number
+    :type x: Block or scalar
     :param y: the divisor
-    :type y: Block or scalar number
+    :type y: Block or scalar
     """
 
 
@@ -68,7 +68,7 @@ def _neg(x):
     """
     Element-wise negation, the unary ``-`` operator on tensors.
 
-    Equivalent to :code:`0 - x`.  Pointer-typed inputs raise :code:`ValueError`.
+    Equivalent to :code:`0 - x`. Pointer-typed inputs raise :code:`ValueError`.
 
     :param x: the input
     :type x: Block
@@ -79,8 +79,7 @@ def _invert(x):
     """
     Element-wise bitwise NOT, the unary ``~`` operator on tensors.
 
-    Only integer inputs are supported.  Floating-point or pointer inputs
-    raise :code:`ValueError`.
+    Floating-point or pointer inputs raise :code:`ValueError`.
 
     :param x: the input
     :type x: Block
@@ -143,7 +142,7 @@ def _logical_and(x, y):
     Element-wise logical AND, the ``logical_and`` method on tensors.
 
     Both operands are bit-cast to :code:`int1` and then combined with a
-    bitwise AND.  The result is always an :code:`int1` (boolean) tensor.
+    bitwise AND. The result is always an :code:`int1` (boolean) tensor.
 
     :param x: the first input
     :type x: Block
@@ -157,7 +156,7 @@ def _logical_or(x, y):
     Element-wise logical OR, the ``logical_or`` method on tensors.
 
     Both operands are bit-cast to :code:`int1` and then combined with a
-    bitwise OR.  The result is always an :code:`int1` (boolean) tensor.
+    bitwise OR. The result is always an :code:`int1` (boolean) tensor.
 
     :param x: the first input
     :type x: Block
@@ -170,7 +169,7 @@ def _lshift(x, y):
     """
     Element-wise left shift of :code:`x` by :code:`y` bits, the ``<<`` operator on tensors.
 
-    Only integer operands are supported.  Bit widths of both operands are
+    Only integer operands are supported. Bit widths of both operands are
     checked for consistency before the shift (:code:`shl`).
 
     :param x: the value to shift
@@ -184,9 +183,9 @@ def _rshift(x, y):
     """
     Element-wise right shift of :code:`x` by :code:`y` bits, the ``>>`` operator on tensors.
 
-    Only integer operands are supported.  Signed integers use arithmetic
+    Only integer operands are supported. Signed integers use arithmetic
     shift (:code:`ashr`, preserving the sign bit); unsigned integers use
-    logical shift (:code:`lshr`).  Bit widths of both operands are checked
+    logical shift (:code:`lshr`). Bit widths of both operands are checked
     for consistency before the shift.
 
     :param x: the value to shift
@@ -207,9 +206,9 @@ def _gt(x, y):
     The result is an :code:`int1` (boolean) tensor with the same shape.
 
     :param x: the left operand
-    :type x: Block
+    :type x: Block or scalar
     :param y: the right operand
-    :type y: Block
+    :type y: Block or scalar
     """
 
 
@@ -224,9 +223,9 @@ def _ge(x, y):
     The result is an :code:`int1` (boolean) tensor with the same shape.
 
     :param x: the left operand
-    :type x: Block
+    :type x: Block or scalar
     :param y: the right operand
-    :type y: Block
+    :type y: Block or scalar
     """
 
 
@@ -241,9 +240,9 @@ def _lt(x, y):
     The result is an :code:`int1` (boolean) tensor with the same shape.
 
     :param x: the left operand
-    :type x: Block
+    :type x: Block or scalar
     :param y: the right operand
-    :type y: Block
+    :type y: Block or scalar
     """
 
 
@@ -258,9 +257,9 @@ def _le(x, y):
     The result is an :code:`int1` (boolean) tensor with the same shape.
 
     :param x: the left operand
-    :type x: Block
+    :type x: Block or scalar
     :param y: the right operand
-    :type y: Block
+    :type y: Block or scalar
     """
 
 
@@ -274,9 +273,9 @@ def _eq(x, y):
     The result is an :code:`int1` (boolean) tensor with the same shape.
 
     :param x: the left operand
-    :type x: Block
+    :type x: Block or scalar
     :param y: the right operand
-    :type y: Block
+    :type y: Block or scalar
     """
 
 
@@ -290,9 +289,9 @@ def _ne(x, y):
     The result is an :code:`int1` (boolean) tensor with the same shape.
 
     :param x: the left operand
-    :type x: Block
+    :type x: Block or scalar
     :param y: the right operand
-    :type y: Block
+    :type y: Block or scalar
     """
 
 

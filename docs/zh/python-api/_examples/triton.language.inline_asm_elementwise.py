@@ -1,6 +1,5 @@
 import torch
 import torch_npu
-from torch.testing import assert_close
 
 import triton
 import triton.language as tl
@@ -36,9 +35,10 @@ def test_inline_asm_elementwise():
     inline_asm_add_kernel[grid](x, y, out, N, BLOCK_SIZE=BLOCK_SIZE)
     torch.npu.synchronize()
 
-    assert_close(out, x + y)
+    ref = x + y
+    torch.testing.assert_close(out, ref)
 
 
 if __name__ == "__main__":
     test_inline_asm_elementwise()
-    print("test_inline_asm_elementwise PASSED!")
+    print("test_inline_asm_elementwise passed!")

@@ -13,7 +13,7 @@ def copy_kernel(
 ):
     offs_a = tl.arange(0, M)[:, None]
     offs_b = tl.arange(0, N)[None, :]
-    offs_c = (offs_a) * M + (offs_b)
+    offs_c = (offs_a) * N + (offs_b)
     a_ptr = A_ptr + offs_c
     a_val = tl.load(a_ptr)
     a1_ptr = A1_ptr + offs_c

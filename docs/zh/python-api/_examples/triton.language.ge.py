@@ -1,5 +1,4 @@
 import torch
-
 import triton
 import triton.language as tl
 
@@ -26,8 +25,10 @@ def test_ge():
     out = torch.empty(shape, dtype=torch.bool, device="npu")
     triton_ge_3d[(1, 1, 1)](x_cpu.npu(), y_cpu.npu(), out, L=shape[0], M=shape[1], N=shape[2], debug=True)
 
-    assert torch.equal(out.cpu(), torch.ge(x_cpu, y_cpu))
+    ref = torch.ge(x_cpu, y_cpu)
+    torch.testing.assert_close(out.cpu(), ref)
 
 
 if __name__ == "__main__":
     test_ge()
+    print("test_ge passed!")

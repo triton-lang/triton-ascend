@@ -18,14 +18,15 @@ def test_sort_2d():
     shape = (8, 16)
     descending = True
     x = torch.randn(size=shape, dtype=torch.float32).npu()
-    triton_res = torch.empty_like(x)
+    out = torch.empty_like(x)
 
-    torch_res = torch.sort(x, descending=descending)[0]
+    ref = torch.sort(x, descending=descending)[0]
     N = x.shape[0]
     M = x.shape[1]
-    sort_kernel_2d[(1, )](x, triton_res, N, M, descending)
-    assert (torch_res == triton_res).all(), (torch_res, triton_res)
+    sort_kernel_2d[(1, )](x, out, N, M, descending)
+    torch.testing.assert_close(out, ref)
 
 
 if __name__ == '__main__':
     test_sort_2d()
+    print("test_sort_2d passed!")

@@ -2,11 +2,10 @@ import pytest
 import triton
 import triton.language as tl
 import torch
-import math
 
 
 def torch_softmax_d0(x1):
-    res = torch.softmax(x1, axis=0).to(x1.dtype)
+    res = torch.softmax(x1, dim=0).to(x1.dtype)
     return res
 
 
@@ -31,12 +30,13 @@ def test_softmax_2d():
     XB, YB = xnumel, ynumel
     x0 = torch.randn(size=shape, dtype=torch.float32).npu()
 
-    torch_res = torch_softmax_d0(x0)
-    triton_res = torch.empty_like(x0)
-    triton_softmax_2d[1, 1, 1](x0, triton_res, ynumel, XB, YB)
+    ref = torch_softmax_d0(x0)
+    out = torch.empty_like(x0)
+    triton_softmax_2d[1, 1, 1](x0, out, ynumel, XB, YB)
 
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+    torch.testing.assert_close(out, ref, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == '__main__':
     test_softmax_2d()
+    print("test_softmax_2d passed!")

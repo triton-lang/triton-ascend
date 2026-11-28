@@ -147,14 +147,15 @@ index c774e5f41d85c09a929e0fca56f7fc1f2312c0be..2dba446281781b29325fb6e2cd6b1d4f
    // Device type that generated the trace
    Device device;
 diff --git a/third_party/proton/common/include/TraceDataIO/TraceWriter.h b/third_party/proton/common/include/TraceDataIO/TraceWriter.h
-index 9558661f8a62fd41853fafcd5a91e63bbfd3a2b5..a00827b5a854235297f126ea8f1d0ae01ec2fb85 100644
+index 9558661f8a62fd41853fafcd5a91e63bbfd3a2b5..42c3f9d8d0235fe2d292b05daed7d2ce2b5bc073 100644
 --- a/third_party/proton/common/include/TraceDataIO/TraceWriter.h
 +++ b/third_party/proton/common/include/TraceDataIO/TraceWriter.h
-@@ -16,6 +16,8 @@ struct KernelMetadata {
+@@ -16,6 +16,9 @@ struct KernelMetadata {
    std::map<int, std::string> scopeName;
    std::string kernelName;
    std::vector<std::string> callStack;
 +  double cycleCounterFreqMhz = 1000.0;
++  std::map<int, double> channelFreqMhz;
 +  bool channelTrace = false;
  };
  
@@ -199,7 +200,7 @@ index 819db452449f47d12fe62255d223d31ee2d5c081..1f44a4acd9451a67cb7b12b9128201c6
  
    throw e;
 diff --git a/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp b/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
-index 320a4f193a0f857cb86479cacd1ce67cec1cb1a2..99c62f93696235499f4c0c903a4558cd6f1a1985 100644
+index 320a4f193a0f857cb86479cacd1ce67cec1cb1a2..935e1eb86107ea6d6286ae4fd44595b05e1a195c 100644
 --- a/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
 +++ b/third_party/proton/common/lib/TraceDataIO/TraceWriter.cpp
 @@ -1,5 +1,6 @@
@@ -213,14 +214,14 @@ index 320a4f193a0f857cb86479cacd1ce67cec1cb1a2..99c62f93696235499f4c0c903a4558cd
                                            const uint64_t minInitTime) {
    auto result = kernelTrace.first;
    auto metadata = kernelTrace.second;
-+  if (!std::isfinite(metadata->cycleCounterFreqMhz) ||
-+      metadata->cycleCounterFreqMhz <= 0)
++  if (!metadata->channelTrace && (!std::isfinite(metadata->cycleCounterFreqMhz) ||
++                                  metadata->cycleCounterFreqMhz <= 0))
 +    throw std::invalid_argument(
 +        "Cycle counter frequency must be positive and finite");
  
    json callStack = json::array();
    for (auto const &frame : metadata->callStack) {
-@@ -204,14 +209,20 @@ void StreamChromeTraceWriter::writeKernel(json &object,
+@@ -204,14 +209,21 @@ void StreamChromeTraceWriter::writeKernel(json &object,
                  " CTA" + std::to_string(ctaId);
            tid = "warp " + std::to_string(warpId) + " (line " +
                  std::to_string(lineId) + ")";
@@ -239,11 +240,28 @@ index 320a4f193a0f857cb86479cacd1ce67cec1cb1a2..99c62f93696235499f4c0c903a4558cd
 -          // Unit: MHz, we assume freq is 1000MHz (1GHz)
 -          double freq = 1000.0;
 +          // Unit: MHz; backends override the 1GHz default via KernelMetadata.
-+          double freq = metadata->cycleCounterFreqMhz;
++          double freq = metadata->channelTrace ? metadata->channelFreqMhz.at(ctaId)
++                                               : metadata->cycleCounterFreqMhz;
  
            // Global time is in `ns` unit. With 1GHz assumption, we
            // could subtract with blockToMInCycle: (ns - ns) / 1GHz - cycle
-@@ -236,6 +247,17 @@ void StreamChromeTraceWriter::writeKernel(json &object,
+@@ -229,13 +241,32 @@ void StreamChromeTraceWriter::writeKernel(json &object,
+           element["ph"] = "X";
+           element["pid"] = pid;
+           element["tid"] = tid;
+-          element["ts"] = static_cast<double>(ts) / freq;
+-          element["dur"] = static_cast<double>(dur) / freq;
++          if (freq > 0) {
++            element["ts"] = static_cast<double>(ts) / freq;
++            element["dur"] = static_cast<double>(dur) / freq;
++          } else {
++            // Uncalibrated channel: expose the cycle pair without inventing a duration.
++            element["ph"] = "i";
++            element["s"] = "t";
++            element["ts"] = 0;
++          }
+           json args;
+           args["Finalization Time (ns)"] = bt->postFinalTime - bt->preFinalTime;
            args["Frequency (MHz)"] = freq;
            element["args"] = args;
            element["args"]["call_stack"] = callStack;
@@ -252,7 +270,8 @@ index 320a4f193a0f857cb86479cacd1ce67cec1cb1a2..99c62f93696235499f4c0c903a4558cd
 +            element["args"]["all_logical_blocks"] = false;
 +            element["args"]["channel_id_is_core_id"] = false;
 +            element["args"]["clock_domain"] =
-+                "channel-relative; not host synchronized";
++                freq > 0 ? "channel-relative; not host synchronized"
++                         : "uncalibrated; raw cycles only";
 +            element["args"]["start_cycle"] = event.first->cycle;
 +            element["args"]["end_cycle"] = event.second->cycle;
 +            element["args"]["channel_id"] = ctaId;
@@ -394,10 +413,10 @@ index 0000000000000000000000000000000000000000..5b3fdde057add2b1925cd97bbe4d40ab
 +#endif // PROTON_DRIVER_GPU_CANN_H_
 diff --git a/third_party/proton/csrc/include/Driver/GPU/MsptiApi.h b/third_party/proton/csrc/include/Driver/GPU/MsptiApi.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..e4f205b1a22709cc8fab3fbf1c7bcf4402084792
+index 0000000000000000000000000000000000000000..bb64741d7eafb4ff9944940e6b92614e2e3cd10f
 --- /dev/null
 +++ b/third_party/proton/csrc/include/Driver/GPU/MsptiApi.h
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,51 @@
 +#ifndef PROTON_DRIVER_GPU_MSPTI_H_
 +#define PROTON_DRIVER_GPU_MSPTI_H_
 +
@@ -429,6 +448,8 @@ index 0000000000000000000000000000000000000000..e4f205b1a22709cc8fab3fbf1c7bcf44
 +msptiResult activityDisable(msptiActivityKind kind);
 +
 +template <bool CheckSuccess> msptiResult activityFlushAll(uint32_t flag);
++
++bool tryFlushSharedKernelChannel();
 +
 +template <bool CheckSuccess>
 +msptiResult activityGetNextRecord(uint8_t *buffer, size_t validBufferSizeBytes,
@@ -631,10 +652,20 @@ index ba3d67f44e4a21d9d9d1f39f48ae7b78bf143f6c..2d7ade79ad294ea280cb3bf27c2bea6b
  
  /*static*/ thread_local std::map<OpInterface *, bool> OpInterface::opInProgress;
 diff --git a/third_party/proton/csrc/lib/Data/TraceData.cpp b/third_party/proton/csrc/lib/Data/TraceData.cpp
-index 38728127faa7b73f058a8f683833ce3054651031..662323a1b714b42cf8cb4ad91349f151b27107e9 100644
+index 38728127faa7b73f058a8f683833ce3054651031..63b3061ccd325595310590b4c682b2690a75392e 100644
 --- a/third_party/proton/csrc/lib/Data/TraceData.cpp
 +++ b/third_party/proton/csrc/lib/Data/TraceData.cpp
-@@ -404,6 +404,9 @@ convertToTimelineTrace(TraceData::Trace *trace,
+@@ -326,6 +326,9 @@ convertToTimelineTrace(TraceData::Trace *trace,
+ 
+       const auto &blockEvent = sortedEvents[eventIndex];
+       uint32_t currentBlockId = getBlockId(blockEvent);
++      if (blockEvent.cycleMetric->isChannelTrace())
++        metadata->channelFreqMhz[currentBlockId] =
++            blockEvent.cycleMetric->getCycleCounterFreqMhz();
+       uint32_t currentProcId =
+           getInt64Value(blockEvent.cycleMetric, CycleMetric::ProcessorId);
+ 
+@@ -404,6 +407,9 @@ convertToTimelineTrace(TraceData::Trace *trace,
          getStringValue(kernelEvent.cycleMetric, CycleMetric::KernelName);
      metadata->scopeName = scopeIdToName;
      metadata->callStack = std::move(callStack);
@@ -763,13 +794,14 @@ index 0000000000000000000000000000000000000000..7fbde92189c16f59a851788a32e2ed40
 +} // namespace proton::cann
 diff --git a/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp b/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..63721ba512d3c8cae6da0911d5d603aae995ab1c
+index 0000000000000000000000000000000000000000..4030b9887f8c176b3298ee7b500a247e5a705934
 --- /dev/null
 +++ b/third_party/proton/csrc/lib/Driver/GPU/MsptiApi.cpp
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,97 @@
 +#include "Driver/GPU/MsptiApi.h"
 +#include "Device.h"
 +#include "Driver/Dispatch.h"
++#include <string_view>
 +
 +namespace proton {
 +
@@ -824,6 +856,41 @@ index 0000000000000000000000000000000000000000..63721ba512d3c8cae6da0911d5d603aa
 +DEFINE_DISPATCH(ExternLibMspti, activityPopExternalCorrelationId,
 +                msptiActivityPopExternalCorrelationId,
 +                msptiExternalCorrelationKind, uint64_t *)
++
++static bool needsLegacyKernelDrain() {
++  // Newer libraries keep their own channel drain and parser teardown policy.
++  if (dlsym(ExternLibMspti::lib, "msptiGetVersion"))
++    return false;
++  void *acl = dlopen("libascendcl.so", RTLD_LAZY | RTLD_NOLOAD);
++  if (!acl)
++    return false;
++  using GetSocName = const char *(*)();
++  auto getSocName = reinterpret_cast<GetSocName>(dlsym(acl, "aclrtGetSocName"));
++  const char *name = getSocName ? getSocName() : nullptr;
++  const std::string_view soc = name ? name : "";
++  const bool match =
++      soc.rfind("Ascend910B", 0) == 0 || soc.rfind("Ascend910_93", 0) == 0;
++  dlclose(acl);
++  return match;
++}
++
++bool tryFlushSharedKernelChannel() {
++  static const bool legacy = needsLegacyKernelDrain();
++  if (!legacy)
++    return false;
++  // Legacy MSPTI shares the STARS reader between these two activity kinds.
++  // Never disable a communication activity that was enabled by another caller.
++  using IsEnabled = bool (*)(msptiActivityKind);
++  static auto isEnabled = reinterpret_cast<IsEnabled>(
++      dlsym(ExternLibMspti::lib, "msptiActivityIsEnabled"));
++  constexpr auto kind = MSPTI_ACTIVITY_KIND_COMMUNICATION;
++  if (!isEnabled || isEnabled(kind) || !isEnabled(MSPTI_ACTIVITY_KIND_KERNEL))
++    return false;
++  if (activityEnable<false>(kind) != MSPTI_SUCCESS)
++    return false;
++  activityDisable<true>(kind);
++  return true;
++}
 +
 +} // namespace mspti
 +
@@ -996,7 +1063,7 @@ index 0000000000000000000000000000000000000000..70f1dc719d0253d28d5fb055d75412ba
 +
 +} // namespace proton
 diff --git a/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp b/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp
-index aa0868fe8fc3a119c528cbcba5d7e9a37ccd36aa..ff47b9472a40b17b37ec6ea48fd43ffa358e2d3f 100644
+index aa0868fe8fc3a119c528cbcba5d7e9a37ccd36aa..f67010e3ec9dce96e435ffe840609133bbca4d35 100644
 --- a/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp
 +++ b/third_party/proton/csrc/lib/Profiler/Instrumentation/InstrumentationProfiler.cpp
 @@ -1,9 +1,16 @@
@@ -1035,7 +1102,7 @@ index aa0868fe8fc3a119c528cbcba5d7e9a37ccd36aa..ff47b9472a40b17b37ec6ea48fd43ffa
 +        "Instrumentation events require an active NPU instrumentation session");
 +  auto &contexts = functionScopeIdContexts.at(functionId);
 +  for (const auto &r : records) {
-+    if (r[0] < 11 || r[0] > 28 || r[1] > 10 || r[4] < r[3] || r[5] == 0 ||
++    if (r[0] < 11 || r[0] > 28 || r[1] > 10 || r[4] < r[3] ||
 +        !contexts.count(r[2]))
 +      throw std::runtime_error("Invalid instrumentation scope event");
 +  }
@@ -1233,10 +1300,10 @@ index 0bf9147b2cfb0ab2c6b157e0fa0c7579b3fb130b..67779b6a3d8807c2a44ea31fea81f76a
  } // namespace proton
 diff --git a/third_party/proton/csrc/lib/Profiler/Mspti/MsptiProfiler.cpp b/third_party/proton/csrc/lib/Profiler/Mspti/MsptiProfiler.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..959227f5f7061cd4f34dda66186c208bcaadff24
+index 0000000000000000000000000000000000000000..f50ef3b2015479206b37296309e1eef95cfaae7c
 --- /dev/null
 +++ b/third_party/proton/csrc/lib/Profiler/Mspti/MsptiProfiler.cpp
-@@ -0,0 +1,359 @@
+@@ -0,0 +1,372 @@
 +#include "Profiler/Mspti/MsptiProfiler.h"
 +#include "Context/Context.h"
 +#include "Data/Metric.h"
@@ -1244,6 +1311,7 @@ index 0000000000000000000000000000000000000000..959227f5f7061cd4f34dda66186c208b
 +#include "Driver/GPU/MsptiApi.h"
 +
 +#include <atomic>
++#include <chrono>
 +#include <cstdlib>
 +#include <deque>
 +#include <memory>
@@ -1532,6 +1600,18 @@ index 0000000000000000000000000000000000000000..959227f5f7061cd4f34dda66186c208b
 +
 +void MsptiProfiler::MsptiProfilerPimpl::doFlush() {
 +  mspti::activityFlushAll<true>(/*flag=*/0);
++  if (pendingKernelActivities.load(std::memory_order_relaxed) != 0 &&
++      mspti::tryFlushSharedKernelChannel()) {
++    // Consume the last device records while the KERNEL parser is still enabled.
++    const auto deadline =
++        std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
++    do {
++      mspti::activityFlushAll<true>(0);
++      if (pendingKernelActivities.load(std::memory_order_relaxed) == 0)
++        break;
++      std::this_thread::sleep_for(std::chrono::milliseconds(1));
++    } while (std::chrono::steady_clock::now() < deadline);
++  }
 +  if (pendingKernelActivities.load(std::memory_order_relaxed) != 0) {
 +    // MSPTI 26.1 flushes its host ActivityBuffer but does not flush the
 +    // device profiling channel. Cycling only KERNEL forces those SOC records
@@ -1997,10 +2077,10 @@ index aac27ad1887339d44c3d16e47ce48c456b474d4c..87d486c12e19a1e6541df3f0235b0f5a
              alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()
 diff --git a/third_party/proton/proton/ascend_perf_monitor.py b/third_party/proton/proton/ascend_perf_monitor.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..3ecab1c937369697b548fff7ae73ba2b083f9605
+index 0000000000000000000000000000000000000000..613b235fe7bbaee32ee38784057c9ef9b535e980
 --- /dev/null
 +++ b/third_party/proton/proton/ascend_perf_monitor.py
-@@ -0,0 +1,237 @@
+@@ -0,0 +1,240 @@
 +"""Serialized Hardware sampling. The device ABI is supplied by CANN and the driver."""
 +import ctypes as C
 +import json
@@ -2082,7 +2162,8 @@ index 0000000000000000000000000000000000000000..3ecab1c937369697b548fff7ae73ba2b
 +        u, p = C.c_uint32, C.c_void_p
 +        self.physical = _bind(C.CDLL("libruntime.so"), "rtGetDevicePhyIdByIndex", u, C.POINTER(u))
 +        self.command = _bind(C.CDLL("libprofapi.so"), "profSetProfCommand", p, u)
-+        self.info = _bind(hal, "halGetDeviceInfo", u, C.c_int, C.c_int, C.POINTER(C.c_int64))
++        self.info = (_bind(hal, "halGetDeviceInfo", u, C.c_int, C.c_int, C.POINTER(C.c_int64))
++                     if hasattr(hal, "halGetDeviceInfo") else None)
 +        self.start = _bind(hal, "prof_drv_start", u, u, C.POINTER(_Start))
 +        self.read = _bind(hal, "prof_channel_read", u, u, p, u)
 +        self.flush = _bind(hal, "halProfDataFlush", u, u, C.POINTER(u))
@@ -2098,9 +2179,11 @@ index 0000000000000000000000000000000000000000..3ecab1c937369697b548fff7ae73ba2b
 +        values = []
 +        for module in (4, 7):  # AICORE / VECTOR_CORE, DRV_INFO_TYPE_FREQUE, in MHz.
 +            value = C.c_int64()
-+            _check(self.info(device, module, 4, C.byref(value)), "clock lookup")
-+            if not 0 < value.value <= 0xffffffff:
-+                raise RuntimeError(f"Invalid device clock: {value.value}")
++            rc = self.info(device, module, 4, C.byref(value)) if self.info else None
++            if rc != 0 or not 0 < value.value <= 0xffffffff:
++                warnings.warn(f"Device {device} module {module}: clock unavailable (rc={rc}, MHz={value.value}); "
++                              "reporting cycles without wall time", RuntimeWarning, stacklevel=2)
++                value.value = 0
 +            values.append(value.value)
 +        return values
 +

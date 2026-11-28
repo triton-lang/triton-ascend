@@ -13,6 +13,7 @@
 | [07_accuracy_comparison_example](./07_accuracy_comparison_example.md)| 精度比对示例 |
 | [08_max_autotune_example](./08_max_autotune_example.md)| 使用max_autotune进行内核自动调优示例 |
 | [09_costmodel_example](./09_costmodel_example.md)| Costmodel端到端预测示例 |
+| [`al.conv1d` 非对称填充示例](https://github.com/triton-lang/triton-ascend/blob/main/docs/zh/python-api/_examples/triton.language.extra.cann.extension.conv1d.py) | 使用 `padding=(1, 2)` 执行一维卷积，并与 PyTorch 的 CPU 结果对比 |
 
 ```{toctree}
 :maxdepth: 3

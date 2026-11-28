@@ -2421,7 +2421,7 @@ def round(arg0, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-def acos(arg0: core.tensor, _semantic=None):
+def acos(arg0, _semantic=None):
     """
     Computes the inverse cosine (arccos) of the input parameter.
 
@@ -2485,7 +2485,7 @@ def acos(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-def sinh(arg0: core.tensor, _semantic=None):
+def sinh(arg0, _semantic=None):
     """
     Computes the hyperbolic sine of input parameter x.
 
@@ -2511,7 +2511,7 @@ def sinh(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-def cosh(arg0: core.tensor, _semantic=None):
+def cosh(arg0, _semantic=None):
     """
     Computes the hyperbolic cosine of the input parameter.
 
@@ -2537,7 +2537,7 @@ def cosh(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-def acosh(arg0: core.tensor, _semantic=None):
+def acosh(arg0, _semantic=None):
     """
     Computes the inverse hyperbolic cosine of the input parameter.
 
@@ -2562,7 +2562,7 @@ def acosh(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-def asinh(arg0: core.tensor, _semantic=None):
+def asinh(arg0, _semantic=None):
     """
     Computes the inverse hyperbolic sine of the input parameter.
 
@@ -2587,7 +2587,7 @@ def asinh(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-def atanh(arg0: core.tensor, _semantic=None):
+def atanh(arg0, _semantic=None):
     """
     Inverse hyperbolic tangent function, computes the inverse hyperbolic tangent of the input parameter.
 
@@ -2614,7 +2614,7 @@ def atanh(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-def expm1(arg0: core.tensor, _semantic=None):
+def expm1(arg0, _semantic=None):
     """
     Computes e raised to the power of x, minus 1.
 
@@ -2637,7 +2637,7 @@ def expm1(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["fp16", "fp32"])
-def nextafter(arg0: core.tensor, arg1: core.tensor, _semantic=None):
+def nextafter(arg0, arg1, _semantic=None):
     """
     Computes the next representable floating-point number from x toward y.
 
@@ -2689,7 +2689,7 @@ def nextafter(arg0: core.tensor, arg1: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-def hypot(arg0: core.tensor, arg1: core.tensor, _semantic=None):
+def hypot(arg0, arg1, _semantic=None):
     """
     Computes the Euclidean distance between x and y.
 
@@ -2986,7 +2986,7 @@ def yn(arg0, arg1, _semantic=None):
 # All rights reserved.
 @core.builtin
 @math._check_dtype(dtypes=["fp16", "fp32"])
-def cyl_bessel_i0(arg0: core.tensor, _semantic=None):
+def cyl_bessel_i0(arg0, _semantic=None):
     """
     Computes the modified Bessel function of the first kind, order 0, of the input parameter.
 
@@ -3510,7 +3510,7 @@ def lgamma(arg0, _semantic=None):
 @math._check_dtype(dtypes=[
     "fp32",
 ])
-def nearbyint(arg0: core.tensor, _semantic=None):
+def nearbyint(arg0, _semantic=None):
     """
     Converts x to the nearest integer.
 
@@ -3612,7 +3612,7 @@ def cospi(arg0, _semantic=None):
 @math._check_dtype(dtypes=[
     "fp32",
 ])
-def asin(arg0: core.tensor, _semantic=None):
+def asin(arg0, _semantic=None):
     """
     Computes the inverse sine (arcsin) of the input parameter.
 
@@ -3646,7 +3646,7 @@ def asin(arg0: core.tensor, _semantic=None):
 @math._check_dtype(dtypes=[
     "fp32",
 ])
-def log10(arg0: core.tensor, _semantic=None):
+def log10(arg0, _semantic=None):
     """
     Computes the base-10 logarithm of input x.
 
@@ -3680,7 +3680,7 @@ def log10(arg0: core.tensor, _semantic=None):
 @math._check_dtype(dtypes=[
     "fp32",
 ])
-def copysign(arg0: core.tensor, arg1: core.tensor, _semantic=None):
+def copysign(arg0, arg1, _semantic=None):
     """
     Generates a floating-point number with magnitude equal to the magnitude of x and sign equal to the sign of y.
 
@@ -3725,7 +3725,7 @@ def copysign(arg0: core.tensor, arg1: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["fp16", "fp32", "bf16"])
-def rint(arg0: core.tensor, _semantic=None):
+def rint(arg0, _semantic=None):
     """
     Computes the nearest integer to x using round-to-nearest-even rounding mode.
 

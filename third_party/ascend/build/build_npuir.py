@@ -217,7 +217,7 @@ def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Rele
     _log(f"cgroup: {cpus} CPUs, mem limit "
          f"{round(mem_bytes / (1024**3), 1) if mem_bytes else 'unset'} GiB -> -j {max_jobs}")
     build_path = repo_dir / "build"
-    if build_path.exists():
+    if rebuild and build_path.exists():
         shutil.rmtree(str(build_path))
     build_path.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -283,6 +283,10 @@ def _copy_artifacts():
 
 
 def build_npuir():
+    """Build the payload; TRITON_NPUIR_REBUILD=OFF opts into incremental reuse.
+
+    Keep the default clean rebuild after compiler or CMake option changes.
+    """
     # Default ccache dir into the repo: container CI often mounts $HOME
     # read-only (/root/.cache is not writable). An explicit CCACHE_DIR from
     # the caller (e.g. a workflow cache dir) takes precedence.
@@ -303,7 +307,7 @@ def build_npuir():
         _NPUIR_DIR,
         bisheng_compiler_path=bisheng_compiler_path,
         build_type="Release",
-        rebuild=True,
+        rebuild=os.getenv("TRITON_NPUIR_REBUILD", "ON").upper() in ("ON", "1", "YES", "TRUE", "Y"),
     )
 
     _log("Step 5/5: copying artifacts ...")

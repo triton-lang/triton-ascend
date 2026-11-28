@@ -21,6 +21,7 @@ Triton Ascend
    :titlesonly:
    :caption: Getting Started
 
+   What's New <doc_updates>
    Release Notes <release_note>
    Quick Start <quick_start>
    Installation Guide <installation_guide>

@@ -5,7 +5,7 @@
 // CHECK: %[[SCALED:.*]] = arith.muli {{.*}} : tensor<1x16xi8>
 // CHECK: arith.extsi %[[SCALED]] : tensor<1x16xi8> to tensor<1x16xi32>
 // CHECK: %[[LOADED:.*]] = tt.load {{.*}} {ImplicitPermuteHandled} : tensor<16x32x!tt.ptr<f32>>
-// CHECK: tt.trans %[[LOADED]] {order = array<i32: 1, 0>}
+// CHECK: tt.trans %[[LOADED]] {implicit_load_permute, order = array<i32: 1, 0>}
 module {
   tt.func public @i8_mul_before_extend(%base: !tt.ptr<f32>, %idx: !tt.ptr<i8>) -> tensor<32x16xf32> {
     %n = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
@@ -35,7 +35,7 @@ module {
 // CHECK-DAG: arith.extsi %[[SCALED1]] : tensor<1x16xi16> to tensor<1x16xi32>
 // CHECK-DAG: arith.extsi %[[SCALED2]] : tensor<1x16xi16> to tensor<1x16xi32>
 // CHECK: %[[LOADED:.*]] = tt.load {{.*}} {ImplicitPermuteHandled} : tensor<16x32x!tt.ptr<f32>>
-// CHECK: tt.trans %[[LOADED]] {order = array<i32: 1, 0>}
+// CHECK: tt.trans %[[LOADED]] {implicit_load_permute, order = array<i32: 1, 0>}
 module {
   tt.func public @i16_combined_offset_mul(%base: !tt.ptr<f32>, %idx: !tt.ptr<i16>, %idx2: !tt.ptr<i16>) -> tensor<32x16xf32> {
     %n = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
@@ -69,7 +69,7 @@ module {
 // CHECK: %[[EXTENDED:.*]] = arith.extsi {{.*}} : tensor<1x16xi8> to tensor<1x16xi32>
 // CHECK: arith.muli %[[EXTENDED]], {{.*}} : tensor<1x16xi32>
 // CHECK: %[[LOADED:.*]] = tt.load {{.*}} {ImplicitPermuteHandled} : tensor<16x32x!tt.ptr<f32>>
-// CHECK: tt.trans %[[LOADED]] {order = array<i32: 1, 0>}
+// CHECK: tt.trans %[[LOADED]] {implicit_load_permute, order = array<i32: 1, 0>}
 module {
   tt.func public @i8_extend_before_mul(%base: !tt.ptr<f32>, %idx: !tt.ptr<i8>) -> tensor<32x16xf32> {
     %n = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>
@@ -101,7 +101,7 @@ module {
 // CHECK-DAG: arith.muli %[[WIDE1]], {{.*}} : tensor<1x16xi32>
 // CHECK-DAG: arith.muli %[[WIDE2]], {{.*}} : tensor<1x16xi32>
 // CHECK: %[[LOADED:.*]] = tt.load {{.*}} {ImplicitPermuteHandled} : tensor<16x32x!tt.ptr<f32>>
-// CHECK: tt.trans %[[LOADED]] {order = array<i32: 1, 0>}
+// CHECK: tt.trans %[[LOADED]] {implicit_load_permute, order = array<i32: 1, 0>}
 module {
   tt.func public @i8_combined_offset_extend_before_mul(%base: !tt.ptr<f32>, %idx1: !tt.ptr<i8>, %idx2: !tt.ptr<i8>) -> tensor<32x16xf32> {
     %n = tt.make_range {start = 0 : i32, end = 16 : i32} : tensor<16xi32>

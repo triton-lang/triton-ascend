@@ -15,7 +15,6 @@ FROM ${MANYLINUX_IMAGE} AS builder
 ARG PYTHON_VERSION=cp310
 ARG TRITON_WHEEL_VERSION_SUFFIX=+dev
 ARG BUILD_DATE=00000000
-ARG TRITON_BUILD_NPUIR=OFF
 # TD (Triton-distributed-ascend) defaults to ON for CI wheels: setup_patch.py
 # clones the pinned Triton-distributed-ascend revision and bundles the
 # triton_dist Python package plus the TritonDistributed compiler plugin into
@@ -25,10 +24,8 @@ ARG TRITON_BUILD_NPUIR=OFF
 # follows the old RECORD, leaving empty namespace dirs behind) and breaks
 # downstream imports like triton_dist.language.extra.libshmem_device.
 ARG TRITON_BUILD_TD=ON
-ARG ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.2.0-beta.2
-# AscendNPU-IR revision to build against: "stable" (branch HEAD — nightly /
-# regular PR wheels) or an exact 40-hex commit SHA (the Build-Pinned-Wheels
-# job passes the submodule gitlink so the wheel matches what local users get).
+ARG ASCEND_HOME_PATH
+# The wheel workflow passes the source commit from the OBS package manifest.
 ARG NPUIR_REF=stable
 
 # ---------------------------------------------------------------------------
@@ -56,8 +53,8 @@ ENV TRITON_BUILD_WITH_CLANG_LLD=true \
     TRITON_WHEEL_NAME=triton-ascend \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
     TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX}${BUILD_DATE} \
-    TRITON_BUILD_NPUIR=${TRITON_BUILD_NPUIR} \
-    ASCEND_HOME_PATH=${ASCEND_HOME_PATH} \
+    TRITON_BUILD_NPUIR=OFF \
+    TRITON_ASCEND_BISHENGIR_PATH=/project/.npuir-payload \
     IS_MANYLINUX=TRUE
 
 # ---------------------------------------------------------------------------
@@ -67,27 +64,20 @@ ENV TRITON_BUILD_WITH_CLANG_LLD=true \
 COPY . /project/
 WORKDIR /project
 
-# ---------------------------------------------------------------------------
-# Wheel builds track the AscendNPU-IR stable branch, NOT the pinned submodule
-# gitlink (local developer builds use the pin): fetch the stable sources here
-# so the product build code just sees an existing tree and never reaches into
-# the CI workflow scripts itself. Needed both for the C++ plugin build
-# (add_subdirectory(third_party/ascend/AscendNPU-IR)) and for the
-# TRITON_BUILD_NPUIR=ON in-image fallback. Includes the nested third-party
-# submodules (llvm-project / torch-mlir / shmem). NPUIR_REF overrides the
-# branch with an exact SHA for the pinned-submodule verification wheel.
-#
-# Then freeze the gitlink for the rest of the image build: the root setup.py
-# (BackendInstaller.prepare) runs `git submodule update --init ascend` from
-# third_party, whose directory-prefix pathspec also matches the nested
-# AscendNPU-IR gitlink — with the pre-fetched tree at a different SHA (the
-# stable-tracking flows) that command would silently checkout the pinned
-# SHA back over it. submodule.<name>.update=none makes every in-image
-# `git submodule update` skip it; the product code's own guards never issue
-# a submodule command when the tree already exists, so nothing else changes.
-# ---------------------------------------------------------------------------
-RUN NPUIR_REPO_BRANCH=${NPUIR_REF} bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR \
- && git config submodule.third_party/ascend/AscendNPU-IR.update none
+# The C++ plugin compiles the dialects at the OBS package revision.
+# Keep setup.py's submodule update from switching back to the gitlink.
+RUN set -eu; \
+    src=third_party/ascend/AscendNPU-IR; \
+    url=$(git config -f .gitmodules --get "submodule.${src}.url"); \
+    git init -q "$src"; \
+    export GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30; \
+    for attempt in 1 2 3 4 5; do \
+        git -C "$src" fetch --depth=1 --no-recurse-submodules "$url" "$NPUIR_REF" && break; \
+        [ "$attempt" -lt 5 ] || exit 1; \
+        sleep 10; \
+    done; \
+    git -C "$src" checkout --detach FETCH_HEAD; \
+    git config "submodule.${src}.update" none
 
 # ---------------------------------------------------------------------------
 # Build the wheel with the target Python from the manylinux toolchain.
@@ -100,9 +90,8 @@ RUN NPUIR_REPO_BRANCH=${NPUIR_REF} bash .github/workflows/build/fetch-npuir-stab
 # the memory limit (~60 GiB at budget, ~96 GiB worst-case) and still leave
 # headroom if the 32-core quota is shared with other matrix jobs. If the
 # nightly numbers show the quota is shared (no speedup), drop back to 16.
-# ccache (used by both the npuir build and the triton build) lives on a
-# buildkit cache mount below and is exported via cache-to mode=max, so
-# nightly rebuilds only recompile changed TUs.
+# The BuildKit cache mount preserves ccache across nightly rebuilds.
+SHELL ["/bin/bash", "-c"]
 RUN --mount=type=cache,target=/root/.cache/ccache \
     . /project/.github/workflows/build/cgroup-resources.sh \
     || { echo "FAILED to source cgroup-resources.sh; build dir contents:"; ls -la /project/.github/workflows/build/ 2>/dev/null || true; exit 1; } \
@@ -114,6 +103,7 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     && export CCACHE_DIR=/root/.cache/ccache \
     && export CCACHE_MAXSIZE=20G \
     && echo "cgroup: $(cg_cpus) CPUs, mem $(( $(cg_mem_bytes) / (1024*1024*1024) )) GiB -> MAX_JOBS=$MAX_JOBS, ccache at ${CCACHE_DIR} (max ${CCACHE_MAXSIZE})" \
+    && if [ -z "${ASCEND_HOME_PATH:-}" ]; then source /usr/local/Ascend/cann/set_env.sh; fi \
     && export PATH="/opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin:${PATH}" \
     && if [ -f setup_ascend.py ]; then \
          SETUP_DIR="./"; SETUP_PY="setup_ascend.py"; \
@@ -126,21 +116,6 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
          exit 1; \
        fi \
     && cd "$SETUP_DIR" \
-    && if [ -d /project/.npuir-payload/bin ] && [ -d /project/.npuir-payload/lib ]; then \
-         export TRITON_ASCEND_BISHENGIR_PATH=/project/.npuir-payload; \
-         echo "Bundling BishengIR payload from ${TRITON_ASCEND_BISHENGIR_PATH}"; \
-       else \
-         echo "No .npuir-payload in the build context; building without a bundled BishengIR"; \
-       fi \
-    # CXX workaround for the TRITON_BUILD_NPUIR=ON in-image fallback only
-    # (build_npuir.py reads NPUIR_CXX_COMPILER): same wrapper as
-    # npuir-build.yml — the Ascend LLVM fork excludes <cstdint> under
-    # BSPUB_DAVINCI_BISHENGIR_A5 while this image's libstdc++ no longer
-    # provides stdint.h transitively, and clang 21's new -Wall warnings
-    # trip -Werror on LLVM 19 code.
-    && printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error\n' > /tmp/clang++-cstdint \
-    && chmod +x /tmp/clang++-cstdint \
-    && export NPUIR_CXX_COMPILER=/tmp/clang++-cstdint \
     && python3 ${SETUP_PY} bdist_wheel \
     && ccache -s \
     && mkdir -p /out \

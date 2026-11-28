@@ -341,8 +341,7 @@ jobs:
           set -eu
           # Each triton_ascend wheel bundles the AscendNPU-IR (bishengir)
           # payload under triton/backends/ascend/bishengir/. This step pulls
-          # that payload back out and packs one tarball per architecture,
-          # following the naming and layout of npuir-build.yml's publish job:
+          # that payload back out and packs one tarball per architecture:
           #   ascendnpu-ir_<version>_linux-<arch>[-<tag>].tar.gz
           # with bin/, lib/, manifest.xml at the archive root (the same shape
           # the official .run installer unpacks into
@@ -439,8 +438,7 @@ jobs:
 
           python3 extract_npuir.py
 
-          # Safety net mirroring npuir-build.yml: artifact/zip round-trips can
-          # drop permission bits, and bin/ must be executable.
+          # Restore executable permissions after the zip round-trip.
           chmod -R a+x npuir-*/bin
 
           mkdir -p dist
@@ -483,7 +481,7 @@ jobs:
           for f in dist/*.tar.gz; do
             base="$(basename "$f")"
             # Guard: never silently replace an existing object unless the
-            # dispatch explicitly asked for it (same policy as npuir-build.yml).
+            # dispatch explicitly asked for it.
             if [ "${OVERWRITE}" != "true" ] && obsutil/obsutil stat "${OBS_DIR}${base}" >/dev/null 2>&1; then
               echo "Object cann/${base} already exists on OBS; re-dispatch with npuir_overwrite=true to replace it."
               exit 1

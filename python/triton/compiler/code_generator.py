@@ -1305,12 +1305,11 @@ class CodeGenerator(ast.NodeVisitor):
                 for arg in args
             ]
             prototype = ASTFunction([], arg_types, args_cst, dict())
-            generator = CodeGenerator(self.context, prototype, fn.get_capture_scope(), module=self.module, jit_fn=fn,
-                                      function_name=fn_name, function_types=self.function_ret_types,
-                                      noinline=fn.noinline, file_name=file_name, begin_line=begin_line,
-                                      options=self.builder.options, codegen_fns=self.builder.codegen_fns,
-                                      module_map=self.builder.module_map, caller_context=caller_context,
-                                      is_gluon=self.is_gluon)
+            generator = type(self)(self.context, prototype, fn.get_capture_scope(), module=self.module, jit_fn=fn,
+                                   function_name=fn_name, function_types=self.function_ret_types, noinline=fn.noinline,
+                                   file_name=file_name, begin_line=begin_line, options=self.builder.options,
+                                   codegen_fns=self.builder.codegen_fns, module_map=self.builder.module_map,
+                                   caller_context=caller_context, is_gluon=self.is_gluon)
             try:
                 generator.visit(fn.parse())
             except Exception as e:

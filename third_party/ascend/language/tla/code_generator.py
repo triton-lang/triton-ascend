@@ -118,6 +118,17 @@ class TLACodeGenerator(CodeGenerator):
     _tla_pipeline = None
     _scope_depth = 0
 
+    def __init__(self, context, *args, **kwargs):
+        from triton._C.libtriton.ascend import ir as ascend_ir
+
+        from .builder import setup_unified_builder
+
+        super().__init__(context, *args, **kwargs)
+        arch = getattr(self.builder.options, "arch", None)
+        tla_builder = ascend_ir.tla_builder(context, arch or "")
+        tla_builder.set_loc(self.file_name, self.begin_line + 1, 0)
+        setup_unified_builder(self.builder, tla_builder)
+
     def visit_With(self, node):
         self._scope_depth += 1
         try:

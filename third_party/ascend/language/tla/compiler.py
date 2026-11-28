@@ -23,9 +23,7 @@ This does not define a device launcher ABI. Standard Triton ASTSource accepts
 pointer strings; this entry point accepts tla.buffer_type without creating
 pointer tensors or changing Triton's global type parser.
 
-The TLA wiring is self-contained: ``setup_unified_builder`` (mounted in
-``CodeGenerator.__init__`` by the patch) registers the ``with tla.scope.*``
-handlers and attaches the TLA builder methods.
+The TLA code generator mounts the TLA builder for every kernel and JIT helper.
 """
 import re
 from collections import namedtuple
@@ -224,12 +222,6 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
                                  jit_fn=fn, is_kernel=True, file_name=file_name, begin_line=begin_line, options=options,
                                  codegen_fns={}, module_map={}, module=module, is_gluon=False)
     arch = getattr(options, "arch", None)
-    # Mount the TLA builder on the code generator before visiting the AST.
-    from triton.language.extra.tla.builder import setup_unified_builder
-
-    tla_builder = ascend_ir.tla_builder(context, arch or "")
-    tla_builder.set_loc(file_name, begin_line, 0)
-    setup_unified_builder(generator.builder, tla_builder)
     generator.visit(fn.parse())
     module = generator.module
     module.context = context

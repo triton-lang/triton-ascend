@@ -228,9 +228,14 @@ def log1p(arg0, _semantic=None):
     arg0 = _semantic.to_tensor(arg0)
     if ((_is_a5_target(_semantic) or _is_a3_target(_semantic) or _is_a6_target(_semantic))
             and arg0.dtype == core.dtype("fp32")):
-        return core.extern_elementwise("", "", [arg0], {
-            (core.dtype("fp32"), ): ("__hmf_log1p_fp32", core.dtype("fp32")),
-        }, is_pure=True, _semantic=_semantic)
+        # Accurate log1p via the compensated formula to avoid the
+        # catastrophic cancellation of log(1 + x) for tiny x.
+        one = _semantic.full(arg0.shape, 1.0, arg0.type.scalar)
+        u = _semantic.add(one, arg0, False)
+        log_u = math.log(u, _semantic=_semantic)
+        num = _semantic.mul(log_u, arg0, False)
+        den = _semantic.sub(u, one, False)
+        return _semantic.where(_semantic.equal(u, one), arg0, _semantic.truediv(num, den))
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_log1pf", core.dtype("fp32")),

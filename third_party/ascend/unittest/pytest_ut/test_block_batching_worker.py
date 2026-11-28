@@ -841,7 +841,7 @@ def test_worker_private_group_and_stage_outcome(tmp_path, monkeypatch, compile_e
         backend = next(n for n in ast.parse(compiler_path.read_text()).body
                        if isinstance(n, ast.ClassDef) and n.name == 'AscendBackend')
         add_stages = next(n for n in backend.body if isinstance(n, ast.FunctionDef) and n.name == 'add_stages')
-        namespace = dict(_active_attempt=worker._active_attempt, _with_debug_line=lambda stage, opt: stage,
+        namespace = dict(_active_attempt=worker._active_attempt, _with_debug_line=lambda stage, opt, jit_fn=None: stage,
                          make_ttir=lambda module, metadata, opt: lower(module, metadata),
                          make_tla_ttir=lambda module, metadata, opt: lower(module, metadata))
         exec(compile(ast.Module(body=[add_stages], type_ignores=[]), str(compiler_path), 'exec'), namespace)

@@ -200,10 +200,14 @@ class LoadGM2UBParams:
     """Cache configuration for :func:`load_gm_to_ub`.
 
     :param l2_cache_ctrl: Compile-time L2 cache control: ``NORMAL_FV`` or
-        ``NORMAL_LV``. ``None`` selects ``NORMAL_FV``.
+        ``NORMAL_LV``. If neither field is set, the default is ``NORMAL_FV``.
     :type l2_cache_ctrl: tla.L2CachePolicy or None
+    :param raw_l2_cache_mode: Optional compile-time Ascend950 MTE2 descriptor
+        field, 0-6 or 8-15. Mutually exclusive with ``l2_cache_ctrl``.
+    :type raw_l2_cache_mode: int or None
     """
     l2_cache_ctrl: L2CachePolicy = None
+    raw_l2_cache_mode: int = None
 
 
 class LoadGM2L1Mode(Enum):
@@ -430,15 +434,23 @@ def load_gm_to_ub(src, dst, params=None, _semantic=None):
     _route(src, dst, (("gm", "ub"), ))
     p = _params(params, LoadGM2UBParams)
     l2_cache_ctrl = _unwrap_if_constexpr(p.l2_cache_ctrl)
-    if l2_cache_ctrl is None:
-        l2_cache_ctrl = L2CachePolicy.NORMAL_FV
-    # Keep the public cache control independent of HIVM attribute names.
-    eviction = _enum_attr(l2_cache_ctrl, L2CachePolicy, "eviction_policy", _semantic)
-    _semantic.builder.create_tla_load(src.handle, dst.handle, eviction)
+    raw_mode = _unwrap_if_constexpr(p.raw_l2_cache_mode)
+    eviction = None
+    if raw_mode is None:
+        if l2_cache_ctrl is None:
+            l2_cache_ctrl = L2CachePolicy.NORMAL_FV
+        eviction = _enum_attr(l2_cache_ctrl, L2CachePolicy, "eviction_policy", _semantic)
+    else:
+        raw_mode = _integer(raw_mode, "raw_l2_cache_mode", bits=32)
+        if not 0 <= raw_mode <= 15 or raw_mode == 7:
+            raise ValueError("GM-to-UB raw_l2_cache_mode must be in 0-6 or 8-15")
+        if l2_cache_ctrl is not None:
+            raise ValueError("raw_l2_cache_mode and l2_cache_ctrl are mutually exclusive")
+    _semantic.builder.create_tla_load(src.handle, dst.handle, eviction, raw_mode)
 
 
 @builtin
-def store_ub_to_gm(src, dst, _semantic=None):
+def store_ub_to_gm(src, dst, *, l2_cache_ctrl=None, _semantic=None):
     """Stores UB data to global memory using ``hivm.hir.store``.
 
     :param src: UB source with ``space="ub"``.
@@ -446,6 +458,12 @@ def store_ub_to_gm(src, dst, _semantic=None):
     :param dst: GM destination with ``space="gm"``, typically created with
         ``tla.view``. Its element type must match ``src``.
     :type dst: tla.buffer
+    :param l2_cache_ctrl: Optional compile-time Ascend950 MTE3 cache field
+        (0, 1, 2, 4 or 8). ``None`` preserves the default store behavior.
+        Explicit modes require non-atomic stores and apply only to DMA
+        instructions. Functions that enable :func:`set_atomic` cannot use
+        explicit modes.
+    :type l2_cache_ctrl: int or None
     :return: None. The destination buffer is updated in place.
     :rtype: None
 
@@ -456,7 +474,12 @@ def store_ub_to_gm(src, dst, _semantic=None):
         ``AtomicKind.NONE``.
     """
     _route(src, dst, (("ub", "gm"), ))
-    _semantic.builder.create_tla_store(src.handle, dst.handle)
+    mode = _unwrap_if_constexpr(l2_cache_ctrl)
+    if mode is not None:
+        mode = _integer(mode, "l2_cache_ctrl", bits=32)
+        if mode not in (0, 1, 2, 4, 8):
+            raise ValueError("UB-to-GM l2_cache_ctrl must be 0, 1, 2, 4 or 8")
+    _semantic.builder.create_tla_store(src.handle, dst.handle, mode)
 
 
 @builtin

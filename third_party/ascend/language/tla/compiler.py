@@ -200,10 +200,11 @@ def check_ttadapter(module):
             raise ValueError(f"kernel entry must have {key} = {index} : i64")
 
 
-def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
+def ast_to_ttir(fn, signature, constexprs, context, options, module=None, *, attrs=None):
     """Compile a kernel whose runtime arguments are TLA buffers or scalars.
 
     ``signature`` maps argument names to buffer_type or scalar Triton strings.
+    ``attrs`` contains JIT specialization attributes keyed by argument path.
     Only top-level constexpr parameters are supported by this offline entry.
     """
     from triton._C.libtriton.ascend import ir as ascend_ir
@@ -217,7 +218,7 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
             if isinstance(ty, str):
                 ty = str_to_ty(ty, None)
             types.append(ty)
-    prototype = ASTFunction([], types, constants, {})
+    prototype = ASTFunction([], types, constants, attrs if attrs is not None else {})
     file_name, begin_line = get_jit_fn_file_line(fn)
     proxy = namedtuple("SpecializationProxy", "constants signature")(constexprs, signature)
     generator = TLACodeGenerator(context, prototype, gscope=fn.get_capture_scope(), function_name=fn.repr(proxy),

@@ -485,6 +485,56 @@ static bool skipNonComplementaryStaticDeinterleave(triton::LoadOp lhs) {
   return false;
 }
 
+// Older BiShengIR builds expand a collapsed negative-stride view using the
+// minimum signed stride instead of the innermost stride. For a contiguous
+// [-64, -1] layout this changes a reverse load into a stride -64 load. Emit
+// the one-dimensional views explicitly so that no such collapse is needed.
+static memref::CopyOp createLoadCopy(Location loc, Value source, Value dest,
+                                     ConversionPatternRewriter &rewriter) {
+  auto sourceType = cast<MemRefType>(source.getType());
+  auto destType = cast<MemRefType>(dest.getType());
+  auto sourceStrides = sourceType.getStridesAndOffset().first;
+  bool hasNegativeStride = llvm::any_of(sourceStrides, [](int64_t stride) {
+    return !ShapedType::isDynamic(stride) && stride < 0;
+  });
+  if (hasNegativeStride && sourceType.getRank() > 1 &&
+      sourceType.hasStaticShape() && sourceType.getNumElements() > 0 &&
+      sourceType.getShape() == destType.getShape()) {
+    SmallVector<ReassociationIndices> groups(1);
+    for (int64_t axis = 0; axis < sourceType.getRank(); ++axis)
+      groups.front().push_back(axis);
+    if (memref::CollapseShapeOp::isGuaranteedCollapsible(sourceType, groups) &&
+        memref::CollapseShapeOp::isGuaranteedCollapsible(destType, groups)) {
+      auto flatSourceType =
+          memref::CollapseShapeOp::computeCollapsedType(sourceType, groups);
+      auto flatDestType =
+          memref::CollapseShapeOp::computeCollapsedType(destType, groups);
+      // Leave runtime-strided layouts to the normal lowering path.
+      if (ShapedType::isDynamic(
+              flatSourceType.getStridesAndOffset().first.front()) ||
+          ShapedType::isDynamic(
+              flatDestType.getStridesAndOffset().first.front()))
+        return rewriter.create<memref::CopyOp>(loc, source, dest);
+      auto flatten = [&](Value view, MemRefType flatType) -> Value {
+        auto [strides, offset] = flatType.getStridesAndOffset();
+        auto metadata =
+            rewriter.create<memref::ExtractStridedMetadataOp>(loc, view);
+        OpFoldResult flatOffset = ShapedType::isDynamic(offset)
+                                      ? OpFoldResult(metadata.getOffset())
+                                      : rewriter.getIndexAttr(offset);
+        return rewriter.create<memref::ReinterpretCastOp>(
+            loc, flatType, metadata.getBaseBuffer(), flatOffset,
+            ArrayRef<OpFoldResult>{
+                rewriter.getIndexAttr(flatType.getDimSize(0))},
+            ArrayRef<OpFoldResult>{rewriter.getIndexAttr(strides.front())});
+      };
+      return rewriter.create<memref::CopyOp>(
+          loc, flatten(source, flatSourceType), flatten(dest, flatDestType));
+    }
+  }
+  return rewriter.create<memref::CopyOp>(loc, source, dest);
+}
+
 LogicalResult
 LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                                ConversionPatternRewriter &rewriter) const {
@@ -715,7 +765,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
         ptr, srcOffsets, boundarySizes, loc, rewriter);
     auto dstSubview = mlir::ConverterUtils::makeSubViewOp(
         allocOp, dstOffsets, boundarySizes, loc, rewriter);
-    auto copyOp = rewriter.create<memref::CopyOp>(loc, srcSubView, dstSubview);
+    auto copyOp = createLoadCopy(loc, srcSubView, dstSubview, rewriter);
     propagateWasBoolToInt8Attr(op.getOperation(), copyOp.getOperation(),
                                rewriter);
     if (mayImplicitTransposeWithLastAxis) {
@@ -746,7 +796,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
               .succeeded()) {
         return success();
       }
-      auto copyOp = rewriter.create<memref::CopyOp>(loc, ptr, allocOp);
+      auto copyOp = createLoadCopy(loc, ptr, allocOp, rewriter);
       propagateWasBoolToInt8Attr(op.getOperation(), copyOp.getOperation(),
                                  rewriter);
       if (mayImplicitTransposeWithLastAxis &&
@@ -829,7 +879,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
           makeStridedLinearLayoutMap(srcStrides, srcOffset,
                                      rewriter.getContext()));
       auto castOp = rewriter.create<memref::CastOp>(loc, castType, dstSubView);
-      auto copyOp = rewriter.create<memref::CopyOp>(loc, srcSubView, castOp);
+      auto copyOp = createLoadCopy(loc, srcSubView, castOp, rewriter);
       propagateWasBoolToInt8Attr(op.getOperation(), copyOp.getOperation(),
                                  rewriter);
     }

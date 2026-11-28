@@ -2235,6 +2235,8 @@ class AutoTilingTuner(Autotuner):
                 self._user_config_diagnostics.abort(exc)
             raise
         finally:
+            # Drop caller args on every exit path so a failure can't pin the
+            self.nargs = None
             if self._user_config_diagnostics is not None:
                 self._user_config_diagnostics.report()
             self._user_config_diagnostics = None
@@ -2244,6 +2246,29 @@ class AutoTilingTuner(Autotuner):
         # factors and kernels with a same-named argument.
         if "block_batching_factor" not in getattr(self, "arg_names", ()):
             options.setdefault("block_batching_factor", 1)
+
+    @staticmethod
+    def _clear_async_mode(mode_obj):
+        """Release an AsyncCompileMode's futures so retained tracebacks don't
+        keep compile frames alive."""
+        if mode_obj is None:
+            return
+        for raw in mode_obj.raw_futures:
+            e2 = getattr(raw, "_exception", None)
+            if e2 is not None:
+                e2.__traceback__ = None
+                e2.__context__ = None
+                e2.__cause__ = None
+        for fk in mode_obj.future_kernels.values():
+            raw = getattr(fk, "future", None)
+            if raw is not None:
+                e2 = getattr(raw, "_exception", None)
+                if e2 is not None:
+                    e2.__traceback__ = None
+                    e2.__context__ = None
+                    e2.__cause__ = None
+        mode_obj.raw_futures.clear()
+        mode_obj.future_kernels.clear()
 
     def _run_autotune(self, *args, **kwargs):
         kwargs = _remove_deprecated_npu_options(kwargs)
@@ -2586,24 +2611,7 @@ class AutoTilingTuner(Autotuner):
                         # it cannot identify a failure in this pending config.
                         self._record_user_config(pending, "not_evaluated", "Parallel compilation interrupted:", exc=e)
             finally:
-                mode_obj = locals().get("mode") if "mode" in locals() else None
-                if mode_obj is not None:
-                    for raw in mode_obj.raw_futures:
-                        e2 = getattr(raw, "_exception", None)
-                        if e2 is not None:
-                            e2.__traceback__ = None
-                            e2.__context__ = None
-                            e2.__cause__ = None
-                    for fk in mode_obj.future_kernels.values():
-                        raw = getattr(fk, "future", None)
-                        if raw is not None:
-                            e2 = getattr(raw, "_exception", None)
-                            if e2 is not None:
-                                e2.__traceback__ = None
-                                e2.__context__ = None
-                                e2.__cause__ = None
-                    mode_obj.raw_futures.clear()
-                    mode_obj.future_kernels.clear()
+                self._clear_async_mode(locals().get("mode"))
         else:
             for config, fn in kernels_call.items():
                 self._record_user_config(config, "compiling", "Compilation or initial execution did not complete.")
@@ -2732,35 +2740,49 @@ class AutoTilingTuner(Autotuner):
         args = tuple(map(MockTensor.wrap_dtype, args))
         kwargs = _remove_deprecated_npu_options(kwargs)
         self._inject_grid_num_tiles(kwargs)
-        _ = self.generate_key_and_configs(*args, **kwargs)
-        pruned_configs = self.prune_configs(kwargs)
-        ret = []
+        try:
+            _ = self.generate_key_and_configs(*args, **kwargs)
+            pruned_configs = self.prune_configs(kwargs)
+            ret = []
 
-        def warmup_config(config):
-            from triton.backends.ascend.reuse.context import exact_request_scope
+            def warmup_config(config):
+                from triton.backends.ascend.reuse.context import exact_request_scope
 
-            compile_options = dict(config.all_kwargs(), **kwargs)
-            self._default_block_batching(compile_options)
-            with exact_request_scope():
-                return self.fn.warmup(*args, **compile_options)
+                compile_options = dict(config.all_kwargs(), **kwargs)
+                self._default_block_batching(compile_options)
+                with exact_request_scope():
+                    return self.fn.warmup(*args, **compile_options)
 
-        if self.compile_parallel:
-            import psutil
+            if self.compile_parallel:
+                import psutil
 
-            max_workers = min(psutil.cpu_count(logical=False) // 2, len(pruned_configs))
-            with (
-                    ThreadPoolExecutor(max_workers=max_workers) as executor,
-                    triton.AsyncCompileMode(executor),
-            ):
+                max_workers = min(psutil.cpu_count(logical=False) // 2, len(pruned_configs))
+                mode = None
+                try:
+                    with (
+                            ThreadPoolExecutor(max_workers=max_workers) as executor,
+                            triton.AsyncCompileMode(executor) as mode,
+                    ):
+                        for config in pruned_configs:
+                            ret.append(warmup_config(config))
+                except Exception:
+                    # A failed __exit__ can leave the mode installed, poisoning
+                    # later compiles on this thread ("Another AsyncCompileMode is
+                    # already active").
+                    triton.runtime._async_compile.active_mode.set(None)
+                    raise
+                finally:
+                    self._clear_async_mode(mode)
+                # Resolve handles only after all parallel compilations have completed.
+                ret = [kernel.result() if isinstance(kernel, triton.FutureKernel) else kernel for kernel in ret]
+            else:
                 for config in pruned_configs:
                     ret.append(warmup_config(config))
-            # Resolve handles only after all parallel compilations have completed.
-            ret = [kernel.result() if isinstance(kernel, triton.FutureKernel) else kernel for kernel in ret]
-        else:
-            for config in pruned_configs:
-                ret.append(warmup_config(config))
-        self.nargs = None
-        return ret
+            return ret
+        finally:
+            # Drop caller args on every exit path so a failure can't pin the
+            # input tensors.
+            self.nargs = None
 
     def _profile(self, *args, config, **meta):
         from ..testing import do_bench_npu

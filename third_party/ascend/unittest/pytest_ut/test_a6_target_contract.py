@@ -136,7 +136,7 @@ class A6TargetContract(unittest.TestCase):
             ("", False, 0),
             (123, False, 0),
         ]:
-            with self.subTest(arch=arch), patch.dict(sys.modules, {"triton.runtime": None}):
+            with self.subTest(arch=arch):
                 self.assertEqual(self.utils["is_compile_on_910_95"](arch), register_based)
                 self.assertEqual(self.compiler["_is_register_based_target_arch"](arch), register_based)
                 self.assertEqual(self.utils["ub_size_in_kbytes_for_arch"](arch), ub)

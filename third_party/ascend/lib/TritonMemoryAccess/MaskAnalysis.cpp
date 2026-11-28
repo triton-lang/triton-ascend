@@ -73,69 +73,6 @@ bool isZeroMaskConstant(const OpFoldResult &value) {
   return false;
 }
 
-Value materializeIndexValue(const OpFoldResult &value, const Location &loc,
-                            OpBuilder &builder) {
-  if (auto val = dyn_cast<Value>(value)) {
-    if (val.getType().isIndex())
-      return val;
-    return builder.create<arith::IndexCastOp>(loc, builder.getIndexType(), val);
-  }
-  auto attr = dyn_cast<IntegerAttr>(cast<Attribute>(value));
-  if (!attr)
-    return Value();
-  return builder.create<arith::ConstantIndexOp>(loc, attr.getInt());
-}
-
-enum class QuotientBoundary { Lower, Upper };
-
-// Convert a bound on the truncating quotient back to a numerator bound.
-// quotientBound is K on the quotient q; divisor is the positive constant d.
-// Lower returns the first numerator with q == K, so q < K <=> v < result.
-// Upper returns the last numerator with q == K, so q <= K <=> v <= result.
-// The two candidates for Lower are d*K and d*K-(d-1), selected by K >= 1;
-// the two candidates for Upper are d*K+(d-1) and d*K, selected by K >= 0.
-// An empty OpFoldResult means the conversion failed.
-OpFoldResult quotientBoundToNumeratorBound(const OpFoldResult &quotientBound,
-                                           int64_t divisor,
-                                           QuotientBoundary boundary,
-                                           const Location &loc,
-                                           OpBuilder &builder) {
-  auto scaled = mulOpFoldResult(quotientBound, builder.getIndexAttr(divisor),
-                                loc, builder, builder.getIndexType());
-  if (!scaled)
-    return OpFoldResult();
-
-  const bool lower = boundary == QuotientBoundary::Lower;
-  auto shifted =
-      lower ? subOpFoldResult(scaled, builder.getIndexAttr(divisor - 1), loc,
-                              builder)
-            : addOpFoldResult(scaled, builder.getIndexAttr(divisor - 1), loc,
-                              builder, builder.getIndexType());
-  if (!shifted)
-    return OpFoldResult();
-
-  OpFoldResult atOrAbove = lower ? scaled : shifted;
-  OpFoldResult below = lower ? shifted : scaled;
-  const int64_t quotientThreshold = lower ? 1 : 0;
-  if (auto constant = getConstantIntValue(quotientBound))
-    return *constant >= quotientThreshold ? atOrAbove : below;
-
-  // The comparison bound may only be known at runtime. Both candidates are
-  // exact for disjoint value ranges of `quotientBound`, so pick one on the
-  // device.
-  Value quotientBoundValue = materializeIndexValue(quotientBound, loc, builder);
-  Value atOrAboveValue = materializeIndexValue(atOrAbove, loc, builder);
-  Value belowValue = materializeIndexValue(below, loc, builder);
-  if (!quotientBoundValue || !atOrAboveValue || !belowValue)
-    return OpFoldResult();
-  Value useAtOrAbove = builder.create<arith::CmpIOp>(
-      loc, arith::CmpIPredicate::sge, quotientBoundValue,
-      builder.create<arith::ConstantIndexOp>(loc, quotientThreshold));
-  return builder
-      .create<arith::SelectOp>(loc, useAtOrAbove, atOrAboveValue, belowValue)
-      .getResult();
-}
-
 static Value unwrapRuntimeExtentUnsignedOperand(Value operand,
                                                 const Location &loc,
                                                 OpBuilder &builder) {
@@ -319,13 +256,6 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
                             builder, builder.getIndexType());
         if (!offset)
           return failure();
-        if (this->division.hasDivision()) {
-          // The carried value is the result of a division, so the loop shifts
-          // its quotient by `increment` each iteration. Keep the numerator
-          // bounds and accumulate the shift on the quotient side.
-          return accumulatePostScalar(offset, /*isSubtract=*/false, loc,
-                                      builder);
-        }
 
         if (this->start && this->end) {
           this->start = addOpFoldResult(this->start, offset, loc, builder,
@@ -507,24 +437,10 @@ LogicalResult MaskState::addStateScalar(const MaskState &state,
                                         const OpFoldResult scalar,
                                         const Location &loc,
                                         OpBuilder &builder) {
-  this->division = state.division;
-  if (state.division.hasDivision()) {
-    // The scalar applies to the division result, not to the numerator.
-    if (!state.start || !state.end)
-      return failure();
-    start = state.start;
-    end = state.end;
-    if (failed(
-            accumulatePostScalar(scalar, /*isSubtract=*/false, loc, builder)))
-      return failure();
-  } else {
-    start = addOpFoldResult(state.start, scalar, loc, builder,
-                            builder.getIndexType());
-    end = addOpFoldResult(state.end, scalar, loc, builder,
+  start = addOpFoldResult(state.start, scalar, loc, builder,
                           builder.getIndexType());
-    if (!start || !end)
-      return failure();
-  }
+  end =
+      addOpFoldResult(state.end, scalar, loc, builder, builder.getIndexType());
   dims = state.dims;
   offsets = state.offsets;
 
@@ -532,8 +448,6 @@ LogicalResult MaskState::addStateScalar(const MaskState &state,
     return getConstantIntValue(dim).value() == std::optional<int64_t>(1);
   });
   if (allDimsOne) {
-    if (state.division.hasDivision())
-      return failure();
     this->scalar = this->start;
   }
 
@@ -567,20 +481,10 @@ LogicalResult MaskState::subStateScalar(const MaskState &state,
                                         const OpFoldResult scalar,
                                         const Location &loc,
                                         OpBuilder &builder) {
-  this->division = state.division;
-  if (state.division.hasDivision()) {
-    if (!state.start || !state.end)
-      return failure();
-    start = state.start;
-    end = state.end;
-    if (failed(accumulatePostScalar(scalar, /*isSubtract=*/true, loc, builder)))
-      return failure();
-  } else {
-    start = subOpFoldResult(state.start, scalar, loc, builder);
-    end = subOpFoldResult(state.end, scalar, loc, builder);
-    if (!start || !end)
-      return failure();
-  }
+  start = subOpFoldResult(state.start, scalar, loc, builder);
+  end = subOpFoldResult(state.end, scalar, loc, builder);
+  if (!start || !end)
+    return failure();
   dims = state.dims;
   offsets = state.offsets;
 
@@ -588,8 +492,6 @@ LogicalResult MaskState::subStateScalar(const MaskState &state,
     return getConstantIntValue(dim).value() == std::optional<int64_t>(1);
   });
   if (allDimsOne) {
-    if (state.division.hasDivision())
-      return failure();
     this->scalar = this->start;
   }
 
@@ -611,64 +513,14 @@ LogicalResult MaskState::subStates(const MaskState &lhsState,
   return failure();
 }
 
-// A scalar applied to the division result cannot be folded into the numerator
-// bounds: `arith.divsi` truncates towards zero, so shifting the numerator does
-// not shift the quotient by the same amount once the result crosses zero.
-// Accumulate it on the quotient side instead; parseCmp subtracts it from the
-// comparison bound.
-LogicalResult MaskState::accumulatePostScalar(const OpFoldResult &scalar,
-                                              bool isSubtract,
-                                              const Location &loc,
-                                              OpBuilder &builder) {
-  if (!this->division.hasDivision() || !this->start || !this->end)
-    return failure();
-  auto current = this->division.postScalar ? this->division.postScalar
-                                           : builder.getIndexAttr(0);
-  OpFoldResult updated = isSubtract
-                             ? subOpFoldResult(current, scalar, loc, builder)
-                             : addOpFoldResult(current, scalar, loc, builder,
-                                               builder.getIndexType());
-  if (!updated)
-    return failure();
-  this->division.postScalar = updated;
-  return success();
-}
-
 LogicalResult MaskState::divStateScalar(const MaskState &state,
                                         const OpFoldResult scalar,
                                         const Location &loc,
                                         OpBuilder &builder) {
-  auto quotient = getIntAttr(scalar);
-  if (!quotient || *quotient <= 0)
-    return failure();
-  if (!state.start || !state.end)
-    return failure();
-
-  // `arith.divsi` truncates towards zero; parseCmp converts a comparison
-  // bound back to numerator bounds with the trunc-aware quotient blocks, so
-  // the numerator may be negative or of unknown sign.
-  //
-  // Re-dividing a quotient that was shifted by a scalar would need
-  // `trunc((q + C) / d) == trunc(q / d) + something`, which does not hold
-  // when `q + C` crosses zero. Only a provably zero shift is accepted.
-  if (state.division.hasDivision() && state.division.postScalar) {
-    auto shift = getConstantIntValue(state.division.postScalar);
-    if (!shift || *shift != 0)
-      return failure();
-  }
-
-  constexpr int64_t kMaxDivisor = int64_t{1} << 32;
-  if (*quotient > kMaxDivisor / state.division.divisor)
-    return failure();
-
-  // start/end keep the bounds of the value being divided; parseCmp converts
-  // a bound on the division result back to numerator bounds.
-  start = state.start;
-  end = state.end;
+  start = divOpFoldResult(state.start, scalar, loc, builder);
+  end = divOpFoldResult(state.end, scalar, loc, builder);
   dims = state.dims;
   offsets = state.offsets;
-  division.divisor = state.division.divisor * *quotient;
-  division.postScalar = OpFoldResult();
   return success();
 }
 
@@ -795,6 +647,7 @@ LogicalResult MaskState::parseSub(arith::SubIOp subOp, const Location &loc,
 LogicalResult MaskState::parseDiv(arith::DivSIOp divOp, const Location &loc,
                                   OpBuilder &builder) {
   assert(this->isEmpty());
+  return failure(); // temporarily disable parseDiv
   MaskState lhsState;
   if (failed(lhsState.parse(divOp.getLhs(), loc, builder))) {
     return failure();
@@ -887,7 +740,6 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
   if (predicate != arith::CmpIPredicate::slt &&
       predicate != arith::CmpIPredicate::sle &&
       predicate != arith::CmpIPredicate::sge &&
-      predicate != arith::CmpIPredicate::sgt &&
       predicate != arith::CmpIPredicate::eq &&
       predicate != arith::CmpIPredicate::ne && !isTaggedUnsignedUpperBound) {
     LLVM_DEBUG({ llvm::dbgs() << "Unsupported cmpi predicate\n"; });
@@ -948,114 +800,54 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
   assert(cmpDim != -1 &&
          "Unexpected case where no dimension has size larger than 1");
 
-  // A bound compared against `numerator // divisor` is on the division
-  // result. Convert it back to numerator bounds: the truncating quotient is
-  // not shift-invariant (`trunc(q + C) != trunc(q) + C` when q crosses zero),
-  // so the scalar added after the division is subtracted from the bound first,
-  // and the quotient-block edge is rebuilt by
-  // quotientBoundToNumeratorBound.
   this->offsets = lhsState.offsets;
   this->dims = lhsState.dims;
-  const int64_t divisor = lhsState.division.divisor;
-  const bool hasDivision = lhsState.division.hasDivision();
-  auto toQuotientBound = [&](const OpFoldResult &bound) -> OpFoldResult {
-    if (!lhsState.division.postScalar)
-      return bound;
-    return subOpFoldResult(bound, lhsState.division.postScalar, loc, builder);
-  };
-  if (predicate == arith::CmpIPredicate::sle ||
-      predicate == arith::CmpIPredicate::sgt) {
-    auto rhsPlusOne = addOpFoldResult(rhsState.scalar, builder.getIndexAttr(1),
-                                      loc, builder, builder.getIndexType());
-    if (!rhsPlusOne)
-      return failure();
-    rhsState.scalar = rhsPlusOne;
-    predicate = predicate == arith::CmpIPredicate::sle
-                    ? arith::CmpIPredicate::slt
-                    : arith::CmpIPredicate::sge;
-  }
   switch (predicate) {
-  case arith::CmpIPredicate::slt:
-  case arith::CmpIPredicate::sge: {
-    OpFoldResult bound;
-    if (!hasDivision) {
-      bound = rhsState.scalar;
-    } else {
-      auto quotientBound = toQuotientBound(rhsState.scalar);
-      if (!quotientBound)
-        return failure();
-      bound = quotientBoundToNumeratorBound(
-          quotientBound, divisor, QuotientBoundary::Lower, loc, builder);
-    }
-    if (!bound)
-      return failure();
+  case arith::CmpIPredicate::slt: {
+    auto realBound =
+        maxOpFoldResult(lhsState.start, rhsState.scalar, loc, builder);
+    auto newEnd = minOpFoldResult(lhsState.end, realBound, loc, builder);
+    auto newDim = subOpFoldResult(newEnd, lhsState.start, loc, builder);
+    auto clampedNewDim = clampToNonNegativeIndex(newDim, loc, builder);
 
-    auto realBound = maxOpFoldResult(lhsState.start, bound, loc, builder);
-    if (!realBound)
-      return failure();
-    if (predicate == arith::CmpIPredicate::slt) {
-      auto newEnd = minOpFoldResult(lhsState.end, realBound, loc, builder);
-      auto newDim = subOpFoldResult(newEnd, lhsState.start, loc, builder);
-      auto clampedNewDim = clampToNonNegativeIndex(newDim, loc, builder);
-      this->dims[cmpDim] = clampedNewDim;
-    } else {
-      auto newStart = minOpFoldResult(lhsState.end, realBound, loc, builder);
-      auto newOffset = subOpFoldResult(newStart, lhsState.start, loc, builder);
-      auto newDim = subOpFoldResult(lhsState.end, newStart, loc, builder);
-      auto clampedNewDim = clampToNonNegativeIndex(newDim, loc, builder);
-      this->offsets[cmpDim] = newOffset;
-      this->dims[cmpDim] = clampedNewDim;
-    }
+    this->dims[cmpDim] = clampedNewDim;
     break;
   }
-  case arith::CmpIPredicate::eq: {
-    if (!hasDivision) {
-      auto newOffset =
-          subOpFoldResult(rhsState.scalar, lhsState.start, loc, builder);
-      this->offsets[cmpDim] = newOffset;
-      this->dims[cmpDim] = builder.getIndexAttr(1);
-      break;
-    }
-    // `numerator // divisor == rhs` covers the whole quotient block. Intersect
-    // the block with the numerator bounds so the resulting interval stays
-    // inside [start, end) even when the block lies outside the range.
-    auto quotientBound = toQuotientBound(rhsState.scalar);
-    if (!quotientBound)
-      return failure();
-    auto lowerBound = quotientBoundToNumeratorBound(
-        quotientBound, divisor, QuotientBoundary::Lower, loc, builder);
-    auto upperInclusive = quotientBoundToNumeratorBound(
-        quotientBound, divisor, QuotientBoundary::Upper, loc, builder);
-    if (!lowerBound || !upperInclusive)
-      return failure();
-    auto upperExclusive =
-        addOpFoldResult(upperInclusive, builder.getIndexAttr(1), loc, builder,
-                        builder.getIndexType());
-    if (!upperExclusive)
-      return failure();
-
-    auto lowerClamped =
-        maxOpFoldResult(lhsState.start, lowerBound, loc, builder);
-    auto realStart = minOpFoldResult(lhsState.end, lowerClamped, loc, builder);
-    auto upperClamped =
-        maxOpFoldResult(lhsState.start, upperExclusive, loc, builder);
-    auto realEnd = minOpFoldResult(lhsState.end, upperClamped, loc, builder);
-    if (!realStart || !realEnd)
-      return failure();
-    auto newOffset = subOpFoldResult(realStart, lhsState.start, loc, builder);
-    auto newDim = subOpFoldResult(realEnd, realStart, loc, builder);
+  case arith::CmpIPredicate::sle: {
+    // lhs <= rhs  <=>  lhs < rhs + 1
+    auto rhsPlusOne = addOpFoldResult(rhsState.scalar, builder.getIndexAttr(1),
+                                      loc, builder, builder.getIndexType());
+    auto realBound = maxOpFoldResult(lhsState.start, rhsPlusOne, loc, builder);
+    auto newEnd = minOpFoldResult(lhsState.end, realBound, loc, builder);
+    auto newDim = subOpFoldResult(newEnd, lhsState.start, loc, builder);
     auto clampedNewDim = clampToNonNegativeIndex(newDim, loc, builder);
-    if (!newOffset)
-      return failure();
+
+    this->dims[cmpDim] = clampedNewDim;
+    break;
+  }
+  case arith::CmpIPredicate::sge: {
+    auto realBound =
+        maxOpFoldResult(lhsState.start, rhsState.scalar, loc, builder);
+    auto newStart = minOpFoldResult(lhsState.end, realBound, loc, builder);
+    auto newOffset = subOpFoldResult(newStart, lhsState.start, loc, builder);
+    auto newDim = subOpFoldResult(lhsState.end, newStart, loc, builder);
+    auto clampedNewDim = clampToNonNegativeIndex(newDim, loc, builder);
 
     this->offsets[cmpDim] = newOffset;
     this->dims[cmpDim] = clampedNewDim;
     break;
   }
+  case arith::CmpIPredicate::eq: {
+    auto newOffset =
+        subOpFoldResult(rhsState.scalar, lhsState.start, loc, builder);
+    auto newDim = builder.getIndexAttr(1);
+
+    this->offsets[cmpDim] = newOffset;
+    this->dims[cmpDim] = newDim;
+    break;
+  }
   case arith::CmpIPredicate::ne: {
     // only support lhs != 0
-    if (hasDivision)
-      return failure();
     auto rhsScalar = dyn_cast<IntegerAttr>(cast<Attribute>(rhsState.scalar));
     if (!rhsScalar || rhsScalar.getInt() != 0) {
       return failure();
@@ -1068,8 +860,6 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
   default:
     return failure();
   }
-  // The resulting mask state is expressed on the numerator directly again.
-  this->division = DivisionInfo();
   return success();
 }
 
